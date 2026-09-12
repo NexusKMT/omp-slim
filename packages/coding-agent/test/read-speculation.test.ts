@@ -3,8 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { SpeculativeOperationContext } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { getEditStore } from "@oh-my-pi/pi-coding-agent/edit/store";
+import { CodingAgentSpeculativeExecutionHost } from "@oh-my-pi/pi-coding-agent/speculation/host";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { getConflictHistory } from "@oh-my-pi/pi-coding-agent/tools/conflict-detect";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
@@ -43,19 +45,21 @@ describe("read speculation assessment", () => {
 		removeSyncWithRetries(testDir);
 	});
 
-	it("allows only direct local text files", async () => {
+	it("admits local paths without touching the filesystem", async () => {
 		const tool = new ReadTool(createSession(testDir));
 
 		await expect(tool.speculation.finalized?.assess({ args: { path: "plain.txt" } })).resolves.toEqual({
 			eligible: true,
 			effect: {
 				kind: "local_read",
-				resources: [{ scheme: "file", path: fs.realpathSync(path.join(testDir, "plain.txt")), access: "read" }],
+				resources: [{ scheme: "file", path: path.join(testDir, "plain.txt"), access: "read" }],
 			},
 		});
-		await expect(tool.speculation.finalized?.assess({ args: { path: "directory" } })).resolves.toEqual({
-			eligible: false,
-			reason: "read target is not a speculation-safe local path",
+		// Content gates (directory, oversize, binary, image) now run inside
+		// host authorization, so assessment provisionally admits them; the
+		// host denies them before any speculative execution.
+		await expect(tool.speculation.finalized?.assess({ args: { path: "directory" } })).resolves.toMatchObject({
+			eligible: true,
 		});
 	});
 
@@ -75,15 +79,39 @@ describe("read speculation assessment", () => {
 		});
 	});
 
-	it("rejects files too large to bind the result to one buffered snapshot", async () => {
+	it("defers oversize exclusion to host authorization", async () => {
 		const hugePath = path.join(testDir, "huge.txt");
 		fs.writeFileSync(hugePath, "a".repeat(8_192));
 		fs.truncateSync(hugePath, 3 * 1024 * 1024 * 1024);
-		const tool = new ReadTool(createSession(testDir));
+		const session = {
+			...createSession(testDir),
+			settings: Settings.isolated({
+				"images.autoResize": false,
+				"tools.approvalMode": "yolo",
+				"tools.speculativeExecution.enabled": true,
+			}),
+		} as ToolSession;
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
 
-		await expect(tool.speculation.finalized?.assess({ args: { path: "huge.txt" } })).resolves.toEqual({
-			eligible: false,
-			reason: "read target is not a speculation-safe local path",
+		// Metadata-only assessment cannot see the size, so it provisionally
+		// admits the path; the host denies it after the policy gates allow it.
+		const assessment = await policy.assess({ args: { path: "huge.txt" } });
+		if (!assessment.eligible) throw new Error("expected provisional speculative read admission");
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const context: SpeculativeOperationContext = {
+			candidateId: "huge-read",
+			source: "direct",
+			dependencies: [],
+			tool,
+			toolCall: { type: "toolCall", id: "huge-read", name: "read", arguments: { path: "huge.txt" } },
+			args: { path: "huge.txt" },
+			effect: assessment.effect,
+		};
+		await expect(host.authorize(context)).resolves.toEqual({
+			allowed: false,
+			reason: "local read target is unsafe",
 		});
 	});
 
@@ -133,7 +161,7 @@ describe("read speculation assessment", () => {
 
 		expect(session.editStore).toBeUndefined();
 		await tool.speculation.finalized?.commit?.({ ...context, physicalOutcome: outcome }, outcome);
-		const absolutePath = path.join(testDir, "plain.txt");
+		const absolutePath = fs.realpathSync(path.join(testDir, "plain.txt"));
 		const store = getEditStore(session);
 		const snapshotHash = store.headHash(absolutePath);
 		expect(store.headText(absolutePath)).toBe("plain text");
@@ -227,16 +255,13 @@ describe("read speculation assessment", () => {
 		expect(text).toContain("You have received this identical output 3 times");
 	});
 
-	it("rejects non-local, selected, binary, missing, and escaping targets", async () => {
+	it("rejects non-local, selected, convertible, and escaping targets without I/O", async () => {
 		const tool = new ReadTool(createSession(testDir));
 		const rejectedPaths = [
 			"https://example.test/read",
 			"mcp://service/resource",
 			"plain.txt:1-2",
-			"image.png",
 			"document.pdf",
-			"data.sqlite",
-			"missing.txt",
 			"../outside.txt",
 		];
 
@@ -245,6 +270,46 @@ describe("read speculation assessment", () => {
 				eligible: false,
 				reason: "read target is not a speculation-safe local path",
 			});
+		}
+	});
+
+	it("denies unsafe content at host authorization, never at assessment", async () => {
+		fs.writeFileSync(path.join(testDir, "blob.dat"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
+		const session = {
+			...createSession(testDir),
+			settings: Settings.isolated({
+				"images.autoResize": false,
+				"tools.approvalMode": "yolo",
+				"tools.speculativeExecution.enabled": true,
+			}),
+		} as ToolSession;
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const cases: Array<{ path: string; reason: string }> = [
+			{ path: "directory", reason: "local read target is unsafe" },
+			{ path: "image.png", reason: "local read target is unsafe" },
+			{ path: "data.sqlite", reason: "local read target is unsafe" },
+			{ path: "blob.dat", reason: "local read target is unsafe" },
+			{ path: "missing.txt", reason: "local read path is unavailable" },
+		];
+
+		for (const { path: target, reason } of cases) {
+			const assessment = await policy.assess({ args: { path: target } });
+			if (!assessment.eligible) throw new Error(`expected provisional admission for ${target}`);
+			const candidateId = `unsafe-${target}`;
+			await expect(
+				host.authorize({
+					candidateId,
+					source: "direct",
+					dependencies: [],
+					tool,
+					toolCall: { type: "toolCall", id: candidateId, name: "read", arguments: { path: target } },
+					args: { path: target },
+					effect: assessment.effect,
+				} satisfies SpeculativeOperationContext),
+			).resolves.toEqual({ allowed: false, reason });
 		}
 	});
 });

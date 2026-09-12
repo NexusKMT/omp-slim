@@ -742,49 +742,38 @@ async function assessLocalReadSpeculation(
 	) {
 		return LOCAL_READ_SPECULATION_INELIGIBLE;
 	}
-	try {
-		const workspacePath = await fs.realpath(session.cwd);
-		const resolvedPath = await fs.realpath(path.resolve(session.cwd, args.path));
-		const workspaceRelativePath = path.relative(workspacePath, resolvedPath);
-		if (
-			workspaceRelativePath.length === 0 ||
-			workspaceRelativePath === ".." ||
-			workspaceRelativePath.startsWith(`..${path.sep}`) ||
-			path.isAbsolute(workspaceRelativePath)
-		) {
-			return LOCAL_READ_SPECULATION_INELIGIBLE;
-		}
-		const targetStat = await fs.stat(resolvedPath);
-		if (targetStat.isDirectory()) return LOCAL_READ_SPECULATION_INELIGIBLE;
-		if (!targetStat.isFile()) return LOCAL_READ_SPECULATION_INELIGIBLE;
-		if (
-			targetStat.size > SNAPSHOT_MAX_BYTES ||
-			resolvedPath.toLowerCase().endsWith(".ipynb") ||
-			isSampleProfilePath(resolvedPath) ||
-			isCpuProfilePath(resolvedPath) ||
-			CONVERTIBLE_EXTENSIONS.has(path.extname(resolvedPath).toLowerCase()) ||
-			resolvedPath.endsWith(".svg") ||
-			resolvedPath.endsWith(".svgz")
-		) {
-			return LOCAL_READ_SPECULATION_INELIGIBLE;
-		}
-		if (await readImageMetadata(resolvedPath)) return LOCAL_READ_SPECULATION_INELIGIBLE;
-		const bytes = await Bun.file(resolvedPath).slice(0, BINARY_SNIFF_BYTES).bytes();
-		const header = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-		if (
-			isProbablyBinaryHeader(header) ||
-			header.subarray(0, 5).toString("ascii") === "%PDF-" ||
-			header.subarray(0, 16).toString("ascii") === "SQLite format 3\u0000"
-		) {
-			return LOCAL_READ_SPECULATION_INELIGIBLE;
-		}
-		return {
-			eligible: true,
-			effect: { kind: "local_read", resources: [{ scheme: "file", path: resolvedPath, access: "read" }] },
-		};
-	} catch {
+	// Metadata-only: this assessment performs no filesystem I/O. The
+	// coordinator runs assessment before host authorization, so any
+	// realpath/stat/sniff here would touch disk even for reads the approval
+	// policy or lifecycle handlers go on to deny. Content inspection instead
+	// runs inside host authorization (after those policy gates allow the
+	// candidate), and execution revalidates before anything can commit. A
+	// provisional admission that later fails evidence falls back to ordinary
+	// execution and never commits.
+	const lexicalPath = path.resolve(session.cwd, args.path);
+	const workspaceRelativePath = path.relative(session.cwd, lexicalPath);
+	if (
+		workspaceRelativePath.length === 0 ||
+		workspaceRelativePath === ".." ||
+		workspaceRelativePath.startsWith(`..${path.sep}`) ||
+		path.isAbsolute(workspaceRelativePath)
+	) {
 		return LOCAL_READ_SPECULATION_INELIGIBLE;
 	}
+	if (
+		lexicalPath.toLowerCase().endsWith(".ipynb") ||
+		isSampleProfilePath(lexicalPath) ||
+		isCpuProfilePath(lexicalPath) ||
+		CONVERTIBLE_EXTENSIONS.has(path.extname(lexicalPath).toLowerCase()) ||
+		lexicalPath.endsWith(".svg") ||
+		lexicalPath.endsWith(".svgz")
+	) {
+		return LOCAL_READ_SPECULATION_INELIGIBLE;
+	}
+	return {
+		eligible: true,
+		effect: { kind: "local_read", resources: [{ scheme: "file", path: lexicalPath, access: "read" }] },
+	};
 }
 
 /**
@@ -855,9 +844,20 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		if (context.effect.kind !== "local_read" || context.effect.resources.length !== 1) {
 			throw new Error("Invalid speculative read operation");
 		}
-		const absolutePath = context.effect.resources[0].path;
+		// The assessment is metadata-only, so the effect carries the lexical
+		// path. Resolve it here — after host authorization — so the read and
+		// its evidence bind to the same target the host validated. A target
+		// that no longer resolves fails into ordinary execution, never commit.
+		// The discard guard registers synchronously so a racing discard cannot
+		// slip in before the first filesystem access.
 		const execution = { discarded: false };
 		this.#speculativeReadExecutions.set(context.toolCall.id, execution);
+		let absolutePath: string;
+		try {
+			absolutePath = await fs.realpath(context.effect.resources[0].path);
+		} catch {
+			throw new Error("Speculative read target is unavailable");
+		}
 		let snapshotDigest: string | undefined;
 		try {
 			const speculativeSession = Object.create(this.session) as ToolSession;
@@ -906,7 +906,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				isError: result.isError === true,
 				evidence: {
 					kind: "local_read",
-					resource: context.effect.resources[0].path,
+					resource: absolutePath,
 					snapshotDigest,
 				} satisfies LocalReadSpeculationEvidence,
 			};

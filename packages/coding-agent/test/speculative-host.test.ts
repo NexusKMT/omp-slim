@@ -197,4 +197,85 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 			}),
 		).toMatchObject({ allowed: true });
 	});
+
+	it("touches no file content for reads denied by policy or lifecycle handlers", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "approved content");
+		await fs.writeFile(path.join(directory, "blob.dat"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const operationContext = (
+			candidateId: string,
+			target: string,
+			effect: SpeculativeOperationContext["effect"],
+		): SpeculativeOperationContext => ({
+			candidateId,
+			source: "direct",
+			dependencies: [],
+			tool,
+			toolCall: { type: "toolCall", id: candidateId, name: "read", arguments: { path: target } },
+			args: { path: target },
+			effect,
+		});
+
+		// Assessment is metadata-only: a missing path and an unreadable-looking
+		// binary both admit provisionally, without realpath/stat/sniff. Either
+		// admission failed before content inspection moved behind authorization.
+		const missing = await policy.assess({ args: { path: "missing.txt" } });
+		if (!missing.eligible) throw new Error("expected provisional admission for a missing path");
+		expect(missing.effect.resources[0].path).toBe(path.join(directory, "missing.txt"));
+		const binary = await policy.assess({ args: { path: "blob.dat" } });
+		if (!binary.eligible) throw new Error("expected provisional admission for binary content");
+
+		// A denying lifecycle handler wins before any filesystem access: even
+		// the missing path reports the handler, not an I/O failure, and the
+		// binary reports the handler, not the sniff verdict.
+		const denyingHost = new CodingAgentSpeculativeExecutionHost(session.settings, session, {
+			hasHandlers: () => true,
+		});
+		await expect(
+			denyingHost.authorize(operationContext("denied-missing", "missing.txt", missing.effect)),
+		).resolves.toEqual({ allowed: false, reason: "active extension lifecycle handler" });
+		await expect(
+			denyingHost.authorize(operationContext("denied-binary", "blob.dat", binary.effect)),
+		).resolves.toEqual({ allowed: false, reason: "active extension lifecycle handler" });
+		// An explicit deny policy is refused the same way, before the sniff.
+		const denyingPolicySession: ToolSession = {
+			...session,
+			settings: Settings.isolated({
+				"images.autoResize": false,
+				"tools.approvalMode": "yolo",
+				"tools.speculativeExecution.enabled": true,
+				"tools.approval": { read: "deny" },
+			}),
+		};
+		const denyingPolicyHost = new CodingAgentSpeculativeExecutionHost(
+			denyingPolicySession.settings,
+			denyingPolicySession,
+			{ hasHandlers: () => false },
+		);
+		await expect(
+			denyingPolicyHost.authorize(operationContext("denied-binary", "blob.dat", binary.effect)),
+		).resolves.toEqual({ allowed: false, reason: "tool approval is not auto-allow" });
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		await expect(host.authorize(operationContext("unsafe-binary", "blob.dat", binary.effect))).resolves.toEqual({
+			allowed: false,
+			reason: "local read target is unsafe",
+		});
+
+		// While an approved identical read still speculates and commits.
+		const approved = await policy.assess({ args: { path: "note.txt" } });
+		if (!approved.eligible) throw new Error("expected local read assessment to succeed");
+		const context = operationContext("approved-read", "note.txt", approved.effect);
+		await expect(host.authorize(context)).resolves.toEqual({ allowed: true });
+		const physicalOutcome = await policy.execute(context, new AbortController().signal);
+		if (physicalOutcome.kind !== "result") throw new Error("expected speculative read result");
+		expect(await host.validate({ ...context, physicalOutcome })).toBe(true);
+		await expect(
+			host.commit({ ...context, physicalOutcome }, async () => physicalOutcome.result),
+		).resolves.toMatchObject({ kind: "committed" });
+	});
 });

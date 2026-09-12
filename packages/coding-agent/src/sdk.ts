@@ -183,7 +183,7 @@ import { collectMountedMCPToolRoutes, projectMountedMCPXdevGuidance } from "./se
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
-import { CodingAgentSpeculativeExecutionHost } from "./speculation/host";
+import { createSpeculativeToolExecutionConfig } from "./speculation/host";
 import { closeAllConnections } from "./ssh/connection-manager";
 import { unmountAll } from "./ssh/sshfs-mount";
 import {
@@ -3525,13 +3525,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		};
 		const kimiApiFormatSetting = settings.get("providers.kimiApiFormat");
 		const kimiApiFormat = kimiApiFormatSetting === "auto" ? undefined : kimiApiFormatSetting;
-		const speculativeToolExecution = settings.get("tools.speculativeExecution.enabled")
-			? {
-					enabled: true,
-					maxInFlight: settings.get("tools.speculativeExecution.maxInFlight"),
-					host: new CodingAgentSpeculativeExecutionHost(settings, toolSession, extensionRunner),
-				}
-			: undefined;
+		// Live-bound speculation config: the Agent captures this object once at
+		// construction but reads `enabled` per turn (and `maxInFlight` per drain)
+		// through getters, so mid-session settings UI toggles take effect without
+		// a session recreate. The single shared host keeps its evidence across
+		// toggles; per-turn coordinator close never touches it.
+		const speculativeToolExecution = createSpeculativeToolExecutionConfig(settings, toolSession, extensionRunner);
 
 		agent = new Agent({
 			initialState: {

@@ -9,12 +9,17 @@ import type {
 	SpeculativeDiscardContext,
 	SpeculativeExecutionHost,
 	SpeculativeOperationContext,
+	SpeculativeToolExecutionConfig,
 } from "@oh-my-pi/pi-agent-core";
+import { BINARY_SNIFF_BYTES, isProbablyBinaryHeader, readImageMetadata } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import { normalizeToLF } from "../edit/normalize";
 import type { ToolSession } from "../tools";
 import { type ApprovalMode, resolveApproval } from "../tools/approval";
+import { CONVERTIBLE_EXTENSIONS } from "../utils/markit";
 import { type LocalReadSpeculationEvidence, SNAPSHOT_MAX_BYTES } from "../tools/read";
+import { isCpuProfilePath } from "../utils/cpuprofile";
+import { isSampleProfilePath } from "../utils/sample-profile";
 
 type LocalReadEvidence = {
 	path: string;
@@ -128,13 +133,56 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 			return { allowed: false, reason: "local read must have one read resource" };
 		}
 		if (typeof context.args.path !== "string") return { allowed: false, reason: "local read path is invalid" };
+		// The assessment is metadata-only, so the effect carries the lexical
+		// resolution of the requested path. Bind it here before touching disk:
+		// anything else means the candidate no longer describes this call.
+		if (!path.isAbsolute(resource.path)) return { allowed: false, reason: "local read resource changed" };
+		if (path.resolve(this.toolSession.cwd, context.args.path) !== resource.path) {
+			return { allowed: false, reason: "local read resource changed" };
+		}
+		// Content inspection starts here — after the lifecycle, approval, and
+		// shape gates above have allowed the candidate — so a denied read
+		// never touches the filesystem.
 		let resolved: string;
 		try {
-			resolved = await fs.realpath(path.resolve(this.toolSession.cwd, context.args.path));
+			const workspacePath = await fs.realpath(this.toolSession.cwd);
+			resolved = await fs.realpath(resource.path);
+			const workspaceRelativePath = path.relative(workspacePath, resolved);
+			if (
+				workspaceRelativePath.length === 0 ||
+				workspaceRelativePath === ".." ||
+				workspaceRelativePath.startsWith(`..${path.sep}`) ||
+				path.isAbsolute(workspaceRelativePath)
+			) {
+				return { allowed: false, reason: "local read target is unsafe" };
+			}
+			const targetStat = await fs.stat(resolved);
+			if (!targetStat.isFile() || targetStat.size > SNAPSHOT_MAX_BYTES) {
+				return { allowed: false, reason: "local read target is unsafe" };
+			}
+			if (
+				resolved.toLowerCase().endsWith(".ipynb") ||
+				isSampleProfilePath(resolved) ||
+				isCpuProfilePath(resolved) ||
+				CONVERTIBLE_EXTENSIONS.has(path.extname(resolved).toLowerCase()) ||
+				resolved.endsWith(".svg") ||
+				resolved.endsWith(".svgz")
+			) {
+				return { allowed: false, reason: "local read target is unsafe" };
+			}
+			if (await readImageMetadata(resolved)) return { allowed: false, reason: "local read target is unsafe" };
+			const sniffed = await Bun.file(resolved).slice(0, BINARY_SNIFF_BYTES).bytes();
+			const header = Buffer.from(sniffed.buffer, sniffed.byteOffset, sniffed.byteLength);
+			if (
+				isProbablyBinaryHeader(header) ||
+				header.subarray(0, 5).toString("ascii") === "%PDF-" ||
+				header.subarray(0, 16).toString("ascii") === "SQLite format 3\u0000"
+			) {
+				return { allowed: false, reason: "local read target is unsafe" };
+			}
 		} catch {
 			return { allowed: false, reason: "local read path is unavailable" };
 		}
-		if (resolved !== resource.path) return { allowed: false, reason: "local read resource changed" };
 		const evidence = await captureEvidence(resolved);
 		if (!evidence) return { allowed: false, reason: "local read target is unsafe" };
 		this.#evidence.set(context.candidateId, evidence);
@@ -186,4 +234,33 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 	close(): void {
 		this.#evidence.clear();
 	}
+}
+/**
+ * Session-scoped speculative execution config with live settings reads.
+ *
+ * The Agent captures its config once at construction, so a one-shot
+ * `{ enabled: true, maxInFlight: <snapshot> }` object strands mid-session
+ * toggles: enabling via the live settings UI would only persist the setting
+ * until session recreate, and `maxInFlight` changes would never propagate.
+ * Getter-backed fields re-read the current settings on every access (the
+ * agent loop checks `enabled` per turn and `maxInFlight` on every drain),
+ * while the single shared host preserves accumulated evidence across toggles.
+ * The host's own `authorize` re-checks the enabled flag per operation, so a
+ * lingering coordinator from before a disable still vetoes new candidates.
+ */
+export function createSpeculativeToolExecutionConfig(
+	settings: Settings,
+	toolSession: ToolSession,
+	extensionRunner: SpeculationLifecycle,
+): SpeculativeToolExecutionConfig {
+	const host = new CodingAgentSpeculativeExecutionHost(settings, toolSession, extensionRunner);
+	return {
+		get enabled() {
+			return settings.get("tools.speculativeExecution.enabled");
+		},
+		get maxInFlight() {
+			return settings.get("tools.speculativeExecution.maxInFlight");
+		},
+		host,
+	};
 }
