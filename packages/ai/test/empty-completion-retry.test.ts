@@ -426,15 +426,17 @@ describe("withReplaySafeStreamRetry", () => {
 			() => {
 				attempts++;
 				if (attempts > 1) return contentAttempt();
-				// Simulate the OpenAI error path: the stream emits toolcall_start,
-				// dies before any argument delta, and finishOpenBlocksOnError()
-				// synthesizes toolcall_end for the unfilled block before the error.
+				// Mirror the object-args producer branch: a delta event is pushed
+				// per chunk even when empty, the `{}` flush is suppressed, and the
+				// error sweep finalizes through the same finishToolCallBlock, so a
+				// completed call there is event-identical to this unfilled one.
 				const message = assistant();
 				message.stopReason = "error";
 				message.errorMessage = "The socket connection was closed unexpectedly";
 				return streamFromEvents([
 					{ type: "start", partial: message },
 					{ type: "toolcall_start", contentIndex: 0, partial: message },
+					{ type: "toolcall_delta", contentIndex: 0, delta: "", partial: message },
 					{
 						type: "toolcall_end",
 						contentIndex: 0,
