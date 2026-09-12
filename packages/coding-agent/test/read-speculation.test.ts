@@ -285,6 +285,45 @@ describe("read speculation assessment", () => {
 		expect(textOf(ordinary)).toContain("summary.md");
 		expect(textOf(committed)).toBe(textOf(ordinary));
 	});
+	it("summarizes speculative symlink reads by the requested language", async () => {
+		const bodies = Array.from({ length: 25 }, (_, index) => {
+			const work = Array.from({ length: 5 }, (_, line) => `    step${line} = ${index} * ${line}`).join("\n");
+			return `def run${index}():\n${work}\n    return step0`;
+		});
+		const raw = `${bodies.join("\n\n")}\n`;
+		fs.writeFileSync(path.join(testDir, "api.py"), raw);
+		try {
+			fs.symlinkSync(path.join(testDir, "api.py"), path.join(testDir, "api.ts"), "file");
+		} catch {
+			// Windows without symlink privilege: nothing to verify.
+			return;
+		}
+		const session = createSession(testDir);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const args = { path: "api.ts" };
+		const assessment = await policy.assess({ args });
+		if (!assessment?.eligible) throw new Error("expected speculative read admission");
+		const context = {
+			toolCall: { type: "toolCall" as const, id: "lang-link-read", name: "read", arguments: args },
+			args,
+			effect: assessment.effect,
+		};
+		const outcome = await policy.execute(context, new AbortController().signal);
+		if (!outcome) throw new Error("expected speculative read outcome");
+		const committed = await policy.commit?.({ ...context, physicalOutcome: outcome }, outcome);
+		// Requested TypeScript cannot parse `def` bodies, so the ordinary
+		// read returns them verbatim; classifying by the resolved Python
+		// target would summarize instead.
+		const ordinary = await new ReadTool(createSession(testDir)).execute("ordinary-lang-link-read", args);
+		const textOf = (result: unknown) =>
+			(result as { content?: Array<{ type: string; text?: string }> } | undefined)?.content?.find(
+				(entry): entry is { type: "text"; text: string } => entry.type === "text",
+			)?.text ?? "";
+		expect(textOf(ordinary)).toContain("step4 = 24 * 4");
+		expect(textOf(committed)).toBe(textOf(ordinary));
+	});
 
 	it("defers conflict-aware reads without mutating live conflict history", async () => {
 		const conflictPath = path.join(testDir, "conflict.txt");

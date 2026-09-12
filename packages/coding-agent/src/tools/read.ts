@@ -1920,7 +1920,14 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				this.session.settings.get("read.summarize.enabled") &&
 				(this.session.settings.get("read.summarize.prose") || !isProseSummaryPath(renderAbsolutePath))
 			) {
-				const summary = await trySummarize(this.session, absolutePath, fileSize, signal, buffered?.strippedText);
+				const summary = await trySummarize(
+					this.session,
+					absolutePath,
+					fileSize,
+					signal,
+					buffered?.strippedText,
+					renderAbsolutePath,
+				);
 				if (summary?.parsed && summary.elided) {
 					const renderedSummary = renderSummary(this.session, summary);
 					const footer = formatSummaryElisionFooter(
