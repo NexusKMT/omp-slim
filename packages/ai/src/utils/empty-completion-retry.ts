@@ -37,7 +37,7 @@ export function hasVisibleAssistantContent(message: AssistantMessage): boolean {
 	return false;
 }
 
-/** A streamed event that delivers content worth committing the attempt for. `toolcall_start` and `toolcall_end` markers are excluded: they carry no argument data, so a stream that dies after the start but before any delta content should be retried rather than committed. A `toolcall_delta` with a non-empty delta string is what commits a tool call. */
+/** A streamed event that delivers content worth committing the attempt for. `toolcall_start` and `toolcall_end` markers are excluded: they carry no argument data, so a stream that dies after the start but before any delta content should be retried rather than committed. A `toolcall_delta` with a non-empty delta string is what commits a tool call — string-arg hosts emit `{}` itself as a delta, so completed zero-argument calls commit on their args. Object-arg hosts that merge `{}` delta-free are event-identical to the error sweep, so they bounded-retry instead; safe, because buffered output never reached the consumer. */
 function isMeaningfulCompletionEvent(event: AssistantMessageEvent): boolean {
 	switch (event.type) {
 		case "text_delta":
