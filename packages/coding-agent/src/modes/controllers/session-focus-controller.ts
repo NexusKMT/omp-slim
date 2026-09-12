@@ -77,6 +77,8 @@ export class SessionFocusController {
 		// still reviving) wins: drop the stale completion instead of letting
 		// the slower revive replace the view.
 		if (request !== this.#focusRequestSeq) return;
+		// Rebuilding the same live view discards tool cards whose results are not persisted yet.
+		if (id === this.#focusedAgentId && session === this.#attachedSession) return;
 		// Doom in-flight attachments from older requests now that this one is
 		// known usable — not at request time, so a newer revival that fails
 		// leaves the current attachment undisturbed instead of half torn down.

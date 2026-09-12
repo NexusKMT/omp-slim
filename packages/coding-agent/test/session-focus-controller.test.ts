@@ -515,6 +515,63 @@ describe("SessionFocusController", () => {
 		expect(h.reloadTodoSessions).toEqual([]);
 	});
 
+	it("does not orphan an in-flight attach when the same session is focused again", async () => {
+		const renderStarted = Promise.withResolvers<void>();
+		const { promise: renderGate, resolve: releaseRender } = Promise.withResolvers<void>();
+		const h = makeHarness({
+			renderInitialMessages: () => {
+				renderStarted.resolve();
+				return renderGate;
+			},
+		});
+		const worker = makeSessionStub();
+		worker.setQueue({ steering: ["queued worker input"] });
+		const lifecycle = {
+			ensureLive: (_id: string) => Promise.resolve(worker.session),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+		Object.defineProperty(h.ctx, "viewSession", { get: () => controller.target ?? h.main.session });
+
+		const first = controller.focusAgent("Worker");
+		await renderStarted.promise;
+
+		const second = controller.focusAgent("Worker");
+		releaseRender();
+		await first;
+		await second;
+		expect(controller.focusedAgentId).toBe("Worker");
+		expect(controller.target).toBe(worker.session);
+		expect(h.pendingMessagesContainer.render(80).join("\n")).toContain("queued worker input");
+	});
+
+	it("attaches once when a second same-session request arrives before revive completes", async () => {
+		const h = makeHarness();
+		const worker = makeSessionStub();
+		const { promise: revive, resolve: releaseRevive } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (_id: string) => revive,
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		const first = controller.focusAgent("Worker");
+		const second = controller.focusAgent("Worker");
+		expect(controller.focusedAgentId).toBeUndefined();
+
+		releaseRevive(worker.session);
+		await first;
+		await second;
+		expect(controller.focusedAgentId).toBe("Worker");
+		expect(controller.target).toBe(worker.session);
+	});
+
 	it("drops a pending revive when the current view is reaffirmed", async () => {
 		const h = makeHarness();
 		const focused = makeSessionStub();
@@ -534,6 +591,30 @@ describe("SessionFocusController", () => {
 
 		const slowFocus = controller.focusAgent("Slow");
 		controller.invalidatePendingFocus();
+		releaseSlow(slow.session);
+		await slowFocus;
+		expect(controller.focusedAgentId).toBe("Focused");
+		expect(controller.target).toBe(focused.session);
+	});
+
+	it("drops a pending revive when the already-attached session is focused again", async () => {
+		const h = makeHarness();
+		const focused = makeSessionStub();
+		const slow = makeSessionStub();
+		const { promise: slowGate, resolve: releaseSlow } = Promise.withResolvers<AgentSession>();
+		const lifecycle = {
+			ensureLive: (id: string) => (id === "Slow" ? slowGate : Promise.resolve(focused.session)),
+		};
+		const controller = new SessionFocusController(
+			h.ctx,
+			h.registry,
+			() => lifecycle as unknown as AgentLifecycleManager,
+		);
+
+		await controller.focusAgent("Focused");
+
+		const slowFocus = controller.focusAgent("Slow");
+		await controller.focusAgent("Focused");
 		releaseSlow(slow.session);
 		await slowFocus;
 		expect(controller.focusedAgentId).toBe("Focused");

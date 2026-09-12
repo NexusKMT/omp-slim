@@ -1048,6 +1048,11 @@ export class Agent {
 		return this.#followUpQueue;
 	}
 
+	/** Snapshot results awaiting assistant persistence without consuming the provider buffer. */
+	getPendingToolResults(): readonly ToolResultMessage[] {
+		return this.#cursorToolResultBuffer.map(({ toolResult }) => toolResult);
+	}
+
 	get isAborting(): boolean {
 		return this.#abortController?.signal.aborted === true && this.#state.isStreaming;
 	}

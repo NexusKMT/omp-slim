@@ -217,6 +217,7 @@ function makeSession(
 			return streaming;
 		},
 		retryAttempt: 0,
+		agent: { getPendingToolResults: () => [] },
 		subscribe(next: (event: AgentSessionEvent) => Promise<void> | void) {
 			listener = next;
 			return () => {
