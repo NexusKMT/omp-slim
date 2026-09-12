@@ -253,6 +253,12 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 			} else if (key.value === "reset") {
 				if (typeof parsed !== "boolean") return { reason: "eval reset must be boolean" };
 				reset = parsed;
+			} else if (key.value === "title") {
+				// Title carries no planning signal, but a non-string title fails
+				// final dispatch (evalSchema), so planning from this buffer would
+				// be phantom I/O for a call that never runs. Duplicate string
+				// titles need no guard: last-wins matches JSON.parse semantics.
+				if (typeof parsed !== "string") return { reason: "eval title must be a string" };
 			} else if (key.value === "timeout") {
 				if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed < 0) {
 					return { reason: "eval timeout must be a non-negative finite number" };

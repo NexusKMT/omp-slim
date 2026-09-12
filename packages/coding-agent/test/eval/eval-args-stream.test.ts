@@ -230,4 +230,20 @@ describe("EvalArgsStreamDecoder", () => {
 			},
 		});
 	});
+
+	it("disables buffers with a non-string title instead of planning them", () => {
+		expect(
+			new EvalArgsStreamDecoder().update(
+				'{"language":"js","reset":false,"code":"await tool.read({path:\'secret.txt\'})","title":123}',
+			),
+		).toEqual({ kind: "disabled", reason: "eval title must be a string", restart: false });
+	});
+
+	it("keeps string titles plannable", () => {
+		const decoded = new EvalArgsStreamDecoder().update(
+			'{"language":"js","reset":false,"code":"display(1)","title":"load config"}',
+		);
+		expect(decoded.kind).toBe("snapshot");
+		if (decoded.kind === "snapshot") expect(decoded.snapshot.complete).toBe(true);
+	});
 });
