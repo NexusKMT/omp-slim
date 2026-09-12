@@ -5,6 +5,9 @@
 ### Added
 
 - Added opt-in host authorization and exact-once streamed child execution for discard-safe local reads.
+### Fixed
+
+- Speculative stream sessions are now discarded when a hook or argument transform replaces a call's arguments while keeping its ID, instead of releasing deferred work planned from the original code.
 ## [18.1.18] - 2026-09-11
 
 ### Added
