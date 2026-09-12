@@ -37,7 +37,7 @@ import type {
 	ShadowSourceSpan,
 	ShadowValue,
 } from "../speculation/types";
-import { loadBabelParser } from "./shared/rewrite-imports";
+import { containsCallSiteHelperSyntax, loadBabelParser } from "./shared/rewrite-imports";
 
 const MAX_STATIC_LOOP_ITERATIONS = 32;
 
@@ -715,6 +715,15 @@ export async function projectJavaScriptShadowPlan(
 		program = parse(code, { sourceType: "module", errorRecovery: false }).program;
 	} catch {
 		return { operations: [], barrier: { kind: "barrier", reason: "incomplete or invalid JavaScript" } };
+	}
+	// Mirror the runtime: instrumentRuntimeCallSites skips the whole program when
+	// real helper syntax is present (already-instrumented call or shadowing
+	// binding), so the planner must not admit operations it cannot claim.
+	if (containsCallSiteHelperSyntax(program)) {
+		return {
+			operations: [],
+			barrier: { kind: "barrier", reason: "JavaScript call-site helper present" },
+		};
 	}
 	const state: ProjectionState = {
 		snapshot: options.snapshot ?? {},

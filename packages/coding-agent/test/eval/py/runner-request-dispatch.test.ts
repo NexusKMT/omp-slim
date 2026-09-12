@@ -490,4 +490,38 @@ describe("Python runner request dispatch", () => {
 			await runner.dispose();
 		}
 	});
+	it("plans zero operations when the cell binds the reserved call-site helper", async () => {
+		// Runtime `_compile_source` skips instrumentation for the whole cell
+		// when it binds `__omp_with_call_site__` anywhere, so a speculative
+		// read projected from before the binding would never be claimed by
+		// the authoritative call (file read twice). The planner mirrors the
+		// whole-cell skip and fails closed with zero operations plus an
+		// invalidating barrier.
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "clean", type: "shadow_plan", code: 'result = await tool.read({"path": "a.txt"})' });
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "clean",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+
+			runner.send({
+				id: "bound",
+				type: "shadow_plan",
+				code: 'result = await tool.read({"path": "a.txt"})\ndef __omp_with_call_site__(): pass',
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "bound",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
 });

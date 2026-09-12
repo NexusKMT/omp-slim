@@ -2,7 +2,15 @@ import { afterEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SpeculativeCommitContext, SpeculativeOperationContext } from "@oh-my-pi/pi-agent-core";
+import type {
+	AgentContext,
+	AgentLoopConfig,
+	SpeculativeCommitContext,
+	SpeculativeOperationContext,
+} from "@oh-my-pi/pi-agent-core";
+import { SpeculativeOperationCoordinator } from "@oh-my-pi/pi-agent-core";
+import type { Message } from "@oh-my-pi/pi-ai";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { CodingAgentSpeculativeExecutionHost } from "@oh-my-pi/pi-coding-agent/speculation/host";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
@@ -54,7 +62,7 @@ it("admits validated local reads without a risk-bearing operation grant", async 
 			args: { path: "note.txt" },
 			effect: assessment.effect,
 		}),
-	).toEqual({ allowed: true });
+	).toEqual({ allowed: true, deferBeforeToolCall: true });
 });
 
 describe("CodingAgentSpeculativeExecutionHost", () => {
@@ -225,7 +233,9 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		// binary both admit provisionally, without realpath/stat/sniff. Either
 		// admission failed before content inspection moved behind authorization.
 		const missing = await policy.assess({ args: { path: "missing.txt" } });
-		if (!missing.eligible) throw new Error("expected provisional admission for a missing path");
+		if (!missing.eligible || missing.effect.kind !== "local_read") {
+			throw new Error("expected provisional admission for a missing path");
+		}
 		expect(missing.effect.resources[0].path).toBe(path.join(directory, "missing.txt"));
 		const binary = await policy.assess({ args: { path: "blob.dat" } });
 		if (!binary.eligible) throw new Error("expected provisional admission for binary content");
@@ -270,12 +280,117 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		const approved = await policy.assess({ args: { path: "note.txt" } });
 		if (!approved.eligible) throw new Error("expected local read assessment to succeed");
 		const context = operationContext("approved-read", "note.txt", approved.effect);
-		await expect(host.authorize(context)).resolves.toEqual({ allowed: true });
+		await expect(host.authorize(context)).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
 		const physicalOutcome = await policy.execute(context, new AbortController().signal);
 		if (physicalOutcome.kind !== "result") throw new Error("expected speculative read result");
 		expect(await host.validate({ ...context, physicalOutcome })).toBe(true);
 		await expect(
 			host.commit({ ...context, physicalOutcome }, async () => physicalOutcome.result),
 		).resolves.toMatchObject({ kind: "committed" });
+	});
+
+	it("starts no speculative read before the beforeToolCall gate releases it", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "hook-gated content");
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		// Observe coordinator-started execution without changing what it runs.
+		const speculativeExecutions: string[] = [];
+		const recordingExecute: typeof policy.execute = async (context, signal) => {
+			const target = context.args.path;
+			speculativeExecutions.push(typeof target === "string" ? target : "<unknown>");
+			return policy.execute(context, signal);
+		};
+		const observedTool = Object.create(tool, {
+			speculation: { value: { finalized: { ...policy, execute: recordingExecute } } },
+		}) as ReadTool;
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [observedTool] };
+		const loopConfig: AgentLoopConfig = {
+			model: createMockModel({ responses: [] }).model,
+			convertToLlm: messages =>
+				messages.filter(
+					message => message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+				) as Message[],
+			beforeToolCall: async () => ({ block: true, reason: "denied by test hook" }),
+		};
+		const coordinator = new SpeculativeOperationCoordinator({ enabled: true, host }, { context, loopConfig });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "hook-gated-read",
+			name: "read",
+			arguments: { path: "note.txt" },
+		};
+		coordinator.admitFinalized(context, toolCall, loopConfig, undefined);
+		await coordinator.settleAdmissions();
+		// Admission ran (and the host authorized), but the `beforeToolCall`
+		// gate inside `prepareToolCallDispatch()` has not run yet: with
+		// deferral the speculative read must not have started. Without the
+		// defer flag the coordinator drains immediately and this already
+		// holds the read target.
+		expect(speculativeExecutions).toEqual([]);
+		// The loop omits hook-blocked calls from final reconciliation, then
+		// releases survivors. A discarded candidate must never execute.
+		await coordinator.reconcileFinalCalls(new Map());
+		await coordinator.finalizeAdmissions();
+		expect(speculativeExecutions).toEqual([]);
+		await coordinator.close("test complete");
+	});
+
+	it("runs and commits the deferred read when the beforeToolCall gate allows it", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "hook-allowed content");
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const speculativeExecutions: string[] = [];
+		const recordingExecute: typeof policy.execute = async (context, signal) => {
+			const target = context.args.path;
+			speculativeExecutions.push(typeof target === "string" ? target : "<unknown>");
+			return policy.execute(context, signal);
+		};
+		const observedTool = Object.create(tool, {
+			speculation: { value: { finalized: { ...policy, execute: recordingExecute } } },
+		}) as ReadTool;
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const tools: NonNullable<AgentContext["tools"]> = [observedTool];
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools };
+		const loopConfig: AgentLoopConfig = {
+			model: createMockModel({ responses: [] }).model,
+			convertToLlm: messages =>
+				messages.filter(
+					message => message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+				) as Message[],
+			beforeToolCall: async () => undefined,
+		};
+		const coordinator = new SpeculativeOperationCoordinator({ enabled: true, host }, { context, loopConfig });
+		const toolCall = {
+			type: "toolCall" as const,
+			id: "hook-allowed-read",
+			name: "read",
+			arguments: { path: "note.txt" },
+		};
+		coordinator.admitFinalized(context, toolCall, loopConfig, undefined);
+		await coordinator.settleAdmissions();
+		expect(speculativeExecutions).toEqual([]);
+		// The hook allowed the unchanged call: reconciliation keeps it,
+		// finalizing releases the deferred read, and the claim commits it.
+		await coordinator.reconcileFinalCalls(new Map([[toolCall.id, { ...toolCall }]]));
+		await coordinator.finalizeAdmissions();
+		const executionArgs = coordinator.directExecutionArgsFor(toolCall.id, toolCall.arguments);
+		if (!executionArgs) throw new Error("expected admission execution args for the allowed call");
+		// The loop holds tools as `AgentTool<any>`; claim through the same
+		// view (matching `executeToolCalls`) so `execute` variance agrees.
+		const outcome = await coordinator.claim(tools[0], toolCall, executionArgs);
+		expect(speculativeExecutions).toEqual(["note.txt"]);
+		if (!outcome) throw new Error("expected the deferred read to commit");
+		const text = outcome.result.content.find(entry => entry.type === "text")?.text ?? "";
+		expect(text).toContain("hook-allowed content");
+		await coordinator.close("test complete");
 	});
 });

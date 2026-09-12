@@ -541,6 +541,29 @@ def _emit_shadow_plan(req: dict) -> None:
             }
         )
         return
+    # Mirror the `_compile_source` whole-cell instrumentation skip: when the
+    # cell binds `__omp_with_call_site__` anywhere, authoritative execution
+    # runs zero instrumented calls, so the planner must admit zero operations
+    # (per-call scoping is undecidable across call order; fail closed).
+    if _cell_binds_call_site_helper(module):
+        _emit(
+            {
+                "type": "shadow_plan",
+                "id": rid,
+                "eligible": True,
+                "revision": _STATE.namespace_revision,
+                "digest": _shadow_snapshot_digest(snapshot),
+                "values": snapshot,
+                "operations": [],
+                "controls": [],
+                "barrier": {
+                    "kind": "barrier",
+                    "reason": "Python call-site helper binding changed",
+                    "span": {"start": 0, "end": len(code)},
+                },
+            }
+        )
+        return
     tool_available = _shadow_tool_available(snapshot, _STATE.user_ns)
     line_offsets = [0]
     for line in code.splitlines(keepends=True):

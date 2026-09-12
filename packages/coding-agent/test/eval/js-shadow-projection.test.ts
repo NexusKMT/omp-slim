@@ -249,6 +249,15 @@ class tool {}
 		expect(plan.operations).toHaveLength(1);
 		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
 	});
+	it("rejects helper syntax that disables runtime instrumentation", async () => {
+		const plan = await projectJavaScriptShadowPlan('await tool.read({ path: "a.txt" });\n__omp_with_call_site__();');
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("JavaScript call-site helper present");
+
+		const clean = await projectJavaScriptShadowPlan('await tool.read({ path: "a.txt" });');
+		expect(clean.barrier).toBeUndefined();
+		expect(clean.operations).toHaveLength(1);
+	});
 	it("does not leak dynamic branch assignments into later operations", async () => {
 		const plan = await projectJavaScriptShadowPlan(`
 let selected = "base";

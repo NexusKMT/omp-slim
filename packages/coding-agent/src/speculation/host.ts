@@ -186,7 +186,20 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		const evidence = await captureEvidence(resolved);
 		if (!evidence) return { allowed: false, reason: "local read target is unsafe" };
 		this.#evidence.set(context.candidateId, evidence);
-		return { allowed: true };
+		// Defer execution until the finalized call survives the `beforeToolCall`
+		// gate. The coordinator only honors this flag when a `beforeToolCall`
+		// hook is installed (see `SpeculativeOperationCoordinator`), so hook-free
+		// sessions still start the read immediately for full overlap; with a hook
+		// installed the candidate stays queued until `finalizeAdmissions()`, which
+		// runs after `prepareToolCallDispatch()` (validation + hook) and
+		// `reconcileFinalCalls()` (a `{ block: true }` or throw omits the call,
+		// discarding the candidate before it ever executes). The host cannot
+		// distinguish a blocking hook from a pass-through here and does not need
+		// to — the coordinator applies that condition itself. Note this gates
+		// execution, not admission: the `realpath`/`stat`/snapshot reads above
+		// still run at admission time, but nothing they stage can commit without
+		// passing host validation again at commit time.
+		return { allowed: true, deferBeforeToolCall: true };
 	}
 
 	async validate(context: SpeculativeCommitContext): Promise<boolean> {

@@ -246,7 +246,7 @@ function isCallSiteHelperIdentifier(value: unknown): boolean {
 // instrumented code, where wrapping again would double-count the site) or a real
 // binding of the name (which would shadow the worker-injected helper, so fail
 // closed) skips instrumentation.
-function containsCallSiteHelperSyntax(root: unknown): boolean {
+export function containsCallSiteHelperSyntax(root: unknown): boolean {
 	let found = false;
 	walkNodes(root, node => {
 		if (found) return;
