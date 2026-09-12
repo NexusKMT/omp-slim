@@ -9,6 +9,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/internal-urls/registry-helpers";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { formatTruncationMetaNotice } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
+import { shortenPath } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 
 function getTextOutput(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -76,7 +77,9 @@ describe("read tool large artifact handling", () => {
 
 		expect(output).toContain("Unbounded raw read blocked for artifact://0");
 		expect(output).toContain("artifact://0:raw:1-3000");
-		expect(output).toContain(artifactDir);
+		// The notice displays the artifact path through the shared shortener, which
+		// collapses a home prefix to `~` (Windows temp dirs live under `%USERPROFILE%`).
+		expect(output).toContain(shortenPath(artifactDir));
 		expect(output).not.toContain("line-001");
 	});
 
@@ -201,7 +204,9 @@ describe("read tool large artifact handling", () => {
 			const output = getTextOutput(result);
 			// artifactDir sits under the (mocked) home, so shortenPath rewrites the
 			// prefix to `~` — the notice must NOT leak the absolute artifact path.
-			expect(output).toContain(`~${path.sep}session`);
+			// The shortener normalizes separators to `/`, so derive the expectation
+			// from it instead of assuming the host's path style.
+			expect(output).toContain(shortenPath(artifactDir));
 			expect(output).not.toContain(artifactDir);
 		} finally {
 			homeSpy.mockRestore();
