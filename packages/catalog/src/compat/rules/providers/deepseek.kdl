@@ -82,7 +82,9 @@ provider "deepseek" {
 		}
 	}
 	// residue: taxonomy ranks and exact globs do not isolate these models.
-	models "deepseek-v4-flash" "deepseek-v4.1-flash-expires-on-0910" {
+	// The bare `deepseek-flash` alias serves DeepSeek-V4.1-Flash, so it shares
+	// the V4.1 wire contract.
+	models "deepseek-flash" "deepseek-v4-flash" "deepseek-v4.1-flash-expires-on-0910" {
 		max-tokens-field "max_tokens"
 		reasoning-content-field "reasoning_content"
 		requires-assistant-content-for-tool-calls #true

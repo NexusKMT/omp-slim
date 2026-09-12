@@ -9761,11 +9761,15 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:85",
+				"source": "providers/deepseek.kdl:87",
 				"providers": [
 					"deepseek"
 				],
 				"models": [
+					{
+						"kind": "exact",
+						"value": "deepseek-flash"
+					},
 					{
 						"kind": "exact",
 						"value": "deepseek-v4-flash"
