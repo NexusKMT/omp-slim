@@ -329,4 +329,34 @@ describe("Python runner request dispatch", () => {
 		},
 		30_000,
 	);
+	it("plans operations only for awaited tool reads", async () => {
+		// Unawaited `tool.read({...})` never reaches the bridge: the kernel
+		// tool attribute is async, so a bare call only builds a coroutine.
+		// The planner must admit an operation only for the awaited form and
+		// fail closed (barrier, zero operations) otherwise -- a phantom
+		// physical read is planned under the pre-fix implementation, so the
+		// unawaited assertion below fails there.
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "unawaited", type: "shadow_plan", code: 'result = tool.read({"path": "note.txt"})' });
+			await expect(runner.nextFrame()).resolves.toMatchObject({
+				type: "shadow_plan",
+				id: "unawaited",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+
+			runner.send({ id: "awaited", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			await expect(runner.nextFrame()).resolves.toMatchObject({
+				type: "shadow_plan",
+				id: "awaited",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
 });

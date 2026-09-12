@@ -94,6 +94,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 			return;
 		}
 		if (decoded.snapshot.language === undefined && !decoded.snapshot.complete) return;
+		if (decoded.snapshot.reset === undefined && !decoded.snapshot.complete) return;
 		const language = decoded.snapshot.language ?? "js";
 		this.#pendingPlan = { codePrefix: decoded.snapshot.codePrefix, language };
 		if (!this.#planning) {

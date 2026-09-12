@@ -387,7 +387,7 @@ if "__omp_prelude_loaded__" not in globals():
     def __omp_reset_call_occurrences__():
         _OMP_CALL_OCCURRENCES.set(None)
 
-    def __omp_with_call_site__(site_id: str, action, args):
+    async def __omp_with_call_site__(site_id: str, action, args):
         occurrences = dict(_OMP_CALL_OCCURRENCES.get() or {})
         occurrence = occurrences.get(site_id, 0)
         occurrences[site_id] = occurrence + 1
@@ -396,7 +396,15 @@ if "__omp_prelude_loaded__" not in globals():
             {"siteId": site_id, "occurrence": occurrence}
         )
         try:
-            return action(args)
+            # `action` is the async `_ToolCallable.__call__`: calling it only
+            # builds the coroutine, so the identity must stay set until the
+            # coroutine body reaches `_bridge_call`. Awaiting here keeps the
+            # ContextVar alive across the await (and into `asyncio.to_thread`,
+            # which propagates the current context).
+            result = action(args)
+            if inspect.isawaitable(result):
+                return await result
+            return result
         finally:
             _OMP_CALL_IDENTITY.reset(token)
 

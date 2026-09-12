@@ -465,13 +465,13 @@ describe("streamed eval speculation", () => {
 			cwd: session.cwd,
 			sessionId: "speculative-eval-coalesced-test",
 		});
-		const args = { language: "js", code: "abc" };
+		const args = { language: "js", reset: false, code: "abc" };
 		const toolCall = { type: "toolCall" as const, id: "eval-coalesced", name: "eval", arguments: args };
 
-		await shadow.update(toolCall, '{"language":"js","code":"a');
+		await shadow.update(toolCall, '{"language":"js","reset":false,"code":"a');
 		expect(plannedCodes).toEqual(["a"]);
-		await shadow.update(toolCall, '{"language":"js","code":"ab');
-		await shadow.update(toolCall, '{"language":"js","code":"abc');
+		await shadow.update(toolCall, '{"language":"js","reset":false,"code":"ab');
+		await shadow.update(toolCall, '{"language":"js","reset":false,"code":"abc');
 		await shadow.update(toolCall, JSON.stringify(args));
 		firstPlan.resolve(null);
 		await shadow.finalize({ args });
@@ -480,73 +480,85 @@ describe("streamed eval speculation", () => {
 		await shadow.discard("test complete");
 	});
 
-	it("discards admitted shadow work when a streamed cell later sets reset", async () => {
-		const projected: jsContextManager.JavaScriptShadowPlanningResult = {
-			snapshot: { revision: 1, values: {} },
-			digest: "snapshot",
-			plan: {
-				operations: [
-					{
-						kind: "tool",
-						call: {
-							id: "js:0::0",
-							siteId: "js:0",
-							dynamicPath: [],
-							occurrence: 0,
-							name: "read",
-							args: {
-								kind: "object",
-								entries: [{ key: "path", value: { kind: "literal", value: "note.txt" } }],
-							},
-							dependencies: [],
-							controlDependencies: [],
-							sourceOrder: 0,
-							span: { start: 0, end: 32 },
-						},
-					},
-				],
-			},
-		};
-		const plan = vi.spyOn(jsContextManager, "shadowPlanIfPresent").mockResolvedValue(projected);
-		const settings = Settings.isolated({});
+	it("withholds shadow work until streamed reset is known", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-eval-reset-gate-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "content");
+		const settings = Settings.isolated({ "eval.autoBackground.enabled": false, "images.autoResize": false });
 		const session: ToolSession = {
-			cwd: process.cwd(),
+			cwd: directory,
 			hasUI: false,
 			getSessionFile: () => null,
 			getSessionSpawns: () => "*",
+			getEvalSessionId: () => "speculative-eval-reset-gate-test",
 			getToolForEvalBridge: name => (name === "read" ? eraseToolSchema(read) : undefined),
+			getEvalBridgeToolNames: () => ["read"],
 			settings,
 		};
 		const read = new ReadTool(session);
-		const admitted = Promise.withResolvers<void>();
+		const evalTool = new EvalTool(session);
+		await evalTool.execute("warm-reset-gate", { language: "js", code: "globalThis.shadowWarm = true" });
+		const admitted: string[] = [];
 		const closeReasons: string[] = [];
+		const coordinator: SpeculativeOperationSink = {
+			maxInFlight: 2,
+			async admit(definition) {
+				admitted.push(definition.candidateId);
+				return undefined;
+			},
+			close(reason) {
+				closeReasons.push(reason);
+			},
+		};
+		const code = 'tool.read({ path: "note.txt" })';
 		const shadow = new EvalShadowCellSession({
+			coordinator,
+			parentToolCallId: "eval-reset-gate",
+			session,
+			cwd: directory,
+			sessionId: "speculative-eval-reset-gate-test",
+		});
+		const streamingCall = { type: "toolCall" as const, id: "eval-reset-gate", name: "eval", arguments: {} };
+		// Code streamed before reset: language known, reset unknown, object incomplete.
+		const prefix = JSON.stringify({ language: "js", code }).slice(0, -1);
+
+		await shadow.update(streamingCall, prefix);
+		await shadow.finalize({ args: { language: "js", code } });
+
+		expect(admitted).toEqual([]);
+
+		const resetArgs = { language: "js", code, reset: true };
+		await shadow.update(
+			{ type: "toolCall" as const, id: "eval-reset-gate", name: "eval", arguments: resetArgs },
+			JSON.stringify(resetArgs),
+		);
+
+		expect(admitted).toEqual([]);
+		expect(closeReasons).toEqual(["reset eval cells cannot use retained shadow state"]);
+
+		const admittedAfterKnownReset: string[] = [];
+		const fresh = new EvalShadowCellSession({
 			coordinator: {
 				maxInFlight: 2,
-				async admit() {
-					admitted.resolve();
+				async admit(definition) {
+					admittedAfterKnownReset.push(definition.candidateId);
 					return undefined;
 				},
-				close(reason) {
-					closeReasons.push(reason);
-				},
+				close() {},
 			},
-			parentToolCallId: "eval-reset",
+			parentToolCallId: "eval-reset-gate-kept",
 			session,
-			cwd: session.cwd,
-			sessionId: "speculative-eval-reset-test",
+			cwd: directory,
+			sessionId: "speculative-eval-reset-gate-test",
 		});
-		const code = 'tool.read({ path: "note.txt" })';
-		const args = { language: "js", code, reset: true };
-		const prefix = JSON.stringify({ language: "js", code }).slice(0, -1);
-		const toolCall = { type: "toolCall" as const, id: "eval-reset", name: "eval", arguments: args };
+		const keptArgs = { language: "js", code, reset: false };
+		const keptCall = { type: "toolCall" as const, id: "eval-reset-gate-kept", name: "eval", arguments: keptArgs };
 
-		await shadow.update(toolCall, prefix);
-		await admitted.promise;
-		await shadow.update(toolCall, JSON.stringify(args));
+		await fresh.update(keptCall, JSON.stringify(keptArgs));
+		await fresh.finalize({ args: keptArgs });
 
-		expect(plan).toHaveBeenCalledTimes(1);
-		expect(closeReasons).toEqual(["reset eval cells cannot use retained shadow state"]);
+		expect(admittedAfterKnownReset).toHaveLength(1);
+		await fresh.discard("test complete");
 	});
 
 	it("falls back when a speculative child returns or throws an error", async () => {

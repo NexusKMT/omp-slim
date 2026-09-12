@@ -9,6 +9,7 @@ import type {
 	Expression,
 	ExpressionStatement,
 	ForOfStatement,
+	Identifier,
 	IfStatement,
 	ImportDeclaration,
 	MemberExpression,

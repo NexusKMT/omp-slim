@@ -499,7 +499,13 @@ def _emit_shadow_plan(req: dict) -> None:
         control_dependencies: list[str],
     ) -> dict[str, Any] | None:
         nonlocal source_order
-        call_node = expression_node.value if isinstance(expression_node, ast.Await) else expression_node
+        # Unawaited `tool.read(...)` never reaches the bridge: the kernel tool
+        # attribute is async, so a bare call only builds a coroutine. Admit an
+        # operation only for the awaited form; anything else fails closed via
+        # the caller's barrier path below.
+        if not isinstance(expression_node, ast.Await):
+            return None
+        call_node = expression_node.value
         kind = _shadow_call_kind(call_node, "tool" not in snapshot)
         if not isinstance(call_node, ast.Call) or kind != "read":
             return None

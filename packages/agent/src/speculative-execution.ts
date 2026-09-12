@@ -422,6 +422,41 @@ export class SpeculativeOperationCoordinator {
 		await this.close(reason, outcome);
 	}
 
+	/**
+	 * Settles queued admissions without releasing host-deferred work. Lets
+	 * final reconciliation reuse an admission-time transform result instead of
+	 * running the (possibly stateful) transform a second time. Unlike
+	 * `finalizeAdmissions` this never starts deferred candidates, so the
+	 * `beforeToolCall` gate keeps its release semantics.
+	 */
+	async settleAdmissions(): Promise<void> {
+		await this.#admission;
+	}
+
+	/**
+	 * Admission-time transformed args for a direct candidate whose raw call is
+	 * unchanged. Returns undefined when there is no usable candidate, in which
+	 * case the caller recomputes at most once via the transform. Gating on the
+	 * raw call keeps `beforeToolCall` policy intact: any hook revision changes
+	 * the raw args and forces a fresh transform plus re-reconciliation.
+	 */
+	directExecutionArgsFor(
+		toolCallId: string,
+		rawArgs: Readonly<Record<string, unknown>>,
+	): Record<string, unknown> | undefined {
+		const candidate = this.#candidates.get(toolCallId);
+		if (!candidate || candidate.source !== "direct" || candidate.claimed || candidate.state === "discarded") {
+			return undefined;
+		}
+		try {
+			if (canonicalJson(rawArgs) !== canonicalJson(candidate.toolCall.arguments)) return undefined;
+		} catch {
+			// Non-canonical calls cannot safely reuse admission arguments.
+			return undefined;
+		}
+		return candidate.executionArgs;
+	}
+
 	async reconcileFinalCalls(calls: ReadonlyMap<string, AgentToolCall>): Promise<void> {
 		await this.#admission;
 		for (const candidate of this.#candidates.values()) {

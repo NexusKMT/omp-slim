@@ -1947,7 +1947,12 @@ async function streamAssistantResponse(
 								);
 							} else {
 								await speculationCoordinator.reconcileFinalCalls(
-									speculativeFinalCalls(finalMessage, preparedDispatch, config.transformToolCallArguments),
+									await speculativeFinalCalls(
+										finalMessage,
+										preparedDispatch,
+										config.transformToolCallArguments,
+										speculationCoordinator,
+									),
 								);
 								await speculationCoordinator.finalizeAdmissions();
 								speculationCoordinator.attach(finalMessage);
@@ -2188,7 +2193,12 @@ async function streamAssistantResponse(
 						);
 					} else {
 						await speculationCoordinator.reconcileFinalCalls(
-							speculativeFinalCalls(trailing, preparedDispatch, config.transformToolCallArguments),
+							await speculativeFinalCalls(
+								trailing,
+								preparedDispatch,
+								config.transformToolCallArguments,
+								speculationCoordinator,
+							),
 						);
 						await speculationCoordinator.finalizeAdmissions();
 						speculationCoordinator.attach(trailing);
@@ -2627,11 +2637,15 @@ function transformedExecutionArgs(
 	}
 }
 
-function speculativeFinalCalls(
+async function speculativeFinalCalls(
 	assistantMessage: AssistantMessage,
 	preparedDispatch: ReadonlyMap<string, PreparedToolCall>,
 	transformToolCallArguments: AgentLoopConfig["transformToolCallArguments"],
-): Map<string, AgentToolCall> {
+	speculationCoordinator: SpeculativeOperationCoordinator | undefined,
+): Promise<Map<string, AgentToolCall>> {
+	// Settle admissions first: a slow assessment would otherwise look like a
+	// missing candidate and force a second transform application below.
+	await speculationCoordinator?.settleAdmissions();
 	const calls = new Map<string, AgentToolCall>();
 	for (const content of assistantMessage.content) {
 		if (content.type !== "toolCall" || (content as CursorExecResolvedCarrier)[kCursorExecResolved] === true) {
@@ -2646,7 +2660,22 @@ function speculativeFinalCalls(
 		) {
 			continue;
 		}
-		const executionArgs = transformedExecutionArgs(prepared, content, transformToolCallArguments);
+		// Reuse the admission-time transform when the finalized raw call is
+		// unchanged, so a stateful transform runs exactly once end-to-end and
+		// the reconciled path is the path already accessed. Changed raw args
+		// (e.g. a beforeToolCall revision) fall through to a single fresh
+		// transform, leaving the stale candidate for reconciliation to discard.
+		const reused = speculationCoordinator?.directExecutionArgsFor(
+			content.id,
+			content.arguments as Record<string, unknown>,
+		);
+		let executionArgs: Record<string, unknown> | undefined;
+		if (reused !== undefined) {
+			prepared.executionArgs = reused;
+			executionArgs = reused;
+		} else {
+			executionArgs = transformedExecutionArgs(prepared, content, transformToolCallArguments);
+		}
 		if (executionArgs === undefined) continue;
 		calls.set(content.id, { ...content, arguments: executionArgs });
 	}
