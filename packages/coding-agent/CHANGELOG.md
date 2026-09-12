@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Fixed `--mode json` returning exit 0 on a turn-fatal provider/auth/network error ([#11498](https://github.com/can1357/oh-my-pi/issues/11498)).
 
 ### Added
 
