@@ -3023,6 +3023,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (!state) return undefined;
 			return resolveMountedXdevExecutable(state, name);
 		};
+		// Mounted devices are absent from the advertised tool set, so a miss on a
+		// device name has nothing to suggest unless the loop is told they exist.
+		const suggestDeviceToolNames = (): Iterable<string> => toolSession.xdev?.mountedNames ?? [];
 		// Cursor's resource frames ask what THIS client's servers advertise; only
 		// live connections have any. Built once: the advisor bridges answer from
 		// the same connections the primary does.
@@ -3629,6 +3632,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				}
 			},
 			resolveFallbackTool: resolveDeviceTool,
+			suggestFallbackToolNames: suggestDeviceToolNames,
 			intentTracing: !!intentField,
 			pruneToolDescriptions: inlineToolDescriptors,
 			dialect: resolveDialect(settings.get("tools.format"), model),
@@ -4197,6 +4201,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					streamFn: settingsAwareStreamFn,
 					transformToolCallArguments,
 					resolveFallbackTool: resolveDeviceTool,
+					suggestFallbackToolNames: suggestDeviceToolNames,
 					intentTracing: !!intentField,
 					pruneToolDescriptions: inlineToolDescriptors,
 					dialect: resolveDialect(settings.get("tools.format"), captureModel),

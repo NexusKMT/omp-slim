@@ -8,6 +8,11 @@
 ### Fixed
 
 - Speculative stream sessions are now discarded when a hook or argument transform replaces a call's arguments while keeping its ID, instead of releasing deferred work planned from the original code (by [@h4vc](https://github.com/h4vc)).
+
+### Changed
+
+- `Tool <name> not found` now also names mounted `xd://` devices, not just the advertised tool set. A device is routable through `resolveFallbackTool` but appears in no advertised name, so a mis-transcribed device call (`mcp__<ns>__<id>_github` for a mounted `github`) was the one miss with nothing to suggest even though the capability was live. Hosts supply the candidates through the new `suggestFallbackToolNames` option; it is read only when a call has already missed, and the suggestion remains advisory — never a dispatch target ([#11516](https://github.com/can1357/oh-my-pi/issues/11516), [#10109](https://github.com/can1357/oh-my-pi/issues/10109)).
+
 ## [18.1.18] - 2026-09-11
 
 ### Added

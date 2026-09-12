@@ -14,7 +14,7 @@ import type { ExtensionRunner, SourceInfo, ToolInfo } from "../extensibility/ext
 import { ExtensionToolWrapper } from "../extensibility/extensions/wrapper";
 import { loadSkills, type Skill, type SkillWarning, setActiveSkills } from "../extensibility/skills";
 import { type LocalProtocolOptions, stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls";
-import { deduplicateMCPToolsByName } from "../mcp/tool-bridge";
+import { canonicalizeMCPToolName, deduplicateMCPToolsByName } from "../mcp/tool-bridge";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
@@ -423,9 +423,21 @@ export class SessionTools {
 		return this.#toolRegistry.has("edit");
 	}
 
-	/** Looks up a registered tool by its canonical name or `xd://` alias. */
+	/**
+	 * Looks up a registered tool by its canonical name or `xd://` alias.
+	 *
+	 * An unmatched `mcp__` name gets one retry under its canonical registry key:
+	 * the identity prompt primes the Claude Code spelling `mcp__<server>__<tool>`
+	 * while `createMCPToolName` mints a single separator, so the doubled form is
+	 * a dead end for a tool the session does expose. The key is derived from the
+	 * emitted name, so lookup stays exact-match.
+	 */
 	getToolByName(name: string): AgentTool | undefined {
-		return this.#toolRegistry.get(name) ?? this.#toolRegistry.get(stripXdUrlPrefix(name));
+		const bareName = stripXdUrlPrefix(name);
+		const direct = this.#toolRegistry.get(name) ?? this.#toolRegistry.get(bareName);
+		if (direct) return direct;
+		const mcpName = canonicalizeMCPToolName(bareName);
+		return mcpName === undefined ? undefined : this.#toolRegistry.get(mcpName);
 	}
 
 	/** Looks up an enabled tool through the same ACP permission gate as direct calls. */

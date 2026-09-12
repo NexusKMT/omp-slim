@@ -36,7 +36,7 @@ import { parseStreamingJson } from "@oh-my-pi/pi-utils";
 import { schemaDeclaresIntentField } from "../utils/tool-schema";
 import type { RenderResultOptions } from "../extensibility/custom-tools/types";
 import { stripXdUrlPrefix, XD_URL_PREFIX } from "../internal-urls/xd-protocol";
-import { parseMCPToolName } from "../mcp/tool-bridge";
+import { canonicalizeMCPToolName, parseMCPToolName } from "../mcp/tool-bridge";
 import type { Theme } from "../modes/theme/theme";
 import { truncateHeadBytes } from "../session/streaming-output";
 import { resolveToolTier, type ToolTier } from "./approval";
@@ -271,10 +271,19 @@ export function resolveXdevTool(state: XdevState, name: string): Tool | undefine
  * a `write`; the fallback in `sdk.ts` routes that here. Names arrive both bare
  * (`github`) and carrying the very `xd://` prefix the device docs advertise
  * (`xd://github`) — strip it so both spellings resolve to the same device.
+ *
+ * Mounted MCP tools additionally arrive under the Claude Code separator the
+ * identity prompt primes (`mcp__<server>__<tool>`) rather than the single
+ * underscore `createMCPToolName` mints, so an unmatched `mcp__` name gets one
+ * retry under its canonical registry key. Lookup stays exact-match: the
+ * canonical key is derived from the emitted name, never guessed from siblings.
  */
 export function resolveMountedXdevTool(state: XdevState, name: string): Tool | undefined {
 	const canonicalName = stripXdUrlPrefix(name);
-	return state.mountedNames.has(canonicalName) ? state.tools.get(canonicalName) : undefined;
+	if (state.mountedNames.has(canonicalName)) return state.tools.get(canonicalName);
+	const mcpName = canonicalizeMCPToolName(canonicalName);
+	if (mcpName === undefined || !state.mountedNames.has(mcpName)) return undefined;
+	return state.tools.get(mcpName);
 }
 
 /** Resolve a mounted tool with its execution-only permission decorator. */

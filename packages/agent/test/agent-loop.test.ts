@@ -1269,6 +1269,57 @@ describe("agentLoop with AgentMessage", () => {
 		expect(textOf("tool-3")).not.toContain("Did you mean");
 	});
 
+	it("suggests a mounted device the advertised set does not contain", async () => {
+		// Observed in a real transcript: the session mounts `github` as an
+		// `xd://` device, the model emitted `mcp__<ns>__<id>_github`, and the miss
+		// produced a bare `not found`. That is the one unrecoverable shape — the
+		// capability is live, but it appears in no advertised name, so matching
+		// only the advertised set had nothing to offer.
+		const toolSchema = type({ path: "string" });
+		const makeTool = (name: string): AgentTool<typeof toolSchema, { path: string }> => ({
+			name,
+			label: name,
+			description: "Advertised tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: params.path }], details: params };
+			},
+		});
+		const context: AgentContext = {
+			systemPrompt: [""],
+			messages: [],
+			tools: [makeTool("read")],
+		};
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "tool-1", name: "mcp__nsnsnsnsnsns__ididididid_github", arguments: {} },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			// Devices are routable by `resolveFallbackTool` but never advertised.
+			suggestFallbackToolNames: () => ["github", "lsp"],
+		};
+
+		const messages = await agentLoop([createUserMessage("go")], context, config, undefined, mock.stream).result();
+		const result = messages.find((m): m is ToolResultMessage => m.role === "toolResult" && m.toolCallId === "tool-1");
+		const text = (result?.content ?? [])
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map(c => c.text)
+			.join("\n");
+
+		expect(text).toContain("Did you mean github?");
+		// Advisory only: naming the device must not dispatch it. No
+		// `resolveFallbackTool` is installed here, so the call still fails.
+		expect(result?.isError).toBe(true);
+	});
+
 	it("ranks the distinctive tail ahead of tools sharing only the generic one", async () => {
 		const toolSchema = type({ path: "string" });
 		const makeTool = (name: string): AgentTool<typeof toolSchema, { path: string }> => ({

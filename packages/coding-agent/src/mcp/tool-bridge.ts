@@ -414,6 +414,9 @@ function sanitizeMCPToolNamePart(value: string, fallback: string): string {
 	return sanitized.length > 0 ? sanitized : fallback;
 }
 
+/** Registry prefix every minted MCP tool name carries. */
+const MCP_TOOL_NAME_PREFIX = "mcp__";
+
 /**
  * Longest tool name strict validators accept. OpenAI Responses/Completions and
  * Meta Responses enforce `^[a-zA-Z0-9_-]{1,64}$`; names over 64 chars are
@@ -449,7 +452,35 @@ export function createMCPToolName(serverName: string, toolName: string): string 
 		normalizedToolName = sanitizedToolName.slice(prefixWithUnderscore.length);
 	}
 
-	return capMCPToolNameLength(`mcp__${sanitizedServerName}_${normalizedToolName}`);
+	return capMCPToolNameLength(`${MCP_TOOL_NAME_PREFIX}${sanitizedServerName}_${normalizedToolName}`);
+}
+
+/**
+ * Canonical registry spelling for a model-emitted MCP tool name, or `undefined`
+ * when the name is not `mcp__`-prefixed or is already canonical.
+ *
+ * {@link createMCPToolName} joins the sanitized server and tool with a SINGLE
+ * underscore, but OMP presents itself as Claude Code, whose convention is
+ * `mcp__<server>__<tool>` — so a primed model reliably emits the doubled
+ * separator, often keeping the raw unsanitized server spelling as well
+ * (`mcp__seedpatch-client__bank` for a server named `seedpatch-client`). Those
+ * names are strictly unregistered, so dispatch dead-ends on a tool the session
+ * really does expose.
+ *
+ * Re-running the minting sanitizer over the emitted suffix collapses every
+ * separator and punctuation variant onto the key the tool was registered under.
+ * This is normalization, not fuzzy matching: `sanitizeMCPToolNamePart` is
+ * idempotent and registry keys are already in its output form, so a canonical
+ * name maps to itself and two distinct registry keys can never collapse
+ * together. Callers therefore keep exact-match dispatch — they retry the lookup
+ * once under the canonical key rather than guessing a neighbour.
+ */
+export function canonicalizeMCPToolName(name: string): string | undefined {
+	if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return undefined;
+	const suffix = name.slice(MCP_TOOL_NAME_PREFIX.length);
+	if (suffix.length === 0) return undefined;
+	const canonical = `${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "tool")}`;
+	return canonical === name ? undefined : canonical;
 }
 
 export interface MCPToolOriginSource {
@@ -519,9 +550,9 @@ export function deduplicateMCPToolsByName<T extends MCPToolOriginSource>(tools: 
  * The original MCP tool name may have had the server name as a prefix.
  */
 export function parseMCPToolName(name: string): { serverName: string; toolName: string } | null {
-	if (!name.startsWith("mcp__")) return null;
+	if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return null;
 
-	const rest = name.slice(5);
+	const rest = name.slice(MCP_TOOL_NAME_PREFIX.length);
 	const underscoreIdx = rest.indexOf("_");
 	if (underscoreIdx === -1) return null;
 

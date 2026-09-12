@@ -353,6 +353,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * with "Tool not found". Returning `undefined` keeps the failure.
 	 */
 	resolveFallbackTool?: (name: string) => AgentTool<any> | undefined;
+	/**
+	 * Names reachable through {@link resolveFallbackTool} but absent from the
+	 * advertised set (e.g. `xd://` device mounts). Consulted only to name a
+	 * plausible target when a call misses, so a mis-transcribed device call is
+	 * recoverable; never a dispatch source.
+	 */
+	suggestFallbackToolNames?: () => Iterable<string>;
 
 	/**
 	 * Enable intent tracing for tool calls.
