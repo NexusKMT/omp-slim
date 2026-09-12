@@ -66,6 +66,15 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 	readonly #claims = new ShadowClaimStore<ClaimedChild>();
 	readonly contextIndependent = true;
 	readonly #admitted = new Map<string, Promise<void>>();
+	/** Admission attempts that ran to settlement (returned or threw). */
+	readonly #admissionSettled = new Set<string>();
+	/**
+	 * Operations whose speculative execution started (the coordinator
+	 * admitted them). Evaluation succeeds only against committed results
+	 * (see claim()), so a started execution always uses committed arguments
+	 * and is never re-admitted.
+	 */
+	readonly #admissionExecuted = new Set<string>();
 	readonly #results = new Map<string, ShadowValue>();
 	readonly #runtimeOccurrences = new Map<string, number>();
 	#occurrenceAssignment = Promise.resolve();
@@ -275,9 +284,13 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 		const plan = this.#lastPlan?.plan;
 		if (!plan) return;
 		for (const operation of plan.operations) {
-			if (operation.call.dependencies.includes(operationId)) {
-				void this.#admitOperation(operation).catch(() => undefined);
-			}
+			if (!operation.call.dependencies.includes(operationId)) continue;
+			// A started execution already uses committed arguments, and an
+			// in-flight admission evaluates against them when it resumes —
+			// re-admit only a settled attempt that skipped for lack of results.
+			if (this.#admissionExecuted.has(operation.call.id)) continue;
+			if (this.#admitted.has(operation.call.id) && !this.#admissionSettled.has(operation.call.id)) continue;
+			void this.#admitOperation(operation, true).catch(() => undefined);
 		}
 	}
 
@@ -354,13 +367,19 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 		}
 	}
 
-	async #admitOperation(operation: ShadowOperation): Promise<void> {
-		if (this.#admitted.has(operation.call.id)) return;
+	async #admitOperation(operation: ShadowOperation, readmit = false): Promise<void> {
+		if (!readmit && this.#admitted.has(operation.call.id)) return;
+		this.#admissionSettled.delete(operation.call.id);
 		const previousOccurrenceAssignment = this.#occurrenceAssignment;
 		const occurrenceAssigned = Promise.withResolvers<void>();
 		this.#occurrenceAssignment = occurrenceAssigned.promise;
 		const admission = this.#admitWhenReady(operation, previousOccurrenceAssignment, occurrenceAssigned.resolve);
 		this.#admitted.set(operation.call.id, admission);
+		void admission
+			.finally(() => {
+				this.#admissionSettled.add(operation.call.id);
+			})
+			.catch(() => undefined);
 	}
 
 	async #admitWhenReady(
@@ -415,6 +434,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 				source: "eval_shadow",
 			});
 			if (!handle) return;
+			this.#admissionExecuted.add(operation.call.id);
 			this.#claims.register(key, runtimeOccurrence);
 			const startedAt = performance.now();
 			try {

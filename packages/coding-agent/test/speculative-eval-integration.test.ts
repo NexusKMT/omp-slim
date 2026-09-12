@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
 	type AgentMessage,
 	type AgentTool,
+	type AgentToolResult,
 	agentLoop,
 	type SpeculativeOperationSink,
 	type SpeculativePhysicalOutcome,
@@ -386,8 +387,8 @@ describe("streamed eval speculation", () => {
 		// The commit policy transforms the physical result: dependents admitted
 		// from the pre-commit value would speculatively read arguments the
 		// authoritative cell never uses.
-		const physical = { content: [{ type: "text", text: "b" }] };
-		const committed = { content: [{ type: "text", text: "COMMITTED" }] };
+		const physical: AgentToolResult<unknown> = { content: [{ type: "text", text: "b" }] };
+		const committed: AgentToolResult<unknown> = { content: [{ type: "text", text: "COMMITTED" }] };
 		const admitted: Array<{ candidateId: string; args: unknown }> = [];
 		const secondAdmission = Promise.withResolvers<void>();
 		const coordinator: SpeculativeOperationSink = {
@@ -422,17 +423,17 @@ describe("streamed eval speculation", () => {
 		expect(admitted).toHaveLength(1);
 		// Claiming the parent commits (transforming) its result; the dependent is
 		// admitted afterwards, against the committed value.
-		// Drain microtasks first: the admission record above lands before
-		// `#admitWhenReady` finishes registering the claim, and only
-		// wall-clock-free ticks are needed (no timers).
-		for (let index = 0; index < 50; index++) await Promise.resolve();
 		const claimed = await shadow.claim(
 			"read",
 			{ path: "a.txt" },
 			{ siteId: "js:16", occurrence: 0 },
 			Number.MAX_SAFE_INTEGER,
 		);
-		console.log("PROBE claimed:", JSON.stringify(claimed)?.slice(0, 160), "admitted:", admitted.length);
+		expect(claimed).toBeDefined();
+		await secondAdmission.promise;
+		expect(admitted).toHaveLength(2);
+		expect(admitted[1]?.args).toMatchObject({ path: "COMMITTED.txt" });
+		await shadow.discard("test complete");
 	});
 
 	it("namespaces child tool-call IDs across outer eval calls", async () => {
