@@ -64,6 +64,12 @@ type SpeculativeToolCandidate = {
 	rejectOutcome: (error: unknown) => void;
 	state: CandidateState;
 	claimed: boolean;
+	// Set once the speculative result survives host validation and the
+	// policy/host commit. Dependents start only after every dependency
+	// reaches this state: physical completion alone is not enough, since a
+	// vetoed parent (e.g. a read whose file changed after execution) must
+	// discard its children before they consume the stale result.
+	committed: boolean;
 	reported: boolean;
 };
 
@@ -551,7 +557,13 @@ export class SpeculativeOperationCoordinator {
 				return undefined;
 			}
 			if (decision.kind === "failed") throw decision.error;
+			candidate.committed = true;
 			this.#report(candidate, "committed");
+			// Release dependents gated on this commit. Queued children hold no
+			// promises of their own, so a commit that arrives while they wait
+			// simply starts them here; a veto/failure discards them instead
+			// via the cascade below, settling their outcome promises.
+			this.#drain();
 			return {
 				result: decision.result,
 				isError: decision.result.isError === true || physicalOutcome.isError,
@@ -754,6 +766,7 @@ export class SpeculativeOperationCoordinator {
 			rejectOutcome: reject,
 			state: "queued",
 			claimed: false,
+			committed: false,
 			reported: false,
 		};
 		const operationContext = this.#createContext(candidate);
@@ -838,7 +851,15 @@ export class SpeculativeOperationCoordinator {
 				);
 				continue;
 			}
-			if (!dependencies.every(value => value?.state === "completed")) continue;
+			// Dependents start only after every dependency commits, not merely
+			// completes: a completed result may still be vetoed at commit time
+			// (host validation, policy/host fallback), and a veto discards the
+			// whole subtree via #discardCandidate before any child consumes the
+			// stale outcome. A vetoed dependency vanishes from the map, so the
+			// unknown-dependency branch above discards any waiter the cascade
+			// has not already reached; close/discardAll reject every queued
+			// outcome, so no waiter parks forever.
+			if (!dependencies.every(value => value?.state === "completed" && value.committed)) continue;
 			this.#startCandidate(candidate, dependencies as SpeculativeToolCandidate[]);
 		}
 	}

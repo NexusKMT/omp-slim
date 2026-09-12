@@ -202,9 +202,10 @@ function parseSnapshot(raw: string): Omit<EvalArgsStreamSnapshot, "revision" | "
 		offset = skipWhitespace(raw, offset);
 		if (offset >= raw.length) return { language, codePrefix, reset, timeout, complete: false };
 		if (raw[offset] === "}") {
+			if (!languageSeen) return { reason: "missing eval language" };
 			offset = skipWhitespace(raw, offset + 1);
 			if (offset !== raw.length) return { reason: "unexpected bytes after eval arguments" };
-			return { language: languageSeen ? language : "js", codePrefix, reset, timeout, complete: true };
+			return { language, codePrefix, reset, timeout, complete: true };
 		}
 		const key = scanJsonString(raw, offset);
 		if (key.kind === "invalid") return { reason: key.reason };
@@ -302,10 +303,9 @@ export class EvalArgsStreamDecoder {
 		if ("reason" in parsed || !parsed.complete || !parsed.codePrefix.startsWith(this.#codePrefix)) return false;
 		if (this.#last?.language !== undefined && parsed.language !== this.#last.language) return false;
 		if (this.#last?.reset !== undefined && parsed.reset !== this.#last.reset) return false;
-		if (this.#last?.timeout !== undefined && parsed.timeout !== this.#last.timeout) return false;
 		return (
 			parsed.codePrefix === args.code &&
-			parsed.language === (args.language ?? "js") &&
+			parsed.language === args.language &&
 			parsed.reset === args.reset &&
 			parsed.timeout === args.timeout
 		);

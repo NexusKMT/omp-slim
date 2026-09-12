@@ -95,7 +95,10 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 		}
 		if (decoded.snapshot.language === undefined && !decoded.snapshot.complete) return;
 		if (decoded.snapshot.reset === undefined && !decoded.snapshot.complete) return;
-		const language = decoded.snapshot.language ?? "js";
+		// Complete snapshots always carry language (the decoder disables languageless
+		// objects); an undefined language here can only be a decoder bug — withhold.
+		if (decoded.snapshot.language === undefined) return;
+		const language = decoded.snapshot.language;
 		this.#pendingPlan = { codePrefix: decoded.snapshot.codePrefix, language };
 		if (!this.#planning) {
 			this.#planning = true;

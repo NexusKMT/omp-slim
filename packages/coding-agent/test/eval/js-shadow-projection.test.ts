@@ -167,6 +167,53 @@ if (true) {
 		expect(plan.operations).toEqual([]);
 		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
 	});
+	it("models a hoisted function binding as undefined before a projected read", async () => {
+		const plan = await projectJavaScriptShadowPlan(`await tool.read({ path });\nfunction path() {}`, {
+			snapshot: { path: "retained.txt" },
+		});
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
+	});
+
+	it("models a demoted class binding as undefined before a projected read", async () => {
+		const plan = await projectJavaScriptShadowPlan(`await tool.read({ path });\nclass path {}`, {
+			snapshot: { path: "retained.txt" },
+		});
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("unsupported JavaScript statement");
+	});
+	it("rejects a block-hoisted function binding before a read in a taken branch", async () => {
+		const plan = await projectJavaScriptShadowPlan(
+			`const enabled = true;\nif (enabled) {\n  await tool.read({ path });\n  function path() {}\n}`,
+			{ snapshot: { path: "retained.txt" } },
+		);
+
+		expect(plan.operations).toEqual([]);
+		expect(plan.barrier?.reason).toBe("JavaScript block binding changed");
+	});
+
+	it("rejects block-hoisted function and class bindings before reads in a dynamic branch", async () => {
+		const fn = await projectJavaScriptShadowPlan(
+			`if (enabled) {\n  await tool.read({ path });\n  function path() {}\n}`,
+			{
+				snapshot: { path: "retained.txt" },
+			},
+		);
+
+		expect(fn.operations).toEqual([]);
+		expect(fn.barrier?.reason).toBe("JavaScript block binding changed");
+
+		const cls = await projectJavaScriptShadowPlan(
+			`if (enabled) {\n  await tool.read({ path });\n} else {\n  await tool.read({ path });\n  class path {}\n}`,
+			{ snapshot: { path: "retained.txt" } },
+		);
+
+		expect(cls.operations).toHaveLength(1);
+		expect(cls.operations[0]?.call.dynamicPath).toEqual(["if:true"]);
+		expect(cls.barrier?.reason).toBe("JavaScript block binding changed");
+	});
 
 	it("rejects an import binding that shadows the tool bridge", async () => {
 		const plan = await projectJavaScriptShadowPlan(`

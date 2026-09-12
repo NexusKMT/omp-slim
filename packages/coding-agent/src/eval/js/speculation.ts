@@ -422,49 +422,64 @@ function hasToolBinding(statements: readonly Statement[]): boolean {
 }
 
 function hasLexicalBindings(statements: readonly Statement[]): boolean {
-	return statements.some(statement => isVariableDeclaration(statement) && statement.kind !== "var");
+	return statements.some(
+		statement =>
+			(isVariableDeclaration(statement) && statement.kind !== "var") ||
+			isFunctionDeclaration(statement) ||
+			isClassDeclaration(statement),
+	);
 }
-function hoistedVarBindings(nodes: readonly Statement[]): readonly string[] {
-	const names: string[] = [];
+
+/**
+ * Every top-level binding that ends up hoisted-as-undefined after wrapCode demotion,
+ * seeded into the projection environment so earlier reads never see a retained snapshot
+ * value. Covers `var` declarators (natively hoisted), `let`/`const` declarators and class
+ * declarations (demoted to `var`), import locals (rewritten to `const` declarations), and
+ * function declarations (hoisted). Direct `program.body` children only: nested-block
+ * `let`/`const`/`function`/`class` bindings are block-scoped and leave earlier reads alone.
+ * `var` alone hoists through `if`/`for-of` bodies, so only `var` is collected recursively.
+ */
+function demotedTopLevelBindings(nodes: readonly Statement[]): Array<[string, "var" | "let" | "const"]> {
+	const bindings: Array<[string, "var" | "let" | "const"]> = [];
 	for (const statement of nodes) {
-		if (isVariableDeclaration(statement) && statement.kind === "var") {
+		if (
+			isVariableDeclaration(statement) &&
+			(statement.kind === "var" || statement.kind === "let" || statement.kind === "const")
+		) {
 			for (const declaration of statement.declarations) {
-				if (isIdentifier(declaration.id)) names.push(declaration.id.name);
+				if (isIdentifier(declaration.id)) bindings.push([declaration.id.name, statement.kind]);
 			}
-		}
-		if (isIfStatement(statement)) {
-			names.push(...hoistedVarBindings(statements(statement.consequent)));
-			if (statement.alternate) names.push(...hoistedVarBindings(statements(statement.alternate)));
-		}
-		if (isForOfStatement(statement)) {
-			if (isVariableDeclaration(statement.left) && statement.left.kind === "var") {
-				for (const declaration of statement.left.declarations) {
-					if (isIdentifier(declaration.id)) names.push(declaration.id.name);
+		} else if (isImportDeclaration(statement)) {
+			for (const specifier of statement.specifiers) bindings.push([specifier.local.name, "const"]);
+		} else if (isFunctionDeclaration(statement)) {
+			// Pre-declaration assignment to a hoisted function binding is legal and later
+			// overwritten, so "var" keeps the const-assignment barrier off; the declaration
+			// statement itself still barriers in projectStatement, so post-declaration reads
+			// never project.
+			if (statement.id && isIdentifier(statement.id)) bindings.push([statement.id.name, "var"]);
+		} else if (isClassDeclaration(statement)) {
+			// TDZ: pre-declaration access/assignment throws, so the "const" barrier is exact.
+			if (statement.id && isIdentifier(statement.id)) bindings.push([statement.id.name, "const"]);
+		} else if (isIfStatement(statement)) {
+			for (const branch of statement.alternate
+				? [statement.consequent, statement.alternate]
+				: [statement.consequent]) {
+				for (const [name, kind] of demotedTopLevelBindings(statements(branch))) {
+					if (kind === "var") bindings.push([name, kind]);
 				}
 			}
-			names.push(...hoistedVarBindings(statements(statement.body)));
-		}
-	}
-	return names;
-}
-function topLevelDemotedBindings(nodes: readonly Statement[]): readonly [string, "let" | "const"][] {
-	const bindings: [string, "let" | "const"][] = [];
-	for (const statement of nodes) {
-		if (!isVariableDeclaration(statement) || (statement.kind !== "let" && statement.kind !== "const")) continue;
-		for (const declaration of statement.declarations) {
-			if (isIdentifier(declaration.id)) bindings.push([declaration.id.name, statement.kind]);
+		} else if (isForOfStatement(statement)) {
+			if (isVariableDeclaration(statement.left) && statement.left.kind === "var") {
+				for (const declaration of statement.left.declarations) {
+					if (isIdentifier(declaration.id)) bindings.push([declaration.id.name, "var"]);
+				}
+			}
+			for (const [name, kind] of demotedTopLevelBindings(statements(statement.body))) {
+				if (kind === "var") bindings.push([name, kind]);
+			}
 		}
 	}
 	return bindings;
-}
-
-function importedBindings(nodes: readonly Statement[]): readonly string[] {
-	const names: string[] = [];
-	for (const statement of nodes) {
-		if (!isImportDeclaration(statement)) continue;
-		for (const specifier of statement.specifiers) names.push(specifier.local.name);
-	}
-	return names;
 }
 
 function restoreLexicalEnvironment(environment: ReadonlyMap<string, ShadowExpression>, state: ProjectionState): void {
@@ -602,6 +617,13 @@ function projectStatement(
 			span: span(statement),
 		};
 		state.controls.push(control);
+		// Block-hoisted `function` and TDZ `class` declarations cannot be modeled by projecting
+		// children in order: an earlier read in the same block sees the hoisted function (or
+		// throws for a class), never the outer value. `let`/`const`/`var` stay inline — the
+		// per-statement projection below already models those.
+		if (statements(statement.consequent).some(child => isFunctionDeclaration(child) || isClassDeclaration(child))) {
+			return addBarrier(state, "JavaScript block binding changed", statement.consequent);
+		}
 		const environment = new Map(state.environment);
 		for (const child of statements(statement.consequent)) {
 			if (!projectStatement(child, state, [...dynamicPath, "if:true"], [...controlDependencies, conditionalId])) {
@@ -613,6 +635,9 @@ function projectStatement(
 		state.environment.clear();
 		for (const [name, value] of environment) state.environment.set(name, value);
 		if (statement.alternate) {
+			if (statements(statement.alternate).some(child => isFunctionDeclaration(child) || isClassDeclaration(child))) {
+				return addBarrier(state, "JavaScript block binding changed", statement.alternate);
+			}
 			for (const child of statements(statement.alternate)) {
 				if (
 					!projectStatement(child, state, [...dynamicPath, "if:false"], [...controlDependencies, conditionalId])
@@ -706,17 +731,9 @@ export async function projectJavaScriptShadowPlan(
 			barrier: { kind: "barrier", reason: "JavaScript tool binding changed" },
 		};
 	}
-	for (const name of hoistedVarBindings(program.body)) {
-		state.environment.set(name, { kind: "literal", value: undefined });
-		state.bindingKinds.set(name, "var");
-	}
-	for (const [name, kind] of topLevelDemotedBindings(program.body)) {
+	for (const [name, kind] of demotedTopLevelBindings(program.body)) {
 		state.environment.set(name, { kind: "literal", value: undefined });
 		state.bindingKinds.set(name, kind);
-	}
-	for (const name of importedBindings(program.body)) {
-		state.environment.set(name, { kind: "literal", value: undefined });
-		state.bindingKinds.set(name, "const");
 	}
 	for (const statement of program.body) {
 		if (!projectStatement(statement, state, [], [])) break;

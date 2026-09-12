@@ -54,7 +54,7 @@ describe("EvalArgsStreamDecoder", () => {
 		}
 	});
 
-	it("recovers reordered fields but defaults language only after object completion", () => {
+	it("recovers reordered fields while keeping incomplete prefixes languageless", () => {
 		const decoder = new EvalArgsStreamDecoder();
 		const partial = decoder.update('{"code":"display(1)","reset":false');
 		expect(partial).toEqual({
@@ -67,7 +67,7 @@ describe("EvalArgsStreamDecoder", () => {
 				restart: false,
 			},
 		});
-		const complete = decoder.update('{"code":"display(1)","reset":false}');
+		const complete = decoder.update('{"code":"display(1)","reset":false,"language":"js"}');
 		expect(complete).toEqual({
 			kind: "snapshot",
 			snapshot: {
@@ -132,7 +132,7 @@ describe("EvalArgsStreamDecoder", () => {
 	});
 
 	it("keeps single reset, language, and timeout buffers plannable", () => {
-		expect(new EvalArgsStreamDecoder().update('{"reset":true,"code":"display(1)"}')).toEqual({
+		expect(new EvalArgsStreamDecoder().update('{"language":"js","reset":true,"code":"display(1)"}')).toEqual({
 			kind: "snapshot",
 			snapshot: {
 				revision: 1,
@@ -194,9 +194,40 @@ describe("EvalArgsStreamDecoder", () => {
 	});
 
 	it("keeps a lone code value inside a string from disabling the stream", () => {
-		const first = new EvalArgsStreamDecoder().update('{"code":"display(1)"');
+		const first = new EvalArgsStreamDecoder().update('{"language":"js","code":"display(1)"');
 		expect(first.kind).toBe("snapshot");
-		const result = new EvalArgsStreamDecoder().update('{"code":"a \\"code\\" b"}');
+		const result = new EvalArgsStreamDecoder().update('{"language":"js","code":"a \\"code\\" b"}');
 		expect(result.kind).toBe("snapshot");
+	});
+	it("disables a complete object without language instead of planning a default-language read", () => {
+		expect(new EvalArgsStreamDecoder().update('{"code":"await tool.read({path:\'secret.txt\'})"}')).toEqual({
+			kind: "disabled",
+			reason: "missing eval language",
+			restart: false,
+		});
+	});
+
+	it("keeps complete objects with language plannable and incomplete prefixes languageless", () => {
+		expect(new EvalArgsStreamDecoder().update('{"language":"js","code":"display(1)"}')).toEqual({
+			kind: "snapshot",
+			snapshot: {
+				revision: 1,
+				language: "js",
+				codePrefix: "display(1)",
+				reset: undefined,
+				timeout: undefined,
+				complete: true,
+				restart: false,
+			},
+		});
+		expect(new EvalArgsStreamDecoder().update('{"code":"display(1)"')).toEqual({
+			kind: "snapshot",
+			snapshot: {
+				revision: 1,
+				codePrefix: "display(1)",
+				complete: false,
+				restart: false,
+			},
+		});
 	});
 });
