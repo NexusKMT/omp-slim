@@ -331,4 +331,24 @@ tool.read({ path: selected });
 			],
 		});
 	});
+
+	it("removes block-scoped loop bindings after the loop", async () => {
+		const plan = await projectJavaScriptShadowPlan(
+			`for (const path of ["secret.txt"]) {}\nawait tool.read({ path });`,
+			{ snapshot: { path: "retained.txt" } },
+		);
+		expect(plan.operations).toEqual([]);
+	});
+
+	it("restores a shadowed outer binding after the loop", async () => {
+		const plan = await projectJavaScriptShadowPlan(
+			`let path = "outer";\nfor (const path of ["x"]) {}\nawait tool.read({ path });`,
+		);
+		expect(plan.barrier).toBeUndefined();
+		expect(plan.operations).toHaveLength(1);
+		expect(plan.operations[0]?.call.args).toMatchObject({
+			kind: "object",
+			entries: [{ key: "path", value: { kind: "literal", value: "outer" } }],
+		});
+	});
 });

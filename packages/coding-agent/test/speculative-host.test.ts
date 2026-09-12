@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -171,6 +171,9 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
 
 		expect(await host.authorize(context)).toMatchObject({ allowed: true });
+		// Coordinator protocol order: evidence is captured pre-execution (after
+		// the hook gate), so capture here before executing directly.
+		expect(await host.captureEvidence(context)).toBe(true);
 		const physicalOutcome = await policy.execute(context, new AbortController().signal);
 		if (physicalOutcome.kind !== "result") throw new Error("expected speculative read result");
 		const commitContext: SpeculativeCommitContext = { ...context, physicalOutcome };
@@ -270,23 +273,63 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		await expect(
 			denyingPolicyHost.authorize(operationContext("denied-binary", "blob.dat", binary.effect)),
 		).resolves.toEqual({ allowed: false, reason: "tool approval is not auto-allow" });
-		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
-		await expect(host.authorize(operationContext("unsafe-binary", "blob.dat", binary.effect))).resolves.toEqual({
-			allowed: false,
-			reason: "local read target is unsafe",
-		});
 
+		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		// Content inspection runs at pre-execution capture (after the hook gate),
+		// not at authorization: the binary provisionally authorizes here and is
+		// vetoed by capture instead.
+		const unsafeContext = operationContext("unsafe-binary", "blob.dat", binary.effect);
+		await expect(host.authorize(unsafeContext)).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
+		await expect(host.captureEvidence(unsafeContext)).resolves.toBe(false);
 		// While an approved identical read still speculates and commits.
 		const approved = await policy.assess({ args: { path: "note.txt" } });
 		if (!approved.eligible) throw new Error("expected local read assessment to succeed");
 		const context = operationContext("approved-read", "note.txt", approved.effect);
 		await expect(host.authorize(context)).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
+		expect(await host.captureEvidence(context)).toBe(true);
 		const physicalOutcome = await policy.execute(context, new AbortController().signal);
 		if (physicalOutcome.kind !== "result") throw new Error("expected speculative read result");
 		expect(await host.validate({ ...context, physicalOutcome })).toBe(true);
 		await expect(
 			host.commit({ ...context, physicalOutcome }, async () => physicalOutcome.result),
 		).resolves.toMatchObject({ kind: "committed" });
+	});
+
+	it("reads no file content while authorizing", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "speculative-host-"));
+		temporaryDirectories.push(directory);
+		await fs.writeFile(path.join(directory, "note.txt"), "authorized content");
+		const session = createSession(directory);
+		const tool = new ReadTool(session);
+		const policy = tool.speculation.finalized;
+		if (!policy) throw new Error("read tool has no finalized speculation policy");
+		const assessment = await policy.assess({ args: { path: "note.txt" } });
+		if (!assessment.eligible || assessment.effect.kind !== "local_read") {
+			throw new Error("expected provisional admission for note.txt");
+		}
+		// Content evidence moved to the pre-execution capture (after the hook
+		// gate): authorization must resolve without opening the file, so a call
+		// that `beforeToolCall` later blocks never triggers content I/O.
+		const spy = spyOn(fs, "readFile");
+		try {
+			const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, {
+				hasHandlers: () => false,
+			});
+			await expect(
+				host.authorize({
+					candidateId: "no-content-read",
+					source: "direct",
+					dependencies: [],
+					tool,
+					toolCall: { type: "toolCall", id: "no-content-read", name: "read", arguments: { path: "note.txt" } },
+					args: { path: "note.txt" },
+					effect: assessment.effect,
+				}),
+			).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
+			expect(spy).toHaveBeenCalledTimes(0);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it("starts no speculative read before the beforeToolCall gate releases it", async () => {
@@ -349,15 +392,22 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		const policy = tool.speculation.finalized;
 		if (!policy) throw new Error("read tool has no finalized speculation policy");
 		const speculativeExecutions: string[] = [];
+		const orderedEvents: string[] = [];
 		const recordingExecute: typeof policy.execute = async (context, signal) => {
 			const target = context.args.path;
 			speculativeExecutions.push(typeof target === "string" ? target : "<unknown>");
+			orderedEvents.push("execute");
 			return policy.execute(context, signal);
 		};
 		const observedTool = Object.create(tool, {
 			speculation: { value: { finalized: { ...policy, execute: recordingExecute } } },
 		}) as ReadTool;
 		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
+		const captureEvidence = host.captureEvidence.bind(host);
+		host.captureEvidence = async context => {
+			orderedEvents.push("capture");
+			return captureEvidence(context);
+		};
 		const tools: NonNullable<AgentContext["tools"]> = [observedTool];
 		const context: AgentContext = { systemPrompt: [""], messages: [], tools };
 		const loopConfig: AgentLoopConfig = {
@@ -388,6 +438,10 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		// view (matching `executeToolCalls`) so `execute` variance agrees.
 		const outcome = await coordinator.claim(tools[0], toolCall, executionArgs);
 		expect(speculativeExecutions).toEqual(["note.txt"]);
+		// The coordinator captures evidence strictly before executing: a
+		// coordinator regression that stops calling the hook would surface here
+		// (execution without a preceding capture), not just at validate time.
+		expect(orderedEvents).toEqual(["capture", "execute"]);
 		if (!outcome) throw new Error("expected the deferred read to commit");
 		const text = outcome.result.content.find(entry => entry.type === "text")?.text ?? "";
 		expect(text).toContain("hook-allowed content");
@@ -424,7 +478,10 @@ describe("CodingAgentSpeculativeExecutionHost", () => {
 		// Repoint the link outside the workspace between authorization and execution.
 		await fs.unlink(path.join(directory, "link.txt"));
 		await fs.symlink(path.join(outside, "secret.txt"), path.join(directory, "link.txt"));
-		// Execution must fail into ordinary dispatch before reading the new target.
+		// The pre-execution capture (which runs after the hook gate) sees the
+		// swapped target and vetoes before anything executes — and the execution
+		// layer independently refuses the escaped target.
+		await expect(host.captureEvidence(context)).resolves.toBe(false);
 		await expect(policy.execute(context, new AbortController().signal)).rejects.toThrow(
 			"Speculative read target is unavailable",
 		);

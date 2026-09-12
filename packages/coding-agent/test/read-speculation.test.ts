@@ -273,7 +273,7 @@ describe("read speculation assessment", () => {
 		}
 	});
 
-	it("denies unsafe content at host authorization, never at assessment", async () => {
+	it("denies unsafe targets at host authorization, unsafe content at capture", async () => {
 		fs.writeFileSync(path.join(testDir, "blob.dat"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
 		const session = {
 			...createSession(testDir),
@@ -287,29 +287,47 @@ describe("read speculation assessment", () => {
 		const policy = tool.speculation.finalized;
 		if (!policy) throw new Error("read tool has no finalized speculation policy");
 		const host = new CodingAgentSpeculativeExecutionHost(session.settings, session, { hasHandlers: () => false });
-		const cases: Array<{ path: string; reason: string }> = [
+		const authorizeContext = (
+			candidateId: string,
+			target: string,
+			effect: SpeculativeOperationContext["effect"],
+		): SpeculativeOperationContext => ({
+			candidateId,
+			source: "direct",
+			dependencies: [],
+			tool,
+			toolCall: { type: "toolCall", id: candidateId, name: "read", arguments: { path: target } },
+			args: { path: target },
+			effect,
+		});
+		// Metadata verdicts stay at authorization: directories and missing paths
+		// never reach content inspection.
+		for (const { path: target, reason } of [
 			{ path: "directory", reason: "local read target is unsafe" },
-			{ path: "image.png", reason: "local read target is unsafe" },
-			{ path: "data.sqlite", reason: "local read target is unsafe" },
-			{ path: "blob.dat", reason: "local read target is unsafe" },
 			{ path: "missing.txt", reason: "local read path is unavailable" },
-		];
-
-		for (const { path: target, reason } of cases) {
+		]) {
 			const assessment = await policy.assess({ args: { path: target } });
 			if (!assessment.eligible) throw new Error(`expected provisional admission for ${target}`);
-			const candidateId = `unsafe-${target}`;
-			await expect(
-				host.authorize({
-					candidateId,
-					source: "direct",
-					dependencies: [],
-					tool,
-					toolCall: { type: "toolCall", id: candidateId, name: "read", arguments: { path: target } },
-					args: { path: target },
-					effect: assessment.effect,
-				} satisfies SpeculativeOperationContext),
-			).resolves.toEqual({ allowed: false, reason });
+			await expect(host.authorize(authorizeContext(`meta-${target}`, target, assessment.effect))).resolves.toEqual({
+				allowed: false,
+				reason,
+			});
 		}
+		// Content verdicts moved behind the hook gate: authorization admits
+		// provisionally (no file bytes read), and the pre-execution capture —
+		// which runs after `beforeToolCall` for deferred candidates — vetoes.
+		for (const target of ["image.png", "data.sqlite", "blob.dat"]) {
+			const assessment = await policy.assess({ args: { path: target } });
+			if (!assessment.eligible) throw new Error(`expected provisional admission for ${target}`);
+			const context = authorizeContext(`content-${target}`, target, assessment.effect);
+			await expect(host.authorize(context)).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
+			await expect(host.captureEvidence(context)).resolves.toBe(false);
+		}
+		// A plain text file still captures evidence for the commit path.
+		const plain = await policy.assess({ args: { path: "plain.txt" } });
+		if (!plain.eligible) throw new Error("expected provisional admission for plain.txt");
+		const plainContext = authorizeContext("content-plain", "plain.txt", plain.effect);
+		await expect(host.authorize(plainContext)).resolves.toEqual({ allowed: true, deferBeforeToolCall: true });
+		await expect(host.captureEvidence(plainContext)).resolves.toBe(true);
 	});
 });

@@ -646,6 +646,16 @@ export type SpeculativeCommitDecision =
 
 export interface SpeculativeExecutionHost {
 	authorize(context: SpeculativeOperationContext): SpeculativeAuthorization | Promise<SpeculativeAuthorization>;
+	/**
+	 * Capture content evidence after admission gates pass but before the
+	 * candidate executes. The coordinator invokes this immediately before
+	 * starting speculative execution — which for hook-deferred candidates is
+	 * after `beforeToolCall` runs — so content inspection never precedes a
+	 * hook that may block the call. Return false (or throw) to veto the
+	 * candidate without executing it. Hosts without this hook keep the legacy
+	 * behavior of capturing during `authorize`.
+	 */
+	captureEvidence?(context: SpeculativeOperationContext): boolean | Promise<boolean>;
 	validate?(context: SpeculativeCommitContext): boolean | Promise<boolean>;
 	commit?(
 		context: SpeculativeCommitContext,

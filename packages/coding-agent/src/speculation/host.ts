@@ -70,7 +70,7 @@ function sameResourceState(left: nodeFs.Stats, right: nodeFs.Stats): boolean {
 	);
 }
 
-async function captureEvidence(target: string): Promise<LocalReadEvidence | undefined> {
+async function digestTargetEvidence(target: string): Promise<LocalReadEvidence | undefined> {
 	try {
 		const state = await fs.lstat(target);
 		if (state.isSymbolicLink() || !state.isFile() || state.size > SNAPSHOT_MAX_BYTES) return undefined;
@@ -157,19 +157,6 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		) {
 			return { allowed: false, reason: "local read target is unsafe" };
 		}
-		if (await readImageMetadata(resolved)) return { allowed: false, reason: "local read target is unsafe" };
-		const sniffed = await Bun.file(resolved).slice(0, BINARY_SNIFF_BYTES).bytes();
-		const header = Buffer.from(sniffed.buffer, sniffed.byteOffset, sniffed.byteLength);
-		if (
-			isProbablyBinaryHeader(header) ||
-			header.subarray(0, 5).toString("ascii") === "%PDF-" ||
-			header.subarray(0, 16).toString("ascii") === "SQLite format 3\u0000"
-		) {
-			return { allowed: false, reason: "local read target is unsafe" };
-		}
-		const evidence = await captureEvidence(resolved);
-		if (!evidence) return { allowed: false, reason: "local read target is unsafe" };
-		this.#evidence.set(context.candidateId, evidence);
 		// Defer execution until the finalized call survives the `beforeToolCall`
 		// gate. The coordinator only honors this flag when a `beforeToolCall`
 		// hook is installed (see `SpeculativeOperationCoordinator`), so hook-free
@@ -180,13 +167,52 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		// discarding the candidate before it ever executes). The host cannot
 		// distinguish a blocking hook from a pass-through here and does not need
 		// to — the coordinator applies that condition itself. Note this gates
-		// execution, not admission: the `realpath`/`stat`/snapshot reads above
-		// still run at admission time, but nothing they stage can commit without
-		// passing host validation again at commit time.
+		// execution, not admission: `realpath`/`stat` metadata still resolves at
+		// admission time, but content inspection runs in `captureEvidence`
+		// immediately before execution — after the hook gate for deferred
+		// candidates — and nothing commits without passing validation below.
 		return { allowed: true, deferBeforeToolCall: true };
 	}
 
+	/**
+	 * Capture content evidence immediately before speculative execution.
+	 *
+	 * The coordinator invokes this after admission gates pass and — for deferred
+	 * candidates — after `beforeToolCall` runs, so content inspection never
+	 * precedes a hook that may block the call. Returns false (veto, discard
+	 * without executing) when the target fails the content gates. Reuses stored
+	 * evidence when the same candidate captures twice.
+	 */
+	async captureEvidence(context: SpeculativeOperationContext): Promise<boolean> {
+		if (context.effect.kind !== "local_read" || context.effect.resources.length !== 1) return false;
+		if (this.#evidence.has(context.candidateId)) return true;
+		const resource = context.effect.resources[0];
+		if (typeof context.args.path !== "string") return false;
+		if (!path.isAbsolute(resource.path)) return false;
+		if (path.resolve(this.toolSession.cwd, context.args.path) !== resource.path) return false;
+		const target = await resolveSpeculativeReadTarget(this.toolSession.cwd, resource.path);
+		if (!target.ok) return false;
+		const resolved = target.resolved;
+		if (await readImageMetadata(resolved)) return false;
+		const sniffed = await Bun.file(resolved).slice(0, BINARY_SNIFF_BYTES).bytes();
+		const header = Buffer.from(sniffed.buffer, sniffed.byteOffset, sniffed.byteLength);
+		if (
+			isProbablyBinaryHeader(header) ||
+			header.subarray(0, 5).toString("ascii") === "%PDF-" ||
+			(header.length >= 16 && header.subarray(0, 15).toString("ascii") === "SQLite format 3" && header[15] === 0)
+		) {
+			return false;
+		}
+		const evidence = await digestTargetEvidence(resolved);
+		if (!evidence) return false;
+		this.#evidence.set(context.candidateId, evidence);
+		return true;
+	}
+
 	async validate(context: SpeculativeCommitContext): Promise<boolean> {
+		// Evidence is captured pre-execution (after the hook gate), never here:
+		// re-capturing at commit time would resurrect consumed evidence and
+		// allow a replayed outcome to commit twice. Absent evidence fails closed.
 		const expected = this.#evidence.get(context.candidateId);
 		if (!expected) return false;
 		const consumed = context.physicalOutcome.evidence;
@@ -199,16 +225,14 @@ export class CodingAgentSpeculativeExecutionHost implements SpeculativeExecution
 		}
 		const authorization = await this.authorize(context);
 		if (!authorization.allowed) return false;
-		const current = this.#evidence.get(context.candidateId);
-		return (
-			current !== undefined &&
-			current.device === expected.device &&
-			current.inode === expected.inode &&
-			current.mtimeMs === expected.mtimeMs &&
-			current.size === expected.size &&
-			current.digest === expected.digest &&
-			current.snapshotDigest === expected.snapshotDigest
-		);
+		// Re-digest the executed target at commit time: evidence was captured
+		// pre-execution, so anything that changed afterwards (edit, swap,
+		// restore) must veto the commit even though the execution digest matches
+		// the capture. Byte equality also re-binds the type gates — swapped-in
+		// content can never commit without passing them on its own bytes.
+		const fresh = await digestTargetEvidence(consumed.resource);
+		if (!fresh) return false;
+		return fresh.digest === expected.digest && fresh.snapshotDigest === expected.snapshotDigest;
 	}
 
 	async commit(

@@ -715,6 +715,10 @@ function projectStatement(
 			span: span(statement),
 		};
 		state.controls.push(loop);
+		// The loop header shadows any outer binding for the loop duration; capture
+		// the outer state now so it can be restored after the final iteration.
+		const outerValue = state.environment.get(declaration.id.name);
+		const outerKind = state.bindingKinds.get(declaration.id.name);
 		for (const [index, value] of evaluated.value.entries()) {
 			state.bindingKinds.set(declaration.id.name, statement.left.kind);
 			state.environment.set(declaration.id.name, { kind: "literal", value });
@@ -730,9 +734,25 @@ function projectStatement(
 			// Preserve loop-carried outer assignments across iterations: bodies
 			// with their own bindings barrier out above, so anything left in the
 			// environment is either outer state (mutations persist, as at runtime)
-			// or the loop variable (overwritten next iteration). Restoring the
-			// pre-iteration environment here used to lose those mutations and
-			// project later iterations against stale values.
+			// or the loop variable (overwritten next iteration).
+		}
+		// The loop variable ceases to exist after the loop unless the header is
+		// function-scoped `var` (which genuinely leaks its final value). For
+		if (evaluated.value.length === 0) return true;
+		// `let`/`const`, restore the shadowed outer binding when one existed;
+		// otherwise seed hoisted-undefined so later reads fail validation the way
+		// authoritative execution throws ReferenceError instead of consuming a
+		// retained snapshot value.
+		if (statement.left.kind === "var") {
+			return true;
+		}
+		if (outerValue !== undefined) {
+			state.environment.set(declaration.id.name, outerValue);
+			if (outerKind !== undefined) state.bindingKinds.set(declaration.id.name, outerKind);
+			else state.bindingKinds.delete(declaration.id.name);
+		} else {
+			state.environment.set(declaration.id.name, { kind: "literal", value: undefined });
+			state.bindingKinds.set(declaration.id.name, "const");
 		}
 		return true;
 	}

@@ -883,6 +883,17 @@ export class SpeculativeOperationCoordinator {
 		};
 		void (async () => {
 			try {
+				// Content evidence is captured here — immediately before execution —
+				// rather than at admission: for hook-deferred candidates this runs
+				// after `beforeToolCall`, so a blocked call never triggers content
+				// I/O. Hosts without the hook keep capturing during `authorize`.
+				if (this.config.host?.captureEvidence) {
+					const ready = await this.config.host.captureEvidence(this.#createContext(candidate));
+					if (!ready || candidate.state === "discarded") {
+						await this.#discardCandidate(candidate, "discarded", "host declined speculative evidence capture");
+						return;
+					}
+				}
 				const outcome = await candidate.policy.execute(executionContext, signal);
 				if (candidate.state === "discarded") return;
 				candidate.finishedAt = Date.now();
