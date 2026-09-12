@@ -9761,7 +9761,7 @@
 				}
 			},
 			{
-				"source": "providers/deepseek.kdl:87",
+				"source": "providers/deepseek.kdl:89",
 				"providers": [
 					"deepseek"
 				],
@@ -9784,7 +9784,15 @@
 					"reasoningContentField": "reasoning_content",
 					"requiresAssistantContentForToolCalls": true,
 					"requiresReasoningContentForToolCalls": true,
+					"allowsSyntheticReasoningContentForToolCalls": false,
 					"supportsToolChoice": false
+				},
+				"thinking": {
+					"efforts": [
+						"low",
+						"high",
+						"max"
+					]
 				}
 			},
 			{
