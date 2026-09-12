@@ -207,8 +207,10 @@ function parseUsagePayload(payload: unknown, nowMs: number): { rows: KimiUsageRo
 	}
 
 	if (isRecord(data.totalQuota)) {
+		const windowData = isRecord(data.totalQuota.window) ? data.totalQuota.window : {};
 		const total = buildUsageRow(data.totalQuota, "Total quota", nowMs);
 		if (total) {
+			total.window = buildWindow(windowData, nowMs);
 			rows.push(total);
 		}
 	}

@@ -117,7 +117,12 @@ describe("kimi usage provider", () => {
 			{ provider: "kimi-code", credential: makeCredential(), signal: undefined },
 			makeCtx({
 				usage: { limit: "100", used: "28", remaining: "72", resetTime: "2026-07-21T07:43:35.355947Z" },
-				totalQuota: { limit: "500", used: "100", remaining: "400" },
+				totalQuota: {
+					limit: "500",
+					used: "100",
+					remaining: "400",
+					window: { duration: 30, timeUnit: "TIME_UNIT_DAY", resetTime: "2026-08-20T00:00:00.000Z" },
+				},
 			}),
 		);
 
@@ -127,6 +132,8 @@ describe("kimi usage provider", () => {
 		expect(report!.limits[1]!.label).toBe("Total quota");
 		expect(report!.limits[1]!.amount.limit).toBe(500);
 		expect(report!.limits[1]!.amount.remaining).toBe(400);
+		expect(report!.limits[1]!.window?.id).toBe("30d");
+		expect(report!.limits[1]!.window?.resetsAt).toBe(Date.parse("2026-08-20T00:00:00.000Z"));
 	});
 
 	it("cleanly ignores empty totalQuota objects", async () => {
