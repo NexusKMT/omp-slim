@@ -41,6 +41,7 @@ export class SessionFocusController {
 	#focusedAgentId: string | undefined;
 	/** Session currently attached while focused; undefined when unfocused. */
 	#attachedSession: AgentSession | undefined;
+	#focusAttachment: Promise<boolean> | undefined;
 	#registryUnsubscribe: (() => void) | undefined;
 	#attachGeneration = 0;
 	/** Monotonic focus-request id: a request that resolves after a newer one drops instead of clobbering the view. */
@@ -78,24 +79,29 @@ export class SessionFocusController {
 		// still reviving) wins: drop the stale completion instead of letting
 		// the slower revive replace the view.
 		if (request !== this.#focusRequestSeq) return;
-		// Rebuilding the same live view discards tool cards whose results are not persisted yet.
-		if (id === this.#focusedAgentId && session === this.#attachedSession) return;
-		// Doom in-flight attachments from older requests now that this one is
-		// known usable — not at request time, so a newer revival that fails
-		// leaves the current attachment undisturbed instead of half torn down.
-		++this.#attachGeneration;
-		this.#focusedAgentId = id;
-		this.#attachedSession = session;
-		this.#registryUnsubscribe ??= this.registry.onChange(e => this.#onRegistryEvent(e));
+		const sameSession = id === this.#focusedAgentId && session === this.#attachedSession;
+		let attachment = this.#focusAttachment;
+		// Reuse an in-flight rebuild without discarding unpersisted tool cards.
+		if (sameSession) {
+			if (!attachment) return;
+		} else {
+			++this.#attachGeneration;
+			this.#focusedAgentId = id;
+			this.#attachedSession = session;
+			this.#registryUnsubscribe ??= this.registry.onChange(e => this.#onRegistryEvent(e));
+			attachment = this.#attach(session);
+			this.#focusAttachment = attachment;
+		}
 		let attached = false;
 		try {
-			attached = await this.#attach(session);
+			attached = await attachment;
 		} catch (error) {
-			// Same supersede rule as the revive above: only the current
-			// request may surface attachment failures.
 			if (request !== this.#focusRequestSeq) return;
 			throw error;
+		} finally {
+			if (this.#focusAttachment === attachment) this.#focusAttachment = undefined;
 		}
+		if (request !== this.#focusRequestSeq) return;
 		if (attached && this.#focusedAgentId === id && this.#attachedSession === session) {
 			this.ctx.showStatus(`Viewing agent ${id} — Esc returns to main, ←← hops to parent`);
 		}

@@ -580,6 +580,35 @@ describe("SessionFocusController", () => {
 		expect(h.pendingMessagesContainer.render(80).join("\n")).toContain("queued worker input");
 	});
 
+	it("reports attachment failure to a repeated same-session focus request", async () => {
+		const renderStarted = Promise.withResolvers<void>();
+		const renderGate = Promise.withResolvers<void>();
+		const failure = new Error("worker replay failed");
+		let firstReplay = true;
+		const h = makeHarness({
+			renderInitialMessages: async () => {
+				if (!firstReplay) return;
+				firstReplay = false;
+				renderStarted.resolve();
+				await renderGate.promise;
+				throw failure;
+			},
+		});
+		const worker = makeSessionStub();
+		registerSub(h.registry, "Worker", worker.session, MAIN_AGENT_ID);
+		const first = h.controller.focusAgent("Worker");
+		await renderStarted.promise;
+		const second = h.controller.focusAgent("Worker").then(
+			() => undefined,
+			error => error,
+		);
+		await flushAsync();
+		renderGate.resolve();
+		await first;
+		expect(await second).toBe(failure);
+		expect(h.controller.focusedAgentId).toBeUndefined();
+	});
+
 	it("attaches once when a second same-session request arrives before revive completes", async () => {
 		const h = makeHarness();
 		const worker = makeSessionStub();
