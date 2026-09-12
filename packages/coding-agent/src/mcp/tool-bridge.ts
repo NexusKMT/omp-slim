@@ -478,7 +478,10 @@ export function createMCPToolName(serverName: string, toolName: string): string 
  *    `mcp__puppeteer_screenshot`, not `mcp__puppeteer_puppeteer_screenshot` —
  *    and the 64-char {@link capMCPToolNameLength} hash.
  * 2. Sanitize the whole suffix, for a single-separator name whose punctuation
- *    still differs from the minted key (`mcp__seedpatch-client_bank`).
+ *    still differs from the minted key (`mcp__seedpatch-client_bank`). This
+ *    candidate is capped too: without the boundary there is nothing to re-mint,
+ *    but the registered key was still length-capped, so an overlong spelling
+ *    would otherwise never match its hashed form.
  *
  * This is normalization, not fuzzy matching: every candidate is derived from
  * the emitted name by the same rules that minted the registry, never selected
@@ -507,7 +510,9 @@ export function canonicalMCPToolNameCandidates(name: string): string[] {
 		const toolName = suffix.slice(boundary + 2);
 		if (survives(serverName) && survives(toolName)) add(createMCPToolName(serverName, toolName));
 	}
-	if (survives(suffix)) add(`${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "")}`);
+	if (survives(suffix)) {
+		add(capMCPToolNameLength(`${MCP_TOOL_NAME_PREFIX}${sanitizeMCPToolNamePart(suffix, "")}`));
+	}
 	return candidates;
 }
 

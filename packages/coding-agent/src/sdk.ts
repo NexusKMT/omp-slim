@@ -127,7 +127,7 @@ import {
 } from "./extensibility/skills";
 import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./extensibility/slash-commands";
 import type { HindsightSessionState } from "./hindsight/state";
-import { LocalProtocolHandler, type LocalProtocolOptions } from "./internal-urls";
+import { LocalProtocolHandler, type LocalProtocolOptions, stripXdUrlPrefix } from "./internal-urls";
 import { setSharedLspEnabled } from "./lsp/client";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "./lsp/startup-events";
 import {
@@ -142,6 +142,7 @@ import {
 	shouldFilterBrowserMCPForPrelude,
 } from "./mcp";
 import { MCP_CONNECTION_STATUS_EVENT_CHANNEL, type McpConnectionStatusEvent } from "./mcp/startup-events";
+import { canonicalMCPToolNameCandidates } from "./mcp/tool-bridge";
 import { createSessionMemoryRuntimeContext, resolveMemoryBackend } from "./memory-backend";
 import { MEMORY_BACKEND_TOOL_NAMES } from "./memory-backend/tool-names";
 import type { MnemopiSessionState } from "./mnemopi/state";
@@ -3020,8 +3021,25 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// renderer lookup continue to use the undecorated canonical instance.
 		const resolveDeviceTool = (name: string): AgentTool | undefined => {
 			const state = toolSession.xdev;
-			if (!state) return undefined;
-			return resolveFallbackXdevExecutable(state, name);
+			const device = state ? resolveFallbackXdevExecutable(state, name) : undefined;
+			if (device) return device;
+			// `xd://` state is allocated only when `tools.xdev` is on AND the
+			// session is unrestricted (`createTools`), so device resolution cannot
+			// be the only place a Claude Code MCP spelling is recovered — with no
+			// state at all an advertised MCP tool would still dead-end.
+			//
+			// `agent.state.tools` is the set actually advertised to THIS caller and
+			// is already execution-wrapped by `#applyActiveToolsByName`, so a
+			// deselected, `defaultInactive`, or hidden tool stays unreachable and no
+			// permission wrapper is bypassed. The auto-learn capture agent
+			// advertises only `learn`/`manage_skill`, so it gains no MCP surface.
+			// Only `mcp__` names yield candidates, so no first-party tool is
+			// reachable this way.
+			for (const candidate of canonicalMCPToolNameCandidates(stripXdUrlPrefix(name))) {
+				const advertised = agent.state.tools.find(tool => tool.name === candidate);
+				if (advertised) return advertised;
+			}
+			return undefined;
 		};
 		// Mounted devices are absent from the advertised tool set, so a miss on a
 		// device name has nothing to suggest unless the loop is told they exist.

@@ -64,6 +64,13 @@ describe("canonicalMCPToolNameCandidates", () => {
 		const registered = createMCPToolName("srv", longTool);
 		expect(registered.length).toBe(64);
 		expect(recover(`mcp__srv__${longTool}`, registered)).toBe(registered);
+
+		// Single-separator spelling of the same overlong tool: there is no
+		// boundary to re-mint from, so this candidate needs the cap applied
+		// directly or it can never match the hashed key either.
+		const hyphenated = createMCPToolName("seedpatch-client", longTool);
+		expect(hyphenated.length).toBe(64);
+		expect(recover(`mcp__seedpatch-client_${longTool}`, hyphenated)).toBe(hyphenated);
 	});
 
 	it("yields nothing for an already-canonical name so exact match stays authoritative", () => {
