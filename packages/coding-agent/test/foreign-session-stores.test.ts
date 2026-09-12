@@ -77,7 +77,10 @@ async function createClaudeFixture(): Promise<{ info: ForeignSessionInfo; store:
 			parentUuid: "claude-assistant",
 			timestamp: "2026-01-01T00:00:02.000Z",
 			message: {
-				content: [{ type: "tool_result", tool_use_id: "tool-claude", content: "file contents" }],
+				content: [
+					{ type: "tool_result", tool_use_id: "tool-claude", content: "file contents" },
+					{ type: "text", text: "Please preserve this typed follow-up." },
+				],
 			},
 		},
 		{ type: "custom-title", customTitle: "Imported Claude", timestamp: "2026-01-01T00:00:03.000Z" },
@@ -100,7 +103,7 @@ describe("ClaudeSessionStore", () => {
 		expect(manager.getSessionName()).toBe("Imported Claude");
 		const entries = manager.getEntries();
 		const messages = entries.filter(entry => entry.type === "message");
-		expect(messages.map(entry => entry.message.role)).toEqual(["user", "assistant", "toolResult"]);
+		expect(messages.map(entry => entry.message.role)).toEqual(["user", "assistant", "toolResult", "user"]);
 		const assistant = messages.find(entry => entry.message.role === "assistant");
 		if (assistant?.message.role !== "assistant") throw new Error("Missing imported Claude assistant");
 		const call = assistant.message.content.find(block => block.type === "toolCall");
@@ -108,6 +111,9 @@ describe("ClaudeSessionStore", () => {
 		const result = messages.find(entry => entry.message.role === "toolResult");
 		if (result?.message.role !== "toolResult") throw new Error("Missing imported Claude tool result");
 		expect(result.message.toolCallId).toBe("tool-claude");
+		const followUp = messages[3];
+		if (followUp?.message.role !== "user") throw new Error("Missing imported Claude follow-up");
+		expect(followUp.message.content).toEqual([{ type: "text", text: "Please preserve this typed follow-up." }]);
 		expect(
 			entries.some(entry => entry.type === "model_change" && entry.model === "anthropic/claude-sonnet-4-5"),
 		).toBe(true);

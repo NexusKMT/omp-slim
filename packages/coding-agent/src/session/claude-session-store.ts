@@ -283,7 +283,13 @@ function convertRecord(
 			};
 			results.push({ message, suffix: `tool-${index}` });
 		}
-		if (results.length > 0) return results;
+		if (results.length > 0) {
+			const content = userContent(rawContent);
+			if (content !== undefined) {
+				results.push({ message: { role: "user", content, timestamp }, suffix: "message" });
+			}
+			return results;
+		}
 	}
 	const content = userContent(rawContent);
 	if (content === undefined || (typeof content === "string" && content.length === 0)) return [];
