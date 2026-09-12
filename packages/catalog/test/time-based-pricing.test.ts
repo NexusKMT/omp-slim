@@ -427,4 +427,22 @@ describe("deepseek provider metadata corrections", () => {
 		expect(bundled?.contextWindow).toBe(1_000_000);
 		expect(bundled?.maxTokens).toBe(384_000);
 	});
+	it("resolves the V4.1 thinking ladder for the bare Flash alias", () => {
+		const bundled = getBundledModels("deepseek").find(model => model.id === "deepseek-flash");
+		if (!bundled) throw new Error("Expected a bundled deepseek-flash row");
+		const resolved = buildModel(bundled as ModelSpec<"openai-completions">);
+		expect(resolved.reasoning).toBe(true);
+		expect(resolved.thinking).toEqual({ mode: "effort", efforts: ["low", "high", "max"] });
+	});
+	it("resolves the V4.1 tool-call replay contract for the bare Flash alias", () => {
+		const bundled = getBundledModels("deepseek").find(model => model.id === "deepseek-flash");
+		if (!bundled) throw new Error("Expected a bundled deepseek-flash row");
+		const resolved = buildModel(bundled as ModelSpec<"openai-completions">);
+		expect(resolved.compat.supportsToolChoice).toBe(false);
+		expect(resolved.compat.maxTokensField).toBe("max_tokens");
+		expect(resolved.compat.reasoningContentField).toBe("reasoning_content");
+		expect(resolved.compat.requiresReasoningContentForToolCalls).toBe(true);
+		expect(resolved.compat.requiresAssistantContentForToolCalls).toBe(true);
+		expect(resolved.compat.allowsSyntheticReasoningContentForToolCalls).toBe(false);
+	});
 });
