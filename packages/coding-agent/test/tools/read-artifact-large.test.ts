@@ -9,7 +9,6 @@ import {
 } from "@oh-my-pi/pi-coding-agent/internal-urls/registry-helpers";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { formatTruncationMetaNotice } from "@oh-my-pi/pi-coding-agent/tools/output-meta";
-import { shortenPath } from "@oh-my-pi/pi-coding-agent/tools/render-utils";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 
 function getTextOutput(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -77,9 +76,10 @@ describe("read tool large artifact handling", () => {
 
 		expect(output).toContain("Unbounded raw read blocked for artifact://0");
 		expect(output).toContain("artifact://0:raw:1-3000");
-		// The notice displays the artifact path through the shared shortener, which
-		// collapses a home prefix to `~` (Windows temp dirs live under `%USERPROFILE%`).
-		expect(output).toContain(shortenPath(artifactDir));
+		// The notice must name the artifact file so it can be searched or copied.
+		// Only the directory prefix varies by host (a Windows temp dir sits under
+		// `%USERPROFILE%` and is displayed shortened), so match the path tail.
+		expect(output).toMatch(/session[/\\]0\.mcp\.log/);
 		expect(output).not.toContain("line-001");
 	});
 
@@ -202,11 +202,11 @@ describe("read tool large artifact handling", () => {
 		try {
 			const result = await tool.execute("call-raw-home", { path: "artifact://0:raw" });
 			const output = getTextOutput(result);
-			// artifactDir sits under the (mocked) home, so shortenPath rewrites the
-			// prefix to `~` — the notice must NOT leak the absolute artifact path.
-			// The shortener normalizes separators to `/`, so derive the expectation
-			// from it instead of assuming the host's path style.
-			expect(output).toContain(shortenPath(artifactDir));
+			// artifactDir sits under the (mocked) home, so the notice must display it
+			// as `~`-relative (with `/` separators) and must NOT leak the absolute
+			// artifact path. Assert the exact displayed path rather than recomputing
+			// it with the production shortener.
+			expect(output).toContain("~/session/0.mcp.log");
 			expect(output).not.toContain(artifactDir);
 		} finally {
 			homeSpy.mockRestore();
