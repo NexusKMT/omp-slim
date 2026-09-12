@@ -282,6 +282,35 @@ describe("SessionFocusController", () => {
 		expect(h.handledEvents.slice(3)).toEqual([{ type: "message_update", message }]);
 	});
 
+	it("does not restart the next assistant when an older message end finishes rendering", async () => {
+		const h = makeHarness();
+		const worker = makeSessionStub({ isStreaming: true });
+		registerSub(h.registry, "Worker", worker.session, MAIN_AGENT_ID);
+		await h.controller.focusAgent("Worker");
+		const endGate = Promise.withResolvers<void>();
+		const endStarted = Promise.withResolvers<void>();
+		const handleEvent = h.ctx.eventController.handleEvent.bind(h.ctx.eventController);
+		h.ctx.eventController.handleEvent = async event => {
+			await handleEvent(event);
+			if (event.type === "message_end") {
+				endStarted.resolve();
+				await endGate.promise;
+			}
+		};
+		const previous = { role: "assistant", content: "previous" };
+		const next = { role: "assistant", content: "next" };
+		await worker.emit({ type: "message_start", message: previous });
+		const ending = worker.emit({ type: "message_end", message: previous });
+		await endStarted.promise;
+		await worker.emit({ type: "message_start", message: next });
+		endGate.resolve();
+		await ending;
+		h.handledEvents.length = 0;
+		const update = { type: "message_update", message: next };
+		await worker.emit(update);
+		expect(h.handledEvents).toEqual([update]);
+	});
+
 	it("focusParent walks parentId to a registered non-main agent, then re-attaches the main session", async () => {
 		const h = makeHarness();
 		const parent = makeSessionStub();

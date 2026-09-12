@@ -198,8 +198,8 @@ export class SessionFocusController {
 					}
 					if (generation !== this.#attachGeneration) return;
 				}
-				await this.ctx.eventController.handleEvent(event);
 				if (event.type === "message_end" && event.message.role === "assistant") assistantStreamSynced = false;
+				await this.ctx.eventController.handleEvent(event);
 			});
 
 			await target.settleInFlightMessagePersistence();
