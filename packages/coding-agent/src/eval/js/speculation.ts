@@ -38,6 +38,7 @@ import type {
 	ShadowValue,
 } from "../speculation/types";
 import { containsCallSiteHelperSyntax, loadBabelParser } from "./shared/rewrite-imports";
+import type { ShadowInitialGlobals } from "./shared/runtime";
 
 const MAX_STATIC_LOOP_ITERATIONS = 32;
 
@@ -165,6 +166,7 @@ function isDefinitelyString(expression: ShadowExpression): boolean {
 
 type ProjectionState = {
 	readonly snapshot: Readonly<Record<string, unknown>>;
+	readonly initialGlobals: Readonly<Record<string, boolean>>;
 	readonly environment: Map<string, ShadowExpression>;
 	readonly bindingKinds: Map<string, VariableDeclaration["kind"]>;
 	readonly operations: ShadowOperation[];
@@ -212,6 +214,17 @@ function objectKey(property: Node): string | undefined {
 	if (isIdentifier(property)) return property.name;
 	if (isStringLiteral(property) || isNumericLiteral(property)) return String(property.value);
 	return undefined;
+}
+
+/**
+ * Whether a mutable global intrinsic still has its original identity in the
+ * retained session. Same-cell shadows are tracked in the environment; retained
+ * overrides are invisible to the snapshot values (functions are never JSON-safe,
+ * `delete` removes the key), so the runtime reports them explicitly. Absent only
+ * for hand-built snapshots, where intrinsics are assumed intact.
+ */
+function intrinsicIntact(state: ProjectionState, name: string): boolean {
+	return state.initialGlobals[name] ?? true;
 }
 
 function projectExpression(expression: Expression, state: ProjectionState): ShadowExpression | undefined {
@@ -294,6 +307,7 @@ function projectExpression(expression: Expression, state: ProjectionState): Shad
 		if (
 			isIdentifier(expression.callee, { name: "String" }) &&
 			!state.environment.has("String") &&
+			intrinsicIntact(state, "String") &&
 			args.length === 1
 		) {
 			const input = projectExpression(args[0] as Expression, state);
@@ -304,6 +318,8 @@ function projectExpression(expression: Expression, state: ProjectionState): Shad
 			!expression.callee.computed &&
 			isIdentifier(expression.callee.object, { name: "JSON" }) &&
 			!state.environment.has("JSON") &&
+			intrinsicIntact(state, "JSON") &&
+			intrinsicIntact(state, "JSON.stringify") &&
 			isIdentifier(expression.callee.property, { name: "stringify" }) &&
 			args.length === 1
 		) {
@@ -315,6 +331,7 @@ function projectExpression(expression: Expression, state: ProjectionState): Shad
 			!expression.callee.computed &&
 			isArrayExpression(expression.callee.object) &&
 			isIdentifier(expression.callee.property, { name: "join" }) &&
+			intrinsicIntact(state, "Array.prototype.join") &&
 			args.length <= 1
 		) {
 			const input = projectExpression(expression.callee.object, state);
@@ -761,6 +778,9 @@ function projectStatement(
 
 export interface JavaScriptShadowProjectionOptions {
 	readonly snapshot?: Readonly<Record<string, unknown>>;
+	/** Retained-intrinsic identity flags from the runtime snapshot. Absent only for
+	 * hand-built snapshots (unit tests); production snapshots always carry it. */
+	readonly initialGlobals?: ShadowInitialGlobals;
 }
 
 /** Projects a closed, non-executing IR for the supported eval source subset. */
@@ -786,6 +806,9 @@ export async function projectJavaScriptShadowPlan(
 	}
 	const state: ProjectionState = {
 		snapshot: options.snapshot ?? {},
+		// Absent only for hand-built snapshots: treat modeled intrinsics as intact
+		// (production snapshots always carry the map; see ShadowInitialGlobals).
+		initialGlobals: options.initialGlobals ?? {},
 		environment: new Map(),
 		bindingKinds: new Map(),
 		operations: [],

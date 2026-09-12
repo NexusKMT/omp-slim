@@ -2983,8 +2983,12 @@ async function executeToolCalls(
 					? await speculationCoordinator.claim(tool, toolCall, executionArgs)
 					: undefined;
 				if (speculativeOutcome) {
-					result = speculativeOutcome.result;
-					isError = speculativeOutcome.isError;
+					// Normalize exactly like the ordinary execute path below: third-party
+					// speculation policies/hosts may return malformed results (missing or
+					// non-array content) that must never persist verbatim in history.
+					const coerced = coerceToolResult(speculativeOutcome.result);
+					result = coerced.result;
+					if (coerced.malformed || result.isError) isError = true;
 					completedToolExecution = true;
 					executionStarted = true;
 				}

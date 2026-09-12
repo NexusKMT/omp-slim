@@ -109,9 +109,25 @@ const PRELUDE_GLOBAL_KEYS = [
 	"env",
 ];
 
+/**
+ * Which mutable global intrinsics still have their original identity.
+ *
+ * A retained cell can replace e.g. `String` with an arbitrary value; the shadow
+ * projector models `String(...)`/`JSON.stringify(...)`/`Array.prototype.join`
+ * calls as pure transforms only for names flagged intact here, so speculation
+ * never performs I/O from a branch the real cell cannot reach.
+ */
+export type ShadowInitialGlobals = Readonly<{
+	String: boolean;
+	JSON: boolean;
+	"JSON.stringify": boolean;
+	"Array.prototype.join": boolean;
+}>;
+
 export type ShadowSnapshot = Readonly<{
 	revision: number;
 	values: Readonly<Record<string, unknown>>;
+	initialGlobals: ShadowInitialGlobals;
 }>;
 
 export function shadowSnapshotDigest(snapshot: ShadowSnapshot): string {
@@ -271,6 +287,12 @@ export class JsRuntime {
 	#localRoots: Record<string, string>;
 	#namespaceRevision = 0;
 	#initialGlobalKeys = new Set<string>();
+	#initialIntrinsics = {
+		String: globalThis.String,
+		JSON: globalThis.JSON,
+		stringify: globalThis.JSON.stringify,
+		arrayJoin: Array.prototype.join,
+	};
 
 	snapshotUserGlobals(): ShadowSnapshot {
 		this.#activateGlobals("snapshot user globals");
@@ -283,7 +305,26 @@ export class JsRuntime {
 			const copied = copyShadowValue(descriptor.value, 0, snapshotState);
 			if (copied !== undefined) values[key] = copied;
 		}
-		return Object.freeze({ revision: this.#namespaceRevision, values: Object.freeze(values) });
+		// A retained cell may replace these without leaving any snapshot trace
+		// (functions are never JSON-safe, and `delete` removes the key entirely),
+		// so record their identity explicitly. The `JSON` short-circuit guards the
+		// property access when a prior cell nulled the whole object.
+		const currentJSON = globalThis.JSON;
+		const initialGlobals: ShadowInitialGlobals = {
+			String: globalThis.String === this.#initialIntrinsics.String,
+			JSON: currentJSON === this.#initialIntrinsics.JSON,
+			"JSON.stringify":
+				typeof currentJSON === "object" &&
+				currentJSON !== null &&
+				currentJSON === this.#initialIntrinsics.JSON &&
+				currentJSON.stringify === this.#initialIntrinsics.stringify,
+			"Array.prototype.join": Array.prototype.join === this.#initialIntrinsics.arrayJoin,
+		};
+		return Object.freeze({
+			revision: this.#namespaceRevision,
+			values: Object.freeze(values),
+			initialGlobals: Object.freeze(initialGlobals),
+		});
 	}
 	constructor(opts: RuntimeOptions) {
 		this.#cwd = opts.initialCwd;

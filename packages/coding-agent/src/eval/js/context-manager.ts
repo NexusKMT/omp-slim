@@ -340,7 +340,10 @@ export async function shadowPlanIfPresent(options: {
 	return {
 		snapshot,
 		digest: shadowSnapshotDigest(snapshot),
-		plan: await projectJavaScriptShadowPlan(options.code, { snapshot: snapshot.values }),
+		plan: await projectJavaScriptShadowPlan(options.code, {
+			snapshot: snapshot.values,
+			initialGlobals: snapshot.initialGlobals,
+		}),
 	};
 }
 

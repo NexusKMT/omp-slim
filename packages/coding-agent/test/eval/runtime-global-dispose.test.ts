@@ -88,6 +88,12 @@ describe("JsRuntime global disposal", () => {
 			expect(runtime.snapshotUserGlobals()).toEqual({
 				revision: 0,
 				values: { shadowSnapshotProbe: { nested: ["safe"] } },
+				initialGlobals: {
+					String: true,
+					JSON: true,
+					"JSON.stringify": true,
+					"Array.prototype.join": true,
+				},
 			});
 
 			await runtime.run("undefined;", undefined, hooks);

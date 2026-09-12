@@ -68,6 +68,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 	readonly #runtimeOccurrences = new Map<string, number>();
 	#occurrenceAssignment = Promise.resolve();
 	#snapshot: Readonly<Record<string, ShadowValue | unknown>> | undefined;
+	#lastPlan: { code: string; language: string; plan: ShadowPlan | null } | undefined;
 	#closed = false;
 	#updates = Promise.resolve();
 	#pendingPlan: { codePrefix: string; language: string } | undefined;
@@ -141,12 +142,17 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 	async #verifyFinalPlan(args: Readonly<Record<string, unknown>>): Promise<boolean> {
 		const { code, language } = args as { code?: unknown; language?: unknown };
 		if (typeof code !== "string" || (language !== "js" && language !== "py")) return false;
-		const plan = await this.#project(code, language);
+		// The streamed drain already reconciled admissions against this exact code:
+		// re-projecting would plan it twice (and break the coalescing contract
+		// that only the newest pending prefix is planned). Re-project only when
+		// the final arguments were never streamed.
+		const last = this.#lastPlan;
+		const plan =
+			last && last.code === code && last.language === language ? last.plan : await this.#project(code, language);
 		if (!plan) return this.#admitted.size === 0;
 		const plannedOperationIds = new Set(plan.operations.map(operation => operation.call.id));
 		return [...this.#admitted.keys()].every(id => plannedOperationIds.has(id));
 	}
-
 	commit(): void {}
 
 	async discard(reason: string): Promise<void> {
@@ -225,6 +231,7 @@ export class EvalShadowCellSession implements ToolSpeculationStreamSession {
 				plan = projected;
 			}
 		}
+		this.#lastPlan = { code, language, plan };
 		return plan;
 	}
 

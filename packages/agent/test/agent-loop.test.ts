@@ -15,6 +15,7 @@ import type {
 	AgentMessage,
 	AgentTool,
 	AgentToolContext,
+	SpeculativePhysicalOutcome,
 	ToolCallContext,
 } from "@oh-my-pi/pi-agent-core/types";
 import { ASIDE_MESSAGE_COMMIT, ASIDE_MESSAGE_DISCARD, SPECULATIVE_STREAM_SESSION } from "@oh-my-pi/pi-agent-core/types";
@@ -5961,6 +5962,57 @@ describe("speculative tool execution", () => {
 			expect(speculativeExecutions).toBe(0);
 			expect(ordinaryExecutions).toBe(0);
 		}
+	});
+
+	it("normalizes malformed speculative results before persisting them", async () => {
+		const schema = type({ value: "string" });
+		const tool: AgentTool<typeof schema> = {
+			name: "malformed",
+			label: "Malformed",
+			description: "Returns a malformed speculative result",
+			parameters: schema,
+			speculation: {
+				finalized: {
+					assess: () => ({ eligible: true, effect: { kind: "pure" } }),
+					async execute() {
+						// Deliberately malformed at runtime (still typechecks via cast):
+						// content must be an array but arrives as a string.
+						const malformed = { content: "not-an-array" } as unknown as SpeculativePhysicalOutcome["result"];
+						return { kind: "result", result: malformed, isError: false };
+					},
+				},
+			},
+			async execute() {
+				throw new Error("ordinary execution must not run for a claimed speculation");
+			},
+		};
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [{ type: "toolCall", id: "malformed-1", name: "malformed", arguments: { value: "run" } }],
+				},
+				{ content: ["done"] },
+			],
+		});
+		let observed: { content: unknown; isError: unknown } | undefined;
+		await agentLoop(
+			[createUserMessage("run")],
+			{ systemPrompt: [""], messages: [], tools: [tool] },
+			{
+				model: mock.model,
+				convertToLlm: identityConverter,
+				afterToolCall: async ({ result, isError }) => {
+					observed = { content: result.content, isError };
+				},
+				speculativeToolExecution: { enabled: true },
+			},
+			undefined,
+			mock.stream,
+		).result();
+
+		if (!observed) throw new Error("expected the tool turn to complete");
+		expect(Array.isArray(observed.content)).toBe(true);
+		expect(observed.isError).toBe(true);
 	});
 
 	it("discards host-deferred work when beforeToolCall mutates validated arguments in place", async () => {

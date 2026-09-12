@@ -351,4 +351,30 @@ tool.read({ path: selected });
 			entries: [{ key: "path", value: { kind: "literal", value: "outer" } }],
 		});
 	});
+
+	it("rejects builtin transforms when retained cells replaced the intrinsic", async () => {
+		const intact = {
+			String: true,
+			JSON: true,
+			"JSON.stringify": true,
+			"Array.prototype.join": true,
+		};
+		for (const [code, overridden] of [
+			['await tool.read({ path: String("secret.txt") })', "String"],
+			['await tool.read({ path: JSON.stringify({ path: "secret.txt" }) })', "JSON.stringify"],
+			['await tool.read({ path: ["secret.txt"].join() })', "Array.prototype.join"],
+		] as Array<[string, keyof typeof intact]>) {
+			const plan = await projectJavaScriptShadowPlan(code, {
+				snapshot: {},
+				initialGlobals: { ...intact, [overridden]: false },
+			});
+			expect(plan.operations).toEqual([]);
+		}
+		const control = await projectJavaScriptShadowPlan('await tool.read({ path: String("note.txt") })', {
+			snapshot: {},
+			initialGlobals: intact,
+		});
+		expect(control.barrier).toBeUndefined();
+		expect(control.operations).toHaveLength(1);
+	});
 });
