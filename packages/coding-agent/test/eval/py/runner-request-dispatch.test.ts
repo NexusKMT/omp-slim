@@ -401,4 +401,93 @@ describe("Python runner request dispatch", () => {
 			await runner.dispose();
 		}
 	});
+
+	it("fails closed when the retained namespace shadows the tool bridge", async () => {
+		// A retained non-JSON-safe `tool` binding (e.g. `tool = object()`) is
+		// omitted from the shadow snapshot exactly like the genuine prelude
+		// bridge, so snapshot absence alone cannot tell them apart. The
+		// planner must consult the namespace directly and admit speculative
+		// reads only for the marker-tagged (`__omp_tool_bridge__`) genuine
+		// bridge: authoritative execution against the shadow raises
+		// AttributeError before any bridge call, while the pre-fix
+		// `"tool" not in snapshot` check plans a phantom physical read.
+		// Contract note: fakes standing in for the production bridge must
+		// carry the marker to be treated as the genuine bridge (mirroring
+		// the `__omp_tool_bridge__` class attribute on the prelude proxy).
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "shadow", code: "tool = object()" });
+			const [shadowed] = await collectDoneOrder(runner, new Set(["shadow"]));
+			expect(shadowed.status).toBe("ok");
+
+			runner.send({ id: "rejected", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "rejected",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+
+			// Tagged-bridge control: the same shape of binding carrying the
+			// marker (as the production prelude proxy does) still admits.
+			runner.send({
+				id: "retag",
+				code: ["class TaggedTool:", "    __omp_tool_bridge__ = True", "tool = TaggedTool()"].join("\n"),
+			});
+			const [retagged] = await collectDoneOrder(runner, new Set(["retag"]));
+			expect(retagged.status).toBe("ok");
+
+			runner.send({ id: "control", type: "shadow_plan", code: 'result = await tool.read({"path": "note.txt"})' });
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "control",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
+
+	it("plans zero operations for cells that fail whole-cell compilation", async () => {
+		// `await tool.read({"path": path}); global path` parses with
+		// `ast.parse` but `compile()` rejects it (use-before-global), and
+		// authoritative `_compile_source()` raises SyntaxError before any
+		// bridge call -- while the pre-fix planner admitted the read against
+		// the retained `path`. The shadow path applies the same compile gate
+		// (same filename/mode/flags, so top-level await stays legal) and
+		// fails closed with zero operations plus an invalidating barrier.
+		const runner = spawnRunner();
+		try {
+			runner.send({ id: "seed", code: 'path = "secret.txt"' });
+			const [seeded] = await collectDoneOrder(runner, new Set(["seed"]));
+			expect(seeded.status).toBe("ok");
+
+			runner.send({ id: "valid", type: "shadow_plan", code: 'result = await tool.read({"path": path})' });
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "valid",
+				eligible: true,
+				operations: [expect.anything()],
+				barrier: null,
+			});
+
+			runner.send({
+				id: "invalid",
+				type: "shadow_plan",
+				code: 'result = await tool.read({"path": path}); global path',
+			});
+			expect(await runner.nextFrame()).toMatchObject({
+				type: "shadow_plan",
+				id: "invalid",
+				eligible: true,
+				operations: [],
+				barrier: expect.anything(),
+			});
+		} finally {
+			await runner.dispose();
+		}
+	});
 });

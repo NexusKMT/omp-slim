@@ -214,6 +214,12 @@ _SHADOW_SNAPSHOT_MAX_NODES = 2000
 _SHADOW_SNAPSHOT_MAX_STRING_BYTES = 8 * 1024 * 1024
 _SHADOW_UNSUPPORTED = object()
 
+# Class attribute on the prelude `_ToolProxy` identifying the genuine tool
+# bridge. A retained non-JSON-safe user `tool` binding is omitted from the
+# shadow snapshot exactly like the genuine bridge, so snapshot absence alone
+# cannot tell them apart (see `_shadow_tool_available`).
+_TOOL_BRIDGE_MARKER = "__omp_tool_bridge__"
+
 
 def _copy_shadow_value(value: Any, depth: int, state: dict[str, Any]) -> Any:
     """Copy exact JSON-safe values without invoking user protocols."""
@@ -260,6 +266,27 @@ def _snapshot_user_namespace() -> dict[str, Any]:
         if copied is not _SHADOW_UNSUPPORTED:
             values[key] = copied
     return values
+
+
+def _shadow_tool_available(snapshot: dict[str, Any], user_ns: dict[str, Any]) -> bool:
+    """Whether a speculative `tool.read` may reach the genuine bridge.
+
+    Cases: (a) `tool` JSON-safe-present in the snapshot is a user shadow, so
+    authoritative execution would resolve the user value (likely failing
+    before any bridge call) — unavailable. (b) `tool` omitted from the
+    snapshot but marker-tagged in the namespace is the intact bridge —
+    available. (c) `tool` omitted and present-but-untagged is a retained
+    non-JSON-safe user shadow (e.g. `tool = object()`) — unavailable.
+    (d) `tool` wholly absent from the namespace stays available: the
+    production kernel installs the prelude bridge before user cells, and
+    bare-runner harnesses never install it, so absence is the norm there —
+    existing planner tests rely on admitting this case.
+    """
+    if "tool" in snapshot:
+        return False
+    if "tool" not in user_ns:
+        return True
+    return getattr(user_ns["tool"], _TOOL_BRIDGE_MARKER, False) is True
 
 def _shadow_snapshot_digest(values: dict[str, Any]) -> str:
     payload = json.dumps(values, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -487,10 +514,37 @@ def _emit_shadow_plan(req: dict) -> None:
     except SyntaxError:
         _emit({"type": "shadow_plan", "id": rid, "eligible": False, "reason": "incomplete or invalid Python"})
         return
+    snapshot = _snapshot_user_namespace()
+    try:
+        # Whole-cell validity gate: `ast.parse` accepts cells that `compile()`
+        # rejects (e.g. use-before-global), while authoritative
+        # `_compile_source()` raises SyntaxError before any bridge call.
+        # Mirror its filename/mode/flags (top-level await stays legal) and
+        # fail closed with zero operations plus an invalidating barrier.
+        compile(module, "<cell>", "exec", flags=_TLA_FLAG)
+    except SyntaxError:
+        _emit(
+            {
+                "type": "shadow_plan",
+                "id": rid,
+                "eligible": True,
+                "revision": _STATE.namespace_revision,
+                "digest": _shadow_snapshot_digest(snapshot),
+                "values": snapshot,
+                "operations": [],
+                "controls": [],
+                "barrier": {
+                    "kind": "barrier",
+                    "reason": "cell does not compile",
+                    "span": {"start": 0, "end": len(code)},
+                },
+            }
+        )
+        return
+    tool_available = _shadow_tool_available(snapshot, _STATE.user_ns)
     line_offsets = [0]
     for line in code.splitlines(keepends=True):
         line_offsets.append(line_offsets[-1] + len(line))
-    snapshot = _snapshot_user_namespace()
     operations: list[dict[str, Any]] = []
     controls: list[dict[str, Any]] = []
     environment: dict[str, dict[str, Any]] = {}
@@ -511,7 +565,7 @@ def _emit_shadow_plan(req: dict) -> None:
         if not isinstance(expression_node, ast.Await):
             return None
         call_node = expression_node.value
-        kind = _shadow_call_kind(call_node, "tool" not in snapshot)
+        kind = _shadow_call_kind(call_node, tool_available)
         if not isinstance(call_node, ast.Call) or kind != "read":
             return None
         if call_node.keywords or len(call_node.args) != 1:

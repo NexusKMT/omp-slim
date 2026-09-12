@@ -627,6 +627,15 @@ if "__omp_prelude_loaded__" not in globals():
     class _ToolProxy:
         """Define kernel tools or invoke host-side tools by attribute."""
 
+        # Marker identifying the genuine prelude bridge to the Python shadow
+        # planner (runner.py): a retained user `tool` binding that is not
+        # JSON-safe is omitted from the shadow snapshot exactly like this
+        # proxy, so the planner consults the namespace directly and admits
+        # speculative reads only when the binding carries this marker.
+        # (`__slots__` is empty, so this lives on the class, not the
+        # instance; accidental user collision is out of threat model.)
+        __omp_tool_bridge__ = True
+
         __slots__ = ()
 
         def __call__(self, fn=None, /, *, name=None, description=None):
