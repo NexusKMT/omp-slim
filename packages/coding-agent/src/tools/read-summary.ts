@@ -91,7 +91,7 @@ export async function trySummarize(
 		const unfoldUntilLines = session.settings.get("read.summarize.unfoldUntil");
 		const unfoldLimitLines = session.settings.get("read.summarize.unfoldLimit");
 		const cache = getSummaryParseCache(session);
-		const cacheKey = `${absolutePath}\0${Bun.hash(code)}\0${minBodyLines},${minCommentLines},${unfoldUntilLines},${unfoldLimitLines}`;
+		const cacheKey = `${absolutePath}\0${languagePath ?? ""}\0${Bun.hash(code)}\0${minBodyLines},${minCommentLines},${unfoldUntilLines},${unfoldLimitLines}`;
 		const memoized = cache.get(cacheKey);
 		if (memoized !== undefined) return memoized || null;
 		const result = summarizeCode({
