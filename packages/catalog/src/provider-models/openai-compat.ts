@@ -5776,6 +5776,7 @@ function mapLiteLLMRichEntry<TApi extends Api>(
 function mergeLiteLLMCompat<TApi extends Api>(
 	existing: ModelSpec<TApi>["compat"],
 	next: ModelSpec<TApi>["compat"],
+	evidence: { existingReportedParams: boolean; nextReportedParams: boolean },
 ): ModelSpec<TApi>["compat"] {
 	if (!existing) return next;
 	if (!next) return existing;
@@ -5784,7 +5785,18 @@ function mergeLiteLLMCompat<TApi extends Api>(
 		const value = (next as Record<string, unknown>)[axis];
 		if (value !== undefined) merged[axis] = value;
 	}
-	return merged as ModelSpec<TApi>["compat"];
+	// `supportsReasoningEffort` is the one axis with two sources: the endpoint's
+	// own `supported_openai_params` list, and the models.dev reference it falls
+	// back to when no list was reported. Only the list is evidence, so an
+	// inferred value must not override the other endpoint's verdict — a fallback
+	// `true` would send `reasoning_effort` to a group whose own metadata omitted
+	// it (#11985 review).
+	if (!evidence.nextReportedParams) {
+		const reported = (existing as Record<string, unknown>).supportsReasoningEffort;
+		if (reported === undefined) delete merged.supportsReasoningEffort;
+		else merged.supportsReasoningEffort = reported;
+	}
+	return merged as unknown as ModelSpec<TApi>["compat"];
 }
 
 function mergeLiteLLMRichEndpointModels<TApi extends Api>(
@@ -5807,7 +5819,10 @@ function mergeLiteLLMRichEndpointModels<TApi extends Api>(
 		input: next.supportsVision === true || next.supportsVision === false ? next.model.input : existing.model.input,
 		reasoning: typeof next.supportsReasoning === "boolean" ? next.model.reasoning : existing.model.reasoning,
 		cost: { ...existing.model.cost, ...existing.reportedCost, ...next.reportedCost },
-		compat: mergeLiteLLMCompat(existing.model.compat, next.model.compat),
+		compat: mergeLiteLLMCompat(existing.model.compat, next.model.compat, {
+			existingReportedParams: existing.hasSupportedOpenAIParams,
+			nextReportedParams: next.hasSupportedOpenAIParams,
+		}),
 	};
 	if (next.hasToolMetadata) {
 		model.supportsTools = next.model.supportsTools;

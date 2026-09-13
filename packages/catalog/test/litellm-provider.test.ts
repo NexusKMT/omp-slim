@@ -1253,19 +1253,25 @@ describe("LiteLLM provider discovery", () => {
 	});
 });
 
-describe("LiteLLM declared image input", () => {
+describe("LiteLLM declared model capabilities", () => {
 	// The deployment is the only party that knows what its aliases resolve to
-	// and whether a group reads images, and it reports that through more than one
-	// management endpoint. `model_info.supports_vision` therefore has to survive
-	// both the compat merge and the class-wide DeepSeek text-only guard
-	// (`classes/deepseek.kdl`), which keys on the id alone and would otherwise
-	// replace the attachment with "[image omitted: model does not support
-	// vision]" for a group the endpoint reads (issue #11982).
+	// and what they accept, and it reports that through more than one management
+	// endpoint. Its declarations therefore have to survive both the compat merge
+	// and the class-wide DeepSeek guard (`classes/deepseek.kdl`), which keys on
+	// the model id alone (issues #11602, #11982).
 	const limits = { max_input_tokens: 1_048_576, max_output_tokens: 384_000, supports_reasoning: true };
-	const richFetch = (groupInfo: Record<string, unknown>, modelInfo: Record<string, unknown>): FetchImpl =>
+	const stripOf = (spec: ModelSpec<Api> | undefined) =>
+		(spec?.compat as { stripImageInput?: boolean } | undefined)?.stripImageInput;
+	const effortOf = (spec: ModelSpec<Api> | undefined) =>
+		(spec?.compat as { supportsReasoningEffort?: boolean } | undefined)?.supportsReasoningEffort;
+	const richFetch = (
+		groupInfo: Record<string, unknown>,
+		modelInfo: Record<string, unknown>,
+		reference: Record<string, unknown> = {},
+	): FetchImpl =>
 		vi.fn(async (input: string | URL | Request) => {
 			const url = inputUrl(input);
-			if (url === MODELS_DEV_URL) return Response.json({});
+			if (url === MODELS_DEV_URL) return Response.json(reference);
 			if (url.endsWith("/model_group/info")) {
 				return Response.json({ data: [{ model_name: "deepseek-v4.1-flash", model_info: groupInfo }] });
 			}
@@ -1274,44 +1280,82 @@ describe("LiteLLM declared image input", () => {
 			}
 			return new Response("{}", { status: 404 });
 		}) as FetchImpl;
+	const discover = async (fetchImpl: FetchImpl) => {
+		const options = litellmModelManagerOptions({
+			apiKey: "sk-rich",
+			baseUrl: "http://primary:4000/v1",
+			fetch: fetchImpl,
+		});
+		const specs = await options.fetchDynamicModels?.();
+		return specs?.find(model => model.id === "deepseek-v4.1-flash");
+	};
 
 	test("keeps the deployment's image input when a later endpoint declares it", async () => {
 		// `/model_group/info` establishes the row without a vision verdict, so
 		// discovery continues to `/model/info`; a management endpoint enriches the
 		// row instead of retracting the axes the other one did not report.
-		const calls: string[] = [];
-		const inner = richFetch(limits, { ...limits, supports_vision: true });
-		const options = litellmModelManagerOptions({
-			apiKey: "sk-rich",
-			baseUrl: "http://primary:4000/v1",
-			fetch: vi.fn(async (input: string | URL | Request) => {
-				calls.push(inputUrl(input));
-				return inner(input as never, undefined as never);
-			}) as FetchImpl,
-		});
-		const specs = await options.fetchDynamicModels?.();
-		const spec = specs?.find(model => model.id === "deepseek-v4.1-flash");
+		const spec = await discover(richFetch(limits, { ...limits, supports_vision: true }));
 		expect(spec).toBeDefined();
-		expect(calls.some(url => url.endsWith("/model_group/info"))).toBe(true);
-		expect(calls.some(url => url.endsWith("/model/info"))).toBe(true);
 
-		expect(spec?.compat?.stripImageInput).toBe(false);
+		expect(stripOf(spec)).toBe(false);
 		const model = buildModel(spec as ModelSpec<"openai-completions">);
 		expect(model.input).toContain("image");
 		expect(sendsImageInputOnWire(model)).toBe(true);
 	});
 
 	test("still strips a group the deployment declares text-only", async () => {
-		const options = litellmModelManagerOptions({
-			apiKey: "sk-rich",
-			baseUrl: "http://primary:4000/v1",
-			fetch: richFetch(limits, { ...limits, supports_vision: false }),
-		});
-		const specs = await options.fetchDynamicModels?.();
-		const spec = specs?.find(model => model.id === "deepseek-v4.1-flash");
-		expect(spec?.compat?.stripImageInput).toBeUndefined();
+		const spec = await discover(richFetch(limits, { ...limits, supports_vision: false }));
+		expect(stripOf(spec)).toBeUndefined();
 
 		const model = buildModel(spec as ModelSpec<"openai-completions">);
 		expect(sendsImageInputOnWire(model)).toBe(false);
+	});
+
+	test("keeps the reported params list's verdict over a reference fallback", async () => {
+		// `supportsReasoningEffort` has two sources: the endpoint's own
+		// `supported_openai_params` list and the models.dev reference it falls back
+		// to. The deepseek descriptor carries `supportsReasoningEffort: true`, so an
+		// endpoint with no list answers from the reference — and that inferred value
+		// must not override the verdict an earlier endpoint reported by omitting
+		// `reasoning_effort`, or a reasoning request would send the unsupported field.
+		const reference = {
+			deepseek: {
+				models: {
+					"deepseek-v4.1-flash": {
+						name: "DeepSeek V4.1 Flash",
+						tool_call: true,
+						reasoning: true,
+						limit: { context: 1_000_000, output: 384_000 },
+					},
+				},
+			},
+		};
+		const spec = await discover(richFetch({ ...limits, supported_openai_params: ["tools"] }, limits, reference));
+
+		expect(effortOf(spec)).toBe(false);
+	});
+
+	test("takes the reported params list's verdict when a later endpoint reports one", async () => {
+		const reference = {
+			deepseek: {
+				models: {
+					"deepseek-v4.1-flash": {
+						name: "DeepSeek V4.1 Flash",
+						tool_call: true,
+						reasoning: true,
+						limit: { context: 1_000_000, output: 384_000 },
+					},
+				},
+			},
+		};
+		const spec = await discover(
+			richFetch(
+				{ ...limits, supported_openai_params: ["tools"] },
+				{ ...limits, supported_openai_params: ["reasoning_effort"] },
+				reference,
+			),
+		);
+
+		expect(effortOf(spec)).toBe(true);
 	});
 });
