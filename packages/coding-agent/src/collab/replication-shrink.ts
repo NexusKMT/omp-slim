@@ -241,6 +241,29 @@ function shrinkWalk(root: unknown, stringCap: number, arrayLimit: number): unkno
 }
 
 /**
+ * Deep-copy `value` under the same depth bound the shrink passes use, without
+ * clipping a single string or array.
+ *
+ * This is the copier the host hands to `SessionManager.snapshotForReplication`.
+ * The default there is `structuredClone`, which throws `RangeError` on a payload
+ * nested past the engine's recursion limit — and that throw lands inside the
+ * host's hello handler, *before* {@link shrinkReplicatedEntry} gets the chance
+ * to bound the offending entry, so the joining guest never receives its
+ * `final` chunk (issue #11433). Copying through the walk instead degrades only
+ * the too-deep branch, and the entry still arrives with its `id`/`parentId`
+ * intact.
+ *
+ * Bounded, not lossless: nesting past {@link MAX_REPLICATED_DEPTH} and repeated
+ * ancestors become markers, exactly as in the shrink passes. Session entries are
+ * JSON by construction (persisted as JSONL, shipped as JSON), so the walk's
+ * container handling is not a narrowing for the values the host copies through
+ * it; a non-plain leaf such as a `Date` would be walked as an empty object.
+ */
+export function copyForReplication<T>(value: T): T {
+	return shrinkWalk(value, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY) as T;
+}
+
+/**
  * Best-effort shape-preserving shrink: long strings head-truncated, long
  * array tails head-clipped, nesting past {@link MAX_REPLICATED_DEPTH} elided.
  *

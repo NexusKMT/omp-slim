@@ -52,6 +52,7 @@ import {
 } from "./registry";
 import { CollabSocket } from "./relay-client";
 import {
+	copyForReplication,
 	type ReplicatedEntry,
 	replicationByteLength,
 	shrinkReplicatedEntry,
@@ -695,10 +696,16 @@ export class CollabHost {
 		// and chunk sends, so subsequent broadcast frames (entry/event/state/bus)
 		// queue behind the snapshot on the same socket and the guest can't
 		// observe a gap between the snapshot fragment and live traffic.
-		const snapshot = this.#ctx.sessionManager.snapshotForReplication();
-		// `null` means the snapshot is not serializable as-is (cyclic or nested
-		// past the engine limit); treat it as over the threshold so images are
-		// stripped before the chunker has to fall back to placeholders.
+		// `copyForReplication` rather than the default `structuredClone`: a payload
+		// the engine cannot clone is exactly what the shrinker below exists to
+		// bound, so letting the copy throw here would abort the chunk train before
+		// the bound ever runs (issue #11433).
+		const snapshot = this.#ctx.sessionManager.snapshotForReplication(copyForReplication);
+		// `null` means the snapshot is not serializable as-is (a non-JSON leaf
+		// such as `BigInt`, or a `toJSON` that throws — depth and cycles are
+		// already bounded by `copyForReplication` above); treat it as over the
+		// threshold so images are stripped before the chunker has to fall back
+		// to placeholders.
 		const snapshotBytes = replicationByteLength(snapshot);
 		if (snapshotBytes === null || snapshotBytes > WELCOME_IMAGE_STRIP_THRESHOLD) {
 			let stripped = 0;

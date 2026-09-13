@@ -183,16 +183,33 @@ interface HostHarness {
 	statusMessages: string[];
 }
 
+/**
+ * The slice of `SessionManager` the host actually drives. Narrowing it here is
+ * what lets a case supply either a fixture snapshot or the real manager — and
+ * the real manager is the interesting one, because it owns the deep copy the
+ * host performs before the shrinker runs.
+ */
+interface HostReplicationSource {
+	getSessionId(): string;
+	getCwd(): string;
+	snapshotForReplication(copy?: <T>(value: T) => T): HostSnapshot;
+	onEntryAppended?: ((entry: SessionEntry) => void) | undefined;
+}
+
 function makeHostContext(snapshot: HostSnapshot): HostHarness {
+	return makeHostHarness({
+		getSessionId: () => snapshot.header.id,
+		getCwd: () => snapshot.header.cwd,
+		snapshotForReplication: () => snapshot,
+		onEntryAppended: undefined,
+	});
+}
+
+function makeHostHarness(sessionManager: HostReplicationSource): HostHarness {
 	const statusMessages: string[] = [];
 	const ctx = {
 		settings: { get: () => "" },
-		sessionManager: {
-			getSessionId: () => snapshot.header.id,
-			getCwd: () => snapshot.header.cwd,
-			snapshotForReplication: () => snapshot,
-			onEntryAppended: undefined,
-		},
+		sessionManager,
 		session: {
 			isStreaming: false,
 			isAborting: false,
@@ -329,9 +346,16 @@ describe("collab replication shrinking (#3739)", () => {
 });
 
 describe("shrinkReplicatedEntry (#11433)", () => {
-	it("passes an already-small entry through by reference", () => {
+	it("does not substitute a placeholder for an entry that already fits", () => {
+		// Negative contract: the ceiling may only rewrite a payload it cannot
+		// bound. An entry under it must reach the guest verbatim — substituting
+		// here would show every ordinary entry as "too large to replicate".
 		const small = userMessage("m1", null, "2026-09-13T00:00:00Z", "hi");
-		expect(shrinkReplicatedEntry(small)).toBe(small);
+		const shrunk = shrinkReplicatedEntry(small);
+		expect(shrunk.type).toBe("message");
+		const serialized = JSON.stringify(shrunk);
+		expect(serialized).not.toContain(COLLAB_ENTRY_OMITTED_CUSTOM_TYPE);
+		expect(serialized).not.toContain("elided for collab session");
 	});
 
 	it("clamps a single giant string under the ceiling with an elision marker", () => {
@@ -497,9 +521,11 @@ describe("shrinkReplicatedEntry (#11433)", () => {
 });
 
 describe("shrinkReplicatedEvent (#11433)", () => {
-	it("passes an already-small event through by reference", () => {
+	it("does not substitute a notice for an event that already fits", () => {
 		const event: AgentSessionEvent = { type: "agent_end", messages: [] } as unknown as AgentSessionEvent;
-		expect(shrinkReplicatedEvent(event)).toBe(event);
+		const shrunk = shrinkReplicatedEvent(event);
+		expect(shrunk.type).toBe("agent_end");
+		expect(JSON.stringify(shrunk)).not.toContain("Host event omitted");
 	});
 
 	it("still shrinks an event whose size lives in a string leaf", () => {
@@ -534,6 +560,64 @@ describe("shrinkReplicatedEvent (#11433)", () => {
 		if (shrunk.type !== "notice") throw new Error("expected notice event");
 		expect(shrunk.level).toBe("warning");
 		expect(shrunk.message).toContain("tool_execution_end");
+	});
+});
+
+/** `depth`-level nested object. 50 000 is past what the engine's own
+ * `structuredClone`/`JSON.stringify` accept on Bun (both throw `RangeError` at
+ * roughly 40 000), which is the shape this case needs. */
+function nest(depth: number): unknown {
+	let node: unknown = "leaf";
+	for (let i = 0; i < depth; i++) node = { next: node };
+	return node;
+}
+
+describe("collab snapshot train over a real SessionManager (#11433)", () => {
+	it("degrades a too-deep entry instead of aborting the train before the shrinker", async () => {
+		const relay = startTestRelay(RELAY_MAX_PAYLOAD);
+		cleanups.push(() => relay.stop());
+
+		// Every other host case injects a snapshot object literal, which skips
+		// `snapshotForReplication` entirely. This one runs the real manager, so
+		// the host's own deep copy of the entries is on the path being tested —
+		// the copy that used to throw before the shrinker could bound anything.
+		const manager = SessionManager.inMemory();
+		manager.ingestReplicatedEntry(userMessage("small-1", null, "2026-09-13T00:00:00Z", "hi"));
+		manager.ingestReplicatedEntry({
+			type: "message",
+			id: "deep-1",
+			parentId: "small-1",
+			timestamp: "2026-09-13T00:00:01Z",
+			message: { role: "user", content: "probe", timestamp: 0, blob: nest(50_000) },
+		} as unknown as ReplicatedEntry);
+
+		const harness = makeHostHarness(manager);
+		const host = new CollabHost(harness.ctx);
+		await host.start(relay.url);
+		cleanups.push(() => host.stop("test done"));
+
+		// Pre-fix this rejected: the throw left `#handleHello` before the chunk
+		// train started, so the guest never received a `final` chunk.
+		const { frames, closes } = await collectSnapshotTrain(host);
+		expect(closes).toEqual([]);
+
+		const chunkEntries: SessionEntry[] = [];
+		for (const f of frames) if (f.t === "snapshot-chunk") chunkEntries.push(...f.entries);
+		expect(chunkEntries.map(entry => entry.id)).toEqual(["small-1", "deep-1"]);
+
+		// Bounding the depth, not the entry: the too-deep branch is elided, so
+		// the entry keeps its own identity and still fits the ceiling — it is
+		// not one of the typed placeholders reserved for payloads that cannot be
+		// bounded at all.
+		const deep = chunkEntries.find(entry => entry.id === "deep-1");
+		if (deep?.type !== "message") throw new Error("expected the deep entry to survive as a message entry");
+		expect(deep.parentId).toBe("small-1");
+		expect(JSON.stringify(deep)).toContain("deeper levels elided for collab session");
+		expectBounded(deep);
+
+		const replica = SessionManager.inMemory();
+		for (const entry of chunkEntries) replica.ingestReplicatedEntry(entry);
+		expect(replica.getBranch().map(entry => entry.id)).toEqual(["small-1", "deep-1"]);
 	});
 });
 
