@@ -168,6 +168,11 @@ function findUserDataDirInArgs(args: string[] | undefined): string | null {
  */
 const CHROMIUM_BROWSER_BASENAME =
 	/^(?:google[ -]chrome|chrome|chromium|microsoft[ -]edge|msedge|brave|vivaldi|opera|thorium|ungoogled[ -]chromium)(?:[ -](?:beta|dev|canary|unstable|stable|nightly|snapshot|browser|gx|for[ -]testing))*$/i;
+const CHROMIUM_FLATPAK_IDS: Record<string, true> = {
+	"com.google.Chrome": true,
+	"org.chromium.Chromium": true,
+	"io.github.ungoogled_software.ungoogled_chromium": true,
+};
 
 /**
  * Launch argv for a spawned executable. Chrome 136+ silently ignores
@@ -179,17 +184,34 @@ const CHROMIUM_BROWSER_BASENAME =
  * running default-profile browser instead of handing off to it. Electron apps
  * are left untouched: `--user-data-dir` would relocate their app data.
  */
-export function resolveSpawnArgs(exe: string, appArgs: string[] | undefined): string[] {
+export function resolveSpawnArgs(exe: string, appArgs: string[] | undefined, cwd = process.cwd()): string[] {
 	const args = appArgs ?? [];
-	const base = path.basename(exe, ".exe");
-	if (!CHROMIUM_BROWSER_BASENAME.test(base) || findUserDataDirInArgs(args) !== null) return args;
+	const base = path.basename(exe).replace(/\.exe$/i, "");
+	if (!CHROMIUM_BROWSER_BASENAME.test(base) && !Object.hasOwn(CHROMIUM_FLATPAK_IDS, base)) return args;
+	const requestedProfile = findUserDataDirInArgs(args);
+	if (requestedProfile !== null) {
+		// Chromium accepts switch values as --name=value, not a separate argv
+		// item. Canonicalize both spellings so reuse and process launch agree.
+		const launchArgs: string[] = [];
+		for (let index = 0; index < args.length; index++) {
+			const arg = args[index]!;
+			if (arg === "--user-data-dir") {
+				if (args[index + 1] && !args[index + 1]!.startsWith("--")) index++;
+			} else if (!arg.startsWith("--user-data-dir=")) {
+				launchArgs.push(arg);
+			}
+		}
+		launchArgs.push(`--user-data-dir=${path.resolve(cwd, requestedProfile)}`);
+		return launchArgs;
+	}
 	const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-	const hash = Bun.hash.wyhash(exe).toString(16).padStart(16, "0").slice(0, 8);
-	const launchArgs = [...args, `--user-data-dir=${path.join(getBrowserProfilesDir(), `${slug}-${hash}`)}`];
+	const hash = Bun.hash.wyhash(exe).toString(16).padStart(16, "0");
+	const launchArgs = [...args];
 	// A fresh profile otherwise opens the welcome tour and default-browser
 	// prompt as extra page targets, which attach may adopt instead of ours.
 	if (!args.includes("--no-first-run")) launchArgs.push("--no-first-run");
 	if (!args.includes("--no-default-browser-check")) launchArgs.push("--no-default-browser-check");
+	launchArgs.push(`--user-data-dir=${path.join(getBrowserProfilesDir(), `${slug}-${hash}`)}`);
 	return launchArgs;
 }
 
@@ -213,6 +235,11 @@ export async function findReusableCdp(
 	exe: string,
 	options: { signal?: AbortSignal; appArgs?: string[] } = {},
 ): Promise<{ cdpUrl: string; pid: number } | null> {
+	const requestedUserDataDir = findUserDataDirInArgs(options.appArgs);
+	const normalizedRequestedUserDataDir =
+		requestedUserDataDir !== null && path.isAbsolute(requestedUserDataDir)
+			? normalizeUserDataDir(requestedUserDataDir)
+			: null;
 	const candidates = Process.fromPath(exe).filter(process => process.status() === ProcessStatus.Running);
 	const candidateArgs: string[][] = [];
 	let hasUnreadableCandidate = false;
@@ -225,17 +252,22 @@ export async function findReusableCdp(
 			continue;
 		}
 		candidateArgs.push(args);
+		const candidateProfile = findUserDataDirInArgs(args);
+		if (
+			requestedUserDataDir !== null &&
+			(normalizedRequestedUserDataDir === null ||
+				candidateProfile === null ||
+				!path.isAbsolute(candidateProfile) ||
+				normalizeUserDataDir(candidateProfile) !== normalizedRequestedUserDataDir)
+		) {
+			continue;
+		}
 		const port = findCdpPortInArgs(args);
 		if (port === null) continue;
 		if (await probeCdpAt(port, options.signal)) {
 			return { cdpUrl: `http://127.0.0.1:${port}`, pid: process.pid };
 		}
 	}
-	const requestedUserDataDir = findUserDataDirInArgs(options.appArgs);
-	const normalizedRequestedUserDataDir =
-		requestedUserDataDir !== null && path.isAbsolute(requestedUserDataDir)
-			? normalizeUserDataDir(requestedUserDataDir)
-			: null;
 	const canLaunchIsolatedProfile =
 		normalizedRequestedUserDataDir !== null &&
 		!hasUnreadableCandidate &&

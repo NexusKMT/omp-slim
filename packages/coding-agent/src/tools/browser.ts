@@ -11,8 +11,10 @@ import browserDeclarations from "./browser/declarations.d.ts" with { type: "text
 import browserJavascript from "./browser/prelude.js" with { type: "text" };
 import browserPython from "./browser/prelude.py" with { type: "text" };
 import { resolveCmuxKind } from "./browser/cmux/rpc";
+import { resolveSpawnArgs } from "./browser/attach";
 import {
 	acquireBrowser,
+	browserKey,
 	type BrowserHandle,
 	type BrowserKind,
 	type BrowserKindTag,
@@ -108,7 +110,7 @@ function resolveBrowserKind(params: BrowserParams, session: ToolSession): Browse
 	}
 	if (app?.path) {
 		const exe = resolveToCwd(app.path, session.cwd);
-		return { kind: "spawned", path: exe };
+		return { kind: "spawned", path: exe, args: resolveSpawnArgs(exe, app.args, session.cwd) };
 	}
 	const relayUrl = session.settings.get("browser.relayUrl");
 	// Explicit app.relay wins over every setting; PI_BROWSER_RELAY stays the
@@ -231,7 +233,7 @@ async function openBrowser(
 
 	// If a tab with this name already exists on a different browser kind, fail fast — caller must close first.
 	const existing = getTab(name);
-	if (existing && !sameBrowserKind(existing.browser.kind, kind)) {
+	if (existing && browserKey(existing.browser.kind) !== browserKey(kind)) {
 		throw new ToolError(
 			`Tab ${JSON.stringify(name)} is bound to a different browser (${describeKind(existing.browser.kind)}). Close it first.`,
 		);
@@ -240,7 +242,7 @@ async function openBrowser(
 	// First browser use may have to download Chrome for Testing (~180 MB).
 	// That is a one-time install, not part of the open, so it runs before the
 	// deadline below starts: charged against the 30s default it timed out on
-	// every ordinary connection and pushed agents toward `app.path` workarounds.
+	// connections where installation alone exceeds that budget.
 	// The download promise is module-cached, so a caller abort here leaves it
 	// finishing in the background and the next open picks up the result.
 	if (kind.kind === "headless") await untilAborted(signal, () => ensureChromiumExecutable());
@@ -267,7 +269,6 @@ async function openBrowser(
 							deviceScaleFactor: params.viewport.scale,
 						}
 					: undefined,
-				appArgs: params.app?.args,
 				signal: openSignal,
 			}),
 		);
@@ -457,14 +458,4 @@ function describeKind(kind: BrowserKind): string {
 		case "cmux":
 			return `cmux:${kind.surface ?? "split"}`;
 	}
-}
-
-function sameBrowserKind(a: BrowserKind, b: BrowserKind): boolean {
-	if (a.kind !== b.kind) return false;
-	if (a.kind === "headless" && b.kind === "headless") return a.headless === b.headless;
-	if (a.kind === "spawned" && b.kind === "spawned") return a.path === b.path;
-	if (a.kind === "connected" && b.kind === "connected") return a.cdpUrl === b.cdpUrl;
-	if (a.kind === "relay" && b.kind === "relay") return a.cdpUrl === b.cdpUrl;
-	if (a.kind === "cmux" && b.kind === "cmux") return a.socketPath === b.socketPath;
-	return false;
 }

@@ -8,9 +8,12 @@
  * `ensureChromiumExecutable` is spied so no download or Chromium runs.
  */
 
-import { afterEach, describe, expect, it, spyOn, vi } from "bun:test";
+import { afterAll, afterEach, describe, expect, it, spyOn, vi } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
+import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { EvalTool } from "@oh-my-pi/pi-coding-agent/tools/eval";
 import * as launch from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { ToolAbortError, ToolError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
@@ -38,25 +41,56 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+afterAll(async () => {
+	await releaseAllTabs({ kill: true });
+	await disposeAllVmContexts();
+});
+
 describe("browser open during first-use Chromium download", () => {
-	// Real clock on purpose: the contract is that the platform deadline
-	// (`AbortSignal.timeout`, floor 1s via clampTimeout) starts after the
-	// install, and only elapsed time can show it never fired.
-	it("does not charge the download against the requested open timeout", async () => {
-		const downloadMs = 1_500;
-		spyOn(launch, "ensureChromiumExecutable").mockImplementation(async () => {
-			await Bun.sleep(downloadMs);
-			throw new ToolError(DOWNLOAD_FAILED);
+	// Both the isolated Eval worker and the browser host use real deadlines;
+	// fake timers cannot advance the worker's clock. Delay only the install,
+	// then drive a real page through Eval to catch an outer watchdog reset.
+	it("keeps the Eval kernel alive through installation and then drives a page with default browser options", async () => {
+		const executable = await launch.ensureChromiumExecutable();
+		const session: ToolSession = {
+			cwd: process.cwd(),
+			hasUI: false,
+			getSessionFile: () => null,
+			getSessionSpawns: () => null,
+			settings: Settings.isolated({ "async.enabled": false, "browser.cmux": false }),
+			getEvalSessionId: () => "browser-download-regression",
+			getEvalPreludes: () => [prelude],
+		};
+		const prelude = createBrowserPrelude(session);
+		const tool = new EvalTool(session);
+		await tool.execute("browser-warm-eval", { language: "js", code: "var marker = 'kernel survived';" });
+		const entered = Promise.withResolvers<void>();
+		const download = Promise.withResolvers<string | undefined>();
+		spyOn(launch, "ensureChromiumExecutable").mockImplementation(() => {
+			entered.resolve();
+			return download.promise;
 		});
-		const invoke = createBrowserHost();
-		const started = performance.now();
-		// timeout 1s < download 1.5s: a download inside the deadline would
-		// surface "Browser open timed out" before the install ever finished.
-		await expect(invoke({ action: "open", name: "download", url: "about:blank", timeout: 1 })).rejects.toThrow(
-			DOWNLOAD_FAILED,
-		);
-		expect(performance.now() - started).toBeGreaterThanOrEqual(downloadMs - 50);
-	});
+		const resultPromise = tool.execute("browser-download-eval", {
+			language: "js",
+			timeout: 1,
+			code: `var tab = await browser.open();
+await tab.goto('data:text/html,<button onclick="document.title=123">Run</button>');
+await tab.click("button");
+print(marker, await tab.title());
+await tab.close();`,
+		});
+		await Promise.race([
+			entered.promise,
+			resultPromise.then(result => {
+				throw new Error(`Eval finished before browser installation: ${JSON.stringify(result)}`);
+			}),
+		]);
+		await Bun.sleep(1_100);
+		download.resolve(executable);
+		const result = await resultPromise;
+		expect(result.details?.cells?.[0]?.status).toBe("complete");
+		expect(result.content.some(block => block.type === "text" && block.text.includes("kernel survived 123"))).toBe(true);
+	}, 20_000);
 
 	it("still lets the caller abort while the download is pending", async () => {
 		const download = Promise.withResolvers<string>();

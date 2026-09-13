@@ -1,11 +1,13 @@
 # Changelog
 
 ## [Unreleased]
-
 ### Fixed
 
-- `browser.open` with `app.path` pointing at Chrome, Edge, Brave, or another Chromium browser now attaches instead of opening a window that never listens: Chrome 136+ ignores `--remote-debugging-port` on the default profile, so spawned Chromium browsers get an omp-owned profile under `~/.omp/browser-profiles/`, which also lets them launch beside the user's already-running browser.
-- The first-use Chrome for Testing download is no longer charged against `browser.open`'s timeout, so the initial open finishes instead of timing out mid-download on ordinary connections.
+- Fixed Flatpak Chromium launcher executables (including `com.google.Chrome`, `org.chromium.Chromium`, and `io.github.ungoogled_software.ungoogled_chromium`) so `app.path` is treated as a browser and gets managed Chromium profile handling
+- Fixed Chromium `--user-data-dir` handling by normalizing `--user-data-dir <dir>` and relative profile paths to absolute `--user-data-dir=...` values before launch
+- Browser automation now works alongside an already-running Chrome using an isolated profile, keeps requested profiles separate, and never kills reused browser processes.
+- First-use Chromium installation and browser operations no longer consume Eval's runtime timeout or reset its kernel while waiting.
+- Browser startup reuses a successful system-Chrome fallback instead of retrying an unavailable download during the same open.
 
 ## [18.1.20] - 2026-09-13
 
