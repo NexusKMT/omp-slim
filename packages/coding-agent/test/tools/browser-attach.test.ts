@@ -293,7 +293,8 @@ describe("pickElectronTarget", () => {
 			);
 			const session = makeSession();
 			const prelude = createBrowserPrelude(session);
-			const invoke = (parameters: unknown) => prelude.invoke(parameters, { session, toolCallId: "profile-isolation" });
+			const invoke = (parameters: unknown) =>
+				prelude.invoke(parameters, { session, toolCallId: "profile-isolation" });
 			const borrowedName = `borrowed-${crypto.randomUUID()}`;
 			const ownedName = `owned-${crypto.randomUUID()}`;
 			try {
@@ -419,7 +420,11 @@ describe("pickElectronTarget", () => {
 
 describe("resolveSpawnArgs", () => {
 	test("normalizes separated and relative Chromium profiles into an absolute switch value", () => {
-		const args = resolveSpawnArgs("/usr/bin/google-chrome-stable", ["--user-data-dir", "profile", "--incognito"], "/tmp");
+		const args = resolveSpawnArgs(
+			"/usr/bin/google-chrome-stable",
+			["--user-data-dir", "profile", "--incognito"],
+			"/tmp",
+		);
 		expect(args).toEqual(["--incognito", `--user-data-dir=${path.resolve("/tmp", "profile")}`]);
 	});
 

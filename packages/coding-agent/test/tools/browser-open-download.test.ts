@@ -5,7 +5,7 @@
  * agents believing the tool was broken. The caller's abort signal still cuts
  * the wait short.
  *
- * `ensureChromiumExecutable` is spied so no download or Chromium runs.
+ * Installation delay is controlled; the Eval regression drives real Chromium.
  */
 
 import { afterAll, afterEach, describe, expect, it, spyOn, vi } from "bun:test";
@@ -17,7 +17,9 @@ import { EvalTool } from "@oh-my-pi/pi-coding-agent/tools/eval";
 import * as launch from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { ToolAbortError, ToolError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
+import { chromiumAvailable } from "./chromium-probe";
 
+const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const DOWNLOAD_FAILED = "sentinel: Chromium install finished after the open timeout";
 
 function createBrowserHost() {
@@ -29,6 +31,7 @@ function createBrowserHost() {
 		settings: Settings.isolated({
 			"browser.enabled": true,
 			"browser.headless": true,
+			"browser.cmux": false,
 			"tools.maxTimeout": 0,
 		}),
 	};
@@ -50,47 +53,53 @@ describe("browser open during first-use Chromium download", () => {
 	// Both the isolated Eval worker and the browser host use real deadlines;
 	// fake timers cannot advance the worker's clock. Delay only the install,
 	// then drive a real page through Eval to catch an outer watchdog reset.
-	it("keeps the Eval kernel alive through installation and then drives a page with default browser options", async () => {
-		const executable = await launch.ensureChromiumExecutable();
-		const session: ToolSession = {
-			cwd: process.cwd(),
-			hasUI: false,
-			getSessionFile: () => null,
-			getSessionSpawns: () => null,
-			settings: Settings.isolated({ "async.enabled": false, "browser.cmux": false }),
-			getEvalSessionId: () => "browser-download-regression",
-			getEvalPreludes: () => [prelude],
-		};
-		const prelude = createBrowserPrelude(session);
-		const tool = new EvalTool(session);
-		await tool.execute("browser-warm-eval", { language: "js", code: "var marker = 'kernel survived';" });
-		const entered = Promise.withResolvers<void>();
-		const download = Promise.withResolvers<string | undefined>();
-		spyOn(launch, "ensureChromiumExecutable").mockImplementation(() => {
-			entered.resolve();
-			return download.promise;
-		});
-		const resultPromise = tool.execute("browser-download-eval", {
-			language: "js",
-			timeout: 1,
-			code: `var tab = await browser.open();
+	it.skipIf(!CHROMIUM_AVAILABLE)(
+		"keeps the Eval kernel alive through installation and then drives a page with default browser options",
+		async () => {
+			const executable = await launch.ensureChromiumExecutable();
+			const session: ToolSession = {
+				cwd: process.cwd(),
+				hasUI: false,
+				getSessionFile: () => null,
+				getSessionSpawns: () => null,
+				settings: Settings.isolated({ "async.enabled": false, "browser.cmux": false }),
+				getEvalSessionId: () => "browser-download-regression",
+				getEvalPreludes: () => [prelude],
+			};
+			const prelude = createBrowserPrelude(session);
+			const tool = new EvalTool(session);
+			await tool.execute("browser-warm-eval", { language: "js", code: "var marker = 'kernel survived';" });
+			const entered = Promise.withResolvers<void>();
+			const download = Promise.withResolvers<string | undefined>();
+			spyOn(launch, "ensureChromiumExecutable").mockImplementation(() => {
+				entered.resolve();
+				return download.promise;
+			});
+			const resultPromise = tool.execute("browser-download-eval", {
+				language: "js",
+				timeout: 1,
+				code: `var tab = await browser.open();
 await tab.goto('data:text/html,<button onclick="document.title=123">Run</button>');
 await tab.click("button");
 print(marker, await tab.title());
 await tab.close();`,
-		});
-		await Promise.race([
-			entered.promise,
-			resultPromise.then(result => {
-				throw new Error(`Eval finished before browser installation: ${JSON.stringify(result)}`);
-			}),
-		]);
-		await Bun.sleep(1_100);
-		download.resolve(executable);
-		const result = await resultPromise;
-		expect(result.details?.cells?.[0]?.status).toBe("complete");
-		expect(result.content.some(block => block.type === "text" && block.text.includes("kernel survived 123"))).toBe(true);
-	}, 20_000);
+			});
+			await Promise.race([
+				entered.promise,
+				resultPromise.then(result => {
+					throw new Error(`Eval finished before browser installation: ${JSON.stringify(result)}`);
+				}),
+			]);
+			await Bun.sleep(1_100);
+			download.resolve(executable);
+			const result = await resultPromise;
+			expect(result.details?.cells?.[0]?.status).toBe("complete");
+			expect(result.content.some(block => block.type === "text" && block.text.includes("kernel survived 123"))).toBe(
+				true,
+			);
+		},
+		20_000,
+	);
 
 	it("still lets the caller abort while the download is pending", async () => {
 		const download = Promise.withResolvers<string>();

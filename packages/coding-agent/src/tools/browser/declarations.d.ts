@@ -41,7 +41,7 @@ interface BrowserOpenOptions {
 	dialogs?: "accept" | "dismiss";
 	/** Keep the tab live across turn settle and idle close (default false). */
 	persist?: boolean;
-	/** Whole-operation timeout in seconds. */
+	/** Open timeout in seconds, excluding first-use browser installation. */
 	timeout?: number;
 }
 
