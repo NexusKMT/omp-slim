@@ -279,8 +279,7 @@ describe("snapcompact frame persistence", () => {
 		};
 
 		const blocks = snapcompact.historyBlocks(archive, {
-			resolveFrameData: data =>
-				data === available ? { bytes: data.length, read: () => data } : undefined,
+			resolveFrameData: data => (data === available ? { bytes: data.length, read: () => data } : undefined),
 		});
 		const shape = blocks.map(block => (block.type === "image" ? "image" : "text"));
 
@@ -308,8 +307,7 @@ describe("snapcompact frame persistence", () => {
 
 		const blocks = snapcompact.historyBlocks(archive, {
 			maxFrameDataBytes: newest.length,
-			resolveFrameData: data =>
-				data === unavailable ? undefined : { bytes: data.length, read: () => data },
+			resolveFrameData: data => (data === unavailable ? undefined : { bytes: data.length, read: () => data }),
 		});
 
 		const order = blocks.map(block => {
