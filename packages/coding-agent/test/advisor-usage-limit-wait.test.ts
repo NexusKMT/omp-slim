@@ -29,12 +29,27 @@ describe("planAdvisorUsageLimitWait", () => {
 		// says this exhausted window resets in 10s. A 30s cap must permit retry.
 		const waitMs = planAdvisorUsageLimitWait({
 			blockedUntilMs: NOW + 60_000,
+			requestedBlockedUntilMs: NOW + 60_000,
 			reportResetAtMs: NOW + 10_000,
 			retry: { ...RETRY, maxDelayMs: 30_000 },
 			attempt: 0,
 			nowMs: NOW,
 		});
 		expect(waitMs).toBe(10_000);
+	});
+
+	it("honors a merged block longer than the current hintless mark", () => {
+		// The current mark requested a 60s heuristic and the report says 10s,
+		// but credential selection still enforces a shared/persisted 90s block.
+		const waitMs = planAdvisorUsageLimitWait({
+			blockedUntilMs: NOW + 90_000,
+			requestedBlockedUntilMs: NOW + 60_000,
+			reportResetAtMs: NOW + 10_000,
+			retry: { ...RETRY, maxDelayMs: 120_000 },
+			attempt: 0,
+			nowMs: NOW,
+		});
+		expect(waitMs).toBe(90_000);
 	});
 
 	it("preserves a prior provider-timed block over a shorter usage-report reset", () => {

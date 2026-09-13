@@ -134,6 +134,7 @@ export function planAdvisorUsageLimitWait(args: {
 	blockedUntilMs?: number;
 	retryAfterMs?: number;
 	reportResetAtMs?: number;
+	requestedBlockedUntilMs?: number;
 	priorBlockedUntilMs?: number;
 	priorBlockedUntilTimed?: boolean;
 	retry: { enabled: boolean; maxDelayMs: number; maxRetries: number };
@@ -145,6 +146,7 @@ export function planAdvisorUsageLimitWait(args: {
 		blockedUntilMs,
 		retryAfterMs,
 		reportResetAtMs,
+		requestedBlockedUntilMs,
 		priorBlockedUntilMs,
 		priorBlockedUntilTimed,
 		retry,
@@ -171,6 +173,17 @@ export function planAdvisorUsageLimitWait(args: {
 			priorBlockedUntilMs > credentialUnblockAtMs
 		) {
 			credentialUnblockAtMs = priorBlockedUntilMs;
+		}
+		if (
+			blockedUntilMs !== undefined &&
+			requestedBlockedUntilMs !== undefined &&
+			blockedUntilMs > requestedBlockedUntilMs &&
+			blockedUntilMs > credentialUnblockAtMs
+		) {
+			// A merged deadline beyond this call's initial block belongs to a
+			// persisted/shared block (or a longer report) that credential
+			// selection still enforces; never wake before it.
+			credentialUnblockAtMs = blockedUntilMs;
 		}
 	}
 	if (credentialUnblockAtMs !== undefined) candidates.push(Math.max(0, credentialUnblockAtMs - nowMs));
@@ -1571,6 +1584,7 @@ export class SessionAdvisors {
 			isUsageLimitOutcome(extractHttpStatusFromError(error), message);
 		let usageRetryAtMs: number | undefined;
 		let usageBlockedUntilMs: number | undefined;
+		let usageRequestedBlockedUntilMs: number | undefined;
 		let usageReportResetAtMs: number | undefined;
 		let usagePriorBlockedUntilMs: number | undefined;
 		let usagePriorBlockedUntilTimed: boolean | undefined;
@@ -1589,6 +1603,7 @@ export class SessionAdvisors {
 			if (outcome.switched) return true;
 			usageRetryAtMs = outcome.retryAtMs;
 			usageBlockedUntilMs = outcome.blockedUntilMs;
+			usageRequestedBlockedUntilMs = outcome.requestedBlockedUntilMs;
 			usageReportResetAtMs = outcome.reportResetAtMs;
 			usagePriorBlockedUntilMs = outcome.priorBlockedUntilMs;
 			usagePriorBlockedUntilTimed = outcome.priorBlockedUntilTimed;
@@ -1610,6 +1625,7 @@ export class SessionAdvisors {
 						{
 							retryAtMs: usageRetryAtMs,
 							blockedUntilMs: usageBlockedUntilMs,
+							requestedBlockedUntilMs: usageRequestedBlockedUntilMs,
 							retryAfterMs,
 							reportResetAtMs: usageReportResetAtMs,
 							priorBlockedUntilMs: usagePriorBlockedUntilMs,
@@ -1683,6 +1699,7 @@ export class SessionAdvisors {
 		timing: {
 			retryAtMs?: number;
 			blockedUntilMs?: number;
+			requestedBlockedUntilMs?: number;
 			retryAfterMs?: number;
 			reportResetAtMs?: number;
 			priorBlockedUntilMs?: number;
@@ -1693,6 +1710,7 @@ export class SessionAdvisors {
 		const waitMs = planAdvisorUsageLimitWait({
 			retryAtMs: timing.retryAtMs,
 			blockedUntilMs: timing.blockedUntilMs,
+			requestedBlockedUntilMs: timing.requestedBlockedUntilMs,
 			retryAfterMs: timing.retryAfterMs,
 			reportResetAtMs: timing.reportResetAtMs,
 			priorBlockedUntilMs: timing.priorBlockedUntilMs,
@@ -1708,13 +1726,16 @@ export class SessionAdvisors {
 			advisor.usageLimitRetries = 0;
 			return false;
 		}
-		advisor.usageLimitRetries += 1;
+		const attempt = advisor.usageLimitRetries + 1;
 		logger.debug("advisor waiting out usage-limit block", {
 			advisor: advisor.name,
 			waitMs,
-			attempt: advisor.usageLimitRetries,
+			attempt,
 		});
 		await scheduler.wait(waitMs, { signal });
+		// An aborted pause/reset did not reach a provider retry and must not
+		// consume budget in the resumed/reset conversation.
+		advisor.usageLimitRetries = attempt;
 		return true;
 	}
 

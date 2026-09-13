@@ -765,6 +765,11 @@ export { isDefinitiveOAuthFailure } from "./error/auth-classify";
  * the usage report reveals. Callers that wait the account out (instead of
  * rotating) must sleep until this, not the error-text hint alone.
  *
+ * `requestedBlockedUntilMs` (epoch ms) is this mark call's initial deadline,
+ * before usage-report correction and longest-wins merging. Callers use it to
+ * distinguish the call's replaceable heuristic from a longer merged block
+ * that credential selection will continue enforcing.
+ *
  * `priorBlockedUntilMs` (epoch ms) is the live block deadline the map already
  * stored for this credential before this call. The merged `blockedUntilMs`
  * masks a pre-existing block shorter than this call's own heuristic
@@ -790,6 +795,8 @@ export interface UsageLimitMarkResult {
 	switched: boolean;
 	retryAtMs?: number;
 	blockedUntilMs?: number;
+	/** This mark call's initial deadline, before report correction and merging. */
+	requestedBlockedUntilMs?: number;
 	priorBlockedUntilMs?: number;
 	priorBlockedUntilTimed?: boolean;
 	reportResetAtMs?: number;
@@ -4820,7 +4827,8 @@ export class AuthStorage {
 
 		const routing = this.#credentialBlockRouting(provider, credentialType, options?.modelId);
 		const now = Date.now();
-		let blockedUntil = now + (options?.retryAfterMs ?? AuthStorage.#defaultBackoffMs);
+		const requestedBlockedUntilMs = now + (options?.retryAfterMs ?? AuthStorage.#defaultBackoffMs);
+		let blockedUntil = requestedBlockedUntilMs;
 		// Heuristic/default fallbacks are guesses; provider-stated hints and
 		// report-derived extensions are timed.
 		let providerTimed = options?.providerTimed === true;
@@ -4871,7 +4879,11 @@ export class AuthStorage {
 			routing,
 			providerTimed,
 		);
-		return reportResetAtMs === undefined ? rotation : { ...rotation, reportResetAtMs };
+		return {
+			...rotation,
+			requestedBlockedUntilMs,
+			...(reportResetAtMs === undefined ? {} : { reportResetAtMs }),
+		};
 	}
 
 	#resolveWindowResetAt(window: UsageLimit["window"]): number | undefined {
