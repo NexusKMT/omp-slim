@@ -9,6 +9,7 @@ import {
 	findFreeCdpPort,
 	pickElectronTarget,
 	probeCdpStatus,
+	resolveSpawnArgs,
 	shouldPreserveConnectedBrowserFocus,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/attach";
 import {
@@ -343,6 +344,41 @@ describe("pickElectronTarget", () => {
 		},
 		30_000,
 	);
+});
+
+describe("resolveSpawnArgs", () => {
+	// Chrome 136+ ignores --remote-debugging-port on the default profile: the
+	// browser opens, nothing listens, and attach waits out its timeout. A
+	// Chromium-family app.path must therefore launch on an omp-owned profile.
+	test("gives a Chromium browser an omp profile and suppresses first-run pages", () => {
+		const args = resolveSpawnArgs("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", undefined);
+		const profile = args.find(arg => arg.startsWith("--user-data-dir="))?.slice("--user-data-dir=".length);
+		expect(profile).toBeDefined();
+		expect(path.isAbsolute(profile!)).toBe(true);
+		expect(path.basename(profile!)).toMatch(/^google-chrome-[0-9a-f]{8}$/);
+		expect(args).toContain("--no-first-run");
+		expect(args).toContain("--no-default-browser-check");
+	});
+
+	test("keys the profile by executable so two browsers never share a singleton lock", () => {
+		const chrome = resolveSpawnArgs("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", undefined);
+		const edge = resolveSpawnArgs("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge", undefined);
+		const linuxChrome = resolveSpawnArgs("/usr/bin/google-chrome-stable", []);
+		const dirs = [chrome, edge, linuxChrome].map(args => args.find(arg => arg.startsWith("--user-data-dir=")));
+		expect(dirs.every(Boolean)).toBe(true);
+		expect(new Set(dirs).size).toBe(3);
+	});
+
+	test("keeps a caller-chosen user-data-dir and its args verbatim", () => {
+		const args = ["--user-data-dir", "/tmp/my-profile", "--incognito"];
+		expect(resolveSpawnArgs("/usr/bin/google-chrome-stable", args)).toBe(args);
+	});
+
+	test("leaves non-browser CDP apps such as Electron bundles untouched", () => {
+		const args = ["--foo"];
+		expect(resolveSpawnArgs("/Applications/Slack.app/Contents/MacOS/Slack", args)).toBe(args);
+		expect(resolveSpawnArgs("/opt/chrome-remote-desktop/chrome-remote-desktop-host", undefined)).toEqual([]);
+	});
 });
 
 describe("probeCdpStatus", () => {

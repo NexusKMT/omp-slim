@@ -19,6 +19,7 @@ import {
 	holdBrowser,
 	releaseBrowser,
 } from "./browser/registry";
+import { ensureChromiumExecutable } from "./browser/launch";
 import { resolveRelayKind } from "./browser/relay/kind";
 import type { ScreenshotResult } from "./browser/tab-protocol";
 import type { OutputMeta } from "./output-meta";
@@ -235,6 +236,14 @@ async function openBrowser(
 			`Tab ${JSON.stringify(name)} is bound to a different browser (${describeKind(existing.browser.kind)}). Close it first.`,
 		);
 	}
+
+	// First browser use may have to download Chrome for Testing (~180 MB).
+	// That is a one-time install, not part of the open, so it runs before the
+	// deadline below starts: charged against the 30s default it timed out on
+	// every ordinary connection and pushed agents toward `app.path` workarounds.
+	// The download promise is module-cached, so a caller abort here leaves it
+	// finishing in the background and the next open picks up the result.
+	if (kind.kind === "headless") await untilAborted(signal, () => ensureChromiumExecutable());
 
 	// The requested timeout must cover the *entire* open — browser
 	// acquisition (CDP discovery/connect), queued tab acquisition, worker

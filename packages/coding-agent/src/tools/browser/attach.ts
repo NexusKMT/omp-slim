@@ -1,6 +1,7 @@
 import * as net from "node:net";
 import * as path from "node:path";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
+import { getBrowserProfilesDir } from "@oh-my-pi/pi-utils";
 import type { Socket } from "bun";
 import type { Browser, Page } from "puppeteer-core";
 import { ToolError, throwIfAborted } from "../tool-errors";
@@ -158,6 +159,38 @@ function findUserDataDirInArgs(args: string[] | undefined): string | null {
 		if (result !== null) index++;
 	}
 	return result;
+}
+
+/**
+ * Executable basenames of Chromium-family browsers (release channels and
+ * vendor suffixes included), as opposed to Electron apps that also speak CDP.
+ * Matched against the basename without `.exe`.
+ */
+const CHROMIUM_BROWSER_BASENAME =
+	/^(?:google[ -]chrome|chrome|chromium|microsoft[ -]edge|msedge|brave|vivaldi|opera|thorium|ungoogled[ -]chromium)(?:[ -](?:beta|dev|canary|unstable|stable|nightly|snapshot|browser|gx|for[ -]testing))*$/i;
+
+/**
+ * Launch argv for a spawned executable. Chrome 136+ silently ignores
+ * `--remote-debugging-port` when the default user-data-dir is in use: the
+ * browser opens as usual, nothing listens, and attach waits out its timeout.
+ * Chromium-family browsers therefore get a stable omp-owned profile under
+ * `~/.omp/browser-profiles/<exe slug>` unless the caller already picked one.
+ * That profile is also what lets a second instance start beside the user's
+ * running default-profile browser instead of handing off to it. Electron apps
+ * are left untouched: `--user-data-dir` would relocate their app data.
+ */
+export function resolveSpawnArgs(exe: string, appArgs: string[] | undefined): string[] {
+	const args = appArgs ?? [];
+	const base = path.basename(exe, ".exe");
+	if (!CHROMIUM_BROWSER_BASENAME.test(base) || findUserDataDirInArgs(args) !== null) return args;
+	const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+	const hash = Bun.hash.wyhash(exe).toString(16).padStart(16, "0").slice(0, 8);
+	const launchArgs = [...args, `--user-data-dir=${path.join(getBrowserProfilesDir(), `${slug}-${hash}`)}`];
+	// A fresh profile otherwise opens the welcome tour and default-browser
+	// prompt as extra page targets, which attach may adopt instead of ours.
+	if (!args.includes("--no-first-run")) launchArgs.push("--no-first-run");
+	if (!args.includes("--no-default-browser-check")) launchArgs.push("--no-default-browser-check");
+	return launchArgs;
 }
 
 function normalizeUserDataDir(userDataDir: string): string {
