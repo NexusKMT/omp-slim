@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.20] - 2026-09-13
+
 ### Fixed
 
 - Fixed DeepSeek V4.1 Flash dropping image attachments on hosts without their own carve-out, so the natively multimodal model is no longer treated as text-only ([#11992](https://github.com/can1357/oh-my-pi/pull/11992) by [@infernix](https://github.com/infernix)).
