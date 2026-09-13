@@ -399,6 +399,38 @@ describe("runEvalCompletion", () => {
 		expect(result.text).toBe("c answer");
 	});
 
+	it("walks shared descendants once per inherited effort", async () => {
+		const thinking = {
+			api: "anthropic-messages",
+			reasoning: true,
+			thinking: { efforts: [Effort.Low, Effort.Medium, Effort.High], mode: "anthropic-adaptive" },
+		} as const;
+		const models = Object.fromEntries(["b", "d", "c", "e"].map(id => [id, makeModel("p", id, { ...thinking })]));
+		const session = makeSession({
+			available: [REASONING_SLOW, models.b, models.d, models.c, models.e],
+			roles: { slow: "p/slow" },
+		});
+		session.settings.set("retry.fallbackChains", {
+			slow: ["p/b:low", "p/d:high"],
+			"p/b": ["p/c"],
+			"p/d": ["p/c"],
+			"p/c": ["p/e"],
+		});
+		const failures = ["slow", "b", "c:low", "e:low", "d", "c:high"].map(
+			name => () => assistant({ stopReason: "error", errorMessage: `${name} down` }),
+		);
+		const spy = vi.spyOn(ai, "completeSimple");
+		for (const respond of failures) spy.mockResolvedValueOnce(respond());
+		spy.mockResolvedValue(assistant({ text: "e:high answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "slow" }, { session });
+
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["slow", "b", "c", "e", "d", "c", "e"]);
+		const efforts = spy.mock.calls.map(call => (call[2] as { reasoning?: unknown }).reasoning);
+		expect(efforts).toEqual([Effort.High, Effort.Low, Effort.Low, Effort.Low, Effort.High, Effort.High, Effort.High]);
+		expect(result.text).toBe("e:high answer");
+	});
+
 	it("stops the candidate walk once retry.maxRetries is spent", async () => {
 		const models = ["b1", "b2", "b3"].map(id => makeModel("p", id));
 		const session = makeSession({ available: [SMOL, ...models] });

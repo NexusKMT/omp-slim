@@ -165,12 +165,13 @@ interface FallbackExpansion {
  * Append the fallback chain applicable to `selector`, then depth-first walk
  * each appended candidate's own chain so a model-oriented chain (B → C)
  * applies when its owner fails. `seen` dedupes by model plus effective
- * reasoning; `expanded` bounds the walk to one visit per raw selector.
- * `allowMissingPrimary` lets the concrete primary stand in when a role
- * assignment is too unqualified to parse as a chain primary.
- * `roleHint` is the tier, valid only for the root expansion: nested
- * candidates resolve their own exact/wildcard/role chain so a leaf cannot
- * jump back into the root tier chain and reorder its siblings.
+ * reasoning; `expanded` bounds the walk to one visit per raw selector and
+ * inherited effort, so the same model reached at another effort still walks
+ * its own descendants. `allowMissingPrimary` lets the concrete primary
+ * stand in when a role assignment is too unqualified to parse as a chain
+ * primary. `roleHint` is the tier, valid only for the root expansion:
+ * nested candidates resolve their own exact/wildcard/role chain so a leaf
+ * cannot jump back into the root tier chain and reorder its siblings.
  */
 function appendFallbackCandidates(
 	deps: FallbackExpansion,
@@ -182,8 +183,12 @@ function appendFallbackCandidates(
 	expanded: Set<string>,
 	out: CompletionCandidate[],
 ): void {
-	if (expanded.has(selector)) return;
-	expanded.add(selector);
+	// The expansion outcome follows the inherited effort for bare entries,
+	// so qualify the visit: the root call has no parent and keeps the bare
+	// selector key, while nested calls fold in the inherited effort.
+	const visit = parent ? `${selector}|${parent.disableReasoning ? "off" : (parent.reasoning ?? "inherit")}` : selector;
+	if (expanded.has(visit)) return;
+	expanded.add(visit);
 	const chainKey = resolveRetryFallbackChainKey(deps.context, selector, model, roleHint);
 	if (!chainKey) return;
 	for (const entry of findRetryFallbackCandidates(deps.context, chainKey, selector, model, {
