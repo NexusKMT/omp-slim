@@ -16,7 +16,7 @@ import {
 import { formatBytes } from "@oh-my-pi/pi-utils";
 import { theme } from "../../modes/theme/theme";
 import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
-import { compareSessionOrder, type SessionInfo, type SessionStatus } from "../../session/session-listing";
+import type { SessionInfo, SessionStatus } from "../../session/session-listing";
 import { shortenPath } from "../../tools/render-utils";
 import { HookSelectorComponent } from "./hook-selector";
 import { bottomBorder, OverlayPanel, row, topBorder } from "./overlay-box";
@@ -151,19 +151,25 @@ function compareFuzzyRank(a: RankedSessionMatch, b: RankedSessionMatch): number 
 }
 
 /** Exact titles lead partial titles; other matches retain their existing order. */
-function prioritizeTitleMatches(sessions: SessionInfo[], tokens: string[]): SessionInfo[] {
+function prioritizeTitleMatches(
+	sessions: SessionInfo[],
+	tokens: string[],
+	literal: RankedSessionMatch[],
+): SessionInfo[] {
 	const query = tokens.join(" ");
 	const exact: SessionInfo[] = [];
 	const partial: SessionInfo[] = [];
-	const rest: SessionInfo[] = [];
-	for (const session of sessions) {
+	const titleMatches = new Set<SessionInfo>();
+	// Title hits are literal matches, already ranked by recency and source index.
+	for (const { session } of literal) {
 		const title = session.title?.trim().toLowerCase().replace(/\s+/g, " ");
 		if (title === query) exact.push(session);
 		else if (title && isLiteralMatch(title, tokens)) partial.push(session);
-		else rest.push(session);
+		else continue;
+		titleMatches.add(session);
 	}
-	if (exact.length === 0 && partial.length === 0) return sessions;
-	return [...exact.sort(compareSessionOrder), ...partial.sort(compareSessionOrder), ...rest];
+	if (titleMatches.size === 0) return sessions;
+	return [...exact, ...partial, ...sessions.filter(session => !titleMatches.has(session))];
 }
 
 /**
@@ -199,7 +205,7 @@ export function rankSessionSearchMatches(allSessions: SessionInfo[], query: stri
 	const out: SessionInfo[] = [];
 	for (const match of literal) out.push(match.session);
 	for (const match of fuzzyMatches) out.push(match.session);
-	return prioritizeTitleMatches(out, tokens);
+	return prioritizeTitleMatches(out, tokens, literal);
 }
 
 /**
@@ -490,6 +496,7 @@ class SessionList implements Component {
 		this.#filteredSessions = prioritizeTitleMatches(
 			this.#historyIds.length > 0 ? mergeSessionRanking(this.#allSessions, base, this.#historyIds) : base,
 			tokenizeSessionQuery(this.#searchInput.getValue()),
+			this.#literalRanked,
 		);
 		this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
 	}

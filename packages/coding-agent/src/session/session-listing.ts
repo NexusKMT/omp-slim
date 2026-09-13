@@ -497,15 +497,6 @@ async function collectSessionsFromFileStride(
 	return sessions;
 }
 
-/** Canonical session listing order, also used within title-search groups. */
-export function compareSessionOrder(a: SessionInfo, b: SessionInfo): number {
-	return (
-		b.modified.getTime() - a.modified.getTime() ||
-		b.created.getTime() - a.created.getTime() ||
-		b.path.localeCompare(a.path)
-	);
-}
-
 async function collectSessionsFromFiles(
 	files: string[],
 	storage: SessionStorage,
@@ -523,7 +514,12 @@ async function collectSessionsFromFiles(
 					)
 				).flat();
 
-	sessions.sort(compareSessionOrder);
+	sessions.sort(
+		(a, b) =>
+			b.modified.getTime() - a.modified.getTime() ||
+			b.created.getTime() - a.created.getTime() ||
+			b.path.localeCompare(a.path),
+	);
 	return sessions;
 }
 

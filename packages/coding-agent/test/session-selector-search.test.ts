@@ -169,9 +169,9 @@ describe("session picker incremental search", () => {
 			makeSession("body", { firstMessage: "dashboard", modified: new Date(5) }),
 			makeSession("partial-new", { title: "Dashboard notes", modified: new Date(4) }),
 			makeSession("partial-old", { title: "Old dashboard", modified: new Date(3) }),
-			makeSession("exact-b", { title: "dashboard", modified: new Date(2), created: new Date(1) }),
-			makeSession("exact-a", { title: "  DASHBOARD  ", modified: new Date(2), created: new Date(2) }),
 			makeSession("exact-c", { title: "dashboard", modified: new Date(2), created: new Date(2) }),
+			makeSession("exact-a", { title: "  DASHBOARD  ", modified: new Date(2), created: new Date(2) }),
+			makeSession("exact-b", { title: "dashboard", modified: new Date(2), created: new Date(1) }),
 			makeSession("history"),
 		];
 		const harness = makeHarness(sessions, () => ["history", "exact-a", "body"]);
@@ -181,6 +181,22 @@ describe("session picker incremental search", () => {
 		expect(ids(rankSessionSearchMatches(sessions, "dashboard"))).toEqual(before);
 		vi.runAllTimers();
 		expect(ids(harness.filtered())).toEqual([...before.slice(0, 5), "history", "body"]);
+		harness.selector.dispose();
+	});
+
+	it("preserves imported exact and partial title ties in source order", () => {
+		const sessions = [
+			makeSession("a-partial", { title: "Dashboard notes", created: new Date(1) }),
+			makeSession("b-exact", { title: "dashboard", created: new Date(1) }),
+			makeSession("c-partial", { title: "Old dashboard", created: new Date(2) }),
+			makeSession("d-exact", { title: "dashboard", created: new Date(2) }),
+		];
+		// Codex lists equal-mtime sessions by ID ascending, regardless of creation time.
+		const harness = makeHarness(sessions);
+		harness.type("dashboard");
+		const expected = ["b-exact", "d-exact", "a-partial", "c-partial"];
+		expect(ids(harness.filtered())).toEqual(expected);
+		expect(ids(rankSessionSearchMatches(sessions, "dashboard"))).toEqual(expected);
 		harness.selector.dispose();
 	});
 
