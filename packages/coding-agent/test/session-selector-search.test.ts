@@ -164,6 +164,40 @@ describe("session picker incremental search", () => {
 		expect(harness.renders()).toBeGreaterThan(rendersBefore);
 	});
 
+	it("keeps exact and partial titles ahead of newer content hits before and after history arrives", () => {
+		const sessions = [
+			makeSession("body", { firstMessage: "dashboard", modified: new Date(5) }),
+			makeSession("partial-new", { title: "Dashboard notes", modified: new Date(4) }),
+			makeSession("partial-old", { title: "Old dashboard", modified: new Date(3) }),
+			makeSession("exact-b", { title: "dashboard", modified: new Date(2) }),
+			makeSession("exact-a", { title: "  DASHBOARD  ", modified: new Date(2) }),
+			makeSession("history"),
+		];
+		const harness = makeHarness(sessions, () => ["history", "exact-a", "body"]);
+		harness.type("dashboard");
+		const before = ids(harness.filtered());
+		expect(before.slice(0, 2).toSorted()).toEqual(["exact-a", "exact-b"]);
+		expect(before.slice(2)).toEqual(["partial-new", "partial-old", "body"]);
+		expect(ids(rankSessionSearchMatches(sessions, "dashboard"))).toEqual(before);
+		vi.runAllTimers();
+		expect(ids(harness.filtered())).toEqual([...before.slice(0, 4), "history", "body"]);
+		harness.selector.dispose();
+	});
+
+	it("prioritizes titles containing every query token even without a full-title match", () => {
+		const sessions = [
+			makeSession("body", { title: "textcom", firstMessage: "dashboard", modified: new Date(3) }),
+			makeSession("title", { title: "Textcom-dashboard", modified: new Date(1) }),
+			makeSession("history"),
+		];
+		const harness = makeHarness(sessions, () => ["history", "body"]);
+		harness.type("  TEXTCOM   dashb ");
+		expect(ids(harness.filtered())).toEqual(["title", "body"]);
+		vi.runAllTimers();
+		expect(ids(harness.filtered())).toEqual(["title", "history", "body"]);
+		harness.selector.dispose();
+	});
+
 	it("skips the history merge after the user moves the selection", () => {
 		const sessions = makeCorpus();
 		const calls: string[] = [];
