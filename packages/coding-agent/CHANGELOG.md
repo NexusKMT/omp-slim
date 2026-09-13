@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed background task cards missing their final completion or failure after an early result or live-session focus replay.
+- `omp --fork` with a missing session path now fails with `Session "<path>" not found.` instead of silently opening an empty parentless session ([#11944](https://github.com/can1357/oh-my-pi/pull/11944) by [@onlyysaurabh](https://github.com/onlyysaurabh)).
 
 ## [18.1.19] - 2026-09-12
 
