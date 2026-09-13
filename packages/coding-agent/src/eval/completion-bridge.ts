@@ -19,6 +19,7 @@ import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-ca
 import { Snowflake } from "@oh-my-pi/pi-utils";
 import { extractTextContent, extractToolCall, parseJsonPayload } from "../commit/utils";
 
+import type { ModelRegistry } from "../config/model-registry";
 import {
 	expandRoleAlias,
 	formatModelString,
@@ -27,6 +28,7 @@ import {
 	resolveModelFromString,
 	resolveModelOverride,
 } from "../config/model-resolver";
+import type { Settings } from "../config/settings";
 import { MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { ToolSession } from "../tools";
 import { ToolError } from "../tools/tool-errors";
@@ -106,6 +108,8 @@ export function releaseCompletionHandles(ownerId: string): void {
 }
 
 interface CompletionCandidate {
+	/** Raw fallback-chain selector this candidate was resolved from. */
+	selector: string;
 	model: Model<Api>;
 	reasoning: Effort | undefined;
 	disableReasoning: boolean;
@@ -138,6 +142,49 @@ function candidateIdentity(
 	return `${formatModelStringWithRouting(model)}|${effort}`;
 }
 
+interface FallbackExpansion {
+	context: RetryFallbackResolutionContext;
+	modelRegistry: ModelRegistry;
+	settings: Settings | undefined;
+	tier: CompletionTier;
+	disabledProviders: Set<string>;
+}
+
+/**
+ * Append the fallback chain applicable to `selector`, then depth-first walk
+ * each appended candidate's own chain so a model-oriented chain (B → C)
+ * applies when its owner fails. `seen` dedupes by model plus effective
+ * reasoning; `expanded` bounds the walk to one visit per raw selector.
+ * `allowMissingPrimary` lets the concrete primary stand in when a role
+ * assignment is too unqualified to parse as a chain primary.
+ */
+function appendFallbackCandidates(
+	deps: FallbackExpansion,
+	selector: string,
+	model: Model<Api>,
+	seen: Set<string>,
+	expanded: Set<string>,
+	out: CompletionCandidate[],
+): void {
+	if (expanded.has(selector)) return;
+	expanded.add(selector);
+	const chainKey = resolveRetryFallbackChainKey(deps.context, selector, model, deps.tier);
+	if (!chainKey) return;
+	for (const entry of findRetryFallbackCandidates(deps.context, chainKey, selector, model, {
+		allowMissingPrimary: true,
+	})) {
+		const resolved = resolveModelOverride([entry.raw], deps.modelRegistry, deps.settings);
+		const candidate = resolved.model;
+		if (!candidate || deps.disabledProviders.has(candidate.provider)) continue;
+		const reasoning = reasoningForCandidate(deps.tier, candidate, entry.thinkingLevel);
+		const identity = candidateIdentity(candidate, reasoning);
+		if (seen.has(identity)) continue;
+		seen.add(identity);
+		out.push({ selector: entry.raw, model: candidate, ...reasoning });
+		appendFallbackCandidates(deps, entry.raw, candidate, seen, expanded, out);
+	}
+}
+
 /**
  * Resolve a tier to its primary model and configured retry-fallback candidates.
  * `default` prefers the session's active model before the `@default` role.
@@ -161,30 +208,30 @@ function resolveTierCandidates(tier: CompletionTier, session: ToolSession): Comp
 			: resolve(TIER_TO_PATTERN[tier]);
 	if (!primary) return [];
 
-	const candidates: CompletionCandidate[] = [{ model: primary.model, ...reasoningForCandidate(tier, primary.model) }];
+	const candidates: CompletionCandidate[] = [
+		{ selector: primary.selector, model: primary.model, ...reasoningForCandidate(tier, primary.model) },
+	];
 	const retry = session.settings.getGroup("retry");
 	if (!retry.enabled || !retry.modelFallback) return candidates;
 
-	const context: RetryFallbackResolutionContext = {
-		chains: getRetryFallbackChains(session.settings),
-		getModelRole: role => session.settings.getModelRole(role),
-		modelLookup: modelRegistry,
-	};
-	const chainKey = resolveRetryFallbackChainKey(context, primary.selector, primary.model, tier);
-	if (!chainKey) return candidates;
-
-	const disabledProviders = new Set(session.settings.get("disabledProviders"));
-	const seen = new Set([candidateIdentity(primary.model, candidates[0])]);
-	for (const selector of findRetryFallbackCandidates(context, chainKey, primary.selector, primary.model)) {
-		const resolved = resolveModelOverride([selector.raw], modelRegistry, session.settings);
-		const model = resolved.model;
-		if (!model || disabledProviders.has(model.provider)) continue;
-		const reasoning = reasoningForCandidate(tier, model, selector.thinkingLevel);
-		const identity = candidateIdentity(model, reasoning);
-		if (seen.has(identity)) continue;
-		seen.add(identity);
-		candidates.push({ model, ...reasoning });
-	}
+	appendFallbackCandidates(
+		{
+			context: {
+				chains: getRetryFallbackChains(session.settings),
+				getModelRole: role => session.settings.getModelRole(role),
+				modelLookup: modelRegistry,
+			},
+			modelRegistry,
+			settings: session.settings,
+			tier,
+			disabledProviders: new Set(session.settings.get("disabledProviders")),
+		},
+		primary.selector,
+		primary.model,
+		new Set([candidateIdentity(primary.model, candidates[0])]),
+		new Set(),
+		candidates,
+	);
 	return candidates;
 }
 
@@ -225,12 +272,18 @@ async function executeCompletion(
 		: undefined;
 	const telemetry = resolveTelemetry(session.getTelemetry?.(), session.getSessionId?.() ?? undefined);
 	const systemPrompt = system ? [system] : ["You are a helpful assistant."];
+	// Each fallback consumes one retry attempt, mirroring session recovery:
+	// the primary plus at most `retry.maxRetries` fallbacks are attempted.
+	const maxRetries = Math.max(0, session.settings.getGroup("retry").maxRetries ?? 0);
+	const attempts = candidates.slice(0, maxRetries + 1);
 	let response: AssistantMessage | undefined;
 	let model: Model<Api> | undefined;
-	for (const [index, candidate] of candidates.entries()) {
+	for (const [index, candidate] of attempts.entries()) {
 		model = candidate.model;
 		try {
-			const apiKey = await registry.getApiKey(model);
+			// Forward the session id so session-sticky OAuth credentials
+			// resolve (see #5325); without it a usable fallback looks keyless.
+			const apiKey = await registry.getApiKey(model, session.getSessionId?.() ?? undefined, { signal });
 			if (!apiKey) {
 				throw new ToolError(
 					`completion() has no API key for ${formatModelString(model)}. Configure credentials for this provider or choose another tier.`,
@@ -253,14 +306,14 @@ async function executeCompletion(
 				{ telemetry, oneshotKind: "eval_completion" },
 			);
 		} catch (error) {
-			if (signal.aborted || index === candidates.length - 1) throw error;
+			if (signal.aborted || index === attempts.length - 1) throw error;
 			continue;
 		}
 		if (response.stopReason === "aborted") {
 			throw new ToolError("completion() request aborted.");
 		}
 		if (response.stopReason === "error") {
-			if (!signal.aborted && index < candidates.length - 1) continue;
+			if (!signal.aborted && index < attempts.length - 1) continue;
 			throw new ToolError(response.errorMessage ?? "completion() request failed.");
 		}
 		break;

@@ -269,6 +269,100 @@ describe("runEvalCompletion", () => {
 		expect(result.text).toBe("low-effort answer");
 	});
 
+	it("applies the tier chain when the role assignment is too unqualified to parse", async () => {
+		const fallback = makeModel("p", "fallback");
+		const session = makeSession({ available: [SMOL, fallback], roles: { smol: "smol" } });
+		session.settings.set("retry.fallbackChains", { smol: ["p/fallback"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "quota exhausted" }))
+			.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "fallback"]);
+		expect(result.text).toBe("fallback answer");
+	});
+
+	it("walks into a failed fallback's own model chain", async () => {
+		const b = makeModel("p", "b");
+		const c = makeModel("p", "c");
+		const session = makeSession({ available: [SMOL, b, c] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/b"], "p/b": ["p/c"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "smol down" }))
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "b down" }))
+			.mockResolvedValueOnce(assistant({ text: "c answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "b", "c"]);
+		expect(result.text).toBe("c answer");
+	});
+
+	it("terminates on cyclic fallback chains instead of looping", async () => {
+		const b = makeModel("p", "b");
+		const session = makeSession({ available: [SMOL, b] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/b"], "p/b": ["p/smol"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValue(assistant({ stopReason: "error", errorMessage: "always down" }));
+
+		await expect(runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session })).rejects.toThrow(
+			"always down",
+		);
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "b"]);
+	});
+
+	it("stops the candidate walk once retry.maxRetries is spent", async () => {
+		const models = ["b1", "b2", "b3"].map(id => makeModel("p", id));
+		const session = makeSession({ available: [SMOL, ...models] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/b1", "p/b2", "p/b3"] });
+		session.settings.set("retry.maxRetries", 1);
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValue(assistant({ stopReason: "error", errorMessage: "quota exhausted" }));
+
+		await expect(runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session })).rejects.toThrow(
+			"quota exhausted",
+		);
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "b1"]);
+	});
+
+	it("attempts only the primary when retry.maxRetries is zero", async () => {
+		const fallback = makeModel("p", "fallback");
+		const session = makeSession({ available: [SMOL, fallback] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/fallback"] });
+		session.settings.set("retry.maxRetries", 0);
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValue(assistant({ stopReason: "error", errorMessage: "quota exhausted" }));
+
+		await expect(runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session })).rejects.toThrow(
+			"quota exhausted",
+		);
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol"]);
+	});
+
+	it("forwards the session id to the API key lookup", async () => {
+		vi.spyOn(ai, "completeSimple").mockResolvedValue(assistant({ text: "ok" }));
+		const session = makeSession();
+		session.getSessionId = () => "sess-1";
+		const seen: unknown[][] = [];
+		const registry = session.modelRegistry;
+		if (!registry) throw new Error("test requires a model registry");
+		registry.getApiKey = async (model, sessionId, options) => {
+			seen.push([model, sessionId, options]);
+			return "test-key";
+		};
+
+		await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		expect(seen.length).toBe(1);
+		expect(seen[0]?.[1]).toBe("sess-1");
+	});
+
 	it("returns the completion text in plain mode", async () => {
 		vi.spyOn(ai, "completeSimple").mockResolvedValue(assistant({ text: "the answer" }));
 		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session: makeSession() });
