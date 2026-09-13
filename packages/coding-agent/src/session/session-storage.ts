@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { FileLock as NativeFileLock } from "@oh-my-pi/pi-natives";
 import { hasFsCode, isEnoent, logger, peekFileEnds, Snowflake, toError } from "@oh-my-pi/pi-utils";
 import { overlayTitleSlotContent, type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
 
@@ -311,17 +312,24 @@ class FileSessionStorageWriter implements SessionStorageWriter {
  * rename sequence in `writeTextSync`/`writeTextAtomic` is synchronous (no
  * in-process interleave is possible), but a second terminal runs in another
  * process: without a shared lock its append can land between our freshness
- * check and our rename, and the rename then erases it. Every cooperating
- * writer holds this lockfile across check-then-publish, so the window only
- * remains for non-cooperating writers (plain editors), against which the
- * size check still fails closed whenever the skew is detectable.
+ * check and our rename, and the rename then erases it.
  *
- * The lock is held for microseconds (a stat plus one or two renames) and the
- * region never yields, so in-process contention is impossible; cross-process
- * contention fails closed after a short bounded wait instead of blocking the
- * turn loop. A lock whose holder pid is dead is stolen; any other lock is
- * never touched (stealing a live holder would reopen the race). Malformed
- * lock content is treated as live: fail closed, never steal garbage.
+ * Exclusion comes in two layers. The outer layer is a process-owned OS gate
+ * held from before the lockfile claim until after release: the kernel
+ * reclaims it on process exit (including SIGKILL), so no wall-clock age
+ * heuristic decides liveness and no unlink races ownership (F2). The inner
+ * layer is the lockfile protocol below, kept so writers on a previous
+ * binary still interoperate through the same file they always have; among
+ * current writers the gate serializes the whole claim, which also closes
+ * the two-reclaimer unlink race (rJDh). Against a previous-binary peer the
+ * protocol degrades to its released semantics, documented on the steal
+ * path. The window that remains is non-cooperating writers (plain
+ * editors), against which the size check still fails closed whenever the
+ * skew is detectable.
+ *
+ * The region is held for microseconds and never yields, so in-process
+ * contention is impossible; cross-process contention fails closed after a
+ * short bounded wait instead of blocking the turn loop.
  */
 const SESSION_PUBLISH_LOCK_WAIT_MS = 500;
 const SESSION_PUBLISH_LOCK_POLL_MS = 2;
@@ -375,8 +383,9 @@ export class FileSessionStorage implements SessionStorage {
 
 	/**
 	 * Run `task` (the freshness check through the final rename) while holding
-	 * the cross-process publish lock for `fpath`. The region is fully
-	 * synchronous, so a held lock can only belong to another process.
+	 * the cross-process publish lock for `fpath`. The OS gate is acquired
+	 * first and released last, so the lockfile claim below only ever runs
+	 * while this process provably owns the name.
 	 */
 	#withPublishLock(fpath: string, task: () => void): void {
 		const lockPath = this.#publishLockPath(fpath);
@@ -385,16 +394,65 @@ export class FileSessionStorage implements SessionStorage {
 		// the temp file, but the lock claim runs first). Match that behavior
 		// so a first publish to a new directory does not fail with ENOENT.
 		this.ensureDirSync(path.dirname(lockPath));
-		this.#acquirePublishLock(fpath, lockPath);
+		const osGate = this.#acquireOsPublishLock(fpath, lockPath);
 		try {
-			task();
-		} finally {
+			this.#acquirePublishLock(fpath, lockPath);
 			try {
-				fs.unlinkSync(lockPath);
-			} catch (err) {
-				if (!isEnoent(err)) {
-					logger.warn("Failed to remove session publish lock", { sessionFile: fpath, lockPath });
+				task();
+			} finally {
+				try {
+					fs.unlinkSync(lockPath);
+				} catch (err) {
+					if (!isEnoent(err)) {
+						logger.warn("Failed to remove session publish lock", { sessionFile: fpath, lockPath });
+					}
 				}
+			}
+		} finally {
+			osGate.release();
+			this.#discardOsGate(fpath, lockPath);
+		}
+	}
+
+	/**
+	 * Claim the process-owned gate for `fpath`, failing closed after the
+	 * same bounded wait the lockfile claim uses. The gate path is a sidecar
+	 * of the lockfile so one directory holds both; the native handle keeps
+	 * ownership, never the file content, so suspension and SIGKILL cannot
+	 * strand it as stealable.
+	 */
+	#acquireOsPublishLock(fpath: string, lockPath: string): NativeFileLock {
+		const deadline = Date.now() + SESSION_PUBLISH_LOCK_WAIT_MS;
+		for (;;) {
+			const gate = NativeFileLock.tryAcquire(this.#osGatePath(lockPath));
+			if (gate.acquired) return gate;
+			gate.release();
+			if (Date.now() >= deadline) {
+				throw new SessionLockError(fpath, "another writer holds the publish lock");
+			}
+			sleepSyncMs(SESSION_PUBLISH_LOCK_POLL_MS);
+		}
+	}
+
+	/**
+	 * Sidecar carrying the OS gate. It lives beside the lockfile (same trust
+	 * domain) and is removed on release so the session directory listing is
+	 * unchanged after a publish. Only handle ownership matters, never the
+	 * file content, so a crash-orphaned sidecar is inert and the next
+	 * acquire simply reopens it.
+	 */
+	#osGatePath(lockPath: string): string {
+		return `${lockPath}.os`;
+	}
+
+	/** Best-effort sidecar removal; the released gate handle was the ownership record, not this file. */
+	#discardOsGate(fpath: string, lockPath: string): void {
+		const gatePath = this.#osGatePath(lockPath);
+		try {
+			fs.unlinkSync(gatePath);
+		} catch (err) {
+			if (!isEnoent(err)) {
+				logger.warn("Failed to remove session publish gate", { sessionFile: fpath, lockPath: gatePath });
 			}
 		}
 	}
