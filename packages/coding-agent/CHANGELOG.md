@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Orchestration notice no longer hardcodes Bun commands as the verification gate; verification is described generically ("project checks, tests") so non-Bun projects get appropriate wording ([#10985](https://github.com/can1357/oh-my-pi/issues/10985)).
+- Orchestrators now verify with project-appropriate checks instead of Bun-specific commands, so non-Bun projects are no longer told to run a checker they do not have ([#10985](https://github.com/can1357/oh-my-pi/issues/10985)).
 - Documented that native JS/TS hook factories must live in `.omp/hooks/pre/` or `.omp/hooks/post/` (not directly in `.omp/hooks/`), and cross-linked the hooks and extension-loading docs ([#11942](https://github.com/can1357/oh-my-pi/issues/11942)).
 ### Added
 
