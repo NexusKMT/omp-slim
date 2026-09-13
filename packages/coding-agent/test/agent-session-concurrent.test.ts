@@ -1350,7 +1350,12 @@ describe("AgentSession TTSR resume gate", () => {
 						const partial = makeMsg("");
 						stream.push({ type: "start", partial });
 						stream.push({ type: "text_delta", contentIndex: 0, delta: leak, partial: makeMsg(leak) });
-						stream.push({ type: "text_delta", contentIndex: 0, delta: "FORBID", partial: makeMsg(`${leak}FORBID`) });
+						stream.push({
+							type: "text_delta",
+							contentIndex: 0,
+							delta: "FORBID",
+							partial: makeMsg(`${leak}FORBID`),
+						});
 						stream.push({ type: "done", reason: "stop", message: makeMsg(`${leak}FORBID`) });
 					} else {
 						const partial = makeMsg("");
@@ -1447,7 +1452,12 @@ describe("AgentSession TTSR resume gate", () => {
 						setTimeout(() => turnStartReleased.resolve(), 10);
 						void turnStartFinished.promise.then(() => {
 							setTimeout(() => {
-								stream.push({ type: "text_delta", contentIndex: 0, delta: "DEN", partial: makeMsg("FORBIDDEN") });
+								stream.push({
+									type: "text_delta",
+									contentIndex: 0,
+									delta: "DEN",
+									partial: makeMsg("FORBIDDEN"),
+								});
 							}, 10);
 						});
 						if (signal) {
