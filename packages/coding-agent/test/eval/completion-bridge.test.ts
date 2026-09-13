@@ -234,6 +234,24 @@ describe("runEvalCompletion", () => {
 		expect(`${model.provider}/${model.id}`).toBe("p/slow");
 	});
 
+	it("uses the tier fallback chain after the primary model fails", async () => {
+		const fallback = makeModel("p", "fallback");
+		const session = makeSession({ available: [SMOL, fallback] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/fallback"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "quota exhausted" }))
+			.mockResolvedValueOnce(assistant({ text: "fallback answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "fallback"]);
+		expect(result).toEqual({
+			text: "fallback answer",
+			details: { model: "p/fallback", tier: "smol", structured: false },
+		});
+	});
+
 	it("returns the completion text in plain mode", async () => {
 		vi.spyOn(ai, "completeSimple").mockResolvedValue(assistant({ text: "the answer" }));
 		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session: makeSession() });
