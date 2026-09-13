@@ -125,6 +125,20 @@ function reasoningForCandidate(
 }
 
 /**
+ * Identity used to dedupe fallback candidates. A chain may retry the same model
+ * at a different effort (`slow: ["provider/model:low"]`), so the key folds in
+ * the effective reasoning settings — matching the shared resolver, which treats
+ * differently suffixed selectors as distinct.
+ */
+function candidateIdentity(
+	model: Model<Api>,
+	reasoning: Pick<CompletionCandidate, "reasoning" | "disableReasoning">,
+): string {
+	const effort = reasoning.disableReasoning ? "off" : (reasoning.reasoning ?? "inherit");
+	return `${formatModelStringWithRouting(model)}|${effort}`;
+}
+
+/**
  * Resolve a tier to its primary model and configured retry-fallback candidates.
  * `default` prefers the session's active model before the `@default` role.
  */
@@ -160,15 +174,16 @@ function resolveTierCandidates(tier: CompletionTier, session: ToolSession): Comp
 	if (!chainKey) return candidates;
 
 	const disabledProviders = new Set(session.settings.get("disabledProviders"));
-	const seen = new Set([formatModelStringWithRouting(primary.model)]);
+	const seen = new Set([candidateIdentity(primary.model, candidates[0])]);
 	for (const selector of findRetryFallbackCandidates(context, chainKey, primary.selector, primary.model)) {
 		const resolved = resolveModelOverride([selector.raw], modelRegistry, session.settings);
 		const model = resolved.model;
 		if (!model || disabledProviders.has(model.provider)) continue;
-		const identity = formatModelStringWithRouting(model);
+		const reasoning = reasoningForCandidate(tier, model, selector.thinkingLevel);
+		const identity = candidateIdentity(model, reasoning);
 		if (seen.has(identity)) continue;
 		seen.add(identity);
-		candidates.push({ model, ...reasoningForCandidate(tier, model, selector.thinkingLevel) });
+		candidates.push({ model, ...reasoning });
 	}
 	return candidates;
 }
