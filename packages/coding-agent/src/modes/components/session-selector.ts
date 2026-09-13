@@ -16,7 +16,7 @@ import {
 import { formatBytes } from "@oh-my-pi/pi-utils";
 import { theme } from "../../modes/theme/theme";
 import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../../modes/utils/keybinding-matchers";
-import type { SessionInfo, SessionStatus } from "../../session/session-listing";
+import { compareSessionOrder, type SessionInfo, type SessionStatus } from "../../session/session-listing";
 import { shortenPath } from "../../tools/render-utils";
 import { HookSelectorComponent } from "./hook-selector";
 import { bottomBorder, OverlayPanel, row, topBorder } from "./overlay-box";
@@ -163,10 +163,7 @@ function prioritizeTitleMatches(sessions: SessionInfo[], tokens: string[]): Sess
 		else rest.push(session);
 	}
 	if (exact.length === 0 && partial.length === 0) return sessions;
-	// Preserve canonical listing order even when history arrives in another order.
-	const compare = (a: SessionInfo, b: SessionInfo) =>
-		compareSessionRecency(a, b) || b.created.getTime() - a.created.getTime() || b.path.localeCompare(a.path);
-	return [...exact.sort(compare), ...partial.sort(compare), ...rest];
+	return [...exact.sort(compareSessionOrder), ...partial.sort(compareSessionOrder), ...rest];
 }
 
 /**
