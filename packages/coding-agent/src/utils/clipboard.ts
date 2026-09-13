@@ -153,8 +153,8 @@ export async function copyToClipboard(text: string): Promise<void> {
 		// straight to stderr whenever it loses pasteboard ownership — during
 		// process teardown, or to another app that writes at the same moment. The
 		// copy itself is best-effort and the failure is swallowed here, but the
-		// AppKit line still lands in the user's terminal. A child process cannot
-		// emit it, and `pbcopy` ships with every macOS.
+		// AppKit line still lands in the user's terminal. The child's stderr is
+		// discarded by spawnCapture, and `pbcopy` ships with every macOS.
 		//
 		// Two `pbcopy(1)` behaviours are worked around. It types input by sniffing
 		// the leading bytes: text opening with a PDF or EPS header lands on the
