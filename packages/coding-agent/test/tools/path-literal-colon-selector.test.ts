@@ -318,6 +318,21 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(output).not.toContain("offer excluded");
 		});
 
+		it("preserves ranged glob-named files before delimiter expansion", async () => {
+			const literal = path.join(tmpDir, "a;b[1].md");
+			await Bun.write(literal, "needle included\nignored\nneedle excluded\n");
+
+			const tool = new GrepTool(createSession());
+			const result = await tool.execute("grep-ranged-delimiter-literal", {
+				pattern: "needle",
+				path: `${literal}:1-2`,
+			});
+			const output = getText(result);
+
+			expect(output).toContain("needle included");
+			expect(output).not.toContain("needle excluded");
+		});
+
 		it("preserves `:N-M` line-range filtering when the literal file does not exist", async () => {
 			const absolute = path.join(tmpDir, "notes.txt");
 			await Bun.write(absolute, "one\ntwo\nthree\nfour\n");
