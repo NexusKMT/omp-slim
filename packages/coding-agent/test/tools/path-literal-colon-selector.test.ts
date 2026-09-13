@@ -303,6 +303,21 @@ describe("literal colon filename resolution (issue #4618)", () => {
 			expect(output).toContain("literal archive needle");
 		});
 
+		it("applies line ranges to an existing file whose name contains glob characters", async () => {
+			const literal = path.join(tmpDir, "{proposal} {acme} offer.md");
+			await Bun.write(literal, "offer included\nignored\noffer excluded\n");
+
+			const tool = new GrepTool(createSession());
+			const result = await tool.execute("grep-ranged-brace-literal", {
+				pattern: "offer",
+				path: `${literal}:1-2`,
+			});
+			const output = getText(result);
+
+			expect(output).toContain("offer included");
+			expect(output).not.toContain("offer excluded");
+		});
+
 		it("preserves `:N-M` line-range filtering when the literal file does not exist", async () => {
 			const absolute = path.join(tmpDir, "notes.txt");
 			await Bun.write(absolute, "one\ntwo\nthree\nfour\n");
