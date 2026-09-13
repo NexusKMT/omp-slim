@@ -74,6 +74,40 @@ describe("copyToClipboard local backend order", () => {
 		expect(nativeCopy).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		["pbcopy", "newer", 0],
+		["native header", String.raw`{\rtf1 latest}`, 0],
+		["pbcopy after native fallback", "newer", 1],
+	] as const)("keeps the latest %s copy after a slower earlier write", async (_backend, latest, firstExitCode) => {
+		setPlatform("darwin");
+		let clipboard = "";
+		vi.spyOn(natives, "copyToClipboard").mockImplementation(text => {
+			clipboard = text;
+		});
+		const firstFinished = Promise.withResolvers<void>();
+		const calls: SpawnCall[] = [];
+		captureSpawns(calls, () => {
+			const text = calls.at(-1)!.stdin;
+			const exitCode = text === "older" ? firstExitCode : 0;
+			const ready = text === "older" ? firstFinished.promise : Promise.resolve();
+			return {
+				...fakeProcess(exitCode),
+				exited: ready.then(() => {
+					if (exitCode === 0) clipboard = text;
+					return exitCode;
+				}),
+			};
+		});
+
+		const writes = [copyToClipboard("older"), copyToClipboard(latest)];
+		// Let an unqueued second write finish before releasing the older child.
+		await Bun.sleep(0);
+		firstFinished.resolve();
+		await Promise.all(writes);
+
+		expect(clipboard).toBe(latest);
+	});
+
 	it("hands pbcopy a UTF-8 locale so non-ASCII text survives LANG=C", async () => {
 		setPlatform("darwin");
 		vi.spyOn(natives, "copyToClipboard").mockImplementation(() => {});

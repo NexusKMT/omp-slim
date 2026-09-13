@@ -98,6 +98,8 @@ export async function readMacFileUrlsFromClipboard(): Promise<string[]> {
 	}
 }
 
+let macClipboardWrite = Promise.resolve();
+
 /**
  * Copy text to the system clipboard.
  *
@@ -134,6 +136,16 @@ export async function copyToClipboard(text: string): Promise<void> {
 				// Ignore all write failures (OSC 52 is best-effort).
 			}
 		}
+	}
+
+	// Keep pbcopy, document-header writes, and native fallbacks in invocation order.
+	let releaseWrite: (() => void) | undefined;
+	if (process.platform === "darwin") {
+		const previousWrite = macClipboardWrite;
+		const { promise, resolve } = Promise.withResolvers<void>();
+		macClipboardWrite = promise;
+		releaseWrite = resolve;
+		await previousWrite;
 	}
 
 	// Also try native tools (best effort for local sessions)
@@ -178,6 +190,8 @@ export async function copyToClipboard(text: string): Promise<void> {
 		await nativeCopyToClipboard(text);
 	} catch {
 		// Ignore — clipboard copy is best-effort
+	} finally {
+		releaseWrite?.();
 	}
 }
 
