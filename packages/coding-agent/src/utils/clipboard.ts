@@ -66,13 +66,13 @@ function hasDisplay(): boolean {
 
 /**
  * True when `pbcopy(1)` would type this text as a document instead of as text:
- * it sniffs the leading bytes and puts input opening with a PDF (`%PDF-`) or
- * EPS (`%!PS`) header on the pasteboard as that data type. A code block or diff
- * whose first line is such a header must not go through it, or a plain-text
- * paste target receives document data — or nothing.
+ * it sniffs the leading bytes and puts input opening with a PDF (`%PDF-`),
+ * EPS (`%!PS`), or RTF (`{\rtf`) header on the pasteboard as that data type.
+ * A code block or diff whose first line is such a header must not go through it,
+ * or a plain-text paste target receives document data — or nothing.
  */
 function isPasteboardTypedByHeader(text: string): boolean {
-	return text.startsWith("%PDF-") || text.startsWith("%!PS");
+	return text.startsWith("%PDF-") || text.startsWith("%!PS") || text.startsWith("{\\rtf");
 }
 
 /**
@@ -157,7 +157,7 @@ export async function copyToClipboard(text: string): Promise<void> {
 		// discarded by spawnCapture, and `pbcopy` ships with every macOS.
 		//
 		// Two `pbcopy(1)` behaviours are worked around. It types input by sniffing
-		// the leading bytes: text opening with a PDF or EPS header lands on the
+		// the leading bytes: text opening with a PDF, EPS, or RTF header lands on the
 		// pasteboard as that document type instead of as text, so such text keeps
 		// the in-process write. And it decodes stdin per `LANG`, defaulting to
 		// ASCII when unset, which mangles non-ASCII input under `LANG=C` or a bare

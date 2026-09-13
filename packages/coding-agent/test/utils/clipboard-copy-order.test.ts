@@ -99,6 +99,19 @@ describe("copyToClipboard local backend order", () => {
 		expect(nativeCopy).toHaveBeenCalledWith("%PDF-1.7\nnot really a pdf");
 	});
 
+	it("preserves literal RTF source instead of letting pbcopy interpret it as rich text", async () => {
+		setPlatform("darwin");
+		const nativeCopy = vi.spyOn(natives, "copyToClipboard").mockImplementation(() => {});
+		const calls: SpawnCall[] = [];
+		captureSpawns(calls, () => fakeProcess(0));
+		const text = String.raw`{\rtf1\ansi Literal \b bold\b0 text}`;
+
+		await copyToClipboard(text);
+
+		expect(calls.map(call => call.cmd[0])).toEqual([]);
+		expect(nativeCopy).toHaveBeenCalledWith(text);
+	});
+
 	it("still reaches the native write when pbcopy is unavailable", async () => {
 		setPlatform("darwin");
 		const nativeCopy = vi.spyOn(natives, "copyToClipboard").mockImplementation(() => {});
