@@ -271,4 +271,62 @@ describe("SessionManager + indexed backend durability", () => {
 		expect(manager.captureState().expectedDiskSize).toBe(Buffer.byteLength(body, "utf8"));
 		await manager.close();
 	});
+	it("rolls back a chained indexed append failure instead of stranding later rewrites", async () => {
+		const backend = new FakeBackend();
+		const storage = new IndexedSessionStorage(backend);
+		await storage.initialize();
+		const manager = SessionManager.create("/cwd", "/sessions/proj", storage);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected a session file");
+
+		manager.appendMessage(assistantMessage("base turn"));
+		await manager.flush();
+		await storage.drain();
+
+		// Two hot appends queue before the first backend publish fails: the
+		// second must not land on the backend without the first, and the
+		// optimistic index must fall back to the last durable entry so the
+		// next recovery rewrite carries a reachable CAS token (rJDg).
+		backend.failAppends = 1;
+		manager.appendMessage({ role: "user", content: "first queued turn", timestamp: Date.now() });
+		manager.appendMessage({ role: "user", content: "second queued turn", timestamp: Date.now() });
+		await manager.flush().catch(() => {});
+		await storage.drain().catch(() => {});
+
+		manager.appendMessage({ role: "user", content: "healer turn", timestamp: Date.now() });
+		await manager.flush().catch(() => {});
+		await storage.drain().catch(() => {});
+
+		const body = backend.files.get(sessionFile) ?? "";
+		expect(body).toContain("base turn");
+		expect(body).toContain("first queued turn");
+		expect(body).toContain("second queued turn");
+		expect(body).toContain("healer turn");
+		expect(manager.captureState().expectedDiskSize).toBe(Buffer.byteLength(body, "utf8"));
+		await manager.close();
+	});
+
+	it("does not mark a superseded deferred rewrite current on confirm", async () => {
+		const backend = new FakeBackend();
+		const storage = new IndexedSessionStorage(backend);
+		await storage.initialize();
+		const manager = SessionManager.create("/cwd", "/sessions/proj", storage);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected a session file");
+
+		// The first cold rewrite queues its publish; a second turn races it
+		// synchronously and fail-fasts against the unconfirmed optimistic
+		// index. When the first publish confirms, the manager must not
+		// declare current a body that predates the racing turn: close must
+		// still persist the whole transcript (rvEW).
+		manager.appendMessage(assistantMessage("first turn"));
+		manager.appendMessage({ role: "user", content: "second turn", timestamp: Date.now() });
+		await manager.flush().catch(() => {});
+		await storage.drain().catch(() => {});
+		await manager.close();
+
+		const body = backend.files.get(sessionFile) ?? "";
+		expect(body).toContain("first turn");
+		expect(body).toContain("second turn");
+	});
 });

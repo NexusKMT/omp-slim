@@ -360,6 +360,52 @@ describe("FileSessionStorage.writeTextSync", () => {
 			fs.unlinkSync(lockPath);
 		}
 	});
+
+	it("steals a contentless publish lock orphaned by a crash instead of bricking the file", () => {
+		const storage = new FileSessionStorage();
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		storage.writeTextSync(sessionPath, "original\n");
+		const lockPath = path.join(tempDir, ".session.jsonl.lock");
+		// A kill between lock create and holder record leaves a contentless
+		// file no live process owns. Once older than the acquisition budget
+		// it must be stealable, or every later publish fails until manual
+		// removal (hV-oE).
+		fs.writeFileSync(lockPath, "");
+		const aged = new Date(Date.now() - 60_000);
+		fs.utimesSync(lockPath, aged, aged);
+		storage.writeTextSync(sessionPath, "replacement\n");
+		expect(fs.readFileSync(sessionPath, "utf8")).toBe("replacement\n");
+	});
+
+	it("waits out the budget before stealing a sub-budget contentless lock", () => {
+		const storage = new FileSessionStorage();
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		storage.writeTextSync(sessionPath, "original\n");
+		const lockPath = path.join(tempDir, ".session.jsonl.lock");
+		// A live acquirer may still be between create and record, so a
+		// contentless file younger than the acquisition budget must not be
+		// stolen on sight: backdate to 400ms (100ms shy of the 500ms budget)
+		// and require the acquisition to wait for it to age out instead of
+		// succeeding instantly (hV-oE).
+		fs.writeFileSync(lockPath, "");
+		const backdated = new Date(Date.now() - 400);
+		fs.utimesSync(lockPath, backdated, backdated);
+		const start = Date.now();
+		storage.writeTextSync(sessionPath, "replacement\n");
+		expect(Date.now() - start).toBeGreaterThanOrEqual(50);
+		expect(fs.readFileSync(sessionPath, "utf8")).toBe("replacement\n");
+	});
+
+	it("steals a dead holder publish lock", () => {
+		const storage = new FileSessionStorage();
+		const sessionPath = path.join(tempDir, "session.jsonl");
+		storage.writeTextSync(sessionPath, "original\n");
+		const lockPath = path.join(tempDir, ".session.jsonl.lock");
+		// 2^30 is above any real PID maximum: recovery must reclaim the lock.
+		fs.writeFileSync(lockPath, `${2 ** 30}:${Date.now()}\n`);
+		storage.writeTextSync(sessionPath, "replacement\n");
+		expect(fs.readFileSync(sessionPath, "utf8")).toBe("replacement\n");
+	});
 });
 
 describe("FileSessionStorage.updateSessionTitle", () => {

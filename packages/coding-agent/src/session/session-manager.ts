@@ -502,6 +502,13 @@ export class SessionManager {
 	#rewriteRequired = false;
 	/** Byte length this manager last loaded or durably wrote; `null` means the path was absent. */
 	#expectedDiskSize: number | null = null;
+	/**
+	 * Generation of the latest deferred publish queued on a `defersSyncPublish`
+	 * backend. A deferred-rewrite confirmation older than the latest queued
+	 * publish is stale (the backend no longer holds its body) and must record
+	 * nothing (rvEW).
+	 */
+	#deferredPublishGen = 0;
 	/** Lazy gate crossed (ensureOnDisk / loaded file): every entry must persist from now on. */
 	#forceFileCreation = false;
 	/**
@@ -938,8 +945,24 @@ export class SessionManager {
 				// landing a bare append on a body the backend may still reject.
 				// The success handler below is the single place the replacement
 				// becomes durable state.
+				const generation = ++this.#deferredPublishGen;
 				this.#confirmDeferredPublish(targetPath, () => {
+					// A newer deferred publish owns the durability record now;
+					// this body is no longer on the backend, so record nothing.
+					if (generation !== this.#deferredPublishGen) return;
 					this.#recordFullRewrite(body);
+					if (this.#fileBody() !== body) {
+						// Entries raced the unconfirmed publish: the confirmed
+						// body predates them. Stay non-current and re-issue the
+						// full transcript instead of declaring it durable
+						// (rvEW); the re-issued publish carries the
+						// just-confirmed size token, so its queue-time check
+						// passes.
+						this.#fileIsCurrent = false;
+						this.#rewriteRequired = true;
+						this.#rewriteSynchronously();
+						return;
+					}
 					if (!this.#sessionFileRelocating || targetPath === this.#sessionFile) {
 						this.#fileIsCurrent = true;
 						this.#materializeBreadcrumb();

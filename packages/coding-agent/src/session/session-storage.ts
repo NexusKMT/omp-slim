@@ -430,8 +430,9 @@ export class FileSessionStorage implements SessionStorage {
 			if (!hasFsCode(err, "EEXIST")) throw toError(err);
 			return false;
 		}
+		const record = `${process.pid}:${Date.now()}\n`;
 		try {
-			fs.writeFileSync(fd, `${process.pid}:${Date.now()}\n`);
+			fs.writeFileSync(fd, record);
 		} catch (err) {
 			try {
 				fs.closeSync(fd);
@@ -450,6 +451,16 @@ export class FileSessionStorage implements SessionStorage {
 		} catch {
 			// Ignore close errors; the lock content is already written.
 		}
+		// Verify the record survived: a concurrent stale-lock steal may have
+		// removed our file between create and write (a POSIX fd write succeeds
+		// on the unlinked inode), in which case we hold nothing. Retry instead
+		// of entering the region unexclusively (hV-oE).
+		try {
+			if (fs.readFileSync(lockPath, "utf8") !== record) return false;
+		} catch {
+			// Removed under us: hold nothing, retry.
+			return false;
+		}
 		return true;
 	}
 
@@ -466,13 +477,45 @@ export class FileSessionStorage implements SessionStorage {
 			return !!isEnoent(err);
 		}
 		const pid = publishLockPid(content);
-		if (pid === undefined || isPidAlive(pid)) return false;
+		if (pid !== undefined) {
+			if (isPidAlive(pid)) return false;
+		} else if (!this.#isOrphanedPublishLock(lockPath)) {
+			// Contentless or malformed with a fresh mtime: a live acquirer may
+			// still be between create and record. Only a file older than any
+			// live acquisition can be a crash orphan (hV-oE).
+			return false;
+		}
+		// Re-read immediately before removal: a concurrent recovery may have
+		// replaced the dead holder's file with a live lock since the first
+		// read. Remove only what was verified (rJDh).
+		try {
+			if (fs.readFileSync(lockPath, "utf8") !== content) return false;
+		} catch (err) {
+			return !!isEnoent(err);
+		}
 		try {
 			fs.unlinkSync(lockPath);
 			return true;
 		} catch (err) {
 			return !!isEnoent(err);
 		}
+	}
+
+	/**
+	 * Whether a contentless or malformed lock file is old enough that no live
+	 * acquirer could own it: holders write their record microseconds after
+	 * create and release after a check-and-rename critical section, so
+	 * anything older than the full acquisition wait budget is a crash orphan.
+	 */
+	#isOrphanedPublishLock(lockPath: string): boolean {
+		let mtimeMs: number;
+		try {
+			mtimeMs = fs.statSync(lockPath).mtimeMs;
+		} catch {
+			// Vanished mid-check; the steal path re-verifies before removal.
+			return true;
+		}
+		return Date.now() - mtimeMs > SESSION_PUBLISH_LOCK_WAIT_MS;
 	}
 
 	ensureDirSync(dir: string): void {
