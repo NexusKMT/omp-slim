@@ -527,9 +527,16 @@ export class IndexedSessionStorage implements SessionStorage {
 	 * Settle a failed optimistic frame. The frame drops; when newer frames
 	 * are still live their publishes will converge the backend past this
 	 * failure, so the next frame rebases onto this frame's previous instead
-	 * of restoring it. When no newer frame lives, nothing will supersede:
-	 * restore this frame's previous (the last durable entry). Rebased chains
-	 * stay exact: the oldest live frame's previous is always durable state.
+	 * of restoring it. When no newer frame lives, restore this frame's
+	 * previous unless a newer mutation committed meanwhile: a failure that
+	 * settles outside the queue (the atomic write's gated readback) can
+	 * land after a newer write committed and dropped its frame, and
+	 * restoring then would clobber newer durable state (F1). Index mtimes
+	 * are unique per mutation, so a live entry carrying a different mtime
+	 * proves a newer commit won; an absent entry (unlink/rename-src
+	 * bookkeeping) or our own optimistic entry still restores. Rebased
+	 * chains stay exact: the oldest live frame's previous is always
+	 * durable state.
 	 */
 	#failFrame(path: string, mtimeMs: number): void {
 		const frames = this.#pendingFrames.get(path);
@@ -539,8 +546,10 @@ export class IndexedSessionStorage implements SessionStorage {
 		const [failed] = frames.splice(index, 1);
 		if (failed === undefined) return;
 		const next = frames[index];
-		if (next === undefined) this.#restoreIndex(path, failed.previous);
-		else next.previous = failed.previous;
+		if (next === undefined) {
+			const current = this.#index.get(path);
+			if (current === undefined || current.mtimeMs === mtimeMs) this.#restoreIndex(path, failed.previous);
+		} else next.previous = failed.previous;
 		if (frames.length === 0) this.#pendingFrames.delete(path);
 	}
 
