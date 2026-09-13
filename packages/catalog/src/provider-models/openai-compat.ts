@@ -4292,10 +4292,17 @@ export interface BasetenModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
-// A previous version of OMP shipped this model without reasoning levels. We've
-// since fixed that. This const lets us bust the cache so that users on that
-// version of OMP pick up the reasoning levels immediately.
-const BASETEN_CACHE_MIGRATION_MODEL_IDS = ["zai-org/GLM-5.3", "zai-org/GLM-5.3-Flash"] as const;
+// A previous version of OMP shipped these models without reasoning levels.
+// We've since fixed that (V4-generation whitelist). This const lets us bust
+// the cache so that users on that version of OMP pick up the reasoning levels
+// immediately.
+const BASETEN_CACHE_MIGRATION_MODEL_IDS = [
+	"zai-org/GLM-5.3",
+	"zai-org/GLM-5.3-Flash",
+	"deepseek-ai/DeepSeek-V4-Flash-0731",
+	"deepseek-ai/DeepSeek-V4.1-Flash",
+	"deepseek-ai/DeepSeek-V4-Pro-0813",
+] as const;
 
 export function basetenModelManagerOptions(
 	config?: BasetenModelManagerConfig,
@@ -4326,7 +4333,7 @@ export function basetenModelManagerOptions(
 				(identity.class === "kimi" && identity.family === "k3") ||
 				isGlmReasoningIdentity("baseten", defaults.id, "5.2") ||
 				defaults.id === "openai/gpt-oss-120b" ||
-				defaults.id === "deepseek-ai/DeepSeek-V4-Pro";
+				isDeepseekV4Generation("baseten", defaults.id);
 			const reasoning =
 				isSupportedBasetenReasoningModel &&
 				(features.includes("reasoning") || features.includes("reasoning_effort"));
