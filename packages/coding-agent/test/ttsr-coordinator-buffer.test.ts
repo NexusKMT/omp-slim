@@ -56,7 +56,14 @@ function update(message: AgentMessage, assistantMessageEvent: AssistantMessageEv
 	} as unknown as AgentEvent;
 }
 
-function start(message: AgentMessage): AgentEvent {
+/**
+ * The agent loop turns the first provider `start` of a response into an
+ * `AgentEvent` of type `message_start`, which the session routes to
+ * `onAssistantMessageStart`; only a later `start` inside the same response
+ * reaches `checkMessageUpdate`. Tests call `onAssistantMessageStart` where the
+ * session would, so the reset is exercised on the event that actually occurs.
+ */
+function restart(message: AgentMessage): AgentEvent {
 	return update(message, {
 		type: "start",
 		partial: message as AssistantMessage,
@@ -101,9 +108,9 @@ describe("TTSR stream buffers", () => {
 		const second = assistantMessage();
 
 		coordinator.onTurnStart();
-		await coordinator.checkMessageUpdate(start(first));
+		coordinator.onAssistantMessageStart();
 		await coordinator.checkMessageUpdate(textDelta(first, CONDITION));
-		await coordinator.checkMessageUpdate(start(second));
+		coordinator.onAssistantMessageStart();
 		await coordinator.checkMessageUpdate(textDelta(second, "safe"));
 
 		expect(emitSessionEvent).toHaveBeenCalledTimes(1);
@@ -115,10 +122,23 @@ describe("TTSR stream buffers", () => {
 		const second = assistantMessage([{ type: "toolCall", id: "", name: "bash", arguments: {} }]);
 
 		coordinator.onTurnStart();
-		await coordinator.checkMessageUpdate(start(first));
+		coordinator.onAssistantMessageStart();
 		await coordinator.checkMessageUpdate(toolDelta(first, CONDITION));
-		await coordinator.checkMessageUpdate(start(second));
+		coordinator.onAssistantMessageStart();
 		await coordinator.checkMessageUpdate(toolDelta(second, "safe"));
+
+		expect(emitSessionEvent).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not carry text from a discarded response into its restart", async () => {
+		const { coordinator, emitSessionEvent } = coordinatorFor("text");
+		const message = assistantMessage();
+
+		coordinator.onTurnStart();
+		coordinator.onAssistantMessageStart();
+		await coordinator.checkMessageUpdate(textDelta(message, CONDITION));
+		await coordinator.checkMessageUpdate(restart(message));
+		await coordinator.checkMessageUpdate(textDelta(message, "safe"));
 
 		expect(emitSessionEvent).toHaveBeenCalledTimes(1);
 	});
@@ -128,7 +148,7 @@ describe("TTSR stream buffers", () => {
 		const message = assistantMessage();
 
 		coordinator.onTurnStart();
-		await coordinator.checkMessageUpdate(start(message));
+		coordinator.onAssistantMessageStart();
 		await coordinator.checkMessageUpdate(textDelta(message, "FOR"));
 		await coordinator.checkMessageUpdate(textDelta(message, "BIDDEN"));
 
