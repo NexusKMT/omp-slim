@@ -176,14 +176,27 @@ pub(super) fn restore(context: &Context, snapshot: &Snapshot) -> Result<()> {
 	// must recognize both encodings as owned — otherwise the project's own value
 	// looks externally changed, the journal is retained, and every later start
 	// retries the same failed recovery.
-	let legacy_command = legacy_relay_command(&context.helper_path, &context.callback_path)?;
-	// The only way the normalized form fails while the legacy form succeeds is
-	// the shell refusal of volume/device paths; fall back so those dead
-	// registrations still clean up instead of wedging recovery.
-	let command = relay_command(&context.helper_path, &context.callback_path)
-		.unwrap_or_else(|_| legacy_command.clone());
+	let (command, legacy_command) =
+		if let Ok(normalized) = relay_command(&context.helper_path, &context.callback_path) {
+			// The legacy encoding is 8 units longer on verbatim disk paths; if the
+			// normalized command fits but the legacy one exceeds the command limit,
+			// no older binary could have installed it, so treat it as no match
+			// rather than failing recovery.
+			let legacy = legacy_relay_command(&context.helper_path, &context.callback_path)
+				.ok()
+				.filter(|legacy| *legacy != normalized);
+			(normalized, legacy)
+		} else {
+			// The only way the normalized form fails while the legacy form succeeds is
+			// the shell refusal of volume/device paths; fall back so those dead
+			// registrations still clean up instead of wedging recovery.
+			let legacy = legacy_relay_command(&context.helper_path, &context.callback_path)?;
+			(legacy.clone(), Some(legacy))
+		};
 	let owned = owned_values(context, &command);
-	let legacy_owned = owned_values(context, &legacy_command);
+	let legacy_owned = legacy_command
+		.as_ref()
+		.map(|legacy| owned_values(context, legacy));
 	let marker_before = &snapshot.values[3].value;
 	let marker_owned = &owned[3];
 	let marker_current = read_value(&layout.root, MARKER_NAME)?;
@@ -195,8 +208,10 @@ pub(super) fn restore(context: &Context, snapshot: &Snapshot) -> Result<()> {
 		)]
 		for index in 0..3 {
 			let current = read_value(&snapshot.values[index].path, &snapshot.values[index].name)?;
-			let ours =
-				current == Some(owned[index].clone()) || current == Some(legacy_owned[index].clone());
+			let ours = current == Some(owned[index].clone())
+				|| legacy_owned
+					.as_ref()
+					.is_some_and(|legacy| current == Some(legacy[index].clone()));
 			if ours && current != snapshot.values[index].value {
 				bail!(
 					"Windows OAuth callback ownership marker is absent while HKCU\\{} still has this \
@@ -226,7 +241,11 @@ pub(super) fn restore(context: &Context, snapshot: &Snapshot) -> Result<()> {
 		context.check()?;
 		let entry = &snapshot.values[index];
 		let current = read_value(&entry.path, &entry.name)?;
-		if current == Some(owned[index].clone()) || current == Some(legacy_owned[index].clone()) {
+		if current == Some(owned[index].clone())
+			|| legacy_owned
+				.as_ref()
+				.is_some_and(|legacy| current == Some(legacy[index].clone()))
+		{
 			restore_value(entry)?;
 		} else if current != entry.value {
 			conflicts.push(format!("HKCU\\{} value {:?}", entry.path, entry.name));
@@ -872,6 +891,39 @@ mod tests {
 		}
 		// The new binary must recognize the legacy command as owned and roll the
 		// transaction back instead of retaining the journal as conflicted.
+		restore(&verbatim, &snapshot).unwrap();
+		for entry in &snapshot.values {
+			assert_eq!(read_value(&entry.path, &entry.name).unwrap(), entry.value);
+		}
+	}
+
+	#[test]
+	fn recovery_falls_back_to_legacy_commands_for_volume_paths_the_shell_refuses() {
+		let (_guard, context) = DisposableScheme::new();
+		// Volume/device paths predate the shell fix too, but the normalized form
+		// refuses them while the legacy encoding still succeeds. Recovery must
+		// fall back to the legacy command instead of retaining the journal.
+		let verbatim = Context::new(
+			context.home,
+			PathBuf::from(r"\\?\Volume{d0e5f6a7-0000-0000-0000-000000000000}\omp-oauth-test"),
+			context.scheme,
+			context.id,
+			BTreeMap::new(),
+			CancelToken::default(),
+		);
+		assert!(
+			relay_command(&verbatim.helper_path, &verbatim.callback_path).is_err(),
+			"test requires a path the shell refuses"
+		);
+		let legacy = legacy_relay_command(&verbatim.helper_path, &verbatim.callback_path).unwrap();
+		let snapshot = prepare(&verbatim).unwrap();
+		for (entry, desired) in snapshot
+			.values
+			.iter()
+			.zip(owned_values(&verbatim, &legacy).iter())
+		{
+			write_value(&entry.path, &entry.name, desired).unwrap();
+		}
 		restore(&verbatim, &snapshot).unwrap();
 		for entry in &snapshot.values {
 			assert_eq!(read_value(&entry.path, &entry.name).unwrap(), entry.value);
