@@ -992,7 +992,7 @@ export class ModelHubComponent implements Component {
 			committedLevel ??
 			(this.#settings.get("modelRoleStorage") === "project" && scope !== undefined
 				? this.#thinkingLevelForScope(role, scope)
-				: (this.#roles[role]?.thinkingLevel ?? ThinkingLevel.Inherit);
+				: (this.#roles[role]?.thinkingLevel ?? ThinkingLevel.Inherit));
 		const chips = this.#thinkingChips(options);
 		const preselect = options.indexOf(current);
 		this.#strip = {
