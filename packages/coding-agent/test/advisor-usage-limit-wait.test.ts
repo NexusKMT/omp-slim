@@ -66,8 +66,9 @@ describe("planAdvisorUsageLimitWait", () => {
 	});
 
 	it("declines (latch) when the block outlasts retry.maxDelayMs", () => {
-		// Genuine 30-minute quota exhaustion exceeds the 5-minute cap.
+		// A provider-stated 30-minute wait exceeds the 5-minute cap.
 		const waitMs = planAdvisorUsageLimitWait({
+			retryAfterMs: 30 * 60 * 1000,
 			blockedUntilMs: NOW + 30 * 60 * 1000,
 			retry: RETRY,
 			attempt: 0,
@@ -108,15 +109,43 @@ describe("planAdvisorUsageLimitWait", () => {
 	});
 
 	it("retries as soon as a sibling frees, before the current credential unblocks", () => {
-		// Sibling unblocks in 10s (+1s buffer); current credential not for 40s.
+		// Sibling unblocks in 10s (+1s buffer); current provider-timed credential
+		// not for 40s — the earliest wins.
 		const waitMs = planAdvisorUsageLimitWait({
 			retryAtMs: NOW + 10_000,
+			retryAfterMs: 40_000,
 			blockedUntilMs: NOW + 40_000,
 			retry: RETRY,
 			attempt: 0,
 			nowMs: NOW,
 		});
 		expect(waitMs).toBe(11_000);
+	});
+
+	it("declines (latch) immediately on a hintless heuristic block with no sibling", () => {
+		// A permanent 402 balance/spend cap: no retry hint, no complete report,
+		// only AuthStorage's 60s default. Waiting on it would retry the dead
+		// credential every minute until the budget drains, so decline now.
+		const waitMs = planAdvisorUsageLimitWait({
+			blockedUntilMs: NOW + 60_000,
+			retry: RETRY,
+			attempt: 0,
+			nowMs: NOW,
+		});
+		expect(waitMs).toBeUndefined();
+	});
+
+	it("waits for a sibling even when the current block is a bare heuristic", () => {
+		// The current credential's 60s block is only the heuristic default, but a
+		// sibling frees in 5s (+1s buffer) — retry then rather than latch.
+		const waitMs = planAdvisorUsageLimitWait({
+			blockedUntilMs: NOW + 60_000,
+			retryAtMs: NOW + 5_000,
+			retry: RETRY,
+			attempt: 0,
+			nowMs: NOW,
+		});
+		expect(waitMs).toBe(6_000);
 	});
 
 	it("declines (latch) when the error carries no authoritative timing", () => {

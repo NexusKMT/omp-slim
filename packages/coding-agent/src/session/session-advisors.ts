@@ -161,8 +161,11 @@ export function planAdvisorUsageLimitWait(args: {
 	// blocked sibling does — the next attempt's getApiKey re-ranks and picks up
 	// whichever is available first.
 	const candidates: number[] = [];
-	let credentialUnblockAtMs = blockedUntilMs;
-	if (reportResetAtMs !== undefined && retryAfterMs === undefined) {
+	let credentialUnblockAtMs: number | undefined;
+	if (retryAfterMs !== undefined) {
+		// Provider-stated retry hint, merged with any longer persisted/shared block.
+		credentialUnblockAtMs = blockedUntilMs ?? nowMs + retryAfterMs;
+	} else if (reportResetAtMs !== undefined) {
 		// A complete usage report is authoritative for a hintless failure and
 		// replaces this call's heuristic block in either direction. Preserve a
 		// prior provider-timed block, which remains independently authoritative.
@@ -186,9 +189,13 @@ export function planAdvisorUsageLimitWait(args: {
 			credentialUnblockAtMs = blockedUntilMs;
 		}
 	}
+	// Hintless with no complete report → blockedUntilMs is only the default
+	// heuristic (e.g. a permanent 402 balance/spend cap). Never wait on it: a
+	// sibling unblock (retryAtMs) may still authorize a wait, otherwise the
+	// empty-candidate decline below latches immediately instead of retrying the
+	// dead credential every minute until the budget drains.
 	if (credentialUnblockAtMs !== undefined) candidates.push(Math.max(0, credentialUnblockAtMs - nowMs));
 	if (retryAtMs !== undefined) candidates.push(Math.max(0, retryAtMs - nowMs) + ADVISOR_SIBLING_UNBLOCK_BUFFER_MS);
-	if (candidates.length === 0 && retryAfterMs !== undefined) candidates.push(Math.max(0, retryAfterMs));
 	if (candidates.length === 0) return undefined;
 	const waitMs = Math.min(...candidates);
 	if (retry.maxDelayMs > 0 && waitMs > retry.maxDelayMs) return undefined;
