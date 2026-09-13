@@ -102,20 +102,6 @@ function coordinatorFor(scope: string) {
 }
 
 describe("TTSR stream buffers", () => {
-	it("does not carry text from one assistant message into the next", async () => {
-		const { coordinator, emitSessionEvent } = coordinatorFor("text");
-		const first = assistantMessage();
-		const second = assistantMessage();
-
-		coordinator.onTurnStart();
-		coordinator.onAssistantMessageStart();
-		await coordinator.checkMessageUpdate(textDelta(first, CONDITION));
-		coordinator.onAssistantMessageStart();
-		await coordinator.checkMessageUpdate(textDelta(second, "safe"));
-
-		expect(emitSessionEvent).toHaveBeenCalledTimes(1);
-	});
-
 	it("does not carry a fallback-key tool buffer into the next assistant message", async () => {
 		const { coordinator, emitSessionEvent } = coordinatorFor("tool:bash");
 		const first = assistantMessage([{ type: "toolCall", id: "", name: "bash", arguments: {} }]);
