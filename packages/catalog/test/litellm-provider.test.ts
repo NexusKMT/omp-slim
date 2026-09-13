@@ -7,6 +7,7 @@ import {
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { Api, FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import * as logger from "@oh-my-pi/pi-utils/logger";
+import { sendsImageInputOnWire } from "@oh-my-pi/pi-ai/providers/vision-guard";
 
 const ORIGINAL_LITELLM_BASE_URL = Bun.env.LITELLM_BASE_URL;
 const MODELS_DEV_URL = "https://catalog.stencil.so/models.json.zstd";
@@ -131,7 +132,7 @@ describe("LiteLLM provider discovery", () => {
 		const models = await options.fetchDynamicModels?.();
 
 		expect(options.cacheProviderId).toBe(
-			`litellm:rich-v8:${Bun.hash("http://litellm.example:4100/v1").toString(36)}`,
+			`litellm:rich-v9:${Bun.hash("http://litellm.example:4100/v1").toString(36)}`,
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(6);
 		expect(models).toHaveLength(1);
@@ -155,7 +156,7 @@ describe("LiteLLM provider discovery", () => {
 		const models = await options.fetchDynamicModels?.();
 
 		expect(options.cacheProviderId).toBe(
-			`litellm:rich-v8:${Bun.hash("http://litellm-config.example:4200/v1/").toString(36)}`,
+			`litellm:rich-v9:${Bun.hash("http://litellm-config.example:4200/v1/").toString(36)}`,
 		);
 		expect(fetchMock).toHaveBeenCalledTimes(6);
 		expect(models).toHaveLength(1);
@@ -1249,5 +1250,68 @@ describe("LiteLLM provider discovery", () => {
 				},
 			},
 		});
+	});
+});
+
+describe("LiteLLM declared image input", () => {
+	// The deployment is the only party that knows what its aliases resolve to
+	// and whether a group reads images, and it reports that through more than one
+	// management endpoint. `model_info.supports_vision` therefore has to survive
+	// both the compat merge and the class-wide DeepSeek text-only guard
+	// (`classes/deepseek.kdl`), which keys on the id alone and would otherwise
+	// replace the attachment with "[image omitted: model does not support
+	// vision]" for a group the endpoint reads (issue #11982).
+	const limits = { max_input_tokens: 1_048_576, max_output_tokens: 384_000, supports_reasoning: true };
+	const richFetch = (groupInfo: Record<string, unknown>, modelInfo: Record<string, unknown>): FetchImpl =>
+		vi.fn(async (input: string | URL | Request) => {
+			const url = inputUrl(input);
+			if (url === MODELS_DEV_URL) return Response.json({});
+			if (url.endsWith("/model_group/info")) {
+				return Response.json({ data: [{ model_name: "deepseek-v4.1-flash", model_info: groupInfo }] });
+			}
+			if (url.endsWith("/model/info")) {
+				return Response.json({ data: [{ model_name: "deepseek-v4.1-flash", model_info: modelInfo }] });
+			}
+			return new Response("{}", { status: 404 });
+		}) as FetchImpl;
+
+	test("keeps the deployment's image input when a later endpoint declares it", async () => {
+		// `/model_group/info` establishes the row without a vision verdict, so
+		// discovery continues to `/model/info`; a management endpoint enriches the
+		// row instead of retracting the axes the other one did not report.
+		const calls: string[] = [];
+		const inner = richFetch(limits, { ...limits, supports_vision: true });
+		const options = litellmModelManagerOptions({
+			apiKey: "sk-rich",
+			baseUrl: "http://primary:4000/v1",
+			fetch: vi.fn(async (input: string | URL | Request) => {
+				calls.push(inputUrl(input));
+				return inner(input as never, undefined as never);
+			}) as FetchImpl,
+		});
+		const specs = await options.fetchDynamicModels?.();
+		const spec = specs?.find(model => model.id === "deepseek-v4.1-flash");
+		expect(spec).toBeDefined();
+		expect(calls.some(url => url.endsWith("/model_group/info"))).toBe(true);
+		expect(calls.some(url => url.endsWith("/model/info"))).toBe(true);
+
+		expect(spec?.compat?.stripImageInput).toBe(false);
+		const model = buildModel(spec as ModelSpec<"openai-completions">);
+		expect(model.input).toContain("image");
+		expect(sendsImageInputOnWire(model)).toBe(true);
+	});
+
+	test("still strips a group the deployment declares text-only", async () => {
+		const options = litellmModelManagerOptions({
+			apiKey: "sk-rich",
+			baseUrl: "http://primary:4000/v1",
+			fetch: richFetch(limits, { ...limits, supports_vision: false }),
+		});
+		const specs = await options.fetchDynamicModels?.();
+		const spec = specs?.find(model => model.id === "deepseek-v4.1-flash");
+		expect(spec?.compat?.stripImageInput).toBeUndefined();
+
+		const model = buildModel(spec as ModelSpec<"openai-completions">);
+		expect(sendsImageInputOnWire(model)).toBe(false);
 	});
 });
