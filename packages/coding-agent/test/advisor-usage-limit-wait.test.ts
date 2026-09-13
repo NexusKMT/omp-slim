@@ -9,7 +9,7 @@ import { describe, expect, it } from "bun:test";
 import { planAdvisorUsageLimitWait } from "@oh-my-pi/pi-coding-agent/session/session-advisors";
 
 const NOW = 1_000_000;
-const RETRY = { enabled: true, maxDelayMs: 5 * 60 * 1000, maxRetries: 10 };
+const RETRY = { enabled: true, baseDelayMs: 500, maxDelayMs: 5 * 60 * 1000, maxRetries: 10 };
 
 describe("planAdvisorUsageLimitWait", () => {
 	it("waits out a transient block within retry.maxDelayMs and retries", () => {
@@ -22,6 +22,19 @@ describe("planAdvisorUsageLimitWait", () => {
 			nowMs: NOW,
 		});
 		expect(waitMs).toBe(50_000);
+	});
+
+	it("floors an expired provider wait with the configured retry backoff", () => {
+		const waitMs = planAdvisorUsageLimitWait({
+			blockedUntilMs: NOW,
+			retryAfterMs: 0,
+			retry: { ...RETRY, baseDelayMs: 1_000 },
+			attempt: 0,
+			nowMs: NOW,
+		});
+		// Shared retry backoff applies 0–25% downward jitter to the 1s base.
+		expect(waitMs).toBeGreaterThanOrEqual(750);
+		expect(waitMs).toBeLessThanOrEqual(1_000);
 	});
 
 	it("uses a complete usage-report reset instead of a longer hintless heuristic block", () => {

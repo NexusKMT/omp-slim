@@ -93,6 +93,7 @@ import { resolveCompactionMethodOrder } from "./compaction-methods";
 import type { CustomMessage, CustomMessagePayload } from "./messages";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
+	calculateRetryBackoffDelayMs,
 	formatRetryFallbackSelector,
 	getRetryFallbackRevertPolicy,
 	parseRetryFallbackSelector,
@@ -137,7 +138,7 @@ export function planAdvisorUsageLimitWait(args: {
 	requestedBlockedUntilMs?: number;
 	priorBlockedUntilMs?: number;
 	priorBlockedUntilTimed?: boolean;
-	retry: { enabled: boolean; maxDelayMs: number; maxRetries: number };
+	retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number };
 	attempt: number;
 	nowMs: number;
 }): number | undefined {
@@ -197,7 +198,9 @@ export function planAdvisorUsageLimitWait(args: {
 	if (credentialUnblockAtMs !== undefined) candidates.push(Math.max(0, credentialUnblockAtMs - nowMs));
 	if (retryAtMs !== undefined) candidates.push(Math.max(0, retryAtMs - nowMs) + ADVISOR_SIBLING_UNBLOCK_BUFFER_MS);
 	if (candidates.length === 0) return undefined;
-	const waitMs = Math.min(...candidates);
+	const providerWaitMs = Math.min(...candidates);
+	const retryBackoffMs = calculateRetryBackoffDelayMs(retry.baseDelayMs, attempt + 1);
+	const waitMs = Math.max(providerWaitMs, retryBackoffMs);
 	if (retry.maxDelayMs > 0 && waitMs > retry.maxDelayMs) return undefined;
 	return waitMs;
 }
@@ -1702,7 +1705,7 @@ export class SessionAdvisors {
 	 */
 	async #waitOutAdvisorUsageLimit(
 		advisor: ActiveAdvisor,
-		retry: { enabled: boolean; maxDelayMs: number; maxRetries: number },
+		retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number },
 		timing: {
 			retryAtMs?: number;
 			blockedUntilMs?: number;
