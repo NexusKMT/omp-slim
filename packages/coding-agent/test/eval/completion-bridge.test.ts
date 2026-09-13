@@ -315,6 +315,90 @@ describe("runEvalCompletion", () => {
 		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "b"]);
 	});
 
+	it("resolves nested fallbacks without the root tier hint", async () => {
+		const [b, c, d, e] = ["b", "c", "d", "e"].map(id => makeModel("p", id));
+		const session = makeSession({ available: [SMOL, b, c, d, e] });
+		session.settings.setModelRole("vision", "p/b");
+		session.settings.set("retry.fallbackChains", { smol: ["p/b", "p/c"], vision: ["p/d", "p/e"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "smol down" }))
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "b down" }))
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "d down" }))
+			.mockResolvedValueOnce(assistant({ text: "e answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "b", "d", "e"]);
+		expect(result.text).toBe("e answer");
+	});
+
+	it("inherits the failed candidate's effort for bare nested entries", async () => {
+		const thinking = {
+			api: "anthropic-messages",
+			reasoning: true,
+			thinking: { efforts: [Effort.Low, Effort.Medium, Effort.High], mode: "anthropic-adaptive" },
+		} as const;
+		const b = makeModel("p", "b", { ...thinking });
+		const c = makeModel("p", "c", { ...thinking });
+		const session = makeSession({ available: [REASONING_SLOW, b, c], roles: { slow: "p/slow" } });
+		session.settings.set("retry.fallbackChains", { slow: ["p/b:low"], "p/b": ["p/c"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "slow down" }))
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "b down" }))
+			.mockResolvedValueOnce(assistant({ text: "c answer" }));
+
+		await runEvalCompletionAndWait({ prompt: "q", model: "slow" }, { session });
+
+		const efforts = spy.mock.calls.map(call => (call[2] as { reasoning?: unknown }).reasoning);
+		expect(efforts).toEqual([Effort.High, Effort.Low, Effort.Low]);
+	});
+
+	it("keeps reasoning disabled for bare nested entries after an :off fallback", async () => {
+		const thinking = {
+			api: "anthropic-messages",
+			reasoning: true,
+			thinking: { efforts: [Effort.Low, Effort.Medium, Effort.High], mode: "anthropic-adaptive" },
+		} as const;
+		const b = makeModel("p", "b", { ...thinking });
+		const c = makeModel("p", "c", { ...thinking });
+		const session = makeSession({ available: [REASONING_SLOW, b, c], roles: { slow: "p/slow" } });
+		session.settings.set("retry.fallbackChains", { slow: ["p/b:off"], "p/b": ["p/c"] });
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "slow down" }))
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "b down" }))
+			.mockResolvedValueOnce(assistant({ text: "c answer" }));
+
+		await runEvalCompletionAndWait({ prompt: "q", model: "slow" }, { session });
+
+		const nested = spy.mock.calls[2]?.[2] as { reasoning?: unknown; disableReasoning?: unknown };
+		expect(nested.reasoning).toBeUndefined();
+		expect(nested.disableReasoning).toBe(true);
+	});
+
+	it("skips keyless fallbacks without spending retry budget", async () => {
+		const b = makeModel("p", "b");
+		const c = makeModel("p", "c");
+		const session = makeSession({ available: [SMOL, b, c] });
+		session.settings.set("retry.fallbackChains", { smol: ["p/b", "p/c"] });
+		session.settings.set("retry.maxRetries", 1);
+		const registry = session.modelRegistry;
+		if (!registry) throw new Error("test requires a model registry");
+		registry.getApiKey = async model => (model.id === "b" ? undefined : "test-key");
+		const spy = vi
+			.spyOn(ai, "completeSimple")
+			.mockResolvedValueOnce(assistant({ stopReason: "error", errorMessage: "smol down" }))
+			.mockResolvedValueOnce(assistant({ text: "c answer" }));
+
+		const result = await runEvalCompletionAndWait({ prompt: "q", model: "smol" }, { session });
+
+		// b never reaches completeSimple: the keyless preflight skips it.
+		expect(spy.mock.calls.map(call => (call[0] as Model<Api>).id)).toEqual(["smol", "c"]);
+		expect(result.text).toBe("c answer");
+	});
+
 	it("stops the candidate walk once retry.maxRetries is spent", async () => {
 		const models = ["b1", "b2", "b3"].map(id => makeModel("p", id));
 		const session = makeSession({ available: [SMOL, ...models] });

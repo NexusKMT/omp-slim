@@ -119,9 +119,20 @@ function reasoningForCandidate(
 	tier: CompletionTier,
 	model: Model<Api>,
 	level?: ThinkingLevel,
+	parent?: Pick<CompletionCandidate, "reasoning" | "disableReasoning">,
 ): Pick<CompletionCandidate, "reasoning" | "disableReasoning"> {
 	if (shouldDisableReasoning(level)) return { reasoning: undefined, disableReasoning: true };
-	const requested = toReasoningEffort(level) ?? reasoningForTier(tier, model);
+	const explicit = toReasoningEffort(level);
+	if (explicit !== undefined) {
+		return { reasoning: clampThinkingLevelForModel(model, explicit), disableReasoning: false };
+	}
+	// Bare nested entries inherit the failed candidate's effective effort
+	// instead of recomputing the tier default for a different model.
+	if (parent) {
+		if (parent.disableReasoning) return { reasoning: undefined, disableReasoning: true };
+		return { reasoning: clampThinkingLevelForModel(model, parent.reasoning), disableReasoning: false };
+	}
+	const requested = reasoningForTier(tier, model);
 	return {
 		reasoning: clampThinkingLevelForModel(model, requested),
 		disableReasoning: false,
@@ -157,18 +168,23 @@ interface FallbackExpansion {
  * reasoning; `expanded` bounds the walk to one visit per raw selector.
  * `allowMissingPrimary` lets the concrete primary stand in when a role
  * assignment is too unqualified to parse as a chain primary.
+ * `roleHint` is the tier, valid only for the root expansion: nested
+ * candidates resolve their own exact/wildcard/role chain so a leaf cannot
+ * jump back into the root tier chain and reorder its siblings.
  */
 function appendFallbackCandidates(
 	deps: FallbackExpansion,
 	selector: string,
 	model: Model<Api>,
+	parent: Pick<CompletionCandidate, "reasoning" | "disableReasoning"> | undefined,
+	roleHint: string | undefined,
 	seen: Set<string>,
 	expanded: Set<string>,
 	out: CompletionCandidate[],
 ): void {
 	if (expanded.has(selector)) return;
 	expanded.add(selector);
-	const chainKey = resolveRetryFallbackChainKey(deps.context, selector, model, deps.tier);
+	const chainKey = resolveRetryFallbackChainKey(deps.context, selector, model, roleHint);
 	if (!chainKey) return;
 	for (const entry of findRetryFallbackCandidates(deps.context, chainKey, selector, model, {
 		allowMissingPrimary: true,
@@ -176,12 +192,12 @@ function appendFallbackCandidates(
 		const resolved = resolveModelOverride([entry.raw], deps.modelRegistry, deps.settings);
 		const candidate = resolved.model;
 		if (!candidate || deps.disabledProviders.has(candidate.provider)) continue;
-		const reasoning = reasoningForCandidate(deps.tier, candidate, entry.thinkingLevel);
+		const reasoning = reasoningForCandidate(deps.tier, candidate, entry.thinkingLevel, parent);
 		const identity = candidateIdentity(candidate, reasoning);
 		if (seen.has(identity)) continue;
 		seen.add(identity);
 		out.push({ selector: entry.raw, model: candidate, ...reasoning });
-		appendFallbackCandidates(deps, entry.raw, candidate, seen, expanded, out);
+		appendFallbackCandidates(deps, entry.raw, candidate, reasoning, undefined, seen, expanded, out);
 	}
 }
 
@@ -218,7 +234,7 @@ function resolveTierCandidates(tier: CompletionTier, session: ToolSession): Comp
 		{
 			context: {
 				chains: getRetryFallbackChains(session.settings),
-				getModelRole: role => session.settings.getModelRole(role),
+				getModelRole: (role: string) => session.settings.getModelRole(role),
 				modelLookup: modelRegistry,
 			},
 			modelRegistry,
@@ -228,6 +244,8 @@ function resolveTierCandidates(tier: CompletionTier, session: ToolSession): Comp
 		},
 		primary.selector,
 		primary.model,
+		undefined,
+		tier,
 		new Set([candidateIdentity(primary.model, candidates[0])]),
 		new Set(),
 		candidates,
@@ -272,23 +290,29 @@ async function executeCompletion(
 		: undefined;
 	const telemetry = resolveTelemetry(session.getTelemetry?.(), session.getSessionId?.() ?? undefined);
 	const systemPrompt = system ? [system] : ["You are a helpful assistant."];
-	// Each fallback consumes one retry attempt, mirroring session recovery:
-	// the primary plus at most `retry.maxRetries` fallbacks are attempted.
+	// Each fallback that issues a model request consumes one retry attempt,
+	// mirroring session recovery. Keyless candidates are skipped without
+	// consuming budget so a usable later fallback is still attempted.
 	const maxRetries = Math.max(0, session.settings.getGroup("retry").maxRetries ?? 0);
-	const attempts = candidates.slice(0, maxRetries + 1);
 	let response: AssistantMessage | undefined;
 	let model: Model<Api> | undefined;
-	for (const [index, candidate] of attempts.entries()) {
+	let lastError: unknown;
+	let retriesUsed = 0;
+	let completed = false;
+	for (const [index, candidate] of candidates.entries()) {
+		if (index > 0 && retriesUsed >= maxRetries) break;
 		model = candidate.model;
 		try {
 			// Forward the session id so session-sticky OAuth credentials
 			// resolve (see #5325); without it a usable fallback looks keyless.
 			const apiKey = await registry.getApiKey(model, session.getSessionId?.() ?? undefined, { signal });
 			if (!apiKey) {
-				throw new ToolError(
+				lastError = new ToolError(
 					`completion() has no API key for ${formatModelString(model)}. Configure credentials for this provider or choose another tier.`,
 				);
+				continue;
 			}
+			if (index > 0) retriesUsed += 1;
 			response = await instrumentedCompleteSimple(
 				model,
 				{
@@ -306,19 +330,25 @@ async function executeCompletion(
 				{ telemetry, oneshotKind: "eval_completion" },
 			);
 		} catch (error) {
-			if (signal.aborted || index === attempts.length - 1) throw error;
+			lastError = error;
+			if (signal.aborted || index === candidates.length - 1) throw error;
 			continue;
 		}
 		if (response.stopReason === "aborted") {
 			throw new ToolError("completion() request aborted.");
 		}
 		if (response.stopReason === "error") {
-			if (!signal.aborted && index < attempts.length - 1) continue;
-			throw new ToolError(response.errorMessage ?? "completion() request failed.");
+			lastError = new ToolError(response.errorMessage ?? "completion() request failed.");
+			if (!signal.aborted && index < candidates.length - 1) continue;
+			throw lastError;
 		}
+		completed = true;
 		break;
 	}
-	if (!response || !model) throw new ToolError("completion() request failed.");
+	if (!completed || !response || !model) {
+		if (lastError instanceof Error) throw lastError;
+		throw new ToolError("completion() request failed.");
+	}
 
 	let resultText: string;
 	if (schema) {
