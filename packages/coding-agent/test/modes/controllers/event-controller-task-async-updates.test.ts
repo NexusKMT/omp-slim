@@ -23,6 +23,7 @@ import { UiHelpers } from "@oh-my-pi/pi-coding-agent/modes/utils/ui-helpers";
 import type { SessionContext } from "@oh-my-pi/pi-coding-agent/session/session-context";
 import type { TaskToolDetails } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { BashToolDetails } from "@oh-my-pi/pi-coding-agent/tools/bash";
+import type { CoordinationDetails } from "@oh-my-pi/pi-coding-agent/tools/hub";
 import { createInteractiveModeContext } from "../../helpers/interactive-mode-context";
 
 function taskResult(asyncState: "running" | "completed" | "failed" | undefined, text: string) {
@@ -230,6 +231,38 @@ describe("EventController async update finalization", () => {
 		});
 
 		expect(pendingTools.has("tc-bash")).toBe(false);
+		expect(component.isTranscriptBlockFinalized()).toBe(true);
+	});
+
+	it("settles an early Hub wait result while another reported job remains running", async () => {
+		const { controller, pendingTools, chatContainer } = createFixture();
+		const details: CoordinationDetails = {
+			op: "wait",
+			jobs: [
+				{ id: "Job1", type: "task", status: "completed", label: "Finished work", durationMs: 5 },
+				{ id: "Job2", type: "task", status: "running", label: "Background work", durationMs: 5 },
+			],
+		};
+		await controller.handleEvent({
+			type: "tool_execution_end",
+			toolCallId: "tc-hub",
+			toolName: "hub",
+			result: { content: [{ type: "text", text: "Job1 finished; Job2 is still running." }], details },
+			isError: false,
+		});
+		await controller.handleEvent({
+			type: "tool_execution_start",
+			toolCallId: "tc-hub",
+			toolName: "hub",
+			args: { op: "wait", ids: ["Job1", "Job2"] },
+		});
+		const component = chatContainer.children.find(
+			(child): child is ToolExecutionComponent => child instanceof ToolExecutionComponent,
+		)!;
+		sealed.push(component);
+		component.setExpanded(true);
+		expect(Bun.stripANSI(chatContainer.render(120).join("\n"))).toContain("Job1 Finished work");
+		expect(pendingTools.has("tc-hub")).toBe(false);
 		expect(component.isTranscriptBlockFinalized()).toBe(true);
 	});
 
