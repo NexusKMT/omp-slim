@@ -291,6 +291,37 @@ describe("snapcompact frame persistence", () => {
 		expect((blocks[1] as { text: string }).text).toContain("archived image frame unavailable here");
 	});
 
+	it("keeps unavailable and budget gaps in frame chronology", () => {
+		const unavailable = "blob:sha256:missing";
+		const omitted = Buffer.alloc(80, 2).toString("base64");
+		const newest = Buffer.alloc(40, 3).toString("base64");
+		const archive: Archive = {
+			frames: [
+				{ data: unavailable, mimeType: "image/png", cols: 10, rows: 10, chars: 100 },
+				{ data: omitted, mimeType: "image/png", cols: 10, rows: 10, chars: 100 },
+				{ data: omitted, mimeType: "image/png", cols: 10, rows: 10, chars: 100 },
+				{ data: newest, mimeType: "image/png", cols: 10, rows: 10, chars: 100 },
+			],
+			totalChars: 400,
+			truncatedChars: 0,
+		};
+
+		const blocks = snapcompact.historyBlocks(archive, {
+			maxFrameDataBytes: newest.length,
+			resolveFrameData: data =>
+				data === unavailable ? undefined : { bytes: data.length, read: () => data },
+		});
+
+		const order = blocks.map(block => {
+			if (block.type === "image") return "image";
+			return block.text.includes("unavailable here") ? "unavailable" : "budget";
+		});
+		expect(order).toEqual(["unavailable", "budget", "image"]);
+		const budgetNotice = blocks[1];
+		if (budgetNotice?.type !== "text") throw new Error("Expected an in-place budget notice");
+		expect(budgetNotice.text).toContain("2 archived image frames");
+	});
+
 	it("drops malformed frame blob references before provider input", () => {
 		using tempDir = TempDir.createSync("@snapcompact-malformed-frame-ref-");
 		const blobStore = new BlobStore(tempDir.path());

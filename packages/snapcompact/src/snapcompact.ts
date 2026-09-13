@@ -1806,31 +1806,22 @@ function isUnresolvedBlobReference(data: string): boolean {
 	return data.startsWith(BLOB_REFERENCE_PREFIX);
 }
 
-/** One reconstructed slot: a usable frame, or a gap where one was unavailable. */
-type FrameSlot = { frame: Frame } | { unavailable: true };
+/** One reconstructed slot: a usable frame, an unavailable gap, or a byte-budget gap. */
+type FrameSlot = { frame: Frame } | { unavailable: true } | { omittedBytes: number };
 
 /**
- * Pick the frames that fit the payload budget, newest first.
- *
- * Two causes are kept apart on purpose. A budget omission always takes the
- * OLDEST frames, so one notice in front of the kept images stays truthful. An
- * unavailable payload can sit anywhere, so its gap is reported at its own
- * position instead: merging the two would place a notice before an image that
- * is actually older than the gap.
+ * Price every frame newest-first and retain only payloads that fit the byte
+ * budget. Gap slots preserve the original chronology without materializing
+ * rejected payloads.
  */
-function imagesWithinBudget(
-	archive: Archive,
-	options: HistoryBlockOptions,
-): { slots: FrameSlot[]; omittedFrames: number; omittedBytes: number } {
+function imagesWithinBudget(archive: Archive, options: HistoryBlockOptions): FrameSlot[] {
 	const { maxFrameDataBytes, resolveFrameData } = options;
 	const hasUnresolvedReference = archive.frames.some(frame => isUnresolvedBlobReference(frame.data));
 	if (maxFrameDataBytes === undefined && !resolveFrameData && !hasUnresolvedReference) {
-		return { slots: archive.frames.map(frame => ({ frame })), omittedFrames: 0, omittedBytes: 0 };
+		return archive.frames.map(frame => ({ frame }));
 	}
 
 	let usedBytes = 0;
-	let omittedFrames = 0;
-	let omittedBytes = 0;
 	const newestFirst: FrameSlot[] = [];
 	for (let index = archive.frames.length - 1; index >= 0; index--) {
 		const frame = archive.frames[index];
@@ -1842,15 +1833,14 @@ function imagesWithinBudget(
 		}
 		const bytes = lazy ? lazy.bytes : frame.data.length;
 		if (maxFrameDataBytes !== undefined && usedBytes + bytes > maxFrameDataBytes) {
-			omittedFrames++;
-			omittedBytes += bytes;
+			newestFirst.push({ omittedBytes: bytes });
 			continue;
 		}
 		usedBytes += bytes;
 		newestFirst.push({ frame: lazy ? { ...frame, data: lazy.read() } : frame });
 	}
 	newestFirst.reverse();
-	return { slots: newestFirst, omittedFrames, omittedBytes };
+	return newestFirst;
 }
 
 /** Collapse a run of unavailable frames into one in-place gap marker. */
@@ -1858,22 +1848,36 @@ function unavailableFrameNotice(count: number): string {
 	return `-------------- ${count.toLocaleString()} archived image frame${count === 1 ? "" : "s"} unavailable here --------------`;
 }
 
-/** Blocks for the imaged middle, with gaps kept where their frames were. */
+/** Blocks for the imaged middle, with both gap causes kept in chronological position. */
 function frameBlocks(slots: FrameSlot[]): (TextContent | ImageContent)[] {
 	const blocks: (TextContent | ImageContent)[] = [];
-	let pendingGap = 0;
+	let pendingGap: "unavailable" | "budget" | undefined;
+	let pendingFrames = 0;
+	let pendingBytes = 0;
 	const flushGap = (): void => {
-		if (pendingGap === 0) return;
-		blocks.push({ type: "text", text: unavailableFrameNotice(pendingGap) });
-		pendingGap = 0;
+		if (!pendingGap) return;
+		blocks.push({
+			type: "text",
+			text:
+				pendingGap === "unavailable"
+					? unavailableFrameNotice(pendingFrames)
+					: omittedFrameNotice(pendingFrames, pendingBytes),
+		});
+		pendingGap = undefined;
+		pendingFrames = 0;
+		pendingBytes = 0;
 	};
 	for (const slot of slots) {
-		if ("unavailable" in slot) {
-			pendingGap++;
+		if ("frame" in slot) {
+			flushGap();
+			blocks.push(...images({ frames: [slot.frame] } as Archive));
 			continue;
 		}
-		flushGap();
-		blocks.push(...images({ frames: [slot.frame] } as Archive));
+		const gap = "unavailable" in slot ? "unavailable" : "budget";
+		if (pendingGap && pendingGap !== gap) flushGap();
+		pendingGap = gap;
+		pendingFrames++;
+		if ("omittedBytes" in slot) pendingBytes += slot.omittedBytes;
 	}
 	flushGap();
 	return blocks;
@@ -1906,25 +1910,12 @@ export function images(archive: Archive): ImageContent[] {
  *  instead of persisted on the session entry. */
 export function historyBlocks(archive: Archive, options: HistoryBlockOptions = {}): (TextContent | ImageContent)[] {
 	const blocks: (TextContent | ImageContent)[] = [];
-	const budgeted = imagesWithinBudget(archive, options);
-	const middle = frameBlocks(budgeted.slots);
+	const middle = frameBlocks(imagesWithinBudget(archive, options));
 	const hasImages = middle.some(block => block.type === "image");
-	const hasOmittedImages = budgeted.omittedFrames > 0;
+	const hasOmittedImages = middle.some(block => block.type === "text");
 	if (archive.textHead) {
-		const suffix = hasImages
-			? "\n-------------- imaged middle below\n"
-			: hasOmittedImages
-				? `\n${omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes)}\n`
-				: "";
+		const suffix = hasImages ? "\n-------------- imaged middle below\n" : "";
 		blocks.push({ type: "text", text: elideDataUrls(toPlainText(archive.textHead), "archive") + suffix });
-	} else if (hasOmittedImages && !hasImages) {
-		blocks.push({ type: "text", text: omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes) });
-	}
-	// Omitted frames are the OLDEST archived images: the byte budget keeps the
-	// newest tail frames, so the gap notice precedes the kept images to keep the
-	// reconstructed blocks oldest-to-newest.
-	if (hasImages && hasOmittedImages) {
-		blocks.push({ type: "text", text: omittedFrameNotice(budgeted.omittedFrames, budgeted.omittedBytes) });
 	}
 	blocks.push(...middle);
 	if (archive.textTail) {
