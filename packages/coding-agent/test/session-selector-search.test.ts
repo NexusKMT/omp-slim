@@ -164,23 +164,23 @@ describe("session picker incremental search", () => {
 		expect(harness.renders()).toBeGreaterThan(rendersBefore);
 	});
 
-	it("keeps exact and partial titles ahead of newer content hits before and after history arrives", () => {
+	it("keeps title matches in canonical order before and after history arrives", () => {
 		const sessions = [
 			makeSession("body", { firstMessage: "dashboard", modified: new Date(5) }),
 			makeSession("partial-new", { title: "Dashboard notes", modified: new Date(4) }),
 			makeSession("partial-old", { title: "Old dashboard", modified: new Date(3) }),
-			makeSession("exact-b", { title: "dashboard", modified: new Date(2) }),
-			makeSession("exact-a", { title: "  DASHBOARD  ", modified: new Date(2) }),
+			makeSession("exact-b", { title: "dashboard", modified: new Date(2), created: new Date(1) }),
+			makeSession("exact-a", { title: "  DASHBOARD  ", modified: new Date(2), created: new Date(2) }),
+			makeSession("exact-c", { title: "dashboard", modified: new Date(2), created: new Date(2) }),
 			makeSession("history"),
 		];
 		const harness = makeHarness(sessions, () => ["history", "exact-a", "body"]);
 		harness.type("dashboard");
 		const before = ids(harness.filtered());
-		expect(before.slice(0, 2).toSorted()).toEqual(["exact-a", "exact-b"]);
-		expect(before.slice(2)).toEqual(["partial-new", "partial-old", "body"]);
+		expect(before).toEqual(["exact-c", "exact-a", "exact-b", "partial-new", "partial-old", "body"]);
 		expect(ids(rankSessionSearchMatches(sessions, "dashboard"))).toEqual(before);
 		vi.runAllTimers();
-		expect(ids(harness.filtered())).toEqual([...before.slice(0, 4), "history", "body"]);
+		expect(ids(harness.filtered())).toEqual([...before.slice(0, 5), "history", "body"]);
 		harness.selector.dispose();
 	});
 

@@ -163,8 +163,9 @@ function prioritizeTitleMatches(sessions: SessionInfo[], tokens: string[]): Sess
 		else rest.push(session);
 	}
 	if (exact.length === 0 && partial.length === 0) return sessions;
-	// Resolve recency ties independently of the order in which history arrives.
-	const compare = (a: SessionInfo, b: SessionInfo) => compareSessionRecency(a, b) || a.path.localeCompare(b.path);
+	// Preserve canonical listing order even when history arrives in another order.
+	const compare = (a: SessionInfo, b: SessionInfo) =>
+		compareSessionRecency(a, b) || b.created.getTime() - a.created.getTime() || b.path.localeCompare(a.path);
 	return [...exact.sort(compare), ...partial.sort(compare), ...rest];
 }
 
