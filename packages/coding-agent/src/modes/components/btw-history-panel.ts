@@ -81,6 +81,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 	#detailRecord: BtwHistoryRecord | undefined;
 	#detailWidth = 0;
 	#detailDirty = true;
+	#lastCopiedId: string | undefined;
 	readonly #detail = new ScrollView([], {
 		height: 1,
 		scrollbar: "auto",
@@ -113,6 +114,9 @@ export class BtwHistoryPanel implements Component, Focusable {
 	update(records: readonly BtwHistoryRecord[]): void {
 		this.#records = records;
 		this.#detailDirty = true;
+		if (this.#lastCopiedId !== undefined && !records.some(record => record.id === this.#lastCopiedId)) {
+			this.#lastCopiedId = undefined;
+		}
 		if (this.#composer && !records.some(record => record.id === this.#composer?.recordId)) {
 			this.#composer = undefined;
 		}
@@ -122,6 +126,13 @@ export class BtwHistoryPanel implements Component, Focusable {
 			this.#followLatest = false;
 			this.#detail.scrollToTop();
 		}
+		this.#options.requestRender();
+	}
+
+	/** Visual confirmation that `c` copied this record's answer to the clipboard. */
+	markCopied(recordId: string): void {
+		this.#lastCopiedId = recordId;
+		this.#detailDirty = true;
 		this.#options.requestRender();
 	}
 
@@ -245,7 +256,14 @@ export class BtwHistoryPanel implements Component, Focusable {
 			if (record && getBtwCopyText(record) !== undefined) this.#options.onCopy(record);
 			return;
 		}
-		if (matchesKey(data, "tab") || matchesKey(data, "shift+tab")) {
+		// Legacy terminals deliver Ctrl+/ (and Ctrl+_) as US without Kitty protocol.
+		if (
+			matchesKey(data, "tab") ||
+			matchesKey(data, "shift+tab") ||
+			matchesKey(data, "ctrl+/") ||
+			matchesKey(data, "ctrl+_") ||
+			data === String.fromCharCode(31)
+		) {
 			this.#focus = this.#focus === "list" ? "answer" : "list";
 		} else if (matchesKey(data, "right")) {
 			this.#focus = "answer";
@@ -377,6 +395,9 @@ export class BtwHistoryPanel implements Component, Focusable {
 		if (this.#detailDirty || record !== this.#detailRecord || this.#detailWidth !== width) {
 			const inner = Math.max(1, width - 1);
 			const lines: string[] = [];
+			if (record && record.id === this.#lastCopiedId) {
+				lines.push(...wrapTextWithAnsi(theme.fg("success", "✓ Copied to clipboard"), inner), "");
+			}
 			if (record) {
 				const turns = getBtwTurns(record);
 				for (let index = 0; index < turns.length; index++) {
@@ -420,11 +441,16 @@ export class BtwHistoryPanel implements Component, Focusable {
 		const latest = record ? getBtwLatestTurn(record) : undefined;
 		const actions = composer
 			? [rawKeyHint("Enter", this.#followUpPending ? "starting…" : "send"), rawKeyHint("Esc", "cancel")]
-			: [rawKeyHint("Esc", latest?.status === "running" ? "cancel" : "close"), rawKeyHint("Tab", "switch pane")];
+			: [
+					rawKeyHint("Esc", latest?.status === "running" ? "cancel" : "close"),
+					rawKeyHint("Tab/Ctrl+/", "switch pane"),
+				];
 		if (!composer) {
 			if (record && this.#canFollowUp(record)) actions.push(rawKeyHint("f/Enter", "follow up"));
-			if (record && getBtwCopyText(record) !== undefined)
-				actions.push(rawKeyHint("c", inner < 40 ? "copy" : "copy answer"));
+			if (record && getBtwCopyText(record) !== undefined) {
+				if (record.id === this.#lastCopiedId) actions.push(theme.fg("success", "✓ copied · c to copy again"));
+				else actions.push(rawKeyHint("c", inner < 40 ? "copy" : "copy answer"));
+			}
 		}
 		const actionLines = wrapTextWithAnsi(actions.join(" · "), inner).slice(0, framed ? 2 : 1);
 		const chrome = framed ? 3 + actionLines.length : height >= 3 ? 2 : 0;

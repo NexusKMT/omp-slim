@@ -127,12 +127,14 @@ export class BtwController {
 		);
 	}
 
-	async #copyAnswer(answer: string): Promise<boolean> {
+	async #copyAnswer(answer: string, options?: { historyRecordId?: string }): Promise<boolean> {
 		if (this.#copyInFlight || !answer.trim()) return false;
 		this.#copyInFlight = true;
 		try {
 			await copyToClipboard(replaceTabs(answer).trim());
 			this.ctx.showStatus("Copied /btw answer to clipboard");
+			if (options?.historyRecordId !== undefined) this.#historyPanel?.markCopied(options.historyRecordId);
+			else if (this.#visible) this.#activeRequest?.component.markCopied();
 			return true;
 		} catch (error) {
 			this.ctx.showError(sanitizeErrorLine(error));
@@ -462,7 +464,7 @@ export class BtwController {
 			onClose: () => this.#closeHistory(),
 			onCopy: record => {
 				const answer = getBtwCopyText(record);
-				if (answer !== undefined) void this.#copyAnswer(answer);
+				if (answer !== undefined) void this.#copyAnswer(answer, { historyRecordId: record.id });
 			},
 			onCancel: record => {
 				if (this.#activeRequest?.record.id === record.id) this.handleCancel();
