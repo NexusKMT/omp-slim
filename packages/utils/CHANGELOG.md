@@ -9,6 +9,7 @@
 
 - Timed out stalled Chrome-for-Testing metadata requests after 30 seconds when looking up download metadata
 - Concurrent browser installations share one download without replacing a running browser, and stalled downloads time out with partial files cleaned up for retry.
+- Reading an EPUB, PPTX or XLSX whose XML has a mismatched or stray end tag no longer hangs the session forever; the parser recovers and the document converts.
 
 ## [18.1.19] - 2026-09-12
 
