@@ -1,228 +1,98 @@
 import { describe, expect, it } from "bun:test";
 import { buildParams } from "@oh-my-pi/pi-ai/providers/openai-responses";
-import type { AssistantMessage, Context, Model, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Context, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
-describe("issue #10966: Responses synthetic reasoning suppression when allowsSyntheticReasoningContentForToolCalls is false", () => {
-	const museOpenRouterModel = buildModel({
-		id: "meta/muse-spark-1.3",
-		name: "Muse Spark 1.3",
+const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+function continuation(id: string, thinking?: string) {
+	const model = buildModel({
+		id,
+		name: id,
 		api: "openrouter",
 		provider: "openrouter",
 		baseUrl: "https://openrouter.ai/api/v1",
 		reasoning: true,
-		input: ["text", "image"],
+		input: ["text"],
 		contextWindow: 1_048_576,
 		maxTokens: 64_000,
+		cost,
 	});
+	const assistant: AssistantMessage = {
+		role: "assistant",
+		api: "openrouter",
+		provider: "openrouter",
+		model: id,
+		content: [
+			...(thinking === undefined ? [] : [{ type: "thinking" as const, thinking }]),
+			{ type: "toolCall", id: "call_echo", name: "bash", arguments: { command: "echo 1" } },
+		],
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { ...cost, total: 0 } },
+		stopReason: "toolUse",
+		timestamp: 1,
+	};
+	const context: Context = {
+		messages: [
+			{ role: "user", content: "Run echo 1", timestamp: 0 },
+			assistant,
+			{
+				role: "toolResult",
+				toolCallId: "call_echo",
+				toolName: "bash",
+				content: [{ type: "text", text: "1\n" }],
+				isError: false,
+				timestamp: 2,
+			},
+			{ role: "user", content: "Continue", timestamp: 3 },
+		],
+	};
+	const { params } = buildParams(
+		model as unknown as Model<"openai-responses">,
+		context,
+		{ reasoning: "high" },
+		undefined,
+	);
+	const items = params.input as Array<{
+		type?: string;
+		call_id?: string;
+		output?: string;
+		content?: Array<{ type: string; text: string }>;
+	}>;
+	return { items, reasoning: items.filter(item => item.type === "reasoning") };
+}
 
-	it("does not synthesize placeholder reasoning items on tool-call continuations when synthetic reasoning is disabled", () => {
-		expect(museOpenRouterModel.compat.filterReasoningHistory).toBe(true);
-		expect(museOpenRouterModel.compat.requiresReasoningContentForToolCalls).toBe(true);
-		expect(museOpenRouterModel.compat.allowsSyntheticReasoningContentForToolCalls).toBe(false);
-		const userMessage: UserMessage = {
-			role: "user",
-			content: "Run echo 1",
-			timestamp: Date.now(),
-		};
-
-		// Prior assistant turn containing thinking + tool call
-		const assistantMessage: AssistantMessage = {
-			role: "assistant",
-			content: [
-				{ type: "thinking", thinking: "need to run echo 1" },
-				{
-					type: "toolCall",
-					id: "call_12345",
-					name: "bash",
-					arguments: { command: "echo 1" },
-				},
-			],
-			api: "openrouter",
-			provider: "openrouter",
-			model: "meta/muse-spark-1.3",
-			usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 20 },
-			stopReason: "toolUse",
-			timestamp: Date.now(),
-		};
-
-		const toolResultMessage: ToolResultMessage = {
-			role: "toolResult",
-			toolCallId: "call_12345",
-			toolName: "bash",
-			content: [{ type: "text", text: "1\n" }],
-			isError: false,
-			timestamp: Date.now(),
-		};
-
-		const followUpUserMessage: UserMessage = {
-			role: "user",
-			content: "Now run echo 2",
-			timestamp: Date.now(),
-		};
-
-		const context: Context = {
-			messages: [userMessage, assistantMessage, toolResultMessage, followUpUserMessage],
-		};
-
-		const { params } = buildParams(
-			museOpenRouterModel as unknown as Model<"openai-responses">,
-			context,
-			{ reasoning: "medium" },
-			undefined,
-		);
-
-		const reasoningItems = (params.input as Array<{ type?: string; id?: string }>).filter(
-			item => item.type === "reasoning",
-		);
-
-		// With filterReasoningHistory: true, neither native reasoning items nor synthetic
-		// placeholder reasoning items (`rs_*` with "reasoning unavailable") must be sent.
-		expect(reasoningItems).toHaveLength(0);
-
-		// Function call and output must remain intact
-		const functionCall = (params.input as Array<{ type?: string; call_id?: string }>).find(
-			item => item.type === "function_call",
-		);
-		expect(functionCall).toBeDefined();
-		expect(functionCall?.call_id).toBe("call_12345");
-	});
-
-	it("preserves synthetic reasoning items for models with allowsSyntheticReasoningContentForToolCalls: true", () => {
-		const claudeOpenRouterModel = buildModel({
-			id: "anthropic/claude-sonnet-4",
-			name: "Claude Sonnet 4",
-			api: "openrouter",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: true,
-			input: ["text", "image"],
-			contextWindow: 200_000,
-			maxTokens: 8_192,
+describe("issue #10966: OpenRouter reasoning reconstruction", () => {
+	it("does not reconstruct filtered Muse reasoning from surviving text", () => {
+		const { items, reasoning } = continuation("meta/muse-spark-1.3", "need to run echo 1");
+		expect(reasoning).toEqual([]);
+		expect(items.find(item => item.type === "function_call")).toMatchObject({ call_id: "call_echo" });
+		expect(items.find(item => item.type === "function_call_output")).toMatchObject({
+			call_id: "call_echo",
+			output: "1\n",
 		});
-
-		expect(claudeOpenRouterModel.compat.filterReasoningHistory).toBe(true);
-		expect(claudeOpenRouterModel.compat.allowsSyntheticReasoningContentForToolCalls).toBe(true);
-
-		const userMessage: UserMessage = {
-			role: "user",
-			content: "Run echo test",
-			timestamp: Date.now(),
-		};
-
-		const assistantMessage: AssistantMessage = {
-			role: "assistant",
-			content: [
-				{ type: "thinking", thinking: "running command" },
-				{
-					type: "toolCall",
-					id: "call_abc123",
-					name: "bash",
-					arguments: { command: "echo test" },
-				},
-			],
-			api: "openrouter",
-			provider: "openrouter",
-			model: "anthropic/claude-sonnet-4",
-			usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 20 },
-			stopReason: "toolUse",
-			timestamp: Date.now(),
-		};
-
-		const toolResultMessage: ToolResultMessage = {
-			role: "toolResult",
-			toolCallId: "call_abc123",
-			toolName: "bash",
-			content: [{ type: "text", text: "test\n" }],
-			isError: false,
-			timestamp: Date.now(),
-		};
-
-		const followUpUserMessage: UserMessage = {
-			role: "user",
-			content: "Next step",
-			timestamp: Date.now(),
-		};
-
-		const context: Context = {
-			messages: [userMessage, assistantMessage, toolResultMessage, followUpUserMessage],
-		};
-
-		const { params } = buildParams(
-			claudeOpenRouterModel as unknown as Model<"openai-responses">,
-			context,
-			{ reasoning: "medium" },
-			undefined,
-		);
-
-		// Anthropic on OpenRouter preserves synthetic reasoning replay when required
-		expect(reasoningItems.length).toBeGreaterThanOrEqual(1);
-		expect(reasoningItems[0].content?.[0]?.text).toBe("running command");
-
-		const functionCall = (params.input as Array<{ type?: string; call_id?: string }>).find(
-			item => item.type === "function_call",
-		);
-		expect(functionCall).toBeDefined();
-		expect(functionCall?.call_id).toBe("call_abc123");
 	});
 
-	it("preserves required reasoning item replay for OpenRouter DeepSeek with real thinking", () => {
-		const deepseekOpenRouterModel = buildModel({
-			id: "deepseek/deepseek-v4-pro",
-			name: "DeepSeek V4 Pro",
-			api: "openrouter",
-			provider: "openrouter",
-			baseUrl: "https://openrouter.ai/api/v1",
-			reasoning: true,
-			input: ["text"],
-			contextWindow: 1_048_576,
-			maxTokens: 384_000,
-		});
+	it("does not replace missing Muse reasoning with a placeholder", () => {
+		expect(continuation("meta/muse-spark-1.3").reasoning).toEqual([]);
+	});
 
-		expect(deepseekOpenRouterModel.compat.requiresReasoningContentForToolCalls).toBe(true);
-		expect(deepseekOpenRouterModel.compat.allowsSyntheticReasoningContentForToolCalls).toBe(false);
+	it("retains reconstruction for filtered Anthropic models that allow it", () => {
+		const { reasoning } = continuation("anthropic/claude-sonnet-4", "running command");
+		expect(reasoning).toHaveLength(1);
+		expect(reasoning[0]?.content).toEqual([{ type: "reasoning_text", text: "running command" }]);
+	});
 
-		const assistantMessage: AssistantMessage = {
-			role: "assistant",
-			content: [
-				{ type: "thinking", thinking: "deepseek thinking trace" },
-				{
-					type: "toolCall",
-					id: "call_ds123",
-					name: "bash",
-					arguments: { command: "echo ds" },
-				},
-			],
-			api: "openrouter",
-			provider: "openrouter",
-			model: "deepseek/deepseek-v4-pro",
-			usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 20 },
-			stopReason: "toolUse",
-			timestamp: Date.now(),
-		};
+	it("replays surviving DeepSeek thinking without a native signature", () => {
+		const { reasoning } = continuation("deepseek/deepseek-v4-pro", "deepseek thinking trace");
+		expect(reasoning).toHaveLength(1);
+		expect(reasoning[0]?.content).toEqual([{ type: "reasoning_text", text: "deepseek thinking trace" }]);
+	});
 
-		const context: Context = {
-			messages: [
-				{ role: "user", content: "Run ds", timestamp: Date.now() },
-				assistantMessage,
-				{ role: "toolResult", toolCallId: "call_ds123", toolName: "bash", content: [{ type: "text", text: "ds\n" }], isError: false, timestamp: Date.now() },
-				{ role: "user", content: "Next ds", timestamp: Date.now() },
-			],
-		};
-
-		const { params } = buildParams(
-			deepseekOpenRouterModel as unknown as Model<"openai-responses">,
-			context,
-			{ reasoning: "high" },
-			undefined,
+	it("retains the required nonempty DeepSeek fallback after compaction", () => {
+		const { reasoning } = continuation("deepseek/deepseek-v4-pro");
+		expect(reasoning).toHaveLength(1);
+		expect(reasoning[0]?.content?.some(part => part.type === "reasoning_text" && part.text.trim().length > 0)).toBe(
+			true,
 		);
-
-		const reasoningItems = (params.input as Array<{ type?: string; content?: Array<{ text?: string }> }>).filter(
-			item => item.type === "reasoning",
-		);
-
-		// With surviving reasoning text, DeepSeek gets the required reasoning item with real thinking text
-		expect(reasoningItems).toHaveLength(1);
-		expect(reasoningItems[0].content?.[0]?.text).toBe("deepseek thinking trace");
 	});
 });
