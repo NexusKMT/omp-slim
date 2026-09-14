@@ -1267,7 +1267,10 @@ export class SessionMaintenance {
 					this.#manualCompactionCleanup = undefined;
 				}
 				manualCompactionCleanup?.resolve();
-				if ((compactionCommitted || rejectedAsNoOp) && resumeInterruptedTurn) {
+				// An inherited resume was earned by the pass that committed it; this
+				// pass's own outcome (hook cancel, summarizer failure) only decides the
+				// turn it interrupted itself, so the inherited one stays owed.
+				if ((compactionCommitted || rejectedAsNoOp || inheritedResume) && resumeInterruptedTurn) {
 					if (this.#promptsAwaitingCleanup > 0) {
 						// A prompt parked on the barrier just resolved is the user's next
 						// intent and takes the session instead (its continuation is a
