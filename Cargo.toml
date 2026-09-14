@@ -234,12 +234,12 @@ parking_lot = "0.12.5"
 rayon = "1.12"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["full"] }
-flume = "0.11"
+flume = "0.12"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Serialization & Data Formats
 # ──────────────────────────────────────────────────────────────────────────────
-base64 = "0.22"
+base64 = "0.23"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 toml = "1.1"
@@ -267,7 +267,7 @@ fontdue = { version = "0.9", default-features = false }
 # ──────────────────────────────────────────────────────────────────────────────
 # Data Structures - Collections
 # ──────────────────────────────────────────────────────────────────────────────
-phf = { version = "0.13", features = ["macros"] }
+phf = { version = "0.14", features = ["macros"] }
 heapless = "0.9"
 smallvec = { version = "1.16.1", features = [
    "serde",
@@ -284,8 +284,7 @@ xxhash-rust = { version = "0.8", features = ["xxh64", "xxh32"] }
 # ──────────────────────────────────────────────────────────────────────────────
 # Audio & Realtime Media
 # ──────────────────────────────────────────────────────────────────────────────
-audiopus_sys = { version = "0.2.2", features = ["static"] }
-opus = "0.3.1"
+opus = "0.4.0"
 webrtc = "0.17.2"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -320,7 +319,7 @@ napi-derive = "3"
 # ──────────────────────────────────────────────────────────────────────────────
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 clipboard-win = "5.4"
-icy_sixel = "0.5"
+icy_sixel = "0.7"
 portable-pty = "0.9"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -347,9 +346,9 @@ resvg = "0.48"
 # JPEG decoder compiles — zune-jpeg 0.5.15's no-log stub macros are not
 # expression-safe and the crate fails to build without it.
 zune-jpeg = { version = "0.5", default-features = false, features = ["log"] }
-# Not used directly: pins tinyvec to 1.12.0 because 1.13.0 was published broken
+# Not used directly: pins tinyvec to fixed 1.13.3 because 1.13.0 was published broken
 # (cannot find macro `vec` in alloc-only context).
-tinyvec = "=1.12.0"
+tinyvec = "=1.13.3"
 png = "0.18"
 inferno = { version = "0.12", default-features = false }
 syntect = { version = "5.3", default-features = false, features = [
@@ -368,9 +367,9 @@ html-to-markdown-rs = { version = "3.12.4", default-features = false }
 # Tokenization
 # ──────────────────────────────────────────────────────────────────────────────
 xutf = "1.5"
-zstd = "0.13"
+zstd = "0.14"
 fancy-regex = "0.16"
-tiktoken-rs = "0.11"
+tiktoken-rs = "0.12"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shell Parsing

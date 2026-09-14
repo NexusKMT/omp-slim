@@ -11,8 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-# Forces the static libopus build for the `opus` codec crate.
-audiopus_sys.workspace = true
 bytes.workspace = true
 flume.workspace = true
 opus.workspace = true
