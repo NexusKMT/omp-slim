@@ -15,6 +15,7 @@
 
 - `/debug` memory reports now include numeric memory statistics instead of raw heap snapshots that could expose provider and MCP credentials.
 - Multi-step logins (e.g. Perplexity email → code) now move the input field under the latest prompt instead of leaving it stuck beneath the first one.
+- Todo updates made through Eval's `tool.todo(...)` now persist to the session, so they survive resume/rewind/fork and no longer trigger false incomplete-todo reminders.
 
 ## [18.1.21] - 2026-09-14
 
