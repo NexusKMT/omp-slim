@@ -689,4 +689,57 @@ describe("SessionManager.moveTo", () => {
 		expect(await fsp.readFile(path.join(homeArtifactsDir, "stale.md"), "utf8")).toBe("already here");
 		expect(await fsp.readdir(awayArtifactsDir)).toEqual(["stuck.md"]);
 	});
+
+	it("notices an artifact id a writer publishes after the destination was listed", async () => {
+		// The destination is listed before moving; a writer landing `1.read.log`
+		// after that listing does not collide by name with the source's
+		// `1.bash.log`, so both would arrive and `artifact://1` would depend on
+		// readdir order. The occupancy must be re-read before an id-bearing move.
+		const { session, homeArtifactsDir, awayArtifactsDir } = await sessionAwayFromHome();
+		const id = (await session.saveArtifact("written while away", "bash"))!;
+		await fsp.writeFile(path.join(homeArtifactsDir, "stale.md"), "already here");
+		const readdir = fs.promises.readdir.bind(fs.promises);
+		let published = false;
+		// The relocation only ever lists with `withFileTypes: true`; satisfy the
+		// overload set with that shape.
+		const listing = async (target: fs.PathLike, options: { withFileTypes: true }) => {
+			const entries = await readdir(target, options);
+			if (!published && path.resolve(target.toString()) === homeArtifactsDir) {
+				published = true;
+				await fsp.writeFile(path.join(homeArtifactsDir, `${id}.read.log`), "published after the listing");
+			}
+			return entries;
+		};
+		const readdirSpy = spyOn(fs.promises, "readdir").mockImplementation(listing as typeof fs.promises.readdir);
+		try {
+			await session.moveTo(cwdA);
+		} finally {
+			readdirSpy.mockRestore();
+		}
+
+		expect((await fsp.readdir(homeArtifactsDir)).sort()).toEqual([`${id}.read.log`, "stale.md"]);
+		expect(await session.getArtifactPath(id)).toBe(path.join(homeArtifactsDir, `${id}.read.log`));
+		expect(await fsp.readdir(awayArtifactsDir)).toEqual([`${id}.bash.log`]);
+	});
+
+	it("does not merge through a symlink at the destination", async () => {
+		// A symlink where the artifacts directory should be would make the merge
+		// move the session's files into whatever it points at. That is a
+		// relocation failure, not a merge target: the move fails and the
+		// session stays where it was.
+		const { session, homeArtifactsDir, awayArtifactsDir } = await sessionAwayFromHome();
+		const id = (await session.saveArtifact("written while away", "bash"))!;
+		const awaySessionFile = session.getSessionFile()!;
+		const elsewhere = path.join(testAgentDir, "elsewhere");
+		await fsp.mkdir(elsewhere);
+		await fsp.writeFile(path.join(elsewhere, "unrelated.md"), "untouched");
+		await fsp.rmdir(homeArtifactsDir);
+		await fsp.symlink(elsewhere, homeArtifactsDir);
+
+		await expect(session.moveTo(cwdA)).rejects.toThrow();
+
+		expect(await fsp.readdir(elsewhere)).toEqual(["unrelated.md"]);
+		expect(session.getSessionFile()).toBe(awaySessionFile);
+		expect(await session.getArtifactPath(id)).toBe(path.join(awayArtifactsDir, `${id}.bash.log`));
+	});
 });

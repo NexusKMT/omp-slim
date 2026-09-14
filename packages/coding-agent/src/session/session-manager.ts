@@ -170,6 +170,20 @@ async function moveEntryWithoutReplacing(from: string, to: string, isDirectory: 
 	}
 }
 
+/** What `destination` currently holds: entries by name, and the artifact ids (`<id>.<tool>.log`) already in use. */
+async function destinationOccupancy(
+	destination: string,
+): Promise<{ occupants: Map<string, fs.Dirent>; takenIds: Set<string> }> {
+	const present = await fs.promises.readdir(destination, { withFileTypes: true });
+	const occupants = new Map(present.map(entry => [entry.name, entry]));
+	const takenIds = new Set<string>();
+	for (const entry of present) {
+		const id = artifactIdOf(entry.name);
+		if (id !== undefined) takenIds.add(id);
+	}
+	return { occupants, takenIds };
+}
+
 /**
  * Move `source`'s entries into `destination`, recursing into directories that
  * exist on both sides, then remove `source` once it is empty. Nothing at the
@@ -185,20 +199,18 @@ async function mergeDirectoryInto(
 	stranded: string[] = [],
 	prefix = "",
 ): Promise<string[]> {
-	const present = await fs.promises.readdir(destination, { withFileTypes: true });
-	const occupants = new Map(present.map(entry => [entry.name, entry]));
-	const takenIds = new Set<string>();
-	for (const entry of present) {
-		const id = artifactIdOf(entry.name);
-		if (id !== undefined) takenIds.add(id);
-	}
+	let { occupants, takenIds } = await destinationOccupancy(destination);
 	const strandedBefore = stranded.length;
 	for (const entry of await fs.promises.readdir(source, { withFileTypes: true })) {
 		const from = path.join(source, entry.name);
 		const to = path.join(destination, entry.name);
 		const label = prefix + entry.name;
-		const occupant = occupants.get(entry.name);
 		const id = artifactIdOf(entry.name);
+		// A writer can publish another `<id>.*` file while earlier entries move, and
+		// a different file name slips past link(2)'s EEXIST; list again right before
+		// an id-bearing move so the check is one syscall old, not the whole merge.
+		if (id !== undefined) ({ occupants, takenIds } = await destinationOccupancy(destination));
+		const occupant = occupants.get(entry.name);
 		try {
 			if (occupant === undefined && (id === undefined || !takenIds.has(id))) {
 				await moveEntryWithoutReplacing(from, to, entry.isDirectory());
@@ -249,9 +261,11 @@ async function relocateArtifactsDirectory(source: string, destination: string): 
 		await fs.promises.rename(source, destination);
 		return "renamed";
 	} catch (err) {
+		// lstat: a symlink at the destination must not be merged through into
+		// whatever it points at; only a real directory is a merge target.
 		let occupant: fs.Stats | null = null;
 		try {
-			occupant = await fs.promises.stat(destination);
+			occupant = await fs.promises.lstat(destination);
 		} catch (statErr) {
 			if (!isEnoent(statErr)) throw err;
 		}
