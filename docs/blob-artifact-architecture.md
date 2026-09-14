@@ -213,6 +213,8 @@ Blob implications after fork:
 
 `SessionManager.moveTo()` renames both session file and artifact directory to the new default session directory, with rollback logic if a later step fails. This preserves artifact identity while relocating session scope.
 
+When the destination artifact directory already exists — a session returning to a project it lived in before, whose old artifact path a subagent or eval subprocess kept writing to — the two directories are merged instead: entries move across, directories present on both sides merge recursively, and an entry whose name is already taken at the destination stays at the source (artifact IDs resolve by `<id>.` prefix, so neither copy is overwritten or renamed). A merged move is not rolled back by renaming the directory back; only the session-file rename is.
+
 ## Failure handling and fallback paths
 
 | Case                                                      | Behavior                                                                               |
@@ -228,6 +230,7 @@ Blob implications after fork:
 | Full `artifact://` resolution exceeds 8 MiB               | Rejects inline materialization; bounded selectors/path-only workflows remain available |
 | OutputSink artifact writer init fails                     | Continues with bounded in-memory output only                                           |
 | Non-persistent `saveArtifact`                             | Stores text in `SessionManager` memory map; not file-backed URL data                   |
+| Artifact directory already exists at the move destination | Directories merged; an entry whose name or artifact id is taken stays at the source and is logged (warn) |
 
 ## Binary blob externalization vs text-output artifacts
 
