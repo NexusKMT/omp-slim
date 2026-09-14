@@ -890,7 +890,7 @@ async function readSessionMetadata(file: string): Promise<SessionMetadata> {
 				continue;
 			}
 			if (parsed.type === "session") {
-				if (typeof parsed.title === "string") title = parsed.title;
+				if (title === null && typeof parsed.title === "string") title = parsed.title;
 				if (typeof parsed.cwd === "string") cwd = parsed.cwd;
 				break;
 			}

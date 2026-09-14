@@ -531,18 +531,25 @@ describe("listSessionSummaries", () => {
 		await fs.mkdir(path.dirname(legacyFile), { recursive: true });
 		await Bun.write(
 			currentFile,
-			JSON.stringify({
-				type: "session",
-				version: 3,
-				id: "current",
-				timestamp: iso(T),
-				cwd: "/home/han/project/omp-kit",
-			}),
+			[
+				{ type: "title", v: 1, title: "Current title" },
+				{
+					type: "session",
+					version: 3,
+					id: "current",
+					timestamp: iso(T),
+					cwd: "/home/han/project/omp-kit",
+					title: "Stale header title",
+				},
+			]
+				.map(entry => JSON.stringify(entry))
+				.join("\n"),
 		);
 		await Bun.write(legacyFile, JSON.stringify({ type: "title", v: 1, title: "Legacy session" }));
 
 		const rows = await listSessionSummaries();
 		expect(rows.find(row => row.file === currentFile)?.folder).toBe("/home/han/project/omp-kit");
+		expect(rows.find(row => row.file === currentFile)?.title).toBe("Current title");
 		expect(rows.find(row => row.file === legacyFile)?.folder).toBe("/work/legacy/");
 	});
 
