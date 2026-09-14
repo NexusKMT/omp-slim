@@ -320,15 +320,40 @@ describe("ModelBrowser native model metadata", () => {
 		const partial = makeModel("fixture", "partial");
 		partial.cost.input = Number.NaN;
 		partial.cost.output = 2;
+		const negativeZero = makeModel("fixture", "negative-zero");
+		negativeZero.cost.input = -1;
+		negativeZero.cost.output = 0;
 		const invalid = makeModel("fixture", "invalid");
 		invalid.cost.input = -1;
 		invalid.cost.output = Number.POSITIVE_INFINITY;
-		const browser = makeBrowser([zero, missing, partial, invalid], []);
+		const browser = makeBrowser([zero, missing, partial, negativeZero, invalid], []);
 		const rows = browser.render(100).map(line => Bun.stripANSI(line));
 		expect(rows.find(line => line.includes("fixture/zero"))).toContain("free");
 		expect(rows.find(line => line.includes("fixture/missing"))).toContain("free");
 		expect(rows.find(line => line.includes("fixture/partial"))).toContain("$?/2");
+		expect(rows.find(line => line.includes("fixture/negative-zero"))).toContain("$?/0");
 		expect(rows.find(line => line.includes("fixture/invalid"))).toContain("$?/?");
+
+		browser.setQuery("free");
+		const freeRows = browser.render(100).map(line => Bun.stripANSI(line));
+		expect(freeRows.some(line => line.includes("fixture/zero"))).toBe(true);
+		expect(freeRows.some(line => line.includes("fixture/negative-zero"))).toBe(false);
+	});
+
+	test.each([
+		[-1, 0, "$?/0"],
+		[0, -1, "$0/?"],
+		[-1, -2, "$?/?"],
+	] as const)("renders invalid rates %s/%s with per-leg markers", (input, output, expected) => {
+		const model = makeModel("demo", "invalid-rate");
+		model.cost.input = input;
+		model.cost.output = output;
+		const browser = makeBrowser([model], []);
+		const rows = browser.render(100).map(line => Bun.stripANSI(line));
+		expect(rows.find(line => line.includes("demo/invalid-rate"))).toContain(expected);
+		expect(renderDetail(model)).toContain(`${expected} per M`);
+		browser.setQuery("free");
+		expect(browser.visibleCount).toBe(0);
 	});
 
 	test("price formatting preserves integer zeros and positive sub-cent rates", () => {

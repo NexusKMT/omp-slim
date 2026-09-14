@@ -358,7 +358,7 @@ export function formatRoleChip(role: string, assignment: RoleAssignment, setting
 /** Both token legs at zero cost — the condition {@link formatCostPair} renders as `free`. */
 function isFreeModel(model: Model): boolean {
 	const cost = model.cost;
-	return !cost || (cost.input <= 0 && cost.output <= 0);
+	return !cost || (cost.input === 0 && cost.output === 0);
 }
 
 /** `$in/out` per-million cost pair; `free` when both legs are zero. */
