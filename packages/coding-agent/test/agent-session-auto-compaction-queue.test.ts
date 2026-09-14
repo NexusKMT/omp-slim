@@ -85,6 +85,12 @@ describe("AgentSession auto-compaction queue resume", () => {
 				pi.on("todo_reminder", event => {
 					getRuntimeSignals().push(`todo:${event.attempt}/${event.maxAttempts}`);
 				});
+				// Handled entirely inside prompt(); starts no agent turn.
+				pi.registerCommand("noop", {
+					handler: () => {
+						getRuntimeSignals().push("command:noop");
+					},
+				});
 			},
 			tempDir.path(),
 			new EventBus(),
@@ -556,6 +562,116 @@ describe("AgentSession auto-compaction queue resume", () => {
 		expect(prompted).toHaveLength(1);
 		const roles = prompted[0]?.map(message => message.role);
 		expect(roles).toContain("user");
+		expect(prompted[0]?.some(message => message.synthetic === true)).toBe(false);
+	});
+
+	it("hands the resume back when the prompt submitted during compaction is a local command", async () => {
+		// An extension command typed during a manual compaction parks on the same
+		// barrier as a real prompt, but it is handled inside prompt() and starts no
+		// turn. It must not swallow the resume, or the interrupted work is stranded
+		// exactly the way it was before the fix.
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.override("compaction.autoContinue", true);
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "previous answer" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 1_000,
+				output: 100,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		});
+		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+
+		session.agent.state.isStreaming = true;
+		vi.spyOn(session, "abort").mockImplementation(async () => {
+			session.agent.state.isStreaming = false;
+		});
+		type Dispatched = { role: string; synthetic?: boolean };
+		const prompted: Dispatched[][] = [];
+		vi.spyOn(session.agent, "prompt").mockImplementation(async message => {
+			prompted.push((Array.isArray(message) ? message : [message]) as Dispatched[]);
+		});
+
+		const gate = Promise.withResolvers<void>();
+		(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
+			gate.promise;
+		const compacted = session.compact();
+		while (!getRuntimeSignals().includes("before_compact:enter")) {
+			await Promise.resolve();
+		}
+		const command = session.prompt("/noop");
+		gate.resolve();
+		await compacted;
+		expect(await command).toBe(false);
+		await session.waitForIdle();
+
+		expect(getRuntimeSignals()).toContain("command:noop");
+		// The command consumed nothing, so the interrupted turn still resumes.
+		expect(prompted).toHaveLength(1);
+		expect(prompted[0]?.some(message => message.role === "developer" && message.synthetic === true)).toBe(true);
+	});
+
+	it("drops the resume once any parked prompt starts a turn, even if a local command releases first", async () => {
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.override("compaction.autoContinue", true);
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "previous answer" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 1_000,
+				output: 100,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		});
+		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+
+		session.agent.state.isStreaming = true;
+		vi.spyOn(session, "abort").mockImplementation(async () => {
+			session.agent.state.isStreaming = false;
+		});
+		type Dispatched = { role: string; synthetic?: boolean };
+		const prompted: Dispatched[][] = [];
+		vi.spyOn(session.agent, "prompt").mockImplementation(async message => {
+			prompted.push((Array.isArray(message) ? message : [message]) as Dispatched[]);
+		});
+
+		const gate = Promise.withResolvers<void>();
+		(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
+			gate.promise;
+		const compacted = session.compact();
+		while (!getRuntimeSignals().includes("before_compact:enter")) {
+			await Promise.resolve();
+		}
+		// Parked in this order, the local command releases before the real prompt
+		// dispatches; the still-parked prompt must keep the resume withheld.
+		const command = session.prompt("/noop");
+		const redirected = session.prompt("redirect");
+		gate.resolve();
+		await compacted;
+		await command;
+		await redirected;
+		await session.waitForIdle();
+
+		// Exactly one turn: the user's prompt. No synthetic nudge.
+		expect(prompted).toHaveLength(1);
+		expect(prompted[0]?.map(message => message.role)).toContain("user");
 		expect(prompted[0]?.some(message => message.synthetic === true)).toBe(false);
 	});
 

@@ -6114,8 +6114,7 @@ export class AgentSession {
 	 * - Validates model and API key before sending (when not streaming)
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
-	 */
-	/**
+	 *
 	 * Returns `false` when the command was fully handled locally (extension or
 	 * custom-TS command consumed without calling the LLM). Returns `true` when
 	 * the prompt was forwarded to the agent — either directly or queued as a
@@ -6132,13 +6131,28 @@ export class AgentSession {
 		// would neither persist nor forward its events and could race the in-flight
 		// history rewrite. `abort` still overtakes compaction; ordinary prompts wait
 		// here, and a waiting prompt supersedes the interrupted-turn resume the
-		// compaction would otherwise schedule. No-op when no manual compaction is active.
-		await this.#maintenance.waitForManualCompactionCleanup();
+		// compaction would otherwise schedule — unless it turns out to be a locally
+		// handled command that starts no turn, in which case `release(false)` hands
+		// the resume back. No-op when no manual compaction is active.
+		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		if (!release) return this.#dispatchPrompt(text, options, submittedAt);
+		// A throw (AgentBusyError, model/key validation) keeps `startedTurn` true:
+		// either a turn already owns the session or none can start, so resuming
+		// the interrupted one would fail the same way.
+		let startedTurn = true;
+		try {
+			startedTurn = await this.#dispatchPrompt(text, options, submittedAt);
+			return startedTurn;
+		} finally {
+			release(startedTurn);
+		}
+	}
+
+	async #dispatchPrompt(text: string, options: PromptOptions | undefined, submittedAt: number): Promise<boolean> {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		// Slash/custom-command handling below rewrites `text`; keep the original
 		// so a dropped prompt is handed back exactly as the user typed it.
 		const typedText = text;
-
 		// Handle extension commands first (execute immediately, even during streaming)
 		if (expandPromptTemplates && text.startsWith("/")) {
 			const handled = await this.#tryExecuteExtensionCommand(text);

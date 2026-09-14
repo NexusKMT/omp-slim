@@ -365,8 +365,10 @@ export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
 	/** Resolves after an active manual compaction has reconnected the agent subscription. */
 	#manualCompactionCleanup: Promise<void> | undefined;
-	/** Prompts parked in {@link waitForManualCompactionCleanup}; any waiter supersedes the interrupted-turn resume. */
+	/** Prompts parked in {@link waitForManualCompactionCleanup} and not yet released; any one supersedes the interrupted-turn resume. */
 	#promptsAwaitingCleanup = 0;
+	/** Interrupted-turn resume withheld from a compaction `finally` because prompts were parked; see {@link waitForManualCompactionCleanup}. */
+	#deferredResumeGeneration: number | undefined;
 	#autoCompactionAbortController: AbortController | undefined;
 	/**
 	 * Live tool-loop contexts parked after mid-turn maintenance hit a no-progress
@@ -854,8 +856,11 @@ export class SessionMaintenance {
 				!customInstructions &&
 				!options?.internalGuidance
 			) {
-				const result = await this.#compactExperimentalContext(activeModel, compactionAbortController);
-				markCommitted();
+				const result = await this.#compactExperimentalContext(
+					activeModel,
+					compactionAbortController,
+					markCommitted,
+				);
 				options?.onComplete?.(result);
 				return result;
 			}
@@ -1235,19 +1240,16 @@ export class SessionMaintenance {
 					this.#manualCompactionCleanup = undefined;
 				}
 				manualCompactionCleanup?.resolve();
-				if (compactionCommitted && resumeInterruptedTurn && this.#promptsAwaitingCleanup === 0) {
-					// Same continuation the context-full path uses: a queued steer/follow-up
-					// (drained above) drives the resume, otherwise the auto-continue nudge
-					// does. `terminalTextAnswer` is false by construction — the turn was
-					// cut mid-run, so there is no finished answer to preserve. A prompt
-					// parked on the barrier just resolved is still counted here (its
-					// continuation is a microtask away) and takes the session instead.
-					this.#host.scheduleCompactionContinuation({
-						generation: interruptedTurnGeneration,
-						autoContinue: true,
-						terminalTextAnswer: false,
-						suppressContinuation: false,
-					});
+				if (compactionCommitted && resumeInterruptedTurn) {
+					if (this.#promptsAwaitingCleanup > 0) {
+						// A prompt parked on the barrier just resolved is the user's next
+						// intent and takes the session instead (its continuation is a
+						// microtask away). It reports back via `release`: a turn drops the
+						// resume, a locally handled command hands it back.
+						this.#deferredResumeGeneration = interruptedTurnGeneration;
+					} else {
+						this.#scheduleInterruptedTurnResume(interruptedTurnGeneration);
+					}
 				}
 			}
 		}
@@ -1258,7 +1260,11 @@ export class SessionMaintenance {
 	 * rewriting the canonical transcript. Explicit compact modes and focused
 	 * manual compactions deliberately bypass this path.
 	 */
-	async #compactExperimentalContext(model: Model, signalController: AbortController): Promise<CompactionResult> {
+	async #compactExperimentalContext(
+		model: Model,
+		signalController: AbortController,
+		onCommitted: () => void,
+	): Promise<CompactionResult> {
 		const entries = this.#host.sessionManager.getBranch();
 		const settings = this.#host.settings.getGroup("compaction");
 		const preparation = prepareCompaction(entries, settings, model, this.#tokenizer);
@@ -1326,6 +1332,10 @@ export class SessionMaintenance {
 						details: { kind: "experimental-context-rollover", version: 1 },
 						preserveData: prepared.preserveData,
 					};
+		// Report before the append: `#commitCompactionEntry` awaits the
+		// `session_compact` hook after the entry lands, and a rejection there must
+		// still count as committed for the interrupted-turn resume.
+		onCommitted();
 		await this.#commitCompactionEntry({
 			...result,
 			fromExtension,
@@ -1592,23 +1602,55 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Park an ordinary prompt until an in-flight manual compaction has reconnected
-	 * the agent subscription and re-drained its preserved queues; returns at once
-	 * when no manual compaction is active. A prompt waiting here is the user's
-	 * next intent, so it supersedes the interrupted-turn resume: the cleanup
-	 * `finally` skips the synthetic continuation while any waiter is parked,
-	 * otherwise the nudge claims the session first and the prompt lands on
-	 * `AgentBusyError`.
+	 * Same continuation the context-full path uses: a queued steer/follow-up
+	 * (drained in compact()'s `finally`) drives the resume, otherwise the
+	 * auto-continue nudge does. `terminalTextAnswer` is false by construction —
+	 * the turn was cut mid-run, so there is no finished answer to preserve.
 	 */
-	async waitForManualCompactionCleanup(): Promise<void> {
+	#scheduleInterruptedTurnResume(generation: number): void {
+		this.#host.scheduleCompactionContinuation({
+			generation,
+			autoContinue: true,
+			terminalTextAnswer: false,
+			suppressContinuation: false,
+		});
+	}
+
+	/**
+	 * Park an ordinary prompt until an in-flight manual compaction has reconnected
+	 * the agent subscription and re-drained its preserved queues; returns
+	 * `undefined` at once when no manual compaction is active. A prompt waiting
+	 * here is the user's next intent, so it supersedes the interrupted-turn
+	 * resume: the cleanup `finally` defers the synthetic continuation while any
+	 * waiter is parked, otherwise the nudge claims the session first and the
+	 * prompt lands on `AgentBusyError`.
+	 *
+	 * The caller MUST invoke the returned `release` once the prompt settles.
+	 * `startedTurn: true` (dispatched or queued) drops the deferred resume for
+	 * good; `false` (an extension/custom command handled locally, no turn) hands
+	 * it back so the interrupted work is not stranded, once no other parked
+	 * prompt can still claim the session.
+	 */
+	async waitForManualCompactionCleanup(): Promise<((startedTurn: boolean) => void) | undefined> {
 		const cleanup = this.#manualCompactionCleanup;
-		if (!cleanup) return;
+		if (!cleanup) return undefined;
 		this.#promptsAwaitingCleanup++;
-		try {
-			await cleanup;
-		} finally {
+		let released = false;
+		const release = (startedTurn: boolean): void => {
+			if (released) return;
+			released = true;
 			this.#promptsAwaitingCleanup--;
-		}
+			if (startedTurn) {
+				this.#deferredResumeGeneration = undefined;
+				return;
+			}
+			if (this.#promptsAwaitingCleanup > 0 || this.#deferredResumeGeneration === undefined) return;
+			const generation = this.#deferredResumeGeneration;
+			this.#deferredResumeGeneration = undefined;
+			this.#scheduleInterruptedTurnResume(generation);
+		};
+		await cleanup;
+		return release;
 	}
 
 	/** Cancel only automatic maintenance while preserving a manual compaction. */
