@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import { OllamaProvider, searchOllama } from "@oh-my-pi/pi-coding-agent/web/search/providers/ollama";
+import { searchOllama } from "@oh-my-pi/pi-coding-agent/web/search/providers/ollama";
 import { parseSearchQuery } from "@oh-my-pi/pi-coding-agent/web/search/query";
 
 const OLLAMA_SEARCH_URL = "https://ollama.com/api/web_search";
@@ -513,26 +513,5 @@ describe("Ollama searchOllama auth resolution", () => {
 		await searchOllama({ ...makeParams("test"), authStorage, fetch: fetchMock });
 
 		expect(resolverMock).toHaveBeenCalledWith("ollama-cloud", expect.any(Object));
-	});
-});
-
-describe("OllamaProvider", () => {
-	const availableStorage = makeAuthStorage("test-key");
-	const unavailableStorage = makeAuthStorage(undefined);
-
-	it("is available when authStorage has credentials", () => {
-		const hasAuthMock = vi.fn((provider: string) => provider === "ollama-cloud");
-		const authStorage = { hasAuth: hasAuthMock } as unknown as AuthStorage;
-		expect(new OllamaProvider().isAvailable(authStorage)).toBe(true);
-		expect(hasAuthMock).toHaveBeenCalledWith("ollama-cloud");
-	});
-
-	it("is not available when no credential exists", () => {
-		expect(new OllamaProvider().isAvailable(unavailableStorage)).toBe(false);
-	});
-
-	it("delegates isExplicitlyAvailable to isAvailable", () => {
-		expect(new OllamaProvider().isExplicitlyAvailable(availableStorage)).toBe(true);
-		expect(new OllamaProvider().isExplicitlyAvailable(unavailableStorage)).toBe(false);
 	});
 });
