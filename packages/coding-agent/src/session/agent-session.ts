@@ -9644,6 +9644,7 @@ export class AgentSession {
 			this.sessionManager.appendMessage({
 				role: "user",
 				content: [{ type: "text", text: question }],
+				attribution: "user",
 				timestamp: Date.now(),
 			});
 			this.sessionManager.appendMessage(sanitizeAssistantForReparentedHistory(assistantMessage));
