@@ -99,6 +99,8 @@ export interface TruncationOptions {
 	artifactId?: string;
 	/** Byte budget that stopped the read, when truncation is byte-limited. */
 	maxBytes?: number;
+	/** Override the derived continuation line; `null` suppresses an unsafe continuation hint. */
+	nextOffset?: number | null;
 }
 
 export interface TruncationSummaryOptions {
@@ -216,7 +218,12 @@ export class OutputMetaBuilder {
 			maxBytes,
 			shownRange: { start: shownStart, end: shownEnd },
 			artifactId,
-			nextOffset: direction === "head" ? shownEnd + 1 : undefined,
+			nextOffset:
+				direction === "head"
+					? options.nextOffset === null
+						? undefined
+						: (options.nextOffset ?? shownEnd + 1)
+					: undefined,
 		};
 
 		return this;
@@ -886,6 +893,16 @@ async function spillLargeResultToArtifact(
 // =============================================================================
 // Tool wrapper
 // =============================================================================
+
+export async function postProcessToolResult(
+	result: AgentToolResult,
+	toolName: string,
+	context?: AgentToolContext,
+): Promise<AgentToolResult> {
+	const processed = await spillLargeResultToArtifact(result, toolName, context);
+	const meta: OutputMeta | undefined = processed.details?.meta;
+	return meta ? { ...processed, content: appendOutputNotice(processed.content, meta) } : processed;
+}
 
 async function wrappedExecute(
 	this: AgentTool & { [kUnwrappedExecute]: AgentToolExecFn },
