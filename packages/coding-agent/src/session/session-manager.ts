@@ -1408,7 +1408,11 @@ export class SessionManager {
 		await this.#setSessionFile(sessionFile);
 	}
 
-	async #setSessionFile(sessionFile: string, loadedSession?: SessionLoadResult): Promise<void> {
+	async #setSessionFile(
+		sessionFile: string,
+		loadedSession?: SessionLoadResult,
+		newSessionOptions?: NewSessionOptions,
+	): Promise<void> {
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
 		this.#draftOnlySessionCleanupArmed = false;
@@ -1428,7 +1432,7 @@ export class SessionManager {
 		if (fileEntries.length === 0) {
 			// Explicit but empty/missing path (e.g. --session flag): start fresh but
 			// keep the requested path and materialize the header immediately.
-			this.#resetToNewSession(undefined, resolvedSessionFile);
+			this.#resetToNewSession(newSessionOptions, resolvedSessionFile);
 			this.#forceFileCreation = true;
 			await this.#rewriteAtomically();
 			this.#fileIsCurrent = true;
@@ -2922,12 +2926,13 @@ export class SessionManager {
 	 * Open a specific session file.
 	 * @param sessionDir Optional dir for /new or /branch; defaults to the file's parent.
 	 * @param options.initialCwd Cwd to use when the file is empty or missing.
+	 * @param options.parentSession Parent session file recorded when the file is empty or missing.
 	 */
 	static async open(
 		filePath: string,
 		sessionDir?: string,
 		storage: SessionStorage = new FileSessionStorage(),
-		options?: { initialCwd?: string; suppressBreadcrumb?: boolean },
+		options?: { initialCwd?: string; parentSession?: string; suppressBreadcrumb?: boolean },
 	): Promise<SessionManager> {
 		const loaded = await loadSessionFile(filePath, storage);
 		const header = loaded.entries.find(entry => entry.type === "session") as SessionHeader | undefined;
@@ -2947,7 +2952,7 @@ export class SessionManager {
 				: path.dirname(path.resolve(filePath)));
 		const manager = new SessionManager(cwd, dir, true, storage);
 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
-		await manager.#setSessionFile(filePath, loaded);
+		await manager.#setSessionFile(filePath, loaded, { parentSession: options?.parentSession });
 		return manager;
 	}
 

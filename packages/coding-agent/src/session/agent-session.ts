@@ -56,6 +56,7 @@ import type {
 	CodexCompactionContext,
 	ImageContent,
 	Message,
+	MessageAttribution,
 	Model,
 	OAuthAccountIdentity,
 	ProviderResponseMetadata,
@@ -253,9 +254,11 @@ import type {
 	RestoredQueuedMessage,
 	RoleModelCycle,
 	RoleModelCycleResult,
+	SendUserMessageOptions,
 	SessionHandoffOptions,
 	SessionOAuthAccountList,
 	SessionStats,
+	SteerOptions,
 	UsageFallbackConfirmer,
 } from "./agent-session-types";
 import { writeArtifact } from "./artifacts";
@@ -6217,6 +6220,8 @@ export class AgentSession {
 			this.#toolChoiceQueue.removeByLabel("plan-mode-decision");
 		}
 
+		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
+
 		// If streaming, queue via steer()/followUp()/aside based on option
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
@@ -6227,7 +6232,10 @@ export class AgentSession {
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
-			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, submittedAt);
+			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
+				timestamp: submittedAt,
+				attribution: promptAttribution,
+			});
 			return true;
 		}
 
@@ -6273,14 +6281,17 @@ export class AgentSession {
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
-			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, submittedAt, {
-				images: normalizedImages,
-				descriptionNotice: imageDescriptionNotice,
+			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
+				timestamp: submittedAt,
+				attribution: promptAttribution,
+				preprocessed: {
+					images: normalizedImages,
+					descriptionNotice: imageDescriptionNotice,
+				},
 			});
 			return true;
 		}
 
-		const promptAttribution = options?.attribution ?? (options?.synthetic ? "agent" : "user");
 		if (externalThinkingToolChoice) {
 			this.#toolChoiceQueue.pushOnce(externalThinkingToolChoice, {
 				label: "external-thinking",
@@ -6830,7 +6841,7 @@ export class AgentSession {
 	/**
 	 * Queue a steering message to interrupt the agent mid-run.
 	 */
-	async steer(text: string, images?: ImageContent[]): Promise<void> {
+	async steer(text: string, images?: ImageContent[], options?: SteerOptions): Promise<void> {
 		if (text.startsWith("/")) {
 			this.#throwIfExtensionCommand(text);
 		}
@@ -6839,7 +6850,10 @@ export class AgentSession {
 		// Stamp before image preprocessing so a queued image steer measures from
 		// the operator's submission, not after the vision-model description.
 		const submittedAt = Date.now();
-		await this.#queueUserMessage(expandedText, images, "steer", submittedAt);
+		await this.#queueUserMessage(expandedText, images, "steer", {
+			timestamp: submittedAt,
+			attribution: options?.attribution,
+		});
 	}
 
 	/**
@@ -6860,12 +6874,15 @@ export class AgentSession {
 		// from the operator's submission, not after the vision-model description.
 		const submittedAt = Date.now();
 		if (!options?.synthetic) {
-			await this.#queueUserMessage(expandedText, images, "followUp", submittedAt);
+			await this.#queueUserMessage(expandedText, images, "followUp", {
+				timestamp: submittedAt,
+				attribution: options?.attribution,
+			});
 			return;
 		}
 		// Synthetic branch: agent-initiated hidden developer message. Bypass
 		// #queueUserMessage (which clears advisor auto-resume suppression and
-		// enqueues as a user-attributed message) and place the developer message
+		// enqueues as a user-role message) and place the developer message
 		// directly on the follow-up queue.
 		const normalizedImages = await this.#normalizeImagesForModel(images);
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -6921,9 +6938,15 @@ export class AgentSession {
 		text: string,
 		images: ImageContent[] | undefined,
 		mode: "steer" | "followUp" | "aside",
-		timestamp?: number,
-		preprocessed?: { images: ImageContent[] | undefined; descriptionNotice: CustomMessage | undefined },
+		options?: {
+			timestamp?: number;
+			attribution?: MessageAttribution;
+			preprocessed?: { images: ImageContent[] | undefined; descriptionNotice: CustomMessage | undefined };
+		},
 	): Promise<void> {
+		const attribution = options?.attribution ?? "user";
+		const timestamp = options?.timestamp;
+		const preprocessed = options?.preprocessed;
 		// Captured before any await below so the aside branch can detect a
 		// newSession()/switchSession() that completed while normalization/vision
 		// description was in flight and drop a record that would otherwise land in a
@@ -6957,7 +6980,7 @@ export class AgentSession {
 			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
 			const records: AgentMessage[] = [];
 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
-			records.push({ role: "user", content, attribution: "user", timestamp: timestamp ?? Date.now() });
+			records.push({ role: "user", content, attribution, timestamp: timestamp ?? Date.now() });
 			this.#irc.queueAside(records);
 			// The awaits above (image normalization / vision description) can span the run's
 			// settle, so the run may already be idle by the time the record lands in the aside
@@ -6973,7 +6996,7 @@ export class AgentSession {
 			this.agent.followUp({
 				role: "user",
 				content,
-				attribution: "user",
+				attribution,
 				timestamp: timestamp ?? Date.now(),
 			});
 		} else {
@@ -6983,7 +7006,7 @@ export class AgentSession {
 				role: "user",
 				content,
 				steering: true,
-				attribution: "user",
+				attribution,
 				timestamp: timestamp ?? Date.now(),
 			});
 		}
@@ -7376,7 +7399,7 @@ export class AgentSession {
 	 */
 	async sendUserMessage(
 		content: string | (TextContent | ImageContent)[],
-		options?: { deliverAs?: "steer" | "followUp" | "aside" },
+		options?: SendUserMessageOptions,
 	): Promise<void> {
 		// Normalize content to text string + optional images
 		let text: string;
@@ -7401,17 +7424,17 @@ export class AgentSession {
 		let deliveredAsAside = false;
 		if (options?.deliverAs === "aside") {
 			if (this.isStreaming) {
-				await this.#queueUserMessage(text, images, "aside");
+				await this.#queueUserMessage(text, images, "aside", { attribution: options.attribution });
 				return;
 			}
 			// Idle: fall through to the prompt flow below (starts a turn, like an omitted
 			// deliverAs) — there is no live run to inject an aside into.
 			deliveredAsAside = true;
 		} else if (options?.deliverAs === "followUp") {
-			await this.#queueUserMessage(text, images, "followUp");
+			await this.#queueUserMessage(text, images, "followUp", { attribution: options.attribution });
 			return;
 		} else if (options?.deliverAs === "steer") {
-			await this.#queueUserMessage(text, images, "steer");
+			await this.#queueUserMessage(text, images, "steer", { attribution: options.attribution });
 			return;
 		}
 
@@ -7423,6 +7446,7 @@ export class AgentSession {
 		// "steer") keeps that race from degrading a non-interrupting aside into a
 		// tool-batch-aborting steer.
 		await this.prompt(text, {
+			attribution: options?.attribution,
 			expandPromptTemplates: false,
 			images,
 			streamingBehavior: deliveredAsAside ? "aside" : "steer",

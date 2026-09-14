@@ -13,7 +13,7 @@ import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
-import { resolveSoftRequestBudget, runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
+import { buildBudgetNotice, resolveSoftRequestBudget, runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
@@ -37,6 +37,10 @@ import { createSessionDefaults } from "../helpers/session-defaults";
 interface MockSessionHandle {
 	session: AgentSession;
 	prompts: Array<{ text: string; options?: PromptOptions }>;
+	sentUserMessages: Array<{
+		content: string | unknown[];
+		options?: { deliverAs?: "steer" | "followUp" | "aside"; attribution?: "user" | "agent" };
+	}>;
 	abortCalls: () => number;
 	disposeCalls: () => number;
 }
@@ -56,6 +60,7 @@ function createMockSession(
 	const listeners: Array<(event: AgentSessionEvent) => void> = [];
 	const messages: unknown[] = [];
 	const prompts: Array<{ text: string; options?: PromptOptions }> = [];
+	const sentUserMessages: MockSessionHandle["sentUserMessages"] = [];
 	let abortCount = 0;
 	let disposeCount = 0;
 	let promptIndex = 0;
@@ -91,7 +96,9 @@ function createMockSession(
 			return true;
 		},
 		getLastAssistantMessage: () => messages[messages.length - 1] as never,
-		sendUserMessage: async () => {},
+		sendUserMessage: async (content, options) => {
+			sentUserMessages.push({ content, options });
+		},
 		setIrcWakeTurnObserver: observer => {
 			ircWakeTurnObserver = observer;
 		},
@@ -148,6 +155,7 @@ function createMockSession(
 	return {
 		session: session as AgentSession,
 		prompts,
+		sentUserMessages,
 		abortCalls: () => abortCount,
 		disposeCalls: () => disposeCount,
 	};
@@ -254,10 +262,11 @@ describe("runSubprocess soft request budget", () => {
 				isError: false,
 			} as AgentSessionEvent);
 		});
-		mockCreateAgentSession(handle.session);
+		const createAgentSessionSpy = mockCreateAgentSession(handle.session);
 		registerRunning(id, handle.session);
+		const parentSessionFile = `${tempDir.path()}/parent.jsonl`;
 
-		const result = await runSubprocess(baseOptions(id));
+		const result = await runSubprocess({ ...baseOptions(id), sessionFile: parentSessionFile });
 
 		// The budget stop aborted the free-running turn exactly once before the
 		// wrap-up reminder; the second abort (after the terminal yield) is the
@@ -267,6 +276,12 @@ describe("runSubprocess soft request budget", () => {
 		expect(handle.prompts).toHaveLength(2);
 		expect(handle.prompts[1]?.options?.synthetic).toBe(true);
 		expect(handle.prompts[1]?.options?.toolChoice).toEqual({ type: "tool", name: "yield" });
+		expect(handle.sentUserMessages).toContainEqual({
+			content: buildBudgetNotice(2, 2),
+			options: { deliverAs: "steer", attribution: "agent" },
+		});
+		const createOptions = createAgentSessionSpy.mock.calls[0]?.[0];
+		expect(createOptions?.sessionManager?.getHeader()?.parentSession).toBe(parentSessionFile);
 		// The forced yield finalizes as a normal completion, not an abort.
 		expect(result.aborted).toBe(false);
 		expect(result.exitCode).toBe(0);
