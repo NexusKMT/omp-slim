@@ -784,7 +784,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 	it("resumes the interrupted turn when there was nothing to compact", async () => {
 		// The abort has already ended the turn by the time compact() discovers the
 		// session is too small. Rejecting without a resume strands the work exactly
-		// like the original bug; history is untouched, so resuming is safe.
+		// like the original bug; the rejection appended nothing, so resuming is safe.
 		session.settings.override("compaction.autoContinue", true);
 		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
 

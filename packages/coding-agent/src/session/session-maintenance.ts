@@ -259,15 +259,16 @@ function handoffSummaryFromDocument(
 }
 
 /**
- * Manual compaction found no compactable history. Thrown before any method
- * runs or entry lands, so — unlike a hook cancel or a summarizer failure — it
- * leaves the transcript untouched, and a turn the compaction aborted is
- * resumed exactly as after a committed summary.
+ * Manual compaction rejected as a no-op: the session is too small, or its
+ * branch already ends in a compaction entry. Thrown before this pass runs a
+ * method or appends anything, so — unlike a hook cancel or a summarizer
+ * failure — a turn the pass aborted (or a resume it inherited from an earlier
+ * pass) is resumed exactly as after a committed summary.
  */
-class NothingToCompactError extends Error {
+class ManualCompactionNoOpError extends Error {
 	constructor(message: string) {
 		super(message);
-		this.name = "NothingToCompactError";
+		this.name = "ManualCompactionNoOpError";
 	}
 }
 
@@ -826,10 +827,10 @@ export class SessionMaintenance {
 			onCommitted?.();
 		};
 		let methodAttempted = false;
-		// Nothing-to-compact rejections leave history untouched, so an interrupted
-		// turn resumes on them like on a commit (a hook cancel or summarizer failure
-		// does not resume).
-		let nothingToCompact = false;
+		// No-op rejections (too small / already compacted) make no history change
+		// in this pass, so an interrupted or inherited turn resumes on them like on
+		// a commit; a hook cancel or summarizer failure does not resume.
+		let rejectedAsNoOp = false;
 		// Set when this manual pass aborted a live turn — or inherited a resume an
 		// earlier pass withheld for a still-parked prompt (see
 		// `waitForManualCompactionCleanup`): the turn is resumed once the summary
@@ -958,9 +959,9 @@ export class SessionMaintenance {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
 				if (lastEntry?.type === "compaction") {
-					throw new NothingToCompactError("Already compacted");
+					throw new ManualCompactionNoOpError("Already compacted");
 				}
-				throw new NothingToCompactError("Nothing to compact (session too small)");
+				throw new ManualCompactionNoOpError("Nothing to compact (session too small)");
 			}
 
 			let hookCompaction: CompactionResult | undefined;
@@ -1225,7 +1226,7 @@ export class SessionMaintenance {
 			return compactionResult;
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
-			if (error instanceof NothingToCompactError) nothingToCompact = true;
+			if (error instanceof ManualCompactionNoOpError) rejectedAsNoOp = true;
 			if (
 				methodAttempted &&
 				!compactionCommitted &&
@@ -1266,7 +1267,7 @@ export class SessionMaintenance {
 					this.#manualCompactionCleanup = undefined;
 				}
 				manualCompactionCleanup?.resolve();
-				if ((compactionCommitted || nothingToCompact) && resumeInterruptedTurn) {
+				if ((compactionCommitted || rejectedAsNoOp) && resumeInterruptedTurn) {
 					if (this.#promptsAwaitingCleanup > 0) {
 						// A prompt parked on the barrier just resolved is the user's next
 						// intent and takes the session instead (its continuation is a
@@ -1295,7 +1296,7 @@ export class SessionMaintenance {
 		const settings = this.#host.settings.getGroup("compaction");
 		const preparation = prepareCompaction(entries, settings, model, this.#tokenizer);
 		if (!preparation)
-			throw new NothingToCompactError("Nothing to compact (session too small or already rolled over)");
+			throw new ManualCompactionNoOpError("Nothing to compact (session too small or already rolled over)");
 
 		const sourceLeafId = entries.at(-1)?.id;
 		const sourceSessionId = this.#host.sessionId();
