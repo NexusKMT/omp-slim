@@ -368,7 +368,9 @@ function formatCostPair(model: Model): string {
 
 	const fmt = (n: number): string => {
 		if (!Number.isFinite(n) || n < 0) return "?";
-		if (n > 0 && n < 0.01) return String(n);
+		if (n > 0 && n < 0.01) {
+			return n.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+		}
 		const s = n >= 100 ? String(Math.round(n)) : n >= 10 ? n.toFixed(1) : n.toFixed(2);
 		return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 	};

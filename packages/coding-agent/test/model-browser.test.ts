@@ -332,15 +332,20 @@ describe("ModelBrowser native model metadata", () => {
 	});
 
 	test("price formatting preserves integer zeros and positive sub-cent rates", () => {
-		const model = makeModel("fixture", "priced");
-		model.cost.input = 100;
-		model.cost.output = 0.001;
-		const browser = makeBrowser([model], []);
+		const priced = makeModel("fixture", "priced");
+		priced.cost.input = 100;
+		priced.cost.output = 0.001;
+		const tiny = makeModel("fixture", "tiny");
+		tiny.cost.input = 0.0000001;
+		tiny.cost.output = 0.001;
+		const browser = makeBrowser([priced, tiny], []);
 		const rows = browser.render(100).map(line => Bun.stripANSI(line));
 		const listRow = rows.find(line => line.includes("fixture/priced"));
 		const detailRow = rows.find(line => line.includes("$100/0.001 per M"));
+		const tinyRow = rows.find(line => line.includes("fixture/tiny"));
 		expect(listRow).toContain("$100/0.001");
 		expect(detailRow).toContain("$100/0.001 per M");
+		expect(tinyRow).toContain("$0.0000001/0.001");
 		expect(rows.every(line => Bun.stringWidth(line) <= 100)).toBe(true);
 	});
 });
