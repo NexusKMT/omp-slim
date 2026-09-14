@@ -416,10 +416,7 @@ describe("BtwController", () => {
 		expect(Bun.stripANSI(ctx.btwContainer.render(100).join("\n"))).toContain("Copied");
 	});
 	it("does not confirm a superseded panel when the clipboard settles late", async () => {
-		let releaseCopy!: () => void;
-		const copyGate = new Promise<void>(resolve => {
-			releaseCopy = resolve;
-		});
+		const { promise: copyGate, resolve: releaseCopy } = Promise.withResolvers<void>();
 		const copySpy = vi.spyOn(clipboard, "copyToClipboard").mockImplementation(async () => {
 			await copyGate;
 		});
