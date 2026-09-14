@@ -95,7 +95,9 @@ export async function searchOllama(params: SearchParamsWithFetch): Promise<Searc
 		sessionId: params.sessionId,
 	});
 
-	const numResults = clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
+	const numResults = Math.floor(
+		clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS),
+	);
 	const fetchImpl = params.fetch;
 
 	const parsed = params.parsedQuery ?? parseSearchQuery(params.query);

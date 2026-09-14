@@ -182,6 +182,21 @@ describe("Ollama searchOllama request shape", () => {
 		expect(capturedBody?.max_results).toBe(1);
 	});
 
+	it("floors fractional max_results to an integer", async () => {
+		let capturedBody: Record<string, unknown> | undefined;
+		const fetchMock: FetchImpl = async (_input, init) => {
+			capturedBody = JSON.parse(init?.body as string);
+			return new Response(JSON.stringify({ results: [] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		};
+
+		await searchOllama({ ...makeParams("test"), numSearchResults: 2.7, fetch: fetchMock });
+
+		expect(capturedBody?.max_results).toBe(2);
+	});
+
 	it("prefers numSearchResults over limit when both are set", async () => {
 		let capturedBody: Record<string, unknown> | undefined;
 		const fetchMock: FetchImpl = async (_input, init) => {
