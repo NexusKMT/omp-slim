@@ -14,8 +14,9 @@
 name = "pi-builtins"
 version.workspace = true
 edition.workspace = true
-license = "MIT"
+license.workspace = true
 authors.workspace = true
+homepage.workspace = true
 repository.workspace = true
 rust-version = "1.88.0"
 description = "Builtins and in-process command-line utilities for the embedded brush shell"

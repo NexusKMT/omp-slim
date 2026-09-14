@@ -919,7 +919,7 @@ mod tests {
 		let captured_path = root.0.join("Previous.app");
 		let moved_path = root.0.join("Moved Previous.app");
 		let previous = found(&captured_path, "com.example.previous");
-		let (context, state) = context(&root, previous.clone());
+		let (context, state) = context(&root, previous);
 		let snapshot = prepare(&context).unwrap();
 		state
 			.lock()
