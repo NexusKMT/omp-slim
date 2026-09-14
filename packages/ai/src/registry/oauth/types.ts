@@ -70,12 +70,20 @@ export interface OAuthProviderInfo {
 	storeCredentialsAs?: string;
 }
 
+/** Sign-in URL and cookie to capture in an isolated, host-owned browser. */
+export type OAuthBrowserSessionRequest = {
+	url: string;
+	cookieName: string;
+};
+
 export interface OAuthController {
 	onAuth?(info: OAuthAuthInfo): void;
 	onProgress?(message: string): void;
 	/** Request pasted callback input; stop any visible prompt when `signal` aborts. */
 	onManualCodeInput?(signal?: AbortSignal): Promise<string>;
 	onPrompt?(prompt: OAuthPrompt): Promise<string>;
+	/** Complete browser login and return only the requested cookie, privately. Reject on cancellation or failure. */
+	onBrowserSession?(request: OAuthBrowserSessionRequest, signal?: AbortSignal): Promise<string>;
 	signal?: AbortSignal;
 	fetch?: FetchImpl;
 }

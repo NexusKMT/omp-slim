@@ -82,6 +82,7 @@ import { AskTool, type AskToolDetails, type AskToolInput } from "../../tools/ask
 import { sanitizeDisplayWarnings, shortenPath } from "../../tools/render-utils";
 import { ToolAbortError } from "../../tools/tool-errors";
 import { applyHyperlinkSetting } from "../../tui/hyperlink";
+import { captureBrowserSession } from "../../utils/browser-session";
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
@@ -2037,6 +2038,7 @@ export class SelectorController {
 		try {
 			const identity = await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
 				signal: dialog.signal,
+				onBrowserSession: captureBrowserSession,
 				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
 					// The dialog renders the full URL (SSH-safe copy target) and
 					// opens the browser best-effort.
