@@ -115,6 +115,11 @@ function parseOllamaUrl(url: string): { modelRef: string; baseRef: string; pageU
 		}
 
 		const baseRoot = parts[0].split(":")[0];
+		// Single-segment shorthands (ollama.com/<model>) share the root
+		// namespace with marketing routes, so a tags-first check in the
+		// handler below confirms the candidate before fetching its page. A
+		// missing model yields no tags match, which maps to null
+		// (generic-scrape fallback).
 		if (parts.length === 1 && !RESERVED_ROOTS.has(baseRoot)) {
 			const modelRef = decodeURIComponent(parts[0]);
 			const baseRef = modelRef.split(":")[0] ?? modelRef;
@@ -179,25 +184,28 @@ export const handleOllama: SpecialHandler = async (
 		const { modelRef, baseRef, pageUrl } = parsed;
 		const fetchedAt = new Date().toISOString();
 
+		// Confirm the candidate against the tags index before fetching its
+		// page: the tags response is a single small (~5 KiB) JSON payload
+		// versus a full HTML model page, so bailing here avoids a wasted page
+		// fetch for non-model root paths like /turbo. When the tags API is
+		// down, fall through to the page fetch and let its outcome decide.
 		const tagsUrl = "https://ollama.com/api/tags";
-		const [tagsResult, pageResult] = await Promise.all([
-			loadPage(tagsUrl, { timeout, signal, headers: { Accept: "application/json" } }),
-			loadPage(pageUrl, { timeout, signal }),
-		]);
-
+		const tagsResult = await loadPage(tagsUrl, { timeout, signal, headers: { Accept: "application/json" } });
 		const tagsData = tagsResult.ok ? tryParseJson<OllamaTagsResponse>(tagsResult.content) : null;
-
-		const html = pageResult.ok ? pageResult.content : "";
-		const description = html ? extractMetaDescription(html) : null;
-		const htmlParameterSizes = html ? extractParameterSizes(html) : [];
-		const htmlTags = html ? extractTagsFromHtml(html, baseRef) : [];
-
 		const baseLower = baseRef.toLowerCase();
 		const models = tagsData?.models ?? [];
 		const matchingModels = models.filter(model => {
 			const name = (model.model ?? model.name ?? "").toLowerCase();
 			return name === baseLower || name.startsWith(`${baseLower}:`);
 		});
+		if (tagsResult.ok && matchingModels.length === 0) return null;
+
+		const pageResult = await loadPage(pageUrl, { timeout, signal });
+
+		const html = pageResult.ok ? pageResult.content : "";
+		const description = html ? extractMetaDescription(html) : null;
+		const htmlParameterSizes = html ? extractParameterSizes(html) : [];
+		const htmlTags = html ? extractTagsFromHtml(html, baseRef) : [];
 
 		if (!pageResult.ok && (!tagsResult.ok || matchingModels.length === 0)) {
 			return null;

@@ -53,6 +53,57 @@ describe("handleOllama scraper with mocked responses", () => {
 		expect(result).toBeNull();
 	});
 
+	it("returns null for single-segment non-models without fetching the page", async () => {
+		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
+			if (url.includes("/api/tags")) {
+				return {
+					ok: true,
+					status: 200,
+					finalUrl: url,
+					contentType: "application/json",
+					content: JSON.stringify({ models: [{ name: "llama3:latest" }] }),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				finalUrl: url,
+				contentType: "text/html",
+				content: "<html></html>",
+			};
+		});
+
+		const result = await handleOllama("https://ollama.com/turbo", 5000);
+		expect(result).toBeNull();
+		expect(loadPage).toHaveBeenCalledTimes(1);
+	});
+
+	it("falls through to the page fetch when the tags API is down", async () => {
+		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
+			if (url.includes("/api/tags")) {
+				return {
+					ok: false,
+					status: 500,
+					finalUrl: url,
+					contentType: "application/json",
+					content: "Internal Error",
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				finalUrl: url,
+				contentType: "text/html",
+				content: `<html><head><meta name="description" content="Offline model page" /></head></html>`,
+			};
+		});
+
+		const result = await handleOllama("https://ollama.com/offline-model", 5000);
+		expect(result).not.toBeNull();
+		expect(result?.content).toContain("# offline-model");
+		expect(loadPage).toHaveBeenCalledTimes(2);
+	});
+
 	it("returns null when page fetch fails and tags API returns no matching models", async () => {
 		vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
 			if (url.includes("/api/tags")) {
