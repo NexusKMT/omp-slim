@@ -2219,8 +2219,8 @@ mod tests {
 		fs::write(temp.path().join("parent-untracked.txt"), "delete\n").unwrap();
 
 		// 4. Global excludesfile (core.excludesFile), configured *after* `repo`'s
-		//    cached gix handle was opened by the staging calls above. The clean below
-		//    must observe it or `global.env` is deleted.
+		//    cached gix handle was opened by the staging calls above. The clean
+		//    below must observe it or `global.env` is deleted.
 		let global_exclude = outside.path().join("global-excludes");
 		fs::write(&global_exclude, "global.env\n").unwrap();
 		git(temp.path(), &["config", "core.excludesFile", global_exclude.to_str().unwrap()]);
@@ -2285,8 +2285,8 @@ mod tests {
 			initially_empty.exists(),
 			"pathspec-scoped clean leaves directories outside the pathspec"
 		);
-		// 10. Pathspec scoping: cleaning with a pathspec prunes empty dirs inside the
-		//     pathspec but preserves the parent
+		// 10. Pathspec scoping: cleaning with a pathspec prunes empty dirs inside
+		//     the pathspec but preserves the parent
 		let pathspec_dir = temp.path().join("pathspec-parent/child/grandchild");
 		fs::create_dir_all(&pathspec_dir).unwrap();
 		fs::write(pathspec_dir.join("leaf.txt"), "leaf\n").unwrap();
@@ -2318,7 +2318,8 @@ mod tests {
 		assert!(nested.join("secret.env").exists());
 		assert_eq!(fs::read_to_string(nested.join("secret.env")).unwrap(), "secret\n");
 
-		// Global excluded file MUST SURVIVE (config set after the handle was cached)
+		// Global excluded file MUST SURVIVE (config set after the handle was
+		// cached)
 		assert!(temp.path().join("global.env").exists());
 		assert_eq!(fs::read_to_string(temp.path().join("global.env")).unwrap(), "global-secret\n");
 
@@ -2340,7 +2341,8 @@ mod tests {
 		// Untracked nested repo MUST SURVIVE
 		assert!(untracked_repo.join(".git").exists());
 		assert!(untracked_repo.join("nested.txt").exists());
-		// Symlink to directory: symlink is removed, target directory content survives
+		// Symlink to directory: symlink is removed, target directory content
+		// survives
 		#[cfg(unix)]
 		{
 			assert!(!temp.path().join("symlink-to-dir").exists());
