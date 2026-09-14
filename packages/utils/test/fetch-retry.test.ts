@@ -205,6 +205,15 @@ describe("extractRetryHint", () => {
 		expect(hint).toBeLessThanOrEqual(3_600_000);
 	});
 
+	it("ignores a zone-skewed naive reset-at past the relative retry hint", () => {
+		// Regression: a provider wall-clock `reset at` without offset (Beijing
+		// wall read as UTC inflates the wait ~8h) must not shadow the relative
+		// `retry-after-ms` from the same message — that slept 8h22m for a ~30min wait.
+		const skewedWall = new Date(Date.now() + 1_788_000 + 8 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
+		const body = `[1308][Usage limit reached for 5 hour. Your limit will reset at ${skewedWall}][20260914225615aef9adf30c84a5d] retry-after-ms=1788000`;
+		expect(extractRetryHint(undefined, body)).toBe(1_788_000);
+	});
+
 	it("parses Chinese '将在 YYYY-MM-DD HH:MM:SS 重置' reset timestamp in error body", () => {
 		const future = new Date(Date.now() + 3_600_000).toISOString().replace("T", " ").slice(0, 19);
 		const hint = extractRetryHint(undefined, `已达到使用上限。您的限额将在 ${future} 重置。`);
