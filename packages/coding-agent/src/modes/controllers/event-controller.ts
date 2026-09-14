@@ -1412,8 +1412,8 @@ export class EventController {
 		// The persistence slot exists before message_end notification, unlike
 		// tool_execution_end. Resolve HUD identity only after canonical append.
 		if (event.message.role === "toolResult" && event.message.toolName === "todo" && !event.message.isError) {
-			const details = event.message.details as { phases?: TodoPhase[] } | undefined;
-			if (details?.phases) {
+			const details = event.message.details as { op?: string; phases?: TodoPhase[] } | undefined;
+			if (details?.op !== "view" && details?.phases) {
 				const owner = this.ctx.viewSession;
 				const sessionId = owner.sessionManager.getSessionId();
 				const sessionFile = owner.sessionManager.getSessionFile();
