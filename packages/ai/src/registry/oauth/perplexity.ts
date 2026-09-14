@@ -281,7 +281,7 @@ async function browserSsoLogin(ctrl: OAuthController): Promise<OAuthCredentials>
 		await ctrl.onBrowserSession(
 			{
 				url: `${PERPLEXITY_BASE_URL}/auth/signin`,
-				cookieName: SESSION_COOKIE_NAME,
+				cookieNames: [SESSION_COOKIE_NAME, "next-auth.session-token"],
 			},
 			ctrl.signal,
 		)

@@ -11,7 +11,7 @@ import { ensureChromiumExecutable, loadPuppeteer, removeUserDataDir } from "../t
 
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
-/** Own an isolated sign-in browser; return only the requested cookie, never the cookie jar. */
+/** Own an isolated sign-in browser; return one cookie value in preference order, never the cookie jar. */
 export async function captureBrowserSession(
 	request: OAuthBrowserSessionRequest,
 	signal?: AbortSignal,
@@ -55,8 +55,10 @@ export async function captureBrowserSession(
 			// Chromium applies domain/path/secure matching, including HttpOnly cookies.
 			const { cookies } = await untilAborted(waiting, () => cdp.send("Network.getCookies", { urls: [request.url] }));
 			waiting.throwIfAborted();
-			const session = cookies.find(cookie => cookie.name === request.cookieName);
-			if (session?.value) return session.value;
+			for (const name of request.cookieNames) {
+				const session = cookies.find(cookie => cookie.name === name && cookie.value);
+				if (session) return session.value;
+			}
 			await untilAborted(waiting, () => Bun.sleep(250));
 		}
 	} catch (error) {

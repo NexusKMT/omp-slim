@@ -168,7 +168,7 @@ describe("Perplexity browser SSO login", () => {
 					onBrowserSession: async request => {
 						expect(request).toEqual({
 							url: "https://www.perplexity.ai/auth/signin",
-							cookieName: "__Secure-next-auth.session-token",
+							cookieNames: ["__Secure-next-auth.session-token", "next-auth.session-token"],
 						});
 						return token;
 					},

@@ -7,7 +7,10 @@ import * as launchModule from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import { captureBrowserSession } from "@oh-my-pi/pi-coding-agent/utils/browser-session";
 import type { Browser, LaunchOptions, PuppeteerNode } from "puppeteer-core";
 
-const request = { url: "https://www.perplexity.ai/auth/signin", cookieName: "session" };
+const request = {
+	url: "https://www.perplexity.ai/auth/signin",
+	cookieNames: ["__Secure-next-auth.session-token", "next-auth.session-token"],
+};
 const profiles: string[] = [];
 
 afterEach(async () => {
@@ -19,7 +22,8 @@ function browserFixture() {
 	const readCookies = vi.fn(async () => ({
 		cookies: [
 			{ name: "csrf", value: "other-cookie" },
-			{ name: "session", value: "secret-session" },
+			{ name: "next-auth.session-token", value: "alternate-session" },
+			{ name: "__Secure-next-auth.session-token", value: "secret-session" },
 		],
 	}));
 	const page = Object.assign(new EventEmitter(), {
@@ -54,10 +58,36 @@ async function expectProfilesRemoved() {
 }
 
 describe("browser session capture", () => {
-	it("returns only the requested cookie and removes the owned browser state", async () => {
+	it("prefers the secure cookie and removes the owned browser state", async () => {
 		const fixture = browserFixture();
 		await expect(captureBrowserSession(request)).resolves.toBe("secret-session");
 		expect(fixture.readCookies).toHaveBeenCalledWith("Network.getCookies", { urls: [request.url] });
+		expect(fixture.browser.connected).toBe(false);
+		await expectProfilesRemoved();
+	});
+
+	it("captures an unprefixed Perplexity session when the secure cookie is absent", async () => {
+		const fixture = browserFixture();
+		fixture.readCookies.mockResolvedValue({
+			cookies: [
+				{ name: "csrf", value: "other-cookie" },
+				{ name: "next-auth.session-token", value: "alternate-session" },
+			],
+		});
+		await expect(captureBrowserSession(request, AbortSignal.timeout(1_000))).resolves.toBe("alternate-session");
+		expect(fixture.browser.connected).toBe(false);
+		await expectProfilesRemoved();
+	});
+
+	it("ignores an empty preferred cookie when the alternate session is available", async () => {
+		const fixture = browserFixture();
+		fixture.readCookies.mockResolvedValue({
+			cookies: [
+				{ name: "__Secure-next-auth.session-token", value: "" },
+				{ name: "next-auth.session-token", value: "alternate-session" },
+			],
+		});
+		await expect(captureBrowserSession(request, AbortSignal.timeout(1_000))).resolves.toBe("alternate-session");
 		expect(fixture.browser.connected).toBe(false);
 		await expectProfilesRemoved();
 	});

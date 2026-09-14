@@ -70,10 +70,11 @@ export interface OAuthProviderInfo {
 	storeCredentialsAs?: string;
 }
 
-/** Sign-in URL and cookie to capture in an isolated, host-owned browser. */
+/** Sign-in URL and accepted cookies for an isolated, host-owned browser. */
 export type OAuthBrowserSessionRequest = {
 	url: string;
-	cookieName: string;
+	/** Cookie names in preference order; return the first non-empty matching value. */
+	cookieNames: readonly string[];
 };
 
 export interface OAuthController {
@@ -82,7 +83,7 @@ export interface OAuthController {
 	/** Request pasted callback input; stop any visible prompt when `signal` aborts. */
 	onManualCodeInput?(signal?: AbortSignal): Promise<string>;
 	onPrompt?(prompt: OAuthPrompt): Promise<string>;
-	/** Complete browser login and return only the requested cookie, privately. Reject on cancellation or failure. */
+	/** Complete browser login and return one matching cookie value privately. Reject on cancellation or failure. */
 	onBrowserSession?(request: OAuthBrowserSessionRequest, signal?: AbortSignal): Promise<string>;
 	signal?: AbortSignal;
 	fetch?: FetchImpl;
