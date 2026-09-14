@@ -87,7 +87,7 @@ describe("AgentSession auto-compaction queue resume", () => {
 				});
 				// Handled entirely inside prompt(); starts no agent turn.
 				pi.registerCommand("noop", {
-					handler: () => {
+					handler: async () => {
 						getRuntimeSignals().push("command:noop");
 					},
 				});
