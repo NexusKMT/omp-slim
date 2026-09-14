@@ -1768,7 +1768,7 @@ export async function runRootCommand(
 			throw error;
 		}
 
-		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager) {
+		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
 			const previousCwd = cwd;
 			const recordedCwd = sessionManager.getRecordedCwd() ?? sessionManager.getCwd();
 			const resumedProject = await switchToResumedProject(
@@ -1798,8 +1798,11 @@ export async function runRootCommand(
 			process.exit(0);
 		}
 
-		// Handle --resume (no value): show session picker
-		if (parsedArgs.resume === true && !parsedArgs.fork) {
+		// Handle --resume (no value): show session picker. Skipped under
+		// --no-session — createSessionManager already returned an ephemeral manager,
+		// and the deferred persistence check below (after extension flag ownership is
+		// resolved) rejects a native --resume, so the picker must not run first.
+		if (parsedArgs.resume === true && !parsedArgs.fork && !parsedArgs.noSession) {
 			const folderSessions = await logger.time(
 				"SessionManager.list",
 				SessionManager.list,
