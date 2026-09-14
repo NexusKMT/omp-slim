@@ -854,8 +854,10 @@ describe("BTW follow-up composer", () => {
 		slashed.panel.handleInput(String.fromCharCode(31));
 		expect(Bun.stripANSI(slashed.panel.render(120).join("\n"))).toBe(tabRender);
 		expect(Bun.stripANSI(slashed.panel.render(120).join("\n"))).toContain("switch pane");
-		slashed.panel.markCopied(slashed.record.id);
+		slashed.panel.markCopied(slashed.record.id, slashed.record.answer);
 		expect(Bun.stripANSI(slashed.panel.render(120).join("\n"))).toContain("Copied to clipboard");
+		slashed.panel.update([{ ...slashed.record, answer: "Follow-up answer", updatedAt: 3 }]);
+		expect(Bun.stripANSI(slashed.panel.render(120).join("\n"))).not.toContain("Copied to clipboard");
 	});
 	it("treats f/c/x as draft text and lets Escape cancel only the composer", () => {
 		const followUp = vi.fn(async () => true);

@@ -82,6 +82,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 	#detailWidth = 0;
 	#detailDirty = true;
 	#lastCopiedId: string | undefined;
+	#lastCopiedText: string | undefined;
 	readonly #detail = new ScrollView([], {
 		height: 1,
 		scrollbar: "auto",
@@ -114,8 +115,11 @@ export class BtwHistoryPanel implements Component, Focusable {
 	update(records: readonly BtwHistoryRecord[]): void {
 		this.#records = records;
 		this.#detailDirty = true;
-		if (this.#lastCopiedId !== undefined && !records.some(record => record.id === this.#lastCopiedId)) {
+		const copied =
+			this.#lastCopiedId !== undefined ? records.find(record => record.id === this.#lastCopiedId) : undefined;
+		if (!copied || getBtwCopyText(copied) !== this.#lastCopiedText) {
 			this.#lastCopiedId = undefined;
+			this.#lastCopiedText = undefined;
 		}
 		if (this.#composer && !records.some(record => record.id === this.#composer?.recordId)) {
 			this.#composer = undefined;
@@ -130,10 +134,16 @@ export class BtwHistoryPanel implements Component, Focusable {
 	}
 
 	/** Visual confirmation that `c` copied this record's answer to the clipboard. */
-	markCopied(recordId: string): void {
+	markCopied(recordId: string, text: string): void {
 		this.#lastCopiedId = recordId;
+		this.#lastCopiedText = text;
 		this.#detailDirty = true;
 		this.#options.requestRender();
+	}
+
+	/** The confirmation survives only while the record still holds the copied text. */
+	#isCopied(record: BtwHistoryRecord): boolean {
+		return record.id === this.#lastCopiedId && getBtwCopyText(record) === this.#lastCopiedText;
 	}
 
 	invalidate(): void {
@@ -395,7 +405,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 		if (this.#detailDirty || record !== this.#detailRecord || this.#detailWidth !== width) {
 			const inner = Math.max(1, width - 1);
 			const lines: string[] = [];
-			if (record && record.id === this.#lastCopiedId) {
+			if (record && this.#isCopied(record)) {
 				lines.push(...wrapTextWithAnsi(theme.fg("success", "✓ Copied to clipboard"), inner), "");
 			}
 			if (record) {
@@ -448,7 +458,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 		if (!composer) {
 			if (record && this.#canFollowUp(record)) actions.push(rawKeyHint("f/Enter", "follow up"));
 			if (record && getBtwCopyText(record) !== undefined) {
-				if (record.id === this.#lastCopiedId) actions.push(theme.fg("success", "✓ copied · c to copy again"));
+				if (this.#isCopied(record)) actions.push(theme.fg("success", "✓ copied · c to copy again"));
 				else actions.push(rawKeyHint("c", inner < 40 ? "copy" : "copy answer"));
 			}
 		}

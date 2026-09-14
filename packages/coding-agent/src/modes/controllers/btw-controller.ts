@@ -130,11 +130,15 @@ export class BtwController {
 	async #copyAnswer(answer: string, options?: { historyRecordId?: string }): Promise<boolean> {
 		if (this.#copyInFlight || !answer.trim()) return false;
 		this.#copyInFlight = true;
+		// Clipboard writes settle asynchronously; the user may close this panel or
+		// start another /btw before they do. Confirm only the still-active surface.
+		const inlineRequest = options?.historyRecordId === undefined ? this.#activeRequest : undefined;
 		try {
 			await copyToClipboard(replaceTabs(answer).trim());
 			this.ctx.showStatus("Copied /btw answer to clipboard");
-			if (options?.historyRecordId !== undefined) this.#historyPanel?.markCopied(options.historyRecordId);
-			else if (this.#visible) this.#activeRequest?.component.markCopied();
+			if (options?.historyRecordId !== undefined) this.#historyPanel?.markCopied(options.historyRecordId, answer);
+			else if (inlineRequest && this.#visible && this.#activeRequest === inlineRequest)
+				inlineRequest.component.markCopied();
 			return true;
 		} catch (error) {
 			this.ctx.showError(sanitizeErrorLine(error));

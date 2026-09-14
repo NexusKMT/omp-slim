@@ -415,6 +415,36 @@ describe("BtwController", () => {
 		expect(copySpy).toHaveBeenCalledWith(replaceTabs("Visible\tanswer\n\nfrom /btw"));
 		expect(Bun.stripANSI(ctx.btwContainer.render(100).join("\n"))).toContain("Copied");
 	});
+	it("does not confirm a superseded panel when the clipboard settles late", async () => {
+		let releaseCopy!: () => void;
+		const copyGate = new Promise<void>(resolve => {
+			releaseCopy = resolve;
+		});
+		const copySpy = vi.spyOn(clipboard, "copyToClipboard").mockImplementation(async () => {
+			await copyGate;
+		});
+		const runEphemeralTurn = vi.fn(async () => ({
+			replyText: "First answer",
+			assistantMessage: createAssistantMessage("First answer"),
+		}));
+		const btwContainer = new Container();
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
+		const controller = new BtwController(ctx);
+		try {
+			await controller.start("First?");
+			await drainBtwRequest();
+			const copyPromise = controller.handleCopy();
+			await controller.start("Second?");
+			await drainBtwRequest();
+			releaseCopy();
+			expect(await copyPromise).toBe(true);
+			expect(copySpy).toHaveBeenCalledTimes(1);
+			expect(Bun.stripANSI(btwContainer.render(100).join("\n"))).not.toContain("Copied");
+		} finally {
+			await controller.dispose();
+		}
+	});
+
 	it("does not copy running, empty, or errored /btw answers", async () => {
 		const copySpy = vi.spyOn(clipboard, "copyToClipboard").mockResolvedValue(undefined);
 
