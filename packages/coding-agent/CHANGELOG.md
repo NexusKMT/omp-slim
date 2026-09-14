@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Hub message/job waits now use a fixed 30-second window; removed the `timeoutMs` argument and `async.pollWaitDuration` setting.
+
 ### Added
 
 - Added a privacy warning to memory reports reminding users to review data for secrets before sharing

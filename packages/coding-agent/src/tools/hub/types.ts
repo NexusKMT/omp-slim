@@ -48,6 +48,9 @@ export type HubListStatus = "running" | "idle" | "parked";
 export const DEFAULT_HUB_LIST_LIMIT = 32;
 export const MAX_HUB_LIST_LIMIT = 100;
 
+/** Fixed coordination wait window shared by job and message waits. */
+export const HUB_WAIT_TIMEOUT_MS = 30_000;
+
 /** Addressable roster tallies always returned by `op:"list"`. */
 export interface HubRosterCounts {
 	running: number;
@@ -142,7 +145,6 @@ export type HubRenderArgs = {
 	replyTo?: string;
 	await?: boolean;
 	from?: string;
-	timeoutMs?: number;
 	peek?: boolean;
 	ids?: string[];
 } & Partial<Omit<LaunchParams, "op">>;

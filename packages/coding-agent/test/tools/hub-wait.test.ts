@@ -4,7 +4,7 @@
  * (pure message wait, pure job poll) are covered by the pre-existing
  * messaging/job suites.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 import { IrcBus } from "@oh-my-pi/pi-coding-agent/irc/bus";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -18,7 +18,6 @@ function makeSession(manager: AsyncJobManager | undefined): ToolSession {
 		cwd: process.cwd(),
 		settings: {
 			get(key: string): unknown {
-				if (key === "async.pollWaitDuration") return "5m";
 				if (key === "irc.timeoutMs") return 120_000;
 				return undefined;
 			},
@@ -44,8 +43,32 @@ describe("hub unified wait", () => {
 		IrcBus.resetGlobalForTests();
 	});
 	afterEach(() => {
+		vi.useRealTimers();
 		AgentRegistry.resetGlobalForTests();
 		IrcBus.resetGlobalForTests();
+	});
+
+	test("job waits return after thirty seconds without cancelling unfinished work", async () => {
+		vi.useFakeTimers();
+		const manager = new AsyncJobManager({ onJobComplete: () => {} });
+		const job = registerHangingJob(manager, "unfinished job");
+		try {
+			let settled = false;
+			const pending = new HubTool(makeSession(manager)).execute("deadline", { op: "wait" }).then(result => {
+				settled = true;
+				return result;
+			});
+			vi.advanceTimersByTime(29_999);
+			for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+			expect(settled).toBe(false);
+			vi.advanceTimersByTime(1);
+			const result = await pending;
+			expect(result.useless).toBe(true);
+			expect(result.details).toMatchObject({ op: "wait", jobs: [{ id: job.id, status: "running" }] });
+			expect(manager.getJob(job.id)?.status).toBe("running");
+		} finally {
+			manager.cancel(job.id);
+		}
 	});
 
 	test("an incoming message settles the wait while watched jobs keep running", async () => {
@@ -123,9 +146,8 @@ describe("hub unified wait", () => {
 		});
 
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
-		// `timeoutMs: 0` would block forever if the stale ref still opened the
-		// message-wait gate; the test times out instead of asserting.
-		const result = await new HubTool(makeSession(manager)).execute("call_4", { op: "wait", timeoutMs: 0 });
+		// Opening the message-wait gate would exceed the test deadline.
+		const result = await new HubTool(makeSession(manager)).execute("call_4", { op: "wait" });
 		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
 		expect(text).toContain("No running background jobs to wait for.");
