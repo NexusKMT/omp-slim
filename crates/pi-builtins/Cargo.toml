@@ -95,7 +95,7 @@ rustc-hash = "2.1.1"
 self_cell = "1.0.4"
 serde_json = "1"
 smallvec.workspace = true
-similar = "3.1.0"
+similar = "3.2.0"
 tempfile = "3.15.0"
 tokio-util = "0.7"
 xutf.workspace = true
@@ -152,10 +152,10 @@ features = ["io-util", "macros", "rt"]
 procfs = "0.18.0"
 
 [target."cfg(any(target_os = \"freebsd\", target_os = \"openbsd\"))".dependencies]
-dns-lookup = "3.0.0"
+dns-lookup = "3.0.1"
 
 [target."cfg(unix)".dependencies]
-nix = { version = "0.31.2", features = ["fs", "poll", "process", "resource", "signal", "term", "user"] }
+nix = { version = "0.31.3", features = ["fs", "poll", "process", "resource", "signal", "term", "user"] }
 notify = { version = "=8.2.0", features = ["macos_kqueue"] }
 rlimit = "0.11.0"
 rustix = { version = "1.1.4", features = ["fs", "process", "time"] }
