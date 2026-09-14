@@ -205,15 +205,6 @@ describe("extractRetryHint", () => {
 		expect(hint).toBeLessThanOrEqual(3_600_000);
 	});
 
-	it("ignores a zone-skewed naive reset-at past the relative retry hint", () => {
-		// Regression: a provider wall-clock `reset at` without offset (Beijing
-		// wall read as UTC inflates the wait ~8h) must not shadow the relative
-		// `retry-after-ms` from the same message — that slept 8h22m for a ~30min wait.
-		const skewedWall = new Date(Date.now() + 1_788_000 + 8 * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
-		const body = `[1308][Usage limit reached for 5 hour. Your limit will reset at ${skewedWall}][20260914225615aef9adf30c84a5d] retry-after-ms=1788000`;
-		expect(extractRetryHint(undefined, body)).toBe(1_788_000);
-	});
-
 	it("yields to the relative retry hint over a longer naive reset-at stamp", () => {
 		// A naive stamp is the provider's wall clock in an unknown zone: it
 		// cannot disambiguate against a conflicting relative signal without
