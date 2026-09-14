@@ -710,6 +710,14 @@ export class SessionResolutionError extends Error {
 	}
 }
 
+function exitForSessionResolutionError(error: SessionResolutionError): never {
+	process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
+	if (error.hint) {
+		process.stderr.write(`${chalk.dim(error.hint)}\n`);
+	}
+	process.exit(1);
+}
+
 function resolveForeignSessionSource(
 	parsed: Pick<Args, "continue" | "fork" | "fromClaude" | "fromCodex" | "noSession" | "resume">,
 ): ForeignSessionSource | undefined {
@@ -974,12 +982,27 @@ export function normalizeContinueSessionArgs(parsed: Args, rawArgs?: readonly st
 	parsed.messages.splice(messageIndex, 1);
 }
 
-/** Resolves CLI session flags into an existing, forked, in-memory, or cancelled session manager. */
+function validateSessionPersistenceArgs(parsed: Pick<Args, "continue" | "noSession" | "resume">): void {
+	if (!parsed.noSession) return;
+	if (parsed.resume !== undefined) {
+		throw new SessionResolutionError("--resume requires session persistence");
+	}
+	if (parsed.continue) {
+		throw new SessionResolutionError("--continue requires session persistence");
+	}
+}
+/**
+ * Resolves CLI session flags into an existing, forked, in-memory, or cancelled session manager.
+ *
+ * `nativeFlagOwnership: "preliminary"` is reserved for the startup parse,
+ * before extensions establish whether a built-in-named flag belongs to them.
+ */
 export async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	activeSettings: Settings = settings,
 	askToMoveSession: SessionPrompt = promptMoveSession,
+	options: { nativeFlagOwnership?: "preliminary" | "resolved" } = {},
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
 		if (parsed.noSession) {
@@ -1000,17 +1023,9 @@ export async function createSessionManager(
 	}
 
 	if (parsed.noSession) {
-		// Resolve `--continue <id>` into `--resume <id>` first so the guard fires
-		// for that spelling too, then reject any resume source: `--no-session`
-		// starts a fresh ephemeral session and cannot persist a resumed one, so
-		// silently discarding the source would drop the user's history without a
-		// word. Fail loudly like `--fork`/`--from-*` do above.
 		normalizeContinueSessionArgs(parsed);
-		if (parsed.resume !== undefined) {
-			throw new SessionResolutionError("--resume requires session persistence");
-		}
-		if (parsed.continue) {
-			throw new SessionResolutionError("--continue requires session persistence");
+		if (options.nativeFlagOwnership !== "preliminary") {
+			validateSessionPersistenceArgs(parsed);
 		}
 		return SessionManager.inMemory();
 	}
@@ -1742,15 +1757,13 @@ export async function runRootCommand(
 					parsedArgs,
 					cwd,
 					settingsInstance,
+					promptMoveSession,
+					{ nativeFlagOwnership: "preliminary" },
 				);
 			}
 		} catch (error: unknown) {
 			if (error instanceof SessionResolutionError) {
-				process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
-				if (error.hint) {
-					process.stderr.write(`${chalk.dim(error.hint)}\n`);
-				}
-				process.exit(1);
+				exitForSessionResolutionError(error);
 			}
 			throw error;
 		}
@@ -1952,6 +1965,14 @@ export async function runRootCommand(
 			};
 			const initialArgs = applyExtensionFlags(extensionFlagSink, rawArgs) ?? parsedArgs;
 			normalizeContinueSessionArgs(initialArgs, rawArgs);
+			try {
+				validateSessionPersistenceArgs(initialArgs);
+			} catch (error: unknown) {
+				if (error instanceof SessionResolutionError) {
+					exitForSessionResolutionError(error);
+				}
+				throw error;
+			}
 			if ((parsedArgs.trustedExtensions?.length ?? 0) > 0 && extensionsResult.errors.length > 0) {
 				throw new Error(
 					`Trusted extension failed to load: ${extensionsResult.errors.map(item => item.error).join("; ")}`,

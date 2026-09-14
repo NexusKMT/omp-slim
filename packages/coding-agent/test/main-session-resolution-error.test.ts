@@ -207,6 +207,18 @@ describe("createSessionManager — missing session (#2084)", () => {
 		});
 	});
 
+	it("defers --resume + --no-session rejection while extension flag ownership is unresolved", async () => {
+		const manager = await createSessionManager(
+			{ ...buildResumeArgs("019ea530"), noSession: true },
+			"/current/project",
+			stubSettings,
+			async () => "unavailable",
+			{ nativeFlagOwnership: "preliminary" },
+		);
+
+		expect(manager?.getEntries()).toEqual([]);
+	});
+
 	it("rejects the --resume picker (no value) combined with --no-session (#12008)", async () => {
 		await expect(
 			createSessionManager(
