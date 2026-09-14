@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Late non-blocking advisor notes arriving while a terminal primary turn unwinds now stay visible as advisor cards instead of starting an extra primary request.
+
 ## [18.1.21] - 2026-09-14
 
 ### Fixed
