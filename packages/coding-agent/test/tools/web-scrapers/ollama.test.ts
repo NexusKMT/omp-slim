@@ -306,6 +306,58 @@ describe("handleOllama scraper with mocked responses", () => {
 		expect(result?.content).toContain("`special-model:latest`, `special-model:13b`");
 	});
 
+	it("still renders canonical URLs missing from the tags index", async () => {
+		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
+			if (url.includes("/api/tags")) {
+				return {
+					ok: true,
+					status: 200,
+					finalUrl: url,
+					contentType: "application/json",
+					content: JSON.stringify({ models: [{ name: "unrelated:latest" }] }),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				finalUrl: url,
+				contentType: "text/html",
+				content: `<html><head><meta name="description" content="Canonical model page" /></head></html>`,
+			};
+		});
+
+		const result = await handleOllama("https://ollama.com/library/canonical-model", 5000);
+		expect(result).not.toBeNull();
+		expect(result?.content).toContain("# canonical-model");
+		expect(loadPage).toHaveBeenCalledTimes(2);
+	});
+
+	it("still renders shorthand URLs when the tags payload is malformed", async () => {
+		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
+			if (url.includes("/api/tags")) {
+				return {
+					ok: true,
+					status: 200,
+					finalUrl: url,
+					contentType: "application/json",
+					content: "not json at all",
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				finalUrl: url,
+				contentType: "text/html",
+				content: `<html><head><meta name="description" content="Malformed index page" /></head></html>`,
+			};
+		});
+
+		const result = await handleOllama("https://ollama.com/malformed-model", 5000);
+		expect(result).not.toBeNull();
+		expect(result?.content).toContain("# malformed-model");
+		expect(loadPage).toHaveBeenCalledTimes(2);
+	});
+
 	it("elides tags when there are more than 40 available tags", async () => {
 		const models = Array.from({ length: 45 }, (_, i) => ({
 			name: `big-model:v${i + 1}`,

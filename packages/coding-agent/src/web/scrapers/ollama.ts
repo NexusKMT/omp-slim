@@ -99,7 +99,9 @@ function buildModelPath(parts: string[]): string {
 	return parts.map(part => encodeURIComponent(part)).join("/");
 }
 
-function parseOllamaUrl(url: string): { modelRef: string; baseRef: string; pageUrl: string } | null {
+function parseOllamaUrl(
+	url: string,
+): { modelRef: string; baseRef: string; pageUrl: string; shorthand: boolean } | null {
 	try {
 		const parsed = new URL(url);
 		if (!VALID_HOSTNAMES.has(parsed.hostname)) return null;
@@ -111,7 +113,7 @@ function parseOllamaUrl(url: string): { modelRef: string; baseRef: string; pageU
 			const modelRef = decodeURIComponent(parts[1]);
 			const baseRef = modelRef.split(":")[0] ?? modelRef;
 			const pageUrl = `${parsed.origin}/${buildModelPath(["library", baseRef])}`;
-			return { modelRef, baseRef, pageUrl };
+			return { modelRef, baseRef, pageUrl, shorthand: false };
 		}
 
 		const baseRoot = parts[0].split(":")[0];
@@ -124,7 +126,7 @@ function parseOllamaUrl(url: string): { modelRef: string; baseRef: string; pageU
 			const modelRef = decodeURIComponent(parts[0]);
 			const baseRef = modelRef.split(":")[0] ?? modelRef;
 			const pageUrl = `${parsed.origin}/${buildModelPath(["library", baseRef])}`;
-			return { modelRef, baseRef, pageUrl };
+			return { modelRef, baseRef, pageUrl, shorthand: true };
 		}
 
 		if (parts.length >= 2 && !RESERVED_ROOTS.has(baseRoot)) {
@@ -134,7 +136,7 @@ function parseOllamaUrl(url: string): { modelRef: string; baseRef: string; pageU
 			const modelRef = `${namespace}/${model}`;
 			const baseRef = `${namespace}/${modelBase}`;
 			const pageUrl = `${parsed.origin}/${buildModelPath([namespace, modelBase])}`;
-			return { modelRef, baseRef, pageUrl };
+			return { modelRef, baseRef, pageUrl, shorthand: false };
 		}
 	} catch {}
 
@@ -181,24 +183,29 @@ export const handleOllama: SpecialHandler = async (
 		const parsed = parseOllamaUrl(url);
 		if (!parsed) return null;
 
-		const { modelRef, baseRef, pageUrl } = parsed;
+		const { modelRef, baseRef, pageUrl, shorthand } = parsed;
 		const fetchedAt = new Date().toISOString();
 
-		// Confirm the candidate against the tags index before fetching its
-		// page: the tags response is a single small (~5 KiB) JSON payload
-		// versus a full HTML model page, so bailing here avoids a wasted page
-		// fetch for non-model root paths like /turbo. When the tags API is
-		// down, fall through to the page fetch and let its outcome decide.
+		// Confirm ambiguous single-segment shorthands against the tags index
+		// before fetching the page: they share the root namespace with
+		// marketing routes, and the tags response is a single small (~5 KiB)
+		// JSON payload versus a full HTML model page, so bailing here avoids
+		// a wasted page fetch for paths like /turbo. Canonical and
+		// namespaced URLs skip this gate — the page fetch below plus the
+		// existing failure mapping already decides their outcome. Only a
+		// successfully parsed index with a models array can reject; a failed
+		// fetch or malformed payload falls through to the page.
 		const tagsUrl = "https://ollama.com/api/tags";
 		const tagsResult = await loadPage(tagsUrl, { timeout, signal, headers: { Accept: "application/json" } });
 		const tagsData = tagsResult.ok ? tryParseJson<OllamaTagsResponse>(tagsResult.content) : null;
+		const tagsIndex = Array.isArray(tagsData?.models) ? tagsData.models : null;
 		const baseLower = baseRef.toLowerCase();
-		const models = tagsData?.models ?? [];
+		const models = tagsIndex ?? [];
 		const matchingModels = models.filter(model => {
 			const name = (model.model ?? model.name ?? "").toLowerCase();
 			return name === baseLower || name.startsWith(`${baseLower}:`);
 		});
-		if (tagsResult.ok && matchingModels.length === 0) return null;
+		if (shorthand && tagsIndex && matchingModels.length === 0) return null;
 
 		const pageResult = await loadPage(pageUrl, { timeout, signal });
 
