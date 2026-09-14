@@ -470,8 +470,10 @@ type AgentContinueOutcome =
 
 /**
  * Reported by `#dispatchPrompt` to `prompt()`: whether the prompt took the
- * session (dispatched, queued, or found a turn already running). Distinct from
- * the public return value, which stays `true` for a dropped prompt.
+ * session — a turn dispatched or queued, or the agent already owning one.
+ * Distinct from the public return value, which stays `true` for a dropped
+ * prompt. A dispatch that `agent.prompt` rejects started no turn and claims
+ * nothing.
  */
 type PromptDispatchOutcome = { sessionClaimed: boolean };
 

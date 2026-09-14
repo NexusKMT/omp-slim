@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { scheduler } from "node:timers/promises";
-import { Agent } from "@oh-my-pi/pi-agent-core";
+import { Agent, AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -673,6 +673,89 @@ describe("AgentSession auto-compaction queue resume", () => {
 		expect(prompted).toHaveLength(1);
 		expect(prompted[0]?.map(message => message.role)).toContain("user");
 		expect(prompted[0]?.some(message => message.synthetic === true)).toBe(false);
+	});
+	it("keeps the resume when a parked prompt is refused only because another prompt is in setup", async () => {
+		// Two prompts park during the compaction. The first enters turn setup
+		// (in-flight, agent owns no turn) and the second is refused with
+		// AgentBusyError on that setup-only busy state. That refusal claims
+		// nothing. The first then reaches `agent.prompt`, which rejects: no turn
+		// started, so it claims nothing either and the interrupted turn resumes.
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.override("compaction.autoContinue", true);
+		sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "previous answer" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 1_000,
+				output: 100,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 1_100,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		});
+		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+
+		session.agent.state.isStreaming = true;
+		vi.spyOn(session, "abort").mockImplementation(async () => {
+			session.agent.state.isStreaming = false;
+		});
+		type Dispatched = { role: string; synthetic?: boolean };
+		const prompted: Dispatched[][] = [];
+		vi.spyOn(session.agent, "prompt")
+			.mockImplementation(async message => {
+				prompted.push((Array.isArray(message) ? message : [message]) as Dispatched[]);
+			})
+			// The first prompt reaches dispatch and the agent rejects it: no turn.
+			.mockImplementationOnce(async () => {
+				throw new Error("provider rejected the request");
+			});
+
+		const compactGate = Promise.withResolvers<void>();
+		(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
+			compactGate.promise;
+		const startGate: AgentStartGate = {
+			entered: Promise.withResolvers<void>(),
+			release: Promise.withResolvers<void>(),
+		};
+		(globalThis as typeof globalThis & { __ompAgentStartGate?: AgentStartGate }).__ompAgentStartGate = startGate;
+		const compacted = session.compact();
+		while (!getRuntimeSignals().includes("before_compact:enter")) {
+			await Promise.resolve();
+		}
+		// Capture the rejections up front: `second` rejects as soon as it observes
+		// `first` in setup, well before the awaits below reach it.
+		const first = session.prompt("first").then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		const second = session.prompt("second").then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		compactGate.resolve();
+		await compacted;
+
+		// First prompt parked in before_agent_start: session busy, agent idle.
+		await startGate.entered.promise;
+		expect(session.isStreaming).toBe(true);
+		expect(session.agent.state.isStreaming).toBe(false);
+		expect(await second).toBeInstanceOf(AgentBusyError);
+
+		startGate.release.resolve();
+		expect(await first).toEqual(new Error("provider rejected the request"));
+		await session.waitForIdle();
+
+		// Neither parked prompt produced a turn, so the interrupted one resumes.
+		const resumes = prompted.filter(turn =>
+			turn.some(message => message.role === "developer" && message.synthetic === true),
+		);
+		expect(resumes).toHaveLength(1);
 	});
 
 	it("cancels an in-flight auto-compaction when manual compact startup aborts", async () => {
