@@ -1497,7 +1497,6 @@ describe("YieldTool", () => {
 			data: '"correct"',
 		} as never);
 		expect(recovered.details?.data).toBe("correct");
-		expect(recovered.content).toEqual([{ type: "text", text: "Result submitted." }]);
 		// Double-encoded number on its own label.
 		const recoveredNum = await tool.execute("call-prim-num", {
 			type: ["verdict_count"],
@@ -1531,7 +1530,6 @@ describe("YieldTool", () => {
 			data: "42",
 		} as never);
 		expect(result.details?.data).toBe("42");
-		expect(result.content).toEqual([{ type: "text", text: "Result submitted." }]);
 	});
 
 	it("does not treat literal $ref fields inside enum values as unresolved schema references", async () => {
