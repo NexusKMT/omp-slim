@@ -1000,6 +1000,18 @@ export async function createSessionManager(
 	}
 
 	if (parsed.noSession) {
+		// Resolve `--continue <id>` into `--resume <id>` first so the guard fires
+		// for that spelling too, then reject any resume source: `--no-session`
+		// starts a fresh ephemeral session and cannot persist a resumed one, so
+		// silently discarding the source would drop the user's history without a
+		// word. Fail loudly like `--fork`/`--from-*` do above.
+		normalizeContinueSessionArgs(parsed);
+		if (parsed.resume !== undefined) {
+			throw new SessionResolutionError("--resume requires session persistence");
+		}
+		if (parsed.continue) {
+			throw new SessionResolutionError("--continue requires session persistence");
+		}
 		return SessionManager.inMemory();
 	}
 	normalizeContinueSessionArgs(parsed);
