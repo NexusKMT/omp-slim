@@ -541,15 +541,13 @@ export function buildSystemPromptToolMetadata(
  *
  * Shared by initial prompt construction and mid-session skill notices so both
  * consult declared capability instead of the tool name. Accepts live tools
- * (`AgentTool`, capability carried as an optional extra property) and
- * projected metadata (`SystemPromptToolMetadata`). */
-export function toolReadsSkillUris(tool: unknown): boolean {
-	return (
-		typeof tool === "object" &&
-		tool !== null &&
-		"readsSkillUris" in tool &&
-		(tool as { readsSkillUris?: unknown }).readsSkillUris === true
-	);
+ * (`AgentTool` declares the `readsSkillUris` capability) and projected
+ * metadata (`SystemPromptToolMetadata`). Accepts `undefined`/`null` (missing
+ * registry/metadata entries) and returns `false` for them. */
+export function toolReadsSkillUris(
+	tool: Pick<AgentTool, "readsSkillUris"> | SystemPromptToolMetadata | undefined | null,
+): boolean {
+	return tool != null && tool.readsSkillUris === true;
 }
 
 /** Builds a mode-specific metadata snapshot for internal prompt assembly. */

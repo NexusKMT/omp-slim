@@ -36,6 +36,8 @@ import {
 } from "./acp-permission-gate";
 import type { ClientBridge, ClientBridgePermissionOutcome } from "./client-bridge";
 import { buildToolNamespacesInfo, resolveCodeMode, type ToolNamespacesInfo } from "./code-mode";
+import { toolReadsSkillUris } from "../system-prompt";
+
 import type { CustomMessage } from "./messages";
 import type { SessionManager } from "./session-manager";
 
@@ -1629,10 +1631,8 @@ export class SessionTools {
 		// Order-preserving join: any reorder must produce a different signature so
 		// the rebuild fires and the new tool list reaches the API.
 		const nameSegment = toolNames.join("\u0001");
-		const describeTool = (tool: AgentTool): string => {
-			const readsSkillUris = "readsSkillUris" in tool && tool.readsSkillUris === true;
-			return `${tool.name}=${tool.label ?? ""}|${tool.description ?? ""}|${tool.customWireName ?? ""}|${readsSkillUris}`;
-		};
+		const describeTool = (tool: AgentTool): string =>
+			`${tool.name}=${tool.label ?? ""}|${tool.description ?? ""}|${tool.customWireName ?? ""}|${toolReadsSkillUris(tool)}`;
 		const descriptionSegment = tools.map(describeTool).join("\u0002");
 		const mountedMCPProjection = projectMountedMCPXdevGuidance(
 			collectMountedMCPToolRoutes(this.#xdev ? listXdevTools(this.#xdev) : []),
@@ -1668,7 +1668,7 @@ export class SessionTools {
 		// names of mounted readers so their mount/unmount/flip rebuilds, while
 		// mount churn of capability-less tools keeps the prompt byte-stable.
 		const mountedReaderSegment = mountedTools
-			.filter(tool => "readsSkillUris" in tool && tool.readsSkillUris === true)
+			.filter(tool => toolReadsSkillUris(tool))
 			.map(tool => tool.name)
 			.sort()
 			.join("\u0002");
