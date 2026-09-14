@@ -1509,6 +1509,11 @@ describe("YieldTool", () => {
 		await expect(
 			tool.execute("call-prim-bad", { type: ["overall_correctness"], data: '"still-wrong"' } as never),
 		).rejects.toThrow(/Section "overall_correctness" does not match schema/);
+		// Decoded `null` stays rejected with a retryable error: finalization
+		// treats null data as missing, so accepting it would warn post-mortem.
+		await expect(
+			tool.execute("call-prim-null", { type: ["overall_correctness"], data: "null" } as never),
+		).rejects.toThrow(/Section "overall_correctness" does not match schema/);
 	});
 
 	it("leaves raw-valid strings untouched by JSON recovery", async () => {
@@ -1519,13 +1524,13 @@ describe("YieldTool", () => {
 				},
 			}),
 		);
-		// `correct` without quotes is already a valid string — recovery must
-		// not parse or alter it (no reverse stringify-into-typed-fields).
+		// `"42"` is already a valid string but also parses as JSON — recovery
+		// must not run before raw validation and coerce it to `42`.
 		const result = await tool.execute("call-raw-str", {
 			type: ["explanation"],
-			data: "correct",
+			data: "42",
 		} as never);
-		expect(result.details?.data).toBe("correct");
+		expect(result.details?.data).toBe("42");
 		expect(result.content).toEqual([{ type: "text", text: "Result submitted." }]);
 	});
 

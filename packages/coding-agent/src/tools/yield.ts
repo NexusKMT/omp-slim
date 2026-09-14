@@ -473,9 +473,12 @@ export class YieldTool implements AgentTool<TSchema, YieldDetails> {
 				// the intended value (executor finalization already parses terminal
 				// yields the same way). Never the reverse — stringifying objects to
 				// fit string-typed fields is silent corruption. The sentinel keeps
-				// decoded `null`/`false` distinct from a parse error.
+				// decoded `false` distinct from a parse error. Decoded `null` is
+				// never adopted: finalization treats null data as missing
+				// (`resolveYieldPayload`), so accepting it here would report success
+				// and then warn post-mortem instead of giving a retryable error.
 				const decoded = parseJsonEncodedValue(data);
-				if (decoded.parsed) {
+				if (decoded.parsed && decoded.value !== null) {
 					const revalidated = validateData(decoded.value);
 					if (revalidated === undefined || revalidated.success) {
 						data = decoded.value;
