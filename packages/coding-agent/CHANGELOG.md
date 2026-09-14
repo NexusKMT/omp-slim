@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Deferred TTSR reminders no longer repeat before the configured `repeatGap` has elapsed ([#12057](https://github.com/can1357/oh-my-pi/issues/12057)).
 - `/debug` memory reports now include numeric memory statistics instead of raw heap snapshots that could expose provider and MCP credentials.
 
 ## [18.1.21] - 2026-09-14
