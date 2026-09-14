@@ -14,6 +14,16 @@ export const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * {@link MAX_TIMER_DELAY_MS} chunk the sleep into back-to-back timer waits
  * so no single timer overflows; an abort during any chunk rejects like
  * `scheduler.wait`.
+ *
+ * The remainder is deliberately consumed by chunk, not recomputed from a
+ * monotonic deadline: deadline tracking never terminates under the repo's
+ * instant `scheduler.wait` mocks (retry-cap suites spy it to resolve
+ * immediately, so `deadline - performance.now()` never reaches zero and the
+ * loop spins forever). A premature native wake (Bun `uv_async_send`, see
+ * `sleepAtLeast` in `packages/agent/src/utils/yield.ts`) can therefore
+ * under-wait by the unelapsed chunk time — but that self-corrects downstream:
+ * credential blocks carry the true deadline independently of this sleep, so
+ * an early retry re-hits 429 and re-sleeps on a fresh server hint.
  */
 export async function sleepLong(delayMs: number, signal?: AbortSignal): Promise<void> {
 	signal?.throwIfAborted();
