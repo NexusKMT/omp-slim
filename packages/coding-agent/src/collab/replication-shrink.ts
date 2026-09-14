@@ -162,6 +162,13 @@ interface WalkFrame {
 	keys: readonly (string | number)[];
 	depth: number;
 	index: number;
+	/**
+	 * Dictionary destination: keys must be defined explicitly (PR #11999
+	 * review) — a plain-assignment `dst[key]` on a `{}` destination routes an
+	 * own `__proto__` key through the inherited setter, mutating the clone's
+	 * prototype and silently dropping persisted extension metadata.
+	 */
+	safe: boolean;
 }
 
 /**
@@ -200,17 +207,29 @@ function shrinkWalk(root: unknown, stringCap: number, arrayLimit: number): unkno
 					keys,
 					depth: depth + 1,
 					index: 0,
+					safe: false,
 				});
 			}
 			return out;
 		}
 
 		const src = value as Record<string, unknown>;
+		const withToJSON = value as { toJSON?: (key?: string) => unknown };
+		if (typeof withToJSON.toJSON === "function") {
+			// Own `toJSON` is honored before the walk: `JSON.stringify` calls it
+			// for the replica JSONL and the sealed wire frame, so the copy must
+			// reflect it — emitting `{}` (a Date's own-key view) would silently
+			// corrupt extension metadata that `structuredClone` preserved
+			// (PR #11999 review). The bound method ships as a leaf pair, so the
+			// serialized clone exactly matches what `stringify` would emit.
+			return { toJSON: withToJSON.toJSON.bind(value) };
+		}
 		// `Object.keys` (not `for…in`) so the clone matches what
 		// `JSON.stringify` will actually emit — inherited keys are not part of
-		// the serialized payload in the first place.
+		// the serialized payload in the first place. Dictionary destination:
+		// an own `__proto__` key must survive as data (PR #11999 review).
 		const keys = Object.keys(src);
-		const out: Record<string, unknown> = {};
+		const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
 		if (keys.length > 0) {
 			ancestors.add(value);
 			stack.push({
@@ -219,6 +238,7 @@ function shrinkWalk(root: unknown, stringCap: number, arrayLimit: number): unkno
 				keys,
 				depth: depth + 1,
 				index: 0,
+				safe: true,
 			});
 		}
 		return out;
@@ -235,7 +255,19 @@ function shrinkWalk(root: unknown, stringCap: number, arrayLimit: number): unkno
 		}
 		const key = frame.keys[frame.index++];
 		if (key === undefined) continue;
-		frame.dst[key] = visit(frame.src[key], frame.depth);
+		const child = visit(frame.src[key], frame.depth);
+		if (frame.safe) {
+			// Explicit define (never a plain assignment): keeps own `__proto__`
+			// keys as data on the null-prototype destination.
+			Object.defineProperty(frame.dst, key, {
+				value: child,
+				writable: true,
+				enumerable: true,
+				configurable: true,
+			});
+		} else {
+			frame.dst[key] = child;
+		}
 	}
 	return result;
 }
@@ -257,7 +289,9 @@ function shrinkWalk(root: unknown, stringCap: number, arrayLimit: number): unkno
  * ancestors become markers, exactly as in the shrink passes. Session entries are
  * JSON by construction (persisted as JSONL, shipped as JSON), so the walk's
  * container handling is not a narrowing for the values the host copies through
- * it; a non-plain leaf such as a `Date` would be walked as an empty object.
+ * it: own `__proto__` keys survive as data (dictionary destinations) and own
+ * `toJSON` methods are honored, matching what `JSON.stringify` emits for the
+ * replica JSONL and the sealed wire frame (PR #11999 review).
  */
 export function copyForReplication<T>(value: T): T {
 	return shrinkWalk(value, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY) as T;
@@ -323,6 +357,22 @@ export function shrinkReplicatedEntry(entry: ReplicatedEntry): ReplicatedEntry {
 		customType: COLLAB_ENTRY_OMITTED_CUSTOM_TYPE,
 		display: true,
 		content: `…[${detail} omitted for collab session: too large to replicate]`,
+	};
+}
+
+/**
+ * Emit the guest-visible notice that accompanies a live oversized-entry
+ * substitution. Mirrors the wording of the placeholder so a guest that only
+ * applies `message` entries to its live agent context still learns an entry
+ * was dropped (PR #11999 review) — notices never enter agent state and never
+ * reach the model, so this is display-only.
+ */
+export function oversizedEntryNotice(entryType: string): Extract<AgentSessionEvent, { type: "notice" }> {
+	return {
+		type: "notice",
+		level: "warning",
+		source: "collab",
+		message: `Host entry omitted: too large to replicate (${entryType}).`,
 	};
 }
 

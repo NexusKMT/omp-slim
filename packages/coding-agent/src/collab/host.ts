@@ -52,7 +52,9 @@ import {
 } from "./registry";
 import { CollabSocket } from "./relay-client";
 import {
+	COLLAB_ENTRY_OMITTED_CUSTOM_TYPE,
 	copyForReplication,
+	oversizedEntryNotice,
 	type ReplicatedEntry,
 	replicationByteLength,
 	shrinkReplicatedEntry,
@@ -427,7 +429,17 @@ export class CollabHost {
 		}
 		this.#registryUnsubscribe = AgentRegistry.global().onChange(() => this.#scheduleAgentsBroadcast());
 		this.#ctx.sessionManager.onEntryAppended = entry => {
-			if (isWireSessionEntry(entry)) this.#send({ t: "entry", entry: shrinkReplicatedEntry(entry) });
+			if (isWireSessionEntry(entry)) {
+				const shrunk = shrinkReplicatedEntry(entry);
+				if (shrunk.type === "custom_message" && shrunk.customType === COLLAB_ENTRY_OMITTED_CUSTOM_TYPE) {
+					// The live path also emits a guest-visible notice: guests only
+					// apply `message` entries to their agent context, so without
+					// this the substitution would be silently invisible there
+					// (PR #11999 review). Notices never enter agent state.
+					this.#send({ t: "event", event: oversizedEntryNotice(entry.type) });
+				}
+				this.#send({ t: "entry", entry: shrunk });
+			}
 			// Model/thinking/title changes land as entries while idle; refresh
 			// guest state promptly (debounce + JSON diff dedupe).
 			this.#scheduleStateBroadcast();

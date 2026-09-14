@@ -41,7 +41,9 @@ import {
 import { CollabSocket } from "@oh-my-pi/pi-coding-agent/collab/relay-client";
 import {
 	COLLAB_ENTRY_OMITTED_CUSTOM_TYPE,
+	copyForReplication,
 	MAX_REPLICATED_PAYLOAD_BYTES,
+	oversizedEntryNotice,
 	type ReplicatedEntry,
 	replicationByteLength,
 	shrinkReplicatedEntry,
@@ -655,5 +657,79 @@ describe("collab snapshot train under an unshrinkable entry (#11433)", () => {
 		const replica = SessionManager.inMemory();
 		for (const entry of chunkEntries) replica.ingestReplicatedEntry(entry);
 		expect(replica.getBranch().map(entry => entry.id)).toEqual(snapshot.entries.map(entry => entry.id));
+	});
+});
+
+describe("copyForReplication JSON contract (PR #11999 review)", () => {
+	it("preserves own __proto__ keys as data instead of mutating the clone's prototype", () => {
+		// structuredClone round-trips an own `__proto__` key as data; the walker
+		// must too. A plain `{}` destination routes the key through the
+		// inherited setter: the metadata silently drops from the guest's JSONL
+		// replica and the clone's prototype changes.
+		const value: Record<string, unknown> = Object.create(null);
+		Object.defineProperty(value, "__proto__", {
+			value: { injected: true },
+			writable: true,
+			enumerable: true,
+			configurable: true,
+		});
+		value.normal = "metadata";
+
+		const copy = copyForReplication(value) as Record<string, unknown>;
+		expect(Object.getPrototypeOf(copy)).toBe(null);
+		expect(Object.prototype.hasOwnProperty.call(copy, "__proto__")).toBe(true);
+		expect((copy.__proto__ as { injected: boolean }).injected).toBe(true);
+		// Exact bytes: the own `__proto__` key must appear in the serialized
+		// payload (built as a literal it would invoke the setter and vanish).
+		expect(JSON.stringify(copy)).toBe('{"__proto__":{"injected":true},"normal":"metadata"}');
+
+		// Nested containers get the same protection: the poisoned key lives one
+		// level down, exactly where an extension payload would carry it.
+		const nested = copyForReplication({ details: value }) as { details: Record<string, unknown> };
+		expect(Object.prototype.hasOwnProperty.call(nested.details, "__proto__")).toBe(true);
+		expect(JSON.stringify(nested.details)).toContain("injected");
+	});
+
+	it("honors own toJSON on snapshot leaves instead of walking them as empty objects", () => {
+		// A Date survives structuredClone and serializes through its `toJSON`;
+		// the walker must reflect that contract, not emit `{}` from the Date's
+		// empty own-key view. Extension custom_message details are the
+		// realistic carrier.
+		const date = new Date("2026-09-13T12:00:00.000Z");
+		const value = { details: { at: date, label: "x" } };
+
+		const copy = copyForReplication(value) as { details: { at: unknown; label: string } };
+		expect(JSON.stringify(copy)).toBe('{"details":{"at":"2026-09-13T12:00:00.000Z","label":"x"}}');
+		expect(replicationByteLength(copy)).not.toBe(null);
+	});
+});
+
+describe("live oversized-entry substitution is guest-visible (PR #11999 review)", () => {
+	it("accompanies a live placeholder with a notice event on the event stream", () => {
+		// Guests only apply `message` entries to their live agent context, so
+		// the placeholder entry alone would be silently invisible there. The
+		// host must emit a notice with the same visible text; notices never
+		// enter agent state, so this stays display-only.
+		const giantKey = "k".repeat(2 * MAX_REPLICATED_PAYLOAD_BYTES);
+		const entry = {
+			type: "message",
+			id: "huge-live-1",
+			parentId: null,
+			timestamp: "2026-09-13T00:00:00Z",
+			message: { role: "user", content: "", timestamp: 0, blob: { [giantKey]: 1 } },
+		} as unknown as ReplicatedEntry;
+
+		const shrunk = shrinkReplicatedEntry(entry);
+		expect(shrunk.type).toBe("custom_message");
+		if (shrunk.type !== "custom_message") throw new Error("expected the typed placeholder");
+		expect(shrunk.customType).toBe(COLLAB_ENTRY_OMITTED_CUSTOM_TYPE);
+		expectBounded(shrunk);
+
+		const notice = oversizedEntryNotice("message");
+		expect(notice.type).toBe("notice");
+		expect(notice.level).toBe("warning");
+		expect(notice.source).toBe("collab");
+		expect(notice.message).toContain("too large to replicate");
+		expect(notice.message).toContain("(message)");
 	});
 });
