@@ -19,15 +19,18 @@ const CN_RESET_AT_PATTERN = /将在\s*([0-9]{4}-[0-9]{2}-[0-9]{2}\s+[0-9]{2}:[0-
 // "retry-after-ms=98497000" / "retry-after-ms: 7200000" / "retry-after-ms = 7200000"
 const RETRY_AFTER_MS_BODY_PATTERN = /\bretry-after-ms\s*[:=]\s*([0-9]+)\b/i;
 
-// A timezone-naive `reset at` reading that overshoots every unambiguous
-// signal by more than this is provider-wall-clock skew (e.g. a Beijing wall
-// timestamp read as UTC inflates the wait ~8h), not a longer window. Well
-// above minute-rounded relative phrases, well below any real zone offset.
-const NAIVE_RESET_SKEW_TOLERANCE_MS = 10 * 60_000;
+// A timezone-naive `reset at` stamp (no `Z`/offset) is the provider's
+// wall clock in an unknown zone: it cannot be converted to a delay without
+// guessing the zone, so it resolves only as a fallback when the body
+// carries no unambiguous relative signal.
+
+// A conflict probe needs no new signal: when a naive `reset at` wall stamp
+// disagrees with the merged relative wait, the merged wait (which already
+// ignores the naive stamp) sleeps first, and the retry after it is the
+// probe — success proves skew, a fresh 429 re-anchors with live timing.
 
 /**
  * Server-suggested retry delay extraction. Merges the patterns historically used
- * by the OpenAI Codex and Google Gemini retry helpers.
  *
  * Header sources (checked in order):
  *  - `retry-after-ms` (milliseconds)
@@ -43,8 +46,8 @@ const NAIVE_RESET_SKEW_TOLERANCE_MS = 10 * 60_000;
  *  - `try again in 250ms` / `try again in 12s` / `try again in 5 min` / `try again in ~158 min`
  *  - `retry-after-ms=98497000` / `retry-after-ms: 7200000` / `retry-after-ms = 7200000`
  *  - `Your limit will reset at 2026-09-01 09:44:51` / `将在 2026-09-01 09:44:51 重置`
- *    (timezone-naive stamps that overshoot every relative signal are provider
- *    wall-clock skew and lose to the relative signal)
+ *    (offset-bearing only; a timezone-naive stamp is provider wall clock in
+ *    an unknown zone and only resolves when no relative signal is present)
  *
  * Returns `undefined` if no signal is found, or `0` when the provider
  * explicitly asks for an immediate retry (`retry-after…=0`, or an absolute
@@ -107,10 +110,14 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 	// provider told to retry immediately.
 	let retryNow = false;
 
-	// Timezone-naive `reset at` stamps (no `Z`/offset): the provider's wall
-	// clock in an unknown zone. They resolve after every unambiguous signal
-	// below, which disambiguates them (see NAIVE_RESET_SKEW_TOLERANCE_MS).
-	const naiveResetCandidates: string[] = [];
+	// Timezone-naive `reset at` stamps (no `Z`/offset) are the provider's
+	// wall clock in an unknown zone — converting them to a delay requires
+	// guessing the zone. They resolve AFTER every unambiguous signal below,
+	// and only as a fallback when none was found.
+	let longestNaiveMs: number | undefined;
+	const considerNaive = (ms: number | undefined): void => {
+		if (ms !== undefined && ms > 0 && (longestNaiveMs === undefined || ms > longestNaiveMs)) longestNaiveMs = ms;
+	};
 	const consider = (ms: number | undefined): void => {
 		if (ms !== undefined && ms > 0 && (longestMs === undefined || ms > longestMs)) longestMs = ms;
 	};
@@ -135,7 +142,8 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 		if (!match?.[1]) continue;
 		// Offset-bearing stamps are unambiguous and compete by longest-wins.
 		// Naive stamps (provider wall clock, unknown zone) resolve after the
-		// relative signals below disambiguate them.
+		// relative signals below, and only when nothing unambiguous was
+		// found — never by guessing the zone against a conflicting signal.
 		const normalized = match[1].replace(" ", "T");
 		const hasOffset = /(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(normalized);
 		if (hasOffset) {
@@ -144,7 +152,10 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 				consider(parsed - Date.now());
 			}
 		} else {
-			naiveResetCandidates.push(normalized);
+			const parsed = Date.parse(`${normalized}Z`);
+			if (!Number.isNaN(parsed) && parsed > Date.now()) {
+				considerNaive(parsed - Date.now());
+			}
 		}
 	}
 	const accountResetMatch = WILL_RESET_IN_PATTERN.exec(body);
@@ -206,19 +217,9 @@ export function extractRetryHint(source: Response | Headers | null | undefined, 
 			considerClamped(resetSeconds > 1_000_000_000 ? resetSeconds * 1000 - Date.now() : resetSeconds * 1000);
 		}
 	}
-	for (const candidate of naiveResetCandidates) {
-		const parsed = Date.parse(`${candidate}Z`);
-		if (Number.isNaN(parsed)) continue;
-		const naiveMs = parsed - Date.now();
-		// Elapsed naive stamps stay ignored (as before): only an explicit
-		// zero/expired relative signal is an authoritative retry-now.
-		if (naiveMs <= 0) continue;
-		// A naive reading past every unambiguous signal is zone skew, not a
-		// longer window: the true window is covered by the relative signal.
-		if (longestMs !== undefined && naiveMs > longestMs + NAIVE_RESET_SKEW_TOLERANCE_MS) continue;
-		consider(naiveMs);
-	}
-	return longestMs ?? (retryNow ? 0 : undefined);
+	// Elapsed naive stamps were ignored before this change and stay ignored:
+	// only an explicit zero/expired relative signal is authoritative retry-now.
+	return longestMs ?? longestNaiveMs ?? (retryNow ? 0 : undefined);
 }
 
 function unitToMs(unit: string): number | undefined {
