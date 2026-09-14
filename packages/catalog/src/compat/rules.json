@@ -19134,7 +19134,10 @@
 				"name": "Amazon Bedrock",
 				"env": {
 					"hook": "aws-bedrock"
-				}
+				},
+				"nativeAuthApis": [
+					"bedrock-converse-stream"
+				]
 			},
 			{
 				"id": "azure",
@@ -19148,7 +19151,10 @@
 				"env": {
 					"hook": "aws-bedrock-mantle"
 				},
-				"allowsMissingApiKey": true
+				"allowsMissingApiKey": true,
+				"nativeAuthApis": [
+					"openai-responses"
+				]
 			},
 			{
 				"id": "google",
