@@ -835,7 +835,10 @@ export class SessionMaintenance {
 		// earlier pass withheld for a still-parked prompt (see
 		// `waitForManualCompactionCleanup`): the turn is resumed once the summary
 		// lands (see the `finally`). Generation is captured after the abort bump so
-		// a reset/new-session in between skips the resume as stale.
+		// a reset/new-session in between skips the resume as stale. This pass's
+		// options gate both (a `suppressContinuation` caller owns whatever turn
+		// follows, e.g. plan-mode approve-and-compact); its outcome gates only the
+		// turn it interrupted itself — see the `finally`.
 		let resumeInterruptedTurn = false;
 		let interruptedTurnGeneration = 0;
 		let inheritedResume = false;
