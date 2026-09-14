@@ -751,11 +751,10 @@ describe("AgentSession auto-compaction queue resume", () => {
 		expect(await first).toEqual(new Error("provider rejected the request"));
 		await session.waitForIdle();
 
-		// Neither parked prompt produced a turn, so the interrupted one resumes.
-		const resumes = prompted.filter(turn =>
-			turn.some(message => message.role === "developer" && message.synthetic === true),
-		);
-		expect(resumes).toHaveLength(1);
+		// Neither parked prompt produced a successful turn, so the interrupted one
+		// resumes — and nothing else starts.
+		expect(prompted).toHaveLength(1);
+		expect(prompted[0]?.some(message => message.role === "developer" && message.synthetic === true)).toBe(true);
 	});
 
 	it("cancels an in-flight auto-compaction when manual compact startup aborts", async () => {
