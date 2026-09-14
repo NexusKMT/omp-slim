@@ -43,4 +43,16 @@ describe("sleepLong", () => {
 			spy.mockRestore();
 		}
 	});
+
+	it("rejects a pre-aborted zero-length sleep", async () => {
+		const spy = vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		try {
+			const controller = new AbortController();
+			controller.abort();
+			await expect(sleepLong(0, controller.signal)).rejects.toThrow("The operation was aborted");
+			expect(spy).not.toHaveBeenCalled();
+		} finally {
+			spy.mockRestore();
+		}
+	});
 });

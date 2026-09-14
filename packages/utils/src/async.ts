@@ -16,11 +16,12 @@ export const MAX_TIMER_DELAY_MS = 2_147_483_647;
  * `scheduler.wait`.
  */
 export async function sleepLong(delayMs: number, signal?: AbortSignal): Promise<void> {
+	signal?.throwIfAborted();
 	let remaining = delayMs;
 	while (remaining > 0) {
-		signal?.throwIfAborted();
 		await scheduler.wait(Math.min(remaining, MAX_TIMER_DELAY_MS), { signal });
 		remaining -= MAX_TIMER_DELAY_MS;
+		signal?.throwIfAborted();
 	}
 }
 

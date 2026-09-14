@@ -310,16 +310,13 @@ describe("isUsageLimit", () => {
 		// Upstream `GoUsageLimitError` wire shape: HTTP 429
 		// `{"type":"error","error":{"type":"GoUsageLimitError","message":"… Resets in …"},"metadata":{…}}`
 		// plus a `retry-after` header, flattened by `captureOpenAIHttpError` into
-		// "429 <message>". All three windows must rotate the credential.
-		for (const message of [
-			"429 5-hour usage limit reached. Resets in 2hr 15min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go",
-			"429 Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go",
-			"429 Monthly usage limit reached. Resets in 12 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go",
-		]) {
-			expect(parseRateLimitReason(message)).toBe("QUOTA_EXHAUSTED");
-			expect(isUsageLimitOutcome(429, message)).toBe(true);
-			expect(isUsageLimit(message)).toBe(true);
-		}
+		// "429 <message>". One window fixture pins the rotation branch; the
+		// distinct reset-duration formats are covered in `fetch-retry.test.ts`.
+		const message =
+			"429 5-hour usage limit reached. Resets in 2hr 15min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_1/go";
+		expect(parseRateLimitReason(message)).toBe("QUOTA_EXHAUSTED");
+		expect(isUsageLimitOutcome(429, message)).toBe(true);
+		expect(isUsageLimit(message)).toBe(true);
 	});
 
 	it("detects Antigravity capacity-exhausted message as a usage-limit error", () => {
