@@ -523,6 +523,29 @@ describe("getTraceEntry", () => {
 });
 
 describe("listSessionSummaries", () => {
+	it("uses the session cwd for home-relative storage keys and keeps the legacy path fallback", async () => {
+		const sessionsDir = getSessionsDir();
+		const currentFile = path.join(sessionsDir, "-project-omp-kit", "current.jsonl");
+		const legacyFile = path.join(sessionsDir, "--work--legacy--", "legacy.jsonl");
+		await fs.mkdir(path.dirname(currentFile), { recursive: true });
+		await fs.mkdir(path.dirname(legacyFile), { recursive: true });
+		await Bun.write(
+			currentFile,
+			JSON.stringify({
+				type: "session",
+				version: 3,
+				id: "current",
+				timestamp: iso(T),
+				cwd: "/home/han/project/omp-kit",
+			}),
+		);
+		await Bun.write(legacyFile, JSON.stringify({ type: "title", v: 1, title: "Legacy session" }));
+
+		const rows = await listSessionSummaries();
+		expect(rows.find(row => row.file === currentFile)?.folder).toBe("/home/han/project/omp-kit");
+		expect(rows.find(row => row.file === legacyFile)?.folder).toBe("/work/legacy/");
+	});
+
 	it("lists unsynced on-disk sessions with titles before any sync", async () => {
 		const rootFile = await writeFixture();
 		const rows = await listSessionSummaries();

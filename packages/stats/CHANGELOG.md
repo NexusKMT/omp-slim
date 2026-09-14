@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the sessions API returning an encoded storage key instead of the session working directory ([#12060](https://github.com/can1357/oh-my-pi/issues/12060)).
+
 ## [18.1.17] - 2026-09-10
 
 ### Fixed
