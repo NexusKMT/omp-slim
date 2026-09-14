@@ -58,6 +58,38 @@ async function writeOmpPluginAgent(home: string): Promise<void> {
 	await fs.writeFile(path.join(pluginRoot, "agents", "loom-verify-spec.md"), OMP_PLUGIN_AGENT_MD);
 }
 
+const OMP_MARKETPLACE_AGENT_MD = [
+	"---",
+	"name: market-probe",
+	"description: Marketplace-installed agent with tiered model preference.",
+	'model: ["@advisor", "@smol"]',
+	"---",
+	"You probe the marketplace.",
+].join("\n");
+
+// Register an omp-installed marketplace plugin via the OMP plugin registry
+// (`~/.omp/plugins/installed_plugins.json`), the path listClaudePluginRoots
+// reads as origin "omp" — distinct from the node_modules path above.
+async function writeOmpMarketplacePluginAgent(home: string): Promise<void> {
+	const pluginRoot = path.join(home, "marketplace-cache", "market-plugin");
+	await fs.mkdir(path.join(pluginRoot, "agents"), { recursive: true });
+	await fs.writeFile(path.join(pluginRoot, "agents", "market-probe.md"), OMP_MARKETPLACE_AGENT_MD);
+
+	const registryDir = path.join(home, ".omp", "plugins");
+	await fs.mkdir(registryDir, { recursive: true });
+	await fs.writeFile(
+		path.join(registryDir, "installed_plugins.json"),
+		JSON.stringify({
+			version: 1,
+			plugins: {
+				"market-plugin@my-marketplace": [
+					{ installPath: pluginRoot, version: "1.0.0", scope: "user", enabled: true },
+				],
+			},
+		}),
+	);
+}
+
 describe("discoverAgents", () => {
 	let tempHome: string;
 	let projectDir: string;
@@ -193,5 +225,20 @@ describe("discoverAgents", () => {
 		const names = agents.map(agent => agent.name);
 
 		expect(names).toContain("plugin-dir-agent");
+	});
+
+	test("honors model frontmatter of omp-installed marketplace plugin agents (#12028)", async () => {
+		// omp-installed marketplace plugins ride the shared plugin registry as
+		// origin "omp" roots. Unlike foreign Claude Code roots (origin "claude",
+		// whose "opus"/"sonnet" aliases are not OMP selectors and are dropped per
+		// #7966), their frontmatter is OMP-native, so `model:` must survive.
+		enableProvider("claude-plugins");
+		await writeOmpMarketplacePluginAgent(tempHome);
+
+		const { agents } = await discoverAgents(projectDir, tempHome);
+		const agent = agents.find(candidate => candidate.name === "market-probe");
+
+		expect(agent).toBeDefined();
+		expect(agent?.model).toEqual(["@advisor", "@smol"]);
 	});
 });

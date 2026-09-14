@@ -132,13 +132,16 @@ export async function discoverAgents(
 		return a.scope === "project" ? -1 : 1;
 	});
 	for (const plugin of sortedPluginRoots) {
-		// Claude aliases such as "sonnet" and "opus" are not OMP model selectors.
-		// Leave the model unset so settings overrides or the parent session choose it.
+		// Only foreign Claude Code marketplace roots use Claude aliases such as
+		// "sonnet"/"opus", which are not OMP model selectors — drop their model so
+		// settings overrides or the parent session choose it (#7966). OMP-installed
+		// marketplace plugins and --plugin-dir roots ship OMP-native frontmatter, so
+		// their `model:` selectors are honored like project/user agents (#12028).
 		const agentsDir = path.join(plugin.path, "agents");
 		orderedDirs.push({
 			dir: agentsDir,
 			source: plugin.scope === "project" ? "project" : "user",
-			ignoreModel: true,
+			ignoreModel: plugin.origin === "claude",
 		});
 	}
 
