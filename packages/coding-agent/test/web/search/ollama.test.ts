@@ -264,8 +264,6 @@ describe("Ollama searchOllama response mapping", () => {
 				title: "Ollama",
 				url: "https://ollama.com/",
 				snippet: "Cloud models are now available...",
-				publishedDate: undefined,
-				ageSeconds: undefined,
 			},
 		]);
 	});

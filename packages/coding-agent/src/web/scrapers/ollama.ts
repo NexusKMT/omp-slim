@@ -277,6 +277,13 @@ export const handleOllama: SpecialHandler = async (
 			const tagsIndex = parseTagsIndex(tagsResult);
 			const matchingModels = matchTagsModels(baseRef, tagsIndex);
 			if (tagsIndex && matchingModels.length === 0) return null;
+			// A tagged shorthand names an exact tag; reject when the parsed
+			// index lists the model but not the requested tag, instead of
+			// rendering aggregate metadata under a nonexistent tag.
+			const tagRef = modelRef.includes(":") ? modelRef.toLowerCase() : null;
+			const tagKnown =
+				!tagRef || matchingModels.some(model => (model.model ?? model.name ?? "").toLowerCase() === tagRef);
+			if (tagsIndex && !tagKnown) return null;
 			const pageResult = await loadPage(pageUrl, { timeout, signal });
 			return renderOllamaModel({ url, modelRef, baseRef, fetchedAt, tagsResult, matchingModels, pageResult });
 		}

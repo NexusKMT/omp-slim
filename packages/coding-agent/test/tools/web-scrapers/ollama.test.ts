@@ -78,6 +78,31 @@ describe("handleOllama scraper with mocked responses", () => {
 		expect(loadPage).toHaveBeenCalledTimes(1);
 	});
 
+	it("returns null for tagged shorthands missing from the tags index", async () => {
+		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
+			if (url.includes("/api/tags")) {
+				return {
+					ok: true,
+					status: 200,
+					finalUrl: url,
+					contentType: "application/json",
+					content: JSON.stringify({ models: [{ name: "llama3:latest" }] }),
+				};
+			}
+			return {
+				ok: true,
+				status: 200,
+				finalUrl: url,
+				contentType: "text/html",
+				content: "<html></html>",
+			};
+		});
+
+		const result = await handleOllama("https://ollama.com/llama3:not-a-tag", 5000);
+		expect(result).toBeNull();
+		expect(loadPage).toHaveBeenCalledTimes(1);
+	});
+
 	it("falls through to the page fetch when the tags API is down", async () => {
 		const loadPage = vi.spyOn(scrapers, "loadPage").mockImplementation(async url => {
 			if (url.includes("/api/tags")) {
