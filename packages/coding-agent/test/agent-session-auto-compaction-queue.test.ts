@@ -7,6 +7,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
+import type { CompactOptions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -974,89 +975,96 @@ describe("AgentSession auto-compaction queue resume", () => {
 		expect(prompted[0]?.some(message => message.role === "developer" && message.synthetic === true)).toBe(true);
 	});
 
-	it.each([
-		["resumes", undefined, 1],
-		["is dropped under suppressContinuation", { suppressContinuation: true }, 0],
-	] as const)(
-		"an inherited resume %s when the second manual compaction is vetoed",
-		async (_label, options, expectedTurns) => {
-			// The second pass takes over a resume the first pass withheld for a parked
-			// command. If that pass is then cancelled by a hook it commits nothing and
-			// is not a no-op, but the inherited resume was earned by the first pass:
-			// it must survive so the command's release still resumes the turn. A
-			// `suppressContinuation` takeover (plan-mode approve-and-compact) owns
-			// whatever turn follows — on cancel it explicitly dispatches nothing — so
-			// it drops the inherited resume instead.
-			session.settings.set("compaction.keepRecentTokens", 1);
-			session.settings.override("compaction.autoContinue", true);
-			const appendAssistant = (text: string): void => {
-				sessionManager.appendMessage({
-					role: "assistant",
-					content: [{ type: "text", text }],
-					api: "anthropic-messages",
-					provider: "anthropic",
-					model: "claude-sonnet-4-5",
-					stopReason: "stop",
-					usage: {
-						input: 1_000,
-						output: 100,
-						cacheRead: 0,
-						cacheWrite: 0,
-						totalTokens: 1_100,
-						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-					},
-					timestamp: Date.now(),
-				});
-			};
-			appendAssistant("previous answer");
-			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
-
-			session.agent.state.isStreaming = true;
-			vi.spyOn(session, "abort").mockImplementation(async () => {
-				session.agent.state.isStreaming = false;
+	/**
+	 * First manual compaction withholds its resume for a parked `/park` command;
+	 * a second pass (with `options`) inherits it and is then vetoed by the hook.
+	 * Returns the turns dispatched once the parked command releases.
+	 */
+	async function vetoedTakeoverAfterWithheldResume(
+		options?: CompactOptions,
+	): Promise<{ role: string; synthetic?: boolean }[][]> {
+		session.settings.set("compaction.keepRecentTokens", 1);
+		session.settings.override("compaction.autoContinue", true);
+		const appendAssistant = (text: string): void => {
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text }],
+				api: "anthropic-messages",
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				stopReason: "stop",
+				usage: {
+					input: 1_000,
+					output: 100,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 1_100,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				timestamp: Date.now(),
 			});
-			type Dispatched = { role: string; synthetic?: boolean };
-			const prompted: Dispatched[][] = [];
-			vi.spyOn(session.agent, "prompt").mockImplementation(async message => {
-				prompted.push((Array.isArray(message) ? message : [message]) as Dispatched[]);
-			});
+		};
+		appendAssistant("previous answer");
+		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
 
-			const compactGate = Promise.withResolvers<void>();
-			(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
-				compactGate.promise;
-			const parkGate = Promise.withResolvers<void>();
-			(globalThis as ParkCommandGlobals).__ompParkGate = parkGate.promise;
-			const compacted = session.compact();
-			while (!getRuntimeSignals().includes("before_compact:enter")) {
-				await Promise.resolve();
-			}
-			const command = session.prompt("/park");
-			compactGate.resolve();
-			await compacted;
-			await session.waitForIdle();
-			expect(prompted).toHaveLength(0);
+		session.agent.state.isStreaming = true;
+		vi.spyOn(session, "abort").mockImplementation(async () => {
+			session.agent.state.isStreaming = false;
+		});
+		const prompted: { role: string; synthetic?: boolean }[][] = [];
+		vi.spyOn(session.agent, "prompt").mockImplementation(async message => {
+			prompted.push((Array.isArray(message) ? message : [message]) as { role: string; synthetic?: boolean }[]);
+		});
 
-			// Give the second pass something to compact so it reaches the hook, then
-			// veto it there.
-			appendAssistant("next answer");
-			(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
-				undefined;
-			(globalThis as typeof globalThis & { __ompManualCompactCancel?: boolean }).__ompManualCompactCancel = true;
-			await expect(session.compact(undefined, options)).rejects.toBeInstanceOf(CompactionCancelledError);
-			await session.waitForIdle();
-			expect(prompted).toHaveLength(0);
+		const compactGate = Promise.withResolvers<void>();
+		(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate =
+			compactGate.promise;
+		const parkGate = Promise.withResolvers<void>();
+		(globalThis as ParkCommandGlobals).__ompParkGate = parkGate.promise;
+		const compacted = session.compact();
+		while (!getRuntimeSignals().includes("before_compact:enter")) {
+			await Promise.resolve();
+		}
+		const command = session.prompt("/park");
+		compactGate.resolve();
+		await compacted;
+		await session.waitForIdle();
+		expect(prompted).toHaveLength(0);
 
-			parkGate.resolve();
-			expect(await command).toBe(false);
-			await session.waitForIdle();
+		// Give the second pass something to compact so it reaches the hook, then
+		// veto it there.
+		appendAssistant("next answer");
+		(globalThis as typeof globalThis & { __ompManualCompactGate?: Promise<void> }).__ompManualCompactGate = undefined;
+		(globalThis as typeof globalThis & { __ompManualCompactCancel?: boolean }).__ompManualCompactCancel = true;
+		await expect(session.compact(undefined, options)).rejects.toBeInstanceOf(CompactionCancelledError);
+		await session.waitForIdle();
+		expect(prompted).toHaveLength(0);
 
-			expect(getRuntimeSignals()).toContain("command:park");
-			expect(prompted).toHaveLength(expectedTurns);
-			if (expectedTurns > 0) {
-				expect(prompted[0]?.some(message => message.role === "developer" && message.synthetic === true)).toBe(true);
-			}
-		},
-	);
+		parkGate.resolve();
+		expect(await command).toBe(false);
+		await session.waitForIdle();
+		expect(getRuntimeSignals()).toContain("command:park");
+		return prompted;
+	}
+
+	it("keeps an inherited resume when the second manual compaction is vetoed", async () => {
+		// The vetoed pass commits nothing and is not a no-op, but the inherited
+		// resume was earned by the first pass: it must survive so the command's
+		// release still resumes the interrupted turn.
+		const prompted = await vetoedTakeoverAfterWithheldResume();
+
+		expect(prompted).toHaveLength(1);
+		expect(prompted[0]?.some(message => message.role === "developer" && message.synthetic === true)).toBe(true);
+	});
+
+	it("drops an inherited resume when the vetoed second compaction suppresses continuation", async () => {
+		// A `suppressContinuation` takeover (plan-mode approve-and-compact) owns
+		// whatever turn follows; on cancel it deliberately dispatches nothing, so
+		// the inherited resume must not resurrect the pre-approval turn later.
+		const prompted = await vetoedTakeoverAfterWithheldResume({ suppressContinuation: true });
+
+		expect(prompted).toHaveLength(0);
+	});
 
 	it("drops the resume when a prompt arriving after the cleanup starts a turn while a parked command is still settling", async () => {
 		// The parked local command is still running when a second prompt arrives.
