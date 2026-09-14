@@ -6400,6 +6400,30 @@ export class AgentSession {
 			queueOnly?: boolean;
 		},
 	): Promise<boolean> {
+		// Same barrier/claim protocol as prompt(): skill invocations, collab peer
+		// prompts and the CLI initial message arrive here and must neither start a
+		// turn against the disconnected session nor lose the session to the
+		// interrupted-turn resume once compaction ends.
+		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchCustomPrompt(message, options, outcome);
+		try {
+			return await this.#dispatchCustomPrompt(message, options, outcome);
+		} finally {
+			release(outcome.sessionClaimed);
+		}
+	}
+
+	async #dispatchCustomPrompt<T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
+		options:
+			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+					queueChipText?: string;
+					queueOnly?: boolean;
+			  })
+			| undefined,
+		outcome: PromptDispatchOutcome,
+	): Promise<boolean> {
 		const textContent =
 			typeof message.content === "string"
 				? message.content
@@ -6435,16 +6459,23 @@ export class AgentSession {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options.queueChipText);
+			outcome.sessionClaimed = true;
 			return true;
 		}
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				// Mirrors #dispatchPrompt: busy because the agent owns a turn claims the
+				// session; busy only from another prompt's setup claims nothing.
+				outcome.sessionClaimed = this.agent.state.isStreaming;
+				throw new AgentBusyError();
+			}
 
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options?.queueChipText);
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6458,10 +6489,11 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 
-		return this.#promptWithMessage(customMessage, textContent, {
+		outcome.sessionClaimed = await this.#promptWithMessage(customMessage, textContent, {
 			...options,
 			prependMessages: keywordNotices.length > 0 ? keywordNotices : undefined,
 		});
+		return outcome.sessionClaimed;
 	}
 
 	async #promptWithMessage(
