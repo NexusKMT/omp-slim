@@ -32,7 +32,6 @@ import {
 import {
 	type CoordinationDetails,
 	DEFAULT_HUB_LIST_LIMIT,
-	HUB_WAIT_TIMEOUT_MS,
 	type HubListStatus,
 	type HubRenderArgs,
 	type HubRosterCounts,
@@ -387,15 +386,15 @@ export async function executeSend(
 	}
 }
 
-/** Pure message wait: no jobs in play, block on the bus with peer liveness. */
+/** Pure message wait: no jobs in play, block on the bus with peer liveness for `timeoutMs`. */
 export async function executeMessageWait(
 	deps: { registry: AgentRegistry; senderId: string },
-	params: { from?: string },
+	params: { from?: string; timeoutMs: number },
 	signal?: AbortSignal,
 ): Promise<AgentToolResult<CoordinationDetails>> {
 	const { registry, senderId } = deps;
+	const { timeoutMs } = params;
 	const from = params.from?.trim() || undefined;
-	const timeoutMs = HUB_WAIT_TIMEOUT_MS;
 	try {
 		const waited = await IrcBus.global().wait(senderId, { from }, timeoutMs, signal, {
 			liveness: { registry, senderId },

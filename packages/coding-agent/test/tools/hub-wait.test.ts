@@ -48,23 +48,30 @@ describe("hub unified wait", () => {
 		IrcBus.resetGlobalForTests();
 	});
 
-	test("job waits return after thirty seconds without cancelling unfinished work", async () => {
+	test("back-to-back job waits climb the adaptive window without cancelling unfinished work", async () => {
 		vi.useFakeTimers();
 		const manager = new AsyncJobManager({ onJobComplete: () => {} });
 		const job = registerHangingJob(manager, "unfinished job");
-		try {
+		const tool = new HubTool(makeSession(manager));
+		const waitFor = async (windowMs: number) => {
 			let settled = false;
-			const pending = new HubTool(makeSession(manager)).execute("deadline", { op: "wait" }).then(result => {
+			const pending = tool.execute("deadline", { op: "wait" }).then(result => {
 				settled = true;
 				return result;
 			});
-			vi.advanceTimersByTime(29_999);
+			vi.advanceTimersByTime(windowMs - 1);
 			for (let turn = 0; turn < 10; turn++) await Promise.resolve();
 			expect(settled).toBe(false);
 			vi.advanceTimersByTime(1);
-			const result = await pending;
-			expect(result.useless).toBe(true);
-			expect(result.details).toMatchObject({ op: "wait", jobs: [{ id: job.id, status: "running" }] });
+			return pending;
+		};
+		try {
+			// First wait sits on the ladder floor; an immediate re-wait climbs a rung.
+			const first = await waitFor(5_000);
+			expect(first.useless).toBe(true);
+			expect(first.details).toMatchObject({ op: "wait", jobs: [{ id: job.id, status: "running" }] });
+			const second = await waitFor(10_000);
+			expect(second.useless).toBe(true);
 			expect(manager.getJob(job.id)?.status).toBe("running");
 		} finally {
 			manager.cancel(job.id);

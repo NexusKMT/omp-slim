@@ -6,7 +6,7 @@
 
 ### Breaking Changes
 
-- Hub message/job waits now use a fixed 30-second window; removed the `timeoutMs` argument and `async.pollWaitDuration` setting.
+- Hub message/job waits now always use the adaptive window (5s, lengthening to 5m across back-to-back waits); removed the `timeoutMs` argument and `async.pollWaitDuration` setting.
 
 ### Added
 

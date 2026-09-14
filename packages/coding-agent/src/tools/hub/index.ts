@@ -26,6 +26,7 @@ import type {
 import type { ToolExample } from "@oh-my-pi/pi-ai";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { prompt } from "@oh-my-pi/pi-utils";
+import { POLL_WAIT_LADDER_MS } from "../../async/job-manager";
 import type { RenderResultOptions } from "../../extensibility/custom-tools/types";
 import { IrcBus } from "../../irc/bus";
 import type { Theme } from "../../modes/theme/theme";
@@ -64,7 +65,6 @@ import {
 } from "./messaging";
 import {
 	DEFAULT_HUB_LIST_LIMIT,
-	HUB_WAIT_TIMEOUT_MS,
 	type HubDetails,
 	type HubRenderArgs,
 	hubErrorResult,
@@ -396,6 +396,12 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 			return buildJobResult(this.session, manager, "wait", jobsToWatch, []);
 		}
 
+		// Wait window: the adaptive ladder starts at the floor and climbs as the
+		// agent waits in a tight loop, then resets once it steps away (see
+		// AsyncJobManager.nextPollWaitMs). Job and message waits share one
+		// per-owner ladder; only paths that actually block advance and record it.
+		const nextWindowMs = (): number => manager?.nextPollWaitMs(ownerId) ?? POLL_WAIT_LADDER_MS[0];
+
 		if (!manager || runningJobs.length === 0) {
 			// No job legs: pure message wait — or nothing to block on at all.
 			if (!messaging) return nothingToWaitForResult(this.session);
@@ -416,7 +422,11 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 					.some(ref => messaging.registry.isRunning(ref));
 				if (!hasRunningPeer) return nothingToWaitForResult(this.session);
 			}
-			return executeMessageWait(messaging, { from }, signal);
+			try {
+				return await executeMessageWait(messaging, { from, timeoutMs: nextWindowMs() }, signal);
+			} finally {
+				manager?.recordPollWaitEnd(ownerId);
+			}
 		}
 
 		const racePromises: Promise<unknown>[] = runningJobs.map(j => j.promise);
@@ -453,7 +463,7 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 		}
 
 		const { promise: timeoutPromise, resolve: timeoutResolve } = Promise.withResolvers<void>();
-		const timeoutHandle = setTimeout(() => timeoutResolve(), HUB_WAIT_TIMEOUT_MS);
+		const timeoutHandle = setTimeout(() => timeoutResolve(), nextWindowMs());
 		racePromises.push(timeoutPromise);
 
 		const watchedJobIds = runningJobs.map(job => job.id);
@@ -489,6 +499,9 @@ export class HubTool implements AgentTool<typeof hubSchema, HubDetails> {
 			clearInterval(progressTimer);
 			busAbort?.abort(busCancelled);
 			removeBusAbortListener?.();
+			// Reset the idle-gap clock: escalate if the agent waits again soon,
+			// drop back to the floor once it goes quiet for a while.
+			manager.recordPollWaitEnd(ownerId);
 		}
 
 		// A message consumed by the bus waiter must never be dropped — it wins

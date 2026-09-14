@@ -1090,7 +1090,7 @@ describe("IRC", () => {
 			expect(details?.receipts?.[0]?.outcome).toBe("failed");
 		});
 
-		it("op=wait returns a clean non-error timeout after thirty seconds", async () => {
+		it("op=wait returns a clean non-error timeout after the ladder floor", async () => {
 			const fake = makeFakeSession();
 			registry.register({ id: "0-Sub", displayName: "sub", kind: "sub", session: fake.session, status: "running" });
 			const tool = new HubTool(makeToolSession(registry, "0-Main"));
@@ -1100,7 +1100,7 @@ describe("IRC", () => {
 				settled = true;
 				return result;
 			});
-			vi.advanceTimersByTime(29_999);
+			vi.advanceTimersByTime(4_999);
 			for (let turn = 0; turn < 10; turn++) await Promise.resolve();
 			expect(settled).toBe(false);
 			vi.advanceTimersByTime(1);

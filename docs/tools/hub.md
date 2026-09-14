@@ -16,7 +16,7 @@ Merged from the former `irc`, `job`, and `launch` tools; each op family keeps it
   - `packages/coding-agent/src/registry/agent-registry.ts` — process-global agent directory and status.
   - `packages/coding-agent/src/registry/agent-lifecycle.ts` — revival of parked recipients on direct send.
   - `packages/coding-agent/src/session/agent-session.ts` — `deliverIrcMessage(...)`: recipient-side injection and wake turns.
-  - `packages/coding-agent/src/async/job-manager.ts` — job registry, cancellation, delivery suppression.
+  - `packages/coding-agent/src/async/job-manager.ts` — job registry, cancellation, delivery suppression, adaptive wait ladder.
   - `packages/coding-agent/src/launch/client.ts` / `broker.ts` / `presence.ts` / `protocol.ts` — process-supervision broker.
   - `packages/coding-agent/src/config/settings-schema.ts` — `irc.timeoutMs` (awaited sends), `launch.enabled`.
 
@@ -41,7 +41,7 @@ Merged from the former `irc`, `job`, and `launch` tools; each op family keeps it
 
 ## Op families and dispatch
 - **Messaging** — `send` (with `to`), `inbox`, `list`, and `wait` with `from`. Fire-and-forget sends return delivery receipts (`injected`/`woken`/`revived`/`failed`); direct sends can revive parked agents, while broadcasts target visible live peers without reviving every parked agent. `await: true` waits for one reply after delivery. A busy recipient with async execution disabled may auto-reply rather than strand an awaiting sender.
-- **Jobs** — `wait` (bare or with `ids`), `cancel`, `jobs`. Owner-scoped visibility, watch/unwatch delivery suppression, `acknowledgeDeliveries` on returned completions, 500 ms `onUpdate` snapshots while waiting, and a fixed 30-second wait window. `jobs` is the former job-list snapshot plus the roster of running subagents with no running job entry.
+- **Jobs** — `wait` (bare or with `ids`), `cancel`, `jobs`. Owner-scoped visibility, watch/unwatch delivery suppression, `acknowledgeDeliveries` on returned completions, 500 ms `onUpdate` snapshots while waiting, and the adaptive wait window. `jobs` is the former job-list snapshot plus the roster of running subagents with no running job entry.
 - **Processes** — `start`, `ps`, `logs`, `stop`, `restart`, `describe`, plus `send`/`wait` when they carry `name`. Exact behavior of the former `launch` tool; `ps` is the broker's `list`. See the launch sections below.
 
 `send` with both `to` and `name` is rejected as ambiguous. `wait` routes by target: `name` → process wait; otherwise the unified coordination wait.
@@ -50,15 +50,17 @@ Merged from the former `irc`, `job`, and `launch` tools; each op family keeps it
 One blocking primitive. It resolves job legs (explicit `ids`, owner-scoped and silently filtered, or every running job the caller owns) and — when the session can message peers — parks a bus waiter, then races:
 - every watched running job's `job.promise`,
 - the first matching incoming message (`from`-filtered when given),
-- the fixed 30-second wait window,
+- the adaptive wait window (`manager.nextPollWaitMs(owner)`),
 - the tool-call abort signal.
 
 Outcomes:
 - A message wins (even a photo-finish: a message consumed by the bus waiter is never dropped) → the message is returned exactly like the former `irc wait` (`details.waited`), and the jobs keep running; their results still self-deliver.
 - A job settles or the window elapses → a job snapshot exactly like the former `job` poll (`details.jobs`, `## Completed` / `## Still Running` sections). An all-running snapshot is flagged `useless` and rendered as a displaceable waiting frame that the next `hub` call supersedes.
-- No job legs: pure message wait with peer liveness (bounded by 30 seconds); with no running peers either, it returns `No running background jobs to wait for.` immediately (plus the jobless running-agent roster when one exists).
+- No job legs: pure message wait with peer liveness (bounded by the same adaptive window); with no running peers either, it returns `No running background jobs to wait for.` immediately (plus the jobless running-agent roster when one exists).
 - Explicit `ids` that match nothing visible → `No matching jobs found for IDs: ...` with per-id agent hints (`history://<id>`), never a hang.
 - A message already buffered on the session satisfies the wait before anything is watched.
+
+Ladder bookkeeping (`nextPollWaitMs` / `recordPollWaitEnd`) runs only on paths that actually block; immediate returns leave the rung untouched.
 
 ## Outputs
 - Messaging and job results: single text block plus `details: CoordinationDetails` — `{ op, from?, to?, receipts?, waited?, inbox?, peers?, jobs?, cancelled?, agents? }`. Shapes are unchanged from the former tools except that job-op details now carry `op` (`"wait" | "cancel" | "jobs"`).
@@ -106,7 +108,7 @@ Unchanged from the former `launch` tool: the first process op starts a detached 
 ## Limits & Caps
 - Mailboxes: 100 messages per agent (`MAILBOX_CAP`); oldest dropped beyond the cap.
 - Awaited sends: `irc.timeoutMs` default `120_000`; `0` disables; negative/non-finite fall back to the default.
-- Message/job `wait` window: fixed 30 seconds; no per-call or settings override.
+- Message/job `wait` window: adaptive ladder `[5s, 10s, 30s, 1m, 5m]` climbing one rung per back-to-back wait (per owner), resetting to the floor after 60 s without waiting; no per-call or settings override.
 - Job retention 5 min; manager max-running fallback 15; `async.maxJobs` clamped 1..100.
 - Launch names 1-48 chars; `ready.port` 1..65535; `logs`/`wait`/`stop` timeouts capped at one hour.
 
