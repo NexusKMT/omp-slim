@@ -6246,7 +6246,10 @@ export class AgentSession {
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
 			if (!streamingBehavior) {
-				outcome.sessionClaimed = true;
+				// Busy because the agent owns a turn: that turn supersedes the interrupted
+				// one (after compaction it is the queued-message drain). Busy only from
+				// another prompt's setup claims nothing yet.
+				outcome.sessionClaimed = this.agent.state.isStreaming;
 				throw new AgentBusyError();
 			}
 
@@ -6299,7 +6302,7 @@ export class AgentSession {
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
 			if (!streamingBehavior) {
-				outcome.sessionClaimed = true;
+				outcome.sessionClaimed = this.agent.state.isStreaming;
 				throw new AgentBusyError();
 			}
 			for (const notice of keywordNotices) {
