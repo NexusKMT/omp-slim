@@ -146,9 +146,9 @@ function artifactIdOf(name: string): string | undefined {
 /**
  * Move one directory entry without replacing anything that has appeared at
  * `to` since the caller listed the destination. `link(2)` refuses an existing
- * target where `rename(2)` would silently overwrite it; any other link failure
- * (a filesystem without hard links) falls back to the plain rename. A directory
- * rename only ever replaces an empty directory, which is harmless.
+ * target where `rename(2)` would silently overwrite it; where hard links are
+ * unavailable an exclusive copy keeps the same guarantee. A directory rename
+ * only ever replaces an empty directory, which is harmless.
  */
 async function moveEntryWithoutReplacing(from: string, to: string, isDirectory: boolean): Promise<void> {
 	if (isDirectory) {
@@ -159,14 +159,13 @@ async function moveEntryWithoutReplacing(from: string, to: string, isDirectory: 
 		await fs.promises.link(from, to);
 	} catch (err) {
 		if (isEexist(err)) throw err;
-		await fs.promises.rename(from, to);
-		return;
+		await fs.promises.copyFile(from, to, fs.constants.COPYFILE_EXCL);
 	}
 	try {
 		await fs.promises.unlink(from);
 	} catch (err) {
-		// The entry has landed; a second link left behind is not a failed move.
-		if (!isEnoent(err)) logger.debug("Artifact linked but its source copy could not be removed", { from, to });
+		// The entry has landed; a second copy left behind is not a failed move.
+		if (!isEnoent(err)) logger.debug("Artifact placed but its source copy could not be removed", { from, to });
 	}
 }
 
@@ -206,12 +205,14 @@ async function mergeDirectoryInto(
 		const to = path.join(destination, entry.name);
 		const label = prefix + entry.name;
 		const id = artifactIdOf(entry.name);
-		// A writer can publish another `<id>.*` file while earlier entries move, and
-		// a different file name slips past link(2)'s EEXIST; list again right before
-		// an id-bearing move so the check is one syscall old, not the whole merge.
-		if (id !== undefined) ({ occupants, takenIds } = await destinationOccupancy(destination));
-		const occupant = occupants.get(entry.name);
 		try {
+			// A writer can publish another `<id>.*` file while earlier entries move,
+			// and a different file name slips past link(2)'s EEXIST; list again right
+			// before an id-bearing move so the check is one syscall old, not the
+			// whole merge. Inside the boundary: a failed listing strands this entry
+			// like a failed move would, instead of aborting a merge already under way.
+			if (id !== undefined) ({ occupants, takenIds } = await destinationOccupancy(destination));
+			const occupant = occupants.get(entry.name);
 			if (occupant === undefined && (id === undefined || !takenIds.has(id))) {
 				await moveEntryWithoutReplacing(from, to, entry.isDirectory());
 			} else if (occupant?.isDirectory() && entry.isDirectory()) {
@@ -261,15 +262,18 @@ async function relocateArtifactsDirectory(source: string, destination: string): 
 		await fs.promises.rename(source, destination);
 		return "renamed";
 	} catch (err) {
-		// lstat: a symlink at the destination must not be merged through into
-		// whatever it points at; only a real directory is a merge target.
-		let occupant: fs.Stats | null = null;
-		try {
-			occupant = await fs.promises.lstat(destination);
-		} catch (statErr) {
-			if (!isEnoent(statErr)) throw err;
-		}
-		if (occupant === null || !occupant.isDirectory()) throw err;
+		// lstat on both sides: a symlink is never merged through, whichever end it
+		// is on — the destination's target is not this session's directory, and a
+		// symlinked source would have its target's contents moved out from under
+		// it. Only a real directory on each side is a merge.
+		const [occupant, origin] = await Promise.all([
+			fs.promises.lstat(destination).catch((statErr: unknown) => {
+				if (isEnoent(statErr)) return null;
+				throw err;
+			}),
+			fs.promises.lstat(source),
+		]);
+		if (occupant === null || !occupant.isDirectory() || !origin.isDirectory()) throw err;
 	}
 	const stranded = await mergeDirectoryInto(source, destination);
 	if (stranded.length > 0) {

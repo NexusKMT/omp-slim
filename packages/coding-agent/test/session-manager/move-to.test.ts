@@ -663,25 +663,25 @@ describe("SessionManager.moveTo", () => {
 		const id = (await session.saveArtifact("written while away", "bash"))!;
 		await fsp.writeFile(path.join(awayArtifactsDir, "stuck.md"), "cannot move");
 		await fsp.writeFile(path.join(homeArtifactsDir, "stale.md"), "already here");
-		// Both the no-replace link and its rename fallback refuse this one entry;
-		// everything else, including the session file rename, goes through.
+		// Both the no-replace link and its exclusive-copy fallback refuse this one
+		// entry; everything else, including the session file rename, goes through.
 		const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
 		const link = fs.promises.link.bind(fs.promises);
-		const rename = fs.promises.rename.bind(fs.promises);
+		const copyFile = fs.promises.copyFile.bind(fs.promises);
 		const linkSpy = spyOn(fs.promises, "link").mockImplementation(async (existing, target) => {
 			if (path.basename(existing.toString()) === "stuck.md") throw denied;
 			return link(existing, target);
 		});
-		const renameSpy = spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
+		const copySpy = spyOn(fs.promises, "copyFile").mockImplementation(async (source, target, mode) => {
 			if (path.basename(source.toString()) === "stuck.md") throw denied;
-			return rename(source, target);
+			return copyFile(source, target, mode);
 		});
 
 		try {
 			await session.moveTo(cwdA);
 		} finally {
 			linkSpy.mockRestore();
-			renameSpy.mockRestore();
+			copySpy.mockRestore();
 		}
 
 		expect(session.getSessionFile()!.slice(0, -6)).toBe(homeArtifactsDir);
@@ -722,24 +722,96 @@ describe("SessionManager.moveTo", () => {
 		expect(await fsp.readdir(awayArtifactsDir)).toEqual([`${id}.bash.log`]);
 	});
 
-	it("does not merge through a symlink at the destination", async () => {
-		// A symlink where the artifacts directory should be would make the merge
-		// move the session's files into whatever it points at. That is a
-		// relocation failure, not a merge target: the move fails and the
-		// session stays where it was.
+	it("does not merge through a symlink on either side", async () => {
+		// A symlink where an artifacts directory should be would make the merge
+		// move files into, or out of, whatever it points at. That is a
+		// relocation failure, not a merge: the move fails and the session stays
+		// where it was.
 		const { session, homeArtifactsDir, awayArtifactsDir } = await sessionAwayFromHome();
 		const id = (await session.saveArtifact("written while away", "bash"))!;
 		const awaySessionFile = session.getSessionFile()!;
 		const elsewhere = path.join(testAgentDir, "elsewhere");
 		await fsp.mkdir(elsewhere);
 		await fsp.writeFile(path.join(elsewhere, "unrelated.md"), "untouched");
+
+		// Destination is a symlink.
 		await fsp.rmdir(homeArtifactsDir);
 		await fsp.symlink(elsewhere, homeArtifactsDir);
-
 		await expect(session.moveTo(cwdA)).rejects.toThrow();
-
 		expect(await fsp.readdir(elsewhere)).toEqual(["unrelated.md"]);
 		expect(session.getSessionFile()).toBe(awaySessionFile);
 		expect(await session.getArtifactPath(id)).toBe(path.join(awayArtifactsDir, `${id}.bash.log`));
+
+		// Source is a symlink and the destination is an occupied real directory.
+		await fsp.unlink(homeArtifactsDir);
+		await fsp.mkdir(homeArtifactsDir);
+		await fsp.writeFile(path.join(homeArtifactsDir, "stale.md"), "already here");
+		await fsp.rename(awayArtifactsDir, path.join(testAgentDir, "moved-away"));
+		await fsp.symlink(elsewhere, awayArtifactsDir);
+		await expect(session.moveTo(cwdA)).rejects.toThrow();
+		expect(await fsp.readdir(elsewhere)).toEqual(["unrelated.md"]);
+		expect(await fsp.readdir(homeArtifactsDir)).toEqual(["stale.md"]);
+		expect(session.getSessionFile()).toBe(awaySessionFile);
+	});
+
+	it("strands an entry whose occupancy re-read fails instead of aborting the merge", async () => {
+		// The re-read before an id-bearing move is a syscall that can fail like
+		// the move itself; once entries have moved it must not throw out of the
+		// merge, or the session file is rolled back away from them.
+		const { session, homeArtifactsDir, awayArtifactsDir } = await sessionAwayFromHome();
+		const id = (await session.saveArtifact("written while away", "bash"))!;
+		await fsp.writeFile(path.join(awayArtifactsDir, "unique.md"), "moves fine");
+		await fsp.writeFile(path.join(homeArtifactsDir, "stale.md"), "already here");
+		const readdir = fs.promises.readdir.bind(fs.promises);
+		let homeListings = 0;
+		const listing = async (target: fs.PathLike, options: { withFileTypes: true }) => {
+			if (path.resolve(target.toString()) === homeArtifactsDir && ++homeListings === 2) {
+				throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+			}
+			return readdir(target, options);
+		};
+		const readdirSpy = spyOn(fs.promises, "readdir").mockImplementation(listing as typeof fs.promises.readdir);
+		try {
+			await session.moveTo(cwdA);
+		} finally {
+			readdirSpy.mockRestore();
+		}
+
+		expect(session.getSessionFile()!.slice(0, -6)).toBe(homeArtifactsDir);
+		expect((await fsp.readdir(homeArtifactsDir)).sort()).toEqual(["stale.md", "unique.md"]);
+		expect(await fsp.readdir(awayArtifactsDir)).toEqual([`${id}.bash.log`]);
+	});
+
+	it("keeps the no-replace guarantee when hard links are unavailable", async () => {
+		// Without link(2), the fallback must still refuse a file a writer
+		// published between the listing and the move, rather than replacing it.
+		const { session, homeArtifactsDir, awayArtifactsDir } = await sessionAwayFromHome();
+		await fsp.mkdir(awayArtifactsDir, { recursive: true });
+		await fsp.writeFile(path.join(awayArtifactsDir, "unique.md"), "moves fine");
+		await fsp.writeFile(path.join(awayArtifactsDir, "raced.md"), "source copy");
+		await fsp.writeFile(path.join(homeArtifactsDir, "stale.md"), "already here");
+		const noLinks = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+		const linkSpy = spyOn(fs.promises, "link").mockRejectedValue(noLinks);
+		const readdir = fs.promises.readdir.bind(fs.promises);
+		let published = false;
+		const listing = async (target: fs.PathLike, options: { withFileTypes: true }) => {
+			const entries = await readdir(target, options);
+			if (!published && path.resolve(target.toString()) === homeArtifactsDir) {
+				published = true;
+				await fsp.writeFile(path.join(homeArtifactsDir, "raced.md"), "published after the listing");
+			}
+			return entries;
+		};
+		const readdirSpy = spyOn(fs.promises, "readdir").mockImplementation(listing as typeof fs.promises.readdir);
+		try {
+			await session.moveTo(cwdA);
+		} finally {
+			linkSpy.mockRestore();
+			readdirSpy.mockRestore();
+		}
+
+		expect(await fsp.readFile(path.join(homeArtifactsDir, "raced.md"), "utf8")).toBe("published after the listing");
+		expect(await fsp.readFile(path.join(homeArtifactsDir, "unique.md"), "utf8")).toBe("moves fine");
+		expect(await fsp.readdir(awayArtifactsDir)).toEqual(["raced.md"]);
 	});
 });
