@@ -468,6 +468,13 @@ type AgentContinueOutcome =
 	| { status: "skipped"; reason: AgentContinueSkipReason }
 	| { status: "failed"; error: unknown };
 
+/**
+ * Reported by `#dispatchPrompt` to `prompt()`: whether the prompt took the
+ * session (dispatched, queued, or found a turn already running). Distinct from
+ * the public return value, which stays `true` for a dropped prompt.
+ */
+type PromptDispatchOutcome = { sessionClaimed: boolean };
+
 type ActiveAgentContinue = {
 	schedulerToken: number;
 	source: string;
@@ -6167,24 +6174,27 @@ export class AgentSession {
 		// would neither persist nor forward its events and could race the in-flight
 		// history rewrite. `abort` still overtakes compaction; ordinary prompts wait
 		// here, and a waiting prompt supersedes the interrupted-turn resume the
-		// compaction would otherwise schedule — unless it turns out to be a locally
-		// handled command that starts no turn, in which case `release(false)` hands
-		// the resume back. No-op when no manual compaction is active.
+		// compaction would otherwise schedule — but only once it actually claims the
+		// session (a turn dispatched or queued, or one already running). A locally
+		// handled command, a pre-dispatch throw, or a prompt dropped by the
+		// abort/preflight race hands the resume back via `release(false)`. No-op
+		// when no manual compaction is active.
 		const release = await this.#maintenance.waitForManualCompactionCleanup();
-		if (!release) return this.#dispatchPrompt(text, options, submittedAt);
-		// A throw (AgentBusyError, model/key validation) keeps `startedTurn` true:
-		// either a turn already owns the session or none can start, so resuming
-		// the interrupted one would fail the same way.
-		let startedTurn = true;
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchPrompt(text, options, submittedAt, outcome);
 		try {
-			startedTurn = await this.#dispatchPrompt(text, options, submittedAt);
-			return startedTurn;
+			return await this.#dispatchPrompt(text, options, submittedAt, outcome);
 		} finally {
-			release(startedTurn);
+			release(outcome.sessionClaimed);
 		}
 	}
 
-	async #dispatchPrompt(text: string, options: PromptOptions | undefined, submittedAt: number): Promise<boolean> {
+	async #dispatchPrompt(
+		text: string,
+		options: PromptOptions | undefined,
+		submittedAt: number,
+		outcome: PromptDispatchOutcome,
+	): Promise<boolean> {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		// Slash/custom-command handling below rewrites `text`; keep the original
 		// so a dropped prompt is handed back exactly as the user typed it.
@@ -6235,7 +6245,10 @@ export class AgentSession {
 		// If streaming, queue via steer()/followUp()/aside based on option
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				outcome.sessionClaimed = true;
+				throw new AgentBusyError();
+			}
 
 			// Steer/follow-up/aside the keyword notices BEFORE the queued user message so the
 			// model reads the steering notice ahead of the prompt it modifies.
@@ -6243,6 +6256,7 @@ export class AgentSession {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, submittedAt);
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6284,7 +6298,10 @@ export class AgentSession {
 		// in-flight increment is visible to every later re-check.
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				outcome.sessionClaimed = true;
+				throw new AgentBusyError();
+			}
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
@@ -6292,6 +6309,7 @@ export class AgentSession {
 				images: normalizedImages,
 				descriptionNotice: imageDescriptionNotice,
 			});
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6350,6 +6368,7 @@ export class AgentSession {
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
 			this.#toolChoiceQueue.removeByLabel("external-thinking");
 		}
+		outcome.sessionClaimed = dispatched;
 		if (!dispatched && message.role === "user") {
 			// An abort (Esc) or preflight denial raced turn setup: the prompt never
 			// reached the agent or the session file. Hand it back to the host so the

@@ -823,6 +823,9 @@ export class SessionMaintenance {
 		if (ownsCompactionController) {
 			this.#compactionAbortController = compactionAbortController;
 			this.#manualCompactionCleanup = manualCompactionCleanup?.promise;
+			// A resume still withheld from an earlier pass is stale: this pass decides
+			// afresh whether it interrupted anything.
+			this.#deferredResumeGeneration = undefined;
 		}
 		// A manual pass supersedes any background speculation; running both would
 		// double-bill the summarizer and race the commit.
@@ -1332,9 +1335,10 @@ export class SessionMaintenance {
 						details: { kind: "experimental-context-rollover", version: 1 },
 						preserveData: prepared.preserveData,
 					};
-		// Report before the append: `#commitCompactionEntry` awaits the
-		// `session_compact` hook after the entry lands, and a rejection there must
-		// still count as committed for the interrupted-turn resume.
+		// Report before `#commitCompactionEntry`, as the direct path does: it appends
+		// the entry and then awaits post-append bookkeeping and the `session_compact`
+		// hook, and a rejection there must still count as committed for the
+		// interrupted-turn resume.
 		onCommitted();
 		await this.#commitCompactionEntry({
 			...result,
