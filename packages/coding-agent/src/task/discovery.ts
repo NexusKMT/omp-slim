@@ -24,6 +24,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { isProviderEnabled, isUserSourceEnabled } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
 import { findAllNearestProjectConfigDirs, getConfigDirs } from "../config";
+import { pluginUsesClaudeModelDialect } from "../discovery/agent-plugin-format";
 import { listClaudePluginRoots } from "../discovery/helpers";
 import { listOmpExtensionRoots } from "../discovery/omp-extension-roots";
 import { loadBundledAgents, parseAgent } from "./agents";
@@ -131,19 +132,24 @@ export async function discoverAgents(
 		if (a.scope === b.scope) return 0;
 		return a.scope === "project" ? -1 : 1;
 	});
-	for (const plugin of sortedPluginRoots) {
-		// Only foreign Claude Code marketplace roots use Claude aliases such as
-		// "sonnet"/"opus", which are not OMP model selectors — drop their model so
-		// settings overrides or the parent session choose it (#7966). OMP-installed
-		// marketplace plugins and --plugin-dir roots ship OMP-native frontmatter, so
-		// their `model:` selectors are honored like project/user agents (#12028).
-		const agentsDir = path.join(plugin.path, "agents");
+	const pluginModelDrops = await Promise.all(
+		// The `model:` dialect follows the plugin's declared manifest, not the
+		// registry that supplied it: foreign Claude roots (origin "claude") always
+		// use Claude aliases, and an omp-installed or --plugin-dir root can still
+		// ship a `.claude-plugin` package. Claude-dialect frontmatter is dropped so
+		// its aliases are not misread as OMP selectors (#7966); OMP-native and
+		// Agent-Plugins-standard plugin agents keep their selectors (#12028).
+		sortedPluginRoots.map(
+			async plugin => plugin.origin === "claude" || (await pluginUsesClaudeModelDialect(plugin.path)),
+		),
+	);
+	sortedPluginRoots.forEach((plugin, index) => {
 		orderedDirs.push({
-			dir: agentsDir,
+			dir: path.join(plugin.path, "agents"),
 			source: plugin.scope === "project" ? "project" : "user",
-			ignoreModel: plugin.origin === "claude",
+			ignoreModel: pluginModelDrops[index],
 		});
-	}
+	});
 
 	const seen = new Set<string>();
 	const loadedAgents = (await Promise.all(orderedDirs.map(loadAgentsFromDir))).flat().filter(agent => {
