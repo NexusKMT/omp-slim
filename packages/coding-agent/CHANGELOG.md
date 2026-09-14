@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Auto-retry waits past the signed 32-bit timer ceiling (e.g. a month-scale OpenCode Go reset with `retry.waitForUsageReset`) now elapse in full instead of overflowing the timer and retrying immediately.
 - `openrouter/<vendor>/<model>@upstream` now resolves when the first-party provider bundles the same id (e.g. `google/gemini-*`), instead of failing with "model not found".
 - Kept the subagent `yield` tool as a direct function call instead of mounting it through `xd://`.
 - Git TUI staging now honors `.gitattributes` `text`/`eol` and clean filters, so "Stage All" no longer leaves `eol=crlf` files (e.g. `*.cmd`) dirty with no visible diff.
