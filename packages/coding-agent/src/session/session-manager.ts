@@ -13,7 +13,9 @@ import {
 	getBlobsDir,
 	getProjectDir,
 	getSessionsDir,
+	isEexist,
 	isEnoent,
+	isEnotempty,
 	logger,
 	stringifyJson,
 	toError,
@@ -133,6 +135,77 @@ export async function copySessionArtifacts(sourceSessionFile: string, destinatio
 			});
 		}
 	}
+}
+
+/**
+ * Move `source`'s entries into `destination`, recursing into directories that
+ * exist on both sides. An entry whose name is already taken by something else
+ * stays where it is. Removes `source` once nothing is left in it. Returns the
+ * number of entries left behind.
+ */
+async function mergeDirectoryInto(source: string, destination: string): Promise<number> {
+	let stranded = 0;
+	for (const entry of await fs.promises.readdir(source, { withFileTypes: true })) {
+		const from = path.join(source, entry.name);
+		const to = path.join(destination, entry.name);
+		let occupant: fs.Stats | null = null;
+		try {
+			occupant = await fs.promises.lstat(to);
+		} catch (err) {
+			if (!isEnoent(err)) throw err;
+		}
+		if (occupant === null) {
+			await fs.promises.rename(from, to);
+		} else if (occupant.isDirectory() && entry.isDirectory()) {
+			stranded += await mergeDirectoryInto(from, to);
+		} else {
+			stranded += 1;
+		}
+	}
+	if (stranded === 0) {
+		try {
+			await fs.promises.rmdir(source);
+		} catch (err) {
+			// A writer still holding this path landed something mid-merge.
+			if (!isEnotempty(err)) throw err;
+			stranded = (await fs.promises.readdir(source)).length;
+		}
+	}
+	return stranded;
+}
+
+/**
+ * Relocate a session's artifacts directory for {@link SessionManager.moveTo}.
+ *
+ * The destination may already exist: a session moving back into a bucket it
+ * lived in before finds its own `<id>/` there whenever a writer that captured
+ * the old path — subagents adopt the parent's `ArtifactManager`, eval
+ * subprocesses inherit `PI_ARTIFACTS_DIR` — kept writing after the move away.
+ * `rename(2)` onto a non-empty directory is ENOTEMPTY (EEXIST on some
+ * filesystems), so fall back to merging the two trees. A name collision is left
+ * at the source rather than resolved: artifact ids resolve by `<id>.` prefix, so
+ * overwriting the destination copy or parking a renamed duplicate beside it
+ * would each lose or confuse a referenced artifact, and the header's
+ * `previousSessionFiles` keeps the stranded copy inside the session's lineage.
+ */
+async function relocateArtifactsDirectory(source: string, destination: string): Promise<"renamed" | "merged"> {
+	try {
+		await fs.promises.rename(source, destination);
+		return "renamed";
+	} catch (err) {
+		if (!isEnotempty(err) && !isEexist(err)) throw err;
+	}
+	const stranded = await mergeDirectoryInto(source, destination);
+	if (stranded > 0) {
+		logger.warn("Merged session artifacts into an existing directory; colliding entries left at source", {
+			source,
+			destination,
+			stranded,
+		});
+	} else {
+		logger.info("Merged session artifacts into an existing directory", { source, destination });
+	}
+	return "merged";
 }
 
 /**
@@ -1607,8 +1680,10 @@ export class SessionManager {
 						try {
 							const artifactStat = await fs.promises.stat(oldArtifactsDir);
 							if (artifactStat.isDirectory()) {
-								await fs.promises.rename(oldArtifactsDir, newArtifactsDir);
-								artifactsMoved = true;
+								// Only a whole-directory rename can be undone by renaming back;
+								// a merge leaves the rollback below to the session file alone.
+								artifactsMoved =
+									(await relocateArtifactsDirectory(oldArtifactsDir, newArtifactsDir)) === "renamed";
 							}
 						} catch (err) {
 							if (!isEnoent(err)) throw err;

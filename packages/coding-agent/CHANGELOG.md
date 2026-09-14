@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Resuming a session whose directory is gone no longer fails with `ENOTEMPTY` when the target project already holds that session's artifacts; the two artifact directories are merged instead.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes

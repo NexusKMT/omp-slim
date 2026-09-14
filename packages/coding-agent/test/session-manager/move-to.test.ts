@@ -553,4 +553,66 @@ describe("SessionManager.moveTo", () => {
 		// appends continue there instead of splitting the transcript.
 		expect(session.getSessionFile()).toBe(movedFile);
 	});
+
+	it("merges into an artifacts dir that already exists at the destination", async () => {
+		// A session that returns to a bucket it lived in before finds its own
+		// `<id>/` still there whenever a writer holding the old path (subagents
+		// adopt the parent's ArtifactManager) kept writing after the move away.
+		// rename(2) onto a non-empty dir is ENOTEMPTY and used to abort the
+		// resume; the move must merge instead.
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+		const homeArtifactsDir = session.getSessionFile()!.slice(0, -6);
+		const firstId = await session.saveArtifact("first", "bash");
+
+		await session.moveTo(cwdB);
+		const awayArtifactsDir = session.getSessionFile()!.slice(0, -6);
+		expect(fs.existsSync(homeArtifactsDir)).toBe(false);
+		const secondId = await session.saveArtifact("second", "read");
+
+		// Stale writer repopulates the home bucket while the session is away.
+		await fsp.mkdir(path.join(homeArtifactsDir, "SubagentA"), { recursive: true });
+		await fsp.writeFile(path.join(homeArtifactsDir, "SubagentA", "output.md"), "stale subagent output");
+		await fsp.writeFile(path.join(homeArtifactsDir, "SubagentA.md"), "stale summary");
+
+		await session.moveTo(cwdA);
+
+		expect(session.getSessionFile()!.slice(0, -6)).toBe(homeArtifactsDir);
+		expect(fs.existsSync(awayArtifactsDir)).toBe(false);
+		expect(await session.getArtifactPath(firstId!)).toBe(path.join(homeArtifactsDir, `${firstId}.bash.log`));
+		expect(await session.getArtifactPath(secondId!)).toBe(path.join(homeArtifactsDir, `${secondId}.read.log`));
+		expect(await fsp.readFile(path.join(homeArtifactsDir, "SubagentA", "output.md"), "utf8")).toBe(
+			"stale subagent output",
+		);
+		expect(await fsp.readFile(path.join(homeArtifactsDir, "SubagentA.md"), "utf8")).toBe("stale summary");
+	});
+
+	it("keeps both copies when a merged artifact name collides", async () => {
+		// Two buckets can each hold `0.bash.log` (ids are seeded per directory),
+		// and `artifact://0` resolves by `0.` prefix, so the merge must neither
+		// overwrite the destination copy nor stack a renamed duplicate beside
+		// it: the colliding source entry stays where it was.
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+		const homeArtifactsDir = session.getSessionFile()!.slice(0, -6);
+		await session.moveTo(cwdB);
+		const awayArtifactsDir = session.getSessionFile()!.slice(0, -6);
+		const id = await session.saveArtifact("written while away", "bash");
+		await fsp.mkdir(homeArtifactsDir, { recursive: true });
+		await fsp.writeFile(path.join(homeArtifactsDir, `${id}.bash.log`), "written by a stale writer");
+		await fsp.writeFile(path.join(awayArtifactsDir, "unique.md"), "moves fine");
+
+		await session.moveTo(cwdA);
+
+		expect(await fsp.readFile(path.join(homeArtifactsDir, `${id}.bash.log`), "utf8")).toBe(
+			"written by a stale writer",
+		);
+		expect(await fsp.readFile(path.join(homeArtifactsDir, "unique.md"), "utf8")).toBe("moves fine");
+		expect(await fsp.readdir(awayArtifactsDir)).toEqual([`${id}.bash.log`]);
+		expect(await fsp.readFile(path.join(awayArtifactsDir, `${id}.bash.log`), "utf8")).toBe("written while away");
+	});
 });
