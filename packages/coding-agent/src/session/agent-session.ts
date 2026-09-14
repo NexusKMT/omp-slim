@@ -2956,6 +2956,7 @@ export class AgentSession {
 		if (event.type === "agent_start") {
 			this.#prunedTerminalRefusal = undefined;
 			this.#emitRunState("running");
+			this.#maintenance.noteTurnStarted();
 		}
 		// This must happen before event fan-out awaits: streamed tool-call deltas
 		// can otherwise queue validation that a delayed turn-start reset erases.
@@ -6179,8 +6180,9 @@ export class AgentSession {
 		// compaction would otherwise schedule — but only once it actually claims the
 		// session (a turn dispatched or queued, or one already running). A locally
 		// handled command, a pre-dispatch throw, or a prompt dropped by the
-		// abort/preflight race hands the resume back via `release(false)`. No-op
-		// when no manual compaction is active.
+		// abort/preflight race hands the resume back via `release(false)`. A prompt
+		// arriving after the cleanup while an earlier parked prompt is still settling
+		// takes part in the same decision. No-op otherwise.
 		const release = await this.#maintenance.waitForManualCompactionCleanup();
 		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
 		if (!release) return this.#dispatchPrompt(text, options, submittedAt, outcome);
@@ -7289,6 +7291,34 @@ export class AgentSession {
 			acceptTerminalEmptyStop?: boolean;
 		},
 	): Promise<boolean> {
+		// An extension command parked on a manual compaction may fire this
+		// (`pi.sendMessage(..., { triggerTurn: true })`) and return without awaiting
+		// it. Claim synchronously, before the normalization await below, so the
+		// parked command's `release(false)` cannot hand the interrupted-turn resume
+		// back while this turn is still in setup. Only a definitive dispatch, or a
+		// live agent turn this message was queued into, counts as a claim.
+		const release = this.#maintenance.claimPendingResume();
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchCustomMessage(message, options, outcome);
+		try {
+			return await this.#dispatchCustomMessage(message, options, outcome);
+		} finally {
+			release(outcome.sessionClaimed);
+		}
+	}
+
+	async #dispatchCustomMessage<T = unknown>(
+		message: CustomMessagePayload<T>,
+		options:
+			| {
+					triggerTurn?: boolean;
+					deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+					queueChipText?: string;
+					acceptTerminalEmptyStop?: boolean;
+			  }
+			| undefined,
+		outcome: PromptDispatchOutcome,
+	): Promise<boolean> {
 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
 		const sessionGeneration = this.#sessionGeneration;
 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
@@ -7313,6 +7343,9 @@ export class AgentSession {
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
 		if (this.isStreaming) {
+			// Queued into a turn the agent owns: that turn holds the session. Busy only
+			// from another prompt's setup claims nothing (that prompt decides).
+			outcome.sessionClaimed = this.agent.state.isStreaming;
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
 				return false;
@@ -7343,9 +7376,10 @@ export class AgentSession {
 					this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 					return false;
 				}
-				return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+				outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 					acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 				});
+				return outcome.sessionClaimed;
 			}
 			this.agent.appendMessage(normalizedAppMessage);
 			this.sessionManager.appendCustomMessageEntry(
@@ -7382,9 +7416,10 @@ export class AgentSession {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 				acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 			});
+			return outcome.sessionClaimed;
 		}
 
 		if (options?.triggerTurn) {
@@ -7392,7 +7427,8 @@ export class AgentSession {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			return await this.#promptAgentInitiatedMessage(normalizedAppMessage);
+			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage);
+			return outcome.sessionClaimed;
 		}
 
 		this.agent.appendMessage(normalizedAppMessage);
