@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.1.22] - 2026-09-14
+
 ### Added
 
 - Enabled assistant prefill support for Ollama models
