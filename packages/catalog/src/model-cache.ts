@@ -95,27 +95,17 @@ export interface CacheEntry<TApi extends Api = Api> {
 let sharedDb: Database | null = null;
 let sharedDbPath: string | null = null;
 
-const readRowCache = new Map<string, { fingerprint: string; entry: CacheEntry<Api> | null }>();
+const readRowCache = new Map<string, { dataVersion: number; entry: CacheEntry<Api> | null }>();
 const READ_ROW_CACHE_MAX = 64;
 
 function readCacheKey(resolvedPath: string, providerId: string): string {
 	return `${resolvedPath} ${providerId}`;
 }
 
-function fileState(resolvedPath: string, suffix: string): string {
+function dbDataVersion(db: Database): number | null {
 	try {
-		const file = Bun.file(suffix === "" ? resolvedPath : `${resolvedPath}${suffix}`);
-		return `${file.size ?? -1}:${file.lastModified ?? -1}`;
-	} catch {
-		return "-1:-1";
-	}
-}
-
-function dbFingerprint(resolvedPath: string): string | null {
-	try {
-		// WAL mode: peer writes land in -wal/-shm while the main file mtime
-		// can sit unchanged until checkpoint, so fingerprint all three.
-		return `${fileState(resolvedPath, "")}|${fileState(resolvedPath, "-wal")}|${fileState(resolvedPath, "-shm")}`;
+		const row = db.query<{ data_version: number }, []>("PRAGMA data_version").get();
+		return typeof row?.data_version === "number" ? row.data_version : null;
 	} catch {
 		return null;
 	}
@@ -131,7 +121,6 @@ function withFreshness<TApi extends Api>(
 	const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ttlMs;
 	return fresh === entry.fresh ? entry : { ...entry, fresh };
 }
-
 function invalidateReadRow(providerId: string, dbPath?: string): void {
 	try {
 		readRowCache.delete(readCacheKey(dbPath ?? getModelDbPath(), providerId));
@@ -380,24 +369,70 @@ export function readModelCache<TApi extends Api>(
 ): CacheEntry<TApi> | null {
 	try {
 		const resolvedPath = dbPath ?? getModelDbPath();
-		const fingerprint = dbFingerprint(resolvedPath);
 		const key = readCacheKey(resolvedPath, providerId);
-		if (fingerprint !== null) {
-			const cached = readRowCache.get(key);
-			if (cached !== undefined && cached.fingerprint === fingerprint) {
-				// Freshness is time-relative: recompute per call from the cached
-				// row's updatedAt so a long-lived process still goes stale.
-				return withFreshness(cached.entry as CacheEntry<TApi> | null, ttlMs, now);
+		// Monotonic change signal: same-shaped WAL overwrites after checkpoint
+		// can leave every size:mtime pair identical, so file metadata alone
+		// cannot invalidate. PRAGMA data_version increments on each committed
+		// write transaction visible to a new reader.
+		const entry = withModelCacheDb(dbPath, db => {
+			const dataVersion = dbDataVersion(db);
+			if (dataVersion !== null) {
+				const cached = readRowCache.get(key);
+				if (cached !== undefined && cached.dataVersion === dataVersion) {
+					// Freshness is time-relative: recompute per call from the
+					// cached row's updatedAt so a long-lived process goes stale.
+					return { hit: true as const, entry: withFreshness(cached.entry as CacheEntry<TApi> | null, ttlMs, now) };
+				}
 			}
-		}
-		const entry = readModelCacheUncached<TApi>(providerId, ttlMs, now, dbPath);
-		if (fingerprint !== null) {
-			if (readRowCache.size >= READ_ROW_CACHE_MAX) readRowCache.clear();
-			readRowCache.set(key, { fingerprint, entry: entry as CacheEntry<Api> | null });
-		}
-		return entry;
+			const fresh = readRowUncached<TApi>(db, providerId, ttlMs, now);
+			if (dataVersion !== null) {
+				if (readRowCache.size >= READ_ROW_CACHE_MAX) readRowCache.clear();
+				readRowCache.set(key, { dataVersion, entry: fresh as CacheEntry<Api> | null });
+			}
+			return { hit: false as const, entry: fresh };
+		});
+		return entry.entry;
 	} catch {
 		return null;
+	}
+}
+
+function readRowUncached<TApi extends Api>(
+	db: Database,
+	providerId: string,
+	ttlMs: number,
+	now: () => number,
+): CacheEntry<TApi> | null {
+	const stmt = db.query<CacheRow, [string]>("SELECT * FROM model_cache WHERE provider_id = ?");
+	try {
+		const row = stmt.get(providerId);
+		if (!row || row.version !== CACHE_SCHEMA_VERSION || row.materialization_policy !== materializationPolicy()) {
+			return null;
+		}
+		const models = parseMaterializedModels<TApi>(row.models);
+		const headerOmittedModelIds = parseModelIds(row.header_omitted_model_ids);
+		const unrestorableHeaderModelIds = parseModelIds(row.unrestorable_header_model_ids);
+		if (models === null || headerOmittedModelIds === null || unrestorableHeaderModelIds === null) {
+			// Fail closed on corrupt header provenance: treating malformed
+			// markers as empty could return a model with required credentials
+			// silently absent. secure_delete scrubs the rejected payload.
+			db.run("DELETE FROM model_cache WHERE provider_id = ?", [providerId]);
+			return null;
+		}
+		const ageMs = now() - row.updated_at;
+		const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ttlMs;
+		return {
+			models,
+			fresh,
+			authoritative: row.authoritative === 1,
+			updatedAt: row.updated_at,
+			headerOmittedModelIds,
+			unrestorableHeaderModelIds,
+			legacyHeaderRestoreMarkers: row.header_restore_version < HEADER_RESTORE_VERSION,
+			staticFingerprint: row.static_fingerprint ?? "",
+		};
+	} finally {
+		stmt.finalize();
 	}
 }
 
@@ -408,39 +443,7 @@ function readModelCacheUncached<TApi extends Api>(
 	dbPath?: string,
 ): CacheEntry<TApi> | null {
 	try {
-		return withModelCacheDb(dbPath, db => {
-			const stmt = db.query<CacheRow, [string]>("SELECT * FROM model_cache WHERE provider_id = ?");
-			try {
-				const row = stmt.get(providerId);
-				if (!row || row.version !== CACHE_SCHEMA_VERSION || row.materialization_policy !== materializationPolicy()) {
-					return null;
-				}
-				const models = parseMaterializedModels<TApi>(row.models);
-				const headerOmittedModelIds = parseModelIds(row.header_omitted_model_ids);
-				const unrestorableHeaderModelIds = parseModelIds(row.unrestorable_header_model_ids);
-				if (models === null || headerOmittedModelIds === null || unrestorableHeaderModelIds === null) {
-					// Fail closed on corrupt header provenance: treating malformed
-					// markers as empty could return a model with required credentials
-					// silently absent. secure_delete scrubs the rejected payload.
-					db.run("DELETE FROM model_cache WHERE provider_id = ?", [providerId]);
-					return null;
-				}
-				const ageMs = now() - row.updated_at;
-				const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ttlMs;
-				return {
-					models,
-					fresh,
-					authoritative: row.authoritative === 1,
-					updatedAt: row.updated_at,
-					headerOmittedModelIds,
-					unrestorableHeaderModelIds,
-					legacyHeaderRestoreMarkers: row.header_restore_version < HEADER_RESTORE_VERSION,
-					staticFingerprint: row.static_fingerprint ?? "",
-				};
-			} finally {
-				stmt.finalize();
-			}
-		});
+		return withModelCacheDb(dbPath, db => readRowUncached<TApi>(db, providerId, ttlMs, now));
 	} catch {
 		return null;
 	}
