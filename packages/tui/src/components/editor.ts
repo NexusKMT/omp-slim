@@ -1719,7 +1719,14 @@ export class Editor implements Component, Focusable {
 					} else {
 						if (selected && this.#autocompleteProvider) {
 							const shouldChainSlashCommandAutocomplete = this.#isSlashCommandNameAutocompleteSelection();
-							const shouldChainDirectoryCompletion = isDirectoryCompletionValue(selected.value);
+							// Directory chaining exists so an @ mention can be browsed deeper
+							// without retyping the path. It must not apply to a slash
+							// command's directory argument: there the accepted value is the
+							// whole argument, so chaining reopens the popup on the directory's
+							// children, the command never submits, and every further Enter
+							// descends another level (#12107).
+							const shouldChainDirectoryCompletion =
+								this.#autocompletePrefix.startsWith("@") && isDirectoryCompletionValue(selected.value);
 							const result = this.#autocompleteProvider.applyCompletion(
 								this.#state.lines,
 								this.#state.cursorLine,

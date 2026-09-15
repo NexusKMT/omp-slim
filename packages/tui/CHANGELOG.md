@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Enter now runs a slash command whose argument completes to a directory, instead of descending into it. ([#12112](https://github.com/can1357/oh-my-pi/pull/12112) by [@Huang-404-Q](https://github.com/Huang-404-Q))
+
 ## [18.2.0] - 2026-09-15
 
 ### Added
