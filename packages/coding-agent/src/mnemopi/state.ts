@@ -730,7 +730,8 @@ export class MnemopiSessionState {
 	 * delete the DB files — e.g. `mnemopiBackend.clear` — pass
 	 * `{ consolidate: false }` to skip the retain/flush pass, since spending
 	 * tokens on memories that will be wiped on the next line is wasted work
-	 * (PR #2327 review).
+	 * (PR #2327 review). Cwd rebinding passes `{ retain: false }` to drain
+	 * existing extractions without capturing a transcript after its cwd changed.
 	 *
 	 * `timeoutMs` caps both synchronous SQLite lock waits during final retention
 	 * and the asynchronous consolidation drain (the user-visible `/quit`,
@@ -752,7 +753,7 @@ export class MnemopiSessionState {
 		for (const memory of this.scoped.owned) memory.beam.db.exec(`PRAGMA busy_timeout=${busyTimeoutMs}`);
 	}
 
-	async dispose(options: { consolidate?: boolean; timeoutMs?: number } = {}): Promise<void> {
+	async dispose(options: { consolidate?: boolean; timeoutMs?: number; retain?: boolean } = {}): Promise<void> {
 		this.#recallGeneration++;
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -772,7 +773,7 @@ export class MnemopiSessionState {
 			full: false,
 			extract: false,
 			sleep: false,
-			retain: this.config.autoRetain,
+			retain: this.config.autoRetain && options.retain !== false,
 		}).catch((error: unknown) => {
 			logger.warn("Mnemopi: consolidation on dispose failed.", { error: String(error) });
 		});
