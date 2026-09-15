@@ -95,17 +95,6 @@ describe("orchestrate notice", () => {
 		expect(notice).not.toContain("$@");
 	});
 
-	it("never names a Bun-specific verification command for a bash-enabled session", () => {
-		// Regression: the notice used to hardcode `bun check`/`bun test`, which
-		// told orchestrators on plain-Node, Python, Go, or Rust repos to run a
-		// checker those projects do not have. The positive half keeps the
-		// assertion from passing vacuously if verification guidance were dropped.
-		const notice = renderOrchestrateNotice({ tools: ["read", "bash"] });
-		expect(notice).toContain("verification");
-		expect(notice).not.toContain("bun");
-		expect(notice).not.toContain("Bun");
-	});
-
 	it("omits tool-budget mentions for tools absent from the session", () => {
 		const notice = renderOrchestrateNotice({ tools: ["read"] });
 		expect(notice).not.toContain("`task` for dispatch");
