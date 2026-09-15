@@ -101,6 +101,7 @@
 
 - Fixed rate-limit/overload failures that arrive *inside* an HTTP 200 body (Azure, LiteLLM-style aggregators, and reverse proxies that already committed to the stream) not advancing `retry.fallbackChains`: a `{"error":{…}}`/`{"code":429}` chunk or a plain-text throttle frame (`429 Too Many Requests`, an nginx page) is now classified as a retryable 429/5xx through the same path an HTTP-status 429 takes, so a busy provider backs off and fails over instead of ending the session. Only bodies the provider actually reported are used: no status is inferred from error wording, and an unreadable body can no longer consume a credential.
 - Fixed tool schema normalization and cycle detection for frozen, sealed, and nonextensible schemas.
+- Reduced memory retained by `complete()` and `completeSimple()` while streaming responses.
 
 ## [18.1.15] - 2026-09-08
 
