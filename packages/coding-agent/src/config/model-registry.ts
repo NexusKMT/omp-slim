@@ -61,6 +61,7 @@ import {
 import {
 	type CommandApiKeyResolution,
 	createLiveConfigHeaders,
+	invalidateAllCommandConfigs,
 	invalidateCommandConfig,
 	isCommandConfigValue,
 	resolveConfigHeaders,
@@ -406,7 +407,17 @@ export class ModelRegistry {
 	 * Reload models from disk (built-in + custom config).
 	 */
 	async refresh(strategy: ModelRefreshStrategy = "online-if-uncached"): Promise<void> {
-		this.#reloadStaticModels();
+		if (strategy === "online") {
+			// User-facing recovery (`omp models refresh`, `/models refresh`, TUI F5):
+			// re-run command-backed credentials. The 401 retry path only invalidates
+			// once; a stuck cache otherwise lasts until process restart.
+			// preserveRuntimeDiscovery keeps extension/discovered models in place
+			// while keys re-install; #refreshRuntimeDiscoveries below still refetches.
+			invalidateAllCommandConfigs();
+			this.#reloadStaticModels({ force: true, preserveRuntimeDiscovery: true });
+		} else {
+			this.#reloadStaticModels();
+		}
 		this.#suppressedSelectors.clear();
 		await this.#refreshRuntimeDiscoveries(strategy);
 	}
@@ -538,7 +549,12 @@ export class ModelRegistry {
 	}
 
 	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {
-		this.#reloadStaticModels();
+		if (strategy === "online") {
+			this.#invalidateProviderCommandConfigs(providerId);
+			this.#reloadStaticModels({ force: true, preserveRuntimeDiscovery: true });
+		} else {
+			this.#reloadStaticModels();
+		}
 		for (const selector of this.#suppressedSelectors.keys()) {
 			if (selector.startsWith(`${providerId}/`)) {
 				this.#suppressedSelectors.delete(selector);
