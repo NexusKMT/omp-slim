@@ -612,6 +612,10 @@
 
 - Fixed `/tan` forking a mid-turn parent leaving the clone showing the parent's in-flight tool call as its own unresolved work: the fork now pairs the parent's unresolved tool call with a synthetic aborted result so the clone inherits a terminal, well-formed transcript ([#11118](https://github.com/can1357/oh-my-pi/issues/11118)).
 
+### Fixed
+
+- Antigravity image generation now uses the image model advertised for the connected account instead of silently falling back after a stale-model 404 ([#11106](https://github.com/can1357/oh-my-pi/issues/11106)).
+
 ## [18.1.12] - 2026-09-06
 
 - Fixed edit and write results to report the formatted bytes actually committed by LSP writethrough.
