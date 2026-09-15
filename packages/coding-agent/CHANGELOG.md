@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Codex Spark now defaults to replace edits instead of hashline; explicit edit-mode overrides remain honored.
+- Codex Spark, all MiniMax models, and GLM-5.3-Flash now default to replace edits instead of hashline; explicit edit-mode overrides remain honored.
 
 ## [18.2.0] - 2026-09-15
 
