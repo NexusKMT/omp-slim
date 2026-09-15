@@ -282,7 +282,7 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	try {
 		await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
 	} catch (error) {
-		if (!persistenceFailure) throw error;
+		if (!persistenceFailure || error !== persistenceFailure) throw error;
 		durabilityFailure = true;
 		// The store is still failing at teardown, so this is the moment the
 		// transcript stops being retryable and becomes lost.

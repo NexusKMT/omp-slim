@@ -182,6 +182,42 @@ describe("headless persistence-failure surface", () => {
 		expect(transcript).toContain("recovered-user");
 	});
 
+	it("does not misattribute a later non-persistence dispose rejection", async () => {
+		const persistenceError = new Error("temporary persistence failure");
+		const unrelatedDisposeError = new Error("unrelated dispose failure");
+		let notifyPersistenceError: ((error: Error) => void) | undefined;
+		const stderr = captureStderr();
+		const session = {
+			extensionRunner: undefined,
+			subscribe: () => {},
+			settings: { get: () => false },
+			sessionManager: {
+				onPersistenceError: (callback: (error: Error) => void) => {
+					notifyPersistenceError = callback;
+					return () => {};
+				},
+			},
+			getLastAssistantMessage: () => assistant(""),
+			prepareForHeadlessAdvisorDrain: () => {},
+			setTextOutputCommitted: () => {},
+			waitForAdvisorCatchup: async () => true,
+			prompt: async () => {
+				notifyPersistenceError?.(persistenceError);
+			},
+			dispose: async () => {
+				throw unrelatedDisposeError;
+			},
+		} as unknown as AgentSession;
+
+		try {
+			await expect(runPrintMode(session, { mode: "text", initialMessage: "hello" })).rejects.toBe(
+				unrelatedDisposeError,
+			);
+		} finally {
+			stderr.restore();
+		}
+	});
+
 	it("keeps running, and keeps writing later diagnostics, when stderr throws", async () => {
 		const manager = makeSessionManager();
 		await manager.ensureOnDisk();

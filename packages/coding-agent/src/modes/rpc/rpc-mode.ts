@@ -1123,7 +1123,7 @@ export async function runRpcMode(
 		try {
 			await session.dispose();
 		} catch (error) {
-			if (!persistenceFailure) throw error;
+			if (!persistenceFailure || error !== persistenceFailure) throw error;
 			// The notice frame this failure queued must reach the client before the
 			// process ends (review 3983906393).
 			await stdoutQueue;
