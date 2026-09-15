@@ -75,6 +75,8 @@ function createCloneStub(overrides?: {
 		}),
 		prompt: vi.fn(overrides?.prompt ?? (async () => {})),
 		waitForIdle: vi.fn(async () => {}),
+		hasPendingAsyncWork: vi.fn(() => false),
+		settleAsyncWork: vi.fn(async () => {}),
 		getLastAssistantMessage: vi.fn(() => assistantText(overrides?.lastAssistantText ?? "done")),
 		abort: vi.fn(overrides?.abort ?? (() => {})),
 		dispose: vi.fn(async () => {}),
@@ -278,6 +280,99 @@ describe("TanCommandController", () => {
 		// The local mapping keys off the session-manager id (not `session.sessionId`,
 		// still "parent-session"), matching the parent's large-paste / local:// writes.
 		expect(opts.getSessionId?.()).toBe("parent-local-session");
+	});
+
+	it("keeps the tangent alive until successive descendant results produce the final answer", async () => {
+		const harness = createContext();
+		vi.spyOn(SessionManager, "forkFrom").mockResolvedValue(harness.cloneManager);
+		const { clone } = createCloneStub();
+		const firstEntered = Promise.withResolvers<void>();
+		const secondEntered = Promise.withResolvers<void>();
+		const firstResult = Promise.withResolvers<void>();
+		const secondResult = Promise.withResolvers<void>();
+		let generation = 0;
+		let answer = "preliminary answer";
+		clone.hasPendingAsyncWork.mockImplementation(() => generation < 2);
+		clone.settleAsyncWork.mockImplementation(async () => {
+			if (generation === 0) {
+				firstEntered.resolve();
+				await firstResult.promise;
+				answer = "first descendant result; another descendant is pending";
+			} else {
+				secondEntered.resolve();
+				await secondResult.promise;
+				answer = "final answer incorporating both descendant results";
+			}
+			generation++;
+		});
+		clone.getLastAssistantMessage.mockImplementation(() => assistantText(answer));
+		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({
+			session: clone,
+		} as unknown as CreateAgentSessionResult);
+		await new TanCommandController(harness.ctx).start("integrate descendant results");
+		const run = harness.capturedRun;
+		if (!run) throw new Error("run function was not captured");
+		let returned = false;
+		const result = run({
+			jobId: "job-123",
+			signal: new AbortController().signal,
+			reportProgress: async () => {},
+		}).then(value => {
+			returned = true;
+			return value;
+		});
+		try {
+			// Racing the first wait against completion makes the old premature return
+			// fail immediately rather than waiting for a test timeout.
+			expect(await Promise.race([firstEntered.promise.then(() => "waiting"), result.then(() => "returned")])).toBe(
+				"waiting",
+			);
+			expect(clone.dispose).not.toHaveBeenCalled();
+			firstResult.resolve();
+			await secondEntered.promise;
+			expect(returned).toBe(false);
+			expect(clone.dispose).not.toHaveBeenCalled();
+			secondResult.resolve();
+			expect(await result).toBe("final answer incorporating both descendant results");
+			expect(clone.dispose).toHaveBeenCalledTimes(1);
+		} finally {
+			firstResult.resolve();
+			secondResult.resolve();
+			await result;
+		}
+	});
+
+	it("cancels a tangent while descendant settlement is pending and disposes its clone", async () => {
+		const harness = createContext();
+		vi.spyOn(SessionManager, "forkFrom").mockResolvedValue(harness.cloneManager);
+		const { clone } = createCloneStub();
+		const settling = Promise.withResolvers<void>();
+		const settled = Promise.withResolvers<void>();
+		clone.hasPendingAsyncWork.mockReturnValue(true);
+		clone.settleAsyncWork.mockImplementation(async () => {
+			settling.resolve();
+			await settled.promise;
+		});
+		vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue({
+			session: clone,
+		} as unknown as CreateAgentSessionResult);
+		await new TanCommandController(harness.ctx).start("wait for a descendant");
+		const run = harness.capturedRun;
+		if (!run) throw new Error("run function was not captured");
+		const abort = new AbortController();
+		const result = run({ jobId: "job-123", signal: abort.signal, reportProgress: async () => {} });
+		try {
+			await settling.promise;
+			abort.abort();
+			await expect(result).rejects.toThrow();
+			expect(clone.abort).toHaveBeenCalledTimes(1);
+			expect(clone.dispose).toHaveBeenCalledTimes(1);
+			expect(clone.getLastAssistantMessage).not.toHaveBeenCalled();
+		} finally {
+			clone.hasPendingAsyncWork.mockReturnValue(false);
+			settled.resolve();
+			await result.catch(() => {});
+		}
 	});
 
 	it("forwards the parent's prepared extensions and root policy so the tan child rebinds runtime providers", async () => {
