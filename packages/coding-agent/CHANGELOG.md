@@ -3,6 +3,10 @@
 ## [Unreleased]
 - Fixed standalone `omp read skill://<name>` failing with `Unknown skill` by discovering configured skills before resolving the URI ([#10961](https://github.com/can1357/oh-my-pi/issues/10961)).
 
+### Changed
+
+- Long sessions spend less time checking retired transcript blocks on each frame.
+
 ### Fixed
 
 - Subagents no longer remain `running` after their final result is accepted; a finished run reaches a terminal state without the parent having to send a status message ([#11079](https://github.com/can1357/oh-my-pi/issues/11079)).
