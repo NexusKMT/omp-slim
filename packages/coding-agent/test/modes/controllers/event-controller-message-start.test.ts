@@ -94,7 +94,9 @@ describe("EventController message_start (user role)", () => {
 		expect(addMessageToChat).toHaveBeenCalledWith(message);
 		// Pending list always refreshes so the dequeued entry disappears.
 		expect(updatePendingMessagesDisplay).toHaveBeenCalledTimes(1);
-		// Signature is consumed so a future external message with the same shape still clears.
+		// Signature is consumed so a future external message with the same shape is
+		// not matched to this local submission again. The composer is never cleared
+		// on message_start, so consumption no longer affects the draft.
 		expect(ctx.locallySubmittedUserSignatures.has(signature)).toBe(false);
 	});
 
