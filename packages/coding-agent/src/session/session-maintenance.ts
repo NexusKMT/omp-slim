@@ -277,6 +277,20 @@ function handoffSummaryFromDocument(
 	};
 }
 
+/**
+ * Manual compaction rejected as a no-op: the session is too small, or its
+ * branch already ends in a compaction entry. Thrown before this pass runs a
+ * method or appends anything, so — unlike a hook cancel or a summarizer
+ * failure — a turn the pass aborted (or a resume it inherited from an earlier
+ * pass) is resumed exactly as after a committed summary.
+ */
+class ManualCompactionNoOpError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ManualCompactionNoOpError";
+	}
+}
+
 /** Capabilities borrowed from the owning AgentSession. */
 export interface SessionMaintenanceHost {
 	agent: Agent;
@@ -384,6 +398,10 @@ export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
 	/** Resolves after an active manual compaction has reconnected the agent subscription. */
 	#manualCompactionCleanup: Promise<void> | undefined;
+	/** Dispatches holding an unreleased claim from {@link waitForManualCompactionCleanup}/{@link claimPendingResume}; any one may supersede the interrupted-turn resume. */
+	#promptsAwaitingCleanup = 0;
+	/** Interrupted-turn resume withheld from a compaction `finally` because a claim was open; consumed by `release(false)`, {@link noteTurnStarted}, or the next manual pass. */
+	#deferredResumeGeneration: number | undefined;
 	#autoCompactionAbortController: AbortController | undefined;
 	/**
 	 * Live tool-loop contexts parked after mid-turn maintenance hit a no-progress
@@ -879,12 +897,17 @@ export class SessionMaintenance {
 	 * Aborts current agent operation first.
 	 * @param customInstructions Optional instructions for the compaction summary
 	 * @param options Optional callbacks for completion/error handling
+	 * @param onCommitted Internal: nested fallback frames report their commit to
+	 * the owning frame the moment the entry lands, so a late rejection (a
+	 * `session_compact` hook or `onComplete` throwing after the append) still
+	 * resumes the interrupted turn exactly as the direct path does.
 	 */
 	async compact(
 		customInstructions?: string,
 		options?: CompactOptions,
 		methodOffset = 0,
 		retryController?: AbortController,
+		onCommitted?: () => void,
 	): Promise<CompactionResult> {
 		const ownsCompactionController = retryController === undefined;
 		if (this.#compactionAbortController && this.#compactionAbortController !== retryController) {
@@ -907,12 +930,36 @@ export class SessionMaintenance {
 		let methods: CompactionMethod[] = [];
 		let selectedMethodIndex = -1;
 		let compactionCommitted = false;
+		const markCommitted = (): void => {
+			compactionCommitted = true;
+			onCommitted?.();
+		};
 		let methodAttempted = false;
+		// No-op rejections (too small / already compacted) make no history change
+		// in this pass, so an interrupted or inherited turn resumes on them like on
+		// a commit; a hook cancel or summarizer failure does not resume.
+		let rejectedAsNoOp = false;
+		// Set when this manual pass aborted a live turn — or inherited a resume an
+		// earlier pass withheld for a still-parked prompt (see
+		// `waitForManualCompactionCleanup`): the turn is resumed once the summary
+		// lands (see the `finally`). Generation is captured after the abort bump so
+		// a reset/new-session in between skips the resume as stale. This pass's
+		// options gate both (a `suppressContinuation` caller owns whatever turn
+		// follows, e.g. plan-mode approve-and-compact); its outcome gates only the
+		// turn it interrupted itself — see the `finally`.
+		let resumeInterruptedTurn = false;
+		let interruptedTurnGeneration = 0;
+		let inheritedResume = false;
 		const compactionAbortController = retryController ?? new AbortController();
 		const manualCompactionCleanup = ownsCompactionController ? Promise.withResolvers<void>() : undefined;
 		if (ownsCompactionController) {
 			this.#compactionAbortController = compactionAbortController;
 			this.#manualCompactionCleanup = manualCompactionCleanup?.promise;
+			// A resume still withheld from an earlier pass belongs to this pass now:
+			// the earlier pass's abort already bumped the generation it captured, so
+			// re-decide with this pass's generation instead of stranding the turn.
+			inheritedResume = this.#deferredResumeGeneration !== undefined;
+			this.#deferredResumeGeneration = undefined;
 		}
 		// A manual pass supersedes any background speculation; running both would
 		// double-bill the summarizer and race the commit.
@@ -920,8 +967,21 @@ export class SessionMaintenance {
 
 		try {
 			if (ownsCompactionController) {
+				// A manual compaction aborts the live turn, tool loop included. Without a
+				// resume the agent sits idle on a half-finished loop (an autoresearch run,
+				// a pending tool result) until the user types "continue" by hand.
+				// Only a turn the agent actually owns counts: the session-level busy flag
+				// is also true while a prompt is still in async setup (before its message
+				// reaches the agent). The abort bump drops that prompt, so resuming on
+				// its behalf would nudge the model on the previous transcript instead.
+				const interruptedActiveTurn = this.#host.agent.state.isStreaming;
 				this.#host.disconnectFromAgent();
 				await this.#host.abort({ goalReason: "internal", preserveCompaction: true });
+				resumeInterruptedTurn =
+					(interruptedActiveTurn || inheritedResume) &&
+					options?.suppressContinuation !== true &&
+					this.#host.settings.get("compaction.autoContinue") !== false;
+				interruptedTurnGeneration = this.#host.promptGeneration();
 			}
 			const activeModel = this.#model;
 			if (!activeModel) {
@@ -933,7 +993,11 @@ export class SessionMaintenance {
 				!customInstructions &&
 				!options?.internalGuidance
 			) {
-				const result = await this.#compactExperimentalContext(activeModel, compactionAbortController);
+				const result = await this.#compactExperimentalContext(
+					activeModel,
+					compactionAbortController,
+					markCommitted,
+				);
 				options?.onComplete?.(result);
 				return result;
 			}
@@ -990,7 +1054,15 @@ export class SessionMaintenance {
 					`remote compaction is unavailable for ${activeModel.id}; trying the next preferred method`,
 					"compaction",
 				);
-				return await this.compact(customInstructions, options, selectedMethodIndex + 1, compactionAbortController);
+				// The nested call runs on this controller, so it never owns the resume;
+				// it reports its commit back here instead.
+				return await this.compact(
+					customInstructions,
+					options,
+					selectedMethodIndex + 1,
+					compactionAbortController,
+					markCommitted,
+				);
 			}
 			const pathEntries = this.#host.sessionManager.getBranch();
 			const preparation = prepareCompaction(pathEntries, effectiveSettings, activeModel, this.#tokenizer);
@@ -998,9 +1070,9 @@ export class SessionMaintenance {
 				// Check why we can't compact
 				const lastEntry = pathEntries[pathEntries.length - 1];
 				if (lastEntry?.type === "compaction") {
-					throw new Error("Already compacted");
+					throw new ManualCompactionNoOpError("Already compacted");
 				}
-				throw new Error("Nothing to compact (session too small)");
+				throw new ManualCompactionNoOpError("Nothing to compact (session too small)");
 			}
 
 			let hookCompaction: CompactionResult | undefined;
@@ -1239,7 +1311,7 @@ export class SessionMaintenance {
 				});
 			}
 
-			compactionCommitted = true;
+			markCommitted();
 			await this.#commitCompactionEntry({
 				summary,
 				shortSummary,
@@ -1265,6 +1337,7 @@ export class SessionMaintenance {
 			return compactionResult;
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
+			if (error instanceof ManualCompactionNoOpError) rejectedAsNoOp = true;
 			if (
 				methodAttempted &&
 				!compactionCommitted &&
@@ -1278,7 +1351,13 @@ export class SessionMaintenance {
 					`${methods[selectedMethodIndex]} compaction failed; trying the next preferred method`,
 					"compaction",
 				);
-				return await this.compact(customInstructions, options, selectedMethodIndex + 1, compactionAbortController);
+				return await this.compact(
+					customInstructions,
+					options,
+					selectedMethodIndex + 1,
+					compactionAbortController,
+					markCommitted,
+				);
 			}
 			options?.onError?.(err);
 			throw error;
@@ -1299,6 +1378,20 @@ export class SessionMaintenance {
 					this.#manualCompactionCleanup = undefined;
 				}
 				manualCompactionCleanup?.resolve();
+				// An inherited resume was earned by the pass that committed it; this
+				// pass's own outcome (hook cancel, summarizer failure) only decides the
+				// turn it interrupted itself, so the inherited one stays owed.
+				if ((compactionCommitted || rejectedAsNoOp || inheritedResume) && resumeInterruptedTurn) {
+					if (this.#promptsAwaitingCleanup > 0) {
+						// A prompt parked on the barrier just resolved is the user's next
+						// intent and takes the session instead (its continuation is a
+						// microtask away). It reports back via `release`: a turn drops the
+						// resume, a locally handled command hands it back.
+						this.#deferredResumeGeneration = interruptedTurnGeneration;
+					} else {
+						this.#scheduleInterruptedTurnResume(interruptedTurnGeneration);
+					}
+				}
 			}
 		}
 	}
@@ -1308,11 +1401,16 @@ export class SessionMaintenance {
 	 * rewriting the canonical transcript. Explicit compact modes and focused
 	 * manual compactions deliberately bypass this path.
 	 */
-	async #compactExperimentalContext(model: Model, signalController: AbortController): Promise<CompactionResult> {
+	async #compactExperimentalContext(
+		model: Model,
+		signalController: AbortController,
+		onCommitted: () => void,
+	): Promise<CompactionResult> {
 		const entries = this.#host.sessionManager.getBranch();
 		const settings = this.#host.settings.getGroup("compaction");
 		const preparation = prepareCompaction(entries, settings, model, this.#tokenizer);
-		if (!preparation) throw new Error("Nothing to compact (session too small or already rolled over)");
+		if (!preparation)
+			throw new ManualCompactionNoOpError("Nothing to compact (session too small or already rolled over)");
 
 		const sourceLeafId = entries.at(-1)?.id;
 		const sourceSessionId = this.#host.sessionId();
@@ -1376,6 +1474,11 @@ export class SessionMaintenance {
 						details: { kind: "experimental-context-rollover", version: 1 },
 						preserveData: prepared.preserveData,
 					};
+		// Report before `#commitCompactionEntry`, as the direct path does: it appends
+		// the entry and then awaits post-append bookkeeping and the `session_compact`
+		// hook, and a rejection there must still count as committed for the
+		// interrupted-turn resume.
+		onCommitted();
 		await this.#commitCompactionEntry({
 			...result,
 			fromExtension,
@@ -1642,13 +1745,83 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Resolves once an in-flight manual compaction has reconnected the agent
-	 * subscription and re-drained its preserved queues; `undefined` when no manual
-	 * compaction is active. Callers that must not start a turn against the
-	 * disconnected session (e.g. ordinary prompts) await this first.
+	 * Same continuation the context-full path uses: a queued steer/follow-up
+	 * (drained in compact()'s `finally`) drives the resume, otherwise the
+	 * auto-continue nudge does. `terminalTextAnswer` is false by construction —
+	 * the turn was cut mid-run, so there is no finished answer to preserve.
 	 */
-	get manualCompactionCleanup(): Promise<void> | undefined {
-		return this.#manualCompactionCleanup;
+	#scheduleInterruptedTurnResume(generation: number): void {
+		this.#host.scheduleCompactionContinuation({
+			generation,
+			autoContinue: true,
+			terminalTextAnswer: false,
+			suppressContinuation: false,
+		});
+	}
+
+	/**
+	 * Park an ordinary prompt until an in-flight manual compaction has reconnected
+	 * the agent subscription and re-drained its preserved queues. A prompt waiting
+	 * here is the user's next intent, so it supersedes the interrupted-turn
+	 * resume: the cleanup `finally` defers the synthetic continuation while any
+	 * waiter is parked, otherwise the nudge claims the session first and the
+	 * prompt lands on `AgentBusyError`.
+	 *
+	 * Returns `undefined` at once when no manual compaction is active and no
+	 * resume decision is open. Otherwise the caller MUST invoke the returned
+	 * `release` once the prompt settles — see {@link claimPendingResume}.
+	 */
+	async waitForManualCompactionCleanup(): Promise<((startedTurn: boolean) => void) | undefined> {
+		const cleanup = this.#manualCompactionCleanup;
+		// No compaction to wait for, but an earlier parked prompt is still settling:
+		// this prompt competes for the same session, so it takes part in the
+		// resume decision (a turn it starts must not be followed by the stale nudge).
+		if (!cleanup) return this.claimPendingResume();
+		const release = this.#claimResume();
+		await cleanup;
+		return release;
+	}
+
+	/**
+	 * Register a dispatch that may start a turn while an interrupted-turn resume
+	 * decision is open (a prompt parked by {@link waitForManualCompactionCleanup}
+	 * has not released yet). `undefined` when no decision is open.
+	 *
+	 * The caller MUST invoke the returned `release` once the dispatch settles.
+	 * `startedTurn: true` (dispatched or queued) drops the deferred resume for
+	 * good; `false` (an extension/custom command handled locally, a pre-dispatch
+	 * throw) hands it back so the interrupted work is not stranded, once no other
+	 * participant can still claim the session.
+	 */
+	claimPendingResume(): ((startedTurn: boolean) => void) | undefined {
+		return this.#promptsAwaitingCleanup > 0 ? this.#claimResume() : undefined;
+	}
+
+	#claimResume(): (startedTurn: boolean) => void {
+		this.#promptsAwaitingCleanup++;
+		let released = false;
+		return (startedTurn: boolean): void => {
+			if (released) return;
+			released = true;
+			this.#promptsAwaitingCleanup--;
+			if (startedTurn) {
+				this.#deferredResumeGeneration = undefined;
+				return;
+			}
+			if (this.#promptsAwaitingCleanup > 0 || this.#deferredResumeGeneration === undefined) return;
+			const generation = this.#deferredResumeGeneration;
+			this.#deferredResumeGeneration = undefined;
+			this.#scheduleInterruptedTurnResume(generation);
+		};
+	}
+
+	/**
+	 * A turn started, by whatever path (a released prompt, an extension's
+	 * `sendMessage({ triggerTurn })`, the queued-message drain). It owns the
+	 * session now, so a resume still withheld for a parked prompt is moot.
+	 */
+	noteTurnStarted(): void {
+		this.#deferredResumeGeneration = undefined;
 	}
 
 	/** Cancel only automatic maintenance while preserving a manual compaction. */

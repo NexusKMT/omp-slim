@@ -491,6 +491,15 @@ type AgentContinueOutcome =
 	| { status: "skipped"; reason: AgentContinueSkipReason }
 	| { status: "failed"; error: unknown };
 
+/**
+ * Reported by `#dispatchPrompt` to `prompt()`: whether the prompt took the
+ * session — a turn dispatched or queued, or the agent already owning one.
+ * Distinct from the public return value, which stays `true` for a dropped
+ * prompt. A dispatch that `agent.prompt` rejects started no turn and claims
+ * nothing.
+ */
+type PromptDispatchOutcome = { sessionClaimed: boolean };
+
 type ActiveAgentContinue = {
 	schedulerToken: number;
 	source: string;
@@ -3041,6 +3050,7 @@ export class AgentSession {
 			this.#prunedTerminalRefusal = undefined;
 			this.#advisors.onPrimaryAgentStart();
 			this.#emitRunState("running");
+			this.#maintenance.noteTurnStarted();
 		}
 		// This must happen before event fan-out awaits: streamed tool-call deltas
 		// can otherwise queue validation that a delayed turn-start reset erases.
@@ -6286,8 +6296,7 @@ export class AgentSession {
 	 * - Validates model and API key before sending (when not streaming)
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
-	 */
-	/**
+	 *
 	 * Returns `false` when the command was fully handled locally (extension or
 	 * custom-TS command consumed without calling the LLM). Returns `true` when
 	 * the prompt was forwarded to the agent — either directly or queued as a
@@ -6307,13 +6316,33 @@ export class AgentSession {
 		// cleanup finally re-drains the preserved queues. Starting a turn before then
 		// would neither persist nor forward its events and could race the in-flight
 		// history rewrite. `abort` still overtakes compaction; ordinary prompts wait
-		// here. No-op when no manual compaction is active.
-		await this.#maintenance.manualCompactionCleanup;
+		// here, and a waiting prompt supersedes the interrupted-turn resume the
+		// compaction would otherwise schedule — but only once it actually claims the
+		// session (a turn dispatched or queued, or one already running). A locally
+		// handled command, a pre-dispatch throw, or a prompt dropped by the
+		// abort/preflight race hands the resume back via `release(false)`. A prompt
+		// arriving after the cleanup while an earlier parked prompt is still settling
+		// takes part in the same decision. No-op otherwise.
+		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchPrompt(text, options, submittedAt, outcome);
+		try {
+			return await this.#dispatchPrompt(text, options, submittedAt, outcome);
+		} finally {
+			release(outcome.sessionClaimed);
+		}
+	}
+
+	async #dispatchPrompt(
+		text: string,
+		options: PromptOptions | undefined,
+		submittedAt: number,
+		outcome: PromptDispatchOutcome,
+	): Promise<boolean> {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		// Slash/custom-command handling below rewrites `text`; keep the original
 		// so a dropped prompt is handed back exactly as the user typed it.
 		const typedText = text;
-
 		// Handle extension commands first (execute immediately, even during streaming)
 		if (expandPromptTemplates && text.startsWith("/")) {
 			const handled = await this.#tryExecuteExtensionCommand(text);
@@ -6362,7 +6391,13 @@ export class AgentSession {
 		// If streaming, queue via steer()/followUp()/aside based on option
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				// Busy because the agent owns a turn: that turn supersedes the interrupted
+				// one (after compaction it is the queued-message drain). Busy only from
+				// another prompt's setup claims nothing yet.
+				outcome.sessionClaimed = this.agent.state.isStreaming;
+				throw new AgentBusyError();
+			}
 
 			// Steer/follow-up/aside the keyword notices BEFORE the queued user message so the
 			// model reads the steering notice ahead of the prompt it modifies.
@@ -6373,6 +6408,7 @@ export class AgentSession {
 				timestamp: submittedAt,
 				attribution: promptAttribution,
 			});
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6414,7 +6450,10 @@ export class AgentSession {
 		// in-flight increment is visible to every later re-check.
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				outcome.sessionClaimed = this.agent.state.isStreaming;
+				throw new AgentBusyError();
+			}
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
@@ -6426,6 +6465,7 @@ export class AgentSession {
 					descriptionNotice: imageDescriptionNotice,
 				},
 			});
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6488,6 +6528,7 @@ export class AgentSession {
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
 			this.#toolChoiceQueue.removeByLabel("external-thinking");
 		}
+		outcome.sessionClaimed = dispatched;
 		if (!dispatched && message.role === "user") {
 			// An abort (Esc) or preflight denial raced turn setup: the prompt never
 			// reached the agent or the session file. Hand it back to the host so the
@@ -6521,6 +6562,30 @@ export class AgentSession {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
+	): Promise<boolean> {
+		// Same barrier/claim protocol as prompt(): skill invocations, collab peer
+		// prompts and the CLI initial message arrive here and must neither start a
+		// turn against the disconnected session nor lose the session to the
+		// interrupted-turn resume once compaction ends.
+		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchCustomPrompt(message, options, outcome);
+		try {
+			return await this.#dispatchCustomPrompt(message, options, outcome);
+		} finally {
+			release(outcome.sessionClaimed);
+		}
+	}
+
+	async #dispatchCustomPrompt<T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
+		options:
+			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+					queueChipText?: string;
+					queueOnly?: boolean;
+			  })
+			| undefined,
+		outcome: PromptDispatchOutcome,
 	): Promise<boolean> {
 		const textContent =
 			typeof message.content === "string"
@@ -6557,16 +6622,23 @@ export class AgentSession {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options.queueChipText);
+			outcome.sessionClaimed = true;
 			return true;
 		}
 		if (this.isStreaming) {
 			const streamingBehavior = options?.streamingBehavior;
-			if (!streamingBehavior) throw new AgentBusyError();
+			if (!streamingBehavior) {
+				// Mirrors #dispatchPrompt: busy because the agent owns a turn claims the
+				// session; busy only from another prompt's setup claims nothing.
+				outcome.sessionClaimed = this.agent.state.isStreaming;
+				throw new AgentBusyError();
+			}
 
 			for (const notice of keywordNotices) {
 				await this.#queueCustomMessage(notice, streamingBehavior);
 			}
 			await this.#queueCustomMessage(message, streamingBehavior, options?.queueChipText);
+			outcome.sessionClaimed = true;
 			return true;
 		}
 
@@ -6580,10 +6652,11 @@ export class AgentSession {
 			timestamp: Date.now(),
 		};
 
-		return this.#promptWithMessage(customMessage, textContent, {
+		outcome.sessionClaimed = await this.#promptWithMessage(customMessage, textContent, {
 			...options,
 			prependMessages: keywordNotices.length > 0 ? keywordNotices : undefined,
 		});
+		return outcome.sessionClaimed;
 	}
 
 	/** Queue ownership belongs to Agent; only actual user deliveries refresh submission policy. */
@@ -7503,6 +7576,34 @@ export class AgentSession {
 			acceptTerminalEmptyStop?: boolean;
 		},
 	): Promise<boolean> {
+		// An extension command parked on a manual compaction may fire this
+		// (`pi.sendMessage(..., { triggerTurn: true })`) and return without awaiting
+		// it. Claim synchronously, before the normalization await below, so the
+		// parked command's `release(false)` cannot hand the interrupted-turn resume
+		// back while this turn is still in setup. Only a definitive dispatch, or a
+		// live agent turn this message was queued into, counts as a claim.
+		const release = this.#maintenance.claimPendingResume();
+		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
+		if (!release) return this.#dispatchCustomMessage(message, options, outcome);
+		try {
+			return await this.#dispatchCustomMessage(message, options, outcome);
+		} finally {
+			release(outcome.sessionClaimed);
+		}
+	}
+
+	async #dispatchCustomMessage<T = unknown>(
+		message: CustomMessagePayload<T>,
+		options:
+			| {
+					triggerTurn?: boolean;
+					deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+					queueChipText?: string;
+					acceptTerminalEmptyStop?: boolean;
+			  }
+			| undefined,
+		outcome: PromptDispatchOutcome,
+	): Promise<boolean> {
 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
 		const sessionGeneration = this.#sessionGeneration;
 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
@@ -7527,6 +7628,9 @@ export class AgentSession {
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
 		if (this.isStreaming) {
+			// Queued into a turn the agent owns: that turn holds the session. Busy only
+			// from another prompt's setup claims nothing (that prompt decides).
+			outcome.sessionClaimed = this.agent.state.isStreaming;
 			if (options?.deliverAs === "nextTurn") {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
 				return false;
@@ -7557,9 +7661,10 @@ export class AgentSession {
 					this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 					return false;
 				}
-				return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+				outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 					acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 				});
+				return outcome.sessionClaimed;
 			}
 			this.agent.appendMessage(normalizedAppMessage);
 			this.sessionManager.appendCustomMessageEntry(
@@ -7596,9 +7701,10 @@ export class AgentSession {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			return await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
 				acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
 			});
+			return outcome.sessionClaimed;
 		}
 
 		if (options?.triggerTurn) {
@@ -7606,7 +7712,8 @@ export class AgentSession {
 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
 				return false;
 			}
-			return await this.#promptAgentInitiatedMessage(normalizedAppMessage);
+			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage);
+			return outcome.sessionClaimed;
 		}
 
 		this.agent.appendMessage(normalizedAppMessage);

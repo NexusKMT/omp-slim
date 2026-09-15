@@ -471,7 +471,7 @@ Post-navigation event exposing new/old leaf and optional summary entry.
 
 ## Runtime behavior and failure semantics
 
-- Manual compaction aborts current agent operation first.
+- Manual compaction aborts current agent operation first. If that abort cut a turn in flight, the compaction resumes it once the summary is committed — or immediately when it rejects as a no-op (session too small / already compacted), since that pass makes no history change — using a queued steer/follow-up first, otherwise the auto-continue prompt. A hook cancel or summarizer failure does not resume. The resume is skipped when `compaction.autoContinue` is `false` or the caller passed `suppressContinuation` (plan-mode approval dispatches its own execution turn). A manual compaction issued while idle never starts a turn. A prompt submitted while the compaction runs waits for it and, if it starts or queues a turn, replaces the resume; a locally handled extension/custom command hands the resume back — unless a turn it triggered (`pi.sendMessage(..., { triggerTurn: true })`, `pi.sendUserMessage()`), a later prompt, or any other turn starts first. A second manual compaction started while such a resume is still withheld takes it over.
 - `abortCompaction()` cancels manual compaction, auto-compaction, and handoff generation controllers.
 - Auto compaction emits start/end session events for UI/state updates.
 - Auto compaction can try multiple model candidates and retry transient failures; long retry delays prefer the next candidate when one is available.
