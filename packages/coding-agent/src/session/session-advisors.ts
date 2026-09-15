@@ -1,3 +1,4 @@
+import { scheduler } from "node:timers/promises";
 import {
 	Agent,
 	type AgentMessage,
@@ -93,6 +94,7 @@ import { resolveCompactionMethodOrder, resolveMethodSettings } from "./compactio
 import type { CustomMessage, CustomMessagePayload } from "./messages";
 import { isAdvisorCard, isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
+	calculateRetryBackoffDelayMs,
 	formatRetryFallbackSelector,
 	getRetryFallbackRevertPolicy,
 	parseRetryFallbackSelector,
@@ -107,6 +109,103 @@ import { buildSessionMetadata } from "./session-metadata";
 import type { YieldQueue } from "./yield-queue";
 
 const ADVISOR_CODEX_SSE_MAX_ATTEMPTS = 1;
+
+/**
+ * Buffer added to a sibling credential's unblock deadline before the advisor
+ * retries, so the next `getApiKey` re-rank sees the block already expired.
+ * Mirrors turn-recovery's `SIBLING_UNBLOCK_BUFFER_MS`.
+ */
+const ADVISOR_SIBLING_UNBLOCK_BUFFER_MS = 1_000;
+
+/**
+ * Decide whether an advisor should wait out a usage-limit block and retry the
+ * turn instead of latching {@link AdvisorRuntime}'s permanent quota state.
+ *
+ * Mirrors the primary turn-recovery wait: a transient credential block (a short
+ * provider retry-after / `blockedUntilMs`, or a sibling that frees soon via
+ * `retryAtMs`) is waited out; a wait past `retry.maxDelayMs`, an exhausted retry
+ * budget, or an error with no authoritative timing at all falls through to the
+ * permanent latch (a genuine multi-hour quota window). Uses the block window,
+ * not the classification, so a per-minute burst limit misclassified as
+ * `QUOTA_EXHAUSTED` still recovers.
+ *
+ * @returns the wait in ms (≥0) when the advisor should sleep and retry, or
+ *   `undefined` when it should decline (latch).
+ */
+export function planAdvisorUsageLimitWait(args: {
+	retryAtMs?: number;
+	blockedUntilMs?: number;
+	retryAfterMs?: number;
+	reportResetAtMs?: number;
+	requestedBlockedUntilMs?: number;
+	priorBlockedUntilMs?: number;
+	priorBlockedUntilTimed?: boolean;
+	retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number };
+	attempt: number;
+	nowMs: number;
+}): number | undefined {
+	const {
+		retryAtMs,
+		blockedUntilMs,
+		retryAfterMs,
+		reportResetAtMs,
+		requestedBlockedUntilMs,
+		priorBlockedUntilMs,
+		priorBlockedUntilTimed,
+		retry,
+		attempt,
+		nowMs,
+	} = args;
+	if (!retry.enabled) return undefined;
+	// A direct compare keeps maxRetries=0 meaning "no retries" (latch immediately),
+	// matching the primary retry path's exhausted-budget semantics.
+	if (attempt >= retry.maxRetries) return undefined;
+	// Retry as soon as either the just-blocked credential frees or a temporarily
+	// blocked sibling does — the next attempt's getApiKey re-ranks and picks up
+	// whichever is available first.
+	const candidates: number[] = [];
+	let credentialUnblockAtMs: number | undefined;
+	if (retryAfterMs !== undefined) {
+		// Provider-stated retry hint, merged with any longer persisted/shared block.
+		credentialUnblockAtMs = blockedUntilMs ?? nowMs + retryAfterMs;
+	} else if (reportResetAtMs !== undefined) {
+		// A complete usage report is authoritative for a hintless failure and
+		// replaces this call's heuristic block in either direction. Preserve a
+		// prior provider-timed block, which remains independently authoritative.
+		credentialUnblockAtMs = reportResetAtMs;
+		if (
+			priorBlockedUntilTimed === true &&
+			priorBlockedUntilMs !== undefined &&
+			priorBlockedUntilMs > credentialUnblockAtMs
+		) {
+			credentialUnblockAtMs = priorBlockedUntilMs;
+		}
+		if (
+			blockedUntilMs !== undefined &&
+			requestedBlockedUntilMs !== undefined &&
+			blockedUntilMs > requestedBlockedUntilMs &&
+			blockedUntilMs > credentialUnblockAtMs
+		) {
+			// A merged deadline beyond this call's initial block belongs to a
+			// persisted/shared block (or a longer report) that credential
+			// selection still enforces; never wake before it.
+			credentialUnblockAtMs = blockedUntilMs;
+		}
+	}
+	// Hintless with no complete report → blockedUntilMs is only the default
+	// heuristic (e.g. a permanent 402 balance/spend cap). Never wait on it: a
+	// sibling unblock (retryAtMs) may still authorize a wait, otherwise the
+	// empty-candidate decline below latches immediately instead of retrying the
+	// dead credential every minute until the budget drains.
+	if (credentialUnblockAtMs !== undefined) candidates.push(Math.max(0, credentialUnblockAtMs - nowMs));
+	if (retryAtMs !== undefined) candidates.push(Math.max(0, retryAtMs - nowMs) + ADVISOR_SIBLING_UNBLOCK_BUFFER_MS);
+	if (candidates.length === 0) return undefined;
+	const providerWaitMs = Math.min(...candidates);
+	const retryBackoffMs = calculateRetryBackoffDelayMs(retry.baseDelayMs, attempt + 1);
+	const waitMs = Math.max(providerWaitMs, retryBackoffMs);
+	if (retry.maxDelayMs > 0 && waitMs > retry.maxDelayMs) return undefined;
+	return waitMs;
+}
 /** Advisor statistics for the advisor status command. */
 export interface AdvisorStats {
 	configured: boolean;
@@ -166,6 +265,8 @@ interface ActiveAdvisor {
 	providerSessionId: string | undefined;
 	retryFallback?: AdvisorRetryFallbackState;
 	retryFallbackPendingSuccess: boolean;
+	/** Count of consecutive usage-limit block waits, bounded by retry.maxRetries; reset on turn success. */
+	usageLimitRetries: number;
 	signature: string;
 }
 interface AdvisorCompactionSummaryMessage extends CompactionSummaryMessage {
@@ -733,6 +834,9 @@ export class SessionAdvisors {
 			a.agentUnsubscribe?.();
 			a.agentUnsubscribe = undefined;
 			a.runtime.reset("conversation-boundary");
+			// A reset aborts any pending usage-limit wait; clear its budget so the new
+			// conversation starts with a fresh retry allowance (issue #11947).
+			a.usageLimitRetries = 0;
 			// Resets the emission guard and every tool-side note state together.
 			a.adviseTool.resetDeliveredNotes();
 			this.#attachAdvisorRecorderFeed(a);
@@ -1150,6 +1254,9 @@ export class SessionAdvisors {
 					// Commit the delivered batch so retries of a failed turn stay deduped
 					// while this successful turn's context is persisted once (issue #9553).
 					advisorRef.recorder.commitTurn();
+					// A completed turn ended the usage-limit episode — start the next
+					// block's bounded wait budget fresh.
+					advisorRef.usageLimitRetries = 0;
 					const fallback = advisorRef.retryFallback;
 					if (!advisorRef.retryFallbackPendingSuccess || !fallback) return;
 					advisorRef.retryFallbackPendingSuccess = false;
@@ -1202,6 +1309,7 @@ export class SessionAdvisors {
 				thinkingLevel: advisorThinkingLevel,
 				providerSessionId: advisorProviderSessionId,
 				retryFallbackPendingSuccess: false,
+				usageLimitRetries: 0,
 				signature,
 			};
 			this.#refreshAdvisorProviderIdentity(advisorRef);
@@ -1336,7 +1444,12 @@ export class SessionAdvisors {
 
 	/** Re-prime every advisor's transcript view after an in-conversation history rewrite. */
 	#resetAllAdvisorRuntimes(reason?: string): void {
-		for (const a of this.#advisors) a.runtime.reset(reason);
+		for (const a of this.#advisors) {
+			a.runtime.reset(reason);
+			// Match the conversation-boundary re-prime: a reset must not carry a
+			// pending wait's usage-limit budget into the reset conversation.
+			a.usageLimitRetries = 0;
+		}
 	}
 
 	#stopAdvisorRuntime(): void {
@@ -1497,6 +1610,12 @@ export class SessionAdvisors {
 		const usageLimit =
 			AIError.is(errorId, AIError.Flag.UsageLimit) ||
 			isUsageLimitOutcome(extractHttpStatusFromError(error), message);
+		let usageRetryAtMs: number | undefined;
+		let usageBlockedUntilMs: number | undefined;
+		let usageRequestedBlockedUntilMs: number | undefined;
+		let usageReportResetAtMs: number | undefined;
+		let usagePriorBlockedUntilMs: number | undefined;
+		let usagePriorBlockedUntilTimed: boolean | undefined;
 		if (usageLimit) {
 			const outcome = await this.#host.modelRegistry.authStorage.markUsageLimitReached(
 				currentModel.provider,
@@ -1510,13 +1629,40 @@ export class SessionAdvisors {
 				},
 			);
 			if (outcome.switched) return true;
+			usageRetryAtMs = outcome.retryAtMs;
+			usageBlockedUntilMs = outcome.blockedUntilMs;
+			usageRequestedBlockedUntilMs = outcome.requestedBlockedUntilMs;
+			usageReportResetAtMs = outcome.reportResetAtMs;
+			usagePriorBlockedUntilMs = outcome.priorBlockedUntilMs;
+			usagePriorBlockedUntilTimed = outcome.priorBlockedUntilTimed;
 		}
 		if (!assistantFailure && !accountPolicyDenial && !usageLimit) return false;
 
 		const currentSelector = formatRetryFallbackSelector(currentModel, advisor.thinkingLevel);
 
 		const retrySettings = this.#host.settings.getGroup("retry");
-		if (!retrySettings.enabled || !retrySettings.modelFallback) return false;
+		// A usage-limit error with no sibling credential and no usable model
+		// fallback is not automatically fatal: wait out a transient credential
+		// block and retry, mirroring the primary turn-recovery. Only a wait past
+		// retry.maxDelayMs / an exhausted budget falls through to the latch.
+		const declineUsageLimit = (): Promise<boolean> =>
+			usageLimit
+				? this.#waitOutAdvisorUsageLimit(
+						advisor,
+						retrySettings,
+						{
+							retryAtMs: usageRetryAtMs,
+							blockedUntilMs: usageBlockedUntilMs,
+							requestedBlockedUntilMs: usageRequestedBlockedUntilMs,
+							retryAfterMs,
+							reportResetAtMs: usageReportResetAtMs,
+							priorBlockedUntilMs: usagePriorBlockedUntilMs,
+							priorBlockedUntilTimed: usagePriorBlockedUntilTimed,
+						},
+						signal,
+					)
+				: Promise.resolve(false);
+		if (!retrySettings.enabled || !retrySettings.modelFallback) return declineUsageLimit();
 		// Same two-key walk the main loop uses: the chain that owns this advisor's
 		// active fallback, then the chain the current model owns. Without the
 		// second key an advisor that lands on the last entry of one chain never
@@ -1528,7 +1674,7 @@ export class SessionAdvisors {
 		if (
 			!chainKeys.some(role => this.#host.findRetryFallbackCandidates(role, currentSelector, currentModel).length > 0)
 		) {
-			return false;
+			return declineUsageLimit();
 		}
 
 		this.#host.noteRetryFallbackCooldown(currentSelector, retryAfterMs, message);
@@ -1567,7 +1713,59 @@ export class SessionAdvisors {
 				return true;
 			}
 		}
-		return false;
+		return declineUsageLimit();
+	}
+
+	/**
+	 * Wait out a transient usage-limit credential block and signal a retry, or
+	 * decline so {@link AdvisorRuntime} latches its permanent quota state.
+	 * See {@link planAdvisorUsageLimitWait} for the wait-vs-latch decision; the
+	 * wait is abortable via `signal` (reset/dispose/session transition).
+	 */
+	async #waitOutAdvisorUsageLimit(
+		advisor: ActiveAdvisor,
+		retry: { enabled: boolean; baseDelayMs: number; maxDelayMs: number; maxRetries: number },
+		timing: {
+			retryAtMs?: number;
+			blockedUntilMs?: number;
+			requestedBlockedUntilMs?: number;
+			retryAfterMs?: number;
+			reportResetAtMs?: number;
+			priorBlockedUntilMs?: number;
+			priorBlockedUntilTimed?: boolean;
+		},
+		signal: AbortSignal,
+	): Promise<boolean> {
+		const waitMs = planAdvisorUsageLimitWait({
+			retryAtMs: timing.retryAtMs,
+			blockedUntilMs: timing.blockedUntilMs,
+			requestedBlockedUntilMs: timing.requestedBlockedUntilMs,
+			retryAfterMs: timing.retryAfterMs,
+			reportResetAtMs: timing.reportResetAtMs,
+			priorBlockedUntilMs: timing.priorBlockedUntilMs,
+			priorBlockedUntilTimed: timing.priorBlockedUntilTimed,
+			retry,
+			attempt: advisor.usageLimitRetries,
+			nowMs: Date.now(),
+		});
+		if (waitMs === undefined) {
+			// A genuine long quota window (wait past retry.maxDelayMs) or an
+			// exhausted retry budget — reset the counter so a fresh episode after a
+			// reset starts over, then decline so the runtime latches.
+			advisor.usageLimitRetries = 0;
+			return false;
+		}
+		const attempt = advisor.usageLimitRetries + 1;
+		logger.debug("advisor waiting out usage-limit block", {
+			advisor: advisor.name,
+			waitMs,
+			attempt,
+		});
+		await scheduler.wait(waitMs, { signal });
+		// An aborted pause/reset did not reach a provider retry and must not
+		// consume budget in the resumed/reset conversation.
+		advisor.usageLimitRetries = attempt;
+		return true;
 	}
 
 	async #promoteAdvisorContextModel(
