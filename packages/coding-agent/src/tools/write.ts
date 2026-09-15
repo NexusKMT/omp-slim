@@ -423,11 +423,14 @@ function readProjectionPayloadLength(content: string): number | undefined {
 
 function assertNotShorterReadProjection(
 	displayPath: string,
-	content: string,
+	rawContent: string,
 	currentContent: string | undefined,
+	writeContent: string = rawContent,
 ): void {
-	const payloadLength = readProjectionPayloadLength(content);
-	if (payloadLength === undefined || currentContent === undefined) return;
+	const rawPayloadLength = readProjectionPayloadLength(rawContent);
+	if (rawPayloadLength === undefined || currentContent === undefined) return;
+	const payloadLength =
+		writeContent === rawContent ? rawPayloadLength : normalizeToLF(writeContent).length;
 	if (payloadLength >= normalizeToLF(currentContent).length) return;
 	throw new ToolError(
 		`Refusing to overwrite '${displayPath}' with an incomplete read projection: the content ends with an omp read truncation notice and covers less than the current source, so it would discard unseen content. Re-read the omitted ranges and write the complete file, or use edit for a partial change.`,
@@ -439,11 +442,12 @@ async function assertNotTruncatedFileReadProjection(
 	requestedPath: string,
 	absolutePath: string,
 	displayPath: string,
-	content: string,
+	rawContent: string,
+	writeContent: string,
 ): Promise<void> {
-	if (!endsWithReadTruncationNotice(content)) return;
+	if (!endsWithReadTruncationNotice(rawContent)) return;
 	const currentContent = await readCurrentWriteSource(session, requestedPath, absolutePath);
-	assertNotShorterReadProjection(displayPath, content, currentContent);
+	assertNotShorterReadProjection(displayPath, rawContent, currentContent, writeContent);
 }
 
 /**
@@ -773,7 +777,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			const existingBytes =
 				existingTarget instanceof Blob ? new Uint8Array(await existingTarget.arrayBuffer()) : existingTarget;
 			const existingText = typeof existingBytes === "string" ? existingBytes : decodeUtf8Text(existingBytes);
-			assertNotShorterReadProjection(writeTarget, rawContent, existingText ?? undefined);
+			assertNotShorterReadProjection(writeTarget, rawContent, existingText ?? undefined, content);
 		}
 		entries.set(resolvedArchivePath.archiveSubPath, content);
 
@@ -1242,7 +1246,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 							settings: this.session.settings,
 							signal,
 						});
-						assertNotShorterReadProjection(path, content, currentResource.content);
+						assertNotShorterReadProjection(path, content, currentResource.content, cleanContent);
 					}
 					// Handler-owned writes mutate user data outside the local
 					// sandbox. xd:// dispatches retain each wrapped tool's tier.
@@ -1391,7 +1395,14 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			if (await fs.exists(absolutePath)) {
 				await assertEditableFile(absolutePath, path, this.session.settings);
 			}
-			await assertNotTruncatedFileReadProjection(this.session, path, absolutePath, displayPath, content);
+			await assertNotTruncatedFileReadProjection(
+				this.session,
+				path,
+				absolutePath,
+				displayPath,
+				content,
+				cleanContent,
+			);
 
 			emitWriteProgress(onUpdate, cleanContent, displayPath, absolutePath);
 
