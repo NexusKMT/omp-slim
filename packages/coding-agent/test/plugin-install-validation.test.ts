@@ -163,6 +163,35 @@ describe("PluginManager.install load validation", () => {
 		expect(result.version).toBe("0.1.9");
 	});
 
+	test("forces bun to replace an existing scoped npm plugin", async () => {
+		const name = "@scope/plugin";
+		await writePluginPackage(pluginsNodeModules, name, {
+			version: "1.0.3",
+			source: 'export default function(pi) { pi.registerCommand("scoped", { handler: async () => {} }); }\n',
+		});
+		const packageJson = JSON.stringify({
+			name: "omp-plugins",
+			private: true,
+			dependencies: { [name]: "^1.0.3" },
+		});
+		await Bun.write(pluginsPkgJson, packageJson);
+		const install = Bun.spawn(["bun", "-e", ""], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const spawnSpy = vi.spyOn(Bun, "spawn").mockReturnValue(install);
+
+		const result = await new PluginManager(tmpRoot).install(name, { force: true });
+		expect(spawnSpy).toHaveBeenCalledWith(
+			["bun", "install", "--no-cache", "--force", name],
+			expect.objectContaining({ cwd: pluginsDir }),
+		);
+
+		expect(result.version).toBe("1.0.3");
+		expect((await Bun.file(pluginsPkgJson).json()).dependencies).toEqual({ [name]: "^1.0.3" });
+	});
+
 	test("rejects and rolls back an install when the extension factory throws", async () => {
 		vi.spyOn(Bun, "spawn").mockImplementation(((cmd: string[]) => {
 			expect(cmd).toEqual(["bun", "install", "--no-cache", "factory-failure-plugin"]);
