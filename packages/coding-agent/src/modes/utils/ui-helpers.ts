@@ -174,6 +174,7 @@ export class UiHelpers {
 				}
 				component.setComplete(message.exitCode, message.cancelled, {
 					truncation: message.meta?.truncation,
+					artifactError: message.meta?.artifactError,
 					images: message.images,
 					showImages: settings.get("terminal.showImages"),
 				});
@@ -187,6 +188,7 @@ export class UiHelpers {
 				}
 				component.setComplete(message.exitCode, message.cancelled, {
 					truncation: message.meta?.truncation,
+					artifactError: message.meta?.artifactError,
 				});
 				this.ctx.chatContainer.addChild(component);
 				break;
