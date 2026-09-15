@@ -89,13 +89,13 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 		}
 		case "litellm": {
 			const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId)!;
-			// rich-v9 filters known non-conversational LiteLLM modes, unions compat
+			// rich-v10 filters known non-conversational LiteLLM modes, unions compat
 			// across the management endpoints, and keys the deployment's
-			// `supports_vision` declaration into it. It also invalidates rich-v8
-			// rows whose `compatConfig` retained a colliding bundled model's
+			// `supports_vision` declaration into it. It also invalidates older rows
+			// whose `compatConfig` retained a colliding bundled model's
 			// provider-specific transport (e.g. Fireworks `wireModelIdMode`)
 			// before that leak was fixed (issue #9938).
-			return `litellm:rich-v9:${Bun.hash(baseUrl).toString(36)}`;
+			return `litellm:rich-v10:${Bun.hash(baseUrl).toString(36)}`;
 		}
 		case "opencode-go":
 		case "opencode-zen": {

@@ -5328,17 +5328,17 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v9 filters known non-conversational LiteLLM modes, keys the
+		// rich-v10 filters known non-conversational LiteLLM modes, keys the
 		// deployment's `supports_vision` declaration into cached compat, and
 		// unions compat across management endpoints instead of letting a later
-		// endpoint retract what an earlier one reported (issue #11982). rich-v8
-		// invalidated rows whose `compatConfig` retained a colliding bundled
-		// model's provider-specific transport (e.g. Fireworks `wireModelIdMode`)
-		// before that leak was fixed. Earlier versions added bundled reference
-		// fallback, moved OpenAI models to Responses, continued past incomplete
-		// vision/API metadata and endpoints omitting cache pricing, stripped
-		// reseller usage suffixes, filtered placeholder rows, and mapped rich
-		// pricing. Bump the version whenever these mappers change,
+		// endpoint retract what an earlier one reported (issue #11982). Earlier
+		// versions invalidated rows whose `compatConfig` retained a colliding
+		// bundled model's provider-specific transport (e.g. Fireworks
+		// `wireModelIdMode`), added bundled reference fallback, moved OpenAI
+		// models to Responses, continued past incomplete vision/API metadata and
+		// endpoints omitting cache pricing, stripped reseller usage suffixes,
+		// filtered placeholder rows, and mapped rich pricing. Bump the version
+		// whenever these mappers change,
 		// or warm authoritative caches keep serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
