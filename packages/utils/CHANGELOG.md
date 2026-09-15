@@ -52,6 +52,7 @@
 
 ### Fixed
 
+- Fixed `filterChildShellEnv` forwarding the host process's `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides to child shells, where `git` would ignore the command's `cwd`.
 - Child-shell environment filtering now tolerates a removed process working directory by retaining the resolved project directory ([#11828](https://github.com/can1357/oh-my-pi/issues/11828)).
 ### Fixed
 
@@ -62,6 +63,8 @@
 ### Fixed
 
 - Fixed `$which` capturing `Bun.which` at import on Linux and Windows, so `Bun.which` stubs installed later (e.g. per-test spies) are honoured and PATH-only language servers no longer leak into test results.
+### Fixed
+
 
 ## [18.1.13] - 2026-09-07
 
