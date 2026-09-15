@@ -414,7 +414,6 @@ export class FileSessionStorage implements SessionStorage {
 			}
 		} finally {
 			osGate.release();
-			this.#discardOsGate(fpath, lockPath);
 		}
 	}
 
@@ -440,25 +439,14 @@ export class FileSessionStorage implements SessionStorage {
 
 	/**
 	 * Sidecar carrying the OS gate. It lives beside the lockfile (same trust
-	 * domain) and is removed on release so the session directory listing is
-	 * unchanged after a publish. Only handle ownership matters, never the
-	 * file content, so a crash-orphaned sidecar is inert and the next
-	 * acquire simply reopens it.
+	 * domain). Platforms backed by `flock(2)` require this path to remain
+	 * persistent: unlinking it after release can race a successor that already
+	 * opened the old inode, allowing a third process to lock a new inode at the
+	 * same path concurrently. Only handle ownership matters, so a
+	 * crash-orphaned sidecar is inert and the next acquire simply reopens it.
 	 */
 	#osGatePath(lockPath: string): string {
 		return `${lockPath}.os`;
-	}
-
-	/** Best-effort sidecar removal; the released gate handle was the ownership record, not this file. */
-	#discardOsGate(fpath: string, lockPath: string): void {
-		const gatePath = this.#osGatePath(lockPath);
-		try {
-			fs.unlinkSync(gatePath);
-		} catch (err) {
-			if (!isEnoent(err)) {
-				logger.warn("Failed to remove session publish gate", { sessionFile: fpath, lockPath: gatePath });
-			}
-		}
 	}
 
 	#acquirePublishLock(fpath: string, lockPath: string): void {
