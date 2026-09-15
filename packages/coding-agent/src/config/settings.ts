@@ -2342,6 +2342,33 @@ export class Settings {
 		}
 		delete raw["providers.parallelFetch"];
 
+		// Retired local title models (replaced by the LFM2.5/Falcon refresh) map to
+		// their closest current equivalents. Without this a pinned retired key
+		// passes through as a stale string and title generation silently skips
+		// every turn instead of falling back (no online fallback by design).
+		const RETIRED_TINY_TITLE_MODELS: Record<string, string> = {
+			"lfm2-350m": "lfm2.5-350m",
+			"lfm2-700m": "lfm2.5-350m",
+			"qwen3-0.6b": "lfm2.5-350m",
+			"qwen2.5-0.5b": "lfm2.5-230m",
+			"gemma-270m": "falcon-h1-90m",
+		};
+		const migrateTinyModelValue = (value: unknown): string | undefined =>
+			typeof value === "string" ? RETIRED_TINY_TITLE_MODELS[value] : undefined;
+		// Quoted-dotted flat keys (`"providers.tinyModel"` in YAML/legacy JSON)
+		// promote into the nested setting; nested wins when both are present.
+		const flatTinyModel = migrateTinyModelValue(raw["providers.tinyModel"]);
+		if (flatTinyModel !== undefined) {
+			const providersRoot = isRecord(raw.providers) ? raw.providers : {};
+			if (typeof providersRoot.tinyModel !== "string") providersRoot.tinyModel = flatTinyModel;
+			raw.providers = providersRoot;
+			delete raw["providers.tinyModel"];
+		}
+		if (providersObj) {
+			const migrated = migrateTinyModelValue(providersObj.tinyModel);
+			if (migrated !== undefined) providersObj.tinyModel = migrated;
+		}
+
 		// codexResets.autoRedeem: boolean -> tri-state enum.
 		// Existing explicit false keeps the old "do not run" behavior; missing
 		// config now falls through to the new "unset" default, which asks before
