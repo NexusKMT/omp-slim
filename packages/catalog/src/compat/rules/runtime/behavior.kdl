@@ -83,6 +83,11 @@ behavior {
 			glob="*/gpt-5.6-sol-pro" glob="*/gpt-5.6-luna" glob="*/gpt-5.6-luna-pro"
 	}
 
+	// Z.AI and Zhipu emit timezone-naive account-reset wall clocks in Beijing
+	// time. Provider-aware retry paths append this offset before parsing.
+	retry-reset-timezone provider="zai" offset="+08:00"
+	retry-reset-timezone provider="zhipu-coding-plan" offset="+08:00"
+
 	// Cloudflare AI Gateway namespace routing. The Workers AI prefix remains
 	// on the request id; the upstream namespaces are stripped.
 	api-routes provider="cloudflare-ai-gateway" {

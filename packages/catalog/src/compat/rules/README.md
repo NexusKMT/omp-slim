@@ -291,6 +291,7 @@ behavior {
     exclude-discovery-modes "embedding" "moderation" provider="litellm"
     exclude-models provider="nanogpt" substring="embed" substring="tts"
     plan-requirement provider="openai-codex" { tier "pro" substring="-spark" }
+    retry-reset-timezone provider="zai" offset="+08:00"
     pricing-peer provider="google-antigravity" peers="google" "google-vertex" {
         alias "gemini-3-pro" peer-id="gemini-3-pro-preview"
     }

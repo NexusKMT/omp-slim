@@ -312,6 +312,12 @@ export interface CompiledPricingPeer {
 	aliases: { model: string; peerId: string }[];
 }
 
+/** Provider timezone assumption for offset-less absolute retry-reset timestamps. */
+export interface CompiledRetryResetTimezone {
+	provider: string;
+	offset: string;
+}
+
 /** Compiled runtime behavior vocabulary (`runtime/behavior.kdl`). */
 export interface CompiledBehavior {
 	openaiResponsesHeuristic?: CompiledResponsesHeuristic;
@@ -326,6 +332,7 @@ export interface CompiledBehavior {
 	excludeModels: CompiledExcludeModels[];
 	planRequirements: CompiledPlanRequirement[];
 	pricingPeers: CompiledPricingPeer[];
+	retryResetTimezones: CompiledRetryResetTimezone[];
 	retiredProviders: string[];
 }
 

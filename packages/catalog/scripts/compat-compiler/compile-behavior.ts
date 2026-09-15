@@ -4,7 +4,8 @@
  * Ports the o2 runtime-behavior grammar (openai-responses-heuristic,
  * model-operations, cursor-effort, cursor-model-parameter, quota-tiers,
  * hosted-default) and adds the pi-only nodes: api-routes, model-limits,
- * exclude-discovery-modes, exclude-models, plan-requirement, pricing-peer.
+ * exclude-discovery-modes, exclude-models, plan-requirement, pricing-peer,
+ * and retry-reset-timezone.
  * Every node kind is optional; per-node shapes are strict.
  */
 import type {
@@ -17,6 +18,7 @@ import type {
 	CompiledModelOperations,
 	CompiledPlanRequirement,
 	CompiledPricingPeer,
+	CompiledRetryResetTimezone,
 	CompiledQuotaRule,
 	CompiledResponsesHeuristic,
 } from "../../src/compat/types";
@@ -80,6 +82,16 @@ function matchListFromProps(node: KdlNodeView, skip: readonly string[]): Compile
 		}
 	}
 	return match;
+}
+
+const UTC_OFFSET_PATTERN = /^(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/;
+
+function parseRetryResetTimezone(node: KdlNodeView): CompiledRetryResetTimezone {
+	ensureLeaf(node, ["provider", "offset"]);
+	const provider = requiredProp(node, "provider");
+	const offset = requiredProp(node, "offset");
+	if (!provider || !UTC_OFFSET_PATTERN.test(offset) || node.args.length > 0) malformed(node);
+	return { provider, offset };
 }
 
 function hasMatchers(match: CompiledMatchList): boolean {
@@ -289,6 +301,7 @@ export function compileBehavior(source: { file: string; text: string } | undefin
 		excludeModels: [],
 		retiredProviders: [],
 		planRequirements: [],
+		retryResetTimezones: [],
 		pricingPeers: [],
 	};
 	if (!source) return behavior;
@@ -354,6 +367,9 @@ export function compileBehavior(source: { file: string; text: string } | undefin
 				break;
 			case "plan-requirement":
 				behavior.planRequirements.push(parsePlanRequirement(node));
+				break;
+			case "retry-reset-timezone":
+				behavior.retryResetTimezones.push(parseRetryResetTimezone(node));
 				break;
 			case "pricing-peer":
 				behavior.pricingPeers.push(parsePricingPeer(node));
