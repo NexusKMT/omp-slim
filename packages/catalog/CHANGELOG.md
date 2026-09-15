@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Fixed Cerebras Qwen 3.8 reasoning control by enabling correct effort tiers and disable behavior
 - Fixed Cerebras Qwen models using incorrect reasoning format, enabling proper support for thinking modes
 - Fixed Command Code's `deepseek/deepseek-v4.1-flash` row exposing its documented low/high/max thinking levels and image input, and made live discovery resolve the reasoning contract its rules declare ([#1666](https://github.com/can1357/oh-my-pi/issues/1666), [#11703](https://github.com/can1357/oh-my-pi/pull/11703) by [@aliefe04](https://github.com/aliefe04)).
 - Fixed Meta Model API and Muse Code requests failing with 400 whenever omp forced a tool choice: `api.meta.ai/v1` accepts only `tool_choice: "auto"`, so `none`, `required`, and named choices (subagent final-retry `yield`, forced tools, structured output, compaction handoff) are now omitted instead of sent ([#11635](https://github.com/can1357/oh-my-pi/pull/11635) by [@quantmind-br](https://github.com/quantmind-br)).

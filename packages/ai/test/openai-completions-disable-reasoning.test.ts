@@ -56,10 +56,6 @@ function createCerebrasQwenModel(): Model<"openai-completions"> {
 		provider: "cerebras",
 		baseUrl: "https://api.cerebras.ai/v1",
 		reasoning: true,
-		thinking: {
-			mode: "effort",
-			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
-		},
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 131_072,
@@ -296,14 +292,10 @@ describe("OpenAI completions disableReasoning and thinking dialects", () => {
 		expect(payload.chat_template_kwargs).toBeUndefined();
 	});
 
-	it("does not send DashScope thinking fields to Cerebras Qwen", async () => {
-		const { promise, resolve } = Promise.withResolvers<unknown>();
-		streamOpenAICompletions(createCerebrasQwenModel(), testContext, {
-			apiKey: "test-key",
-			fetch: createMockFetchForQwen(resolve),
-		});
+	it("disables Cerebras Qwen reasoning through reasoning_effort", async () => {
+		const payload = await captureDisableReasoningPayload(createCerebrasQwenModel());
 
-		const payload = (await promise) as Record<string, unknown>;
+		expect(payload.reasoning_effort).toBe("none");
 		expect(payload.enable_thinking).toBeUndefined();
 		expect(payload.chat_template_kwargs).toBeUndefined();
 	});
