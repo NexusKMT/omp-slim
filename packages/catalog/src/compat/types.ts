@@ -334,6 +334,7 @@ export interface CompiledBehavior {
 	pricingPeers: CompiledPricingPeer[];
 	retryResetTimezones: CompiledRetryResetTimezone[];
 	retiredProviders: string[];
+	referenceIsolatedProviders: string[];
 }
 
 /**

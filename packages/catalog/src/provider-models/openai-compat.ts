@@ -4,6 +4,7 @@ import { toClinePassPublicModelId } from "../cline-pass-model-id";
 import {
 	apiRouteExactModelIds,
 	apiRouteFor,
+	isBareIdReferenceProvider,
 	isExcludedDiscoveryMode,
 	isExcludedModel,
 	isLikelyOpenAIResponsesId,
@@ -580,6 +581,7 @@ type OpenAICompatibleModelManagerBuilderOptions<TApi extends Api> = {
 	dynamicModelsAuthoritative?: true;
 	requireApiKey?: true;
 	dropCachedModelIdsOnStaticMismatch?: readonly string[];
+	cacheProviderId?: string;
 	filterModel?: (
 		entry: OpenAICompatibleModelRecord,
 		model: ModelSpec<TApi>,
@@ -601,6 +603,7 @@ function createOpenAICompatibleModelManagerOptions<TApi extends Api>(
 	const filterModel = options.filterModel;
 	return {
 		providerId: options.providerId,
+		...(options.cacheProviderId && { cacheProviderId: options.cacheProviderId }),
 		...(options.dynamicModelsAuthoritative && { dynamicModelsAuthoritative: true }),
 		...(options.dropCachedModelIdsOnStaticMismatch && {
 			dropCachedModelIdsOnStaticMismatch: options.dropCachedModelIdsOnStaticMismatch,
@@ -983,6 +986,7 @@ export function gmiCloudModelManagerOptions(
 		api: "openai-completions",
 		providerId: "gmi-cloud",
 		defaultBaseUrl: GMI_CLOUD_BASE_URL,
+		cacheProviderId: resolveModelCacheProviderId("gmi-cloud"),
 		config,
 		requireApiKey: true,
 		mapModel: mapGmiCloudModel,
@@ -1719,6 +1723,7 @@ function createSiliconFlowModelManagerOptions(
 	const baseUrl = config?.baseUrl ?? defaultBaseUrl;
 	return {
 		providerId,
+		cacheProviderId: resolveModelCacheProviderId(providerId),
 		dynamicModelsAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: async () => {
@@ -2142,6 +2147,9 @@ function createModelsDevReferenceMap<TApi extends Api>(
 	const references = new Map<string, ModelSpec<TApi>>();
 	for (const model of models) {
 		const candidate = model as ModelSpec<TApi>;
+		if (!isBareIdReferenceProvider(candidate.provider)) {
+			continue;
+		}
 		const existing = references.get(candidate.id);
 		if (!existing) {
 			references.set(candidate.id, candidate);
@@ -5335,18 +5343,18 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v10 filters known non-conversational LiteLLM modes, keys the
-		// deployment's `supports_vision` declaration into cached compat, and
-		// unions compat across management endpoints instead of letting a later
-		// endpoint retract what an earlier one reported (issue #11982). Earlier
-		// versions invalidated rows whose `compatConfig` retained a colliding
-		// bundled model's provider-specific transport (e.g. Fireworks
-		// `wireModelIdMode`), added bundled reference fallback, moved OpenAI
-		// models to Responses, continued past incomplete vision/API metadata and
-		// endpoints omitting cache pricing, stripped reseller usage suffixes,
-		// filtered placeholder rows, and mapped rich pricing. Bump the version
-		// whenever these mappers change,
-		// or warm authoritative caches keep serving pre-change rows for the full TTL.
+		// rich-v11 invalidates rows that inherited ClinePass gateway metadata
+		// through generic models.dev bare-id enrichment (issue #10932). rich-v10
+		// filtered known non-conversational LiteLLM modes, keyed the deployment's
+		// `supports_vision` declaration into cached compat, and unioned compat
+		// across management endpoints instead of letting a later endpoint retract
+		// what an earlier one reported (issue #11982). Earlier versions fixed
+		// provider-specific transport leakage, added bundled reference fallback,
+		// moved OpenAI models to Responses, continued past incomplete vision/API
+		// metadata and endpoints omitting cache pricing, stripped reseller usage
+		// suffixes, filtered placeholder rows, and mapped rich pricing. Bump the
+		// version whenever these mappers change, or warm authoritative caches keep
+		// serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
 		// would leak the machine's localhost catalog). Prefer the proxy's richer
@@ -6369,6 +6377,7 @@ const MODELS_DEV_PROVIDER_DESCRIPTORS_CORE: readonly ModelsDevProviderDescriptor
 			return {
 				...model,
 				id,
+				name: id,
 				thinking: model.reasoning ? buildClinePassThinking(raw, model) : undefined,
 			};
 		},
