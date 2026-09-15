@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Command Code's `deepseek/deepseek-v4.1-flash` row exposing its documented low/high/max thinking levels and image input, and made live discovery resolve the reasoning contract its rules declare ([#1666](https://github.com/can1357/oh-my-pi/issues/1666), [#11703](https://github.com/can1357/oh-my-pi/pull/11703) by [@aliefe04](https://github.com/aliefe04)).
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
