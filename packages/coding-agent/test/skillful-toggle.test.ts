@@ -69,10 +69,7 @@ describe("skillful setting and /skillful session toggle", () => {
 		cleanupTempHome(() => ({ tempDir, tempHomeDir, originalHome }))();
 	});
 
-	async function createSession(
-		overrides: Record<string, unknown> = {},
-		skills?: Skill[],
-	): Promise<AgentSession> {
+	async function createSession(overrides: Record<string, unknown> = {}, skills?: Skill[]): Promise<AgentSession> {
 		const created = await createAgentSession({
 			cwd: tempDir,
 			agentDir: tempDir,

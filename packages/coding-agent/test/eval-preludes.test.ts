@@ -97,12 +97,16 @@ describe("eval prelude host invocation", () => {
 		const session = makeSession(() => [definition]);
 
 		await expect(
-			invokeEvalPrelude("guarded", {}, {
-				session,
-				toolCallId: "empty-context",
-				// Execute-time context with no settings and no grant: must fail closed.
-				context: {} as unknown as AgentToolContext,
-			}),
+			invokeEvalPrelude(
+				"guarded",
+				{},
+				{
+					session,
+					toolCallId: "empty-context",
+					// Execute-time context with no settings and no grant: must fail closed.
+					context: {} as unknown as AgentToolContext,
+				},
+			),
 		).rejects.toThrow(/requires approval but no interactive UI is available/);
 		expect(invoke).not.toHaveBeenCalled();
 	});

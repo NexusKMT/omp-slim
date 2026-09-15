@@ -104,10 +104,7 @@ describe("HindsightSessionState mental-model freeze", () => {
 });
 
 describe("SessionMemory mental-model boundary reload", () => {
-	function makeBoundaryHarness(
-		response: Promise<MentalModelListResponse>,
-		publicationGate?: Promise<void>,
-	) {
+	function makeBoundaryHarness(response: Promise<MentalModelListResponse>, publicationGate?: Promise<void>) {
 		const published: Array<string | undefined> = [];
 		const client = { listMentalModels: () => response } as unknown as HindsightApi;
 		const stateSession: {

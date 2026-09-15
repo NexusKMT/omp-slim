@@ -267,7 +267,9 @@ describe("FileSessionStorage.writeTextSync", () => {
 			expect(fs.readFileSync(reader, "utf8")).toBe("original snapshot\n");
 			expect(fs.statSync(sessionPath).ino).not.toBe(original.ino);
 			expect(await Bun.file(sessionPath).text()).toBe("replacement snapshot\n");
-			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual(["session.jsonl"]);
+			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual([
+				"session.jsonl",
+			]);
 		} finally {
 			renameSpy.mockRestore();
 			fs.closeSync(reader);
@@ -294,7 +296,9 @@ describe("FileSessionStorage.writeTextSync", () => {
 			expect(() => storage.writeTextSync(sessionPath, "replacement\n")).toThrow("retry failed");
 			expect(fs.statSync(sessionPath).ino).toBe(original.ino);
 			expect(await Bun.file(sessionPath).text()).toBe("original\n");
-			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual(["session.jsonl"]);
+			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual([
+				"session.jsonl",
+			]);
 		} finally {
 			renameSpy.mockRestore();
 		}
@@ -316,7 +320,9 @@ describe("FileSessionStorage.writeTextSync", () => {
 			expect(() => storage.writeTextSync(sessionPath, "replacement\n")).toThrow("staging denied");
 			expect(fs.statSync(sessionPath).ino).toBe(original.ino);
 			expect(await Bun.file(sessionPath).text()).toBe("original\n");
-			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual(["session.jsonl"]);
+			expect((await fsp.readdir(tempDir)).filter(file => file !== ".session.jsonl.lock.os")).toEqual([
+				"session.jsonl",
+			]);
 		} finally {
 			writeSpy.mockRestore();
 		}

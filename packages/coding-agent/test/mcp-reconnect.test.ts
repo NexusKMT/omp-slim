@@ -113,7 +113,13 @@ describe("createMCPToolName", () => {
 		// Slow-startup servers register DeferredMCPTool instead of MCPTool;
 		// approval fallback must not depend on connection timing (#10810 review).
 		const digitTool = { name: "query-docs", inputSchema: { type: "object" as const } };
-		const live = new MCPTool(makeConnection(mockTransport(async () => ({})), "context7"), digitTool);
+		const live = new MCPTool(
+			makeConnection(
+				mockTransport(async () => ({})),
+				"context7",
+			),
+			digitTool,
+		);
 		const deferred = new DeferredMCPTool("context7", digitTool, async () => {
 			throw new Error("unneeded");
 		});

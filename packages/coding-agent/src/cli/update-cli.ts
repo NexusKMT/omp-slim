@@ -1505,12 +1505,7 @@ export function buildHomebrewUpdateArgs(force: boolean): string[] {
  * omit it when the installed command help does not advertise either name.
  */
 export function buildMiseUpgradeArgs(supportsReleaseAgeOverride = true): string[] {
-	return [
-		"upgrade",
-		MISE_TOOL,
-		"--bump",
-		...(supportsReleaseAgeOverride ? ["--before", "0s"] : []),
-	];
+	return ["upgrade", MISE_TOOL, "--bump", ...(supportsReleaseAgeOverride ? ["--before", "0s"] : [])];
 }
 
 export function buildMiseUpdateEnv(
@@ -1792,8 +1787,7 @@ async function updateViaMise(expectedVersion: string, force: boolean): Promise<v
 	console.log(chalk.dim("Updating via mise..."));
 	const env = buildMiseUpdateEnv();
 	const help = await $`mise upgrade --help`.env(env).quiet().nothrow();
-	const supportsReleaseAgeOverride =
-		help.exitCode === 0 && /(?:--minimum-release-age|--before)\b/.test(help.text());
+	const supportsReleaseAgeOverride = help.exitCode === 0 && /(?:--minimum-release-age|--before)\b/.test(help.text());
 	const args = buildMiseUpgradeArgs(supportsReleaseAgeOverride);
 	const result = await $`mise ${args}`.env(env).nothrow();
 	if (result.exitCode !== 0) {

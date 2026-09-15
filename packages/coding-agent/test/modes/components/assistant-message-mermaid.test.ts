@@ -130,15 +130,13 @@ describe("AssistantMessageComponent transcript lifecycle", () => {
 		const transcript = new TranscriptContainer();
 		transcript.addChild(component);
 
-		component.updateContent(
-			createAssistantMessage("Alpha completed paragraph.\n\nPartial tail"),
-			{ transient: true },
-		);
+		component.updateContent(createAssistantMessage("Alpha completed paragraph.\n\nPartial tail"), {
+			transient: true,
+		});
 		transcript.renderViewport(80, 20, { now: 0, tick: 0 });
-		component.updateContent(
-			createAssistantMessage("Alpha completed paragraph.\n\nPartial tail grows.\n\nNew tail"),
-			{ transient: true },
-		);
+		component.updateContent(createAssistantMessage("Alpha completed paragraph.\n\nPartial tail grows.\n\nNew tail"), {
+			transient: true,
+		});
 		transcript.renderViewport(80, 20, { now: 1, tick: 1 });
 
 		const batch = transcript.peekFinalizedBatch(80, 0);

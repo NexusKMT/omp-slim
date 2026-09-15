@@ -159,18 +159,22 @@ function decorate<Out>(schema: Decoratable<Out>, optional = false): ZodLikeSchem
 				ir.out !== undefined &&
 				(ir.out.k === "string" || ir.out.k === "array")
 			) {
-				if (!Number.isSafeInteger(bound) || bound < 0) throw new OmpTypeError("min length must be a nonnegative safe integer");
+				if (!Number.isSafeInteger(bound) || bound < 0)
+					throw new OmpTypeError("min length must be a nonnegative safe integer");
 				const out = { ...ir.out, min: ir.out.min === undefined ? bound : Math.max(ir.out.min, bound) };
 				return next(restrictBase(schema, { ...ir, out }));
 			}
 			if (ir.k === "morph" && (schema.hasSteps || ir.out === undefined)) {
-				if (!Number.isSafeInteger(bound) || bound < 0) throw new OmpTypeError("min length must be a nonnegative safe integer");
-				return next(schema.narrow((value, ctx) => {
-					if (typeof value === "string" || Array.isArray(value)) {
-						return value.length >= bound || ctx.mustBe(`at least ${bound} characters`);
-					}
-					return ctx.mustBe("a string or array");
-				}));
+				if (!Number.isSafeInteger(bound) || bound < 0)
+					throw new OmpTypeError("min length must be a nonnegative safe integer");
+				return next(
+					schema.narrow((value, ctx) => {
+						if (typeof value === "string" || Array.isArray(value)) {
+							return value.length >= bound || ctx.mustBe(`at least ${bound} characters`);
+						}
+						return ctx.mustBe("a string or array");
+					}),
+				);
 			}
 			throw new OmpTypeError(`cannot apply min to ${ir.k}`);
 		},
@@ -192,18 +196,22 @@ function decorate<Out>(schema: Decoratable<Out>, optional = false): ZodLikeSchem
 				ir.out !== undefined &&
 				(ir.out.k === "string" || ir.out.k === "array")
 			) {
-				if (!Number.isSafeInteger(bound) || bound < 0) throw new OmpTypeError("max length must be a nonnegative safe integer");
+				if (!Number.isSafeInteger(bound) || bound < 0)
+					throw new OmpTypeError("max length must be a nonnegative safe integer");
 				const out = { ...ir.out, max: ir.out.max === undefined ? bound : Math.min(ir.out.max, bound) };
 				return next(restrictBase(schema, { ...ir, out }));
 			}
 			if (ir.k === "morph" && (schema.hasSteps || ir.out === undefined)) {
-				if (!Number.isSafeInteger(bound) || bound < 0) throw new OmpTypeError("max length must be a nonnegative safe integer");
-				return next(schema.narrow((value, ctx) => {
-					if (typeof value === "string" || Array.isArray(value)) {
-						return value.length <= bound || ctx.mustBe(`at most ${bound} characters`);
-					}
-					return ctx.mustBe("a string or array");
-				}));
+				if (!Number.isSafeInteger(bound) || bound < 0)
+					throw new OmpTypeError("max length must be a nonnegative safe integer");
+				return next(
+					schema.narrow((value, ctx) => {
+						if (typeof value === "string" || Array.isArray(value)) {
+							return value.length <= bound || ctx.mustBe(`at most ${bound} characters`);
+						}
+						return ctx.mustBe("a string or array");
+					}),
+				);
 			}
 			throw new OmpTypeError(`cannot apply max to ${ir.k}`);
 		},
@@ -223,7 +231,9 @@ function decorate<Out>(schema: Decoratable<Out>, optional = false): ZodLikeSchem
 		},
 		regex(expression: RegExp, message?: string): ZodLikeSchema<Out> {
 			const ir = schema.ir;
-			const isStringLike = ir.k === "string" || (ir.k === "morph" && (ir.out?.k === "string" || (ir.out === undefined && ir.input.k === "string")));
+			const isStringLike =
+				ir.k === "string" ||
+				(ir.k === "morph" && (ir.out?.k === "string" || (ir.out === undefined && ir.input.k === "string")));
 			if (!isStringLike) throw new OmpTypeError(`cannot apply regex to ${ir.k}`);
 			const expectation = message ?? `matching ${expression}`;
 			const narrowed = schema.narrow((value, ctx) => {
@@ -242,10 +252,17 @@ function decorate<Out>(schema: Decoratable<Out>, optional = false): ZodLikeSchem
 				return next(restrictBase(schema, { ...ir, out: { ...ir.out, url: true } }));
 			}
 			if (ir.k === "morph" && (schema.hasSteps || ir.out === undefined)) {
-				return next(schema.narrow((value, ctx) => {
-					if (typeof value !== "string") return ctx.mustBe("a string");
-					try { new URL(value); return true; } catch { return ctx.mustBe("a valid URL"); }
-				}));
+				return next(
+					schema.narrow((value, ctx) => {
+						if (typeof value !== "string") return ctx.mustBe("a string");
+						try {
+							new URL(value);
+							return true;
+						} catch {
+							return ctx.mustBe("a valid URL");
+						}
+					}),
+				);
 			}
 			throw new OmpTypeError(`cannot apply url to ${ir.k}`);
 		},
@@ -275,19 +292,21 @@ function decorate<Out>(schema: Decoratable<Out>, optional = false): ZodLikeSchem
 			return next(schema.narrow((value, ctx) => Boolean(predicate(value)) || ctx.mustBe(expectation)));
 		},
 		superRefine(refinement: (value: Out, ctx: SuperRefineContext) => void): ZodLikeSchema<Out> {
-			return next(schema.narrow((value, ctx) => {
-				const proxy: SuperRefineContext = {
-					addIssue(issue) {
-						ctx.error({
-							expected: issue.message,
-							path: issue.path ?? [],
-							...(issue.actual !== undefined ? { actual: issue.actual } : {}),
-						});
-					},
-				};
-				refinement(value, proxy);
-				return true;
-			}));
+			return next(
+				schema.narrow((value, ctx) => {
+					const proxy: SuperRefineContext = {
+						addIssue(issue) {
+							ctx.error({
+								expected: issue.message,
+								path: issue.path ?? [],
+								...(issue.actual !== undefined ? { actual: issue.actual } : {}),
+							});
+						},
+					};
+					refinement(value, proxy);
+					return true;
+				}),
+			);
 		},
 		trim(): ZodLikeSchema<Out> {
 			const ir = schema.ir;

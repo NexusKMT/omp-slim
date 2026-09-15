@@ -175,7 +175,6 @@ describe("zod-like parsing", () => {
 });
 
 describe("zod-like trim and superRefine", () => {
-
 	it("trims strings and applies constraints post-trim", () => {
 		expect(z.string().trim().parse("  hello  ")).toBe("hello");
 		expect(z.string().min(3).trim().safeParse("  ab  ").success).toBe(false);
@@ -195,20 +194,24 @@ describe("zod-like trim and superRefine", () => {
 		});
 		expect(schema.parse("abc")).toBe("abc");
 		expect(schema.safeParse("ab").success).toBe(false);
-		const obj = z.object({
-			name: z.string(),
-			age: z.number(),
-		}).superRefine((val, ctx) => {
-			if (val.age < 0) ctx.addIssue({ code: "custom", path: ["age"], message: "age must be nonnegative" });
-		});
+		const obj = z
+			.object({
+				name: z.string(),
+				age: z.number(),
+			})
+			.superRefine((val, ctx) => {
+				if (val.age < 0) ctx.addIssue({ code: "custom", path: ["age"], message: "age must be nonnegative" });
+			});
 		expect(obj.parse({ name: "a", age: 1 })).toEqual({ name: "a", age: 1 });
 		const bad = obj.safeParse({ name: "a", age: -1 });
 		expect(bad.success).toBe(false);
 		if (!bad.success) expect(bad.error.issues[0].path).toEqual(["age"]);
 
-		const nested = z.object({
-			child: z.string().superRefine((_, ctx) => ctx.addIssue({ message: "rejected" })),
-		}).safeParse({ child: "value" });
+		const nested = z
+			.object({
+				child: z.string().superRefine((_, ctx) => ctx.addIssue({ message: "rejected" })),
+			})
+			.safeParse({ child: "value" });
 		expect(nested.success).toBe(false);
 		if (!nested.success) expect(nested.error.issues[0].path).toEqual(["child"]);
 	});
@@ -223,7 +226,10 @@ describe("zod-like trim and superRefine", () => {
 		expect(constrained.safeParse("  a  ").success).toBe(false);
 		expect(constrained.safeParse("  abcdef  ").success).toBe(false);
 
-		const transformed = z.string().trim().transform(value => value.slice(0, 1));
+		const transformed = z
+			.string()
+			.trim()
+			.transform(value => value.slice(0, 1));
 		expect(transformed.min(2).safeParse("long").success).toBe(false);
 		expect(transformed.max(0).safeParse("long").success).toBe(false);
 		expect(

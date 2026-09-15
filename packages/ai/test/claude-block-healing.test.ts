@@ -183,9 +183,7 @@ describe("claude usage-block healing", () => {
 		storages.push(storage);
 		await storage.reload();
 
-		expect(await storage.getApiKey("anthropic", "s-direct-heal", { modelId: "claude-fable-5-1" })).toBe(
-			"access-1",
-		);
+		expect(await storage.getApiKey("anthropic", "s-direct-heal", { modelId: "claude-fable-5-1" })).toBe("access-1");
 		expect(clearedScopes).toContain("tier:fable");
 	});
 

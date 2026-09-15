@@ -629,7 +629,16 @@ export class AskDialogComponent implements Component {
 			const listRows = (listWidth: number): number => {
 				let total = 0;
 				for (const rowItem of rowItems) {
-					total += renderRowLabel(rowItem, question, state, false, mdTheme, this.#previewCache, listWidth, this.#expanded).length;
+					total += renderRowLabel(
+						rowItem,
+						question,
+						state,
+						false,
+						mdTheme,
+						this.#previewCache,
+						listWidth,
+						this.#expanded,
+					).length;
 				}
 				return total;
 			};

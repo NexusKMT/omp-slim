@@ -606,9 +606,7 @@ if (isProcessEntry || !Bun.isMainThread) {
 	// terminal lifetime; help/version/subcommand launches never start one. See #10930. The
 	// registration lives for the process — a one-shot entry exits right after runCli settles.
 	if (isProcessEntry) {
-		const { registerStdioDisconnectHandling }: typeof Postmortem = require(
-			"@oh-my-pi/pi-utils/postmortem.js",
-		);
+		const { registerStdioDisconnectHandling }: typeof Postmortem = require("@oh-my-pi/pi-utils/postmortem.js");
 		registerStdioDisconnectHandling();
 	}
 	runCli(process.argv.slice(2)).catch(async error => {

@@ -39,9 +39,15 @@ async function createHost(initializeUi: boolean) {
 		syncComposerShape() {},
 		session: {
 			extensionRunner: runner,
-			get isStreaming() { return state.streaming; },
-			get queuedMessageCount() { return state.queued; },
-			get hasAdmittedSubmission() { return state.admitted > 0; },
+			get isStreaming() {
+				return state.streaming;
+			},
+			get queuedMessageCount() {
+				return state.queued;
+			},
+			get hasAdmittedSubmission() {
+				return state.admitted > 0;
+			},
 			hasPendingAsyncWork: () => state.asyncWork,
 			async waitForIdle() {},
 			waitForAdmittedSubmissions() {
@@ -52,8 +58,12 @@ async function createHost(initializeUi: boolean) {
 			},
 		},
 		hasPendingSubmission: () => state.pendingSubmission,
-		async shutdown() { state.closed = true; },
-		showError(message: string) { errors.push(message); },
+		async shutdown() {
+			state.closed = true;
+		},
+		showError(message: string) {
+			errors.push(message);
+		},
 		setToolUIContext() {},
 		editor: { setText() {}, handleInput() {}, getText: () => "" },
 		setWorkingMessage() {},
