@@ -51,7 +51,7 @@ import type {
 	ExtensionEvent,
 	ExtensionFlag,
 	ExtensionMode,
-	ExtensionRuntime,
+	ExtensionRuntimeContract,
 	ExtensionShortcut,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
@@ -604,7 +604,7 @@ export class ExtensionRunner {
 
 	constructor(
 		private readonly extensions: Extension[],
-		private readonly runtime: ExtensionRuntime,
+		private readonly runtime: ExtensionRuntimeContract,
 		/** Ignored: `cwd` is always read live via the `cwd` getter below, not cached here. */
 		_initialCwd: string,
 		private readonly sessionManager: SessionManager,

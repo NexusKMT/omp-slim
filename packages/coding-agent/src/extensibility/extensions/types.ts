@@ -1644,6 +1644,13 @@ export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 export interface RegisteredTool<TParams extends TSchema = TSchema, TDetails = unknown> {
 	definition: ToolDefinition<TParams, TDetails>;
 	extensionPath: string;
+	/**
+	 * Upstream-shaped provenance mirroring {@link SourceInfo}. Extensions authored
+	 * against `@earendil-works/pi-coding-agent` — whose registered tools expose
+	 * `sourceInfo` — read `sourceInfo.path` off `getAllRegisteredTools()` entries,
+	 * so it carries the same value `SessionTools.getAllToolInfos()` synthesizes.
+	 */
+	sourceInfo: SourceInfo;
 }
 
 /** Internal observer invoked when an already-loaded extension registers or replaces a tool. */
@@ -1762,8 +1769,8 @@ export interface ExtensionCommandContextActions {
 	reload: () => Promise<void>;
 }
 
-/** Full runtime = state + actions, including host-compatible service-tier fallbacks. */
-export interface ExtensionRuntime extends ExtensionRuntimeState, ExtensionActions {
+/** Runtime contract implemented by the loader and consumed by extension hosts. */
+export interface ExtensionRuntimeContract extends ExtensionRuntimeState, ExtensionActions {
 	getServiceTiers: GetServiceTiersHandler;
 	setServiceTier: SetServiceTierHandler;
 }
@@ -1802,7 +1809,7 @@ export interface PreparedExtension {
 export interface LoadExtensionsResult {
 	extensions: Extension[];
 	errors: Array<{ path: string; error: string }>;
-	runtime: ExtensionRuntime;
+	runtime: ExtensionRuntimeContract;
 	/** Session-independent imported factories safe to rebind in child sessions. */
 	preparedExtensions?: PreparedExtension[];
 }

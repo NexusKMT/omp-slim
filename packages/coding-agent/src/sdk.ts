@@ -111,6 +111,7 @@ import {
 	ExtensionRunner,
 	ExtensionToolWrapper,
 	type ExtensionUIContext,
+	extensionToolSourceInfo,
 	type LoadExtensionsResult,
 	loadExtensionFromFactory,
 	loadExtensions,
@@ -2900,7 +2901,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			...registeredTools,
 			...sdkCustomTools.map(tool => {
 				const definition = isCustomTool(tool) ? customToolToDefinition(tool) : tool;
-				return { definition, extensionPath: "<sdk>" };
+				return { definition, extensionPath: "<sdk>", sourceInfo: extensionToolSourceInfo(definition, "<sdk>") };
 			}),
 		];
 		// `wrapToolWithMetaNotice` runs the centralized large-output → artifact spill.

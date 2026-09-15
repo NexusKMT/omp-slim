@@ -393,6 +393,10 @@
 
 - File slash commands now surface their `argument-hint` frontmatter as inline autocomplete ghost text and ACP `input.hint`, not only in the `/extensions` inspector ([#11647](https://github.com/can1357/oh-my-pi/issues/11647)).
 
+### Fixed
+
+- Extensions authored against upstream Pi (e.g. pi-fabric) no longer crash every session at startup: registered tools now carry the upstream-shaped `sourceInfo` provenance that `getAllRegisteredTools()` consumers read ([#11661](https://github.com/can1357/oh-my-pi/issues/11661)).
+
 ## [18.1.17] - 2026-09-10
 
 - Stop eval from advertising `agent()` after the session reaches its subagent recursion-depth limit.
