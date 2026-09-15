@@ -7,6 +7,9 @@
 ### Fixed
 
 - Fixed working-memory recall returning too few or no results after matching memories were invalidated.
+### Fixed
+
+- Fixed an explicitly invalidated memory still being returned by an identical repeat query until the recall cache expired.
 
 ## [18.0.9] - 2026-08-28
 
