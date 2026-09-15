@@ -137,6 +137,7 @@
 - Fixed background task cards missing their final completion or failure after an early result or live-session focus replay.
 - Ranged reads on Windows no longer intermittently open the selector-suffixed path when filesystem probes return transient errors ([#11284](https://github.com/can1357/oh-my-pi/issues/11284)).
 - Preserved `xd://` device mounting and device-only write restrictions when restoring active tools after temporary toolset restrictions or extension mode toggles ([#11543](https://github.com/can1357/oh-my-pi/pull/11543) by [@shivamklr](https://github.com/shivamklr)).
+- Fixed `omp bench` and `omp if-bench` rejecting models that `omp models` lists (e.g. llama.cpp, Ollama, LM Studio, `models.yml` servers) by retrying model resolution through a live discovery pass when the local cache can't restore their credentials ([#11598](https://github.com/can1357/oh-my-pi/pull/11598) by [@yomgui1](https://github.com/yomgui1)).
 
 ## [18.1.19] - 2026-09-12
 
