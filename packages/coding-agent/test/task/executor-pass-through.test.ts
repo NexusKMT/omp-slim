@@ -229,9 +229,14 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 		expect(spy.mock.calls[1]?.[0]?.toolNames).toEqual(["read", "write", "hub"]);
 		expect(spy.mock.calls[2]?.[0]?.toolNames).toEqual(["read", "task", "hub"]);
 
-		const readOnlyPrompt = spy.mock.calls[0]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
-		const writablePrompt = spy.mock.calls[1]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
-		const spawningPrompt = spy.mock.calls[2]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
+		const promptText = (index: number): string => {
+			const prompt = spy.mock.calls[index]?.[0]?.systemPrompt;
+			const resolved = typeof prompt === "function" ? prompt(["default"]) : prompt;
+			return Array.isArray(resolved) ? resolved.join("\n") : (resolved ?? "");
+		};
+		const readOnlyPrompt = promptText(0);
+		const writablePrompt = promptText(1);
+		const spawningPrompt = promptText(2);
 		expect(readOnlyPrompt.includes("# Peers")).toBe(false);
 		expect(writablePrompt.includes("# Peers")).toBe(true);
 		expect(spawningPrompt.includes("# Peers")).toBe(true);
