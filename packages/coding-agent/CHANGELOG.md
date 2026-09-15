@@ -299,6 +299,7 @@
 - Startup and daemon commands no longer crash when project-directory canonicalization encounters EPERM or EACCES.
 - `omp plugin install --dry-run` now previews marketplace installs without mutating plugin state.
 - In colocated jj-git workspaces, the status line and footer now show the JJ label (bookmark or short change ID) instead of a detached git HEAD. Git-backed automation still resolves these directories to Git ([#11071](https://github.com/can1357/oh-my-pi/issues/11071), [#11325](https://github.com/can1357/oh-my-pi/pull/11325) by [@boazy](https://github.com/boazy)).
+- Command output from native Windows tools on Chinese (and other non-UTF-8) locales is decoded using the system ANSI code page instead of turning into replacement characters.
 
 ## [18.1.16] - 2026-09-09
 
