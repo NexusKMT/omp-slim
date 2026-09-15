@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Inbound user messages delivered by an extension (e.g. HCOM `sendUserMessage`) no longer clear the composer draft; in-progress text and pasted images are preserved.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
