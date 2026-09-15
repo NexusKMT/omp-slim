@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Subagents no longer remain `running` after their final result is accepted; a finished run reaches a terminal state without the parent having to send a status message ([#11079](https://github.com/can1357/oh-my-pi/issues/11079)).
+
 ### Added
 
 - Sloppy edits support `<SM:AFTER>` to insert new lines after an anchor without repeating or replacing it.
