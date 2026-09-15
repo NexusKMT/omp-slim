@@ -157,6 +157,21 @@ describe("runPluginCommand({ action: 'install', args: [<local>] })", () => {
 		expect(await fs.readlink(linkTarget)).toBe(localPlugin);
 	});
 
+	test("rejects a package name that could escape the plugin directory", async () => {
+		const localPlugin = path.join(tmpRoot, "malicious");
+		await fs.mkdir(localPlugin);
+		await Bun.write(
+			path.join(localPlugin, "package.json"),
+			JSON.stringify({ name: "../../victim", version: "1.0.0" }),
+		);
+		const victim = path.join(tmpRoot, "victim");
+		await fs.mkdir(victim);
+		await Bun.write(path.join(victim, "sentinel.txt"), "keep");
+
+		await expect(new PluginManager(tmpRoot).link(localPlugin)).rejects.toThrow("Invalid package name");
+		expect(await Bun.file(path.join(victim, "sentinel.txt")).text()).toBe("keep");
+	});
+
 	test("list --json includes linked local plugin without package dependencies", async () => {
 		const localPlugin = await createLocalPlugin(tmpRoot);
 		const output: string[] = [];

@@ -782,6 +782,7 @@ export class PluginManager {
 		if (!pkg.name) {
 			throw new Error("package.json must have a name field");
 		}
+		validatePackageName(pkg.name);
 
 		await this.#ensurePluginsDir();
 
