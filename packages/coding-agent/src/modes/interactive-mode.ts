@@ -5474,8 +5474,41 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.stop();
 	}
 
+	requestShutdown(): void {
+		this.shutdownRequested = true;
+		// Background extensions do not submit terminal input. Start the same
+		// settled-boundary check without waiting for another user keystroke.
+		void this.checkShutdownRequested().catch(error => {
+			this.showError(`Shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+		});
+	}
+
+	/** True while a foreground submission is accepted but not yet handed to the session. */
+	hasPendingSubmission(): boolean {
+		return this.#pendingSubmittedInput !== undefined;
+	}
+
 	async checkShutdownRequested(): Promise<void> {
-		if (!this.shutdownRequested) return;
+		if (!this.shutdownRequested || this.isShuttingDown) return;
+		// Quiesce in a loop: an admitted submission that settles may have started a turn
+		// whose recovery work waitForIdle() must observe again before the final decision.
+		for (;;) {
+			await this.session.waitForIdle();
+			if (!this.session.hasAdmittedSubmission) break;
+			await this.session.waitForAdmittedSubmissions();
+		}
+		// No await between this check and shutdown(): the decision and the start of
+		// teardown share one microtask, so nothing can be admitted in between.
+		if (
+			this.isShuttingDown ||
+			this.hasPendingSubmission() ||
+			this.session.hasAdmittedSubmission ||
+			this.session.isStreaming ||
+			this.session.queuedMessageCount > 0 ||
+			this.session.hasPendingAsyncWork()
+		) {
+			return;
+		}
 		await this.shutdown();
 	}
 

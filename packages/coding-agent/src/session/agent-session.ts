@@ -795,6 +795,12 @@ export class AgentSession {
 	readonly #loopGuards: LoopGuards;
 	#promptInFlightCount = 0;
 	#abortInProgress = false;
+	/** Submissions accepted by prompt()/promptCustomMessage()/sendCustomMessage() that have not
+	 *  yet dispatched a turn, queued, or bailed. Preprocessing (manual-compaction wait, slash
+	 *  commands, image normalization, vision description) runs before #promptInFlightCount is
+	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
+	#admittedSubmissionCount = 0;
+	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
 	// checks in #handleAgentEvent) still fire on the original schedule — only the
@@ -2317,6 +2323,31 @@ export class AgentSession {
 		return this.#hasPendingAsyncWake();
 	}
 
+	/** True while a submission has been admitted but has not yet started a turn, queued, or bailed. */
+	get hasAdmittedSubmission(): boolean {
+		return this.#admittedSubmissionCount > 0;
+	}
+
+	/** Resolves once every currently admitted submission has dispatched, queued, or bailed. */
+	waitForAdmittedSubmissions(): Promise<void> {
+		if (this.#admittedSubmissionCount === 0) return Promise.resolve();
+		this.#admittedSubmissionsSettled ??= Promise.withResolvers<void>();
+		return this.#admittedSubmissionsSettled.promise;
+	}
+
+	async #admitSubmission<T>(work: () => Promise<T>): Promise<T> {
+		this.#admittedSubmissionCount++;
+		try {
+			return await work();
+		} finally {
+			if (--this.#admittedSubmissionCount === 0 && this.#admittedSubmissionsSettled) {
+				const settled = this.#admittedSubmissionsSettled;
+				this.#admittedSubmissionsSettled = undefined;
+				settled.resolve();
+			}
+		}
+	}
+
 	/**
 	 * Settle one generation of owner-scoped async work: wait for running owner
 	 * jobs to finish, deliver their queued results (which enqueue async-result
@@ -2754,6 +2785,16 @@ export class AgentSession {
 	 * appended to the current branch. Uses the current branch's memoized
 	 * persistence-key cache for the common missing-key case, and only walks the
 	 * branch to verify content when a key hit could be a rare collision.
+	 *
+	 * Error turns need one extra discriminator. An empty error turn carries no
+	 * content at all, so every failed attempt of one retry saga serializes to the
+	 * same `[]` — and when two attempts land in the same wall-clock millisecond
+	 * (mocked/zero retry delay, or a fast provider failure) they also share a
+	 * persistence key of `assistant:<ts>:<provider>:<model>::error`. Content
+	 * equality alone then reports the aggregated terminal turn ("Retry budget
+	 * exhausted after N retries: …") as a duplicate of the attempt error it
+	 * supersedes, and the session journal silently loses the record of why the
+	 * run stopped. The failure text is the only thing that distinguishes them.
 	 */
 	#sessionMessageAlreadyPersisted(message: AgentMessage): boolean {
 		const key = sessionMessagePersistenceKey(message);
@@ -2765,7 +2806,15 @@ export class AgentSession {
 			const entry = branch[index];
 			if (entry.type !== "message") continue;
 			if (sessionMessagePersistenceKey(entry.message) !== key) continue;
-			if (sameMessageContent(entry.message, message)) return true;
+			if (!sameMessageContent(entry.message, message)) continue;
+			if (
+				entry.message.role === "assistant" &&
+				message.role === "assistant" &&
+				entry.message.errorMessage !== message.errorMessage
+			) {
+				continue;
+			}
+			return true;
 		}
 		return false;
 	}
@@ -6199,6 +6248,10 @@ export class AgentSession {
 	 * the ACP agent) use this to know whether to expect an `agent_end` event.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
+		return this.#admitSubmission(() => this.#prompt(text, options));
+	}
+
+	async #prompt(text: string, options?: PromptOptions): Promise<boolean> {
 		// Stamp the operator's submission instant before ANY async preprocessing —
 		// command execution, image normalization, vision-model description — so the
 		// prompt→yield delta includes the whole wait, whatever path the prompt takes.
@@ -6398,6 +6451,16 @@ export class AgentSession {
 	 * stop instead of hanging.
 	 */
 	async promptCustomMessage<T = unknown>(
+		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
+		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+			queueChipText?: string;
+			queueOnly?: boolean;
+		},
+	): Promise<boolean> {
+		return this.#admitSubmission(() => this.#promptCustomMessage(message, options));
+	}
+
+	async #promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
 			queueChipText?: string;
@@ -7353,6 +7416,18 @@ export class AgentSession {
 	 * use this to avoid acting on a turn that never ran.
 	 */
 	async sendCustomMessage<T = unknown>(
+		message: CustomMessagePayload<T>,
+		options?: {
+			triggerTurn?: boolean;
+			deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+			queueChipText?: string;
+			acceptTerminalEmptyStop?: boolean;
+		},
+	): Promise<boolean> {
+		return this.#admitSubmission(() => this.#sendCustomMessage(message, options));
+	}
+
+	async #sendCustomMessage<T = unknown>(
 		message: CustomMessagePayload<T>,
 		options?: {
 			triggerTurn?: boolean;
