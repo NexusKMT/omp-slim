@@ -1707,12 +1707,20 @@ export class SessionTools {
 		const directToolNames = this.#codeModeDirectWireSignature === undefined ? undefined : activeToolNames;
 		this.#setActiveToolNames?.(this.#toolPredicateNames ?? activeToolNames);
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
+		// Stage the hint snapshot BEFORE rendering: `#rebuildSystemPrompt` reads
+		// the skill gates inside `BashTool.description` and `ReadTool.parameters`,
+		// so those getters must see the new visibility while the prompt renders.
+		// The staged value commits atomically with the prompt (rolled back with
+		// it) so a declined preparation leaves the previous state untouched.
+		const previousSkillHintVisible = this.#skillHintVisible;
+		this.#refreshSkillHintVisibility();
 		const built = await this.#rebuildSystemPrompt(promptToolNames, this.#toolRegistry, { directToolNames });
 		return {
 			systemPrompt: built.systemPrompt,
 			commit: () => {
-				if (this.#host.isDisposed() || isCurrent?.() === false) return false;
-				// A handler may have rebuilt policy while this preparation was awaiting its final commit.
+				// A handler may have rebuilt policy while this preparation was
+				// awaiting its final commit: its own lifecycle already re-snapshotted
+				// hint visibility, so only carry the prompt forward.
 				if (this.#baseSystemPrompt !== previousBaseSystemPrompt) return true;
 				this.#baseSystemPrompt = built.systemPrompt;
 				this.#setBasePromptXdevNames(built.xdevCatalogNames);
@@ -1745,7 +1753,6 @@ export class SessionTools {
 					directToolNames,
 					mountedSignatureTools,
 				);
-				this.#refreshSkillHintVisibility();
 				return true;
 			},
 		};
