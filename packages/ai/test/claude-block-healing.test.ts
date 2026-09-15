@@ -176,6 +176,19 @@ describe("claude usage-block healing", () => {
 		expect(await storage.getApiKey("anthropic", "s-heal", { modelId: "claude-fable-5-1" })).toBe("access-1");
 	});
 
+	it("lifts a stale tier:fable block during credential selection without a prior health check", async () => {
+		const { storage, clearedScopes } = makeHarness(
+			claudeReport([sharedLimit("5h", "5h", 0.1), sharedLimit("7d", "7d", 0.2), tierLimit("fable", 0)]),
+		);
+		storages.push(storage);
+		await storage.reload();
+
+		expect(await storage.getApiKey("anthropic", "s-direct-heal", { modelId: "claude-fable-5-1" })).toBe(
+			"access-1",
+		);
+		expect(clearedScopes).toContain("tier:fable");
+	});
+
 	it("keeps the block while the shared 5-hour window is spent", async () => {
 		const { storage, clearedScopes } = makeHarness(
 			claudeReport([sharedLimit("5h", "5h", 1), sharedLimit("7d", "7d", 0.2), tierLimit("fable", 0)]),
