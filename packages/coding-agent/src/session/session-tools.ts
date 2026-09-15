@@ -100,6 +100,12 @@ interface SessionToolsOptions {
 	skillsReloadable?: boolean;
 }
 
+interface SystemPromptPreparation {
+	systemPrompt: string[];
+	/** Publish staged state at validated delivery; false declines the prepared turn without mutation. */
+	commit?(): boolean;
+}
+
 export interface MountedMCPToolRouteSource {
 	readonly name: string;
 	readonly mcpServerName?: unknown;
@@ -1695,11 +1701,13 @@ export class SessionTools {
 
 	/** Rebuilds the stable base prompt for the current tools and model. */
 	refreshBaseSystemPrompt(): Promise<void> {
-		return this.runToolRegistryMutation(() => this.#refreshBaseSystemPrompt());
+		return this.runToolRegistryMutation(async () => {
+			(await this.#prepareBaseSystemPrompt())?.commit?.();
+		});
 	}
 
-	async #refreshBaseSystemPrompt(): Promise<void> {
-		if (this.#host.isDisposed() || !this.#rebuildSystemPrompt) return;
+	async #prepareBaseSystemPrompt(isCurrent?: () => boolean): Promise<SystemPromptPreparation | undefined> {
+		if (this.#host.isDisposed() || !this.#rebuildSystemPrompt || isCurrent?.() === false) return;
 		const activeToolNames = this.getActiveToolNames();
 		const promptToolNames =
 			this.#codeModeDirectWireSignature === undefined ? activeToolNames : this.getEnabledToolNames();
@@ -1708,74 +1716,96 @@ export class SessionTools {
 		this.#setActiveToolNames?.(this.#toolPredicateNames ?? activeToolNames);
 		const previousBaseSystemPrompt = this.#baseSystemPrompt;
 		const built = await this.#rebuildSystemPrompt(promptToolNames, this.#toolRegistry, { directToolNames });
-		if (this.#host.isDisposed()) return;
-		this.#baseSystemPrompt = built.systemPrompt;
-		this.#basePromptXdevNames = new Set(built.xdevCatalogNames);
-		this.#host.clearMemoryPromotionSnapshot();
-		if (
-			previousBaseSystemPrompt.length !== this.#baseSystemPrompt.length ||
-			previousBaseSystemPrompt.some((part, index) => part !== this.#baseSystemPrompt[index])
-		) {
-			this.#host.clearInheritedProviderPromptCacheKey();
-		}
-		this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
-		invalidateToolSchemaMetadata(this.#host.agent.state.tools);
-		this.#promptModelKey = this.#currentPromptModelKey();
-		// Refresh the cached signature so a subsequent `applyActiveToolsByName` with
-		// the same tool set does not re-rebuild on top of the explicit refresh we
-		// just performed (and conversely, a different set forces a fresh rebuild).
-		const promptTools = promptToolNames
-			.map(name => this.#toolRegistry.get(name))
-			.filter((tool): tool is AgentTool => tool != null);
-		const mountedSignatureTools = [...(this.#xdev?.mountedNames ?? [])].flatMap(name => {
-			const tool = this.#toolRegistry.get(name);
-			return tool ? [tool] : [];
-		});
-		this.#lastAppliedToolSignature = this.#computeAppliedToolSignature(
-			promptToolNames,
-			promptTools,
-			directToolNames,
-			mountedSignatureTools,
-		);
+		if (this.#host.isDisposed() || isCurrent?.() === false) return;
+		return {
+			systemPrompt: built.systemPrompt,
+			commit: () => {
+				if (this.#host.isDisposed() || isCurrent?.() === false) return false;
+				// A handler may have rebuilt policy while this preparation was awaiting its final commit.
+				if (this.#baseSystemPrompt !== previousBaseSystemPrompt) return true;
+				this.#baseSystemPrompt = built.systemPrompt;
+				this.#basePromptXdevNames = new Set(built.xdevCatalogNames);
+				this.#host.clearMemoryPromotionSnapshot();
+				if (
+					previousBaseSystemPrompt.length !== this.#baseSystemPrompt.length ||
+					previousBaseSystemPrompt.some((part, index) => part !== this.#baseSystemPrompt[index])
+				) {
+					this.#host.clearInheritedProviderPromptCacheKey();
+				}
+				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
+				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
+				this.#promptModelKey = this.#currentPromptModelKey();
+				// Match the committed prompt so an unchanged tool set can skip rebuilding it.
+				const promptTools = promptToolNames
+					.map(name => this.#toolRegistry.get(name))
+					.filter((tool): tool is AgentTool => tool != null);
+				const mountedSignatureTools = [...(this.#xdev?.mountedNames ?? [])].flatMap(name => {
+					const tool = this.#toolRegistry.get(name);
+					return tool ? [tool] : [];
+				});
+				this.#lastAppliedToolSignature = this.#computeAppliedToolSignature(
+					promptToolNames,
+					promptTools,
+					directToolNames,
+					mountedSignatureTools,
+				);
+				return true;
+			},
+		};
 	}
 
-	/** Applies one-turn memory prompt injection before an agent run. */
-	async buildSystemPromptForAgentStart(promptText: string): Promise<string[]> {
+	/** Stages memory prompt injection; the owning turn commits it together with extension policy. */
+	async buildSystemPromptForAgentStart(
+		promptText: string,
+		isCurrent: () => boolean,
+	): Promise<SystemPromptPreparation> {
 		const backend = await resolveMemoryBackend(this.#host.settings);
-		if (!backend.beforeAgentStartPrompt) return this.#baseSystemPrompt;
+		if (!isCurrent() || !backend.beforeAgentStartPrompt) return { systemPrompt: this.#baseSystemPrompt };
 
 		try {
-			const injected = await backend.beforeAgentStartPrompt(this.#host.memoryBackendSession(), promptText);
-			if (!injected) return this.#baseSystemPrompt;
+			const memory = await backend.beforeAgentStartPrompt(this.#host.memoryBackendSession(), promptText);
+			if (!isCurrent() || !memory) return { systemPrompt: this.#baseSystemPrompt };
+			const injected = memory.context;
+			if (!injected) {
+				return {
+					systemPrompt: this.#baseSystemPrompt,
+					commit: () => isCurrent() && memory.commit(),
+				};
+			}
 
-			const previousBaseSystemPrompt = this.#baseSystemPrompt;
+			let refreshed: SystemPromptPreparation | undefined;
 			try {
-				await this.refreshBaseSystemPrompt();
+				refreshed = await this.runToolRegistryMutation(() => this.#prepareBaseSystemPrompt(isCurrent));
 			} catch (refreshErr) {
 				logger.debug("Memory backend prompt refresh after beforeAgentStartPrompt failed", {
 					backend: backend.id,
 					error: String(refreshErr),
 				});
 			}
+			if (!isCurrent()) return { systemPrompt: this.#baseSystemPrompt };
 
-			if (
-				this.#baseSystemPrompt.length !== previousBaseSystemPrompt.length ||
-				this.#baseSystemPrompt.some((part, index) => part !== previousBaseSystemPrompt[index])
-			) {
-				return this.#baseSystemPrompt;
-			}
-
-			this.#host.captureMemoryPromotionSnapshot(previousBaseSystemPrompt);
-			const stablePrompt = [...previousBaseSystemPrompt, injected];
-			this.#baseSystemPrompt = stablePrompt;
-			this.#applyAgentSystemPrompt(stablePrompt);
-			return stablePrompt;
+			const preparedBase = refreshed?.systemPrompt ?? this.#baseSystemPrompt;
+			const stablePrompt = [...preparedBase, injected];
+			return {
+				systemPrompt: stablePrompt,
+				commit: () => {
+					if (!isCurrent() || !memory.commit()) return false;
+					refreshed?.commit?.();
+					// A handler may have refreshed tools or policy. Promote the recall onto
+					// that winning base, never replace it with the preparation's snapshot.
+					const currentBase = this.#baseSystemPrompt;
+					this.#host.captureMemoryPromotionSnapshot(currentBase);
+					this.#baseSystemPrompt = currentBase === preparedBase ? stablePrompt : [...currentBase, injected];
+					this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
+					return true;
+				},
+			};
 		} catch (err) {
 			logger.debug("Memory backend beforeAgentStartPrompt failed", {
 				backend: backend.id,
 				error: String(err),
 			});
-			return this.#baseSystemPrompt;
+			return { systemPrompt: this.#baseSystemPrompt };
 		}
 	}
 
