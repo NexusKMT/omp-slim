@@ -63,6 +63,9 @@
 ### Fixed
 
 - Fixed `$which` capturing `Bun.which` at import on Linux and Windows, so `Bun.which` stubs installed later (e.g. per-test spies) are honoured and PATH-only language servers no longer leak into test results.
+### Added
+
+- Added `readSseJsonOrText`: like `readSseJson`, but a `data:` frame that is not valid JSON is yielded as its raw text instead of raising a `SyntaxError`, so a consumer can classify a reverse proxy's plain-text throttle page (`429 Too Many Requests`) that arrives after the stream headers were already sent. `readSseJson` is unchanged and shares the framing with it.
 
 ## [18.1.13] - 2026-09-07
 
