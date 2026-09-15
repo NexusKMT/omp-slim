@@ -16,6 +16,7 @@
 ### Fixed
 
 - Auto-retry waits past the signed 32-bit timer ceiling (e.g. a month-scale OpenCode Go reset with `retry.waitForUsageReset`) now elapse in full instead of overflowing the timer and retrying immediately.
+- JavaScript eval now reports startup failure if both isolated runtimes fail, instead of executing uncancellable code on the host thread.
 - Esc-Esc rewind, `/copy`, and `/tree`'s user-only filter now treat user-invoked skill and collab prompts as user turns: they are selectable, `←`/`→` jumps land on them, and rewinding past one restores the text you typed (with its chips) into the editor.
 - `/skill:<name>` followed by a newline now invokes the skill instead of sending the draft as plain text.
 - `openrouter/<vendor>/<model>@upstream` now resolves when the first-party provider bundles the same id (e.g. `google/gemini-*`), instead of failing with "model not found".
