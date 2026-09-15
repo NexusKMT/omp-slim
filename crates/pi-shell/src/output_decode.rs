@@ -45,7 +45,7 @@ impl Default for OutputDecoder {
 
 impl OutputDecoder {
 	/// Decode with the host ANSI code page as the Windows fallback.
-	pub fn new() -> Self {
+	pub const fn new() -> Self {
 		Self {
 			pending: Vec::new(),
 			mode: Mode::Utf8,
