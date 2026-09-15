@@ -5811,7 +5811,6 @@ describe("advisor", () => {
 				agent,
 				{
 					snapshotMessages: () => [],
-					enqueueAdvice: () => {},
 					onTurnError: async () => {
 						hookEntered.resolve();
 						await releaseHook.promise;
