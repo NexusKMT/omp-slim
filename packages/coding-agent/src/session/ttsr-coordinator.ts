@@ -155,8 +155,17 @@ export class TtsrCoordinator {
 		if (!Array.isArray(rules)) return;
 		const ruleNames = rules.filter((ruleName): ruleName is string => typeof ruleName === "string");
 		this.#markInjected(ruleNames);
+		this.releaseDeferredReservationFromDetails(details);
+	}
+
+	/** Releases a queued delivery that was discarded before persistence. */
+	releaseDeferredReservationFromDetails(details: unknown): void {
+		if (!details || typeof details !== "object" || Array.isArray(details)) return;
+		const rules = "rules" in details ? details.rules : undefined;
 		const deliveryId = "deliveryId" in details ? details.deliveryId : undefined;
-		if (typeof deliveryId === "number") this.#releaseDeferredReservation(deliveryId, ruleNames);
+		if (!Array.isArray(rules) || typeof deliveryId !== "number") return;
+		const ruleNames = rules.filter((ruleName): ruleName is string => typeof ruleName === "string");
+		this.#releaseDeferredReservation(deliveryId, ruleNames);
 	}
 
 	/** Folds per-tool reminders into the matched tool's result. */

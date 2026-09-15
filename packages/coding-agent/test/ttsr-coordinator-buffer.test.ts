@@ -236,6 +236,34 @@ describe("TTSR stream buffers", () => {
 		expect(host.agent.followUp).toHaveBeenCalledTimes(2);
 	});
 
+	it("releases a reservation when a queued delivery is discarded", async () => {
+		const { host, followUp } = makeHost();
+		const manager = new TtsrManager({
+			enabled: true,
+			contextMode: "discard",
+			interruptMode: "never",
+			repeatMode: "after-gap",
+			repeatGap: 6,
+		});
+		expect(manager.addRule(makeRule("text"))).toBe(true);
+		const coordinator = new TtsrCoordinator(host, manager);
+		const first = assistantMessage();
+
+		coordinator.onAssistantMessageStart();
+		await coordinator.checkMessageUpdate(textDelta(first, CONDITION));
+		coordinator.onAssistantMessageEnd({ ...first, stopReason: "stop" } as AssistantMessage);
+		const delivery = followUp.mock.calls[0]?.[0];
+		if (delivery?.role !== "custom") throw new Error("Expected a custom TTSR delivery");
+
+		coordinator.releaseDeferredReservationFromDetails(delivery.details);
+		const second = assistantMessage();
+		coordinator.onAssistantMessageStart();
+		await coordinator.checkMessageUpdate(textDelta(second, CONDITION));
+		coordinator.onAssistantMessageEnd({ ...second, stopReason: "stop" } as AssistantMessage);
+
+		expect(host.agent.followUp).toHaveBeenCalledTimes(2);
+	});
+
 	it("does not carry a fallback-key tool buffer into the next assistant message", async () => {
 		const { coordinator, emitSessionEvent } = coordinatorFor("tool:bash");
 		const first = assistantMessage([{ type: "toolCall", id: "", name: "bash", arguments: {} }]);

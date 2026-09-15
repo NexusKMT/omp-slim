@@ -4879,10 +4879,20 @@ export class AgentSession {
 
 	/** Drop the in-memory conversation state after the terminal dispose flush. */
 	#releaseRetainedSessionMemory(): void {
+		this.#releaseQueuedTtsrReservations();
 		this.agent.reset();
 		this.agent.setAppendOnlyContext(undefined);
 		this.rawSseDebugBuffer.clear();
 		this.sessionManager.releaseRetainedEntries();
+	}
+
+	/** Releases deferred TTSR deliveries discarded by a session reset. */
+	#releaseQueuedTtsrReservations(): void {
+		for (const message of [...this.agent.peekSteeringQueue(), ...this.agent.peekFollowUpQueue()]) {
+			if (message.role === "custom" && message.customType === "ttsr-injection") {
+				this.#ttsr.releaseDeferredReservationFromDetails(message.details);
+			}
+		}
 	}
 
 	#closeAllProviderSessions(reason: string): void {
@@ -4962,6 +4972,7 @@ export class AgentSession {
 
 		// Drop the conversation: messages, queued steers/follow-ups, pending tool
 		// calls, and error state. agent.reset() keeps the model and system prompt.
+		this.#releaseQueuedTtsrReservations();
 		this.agent.reset();
 		this.#pendingNextTurnMessages = [];
 		this.#experimentalContextNotesReminder = undefined;
@@ -7448,6 +7459,11 @@ export class AgentSession {
 		const keep: (m: AgentMessage) => boolean = options?.forInterrupt
 			? isAdvisorCard
 			: m => !isUserQueuedMessage(m) && !isHiddenUserCompanion(m);
+		for (const message of [...steeringAll, ...followUpAll]) {
+			if (!keep(message) && message.role === "custom" && message.customType === "ttsr-injection") {
+				this.#ttsr.releaseDeferredReservationFromDetails(message.details);
+			}
+		}
 		this.agent.replaceQueues(steeringAll.filter(keep), followUpAll.filter(keep));
 		this.#reconcileQueuedMessageDrain();
 		return { steering, followUp };
@@ -7918,6 +7934,7 @@ export class AgentSession {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
+				this.#releaseQueuedTtsrReservations();
 				this.agent.reset();
 				if (options?.drop && previousSessionFile) {
 					try {
@@ -9584,6 +9601,7 @@ export class AgentSession {
 
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
+		this.#releaseQueuedTtsrReservations();
 		this.agent.replaceQueues([], []);
 		this.#queuedMessageDrainBlocked = false;
 		this.#usagePreflightReadyForNextModelCall = false;
