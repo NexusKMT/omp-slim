@@ -409,6 +409,21 @@ describe("xAI Responses answer extraction from relay output items", () => {
 		expect(response.answer).toBe("First finding.\nSecond finding.");
 	});
 
+	it("excludes unphased narration when an explicit final answer exists", async () => {
+		const response = await searchXAI(
+			makeParams(
+				makeFetchMock({
+					output: [
+						{ type: "message", content: [{ text: "Searching the release notes. ".repeat(20) }] },
+						{ type: "message", phase: "final_answer", content: [{ text: "The answer is 42." }] },
+					],
+				}),
+			),
+		);
+
+		expect(response.answer).toBe("The answer is 42.");
+	});
+
 	it("does not promote unphased narration when the last message is commentary", async () => {
 		await expect(
 			searchXAI(

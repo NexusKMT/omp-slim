@@ -318,14 +318,15 @@ function parseAnswer(response: XAIResponsesResponse): string | undefined {
 		if (!lastMessage) return response.output_text?.trim() || undefined;
 		if (lastMessage.texts.length === 0 && lastMessage.phase !== "commentary") return undefined;
 	}
-	const kept = messages.filter(
-		(entry, index) =>
-			entry.phase === "final_answer" ||
-			(entry.phase == null &&
-				(index === messages.length - 1 ||
-					entry.hasCitations ||
-					entry.texts.join("").length >= SUBSTANTIVE_MIN_CHARS)),
-	);
+	const kept = hasFinalAnswerContent
+		? messages.filter(entry => entry.phase === "final_answer")
+		: messages.filter(
+				(entry, index) =>
+					entry.phase == null &&
+					(index === messages.length - 1 ||
+						entry.hasCitations ||
+						entry.texts.join("").length >= SUBSTANTIVE_MIN_CHARS),
+			);
 
 	const answer = kept
 		.flatMap(entry => entry.texts)
