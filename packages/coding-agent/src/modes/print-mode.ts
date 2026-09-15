@@ -7,7 +7,7 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { logger, sanitizeText } from "@oh-my-pi/pi-utils";
+import { logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { isSilentAbort } from "../session/messages";
 import { flushTelemetryExport } from "../telemetry-export";
@@ -94,6 +94,26 @@ export function printableEvent(event: AgentSessionEvent): unknown {
  * returns the process exit code for the completed turn.
  */
 export async function runPrintMode(session: AgentSession, options: PrintModeOptions): Promise<number> {
+	// A signal (SIGINT/SIGTERM/SIGHUP) landing mid-turn drives the exit code
+	// through postmortem (130/143/129). Record the reason so the aborted-response
+	// branch below never races that with its own ordinary failure status.
+	let signalReason: postmortem.Reason | undefined;
+	const cancelSignalTeardown = postmortem.register("print-mode-session", reason => {
+		signalReason = reason;
+		return session.dispose({ reason, mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
+	});
+	try {
+		return await runPrintModeCore(session, options, () => signalReason !== undefined);
+	} finally {
+		cancelSignalTeardown();
+	}
+}
+
+async function runPrintModeCore(
+	session: AgentSession,
+	options: PrintModeOptions,
+	signalTeardownActive: () => boolean,
+): Promise<number> {
 	const { mode, messages = [], initialMessage, initialImages, printThoughts, planYolo = false } = options;
 
 	// process.stdout.write is fire-and-forget: a large final record (e.g. a
@@ -230,11 +250,13 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 	// The terminal stop reason decides the process exit code in every output
 	// mode: `--mode json` used to report success for the same turn-fatal error
 	// text mode exits 1 on (issue #11498). Silent aborts (plan-mode compaction
-	// transitions) stay non-fatal in both modes.
+	// transitions) and aborts initiated by signal teardown stay non-fatal here;
+	// postmortem owns the signal-specific exit code (130/143/129).
 	const terminalFailure =
 		assistantMsg !== undefined &&
 		(assistantMsg.stopReason === "error" || assistantMsg.stopReason === "aborted") &&
-		!isSilentAbort(assistantMsg);
+		!isSilentAbort(assistantMsg) &&
+		!signalTeardownActive();
 
 	// In text mode, output the final response. A terminal failure prints only
 	// the error line below; JSON mode already emitted the assistant message and
