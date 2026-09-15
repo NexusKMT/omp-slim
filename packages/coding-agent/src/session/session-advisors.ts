@@ -349,6 +349,8 @@ export class SessionAdvisors {
 	#advisorAutoResumeSuppressed = false;
 	#preserveAdvisorAdvice = false;
 	#preserveTerminalYieldAdvice = false;
+	/** Keeps terminal non-blocker advice on the visible card route during unwind. */
+	#terminalUnwindActive = false;
 	#advisorPrimaryTurnsCompleted = 0;
 	#advisorInterruptImmuneTurnStart: number | undefined;
 	#pendingAdvisorCardEvents = new Set<Promise<void>>();
@@ -380,23 +382,32 @@ export class SessionAdvisors {
 		willContinue: boolean | undefined,
 		signal?: AbortSignal,
 	): Promise<void> {
-		this.#advisorPrimaryTurnsCompleted++;
-		for (const advisor of this.#advisors) {
-			if (advisor.runtime.disposed) continue;
-			// Only the terminal primary boundary owns the deferred flush. Continuing
-			// tool turns must keep partial-work critiques withheld. The flush never
-			// resets the per-update budget — no new advisor update starts here.
-			if (willContinue !== true) advisor.adviseTool.flushDeferredNotes();
-			try {
-				advisor.runtime.onTurnEnd(messages, { willContinue });
-			} catch (error) {
-				logger.warn("advisor onTurnEnd threw; delta dropped", { advisor: advisor.name, err: String(error) });
+		const terminalBoundary = willContinue !== true;
+		if (terminalBoundary) this.#terminalUnwindActive = true;
+		try {
+			this.#advisorPrimaryTurnsCompleted++;
+			for (const advisor of this.#advisors) {
+				if (advisor.runtime.disposed) continue;
+				// Only the terminal primary boundary owns the deferred flush. Continuing
+				// tool turns must keep partial-work critiques withheld. The flush never
+				// resets the per-update budget — no new advisor update starts here.
+				if (willContinue !== true) advisor.adviseTool.flushDeferredNotes();
+				try {
+					advisor.runtime.onTurnEnd(messages, { willContinue });
+				} catch (error) {
+					logger.warn("advisor onTurnEnd threw; delta dropped", { advisor: advisor.name, err: String(error) });
+				}
 			}
+			const syncBacklog = this.#host.settings.get("advisor.syncBacklog");
+			if (this.#advisors.length === 0 || syncBacklog === "off") return;
+			const threshold = Number.parseInt(syncBacklog, 10);
+			await Promise.all(this.#advisors.map(advisor => advisor.runtime.waitForCatchup(30_000, threshold, signal)));
+		} finally {
+			// With advisor.syncBacklog=off, the review drain can emit after this
+			// callback returns. Keep the terminal guard until the next real agent
+			// start rather than reopening the steer path in that microtask gap.
+			if (!terminalBoundary) this.#terminalUnwindActive = false;
 		}
-		const syncBacklog = this.#host.settings.get("advisor.syncBacklog");
-		if (this.#advisors.length === 0 || syncBacklog === "off") return;
-		const threshold = Number.parseInt(syncBacklog, 10);
-		await Promise.all(this.#advisors.map(advisor => advisor.runtime.waitForCatchup(30_000, threshold, signal)));
 	}
 
 	/** Rebuilds live advisors when role assignments alter their resolved runtime inputs. */
@@ -1253,16 +1264,18 @@ export class SessionAdvisors {
 		// agent-facing `<advisory>` bytes stay identical to the pre-multi-advisor path.
 		const source = advisor.slug ? advisor.name : undefined;
 		const interrupting = isInterruptingSeverity(severity);
+		const terminalAnswerNoQueuedWork = this.#hasTerminalTextAnswerWithoutQueuedWork();
+		const terminalUnwindPreserve = this.#terminalUnwindActive && severity !== "blocker" && terminalAnswerNoQueuedWork;
 		const channel = resolveAdvisorDeliveryChannel({
 			severity,
 			autoResumeSuppressed: this.#advisorAutoResumeSuppressed,
-			preserveOnly: this.#preserveAdvisorAdvice,
+			preserveOnly: this.#preserveAdvisorAdvice || terminalUnwindPreserve,
 			// Key on the live agent-core loop, not session `isStreaming` (which also
 			// counts `#promptInFlightCount` during post-turn unwind). Only a running
 			// loop consumes a steer at its next boundary.
-			streaming: this.#host.agent.state.isStreaming && !this.#preserveTerminalYieldAdvice,
+			streaming: this.#host.agent.state.isStreaming && !this.#preserveTerminalYieldAdvice && !terminalUnwindPreserve,
 			aborting: this.#host.abortInProgress(),
-			terminalAnswerNoQueuedWork: this.#hasTerminalTextAnswerWithoutQueuedWork(),
+			terminalAnswerNoQueuedWork,
 			interruptImmuneTurnActive: interrupting && this.#isAdvisorInterruptImmuneTurnActive(),
 		});
 		if (channel === "aside") {
@@ -1878,6 +1891,11 @@ export class SessionAdvisors {
 	prepareForTerminalYieldAdvisorDrain(): void {
 		this.#preserveAdvisorAdvice = true;
 		this.#preserveTerminalYieldAdvice = true;
+	}
+
+	/** Clear terminal-unwind delivery only when a real primary run starts. */
+	onPrimaryAgentStart(): void {
+		this.#terminalUnwindActive = false;
 	}
 
 	/** Restore normal advisor routing when a kept-alive subagent starts new work. */
