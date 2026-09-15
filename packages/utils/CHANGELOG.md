@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- Async file-peek callbacks now receive stable `Uint8Array` windows with copying `slice()` semantics.
 - Dotenv loading now handles multiline values and escapes consistently with Bun, preventing project values from leaking into child-shell environments.
 - SSE readers now support lone-CR line endings and CRLF split across chunks without merging or delaying events.
 
