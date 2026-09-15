@@ -1911,6 +1911,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			setTodoPhases: phases => session.setTodoPhases(phases),
 			persistTodoPhases: phases => sessionManager.appendCustomEntry(USER_TODO_EDIT_CUSTOM_TYPE, { phases }),
 			getWorkPoolYieldItems: () => session?.getWorkPoolYieldItems() ?? [],
+			getLastAssistantText: () => session?.getLastAssistantText(),
 			setWorkPoolYieldItems: items => session.setWorkPoolYieldItems(items),
 			getCheckpointState: () => session.getCheckpointState(),
 			setCheckpointState: state => session.setCheckpointState(state ?? undefined),
