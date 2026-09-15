@@ -881,7 +881,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	readonly #startupChangelog: StartupChangelogSelection | undefined;
 	/** Header components below the config warnings + welcome, retained so a live config-warning change can rebuild the header (#10048). */
 	#headerAfter: readonly Component[] = [];
-	#planModePreviousToolPresentation: { enabled: string[]; mounted: string[]; fullWrite?: boolean } | undefined;
+	#planModePreviousToolPresentation: { enabled: string[]; mounted: string[] } | undefined;
 	#goalModePreviousTools: string[] | undefined;
 	#vibeModePreviousTools: string[] | undefined;
 	#vibeModeOwnerScope: VibeOwnerScope | undefined;
@@ -3487,7 +3487,6 @@ export class InteractiveMode implements InteractiveModeContext {
 					await this.session.restoreNonMCPToolPresentation(
 						previousPresentation.enabled,
 						previousPresentation.mounted,
-						{ fullWrite: previousPresentation.fullWrite },
 					);
 				}
 			} finally {
@@ -3506,11 +3505,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		if (this.goalModeEnabled || this.goalModePaused) {
 			if (this.#goalModePreviousTools !== undefined) {
-				const previousTools =
-					this.session.isDeviceOnlyWrite() === true
-						? this.#goalModePreviousTools.filter(name => name !== "write")
-						: this.#goalModePreviousTools;
-				await this.session.setActiveToolsByName(previousTools);
+				await this.session.setActiveToolsByName(this.#goalModePreviousTools);
 			}
 			this.session.setGoalModeState(undefined);
 			this.goalModeEnabled = false;
@@ -3590,10 +3585,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			// sdk.ts excludes "goal" from the initial active tool set unconditionally.
 			// Re-add it now so the agent can call resume, complete, or drop on this goal.
 			if (restored?.goal) {
-				const deviceOnly = this.session.isDeviceOnlyWrite() === true;
-				const previousTools = this.session
-					.getEnabledToolNames()
-					.filter(name => name !== "goal" && !(deviceOnly && name === "write"));
+				const previousTools = this.session.getEnabledToolNames().filter(name => name !== "goal");
 				this.#goalModePreviousTools = previousTools;
 				await this.session.setActiveToolsByName([...new Set([...previousTools, "goal"])]);
 			}
@@ -3671,7 +3663,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#planModePreviousToolPresentation = {
 			enabled: previousTools.filter(name => !isMCPToolName(name)),
 			mounted: previousMountedTools.filter(name => !isMCPToolName(name)),
-			fullWrite: this.session.isDeviceOnlyWrite() === false && previousTools.includes("write"),
 		};
 		this.planModePlanFilePath = planFilePath;
 		this.planModeEnabled = true;
@@ -3787,7 +3778,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				await this.session.restoreNonMCPToolPresentation(
 					previousPresentation.enabled,
 					previousPresentation.mounted,
-					{ fullWrite: previousPresentation.fullWrite },
 				);
 			}
 			if (this.#planModePreviousModelState && !options?.deferModelRestore) {
@@ -3823,9 +3813,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				mountedTools.some((name, index) => name !== planModeMountedTools[index])
 			) {
 				try {
-					await this.session.setActiveToolPresentation(planModeTools, planModeMountedTools, {
-						fullWrite: false,
-					});
+					await this.session.setActiveToolPresentation(planModeTools, planModeMountedTools);
 				} catch (rollbackError) {
 					logger.warn("Failed to restore plan tools after plan exit failure", { error: String(rollbackError) });
 				}
@@ -3874,10 +3862,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showWarning("Exit vibe mode first.");
 			return;
 		}
-		const deviceOnly = this.session.isDeviceOnlyWrite() === true;
-		const previousTools = this.session
-			.getEnabledToolNames()
-			.filter(name => name !== "goal" && !(deviceOnly && name === "write"));
+		const previousTools = this.session.getEnabledToolNames().filter(name => name !== "goal");
 		const goalTools = [...new Set([...previousTools, "goal"])];
 		this.#goalModePreviousTools = previousTools;
 		this.goalModePaused = false;
@@ -4319,7 +4304,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		const previousPresentation = this.#planModePreviousToolPresentation ?? {
 			enabled: this.session.getEnabledToolNames().filter(name => !isMCPToolName(name)),
 			mounted: this.session.getMountedXdevToolNames().filter(name => !isMCPToolName(name)),
-			fullWrite: false,
 		};
 
 		// Mark the pending abort caused by the plan-mode → compaction transition as
@@ -4393,9 +4377,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		const executionTools = previousPresentation.enabled.includes("read")
 			? previousPresentation.enabled
 			: [...previousPresentation.enabled, "read"];
-		await this.session.restoreNonMCPToolPresentation(executionTools, previousPresentation.mounted, {
-			fullWrite: previousPresentation.fullWrite ?? false,
-		});
+		await this.session.restoreNonMCPToolPresentation(executionTools, previousPresentation.mounted);
 		this.session.setPlanReferencePath(options.planFilePath);
 		try {
 			const autosaved = await autosaveApprovedPlan({
@@ -4878,8 +4860,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			// calling `goal create`. Record the pre-interview toolset first: the
 			// tool-driven create flips goalModeEnabled via `goal_updated`, and the
 			// eventual goal exit restores this set (dropping the goal tool again).
-			const deviceOnly = this.session.isDeviceOnlyWrite() === true;
-			const enabledTools = this.session.getEnabledToolNames().filter(name => !(deviceOnly && name === "write"));
+			const enabledTools = this.session.getEnabledToolNames();
 			this.#goalModePreviousTools = enabledTools.filter(name => name !== "goal");
 			if (!enabledTools.includes("goal")) {
 				await this.session.setActiveToolsByName([...enabledTools, "goal"]);

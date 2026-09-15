@@ -4027,7 +4027,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						await session.setActiveToolPresentation(
 							enabled.filter(enabledName => enabledName !== name),
 							mounted.filter(mountedName => mountedName !== name),
-							{ forcePromptRefresh: existingTool !== undefined, signal: activationSignal },
+							existingTool !== undefined,
+							activationSignal,
 						);
 						return;
 					}
@@ -4047,10 +4048,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							? mounted
 							: [...mounted, name]
 						: mounted.filter(mountedName => mountedName !== name);
-					await session.setActiveToolPresentation(alreadyEnabled ? enabled : [...enabled, name], nextMounted, {
-						forcePromptRefresh: existingTool !== undefined,
-						signal: activationSignal,
-					});
+					await session.setActiveToolPresentation(
+						alreadyEnabled ? enabled : [...enabled, name],
+						nextMounted,
+						existingTool !== undefined,
+						activationSignal,
+					);
 				} catch (error) {
 					if (existingTool) {
 						toolRegistry.set(name, existingTool);

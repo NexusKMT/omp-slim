@@ -75,12 +75,7 @@ export interface PrewalkCoordinatorHost {
 		options?: { ephemeral?: boolean },
 	): Promise<void>;
 	setActiveToolsByName(names: string[]): Promise<void>;
-	restoreNonMCPToolPresentation(
-		nonMCPToolNames: string[],
-		nonMCPMountedToolNames: string[],
-		options?: { fullWrite?: boolean },
-	): Promise<void>;
-	isDeviceOnlyWrite?(): boolean;
+	restoreNonMCPToolPresentation(nonMCPToolNames: string[], nonMCPMountedToolNames: string[]): Promise<void>;
 	getActiveToolNames(): string[];
 	getEnabledToolNames(): string[];
 	getMountedXdevToolNames(): string[];
@@ -109,7 +104,7 @@ export class PrewalkCoordinator {
 	#continuePending = false;
 	#todoSeen = false;
 	#planYolo: PlanYolo | undefined;
-	#planYoloPreviousNonMCPPresentation: { enabled: string[]; mounted: string[]; fullWrite?: boolean } | undefined;
+	#planYoloPreviousNonMCPPresentation: { enabled: string[]; mounted: string[] } | undefined;
 	#planYoloArmed = false;
 
 	constructor(host: PrewalkCoordinatorHost, options: PrewalkCoordinatorOptions = {}) {
@@ -306,7 +301,6 @@ export class PrewalkCoordinator {
 		const previousEnabledTools = this.#host.getEnabledToolNames();
 		const previousMountedTools = this.#host.getMountedXdevToolNames();
 		const previousPlanModeState = this.#host.getPlanModeState();
-		const previousFullWrite = this.#host.isDeviceOnlyWrite?.() === false && previousEnabledTools.includes("write");
 		const planModeState: PlanModeState = {
 			enabled: true,
 			planFilePath: this.#host.getPlanReferencePath() || "local://PLAN.md",
@@ -327,7 +321,6 @@ export class PrewalkCoordinator {
 		this.#planYoloPreviousNonMCPPresentation = {
 			enabled: previousEnabledTools.filter(name => !isMCPToolName(name)),
 			mounted: previousMountedTools.filter(name => !isMCPToolName(name)),
-			fullWrite: previousFullWrite,
 		};
 		this.#host.setPlanProposalHandler(title => this.#finalizePlanYoloProposal(title));
 	}
@@ -397,9 +390,7 @@ export class PrewalkCoordinator {
 		const previousPresentation = this.#planYoloPreviousNonMCPPresentation;
 		try {
 			if (previousPresentation) {
-				await this.#host.restoreNonMCPToolPresentation(previousPresentation.enabled, previousPresentation.mounted, {
-					fullWrite: previousPresentation.fullWrite,
-				});
+				await this.#host.restoreNonMCPToolPresentation(previousPresentation.enabled, previousPresentation.mounted);
 			}
 		} catch (error) {
 			this.#host.setPlanModeState(state);

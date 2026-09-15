@@ -3843,9 +3843,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			// subagent to commit its own todo list before the hand-off.
 			const isParentOwnedTool = (name: string): boolean => !prewalk && name === "todo";
 			const subagentToolNames = session.getEnabledToolNames();
-			const filteredSubagentTools = subagentToolNames.filter(
-				name => !isParentOwnedTool(name) && !(session.isDeviceOnlyWrite?.() === true && name === "write"),
-			);
+			const filteredSubagentTools = subagentToolNames.filter(name => !isParentOwnedTool(name));
 			if (filteredSubagentTools.length !== subagentToolNames.length) {
 				await awaitAbortable(session.setActiveToolsByName(filteredSubagentTools));
 			}
