@@ -6,6 +6,10 @@
 
 - Added collapseToAtom method to compress text spans into UI-friendly atoms
 
+### Changed
+
+- Terminal UIs reach their first frame with a smaller startup module graph.
+
 ## [18.1.17] - 2026-09-10
 
 ### Added

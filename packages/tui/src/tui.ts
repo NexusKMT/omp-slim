@@ -14,7 +14,10 @@
  */
 import * as fs from "node:fs";
 import { performance } from "node:perf_hooks";
-import { $flag, getDebugLogPath, logger, postmortem } from "@oh-my-pi/pi-utils";
+import { getDebugLogPath } from "@oh-my-pi/pi-utils/dirs";
+import { $flag } from "@oh-my-pi/pi-utils/env";
+import * as logger from "@oh-my-pi/pi-utils/logger";
+import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import { DEFAULT_MAX_INLINE_IMAGES, ImageBudget } from "./components/image";
 import { TuiDebugServer } from "./debug-server";
 import { isKeyRelease, matchesKey } from "./keys";

@@ -16,6 +16,7 @@
 
 ### Changed
 
+- Interactive startup paints its speculative frame before loading the session runtime; model/auth dialogs and browser/computer preludes load on first use.
 - Status-line redraws reuse unchanged segment output, settings groups, and tool token estimates while preserving live invalidation.
 - Skill invocations render as a normal user turn: a mid-prompt skill shows as an inline chip in the user bubble; a leading skill shows as a railed callout with the chip and prompt size, with the rest of your message rendered as full multi-line Markdown instead of a single collapsed header.
 

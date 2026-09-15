@@ -1,20 +1,12 @@
 import { fileURLToPath } from "node:url";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import {
-	addKeyAliases,
-	canonicalKeyId,
-	Editor,
-	type EditorTextDecorationContext,
-	type EditorTheme,
-	getKeybindings,
-	type KeyId,
-	parseKey,
-	parseKittySequence,
-	TUI,
-} from "@oh-my-pi/pi-tui";
 import { BracketedPasteHandler } from "@oh-my-pi/pi-tui/bracketed-paste";
+import { Editor, type EditorTextDecorationContext, type EditorTheme } from "@oh-my-pi/pi-tui/components/editor";
+import { addKeyAliases, canonicalKeyId, getKeybindings } from "@oh-my-pi/pi-tui/keybindings";
+import { type KeyId, parseKey, parseKittySequence } from "@oh-my-pi/pi-tui/keys";
+import { TUI } from "@oh-my-pi/pi-tui/tui";
 import type { AppKeybinding } from "../../config/keybindings";
-import { allowsSkillTokens, SKILL_TOKEN_RE } from "../../extensibility/skills";
+import { allowsSkillTokens, SKILL_TOKEN_RE } from "../../extensibility/skill-tokens";
 import { isVideoPath, videoPreviewSource } from "../../utils/video";
 import {
 	attachmentSgr,
