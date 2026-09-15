@@ -31,12 +31,19 @@ const HEADER_RESTORE_VERSION = 1;
  * Explicit compatibility gate for materialized rows. Bump whenever buildModel
  * semantics change without an app-version change. The compiled-rules content
  * hash catches every KDL policy edit even when the package version is unchanged;
- * it is computed once per process rather than once per provider or model.
+ * computed lazily on first cache access and memoized, so processes that never
+ * touch the model cache skip the stringify entirely.
  */
 const MODEL_MATERIALIZATION_VERSION = 1;
-const MATERIALIZATION_POLICY =
-	`app-${VERSION}:builder-${MODEL_MATERIALIZATION_VERSION}:rules-${RULES.version}-` +
-	Bun.hash(JSON.stringify(RULES)).toString(36);
+let cachedMaterializationPolicy: string | undefined;
+function materializationPolicy(): string {
+	if (cachedMaterializationPolicy === undefined) {
+		cachedMaterializationPolicy =
+			`app-${VERSION}:builder-${MODEL_MATERIALIZATION_VERSION}:rules-${RULES.version}-` +
+			Bun.hash(JSON.stringify(RULES)).toString(36);
+	}
+	return cachedMaterializationPolicy;
+}
 
 interface CacheRow {
 	provider_id: string;
@@ -87,6 +94,35 @@ export interface CacheEntry<TApi extends Api = Api> {
 
 let sharedDb: Database | null = null;
 let sharedDbPath: string | null = null;
+
+const readRowCache = new Map<string, { mtimeMs: number; entry: CacheEntry<Api> | null }>();
+const READ_ROW_CACHE_MAX = 64;
+
+function readCacheKey(resolvedPath: string, providerId: string): string {
+	return `${resolvedPath} ${providerId}`;
+}
+
+function cachedDbMtimeMs(resolvedPath: string): number | null {
+	try {
+		return Bun.file(resolvedPath).lastModified ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function invalidateReadRow(providerId: string, dbPath?: string): void {
+	try {
+		readRowCache.delete(readCacheKey(dbPath ?? getModelDbPath(), providerId));
+	} catch {
+		// Best-effort only; a missed invalidation just costs one extra parse.
+	}
+}
+
+function invalidateReadPath(resolvedPath: string): void {
+	for (const key of readRowCache.keys()) {
+		if (key.startsWith(`${resolvedPath} `)) readRowCache.delete(key);
+	}
+}
 
 function openDb(resolvedPath: string): Database {
 	const db = new Database(resolvedPath, { create: true });
@@ -178,6 +214,7 @@ function healCorruptModelCache(resolvedPath: string, shared: boolean, err: unkno
 		sharedDb = null;
 		sharedDbPath = null;
 	}
+	invalidateReadPath(resolvedPath);
 	quarantineCorruptModelCache(resolvedPath);
 	const code = err && typeof err === "object" && "code" in err ? err.code : undefined;
 	if (reportedCorruptPaths.has(resolvedPath)) {
@@ -232,7 +269,7 @@ function migrateCacheSchema(db: Database): void {
 	// compaction path even after CACHE_SCHEMA_VERSION was bumped).
 	db.run("DELETE FROM model_cache WHERE version <> ? OR materialization_policy <> ?", [
 		CACHE_SCHEMA_VERSION,
-		MATERIALIZATION_POLICY,
+		materializationPolicy(),
 	]);
 }
 
@@ -313,8 +350,34 @@ function parseModelIds(serialized: string): string[] | null {
 		return null;
 	}
 }
-
 export function readModelCache<TApi extends Api>(
+	providerId: string,
+	ttlMs: number,
+	now: () => number,
+	dbPath?: string,
+): CacheEntry<TApi> | null {
+	try {
+		const resolvedPath = dbPath ?? getModelDbPath();
+		const mtimeMs = cachedDbMtimeMs(resolvedPath);
+		const key = readCacheKey(resolvedPath, providerId);
+		if (mtimeMs !== null) {
+			const cached = readRowCache.get(key);
+			if (cached !== undefined && cached.mtimeMs === mtimeMs) {
+				return cached.entry as CacheEntry<TApi> | null;
+			}
+		}
+		const entry = readModelCacheUncached<TApi>(providerId, ttlMs, now, dbPath);
+		if (mtimeMs !== null) {
+			if (readRowCache.size >= READ_ROW_CACHE_MAX) readRowCache.clear();
+			readRowCache.set(key, { mtimeMs, entry: entry as CacheEntry<Api> | null });
+		}
+		return entry;
+	} catch {
+		return null;
+	}
+}
+
+function readModelCacheUncached<TApi extends Api>(
 	providerId: string,
 	ttlMs: number,
 	now: () => number,
@@ -325,7 +388,7 @@ export function readModelCache<TApi extends Api>(
 			const stmt = db.query<CacheRow, [string]>("SELECT * FROM model_cache WHERE provider_id = ?");
 			try {
 				const row = stmt.get(providerId);
-				if (!row || row.version !== CACHE_SCHEMA_VERSION || row.materialization_policy !== MATERIALIZATION_POLICY) {
+				if (!row || row.version !== CACHE_SCHEMA_VERSION || row.materialization_policy !== materializationPolicy()) {
 					return null;
 				}
 				const models = parseMaterializedModels<TApi>(row.models);
@@ -406,6 +469,7 @@ export function writeModelCache<TApi extends Api>(
 	restorableHeaderFallback?: Record<string, string>,
 ): void {
 	try {
+		invalidateReadRow(providerId, dbPath);
 		withModelCacheDb(dbPath, db => {
 			const headerOmittedModelIds: string[] = [];
 			const unrestorableHeaderModelIds: string[] = [];
@@ -442,7 +506,7 @@ export function writeModelCache<TApi extends Api>(
 				[
 					providerId,
 					CACHE_SCHEMA_VERSION,
-					MATERIALIZATION_POLICY,
+					materializationPolicy(),
 					updatedAt,
 					authoritative ? 1 : 0,
 					staticFingerprint,
