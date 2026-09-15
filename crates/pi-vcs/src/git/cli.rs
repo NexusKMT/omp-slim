@@ -1,10 +1,12 @@
 //! The deliberately small git-CLI escape hatch.
 //!
-//! Two categories are allowed to spawn `git`, per the hybrid policy:
+//! Three categories are allowed to spawn `git`, per the hybrid policy:
 //! - **Credential-bound network transfers** — clone/fetch/push must reuse the
 //!   user's ssh config and credential helpers, which are subprocess-based by
 //!   design; no library reaches auth parity (and gitoxide has no send-pack).
 //! - **Reftable ref access** — no in-process reftable implementation exists.
+//! - **Whole-worktree status/untracked walks** — a subprocess contains
+//!   gitoxide worker-thread spawn failures under host resource exhaustion.
 //!
 //! The runner ports the hardened subprocess contract of the TS wrapper:
 //! non-interactive env (`GIT_TERMINAL_PROMPT=0`, askpass rejection, `LC_ALL`

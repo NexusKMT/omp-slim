@@ -1,11 +1,10 @@
 //! In-process version control for the coding agent.
 //!
 //! Collapses the git and Jujutsu CLI wrappers into one Rust interface:
-//! - **git** ([`git::GitRepo`]) runs on gitoxide. The git binary survives only
-//!   where an in-process implementation cannot reach parity: credential-bound
-//!   network transfers (push/fetch/clone reuse the user's ssh config and
-//!   credential helpers) and reftable repositories (no library implementation
-//!   of reftable exists yet).
+//! - **git** ([`git::GitRepo`]) runs primarily on gitoxide. The git binary
+//!   handles credential-bound network transfers, reftable repositories, and
+//!   whole-worktree status/untracked walks whose resource failures must stay
+//!   outside the driving process.
 //! - **jj** ([`jj::JjWorkspace`]) runs on jj-lib, which shares the same
 //!   gitoxide stack for its git backend. No subprocess at all.
 //!

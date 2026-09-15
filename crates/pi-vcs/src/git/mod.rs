@@ -1,8 +1,8 @@
 //! Git backend: gitoxide-powered repository operations.
 //!
-//! A git-CLI fallback is reserved for credential-bound network transfers
-//! (push/fetch/clone) and reftable repositories, which no in-process
-//! implementation can read yet.
+//! Git subprocesses are reserved for credential-bound network transfers,
+//! reftable repositories, and whole-worktree status/untracked walks whose
+//! resource failures must stay outside the driving process.
 //!
 //! Repository discovery is a pure filesystem walk (no subprocess, no gix open):
 //! it mirrors the battle-tested TypeScript walk it replaces — `.git` pointer
