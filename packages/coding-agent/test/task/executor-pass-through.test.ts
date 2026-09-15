@@ -216,16 +216,25 @@ describe("runSubprocess parent-discovery pass-through (issue #2190)", () => {
 			id: "writable-child",
 			agent: { ...baseAgent, tools: ["read", "write"] },
 		});
+		const spawningResult = await runSubprocess({
+			...baseOptions,
+			id: "spawning-child",
+			agent: { ...baseAgent, tools: ["read"], spawns: ["scout"] },
+		});
 
 		expect(readOnlyResult.exitCode).toBe(0);
 		expect(writableResult.exitCode).toBe(0);
+		expect(spawningResult.exitCode).toBe(0);
 		expect(spy.mock.calls[0]?.[0]?.toolNames).toEqual(["read", "grep", "glob"]);
 		expect(spy.mock.calls[1]?.[0]?.toolNames).toEqual(["read", "write", "hub"]);
+		expect(spy.mock.calls[2]?.[0]?.toolNames).toEqual(["read", "task", "hub"]);
 
 		const readOnlyPrompt = spy.mock.calls[0]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
 		const writablePrompt = spy.mock.calls[1]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
+		const spawningPrompt = spy.mock.calls[2]?.[0]?.systemPrompt?.(["default"])?.join("\n") ?? "";
 		expect(readOnlyPrompt.includes("# Peers")).toBe(false);
 		expect(writablePrompt.includes("# Peers")).toBe(true);
+		expect(spawningPrompt.includes("# Peers")).toBe(true);
 	});
 
 	it("records the spawning agent as parentAgentId, distinct from the child's own id and prefix", async () => {
