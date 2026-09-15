@@ -215,6 +215,16 @@ describe("fileHyperlink", () => {
 		expect(fileUriForTerminal(filePath, undefined, "vscode")).toBe(`vscode://file${filePath}`);
 	});
 
+	it("encodes reserved path bytes in vscode://file targets without hiding the location", () => {
+		const uri = fileUriForTerminal("/Users/foo/a#b?c% d.ts", { line: 42, col: 7 }, "vscode");
+		expect(uri).toBe("vscode://file/Users/foo/a%23b%3Fc%25%20d.ts:42:7");
+		expect(new URL(uri).search).toBe("");
+		expect(new URL(uri).hash).toBe("");
+		expect(fileUriForTerminal("C:\\Users\\foo bar\\a.ts", { line: 4 }, "vscode")).toBe(
+			"vscode://file/C:/Users/foo%20bar/a.ts:4",
+		);
+	});
+
 	it("keeps a plain file URI on terminals that are not the VS Code family", () => {
 		const filePath = path.resolve("/Users/foo/bar.ts");
 		for (const terminalId of ["iterm2", "kitty", "base"] as const) {

@@ -67,12 +67,17 @@ export function fileUriForTerminal(
 	terminalId: TerminalId,
 ): string {
 	if (terminalId !== "vscode") return url.pathToFileURL(filePath).href;
-	// vscode:// takes a filesystem path rather than an encoded URL: forward
-	// slashes throughout, and a leading slash for Windows drive paths.
+	// vscode:// takes a filesystem path with forward slashes. Encode each
+	// segment independently so separators and a Windows drive colon stay
+	// structural while reserved bytes in file names cannot become URI syntax.
 	const asPath = filePath.replace(/\\/gu, "/");
+	const encodedPath = asPath
+		.split("/")
+		.map((segment, index) => (index === 0 && /^[a-z]:$/iu.test(segment) ? segment : encodeURIComponent(segment)))
+		.join("/");
 	const position =
 		opts?.line === undefined ? "" : opts.col === undefined ? `:${opts.line}` : `:${opts.line}:${opts.col}`;
-	return `vscode://file${asPath.startsWith("/") ? "" : "/"}${asPath}${position}`;
+	return `vscode://file${encodedPath.startsWith("/") ? "" : "/"}${encodedPath}${position}`;
 }
 
 /** Build the OSC 8 target for `filePath` on this terminal. */

@@ -325,10 +325,9 @@ describe("ReadToolGroupComponent", () => {
 
 		const rendered = component.render(120).join("\n");
 
-		const exampleUri = new URL(url.pathToFileURL(path.resolve(examplePath)).href);
-		exampleUri.searchParams.set("line", "7");
+		const exampleUri = url.pathToFileURL(path.resolve(examplePath)).href;
 		expect(Bun.stripANSI(rendered)).toContain("Read src/example.ts:7-9");
-		expect(extractLinkUris(rendered)).toContain(exampleUri.href);
+		expect(extractLinkUris(rendered)).toContain(exampleUri);
 		expect(extractLinkTexts(rendered)).toContain("src/example.ts");
 		expect(extractLinkTexts(rendered)).not.toContain("src/example.ts:7-9");
 	});
@@ -349,10 +348,9 @@ describe("ReadToolGroupComponent", () => {
 
 		const rendered = component.render(120).join("\n");
 
-		const previewUri = new URL(url.pathToFileURL(path.resolve(previewPath)).href);
-		previewUri.searchParams.set("line", "20");
+		const previewUri = url.pathToFileURL(path.resolve(previewPath)).href;
 		expect(Bun.stripANSI(rendered)).toContain("Read src/preview.ts:20-22");
-		expect(extractLinkUris(rendered)).toContain(previewUri.href);
+		expect(extractLinkUris(rendered)).toContain(previewUri);
 		expect(extractLinkTexts(rendered)).toContain("src/preview.ts");
 		expect(extractLinkTexts(rendered)).not.toContain("src/preview.ts:20-22");
 	});
