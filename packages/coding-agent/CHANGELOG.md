@@ -11,9 +11,6 @@
 
 - Storage maintenance streams large session journals and gzip archives instead of loading complete files into memory.
 
-### Fixed
-
-- Read error and preview rendering now sanitizes tabs and Windows-style CRLF (e.g. ssh host-key failures, tab-indented fetched content) so raw output can no longer tear the result frame.
 ### Added
 
 - Sloppy edits support `<SM:AFTER>` to insert new lines after an anchor without repeating or replacing it.
