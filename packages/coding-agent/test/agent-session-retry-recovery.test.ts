@@ -383,6 +383,7 @@ describe("AgentSession retry recovery", () => {
 		});
 		sessions.push(session);
 		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		vi.spyOn(Date, "now").mockReturnValue(1_750_000_000_000);
 		const retryEndEvents: AutoRetryEndEvent[] = [];
 		session.subscribe(event => {
 			if (event.type === "auto_retry_end") retryEndEvents.push(event);
