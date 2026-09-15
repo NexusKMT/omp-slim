@@ -211,6 +211,29 @@ describe("Settings", () => {
 		});
 	});
 
+	describe("status line segment validation", () => {
+		it("logs each unknown configured segment once while preserving the config", async () => {
+			await writeSettings({
+				statusLine: {
+					preset: "custom",
+					leftSegments: ["modle", "git", "modle"],
+					rightSegments: ["usage", "sesion", "modle"],
+				},
+			});
+			const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(JSON.stringify(settings.get("statusLine.leftSegments"))).toBe('["modle","git","modle"]');
+			expect(
+				warn.mock.calls.filter(([message]) => String(message).startsWith("Settings: unknown status line segment")),
+			).toEqual([
+				['Settings: unknown status line segment "modle"', { setting: "statusLine.leftSegments" }],
+				['Settings: unknown status line segment "sesion"', { setting: "statusLine.rightSegments" }],
+			]);
+		});
+	});
+
 	describe("shell configuration errors", () => {
 		it("points to the selected global config in the active agent directory", async () => {
 			const configPath = path.join(agentDir, "config.yaml");
