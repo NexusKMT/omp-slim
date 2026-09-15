@@ -24,6 +24,9 @@
 ### Changed
 
 - Workspace startup scans skip excluded build directories and retain a bounded set of entries and directory rules.
+### Changed
+
+- Limited newest-file searches use less memory on large directory trees when scan caching is disabled.
 
 ## [18.1.15] - 2026-09-08
 
