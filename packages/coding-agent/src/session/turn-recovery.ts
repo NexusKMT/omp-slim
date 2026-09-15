@@ -2708,6 +2708,7 @@ export class TurnRecovery {
 	setAutoRetryEnabled(enabled: boolean, persist = false): void {
 		if (persist) {
 			this.#host.settings.set("retry.enabled", enabled);
+			this.#host.settings.clearOverride("retry.enabled");
 		} else {
 			this.#host.settings.override("retry.enabled", enabled);
 		}

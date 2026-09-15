@@ -5233,6 +5233,7 @@ export class SessionMaintenance {
 	setAutoCompactionEnabled(enabled: boolean, persist = false): void {
 		if (persist) {
 			this.#host.settings.set("compaction.enabled", enabled);
+			this.#host.settings.clearOverride("compaction.enabled");
 		} else {
 			this.#host.settings.override("compaction.enabled", enabled);
 		}

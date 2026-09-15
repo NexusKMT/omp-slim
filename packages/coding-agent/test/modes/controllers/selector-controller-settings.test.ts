@@ -85,7 +85,6 @@ describe("SelectorController prompt-affecting settings", () => {
 			expect(onDisk).toContain("followUpMode: all");
 			expect(onDisk).toContain("interruptMode: wait");
 		});
-		});
 	});
 
 	it("persists the Auto-Compact toggle globally from the settings panel", () => {

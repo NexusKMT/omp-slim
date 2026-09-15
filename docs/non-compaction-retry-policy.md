@@ -190,7 +190,7 @@ Defined in settings schema under retry group:
 
 Programmatic toggles in session:
 
-- `setAutoRetryEnabled(enabled)` writes `retry.enabled`
+- `setAutoRetryEnabled(enabled)` applies a session-scoped `retry.enabled` override; pass `persist: true` to write the global setting
 - `autoRetryEnabled` reads `retry.enabled`
 - `isRetrying` reports whether retry lifecycle promise is active
 

@@ -68,15 +68,19 @@ describe("AgentSession auto-maintenance controls are session-scoped by default",
 	});
 
 	it("persists to global config.yml when persist=true (settings panel path)", async () => {
-		session.setAutoCompactionEnabled(false, true);
-		session.setAutoRetryEnabled(false, true);
+		session.setAutoCompactionEnabled(false);
+		session.setAutoRetryEnabled(false);
+		session.setAutoCompactionEnabled(true, true);
+		session.setAutoRetryEnabled(true, true);
 		await settings.flush();
 
+		expect(settings.get("compaction.enabled")).toBe(true);
+		expect(settings.get("retry.enabled")).toBe(true);
 		expect(settings.getGlobalSettings()).toMatchObject({
-			compaction: { enabled: false },
-			retry: { enabled: false },
+			compaction: { enabled: true },
+			retry: { enabled: true },
 		});
 		const onDisk = await Bun.file(configPath).text();
-		expect(onDisk).toContain("enabled: false");
+		expect(onDisk).toContain("enabled: true");
 	});
 });
