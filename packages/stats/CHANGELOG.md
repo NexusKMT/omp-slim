@@ -21,6 +21,8 @@
 ### Fixed
 
 - Fixed garbage tool names from provider-side parse failures (e.g. a gateway returning the model's whole invocation text as the tool name) polluting the tools dashboard's per-tool rows and filter dropdown; such names now collapse to their leading identifier, and existing databases re-ingest cleaned on next sync.
+- Reduced repeat stats-sync reads to appended transcript data while preserving service-tier accounting across restarts.
+- Rebuilt stats for replaced or truncated session files instead of retaining stale totals.
 
 ## [18.1.3] - 2026-09-02
 
