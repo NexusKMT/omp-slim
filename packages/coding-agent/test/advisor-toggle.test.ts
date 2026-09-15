@@ -994,6 +994,75 @@ describe("AgentSession advisor toggle", () => {
 			await branchDir.remove().catch(() => {});
 		}
 	});
+	it("retries an advisor after a short authoritative usage-limit block", async () => {
+		const mock = createMockModel({ responses: [{ content: ["primary complete"] }] });
+		const primaryAgent = new Agent({
+			initialState: {
+				model,
+				systemPrompt: ["Test"],
+				tools: [],
+				messages: [],
+			},
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.enabled": true,
+			"retry.baseDelayMs": 0,
+			"retry.maxDelayMs": 100,
+			"retry.maxRetries": 1,
+			"retry.modelFallback": false,
+		});
+		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+		const quotaSession = new AgentSession({
+			agent: primaryAgent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+			advisorTools: [],
+		});
+
+		try {
+			expect(quotaSession.setAdvisorEnabled(true)).toBe(true);
+			const advisorAgent = quotaSession.getAdvisorAgent();
+			if (!advisorAgent) throw new Error("Expected advisor agent to exist");
+			const prompt = vi
+				.spyOn(advisorAgent, "prompt")
+				.mockRejectedValueOnce(
+					new AIError.ProviderHttpError("Generic provider failure", 429, {
+						code: "insufficient_quota",
+					}),
+				)
+				.mockResolvedValue(undefined);
+			const markUsageLimitReached = vi.spyOn(authStorage, "markUsageLimitReached").mockImplementation(async () => {
+				const deadline = Date.now() + 20;
+				return {
+					switched: false,
+					blockedUntilMs: deadline,
+					requestedBlockedUntilMs: deadline,
+					reportResetAtMs: deadline,
+				};
+			});
+			const advisorYielded = Promise.withResolvers<void>();
+			const unsubscribe = quotaSession.subscribe(event => {
+				if (event.type === "advisor_yielded") advisorYielded.resolve();
+			});
+
+			await quotaSession.prompt("Trigger advisor");
+			await quotaSession.waitForIdle();
+			await advisorYielded.promise;
+			unsubscribe();
+
+			expect(markUsageLimitReached).toHaveBeenCalledTimes(1);
+			expect(prompt).toHaveBeenCalledTimes(2);
+			expect(quotaSession.getAdvisorStatusOverview().advisors[0]).toMatchObject({
+				status: "running",
+				yielded: true,
+			});
+		} finally {
+			await quotaSession.dispose();
+		}
+	});
 	it("marks structurally classified advisor usage limits", async () => {
 		const mock = createMockModel({
 			responses: [
