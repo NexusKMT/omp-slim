@@ -2303,6 +2303,75 @@ describe("Settings", () => {
 			expect(await Bun.file(getConfigPath()).exists()).toBe(false);
 		});
 
+		it("keeps settings.json when the migrated config.yml write fails", async () => {
+			const jsonPath = path.join(agentDir, "settings.json");
+			await fs.promises.writeFile(jsonPath, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
+
+			const open = fs.promises.open.bind(fs.promises);
+			vi.spyOn(fs.promises, "open").mockImplementation(async (filePath, flags, mode) => {
+				if (String(filePath).includes(`${path.sep}config.yml.`) && String(filePath).endsWith(".tmp")) {
+					throw new FsCodeError("EACCES", "injected migration write failure");
+				}
+				return open(filePath, flags, mode);
+			});
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(fs.existsSync(jsonPath)).toBe(true);
+			expect(fs.existsSync(`${jsonPath}.bak`)).toBe(false);
+			expect(await Bun.file(getConfigPath()).exists()).toBe(false);
+			expect(JSON.parse(await fs.promises.readFile(jsonPath, "utf8"))).toEqual({
+				symbolPreset: "ascii",
+				queueMode: "all",
+			});
+			expect(warnSpy).toHaveBeenCalledWith(
+				"Settings: failed to write migrated config.yml",
+				expect.objectContaining({ path: getConfigPath() }),
+			);
+		});
+
+		it("recovers settings from settings.json.bak when config.yml is missing", async () => {
+			const jsonPath = path.join(agentDir, "settings.json");
+			await fs.promises.writeFile(`${jsonPath}.bak`, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("symbolPreset")).toBe("ascii");
+			expect(settings.get("steeringMode")).toBe("all");
+			expect(await readSettings()).toMatchObject({
+				symbolPreset: "ascii",
+				steeringMode: "all",
+			});
+			expect(fs.existsSync(jsonPath)).toBe(false);
+			expect(fs.existsSync(`${jsonPath}.bak`)).toBe(true);
+			expect(warnSpy).toHaveBeenCalledWith(
+				"Settings: recovering from orphaned settings.json.bak",
+				expect.objectContaining({ path: `${jsonPath}.bak` }),
+			);
+		});
+
+		it("does not resurrect a stale settings.json.bak when the live settings.json is present but malformed", async () => {
+			const jsonPath = path.join(agentDir, "settings.json");
+			// Newer live file exists but is unparseable; a stale valid backup must not win.
+			await fs.promises.writeFile(jsonPath, '{ "symbolPreset": "unicode", ');
+			await fs.promises.writeFile(`${jsonPath}.bak`, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
+			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			// The stale backup is neither applied nor promoted to config.yml.
+			expect(settings.get("symbolPreset")).not.toBe("ascii");
+			expect(await Bun.file(getConfigPath()).exists()).toBe(false);
+			// The malformed live file is left untouched, not archived to .bak.
+			expect(fs.existsSync(jsonPath)).toBe(true);
+			expect(warnSpy).not.toHaveBeenCalledWith(
+				"Settings: recovering from orphaned settings.json.bak",
+				expect.anything(),
+			);
+		});
+
 		it("migrates legacy power booleans with system=true to system level", async () => {
 			await writeSettings({
 				power: {
