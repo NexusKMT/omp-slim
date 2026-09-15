@@ -374,6 +374,14 @@ function generateZsh(spec: CompletionSpec): string {
 
 	// Dynamic helpers (single source: `<bin> __complete <kind>` → value<TAB>desc).
 	parts.push(`_omp_call() {
+	# zsh's _arguments invokes an action function with the compadd options it
+	# computed prepended ($subopts, then $expl — _arguments:465), so $1 is
+	# "-J" in a stock setup and the kind arrives after them. Skip the leading
+	# option/value pairs before reading it, or every dynamic completion asks
+	# \`${bin} __complete -J\` and comes back empty.
+	while [[ $1 == -* && $# -gt 1 ]]; do
+		shift 2
+	done
 	local kind=$1
 	local -a items
 	local line

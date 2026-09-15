@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- zsh completions for `--resume`, `--model` and the other dynamic value flags work again.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
