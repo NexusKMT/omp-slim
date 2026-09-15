@@ -95,19 +95,41 @@ export interface CacheEntry<TApi extends Api = Api> {
 let sharedDb: Database | null = null;
 let sharedDbPath: string | null = null;
 
-const readRowCache = new Map<string, { mtimeMs: number; entry: CacheEntry<Api> | null }>();
+const readRowCache = new Map<string, { fingerprint: string; entry: CacheEntry<Api> | null }>();
 const READ_ROW_CACHE_MAX = 64;
 
 function readCacheKey(resolvedPath: string, providerId: string): string {
 	return `${resolvedPath} ${providerId}`;
 }
 
-function cachedDbMtimeMs(resolvedPath: string): number | null {
+function fileState(resolvedPath: string, suffix: string): string {
 	try {
-		return Bun.file(resolvedPath).lastModified ?? null;
+		const file = Bun.file(suffix === "" ? resolvedPath : `${resolvedPath}${suffix}`);
+		return `${file.size ?? -1}:${file.lastModified ?? -1}`;
+	} catch {
+		return "-1:-1";
+	}
+}
+
+function dbFingerprint(resolvedPath: string): string | null {
+	try {
+		// WAL mode: peer writes land in -wal/-shm while the main file mtime
+		// can sit unchanged until checkpoint, so fingerprint all three.
+		return `${fileState(resolvedPath, "")}|${fileState(resolvedPath, "-wal")}|${fileState(resolvedPath, "-shm")}`;
 	} catch {
 		return null;
 	}
+}
+
+function withFreshness<TApi extends Api>(
+	entry: CacheEntry<TApi> | null,
+	ttlMs: number,
+	now: () => number,
+): CacheEntry<TApi> | null {
+	if (entry === null) return null;
+	const ageMs = now() - entry.updatedAt;
+	const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ttlMs;
+	return fresh === entry.fresh ? entry : { ...entry, fresh };
 }
 
 function invalidateReadRow(providerId: string, dbPath?: string): void {
@@ -358,18 +380,20 @@ export function readModelCache<TApi extends Api>(
 ): CacheEntry<TApi> | null {
 	try {
 		const resolvedPath = dbPath ?? getModelDbPath();
-		const mtimeMs = cachedDbMtimeMs(resolvedPath);
+		const fingerprint = dbFingerprint(resolvedPath);
 		const key = readCacheKey(resolvedPath, providerId);
-		if (mtimeMs !== null) {
+		if (fingerprint !== null) {
 			const cached = readRowCache.get(key);
-			if (cached !== undefined && cached.mtimeMs === mtimeMs) {
-				return cached.entry as CacheEntry<TApi> | null;
+			if (cached !== undefined && cached.fingerprint === fingerprint) {
+				// Freshness is time-relative: recompute per call from the cached
+				// row's updatedAt so a long-lived process still goes stale.
+				return withFreshness(cached.entry as CacheEntry<TApi> | null, ttlMs, now);
 			}
 		}
 		const entry = readModelCacheUncached<TApi>(providerId, ttlMs, now, dbPath);
-		if (mtimeMs !== null) {
+		if (fingerprint !== null) {
 			if (readRowCache.size >= READ_ROW_CACHE_MAX) readRowCache.clear();
-			readRowCache.set(key, { mtimeMs, entry: entry as CacheEntry<Api> | null });
+			readRowCache.set(key, { fingerprint, entry: entry as CacheEntry<Api> | null });
 		}
 		return entry;
 	} catch {

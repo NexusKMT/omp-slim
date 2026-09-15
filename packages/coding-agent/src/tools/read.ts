@@ -1786,15 +1786,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const ext = path.extname(renderAbsolutePath).toLowerCase();
 		// Buffer once for every consumer below: the image sniff, the binary sniff,
 		// the structural summary, the rendered window, bracket context, and the
-		// snapshot hash all want the same bytes. Extension-gated image sniffing
-		// then reuses the in-memory header instead of a second 256KB open/read;
-		// anything implausible (e.g. .ts source) skips the peek entirely.
+		// snapshot hash all want the same bytes. Magic bytes come from the
+		// in-memory header whenever the file is buffered (no extra open/read),
+		// so a PNG stored as `.txt` still resolves; only unbuffered files with
+		// implausible extensions skip the single 256KB peek.
 		// `:raw` stays byte-verbatim below.
 		const wholeFileBytes = fileSize <= SNAPSHOT_MAX_BYTES ? await readWholeFile(absolutePath) : undefined;
-		const mayBeImage = parsed.kind === "image" || ext === "" || IMAGE_LIKE_EXTENSIONS.has(ext);
 		const imageHeader = wholeFileBytes?.subarray(0, BINARY_SNIFF_BYTES);
+		const mayBeImage = parsed.kind === "image" || ext === "" || IMAGE_LIKE_EXTENSIONS.has(ext);
 		const imageMetadata =
-			!mayBeImage || isRawSelector(parsed)
+			isRawSelector(parsed) || (!mayBeImage && imageHeader === undefined)
 				? null
 				: imageHeader !== undefined
 					? parseImageMetadata(imageHeader)
