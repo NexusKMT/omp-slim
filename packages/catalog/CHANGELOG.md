@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.1] - 2026-09-15
+
 ### Added
 
 - DeepSeek V4.1 Flash (`deepseek-flash`) now accepts image inputs and resolves its reasoning metadata, name, and effort ladder from upstream instead of shipping as a text-only row without them.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.1] - 2026-09-15
+
 ### Added
 
 - Added support for Cerebras Qwen 3.8-27b with improved reasoning effort control
