@@ -495,6 +495,7 @@
 ## [18.1.16] - 2026-09-09
 
 - RPC output spills to temporary disk storage for slow readers instead of retaining an unbounded memory queue, and drains final responses before shutdown.
+- Large session records load faster without repeatedly copying unfinished JSONL rows.
 ### Added
 
 - `/rename` without a title now generates a session name from recent conversation using the configured tiny model.
