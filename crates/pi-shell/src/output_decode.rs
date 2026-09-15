@@ -54,10 +54,7 @@ impl OutputDecoder {
 	/// Decode as UTF-8 only; no ANSI fallback exists off Windows.
 	#[cfg(not(windows))]
 	pub const fn new() -> Self {
-		Self {
-			pending: Vec::new(),
-			mode:    Mode::Utf8,
-		}
+		Self { pending: Vec::new(), mode: Mode::Utf8 }
 	}
 
 	/// Decode with an explicit ANSI fallback. Used by tests so GBK fixtures
