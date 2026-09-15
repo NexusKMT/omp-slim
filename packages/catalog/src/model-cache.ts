@@ -388,7 +388,11 @@ function readModelCacheUncached<TApi extends Api>(
 			const stmt = db.query<CacheRow, [string]>("SELECT * FROM model_cache WHERE provider_id = ?");
 			try {
 				const row = stmt.get(providerId);
-				if (!row || row.version !== CACHE_SCHEMA_VERSION || row.materialization_policy !== materializationPolicy()) {
+				if (
+					!row ||
+					row.version !== CACHE_SCHEMA_VERSION ||
+					row.materialization_policy !== materializationPolicy()
+				) {
 					return null;
 				}
 				const models = parseMaterializedModels<TApi>(row.models);

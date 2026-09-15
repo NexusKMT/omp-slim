@@ -57,7 +57,10 @@ function sanitizeMentionPath(rawPath: string): string | null {
 	return cleaned.length > 0 ? cleaned : null;
 }
 
-async function resolveMentionPath(filePath: string, cwd: string): Promise<{ resolvedPath: string; absolutePath: string } | null> {
+async function resolveMentionPath(
+	filePath: string,
+	cwd: string,
+): Promise<{ resolvedPath: string; absolutePath: string } | null> {
 	// Exact resolution only. The TUI @-selector inserts the real, complete path, so a
 	// mention that does not resolve to an existing file or directory is prose, not a file
 	// reference. Fuzzy/prefix guessing here previously dragged in unrelated same-named
