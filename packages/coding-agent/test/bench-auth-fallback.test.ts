@@ -11,6 +11,7 @@ import type {
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import { type BenchSummary, runBenchCommand } from "@oh-my-pi/pi-coding-agent/cli/bench-cli";
@@ -144,7 +145,7 @@ describe("bench discovery fallback", () => {
 		expect(refreshCalls).toBe(1);
 	});
 	it("re-resolves already-resolved selectors from the refreshed catalog, dropping stale rows", async () => {
-		const stale = buildModel({
+		const staleSpec: ModelSpec<"openai-completions"> = {
 			provider: "lm-studio",
 			id: "model-a",
 			name: "model-a",
@@ -155,9 +156,10 @@ describe("bench discovery fallback", () => {
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			maxTokens: 4096,
 			contextWindow: 128_000,
-		});
+		};
+		const stale = buildModel(staleSpec);
 		const fresh = buildModel({
-			...stale,
+			...staleSpec,
 			baseUrl: "https://fresh.test/v1",
 		});
 		let models: Model<Api>[] = [stale];

@@ -2763,7 +2763,6 @@ describe("advisor", () => {
 				const maintenanceInputs: Array<Array<Record<string, unknown>>> = [];
 				const runtime = new AdvisorRuntime(agent, {
 					snapshotMessages: () => messages,
-					enqueueAdvice: () => {},
 					obfuscator,
 					maintainContext: async () => {
 						const summary = agent.state.messages[0];
@@ -2986,7 +2985,6 @@ describe("advisor", () => {
 				const messages: AgentMessage[] = [{ role: "user", content: "review OTHERSECRET", timestamp: 2 }];
 				const runtime = new AdvisorRuntime(agent, {
 					snapshotMessages: () => messages,
-					enqueueAdvice: () => {},
 					obfuscator,
 					maintainContext: async incoming => {
 						maintenancePreviews.push(promptText([incoming]));
@@ -3067,7 +3065,6 @@ describe("advisor", () => {
 			const messages: AgentMessage[] = [{ role: "user", content: "remember OTHERSECRET", timestamp: 1 }];
 			const runtime = new AdvisorRuntime(agent, {
 				snapshotMessages: () => messages,
-				enqueueAdvice: () => {},
 				obfuscator,
 				maintainContext: async () => {
 					maintenanceCalls++;
