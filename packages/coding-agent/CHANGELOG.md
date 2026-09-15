@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress (by [@shivamklr](https://github.com/shivamklr)).
+- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress ([#12177](https://github.com/can1357/oh-my-pi/pull/12177) by [@shivamklr](https://github.com/shivamklr)).
 
 ## [18.2.0] - 2026-09-15
 
