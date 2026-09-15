@@ -14,6 +14,9 @@
 ### Fixed
 
 - Fixed Traces search inputs and checkbox using unthemed browser defaults, and iOS viewport zoom on search focus.
+### Fixed
+
+- Fixed garbage tool names from provider-side parse failures (e.g. a gateway returning the model's whole invocation text as the tool name) polluting the tools dashboard's per-tool rows and filter dropdown; such names now collapse to their leading identifier, and existing databases re-ingest cleaned on next sync.
 
 ## [18.1.3] - 2026-09-02
 
