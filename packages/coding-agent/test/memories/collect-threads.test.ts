@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -96,9 +96,29 @@ describe("collectThreads", () => {
 		const bigBody = ('{"type":"assistant","message":"' + "x".repeat(1000) + '"}\n').repeat(250);
 		await Bun.write(filePath, header + bigBody);
 
-		const threads = await collectThreads(makeFakeSession(tempDir));
-		expect(threads.length).toBe(1);
-		expect(threads[0]?.id).toBe("big-id");
-		expect(threads[0]?.cwd).toBe("/big/project");
+		let fullTextReads = 0;
+		const originalFile = Bun.file.bind(Bun);
+		const fileSpy = spyOn(Bun, "file").mockImplementation(
+			(arg: string | URL | Uint8Array | ArrayBufferLike | number, options?: BlobPropertyBag) => {
+				const file = originalFile(arg as string, options);
+				if (arg === filePath) {
+					file.text = async () => {
+						fullTextReads++;
+						throw new Error("full session body read");
+					};
+				}
+				return file;
+			},
+		);
+
+		try {
+			const threads = await collectThreads(makeFakeSession(tempDir));
+			expect(fullTextReads).toBe(0);
+			expect(threads.length).toBe(1);
+			expect(threads[0]?.id).toBe("big-id");
+			expect(threads[0]?.cwd).toBe("/big/project");
+		} finally {
+			fileSpy.mockRestore();
+		}
 	});
 });
