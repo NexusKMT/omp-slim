@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Sloppy edits support `<SM:AFTER>` to insert new lines after an anchor without repeating or replacing it.
+
+### Changed
+
+- Codex Spark, all MiniMax models, and GLM-5.3-Flash now default to replace edits instead of hashline; explicit edit-mode overrides remain honored.
+
 ### Fixed
 
 - Inbound user messages delivered by an extension (e.g. HCOM `sendUserMessage`) no longer clear the composer draft; in-progress text and pasted images are preserved.
@@ -31,6 +39,7 @@
 
 ### Fixed
 
+- `hub wait` on a process now reports what it was actually blocked on when it times out (process exit, the `pattern`, or readiness) instead of always citing the start readiness log pattern.
 - Isolated settings no longer share mutable array and record defaults.
 - Ask timeouts above 1,000 seconds now retain their configured duration.
 - Configured extension directories no longer load fallback index files when declared entries are missing.
