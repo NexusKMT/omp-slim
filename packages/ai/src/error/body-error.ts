@@ -103,13 +103,13 @@ const IN_BAND_RETRYABLE_TEXT_PATTERN =
 
 /**
  * A status in the position a proxy error page puts it: the very first token,
- * optionally after an `HTTP/1.1 ` prefix. Delimited by a non-digit so
+ * optionally after an `HTTP/1.1 ` prefix. Delimited by a word boundary so
  * identifiers (`chatcmpl-500321`, `gpt-500x`, `req500502`) cannot fabricate a
  * status — the same hazard `error-transient-status-boundary.test.ts` guards.
  * Prose that merely *mentions* a number (`Too many requests (401 from …)`) is
  * deliberately not read as status metadata.
  */
-const LEADING_STATUS_PATTERN = /^\s*(?:HTTP[/.]\d(?:\.\d)?\s+)?([45]\d{2})(?:\D|$)/i;
+const LEADING_STATUS_PATTERN = /^\s*(?:HTTP[/.]\d(?:\.\d)?\s+)?([45]\d{2})(?:\b|$)/i;
 
 /** Codes that mean a persistent account/billing cap or a bad request; never shed-and-retry. */
 const NON_RETRYABLE_CODE_PATTERN =

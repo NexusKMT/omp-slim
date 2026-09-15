@@ -203,6 +203,7 @@ describe("createInBandProviderError", () => {
 		expect(createInBandProviderError({ error: { status: 404, message: "no such model" } })).toBeUndefined();
 		expect(createInBandProviderError({ error: { code: 401, message: "nope" } })).toBeUndefined();
 		expect(createInBandProviderErrorFromText("model gpt-500x rejected the request")).toBeUndefined();
+		expect(createInBandProviderErrorFromText("500x model rejected the request")).toBeUndefined();
 		expect(createInBandProviderErrorFromText("hello world")).toBeUndefined();
 	});
 
