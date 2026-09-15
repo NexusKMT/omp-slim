@@ -35,6 +35,10 @@
 
 - Inbound user messages delivered by an extension (e.g. HCOM `sendUserMessage`) no longer clear the composer draft; in-progress text and pasted images are preserved.
 
+### Fixed
+
+- zsh completions for `--resume`, `--model` and the other dynamic value flags work again. ([#12113](https://github.com/can1357/oh-my-pi/pull/12113) by [@Huang-404-Q](https://github.com/Huang-404-Q))
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
