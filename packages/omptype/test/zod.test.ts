@@ -168,6 +168,9 @@ describe("zod-like parsing", () => {
 		const flags = z.record(z.enum(["A", "B"] as const), z.boolean());
 		expect(flags.parse({ A: true, B: false })).toEqual({ A: true, B: false });
 		expect(flags.safeParse({ C: true }).success).toBe(false);
+		const values = z.record(z.number());
+		expect(values.parse({ first: 1, second: 2 })).toEqual({ first: 1, second: 2 });
+		expect(values.safeParse({ first: "one" }).success).toBe(false);
 	});
 });
 
@@ -183,6 +186,7 @@ describe("zod-like trim and superRefine", () => {
 		expect(z.string().trim().regex(/^omp$/).safeParse("  nope  ").success).toBe(false);
 		expect(z.string().trim().url().parse("  https://omp.sh  ")).toBe("https://omp.sh");
 		expect(z.string().trim().url().safeParse("  not-a-url  ").success).toBe(false);
+		expect(z.object({ name: z.string().default(" omp ").trim() }).parse({})).toEqual({ name: "omp" });
 	});
 
 	it("supports superRefine with addIssue", () => {
@@ -201,6 +205,12 @@ describe("zod-like trim and superRefine", () => {
 		const bad = obj.safeParse({ name: "a", age: -1 });
 		expect(bad.success).toBe(false);
 		if (!bad.success) expect(bad.error.issues[0].path).toEqual(["age"]);
+
+		const nested = z.object({
+			child: z.string().superRefine((_, ctx) => ctx.addIssue({ message: "rejected" })),
+		}).safeParse({ child: "value" });
+		expect(nested.success).toBe(false);
+		if (!nested.success) expect(nested.error.issues[0].path).toEqual(["child"]);
 	});
 
 	it("chains trim through stepped schemas", () => {
@@ -212,5 +222,25 @@ describe("zod-like trim and superRefine", () => {
 		expect(constrained.parse("  abc  ")).toBe("abc");
 		expect(constrained.safeParse("  a  ").success).toBe(false);
 		expect(constrained.safeParse("  abcdef  ").success).toBe(false);
+
+		const transformed = z.string().trim().transform(value => value.slice(0, 1));
+		expect(transformed.min(2).safeParse("long").success).toBe(false);
+		expect(transformed.max(0).safeParse("long").success).toBe(false);
+		expect(
+			z
+				.string()
+				.trim()
+				.transform(() => 42)
+				.regex(/^42$/)
+				.safeParse("value").success,
+		).toBe(false);
+		expect(
+			z
+				.string()
+				.trim()
+				.transform(() => "not a url")
+				.url()
+				.safeParse("https://omp.sh").success,
+		).toBe(false);
 	});
 });
