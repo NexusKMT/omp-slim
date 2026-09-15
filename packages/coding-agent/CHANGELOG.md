@@ -358,6 +358,10 @@
 
 - Disabled providers are no longer selected as pinned subagent models; ordered agent model lists now skip them ([#11709](https://github.com/can1357/oh-my-pi/issues/11709)).
 
+### Fixed
+
+- Entering goal or vibe mode while a plan session is paused now warns `Plan mode is paused — run /plan again to fully exit.` instead of the stale `Exit plan mode first.` ([#11692](https://github.com/can1357/oh-my-pi/issues/11692)).
+
 ## [18.1.17] - 2026-09-10
 
 - Stop eval from advertising `agent()` after the session reaches its subagent recursion-depth limit.
