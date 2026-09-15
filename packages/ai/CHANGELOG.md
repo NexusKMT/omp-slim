@@ -56,6 +56,7 @@
 - Fixed Muse Code login failing when Meta returns no assigned subscription tier (`subs_tier_id`/`subs_tier_name` as null); sign-in now succeeds and usage is reported without a tier ([#11843](https://github.com/can1357/oh-my-pi/pull/11843) by [@John-Cusack](https://github.com/John-Cusack)).
 - Fixed OpenRouter reasoning models (e.g. Meta Muse Spark) rejecting every turn with `400 Provider returned error` after the session history contains a tool-call turn from another provider, by no longer sending a fabricated reasoning item id ([#11791](https://github.com/can1357/oh-my-pi/pull/11791) by [@brndnmtthws](https://github.com/brndnmtthws)).
 - Fixed statusless stream-drop diagnostics (stream disconnected/closed before `response.completed`, upstream stream interrupted or ended before its terminal chunk, socket disconnected before the secure TLS handshake) classifying as terminal errors, so they now retry like their status-tagged twins instead of settling the turn ([#11805](https://github.com/can1357/oh-my-pi/issues/11805)).
+- OpenAI-compatible endpoints that report `ReasoningEffort` in CamelCase now trigger effort-downgrade retries instead of terminating turns with HTTP 400 ([#11804](https://github.com/can1357/oh-my-pi/issues/11804)).
 
 ## [18.1.18] - 2026-09-11
 
