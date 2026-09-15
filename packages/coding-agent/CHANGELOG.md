@@ -526,6 +526,9 @@
 ### Removed
 
 - Removed the bundled `designer` subagent and `designer` model role; `modelRoles.designer` and `@designer` are no longer built in.
+### Fixed
+
+- GitHub failures now retain structured API diagnostics, identify failed file reads, and clarify Boolean search syntax.
 
 ## [18.1.3] - 2026-09-02
 
