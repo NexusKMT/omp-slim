@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Bedrock's Qwen rows no longer ask for more output tokens than the model accepts, which Bedrock rejected with a 400.
+- Bedrock's Qwen rows no longer ask for more output tokens than the model accepts, which Bedrock rejected with a 400. ([#12117](https://github.com/can1357/oh-my-pi/pull/12117) by [@Huang-404-Q](https://github.com/Huang-404-Q))
 
 ## [18.2.0] - 2026-09-15
 
