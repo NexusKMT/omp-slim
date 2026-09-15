@@ -297,6 +297,7 @@
 - macOS self-updates preserve executable backups still used by running sessions, preventing lost privacy-permission attribution.
 - Startup and daemon commands no longer crash when project-directory canonicalization encounters EPERM or EACCES.
 - `omp plugin install --dry-run` now previews marketplace installs without mutating plugin state.
+- In colocated jj-git workspaces, the status line and footer now show the JJ label (bookmark or short change ID) instead of a detached git HEAD. Git-backed automation still resolves these directories to Git ([#11071](https://github.com/can1357/oh-my-pi/issues/11071), [#11325](https://github.com/can1357/oh-my-pi/pull/11325) by [@boazy](https://github.com/boazy)).
 
 ## [18.1.16] - 2026-09-09
 
