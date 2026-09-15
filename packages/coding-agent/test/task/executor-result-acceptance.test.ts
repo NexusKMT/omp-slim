@@ -96,6 +96,7 @@ function createHarness(): SessionHarness {
 		sessionManager: { appendSessionInit: () => {} },
 		getActiveToolNames: () => ["read", "yield"],
 		getEnabledToolNames: () => ["read", "yield"],
+		getToolByName: () => undefined,
 		setActiveToolsByName: async () => {},
 		setWorkPoolYieldItems: () => {},
 		subscribe: (listener: (event: AgentSessionEvent) => void) => {

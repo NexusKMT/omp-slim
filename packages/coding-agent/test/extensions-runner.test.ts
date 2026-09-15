@@ -1337,6 +1337,7 @@ describe("ExtensionRunner", () => {
 			label: "Flagged",
 			description: "returns a non-throwing failure",
 			parameters: {} as never,
+			approval: "read",
 			execute: async () => ({
 				content: [{ type: "text" as const, text: "reported failure" }],
 				isError: true,

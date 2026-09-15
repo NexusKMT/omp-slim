@@ -1061,6 +1061,7 @@ describe("AgentSession advisor toggle", () => {
 			});
 		} finally {
 			await quotaSession.dispose();
+			vi.restoreAllMocks();
 		}
 	});
 	it("marks structurally classified advisor usage limits", async () => {

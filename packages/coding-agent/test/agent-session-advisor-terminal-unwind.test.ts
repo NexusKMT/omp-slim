@@ -197,7 +197,7 @@ it.each(["concern", "nit", "blocker"] as const)(
 			note: "live next-turn concern",
 			severity: "concern",
 		});
-		expect(contentText(liveResult.content)).toMatch(/Recorded\.|Deferred/);
+		expect(contentText(liveResult.content)).toMatch(/Accepted|Deferred/);
 		releaseNextProvider.resolve();
 		await nextRun;
 		await session.waitForIdle();

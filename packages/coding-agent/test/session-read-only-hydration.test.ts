@@ -185,30 +185,21 @@ describe("read-only session blob hydration", () => {
 		}
 	});
 
-	it("bounds simultaneous blob reads inside one large frame archive", async () => {
-		using dir = TempDir.createSync("@archive-hydration-limit-");
+	it("bounds simultaneous blob reads inside one large message", async () => {
+		using dir = TempDir.createSync("@message-hydration-limit-");
 		const store = new BlobStore(path.join(dir.path(), "blobs"));
-		const blob = await store.put(Buffer.from("frame"));
-		const archive: snapcompact.Archive = {
-			frames: Array.from({ length: 48 }, () => ({
-				data: blob.ref,
-				mimeType: "image/png",
-				cols: 1,
-				rows: 1,
-				chars: 1,
-			})),
-			totalChars: 48,
-			truncatedChars: 0,
-		};
-		const entry: CompactionEntry = {
-			type: "compaction",
-			id: "compact",
+		const blob = await store.put(Buffer.from("image"));
+		const images = Array.from({ length: 48 }, () => ({
+			type: "image" as const,
+			data: blob.ref,
+			mimeType: "image/png",
+		}));
+		const entry: SessionMessageEntry = {
+			type: "message",
+			id: "message",
 			parentId: null,
 			timestamp,
-			firstKeptEntryId: "none",
-			summary: "summary",
-			tokensBefore: 1000,
-			preserveData: { [snapcompact.PRESERVE_KEY]: archive },
+			message: { role: "user", content: images, timestamp: 0 },
 		};
 		const get = store.get.bind(store);
 		let active = 0;
@@ -226,9 +217,7 @@ describe("read-only session blob hydration", () => {
 		try {
 			await resolveBlobRefsInEntries([entry], store);
 			expect(peak).toBeLessThanOrEqual(8);
-			expect(archive.frames.map(frame => frame.data)).toEqual(
-				Array(48).fill(Buffer.from("frame").toString("base64")),
-			);
+			expect(images.map(image => image.data)).toEqual(Array(48).fill(Buffer.from("image").toString("base64")));
 		} finally {
 			readSpy.mockRestore();
 		}

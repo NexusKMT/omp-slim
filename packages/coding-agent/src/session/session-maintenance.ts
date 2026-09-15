@@ -86,7 +86,12 @@ import {
 	resolveMethodSettings,
 	resolveSpeculationMethod,
 } from "./compaction-methods";
-import { assistantTurnProducedOutput, convertToLlm, stripImagesFromMessage } from "./messages";
+import {
+	assistantTurnProducedOutput,
+	convertToLlm,
+	invalidateConvertToLlmArrayCache,
+	stripImagesFromMessage,
+} from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
 import {
 	resolveCompactionConfiguredTarget,
@@ -2517,6 +2522,7 @@ export class SessionMaintenance {
 			const compactedMessages = this.#host.agent.state.messages;
 			if (compactedMessages !== activeMessages) {
 				activeMessages.splice(0, activeMessages.length, ...compactedMessages);
+				invalidateConvertToLlmArrayCache(activeMessages);
 			}
 			return;
 		}
@@ -2603,6 +2609,7 @@ export class SessionMaintenance {
 		const compactedMessages = this.#host.agent.state.messages;
 		if (compactedMessages !== activeMessages) {
 			activeMessages.splice(0, activeMessages.length, ...compactedMessages);
+			invalidateConvertToLlmArrayCache(activeMessages);
 		}
 		logger.debug("Mid-run compaction ran between provider calls", {
 			contextTokens,
