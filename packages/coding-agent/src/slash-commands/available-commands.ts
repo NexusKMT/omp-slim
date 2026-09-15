@@ -54,6 +54,11 @@ export async function buildAvailableSlashCommands(
 			subcommands: command.subcommands,
 			source: "builtin",
 		});
+		// ACP dispatch resolves builtin aliases before `session.prompt()` sees the
+		// input, so a custom/file command sharing an alias would be advertised but
+		// never run. Reserve aliases here too; TUI-only builtins are skipped above,
+		// so their aliases stay available.
+		for (const alias of command.aliases ?? []) seenNames.add(alias);
 	}
 
 	if (session.skillsSettings?.enableSkillCommands) {
