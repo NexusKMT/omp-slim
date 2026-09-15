@@ -17,6 +17,7 @@ import { type LocalProtocolOptions, stripXdUrlPrefix, XD_URL_PREFIX } from "../i
 import { deduplicateMCPToolsByName, resolveMCPToolAlias } from "../mcp/tool-bridge";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import { MEMORY_BACKEND_TOOL_NAMES } from "../memory-backend/tool-names";
+import { invalidateToolSchemaMetadata } from "../modes/utils/context-usage";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
 import toolRosterNoticePrompt from "../prompts/system/tool-roster-notice.md" with { type: "text" };
 import xdevMountNoticePrompt from "../prompts/system/xdev-mount-notice.md" with { type: "text" };
@@ -1078,7 +1079,13 @@ export class SessionTools {
 
 		try {
 			this.#notifyXdevMountDelta(previousMounted);
-			this.#host.agent.setTools(appliedTools);
+			const currentTools = this.#host.agent.state.tools;
+			if (
+				currentTools.length !== appliedTools.length ||
+				currentTools.some((tool, index) => tool !== appliedTools[index])
+			) {
+				this.#host.agent.setTools(appliedTools);
+			}
 			this.#host.setCodeModeNamespacesInfo?.(nextCodeModeNamespacesInfo);
 			this.#codeModeDirectWireSignature = codeMode.active
 				? this.#computeCodeModeDirectWireSignature(appliedNames)
@@ -1088,6 +1095,7 @@ export class SessionTools {
 				this.#baseSystemPrompt = rebuiltSystemPrompt;
 				this.#host.clearMemoryPromotionSnapshot();
 				this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
+				invalidateToolSchemaMetadata(this.#host.agent.state.tools);
 				this.#lastAppliedToolSignature = rebuiltSignature;
 				this.#promptModelKey = this.#currentPromptModelKey();
 				this.#basePromptXdevNames = new Set(rebuiltXdevCatalogNames);
@@ -1516,6 +1524,7 @@ export class SessionTools {
 			this.#host.clearInheritedProviderPromptCacheKey();
 		}
 		this.#applyAgentSystemPrompt(this.#baseSystemPrompt);
+		invalidateToolSchemaMetadata(this.#host.agent.state.tools);
 		this.#promptModelKey = this.#currentPromptModelKey();
 		// Refresh the cached signature so a subsequent `applyActiveToolsByName` with
 		// the same tool set does not re-rebuild on top of the explicit refresh we
