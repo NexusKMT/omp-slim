@@ -1848,10 +1848,16 @@ export class SessionTools {
 		});
 	}
 
-	/** Rebuilds the stable base prompt for the current tools and model. */
-	refreshBaseSystemPrompt(): Promise<void> {
+	/**
+	 * Rebuilds the stable base prompt for the current tools and model.
+	 * `commitIf` lets asynchronous producers discard a stale rebuild atomically
+	 * after its inputs have been superseded.
+	 */
+	refreshBaseSystemPrompt(commitIf?: () => boolean): Promise<void> {
 		return this.runToolRegistryMutation(async () => {
-			(await this.#prepareBaseSystemPrompt())?.commit?.();
+			const prepared = await this.#prepareBaseSystemPrompt();
+			if (commitIf && !commitIf()) return;
+			prepared?.commit?.();
 		});
 	}
 

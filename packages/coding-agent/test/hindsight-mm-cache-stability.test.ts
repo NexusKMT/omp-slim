@@ -64,7 +64,8 @@ describe("renderMentalModelsBlock cache stability", () => {
 describe("HindsightSessionState mental-model freeze", () => {
 	function makeState() {
 		const listeners = new Set<AgentSessionEventListener>();
-		const client = { listMentalModels: async () => ({ items: [] }) } as unknown as HindsightApi;
+		const listMentalModels = vi.fn(async () => ({ items: [] }));
+		const client = { listMentalModels } as unknown as HindsightApi;
 		const state = new HindsightSessionState({
 			sessionId: "s",
 			client,
@@ -82,12 +83,11 @@ describe("HindsightSessionState mental-model freeze", () => {
 			lastRetainedTurn: 0,
 			hasRecalledForFirstTurn: false,
 		});
-		return { state, listeners };
+		return { state, listeners, listMentalModels };
 	}
 
 	it("does not reload the snippet on agent_end even long past the old TTL window", () => {
-		const { state, listeners } = makeState();
-		const reload = vi.spyOn(state, "refreshMentalModelsSnippet").mockResolvedValue();
+		const { state, listeners, listMentalModels } = makeState();
 		const flush = vi.spyOn(state, "flushRetainQueue").mockResolvedValue();
 		state.mentalModelsSnippet = "<mental_models>frozen</mental_models>";
 		// Loaded well beyond any previous refresh interval — the timer path is gone.
@@ -98,16 +98,22 @@ describe("HindsightSessionState mental-model freeze", () => {
 
 		// Listener is live (retain queue drained) but the frozen block is untouched.
 		expect(flush).toHaveBeenCalled();
-		expect(reload).not.toHaveBeenCalled();
+		expect(listMentalModels).not.toHaveBeenCalled();
 		expect(state.mentalModelsSnippet).toBe("<mental_models>frozen</mental_models>");
 	});
 });
 
 describe("SessionMemory mental-model boundary reload", () => {
-	function makeBoundaryHarness(response: Promise<MentalModelListResponse>) {
+	function makeBoundaryHarness(
+		response: Promise<MentalModelListResponse>,
+		publicationGate?: Promise<void>,
+	) {
 		const published: Array<string | undefined> = [];
 		const client = { listMentalModels: () => response } as unknown as HindsightApi;
-		const stateSession = {
+		const stateSession: {
+			refreshBaseSystemPrompt: (commitIf?: () => boolean) => Promise<void>;
+			sessionManager: { getEntries: () => never[] };
+		} = {
 			refreshBaseSystemPrompt: async () => {},
 			sessionManager: { getEntries: () => [] },
 		};
@@ -121,10 +127,14 @@ describe("SessionMemory mental-model boundary reload", () => {
 			lastRetainedTurn: 0,
 			hasRecalledForFirstTurn: false,
 		});
-		const publish = async () => {
+		const publishBoundary = async (commitIf?: () => boolean) => {
+			await publicationGate;
+			if (!commitIf || commitIf()) published.push(state.mentalModelsSnippet);
+		};
+		const publishReset = async () => {
 			published.push(state.mentalModelsSnippet);
 		};
-		stateSession.refreshBaseSystemPrompt = publish;
+		stateSession.refreshBaseSystemPrompt = publishBoundary;
 		state.mentalModelsSnippet = "<mental_models>old</mental_models>";
 		state.mentalModelsLoadedAt = Date.now();
 		const host = {
@@ -138,7 +148,7 @@ describe("SessionMemory mental-model boundary reload", () => {
 			getMnemopiSessionState: () => undefined,
 			takeMnemopiSessionState: () => undefined,
 			setBaseSystemPrompt: () => {},
-			refreshBaseSystemPrompt: publish,
+			refreshBaseSystemPrompt: publishReset,
 			replaceMemoryTools: async () => {},
 		} as unknown as SessionMemoryHost;
 		return { memory: new SessionMemory(host, {}), published, state };
@@ -204,5 +214,73 @@ describe("SessionMemory mental-model boundary reload", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("discards a snapshot whose prompt publication misses the deadline", async () => {
+		vi.useFakeTimers();
+		try {
+			const publication = Promise.withResolvers<void>();
+			const response = Promise.resolve<MentalModelListResponse>({
+				items: [{ id: "u", bank_id: "b", name: "User Preferences", content: "unpublished preference" }],
+			});
+			const { memory, published, state } = makeBoundaryHarness(response, publication.promise);
+
+			await memory.resetContextForNewTranscript();
+			await Promise.resolve();
+			vi.advanceTimersByTime(1_500);
+			await state.mentalModelsLoadPromise;
+
+			expect(state.mentalModelsSnippet).toBe("<mental_models>old</mental_models>");
+			publication.resolve();
+			await Promise.resolve();
+			expect(published).toEqual(["<mental_models>old</mental_models>"]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("discards a pending bootstrap write after a transcript boundary reload", async () => {
+		const bootstrapResponse = Promise.withResolvers<MentalModelListResponse>();
+		const boundaryResponse = Promise.withResolvers<MentalModelListResponse>();
+		let request = 0;
+		const client = {
+			listMentalModels: () => (request++ === 0 ? bootstrapResponse.promise : boundaryResponse.promise),
+		} as unknown as HindsightApi;
+		const published: Array<string | undefined> = [];
+		const stateSession: {
+			refreshBaseSystemPrompt: (commitIf?: () => boolean) => Promise<void>;
+			sessionManager: { getEntries: () => never[] };
+		} = {
+			refreshBaseSystemPrompt: async commitIf => {
+				if (!commitIf || commitIf()) published.push(state.mentalModelsSnippet);
+			},
+			sessionManager: { getEntries: () => [] },
+		};
+		const state = new HindsightSessionState({
+			sessionId: "s",
+			client,
+			bankId: "b",
+			config: makeConfig(),
+			session: stateSession as never,
+			banksSet: new Set(["b"]),
+			lastRetainedTurn: 0,
+			hasRecalledForFirstTurn: false,
+		});
+
+		const bootstrap = state.runMentalModelLoad({ bankId: "b" });
+		await Promise.resolve();
+		state.beginMentalModelsTranscriptReload();
+		boundaryResponse.resolve({
+			items: [{ id: "new", bank_id: "b", name: "User Preferences", content: "boundary preference" }],
+		});
+		await state.mentalModelsLoadPromise;
+		bootstrapResponse.resolve({
+			items: [{ id: "old", bank_id: "b", name: "User Preferences", content: "stale bootstrap preference" }],
+		});
+		await bootstrap;
+
+		expect(state.mentalModelsSnippet).toContain("boundary preference");
+		expect(state.mentalModelsSnippet).not.toContain("stale bootstrap preference");
+		expect(published).toHaveLength(1);
 	});
 });

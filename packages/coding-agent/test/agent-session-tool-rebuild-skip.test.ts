@@ -665,6 +665,20 @@ describe("AgentSession refreshMCPTools rebuild skipping", () => {
 		expect(rebuildCount).toBe(2);
 	});
 
+	it("does not commit an asynchronous prompt rebuild after its producer becomes stale", async () => {
+		const rebuild = Promise.withResolvers<void>();
+		const { session } = newSession(async () => {
+			await rebuild.promise;
+			return "stale rebuild";
+		});
+
+		const refresh = session.refreshBaseSystemPrompt(() => false);
+		rebuild.resolve();
+		await refresh;
+
+		expect(session.systemPrompt).toEqual(["initial"]);
+	});
+
 	it("rebuilds when the refresh argument tool order changes", async () => {
 		let rebuildCount = 0;
 		const { session } = newSession(async toolNames => {

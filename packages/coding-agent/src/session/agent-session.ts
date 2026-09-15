@@ -5588,9 +5588,9 @@ export class AgentSession {
 		return this.#memory.applyMemoryBackend(options);
 	}
 
-	/** Rebuilds the stable base prompt for the current tools and model. */
-	refreshBaseSystemPrompt(): Promise<void> {
-		return this.#tools.refreshBaseSystemPrompt();
+	/** Rebuilds the stable base prompt, optionally discarding a stale asynchronous rebuild. */
+	refreshBaseSystemPrompt(commitIf?: () => boolean): Promise<void> {
+		return this.#tools.refreshBaseSystemPrompt(commitIf);
 	}
 
 	/** Replaces connected MCP tools and enables them immediately. */
