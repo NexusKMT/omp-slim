@@ -321,13 +321,16 @@ export async function generateTitleOnline(
 			const maxTokens = TITLE_MAX_TOKENS;
 			logger.debug("title-generator: request", { ...modelContext, maxTokens });
 
+			const messages: Message[] = [{ role: "user", content: userMessage, timestamp: Date.now() }];
+			if (model.supportsAssistantPrefill) messages.push(titlePrefill(model));
+
 			const response = await retryTransientCompletion(
 				() =>
 					completeSimple(
 						model,
 						{
 							systemPrompt,
-							messages: [{ role: "user", content: userMessage, timestamp: Date.now() }],
+							messages,
 						},
 						{
 							apiKey: registry.resolver(model, sessionId),
