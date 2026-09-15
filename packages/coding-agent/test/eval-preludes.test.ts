@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "bun:test";
-import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+import type { AgentToolContext, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { EvalPreludeDefinition } from "@oh-my-pi/pi-coding-agent/eval";
 import { getEnabledEvalPreludes, invokeEvalPrelude } from "@oh-my-pi/pi-coding-agent/eval";
@@ -97,7 +97,12 @@ describe("eval prelude host invocation", () => {
 		const session = makeSession(() => [definition]);
 
 		await expect(
-			invokeEvalPrelude("guarded", {}, { session, toolCallId: "empty-context", context: {} }),
+			invokeEvalPrelude("guarded", {}, {
+				session,
+				toolCallId: "empty-context",
+				// Execute-time context with no settings and no grant: must fail closed.
+				context: {} as unknown as AgentToolContext,
+			}),
 		).rejects.toThrow(/requires approval but no interactive UI is available/);
 		expect(invoke).not.toHaveBeenCalled();
 	});
