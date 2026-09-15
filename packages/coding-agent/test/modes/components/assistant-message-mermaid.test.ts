@@ -125,6 +125,26 @@ describe("AssistantMessageComponent transcript lifecycle", () => {
 		expect(flushText).toContain("Newer tail");
 	});
 
+	it("retires frozen prose into history while an append-only wire is still streaming", () => {
+		const component = new AssistantMessageComponent();
+		const transcript = new TranscriptContainer();
+		transcript.addChild(component);
+
+		component.updateContent(
+			createAssistantMessage("Alpha completed paragraph.\n\nPartial tail"),
+			{ transient: true },
+		);
+		transcript.renderViewport(80, 20, { now: 0, tick: 0 });
+		component.updateContent(
+			createAssistantMessage("Alpha completed paragraph.\n\nPartial tail grows.\n\nNew tail"),
+			{ transient: true },
+		);
+		transcript.renderViewport(80, 20, { now: 1, tick: 1 });
+
+		const batch = transcript.peekFinalizedBatch(80, 0);
+		expect(Bun.stripANSI(batch?.rows.join("\n") ?? "")).toContain("Alpha completed paragraph.");
+	});
+
 	it("withholds mid-stream retirement when the wire may revise streamed text", () => {
 		const thinkingMessage = (thinking: string): AssistantMessage => ({
 			...createAssistantMessage(""),
