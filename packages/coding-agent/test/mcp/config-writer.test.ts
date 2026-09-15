@@ -20,6 +20,10 @@ describe("validateServerName", () => {
 		expect(validateServerName("cloudflare:cloudflare-api")).toBeUndefined();
 		expect(validateServerName("bad/name")).toBeDefined();
 		expect(validateServerName("")).toBeDefined();
+		expect(validateServerName(" ")).toBeDefined();
+		expect(validateServerName(" MaaS Slack")).toBeDefined();
+		expect(validateServerName("MaaS Slack ")).toBeDefined();
+		expect(validateServerName("MaaS  Slack")).toBeDefined();
 	});
 
 	it("sanitizes a spaced server name into a valid tool identifier", () => {

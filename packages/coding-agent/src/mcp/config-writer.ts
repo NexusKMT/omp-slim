@@ -97,8 +97,8 @@ export function validateServerName(name: string): string | undefined {
 	// sanitize them via createMCPToolName, ownership matches on the raw name) and
 	// `/mcp reauth` writes such names back as a user-config override that shadows
 	// the discovered entry.
-	if (!/^[a-zA-Z0-9_.: -]+$/.test(name)) {
-		return "Server name can only contain letters, numbers, dash, underscore, dot, colon, and space";
+	if (!/^[a-zA-Z0-9_.:-]+(?: [a-zA-Z0-9_.:-]+)*$/.test(name)) {
+		return "Server name can only contain letters, numbers, dash, underscore, dot, colon, and single spaces";
 	}
 	return undefined;
 }
