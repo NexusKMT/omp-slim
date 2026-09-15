@@ -406,8 +406,8 @@ export class OutputMetaBuilder {
 
 	/**
 	 * Add column truncation notice. No-op if maxColumn <= 0. `unit` names the
-	 * unit the producer enforced the cap in — `"bytes"` for the streaming
-	 * sink's UTF-8 cap, `"chars"` (UTF-16 code units) for the read/grep path.
+	 * unit the producer enforced the cap in — `"bytes"` for the streaming sink
+	 * and grep's UTF-8 caps, `"chars"` (UTF-16 code units) for the read path.
 	 *
 	 * When `artifactId` is supplied the sink mirrored the raw, uncapped stream
 	 * into that artifact; the rendered notice then advertises it as a recovery
