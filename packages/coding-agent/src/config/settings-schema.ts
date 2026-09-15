@@ -270,6 +270,15 @@ export const STATUS_LINE_SEGMENT_IDS = [
 /** One identifier from the supported status-line segment catalog. */
 export type StatusLineSegmentId = (typeof STATUS_LINE_SEGMENT_IDS)[number];
 
+/** Baseline segments used when Custom is selected without segment overrides. */
+export const CUSTOM_STATUS_LINE_DEFAULTS: {
+	readonly left: StatusLineSegmentId[];
+	readonly right: StatusLineSegmentId[];
+} = {
+	left: ["vim", "model", "mode", "path", "git", "pr"],
+	right: ["session_name", "token_total", "cost", "context_pct"],
+};
+
 /** Submenu choice metadata. */
 export type SubmenuOption<V extends string = string> = {
 	value: V;
@@ -996,9 +1005,9 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"statusLine.leftSegments": { type: "array", default: [] as StatusLineSegmentId[] },
+	"statusLine.leftSegments": { type: "array", default: CUSTOM_STATUS_LINE_DEFAULTS.left },
 
-	"statusLine.rightSegments": { type: "array", default: [] as StatusLineSegmentId[] },
+	"statusLine.rightSegments": { type: "array", default: CUSTOM_STATUS_LINE_DEFAULTS.right },
 
 	"statusLine.segmentOptions": { type: "record", default: {} as Record<string, unknown> },
 
