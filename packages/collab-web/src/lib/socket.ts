@@ -114,7 +114,7 @@ export class CollabSocket {
 		this.#ws = ws;
 		ws.onopen = () => {
 			if (this.#ws !== ws) return;
-			this.#attempt = 0;
+			if (!this.#retryMissingRoom) this.#attempt = 0;
 			for (const envelope of this.#pendingSends) ws.send(envelope);
 			this.#pendingSends.length = 0;
 			this.onOpen?.();
@@ -163,6 +163,8 @@ export class CollabSocket {
 					return;
 				}
 				if (this.#ws !== ws) return;
+				this.#retryMissingRoom = false;
+				this.#attempt = 0;
 				this.onFrame?.(frame, envelope.peerId);
 			})
 			.catch(() => {

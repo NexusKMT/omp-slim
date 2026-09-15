@@ -92,7 +92,9 @@ describe("CollabSocket guest room recovery", () => {
 			instance(1).relayClose(4004, "no such room");
 			expect(closes.at(-1)).toEqual({ reason: "no such room", willReconnect: true });
 
-			vi.advanceTimersByTime(2_000);
+			vi.advanceTimersByTime(1_000);
+			expect(ScriptedWebSocket.instances).toHaveLength(2);
+			vi.advanceTimersByTime(1_000);
 			instance(2).open();
 			expect(socket.isOpen).toBe(true);
 		} finally {

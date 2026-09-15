@@ -90,7 +90,9 @@ describe("browser guest room recovery", () => {
 			instance(1).relayClose(4004, "no such room");
 			expect(client.getSnapshot().phase).toBe("reconnecting");
 
-			vi.advanceTimersByTime(2_000);
+			vi.advanceTimersByTime(1_000);
+			expect(ScriptedWebSocket.instances).toHaveLength(2);
+			vi.advanceTimersByTime(1_000);
 			instance(2).open();
 			expect(client.getSnapshot().phase).toBe("reconnecting");
 		} finally {
