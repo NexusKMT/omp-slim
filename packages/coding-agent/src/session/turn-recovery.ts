@@ -1,4 +1,3 @@
-import { scheduler } from "node:timers/promises";
 import {
 	type Agent,
 	AgentBusyError,
@@ -23,7 +22,7 @@ import * as AIError from "@oh-my-pi/pi-ai/error";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { extractRetryHint, logger, prompt } from "@oh-my-pi/pi-utils";
+import { extractRetryHint, logger, prompt, sleepLong } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { formatModelStringWithRouting, resolveModelOverride } from "../config/model-resolver";
 
@@ -79,11 +78,13 @@ const USAGE_PREFLIGHT_BLOCKED_PREFIX = "Usage preflight blocked:";
 const STREAM_STALL_ERROR_RE = /stream stall/i;
 const HTTP2_STREAM_RESET_ERROR_RE =
 	/stream closed with error code\s+nghttp2_(?:internal_error|refused_stream)|nghttp2_(?:internal_error|refused_stream)|HTTP2(?:StreamReset|RefusedStream)/i;
-// Gateway closes the SSE stream mid-generation without a terminal chunk
+// Gateway/provider closes a stream mid-generation without its terminal chunk
 // (openai-completions "finish_reason", openai/azure responses "terminal
-// response event"). Same transport-failure class as the stall/reset entries:
-// retriable, and eligible for preserved-turn continuation on resolved tool turns.
-const PREMATURE_STREAM_CLOSE_ERROR_RE = /stream closed before a (?:finish_reason|terminal response event)/i;
+// response event", Codex "terminal completion event"). Same transport-failure
+// class as the stall/reset entries: retriable, and eligible for preserved-turn
+// continuation on resolved tool turns.
+const PREMATURE_STREAM_CLOSE_ERROR_RE =
+	/(?:stream closed before a (?:finish_reason|terminal response event)|Codex stream ended before terminal completion event)/i;
 const IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN =
 	/messages\.\d+\.content\.\d+.*\b(?:thinking|redacted_thinking)\b.*\blatest assistant message cannot be modified\b/is;
 
@@ -367,6 +368,8 @@ export class TurnRecovery {
 		}
 		const value: ServingModel = {
 			selector: formatRetryFallbackSelector(model, level),
+			modelIdentity: formatModelStringWithRouting(model),
+			thinkingLevel: level,
 			isFallback: this.#fallbackRouted,
 		};
 		this.#bootstrapCache = { model, level, routed: this.#fallbackRouted, value };
@@ -420,9 +423,12 @@ export class TurnRecovery {
 		}
 		const model = this.#host.model();
 		if (model) {
+			const level = this.#host.thinkingLevel();
 			this.#lastServed = {
 				attribution: {
-					selector: formatRetryFallbackSelector(model, this.#host.thinkingLevel()),
+					selector: formatRetryFallbackSelector(model, level),
+					modelIdentity: formatModelStringWithRouting(model),
+					thinkingLevel: level,
 					isFallback: this.#fallbackRouted,
 				},
 				sessionId: this.#host.sessionManager.getSessionId(),
@@ -1335,7 +1341,9 @@ export class TurnRecovery {
 			message.stopReason === "error" && STREAM_STALL_ERROR_RE.test(errorMessage) && AIError.retriable(id);
 		const transportReset =
 			message.stopReason === "error" &&
-			HTTP2_STREAM_RESET_ERROR_RE.test(errorMessage) &&
+			(HTTP2_STREAM_RESET_ERROR_RE.test(errorMessage) ||
+				AIError.PYTHON_HTTP2_STREAM_RESET_PATTERN.test(errorMessage) ||
+				AIError.PYTHON_HTTP_INCOMPLETE_CHUNK_PATTERN.test(errorMessage)) &&
 			AIError.retriable(id) &&
 			!this.#host.abortInProgress() &&
 			!this.#host.isDisposed() &&
@@ -2458,12 +2466,15 @@ export class TurnRecovery {
 		// pattern instead of re-sampling the same stalled reasoning.
 		this.#maybeInjectThinkingLoopRedirect(id);
 
-		// Wait with exponential backoff (abortable).
+		// Day-scale provider waits (a monthly quota reset parsed from the error
+		// text) exceed the signed 32-bit timer limit; sleepLong chunks the sleep
+		// so the full wait elapses instead of overflowing the timer. `delayMs`
+		// stays exact for events and the retry deadline computation.
 		const retryAbortController = new AbortController();
 		this.#retryAbortController?.abort();
 		this.#retryAbortController = retryAbortController;
 		try {
-			await scheduler.wait(delayMs, { signal: retryAbortController.signal });
+			await sleepLong(delayMs, retryAbortController.signal);
 		} catch {
 			if (this.#retryAbortController !== retryAbortController) {
 				return false;
