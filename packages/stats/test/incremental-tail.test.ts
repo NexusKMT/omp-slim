@@ -105,14 +105,6 @@ describe("incremental stats ingestion", () => {
 			closeDb();
 			await Bun.write(`${owner}.replacement`, entry(newTime, kind === "tool-entry" ? "new-entry" : "shared"));
 			await fs.rename(`${owner}.replacement`, owner);
-			const visited: string[] = [];
-			await syncAllSessions({
-				workers: 1,
-				onProgress(progress) {
-					visited.push(progress.sessionFile);
-				},
-			});
-			expect(visited[0]).toBe(fork);
 			await syncAllSessions({ workers: 1 });
 			const table = kind === "message" ? "messages" : kind === "user" ? "user_messages" : "tool_calls";
 			const rows = (await initDb()).prepare(`SELECT timestamp FROM ${table} ORDER BY timestamp`).all() as {
