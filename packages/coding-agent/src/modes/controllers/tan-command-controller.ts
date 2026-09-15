@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { prompt, Snowflake } from "@oh-my-pi/pi-utils";
+import { prompt, Snowflake, untilAborted } from "@oh-my-pi/pi-utils";
 import backgroundTanDispatchPrompt from "../../prompts/system/background-tan-dispatch.md" with { type: "text" };
 import tanContextSwitchPrompt from "../../prompts/system/tan-context-switch.md" with { type: "text" };
 import { AgentRegistry, MAIN_AGENT_ID } from "../../registry/agent-registry";
@@ -213,6 +213,10 @@ export class TanCommandController {
 							injectContextSwitch();
 							await clone.prompt(trimmedWork, { attribution: "user" });
 							await clone.waitForIdle();
+							while (clone.hasPendingAsyncWork()) {
+								if (signal.aborted) throw new Error("Aborted while settling descendant work");
+								await untilAborted(signal, clone.settleAsyncWork());
+							}
 							return extractAssistantText(clone.getLastAssistantMessage()) || "(no output)";
 						} finally {
 							unsubscribeCompaction();
