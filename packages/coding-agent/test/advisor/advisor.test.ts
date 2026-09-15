@@ -6664,16 +6664,18 @@ describe("advisor", () => {
 			}
 		});
 
-		it("preserves a late concern when the primary already ended with a terminal answer", () => {
-			expect(
-				resolveAdvisorDeliveryChannel({
-					severity: "concern",
-					autoResumeSuppressed: false,
-					streaming: false,
-					aborting: false,
-					terminalAnswerNoQueuedWork: true,
-				}),
-			).toBe("preserve");
+		it("preserves a late non-blocker (nit/concern) when the primary already ended with a terminal answer", () => {
+			for (const severity of ["nit", "concern"] as const) {
+				expect(
+					resolveAdvisorDeliveryChannel({
+						severity,
+						autoResumeSuppressed: false,
+						streaming: false,
+						aborting: false,
+						terminalAnswerNoQueuedWork: true,
+					}),
+				).toBe("preserve");
+			}
 		});
 
 		it("steers a late blocker after a terminal answer so the primary continues and acknowledges it (#5628)", () => {
