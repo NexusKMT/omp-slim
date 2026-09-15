@@ -17,6 +17,7 @@ import {
 	type SettingPath,
 	Settings,
 } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { SETTINGS_SCHEMA } from "@oh-my-pi/pi-coding-agent/config/settings-schema";
 import * as discovery from "@oh-my-pi/pi-coding-agent/discovery";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/tools/image-providers";
@@ -1193,6 +1194,25 @@ describe("Settings", () => {
 
 			isolated.clearOverride("display.showTokenUsage");
 			expect(isolated.get("display.showTokenUsage")).toBe(true);
+		});
+
+		it("isolates mutable defaults between instances and from the schema", () => {
+			const first = Settings.isolated();
+			const second = Settings.isolated();
+
+			first.get("enabledModels").push("openai/gpt-test");
+			first.get("providers.maxInFlightRequests").openai = 1;
+
+			expect(first.get("enabledModels")).toEqual(["openai/gpt-test"]);
+			expect(first.get("providers.maxInFlightRequests")).toEqual({ openai: 1 });
+			expect(second.get("enabledModels")).toEqual([]);
+			expect(second.get("providers.maxInFlightRequests")).toEqual({});
+			expect(SETTINGS_SCHEMA.enabledModels.default).toEqual([]);
+			expect(SETTINGS_SCHEMA["providers.maxInFlightRequests"].default).toEqual({});
+			expect(first.isConfigured("enabledModels")).toBe(false);
+			expect(first.isConfigured("providers.maxInFlightRequests")).toBe(false);
+			expect(second.isConfigured("enabledModels")).toBe(false);
+			expect(second.isConfigured("providers.maxInFlightRequests")).toBe(false);
 		});
 
 		it("re-resolves path-scoped arrays when cwd changes", async () => {

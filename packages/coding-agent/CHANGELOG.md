@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Isolated settings no longer share mutable array and record defaults.
 - Auto-retry waits past the signed 32-bit timer ceiling (e.g. a month-scale OpenCode Go reset with `retry.waitForUsageReset`) now elapse in full instead of overflowing the timer and retrying immediately.
 - JavaScript eval now reports startup failure if both isolated runtimes fail, instead of executing uncancellable code on the host thread.
 - CommonJS extensions now expose computed and non-enumerable named exports while preserving `require`/import identity and reloads.
