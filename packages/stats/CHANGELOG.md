@@ -46,6 +46,9 @@
 ### Fixed
 
 - Fixed SuperGrok usage appearing as free by applying matching public xAI API pricing (including 200K-token rates), labeling costs as API-equivalent estimates, backfilling existing usage records, and displaying subscription-only models as N/A ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
+### Fixed
+
+- Reclaimed lingering stats dashboards from older releases using their versioned HTTP identity when process command lines are unavailable, so upgrades no longer leave `omp stats` blocked by an opaque Bun listener.
 
 ## [18.0.1] - 2026-08-23
 
