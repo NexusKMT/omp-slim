@@ -2280,9 +2280,21 @@ export class SessionManager {
 	 * Snapshot the session for collab replication: the live header plus a deep
 	 * copy of every entry (the host mutates entries in place on rewrite paths, so
 	 * guests must not share references).
+	 *
+	 * `copy` is injectable because the copier decides whether the snapshot
+	 * survives pathological input at all: `structuredClone` throws `RangeError`
+	 * on a payload nested past the engine's recursion limit, and the collab
+	 * snapshot path builds its chunk train from this return value — so that
+	 * throw lands before the shrinker that exists to bound such an entry, and
+	 * the guest never receives its `final` chunk (issue #11433). The collab host
+	 * passes a depth-bounded copier so one pathological entry degrades on its
+	 * own instead of aborting the whole snapshot.
 	 */
-	snapshotForReplication(): { header: SessionHeader; entries: SessionEntry[] } {
-		return { header: structuredClone(this.#header), entries: structuredClone(this.#entries) as SessionEntry[] };
+	snapshotForReplication(copy: <T>(value: T) => T = structuredClone): {
+		header: SessionHeader;
+		entries: SessionEntry[];
+	} {
+		return { header: copy(this.#header), entries: copy(this.#entries) };
 	}
 
 	/**

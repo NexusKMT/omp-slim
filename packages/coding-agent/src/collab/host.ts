@@ -51,7 +51,15 @@ import {
 	publishCollabHost,
 } from "./registry";
 import { CollabSocket } from "./relay-client";
-import { shrinkForReplication } from "./replication-shrink";
+import {
+	COLLAB_ENTRY_OMITTED_CUSTOM_TYPE,
+	copyForReplication,
+	oversizedEntryNotice,
+	type ReplicatedEntry,
+	replicationByteLength,
+	shrinkReplicatedEntry,
+	shrinkReplicatedEvent,
+} from "./replication-shrink";
 
 /** Events that change the footer state guests render. */
 const STATE_TRIGGER_EVENTS: Record<string, true> = {
@@ -116,7 +124,8 @@ const TRANSCRIPT_ENTRY_TOO_LARGE_ERROR = `transcript entry exceeds transcript fe
  * Soft byte cap per `snapshot-chunk` frame. The first MB of a snapshot takes
  * ~3s through the default relay, so a 512 KB chunk lands well under the
  * guest's 30 s per-chunk progress timeout; oversized single entries still
- * ship in a chunk of their own.
+ * ship in a chunk of their own. Measured in UTF-8 bytes — the unit the relay
+ * and the seal step care about — not UTF-16 code units (#11433).
  */
 const SNAPSHOT_CHUNK_BYTES = 512 * 1024;
 const MAX_PENDING_UI_REQUESTS = 64;
@@ -405,7 +414,7 @@ export class CollabHost {
 		// resolves), and anything that happens after its welcome snapshot must
 		// reach it; the local registry work below is independent of that.
 		this.#unsubscribe = this.#ctx.session.subscribe(event => {
-			if (isWireAgentEvent(event)) this.#send({ t: "event", event: shrinkForReplication(event) });
+			if (isWireAgentEvent(event)) this.#send({ t: "event", event: shrinkReplicatedEvent(event) });
 			this.#onEventForState(event);
 		});
 		// Subagent frames publish on the session tree's observability bus at
@@ -420,7 +429,17 @@ export class CollabHost {
 		}
 		this.#registryUnsubscribe = AgentRegistry.global().onChange(() => this.#scheduleAgentsBroadcast());
 		this.#ctx.sessionManager.onEntryAppended = entry => {
-			if (isWireSessionEntry(entry)) this.#send({ t: "entry", entry: shrinkForReplication(entry) });
+			if (isWireSessionEntry(entry)) {
+				const shrunk = shrinkReplicatedEntry(entry);
+				if (shrunk.type === "custom_message" && shrunk.customType === COLLAB_ENTRY_OMITTED_CUSTOM_TYPE) {
+					// The live path also emits a guest-visible notice: guests only
+					// apply `message` entries to their agent context, so without
+					// this the substitution would be silently invisible there
+					// (PR #11999 review). Notices never enter agent state.
+					this.#send({ t: "event", event: oversizedEntryNotice(entry.type) });
+				}
+				this.#send({ t: "entry", entry: shrunk });
+			}
 			// Model/thinking/title changes land as entries while idle; refresh
 			// guest state promptly (debounce + JSON diff dedupe).
 			this.#scheduleStateBroadcast();
@@ -689,8 +708,18 @@ export class CollabHost {
 		// and chunk sends, so subsequent broadcast frames (entry/event/state/bus)
 		// queue behind the snapshot on the same socket and the guest can't
 		// observe a gap between the snapshot fragment and live traffic.
-		const snapshot = this.#ctx.sessionManager.snapshotForReplication();
-		if (JSON.stringify(snapshot).length > WELCOME_IMAGE_STRIP_THRESHOLD) {
+		// `copyForReplication` rather than the default `structuredClone`: a payload
+		// the engine cannot clone is exactly what the shrinker below exists to
+		// bound, so letting the copy throw here would abort the chunk train before
+		// the bound ever runs (issue #11433).
+		const snapshot = this.#ctx.sessionManager.snapshotForReplication(copyForReplication);
+		// `null` means the snapshot is not serializable as-is (a non-JSON leaf
+		// such as `BigInt`, or a `toJSON` that throws — depth and cycles are
+		// already bounded by `copyForReplication` above); treat it as over the
+		// threshold so images are stripped before the chunker has to fall back
+		// to placeholders.
+		const snapshotBytes = replicationByteLength(snapshot);
+		if (snapshotBytes === null || snapshotBytes > WELCOME_IMAGE_STRIP_THRESHOLD) {
 			let stripped = 0;
 			for (const entry of snapshot.entries) {
 				if (entry.type === "message") stripped += stripImagesFromMessage(entry.message);
@@ -730,14 +759,16 @@ export class CollabHost {
 	/**
 	 * Slice {@link entries} into byte-bounded `snapshot-chunk` frames targeted
 	 * at {@link fromPeer}. Each entry is first run through
-	 * {@link shrinkForReplication} so a single oversized tool-result entry
+	 * {@link shrinkReplicatedEntry} so a single oversized tool-result entry
 	 * cannot ship as an oversized chunk that trips the relay's per-frame
-	 * `maxPayloadLength` (issue #3739). Every batch carries at least one
+	 * `maxPayloadLength` (issue #3739), and an entry that cannot be shrunk at
+	 * all ships as a bounded placeholder instead of stranding the guest
+	 * without a terminator (issue #11433). Every batch carries at least one
 	 * entry, and the last batch is tagged `final: true` so the guest can
 	 * finalize the replica. An empty snapshot still emits one `final` chunk
 	 * so the guest never blocks on a missing terminator.
 	 */
-	#sendSnapshotChunks(entries: (StoredSessionEntry & WireSessionEntry)[], fromPeer: number): void {
+	#sendSnapshotChunks(entries: ReplicatedEntry[], fromPeer: number): void {
 		const socket = this.#socket;
 		if (!socket) return;
 		if (entries.length === 0) {
@@ -746,13 +777,16 @@ export class CollabHost {
 		}
 		let i = 0;
 		while (i < entries.length) {
-			const batch: (StoredSessionEntry & WireSessionEntry)[] = [];
+			const batch: ReplicatedEntry[] = [];
 			let batchBytes = 0;
 			while (i < entries.length) {
 				const entry = entries[i];
 				if (!entry) break;
-				const shrunk = shrinkForReplication(entry);
-				const entryBytes = JSON.stringify(shrunk).length;
+				// Never throws, and always returns a bounded payload: a throw here
+				// would end the train without its `final: true` terminator, and the
+				// guest would time out its join while the host lists it as joined.
+				const shrunk = shrinkReplicatedEntry(entry);
+				const entryBytes = replicationByteLength(shrunk) ?? 0;
 				if (batch.length > 0 && batchBytes + entryBytes > SNAPSHOT_CHUNK_BYTES) break;
 				batch.push(shrunk);
 				batchBytes += entryBytes;
