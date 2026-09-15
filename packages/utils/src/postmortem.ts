@@ -354,7 +354,7 @@ function onStdoutDisconnect(err: Error): void {
  */
 export function registerStdioDisconnectHandling(): () => void {
 	let registered = true;
-	if (isMainThread && stdioDisconnectRegistrations === 0) {
+	if (Bun.isMainThread && stdioDisconnectRegistrations === 0) {
 		process.stdout.on("error", onStdoutDisconnect);
 	}
 	stdioDisconnectRegistrations++;
@@ -362,7 +362,7 @@ export function registerStdioDisconnectHandling(): () => void {
 		if (!registered) return;
 		registered = false;
 		stdioDisconnectRegistrations--;
-		if (isMainThread && stdioDisconnectRegistrations === 0) {
+		if (Bun.isMainThread && stdioDisconnectRegistrations === 0) {
 			process.stdout.removeListener("error", onStdoutDisconnect);
 		}
 	};
