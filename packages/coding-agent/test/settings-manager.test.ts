@@ -1920,6 +1920,17 @@ describe("Settings", () => {
 			expect((await readSettings()).computer).toEqual({ enabled: true });
 		});
 
+		it("maps retired local tiny title models to current equivalents", async () => {
+			await writeSettings({ providers: { tinyModel: "lfm2-350m" } });
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("providers.tinyModel")).toBe("lfm2.5-350m");
+			settings.set("display.showTokenUsage", true);
+			await settings.flush();
+			expect((await readSettings()).providers).toMatchObject({ tinyModel: "lfm2.5-350m" });
+		});
+
 		it("maps removed atom edit mode settings to hashline", async () => {
 			await writeSettings({
 				edit: {
