@@ -23,6 +23,7 @@
 - Ask timeouts above 1,000 seconds now retain their configured duration.
 - Configured extension directories no longer load fallback index files when declared entries are missing.
 - Telemetry no longer sends OTLP when only a non-OTLP exporter is selected.
+- Browser response-body failures now preserve their original protocol errors.
 - Auto-retry waits past the signed 32-bit timer ceiling (e.g. a month-scale OpenCode Go reset with `retry.waitForUsageReset`) now elapse in full instead of overflowing the timer and retrying immediately.
 - JavaScript eval now reports startup failure if both isolated runtimes fail, instead of executing uncancellable code on the host thread.
 - CommonJS extensions now expose computed and non-enumerable named exports while preserving `require`/import identity and reloads.
