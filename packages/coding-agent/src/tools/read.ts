@@ -843,9 +843,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	readonly loadMode = "essential";
 	description: string;
 	get parameters(): typeof readSchema {
-		// `skillful: false` removes the system-prompt catalog and must also
-		// strip the provider-side `skill://` hint, matching sdk.ts:3186.
-		const hasSkills = this.session.settings.get("skillful") && (this.session.skills?.length ?? 0) > 0;
+		// Frozen at the last prompt rebuild: a mid-session `/skillful` toggle
+		// rides the next turn's notice, never the tool prefix.
+		const hasSkills = this.session.skillHintVisible === true;
 		if (this.session.settings.get("memory.backend") === "off") {
 			return hasSkills ? readSchemaWithoutMemoryWithSkills : readSchemaWithoutMemory;
 		}

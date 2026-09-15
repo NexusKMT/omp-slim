@@ -277,6 +277,17 @@ export class SessionTools {
 	#skillWarnings: SkillWarning[];
 	#skillsSettings: SkillsSettings | undefined;
 	#skillsReloadable: boolean;
+	/**
+	 * Snapshot of the skill-URI hint visibility taken at the last system-prompt
+	 * rebuild. The provider-visible system prompt is deliberately byte-stable
+	 * across mid-session `/skillful` toggles (a notice rides the next turn
+	 * instead), so the provider-side hint in `BashTool.description` and
+	 * `ReadTool.parameters` must freeze to the same state — reading the live
+	 * setting per request would mutate the provider tool prefix without the
+	 * intended prompt refresh. The setters below carry the snapshot into the
+	 * tools; the refresh lifecycle updates it.
+	 */
+	#skillHintVisible = false;
 	#acpPermissionDecisions = new Map<string, "allow_always" | "reject_always">();
 
 	constructor(host: SessionToolsHost, options: SessionToolsOptions) {
@@ -317,6 +328,7 @@ export class SessionTools {
 		this.#skillWarnings = options.skillWarnings ?? [];
 		this.#skillsSettings = options.skillsSettings;
 		this.#skillsReloadable = options.skillsReloadable ?? true;
+		this.#refreshSkillHintVisibility();
 		// Seed from the construction slate (top-level tools plus xd:// mounts).
 		// Left empty, getEnabledToolNames() falls back to live agent.state.tools,
 		// so an early reconcile (think/Code Mode after the startup model
@@ -383,6 +395,22 @@ export class SessionTools {
 		return this.#skillsSettings;
 	}
 
+	/**
+	 * Frozen skill-URI hint visibility (see {@link #skillHintVisible}). Tools
+	 * read this instead of the live `skillful` setting so the provider tool
+	 * prefix stays byte-stable between system-prompt rebuilds.
+	 */
+	get skillHintVisible(): boolean {
+		return this.#skillHintVisible;
+	}
+
+	/**
+	 * Re-snapshots hint visibility from the current setting; called by the
+	 * prompt-rebuild lifecycle (see {@link #refreshSkillHintVisibility}).
+	 */
+	#refreshSkillHintVisibility(): void {
+		this.#skillHintVisible = this.#host.settings.get("skillful") === true && (this.#skills?.length ?? 0) > 0;
+	}
 	/** Drops cached per-session ACP `allow_always`/`reject_always` decisions. */
 	clearAcpPermissionDecisions(): void {
 		this.#acpPermissionDecisions.clear();
@@ -1099,6 +1127,7 @@ export class SessionTools {
 				this.#lastAppliedToolSignature = rebuiltSignature;
 				this.#promptModelKey = this.#currentPromptModelKey();
 				this.#basePromptXdevNames = new Set(rebuiltXdevCatalogNames);
+				this.#refreshSkillHintVisibility();
 			} else if (frozenSignature) {
 				this.#notifyToolRosterDelta(previousActiveToolNames, appliedNames);
 				this.#lastAppliedToolSignature = frozenSignature;
@@ -1542,6 +1571,7 @@ export class SessionTools {
 			directToolNames,
 			mountedSignatureTools,
 		);
+		this.#refreshSkillHintVisibility();
 	}
 
 	/** Applies one-turn memory prompt injection before an agent run. */
