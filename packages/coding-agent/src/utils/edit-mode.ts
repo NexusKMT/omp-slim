@@ -46,7 +46,8 @@ export function resolveEditMode(session: EditModeSessionLike): EditMode {
 			identity.class === "kimi" ||
 			identity.class === "mimo" ||
 			identity.class === "deepseek" ||
-			identity.class === "stepfun"
+			identity.class === "stepfun" ||
+			identity.family === "codex-spark"
 		) {
 			return "replace";
 		}

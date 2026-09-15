@@ -69,6 +69,11 @@ describe("resolveEditMode", () => {
 		expect(resolveEditMode(createSession({ activeModel: "kilo/stepfun/step-3.7-flash:free" }))).toBe("replace");
 	});
 
+	test("uses replace for Codex Spark without excluding other Codex models", () => {
+		expect(resolveEditMode(createSession({ activeModel: "openai-codex/gpt-5.3-codex-spark" }))).toBe("replace");
+		expect(resolveEditMode(createSession({ activeModel: "openai-codex/gpt-5.3-codex" }))).toBe("hashline");
+	});
+
 	test("does not exclude non-Kimi Moonshot models", () => {
 		delete Bun.env.PI_EDIT_VARIANT;
 
