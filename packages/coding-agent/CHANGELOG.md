@@ -375,6 +375,10 @@
 
 - `omp plugin install <name>` for npm packages now bypasses bun's manifest cache, so a reinstall picks up a newly published version instead of a stale one, and installing an explicit `<name>@<version>` no longer fails to resolve a version that exists on the registry ([#11634](https://github.com/can1357/oh-my-pi/issues/11634)).
 
+### Fixed
+
+- File slash commands now surface their `argument-hint` frontmatter as inline autocomplete ghost text and ACP `input.hint`, not only in the `/extensions` inspector ([#11647](https://github.com/can1357/oh-my-pi/issues/11647)).
+
 ## [18.1.17] - 2026-09-10
 
 - Stop eval from advertising `agent()` after the session reaches its subagent recursion-depth limit.
