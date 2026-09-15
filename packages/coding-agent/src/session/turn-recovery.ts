@@ -237,6 +237,9 @@ export interface TurnRecoveryHost {
 			suppressHandoff?: boolean;
 			phase?: CodexCompactionContext["phase"];
 			terminalTextAnswer?: boolean;
+			/** Skip `snapcompact` — a byte/payload-limit 413 recovery must not
+			 *  retry with an even larger, media-heavy request (#11482). */
+			excludeMediaMethods?: boolean;
 		},
 	): Promise<RecoveryCompactionResult>;
 	shakeForRequestBodyReadTimeout(generation: number): Promise<boolean>;
@@ -571,7 +574,7 @@ export class TurnRecovery {
 		reason: "overflow" | "incomplete",
 		message: AssistantMessage,
 		allowDefer: boolean,
-		options: { autoContinue: boolean; triggerContextTokens?: number },
+		options: { autoContinue: boolean; triggerContextTokens?: number; excludeMediaMethods?: boolean },
 	): Promise<RecoveryCompactionResult> {
 		return this.#runRecoveryCompactionWithRollback(reason, message, allowDefer, options);
 	}
@@ -1060,7 +1063,7 @@ export class TurnRecovery {
 		reason: "overflow" | "incomplete",
 		assistantMessage: AssistantMessage,
 		allowDefer: boolean,
-		options: { autoContinue: boolean; triggerContextTokens?: number },
+		options: { autoContinue: boolean; triggerContextTokens?: number; excludeMediaMethods?: boolean },
 	): Promise<RecoveryCompactionResult> {
 		const compactionEntryBefore = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
 		await this.dropPersistedAssistantTurn(assistantMessage);
@@ -1068,6 +1071,7 @@ export class TurnRecovery {
 			autoContinue: options.autoContinue,
 			triggerContextTokens: options.triggerContextTokens,
 			phase: "mid_turn",
+			excludeMediaMethods: options.excludeMediaMethods,
 		});
 		const compactionEntryAfter = getLatestCompactionEntry(this.#host.sessionManager.getBranch());
 		if (result.historyRewritten !== true && compactionEntryAfter === compactionEntryBefore) {
