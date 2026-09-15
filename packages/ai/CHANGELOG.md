@@ -25,6 +25,8 @@
 ## [18.1.20] - 2026-09-13
 
 ### Fixed
+- Fixed OpenAI Codex backend rejecting requests with HTTP 400 (`string_above_max_length`) when replaying tool call IDs exceeding 64 characters or containing composite delimiters (`|`, `
+`) by sanitizing and deterministically clamping call IDs on the wire ([#11342](https://github.com/can1357/oh-my-pi/pull/11342)).
 
 - Fixed full OpenAI Responses request-body timeout recovery so the exact HTTP 408 is surfaced for a changed-request recovery instead of repeated unchanged transport retries when eligible tool-result history can be safely elided ([#11878](https://github.com/can1357/oh-my-pi/pull/11878) by [@hellofrommorgan](https://github.com/hellofrommorgan)).
 - Fixed Windows OAuth sign-in failing on every attempt after an upgrade when a previous run left a stale native callback registration behind; handlers registered by older binaries are now recognized as owned and rolled back instead of blocking recovery ([#11967](https://github.com/can1357/oh-my-pi/pull/11967) by [@H4vC](https://github.com/H4vC)).

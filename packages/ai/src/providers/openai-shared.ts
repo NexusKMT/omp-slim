@@ -99,7 +99,7 @@ import {
 } from "./github-copilot-headers";
 import { servedModelFromOpenRouterReasoning } from "./anthropic-signature";
 import type { ChatCompletionCreateParamsStreaming } from "./openai-chat-wire";
-import type { InputItem } from "./openai-codex/request-transformer";
+import { type InputItem, sanitizeCodexCallId } from "./openai-codex/request-transformer";
 import type {
 	Response as OpenAIResponse,
 	ResponseComputerToolCall,
@@ -1420,18 +1420,14 @@ export function normalizeResponsesToolCallIdForTransform(
 	model?: Model<Api>,
 	source?: AssistantMessage,
 ): string {
-	if (!id.includes("|")) return id;
+	const sep = id.search(/[\n|]/);
+	if (sep < 0 && id.length <= 64 && /^[a-zA-Z0-9_-]+$/.test(id)) return id;
 	const isForeignToolCall =
 		source != null && model != null && (source.provider !== model.provider || source.api !== model.api);
-	if (isForeignToolCall) {
-		const [callId, itemId] = id.split("|");
-		const normalizeIdPart = (part: string): string => {
-			const sanitized = part.replace(/[^a-zA-Z0-9_-]/g, "_");
-			const truncated = sanitized.length > 64 ? sanitized.slice(0, 64) : sanitized;
-			return truncated.replace(/_+$/, "");
-		};
-		const normalizedCallId = normalizeIdPart(callId);
-		let normalizedItemId = `fc_${Bun.hash(itemId).toString(36)}`;
+	if (isForeignToolCall || sep >= 0 || id.length > 64) {
+		const [callId, itemId] = sep > 0 ? [id.slice(0, sep), id.slice(sep + 1)] : [id, undefined];
+		const normalizedCallId = sanitizeCodexCallId(callId);
+		let normalizedItemId = itemId ? `fc_${Bun.hash(itemId).toString(36)}` : `fc_${Bun.hash(id).toString(36)}`;
 		if (normalizedItemId.length > 64) normalizedItemId = normalizedItemId.slice(0, 64);
 		return `${normalizedCallId}|${normalizedItemId}`;
 	}

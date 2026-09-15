@@ -4113,7 +4113,7 @@ describe("openai-codex streaming", () => {
 		expect(stats?.deltaRequests).toBe(0);
 	});
 
-	it("chains websocket tool output after normalizing an oversized call id", async () => {
+	it("replays full context rather than chaining when an oversized call id requires wire rewriting", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 		const sentRequests: Array<Record<string, unknown>> = [];
@@ -4205,15 +4205,28 @@ describe("openai-codex streaming", () => {
 		).result();
 
 		expect(sentRequests).toHaveLength(2);
-		expect(sentRequests[1]?.previous_response_id).toBe("resp_tool");
-		expect(sentRequests[1]?.input).toEqual([
-			expect.objectContaining({
-				type: "function_call_output",
-				output: "file contents",
-			}),
-		]);
+		// Because the server emitted an oversized call_id, the client sanitizes it on the wire.
+		// Chaining against the server anchor (which holds the raw unsanitized ID) would fail correlation,
+		// so the chain cleanly breaks and replays full sanitized context.
+		expect(sentRequests[1]?.previous_response_id).toBeUndefined();
+		expect(sentRequests[1]?.input).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "function_call",
+					name: "read_file",
+				}),
+				expect.objectContaining({
+					type: "function_call_output",
+					output: "file contents",
+				}),
+			]),
+		);
+		const inputItems = sentRequests[1]?.input as Array<Record<string, unknown>> | undefined;
+		const callItem = inputItems?.find(i => i.type === "function_call");
+		const outputItem = inputItems?.find(i => i.type === "function_call_output");
+		expect(callItem?.call_id).toBe(outputItem?.call_id);
+		expect(typeof callItem?.call_id === "string" && callItem.call_id.length <= 64).toBe(true);
 	});
-
 	it("chains websocket custom-tool output when live replay retains the provider item id", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-custom-append-");
 		setAgentDir(tempDir.path());
