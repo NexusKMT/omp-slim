@@ -189,6 +189,7 @@
 - Preserved `xd://` device mounting and device-only write restrictions when restoring active tools after temporary toolset restrictions or extension mode toggles ([#11543](https://github.com/can1357/oh-my-pi/pull/11543) by [@shivamklr](https://github.com/shivamklr)).
 - Fixed `omp bench` and `omp if-bench` rejecting models that `omp models` lists (e.g. llama.cpp, Ollama, LM Studio, `models.yml` servers) by retrying model resolution through a live discovery pass when the local cache can't restore their credentials ([#11598](https://github.com/can1357/oh-my-pi/pull/11598) by [@yomgui1](https://github.com/yomgui1)).
 - `omp --fork` with a missing session path now fails with `Session "<path>" not found.` instead of silently opening an empty parentless session ([#11944](https://github.com/can1357/oh-my-pi/pull/11944) by [@onlyysaurabh](https://github.com/onlyysaurabh)).
+- `omp read <mcp-resource>` now waits for a still-handshaking MCP server to finish connecting instead of reporting `No MCP server has resource` when the connect outlasts the startup race ([#11950](https://github.com/can1357/oh-my-pi/issues/11950)).
 
 ## [18.1.19] - 2026-09-12
 
