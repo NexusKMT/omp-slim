@@ -81,6 +81,7 @@
 ### Fixed
 
 - Fixed `extractRetryHint` dropping the longer timing signal when an error body carries both an account reset and an appended retry hint: competing signals now merge by longest window instead of first match, so retries honor the provider's full backoff.
+- `registerStdioDisconnectHandling()` now drives graceful shutdown from `process.stdout`'s own `error` event, so a closed stdout consumer exits cleanly while an unrelated write EPIPE (subprocess stdin, socket) stays fatal ([#10930](https://github.com/can1357/oh-my-pi/issues/10930)).
 
 ## [18.1.7] - 2026-09-03
 
