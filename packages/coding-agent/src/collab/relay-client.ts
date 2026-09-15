@@ -3,7 +3,9 @@
  *
  * Connects to a relay room, seals/opens AES-GCM frames, and reconnects with
  * exponential backoff on transient drops. Guests also survive the relay's
- * host-drop room teardown while the host recreates the room.
+ * host-drop room teardown while the host recreates the room; other fatal relay
+ * close codes (host conflict, room full) and guest decryption failures never
+ * reconnect. Hosts discard undecryptable guest frames without closing the room.
  */
 import { logger } from "@oh-my-pi/pi-utils";
 import { open, seal } from "./crypto";
@@ -249,7 +251,12 @@ export class CollabSocket {
 				try {
 					frame = await open(this.#opts.key, envelope.payload);
 				} catch {
-					this.#failFatal("bad key or corrupted frame");
+					if (this.#ws !== ws) return;
+					if (this.#opts.role === "host") {
+						logger.debug("collab: ignoring undecryptable guest frame", { peer: envelope.peerId });
+					} else {
+						this.#failFatal("bad key or corrupted frame");
+					}
 					return;
 				}
 				if (this.#ws !== ws) return;
