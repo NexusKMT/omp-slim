@@ -647,6 +647,10 @@
 - Searching `free` in the model picker now finds every zero-cost model, not just the ones with `free` in their id.
 - Claude Code sessions without history metadata use the working directory recorded by their transcript before falling back to the encoded project folder name.
 
+### Fixed
+
+- Reassigning a reserved JS Eval global (e.g. `var fs = await import("node:fs/promises")`) now persists across cells instead of silently reverting to the injected value on the next cell ([#10988](https://github.com/can1357/oh-my-pi/issues/10988)).
+
 ## [18.1.11] - 2026-09-05
 
 ### Added
