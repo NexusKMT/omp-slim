@@ -18,6 +18,7 @@ import { completeSimple, type ImageContent, type TextContent } from "@oh-my-pi/p
 import {
 	BINARY_SNIFF_BYTES,
 	type ImageMetadata,
+	IMAGE_METADATA_HEADER_BYTES,
 	isProbablyBinary,
 	isProbablyBinaryHeader,
 	isEnoent,
@@ -159,10 +160,6 @@ export { readToolRenderer } from "./read-renderer";
 /** Largest profile (`*.sample.txt`, `*.cpuprofile`) converted to a bottleneck summary; bigger files read as plain text. */
 const MAX_PROFILE_SUMMARY_BYTES = 32 * 1024 * 1024;
 const MAX_ARTIFACT_RAW_INLINE_BYTES = DEFAULT_MAX_BYTES;
-export const SNAPSHOT_MAX_BYTES = 4 * 1024 * 1024;
-
-/** Extensions that can plausibly be raster/vector images; everything else skips the magic-byte peek. */
-const IMAGE_LIKE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".svgz", ".bmp", ".ico"]);
 /** LF byte, scanned natively to find line boundaries in a buffered file. */
 const LF_BYTE = 0x0a;
 
@@ -1788,18 +1785,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// the structural summary, the rendered window, bracket context, and the
 		// snapshot hash all want the same bytes. Magic bytes come from the
 		// in-memory header whenever the file is buffered (no extra open/read),
-		// so a PNG stored as `.txt` still resolves; only unbuffered files with
-		// implausible extensions skip the single 256KB peek.
-		// `:raw` stays byte-verbatim below.
+		// so a PNG stored as `.txt` still resolves at any size under the cap;
+		// unbuffered files keep one centralized 256KB peek regardless of
+		// extension, since only magic bytes — never the name — decide.
 		const wholeFileBytes = fileSize <= SNAPSHOT_MAX_BYTES ? await readWholeFile(absolutePath) : undefined;
-		const imageHeader = wholeFileBytes?.subarray(0, BINARY_SNIFF_BYTES);
-		const mayBeImage = parsed.kind === "image" || ext === "" || IMAGE_LIKE_EXTENSIONS.has(ext);
-		const imageMetadata =
-			isRawSelector(parsed) || (!mayBeImage && imageHeader === undefined)
-				? null
-				: imageHeader !== undefined
-					? parseImageMetadata(imageHeader)
-					: await readImageMetadata(absolutePath);
+		const imageHeader = wholeFileBytes?.subarray(0, IMAGE_METADATA_HEADER_BYTES);
+		const imageMetadata = isRawSelector(parsed)
+			? null
+			: imageHeader !== undefined
+				? parseImageMetadata(imageHeader)
+				: await readImageMetadata(absolutePath);
 		const mimeType = imageMetadata?.mimeType;
 		const resolvedDisplayPath = formatPathRelativeToCwd(renderAbsolutePath, this.session.cwd);
 		const shouldConvertWithMarkit = CONVERTIBLE_EXTENSIONS.has(ext);
