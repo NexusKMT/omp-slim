@@ -341,6 +341,10 @@
 
 - `/export` HTML now renders bold inline code inside ordered-list items followed by fenced code blocks instead of displaying literal `<strong>` and `<code>` tags ([#11690](https://github.com/can1357/oh-my-pi/issues/11690)).
 
+### Fixed
+
+- Disabled providers are no longer selected as pinned subagent models; ordered agent model lists now skip them ([#11709](https://github.com/can1357/oh-my-pi/issues/11709)).
+
 ## [18.1.17] - 2026-09-10
 
 - Stop eval from advertising `agent()` after the session reaches its subagent recursion-depth limit.

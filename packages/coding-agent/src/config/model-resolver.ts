@@ -1618,6 +1618,9 @@ export function resolveModelOverride(
  * Resolve a list of override patterns to the first matching model, with an
  * auth-aware fallback to the parent session's active model.
  *
+ * Providers disabled through settings are removed before matching so ordered
+ * overrides skip them and an all-disabled list resolves to no model.
+ *
  * If the resolved subagent model has no working credentials (provider has no
  * usable auth), and the parent's active model resolves with working auth,
  * use the parent's model instead. This prevents subagent dispatch from
@@ -1653,7 +1656,13 @@ export async function resolveModelOverrideWithAuthFallback(
 	authFallbackUsed: boolean;
 	warning?: string;
 }> {
-	const primary = resolveModelOverride(modelPatterns, modelRegistry, settings);
+	const disabledProviders = new Set(settings?.get("disabledProviders"));
+	let lookupRegistry: ModelLookupRegistry = modelRegistry;
+	if (disabledProviders.size > 0) {
+		const enabledModels = modelRegistry.getAvailable().filter(model => !disabledProviders.has(model.provider));
+		lookupRegistry = { getAvailable: () => enabledModels };
+	}
+	const primary = resolveModelOverride(modelPatterns, lookupRegistry, settings);
 	if (!primary.model || !parentActiveModelPattern) {
 		return { ...primary, authFallbackUsed: false };
 	}
@@ -1663,7 +1672,7 @@ export async function resolveModelOverrideWithAuthFallback(
 		return { ...primary, authFallbackUsed: false };
 	}
 
-	const fallback = resolveModelOverride([parentActiveModelPattern], modelRegistry, settings);
+	const fallback = resolveModelOverride([parentActiveModelPattern], lookupRegistry, settings);
 	if (!fallback.model) {
 		return { ...primary, authFallbackUsed: false };
 	}

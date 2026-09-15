@@ -2399,6 +2399,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// window.
 			await logger.time("resolveModelDiscoveryDeferredRetry", startRuntimeDiscovery);
 			const matchPreferences = getModelMatchPreferences(settings);
+			const disabledProviders = new Set(settings.get("disabledProviders"));
 			const runtimeResolved = deferredModelPatterns.some(pattern =>
 				pattern.split(",").some(selector => {
 					const trimmedSelector = selector.trim();
@@ -2414,8 +2415,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					// (its discoverable provider hasn't been fetched yet) must NOT
 					// short-circuit the fallback refresh below — otherwise `@role`
 					// selectors pointing at discovery-backed models never trigger the
-					// fetch and fail with `Model "@role" not found`.
-					return Boolean(resolved.model);
+					// fetch and fail with `Model "@role" not found`. A disabled provider
+					// is unreachable, so a match on one likewise must not count: otherwise
+					// a disabled first selector suppresses the discovery refresh an enabled
+					// later selector still needs.
+					return resolved.model !== undefined && !disabledProviders.has(resolved.model.provider);
 				}),
 			);
 			if (!runtimeResolved && modelRegistry.getDiscoverableProviders().length > 0) {
@@ -2423,8 +2427,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					modelRegistry.refresh("online-if-uncached"),
 				);
 			}
-			const allModels = modelRegistry.getAll();
-			const availableModels = modelRegistry.getAvailable();
+			const allEnabledModels =
+				disabledProviders.size === 0
+					? modelRegistry.getAll()
+					: modelRegistry.getAll().filter(candidate => !disabledProviders.has(candidate.provider));
+			const availableModels =
+				disabledProviders.size === 0
+					? modelRegistry.getAvailable()
+					: modelRegistry.getAvailable().filter(candidate => !disabledProviders.has(candidate.provider));
 			const expandedModelPatterns = deferredModelPatterns.flatMap(pattern =>
 				pattern.split(",").flatMap(selector => {
 					const trimmedSelector = selector.trim();
@@ -2457,7 +2467,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						const originalSelector = resolved.configuredPatterns[0];
 						const availableOriginal = parseModelPattern(originalSelector, availableModels, matchPreferences);
 						const originalModel =
-							availableOriginal.model ?? parseModelPattern(originalSelector, allModels, matchPreferences).model;
+							availableOriginal.model ??
+							parseModelPattern(originalSelector, allEnabledModels, matchPreferences).model;
 						const chainKey = resolveRetryFallbackChainKey(
 							fallbackContext,
 							originalSelector,
@@ -2503,7 +2514,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				({ pattern }) => parseModelPattern(pattern, availableModels, matchPreferences).model,
 			)
 				? availableModels
-				: allModels;
+				: allEnabledModels;
 			let usageFallbackTriggered = false;
 			for (let patternIndex = 0; patternIndex < expandedModelPatterns.length; patternIndex += 1) {
 				const { pattern, retryFallback } = expandedModelPatterns[patternIndex];
