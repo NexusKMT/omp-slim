@@ -2166,7 +2166,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					const userLimitedLines = collectedLines.length;
 
 					const totalSelectedLines = totalFileLines - startLine;
-					const wasTruncated = collectedLines.length < totalSelectedLines || stoppedByByteLimit;
+					const wasTruncated = reachedEof && (collectedLines.length < totalSelectedLines || stoppedByByteLimit);
 					const firstLineExceedsLimit = firstLineByteLength !== undefined && firstLineByteLength > maxBytesForRead;
 					const omittedSelectedLine = omittedRequestedLine(
 						byteLimitLine,
@@ -2182,17 +2182,19 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 					// ~50 KB shown on screen.
 					const previewBytes = firstLineExceedsLimit ? (firstLinePreview?.bytes ?? 0) : 0;
 
-					const truncation: TruncationResult = {
-						content: selectedContent,
-						truncated: wasTruncated,
-						truncatedBy: stoppedByByteLimit ? "bytes" : wasTruncated ? "lines" : undefined,
-						totalLines: totalSelectedLines,
-						totalBytes: firstLineExceedsLimit ? (firstLineByteLength ?? previewBytes) : selectedBytes,
-						outputLines: firstLineExceedsLimit ? (previewBytes > 0 ? 1 : 0) : collectedLines.length,
-						outputBytes: firstLineExceedsLimit ? previewBytes : collectedBytes,
-						lastLinePartial: false,
-						firstLineExceedsLimit,
-					};
+					const truncation: TruncationResult | undefined = reachedEof
+						? {
+								content: selectedContent,
+								truncated: wasTruncated,
+								truncatedBy: stoppedByByteLimit ? "bytes" : wasTruncated ? "lines" : undefined,
+								totalLines: totalSelectedLines,
+								totalBytes: firstLineExceedsLimit ? (firstLineByteLength ?? previewBytes) : selectedBytes,
+								outputLines: firstLineExceedsLimit ? (previewBytes > 0 ? 1 : 0) : collectedLines.length,
+								outputBytes: firstLineExceedsLimit ? previewBytes : collectedBytes,
+								lastLinePartial: false,
+								firstLineExceedsLimit,
+							}
+						: undefined;
 
 					const shouldAddHashLines = !rawSelector && displayMode.hashLines;
 					const shouldAddLineNumbers = rawSelector ? false : shouldAddHashLines ? false : displayMode.lineNumbers;
@@ -2202,7 +2204,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						// model returns validates while the live file is unchanged. The
 						// buffered text is that whole file; above the snapshot cap only a
 						// non-truncated whole-file window can supply it.
-						const isWholeFile = offset === undefined && limit === undefined && !wasTruncated;
+						const isWholeFile = reachedEof && offset === undefined && limit === undefined && !wasTruncated;
 						const tag = buffered
 							? getEditStore(this.session).recordSnapshot(absolutePath, buffered.normalizedText)
 							: isWholeFile
@@ -2268,7 +2270,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 
 					let outputText: string;
 
-					if (truncation.firstLineExceedsLimit) {
+					if (firstLineExceedsLimit) {
 						const firstLineBytes = firstLineByteLength ?? 0;
 						const snippet = firstLinePreview ?? { text: "", bytes: 0 };
 
@@ -2284,17 +2286,43 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 								firstLineBytes,
 							)}, exceeds ${formatBytes(maxBytesForRead)} limit. Unable to display a valid UTF-8 snippet.]`;
 						}
-						details = { truncation };
 						sourcePath = renderAbsolutePath;
-						truncationInfo = {
-							result: truncation,
-							options: {
-								direction: "head",
-								startLine: startLineDisplay,
-								totalFileLines: reachedEof ? totalFileLines : undefined,
-							},
-						};
-					} else if (truncation.truncated) {
+						if (truncation) {
+							details = { truncation };
+							truncationInfo = {
+								result: truncation,
+								options: {
+									direction: "head",
+									startLine: startLineDisplay,
+									totalFileLines,
+								},
+							};
+						} else {
+							outputText += shouldAddHashLines
+								? "\n\n[File not scanned to EOF]"
+								: `\n\n[Showing line ${startLineDisplay} (partial, ${formatBytes(
+										snippet.bytes,
+									)} of ${formatBytes(firstLineBytes)}); file not scanned to EOF]`;
+							details = {};
+						}
+					} else if (!reachedEof) {
+						const nextOffset = startLine + userLimitedLines + 1;
+						outputText = formatBracketAwareText() ?? formatText(selectedContent, startLineDisplay);
+						if (omittedSelectedLine) {
+							const lineNumber = omittedSelectedLine.index + 1;
+							outputText += `\n\n${formatOmittedRequestedLineNotice(
+								omittedSelectedLine,
+								maxBytesForRead,
+								`:raw:${lineNumber}-${lineNumber}`,
+							)}`;
+						} else {
+							outputText += `\n\n[More lines in file (${formatBytes(
+								fileSize,
+							)} total; not scanned to EOF). Use :${nextOffset} to continue]`;
+						}
+						details = {};
+						sourcePath = renderAbsolutePath;
+					} else if (truncation?.truncated) {
 						outputText = formatBracketAwareText() ?? formatText(truncation.content, startLineDisplay);
 						if (omittedSelectedLine) {
 							const lineNumber = omittedSelectedLine.index + 1;
@@ -2311,22 +2339,22 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 							options: {
 								direction: "head",
 								startLine: startLineDisplay,
-								totalFileLines: reachedEof ? totalFileLines : undefined,
+								totalFileLines,
 								nextOffset: omittedSelectedLine ? null : undefined,
 							},
 						};
-					} else if (startLine + userLimitedLines < totalFileLines || !reachedEof) {
+					} else if (startLine + userLimitedLines < totalFileLines) {
 						const nextOffset = startLine + userLimitedLines + 1;
 
-						outputText = formatBracketAwareText() ?? formatText(truncation.content, startLineDisplay);
-						outputText += reachedEof
-							? `\n\n[${totalFileLines - (startLine + userLimitedLines)} more lines in file. Use :${nextOffset} to continue]`
-							: `\n\n[More lines in file (${formatBytes(fileSize)} total; not scanned to EOF). Use :${nextOffset} to continue]`;
+						outputText = formatBracketAwareText() ?? formatText(selectedContent, startLineDisplay);
+						outputText += `\n\n[${
+							totalFileLines - (startLine + userLimitedLines)
+						} more lines in file. Use :${nextOffset} to continue]`;
 						details = {};
 						sourcePath = renderAbsolutePath;
 					} else {
 						// No truncation, no user limit exceeded
-						outputText = formatBracketAwareText() ?? formatText(truncation.content, startLineDisplay);
+						outputText = formatBracketAwareText() ?? formatText(selectedContent, startLineDisplay);
 						details = {};
 						sourcePath = renderAbsolutePath;
 					}
