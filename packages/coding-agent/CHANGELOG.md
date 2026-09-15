@@ -123,6 +123,7 @@
 
 ### Fixed
 
+- Subagent transcripts now identify their parent session and attribute host or parent-agent steering to the agent instead of the user ([#12077](https://github.com/can1357/oh-my-pi/issues/12077)).
 - Automatic session titles no longer draw from canned prompt examples.
 - Sessions titled by a local Ollama model (e.g. LFM2.5) no longer stay unnamed when the model's chat template spends the whole output budget on reasoning.
 - User-shell `!` commands now keep their transcript block mutable until queued PTY replay finishes, preventing successful and nonzero stdout/stderr from disappearing into immutable terminal history ([#12062](https://github.com/can1357/oh-my-pi/issues/12062); [#12080](https://github.com/can1357/oh-my-pi/pull/12080) by [@Dante-dan](https://github.com/Dante-dan)).

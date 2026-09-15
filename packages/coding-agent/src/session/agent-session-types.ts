@@ -376,6 +376,20 @@ export interface FollowUpOptions {
 	attribution?: MessageAttribution;
 }
 
+/** Options for AgentSession.steer(). */
+export interface SteerOptions {
+	/** Explicit billing/initiator attribution. */
+	attribution?: MessageAttribution;
+}
+
+/** Options for AgentSession.sendUserMessage(). */
+export interface SendUserMessageOptions {
+	/** Queue behavior; omitted starts a turn when idle and steers while streaming. */
+	deliverAs?: "steer" | "followUp" | "aside";
+	/** Explicit billing/initiator attribution. */
+	attribution?: MessageAttribution;
+}
+
 /** Result from a handoff operation. */
 export interface HandoffResult {
 	document: string;

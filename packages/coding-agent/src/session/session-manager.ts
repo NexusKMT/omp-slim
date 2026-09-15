@@ -1716,7 +1716,7 @@ export class SessionManager {
 	async #setSessionFile(
 		sessionFile: string,
 		loadedSession?: SessionLoadResult,
-		options?: { throwIfMissing?: boolean },
+		options?: { throwIfMissing?: boolean; newSession?: NewSessionOptions },
 	): Promise<void> {
 		await this.#drainAndCloseWriter();
 		this.#clearDiskError();
@@ -1748,7 +1748,7 @@ export class SessionManager {
 			}
 			// Explicit but empty/missing path (e.g. --session flag): start fresh but
 			// keep the requested path and materialize the header immediately.
-			this.#resetToNewSession(undefined, resolvedSessionFile);
+			this.#resetToNewSession(options?.newSession, resolvedSessionFile);
 			this.#expectedDiskSize = sourceSize;
 			this.#forceFileCreation = true;
 			await this.#rewriteAtomically();
@@ -3294,12 +3294,13 @@ export class SessionManager {
 	 * @param sessionDir Optional dir for /new or /branch; defaults to the file's parent.
 	 * @param options.initialCwd Cwd to use when the file is empty or missing.
 	 * @param options.throwIfMissing Propagate ENOENT instead of creating a new session at a missing path.
+	 * @param options.parentSession Parent session file recorded when the file is empty or missing.
 	 */
 	static async open(
 		filePath: string,
 		sessionDir?: string,
 		storage: SessionStorage = new FileSessionStorage(),
-		options?: { initialCwd?: string; suppressBreadcrumb?: boolean; throwIfMissing?: boolean },
+		options?: { initialCwd?: string; parentSession?: string; suppressBreadcrumb?: boolean; throwIfMissing?: boolean },
 	): Promise<SessionManager> {
 		const probed = await loadSessionFile(filePath, storage, { throwIfMissing: options?.throwIfMissing });
 		const header = probed.entries.find(entry => entry.type === "session") as SessionHeader | undefined;
@@ -3327,7 +3328,10 @@ export class SessionManager {
 		const loaded = options?.throwIfMissing
 			? await loadSessionFile(filePath, storage, { throwIfMissing: true })
 			: probed;
-		await manager.#setSessionFile(filePath, loaded, options);
+		await manager.#setSessionFile(filePath, loaded, {
+			throwIfMissing: options?.throwIfMissing,
+			newSession: { parentSession: options?.parentSession },
+		});
 		return manager;
 	}
 

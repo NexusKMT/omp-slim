@@ -1755,7 +1755,9 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 								// never take down event processing (which escalates to terminate).
 								const notice = buildBudgetNotice(progress.requests, softRequestBudget);
 								void Promise.resolve()
-									.then(() => steerSession.sendUserMessage(notice, { deliverAs: "steer" }))
+									.then(() =>
+										steerSession.sendUserMessage(notice, { deliverAs: "steer", attribution: "agent" }),
+									)
 									.catch(err => {
 										logger.warn("Subagent budget steer failed", {
 											error: err instanceof Error ? err.message : String(err),
@@ -3428,6 +3430,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const sessionManagerPromise = sessionFile
 				? SessionManager.open(sessionFile, undefined, undefined, {
 						initialCwd: effectiveCwd,
+						parentSession: options.sessionFile ?? undefined,
 						suppressBreadcrumb: true,
 					})
 				: Promise.resolve(SessionManager.inMemory(effectiveCwd));
