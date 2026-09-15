@@ -146,6 +146,21 @@ describe("GitHub update credentials", () => {
 		expect(token).toBe("gh-token");
 	});
 
+	it("falls back to GH_TOKEN when GITHUB_TOKEN is empty", async () => {
+		const previousGitHubToken = Bun.env.GITHUB_TOKEN;
+		const previousGhToken = Bun.env.GH_TOKEN;
+		Bun.env.GITHUB_TOKEN = "";
+		Bun.env.GH_TOKEN = "gh-env-token";
+		try {
+			expect(await resolveGitHubTokenForTest({ ghPath: null })).toBe("gh-env-token");
+		} finally {
+			if (previousGitHubToken === undefined) delete Bun.env.GITHUB_TOKEN;
+			else Bun.env.GITHUB_TOKEN = previousGitHubToken;
+			if (previousGhToken === undefined) delete Bun.env.GH_TOKEN;
+			else Bun.env.GH_TOKEN = previousGhToken;
+		}
+	});
+
 	it("keeps anonymous fallback when gh is unavailable", async () => {
 		const token = await resolveGitHubTokenForTest({ envToken: "", ghPath: null });
 		expect(token).toBeUndefined();

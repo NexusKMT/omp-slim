@@ -127,7 +127,7 @@ async function resolveGitHubToken(
 		runGhAuthToken?: GitHubCliTokenRunner;
 	} = {},
 ): Promise<string | undefined> {
-	const envToken = options.envToken ?? $env.GITHUB_TOKEN ?? $env.GH_TOKEN;
+	const envToken = options.envToken ?? ($env.GITHUB_TOKEN || $env.GH_TOKEN);
 	if (envToken) return envToken;
 
 	const ghPath = options.ghPath === null ? undefined : (options.ghPath ?? $which("gh"));
