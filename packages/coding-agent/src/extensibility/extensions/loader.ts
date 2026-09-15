@@ -45,7 +45,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionFactory,
-	ExtensionRuntimeContract as IExtensionRuntime,
+	ExtensionRuntime as IExtensionRuntime,
 	LoadExtensionsResult,
 	MessageRenderer,
 	PreparedExtension,
