@@ -52,6 +52,7 @@ import {
 	postmortem,
 	prompt,
 	sanitizeText,
+	stableStringifyJson,
 	setProjectDir,
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
@@ -897,8 +898,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	#vibeSkillInFlight = 0;
 	#vibeScopeSuspendedForSwitch = false;
 	#goalContinuationTimer: NodeJS.Timeout | undefined;
-	#goalTurnHadToolCalls = false;
-	#goalContinuationTurnInFlight = false;
+	/** Submitted continuation turns awaiting their asynchronously delivered `agent_end`. */
+	#pendingGoalContinuationTurns = 0;
+	#previousGoalContinuationActivity: string | undefined;
 	#goalSuppressNextContinuation = false;
 	#planModePreviousModelState: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
 	#pendingModelSwitch: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
@@ -1981,7 +1983,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			if ((this.editor.pendingImages?.length ?? 0) > 0) return;
 			const latestState = this.session.getGoalModeState();
 			if (!latestState?.enabled || latestState.goal.status !== "active") return;
-			this.#goalContinuationTurnInFlight = true;
+			this.#pendingGoalContinuationTurns++;
 			this.onInputCallback(
 				this.startPendingSubmission({
 					text: prompt,
@@ -2344,6 +2346,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			cancelled: false,
 			started: false,
 		};
+		if (submission.customType !== "goal-continuation") {
+			this.#pendingGoalContinuationTurns = 0;
+		}
 		this.#pendingSubmittedInput = submission;
 		this.#pendingSubmissionPreservesDraft = options?.preserveDraft === true;
 		// `submitInteractiveInput` dispatches known `/skill:` text as a custom
@@ -2392,7 +2397,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.clearOptimisticUserMessage();
 		this.#pendingWorkingMessage = undefined;
 		if (submission.customType === "goal-continuation") {
-			this.#goalContinuationTurnInFlight = false;
+			this.#pendingGoalContinuationTurns = Math.max(0, this.#pendingGoalContinuationTurns - 1);
 		}
 		if (this.loadingAnimation) {
 			this.#stopLoadingAnimation(true);
@@ -2454,9 +2459,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.#pendingSubmittedInput = undefined;
 			this.#pendingSubmissionDispose = undefined;
 			this.#pendingSubmissionPreservesDraft = false;
-		}
-		if (input.customType === "goal-continuation") {
-			this.#goalContinuationTurnInFlight = false;
 		}
 
 		if (wasPendingSubmission && !this.session.isStreaming && !this.streamingComponent) {
@@ -3254,6 +3256,26 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#resetGoalContinuationSuppression(): void {
 		this.#goalSuppressNextContinuation = false;
+		this.#previousGoalContinuationActivity = undefined;
+	}
+
+	/** Model-visible tool activity, excluding call IDs and timestamps that differ on every turn. */
+	#goalContinuationActivity(messages: AgentMessage[]): string {
+		const digests: string[] = [];
+		const record = (value: unknown): void => {
+			const serialized = stableStringifyJson(value);
+			digests.push(`${serialized.length}:${Bun.hash(serialized).toString(16)}`);
+		};
+		for (const message of messages) {
+			if (message.role === "assistant") {
+				for (const block of message.content) {
+					if (block.type === "toolCall") record(["call", block.name, block.arguments]);
+				}
+			} else if (message.role === "toolResult") {
+				record(["result", message.toolName, message.content, message.isError === true]);
+			}
+		}
+		return digests.join(":");
 	}
 
 	#getPausedGoalState(): GoalModeState | undefined {
@@ -3293,15 +3315,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async #handleGoalSessionEvent(event: AgentSessionEvent): Promise<void> {
 		if (event.type === "agent_start") {
-			this.#goalTurnHadToolCalls = false;
 			this.#cancelGoalContinuation();
-			return;
-		}
-		if (event.type === "tool_execution_start") {
-			this.#goalTurnHadToolCalls = true;
-			if (!this.#goalContinuationTurnInFlight) {
-				this.#resetGoalContinuationSuppression();
-			}
 			return;
 		}
 		if (event.type === "message_start" && event.message.role === "user" && !event.message.synthetic) {
@@ -3326,9 +3340,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (event.type !== "agent_end") {
 			return;
 		}
-		if (this.#goalContinuationTurnInFlight) {
-			this.#goalSuppressNextContinuation = !this.#goalTurnHadToolCalls;
-			this.#goalContinuationTurnInFlight = false;
+		if (this.#pendingGoalContinuationTurns > 0) {
+			this.#pendingGoalContinuationTurns--;
+			const activity = this.#goalContinuationActivity(event.messages);
+			this.#goalSuppressNextContinuation =
+				activity.length === 0 || activity === this.#previousGoalContinuationActivity;
+			this.#previousGoalContinuationActivity = activity;
+		} else {
+			this.#resetGoalContinuationSuppression();
 		}
 		if (this.session.getGoalModeState()?.mode === "exiting") {
 			await this.#exitGoalMode({ reason: "completed", silent: true });
@@ -3467,8 +3486,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.goalModeEnabled = false;
 			this.goalModePaused = false;
 			this.#goalModePreviousTools = undefined;
-			this.#goalTurnHadToolCalls = false;
-			this.#goalContinuationTurnInFlight = false;
+			this.#pendingGoalContinuationTurns = 0;
+			this.#previousGoalContinuationActivity = undefined;
 			this.#goalSuppressNextContinuation = false;
 			this.#cancelGoalContinuation();
 			this.#updateGoalModeStatus();
@@ -3858,7 +3877,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.goalModeEnabled = false;
 		this.goalModePaused = options?.paused ?? false;
 		this.#goalModePreviousTools = undefined;
-		this.#goalContinuationTurnInFlight = false;
+		this.#pendingGoalContinuationTurns = 0;
+		this.#previousGoalContinuationActivity = undefined;
+		this.#goalSuppressNextContinuation = false;
 		this.#cancelGoalContinuation();
 		this.#updateGoalModeStatus();
 		if (!options?.silent) {
