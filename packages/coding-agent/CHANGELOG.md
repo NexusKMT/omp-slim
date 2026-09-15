@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Sloppy edits support `<SM:AFTER>` to insert new lines after an anchor without repeating or replacing it.
+
 ### Changed
 
 - Codex Spark, all MiniMax models, and GLM-5.3-Flash now default to replace edits instead of hashline; explicit edit-mode overrides remain honored.
