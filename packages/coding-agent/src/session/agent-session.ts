@@ -2836,7 +2836,14 @@ export class AgentSession {
 		// transcript. A message_end handler may still be awaiting an extension at
 		// that boundary; never let its delayed persistence append the previous
 		// conversation to the replacement session.
-		if (this.#promptGeneration !== promptGeneration) return;
+		if (this.#promptGeneration !== promptGeneration) {
+			// The message has already left the agent queue. If it was a deferred TTSR
+			// delivery, queue cleanup cannot clear its reservation.
+			if (message.role === "custom" && message.customType === "ttsr-injection") {
+				this.#ttsr.releaseDeferredReservationFromDetails(message.details);
+			}
+			return;
+		}
 		if (message.role === "hookMessage" || message.role === "custom") {
 			// One-run instructions must not return from persisted history: prewalk
 			// nudges are consumed once, and Vibe context is rebuilt only while active.
@@ -4888,7 +4895,11 @@ export class AgentSession {
 
 	/** Releases deferred TTSR deliveries discarded by a session reset. */
 	#releaseQueuedTtsrReservations(): void {
-		for (const message of [...this.agent.peekSteeringQueue(), ...this.agent.peekFollowUpQueue()]) {
+		this.#releaseTtsrReservations([...this.agent.peekSteeringQueue(), ...this.agent.peekFollowUpQueue()]);
+	}
+
+	#releaseTtsrReservations(messages: AgentMessage[]): void {
+		for (const message of messages) {
 			if (message.role === "custom" && message.customType === "ttsr-injection") {
 				this.#ttsr.releaseDeferredReservationFromDetails(message.details);
 			}
@@ -9336,6 +9347,10 @@ export class AgentSession {
 				this.#advisors.restoreCost(costs, providersBySlug);
 			}
 			this.#bash.finishSessionTransition(bashTransition, true);
+			// Keep the old reservations during rollback; the target is committed now,
+			// so the snapshotted old queues can no longer be restored.
+			this.#releaseTtsrReservations(previousSteeringMessages);
+			this.#releaseTtsrReservations(previousFollowUpMessages);
 			if (previousSessionState.sessionId !== this.sessionManager.getSessionId()) {
 				this.#notifySessionChangeCallbacks();
 			}
