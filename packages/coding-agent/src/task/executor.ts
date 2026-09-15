@@ -2596,7 +2596,7 @@ async function relayWakeTurnOutput(args: {
 	const bus = IrcBus.global();
 	const sources = wakeSources(args.records, args.id);
 	if (sources.length === 0) return;
-	const failed = args.error !== undefined || args.aborted;
+	const failed = args.error !== undefined || args.aborted || args.finalizeError !== undefined;
 	for (const source of sources) {
 		const alreadyMessaged = bus.sentSince(args.id, source.from, args.turnStartTime);
 		// A completed turn's answer would duplicate what the agent already sent
