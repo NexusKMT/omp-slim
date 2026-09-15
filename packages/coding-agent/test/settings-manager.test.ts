@@ -2331,45 +2331,22 @@ describe("Settings", () => {
 			);
 		});
 
-		it("recovers settings from settings.json.bak when config.yml is missing", async () => {
+		it("does not resurrect archived legacy settings after config.yml is removed", async () => {
 			const jsonPath = path.join(agentDir, "settings.json");
-			await fs.promises.writeFile(`${jsonPath}.bak`, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
-			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+			await fs.promises.writeFile(jsonPath, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
 
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("symbolPreset")).toBe("ascii");
-			expect(settings.get("steeringMode")).toBe("all");
-			expect(await readSettings()).toMatchObject({
-				symbolPreset: "ascii",
-				steeringMode: "all",
-			});
-			expect(fs.existsSync(jsonPath)).toBe(false);
+			await Settings.init({ cwd: projectDir, agentDir });
+			expect(await Bun.file(getConfigPath()).exists()).toBe(true);
 			expect(fs.existsSync(`${jsonPath}.bak`)).toBe(true);
-			expect(warnSpy).toHaveBeenCalledWith(
-				"Settings: recovering from orphaned settings.json.bak",
-				expect.objectContaining({ path: `${jsonPath}.bak` }),
-			);
-		});
 
-		it("does not resurrect a stale settings.json.bak when the live settings.json is present but malformed", async () => {
-			const jsonPath = path.join(agentDir, "settings.json");
-			// Newer live file exists but is unparseable; a stale valid backup must not win.
-			await fs.promises.writeFile(jsonPath, '{ "symbolPreset": "unicode", ');
-			await fs.promises.writeFile(`${jsonPath}.bak`, JSON.stringify({ symbolPreset: "ascii", queueMode: "all" }));
-			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+			await fs.promises.rm(getConfigPath());
+			resetSettingsForTest();
+			AgentStorage.close();
+			const reloaded = await Settings.init({ cwd: projectDir, agentDir });
 
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			// The stale backup is neither applied nor promoted to config.yml.
-			expect(settings.get("symbolPreset")).not.toBe("ascii");
+			expect(reloaded.get("symbolPreset")).not.toBe("ascii");
 			expect(await Bun.file(getConfigPath()).exists()).toBe(false);
-			// The malformed live file is left untouched, not archived to .bak.
-			expect(fs.existsSync(jsonPath)).toBe(true);
-			expect(warnSpy).not.toHaveBeenCalledWith(
-				"Settings: recovering from orphaned settings.json.bak",
-				expect.anything(),
-			);
+			expect(fs.existsSync(`${jsonPath}.bak`)).toBe(true);
 		});
 
 		it("migrates legacy power booleans with system=true to system level", async () => {

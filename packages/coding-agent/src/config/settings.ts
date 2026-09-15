@@ -1964,38 +1964,24 @@ export class Settings {
 
 		let settings: RawSettings = {};
 		let migrated = false;
-		let jsonSourcePath: string | undefined;
+		let migratedSettingsJson = false;
 
 		const settingsJsonPath = path.join(this.#agentDir, "settings.json");
-		const settingsJsonBakPath = `${settingsJsonPath}.bak`;
-
-		// Prefer the live file; fall back to an orphaned .bak left behind by a
-		// previous migration that renamed before the durable write completed.
-		for (const candidate of [settingsJsonPath, settingsJsonBakPath]) {
-			try {
-				const parsed: unknown = JSONC.parse(await Bun.file(candidate).text());
-				if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-					settings = this.#deepMerge(settings, this.#migrateRawSettings(parsed as RawSettings));
-					migrated = true;
-					jsonSourcePath = candidate;
-					if (candidate === settingsJsonBakPath) {
-						logger.warn("Settings: recovering from orphaned settings.json.bak", { path: candidate });
-					}
-					break;
-				}
-				// A present-but-non-object legacy file is unusable; don't fall back to a
-				// stale .bak that would overwrite the newer live file.
-				logger.warn("Settings: ignoring non-object legacy settings.json", { path: candidate });
-				break;
-			} catch (error) {
-				// Only an absent live file should trigger .bak recovery; a malformed or
-				// unreadable live file must not be replaced by a stale backup.
-				if (isEnoent(error)) continue;
+		try {
+			const parsed: unknown = JSONC.parse(await Bun.file(settingsJsonPath).text());
+			if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+				settings = this.#deepMerge(settings, this.#migrateRawSettings(parsed as RawSettings));
+				migrated = true;
+				migratedSettingsJson = true;
+			} else {
+				logger.warn("Settings: ignoring non-object legacy settings.json", { path: settingsJsonPath });
+			}
+		} catch (error) {
+			if (!isEnoent(error)) {
 				logger.warn("Settings: failed to read legacy settings.json", {
-					path: candidate,
+					path: settingsJsonPath,
 					error: String(error),
 				});
-				break;
 			}
 		}
 
@@ -2021,9 +2007,9 @@ export class Settings {
 				return;
 			}
 
-			if (jsonSourcePath === settingsJsonPath) {
+			if (migratedSettingsJson) {
 				try {
-					await fs.promises.rename(settingsJsonPath, settingsJsonBakPath);
+					await fs.promises.rename(settingsJsonPath, `${settingsJsonPath}.bak`);
 				} catch (error) {
 					logger.warn("Settings: failed to archive settings.json after migration", {
 						path: settingsJsonPath,
