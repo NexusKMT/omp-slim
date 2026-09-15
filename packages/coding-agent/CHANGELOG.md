@@ -16,6 +16,7 @@
 
 ### Changed
 
+- Compiled binaries ship precompiled bytecode: `omp` boots in ~30 ms instead of ~250 ms and the interactive prompt accepts input ~300 ms sooner, at the cost of a larger binary.
 - Welcome recents refresh after first paint, and attachment bands reuse cached chip state until the draft changes.
 - Interactive startup paints its speculative frame before loading the session runtime; model/auth dialogs and browser/computer preludes load on first use.
 - Status-line redraws reuse unchanged segment output, settings groups, and tool token estimates while preserving live invalidation.
