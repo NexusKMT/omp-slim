@@ -13,6 +13,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { formatNumber } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
+import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import type { AssistantThinkingRenderer } from "../../extensibility/extensions/types";
 import { getMarkdownTheme, theme } from "../../modes/theme/theme";
 import { resolveImageOptions } from "../../tools/render-utils";
@@ -48,18 +49,19 @@ type StablePart = { kind: "thinking" | "text"; text: string } | { kind: "spacer"
  * them retire into native scrollback mid-stream.
  */
 interface StableSnapshot {
-	readonly key: string;
-	readonly parts: readonly StablePart[];
+	// Earlier parts are immutable; only the final part needs a historical offset.
+	readonly partCount: number;
+	readonly lastTextLength: number;
 }
 
-function isSnapshotExtension(previous: StableSnapshot, current: StableSnapshot): boolean {
-	if (previous.parts.length > current.parts.length) return false;
-	for (let index = 0; index < previous.parts.length; index++) {
-		const before = previous.parts[index]!;
-		const after = current.parts[index]!;
+function isSnapshotExtension(previous: readonly StablePart[], current: readonly StablePart[]): boolean {
+	if (previous.length > current.length) return false;
+	for (let index = 0; index < previous.length; index++) {
+		const before = previous[index]!;
+		const after = current[index]!;
 		if (before.kind !== after.kind) return false;
 		if (before.kind === "spacer" || after.kind === "spacer") continue;
-		const isLast = index === previous.parts.length - 1;
+		const isLast = index === previous.length - 1;
 		if (isLast ? !after.text.startsWith(before.text) : after.text !== before.text) return false;
 	}
 	return true;
@@ -249,11 +251,13 @@ export class AssistantMessageComponent extends Container {
 	 *  Undefined until the first thinking update of this block. */
 	#lastTokenCount: number | undefined;
 	#lastTokenTime = 0;
-	/** Published width-independent thinking prefixes; grows only, never retracts. */
+	/** Published width-independent stable prefixes; grows only, never retracts. */
 	#stableSnapshots: StableSnapshot[] = [];
+	#stableParts: readonly StablePart[] = [];
+	#nextStableRowId = 0;
 	#transcriptStableRows: TranscriptStableRow[] = [];
-	/** Rendered stable rows memoized by `${count}:${width}`, insertion-evicted. */
-	#stableRenderCache = new Map<string, readonly string[]>();
+	/** Keep the previous and current render, not every cumulative published prefix. */
+	#stableRenderCache = new LRUCache<string, readonly string[]>({ max: 2 });
 	/** Provider-reported tokens in the live thinking block — reasoning tokens when
 	 *  the provider streams them, else total output — shown dimmed beside the
 	 *  speed badge. 0 when no thinking is streaming. */
@@ -598,6 +602,7 @@ export class AssistantMessageComponent extends Container {
 	 */
 	resetTranscriptStableRows(): void {
 		this.#stableSnapshots = [];
+		this.#stableParts = [];
 		this.#transcriptStableRows = [];
 		this.#stableRenderCache.clear();
 	}
@@ -608,13 +613,14 @@ export class AssistantMessageComponent extends Container {
 		const key = `${index}:${width}`;
 		const cached = this.#stableRenderCache.get(key);
 		if (cached) return cached;
-		const rows = this.#renderStableSnapshot(this.#stableSnapshots[index - 1]!, width);
-		this.#stableRenderCache.set(key, rows);
-		// Bounded: the container re-requests only recent counts at live widths.
-		if (this.#stableRenderCache.size > 64) {
-			const oldest = this.#stableRenderCache.keys().next().value;
-			if (oldest !== undefined) this.#stableRenderCache.delete(oldest);
+		const snapshot = this.#stableSnapshots[index - 1]!;
+		const parts = this.#stableParts.slice(0, snapshot.partCount);
+		const last = parts.at(-1);
+		if (last && last.kind !== "spacer") {
+			parts[parts.length - 1] = { kind: last.kind, text: last.text.slice(0, snapshot.lastTextLength) };
 		}
+		const rows = this.#renderStableSnapshot(parts, width);
+		this.#stableRenderCache.set(key, rows);
 		return rows;
 	}
 
@@ -628,12 +634,15 @@ export class AssistantMessageComponent extends Container {
 	 */
 	#publishStableSnapshot(rendered: readonly string[], width: number): void {
 		if (!this.#midStreamPublication) return;
-		const snapshot = this.#currentStableSnapshot();
-		if (!snapshot) return;
+		const parts = this.#currentStableSnapshot();
+		if (!parts) return;
+		const last = parts.at(-1);
+		if (!last || last.kind === "spacer") return;
+		const snapshot = { partCount: parts.length, lastTextLength: last.text.length };
 		const previous = this.#stableSnapshots.at(-1);
-		if (previous?.key === snapshot.key) return;
-		if (previous && !isSnapshotExtension(previous, snapshot)) return;
-		const currentRows = this.#renderStableSnapshot(snapshot, width);
+		if (previous && !isSnapshotExtension(this.#stableParts, parts)) return;
+		if (previous?.partCount === snapshot.partCount && previous.lastTextLength === snapshot.lastTextLength) return;
+		const currentRows = this.#renderStableSnapshot(parts, width);
 		// The container verifies stable rows against the blank-trimmed render.
 		if (!isRowPrefix(currentRows, trimBlankEdges(rendered))) return;
 		const previousRows = previous
@@ -642,8 +651,9 @@ export class AssistantMessageComponent extends Container {
 		if (!isRowPrefix(previousRows, currentRows)) return;
 		// Each stable row must add at least one physical row at every width.
 		if (currentRows.length === previousRows.length) return;
+		this.#stableParts = parts;
 		this.#stableSnapshots.push(snapshot);
-		this.#transcriptStableRows.push({ key: snapshot.key });
+		this.#transcriptStableRows.push({ key: `thinking:${this.#nextStableRowId++}` });
 		this.#stableRenderCache.set(`${this.#stableSnapshots.length}:${width}`, currentRows);
 	}
 
@@ -654,7 +664,7 @@ export class AssistantMessageComponent extends Container {
 	 * (finalized or non-transient renders, marker rows, extension components,
 	 * hidden thinking, or no frozen prefix yet).
 	 */
-	#currentStableSnapshot(): StableSnapshot | undefined {
+	#currentStableSnapshot(): readonly StablePart[] | undefined {
 		if (this.#transcriptBlockFinalized || !this.#lastUpdateTransient) return undefined;
 		if (this.#markerSlot.children.length > 0) return undefined;
 		const items = this.#fastPathItems;
@@ -691,12 +701,12 @@ export class AssistantMessageComponent extends Container {
 		}
 		while (parts.at(-1)?.kind === "spacer") parts.pop();
 		if (parts.length === 0) return undefined;
-		return { key: JSON.stringify(parts), parts };
+		return parts;
 	}
 
-	#renderStableSnapshot(snapshot: StableSnapshot, width: number): readonly string[] {
+	#renderStableSnapshot(parts: readonly StablePart[], width: number): readonly string[] {
 		const rows: string[] = [];
-		for (const part of snapshot.parts) {
+		for (const part of parts) {
 			if (part.kind === "spacer") {
 				rows.push("");
 				continue;
@@ -737,6 +747,7 @@ export class AssistantMessageComponent extends Container {
 
 	markTranscriptBlockFinalized(): void {
 		this.#transcriptBlockFinalized = true;
+		this.#stableRenderCache.clear();
 		this.#stopThinkingAnimation();
 		// If the live pulse was on screen when the block sealed, drop the fast path
 		// and rebuild so the placeholder is removed — finalized blocks never animate.

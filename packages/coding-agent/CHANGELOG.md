@@ -317,6 +317,7 @@
 ### Fixed
 
 - `write` now rejects exact incomplete read projections before they can replace and truncate an existing file ([#11792](https://github.com/can1357/oh-my-pi/issues/11792)).
+- Long reasoning streams retain less memory while preserving scrollback and terminal-width replay.
 ### Added
 
 - Added session-local `/btw` history with persistent answers and follow-ups; bare `/btw` reopens history, Escape cancels running answers before closing, and new questions no longer replace an in-progress answer.
