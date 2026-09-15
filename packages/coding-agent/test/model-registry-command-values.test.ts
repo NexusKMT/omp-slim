@@ -586,4 +586,53 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 		expect(fs.readFileSync(counterA, "utf8")).toBe("11");
 		expect(fs.readFileSync(counterB, "utf8")).toBe("1");
 	});
+
+	test("refreshProvider('online') re-runs extension-registered command-backed headers", async () => {
+		const providerHeaderFile = path.join(tempDir, "provider-header.txt");
+		const modelHeaderFile = path.join(tempDir, "model-header.txt");
+		const providerCounter = path.join(tempDir, "provider-counter.txt");
+		const modelCounter = path.join(tempDir, "model-counter.txt");
+		fs.writeFileSync(providerHeaderFile, "stale-provider");
+		fs.writeFileSync(modelHeaderFile, "stale-model");
+		fs.writeFileSync(providerCounter, "");
+		fs.writeFileSync(modelCounter, "");
+		fs.writeFileSync(modelsPath, JSON.stringify({ providers: {} }));
+
+		const registry = new ModelRegistry(authStorage, modelsPath);
+		registry.registerProvider("ext-proxy", {
+			baseUrl: "https://ext.example.com/v1",
+			api: "openai-completions",
+			apiKey: "literal-key",
+			headers: { "x-tenant-token": `!${trackedTokenCommand(providerHeaderFile, providerCounter)}` },
+			models: [
+				{
+					id: "ext-model",
+					name: "Ext",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 4096,
+					maxTokens: 1024,
+					headers: { "x-model-token": `!${trackedTokenCommand(modelHeaderFile, modelCounter)}` },
+				},
+			],
+		});
+
+		const model = registry.find("ext-proxy", "ext-model");
+		if (!model) throw new Error("Expected extension model");
+		expect(model.headers?.["x-tenant-token"]).toBe("stale-provider");
+		expect(model.headers?.["x-model-token"]).toBe("stale-model");
+		expect(fs.readFileSync(providerCounter, "utf8")).toBe("1");
+		expect(fs.readFileSync(modelCounter, "utf8")).toBe("1");
+
+		fs.writeFileSync(providerHeaderFile, "fresh-provider");
+		fs.writeFileSync(modelHeaderFile, "fresh-model");
+		await registry.refreshProvider("ext-proxy", "online");
+
+		const refreshed = registry.find("ext-proxy", "ext-model");
+		expect(refreshed?.headers?.["x-tenant-token"]).toBe("fresh-provider");
+		expect(refreshed?.headers?.["x-model-token"]).toBe("fresh-model");
+		expect(fs.readFileSync(providerCounter, "utf8")).toBe("11");
+		expect(fs.readFileSync(modelCounter, "utf8")).toBe("11");
+	});
 });
