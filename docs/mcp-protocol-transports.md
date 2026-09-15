@@ -218,7 +218,7 @@ Two SSE paths exist:
 
 ## Malformed payload and disconnect handling
 
-SSE JSON parsing errors bubble out of `readSseJson` and reject request/listener.
+The shared `readSseEvents` decoder supports LF, CRLF, and lone CR, including delimiters split across chunks. JSON parsing errors in transport consumers reject the request/listener.
 
 - Request SSE parse errors reject the active request.
 - Background listener errors trigger `onError` (except AbortError), and an established listener ending while still connected triggers `onClose` so the manager can reconnect.
