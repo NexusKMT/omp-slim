@@ -376,13 +376,9 @@ function generateZsh(spec: CompletionSpec): string {
 	parts.push(`_omp_call() {
 	# zsh's _arguments invokes an action function with the compadd options it
 	# computed prepended ($subopts, then $expl — _arguments:465), so $1 is
-	# "-J" in a stock setup and the kind arrives after them. Skip the leading
-	# option/value pairs before reading it, or every dynamic completion asks
-	# \`${bin} __complete -J\` and comes back empty.
-	while [[ $1 == -* && $# -gt 1 ]]; do
-		shift 2
-	done
-	local kind=$1
+	# "-J" in a stock setup and the kind arrives last. Read it from the end:
+	# the prepended options can be either flags or option/value pairs.
+	local kind=\${argv[-1]}
 	local -a items
 	local line
 	for line in "\${(@f)$(command ${bin} __complete $kind -- "$PREFIX" 2>/dev/null)}"; do

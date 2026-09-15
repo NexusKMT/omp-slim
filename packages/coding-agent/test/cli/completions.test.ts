@@ -104,7 +104,7 @@ describe.skipIf(!hasZsh)("zsh action helper under _arguments' calling convention
 			fs.writeFileSync(
 				path.join(dir, "harness.zsh"),
 				// _describe only exists inside a completion context.
-				`_describe() { :; }\n${fn}\n_omp_call -J -default- sessions\n`,
+				`_describe() { :; }\n${fn}\n_omp_call -n -J -default- sessions\n`,
 			);
 
 			const result = Bun.spawnSync(["zsh", "-f", path.join(dir, "harness.zsh")], {
@@ -116,11 +116,11 @@ describe.skipIf(!hasZsh)("zsh action helper under _arguments' calling convention
 			const argv = fs.existsSync(path.join(dir, "argv.log"))
 				? fs.readFileSync(path.join(dir, "argv.log"), "utf8")
 				: "";
-			// zsh calls the action as `fn <compadd options> <expl> <kind>`, so the
-			// kind is the fourth argv element; -J is the first. Before the fix the
-			// stub saw `__complete -J -- `.
+			// zsh calls the action as `fn <compadd options> <expl> <kind>`.
+			// Both valueless flags (-n) and option/value pairs (-J -default-) can
+			// precede the kind. Before the fix the stub saw `__complete -n -- `.
 			expect(argv).toContain("__complete sessions --");
-			expect(argv).not.toContain("__complete -J");
+			expect(argv).not.toContain("__complete -n");
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
