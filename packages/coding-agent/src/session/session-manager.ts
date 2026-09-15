@@ -16,6 +16,7 @@ import {
 	isEnoent,
 	isEnotdir,
 	logger,
+	pathIsWithin,
 	stringifyJson,
 	toError,
 } from "@oh-my-pi/pi-utils";
@@ -3086,7 +3087,11 @@ export class SessionManager {
 			// findMostRecentSession(), which would resurrect an older transcript.
 			// Explicit newSession() boundaries are materialized before it returns so
 			// this remains correct even when the relaunch has a different terminal id.
-			if (breadcrumb.fresh && !breadcrumb.exists) {
+			if (
+				breadcrumb.fresh &&
+				!breadcrumb.exists &&
+				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
+			) {
 				const manager = new SessionManager(cwd, dir, true, storage);
 				manager.#resetToNewSession();
 				return manager;
@@ -3097,7 +3102,9 @@ export class SessionManager {
 			breadcrumb.sessionFile = resolveBreadcrumbToInteractiveRoot(breadcrumb.sessionFile);
 			const breadcrumbCwd = path.resolve(breadcrumb.cwd);
 			if (breadcrumbCwd === resolvedCwd) {
-				chosenSession = breadcrumb.sessionFile;
+				if (!sessionDir || pathIsWithin(dir, breadcrumb.sessionFile)) {
+					chosenSession = breadcrumb.sessionFile;
+				}
 			} else {
 				// The terminal's last session started in a different cwd. Re-root only
 				// when that cwd is gone *and* this location is the same directory
