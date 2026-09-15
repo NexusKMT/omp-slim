@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Enter now runs a slash command whose argument completes to a directory, instead of descending into it.
+
 ## [18.2.0] - 2026-09-15
 
 ### Added

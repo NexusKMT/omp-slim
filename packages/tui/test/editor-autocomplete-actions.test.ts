@@ -21,6 +21,12 @@ function onceAutocompleteUpdate(editor: Editor): Promise<void> {
 	};
 	return promise;
 }
+/** Drain queued microtasks (and one macrotask) so chained autocomplete triggers run. */
+async function drainMicrotasks(): Promise<void> {
+	for (let i = 0; i < 20; i += 1) await Promise.resolve();
+	await new Promise(resolve => setTimeout(resolve, 0));
+	for (let i = 0; i < 20; i += 1) await Promise.resolve();
+}
 /** Resolve once the popup is open, driven by autocomplete update events (no wall-clock waits). */
 async function untilAutocompleteShown(editor: Editor): Promise<void> {
 	while (!editor.isShowingAutocomplete()) {
@@ -247,6 +253,41 @@ describe("Editor slash autocomplete acceptance", () => {
 			expect(editor.getText()).toBe("@packages/");
 			expect(editor.isShowingAutocomplete()).toBe(true);
 			expect(submitted).toBe("");
+		} finally {
+			fs.rmSync(baseDir, { recursive: true, force: true });
+		}
+	});
+
+	it("submits a slash-command directory argument with Enter instead of chaining into it", async () => {
+		const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "editor-slash-directory-enter-"));
+		try {
+			const normalizedBaseDir = baseDir.replace(/\\/g, "/");
+			const target = `${normalizedBaseDir}/sibling`;
+			fs.mkdirSync(path.join(target, "child"), { recursive: true });
+			const editor = new Editor(defaultEditorTheme);
+			editor.setAutocompleteProvider(new CombinedAutocompleteProvider([], baseDir));
+			let submitted = "";
+			editor.onSubmit = text => {
+				submitted = text;
+			};
+
+			editor.setText(`/move ${target}`);
+			const autocompleteOpened = onceAutocompleteUpdate(editor);
+			editor.handleInput("\t");
+			await autocompleteOpened;
+			expect(editor.isShowingAutocomplete()).toBe(true);
+
+			// Enter with the popup open accepts the selection and returns; it never
+			// submits. Chaining is what breaks the command: the popup reopens on the
+			// accepted directory's children, so every following Enter descends a level
+			// and the submission never happens. The re-trigger is queued as a
+			// microtask, so drain it before observing the popup.
+			editor.handleInput("\r");
+			await drainMicrotasks();
+			expect(editor.isShowingAutocomplete()).toBe(false);
+
+			editor.handleInput("\r");
+			expect(submitted.startsWith("/move ")).toBe(true);
 		} finally {
 			fs.rmSync(baseDir, { recursive: true, force: true });
 		}
