@@ -497,11 +497,13 @@ describe("OpenRouter Responses request shape", () => {
 		expect(bodies[1]?.input).toEqual([{ role: "user", content: [{ type: "input_text", text: "continue" }] }]);
 	});
 
-	it("synthesizes the required reasoning item without a fabricated id for foreign tool-call history", async () => {
+	it("replays foreign tool-call history without a fabricated reasoning id", async () => {
 		// Meta (via OpenRouter Responses) validates reasoning ids against its own
 		// store and rejects a minted `rs_…` with "Referenced reasoning item … was
 		// not found or has expired", failing every turn once a Claude/Bedrock or
-		// DeepSeek turn with a tool call sits in the history.
+		// DeepSeek turn with a tool call sits in the history. Muse's compat filters
+		// reasoning history and forbids synthetic items outright, so nothing is
+		// synthesized for it; targets that still require the item get it id-less.
 		const usage = {
 			input: 0,
 			output: 0,
@@ -543,8 +545,17 @@ describe("OpenRouter Responses request shape", () => {
 				{ role: "user", content: "continue", timestamp: 3 },
 			],
 		};
-		const body = await capturePseudoResponsesRequest(
+		const museBody = await capturePseudoResponsesRequest(
 			buildOpenRouterModel({ id: "meta/muse-spark-1.3", reasoning: true }),
+			{ reasoning: Effort.Medium },
+			history,
+		);
+		const museInput = museBody.input as Array<Record<string, unknown>>;
+		expect(museInput.filter(item => item.type === "reasoning")).toHaveLength(0);
+		expect(museInput.some(item => item.type === "function_call")).toBe(true);
+
+		const body = await capturePseudoResponsesRequest(
+			buildOpenRouterModel({ id: "moonshotai/kimi-k2.5", reasoning: true }),
 			{ reasoning: Effort.Medium },
 			history,
 		);
