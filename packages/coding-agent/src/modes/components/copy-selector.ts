@@ -25,6 +25,12 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
+import {
+	isUserRequestEntry,
+	type TranscriptEntry,
+	transcriptEntryMessage,
+	userTurnDraft,
+} from "../../session/session-context";
 import type { SessionMessageEntry } from "../../session/session-entries";
 import { replaceTabs } from "../../tools/render-utils";
 import { highlightCode, type ThemeColor, theme } from "../theme/theme";
@@ -41,10 +47,10 @@ import {
 	appendOutlineEntries,
 	type ComposedColumn,
 	composeOutlineColumn,
+	OutlineRowCache,
 	type OutlineTarget,
 	outlineRows,
 	outlineVisibility,
-	stripPromptZones,
 } from "./transcript-outline";
 
 export interface CopySelectorDeps {
@@ -85,6 +91,13 @@ const BLOCK_PREVIEW_LINES = 12;
 const OUTLINE_COLOR: ThemeColor = "success";
 /** Rows above the scroll view: top rule, header, rule. Mouse rows map through this offset. */
 const CONTENT_TOP = 3;
+/**
+ * Entries replayed when the picker opens. Replaying a long session's whole
+ * branch costs seconds before the first frame (one component built and
+ * rendered per entry), and the clipboard target is almost always recent, so
+ * the picker starts at this tail and loads the rest on demand (`a`).
+ */
+const INITIAL_ENTRIES = 600;
 
 /** A clickable control on a block caption, in composed-column columns. */
 interface ControlRegion {
@@ -109,29 +122,65 @@ export class CopySelectorComponent implements Component {
 	#blockCache = new Map<string, CopyBlock[]>();
 	/** Click targets of the last render, keyed by composed-column line index. */
 	#controls = new Map<number, ControlRegion[]>();
+	#rowCache = new OutlineRowCache();
+
+	/** Whole branch; the picker may currently replay only its tail. */
+	#entries: TranscriptEntry[];
+	/** True while older history is still unreplayed. */
+	#truncated = false;
 
 	constructor(
-		entries: SessionMessageEntry[],
+		entries: TranscriptEntry[],
 		private readonly deps: CopySelectorDeps,
 	) {
-		this.#builder = new ChatTranscriptBuilder({
-			ui: deps.ui,
-			getTool: deps.getTool,
-			isBuiltInTool: deps.isBuiltInTool,
-			getMessageRenderer: deps.getMessageRenderer,
-			cwd: deps.cwd,
-			hideThinkingBlock: deps.hideThinkingBlock,
-			proseOnlyThinking: deps.proseOnlyThinking,
-			linkTargets: deps.linkTargets,
-			requestRender: deps.requestRender,
-		});
-		this.#targets = appendOutlineEntries(this.#builder, entries);
+		this.#entries = entries;
+		const tail = recentEntries(entries, INITIAL_ENTRIES);
+		this.#truncated = tail.length < entries.length;
+		this.#builder = this.#replay(tail);
 		this.#selected = Math.max(0, this.#targets.length - 1);
 		this.#scrollView = new ScrollView([], {
 			height: 10,
 			scrollbar: "auto",
 			theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
 		});
+	}
+
+	/** Build a transcript for `entries` and adopt its targets. */
+	#replay(entries: TranscriptEntry[]): ChatTranscriptBuilder {
+		const builder = new ChatTranscriptBuilder({
+			ui: this.deps.ui,
+			getTool: this.deps.getTool,
+			isBuiltInTool: this.deps.isBuiltInTool,
+			getMessageRenderer: this.deps.getMessageRenderer,
+			cwd: this.deps.cwd,
+			hideThinkingBlock: this.deps.hideThinkingBlock,
+			proseOnlyThinking: this.deps.proseOnlyThinking,
+			linkTargets: this.deps.linkTargets,
+			requestRender: this.deps.requestRender,
+		});
+		builder.setExpanded(this.#expanded);
+		this.#targets = appendOutlineEntries(builder, entries);
+		return builder;
+	}
+
+	/**
+	 * Replay the whole branch, keeping the outline on the same turn. Pays the
+	 * full replay cost once, only when the user asks for older history.
+	 */
+	#loadFullHistory(): void {
+		if (!this.#truncated) return;
+		const selectedId = this.#targets[this.#selected]?.turnId;
+		const previous = this.#builder;
+		this.#builder = this.#replay(this.#entries);
+		previous.dispose();
+		this.#truncated = false;
+		this.#visible = undefined;
+		const restored = selectedId ? this.#targets.findIndex(target => target.turnId === selectedId) : -1;
+		this.#selected = restored >= 0 ? restored : Math.max(0, this.#targets.length - 1);
+		this.#blocks = undefined;
+		this.#blockSelected = 0;
+		this.#scrollToSelection = true;
+		this.deps.requestRender();
 	}
 
 	/** Number of copyable transcript items; hosts skip mounting when zero. */
@@ -163,8 +212,11 @@ export class CopySelectorComponent implements Component {
 		if (data.startsWith("\x1b[<")) {
 			routeSgrMouseInput(data, event => {
 				if (event.wheel !== null) {
+					// A wheel notch at either end moves nothing: repainting it
+					// anyway makes the frame twitch under a fast wheel.
+					const before = this.#scrollView.getScrollOffset();
 					this.#scrollView.scroll(event.wheel * 3);
-					this.deps.requestRender();
+					if (this.#scrollView.getScrollOffset() !== before) this.deps.requestRender();
 					return true;
 				}
 				if (event.leftClick) this.#click(event.row, event.col);
@@ -205,6 +257,10 @@ export class CopySelectorComponent implements Component {
 		}
 		if (matchesKey(data, "left")) {
 			if (this.#blocks) this.#ascend();
+			return;
+		}
+		if ((data === "a" || data === "A") && !this.#blocks) {
+			this.#loadFullHistory();
 			return;
 		}
 		if (data === "o" || data === "O") {
@@ -286,7 +342,7 @@ export class CopySelectorComponent implements Component {
 		const contentWidth = Math.max(1, width - 1);
 		const children = this.#builder.container.children;
 		const inner = Math.max(10, contentWidth - 4);
-		const childRows = children.map(child => stripPromptZones(child.render(inner)));
+		const childRows = this.#rowCache.rows(children, inner);
 
 		this.#visible = outlineVisibility(childRows, this.#targets);
 		if (this.#visible[this.#selected] === false) {
@@ -353,8 +409,10 @@ export class CopySelectorComponent implements Component {
 		const openHint = selectedBlock?.href && this.deps.onOpen ? "  o open" : "";
 		const hint = this.#blocks
 			? `${this.#blockSelected + 1}/${this.#blocks.length}  ↑/↓ block  ←/esc back  enter copy${openHint}  click ${theme.cmd.copy}/${theme.cmd.share}`
-			: `${this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : ""}↑/↓ step  ${blocks.length > 0 ? "→ blocks  " : ""}enter copy  ctrl+o expand  esc close`;
-		output.push(` ${theme.fg("dim", hint)}`);
+			: `${this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : ""}↑/↓ step  ${blocks.length > 0 ? "→ blocks  " : ""}enter copy  ${this.#truncated ? "a earlier turns  " : ""}ctrl+o expand  esc close`;
+		// The hint grows with the load-all affordance; an over-width row would
+		// wrap and shift the mouse rows CONTENT_TOP/CHROME_ROWS assume.
+		output.push(` ${theme.fg("dim", truncateToWidth(hint, Math.max(0, width - 1)))}`);
 		output.push(...this.#border.render(width));
 		return output;
 	}
@@ -422,6 +480,27 @@ export class CopySelectorComponent implements Component {
 	}
 }
 
+/**
+ * The trailing slice starting at the last turn initiator at or before
+ * `entries.length - limit`: a user message, or a custom message that starts
+ * a user-attributed turn (a directly invoked `/skill:` prompt, a collab peer's
+ * prompt), the same boundary `ChatTranscriptBuilder` uses.
+ *
+ * The cut has to land on a turn boundary: the builder drops a tool result
+ * whose initiating call was sliced away, so a tail beginning mid-turn renders
+ * without its command — and a tail of nothing but orphaned results would
+ * leave the picker with no target at all. Scanning backwards keeps the whole
+ * final turn instead, and a branch whose last turn is itself longer than
+ * `limit` replays in full.
+ */
+function recentEntries(entries: TranscriptEntry[], limit: number): TranscriptEntry[] {
+	if (entries.length <= limit) return entries;
+	for (let index = entries.length - limit; index > 0; index--) {
+		if (isUserRequestEntry(entries[index]!)) return entries.slice(index);
+	}
+	return entries;
+}
+
 /** Raw multi-line text of a user message (string or text blocks). */
 function rawUserText(message: Extract<SessionMessageEntry["message"], { role: "user" }>): string {
 	if (typeof message.content === "string") return message.content;
@@ -473,10 +552,11 @@ function pushMarkdownBlocks(blocks: CopyBlock[], text: string): void {
 }
 
 /** Inner blocks of one turn: markdown code/quotes, commands, and tool output. */
-function collectBlocks(entries: readonly SessionMessageEntry[]): CopyBlock[] {
+function collectBlocks(entries: readonly TranscriptEntry[]): CopyBlock[] {
 	const blocks: CopyBlock[] = [];
 	for (const entry of entries) {
-		const message = entry.message;
+		const message = transcriptEntryMessage(entry);
+		if (!message) continue;
 		switch (message.role) {
 			case "user":
 				pushMarkdownBlocks(blocks, rawUserText(message));
@@ -518,8 +598,9 @@ function collectBlocks(entries: readonly SessionMessageEntry[]): CopyBlock[] {
 
 /** Clipboard payload for a whole turn, falling back to its blocks when the turn has no prose. */
 function targetCopy(target: OutlineTarget, blocks: readonly CopyBlock[]): { content: string; label: string } {
-	const message = target.entries[0]!.message;
-	switch (message.role) {
+	const entry = target.entries[0]!;
+	const message = transcriptEntryMessage(entry);
+	switch (message?.role) {
 		case "user":
 			return { content: rawUserText(message), label: "user message" };
 		case "assistant": {
@@ -547,6 +628,9 @@ function targetCopy(target: OutlineTarget, blocks: readonly CopyBlock[]): { cont
 			return { content: message.summary, label: "summary" };
 		case "custom":
 		case "hookMessage": {
+			// A user-invoked skill/collab prompt copies as what the user typed, not the expanded body.
+			const draft = message.role === "custom" ? userTurnDraft(entry) : undefined;
+			if (draft?.trim()) return { content: draft, label: "user message" };
 			const content =
 				typeof message.content === "string"
 					? message.content

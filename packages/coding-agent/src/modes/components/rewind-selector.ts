@@ -34,7 +34,7 @@ import {
 	truncateToWidth,
 } from "@oh-my-pi/pi-tui";
 import type { MessageRenderer } from "../../extensibility/extensions/types";
-import type { SessionMessageEntry } from "../../session/session-entries";
+import type { TranscriptEntry } from "../../session/session-context";
 import { theme } from "../theme/theme";
 import {
 	matchesAppToolsExpand,
@@ -49,18 +49,18 @@ import {
 	appendOutlineEntries,
 	type ComposedColumn,
 	composeOutlineColumn,
+	OutlineRowCache,
 	type OutlineTarget,
+	isUserTurnEntry,
 	outlineVisibility,
 	positionRail,
-	stripPromptZones,
-	userMessageHasText,
-	userMessageText,
+	userTurnLabel,
 } from "./transcript-outline";
 
 /** One alternate branch at a divergence: its root and message path root → most-recent leaf. */
 export interface BranchVariantPath {
 	rootId: string;
-	entries: SessionMessageEntry[];
+	entries: TranscriptEntry[];
 }
 
 export interface RewindSelectorDeps {
@@ -109,6 +109,7 @@ export class RewindSelectorComponent implements Component {
 	#siblingVisible: boolean[] | undefined;
 	#scrollToSelection = true;
 	#expanded = false;
+	#rowCache = new OutlineRowCache();
 
 	// Branch strip: present when the selected turn has sibling branches.
 	// Column 0 is the current path; siblings follow in tree order.
@@ -122,7 +123,7 @@ export class RewindSelectorComponent implements Component {
 	#slideTimer: NodeJS.Timeout | undefined;
 
 	constructor(
-		entries: SessionMessageEntry[],
+		entries: TranscriptEntry[],
 		private readonly deps: RewindSelectorDeps,
 	) {
 		this.#builder = this.#newBuilder();
@@ -186,11 +187,8 @@ export class RewindSelectorComponent implements Component {
 			const builder = this.#newBuilder();
 			builder.setExpanded(this.#expanded);
 			const targets = appendOutlineEntries(builder, sibling.entries);
-			const firstUser = sibling.entries.find(
-				entry => entry.message.role === "user" && userMessageHasText(entry.message),
-			);
-			const label =
-				firstUser && firstUser.message.role === "user" ? userMessageText(firstUser.message) : sibling.rootId;
+			const firstUser = sibling.entries.find(isUserTurnEntry);
+			const label = (firstUser && userTurnLabel(firstUser)) || sibling.rootId;
 			columns.push({ rootId: sibling.rootId, builder, targets, label });
 		}
 		this.#variantCache.set(target.turnId, columns);
@@ -242,8 +240,11 @@ export class RewindSelectorComponent implements Component {
 		if (data.startsWith("\x1b[<")) {
 			routeSgrMouseInput(data, event => {
 				if (event.wheel !== null) {
+					// A wheel notch at either end moves nothing: repainting it
+					// anyway makes the frame twitch under a fast wheel.
+					const before = this.#scrollView.getScrollOffset();
 					this.#scrollView.scroll(event.wheel * 3);
-					this.deps.requestRender();
+					if (this.#scrollView.getScrollOffset() !== before) this.deps.requestRender();
 				}
 				return true;
 			});
@@ -351,7 +352,7 @@ export class RewindSelectorComponent implements Component {
 		const contentWidth = Math.max(1, width - 1);
 		const children = this.#builder.container.children;
 		const mainInner = Math.max(10, contentWidth - 4);
-		const childRows = children.map(child => stripPromptZones(child.render(mainInner)));
+		const childRows = this.#rowCache.rows(children, mainInner);
 
 		this.#mainVisible = outlineVisibility(childRows, this.#targets);
 		if (!this.#isMainSelectable(this.#selected)) {
@@ -422,10 +423,7 @@ export class RewindSelectorComponent implements Component {
 		const prefix = composeOutlineColumn(mainRows, 0, anchor.start, [], -1, contentWidth, undefined);
 
 		// Column 0: the current path from the fork down, re-rendered at column width.
-		const suffixRows: (readonly string[])[] = [];
-		for (let index = anchor.start; index < this.#builder.container.children.length; index++) {
-			suffixRows.push(stripPromptZones(this.#builder.container.children[index]!.render(colInner)));
-		}
+		const suffixRows = this.#rowCache.rows(this.#builder.container.children.slice(anchor.start), colInner);
 		const suffixTargets = this.#targets.slice(this.#selected).map(target => ({
 			...target,
 			start: target.start - anchor.start,
@@ -444,7 +442,7 @@ export class RewindSelectorComponent implements Component {
 		];
 		for (let index = 0; index < columns.length; index++) {
 			const column = columns[index]!;
-			const rows = column.builder.container.children.map(child => stripPromptZones(child.render(colInner)));
+			const rows = this.#rowCache.rows(column.builder.container.children, colInner);
 			if (this.#activeVariant === index + 1) {
 				this.#siblingVisible = outlineVisibility(rows, column.targets);
 			}

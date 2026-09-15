@@ -4,7 +4,9 @@
  * map each rendered turn to a selectable target, and compose gutter-prefixed
  * columns with a dotted outline around the selected target.
  */
+import type { Component } from "@oh-my-pi/pi-tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui";
+import { isUserRequestEntry, type TranscriptEntry, userTurnDraft } from "../../session/session-context";
 import type { SessionMessageEntry } from "../../session/session-entries";
 import { type ThemeColor, theme } from "../theme/theme";
 import type { ChatTranscriptBuilder } from "./chat-transcript-builder";
@@ -24,7 +26,7 @@ export interface OutlineTarget {
 	/** One past the last child rendered by this entry. */
 	end: number;
 	/** Entries this target spans: the turn plus any folded tool results. */
-	entries: SessionMessageEntry[];
+	entries: TranscriptEntry[];
 }
 
 /** Composed rows of one column plus the outline's line range within them. */
@@ -58,12 +60,44 @@ export function stripPromptZones(rows: readonly string[]): readonly string[] {
 }
 
 /**
- * Append `entries` to `builder`, returning the selectable targets they
- * produce. Entries that render nothing are folded (tool results, so a turn's
- * rewind keeps its output) or skipped (notices, hidden messages); usage rows
- * flushed at the head of an append are attributed to the turn above.
+ * Prompt-zone-stripped rows for one selector column.
+ *
+ * The selectors recompose their whole column on every keystroke, and stripping
+ * every child's rows again per frame is pure waste on a long session. Per the
+ * {@link Component} render contract a child returns the same array while its
+ * rows are unchanged, so the stripped copy is keyed on that array: a child that
+ * repaints itself asynchronously (Kitty image conversion, todo strike frames)
+ * hands back a new array and is stripped again.
  */
-export function appendOutlineEntries(builder: ChatTranscriptBuilder, entries: SessionMessageEntry[]): OutlineTarget[] {
+export class OutlineRowCache {
+	#stripped = new WeakMap<Component, { rows: readonly string[]; stripped: readonly string[] }>();
+
+	rows(children: readonly Component[], width: number): Array<readonly string[]> {
+		const columns: Array<readonly string[]> = [];
+		for (const child of children) {
+			const rows = child.render(width);
+			const cached = this.#stripped.get(child);
+			if (cached && cached.rows === rows) {
+				columns.push(cached.stripped);
+				continue;
+			}
+			const stripped = stripPromptZones(rows);
+			this.#stripped.set(child, { rows, stripped });
+			columns.push(stripped);
+		}
+		return columns;
+	}
+}
+
+/**
+ * Append `entries` to `builder`, returning the selectable targets they
+ * produce. Tool results fold into the previous target (so a turn's rewind
+ * and `/copy` keep its output, including lazily created children such as
+ * the grouped-read card); notices and hidden messages that render nothing
+ * are skipped. Usage rows flushed at the head of an append are attributed
+ * to the turn above.
+ */
+export function appendOutlineEntries(builder: ChatTranscriptBuilder, entries: TranscriptEntry[]): OutlineTarget[] {
 	const targets: OutlineTarget[] = [];
 	for (const entry of entries) {
 		const children = builder.container.children;
@@ -76,18 +110,18 @@ export function appendOutlineEntries(builder: ChatTranscriptBuilder, entries: Se
 			if (previous && previous.end === start) previous.end = start + 1;
 			start++;
 		}
-		if (start >= after) {
-			const previous = targets.at(-1);
-			if (entry.message.role === "toolResult" && previous) {
-				previous.entryId = entry.id;
-				previous.entries.push(entry);
-			}
+		const previous = targets.at(-1);
+		if (entry.type === "message" && entry.message.role === "toolResult" && previous) {
+			previous.entryId = entry.id;
+			previous.entries.push(entry);
+			if (after > previous.end) previous.end = after;
 			continue;
 		}
+		if (start >= after) continue;
 		targets.push({
 			entryId: entry.id,
 			turnId: entry.id,
-			isUserTurn: entry.message.role === "user" && userMessageHasText(entry.message),
+			isUserTurn: isUserTurnEntry(entry),
 			start,
 			end: after,
 			entries: [entry],
@@ -195,6 +229,22 @@ export function positionRail(
 	const rail = `${moreLeft ? theme.fg("dim", "… ") : "  "}${dots.join(" ")}${moreRight ? theme.fg("dim", " …") : ""}`;
 	const pad = Math.max(0, Math.floor((width - visibleWidth(rail)) / 2));
 	return " ".repeat(pad) + rail;
+}
+
+/**
+ * A turn the user can rewind past and re-edit: a user message with prompt
+ * text, or a user-initiated custom message (skill / collab prompt).
+ */
+export function isUserTurnEntry(entry: TranscriptEntry): boolean {
+	if (entry.type === "message" && entry.message.role === "user") return userMessageHasText(entry.message);
+	return isUserRequestEntry(entry);
+}
+
+/** Single-line label for a user turn: its prompt text, or the custom message's draft. */
+export function userTurnLabel(entry: TranscriptEntry): string | undefined {
+	if (entry.type === "message" && entry.message.role === "user") return userMessageText(entry.message);
+	const draft = userTurnDraft(entry);
+	return draft === undefined ? undefined : draft.replace(/\s+/g, " ").trim();
 }
 
 /** Plain text of a user message (string or text blocks), single line. */
