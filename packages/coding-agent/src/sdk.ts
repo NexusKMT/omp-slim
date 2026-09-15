@@ -191,6 +191,7 @@ import { unmountAll } from "./ssh/sshfs-mount";
 import {
 	type BuildSystemPromptResult,
 	buildSystemPrompt as buildSystemPromptInternal,
+	composeAppendPrompt,
 	loadProjectContextFiles as loadContextFilesInternal,
 	projectSystemPromptToolMetadata,
 } from "./system-prompt";
@@ -3200,7 +3201,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					appendParts.push(`### ${srvName}\n${truncated}`);
 				}
 			}
-			let appendPrompt: string | undefined = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
+			const appendPrompt = composeAppendPrompt(appendParts, options.appendSystemPrompt);
 			// Owned/in-band tool dialects (non-native) require the full functions-
 			// namespace catalog; native tool calling lets the compact name list suffice.
 			const nativeTools = resolveDialect(settings.get("tools.format"), agent?.state.model ?? model) === undefined;
@@ -3208,11 +3209,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				tools,
 				nativeTools && !inlineToolDescriptors ? { mode: "compact", toolNames } : { mode: "full" },
 			);
-			if (options.appendSystemPrompt) {
-				appendPrompt = appendPrompt
-					? `${appendPrompt}\n\n${options.appendSystemPrompt}`
-					: options.appendSystemPrompt;
-			}
 			const defaultPrompt = await buildSystemPromptInternal({
 				cwd: promptCwd,
 				additionalWorkspaceRoots: sessionManager.getAdditionalDirectories(),
