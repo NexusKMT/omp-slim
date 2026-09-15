@@ -1931,6 +1931,19 @@ describe("Settings", () => {
 			expect((await readSettings()).providers).toMatchObject({ tinyModel: "lfm2.5-350m" });
 		});
 
+		it("promotes retired flat tiny title keys into the nested setting", async () => {
+			await Bun.write(getConfigPath(), '"providers.tinyModel": lfm2-350m\n');
+
+			const settings = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(settings.get("providers.tinyModel")).toBe("lfm2.5-350m");
+			settings.set("display.showTokenUsage", true);
+			await settings.flush();
+			const saved = await readSettings();
+			expect(saved.providers).toMatchObject({ tinyModel: "lfm2.5-350m" });
+			expect("providers.tinyModel" in saved).toBe(false);
+		});
+
 		it("maps removed atom edit mode settings to hashline", async () => {
 			await writeSettings({
 				edit: {

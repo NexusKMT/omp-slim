@@ -2299,13 +2299,18 @@ export class Settings {
 		};
 		const migrateTinyModelValue = (value: unknown): string | undefined =>
 			typeof value === "string" ? RETIRED_TINY_TITLE_MODELS[value] : undefined;
+		// Quoted-dotted flat keys (`"providers.tinyModel"` in YAML/legacy JSON)
+		// promote into the nested setting; nested wins when both are present.
+		const flatTinyModel = migrateTinyModelValue(raw["providers.tinyModel"]);
+		if (flatTinyModel !== undefined) {
+			const providersRoot = isRecord(raw.providers) ? raw.providers : {};
+			if (typeof providersRoot.tinyModel !== "string") providersRoot.tinyModel = flatTinyModel;
+			raw.providers = providersRoot;
+			delete raw["providers.tinyModel"];
+		}
 		if (providersObj) {
 			const migrated = migrateTinyModelValue(providersObj.tinyModel);
 			if (migrated !== undefined) providersObj.tinyModel = migrated;
-		}
-		{
-			const migrated = migrateTinyModelValue(raw["providers.tinyModel"]);
-			if (migrated !== undefined) raw["providers.tinyModel"] = migrated;
 		}
 
 		// codexResets.autoRedeem: boolean -> tri-state enum.
