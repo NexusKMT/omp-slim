@@ -199,7 +199,20 @@ export class CollabHost {
 	/** Rejects the in-flight first-open wait when `stop()` overtakes `start()`. */
 	#abortStart: ((reason: Error) => void) | null = null;
 	#unsubscribe?: () => void;
+	/**
+	 * Guest identity and permission, keyed by relay peer id. Drives the
+	 * participant list, notices, the status segment and the writable-peer fan-out.
+	 * Deliverability is not its job: {@link CollabSocket.isServing} owns that, and
+	 * the two disagree on purpose while a peer is connected but has not said hello
+	 * yet, and after a shed, when the peer leaves the participant list but is
+	 * still owed a resync error.
+	 */
 	#peers = new Map<number, { name: string; canWrite: boolean }>();
+	/**
+	 * Never reset, including across a room recreation: ids must not be reissued, or
+	 * a late `ui-response` carrying an old id would settle an unrelated new request.
+	 * An old id that maps to nothing is harmless.
+	 */
 	#uiReqSeq = 0;
 	#pendingUi = new Map<number, PendingCollabUiRequest>();
 	#lastStateJson = "";
@@ -369,6 +382,7 @@ export class CollabHost {
 				firstOpen.resolve();
 			}
 		};
+		socket.onRoomRecreated = () => this.#handleRoomRecreated();
 		socket.onFrame = (frame, fromPeer) => this.#handleFrame(frame, fromPeer);
 		socket.onControl = msg => {
 			if (msg.t === "peer-left") this.#handlePeerLeft(msg.peer);
@@ -627,6 +641,14 @@ export class CollabHost {
 	}
 
 	#handleFrame(frame: CollabFrame, fromPeer: number): void {
+		// Controls are dispatched synchronously while frames finish decrypting, so
+		// a hello can land after its sender's `peer-left`. The socket settled the
+		// peer's lifetime at reception; re-read it here rather than acting on a
+		// sender that is already gone and registering a ghost participant.
+		if (!this.#socket?.isServing(fromPeer)) {
+			logger.debug("collab host ignoring frame from a peer it no longer serves", { type: frame.t, fromPeer });
+			return;
+		}
 		// An old-room answer may wait for rollback, but cannot settle against
 		// another session. The response handler owns that bounded deferral.
 		if (frame.t === "ui-response") {
@@ -704,10 +726,8 @@ export class CollabHost {
 		const canWrite = this.#verifyWriteToken(writeToken);
 		this.#peers.set(fromPeer, { name: cleanName, canWrite });
 
-		// Snapshot and send synchronously: no awaits between snapshot, welcome,
-		// and chunk sends, so subsequent broadcast frames (entry/event/state/bus)
-		// queue behind the snapshot on the same socket and the guest can't
-		// observe a gap between the snapshot fragment and live traffic.
+		// Enqueue the snapshot synchronously so live traffic cannot overtake it;
+		// materialize its chunks only as the transport drains.
 		// `copyForReplication` rather than the default `structuredClone`: a payload
 		// the engine cannot clone is exactly what the shrinker below exists to
 		// bound, so letting the copy throw here would abort the chunk train before
@@ -741,7 +761,7 @@ export class CollabHost {
 			},
 			fromPeer,
 		);
-		this.#sendSnapshotChunks(entries, fromPeer);
+		socket.sendBatch(this.#snapshotChunks(entries), fromPeer);
 		if (canWrite) {
 			for (const pending of this.#pendingUi.values()) {
 				this.#send({ t: "ui-request", request: pending.request }, fromPeer);
@@ -757,8 +777,8 @@ export class CollabHost {
 	}
 
 	/**
-	 * Slice {@link entries} into byte-bounded `snapshot-chunk` frames targeted
-	 * at {@link fromPeer}. Each entry is first run through
+	 * Slice {@link entries} into byte-bounded `snapshot-chunk` frames.
+	 * Each entry is first run through
 	 * {@link shrinkReplicatedEntry} so a single oversized tool-result entry
 	 * cannot ship as an oversized chunk that trips the relay's per-frame
 	 * `maxPayloadLength` (issue #3739), and an entry that cannot be shrunk at
@@ -768,11 +788,9 @@ export class CollabHost {
 	 * finalize the replica. An empty snapshot still emits one `final` chunk
 	 * so the guest never blocks on a missing terminator.
 	 */
-	#sendSnapshotChunks(entries: ReplicatedEntry[], fromPeer: number): void {
-		const socket = this.#socket;
-		if (!socket) return;
+	*#snapshotChunks(entries: ReplicatedEntry[]): Generator<CollabFrame> {
 		if (entries.length === 0) {
-			this.#send({ t: "snapshot-chunk", entries: [], final: true }, fromPeer);
+			yield { t: "snapshot-chunk", entries: [], final: true };
 			return;
 		}
 		let i = 0;
@@ -792,7 +810,7 @@ export class CollabHost {
 				batchBytes += entryBytes;
 				i++;
 			}
-			this.#send({ t: "snapshot-chunk", entries: batch, final: i >= entries.length }, fromPeer);
+			yield { t: "snapshot-chunk", entries: batch, final: i >= entries.length };
 		}
 	}
 
@@ -917,6 +935,35 @@ export class CollabHost {
 			.catch(err => logger.warn("collab guest abort failed", { error: String(err) }));
 	}
 
+	/**
+	 * The relay recreated the room and will reissue peer ids from 1, so every id in
+	 * {@link #peers} is meaningless — and `#peers` is the permission registry, not
+	 * just the roster. Leaving it populated lets whoever takes a reissued id inherit
+	 * the `canWrite` of the guest that held it, which a read-only link is enough to
+	 * exploit: `#handleFrame` admits a frame before its sender has said hello, so a
+	 * `prompt`, `abort`, `agent-cmd` or `ui-response` would be authorized against
+	 * the stale entry. Runs before the socket reports the open, so no frame from the
+	 * new room can be dispatched against the old identities.
+	 */
+	#handleRoomRecreated(): void {
+		if (this.#stopped) return;
+		if (this.#peers.size === 0 && this.#pendingUi.size === 0) return;
+		// Identities first: settle() fans `ui-request-end` out over #peers, and those
+		// ids belong to the room that just went away.
+		this.#peers.clear();
+		// The relay closed everyone who could answer, so an outstanding ask has no
+		// recipient. Leaving it pending hangs callers that await it without racing a
+		// local dialog, and #handleHello re-poses every pending request to the next
+		// writable guest — a different occupant of a different room. Matches the
+		// teardown path; settle() is guarded against a second resolve, so a teardown
+		// after this is a no-op.
+		for (const pending of this.#pendingUi.values()) pending.settle({ kind: "unavailable" });
+		this.#pendingUi.clear();
+		this.#updateStatusSegment();
+		this.#scheduleStateBroadcast();
+	}
+
+	/** Identity and UI only: the socket already retired the peer and dropped its backlog. */
 	#handlePeerLeft(peer: number): void {
 		const name = this.#peers.get(peer)?.name;
 		this.#peers.delete(peer);
