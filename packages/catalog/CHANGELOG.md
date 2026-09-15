@@ -60,6 +60,9 @@
 - Amazon Bedrock OpenAI models, plus unclassified profiles such as opaque application-inference-profile ARNs, now carry the compatibility policy required to preserve image-bearing tool results ([#11681](https://github.com/can1357/oh-my-pi/issues/11681)).
 - DeepSeek V4.1 Flash requests now honor the documented 384K output maximum instead of being capped at 64K ([#11769](https://github.com/can1357/oh-my-pi/issues/11769)).
 - Fixed the first-party `deepseek-flash` alias missing the V4.1 Flash wire contract: it now sends `max_tokens` with `reasoning_content` and replays reasoning and assistant content on tool calls with no tool choice ([#11799](https://github.com/can1357/oh-my-pi/pull/11799) by [@brit](https://github.com/brit)).
+### Fixed
+
+- Fixed Ollama Cloud model discovery synthesizing a generic `minimal`/`low`/`medium`/`high` effort ladder for every thinking-capable model, which shadowed the per-model compat rules and made `max` unreachable on the DeepSeek V4 line (including the served `deepseek-v4.1-flash`, `deepseek-v4-flash:0731`, and `deepseek-v4-pro:0813` ids): discovery now leaves the ladder to the rule tree, so those models advertise the wire-exact `low`/`high`/`max` and GLM-5.3 exposes `low`/`high`/`max` ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
 
 ## [18.1.17] - 2026-09-10
 
