@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.0] - 2026-09-15
+
 ### Added
 
 - Assistant turns from Anthropic-compatible hosts (direct, or via OpenRouter's `reasoning_details`) carry `upstreamModel`, the serving model id recovered from the signed thinking block, so callers can detect a router substituting a different model than requested.

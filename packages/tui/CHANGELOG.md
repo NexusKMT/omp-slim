@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.0] - 2026-09-15
+
 ### Added
 
 - Added `Editor.textRevision` for content-dependent render caches, including undo and draft restoration.

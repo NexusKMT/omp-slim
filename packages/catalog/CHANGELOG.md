@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.0] - 2026-09-15
+
 ### Breaking Changes
 
 - Removed `getCatalogProviderEntry` and the `CATALOG_PROVIDERS` constant in favor of `providerEntry` and `providerEntries`

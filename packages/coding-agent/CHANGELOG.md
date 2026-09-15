@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.0] - 2026-09-15
+
 ### Breaking Changes
 
 - `Settings.getGroup()` now returns shallow-frozen snapshots, reused until effective settings change.
