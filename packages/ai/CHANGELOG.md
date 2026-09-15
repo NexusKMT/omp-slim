@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Expired AWS SSO access tokens are now refreshed via the SSO OIDC `refresh_token` grant instead of failing with `sso-token-expired`, so Bedrock profiles keep working between `aws sso login` runs the same way the AWS CLI does ([#12736](https://github.com/can1357/oh-my-pi/pull/12736) by [@nwbb](https://github.com/nwbb)).
+
 ## [18.2.8] - 2026-09-21
 
 ### Added
