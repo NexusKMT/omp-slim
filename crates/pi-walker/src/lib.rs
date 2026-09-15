@@ -4732,6 +4732,7 @@ mod tests {
 
 	#[test]
 	fn walk_request_rechecks_stale_empty_cached_files_only_result() {
+		let _cache_test_guard = cache::cache_test_guard();
 		let tree = temp_tree("request-empty-recheck");
 		let _cache_guard = CachePathGuard::new(tree.path());
 		let request = WalkRequest::from_options(tree.path(), test_options())
@@ -4795,6 +4796,7 @@ mod tests {
 
 	#[test]
 	fn walk_request_rechecks_stale_cache_empty_after_glob_filter() {
+		let _cache_test_guard = cache::cache_test_guard();
 		let tree = temp_tree("request-filtered-empty-recheck");
 		let _cache_guard = CachePathGuard::new(tree.path());
 		fs::write(tree.path().join("old.txt"), "old")

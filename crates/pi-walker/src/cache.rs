@@ -147,6 +147,12 @@ static SCAN_CACHE: LazyLock<Mutex<ScanCache>> = LazyLock::new(|| {
 	))
 });
 
+#[cfg(test)]
+pub(crate) fn cache_test_guard() -> parking_lot::MutexGuard<'static, ()> {
+	static LOCK: Mutex<()> = Mutex::new(());
+	LOCK.lock()
+}
+
 fn env_uint<T>(name: &str, default: T, min: T, max: T) -> T
 where
 	T: Copy + Ord + std::str::FromStr,
@@ -671,6 +677,7 @@ mod tests {
 
 	#[test]
 	fn collect_entries_discards_a_scan_invalidated_while_in_flight() {
+		let _cache_test_guard = super::cache_test_guard();
 		let root = TempDirGuard::new();
 		fs::write(root.path().join("before.txt"), "ok").unwrap();
 		let options = crate::WalkOptions {
@@ -753,6 +760,7 @@ mod tests {
 
 	#[test]
 	fn cache_hits_preserve_owned_results_and_respect_cancellation() {
+		let _cache_test_guard = super::cache_test_guard();
 		let root = TempDirGuard::new();
 		fs::write(root.path().join("real.txt"), "ok").unwrap();
 		let options = crate::WalkOptions {
