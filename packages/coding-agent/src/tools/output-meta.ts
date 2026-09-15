@@ -83,7 +83,17 @@ export interface LimitsMeta {
 	matchLimit?: { reached: number; suggestion: number };
 	resultLimit?: { reached: number; suggestion: number };
 	headLimit?: { reached: number; suggestion: number };
-	columnTruncated?: { maxColumn: number; artifactId?: string };
+	/** `unit` may be absent in sessions persisted before it was recorded. */
+	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars"; artifactId?: string };
+}
+
+/** Input for {@link OutputMetaBuilder.limits}. `columnUnit` defaults to `chars`. */
+export interface LimitsInput {
+	matchLimit?: number;
+	resultLimit?: number;
+	headLimit?: number;
+	columnMax?: number;
+	columnUnit?: "bytes" | "chars";
 }
 
 /**
@@ -245,9 +255,10 @@ export class OutputMetaBuilder {
 		// A per-line column cap only trims individual lines (with a `…` marker);
 		// it is not a window/byte truncation, so surface it as its own limit
 		// notice rather than a "Showing lines X-Y … limit" range. This runs even
-		// when the output is otherwise complete (`truncated === false`).
+		// when the output is otherwise complete (`truncated === false`). The sink
+		// enforces the cap in UTF-8 bytes, so the notice must say "bytes".
 		if (summary.columnMax != null && summary.columnMax > 0 && (summary.columnTruncatedLines ?? 0) > 0) {
-			this.columnTruncated(summary.columnMax, summary.artifactId);
+			this.columnTruncated(summary.columnMax, "bytes", summary.artifactId);
 		}
 		if (!summary.truncated) return this;
 
@@ -363,7 +374,7 @@ export class OutputMetaBuilder {
 	}
 
 	/** Add limit notices in one call. */
-	limits(limits: { matchLimit?: number; resultLimit?: number; headLimit?: number; columnMax?: number }): this {
+	limits(limits: LimitsInput): this {
 		if (limits.matchLimit !== undefined) {
 			this.matchLimit(limits.matchLimit);
 		}
@@ -374,7 +385,7 @@ export class OutputMetaBuilder {
 			this.headLimit(limits.headLimit);
 		}
 		if (limits.columnMax !== undefined) {
-			this.columnTruncated(limits.columnMax);
+			this.columnTruncated(limits.columnMax, limits.columnUnit);
 		}
 		return this;
 	}
@@ -394,15 +405,17 @@ export class OutputMetaBuilder {
 	}
 
 	/**
-	 * Add column truncation notice. No-op if maxColumn <= 0.
+	 * Add column truncation notice. No-op if maxColumn <= 0. `unit` names the
+	 * unit the producer enforced the cap in — `"bytes"` for the streaming
+	 * sink's UTF-8 cap, `"chars"` (UTF-16 code units) for the read/grep path.
 	 *
 	 * When `artifactId` is supplied the sink mirrored the raw, uncapped stream
 	 * into that artifact; the rendered notice then advertises it as a recovery
 	 * pointer (see {@link formatOutputNotice}), matching the tail-truncation notice.
 	 */
-	columnTruncated(maxColumn: number, artifactId?: string): this {
+	columnTruncated(maxColumn: number, unit: "bytes" | "chars" = "chars", artifactId?: string): this {
 		if (maxColumn <= 0) return this;
-		this.#meta.limits = { ...this.#meta.limits, columnTruncated: { maxColumn, artifactId } };
+		this.#meta.limits = { ...this.#meta.limits, columnTruncated: { maxColumn, unit, artifactId } };
 		return this;
 	}
 
@@ -609,7 +622,11 @@ export function formatOutputNotice(meta: OutputMeta | undefined): string {
 	}
 	if (meta.limits?.columnTruncated) {
 		const c = meta.limits.columnTruncated;
-		let columnNotice = `Some lines truncated to ${c.maxColumn} chars`;
+		// Sessions persisted before the unit field carry only `maxColumn`; those
+		// notices always read "chars", so default missing units to it. Otherwise
+		// a resumed legacy session renders "… 768 undefined" and stripOutputNotice
+		// stops matching the persisted "… 768 chars" text.
+		let columnNotice = `Some lines truncated to ${c.maxColumn} ${c.unit ?? "chars"}`;
 		if (c.artifactId != null) {
 			columnNotice += `. ${formatFullOutputReference(c.artifactId)}`;
 		}
