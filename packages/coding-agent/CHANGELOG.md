@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress (by [@shivamklr](https://github.com/shivamklr)).
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
