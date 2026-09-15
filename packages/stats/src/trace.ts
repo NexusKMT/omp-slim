@@ -861,6 +861,32 @@ interface SessionMetadata {
 
 const metadataCache = new Map<string, SessionMetadata & { mtimeMs: number }>();
 
+/** Read enough decompressed transcript bytes to cover the title slot and session header. */
+async function readSessionMetadataHead(file: string): Promise<string> {
+	if (!file.endsWith(".gz")) return Bun.file(file).slice(0, TITLE_SCAN_BYTES).text();
+
+	const reader = Bun.file(file).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+	const decoder = new TextDecoder();
+	let remaining = TITLE_SCAN_BYTES;
+	let head = "";
+	try {
+		while (remaining > 0) {
+			const { done, value } = await reader.read();
+			if (done) {
+				head += decoder.decode();
+				break;
+			}
+			const chunk = value.subarray(0, remaining);
+			remaining -= chunk.byteLength;
+			head += decoder.decode(chunk, { stream: remaining > 0 && chunk.byteLength === value.byteLength });
+			if (chunk.byteLength < value.byteLength) break;
+		}
+	} finally {
+		await reader.cancel();
+	}
+	return head;
+}
+
 /** Read list metadata from the fixed title slot and session header. */
 async function readSessionMetadata(file: string): Promise<SessionMetadata> {
 	let mtimeMs: number;
@@ -875,7 +901,7 @@ async function readSessionMetadata(file: string): Promise<SessionMetadata> {
 	let title: string | null = null;
 	let cwd: string | null = null;
 	try {
-		const head = await Bun.file(file).slice(0, TITLE_SCAN_BYTES).text();
+		const head = await readSessionMetadataHead(file);
 		for (const line of head.split("\n")) {
 			if (!line.trim()) continue;
 			let parsed: EntryView;
