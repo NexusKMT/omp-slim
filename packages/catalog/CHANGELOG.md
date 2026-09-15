@@ -130,6 +130,7 @@
 - LiteLLM discovery no longer exposes known task-specific models, including embedding, media, moderation, reranking, and search models, as coding models.
 - Fixed custom `anthropic-messages` providers whose adaptive effort ladder exposes `minimal` sending `output_config.effort: "minimal"`, which the Anthropic Messages API rejects with `400 level "minimal" not supported`; the adaptive effort mapper now clamps `minimal` to `low` ([#10994](https://github.com/can1357/oh-my-pi/issues/10994)).
 - Fixed GPT-6 Astra requests through GitHub Copilot failing with an unsupported endpoint error ([#10874](https://github.com/can1357/oh-my-pi/pull/10874) by [@xpcmdshell](https://github.com/xpcmdshell)).
+- Qwen 3.8 models on Alibaba Token Plan now send the selected reasoning effort and replay reasoning history across turns.
 
 ## [18.1.9] - 2026-09-04
 
