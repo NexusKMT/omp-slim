@@ -349,7 +349,7 @@ export class ClaudeSessionStore implements ForeignSessionStore {
 		this.#root = path.resolve(root);
 	}
 
-	/** Lists indexed Claude sessions without reading transcript bodies. */
+	/** Lists Claude sessions, reading a bounded transcript prefix only when indexed cwd metadata is absent. */
 	async list(): Promise<ForeignSessionInfo[]> {
 		const [history, files] = await Promise.all([
 			readHistoryIndex(path.join(this.#root, "history.jsonl")),
