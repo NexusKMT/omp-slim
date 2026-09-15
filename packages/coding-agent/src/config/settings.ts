@@ -2008,14 +2008,6 @@ export class Settings {
 		delete raw.collapseChangelog;
 		delete raw["startup.changelogMode"];
 
-		// ask.timeout: ms -> seconds (if value > 1000, it's old ms format)
-		if (raw.ask && typeof (raw.ask as Record<string, unknown>).timeout === "number") {
-			const oldValue = (raw.ask as Record<string, unknown>).timeout as number;
-			if (oldValue > 1000) {
-				(raw.ask as Record<string, unknown>).timeout = Math.round(oldValue / 1000);
-			}
-		}
-
 		// Migrate old flat "theme" string to nested theme.dark/theme.light
 		if (typeof raw.theme === "string") {
 			const oldTheme = raw.theme;

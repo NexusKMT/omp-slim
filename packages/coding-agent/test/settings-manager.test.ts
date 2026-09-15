@@ -1749,6 +1749,15 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
+		it("preserves current ask timeout seconds in overrides and persisted config", async () => {
+			expect(Settings.isolated({ "ask.timeout": 2000 }).get("ask.timeout")).toBe(2000);
+
+			await writeSettings({ ask: { timeout: 2000 } });
+			const loaded = await Settings.init({ cwd: projectDir, agentDir });
+
+			expect(loaded.get("ask.timeout")).toBe(2000);
+		});
+
 		it("moves the legacy image question timeout and removes its tool settings", async () => {
 			await writeSettings({ inspect_image: { mode: "on", timeoutMs: 42 } });
 
