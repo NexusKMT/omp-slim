@@ -757,6 +757,14 @@ export class SessionResolutionError extends Error {
 	}
 }
 
+function exitForSessionResolutionError(error: SessionResolutionError): never {
+	process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
+	if (error.hint) {
+		process.stderr.write(`${chalk.dim(error.hint)}\n`);
+	}
+	process.exit(1);
+}
+
 function resolveForeignSessionSource(
 	parsed: Pick<Args, "continue" | "fork" | "fromClaude" | "fromCodex" | "noSession" | "resume">,
 ): ForeignSessionSource | undefined {
@@ -1023,12 +1031,27 @@ export function normalizeContinueSessionArgs(parsed: Args, rawArgs?: readonly st
 const FORK_NOT_FOUND_HINT =
 	"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.";
 
-/** Resolves CLI session flags into an existing, forked, in-memory, or cancelled session manager. */
+function validateSessionPersistenceArgs(parsed: Pick<Args, "continue" | "noSession" | "resume">): void {
+	if (!parsed.noSession) return;
+	if (parsed.resume !== undefined) {
+		throw new SessionResolutionError("--resume requires session persistence");
+	}
+	if (parsed.continue) {
+		throw new SessionResolutionError("--continue requires session persistence");
+	}
+}
+/**
+ * Resolves CLI session flags into an existing, forked, in-memory, or cancelled session manager.
+ *
+ * `nativeFlagOwnership: "preliminary"` is reserved for the startup parse,
+ * before extensions establish whether a built-in-named flag belongs to them.
+ */
 export async function createSessionManager(
 	parsed: Args,
 	cwd: string,
 	activeSettings: Settings = settings,
 	askToMoveSession: SessionPrompt = promptMoveSession,
+	options: { nativeFlagOwnership?: "preliminary" | "resolved" } = {},
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
 		if (parsed.noSession) {
@@ -1060,6 +1083,10 @@ export async function createSessionManager(
 	}
 
 	if (parsed.noSession) {
+		normalizeContinueSessionArgs(parsed);
+		if (options.nativeFlagOwnership !== "preliminary") {
+			validateSessionPersistenceArgs(parsed);
+		}
 		return SessionManager.inMemory();
 	}
 	normalizeContinueSessionArgs(parsed);
@@ -1796,20 +1823,18 @@ export async function runRootCommand(
 					parsedArgs,
 					cwd,
 					settingsInstance,
+					promptMoveSession,
+					{ nativeFlagOwnership: "preliminary" },
 				);
 			}
 		} catch (error: unknown) {
 			if (error instanceof SessionResolutionError) {
-				process.stderr.write(`${chalk.red(`Error: ${error.message}`)}\n`);
-				if (error.hint) {
-					process.stderr.write(`${chalk.dim(error.hint)}\n`);
-				}
-				process.exit(1);
+				exitForSessionResolutionError(error);
 			}
 			throw error;
 		}
 
-		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager) {
+		if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager && !parsedArgs.noSession) {
 			const previousCwd = cwd;
 			const recordedCwd = sessionManager.getRecordedCwd() ?? sessionManager.getCwd();
 			const resumedProject = await switchToResumedProject(
@@ -1839,8 +1864,11 @@ export async function runRootCommand(
 			process.exit(0);
 		}
 
-		// Handle --resume (no value): show session picker
-		if (parsedArgs.resume === true && !parsedArgs.fork) {
+		// Handle --resume (no value): show session picker. Skipped under
+		// --no-session — createSessionManager already returned an ephemeral manager,
+		// and the deferred persistence check below (after extension flag ownership is
+		// resolved) rejects a native --resume, so the picker must not run first.
+		if (parsedArgs.resume === true && !parsedArgs.fork && !parsedArgs.noSession) {
 			const folderSessions = await logger.time(
 				"SessionManager.list",
 				SessionManager.list,
@@ -2007,6 +2035,14 @@ export async function runRootCommand(
 			};
 			const initialArgs = applyExtensionFlags(extensionFlagSink, rawArgs) ?? parsedArgs;
 			normalizeContinueSessionArgs(initialArgs, rawArgs);
+			try {
+				validateSessionPersistenceArgs(initialArgs);
+			} catch (error: unknown) {
+				if (error instanceof SessionResolutionError) {
+					exitForSessionResolutionError(error);
+				}
+				throw error;
+			}
 			if ((parsedArgs.trustedExtensions?.length ?? 0) > 0 && extensionsResult.errors.length > 0) {
 				throw new Error(
 					`Trusted extension failed to load: ${extensionsResult.errors.map(item => item.error).join("; ")}`,

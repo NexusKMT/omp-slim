@@ -323,4 +323,52 @@ describe("createSessionManager — missing session (#2084)", () => {
 			await fsp.rm(cwd, { recursive: true, force: true });
 		}
 	});
+
+	it("rejects --resume combined with --no-session instead of silently discarding it (#12008)", async () => {
+		await expect(
+			createSessionManager({ ...buildResumeArgs("019ea530"), noSession: true }, "/current/project", stubSettings),
+		).rejects.toMatchObject({
+			name: "SessionResolutionError",
+			message: "--resume requires session persistence",
+			hint: undefined,
+		});
+	});
+
+	it("defers --resume + --no-session rejection while extension flag ownership is unresolved", async () => {
+		const manager = await createSessionManager(
+			{ ...buildResumeArgs("019ea530"), noSession: true },
+			"/current/project",
+			stubSettings,
+			async () => "unavailable",
+			{ nativeFlagOwnership: "preliminary" },
+		);
+
+		expect(manager?.getEntries()).toEqual([]);
+	});
+
+	it("rejects the --resume picker (no value) combined with --no-session (#12008)", async () => {
+		await expect(
+			createSessionManager(
+				{ ...buildResumeArgs("019ea530"), resume: true, noSession: true },
+				"/current/project",
+				stubSettings,
+			),
+		).rejects.toMatchObject({
+			name: "SessionResolutionError",
+			message: "--resume requires session persistence",
+		});
+	});
+
+	it("rejects --continue combined with --no-session (#12008)", async () => {
+		await expect(
+			createSessionManager(
+				{ ...buildContinueArgs("hello there"), noSession: true },
+				"/current/project",
+				stubSettings,
+			),
+		).rejects.toMatchObject({
+			name: "SessionResolutionError",
+			message: "--continue requires session persistence",
+		});
+	});
 });
