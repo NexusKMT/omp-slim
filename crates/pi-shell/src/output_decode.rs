@@ -122,6 +122,13 @@ impl OutputDecoder {
 						self.pending.drain(..invalid_len);
 					} else {
 						if eof {
+							#[cfg(windows)]
+							if self.can_fallback_to_acp() {
+								self.mode = Mode::Acp;
+								out.push_str(&self.drain_acp(true));
+								return out;
+							}
+
 							out.push_str(REPLACEMENT);
 							self.pending.clear();
 						}
@@ -315,6 +322,16 @@ mod tests {
 		let mut decoder = OutputDecoder::with_fallback_codepage(936);
 		assert_eq!(decoder.push("中文".as_bytes()), "中文");
 		assert_eq!(decoder.finish(), "");
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn incomplete_utf8_at_eof_falls_back_to_acp() {
+		// CP1252 for é is also an incomplete three-byte UTF-8 prefix. EOF proves
+		// this stream is not valid UTF-8, so it must still trigger fallback.
+		let mut decoder = OutputDecoder::with_fallback_codepage(1252);
+		assert_eq!(decoder.push(&[0xe9]), "");
+		assert_eq!(decoder.finish(), "é");
 	}
 
 	#[cfg(windows)]
