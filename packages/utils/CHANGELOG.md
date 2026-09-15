@@ -57,6 +57,9 @@
 ### Fixed
 
 - ACP JSON-RPC now drains accepted inbound requests on clean stdin EOF before resolving `closed`, so in-flight methods such as `session/new` still receive a success or explicit error response instead of being dropped on exit 0 ([#11567](https://github.com/can1357/oh-my-pi/issues/11567)).
+### Added
+
+- Added the public `postmortem.exitProcess()` utility for host-owned hard exits that must bypass temporary process-exit guards ([#11789](https://github.com/can1357/oh-my-pi/issues/11789)).
 
 ## [18.1.16] - 2026-09-09
 
