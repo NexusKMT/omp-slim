@@ -21,6 +21,7 @@ const READ_TOOL = new Map<string, SystemPromptToolMetadata>([
 			label: "Read",
 			description: "Reads files from disk.",
 			parameters: { type: "object", properties: { path: { type: "string" } } },
+			readsSkillUris: true,
 		},
 	],
 ]);
