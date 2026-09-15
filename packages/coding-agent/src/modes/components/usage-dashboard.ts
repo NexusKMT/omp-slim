@@ -20,7 +20,7 @@ import { colorLuma, formatDuration, hexToRgb, rgbToHex, sanitizeText } from "@oh
 import { formatProviderName } from "../../slash-commands/helpers/format";
 import { collapseSharedUsageReports } from "../../utils/usage-display";
 import { colorToAnsi } from "../theme/color";
-import { theme } from "../theme/theme";
+import { ensureThemeSync, theme } from "../theme/theme";
 import { formatAbsoluteOnlyAmount } from "../usage-amounts";
 import {
 	matchesSelectCancel,
@@ -328,6 +328,7 @@ export class UsageDashboardComponent implements Component {
 	readonly #closeController = new AbortController();
 
 	constructor(options: UsageDashboardOptions) {
+		ensureThemeSync();
 		this.#options = options;
 		this.#nowMs = Date.now();
 		this.#cards = buildProviderCards(options.reports, this.#nowMs);

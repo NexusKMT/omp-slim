@@ -17,7 +17,7 @@ import { postmortem } from "@oh-my-pi/pi-utils";
 import { CustomEditor } from "./components/custom-editor";
 import { type AnimationFrame, TranscriptContainer } from "./components/transcript-container";
 import { type LspServerInfo, type RecentSession, WelcomeComponent } from "./components/welcome";
-import { getEditorTheme, initThemeSync, theme } from "./theme/theme";
+import { ensureThemeSync, getEditorTheme, theme } from "./theme/theme";
 
 const DOUBLE_INTERRUPT_MS = 500;
 
@@ -268,7 +268,7 @@ export class Composer implements TerminalFrameProvider {
 	#transferred = false;
 
 	constructor(options: ComposerOptions = {}) {
-		if (typeof theme === "undefined") initThemeSync();
+		ensureThemeSync();
 		// Host-owned hard exit: route through postmortem so a double-Ctrl-C during
 		// an open extension-load guard window exits cleanly instead of throwing
 		// ExtensionExitError through the guarded process.exit (#11789).
