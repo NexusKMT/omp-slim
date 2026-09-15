@@ -23,6 +23,7 @@ import {
 	normalizeDomain,
 	normalizeGitHubCopilotEnterpriseDomain,
 } from "@oh-my-pi/pi-catalog/wire/github-copilot";
+import { $env } from "@oh-my-pi/pi-utils";
 import {
 	resolveCopilotIntegrationIdOverride,
 	wrapFetchForCopilotFallback,
