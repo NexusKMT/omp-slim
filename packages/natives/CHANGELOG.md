@@ -77,6 +77,7 @@
 ### Fixed
 
 - Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
+- Fixed the TUI sometimes stopping repainting while the agent continued running.
 
 ## [18.0.11] - 2026-08-29
 
