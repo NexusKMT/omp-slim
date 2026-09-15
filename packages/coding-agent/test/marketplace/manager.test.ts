@@ -76,6 +76,10 @@ function buildNamedMarketplace(root: string, marketplaceName: string, pluginName
 	return root;
 }
 
+function hasExactEntry(dirPath: string, entry: string): boolean {
+	return fs.readdirSync(dirPath).includes(entry);
+}
+
 // ── Test helper ───────────────────────────────────────────────────────────────
 
 interface TestContext {
@@ -177,7 +181,7 @@ describe("MarketplaceManager", () => {
 				'conflicts with existing marketplace "test-marketplace"',
 			);
 			expect(await Bun.file(existing.catalogPath).text()).toBe(cachedCatalog);
-			expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "marketplaces", "Test-Marketplace"))).toBe(false);
+			expect(hasExactEntry(path.join(ctx.tmpDir, "cache", "marketplaces"), "Test-Marketplace")).toBe(false);
 			expect(await ctx.manager.listMarketplaces()).toHaveLength(1);
 		} finally {
 			fetchSpy.mockRestore();
@@ -377,7 +381,7 @@ describe("MarketplaceManager", () => {
 		);
 		// The npm-managed link is untouched and no marketplace cache was left behind.
 		expect(fs.realpathSync(npmLink)).toBe(fs.realpathSync(npmPackage));
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Foo"))).toBe(false);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Foo")).toBe(false);
 		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "upper-market___Foo___1.0.0"))).toBe(false);
 	});
 
@@ -444,7 +448,7 @@ describe("MarketplaceManager", () => {
 			'Runtime package name "Foo" conflicts with installed package "foo"',
 		);
 		expect(fs.realpathSync(linkedLink)).toBe(fs.realpathSync(linkedPackage));
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Foo"))).toBe(false);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Foo")).toBe(false);
 		expect(fs.existsSync(path.join(ctx.tmpDir, "cache", "plugins", "upper-market___Foo___1.0.0"))).toBe(false);
 	});
 
@@ -458,15 +462,15 @@ describe("MarketplaceManager", () => {
 		fs.writeFileSync(sourcePackage, JSON.stringify({ name: "Widget", version: "1.0.0" }));
 		await ctx.manager.addMarketplace(marketplaceDir);
 		await ctx.manager.installPlugin("widget", "rename-market");
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Widget"))).toBe(true);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Widget")).toBe(true);
 
 		// Same marketplace/plugin/version cache key; only the manifest's runtime-name casing changes.
 		fs.writeFileSync(sourcePackage, JSON.stringify({ name: "widget", version: "1.0.0" }));
 		await ctx.manager.installPlugin("widget", "rename-market", { force: true });
 
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "widget"))).toBe(true);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "widget")).toBe(true);
 		// The stale mixed-case link and lockfile key are removed, not left stranded.
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Widget"))).toBe(false);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Widget")).toBe(false);
 		const runtimeConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
 		expect(Object.keys(runtimeConfig.plugins)).toEqual(["widget"]);
 		expect((await ctx.manager.listInstalledPlugins()).map(plugin => plugin.id)).toEqual(["widget@rename-market"]);
@@ -519,18 +523,18 @@ describe("MarketplaceManager", () => {
 		await ctx.manager.installPlugin("gadget", "gadget-market", { scope: "user" });
 		await ctx.manager.installPlugin("gadget", "gadget-market", { scope: "project" });
 		const projectRoot = path.join(ctx.tmpDir, "project");
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Gadget"))).toBe(true);
-		expect(fs.existsSync(path.join(projectRoot, "node_modules", "Gadget"))).toBe(true);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Gadget")).toBe(true);
+		expect(hasExactEntry(path.join(projectRoot, "node_modules"), "Gadget")).toBe(true);
 
 		// Force reinstall in the user scope with only the manifest name casing changed.
 		fs.writeFileSync(sourcePackage, JSON.stringify({ name: "gadget", version: "1.0.0" }));
 		await ctx.manager.installPlugin("gadget", "gadget-market", { scope: "user", force: true });
 
 		// Both scopes resolve the shared cache under the new name — no stale link or key.
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "gadget"))).toBe(true);
-		expect(fs.existsSync(path.join(ctx.tmpDir, "node_modules", "Gadget"))).toBe(false);
-		expect(fs.existsSync(path.join(projectRoot, "node_modules", "gadget"))).toBe(true);
-		expect(fs.existsSync(path.join(projectRoot, "node_modules", "Gadget"))).toBe(false);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "gadget")).toBe(true);
+		expect(hasExactEntry(path.join(ctx.tmpDir, "node_modules"), "Gadget")).toBe(false);
+		expect(hasExactEntry(path.join(projectRoot, "node_modules"), "gadget")).toBe(true);
+		expect(hasExactEntry(path.join(projectRoot, "node_modules"), "Gadget")).toBe(false);
 		const userConfig = await Bun.file(path.join(ctx.tmpDir, "omp-plugins.lock.json")).json();
 		expect(Object.keys(userConfig.plugins)).toEqual(["gadget"]);
 		const projectConfig = await Bun.file(path.join(projectRoot, "omp-plugins.lock.json")).json();
