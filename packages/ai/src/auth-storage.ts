@@ -5950,6 +5950,8 @@ export class AuthStorage {
 			return configKey;
 		}
 
+		await this.#adoptExternalCredentialChanges();
+
 		// Precedence: a deliberate OAuth/login credential wins, then an explicit env var,
 		// then a stored static api_key (which may be a stale broker-migrated copy) as a last resort.
 		const oauthSelection = this.#selectCredentialByType(provider, "oauth");

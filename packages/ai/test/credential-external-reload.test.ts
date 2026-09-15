@@ -123,12 +123,24 @@ describe("credential pool visibility across processes", () => {
 		await storage.reload();
 
 		// A session that started before any account existed.
-		expect(await storage.getApiKey("anthropic", "session-1")).toBeUndefined();
+		expect(await storage.getOAuthAccess("anthropic", "session-1")).toBeUndefined();
 
 		commitExternally(oauthRow(1));
 
 		// Selection alone must see the new row: no usage-limit error, no rotation.
 		expect(await storage.getApiKey("anthropic", "session-1")).toBe("access-1");
+	});
+
+	it("makes an externally added account visible to non-refreshing discovery", async () => {
+		const rows: StoredAuthCredential[] = [];
+		const { store, commitExternally } = makeExternallyMutableStore(rows);
+		const storage = new AuthStorage(store, { configValueResolver: async value => value });
+		storages.push(storage);
+		await storage.reload();
+
+		commitExternally(oauthRow(1));
+
+		expect(await storage.peekApiKey("anthropic")).toBe("access-1");
 	});
 
 	it("resolves OAuth access for an account another process added", async () => {
