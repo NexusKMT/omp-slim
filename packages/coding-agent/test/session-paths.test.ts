@@ -6,8 +6,10 @@ import {
 	computeDefaultSessionDir,
 	hasPositiveMovedProjectEvidence,
 	readCwdIdentity,
+	writeTerminalBreadcrumb,
 } from "@oh-my-pi/pi-coding-agent/session/session-paths";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { getAgentDir, getCustomSessionFilesDir, getSessionsDir, hashPath, setAgentDir } from "@oh-my-pi/pi-utils";
 
 const cleanup: string[] = [];
 
@@ -83,5 +85,31 @@ describe("hasPositiveMovedProjectEvidence", () => {
 		cleanup.push(to);
 		expect(hasPositiveMovedProjectEvidence(identity, to)).toBe(true);
 		expect(hasPositiveMovedProjectEvidence(undefined, to)).toBe(false);
+	});
+});
+
+describe("custom session-file registry", () => {
+	test("records an exact relocated session file and skips managed JSONL files", () => {
+		const agentDir = makeTempDir("omp-agent-");
+		const cwd = makeTempDir("omp-cwd-");
+		const originalAgentDir = getAgentDir();
+		setAgentDir(agentDir);
+		try {
+			// A relative extensionless --session path resolves against cwd and
+			// lands in the registry as the exact file, not its parent directory.
+			writeTerminalBreadcrumb(cwd, path.join(".omp-sessions", "work"));
+			const expectedFile = path.join(cwd, ".omp-sessions", "work");
+			const marker = path.join(getCustomSessionFilesDir(agentDir), hashPath(expectedFile));
+			expect(fs.readFileSync(marker, "utf8")).toBe(expectedFile);
+
+			// A JSONL transcript under the managed sessions root is covered by
+			// the root glob scan and never registered individually.
+			const managedFile = path.join(getSessionsDir(agentDir), "project", "s.jsonl");
+			writeTerminalBreadcrumb(cwd, managedFile);
+			const managedMarker = path.join(getCustomSessionFilesDir(agentDir), hashPath(managedFile));
+			expect(fs.existsSync(managedMarker)).toBe(false);
+		} finally {
+			setAgentDir(originalAgentDir);
+		}
 	});
 });
