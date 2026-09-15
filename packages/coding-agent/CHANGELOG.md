@@ -496,6 +496,7 @@
 
 - RPC output spills to temporary disk storage for slow readers instead of retaining an unbounded memory queue, and drains final responses before shutdown.
 - Large session records load faster without repeatedly copying unfinished JSONL rows.
+- `omp update` now bypasses mise's `minimum_release_age` gate when updating via mise, so a fresh release published within the freshness window (24h by default) installs instead of being silently skipped ([#11316](https://github.com/can1357/oh-my-pi/issues/11316)).
 ### Added
 
 - `/rename` without a title now generates a session name from recent conversation using the configured tiny model.
