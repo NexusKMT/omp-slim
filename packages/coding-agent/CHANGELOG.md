@@ -21,6 +21,9 @@
 
 - `Settings.getGroup()` now returns shallow-frozen snapshots, reused until effective settings change.
 - Removed `parseSSE`, `MCPToolsResponse`, and `MCPCallResponse`; `callMCP()` now returns the shared `JsonRpcResponse` with an `unknown` result instead of an unchecked generic payload.
+### Changed
+
+- Reduced startup memory and latency when initializing memory with large session histories by reading only session header metadata instead of loading entire transcripts into memory.
 
 ### Added
 
