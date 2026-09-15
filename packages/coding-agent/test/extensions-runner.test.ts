@@ -11,7 +11,7 @@ import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { convertToLlm, wrapSteeringForModel } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -3962,10 +3962,10 @@ describe("ExtensionRunner", () => {
 					pi.on("context", async event => ({
 						messages: [...event.messages.map(message => ({ ...message })), {
 							role: "custom",
-							customType: "probe." + name,
+							customType: "collab-prompt",
 							content: "<probe-" + name + ">",
 							display: false,
-							attribution: "agent",
+							attribution: "user",
 							timestamp: Date.now(),
 						}],
 					}));
@@ -4017,7 +4017,7 @@ describe("ExtensionRunner", () => {
 				model,
 				{
 					systemPrompt: ["system"],
-					messages: convertToLlm(transformed),
+					messages: convertToLlm(wrapSteeringForModel(transformed)),
 					tools: [
 						{
 							name: "lookup",
