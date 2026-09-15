@@ -120,6 +120,22 @@ describe("SessionManager close() drops empty metadata-only sessions", () => {
 		expect(await fileExists(sessionFile)).toBe(true);
 	});
 
+	it("keeps the session file when its current contents include a malformed record", async () => {
+		using tempDir = TempDir.createSync("@pi-session-close-keep-malformed-");
+		const session = SessionManager.create(tempDir.path(), tempDir.path());
+		session.appendModelChange("hai-proxy/anthropic--claude-4.6-opus");
+		await session.saveDraft("draft in terminal A");
+
+		const sessionFile = session.getSessionFile();
+		if (!sessionFile) throw new Error("Expected persistent session file");
+
+		await session.saveDraft("");
+		fs.appendFileSync(sessionFile, "{partially-written-external-record\n");
+		await session.close();
+
+		expect(await fileExists(sessionFile)).toBe(true);
+	});
+
 	it("serializes a concurrent append before the close-time draft GC decision", async () => {
 		using tempDir = TempDir.createSync("@pi-session-close-lock-cross-writer-");
 		const deleteAttemptPath = path.join(tempDir.path(), "delete-attempted");

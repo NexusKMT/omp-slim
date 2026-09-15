@@ -2218,7 +2218,11 @@ export class SessionManager {
 		try {
 			const deleted = await this.#storage.deleteSessionWithArtifactsIf(sessionFile, content => {
 				const onDisk = parseSessionContent(content);
-				return !onDisk.invalidHeader && (onDisk.entries.slice(1) as SessionEntry[]).every(isDraftOnlyMetadataEntry);
+				return (
+					!onDisk.invalidHeader &&
+					onDisk.malformedRecords === 0 &&
+					(onDisk.entries.slice(1) as SessionEntry[]).every(isDraftOnlyMetadataEntry)
+				);
 			});
 			if (!deleted) {
 				await this.#clearDraftOnlySessionMarker();
