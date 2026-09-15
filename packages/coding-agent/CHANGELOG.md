@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Leftover child `.git` directories and broken gitfiles no longer appear as the active project in the status line or agent instructions.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
