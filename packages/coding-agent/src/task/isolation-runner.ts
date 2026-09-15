@@ -393,12 +393,7 @@ export async function runIsolatedSubprocess(opts: IsolatedRunOptions): Promise<S
 			try {
 				let patchResult: IsolationPatchArtifacts;
 				try {
-					patchResult = await writeIsolationPatch(
-						handle.mergedDir,
-						taskBaseline,
-						opts.artifactsDir,
-						opts.agentId,
-					);
+					patchResult = await writeIsolationPatch(handle.mergedDir, taskBaseline, opts.artifactsDir, opts.agentId);
 				} catch (captureErr) {
 					retainWorkspace = true;
 					const retained = await retainIsolationWorkspace(handle.mergedDir, handle.backend);
