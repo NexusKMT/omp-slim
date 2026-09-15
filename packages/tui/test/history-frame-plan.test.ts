@@ -195,16 +195,20 @@ class TmuxPreservedClearTerminal extends VirtualTerminal {
  */
 class ConptyPendingWrapTerminal extends VirtualTerminal {
 	override write(data: string): void {
-		const bottom = `\x1b[${this.rows};1H`;
-		const rowStart = data.indexOf(bottom);
-		const remainder = rowStart < 0 ? "" : data.slice(rowStart + bottom.length);
-		const cursorOffset = remainder.search(/\x1b\[\d+;\d+H/);
-		const cursorMove = cursorOffset < 0 ? -1 : rowStart + bottom.length + cursorOffset;
-		if (cursorMove < 0 || data.slice(rowStart + bottom.length, cursorMove).includes("\r")) {
-			super.write(data);
-			return;
+		const cursorMove = /\x1b\[\d+;\d+H/g;
+		let offset = 0;
+		for (let match = cursorMove.exec(data); match; match = cursorMove.exec(data)) {
+			const beforeMove = data.slice(offset, match.index);
+			super.write(beforeMove);
+			const lastReturn = Math.max(beforeMove.lastIndexOf("\r"), beforeMove.lastIndexOf("\n"));
+			const trailingText = Bun.stripANSI(beforeMove.slice(lastReturn + 1));
+			if (trailingText.length >= this.columns && this.getCursor().row === this.rows - 1) {
+				super.write("\r\n");
+			}
+			super.write(match[0]);
+			offset = match.index + match[0].length;
 		}
-		super.write(`${data.slice(0, cursorMove)}\r\n${data.slice(cursorMove)}`);
+		super.write(data.slice(offset));
 	}
 }
 
