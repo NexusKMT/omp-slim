@@ -17,12 +17,14 @@ import type {
 
 class DelayedEmbedWorker implements MnemopiEmbedWorkerHandle {
 	readonly firstRequest = Promise.withResolvers<MnemopiEmbedWorkerInbound>();
+	readonly secondRequest = Promise.withResolvers<MnemopiEmbedWorkerInbound>();
 	refCalls = 0;
 	unrefCalls = 0;
+	#requestCount = 0;
 	#messageHandler: ((message: MnemopiEmbedWorkerOutbound) => void) | undefined;
 
 	send(message: MnemopiEmbedWorkerInbound): void {
-		this.firstRequest.resolve(message);
+		(this.#requestCount++ === 0 ? this.firstRequest : this.secondRequest).resolve(message);
 	}
 
 	onMessage(handler: (message: MnemopiEmbedWorkerOutbound) => void): () => void {
@@ -75,11 +77,12 @@ describe("issue #12067 — pending mnemopi requests keep print mode alive", () =
 				for await (const vectors of model!.embed(["recall query"])) return vectors;
 				throw new Error("embedding worker returned no vectors");
 			})();
-			await Bun.sleep(0);
+			const embed = await worker.secondRequest.promise;
 
+			expect(embed.type).toBe("embed");
 			expect(worker.refCalls).toBe(2);
 			expect(worker.unrefCalls).toBe(1);
-			worker.emit({ type: "vectors", id: "2", vectors: [[0.25, 0.75]] });
+			worker.emit({ type: "vectors", id: embed.id, vectors: [[0.25, 0.75]] });
 
 			expect(await embedding).toEqual([[0.25, 0.75]]);
 			expect(worker.unrefCalls).toBe(2);
