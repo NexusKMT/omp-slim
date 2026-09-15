@@ -10,6 +10,9 @@
 ### Fixed
 
 - Fixed an explicitly invalidated memory still being returned by an identical repeat query until the recall cache expired.
+### Fixed
+
+- Fixed recall continuing to serve a stale, pre-embedding ranking for up to an hour after background embeddings finished, when the enhanced recall cache is enabled.
 
 ## [18.0.9] - 2026-08-28
 
