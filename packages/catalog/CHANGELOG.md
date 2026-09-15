@@ -2,11 +2,26 @@
 
 ## [Unreleased]
 
+### Added
+
+- DeepSeek V4.1 Flash (`deepseek-flash`) now accepts image inputs and resolves its reasoning metadata, name, and effort ladder from upstream instead of shipping as a text-only row without them.
+
 ### Fixed
 
 - Fixed Command Code's `deepseek/deepseek-v4.1-flash` row exposing its documented low/high/max thinking levels and image input, and made live discovery resolve the reasoning contract its rules declare ([#1666](https://github.com/can1357/oh-my-pi/issues/1666), [#11703](https://github.com/can1357/oh-my-pi/pull/11703) by [@aliefe04](https://github.com/aliefe04)).
 - Fixed Meta Model API and Muse Code requests failing with 400 whenever omp forced a tool choice: `api.meta.ai/v1` accepts only `tool_choice: "auto"`, so `none`, `required`, and named choices (subagent final-retry `yield`, forced tools, structured output, compaction handoff) are now omitted instead of sent ([#11635](https://github.com/can1357/oh-my-pi/pull/11635) by [@quantmind-br](https://github.com/quantmind-br)).
 - Bedrock's Qwen rows no longer ask for more output tokens than the model accepts, which Bedrock rejected with a 400. ([#12117](https://github.com/can1357/oh-my-pi/pull/12117) by [@Huang-404-Q](https://github.com/Huang-404-Q))
+- Gemini 2.5 Flash Lite on Vertex AI no longer requests `maxOutputTokens=65536`, which the endpoint rejects with a 400; the output cap is clamped to 65535 ([#10595](https://github.com/can1357/oh-my-pi/pull/10595) by [@WeMingT](https://github.com/WeMingT)).
+- Fixed Meta muse-spark models on OpenRouter wedging every turn with `400 Referenced reasoning item ... was not found or has expired`: replayed Responses reasoning history is now filtered for the muse-spark family, matching the existing Anthropic-on-OpenRouter treatment ([#10675](https://github.com/can1357/oh-my-pi/pull/10675) by [@Giardi77](https://github.com/Giardi77)).
+- Fixed Ollama Cloud model discovery synthesizing a generic `minimal`/`low`/`medium`/`high` effort ladder for every thinking-capable model, which shadowed the per-model compat rules and made `max` unreachable on the DeepSeek V4 line (including the served `deepseek-v4.1-flash`, `deepseek-v4-flash:0731`, and `deepseek-v4-pro:0813` ids): discovery now leaves the ladder to the rule tree, so those models advertise the wire-exact `low`/`high`/`max` and GLM-5.3 exposes `low`/`high`/`max` ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
+- Fixed Meta Model API and Muse Code requests failing with 400 whenever omp forced a tool choice: `api.meta.ai/v1` accepts only `tool_choice: "auto"`, so `none`, `required`, and named choices (subagent final-retry `yield`, forced tools, structured output, compaction handoff) are now omitted instead of sent.
+- Fixed Azure GPT-6 Astra Chat Completions policy to disable reasoning with function tools and encode thinking-off as `reasoning_effort: "none"` ([#11052](https://github.com/can1357/oh-my-pi/issues/11052)).
+- Fixed Z.AI and Zhipu timezone-naive quota reset timestamps resolving eight hours late by declaring their UTC+8 reset timezone ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
+- Fixed Amazon Bedrock Claude Fable 5.1 effort metadata to expose `xhigh` and `max` instead of the unsupported `minimal` level. ([#10788](https://github.com/can1357/oh-my-pi/pull/10788) by [@voonfoo](https://github.com/voonfoo))
+- LiteLLM discovery no longer exposes known task-specific models, including embedding, media, moderation, reranking, and search models, as coding models.
+- Fixed custom `anthropic-messages` providers whose adaptive effort ladder exposes `minimal` sending `output_config.effort: "minimal"`, which the Anthropic Messages API rejects with `400 level "minimal" not supported`; the adaptive effort mapper now clamps `minimal` to `low` ([#10994](https://github.com/can1357/oh-my-pi/issues/10994)).
+- Qwen 3.8 models on Alibaba Token Plan now send the selected reasoning effort and replay reasoning history across turns.
+- Fixed DeepInfra model cost reporting so promotional pricing is reflected: the `metadata.discount` fraction is now applied to input, output, and cache-read rates ([#10935](https://github.com/can1357/oh-my-pi/issues/10935)).
 
 ## [18.2.0] - 2026-09-15
 
@@ -27,9 +42,6 @@
 - Provider catalog entries (default model, env keys, discovery wiring) and the bundled fallback rows for providers that cannot be discovered at generation time (Anthropic, OpenAI Daybreak, xAI OAuth, Meta, Muse Code, Bedrock Mantle, Devin, Z.AI, Sakana, ai&, Abliteration, Yolo-Auto, GMI Cloud, Fire Pass, QwenCloud Token Plan, Cloudflare AI Gateway, GitLab Duo Workflow) now live in `src/compat/rules/providers/<id>.kdl` and compile into `rules.json`; `KnownProvider` is generated from them, and the generator bundles seed rows by each entry's declared `bundle` policy instead of per-provider code.
 
 ## [18.1.22] - 2026-09-14
-### Fixed
-
-- Gemini 2.5 Flash Lite on Vertex AI no longer requests `maxOutputTokens=65536`, which the endpoint rejects with a 400; the output cap is clamped to 65535 ([#10595](https://github.com/can1357/oh-my-pi/pull/10595) by [@WeMingT](https://github.com/WeMingT)).
 
 ### Added
 
@@ -37,7 +49,6 @@
 
 ### Fixed
 
-- Fixed Meta muse-spark models on OpenRouter wedging every turn with `400 Referenced reasoning item ... was not found or has expired`: replayed Responses reasoning history is now filtered for the muse-spark family, matching the existing Anthropic-on-OpenRouter treatment ([#10675](https://github.com/can1357/oh-my-pi/pull/10675) by [@Giardi77](https://github.com/Giardi77)).
 - OpenCode Zen GPT-6 Astra requests now use the Responses endpoint instead of failing through chat completions with HTTP 500 ([#12030](https://github.com/can1357/oh-my-pi/issues/12030)).
 
 ## [18.1.20] - 2026-09-13
@@ -70,10 +81,6 @@
 - Amazon Bedrock OpenAI models, plus unclassified profiles such as opaque application-inference-profile ARNs, now carry the compatibility policy required to preserve image-bearing tool results ([#11681](https://github.com/can1357/oh-my-pi/issues/11681)).
 - DeepSeek V4.1 Flash requests now honor the documented 384K output maximum instead of being capped at 64K ([#11769](https://github.com/can1357/oh-my-pi/issues/11769)).
 - Fixed the first-party `deepseek-flash` alias missing the V4.1 Flash wire contract: it now sends `max_tokens` with `reasoning_content` and replays reasoning and assistant content on tool calls with no tool choice ([#11799](https://github.com/can1357/oh-my-pi/pull/11799) by [@brit](https://github.com/brit)).
-### Fixed
-
-- Fixed Ollama Cloud model discovery synthesizing a generic `minimal`/`low`/`medium`/`high` effort ladder for every thinking-capable model, which shadowed the per-model compat rules and made `max` unreachable on the DeepSeek V4 line (including the served `deepseek-v4.1-flash`, `deepseek-v4-flash:0731`, and `deepseek-v4-pro:0813` ids): discovery now leaves the ladder to the rule tree, so those models advertise the wire-exact `low`/`high`/`max` and GLM-5.3 exposes `low`/`high`/`max` ([#8334](https://github.com/can1357/oh-my-pi/issues/8334)).
-- Fixed Meta Model API and Muse Code requests failing with 400 whenever omp forced a tool choice: `api.meta.ai/v1` accepts only `tool_choice: "auto"`, so `none`, `required`, and named choices (subagent final-retry `yield`, forced tools, structured output, compaction handoff) are now omitted instead of sent.
 
 ## [18.1.17] - 2026-09-10
 
@@ -83,7 +90,6 @@
 - Added DeepSeek cost estimates that follow published peak/off-peak rates.
 - Added dated, announced price changes to the catalog, so rates switch on their effective date (e.g. DeepSeek Pro moving to Flash rates).
 - Added Command Code as a built-in provider with API-key login, live model discovery, per-model pricing, native OpenAI/Anthropic-compatible routing, cache-aware token usage, and TTFT metrics ([#11391](https://github.com/can1357/oh-my-pi/pull/11391) by [@CherkaSSH](https://github.com/CherkaSSH)).
-- DeepSeek V4.1 Flash (`deepseek-flash`) now accepts image inputs and resolves its reasoning metadata, name, and effort ladder from upstream instead of shipping as a text-only row without them.
 
 ### Fixed
 
@@ -111,9 +117,6 @@
 - Fixed GPT-6 Astra compacting early at a 272K-token window with its full window gated behind `/extended-context`: it now defaults to the documented 1.05M-token window.
 
 ## [18.1.12] - 2026-09-06
-- Fixed OpenCode Go/Zen live model discovery (`GET /v1/models`) missing `x-opencode-session` and omp's `User-Agent`: discovery requests now attribute with the stable install id so the requests OpenCode flags as `Bun fetch` carry the required session header.
-
-- Fixed Azure GPT-6 Astra Chat Completions policy to disable reasoning with function tools and encode thinking-off as `reasoning_effort: "none"` ([#11052](https://github.com/can1357/oh-my-pi/issues/11052)).
 
 ### Added
 
@@ -124,19 +127,9 @@
 ### Fixed
 
 - Fixed OpenCode Go/Zen live model discovery (`GET /v1/models`) missing `x-opencode-session` and omp's `User-Agent`: discovery requests now attribute with the stable install id so the requests OpenCode flags as `Bun fetch` carry the required session header.
-- Fixed Z.AI and Zhipu timezone-naive quota reset timestamps resolving eight hours late by declaring their UTC+8 reset timezone ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
-
 	- Fixed GPT-6 Astra requests through GitHub Copilot failing with an unsupported endpoint error ([#10874](https://github.com/can1357/oh-my-pi/pull/10874) by [@xpcmdshell](https://github.com/xpcmdshell)).
 	- Fixed GPT-6 Astra showing as free with a 272K-token window in the OpenAI Codex catalog by applying its documented pricing; `/extended-context` enables the wire-advertised 872K-token maximum ([#10980](https://github.com/can1357/oh-my-pi/pull/10980) by [@H4vC](https://github.com/H4vC)).
 	- Made extended-context catalog rebuilds faster by resolving each model's maximum window once per process ([#11039](https://github.com/can1357/oh-my-pi/pull/11039) by [@H4vC](https://github.com/H4vC)).
-### Fixed
-
-- Fixed Amazon Bedrock Claude Fable 5.1 effort metadata to expose `xhigh` and `max` instead of the unsupported `minimal` level. ([#10788](https://github.com/can1357/oh-my-pi/pull/10788) by [@voonfoo](https://github.com/voonfoo))
-- LiteLLM discovery no longer exposes known task-specific models, including embedding, media, moderation, reranking, and search models, as coding models.
-- Fixed custom `anthropic-messages` providers whose adaptive effort ladder exposes `minimal` sending `output_config.effort: "minimal"`, which the Anthropic Messages API rejects with `400 level "minimal" not supported`; the adaptive effort mapper now clamps `minimal` to `low` ([#10994](https://github.com/can1357/oh-my-pi/issues/10994)).
-- Fixed GPT-6 Astra requests through GitHub Copilot failing with an unsupported endpoint error ([#10874](https://github.com/can1357/oh-my-pi/pull/10874) by [@xpcmdshell](https://github.com/xpcmdshell)).
-- Qwen 3.8 models on Alibaba Token Plan now send the selected reasoning effort and replay reasoning history across turns.
-- Fixed DeepInfra model cost reporting so promotional pricing is reflected: the `metadata.discount` fraction is now applied to input, output, and cache-read rates ([#10935](https://github.com/can1357/oh-my-pi/issues/10935)).
 
 ## [18.1.9] - 2026-09-04
 

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the public `postmortem.exitProcess()` utility for host-owned hard exits that must bypass temporary process-exit guards ([#11789](https://github.com/can1357/oh-my-pi/issues/11789)).
+- Added `readSseJsonOrText`: like `readSseJson`, but a `data:` frame that is not valid JSON is yielded as its raw text instead of raising a `SyntaxError`, so a consumer can classify a reverse proxy's plain-text throttle page (`429 Too Many Requests`) that arrives after the stream headers were already sent. `readSseJson` is unchanged and shares the framing with it.
+
+### Fixed
+
+- Reading an EPUB, PPTX or XLSX whose XML has a mismatched or stray end tag no longer hangs the session forever; the parser recovers and the document converts ([#12018](https://github.com/can1357/oh-my-pi/pull/12018) by [@kaluli123123](https://github.com/kaluli123123)).
+- Fixed `filterChildShellEnv` forwarding the host process's `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides to child shells, where `git` would ignore the command's `cwd`.
+- ACP JSON-RPC now drains accepted inbound requests on clean stdin EOF before resolving `closed`, so in-flight methods such as `session/new` still receive a success or explicit error response instead of being dropped on exit 0 ([#11567](https://github.com/can1357/oh-my-pi/issues/11567)).
+- Fixed provider-local usage-limit reset timestamps making `waitForUsageReset` sessions resume up to eight hours late while preserving longest-window semantics for naive UTC timestamps ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
+- `registerStdioDisconnectHandling()` now drives graceful shutdown from `process.stdout`'s own `error` event, so a closed stdout consumer exits cleanly while an unrelated write EPIPE (subprocess stdin, socket) stays fatal ([#10930](https://github.com/can1357/oh-my-pi/issues/10930)).
+- Fixed Linux `ptree` timeout cleanup occasionally leaving session-escaped descendants running during subreaper adoption.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
@@ -42,7 +56,6 @@
 
 - Timed out stalled Chrome-for-Testing metadata requests after 30 seconds when looking up download metadata
 - Concurrent browser installations share one download without replacing a running browser, and stalled downloads time out with partial files cleaned up for retry.
-- Reading an EPUB, PPTX or XLSX whose XML has a mismatched or stray end tag no longer hangs the session forever; the parser recovers and the document converts ([#12018](https://github.com/can1357/oh-my-pi/pull/12018) by [@kaluli123123](https://github.com/kaluli123123)).
 
 ## [18.1.19] - 2026-09-12
 
@@ -52,39 +65,25 @@
 
 ### Fixed
 
-- Fixed `filterChildShellEnv` forwarding the host process's `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides to child shells, where `git` would ignore the command's `cwd`.
 - Child-shell environment filtering now tolerates a removed process working directory by retaining the resolved project directory ([#11828](https://github.com/can1357/oh-my-pi/issues/11828)).
-### Fixed
-
-- ACP JSON-RPC now drains accepted inbound requests on clean stdin EOF before resolving `closed`, so in-flight methods such as `session/new` still receive a success or explicit error response instead of being dropped on exit 0 ([#11567](https://github.com/can1357/oh-my-pi/issues/11567)).
-### Added
-
-- Added the public `postmortem.exitProcess()` utility for host-owned hard exits that must bypass temporary process-exit guards ([#11789](https://github.com/can1357/oh-my-pi/issues/11789)).
 
 ## [18.1.16] - 2026-09-09
 
 ### Fixed
 
 - Fixed `$which` capturing `Bun.which` at import on Linux and Windows, so `Bun.which` stubs installed later (e.g. per-test spies) are honoured and PATH-only language servers no longer leak into test results.
-### Added
-
-- Added `readSseJsonOrText`: like `readSseJson`, but a `data:` frame that is not valid JSON is yielded as its raw text instead of raising a `SyntaxError`, so a consumer can classify a reverse proxy's plain-text throttle page (`429 Too Many Requests`) that arrives after the stream headers were already sent. `readSseJson` is unchanged and shares the framing with it.
 
 ## [18.1.13] - 2026-09-07
 
 ### Fixed
 
 - Fixed `filterChildShellEnv` applying the omp process's own launch-environment provenance (the pre-dotenv `NODE_ENV` and launcher-owned names read from `/proc/self/environ`) to caller-supplied environment objects; launch provenance now only applies when filtering the live `process.env`/`Bun.env`, and an explicit env resolves its dotenv mode from its own `NODE_ENV`.
-### Fixed
-
-- Fixed provider-local usage-limit reset timestamps making `waitForUsageReset` sessions resume up to eight hours late while preserving longest-window semantics for naive UTC timestamps ([#11014](https://github.com/can1357/oh-my-pi/issues/11014)).
 
 ## [18.1.11] - 2026-09-05
 
 ### Fixed
 
 - Fixed `extractRetryHint` dropping the longer timing signal when an error body carries both an account reset and an appended retry hint: competing signals now merge by longest window instead of first match, so retries honor the provider's full backoff.
-- `registerStdioDisconnectHandling()` now drives graceful shutdown from `process.stdout`'s own `error` event, so a closed stdout consumer exits cleanly while an unrelated write EPIPE (subprocess stdin, socket) stays fatal ([#10930](https://github.com/can1357/oh-my-pi/issues/10930)).
 
 ## [18.1.7] - 2026-09-03
 
@@ -130,9 +129,6 @@
 - Fixed sub-second duration formatting so it no longer exposes floating-point precision noise.
 - Managed Chrome-for-Testing downloads now reject unsupported Linux ARM64 hosts instead of installing an incompatible x86_64 browser.
 - Fixed Markdown reference-link labels that match built-in `Object.prototype` names, such as `constructor` and `__proto__`, so they are no longer misidentified as definitions or emitted with an undefined URL ([#10283](https://github.com/can1357/oh-my-pi/issues/10283)).
-### Fixed
-
-- Fixed Linux `ptree` timeout cleanup occasionally leaving session-escaped descendants running during subreaper adoption.
 
 ## [18.0.11] - 2026-08-29
 

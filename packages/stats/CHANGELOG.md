@@ -5,6 +5,11 @@
 ### Fixed
 
 - Fixed the sessions API returning an encoded storage key instead of the session working directory ([#12078](https://github.com/can1357/oh-my-pi/pull/12078) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed Traces search inputs and checkbox using unthemed browser defaults, and iOS viewport zoom on search focus.
+- Fixed garbage tool names from provider-side parse failures (e.g. a gateway returning the model's whole invocation text as the tool name) polluting the tools dashboard's per-tool rows and filter dropdown; such names now collapse to their leading identifier, and existing databases re-ingest cleaned on next sync.
+- Reduced repeat stats-sync reads to appended transcript data while preserving service-tier accounting across restarts.
+- Rebuilt stats for replaced or truncated session files instead of retaining stale totals.
+- Reclaimed lingering stats dashboards from older releases using their versioned HTTP identity when process command lines are unavailable, so upgrades no longer leave `omp stats` blocked by an opaque Bun listener.
 
 ## [18.1.17] - 2026-09-10
 
@@ -15,14 +20,6 @@
 - Fixed a legacy entry whose malformed token counter was summed into an inflated request total; counters that are not finite numbers now count as absent.
 - Fixed requests whose timestamp could not be recovered being reported as free usage: they now count as unpriced (`N/A`) rather than `$0`, in both the aggregates and the per-request list, and an existing database re-parses its sessions once so rows stored before this change are repaired.
 - Fixed the trace summary showing `$0` instead of `N/A` for legacy scheduled requests that omit their token total: the total is derived from the token buckets before classifying unpriced usage.
-### Fixed
-
-- Fixed Traces search inputs and checkbox using unthemed browser defaults, and iOS viewport zoom on search focus.
-### Fixed
-
-- Fixed garbage tool names from provider-side parse failures (e.g. a gateway returning the model's whole invocation text as the tool name) polluting the tools dashboard's per-tool rows and filter dropdown; such names now collapse to their leading identifier, and existing databases re-ingest cleaned on next sync.
-- Reduced repeat stats-sync reads to appended transcript data while preserving service-tier accounting across restarts.
-- Rebuilt stats for replaced or truncated session files instead of retaining stale totals.
 
 ## [18.1.3] - 2026-09-02
 
@@ -52,9 +49,6 @@
 ### Fixed
 
 - Fixed SuperGrok usage appearing as free by applying matching public xAI API pricing (including 200K-token rates), labeling costs as API-equivalent estimates, backfilling existing usage records, and displaying subscription-only models as N/A ([#9512](https://github.com/can1357/oh-my-pi/issues/9512)).
-### Fixed
-
-- Reclaimed lingering stats dashboards from older releases using their versioned HTTP identity when process command lines are unavailable, so upgrades no longer leave `omp stats` blocked by an opaque Bun listener.
 
 ## [18.0.1] - 2026-08-23
 

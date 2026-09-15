@@ -2,40 +2,36 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed the embedded shell and PTY sessions inheriting `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides from the host process, which made `git` run in a secondary worktree mutate the primary one ([#11082](https://github.com/can1357/oh-my-pi/issues/11082)).
 ### Added
 
 - Added `maxBytes` to `VcsGitRepo.diffText` options: rendering stops and the call rejects with an `OutputTooLarge` VcsError once the patch crosses the cap, so callers can bound the memory a large change set may consume ([#11454](https://github.com/can1357/oh-my-pi/pull/11454) by [@sjawhar](https://github.com/sjawhar)).
 - Native addon embedding now rejects stale release binaries before standalone builds can package them ([#11831](https://github.com/can1357/oh-my-pi/issues/11831)).
-
 - Fixed git repository discovery treating an unpopulated `.git` directory (no `HEAD`) as a checkout, which made `/wt` and isolated tasks fail with a raw "No such file or directory (os error 2)" instead of reporting that no Git repository was found. Discovery now skips such entries and keeps walking toward the root, matching `git rev-parse`.
+- Added `vcsDiscoverForDisplay` (`repoForDisplay`): like repository discovery, but equal-root jj+git ties prefer Jujutsu for the status line and footer. Git-safe automation must keep using `vcsDiscover` ([#11071](https://github.com/can1357/oh-my-pi/issues/11071), [#11325](https://github.com/can1357/oh-my-pi/pull/11325) by [@boazy](https://github.com/boazy)).
+- Shell and PTY command output on Windows now falls back from UTF-8 to the system ANSI code page (e.g. GBK on Chinese locales) instead of emitting replacement characters.
+
+### Changed
+
+- Workspace startup scans skip excluded build directories and retain a bounded set of entries and directory rules.
+- Limited newest-file searches use less memory on large directory trees when scan caching is disabled.
+
+### Fixed
+
+- Fixed the embedded shell and PTY sessions inheriting `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides from the host process, which made `git` run in a secondary worktree mutate the primary one ([#11082](https://github.com/can1357/oh-my-pi/issues/11082)).
+- Added a vendored Astro grammar so `.astro` files highlight the `---` TypeScript frontmatter and `{…}` template expressions instead of falling back to plain HTML ([#11164](https://github.com/can1357/oh-my-pi/pull/11164) by [@byigitt](https://github.com/byigitt)).
+- Fixed the TUI sometimes stopping repainting while the agent continued running.
+
 ## [18.1.17] - 2026-09-10
 
 ### Fixed
 
 - Fixed Wayland computer-use clicks landing in the wrong place on scaled monitors by mapping captures through the portal's logical monitor geometry ([#11540](https://github.com/can1357/oh-my-pi/issues/11540)).
 
-### Added
-
-- Added `vcsDiscoverForDisplay` (`repoForDisplay`): like repository discovery, but equal-root jj+git ties prefer Jujutsu for the status line and footer. Git-safe automation must keep using `vcsDiscover` ([#11071](https://github.com/can1357/oh-my-pi/issues/11071), [#11325](https://github.com/can1357/oh-my-pi/pull/11325) by [@boazy](https://github.com/boazy)).
-- Shell and PTY command output on Windows now falls back from UTF-8 to the system ANSI code page (e.g. GBK on Chinese locales) instead of emitting replacement characters.
-### Changed
-
-- Workspace startup scans skip excluded build directories and retain a bounded set of entries and directory rules.
-### Changed
-
-- Limited newest-file searches use less memory on large directory trees when scan caching is disabled.
-
 ## [18.1.15] - 2026-09-08
 
 ### Fixed
 
 - Fixed C++ language inference excluding CUDA header (`.cuh`) files ([#10782](https://github.com/can1357/oh-my-pi/pull/10782) by [@alphastorm](https://github.com/alphastorm)).
-### Fixed
-
-- Added a vendored Astro grammar so `.astro` files highlight the `---` TypeScript frontmatter and `{…}` template expressions instead of falling back to plain HTML ([#11164](https://github.com/can1357/oh-my-pi/pull/11164) by [@byigitt](https://github.com/byigitt)).
 
 ## [18.1.9] - 2026-09-04
 
@@ -90,7 +86,6 @@
 ### Fixed
 
 - Fixed TTY output backpressure reporting so pending write progress is accurately reflected during large writes.
-- Fixed the TUI sometimes stopping repainting while the agent continued running.
 
 ## [18.0.11] - 2026-08-29
 
