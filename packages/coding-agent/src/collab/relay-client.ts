@@ -46,6 +46,8 @@ interface PendingSend {
 	eager: boolean;
 	onPrepared?: () => void;
 	preparedEnvelope?: Uint8Array;
+	/** Next batch frame, pulled right after a write so an exhausted batch leaves the head at once. */
+	head?: CollabFrame | string;
 }
 
 export interface CollabSocketOptions {
@@ -276,13 +278,18 @@ export class CollabSocket {
 			if (!pending.eager && !(await this.#waitForWritable(generation))) return;
 			if (this.#closed || generation !== this.#sendGeneration) return;
 			if (pending.cancelled) continue;
-			const next = pending.frames.next();
-			if (next.done) {
-				this.#pendingSends.shift();
-				this.#pendingSendBytes -= pending.bytes;
-				continue;
+			let value = pending.head;
+			pending.head = undefined;
+			if (value === undefined) {
+				const next = pending.frames.next();
+				if (next.done) {
+					this.#pendingSends.shift();
+					this.#pendingSendBytes -= pending.bytes;
+					continue;
+				}
+				value = next.value;
 			}
-			const serialized = typeof next.value === "string" ? next.value : JSON.stringify(next.value);
+			const serialized = typeof value === "string" ? value : JSON.stringify(value);
 			const bytes = pending.bytes === 0 ? Buffer.byteLength(serialized) : 0;
 			if (this.#pendingSendBytes + bytes > MAX_PENDING_SEND_BYTES) {
 				this.#failOverload();
@@ -304,6 +311,17 @@ export class CollabSocket {
 					if (pending.eager) {
 						this.#pendingSends.shift();
 						this.#pendingSendBytes -= pending.bytes;
+					} else {
+						// Pull the successor now: an exhausted batch must leave the head
+						// immediately, or backpressure would hold every later send behind
+						// a batch with nothing left to write. One chunk is held at most.
+						const next = pending.frames.next();
+						if (next.done) {
+							this.#pendingSends.shift();
+							this.#pendingSendBytes -= pending.bytes;
+						} else {
+							pending.head = next.value;
+						}
 					}
 				}
 			} finally {
@@ -474,14 +492,20 @@ export class CollabSocket {
 		if (!bytes) return;
 		const envelope = unpackEnvelope(bytes);
 		if (!envelope) return;
+		// A frame received on the live socket belongs to this room even if the
+		// socket closes while it is still decrypting — a host's goodbye lands just
+		// before the relay tears the room down. Only a terminal close or a room
+		// recreation makes it stale; a mere disconnect ahead of a retry does not.
+		const generation = this.#roomGeneration;
+		const stale = (): boolean => this.#closed || generation !== this.#roomGeneration;
 		this.#recvChain = this.#recvChain
 			.then(async () => {
-				if (this.#ws !== ws) return;
+				if (stale()) return;
 				let frame: CollabFrame;
 				try {
 					frame = await open(this.#opts.key, envelope.payload);
 				} catch {
-					if (this.#ws !== ws) return;
+					if (stale()) return;
 					if (this.#opts.role === "host") {
 						logger.debug("collab: ignoring undecryptable guest frame", { peer: envelope.peerId });
 					} else {
@@ -489,9 +513,11 @@ export class CollabSocket {
 					}
 					return;
 				}
-				if (this.#ws !== ws) return;
-				this.#retryMissingRoom = false;
-				this.#attempt = 0;
+				if (stale()) return;
+				if (this.#ws === ws) {
+					this.#retryMissingRoom = false;
+					this.#attempt = 0;
+				}
 				this.onFrame?.(frame, envelope.peerId);
 			})
 			.catch((err: unknown) => {
