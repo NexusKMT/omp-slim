@@ -266,6 +266,7 @@
 
 ## [18.1.17] - 2026-09-10
 
+- Stop eval from advertising `agent()` after the session reaches its subagent recursion-depth limit.
 ### Added
 
 - Unsent prompts cleared with Ctrl+C can now be recalled with Up, including pastes and images; disable Recall Cleared Drafts in settings to discard future clears instead ([#11524](https://github.com/can1357/oh-my-pi/pull/11524) by [@camjac251](https://github.com/camjac251)).

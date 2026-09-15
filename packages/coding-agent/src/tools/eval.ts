@@ -29,6 +29,7 @@ import evalCodeModeDescription from "../prompts/tools/eval-code-mode.md" with { 
 import { DEFAULT_MAX_BYTES, OutputSink, type OutputSummary, TailBuffer } from "../session/streaming-output";
 import { sessionDelegationBias } from "../task/prompt-policy";
 import { resolveSpawnPolicy } from "../task/spawn-policy";
+import { canSpawnAtDepth } from "../task/types";
 import { webpExclusionForModel } from "../utils/image-loading";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import type { ToolSession } from ".";
@@ -288,6 +289,10 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		} else {
 			const backends = resolveEvalBackends(this.session);
 			const sessionSpawns = this.session.getSessionSpawns?.() ?? "*";
+			const depthAllowsSpawning = canSpawnAtDepth(
+				this.session.settings.get("task.maxRecursionDepth") ?? 2,
+				this.session.taskDepth ?? 0,
+			);
 			const preludeDocumentation = getEnabledEvalPreludes(this.session.getEvalPreludes?.() ?? [])
 				.map(definition => definition.documentation.trim())
 				.filter(Boolean)
@@ -295,7 +300,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			base = getEvalToolDescription({
 				py: backends.python,
 				js: backends.js,
-				spawns: sessionSpawns,
+				spawns: depthAllowsSpawning ? sessionSpawns : false,
 				autoBackgroundEnabled: this.session.settings.get("eval.autoBackground.enabled"),
 				evalTools: this.session.settings.get("eval.tools.enabled"),
 				eagerDelegation: sessionDelegationBias(this.session) === "eager",
