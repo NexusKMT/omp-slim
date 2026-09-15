@@ -235,12 +235,11 @@ describe("ReadToolGroupComponent", () => {
 
 		const rendered = component.render(120).join("\n");
 
-		const oneUri = new URL(url.pathToFileURL(oneLink).href);
-		oneUri.searchParams.set("line", "1");
-		const twoUri = new URL(url.pathToFileURL(twoLink).href);
-		twoUri.searchParams.set("line", "9");
+		// Plain file: URIs — the line location must stay out of the query (#12123).
+		const oneUri = url.pathToFileURL(oneLink).href;
+		const twoUri = url.pathToFileURL(twoLink).href;
 		expect(Bun.stripANSI(rendered)).toContain("Read (2)");
-		expect(extractLinkUris(rendered)).toEqual(expect.arrayContaining([oneUri.href, twoUri.href]));
+		expect(extractLinkUris(rendered)).toEqual(expect.arrayContaining([oneUri, twoUri]));
 		expect(extractLinkTexts(rendered)).toEqual(expect.arrayContaining(["src/one.ts", "src/two.ts"]));
 	});
 
