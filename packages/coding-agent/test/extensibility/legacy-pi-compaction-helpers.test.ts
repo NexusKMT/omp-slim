@@ -116,6 +116,33 @@ describe("legacy shim sessionEntryToContextMessages", () => {
 		expect(sessionEntryToContextMessages(entry)).toEqual([message]);
 	});
 
+	it("normalizes null message content from old or hand-edited sessions", () => {
+		const messages = sessionEntryToContextMessages({
+			type: "message",
+			id: "m",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+			message: { role: "assistant", content: null, timestamp: 0 },
+		} as unknown as SessionEntry);
+		expect(messages).toHaveLength(1);
+		expect(messages[0]?.content).toEqual([]);
+	});
+
+	it("preserves custom-message attribution", () => {
+		const messages = sessionEntryToContextMessages({
+			type: "custom_message",
+			id: "cm",
+			parentId: null,
+			timestamp: new Date(0).toISOString(),
+			customType: "note",
+			content: "hello",
+			display: true,
+			attribution: "user",
+		});
+		expect(messages).toHaveLength(1);
+		expect(messages[0]).toMatchObject({ role: "custom", attribution: "user" });
+	});
+
 	it("projects a compaction entry to a single compaction-summary message", () => {
 		const entry: SessionEntry = {
 			type: "compaction",
