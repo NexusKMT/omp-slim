@@ -83,6 +83,7 @@ export class BashExecutionComponent extends Container {
 	#ptyQueue: string[] = [];
 	#ptyWriting = false;
 	#ptyRefreshQueued = false;
+	#ptyReplayFinalized = false;
 	#images: readonly ImageContent[] = [];
 	#showImages = true;
 	readonly #instanceId = nextBashExecutionId++;
@@ -113,7 +114,7 @@ export class BashExecutionComponent extends Container {
 	 * stay out of native scrollback until the command completes.
 	 */
 	isTranscriptBlockFinalized(): boolean {
-		return this.#status !== "running";
+		return this.#status !== "running" && (!this.#ptyMode || this.#ptyReplayFinalized);
 	}
 
 	getTranscriptBlockVersion(): number {
@@ -170,6 +171,7 @@ export class BashExecutionComponent extends Container {
 	appendPtyChunk(chunk: string): void {
 		if (this.#status !== "running" && !this.#ptyWriting && this.#ptyQueue.length === 0) return;
 		this.#ptyMode = true;
+		this.#ptyReplayFinalized = false;
 		this.#ptyQueue.push(chunk);
 		if (this.#ptyQueue.length > MAX_PTY_QUEUE_CHUNKS) {
 			const firstPending = this.#ptyWriting ? 1 : 0;
@@ -247,8 +249,10 @@ export class BashExecutionComponent extends Container {
 		this.#refreshPtyLines(true);
 		this.#ptyTerminal = undefined;
 		terminal.dispose();
+		this.#ptyReplayFinalized = true;
 		this.#blockVersion++;
 		this.#updateDisplay();
+		this.#ui.requestComponentRender(this);
 	}
 
 	setComplete(
