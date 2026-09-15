@@ -536,6 +536,10 @@
 - Fixed MCP tools discovered during startup disappearing after plan-mode approval or when leaving default-on plan mode.
 - Fixed ACP clients receiving invalid file locations or updates for released terminals, preventing invalid worktree scans and terminal errors on Windows.
 
+### Fixed
+
+- Fixed Ctrl+O (`app.tools.expand`) in the `ask` dialog only expanding a truncated question header: it now also expands truncated option descriptions in place.
+
 ## [18.1.6] - 2026-09-03
 
 ### Breaking Changes
