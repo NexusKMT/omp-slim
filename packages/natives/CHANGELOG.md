@@ -17,6 +17,7 @@
 
 ### Fixed
 
+- Bounded filesystem scan cache memory and prevented stale scans from repopulating the cache after file changes. ([#11240](https://github.com/can1357/oh-my-pi/pull/11240) by [@iliaal](https://github.com/iliaal))
 - Fixed the embedded shell and PTY sessions inheriting `GIT_DIR`, `GIT_WORK_TREE`, and related repo-location overrides from the host process, which made `git` run in a secondary worktree mutate the primary one ([#11082](https://github.com/can1357/oh-my-pi/issues/11082)).
 - Added a vendored Astro grammar so `.astro` files highlight the `---` TypeScript frontmatter and `{…}` template expressions instead of falling back to plain HTML ([#11164](https://github.com/can1357/oh-my-pi/pull/11164) by [@byigitt](https://github.com/byigitt)).
 - Fixed the TUI sometimes stopping repainting while the agent continued running.
@@ -29,9 +30,6 @@
 ### Fixed
 
 - Fixed Wayland computer-use clicks landing in the wrong place on scaled monitors by mapping captures through the portal's logical monitor geometry ([#11540](https://github.com/can1357/oh-my-pi/issues/11540)).
-### Fixed
-
-- Bounded filesystem scan cache memory and prevented stale scans from repopulating the cache after file changes.
 
 ## [18.1.15] - 2026-09-08
 

@@ -105,6 +105,7 @@ import {
 	RANGE_TRAILING_CONTEXT_LINES,
 	READ_CHUNK_SIZE,
 	readHashlineHeaderContext,
+	toReadTruncationStats,
 } from "./read-format";
 import {
 	findSuffixMatchCached,
@@ -648,9 +649,12 @@ const readSchemaWithoutMemoryWithSkills = type({
 
 export type ReadToolInput = typeof readSchema.infer;
 
+/** Read result metadata retains truncation statistics, not a second copy of the body. */
+export type ReadTruncationStats = Omit<TruncationResult, "content">;
+
 export interface ReadToolDetails {
 	kind?: "file" | "url";
-	truncation?: TruncationResult;
+	truncation?: ReadTruncationStats;
 	isDirectory?: boolean;
 	resolvedPath?: string;
 	suffixResolution?: { from: string; to: string };
@@ -2288,7 +2292,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 						}
 						sourcePath = renderAbsolutePath;
 						if (truncation) {
-							details = { truncation };
+							details = { truncation: toReadTruncationStats(truncation) };
 							truncationInfo = {
 								result: truncation,
 								options: {
@@ -2332,7 +2336,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 								`:raw:${lineNumber}-${lineNumber}`,
 							)}`;
 						}
-						details = { truncation };
+						details = { truncation: toReadTruncationStats(truncation) };
 						sourcePath = renderAbsolutePath;
 						truncationInfo = {
 							result: truncation,
@@ -2727,7 +2731,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		}
 		if (reachedEof) details.totalLines = totalFileLines;
 		if (displayContent) details.displayContent = displayContent;
-		if (truncationInfo) details.truncation = truncationInfo.result;
+		if (truncationInfo) details.truncation = toReadTruncationStats(truncationInfo.result);
 		const resultBuilder = toolResult<ReadToolDetails>(details)
 			.text(outputText)
 			.sourcePath(artifact.path)
@@ -2945,7 +2949,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		const resultBuilder = toolResult(details).text(truncation.content).sourcePath(tree.rootPath);
 		if (truncation.truncated) {
 			resultBuilder.truncation(truncation, { direction: "head" });
-			details.truncation = truncation;
+			details.truncation = toReadTruncationStats(truncation);
 		}
 
 		return resultBuilder.done();
