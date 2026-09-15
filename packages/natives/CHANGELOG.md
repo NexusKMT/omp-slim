@@ -26,6 +26,9 @@
 ### Fixed
 
 - Fixed Wayland computer-use clicks landing in the wrong place on scaled monitors by mapping captures through the portal's logical monitor geometry ([#11540](https://github.com/can1357/oh-my-pi/issues/11540)).
+### Fixed
+
+- Bounded filesystem scan cache memory and prevented stale scans from repopulating the cache after file changes.
 
 ## [18.1.15] - 2026-09-08
 
