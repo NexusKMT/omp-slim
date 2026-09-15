@@ -1,3 +1,4 @@
+import { scheduler } from "node:timers/promises";
 import type { Terminal } from "@oh-my-pi/pi-tui";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import type { LspServerInfo, RecentSession } from "./components/welcome";
@@ -109,7 +110,9 @@ export function beginStartupComposer(options: PrepaintComposerOptions = {}): voi
 	}
 	const pending: PendingComposer = { composer, cwd, cache: useCache };
 	pendingComposer = pending;
-	pending.recentSessions = refreshRecentSessions(pending, options.recentSessions);
+	// Keep filesystem discovery out of the synchronous prepaint turn. Composer.start()
+	// has queued the first frame; recents can begin once the event loop yields.
+	pending.recentSessions = loadRecentSessionsAfterFirstFrame(pending, options.recentSessions);
 }
 
 /** Take the live prepaint composer away from the module-level startup owner. */
@@ -165,10 +168,11 @@ export function setStartupComposerLspServers(servers: LspServerInfo[]): void {
 	}
 }
 
-async function refreshRecentSessions(
+async function loadRecentSessionsAfterFirstFrame(
 	pending: PendingComposer,
 	loadOverride: (() => Promise<RecentSession[]>) | undefined,
 ): Promise<RecentSession[] | undefined> {
+	await scheduler.yield();
 	try {
 		const sessions = loadOverride ? await loadOverride() : await loadRecentSessions(pending.cwd);
 		if (pending.cache) {

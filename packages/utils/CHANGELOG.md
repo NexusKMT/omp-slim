@@ -9,6 +9,7 @@
 
 ### Changed
 
+- Log-retention cleanup now runs after logger construction without keeping short-lived commands alive.
 - Debugger support now loads only when SIGUSR1 requests it.
 
 ### Fixed

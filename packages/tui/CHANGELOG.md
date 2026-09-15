@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `Editor.textRevision` for content-dependent render caches, including undo and draft restoration.
 - Added collapseToAtom method to compress text spans into UI-friendly atoms
 
 ### Changed
