@@ -1467,7 +1467,7 @@ export class SessionAdvisors {
 			a.agentUnsubscribe?.();
 			a.agentUnsubscribe = undefined;
 			a.runtime.dispose();
-			// Capture each close so dispose()/`/drop` can await the queued open+append+close —
+			// Capture each close so dispose()/`/delete` can await the queued open+append+close —
 			// the last advisor turn would otherwise be lost on a fast process exit.
 			a.recorderClosed = a.recorder.close();
 			closes.push(a.recorderClosed);
