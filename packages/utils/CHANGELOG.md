@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `relativePathWithinNormalizedRoot()` for reusing canonical paths across containment checks.
 - Added `sleepLong()` and `MAX_TIMER_DELAY_MS`: an abortable sleep that chunks delays past the signed 32-bit timer ceiling so day-scale provider waits elapse instead of overflowing the timer.
 
 ### Fixed

@@ -4,6 +4,7 @@
 
 ### Breaking Changes
 
+- `Settings.getGroup()` now returns shallow-frozen snapshots, reused until effective settings change.
 - Removed `parseSSE`, `MCPToolsResponse`, and `MCPCallResponse`; `callMCP()` now returns the shared `JsonRpcResponse` with an `unknown` result instead of an unchecked generic payload.
 
 ### Added
@@ -15,6 +16,7 @@
 
 ### Changed
 
+- Status-line redraws reuse unchanged segment output, settings groups, and tool token estimates while preserving live invalidation.
 - Skill invocations render as a normal user turn: a mid-prompt skill shows as an inline chip in the user bubble; a leading skill shows as a railed callout with the chip and prompt size, with the rest of your message rendered as full multi-line Markdown instead of a single collapsed header.
 
 ### Fixed

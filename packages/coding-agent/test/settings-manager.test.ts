@@ -90,6 +90,63 @@ describe("Settings", () => {
 		await tempDir?.remove();
 	});
 
+	describe("group cache", () => {
+		it("returns one immutable snapshot per merged settings revision", () => {
+			const settings = Settings.isolated();
+			const first = settings.getGroup("compaction");
+
+			expect(settings.getGroup("compaction")).toBe(first);
+			expect(Object.isFrozen(first)).toBe(true);
+
+			const revision = settings.revision;
+			settings.override("compaction.enabled", !first.enabled);
+			expect(settings.revision).toBeGreaterThan(revision);
+			const overridden = settings.getGroup("compaction");
+			expect(overridden).not.toBe(first);
+			expect(overridden.enabled).toBe(!first.enabled);
+			expect(settings.getGroup("compaction")).toBe(overridden);
+
+			settings.clearOverride("compaction.enabled");
+			const restored = settings.getGroup("compaction");
+			expect(restored).not.toBe(overridden);
+			expect(restored.enabled).toBe(first.enabled);
+		});
+
+		it("keeps cloned defaults independent across settings instances", () => {
+			const first = Settings.isolated().getGroup("compaction");
+			const second = Settings.isolated().getGroup("compaction");
+			expect(first).not.toBe(second);
+			expect(first.methodOrder).not.toBe(second.methodOrder);
+
+			const secondOrder = [...second.methodOrder];
+			first.methodOrder.push(first.methodOrder[0]);
+			expect(second.methodOrder).toEqual(secondOrder);
+		});
+
+		it("bumps the effective revision when cwd re-resolves scoped arrays", async () => {
+			const otherProject = tempDir.join("other-project");
+			fs.mkdirSync(otherProject);
+			const settings = await Settings.init({
+				cwd: projectDir,
+				agentDir,
+				inMemory: true,
+				overrides: {
+					enabledModels: [
+						{ path: projectDir, models: ["openai/first"] },
+						{ path: otherProject, models: ["openai/second"] },
+					],
+				},
+			});
+			const before = settings.revision;
+			expect(settings.get("enabledModels")).toEqual(["openai/first"]);
+
+			await settings.reloadForCwd(otherProject);
+
+			expect(settings.revision).toBeGreaterThan(before);
+			expect(settings.get("enabledModels")).toEqual(["openai/second"]);
+		});
+	});
+
 	describe("main config file selection", () => {
 		it("loads and updates an existing config.yaml without creating config.yml", async () => {
 			const yamlConfigPath = path.join(agentDir, "config.yaml");
