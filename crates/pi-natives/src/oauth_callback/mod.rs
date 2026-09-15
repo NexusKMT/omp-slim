@@ -812,4 +812,6 @@ fn napi_error(error: impl std::fmt::Display) -> Error {
 }
 
 #[cfg(test)]
+mod darwin_compiler;
+#[cfg(test)]
 mod tests;

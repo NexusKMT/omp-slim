@@ -6305,6 +6305,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "shlex 2.0.1",
  "smallvec",
  "syntect",
  "tempfile",
@@ -6390,6 +6391,7 @@ dependencies = [
  "globset",
  "ignore",
  "libc",
+ "parking_lot",
  "rayon",
  "windows-sys 0.61.2",
 ]
