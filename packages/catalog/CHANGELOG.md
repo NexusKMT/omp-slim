@@ -111,6 +111,9 @@
 - Fixed GPT-6 Astra compacting early at a 272K-token window with its full window gated behind `/extended-context`: it now defaults to the documented 1.05M-token window.
 
 ## [18.1.12] - 2026-09-06
+- Fixed OpenCode Go/Zen live model discovery (`GET /v1/models`) missing `x-opencode-session` and omp's `User-Agent`: discovery requests now attribute with the stable install id so the requests OpenCode flags as `Bun fetch` carry the required session header.
+
+- Fixed Azure GPT-6 Astra Chat Completions policy to disable reasoning with function tools and encode thinking-off as `reasoning_effort: "none"` ([#11052](https://github.com/can1357/oh-my-pi/issues/11052)).
 
 ### Added
 

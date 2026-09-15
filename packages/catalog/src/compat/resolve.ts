@@ -488,6 +488,7 @@ function detectOpenAICompat(
 		disableReasoningOnForcedToolChoice:
 			!d.isClinePass && ((facts.is("kimi") && !isMoonshotKimiK3) || isAnthropicModel),
 		disableReasoningOnToolChoice: !d.isClinePass && isDeepseekFamily && reasoningCapable && !d.isOpenRouter,
+		disableReasoningWithTools: false,
 		supportsToolChoice: d.isClinePass || !d.isDirectDeepseekReasoning,
 		supportsForcedToolChoice:
 			!d.requiresEnabledThinking && !(d.isOpenCodeHost && d.isDeepseekReasoning) && !(d.isClinePass && isQwen),
@@ -740,6 +741,7 @@ function resolveOpenAIResponsesPolicy(
 		filterReasoningHistory: isOpenRouter && isAnthropicModel,
 		disableReasoningOnForcedToolChoice: facts.is("kimi"),
 		disableReasoningOnToolChoice: isDeepseekFamily && reasoningCapable && !isOpenRouter,
+		disableReasoningWithTools: false,
 		supportsToolChoice: true,
 		supportsForcedToolChoice: provider !== "opencode-go" && provider !== "opencode-zen",
 		supportsNamedToolChoice: true,
