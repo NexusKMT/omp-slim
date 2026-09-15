@@ -21,12 +21,6 @@ function onceAutocompleteUpdate(editor: Editor): Promise<void> {
 	};
 	return promise;
 }
-/** Drain queued microtasks (and one macrotask) so chained autocomplete triggers run. */
-async function drainMicrotasks(): Promise<void> {
-	for (let i = 0; i < 20; i += 1) await Promise.resolve();
-	await new Promise(resolve => setTimeout(resolve, 0));
-	for (let i = 0; i < 20; i += 1) await Promise.resolve();
-}
 /** Resolve once the popup is open, driven by autocomplete update events (no wall-clock waits). */
 async function untilAutocompleteShown(editor: Editor): Promise<void> {
 	while (!editor.isShowingAutocomplete()) {
@@ -265,7 +259,14 @@ describe("Editor slash autocomplete acceptance", () => {
 			const target = `${normalizedBaseDir}/sibling`;
 			fs.mkdirSync(path.join(target, "child"), { recursive: true });
 			const editor = new Editor(defaultEditorTheme);
-			editor.setAutocompleteProvider(new CombinedAutocompleteProvider([], baseDir));
+			const provider = new CombinedAutocompleteProvider([], baseDir);
+			const getSuggestions = provider.getSuggestions;
+			let chainedRequests = 0;
+			provider.getSuggestions = (...args) => {
+				chainedRequests += 1;
+				return getSuggestions.call(provider, ...args);
+			};
+			editor.setAutocompleteProvider(provider);
 			let submitted = "";
 			editor.onSubmit = text => {
 				submitted = text;
@@ -278,16 +279,15 @@ describe("Editor slash autocomplete acceptance", () => {
 			expect(editor.isShowingAutocomplete()).toBe(true);
 
 			// Enter with the popup open accepts the selection and returns; it never
-			// submits. Chaining is what breaks the command: the popup reopens on the
-			// accepted directory's children, so every following Enter descends a level
-			// and the submission never happens. The re-trigger is queued as a
-			// microtask, so drain it before observing the popup.
+			// submits. A chained regular request would reopen it on the directory's
+			// children, so let the queued callback run before observing the state.
 			editor.handleInput("\r");
-			await drainMicrotasks();
+			await Promise.resolve();
+			expect(chainedRequests).toBe(0);
 			expect(editor.isShowingAutocomplete()).toBe(false);
 
 			editor.handleInput("\r");
-			expect(submitted.startsWith("/move ")).toBe(true);
+			expect(submitted).toBe(`/move ${target}/`);
 		} finally {
 			fs.rmSync(baseDir, { recursive: true, force: true });
 		}
