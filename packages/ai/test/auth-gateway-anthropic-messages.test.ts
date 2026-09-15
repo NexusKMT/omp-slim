@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { encodeResponse, encodeStream, parseRequest } from "@oh-my-pi/pi-ai/providers/anthropic-messages-server";
 import type {
 	ToolSearchServerToolUseBlockParam,
@@ -6,8 +7,9 @@ import type {
 	WebSearchServerToolUseBlockParam,
 	WebSearchToolResultBlockParam,
 } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
-import type { AssistantMessage, AssistantMessageEvent, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, AssistantMessageEvent, Model, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 
 function emptyUsage(): AssistantMessage["usage"] {
@@ -533,6 +535,27 @@ describe("anthropic-messages parseRequest", () => {
 		expect(assistants).toHaveLength(2);
 		expect(assistants[0].stopReason).toBe("toolUse");
 		expect(assistants[1].stopReason).toBe("stop");
+
+		const model: Model<"anthropic-messages"> = buildModel({
+			api: "anthropic-messages",
+			provider: "anthropic",
+			id: "claude-fable-5-1",
+			name: "Claude Fable 5.1",
+			baseUrl: "https://api.anthropic.com",
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			maxTokens: 8_192,
+			contextWindow: 200_000,
+			reasoning: true,
+		});
+		const wire = convertAnthropicMessages(parsed.context.messages, model, false);
+		const replayed = wire.find(message => message.role === "assistant");
+		expect(replayed?.content).toContainEqual({
+			type: "thinking",
+			thinking: "prior reasoning",
+			signature: "sig-1",
+		});
+		expect(JSON.stringify(replayed?.content)).not.toContain('"text":"prior reasoning"');
 	});
 });
 
