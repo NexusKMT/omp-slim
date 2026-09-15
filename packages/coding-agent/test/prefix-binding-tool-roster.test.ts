@@ -331,4 +331,27 @@ describe("prefix-bound tool roster changes", () => {
 		expect(notices).toHaveLength(1);
 		expect(providerText(harness.contexts[1])).toContain("Now available: bash.");
 	});
+
+	it("announces a frozen removal after a rebuild absorbed a pending addition", async () => {
+		const harness = newSession(createPrefixBindingModel());
+		sessions.push(harness.session);
+		await harness.session.setActiveToolPresentation(["read"], []);
+		await harness.session.prompt("first");
+
+		await harness.session.setActiveToolPresentation(["read", "bash"], []);
+		await harness.session.refreshBaseSystemPrompt();
+		await harness.session.setActiveToolPresentation(["read"], []);
+
+		await harness.session.prompt("second");
+
+		expect(harness.systemPrompts[1]).toEqual(["tools:read,bash"]);
+		const notices = harness.session.agent.state.messages.filter(
+			message => message.role === "custom" && message.customType === "tool-roster-notice",
+		);
+		expect(notices).toHaveLength(1);
+		expect(notices[0]).toMatchObject({
+			details: { added: [], removed: ["bash"] },
+		});
+		expect(providerText(harness.contexts[1])).toContain("No longer available: bash.");
+	});
 });
