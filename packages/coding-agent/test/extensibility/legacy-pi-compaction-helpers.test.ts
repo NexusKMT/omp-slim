@@ -125,7 +125,9 @@ describe("legacy shim sessionEntryToContextMessages", () => {
 			message: { role: "assistant", content: null, timestamp: 0 },
 		} as unknown as SessionEntry);
 		expect(messages).toHaveLength(1);
-		expect(messages[0]?.content).toEqual([]);
+		const [message] = messages;
+		expect(message?.role).toBe("assistant");
+		expect(message && "content" in message ? message.content : undefined).toEqual([]);
 	});
 
 	it("preserves custom-message attribution", () => {
