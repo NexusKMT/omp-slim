@@ -1154,15 +1154,37 @@ export class PluginManager {
 	 * global `bun install --force`, which re-extracts every dependency.
 	 */
 	async #reconcileVersionDrift(name: string, expected: string): Promise<boolean> {
-		await fs.promises.rm(path.join(getPluginsNodeModules(), name), { recursive: true, force: true });
-		if (!(await this.#installPluginDependencies())) return false;
+		const packageJsonBefore = await Bun.file(getPluginsPackageJson()).text();
+		const bunLockPath = path.join(getPluginsDir(), "bun.lock");
+		let bunLockBefore: string | null;
 		try {
-			const pkg: { version?: string } = await Bun.file(
-				path.join(getPluginsNodeModules(), name, "package.json"),
-			).json();
-			return pkg.version === expected;
-		} catch {
-			return false;
+			bunLockBefore = await Bun.file(bunLockPath).text();
+		} catch (err) {
+			if (!isEnoent(err)) throw err;
+			bunLockBefore = null;
+		}
+		const snapshot = await this.#snapshotInstalledPackage(name);
+		let fixed = false;
+		try {
+			await fs.promises.rm(path.join(getPluginsNodeModules(), name), { recursive: true, force: true });
+			if (!(await this.#installPluginDependencies())) return false;
+			try {
+				const pkg: { version?: string } = await Bun.file(
+					path.join(getPluginsNodeModules(), name, "package.json"),
+				).json();
+				fixed = pkg.version === expected;
+				return fixed;
+			} catch {
+				return false;
+			}
+		} finally {
+			try {
+				if (!fixed) {
+					await this.#rollbackFailedInstall(name, packageJsonBefore, bunLockBefore, snapshot);
+				}
+			} finally {
+				await this.#cleanupSnapshot(snapshot);
+			}
 		}
 	}
 

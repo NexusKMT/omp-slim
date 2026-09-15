@@ -94,6 +94,27 @@ describe("PluginManager.doctor version drift", () => {
 		expect(checks.find(c => c.name === `plugin:${name}`)?.message).toBe(`v${expectedVersion}`);
 	});
 
+	test("restores the stale package when repair fails", async () => {
+		const name = "@scope/plugin";
+		await seed(name, "1.0.2", "1.0.3");
+		const install = Bun.spawn(["bun", "-e", "process.exit(1)"], {
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		vi.spyOn(Bun, "spawn").mockReturnValue(install);
+
+		const checks = await new PluginManager(tmpRoot).doctor({ fix: true });
+
+		expect(checks.find(c => c.name === `plugin:${name}:version`)).toMatchObject({
+			status: "error",
+			fixed: false,
+		});
+		expect(await Bun.file(path.join(pluginsNodeModules, name, "package.json")).json()).toMatchObject({
+			version: "1.0.2",
+		});
+	});
+
 	test("revalidates the repaired plugin so a newly broken manifest surfaces", async () => {
 		const name = "@scope/plugin";
 		const expectedVersion = "1.0.3";
