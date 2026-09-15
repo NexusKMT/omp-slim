@@ -66,6 +66,7 @@ import {
 import { copyToClipboard } from "../../utils/clipboard";
 import { openPath } from "../../utils/open";
 import { setSessionTerminalTitle } from "../../utils/title-generator";
+import { collapseSharedUsageReports } from "../../utils/usage-display";
 import { formatRemainingOnlyTotal, isUsedOnlyAbsoluteAmount } from "../usage-amounts";
 
 function formatCreditValue(value: number): string {
@@ -1990,7 +1991,7 @@ export function formatCompactQuota(
 	nowMs: number,
 	activeAccount?: OAuthAccountIdentity,
 ): string | null {
-	const providerReports = reports.filter(r => r.provider === provider);
+	const providerReports = collapseSharedUsageReports(reports).filter(r => r.provider === provider);
 	if (providerReports.length === 0) return null;
 	// Group limits by window id so we show BOTH the 5-hour and 7-day windows
 	// (or any other distinct windows the provider exposes). Within each window,
@@ -2092,12 +2093,13 @@ export function renderUsageReports(
 	resolveActiveAccount?: (provider: string) => OAuthAccountIdentity | undefined,
 	usageModelSelectors: readonly string[] = [],
 ): string {
+	const displayReports = collapseSharedUsageReports(reports);
 	const lines: string[] = [];
 	const latestFetchedAt = Math.max(...reports.map(report => report.fetchedAt ?? 0));
 	const headerSuffix = latestFetchedAt ? ` (${formatDuration(nowMs - latestFetchedAt)} ago)` : "";
 	lines.push(uiTheme.bold(uiTheme.fg("accent", `Usage${headerSuffix}`)));
 	const grouped = new Map<string, UsageReport[]>();
-	for (const report of reports) {
+	for (const report of displayReports) {
 		const list = grouped.get(report.provider) ?? [];
 		list.push(report);
 		grouped.set(report.provider, list);
