@@ -10,6 +10,7 @@ const session = {
 	sessionManager: {
 		buildSessionContext: () => ({ messages: [] }),
 		getEntries: () => [],
+		onPersistenceError: () => () => {},
 	},
 	setTextOutputCommitted() {},
 	async prompt() {
