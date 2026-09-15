@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bedrock's Qwen rows no longer ask for more output tokens than the model accepts, which Bedrock rejected with a 400.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
