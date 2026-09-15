@@ -53,6 +53,7 @@
 - Browsers spawned via `app.path` into an omp-owned profile no longer trigger the macOS "wants to use your confidential information in Safe Storage" keychain dialog.
 - Reading Hugging Face file URLs (`/raw/...`, `/resolve/...`, `/blob/...`, `/tree/...`) now returns the file instead of the repo's model/dataset card.
 - Directory reads no longer append a bogus `[1 results limit reached. Use limit=2 for more]` notice (`read` has no `limit`); capped child directories show only their inline `… N more` marker, and the prompt documents paging with `:N-M`/`:-N`.
+- Pre-execution extensions that rewrite a streamed edit now execute the rewritten edit instead of the original input.
 
 ## [18.1.22] - 2026-09-14
 
