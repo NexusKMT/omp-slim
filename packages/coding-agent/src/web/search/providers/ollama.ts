@@ -32,9 +32,11 @@ interface OllamaSearchResponse {
 	results?: unknown;
 }
 
-/** Extract a string field from a loosely-typed result object. */
+/** Extract a string field from a loosely-typed result object, collapsing runs of whitespace. */
 function asString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
+	if (typeof value !== "string") return undefined;
+	const text = value.replace(/\s+/g, " ").trim();
+	return text.length > 0 ? text : undefined;
 }
 
 /** Call the Ollama web search API. */
