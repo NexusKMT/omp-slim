@@ -28,6 +28,7 @@ import { invokeSkillCommandFromText, isKnownSkillCommand } from "../../modes/ski
 import type { InteractiveModeContext } from "../../modes/types";
 import manualContinuePrompt from "../../prompts/system/manual-continue.md" with { type: "text" };
 import { AgentRegistry } from "../../registry/agent-registry";
+import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { PINNED_HUD_TOGGLE_ID } from "../composer";
 import { pickRecentFocusableAgentId } from "./session-focus-controller";
@@ -1379,12 +1380,33 @@ export class InputController {
 	}
 
 	handleDequeue(): void {
-		const restored = this.restoreQueuedMessagesToEditor();
-		if (restored === 0) {
+		const popped = this.#popLastQueuedMessage();
+		if (!popped) {
 			this.ctx.showStatus("No queued messages to restore");
-		} else {
-			this.ctx.showStatus(`Restored ${restored} queued message${restored > 1 ? "s" : ""} to editor`);
+			return;
 		}
+		// Drop only the popped message's local-submission signature; the messages
+		// left in the queue keep theirs so their delivery echo is still recognized
+		// as local and does not blank the editor the dequeue just restored to.
+		this.ctx.locallySubmittedUserSignatures.delete(`${popped.text}\u0000${popped.images?.length ?? 0}`);
+		this.#restoreEntriesToEditor([popped]);
+		this.ctx.showStatus("Restored last queued message to editor");
+	}
+
+	/**
+	 * Pop the single most-recently-queued restorable message for the Alt+Up
+	 * dequeue key. Prefers the agent queues (steering, then follow-up) via the
+	 * session API that steps over hidden companions; falls back to the compaction
+	 * queue for messages typed while compacting, which live outside those queues.
+	 */
+	#popLastQueuedMessage(): RestoredQueuedMessage | undefined {
+		const fromQueue = this.ctx.session.popLastQueuedMessage();
+		if (fromQueue) return fromQueue;
+		const compaction = this.ctx.compactionQueuedMessages;
+		if (compaction.length === 0) return undefined;
+		const last = compaction[compaction.length - 1];
+		this.ctx.compactionQueuedMessages = compaction.slice(0, -1);
+		return { text: last.text, images: last.images };
 	}
 
 	/**
@@ -1666,9 +1688,8 @@ export class InputController {
 		// Messages typed while compacting live in `compactionQueuedMessages`, not the
 		// agent queue `clearQueue()` drains — but the pending bar shows the same
 		// "Alt+Up to edit" hint for them (ui-helpers `updatePendingMessagesDisplay`).
-		// Drain them here too so the dequeue restores every message the hint
-		// advertises; otherwise a skill/text queued during compaction is stranded and
-		// Alt+Up reports "No queued messages to restore".
+		// Drain them here too so the restore recovers every message the hint
+		// advertises; otherwise a skill/text queued during compaction is stranded.
 		const compactionQueued = this.ctx.compactionQueuedMessages;
 		this.ctx.compactionQueuedMessages = [];
 		const allQueued = [
@@ -1677,11 +1698,22 @@ export class InputController {
 			...followUp,
 			...compactionQueued.filter(e => e.mode === "followUp").map(e => ({ text: e.text, images: e.images })),
 		];
-		if (allQueued.length === 0) {
+		const restored = this.#restoreEntriesToEditor(allQueued, options?.currentText);
+		if (options?.abort) {
+			void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
+		}
+		return restored;
+	}
+
+	/**
+	 * Merge queued entries (oldest→newest) ahead of the current draft, folding
+	 * their images back into the pending-image buffer and refreshing the pending
+	 * bar. Shared by the Alt+Up dequeue (one entry) and the Esc restore-all path.
+	 * Returns the number of entries restored.
+	 */
+	#restoreEntriesToEditor(entries: RestoredQueuedMessage[], currentText?: string): number {
+		if (entries.length === 0) {
 			this.ctx.updatePendingMessagesDisplay();
-			if (options?.abort) {
-				void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-			}
 			return 0;
 		}
 		// Image markers are positional: `[Image #N]` ↔ `pendingImages[N-1]`
@@ -1694,21 +1726,21 @@ export class InputController {
 		// indices by the running offset keeps the merged text aligned with the merged
 		// `pendingImages` order; draft markers stay valid because draft images
 		// keep their original positions.
-		const queuedImages = allQueued.flatMap(e => e.images ?? []);
+		const queuedImages = entries.flatMap(e => e.images ?? []);
 		let queuedText: string;
 		if (queuedImages.length > 0) {
 			const parts: string[] = [];
 			let imageOffset = this.ctx.editor.pendingImages.length;
-			for (const entry of allQueued) {
+			for (const entry of entries) {
 				parts.push(shiftImageMarkers(entry.text, imageOffset));
 				if (entry.images && entry.images.length > 0) imageOffset += entry.images.length;
 			}
 			queuedText = parts.join("\n\n");
 		} else {
-			queuedText = allQueued.map(e => e.text).join("\n\n");
+			queuedText = entries.map(e => e.text).join("\n\n");
 		}
-		const currentText = options?.currentText ?? this.ctx.editor.getText();
-		const combinedText = [queuedText, currentText].filter(t => t.trim()).join("\n\n");
+		const current = currentText ?? this.ctx.editor.getText();
+		const combinedText = [queuedText, current].filter(t => t.trim()).join("\n\n");
 		// Hand queued images back to the pending-image buffer first (links are
 		// re-materialized lazily), then set the text: setCollapsedText folds the
 		// renumbered `[Image #N, WxH]` references back into chip tokens, and the
@@ -1720,10 +1752,7 @@ export class InputController {
 		}
 		this.ctx.editor.setCollapsedText(combinedText);
 		this.ctx.updatePendingMessagesDisplay();
-		if (options?.abort) {
-			void this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
-		}
-		return allQueued.length;
+		return entries.length;
 	}
 
 	async #insertPendingImage(imageData: ImageContent, videoPath?: string): Promise<void> {
