@@ -81,6 +81,27 @@ describe("eval prelude host invocation", () => {
 		expect(replacementInvoke).toHaveBeenCalledTimes(1);
 	});
 
+	it("fails closed when the execute-time context is present but empty", async () => {
+		const invoke = vi.fn(async (): Promise<AgentToolResult<unknown>> => ({
+			content: [{ type: "text", text: "must not run" }],
+		}));
+		const definition: EvalPreludeDefinition = {
+			name: "guarded",
+			documentation: "Guarded",
+			javascript: "globalThis.guarded = {};",
+			python: "guarded = object()",
+			exports: ["guarded"],
+			approval: "exec",
+			invoke,
+		};
+		const session = makeSession(() => [definition]);
+
+		await expect(
+			invokeEvalPrelude("guarded", {}, { session, toolCallId: "empty-context", context: {} }),
+		).rejects.toThrow(/requires approval but no interactive UI is available/);
+		expect(invoke).not.toHaveBeenCalled();
+	});
+
 	it("never executes a handler denied by its approval policy", async () => {
 		const invoke = vi.fn(async (): Promise<AgentToolResult<unknown>> => ({
 			content: [{ type: "text", text: "must not run" }],
