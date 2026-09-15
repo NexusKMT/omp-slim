@@ -539,7 +539,10 @@ mod tests {
 	/// Entry contents are chosen so regular files and link targets differ in
 	/// size, keeping second-granularity mtime equality from collapsing the
 	/// Modified cases into "unchanged".
-	fn apply_plain_diff(lower: &[(&str, Entry)], merged: &[(&str, Entry)]) -> (TempDirGuard, String) {
+	fn apply_plain_diff(
+		lower: &[(&str, Entry)],
+		merged: &[(&str, Entry)],
+	) -> (TempDirGuard, String) {
 		let lower_dir = TempDirGuard::new();
 		let merged_dir = TempDirGuard::new();
 		let target_dir = TempDirGuard::new();
@@ -600,7 +603,12 @@ mod tests {
 				let meta = fs::symlink_metadata(&path)
 					.unwrap_or_else(|err| panic!("{name} should exist: {err}"));
 				assert!(meta.is_symlink(), "{name} should be a symlink");
-				assert_eq!(fs::read_link(&path).expect("read link target").to_string_lossy(), *target);
+				assert_eq!(
+					fs::read_link(&path)
+						.expect("read link target")
+						.to_string_lossy(),
+					*target
+				);
 			},
 		}
 	}
@@ -614,10 +622,10 @@ mod tests {
 
 	#[test]
 	fn added_symlink_patch_applies_as_symlink() {
-		let (target, patch) = apply_plain_diff(
-			&[("keep.txt", Entry::File("keep\n"))],
-			&[("keep.txt", Entry::File("keep\n")), ("link", Entry::Link("data.bin"))],
-		);
+		let (target, patch) = apply_plain_diff(&[("keep.txt", Entry::File("keep\n"))], &[
+			("keep.txt", Entry::File("keep\n")),
+			("link", Entry::Link("data.bin")),
+		]);
 		assert!(
 			patch.contains("diff --git a/link b/link\nnew file mode 120000\n"),
 			"added symlink patch must carry the git header before the mode line:\n{patch}"
@@ -642,10 +650,10 @@ mod tests {
 
 	#[test]
 	fn regular_to_symlink_patch_applies_type_transition() {
-		let (target, patch) = apply_plain_diff(
-			&[("entry", Entry::File("payload\n"))],
-			&[("entry", Entry::Link("elsewhere"))],
-		);
+		let (target, patch) = apply_plain_diff(&[("entry", Entry::File("payload\n"))], &[(
+			"entry",
+			Entry::Link("elsewhere"),
+		)]);
 		// Git's canonical typechange representation is delete + create, in
 		// either direction (see `git diff` on a 100644 -> 120000 transition).
 		assert!(
@@ -658,10 +666,10 @@ mod tests {
 
 	#[test]
 	fn symlink_to_regular_patch_applies_type_transition() {
-		let (target, patch) = apply_plain_diff(
-			&[("entry", Entry::Link("elsewhere"))],
-			&[("entry", Entry::File("payload\n"))],
-		);
+		let (target, patch) = apply_plain_diff(&[("entry", Entry::Link("elsewhere"))], &[(
+			"entry",
+			Entry::File("payload\n"),
+		)]);
 		// `git apply` rejects a single 120000 -> 100644 mode transition, so
 		// the patch must use git's canonical delete + create representation.
 		assert!(
