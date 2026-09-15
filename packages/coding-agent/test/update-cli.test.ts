@@ -10,6 +10,7 @@ import {
 	buildBunInstallArgs,
 	buildHomebrewUpdateArgs,
 	buildMiseForceInstallArgs,
+	buildMiseUpdateEnv,
 	buildMiseUpgradeArgs,
 	buildNpmInstallArgs,
 	buildRenameCleanupPackages,
@@ -556,6 +557,11 @@ describe("update-cli package manager commands", () => {
 
 	it("targets the mise GitHub backend and overrides release-age settings for attended updates", () => {
 		expect(buildMiseUpgradeArgs()).toEqual(["upgrade", "github:can1357/oh-my-pi", "--bump", "--before", "0s"]);
+		expect(buildMiseUpgradeArgs(false)).toEqual(["upgrade", "github:can1357/oh-my-pi", "--bump"]);
+		expect(buildMiseUpdateEnv({ PATH: "/bin", MISE_MINIMUM_RELEASE_AGE: "24h" })).toEqual({
+			PATH: "/bin",
+			MISE_MINIMUM_RELEASE_AGE: "0s",
+		});
 		expect(buildMiseForceInstallArgs("15.10.5")).toEqual(["install", "--force", "github:can1357/oh-my-pi@15.10.5"]);
 	});
 

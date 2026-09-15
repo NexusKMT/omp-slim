@@ -1499,11 +1499,24 @@ export function buildHomebrewUpdateArgs(force: boolean): string[] {
  * `--before 0s` overrides global and per-tool release-age settings for this
  * invocation. Unlike `MISE_MINIMUM_RELEASE_AGE`, the command option has the
  * precedence required when the tool entry itself sets `minimum_release_age`.
- * `--before` is accepted by both older mise releases and current versions,
- * where it is the hidden compatibility name for `--minimum-release-age`.
+ * `--before` is accepted by mise releases with release-age filtering and is
+ * the hidden compatibility name for `--minimum-release-age` in current mise.
+ * Older mise releases predate the option and reject unknown flags, so callers
+ * omit it when the installed command help does not advertise either name.
  */
-export function buildMiseUpgradeArgs(): string[] {
-	return ["upgrade", MISE_TOOL, "--bump", "--before", "0s"];
+export function buildMiseUpgradeArgs(supportsReleaseAgeOverride = true): string[] {
+	return [
+		"upgrade",
+		MISE_TOOL,
+		"--bump",
+		...(supportsReleaseAgeOverride ? ["--before", "0s"] : []),
+	];
+}
+
+export function buildMiseUpdateEnv(
+	base: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+	return { ...base, MISE_MINIMUM_RELEASE_AGE: "0s" };
 }
 
 export function buildMiseForceInstallArgs(expectedVersion: string): string[] {
@@ -1777,15 +1790,19 @@ async function updateViaHomebrew(expectedVersion: string, force: boolean): Promi
 
 async function updateViaMise(expectedVersion: string, force: boolean): Promise<void> {
 	console.log(chalk.dim("Updating via mise..."));
-	const args = buildMiseUpgradeArgs();
-	const result = await $`mise ${args}`.nothrow();
+	const env = buildMiseUpdateEnv();
+	const help = await $`mise upgrade --help`.env(env).quiet().nothrow();
+	const supportsReleaseAgeOverride =
+		help.exitCode === 0 && /(?:--minimum-release-age|--before)\b/.test(help.text());
+	const args = buildMiseUpgradeArgs(supportsReleaseAgeOverride);
+	const result = await $`mise ${args}`.env(env).nothrow();
 	if (result.exitCode !== 0) {
 		throw new Error(`mise upgrade failed with exit code ${result.exitCode}`);
 	}
 
 	if (force) {
 		const forceArgs = buildMiseForceInstallArgs(expectedVersion);
-		const forceResult = await $`mise ${forceArgs}`.nothrow();
+		const forceResult = await $`mise ${forceArgs}`.env(env).nothrow();
 		if (forceResult.exitCode !== 0) {
 			throw new Error(`mise install --force failed with exit code ${forceResult.exitCode}`);
 		}
