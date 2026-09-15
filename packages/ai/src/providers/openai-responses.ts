@@ -1165,6 +1165,11 @@ export function buildParams(
 	});
 	const strictResponsesPairing = policy.tools.strictResponsesPairing;
 	const shouldReplayNativeHistory = providerSessionState?.nativeHistoryReplayWarmed ?? true;
+	// Filtering native reasoning must not be undone by reconstruction when the
+	// target also rejects synthetic items (Muse on OpenRouter). Unfiltered targets
+	// retain required text/placeholder replay, including DeepSeek's #10690 fallback.
+	const canReconstructReasoningReplay =
+		!policy.reasoning.filterReasoningHistory || policy.reasoning.allowsSyntheticReasoningContentForToolCalls;
 	const messages = buildResponsesInput({
 		model,
 		context,
@@ -1176,9 +1181,13 @@ export function buildParams(
 		},
 		includeThinkingSignatures: shouldReplayNativeHistory && !policy.reasoning.filterReasoningHistory,
 		requiresReasoningReplayForAllTurns:
-			policy.reasoning.enabled && policy.reasoning.requiresReasoningContentForAllAssistantTurns,
+			policy.reasoning.enabled &&
+			policy.reasoning.requiresReasoningContentForAllAssistantTurns &&
+			canReconstructReasoningReplay,
 		requiresReasoningReplayForToolCalls:
-			policy.reasoning.enabled && policy.reasoning.requiresReasoningContentForToolCalls,
+			policy.reasoning.enabled &&
+			policy.reasoning.requiresReasoningContentForToolCalls &&
+			canReconstructReasoningReplay,
 		repairOrphanOutputs: true,
 	});
 

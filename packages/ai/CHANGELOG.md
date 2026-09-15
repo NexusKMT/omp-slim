@@ -24,6 +24,7 @@
 ### Fixed
 
 - Fixed OpenAI Codex backend rejecting requests with HTTP 400 (`string_above_max_length`) when replaying tool call IDs exceeding 64 characters or containing composite delimiters (`|`, `\n`) by sanitizing and deterministically clamping call IDs on the wire ([#11342](https://github.com/can1357/oh-my-pi/pull/11342)).
+- Fixed OpenRouter multi-turn tool-call sessions failing with `400 Referenced reasoning item ... was not found or has expired` on Meta Muse Spark models by suppressing reasoning reconstruction when history is filtered and synthetic replay is disallowed, while preserving Anthropic and DeepSeek replay ([#10966](https://github.com/can1357/oh-my-pi/issues/10966)).
 
 ## [18.1.20] - 2026-09-13
 
@@ -116,7 +117,6 @@
 ### Fixed
 
 - Fixed Codex compaction timeouts triggering prolonged retries instead of advancing to the next compaction method.
-
 ## [18.1.11] - 2026-09-05
 
 ### Fixed
