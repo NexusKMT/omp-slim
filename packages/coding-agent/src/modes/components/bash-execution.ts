@@ -250,6 +250,7 @@ export class BashExecutionComponent extends Container {
 		this.#ptyReplayFinalized = true;
 		this.#blockVersion++;
 		this.#updateDisplay();
+		this.#ui.requestComponentRender(this);
 	}
 
 	setComplete(
