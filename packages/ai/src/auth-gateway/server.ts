@@ -69,13 +69,6 @@ export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
 	resolveModel: ModelResolver;
 	/** Optional supplier for `/v1/models` listing. Returns the full model array. */
 	listModels?: () => Iterable<Model<Api>>;
-	/**
-	 * Ceiling on retained provider-session states. Defaults to
-	 * {@link AUTH_GATEWAY_MAX_SESSION_STATES}. Each entry can own a Codex
-	 * WebSocket or a GitLab Duo workflow, so a memory-constrained host may want
-	 * fewer; the bound is enforced against entries no request is still holding.
-	 */
-	sessionStateMax?: number;
 }
 
 // `parseBind` lives in ../utils/parse-bind so the gateway and broker can't
@@ -961,7 +954,7 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 	const version = opts.version;
 	// Owned by this server instance so two gateways in one process never share
 	// (or tear down) each other's provider state, and so `close()` can drain it.
-	const sessionStates = new AuthGatewaySessionStateStore(opts.sessionStateMax);
+	const sessionStates = new AuthGatewaySessionStateStore();
 
 	const server = Bun.serve({
 		hostname: bind.hostname,

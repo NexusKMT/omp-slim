@@ -14,7 +14,11 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { clearCustomApis } from "@oh-my-pi/pi-ai/api-registry";
-import { AuthGatewaySessionStateStore, startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
+import {
+	AUTH_GATEWAY_MAX_SESSION_STATES,
+	AuthGatewaySessionStateStore,
+	startAuthGateway,
+} from "@oh-my-pi/pi-ai/auth-gateway";
 import type { AuthGatewayServerHandle, AuthGatewaySessionStateRequest } from "@oh-my-pi/pi-ai/auth-gateway";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
@@ -134,7 +138,7 @@ interface GatewayFixture {
 async function startGateway(
 	model: Model<Api>,
 	provider: string,
-	options?: { sessionStateMax?: number; apiKeys?: string[] },
+	options?: { apiKeys?: string[] },
 ): Promise<GatewayFixture> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gw-session-state-"));
 	const storage = await AuthStorage.create(path.join(dir, "auth.db"));
@@ -152,7 +156,6 @@ async function startGateway(
 		storage,
 		resolveModel: () => model,
 		version: "test",
-		sessionStateMax: options?.sessionStateMax,
 	});
 	let stopped = false;
 	const stop = async (): Promise<void> => {
@@ -457,8 +460,12 @@ describe("auth-gateway provider session state", () => {
 
 	it("hands the retained state back when a request throws, so the ceiling still applies", async () => {
 		registerMockApi();
-		const mock = createMockModel({ provider: "openrouter", id: "gw-session-throw" });
-		const gateway = await startGateway(mock, "openrouter", { sessionStateMax: 1 });
+		const mock = createMockModel({
+			provider: "openrouter",
+			id: "gw-session-throw",
+			handler: () => ({ content: ["ok"] }),
+		});
+		const gateway = await startGateway(mock, "openrouter");
 		try {
 			mock.push(() => {
 				throw new Error("upstream transport exploded");
@@ -482,22 +489,22 @@ describe("auth-gateway provider session state", () => {
 			const closed: string[] = [];
 			states?.set("probe", { close: () => closed.push("probe") });
 
-			// At a ceiling of one, a second session can only be admitted if the
-			// thrown request gave its entry back. A claim leaked on the error path
-			// pins that entry for the life of the process.
-			mock.push({ content: ["ok"] });
-			const next = await fetch(`${gateway.handle.url}/v1/pi/stream`, {
-				method: "POST",
-				headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" },
-				body: JSON.stringify({
-					modelId: mock.id,
-					context: CONTEXT,
-					options: { sessionId: "next-session" },
-					stream: false,
-				}),
-			});
-			expect(next.status).toBe(200);
-			await next.json();
+			// Fill the retained-session ceiling. A claim leaked on the error path
+			// pins the throwing entry and evicts a newer idle entry instead.
+			for (let index = 0; index < AUTH_GATEWAY_MAX_SESSION_STATES; index++) {
+				const next = await fetch(`${gateway.handle.url}/v1/pi/stream`, {
+					method: "POST",
+					headers: { Authorization: "Bearer test-token", "Content-Type": "application/json" },
+					body: JSON.stringify({
+						modelId: mock.id,
+						context: CONTEXT,
+						options: { sessionId: `next-session-${index}` },
+						stream: false,
+					}),
+				});
+				if (!next.ok) throw new Error(`next session ${index} failed with ${next.status}`);
+				await next.json();
+			}
 
 			expect(closed).toEqual(["probe"]);
 		} finally {
