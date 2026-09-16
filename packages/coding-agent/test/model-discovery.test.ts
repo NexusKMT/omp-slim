@@ -2825,6 +2825,7 @@ providers:
 		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
 		await registry.refreshProvider("litellm", "online");
 		expect(getModelsForProvider(registry, "litellm").map(model => model.id)).toEqual(["keep-chat-a", "keep-chat-b"]);
+		expect(registry.getProviderDiscoveryState("litellm")?.status).toBe("ok");
 
 		modelGroups = [
 			{ model_group: "keep-chat-a", mode: "chat", providers: ["openai"], supports_vision: false },

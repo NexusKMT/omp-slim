@@ -20,6 +20,10 @@
 
 - `/handoff` no longer advertises itself in the TUI as handing session context off to a new session; the description now matches the command, which summarizes the session into a handoff document and compacts in place ([#12249](https://github.com/can1357/oh-my-pi/pull/12249) by [@BrahmingWu](https://github.com/BrahmingWu)).
 
+### Fixed
+
+- Deferred cold-cache `retry.fallbackChains` warnings for catalog descriptor providers until discovery settles ([#12223](https://github.com/can1357/oh-my-pi/pull/12223) by [@Dante-dan](https://github.com/Dante-dan)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
