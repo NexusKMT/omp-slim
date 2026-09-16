@@ -11,6 +11,7 @@ import { beforeEach, expect, test } from "bun:test";
 import { hasModelScopedEffortLadder, resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
+	expirePublishedEffortLaddersForTest,
 	moonshotModelManagerOptions,
 	resetPublishedEffortLaddersForTest,
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
@@ -247,4 +248,69 @@ test("concurrent discovery refreshes share one catalog request", async () => {
 			efforts: [Effort.Low, Effort.High],
 		});
 	}
+});
+test("isolates published ladders and in-flight requests by fetch implementation", async () => {
+	const callsA: string[] = [];
+	const callsB: string[] = [];
+	const fetchA = stubFetch(
+		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low"]) } } } },
+		callsA,
+		[UNREVIEWED_ID],
+	);
+	const fetchB = stubFetch(
+		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["high"]) } } } },
+		callsB,
+		[UNREVIEWED_ID],
+	);
+	const [modelsA, modelsB] = await Promise.all([discover(fetchA), discover(fetchB)]);
+	expect(modelsA?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low],
+	});
+	expect(modelsB?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.High],
+	});
+	expect(callsA.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+	expect(callsB.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+});
+
+test("a host row without an effort ladder blocks a foreign bare-id ladder", async () => {
+	const calls: string[] = [];
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					acme: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } },
+					moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } },
+				},
+			},
+			calls,
+			[UNREVIEWED_ID],
+		),
+	);
+	expect(models?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+	expect(calls).not.toContain(MODELS_DEV_URL);
+});
+
+test("retains a good ladder when the post-TTL fallback fetch fails", async () => {
+	const calls: string[] = [];
+	const routes: Record<string, unknown> = {
+		[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
+		[MODELS_DEV_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
+	};
+	const fetchImpl = stubFetch(routes, calls, [UNREVIEWED_ID]);
+	const first = await discover(fetchImpl);
+	expect(first?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low, Effort.High],
+	});
+	expirePublishedEffortLaddersForTest(fetchImpl);
+	routes[MODELS_DEV_URL] = undefined;
+	const second = await discover(fetchImpl);
+	expect(second?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low, Effort.High],
+	});
+	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
 });

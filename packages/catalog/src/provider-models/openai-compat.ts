@@ -267,24 +267,43 @@ function modelsDevEffortLadder(model: ModelsDevModel): Effort[] | undefined {
  * no catalog provider of its own — and only while every host publishing that
  * id agrees on its tiers; ids whose hosts disagree are dropped from it, so the
  * ladder stays unknown instead of borrowing an arbitrary host's.
+ *
+ * `withoutLadder` carries the same `provider\0id` key for a row the catalog
+ * does publish but with no effort dial on it. The host serving an id outranks
+ * every other host on the question of what that deployment accepts, so its
+ * silence blocks the bare-id fallback for that id rather than letting a
+ * foreign ladder answer in its place.
  */
 interface PublishedEffortLadders {
 	byHost: ReadonlyMap<string, readonly Effort[]>;
 	byId: ReadonlyMap<string, readonly Effort[]>;
+	withoutLadder: ReadonlySet<string>;
 }
+
+const EMPTY_PUBLISHED_EFFORT_LADDERS: PublishedEffortLadders = {
+	byHost: new Map(),
+	byId: new Map(),
+	withoutLadder: new Set(),
+};
 
 function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 	const byHost = new Map<string, readonly Effort[]>();
 	const byId = new Map<string, readonly Effort[]>();
+	const withoutLadder = new Set<string>();
+	const index: PublishedEffortLadders = { byHost, byId, withoutLadder };
 	const conflicting = new Set<string>();
-	if (!isRecord(payload)) return { byHost, byId };
+	if (!isRecord(payload)) return index;
 	for (const [providerKey, provider] of Object.entries(payload)) {
 		if (!isRecord(provider) || !isRecord(provider.models)) continue;
 		for (const [modelId, rawModel] of Object.entries(provider.models)) {
 			if (!isRecord(rawModel)) continue;
+			const key = `${providerKey}\u0000${modelId}`;
 			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
-			if (!ladder) continue;
-			byHost.set(`${providerKey}\u0000${modelId}`, ladder);
+			if (!ladder) {
+				withoutLadder.add(key);
+				continue;
+			}
+			byHost.set(key, ladder);
 			if (conflicting.has(modelId)) continue;
 			const shared = byId.get(modelId);
 			if (shared === undefined) {
@@ -295,11 +314,31 @@ function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 			}
 		}
 	}
-	return { byHost, byId };
+	return index;
 }
 
-let publishedEffortMemo: { at: number; ladders: PublishedEffortLadders } | undefined;
-let publishedEffortRequest: Promise<PublishedEffortLadders> | undefined;
+interface PublishedEffortSession {
+	memo?: { at: number; ladders: PublishedEffortLadders };
+	request?: Promise<PublishedEffortLadders>;
+}
+
+/**
+ * Ladder state per fetch context, mirroring the catalog payload sessions: a
+ * registry carrying its own {@link FetchImpl} reaches its own mirror under its
+ * own credentials, so neither its index nor its in-flight request may answer
+ * for an unrelated registry.
+ */
+const defaultPublishedEffortSession: PublishedEffortSession = {};
+const publishedEffortSessionsByFetch = new WeakMap<FetchImpl, PublishedEffortSession>();
+
+function getPublishedEffortSession(fetchImpl: FetchImpl | undefined): PublishedEffortSession {
+	if (!fetchImpl) return defaultPublishedEffortSession;
+	const existing = publishedEffortSessionsByFetch.get(fetchImpl);
+	if (existing) return existing;
+	const created: PublishedEffortSession = {};
+	publishedEffortSessionsByFetch.set(fetchImpl, created);
+	return created;
+}
 
 /**
  * Published effort ladders, memoized for an hour: the catalog moves far slower
@@ -313,29 +352,32 @@ let publishedEffortRequest: Promise<PublishedEffortLadders> | undefined;
  * index with no ladder in it falls back to models.dev itself; the extra request
  * stops happening the moment the pruned copy keeps the field. Each source
  * fails on its own — an unreachable shared payload still lets models.dev
- * answer — and a cycle where both fail is not memoized, so the next discovery
- * retries instead of inheriting an hour of emptiness.
+ * answer — and a cycle that produces no ladder at all neither replaces nor
+ * memoizes over an index that had them, so a transient failure costs a retry
+ * on the next discovery rather than an hour without ladders.
  */
 function loadPublishedEffortLadders(
 	fetchImpl?: FetchImpl,
 	now: () => number = Date.now,
 ): Promise<PublishedEffortLadders> {
-	if (publishedEffortMemo && now() - publishedEffortMemo.at < PUBLISHED_EFFORT_TTL_MS) {
-		return Promise.resolve(publishedEffortMemo.ladders);
+	const session = getPublishedEffortSession(fetchImpl);
+	if (session.memo && now() - session.memo.at < PUBLISHED_EFFORT_TTL_MS) {
+		return Promise.resolve(session.memo.ladders);
 	}
-	if (publishedEffortRequest) return publishedEffortRequest;
-	const request = fetchPublishedEffortLadders(fetchImpl, now).finally(() => {
-		if (publishedEffortRequest === request) publishedEffortRequest = undefined;
+	if (session.request) return session.request;
+	const request = fetchPublishedEffortLadders(session, fetchImpl, now).finally(() => {
+		if (session.request === request) session.request = undefined;
 	});
-	publishedEffortRequest = request;
+	session.request = request;
 	return request;
 }
 
 async function fetchPublishedEffortLadders(
+	session: PublishedEffortSession,
 	fetchImpl: FetchImpl | undefined,
 	now: () => number,
 ): Promise<PublishedEffortLadders> {
-	let ladders: PublishedEffortLadders = { byHost: new Map(), byId: new Map() };
+	let ladders = EMPTY_PUBLISHED_EFFORT_LADDERS;
 	let answered = false;
 	try {
 		ladders = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl));
@@ -361,17 +403,29 @@ async function fetchPublishedEffortLadders(
 			// Both sources failed; fall through to the last good index.
 		}
 	}
-	if (!answered) {
-		return publishedEffortMemo?.ladders ?? ladders;
+	if (ladders.byHost.size === 0) {
+		// A pruned shared payload answers, so `answered` alone cannot tell a
+		// real refresh from one whose only ladder-bearing source failed. The
+		// last index that did carry ladders keeps its timestamp and stays in
+		// place, and a first cycle that reached neither source is not memoized.
+		if (session.memo && session.memo.ladders.byHost.size > 0) return session.memo.ladders;
+		if (!answered) return ladders;
 	}
-	publishedEffortMemo = { at: now(), ladders };
+	session.memo = { at: now(), ladders };
 	return ladders;
 }
 
 /** Test seam: drops the memoized index so a case can serve a different catalog. */
-export function resetPublishedEffortLaddersForTest(): void {
-	publishedEffortMemo = undefined;
-	publishedEffortRequest = undefined;
+export function resetPublishedEffortLaddersForTest(fetchImpl?: FetchImpl): void {
+	const session = getPublishedEffortSession(fetchImpl);
+	session.memo = undefined;
+	session.request = undefined;
+}
+
+/** Test seam: ages a memoized index past its TTL so the next load refetches. */
+export function expirePublishedEffortLaddersForTest(fetchImpl?: FetchImpl): void {
+	const session = getPublishedEffortSession(fetchImpl);
+	if (session.memo) session.memo = { ...session.memo, at: 0 };
 }
 
 /**
@@ -394,7 +448,9 @@ function catalogProviderKeys(providerId: string): readonly string[] {
  * catalog hit, and each peeled segment joins the host candidates ahead of the
  * endpoint's own keys: on an aggregator the prefix names the real upstream.
  * A bare id is only accepted from {@link PublishedEffortLadders.byId}, which
- * holds it only while every publishing host agrees on its tiers.
+ * holds it only while every publishing host agrees on its tiers, and only
+ * while no host serving the id published it without an effort dial: that row
+ * is this deployment's own answer and outranks any other host's ladder.
  */
 function lookupPublishedEffortLadder(
 	ladders: PublishedEffortLadders,
@@ -403,10 +459,14 @@ function lookupPublishedEffortLadder(
 ): readonly Effort[] | undefined {
 	const hosts = [...providerKeys];
 	for (let candidate = modelId; ;) {
+		let dialless = false;
 		for (const host of hosts) {
-			const scoped = ladders.byHost.get(`${host}\u0000${candidate}`);
+			const key = `${host}\u0000${candidate}`;
+			const scoped = ladders.byHost.get(key);
 			if (scoped) return scoped;
+			dialless ||= ladders.withoutLadder.has(key);
 		}
+		if (dialless) return undefined;
 		const shared = ladders.byId.get(candidate);
 		if (shared) return shared;
 		const slash = candidate.indexOf("/");
