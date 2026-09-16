@@ -2132,9 +2132,21 @@ export class ModelRegistry {
 			}
 			return { models, authoritativeProviders, replaceRuntimeProviders };
 		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			const previous = this.#providerDiscoveryStates.get(options.providerId);
+			this.#providerDiscoveryStates.set(options.providerId, {
+				provider: options.providerId,
+				status: "unavailable",
+				optional: previous?.optional ?? false,
+				stale: true,
+				...(previous?.fetchedAt !== undefined ? { fetchedAt: previous.fetchedAt } : {}),
+				...(previous?.source !== undefined ? { source: previous.source } : {}),
+				models: previous?.models ?? [],
+				error: message,
+			});
 			logger.warn("model discovery failed for provider", {
 				provider: options.providerId,
-				error: error instanceof Error ? error.message : String(error),
+				error: message,
 			});
 			return { models: [], authoritativeProviders: new Set(), replaceRuntimeProviders: new Set() };
 		}
