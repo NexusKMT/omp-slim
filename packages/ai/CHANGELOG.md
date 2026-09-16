@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the auth-gateway's `/v1/messages` route reporting `stop_reason: "end_turn"` on a turn that carries a `tool_use` block, so an Anthropic client driving the canonical loop (run tools while `stop_reason === "tool_use"`) never executed the tool it was handed. Providers whose protocol has no separate tool-use stop — Cursor ends the turn with `stop` when it hands a client-declared tool back for the caller to run — now map to `tool_use`, matching what the OpenAI chat wire already does with `tool_calls`.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added

@@ -7,7 +7,13 @@ import type {
 	WebSearchServerToolUseBlockParam,
 	WebSearchToolResultBlockParam,
 } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
-import type { AssistantMessage, AssistantMessageEvent, Model, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
+import type {
+	AssistantMessage,
+	AssistantMessageEvent,
+	Model,
+	ToolCall,
+	ToolResultMessage,
+} from "@oh-my-pi/pi-ai/types";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
@@ -617,6 +623,35 @@ describe("anthropic-messages encodeResponse", () => {
 			/request aborted/,
 		);
 	});
+
+	it("reports tool_use when a client-executed tool call ends the turn on `stop`", () => {
+		// Cursor's exec protocol has no tool-use stop: it hands a tool the
+		// caller declared back for the caller to run and then ends the turn,
+		// leaving `stopReason: "stop"` with the call unpaired. An Anthropic
+		// client runs tools while `stop_reason === "tool_use"`, so `end_turn`
+		// here strands the call it was asked to execute.
+		const message: AssistantMessage = {
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Checking the weather." },
+				{ type: "toolCall", id: "toolu_handoff", name: "get_weather", arguments: { city: "Paris" } },
+			],
+			api: "anthropic-messages",
+			provider: "cursor",
+			model: "cursor-grok-4.6",
+			usage: emptyUsage(),
+			stopReason: "stop",
+			timestamp: 0,
+		};
+		const encoded = encodeResponse(message, "cursor/cursor-grok-4.6");
+		expect(encoded.stop_reason).toBe("tool_use");
+		expect(encoded.content).toContainEqual({
+			type: "tool_use",
+			id: "toolu_handoff",
+			name: "get_weather",
+			input: { city: "Paris" },
+		});
+	});
 });
 
 describe("anthropic-messages encodeStream", () => {
@@ -878,6 +913,36 @@ describe("anthropic-messages encodeStream", () => {
 		const last = sse.at(-1)!;
 		expect(last.event).toBe("error");
 		expect(last.data).toEqual({ type: "error", error: { type: "api_error", message: "boom" } });
+	});
+
+	it("reports tool_use in message_delta when a client-executed tool call ends the turn on `stop`", async () => {
+		const toolCall: ToolCall = {
+			type: "toolCall",
+			id: "toolu_handoff",
+			name: "get_weather",
+			arguments: { city: "Paris" },
+		};
+		const finalMessage: AssistantMessage = {
+			role: "assistant",
+			content: [toolCall],
+			api: "anthropic-messages",
+			provider: "cursor",
+			model: "cursor-grok-4.6",
+			usage: emptyUsage(),
+			stopReason: "stop",
+			timestamp: 0,
+		};
+		const events: AssistantMessageEvent[] = [
+			{ type: "start", partial: finalMessage },
+			{ type: "toolcall_start", contentIndex: 0, partial: finalMessage },
+			{ type: "toolcall_end", contentIndex: 0, toolCall, partial: finalMessage },
+			{ type: "done", reason: "stop", message: finalMessage },
+		];
+		const sse = await collectSse(encodeStream(makeStream(events), "cursor/cursor-grok-4.6"));
+		const delta = sse.find(event => event.event === "message_delta")!.data as {
+			delta: { stop_reason: string };
+		};
+		expect(delta.delta.stop_reason).toBe("tool_use");
 	});
 
 	it("emits a complete envelope when the stream ends without an explicit done", async () => {

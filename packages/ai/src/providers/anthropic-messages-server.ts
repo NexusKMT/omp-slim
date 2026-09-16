@@ -505,14 +505,20 @@ function randomFallback(): string {
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function mapStopReasonOut(reason: StopReason): "end_turn" | "max_tokens" | "tool_use" {
+function mapStopReasonOut(reason: StopReason, hasToolUse: boolean): "end_turn" | "max_tokens" | "tool_use" {
 	switch (reason) {
 		case "length":
 			return "max_tokens";
 		case "toolUse":
 			return "tool_use";
 		default:
-			return "end_turn";
+			// A provider whose protocol has no separate tool-use stop — Cursor
+			// ends the turn with `stop` when it hands a client-declared tool
+			// back for the caller to execute — still owes the client
+			// `tool_use`, or the canonical Anthropic loop (run tools while
+			// `stop_reason === "tool_use"`) never runs the tool it asked for.
+			// The OpenAI chat wire maps the same case to `tool_calls`.
+			return hasToolUse ? "tool_use" : "end_turn";
 	}
 }
 
@@ -568,7 +574,10 @@ export function encodeResponse(message: AssistantMessage, requestedModelId: stri
 		role: "assistant",
 		model: requestedModelId,
 		content: encodeContentBlocks(message),
-		stop_reason: mapStopReasonOut(message.stopReason),
+		stop_reason: mapStopReasonOut(
+			message.stopReason,
+			message.content.some(content => content.type === "toolCall"),
+		),
 		// TODO: surface the matched stop sequence once pi-ai's
 		// `AssistantMessage.stopReason` carries the matched string. Intentionally
 		// `null` for now (Anthropic schema allows it).
@@ -809,7 +818,10 @@ export function encodeStream(
 									// TODO: surface matched stop sequence once pi-ai
 									// propagates it on the `done` event.
 									delta: {
-										stop_reason: mapStopReasonOut(ev.reason),
+										stop_reason: mapStopReasonOut(
+											ev.reason,
+											ev.message.content.some(content => content.type === "toolCall"),
+										),
 										stop_sequence: null,
 									},
 									...(bindingControlsRequested
