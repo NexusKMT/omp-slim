@@ -492,11 +492,13 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 		// Background / policy reloads must not spawn credential helpers.
 		await registry.refresh("online-if-uncached");
 		await registry.refresh("offline");
+		// Passive online discovery (unscoped /models hub open) must not either.
+		await registry.refresh("online");
 		expect(await registry.getApiKey(model)).toBe("stale-key");
 		expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
 
-		// User-facing recovery: `omp models refresh`, `/models refresh`, TUI F5.
-		await registry.refresh("online");
+		// User-facing recovery: `omp models refresh`, TUI F5.
+		await registry.refresh("online", { refreshCommandCredentials: true });
 		expect(await registry.getApiKey(model)).toBe("fresh-key");
 		expect(fs.readFileSync(counterFile, "utf8")).toBe("11");
 		expect(registry.find("custom-proxy", "custom-model")?.headers?.Authorization).toBe("Bearer fresh-key");
@@ -536,9 +538,40 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 		expect(await registry.getApiKey(model)).toBeUndefined();
 		expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
 
-		await registry.refresh("online");
+		await registry.refresh("online", { refreshCommandCredentials: true });
 		expect(await registry.getApiKey(model)).toBe("recovered-key");
 		expect(fs.readFileSync(counterFile, "utf8")).toBe("11");
+	});
+
+	test("refreshProvider('online') without refreshCommandCredentials leaves command cache intact", async () => {
+		const tokenFile = path.join(tempDir, "token.txt");
+		const counterFile = path.join(tempDir, "counter.txt");
+		fs.writeFileSync(tokenFile, "stale-key");
+		fs.writeFileSync(counterFile, "");
+
+		fs.writeFileSync(
+			modelsPath,
+			JSON.stringify({
+				providers: {
+					"custom-proxy": {
+						baseUrl: "https://custom-proxy.example.com/v1",
+						api: "openai-completions",
+						apiKey: `!${trackedTokenCommand(tokenFile, counterFile)}`,
+						models: [{ id: "custom-model", name: "Custom Model" }],
+					},
+				},
+			}),
+		);
+
+		const registry = new ModelRegistry(authStorage, modelsPath);
+		expect(await registry.getApiKeyForProvider("custom-proxy")).toBe("stale-key");
+		expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
+
+		fs.writeFileSync(tokenFile, "fresh-key");
+		// Hover / auto-refresh: live catalog, same cached credential.
+		await registry.refreshProvider("custom-proxy", "online");
+		expect(await registry.getApiKeyForProvider("custom-proxy")).toBe("stale-key");
+		expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
 	});
 
 	test("refreshProvider('online') invalidates only that provider's command cache", async () => {
@@ -579,7 +612,7 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 
 		fs.writeFileSync(tokenA, "a-fresh");
 		fs.writeFileSync(tokenB, "b-fresh");
-		await registry.refreshProvider("proxy-a", "online");
+		await registry.refreshProvider("proxy-a", "online", { refreshCommandCredentials: true });
 
 		expect(await registry.getApiKeyForProvider("proxy-a")).toBe("a-fresh");
 		expect(await registry.getApiKeyForProvider("proxy-b")).toBe("b-stale");
@@ -627,12 +660,107 @@ describe("ModelRegistry command-resolved models.yml values", () => {
 
 		fs.writeFileSync(providerHeaderFile, "fresh-provider");
 		fs.writeFileSync(modelHeaderFile, "fresh-model");
-		await registry.refreshProvider("ext-proxy", "online");
+		await registry.refreshProvider("ext-proxy", "online", { refreshCommandCredentials: true });
 
 		const refreshed = registry.find("ext-proxy", "ext-model");
 		expect(refreshed?.headers?.["x-tenant-token"]).toBe("fresh-provider");
 		expect(refreshed?.headers?.["x-model-token"]).toBe("fresh-model");
 		expect(fs.readFileSync(providerCounter, "utf8")).toBe("11");
 		expect(fs.readFileSync(modelCounter, "utf8")).toBe("11");
+	});
+
+	test("refreshProvider re-runs fetchDynamicModels header commands after explicit credential refresh", async () => {
+		const modelHeaderFile = path.join(tempDir, "dynamic-header.txt");
+		const modelCounter = path.join(tempDir, "dynamic-counter.txt");
+		fs.writeFileSync(modelHeaderFile, "stale-dynamic");
+		fs.writeFileSync(modelCounter, "");
+		fs.writeFileSync(modelsPath, JSON.stringify({ providers: {} }));
+
+		const registry = new ModelRegistry(authStorage, modelsPath);
+		registry.registerProvider("dyn-proxy", {
+			baseUrl: "https://dyn.example.com/v1",
+			api: "openai-completions",
+			apiKey: "literal-key",
+			fetchDynamicModels: async () => [
+				{
+					id: "dyn-model",
+					name: "Dyn",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 4096,
+					maxTokens: 1024,
+					headers: { "x-model-token": `!${trackedTokenCommand(modelHeaderFile, modelCounter)}` },
+				},
+			],
+		});
+
+		await registry.refreshProvider("dyn-proxy", "online");
+		const model = registry.find("dyn-proxy", "dyn-model");
+		if (!model) throw new Error("Expected dynamic model");
+		expect(model.headers?.["x-model-token"]).toBe("stale-dynamic");
+		expect(fs.readFileSync(modelCounter, "utf8")).toBe("1");
+
+		fs.writeFileSync(modelHeaderFile, "fresh-dynamic");
+		await registry.refreshProvider("dyn-proxy", "online");
+		expect(registry.find("dyn-proxy", "dyn-model")?.headers?.["x-model-token"]).toBe("stale-dynamic");
+		expect(fs.readFileSync(modelCounter, "utf8")).toBe("1");
+
+		await registry.refreshProvider("dyn-proxy", "online", { refreshCommandCredentials: true });
+		expect(registry.find("dyn-proxy", "dyn-model")?.headers?.["x-model-token"]).toBe("fresh-dynamic");
+		expect(fs.readFileSync(modelCounter, "utf8")).toBe("11");
+	});
+
+	test("401 refreshes a fetchDynamicModels command-backed header", async () => {
+		const bearerFile = path.join(tempDir, "bearer.txt");
+		const tenantFile = path.join(tempDir, "tenant.txt");
+		fs.writeFileSync(bearerFile, "stale-bearer");
+		fs.writeFileSync(tenantFile, "stale-tenant");
+		fs.writeFileSync(modelsPath, JSON.stringify({ providers: {} }));
+
+		const registry = new ModelRegistry(authStorage, modelsPath);
+		registry.registerProvider("dyn-proxy", {
+			baseUrl: "https://dyn.example.com/v1",
+			api: "openai-completions",
+			apiKey: `!${stdoutFileCommand(bearerFile)}`,
+			authHeader: true,
+			fetchDynamicModels: async () => [
+				{
+					id: "dyn-model",
+					name: "Dyn",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 4096,
+					maxTokens: 1024,
+					headers: { "x-tenant-token": `!${stdoutFileCommand(tenantFile)}` },
+				},
+			],
+		});
+
+		await registry.refreshProvider("dyn-proxy", "online");
+		const model = registry.find("dyn-proxy", "dyn-model");
+		if (!model) throw new Error("Expected dynamic model");
+		expect(model.headers?.["x-tenant-token"]).toBe("stale-tenant");
+		fs.writeFileSync(bearerFile, "fresh-bearer");
+		fs.writeFileSync(tenantFile, "fresh-tenant");
+
+		const seen: Array<{ auth?: string; tenant?: string }> = [];
+		const context: Context = { systemPrompt: ["s"], messages: [{ role: "user", content: "hi", timestamp: 0 }] };
+		const streamHandle = streamSimple(model, context, {
+			apiKey: registry.resolver(model),
+			fetch: refreshGateFetch(seen),
+			maxTokens: 16,
+		});
+		for await (const _event of streamHandle) {
+			// drain
+		}
+		const result = await streamHandle.result();
+
+		expect(result.stopReason).not.toBe("error");
+		expect(seen).toEqual([
+			{ auth: "Bearer stale-bearer", tenant: "stale-tenant" },
+			{ auth: "Bearer fresh-bearer", tenant: "fresh-tenant" },
+		]);
 	});
 });

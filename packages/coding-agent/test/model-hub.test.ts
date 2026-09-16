@@ -1420,6 +1420,7 @@ describe("ModelHub", () => {
 			await Bun.sleep(140);
 			expect(refreshProvider).toHaveBeenCalledTimes(1);
 			expect(refreshProvider).toHaveBeenCalledWith("prov-a", "online");
+			expect(refreshProvider.mock.calls[0]?.[2]).toBeUndefined();
 
 			hub.handleInput(UP); // back to All models
 			hub.handleInput(DOWN); // revisit prov-a
@@ -1430,6 +1431,7 @@ describe("ModelHub", () => {
 			hub.handleInput("\x1b[15~"); // F5
 			await Bun.sleep(140);
 			expect(refreshProvider).toHaveBeenCalledTimes(2);
+			expect(refreshProvider).toHaveBeenCalledWith("prov-a", "online", { refreshCommandCredentials: true });
 		});
 
 		test("shows a refreshing status while the provider fetch is in flight", async () => {

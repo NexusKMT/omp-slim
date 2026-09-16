@@ -212,6 +212,17 @@ function isExtendedContextEnabledFromSettings(settingsInstance?: Settings): bool
 	}
 }
 
+/**
+ * Extra knobs for {@link ModelRegistry.refresh} / {@link ModelRegistry.refreshProvider}.
+ * Online discovery (`strategy: "online"`) is independent of credential minting:
+ * opening `/models` and hovering a provider fetch catalogs without re-running
+ * `!command` helpers. Pass `refreshCommandCredentials` only for explicit user
+ * refresh (`omp models refresh`, TUI F5).
+ */
+export interface ModelRegistryRefreshOptions {
+	refreshCommandCredentials?: boolean;
+}
+
 /** Authentication material returned to legacy extensions for one model request. */
 export type ResolvedRequestAuth =
 	| {
@@ -364,6 +375,29 @@ export class ModelRegistry {
 		else this.#runtimeCommandConfigsByProvider.delete(providerName);
 	}
 
+	/** Fold `!command` headers from a live `fetchDynamicModels` payload into the runtime tracker. */
+	#recordRuntimeModelHeaderCommands(
+		providerName: string,
+		models: readonly { headers?: Record<string, string> }[],
+	): void {
+		if (models.length === 0) return;
+		const target = this.#runtimeCommandConfigsByProvider.get(providerName) ?? new Set<string>();
+		for (const modelDef of models) {
+			this.#collectCommandConfigValues(target, undefined, modelDef.headers);
+		}
+		if (target.size > 0) this.#runtimeCommandConfigsByProvider.set(providerName, target);
+	}
+
+	#reloadStaticModelsForRefresh(options?: ModelRegistryRefreshOptions, providerId?: string): void {
+		if (options?.refreshCommandCredentials) {
+			if (providerId) this.#invalidateProviderCommandConfigs(providerId);
+			else invalidateAllCommandConfigs();
+			this.#reloadStaticModels({ force: true, preserveRuntimeDiscovery: true });
+			return;
+		}
+		this.#reloadStaticModels();
+	}
+
 	#installProviderApiKey(provider: string, keyConfig: string): void {
 		this.#customProviderApiKeys.set(provider, keyConfig);
 		const resolved = resolveConfigValue(keyConfig);
@@ -424,18 +458,14 @@ export class ModelRegistry {
 	/**
 	 * Reload models from disk (built-in + custom config).
 	 */
-	async refresh(strategy: ModelRefreshStrategy = "online-if-uncached"): Promise<void> {
-		if (strategy === "online") {
-			// User-facing recovery (`omp models refresh`, `/models refresh`, TUI F5):
-			// re-run command-backed credentials. The 401 retry path only invalidates
-			// once; a stuck cache otherwise lasts until process restart.
-			// preserveRuntimeDiscovery keeps extension/discovered models in place
-			// while keys re-install; #refreshRuntimeDiscoveries below still refetches.
-			invalidateAllCommandConfigs();
-			this.#reloadStaticModels({ force: true, preserveRuntimeDiscovery: true });
-		} else {
-			this.#reloadStaticModels();
-		}
+	async refresh(
+		strategy: ModelRefreshStrategy = "online-if-uncached",
+		options?: ModelRegistryRefreshOptions,
+	): Promise<void> {
+		// Credential minting is opt-in. `strategy: "online"` only means "hit the
+		// network for catalogs" — the unscoped model hub opens with that strategy
+		// as a background reconcile, and must not spawn `!command` helpers.
+		this.#reloadStaticModelsForRefresh(options);
 		this.#suppressedSelectors.clear();
 		await this.#refreshRuntimeDiscoveries(strategy);
 	}
@@ -566,13 +596,15 @@ export class ModelRegistry {
 		for (const settle of this.#initialRefreshWaiters) settle();
 	}
 
-	async refreshProvider(providerId: string, strategy: ModelRefreshStrategy = "online"): Promise<void> {
-		if (strategy === "online") {
-			this.#invalidateProviderCommandConfigs(providerId);
-			this.#reloadStaticModels({ force: true, preserveRuntimeDiscovery: true });
-		} else {
-			this.#reloadStaticModels();
-		}
+	async refreshProvider(
+		providerId: string,
+		strategy: ModelRefreshStrategy = "online",
+		options?: ModelRegistryRefreshOptions,
+	): Promise<void> {
+		// Hover / auto-refresh uses `"online"` for a live catalog. Only F5 (and
+		// other explicit callers) pass refreshCommandCredentials to re-mint
+		// `!command` keys and headers for this provider.
+		this.#reloadStaticModelsForRefresh(options, providerId);
 		for (const selector of this.#suppressedSelectors.keys()) {
 			if (selector.startsWith(`${providerId}/`)) {
 				this.#suppressedSelectors.delete(selector);
@@ -2979,6 +3011,9 @@ export class ModelRegistry {
 					const modelDefs = await withModelDiscoveryTimeout(RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS, () =>
 						fetcher(resolvedKey),
 					);
+					// Dynamic rows can carry `!command` headers that are not on the
+					// registerProvider() config; track them so F5 / 401 can evict the cache.
+					this.#recordRuntimeModelHeaderCommands(providerName, modelDefs);
 					const results: Model<Api>[] = [];
 					for (const modelDef of modelDefs) {
 						const overlay = buildCustomModelOverlay(

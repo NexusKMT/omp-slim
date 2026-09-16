@@ -290,9 +290,11 @@ export class ModelHubComponent implements Component {
 			this.#setActiveEntry("all");
 		}
 
-		// Reconcile with cached discovery state in the background. A --models
-		// scope is registry-independent, so the offline reload would only repeat
-		// the synchronous hydration above.
+		// Reconcile catalogs in the background. This is online discovery only —
+		// it must not re-run `!command` credential helpers (F5 / `omp models
+		// refresh` pass refreshCommandCredentials for that). A --models scope is
+		// registry-independent, so the reload would only repeat the hydration
+		// above.
 		if (this.#scopedModels.length === 0) {
 			this.#registry
 				.refresh("online")
@@ -760,19 +762,24 @@ export class ModelHubComponent implements Component {
 		// at most once per provider for the process lifetime. F5 forces a re-fetch.
 		if (!options?.force && autoRefreshedProviders.has(providerId)) return;
 		this.#setProviderRefreshing(providerId, true);
+		const refreshCommandCredentials = options?.force === true;
 		const timer = setTimeout(() => {
 			// Consume the once-guard only when the fetch actually starts: hopping
 			// through a provider cancels the debounce and must not burn its slot.
 			autoRefreshedProviders.add(providerId);
 			this.#scheduledProviderRefreshes.delete(providerId);
-			void this.#refreshProviderInBackground(providerId);
+			void this.#refreshProviderInBackground(providerId, refreshCommandCredentials);
 		}, PROVIDER_REFRESH_DEBOUNCE_MS);
 		this.#scheduledProviderRefreshes.set(providerId, timer);
 	}
 
-	async #refreshProviderInBackground(providerId: string): Promise<void> {
+	async #refreshProviderInBackground(providerId: string, refreshCommandCredentials = false): Promise<void> {
 		try {
-			await this.#registry.refreshProvider(providerId, "online");
+			if (refreshCommandCredentials) {
+				await this.#registry.refreshProvider(providerId, "online", { refreshCommandCredentials: true });
+			} else {
+				await this.#registry.refreshProvider(providerId, "online");
+			}
 			// The provider refresh already updated the registry snapshot;
 			// re-reading it here stays purely in-memory.
 			this.#syncFromRegistryState();
