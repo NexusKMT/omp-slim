@@ -6,6 +6,10 @@
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 
+### Fixed
+
+- Fixed background jobs lingering in `hub jobs` / `/jobs` output for the full retention window after they complete: a settled row whose result was delivered or recovered by a snapshot now clears shortly (~30s) after consumption, while unconsumed rows stay inspectable.
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
