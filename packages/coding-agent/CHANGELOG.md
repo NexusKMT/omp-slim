@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- Fixed layout regression where blank rows between transcript blocks collapsed when the terminal chrome area expanded during a session
 - Fixed the `security-reviewer` agent rejecting every valid finding: the finding schema's `optionalProperties` node sat inside `properties`, making a field literally named `optionalProperties` required and leaving `anchor` and `remediation` unreachable ([#12200](https://github.com/can1357/oh-my-pi/pull/12200) by [@dhofheinz](https://github.com/dhofheinz)).
 - `session_stop` hooks that block with a reason now keep the session running until they allow it or the user interrupts, instead of expiring after the advisory-continuation cap or losing to an earlier advisory result; an explicit abort is no longer restarted by a stop hook ([#12187](https://github.com/can1357/oh-my-pi/pull/12187) by [@lbartoszcze](https://github.com/lbartoszcze)).
 - Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress ([#12177](https://github.com/can1357/oh-my-pi/pull/12177) by [@shivamklr](https://github.com/shivamklr)).
