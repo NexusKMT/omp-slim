@@ -1598,30 +1598,9 @@ impl ModeEngine for PatchEngine {
 
 		let first = entry_input(path, entries[0])?;
 		let initial_resolved = files.resolve(path, first.op != Operation::Create)?;
-		// Updates need the current text unless a create already replaced it:
-		// delete/create-only sequences need existence only, and delete →
-		// create → update operates on the newly created content. Unparsable
-		// entries report from the loop below without forcing a content read.
-		let needs_content = {
-			let mut replaced = first.op == Operation::Create;
-			let mut needs = false;
-			for entry in &entries {
-				let Ok(input) = entry_input(path, entry) else {
-					continue;
-				};
-				match input.op {
-					Operation::Create => replaced = true,
-					Operation::Delete => replaced = false,
-					Operation::Update => {
-						if !replaced {
-							needs = true;
-							break;
-						}
-					},
-				}
-			}
-			needs
-		};
+		// After a create or delete, later updates use replacement text or fail
+		// the existence check; only an initial update needs the original text.
+		let needs_content = first.op == Operation::Update;
 		let (initial, initially_existed) = match files.try_read(&initial_resolved) {
 			Ok(initial) => {
 				let existed = initial.is_some();

@@ -164,6 +164,59 @@ async fn create_over_invalid_utf8_reports_already_exists() {
 }
 
 #[tokio::test]
+async fn patch_create_overwrite_preserves_generated_file_guard() {
+	for (name, original) in [
+		("generated.ts", b"const value = 1;\n".as_slice()),
+		("source.ts", b"// @generated\nconst value = 1;\n".as_slice()),
+		("legacy.ts", b"// @generated\nname=caf\xe9\n".as_slice()),
+	] {
+		let ws = Workspace::new(EditMode::Patch);
+		let path = ws.cwd().join(name);
+		std::fs::write(&path, original).unwrap();
+		let mut session = ws.session();
+		session.set_args_json(
+			&serde_json::json!({ "path": name, "edits": [{ "op": "create", "diff": "+new" }] })
+				.to_string(),
+		);
+		session.finish();
+		let preview = session.preview();
+		let writer = DiskWriter::default();
+		let result = session.apply(ApplyRequest::default(), &writer).await;
+		assert_eq!(std::fs::read(&path).unwrap(), original, "{name}");
+		let err = result.expect_err("create-overwrite must respect generated-file protection");
+		assert!(err.to_string().contains("auto-generated"), "{name}: {err}");
+		assert!(writer.requests.lock().is_empty(), "{name}");
+		assert!(
+			preview.files[0]
+				.error
+				.as_deref()
+				.is_some_and(|error| error.contains("auto-generated")),
+			"{name}: {preview:?}"
+		);
+	}
+}
+
+#[tokio::test]
+async fn patch_create_overwrites_invalid_utf8_when_policy_allows_it() {
+	for (block_auto_generated, original) in
+		[(true, b"name=caf\xe9\n".as_slice()), (false, b"// @generated\nname=caf\xe9\n".as_slice())]
+	{
+		let mut ws = Workspace::new(EditMode::Patch);
+		ws.config.policy.block_auto_generated = block_auto_generated;
+		let path = ws.cwd().join("legacy.ts");
+		std::fs::write(&path, original).unwrap();
+		let writer = DiskWriter::default();
+		ws.apply_json(
+			&serde_json::json!({ "path": "legacy.ts", "edits": [{ "op": "create", "diff": "+new" }] }),
+			&writer,
+		)
+		.await
+		.expect("whole-file replacement does not require decoding");
+		assert_eq!(std::fs::read(&path).unwrap(), b"new\n");
+	}
+}
+
+#[tokio::test]
 async fn delete_then_create_replaces_invalid_utf8_file() {
 	let ws = Workspace::new(EditMode::ApplyPatch);
 	let path = ws.cwd().join("a.txt");
@@ -177,6 +230,86 @@ async fn delete_then_create_replaces_invalid_utf8_file() {
 	.expect("delete+create needs existence, not text");
 	assert_eq!(std::fs::read(&path).unwrap(), b"new\n");
 	assert_eq!(writer.requests.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn delete_create_update_uses_replacement_text_for_invalid_utf8_file() {
+	let ws = Workspace::new(EditMode::ApplyPatch);
+	let path = ws.cwd().join("legacy.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	ws.apply_raw(
+		"*** Begin Patch\n*** Delete File: legacy.txt\n*** Add File: legacy.txt\n+new\n*** Update \
+		 File: legacy.txt\n@@\n-new\n+updated\n*** End Patch",
+		&writer,
+	)
+	.await
+	.expect("update must use newly created text");
+	assert_eq!(std::fs::read(&path).unwrap(), b"updated\n");
+	assert_eq!(writer.requests.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn create_update_uses_replacement_text_for_invalid_utf8_file() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("legacy.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	ws.apply_json(
+		&serde_json::json!({ "path": "legacy.txt", "edits": [
+			{ "op": "create", "diff": "+new" },
+			{ "op": "update", "diff": "@@\n-new\n+updated" }
+		] }),
+		&writer,
+	)
+	.await
+	.expect("update must use replacement text");
+	assert_eq!(std::fs::read(&path).unwrap(), b"updated\n");
+	assert_eq!(writer.requests.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn update_before_create_rejects_invalid_utf8_without_writing() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("legacy.txt");
+	let original = b"name=caf\xe9\nalpha\n";
+	std::fs::write(&path, original).unwrap();
+	let writer = DiskWriter::default();
+	let result = ws
+		.apply_json(
+			&serde_json::json!({ "path": "legacy.txt", "edits": [
+			{ "op": "update", "diff": "@@\n-alpha\n+beta" },
+			{ "op": "create", "diff": "+new" }
+		] }),
+			&writer,
+		)
+		.await;
+	assert_eq!(std::fs::read(&path).unwrap(), original);
+	let err = result.expect_err("initial update needs the original text");
+	assert!(err.is_invalid_utf8(), "{err}");
+	assert!(writer.requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn update_after_delete_rejects_missing_file_without_writing() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("legacy.txt");
+	let original = b"name=caf\xe9\n";
+	std::fs::write(&path, original).unwrap();
+	let writer = DiskWriter::default();
+	let result = ws
+		.apply_json(
+			&serde_json::json!({ "path": "legacy.txt", "edits": [
+			{ "op": "delete" },
+			{ "op": "update", "diff": "@@\n-alpha\n+beta" }
+		] }),
+			&writer,
+		)
+		.await;
+	assert_eq!(std::fs::read(&path).unwrap(), original);
+	let err = result.expect_err("update cannot resurrect a deleted file");
+	assert!(err.to_string().contains("File not found"), "{err}");
+	assert!(writer.requests.lock().is_empty());
 }
 
 #[tokio::test]
