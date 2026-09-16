@@ -1,6 +1,6 @@
 # System Prompt Customization
 
-How the coding agent assembles its system prompt and what users can control with `SYSTEM_TEMPLATE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, `TITLE_SYSTEM.md`, and the matching CLI/SDK options.
+How the coding agent assembles its system prompt and what users can control with `SYSTEM_TEMPLATE.md`, `SYSTEM.md`, `APPEND_SYSTEM.md`, `TITLE_SYSTEM.md`, and CLI flags. Programmatic API options are called out where they expose the same routes or full replacement.
 
 Primary implementation:
 
@@ -13,27 +13,29 @@ Primary implementation:
 
 ## Inputs and precedence
 
-| Input | Source | Effect |
-| ------------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `--system-prompt-template <path>` | CLI | Strictly reads `<path>` as Handlebars source and replaces the bundled default instruction block. Highest custom-prompt precedence. |
-| `--system-prompt <text-or-file>` | CLI | Existing plain-text custom route. Highest custom-prompt precedence. Mutually exclusive with the template flag. |
-| `SYSTEM_TEMPLATE.md` | Discovered config file | Raw Handlebars source. Used only when no explicit plain or template override is supplied. |
-| `SYSTEM.md` | Discovered config file | Existing plain-text custom route. Used only when no template override is found. |
-| `--append-system-prompt <text-or-file>` | CLI | Adds plain text to the rendered prompt. Highest append precedence. |
-| `APPEND_SYSTEM.md` | Discovered config file | Existing plain-text append route; used when the append flag is absent. |
+| Input                                   | Source                 | Effect                                                                                                                             |
+| --------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `--system-prompt-template <path>`       | CLI                    | Strictly reads `<path>` as Handlebars source and replaces the bundled default instruction block. Highest custom-prompt precedence. |
+| `--system-prompt <text-or-file>`        | CLI                    | Existing plain-text custom route. Highest custom-prompt precedence. Mutually exclusive with the template flag.                     |
+| `SYSTEM_TEMPLATE.md`                    | Discovered config file | Raw Handlebars source. Used only when no explicit plain or template override is supplied.                                          |
+| `SYSTEM.md`                             | Discovered config file | Existing plain-text custom route. Used only when no template override is found.                                                    |
+| `--append-system-prompt <text-or-file>` | CLI                    | Adds plain text to the rendered prompt. Highest append precedence.                                                                 |
+| `APPEND_SYSTEM.md`                      | Discovered config file | Existing plain-text append route; used when the append flag is absent.                                                             |
 
-Explicit CLI or SDK custom input suppresses native custom-prompt discovery. A template source and an explicit literal custom prompt cannot be combined (including an explicitly supplied empty string): `systemPromptTemplate` conflicts with `customSystemPrompt` in the SDK, and `systemPromptTemplate` conflicts with `customPrompt` / `resolvedCustomPrompt` in `buildSystemPrompt`. These combinations fail clearly instead of silently choosing one.
+**CLI precedence:** An explicit `--system-prompt` or `--system-prompt-template` flag wins over discovered `SYSTEM_TEMPLATE.md` and `SYSTEM.md`; an explicit `--append-system-prompt` wins over discovered `APPEND_SYSTEM.md`. The two custom-prompt flags are mutually exclusive, and supplying both fails clearly. An explicitly supplied empty `--system-prompt` literal still counts as explicit and suppresses custom-prompt discovery.
 
-An explicitly empty literal override also suppresses discovered `SYSTEM.md` and `SYSTEM_TEMPLATE.md` files. It does not disable OMP's generated instructions; use the SDK's full `systemPrompt` replacement for that.
+Programmatic API options use separate contracts, not CLI flags; see [Programmatic API options](#programmatic-api-options).
 
-Without an explicit custom source, discovery is project-first, then user-level. Within each scope OMP checks every configured base for `SYSTEM_TEMPLATE.md` before checking any base for `SYSTEM.md`; therefore a project `.claude/SYSTEM_TEMPLATE.md` beats a project `.omp/SYSTEM.md`. Each filename uses the existing base order:
+That empty literal suppresses discovered `SYSTEM.md` and `SYSTEM_TEMPLATE.md`, but does not disable OMP-generated instructions; only the programmatic `CreateAgentSessionOptions.systemPrompt` full-replacement option does that.
+
+Without an explicit custom source, discovery is project-first, then user-level. Within each scope OMP checks every configured base for `SYSTEM_TEMPLATE.md` before checking any base for `SYSTEM.md`; therefore a project `.claude/SYSTEM_TEMPLATE.md` beats a project `.omp/SYSTEM.md`. For each filename, the first matching listed base wins:
 
 1. `<cwd>/.omp/<file>`, `<cwd>/.claude/<file>`, `<cwd>/.codex/<file>`, `<cwd>/.gemini/<file>`
 2. `~/.omp/agent/<file>`, `~/.claude/<file>`, `~/.codex/<file>`, `~/.gemini/<file>`
 
 The native user path follows the active profile: with `omp --profile work`, `~/.omp/agent` becomes `~/.omp/profiles/work/agent`. `PI_CONFIG_DIR` changes the native config-directory name. This shared config lookup does not use `PI_CODING_AGENT_DIR` as an arbitrary replacement base.
 
-Template-file discovery does **not** walk ancestors: starting OMP in `<repo>/packages/api` does not discover `<repo>/.omp/SYSTEM_TEMPLATE.md`. Before accepting a user-level template, OMP also checks its existing project-level `SYSTEM.md` capability providers. Their ancestor `.omp/SYSTEM.md` and supported `.agent` / `.agents` prompts take precedence over a global template. Explicit CLI/SDK overrides still win. See [Configuration usage](./config-usage.md) for the shared config-directory contract.
+Template-file discovery does **not** walk ancestors: starting OMP in `<repo>/packages/api` does not discover `<repo>/.omp/SYSTEM_TEMPLATE.md`. Before accepting a user-level template, OMP also checks its existing project-level `SYSTEM.md` capability providers. Their ancestor `.omp/SYSTEM.md` and supported `.agent` / `.agents` prompts take precedence over a global template. An explicit CLI flag or programmatic API option still wins over these discovered capability providers. See [Configuration usage](./config-usage.md) for the shared config-directory contract.
 
 `SYSTEM_TEMPLATE.md` is always read as a file. `--system-prompt-template <path>` is also a strict file path: a missing, unreadable, or non-file path is an error, never a literal prompt. An empty or malformed Handlebars template is an error; OMP does not fall back to `SYSTEM.md` or the bundled prompt.
 
@@ -71,7 +73,7 @@ With `SYSTEM.md`, append text is rendered immediately after the custom text in `
 
 With `SYSTEM_TEMPLATE.md` (or `--system-prompt-template`), append text remains generated by the normal project/footer route; the raw template controls block 0 and does not receive an implicit copy of the append text.
 
-SDK-generated append content (for enabled memory/auto-learn features and MCP guidance) is combined before the user-supplied append text.
+OMP-generated append content (for enabled memory/auto-learn features and MCP guidance) is combined before the user-supplied append text.
 Those generated blocks can end with `## MCP Server Instructions`, whose text declares
 itself server-controlled and unverified. Whenever a generated block precedes the
 user-supplied text, the text is rendered under its own `## User Instructions` heading
@@ -80,17 +82,17 @@ generated block — the append text is emitted unchanged, without a heading.
 
 ## Handlebars template route
 
-`SYSTEM_TEMPLATE.md`, `--system-prompt-template <path>`, `CreateAgentSessionOptions.systemPromptTemplate`, and `buildSystemPrompt({ systemPromptTemplate })` all select raw Handlebars source for block 0. The file/option is the template itself, not a path in the SDK case. It is rendered instead of the bundled `system-prompt.md` with the same live data and registered helpers as that bundled template.
+`SYSTEM_TEMPLATE.md` and `--system-prompt-template <path>` select raw Handlebars source from a file. Programmatic callers can instead pass raw Handlebars source through `CreateAgentSessionOptions.systemPromptTemplate` or `buildSystemPrompt({ systemPromptTemplate })`; those programmatic options are the template itself, not a path. Each route is rendered instead of the bundled `system-prompt.md` with the same live data and registered helpers as that bundled template.
 
 Generated blocks that are outside block 0 remain normal: the project/environment footer (including generated context and append material), computer safety, active nested-repository context, and provider tool schemas are retained. Data-driven sections that normally live inside the bundled template are not appended by magic. `skills`, `rules`, `alwaysApplyRules`, `toolInventory`, `xdevTools`, and `xdevDocs` are available to the template, but each is emitted only if the template references it. In particular, omitting `{{toolInventory}}` or `{{xdevDocs}}` omits that in-block catalog. A raw template result never reports delivered xdev catalog metadata, even when it references `{{xdevDocs}}`.
 
 The generated project/footer route already renders `contextFiles` and `appendPrompt` once. A template SHOULD NOT render those fields in block 0 unless it intentionally wants duplicate copies.
 
-Use effective session settings and live tool data rather than copying today's rendered prose. `eagerTasks` and `eagerTasksAlways` reflect task settings captured when the SDK session starts, while `xdevDocs`, `toolInventory`, and `toolRefs` reflect mounted devices and tool state whenever the prompt rebuilds. `xdevDocs` also reflects the `tools.xdevDocs` / `tools.xdevInlineDevices` settings used for that rebuild.
+Use effective session settings and live tool data rather than copying today's rendered prose. `eagerTasks` and `eagerTasksAlways` reflect task settings captured when the session starts, while `xdevDocs`, `toolInventory`, and `toolRefs` reflect mounted devices and tool state whenever the prompt rebuilds. `xdevDocs` also reflects the `tools.xdevDocs` / `tools.xdevInlineDevices` settings used for that rebuild.
 
 The template has the same helper set used by the bundled prompt (`if`, `each`, `unless`, `list`, `when`, `has`, `ifAny`, `includes`, and the other registered helpers). No extra helper is created for a user file. Values inserted into a template are data, not a second template pass: Handlebars-looking text inside `xdevDocs`, context files, tool descriptions, or other values is not recursively rendered.
 
-Treat both sides of this boundary as prompt input. Protect template files like other system-level configuration, and review workspace, extension, MCP, and mounted-device descriptions before treating them as trusted policy; dynamic xdev metadata can be third-party text. The template source is read once by the CLI at launch. Later runtime prompt rebuilds re-render that in-memory source with current live data and settings, but do not re-read a changed file; restart OMP after editing the file.
+Treat both sides of this boundary as prompt input. Protect template files like other system-level configuration, and review workspace, extension, MCP, and mounted-device descriptions before treating them as trusted policy; dynamic xdev metadata can be third-party text. The CLI reads a template file once at launch. Programmatic raw source is already in memory. Later runtime prompt rebuilds re-render that in-memory source with current live data and settings, but do not re-read a changed file; restart OMP after editing the file.
 
 ## Plain-text and template contracts
 
@@ -108,7 +110,7 @@ on
 
 those characters reach the model literally. Internal values such as `cwd`, `skills`, `rules`, and `toolRefs` remain private implementation details for the plain route. The calendar date is deliberately not exposed as a template value anymore — it rides the per-request first-turn reminder instead (see above).
 
-Only the opt-in `SYSTEM_TEMPLATE.md` / `--system-prompt-template` / SDK `systemPromptTemplate` route compiles Handlebars. A malformed template or an empty template fails clearly; it is never silently downgraded to plain text.
+Only the opt-in `SYSTEM_TEMPLATE.md` / `--system-prompt-template` / programmatic `CreateAgentSessionOptions.systemPromptTemplate` and `buildSystemPrompt({ systemPromptTemplate })` routes compile Handlebars. A malformed template or an empty template fails clearly; it is never silently downgraded to plain text.
 
 ## Recipes
 
@@ -192,27 +194,33 @@ If the message has no concrete task, output exactly `none`.
 
 Generated title output has an enforced normalization contract even with a custom prompt. OMP considers only the first trimmed line, strips surrounding quotes, `<title>...</title>` markers, and terminal punctuation, and treats `none` or `<title/>` as “no title yet.” A result longer than 80 characters or 12 words is rejected rather than truncated. Empty, deferred, or rejected output leaves the session unnamed, so a later eligible title attempt can name it.
 
-## Full provider-facing replacement (SDK only)
+## Programmatic API options
 
-`CreateAgentSessionOptions.systemPrompt` is a different, lower-level API. A fixed string or array replaces every generated block without discovering or rendering a system-prompt template, so an unused empty or malformed `SYSTEM_TEMPLATE.md` cannot prevent startup. A callback still receives the generated block array and returns its replacement; normal template discovery and errors apply to that route. Either form can omit all generated context and safety blocks.
+Programmatic API callers use separate options, not CLI flags: `CreateAgentSessionOptions.systemPromptTemplate` and `buildSystemPrompt({ systemPromptTemplate })` take raw Handlebars source; `CreateAgentSessionOptions.customSystemPrompt` is already-loaded literal text, while `buildSystemPrompt`'s `customPrompt` is plain text with path-or-literal resolution (or `resolvedCustomPrompt` is already-loaded text).
 
-`CreateAgentSessionOptions.systemPromptTemplate` is the compositional SDK API described above: it accepts raw Handlebars source, replaces block 0, and keeps the generated footer, context/append route, safety blocks, active-repository context, and provider tool schemas. It is mutually exclusive with `customSystemPrompt`. The exported `buildSystemPrompt({ systemPromptTemplate })` option has the same raw-text contract and conflict behavior.
+For generated-prompt construction, a template source and literal custom prompt cannot be combined: `systemPromptTemplate` conflicts with `customSystemPrompt` in `CreateAgentSessionOptions`, and with `customPrompt` / `resolvedCustomPrompt` in `buildSystemPrompt`. These combinations fail clearly instead of silently choosing one.
 
-The CLI flags and files do **not** set `systemPrompt`: they set the plain/template custom route and `appendSystemPrompt`, which continue through the generated blocks described above.
+## Full provider-facing replacement (programmatic API only)
+
+`CreateAgentSessionOptions.systemPrompt` is a different, lower-level programmatic API. A fixed string or array—including an empty string or array—wins over `systemPromptTemplate`, `customSystemPrompt`, and `appendSystemPrompt`, and replaces every OMP-generated block without discovering or rendering a system-prompt template. A callback instead receives the generated block array after normal template/custom assembly and returns its replacement; normal template discovery and errors apply to that route. Either form can omit all generated context and safety blocks.
+
+`CreateAgentSessionOptions.systemPromptTemplate` is the compositional programmatic API described above: it accepts raw Handlebars source, replaces block 0, and keeps the OMP-generated footer, context/append route, safety blocks, active-repository context, and provider tool schemas. It is mutually exclusive with `customSystemPrompt`. The exported `buildSystemPrompt({ systemPromptTemplate })` option has the same raw-text contract and conflict behavior; its `customPrompt` option remains plain text with path-or-literal resolution.
+
+The CLI flags and files do **not** set `systemPrompt`: they select the plain/template custom route and append route, which continue through the OMP-generated blocks described above.
 
 ## Quick reference
 
-| Goal | Use |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Add instructions while keeping the complete default prompt | `APPEND_SYSTEM.md` or `--append-system-prompt` |
-| Replace the default instruction block with plain text | `SYSTEM.md` or `--system-prompt` |
-| Replace the default instruction block with Handlebars | `SYSTEM_TEMPLATE.md` or `--system-prompt-template <path>` |
-| Supply raw Handlebars from an SDK embedder | `CreateAgentSessionOptions.systemPromptTemplate` or `buildSystemPrompt({ systemPromptTemplate })` |
-| Replace every provider-facing system block | SDK `CreateAgentSessionOptions.systemPrompt` |
-| Customize automatic session titles | `TITLE_SYSTEM.md` |
-| Replace the personality block while keeping the rest of the default prompt | `PERSONALITY.md` |
-| Use `{{cwd}}` or other internal variables in a plain user file | Not supported; plain user content is inserted verbatim |
-| Include live settings, tool inventory, or xdev docs in a template | Reference the corresponding Handlebars fields, such as `{{eagerTasks}}`, `{{toolInventory}}`, and `{{xdevDocs}}` |
-| Inherit selected default-template sections automatically | Not supported; a template must reference the data it needs |
-| Per-directory override | A supported config base directly under the cwd used to launch OMP |
-| Global override | The active native agent directory, or another supported user config base |
+| Goal                                                                       | Use                                                                                                              |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Add instructions while keeping the complete default prompt                 | `APPEND_SYSTEM.md` or `--append-system-prompt`                                                                   |
+| Replace the default instruction block with plain text                      | `SYSTEM.md` or `--system-prompt`                                                                                 |
+| Replace the default instruction block with Handlebars                      | `SYSTEM_TEMPLATE.md` or `--system-prompt-template <path>`                                                        |
+| Supply raw Handlebars through the programmatic API                         | `CreateAgentSessionOptions.systemPromptTemplate` or `buildSystemPrompt({ systemPromptTemplate })`                |
+| Replace every provider-facing system block                                 | `CreateAgentSessionOptions.systemPrompt`                                                                         |
+| Customize automatic session titles                                         | `TITLE_SYSTEM.md`                                                                                                |
+| Replace the personality block while keeping the rest of the default prompt | `PERSONALITY.md`                                                                                                 |
+| Use `{{cwd}}` or other internal variables in a plain user file             | Not supported; plain user content is inserted verbatim                                                           |
+| Include live settings, tool inventory, or xdev docs in a template          | Reference the corresponding Handlebars fields, such as `{{eagerTasks}}`, `{{toolInventory}}`, and `{{xdevDocs}}` |
+| Inherit selected default-template sections automatically                   | Not supported; a template must reference the data it needs                                                       |
+| Per-directory override                                                     | A supported config base directly under the cwd used to launch OMP                                                |
+| Global override                                                            | The active native agent directory, or another supported user config base                                         |
