@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -36,6 +36,8 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 	let sessionFile: string;
 	let corruptedBytes: string;
 	let quitSpy: Mock<typeof postmortem.quit>;
+	let quitCalled: PromiseWithResolvers<void>;
+	let exitSpy: Mock<typeof postmortem.exitProcess>;
 	let showErrorSpy: Mock<typeof InteractiveMode.prototype.showError>;
 	let disposeSpy: Mock<typeof session.dispose>;
 
@@ -89,8 +91,8 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		const materializedFile = sessionManager.getSessionFile();
 		if (!materializedFile) throw new Error("expected a materialized session file");
 		sessionFile = materializedFile;
-		fs.appendFileSync(sessionFile, "you're now broken\n");
-		corruptedBytes = fs.readFileSync(sessionFile, "utf8");
+		await fs.appendFile(sessionFile, "you're now broken\n");
+		corruptedBytes = await Bun.file(sessionFile).text();
 
 		// Any real full-body rewrite (compaction, branch, entry discard, title
 		// repair) now runs the storage guard against the externally modified
@@ -100,7 +102,11 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		// reporter hit, with no mocked error construction.
 		await sessionManager.rewriteEntries().catch(() => undefined);
 
-		quitSpy = vi.spyOn(postmortem, "quit").mockResolvedValue(undefined);
+		quitCalled = Promise.withResolvers<void>();
+		quitSpy = vi.spyOn(postmortem, "quit").mockImplementation(async () => {
+			quitCalled.resolve();
+		});
+		exitSpy = vi.spyOn(postmortem, "exitProcess").mockImplementation(() => undefined as never);
 		showErrorSpy = vi.spyOn(mode, "showError").mockImplementation(() => {});
 		// Observe only: the real dispose implementation runs.
 		disposeSpy = vi.spyOn(session, "dispose");
@@ -131,7 +137,7 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		// The dispose failure IS the genuine guard error, end to end.
 		await expect(disposeSpy.mock.results[0]!.value).rejects.toBeInstanceOf(SessionWriteConflictError);
 		// The guard refused to clobber: the externally added bytes survive.
-		expect(fs.readFileSync(sessionFile, "utf8")).toBe(corruptedBytes);
+		expect(await Bun.file(sessionFile).text()).toBe(corruptedBytes);
 	});
 
 	it("exits without writing the session log on the second attempt", async () => {
@@ -141,10 +147,11 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		// The second Ctrl+C is the escape hatch: it quits rather than re-running
 		// the teardown that already failed once (dispose stays memoized at 1 call).
 		expect(quitSpy).toHaveBeenCalledTimes(1);
+		expect(exitSpy).not.toHaveBeenCalled();
 		expect(disposeSpy).toHaveBeenCalledTimes(1);
 		// "Without writing the session log" is literal: the corrupted file is
 		// still byte-identical to what the external writer left behind.
-		expect(fs.readFileSync(sessionFile, "utf8")).toBe(corruptedBytes);
+		expect(await Bun.file(sessionFile).text()).toBe(corruptedBytes);
 	});
 
 	it("a single Ctrl+C keypress after the failure reaches the escape hatch", async () => {
@@ -156,10 +163,36 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		// teardown armed it must route straight into shutdown()'s force-quit.
 		mode.lastSigintTime = 0; // a single, non-double-tapped press
 		mode.handleCtrlC();
-		await Promise.resolve();
+		await quitCalled.promise;
 
 		expect(quitSpy).toHaveBeenCalledTimes(1);
+		expect(exitSpy).not.toHaveBeenCalled();
 		expect(disposeSpy).toHaveBeenCalledTimes(1); // never re-runs the doomed teardown
-		expect(fs.readFileSync(sessionFile, "utf8")).toBe(corruptedBytes);
+		expect(await Bun.file(sessionFile).text()).toBe(corruptedBytes);
+	});
+
+	it("a failed restart arms the same single-Ctrl+C escape hatch", async () => {
+		await mode.restart();
+		quitSpy.mockClear();
+
+		mode.lastSigintTime = 0;
+		mode.handleCtrlC();
+		await quitCalled.promise;
+
+		expect(quitSpy).toHaveBeenCalledTimes(1);
+		expect(exitSpy).not.toHaveBeenCalled();
+		expect(disposeSpy).toHaveBeenCalledTimes(1);
+		expect(await Bun.file(sessionFile).text()).toBe(corruptedBytes);
+	});
+
+	it("bypasses a guarded process.exit after cleanup", async () => {
+		await mode.shutdown();
+		quitSpy.mockRejectedValueOnce(new Error("process.exit is guarded"));
+
+		await mode.shutdown();
+
+		expect(quitSpy).toHaveBeenCalledTimes(1);
+		expect(exitSpy).toHaveBeenCalledTimes(1);
+		expect(disposeSpy).toHaveBeenCalledTimes(1);
 	});
 });

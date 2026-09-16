@@ -5452,25 +5452,20 @@ export class InteractiveMode implements InteractiveModeContext {
 		// escape hatch: quit without writing the session log. 130 = 128 + SIGINT,
 		// matching the Ctrl+C hard-abort exit code in input-controller.
 		if (this.#teardownFailed) {
-			await postmortem.quit(130);
+			try {
+				await postmortem.quit(130);
+			} catch {
+				// Extension/hook loading temporarily guards process.exit. Cleanup
+				// has already run; bypass that guard for this host-owned escape.
+				postmortem.exitProcess(130);
+			}
 			return;
 		}
 		this.#isShuttingDown = true;
 		try {
 			await this.#teardown();
 		} catch (error) {
-			this.#isShuttingDown = false;
-			const detail = error instanceof Error ? error.message : String(error);
-			// Arm the escape hatch only once dispose() has begun: its promise is
-			// memoized, so a retry can only re-fail. A failure BEFORE dispose (a
-			// transient BTW/live-command flush) leaves the session undisposed and
-			// the teardown genuinely retryable, so it must not force-quit.
-			this.#teardownFailed = this.session.isDisposed;
-			this.showError(
-				this.#teardownFailed
-					? `Could not close session: ${detail}\nPress Ctrl+C again to exit without saving the session log.`
-					: `Could not close session: ${detail}`,
-			);
+			this.#handleTeardownError("close", error);
 			return;
 		}
 
@@ -5483,6 +5478,21 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		await postmortem.quit(0);
+	}
+
+	#handleTeardownError(action: "close" | "restart", error: unknown): void {
+		this.#isShuttingDown = false;
+		const detail = error instanceof Error ? error.message : String(error);
+		// Arm the escape hatch only once dispose() has begun: its promise is
+		// memoized, so a retry can only re-fail. A failure BEFORE dispose (a
+		// transient BTW/live-command flush) leaves the session undisposed and
+		// the teardown genuinely retryable, so it must not force-quit.
+		this.#teardownFailed = this.session.isDisposed;
+		this.showError(
+			this.#teardownFailed
+				? `Could not ${action} session: ${detail}\nPress Ctrl+C again to exit without saving the session log.`
+				: `Could not ${action} session: ${detail}`,
+		);
 	}
 
 	/**
@@ -5502,8 +5512,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		try {
 			await this.#teardown();
 		} catch (error) {
-			this.#isShuttingDown = false;
-			this.showError(`Could not restart session: ${error instanceof Error ? error.message : String(error)}`);
+			this.#handleTeardownError("restart", error);
 			return;
 		}
 
