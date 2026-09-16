@@ -393,23 +393,20 @@ async function fetchPublishedEffortLadders(
 		if (!response.ok) throw new Error(`models.dev catalog fetch failed: ${response.status}`);
 		return indexPublishedEffortLadders((await response.json()) as unknown);
 	};
-	const ladders = await withCatalogDiscoveryTimeout(
-		DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
-		async signal => {
-			let shared = EMPTY_PUBLISHED_EFFORT_LADDERS;
-			try {
-				shared = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl, signal));
-			} catch {
-				// Try models.dev within the same deadline.
-			}
-			if (shared.byHost.size > 0) return shared;
-			try {
-				return await fetchModelsDev(signal);
-			} catch {
-				return shared;
-			}
-		},
-	);
+	const ladders = await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, async signal => {
+		let shared = EMPTY_PUBLISHED_EFFORT_LADDERS;
+		try {
+			shared = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl, signal));
+		} catch {
+			// Try models.dev within the same deadline.
+		}
+		if (shared.byHost.size > 0) return shared;
+		try {
+			return await fetchModelsDev(signal);
+		} catch {
+			return shared;
+		}
+	});
 	if (ladders.byHost.size === 0) {
 		if (session.memo && session.memo.ladders.byHost.size > 0) return session.memo.ladders;
 		return ladders;
