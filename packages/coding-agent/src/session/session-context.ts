@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { getAnthropicCompactionPayload } from "@oh-my-pi/pi-agent-core/compaction";
+import { getAnthropicCompactionPayload, isTurnStartEntry } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	coerceServiceTierByFamily,
 	type OpenAIResponsesHistoryPayload,
@@ -605,16 +605,34 @@ export function buildSessionContext(
 		// SessionEntry rows so a remotely-compacted session keeps its recent
 		// turns visible instead of showing only the summary and post-compaction.
 		if (!remoteReplacementHistory || options?.transcript) {
-			// Emit kept messages (before compaction, starting from firstKeptEntryId)
+			// Emit kept messages (before compaction, starting from firstKeptEntryId).
 			let foundFirstKept = false;
+			// Collapsed display only: `findCutPoint` may cut the kept region at
+			// an assistant message (its tool results follow and stay kept), so
+			// the region can begin mid-turn. Rendering that head would lead the
+			// terminal with stale turn fragments — a subagent spawn prompt and
+			// its result from far back in the conversation. Skip the orphan head
+			// up to the first turn-start entry: those rows stay on the wire and
+			// in the full-history view; only the collapsed head is trimmed.
+			// Trimmed entries still run handleEntryResetTracking — mode/model
+			// changes in the skipped prefix must keep the cache-miss tracking
+			// state identical to the wire walk, or later kept transitions
+			// compute the wrong before-state and mis-mark retained assistants.
+			let displayHeadFound = !options?.transcript;
 			for (let i = 0; i < compactionIdx; i++) {
 				const entry = path[i];
 				if (entry.id === compaction.firstKeptEntryId) {
 					foundFirstKept = true;
 				}
-				if (foundFirstKept) {
-					appendMessage(entry);
+				if (!foundFirstKept) continue;
+				if (!displayHeadFound) {
+					if (!isTurnStartEntry(entry)) {
+						handleEntryResetTracking(entry);
+						continue;
+					}
+					displayHeadFound = true;
 				}
+				appendMessage(entry);
 			}
 		} else if (compaction.providerReplayThroughEntryId) {
 			const replayThroughIdx = path.findIndex(entry => entry.id === compaction.providerReplayThroughEntryId);

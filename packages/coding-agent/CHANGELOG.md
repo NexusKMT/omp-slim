@@ -27,6 +27,11 @@
 - Fixed browser reuse missing Chromium behind Linux wrapper scripts and spawning a duplicate on a locked profile ([#12236](https://github.com/can1357/oh-my-pi/pull/12236) by [@shivamklr](https://github.com/shivamklr)).
 - Explicit model refreshes now re-run command-backed API keys and headers, allowing rotated credentials to recover without restarting omp ([#12172](https://github.com/can1357/oh-my-pi/pull/12172) by [@harshaygadekar](https://github.com/harshaygadekar)).
 
+### Fixed
+
+- Fixed background jobs lingering in `hub jobs` / `/jobs` output for the full retention window after they complete: a settled row whose result was delivered or recovered by a snapshot now clears shortly (~30s) after consumption, while unconsumed rows stay inspectable. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
+- Fixed the collapsed transcript after a compaction whose cut landed mid-turn leading the terminal with stale turn fragments (e.g. a subagent spawn prompt from far back in the conversation); the display head now starts at a turn boundary while the wire context keeps the exact kept region. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
