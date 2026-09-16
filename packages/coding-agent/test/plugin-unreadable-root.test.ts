@@ -54,16 +54,24 @@ async function plantRoot(prefix: string): Promise<{ home: string; cwd: string; m
 // restrictive mode, or a manifest symlinked into a denied path all surface as
 // EACCES/EPERM, and the loader rethrew them — aborting plugin tool-path
 // collection and killing agent and subagent startup with a filesystem error
-// far from its cause. An unreadable root is skipped; a readable one still
-// loads, so the skip cannot hide a working plugin set.
-test("an unreadable plugins root is skipped instead of failing plugin collection", async () => {
+// far from its cause.
+//
+// The readable half is not gated: it is what keeps the skip from hiding a
+// working plugin set, and it holds wherever the suite runs. Only the denial
+// needs mode bits to be enforced, which excludes root and Windows.
+test("a readable plugins root still loads its declared plugin", async () => {
 	const readable = await plantRoot("omp-plugin-readable-");
 	expect((await getEnabledPlugins(readable.cwd, { home: readable.home })).map(plugin => plugin.name)).toEqual([
 		"declared-plugin",
 	]);
-
-	const denied = await plantRoot("omp-plugin-denied-");
-	await fs.chmod(denied.manifest, 0o000);
-	restore.push(denied.manifest);
-	expect(await getEnabledPlugins(denied.cwd, { home: denied.home })).toEqual([]);
 });
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+	"an unreadable plugins root is skipped instead of failing plugin collection",
+	async () => {
+		const denied = await plantRoot("omp-plugin-denied-");
+		await fs.chmod(denied.manifest, 0o000);
+		restore.push(denied.manifest);
+		expect(await getEnabledPlugins(denied.cwd, { home: denied.home })).toEqual([]);
+	},
+);
