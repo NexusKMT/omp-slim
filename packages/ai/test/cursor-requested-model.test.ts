@@ -148,27 +148,30 @@ describe("Cursor requestedModel wire shape", () => {
 	});
 
 	it("honors an explicit false marker when a routed row puts its own id on the wire", async () => {
-		// Bundled claude-4.6-opus-max is a bare/thinking pair: its own id is
+		// Bundled claude-opus-4-7-max is a bare/thinking pair: its own id is
 		// still a wire id, unlike gpt-5.6-sol whose requestModelId names a sibling.
-		const cached = cursorModel("claude-4.6-opus-max", {
+		const cached = cursorModel("claude-opus-4-7-max", {
 			cursorMaxMode: false,
 			thinking: {
 				mode: "effort",
 				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
 				effortRouting: {
-					off: "claude-4.6-opus-max",
-					[Effort.Minimal]: "claude-4.6-opus-max-thinking",
-					[Effort.Low]: "claude-4.6-opus-max-thinking",
-					[Effort.Medium]: "claude-4.6-opus-max-thinking",
-					[Effort.High]: "claude-4.6-opus-max-thinking",
+					off: "claude-opus-4-7-max",
+					[Effort.Minimal]: "claude-opus-4-7-thinking-max",
+					[Effort.Low]: "claude-opus-4-7-thinking-max",
+					[Effort.Medium]: "claude-opus-4-7-thinking-max",
+					[Effort.High]: "claude-opus-4-7-thinking-max",
 				},
 			},
 		});
 		const payload = await capture(cached);
-		expect(payload.requestedModel?.modelId).toBe("claude-4.6-opus-max");
-		expect(payload.modelDetails?.modelId).toBe("claude-4.6-opus-max");
+		expect(payload.requestedModel?.modelId).toBe("claude-opus-4-7-max");
+		expect(payload.modelDetails?.modelId).toBe("claude-opus-4-7-max");
 		expect(payload.requestedModel?.maxMode).toBe(false);
 		expect(payload.modelDetails?.maxMode ?? false).toBe(false);
+
+		const thinkingPayload = await capture(cached, "claude-opus-4-7-thinking-max");
+		expect(thinkingPayload.requestedModel?.maxMode).toBe(false);
 	});
 
 	it("falls back to the wire tier for a bundled row discovery never marked", async () => {

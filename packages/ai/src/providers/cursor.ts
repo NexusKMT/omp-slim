@@ -5263,12 +5263,15 @@ function resolveCursorMaxMode(model: Model<"cursor-agent">, wireModelId: string)
 	if (routing === undefined || wireModelId === model.id) {
 		return model.cursorMaxMode ?? isCursorMaxModeWireId(wireModelId);
 	}
-	if (
-		model.cursorMaxMode === true &&
-		!Object.values(routing).some(target => typeof target === "string" && isCursorMaxModeWireId(target))
-	) {
-		return true;
+	let routesOwnId = routing.off === model.id;
+	let hasInferredMaxRoute = typeof routing.off === "string" && isCursorMaxModeWireId(routing.off);
+	for (const effort of THINKING_EFFORTS) {
+		const target = routing[effort];
+		if (target === model.id) routesOwnId = true;
+		if (typeof target === "string" && isCursorMaxModeWireId(target)) hasInferredMaxRoute = true;
 	}
+	if (routesOwnId) return model.cursorMaxMode ?? isCursorMaxModeWireId(wireModelId);
+	if (model.cursorMaxMode === true && !hasInferredMaxRoute) return true;
 	return isCursorMaxModeWireId(wireModelId);
 }
 

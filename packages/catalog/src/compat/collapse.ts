@@ -736,13 +736,14 @@ function reconcileDefaultMember<TSpec extends VariantSpecLike>(
 
 /**
  * Whether a Cursor wire id names an extended tier that upstream serves only in
- * max mode. Cursor's extended tiers carry the `-xhigh`/`-extra-high`/`-max`
- * effort suffix with an optional `-fast` lane. This is an inference from the
- * slug, not an upstream marker: it is the only per-tier signal available for
- * bundled rows and for routes live discovery never advertised.
+ * max mode. The compiled taxonomy identifies `xhigh`/`extra-high`/`max`
+ * efforts and their optional service lanes. This is an inference, not an
+ * upstream marker: it is the only per-tier signal available for bundled rows
+ * and for routes live discovery never advertised.
  */
 export function isCursorMaxModeWireId(wireModelId: string): boolean {
-	return /-(?:xhigh|extra-high|max)(?:-fast)?$/.test(wireModelId);
+	const effort = collapseVariantId("cursor", wireModelId).effort;
+	return effort === Effort.XHigh || effort === Effort.Max;
 }
 
 /**
