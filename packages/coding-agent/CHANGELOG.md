@@ -6,6 +6,10 @@
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 
+### Fixed
+
+- Fixed browser reuse missing Chromium behind Linux wrapper scripts and spawning a duplicate on a locked profile ([#12236](https://github.com/can1357/oh-my-pi/pull/12236) by [@shivamklr](https://github.com/shivamklr)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
