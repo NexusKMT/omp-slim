@@ -6,7 +6,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getPluginsDir, getPluginsLockfile, isEnoent, logger } from "@oh-my-pi/pi-utils";
+import { getPluginsDir, getPluginsLockfile, hasFsCode, isEacces, isEnoent, logger } from "@oh-my-pi/pi-utils";
 import { getConfigDirPaths } from "../../config";
 import { registerPluginCacheInvalidator, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { findExtensionDirectoryIndex, resolveExtensionDirectory } from "../extensions/directory-resolution";
@@ -70,6 +70,18 @@ async function loadProjectOverrides(cwd: string): Promise<ProjectPluginOverrides
 	return {};
 }
 /**
+ * A plugin root the process is not allowed to read is an environment
+ * condition — a sandbox, restrictive permissions, or a manifest symlinked into
+ * a denied path — not a broken configuration. Skip the root with a warning:
+ * rethrowing aborts plugin tool-path collection, which fails agent and
+ * subagent startup outright, and no plugin is worth that. A malformed manifest
+ * still throws, because that one is the user's to fix.
+ */
+function isUnreadableRoot(err: unknown): boolean {
+	return isEacces(err) || hasFsCode(err, "EPERM");
+}
+
+/**
  * Per-root enumeration of plugins from `<root>/node_modules`,
  * `<root>/package.json#dependencies`, and `<root>/omp-plugins.lock.json#plugins`.
  * Honors `projectOverrides.disabled` and `projectOverrides.features`. Returns an
@@ -93,6 +105,10 @@ async function collectPluginsAtRoot(
 	} catch (err) {
 		// Linked-only setups may have no `<root>/package.json` yet — that's
 		// fine, the lockfile still records the link.
+		if (isUnreadableRoot(err)) {
+			logger.warn("plugins: skipping unreadable plugin root", { root, path: pkgJsonPath });
+			return [];
+		}
 		if (!isEnoent(err)) throw err;
 	}
 
@@ -101,6 +117,10 @@ async function collectPluginsAtRoot(
 	try {
 		runtimeConfig = normalizePluginRuntimeConfig(await Bun.file(lockPath).json());
 	} catch (err) {
+		if (isUnreadableRoot(err)) {
+			logger.warn("plugins: skipping unreadable plugin root", { root, path: lockPath });
+			return [];
+		}
 		if (!isEnoent(err)) throw err;
 		runtimeConfig = normalizePluginRuntimeConfig({});
 	}
