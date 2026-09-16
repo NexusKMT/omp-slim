@@ -123,8 +123,74 @@ async fn invalid_utf8_is_rejected_without_rewriting_unrelated_bytes() {
 		.await;
 	assert_eq!(std::fs::read(&path).unwrap(), original);
 	let error = result.expect_err("invalid UTF-8 must be rejected");
-	assert!(error.to_string().contains("UTF-8"), "{error}");
+	let message = error.to_string();
+	assert!(message.contains("legacy.txt"), "{message}");
+	assert!(message.contains("byte 8"), "{message}");
 	assert!(writer.requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn delete_removes_invalid_utf8_file_without_decoding() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("legacy.bin");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	let outcome = ws
+		.apply_json(
+			&serde_json::json!({ "path": "legacy.bin", "edits": [{ "op": "delete" }] }),
+			&writer,
+		)
+		.await
+		.expect("delete needs existence, not text");
+	assert!(!path.exists(), "invalid UTF-8 file must be deletable");
+	assert_eq!(writer.requests.lock().len(), 1);
+	assert!(outcome.text.contains("Deleted legacy.bin"), "{}", outcome.text);
+}
+
+#[tokio::test]
+async fn create_over_invalid_utf8_reports_already_exists() {
+	let ws = Workspace::new(EditMode::ApplyPatch);
+	let path = ws.cwd().join("legacy.txt");
+	let original = b"name=caf\xe9\n";
+	std::fs::write(&path, original).unwrap();
+	let writer = DiskWriter::default();
+	let err = ws
+		.apply_raw("*** Begin Patch\n*** Add File: legacy.txt\n+new\n*** End Patch", &writer)
+		.await
+		.expect_err("existing undecodable file still exists");
+	assert!(err.to_string().contains("already exists"), "{err}");
+	assert_eq!(std::fs::read(&path).unwrap(), original);
+	assert!(writer.requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn delete_then_create_replaces_invalid_utf8_file() {
+	let ws = Workspace::new(EditMode::ApplyPatch);
+	let path = ws.cwd().join("a.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	ws.apply_raw(
+		"*** Begin Patch\n*** Delete File: a.txt\n*** Add File: a.txt\n+new\n*** End Patch",
+		&writer,
+	)
+	.await
+	.expect("delete+create needs existence, not text");
+	assert_eq!(std::fs::read(&path).unwrap(), b"new\n");
+	assert_eq!(writer.requests.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn hashline_rem_removes_invalid_utf8_file() {
+	let ws = Workspace::new(EditMode::Hashline);
+	let path = ws.cwd().join("legacy.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	let outcome = ws
+		.apply_json(&serde_json::json!({ "input": "[legacy.txt#FFFF]\nREM" }), &writer)
+		.await
+		.expect("REM needs existence, not text");
+	assert!(!path.exists(), "invalid UTF-8 file must be deletable");
+	assert!(outcome.text.contains("Deleted legacy.txt"), "{}", outcome.text);
 }
 
 #[tokio::test]
