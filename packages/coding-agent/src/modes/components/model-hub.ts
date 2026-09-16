@@ -750,15 +750,14 @@ export class ModelHubComponent implements Component {
 	}
 
 	#cancelScheduledRefreshesExcept(keepProviderId?: string): void {
+		// Hover debounce only. An explicit F5 queued behind an in-flight catalog
+		// fetch must still re-mint credentials after that fetch settles, even if
+		// the user has moved to All models or another provider.
 		for (const [providerId, timer] of this.#scheduledProviderRefreshes) {
 			if (providerId === keepProviderId) continue;
 			clearTimeout(timer);
 			this.#scheduledProviderRefreshes.delete(providerId);
 			this.#setProviderRefreshing(providerId, false);
-		}
-		for (const providerId of this.#pendingCredentialRefreshProviders) {
-			if (providerId === keepProviderId) continue;
-			this.#pendingCredentialRefreshProviders.delete(providerId);
 		}
 	}
 

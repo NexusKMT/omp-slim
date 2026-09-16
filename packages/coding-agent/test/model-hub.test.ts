@@ -1476,6 +1476,32 @@ describe("ModelHub", () => {
 			expect(refreshProvider).toHaveBeenLastCalledWith("prov-a", "online", { refreshCommandCredentials: true });
 		});
 
+		test("F5 still re-mints credentials after navigating away mid-fetch", async () => {
+			const modelA = makeModel("prov-a", "model-a");
+			const modelB = makeModel("prov-b", "model-b");
+			const gate = Promise.withResolvers<void>();
+			const refreshProvider = vi.fn(() => gate.promise);
+			const { hub } = createHub({
+				models: [modelA, modelB],
+				registry: { refreshProvider },
+			});
+			installTestTheme();
+
+			hub.handleInput(DOWN); // All models → prov-a
+			await Bun.sleep(140);
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+			expect(refreshProvider.mock.calls[0]?.[2]).toBeUndefined();
+
+			hub.handleInput("\x1b[15~"); // queue credential refresh behind the in-flight catalog fetch
+			hub.handleInput(UP); // All models — must not drop the F5
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+
+			gate.resolve();
+			await Bun.sleep(0);
+			expect(refreshProvider).toHaveBeenCalledTimes(2);
+			expect(refreshProvider).toHaveBeenLastCalledWith("prov-a", "online", { refreshCommandCredentials: true });
+		});
+
 		test("shows a refreshing status while the provider fetch is in flight", async () => {
 			const model = makeModel("prov-b", "model-b");
 			const gate = Promise.withResolvers<void>();
