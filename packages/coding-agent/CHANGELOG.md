@@ -8,8 +8,8 @@
 
 ### Fixed
 
-- Fixed background jobs lingering in `hub jobs` / `/jobs` output for the full retention window after they complete: a settled row whose result was delivered or recovered by a snapshot now clears shortly (~30s) after consumption, while unconsumed rows stay inspectable.
-- Fixed the collapsed transcript after a compaction whose cut landed mid-turn leading the terminal with stale turn fragments (e.g. a subagent spawn prompt from far back in the conversation); the display head now starts at a turn boundary while the wire context keeps the exact kept region.
+- Fixed background jobs lingering in `hub jobs` / `/jobs` output for the full retention window after they complete: a settled row whose result was delivered or recovered by a snapshot now clears shortly (~30s) after consumption, while unconsumed rows stay inspectable. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
+- Fixed the collapsed transcript after a compaction whose cut landed mid-turn leading the terminal with stale turn fragments (e.g. a subagent spawn prompt from far back in the conversation); the display head now starts at a turn boundary while the wire context keeps the exact kept region. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
 
 ## [18.2.1] - 2026-09-15
 
