@@ -49,6 +49,7 @@ import {
 	applyViewport,
 	BROWSER_PROTOCOL_TIMEOUT_MS,
 	DEFAULT_VIEWPORT,
+	isPuppeteerHandle,
 	loadPuppeteerInWorker,
 } from "./launch";
 import { extractReadableFromHtml, type ReadableFormat } from "./readable";
@@ -415,30 +416,48 @@ async function runGuardedHandleAction<T>(
  * Re-home element handles in `args` into `realm` so they can be passed to an
  * evaluation there. The stealth patch resolves selectors (`tab.waitForSelector`,
  * `tab.$`, …) in Puppeteer's isolated world while `tab.evaluate` runs in the main
- * world; CDP rejects a handle used outside the context that created it. Only DOM
- * element handles can cross worlds (via backend node id) — other handles pass
- * through untouched. `dispose()` releases the adopted copies, never the originals.
+ * world; CDP rejects a handle used outside the context that created it. Puppeteer's
+ * supported realm adoption is DOM-only, so non-element JSHandles pass through and
+ * retain Puppeteer's native same-realm requirement. Nested handles likewise remain
+ * unsupported by Puppeteer's positional argument serializer.
+ *
+ * Adopted copies are disposed on partial adoption failure and after evaluation.
+ * Caller-owned handles — including handles already in `realm` — are never disposed.
  */
 async function adoptElementArgs(
 	realm: Realm,
 	args: unknown[],
 ): Promise<{ args: unknown[]; dispose: () => Promise<void> }> {
-	const adopted: JSHandle[] = [];
-	const out: unknown[] = args.slice();
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		const handle = arg instanceof Object && "asElement" in arg ? (arg as JSHandle).asElement() : null;
-		if (!handle || handle.realm === realm) continue;
-		const copy = await realm.adoptHandle(handle);
-		adopted.push(copy);
-		out[i] = copy;
-	}
-	return {
-		args: out,
-		dispose: async () => {
-			await Promise.all(adopted.map(h => h.dispose().catch(() => undefined)));
-		},
+	let adopted: JSHandle[] | undefined;
+	let out: unknown[] | undefined;
+	let copies: Map<JSHandle, JSHandle> | undefined;
+	const dispose = async (): Promise<void> => {
+		if (adopted) await Promise.all(adopted.map(handle => handle.dispose().catch(() => undefined)));
 	};
+
+	try {
+		for (let i = 0; i < args.length; i++) {
+			const handle = args[i];
+			if (!isPuppeteerHandle(handle)) continue;
+			const element = handle.asElement();
+			if (!element || handle.realm === realm) continue;
+
+			copies ??= new Map();
+			let copy = copies.get(handle);
+			if (!copy) {
+				copy = await realm.adoptHandle(element);
+				copies.set(handle, copy);
+				(adopted ??= []).push(copy);
+			}
+			out ??= args.slice();
+			out[i] = copy;
+		}
+	} catch (error) {
+		await dispose();
+		throw error;
+	}
+
+	return { args: out ?? args, dispose };
 }
 
 /**
@@ -1820,9 +1839,12 @@ export class WorkerCore {
 				op("tab.evaluate()", INF, sig =>
 					untilAborted(sig, async () => {
 						const realm = page.mainFrame().mainRealm();
+						// Puppeteer evaluates strings as expressions and ignores extra args; preserve
+						// that behavior without inspecting or adopting otherwise-unused handles.
 						if (typeof fn === "string") return realm.evaluate(fn);
 						const { args: adopted, dispose } = await adoptElementArgs(realm, args);
 						try {
+							throwIfAborted(sig);
 							return await realm.evaluate(fn as (...a: unknown[]) => unknown, ...adopted);
 						} finally {
 							await dispose();
