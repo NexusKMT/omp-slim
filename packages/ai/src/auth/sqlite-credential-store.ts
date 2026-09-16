@@ -509,7 +509,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		);
 	}
 
-	/** Opens credential storage with bounded busy retries and path-attributed initialization errors. */
+	/** Opens credential storage with bounded busy retries and one-shot corruption recovery. */
 	static async open(dbPath: string = getAgentDbPath()): Promise<SqliteAuthCredentialStore> {
 		const dir = path.dirname(dbPath);
 		const dirExists = await fs
@@ -520,15 +520,19 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 		}
 
-		return openSqliteDatabase(dbPath, async db => {
-			try {
-				await fs.chmod(dbPath, 0o600);
-			} catch {
-				// Ignore chmod failures (e.g., Windows)
-			}
-			SqliteAuthCredentialStore.#ensureAuthCredentialRefreshLeasesTable(db);
-			return new SqliteAuthCredentialStore(db);
-		});
+		return openSqliteDatabase(
+			dbPath,
+			async db => {
+				try {
+					await fs.chmod(dbPath, 0o600);
+				} catch {
+					// Ignore chmod failures (e.g., Windows)
+				}
+				SqliteAuthCredentialStore.#ensureAuthCredentialRefreshLeasesTable(db);
+				return new SqliteAuthCredentialStore(db);
+			},
+			{ recoverCorruption: true },
+		);
 	}
 
 	static #ensureAuthCredentialRefreshLeasesTable(db: Database): void {

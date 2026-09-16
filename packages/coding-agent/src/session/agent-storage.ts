@@ -361,7 +361,8 @@ FROM model_usage_legacy
 	/**
 	 * Returns singleton instance for the given database path, creating if needed.
 	 * Retries on the `SQLITE_BUSY` family (including `SQLITE_BUSY_RECOVERY`) with
-	 * exponential backoff. See issue #2421.
+	 * exponential backoff. Corrupt stores are quarantined and initialized once
+	 * from an empty replacement. See issue #2421.
 	 * @param dbPath - Path to the SQLite database file (defaults to config path)
 	 * @returns AgentStorage instance for the given path
 	 */
@@ -370,14 +371,18 @@ FROM model_usage_legacy
 		if (existing) return existing;
 
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-		return openSqliteDatabase(dbPath, db => {
-			const storage = new AgentStorage(db, dbPath);
-			// Publish synchronously: concurrent opens must reuse this handle before the helper yields.
-			// Exit-only cleanup keeps the connection valid for continuing sessions.
-			cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close(), { exitOnly: true });
-			instances.set(dbPath, storage);
-			return storage;
-		});
+		return openSqliteDatabase(
+			dbPath,
+			db => {
+				const storage = new AgentStorage(db, dbPath);
+				// Publish synchronously: concurrent opens must reuse this handle before the helper yields.
+				// Exit-only cleanup keeps the connection valid for continuing sessions.
+				cancelExitCleanup ??= postmortem.register("agent-storage", () => AgentStorage.close(), { exitOnly: true });
+				instances.set(dbPath, storage);
+				return storage;
+			},
+			{ recoverCorruption: true },
+		);
 	}
 
 	/** Flushes deferred writes, closes every process-wide database, and permits reopening them. */
