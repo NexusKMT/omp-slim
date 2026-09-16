@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications.
+- Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications ([#12232](https://github.com/can1357/oh-my-pi/pull/12232) by [@aramalipoor](https://github.com/aramalipoor)).
 
 ## [18.2.1] - 2026-09-15
 
