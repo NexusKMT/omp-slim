@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Detected the rio terminal (`TERM_PROGRAM=rio`) with Kitty graphics protocol and true color; unverified capabilities (hyperlinks, notifications, DECCARA) keep conservative defaults until proven in that terminal ([#12205](https://github.com/can1357/oh-my-pi/issues/12205)) ([#12263](https://github.com/can1357/oh-my-pi/pull/12263) by [@danilouchoa](https://github.com/danilouchoa)).
+
 ## [18.2.8] - 2026-09-21
 
 ### Changed
