@@ -179,6 +179,7 @@ import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { 
 import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" with { type: "text" };
 import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool-decision-reminder.md" with { type: "text" };
 import rewindReportTemplate from "../prompts/system/rewind-report.md" with { type: "text" };
+import sessionStopBlockedPrompt from "../prompts/system/session-stop-blocked.md" with { type: "text" };
 import sideChannelNoToolsReminder from "../prompts/system/side-channel-no-tools.md" with { type: "text" };
 import skillfulNoticePrompt from "../prompts/system/skillful-notice.md" with { type: "text" };
 import vibeModeActivePrompt from "../prompts/system/vibe-mode-active.md" with { type: "text" };
@@ -4220,11 +4221,7 @@ export class AgentSession {
 				: undefined;
 		const reason = typeof result.reason === "string" && result.reason.length > 0 ? result.reason : undefined;
 		if (result.decision === "block") {
-			return (
-				reason ??
-				additionalContext ??
-				"A session_stop handler blocked completion without a reason. Resolve the outstanding work before finishing."
-			);
+			return reason ?? additionalContext ?? prompt.render(sessionStopBlockedPrompt);
 		}
 		if (result.continue === true) {
 			return additionalContext ?? reason;
