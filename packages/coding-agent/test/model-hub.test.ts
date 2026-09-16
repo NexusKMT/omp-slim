@@ -54,7 +54,7 @@ function installTestTheme(): void {
 
 interface RegistryOverrides {
 	refresh?: (mode: string) => Promise<void>;
-	refreshProvider?: (providerId: string, mode: string) => Promise<void>;
+	refreshProvider?: ModelRegistry["refreshProvider"];
 	getAvailable?: () => Model[];
 	getAll?: () => Model[];
 	getDiscoverableProviders?: () => string[];
@@ -1406,7 +1406,7 @@ describe("ModelHub", () => {
 	describe("provider refresh lifecycle", () => {
 		test("auto-refreshes a provider once per process; F5 forces a re-fetch", async () => {
 			const model = makeModel("prov-a", "model-a");
-			const refreshProvider = vi.fn(async () => {});
+			const refreshProvider = vi.fn<ModelRegistry["refreshProvider"]>(async () => {});
 			const { hub } = createHub({
 				models: [model],
 				registry: { refreshProvider },
@@ -1455,7 +1455,7 @@ describe("ModelHub", () => {
 		test("F5 while a catalog refresh is in flight queues a credential re-mint", async () => {
 			const model = makeModel("prov-a", "model-a");
 			const gate = Promise.withResolvers<void>();
-			const refreshProvider = vi.fn(() => gate.promise);
+			const refreshProvider = vi.fn<ModelRegistry["refreshProvider"]>(() => gate.promise);
 			const { hub } = createHub({
 				models: [model],
 				registry: { refreshProvider },
@@ -1480,7 +1480,7 @@ describe("ModelHub", () => {
 			const modelA = makeModel("prov-a", "model-a");
 			const modelB = makeModel("prov-b", "model-b");
 			const gate = Promise.withResolvers<void>();
-			const refreshProvider = vi.fn(() => gate.promise);
+			const refreshProvider = vi.fn<ModelRegistry["refreshProvider"]>(() => gate.promise);
 			const { hub } = createHub({
 				models: [modelA, modelB],
 				registry: { refreshProvider },
