@@ -6,6 +6,10 @@
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 
+### Fixed
+
+- Deferred cold-cache `retry.fallbackChains` warnings for catalog descriptor providers until discovery settles ([#12223](https://github.com/can1357/oh-my-pi/pull/12223) by [@Dante-dan](https://github.com/Dante-dan)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
