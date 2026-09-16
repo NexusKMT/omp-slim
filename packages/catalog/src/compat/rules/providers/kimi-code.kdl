@@ -65,11 +65,12 @@ provider "kimi-code" {
 			cache-read 0.38
 		}
 	}
+	// Moonshot K2 list (`kimi-k2-0711-preview` / `kimi-k2-0905-preview`), not K2.6.
 	models "kimi-k2" {
 		cost-fallback {
-			input 0.95
-			output 4.0
-			cache-read 0.16
+			input 0.6
+			output 2.5
+			cache-read 0.15
 		}
 	}
 	models "kimi-k2.5" {

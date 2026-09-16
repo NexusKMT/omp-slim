@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it, spyOn } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-utils";
 // Import from source, not the package specifier: the workspace `node_modules`
 // copy resolves to the primary checkout, not this worktree.
@@ -679,6 +679,7 @@ describe("devin cost-fallback", () => {
 			name: id,
 			api: "devin-agent",
 			provider: "devin",
+			baseUrl: "https://server.codeium.com",
 			reasoning: true,
 			input: ["text"],
 			supportsTools: true,
@@ -688,10 +689,21 @@ describe("devin cost-fallback", () => {
 		};
 	}
 
-	it("prices plan-included SWE-2 at the promo fallback and keeps a scheduled list-price change", () => {
+	it("prices plan-included SWE-2 at the promo fallback without a recurring tariff", () => {
 		const model = buildModel(spec("swe-2"));
 		expect(model.cost).toMatchObject({ input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 });
-		expect(model.cost.timeBased?.effectiveRates.some(rate => rate.input === 3 && rate.output === 15)).toBe(true);
+		expect(model.cost.timeBased).toBeUndefined();
+	});
+
+	it("switches the SWE-2 fallback to list after the promo ends", () => {
+		const clock = spyOn(Date, "now").mockReturnValue(Date.parse("2027-01-01T00:00:00Z"));
+		try {
+			const model = buildModel(spec("swe-2"));
+			expect(model.cost).toMatchObject({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 });
+			expect(model.cost.timeBased).toBeUndefined();
+		} finally {
+			clock.mockRestore();
+		}
 	});
 
 	it("does not overwrite a discovery row that already has token prices", () => {
