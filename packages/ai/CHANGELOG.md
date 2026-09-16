@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Provider login prompts can request masked entry with `secret: true`.
+
 ## [18.2.2] - 2026-09-16
 
 ### Added

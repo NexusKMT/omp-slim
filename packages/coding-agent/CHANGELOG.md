@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Provider login and setup support masked secret prompts; RPC rejects secret prompts rather than requesting ordinary input.
+
 ### Fixed
 
 - macOS process discovery now retains the complete PID list when locating executables and descendants. ([#12290](https://github.com/can1357/oh-my-pi/pull/12290) by [@iliaal](https://github.com/iliaal))
@@ -11,6 +15,7 @@
 - Fixed sloppy edits crashing with a char-boundary panic instead of reporting a match error when the file contains multibyte (e.g. CJK) text.
 - Restricted and revived subagents retain parent-loaded extension hooks without enabling extension-contributed tools.
 - Revived subagents honor the owning session's extension-discovery restrictions.
+- Secret login answers stay hidden in later prompts and cannot be recovered through undo or yank.
 - Element handles returned by `tab.waitForSelector`, `tab.$`, and related selector helpers can now be passed as arguments to `tab.evaluate` inside `tab.run` instead of failing with "JSHandles can be evaluated only in the context they were created".
 
 ## [18.2.2] - 2026-09-16

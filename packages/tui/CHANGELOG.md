@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Masked inputs no longer expose their text in diagnostic previews.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added

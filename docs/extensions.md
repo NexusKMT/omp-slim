@@ -180,6 +180,16 @@ or configured usage resolver.
 
 Extension-registered providers (`registerProvider`) can supply `fetchDynamicModels` for runtime model discovery; these fetches are hard-bounded to a 15-second timeout (`RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS` in `model-provider-discovery.ts`) so a hung endpoint cannot stall discovery.
 
+Provider login callbacks can request masked entry with
+`callbacks.onPrompt({ message: "Consumer key", secret: true })`. Native `/login`
+and first-run setup preserve the exact submitted value while hiding it in the
+input, retained answers, and input diagnostic previews. Login prompts do not
+share undo or kill/yank history. Ordinary prompts remain unmasked.
+
+RPC rejects secret prompts instead of forwarding them as ordinary input. SDK
+hosts implementing `onPrompt` must honor `secret` or reject the prompt. Masking
+does not provide encryption, memory erasure, or general log redaction.
+
 In interactive mode, `input` handlers run before the built-in first-message auto-title check. Extensions that call `await pi.setSessionName(...)` from `input` can set the persisted session name and prevent the default auto-generated title from running for that session.
 
 Also exposed:
