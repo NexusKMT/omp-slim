@@ -26,8 +26,8 @@ describe("buildTerminalTitleWithState", () => {
 	});
 
 	it("animates spinner frames in the separator slot while working outside Windows", () => {
-		const frame0 = buildTerminalTitleWithState(LABEL, "working", 0, true, "linux");
-		const frame1 = buildTerminalTitleWithState(LABEL, "working", 1, true, "linux");
+		const frame0 = buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "braille", {});
+		const frame1 = buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "braille", {});
 		// The brand stays a bare `π`; only the separator between brand and label
 		// carries the spinner glyph, and it advances per frame.
 		expect(frame0).toBe(`${BRAND} ⠋ ${LABEL}`);
@@ -35,7 +35,7 @@ describe("buildTerminalTitleWithState", () => {
 		expect(frame1).not.toBe(frame0);
 		// The frame index is taken modulo the frame count, so it never throws or
 		// produces an "undefined" separator for a large counter.
-		const wrapped = buildTerminalTitleWithState(LABEL, "working", 9999, true, "linux");
+		const wrapped = buildTerminalTitleWithState(LABEL, "working", 9999, true, "linux", "braille", {});
 		expect(wrapped.startsWith(`${BRAND} `)).toBe(true);
 		expect(wrapped.endsWith(` ${LABEL}`)).toBe(true);
 		expect(wrapped).not.toContain("undefined");
@@ -50,7 +50,7 @@ describe("buildTerminalTitleWithState", () => {
 	it("keeps the state visible as a trailing separator when there is no label", () => {
 		expect(buildTerminalTitleWithState(undefined, "idle", 0, true)).toBe(`${BRAND} >`);
 		expect(buildTerminalTitleWithState(undefined, "attention", 0, true)).toBe(`${BRAND} !`);
-		expect(buildTerminalTitleWithState(undefined, "working", 0, true, "linux")).toBe(`${BRAND} ⠋`);
+		expect(buildTerminalTitleWithState(undefined, "working", 0, true, "linux", "braille", {})).toBe(`${BRAND} ⠋`);
 	});
 
 	it("renders the pre-state `π: label` layout when disabled, regardless of state", () => {
@@ -61,16 +61,16 @@ describe("buildTerminalTitleWithState", () => {
 	});
 
 	it("cycles the dots and line glyph sets while working", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "dots")).toBe(`${BRAND} ⠁ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "dots")).toBe(`${BRAND} ⠂ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "line")).toBe(`${BRAND} - ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "line")).toBe(`${BRAND} \\ ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "dots", {})).toBe(`${BRAND} ⠁ ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "dots", {})).toBe(`${BRAND} ⠂ ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "line", {})).toBe(`${BRAND} - ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 1, true, "linux", "line", {})).toBe(`${BRAND} \\ ${LABEL}`);
 	});
 
 	it("cycles the pulse glyph set while working", () => {
-		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "pulse")).toBe(`${BRAND} ○ ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 4, true, "linux", "pulse")).toBe(`${BRAND} ● ${LABEL}`);
-		expect(buildTerminalTitleWithState(LABEL, "working", 8, true, "linux", "pulse")).toBe(`${BRAND} ○ ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 0, true, "linux", "pulse", {})).toBe(`${BRAND} ○ ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 4, true, "linux", "pulse", {})).toBe(`${BRAND} ● ${LABEL}`);
+		expect(buildTerminalTitleWithState(LABEL, "working", 8, true, "linux", "pulse", {})).toBe(`${BRAND} ○ ${LABEL}`);
 	});
 
 	it("cycles the selected style on Windows too", () => {
@@ -110,7 +110,18 @@ describe("buildTerminalTitleWithState", () => {
 // `vi.useFakeTimers()` makes the real 80ms interval advanceable without a
 // wall-clock wait, so the test is fully deterministic.
 
-const OSC_TITLE_SEQ = "\x1b]0;";
+/** Titles observed through either sink (OSC writes plus the native title mock). */
+function observedTitles(writes: string[], windowsTitleMock: WindowsConsoleTitleMock | undefined): string[] {
+	const osc = writes
+		.map(payload => /\x1b\]0;([\s\S]*?)\x07/.exec(payload)?.[1])
+		.filter((t): t is string => t !== undefined);
+	return [...osc, ...(windowsTitleMock?.titles ?? [])];
+}
+
+function resetObserved(writes: string[], windowsTitleMock: WindowsConsoleTitleMock | undefined): void {
+	writes.length = 0;
+	if (windowsTitleMock) windowsTitleMock.titles.length = 0;
+}
 
 describe("disposeTerminalTitleState", () => {
 	let writes: string[] = [];
@@ -127,6 +138,7 @@ describe("disposeTerminalTitleState", () => {
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 
 		windowsTitleMock = mockWindowsConsoleTitle();
+		windowsTitleMock.succeeds = true;
 		writes = [];
 		stdoutSpy = spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
 			writes.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array));
@@ -140,7 +152,7 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleSpinnerStyle("braille");
 		setSessionTerminalTitle("my-project");
 		setTerminalTitleState("idle");
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 	});
 
 	afterEach(() => {
@@ -167,18 +179,18 @@ describe("disposeTerminalTitleState", () => {
 		// several 80ms tick periods DOES emit further OSC-title writes (proves the
 		// timer was actually running, so the post-dispose silence is meaningful and
 		// not a headless/TTY misconfiguration masking all writes).
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		vi.advanceTimersByTime(400);
-		const ticksWhileLive = writes.filter(payload => payload.includes(OSC_TITLE_SEQ)).length;
+		const ticksWhileLive = observedTitles(writes, windowsTitleMock).length;
 		expect(ticksWhileLive).toBeGreaterThan(0);
 
 		// The fix under test.
 		disposeTerminalTitleState();
 
 		// After dispose: advance far past many tick periods. No tick may fire.
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		vi.advanceTimersByTime(4000);
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ))).toEqual([]);
+		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
 	});
 
 	it("latches: a direct setTerminalTitle after dispose cannot write the shell's tab", () => {
@@ -190,21 +202,21 @@ describe("disposeTerminalTitleState", () => {
 
 		// Control: before dispose the sink really does write, so the silence below
 		// is the latch and not a headless/TTY misconfiguration.
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		setTerminalTitle("live write");
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ)).length).toBeGreaterThan(0);
+		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
 
 		disposeTerminalTitleState();
 
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		setTerminalTitle("after teardown");
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ))).toEqual([]);
+		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
 
 		// And the latch releases only on the explicit ownership path.
 		initTerminalTitleState();
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		setTerminalTitle("owned again");
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ)).length).toBeGreaterThan(0);
+		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
 	});
 
 	it("latches: a run-state change after dispose cannot re-arm the spinner", () => {
@@ -228,7 +240,7 @@ describe("disposeTerminalTitleState", () => {
 		expect(vi.getTimerCount()).toBe(0);
 
 		vi.advanceTimersByTime(4000);
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ))).toEqual([]);
+		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
 	});
 
 	it("keeps a routine session title update from releasing the latch", () => {
@@ -266,7 +278,7 @@ describe("disposeTerminalTitleState", () => {
 		initTerminalTitleState();
 		setSessionTerminalTitle("same-session");
 
-		expect(writes.some(payload => payload.includes("same-session"))).toBe(true);
+		expect(observedTitles(writes, windowsTitleMock).some(title => title.includes("same-session"))).toBe(true);
 	});
 
 	it("emits the selected glyph set on the next spinner tick", () => {
@@ -276,7 +288,7 @@ describe("disposeTerminalTitleState", () => {
 
 		vi.advanceTimersByTime(400);
 
-		const titles = writes.map(payload => /\x1b\]0;([\s\S]*?)\x07/.exec(payload)?.[1]);
+		const titles = observedTitles(writes, windowsTitleMock);
 		expect(titles.length).toBeGreaterThan(0);
 		for (const title of titles) {
 			expect(title).toContain("my-project");
@@ -293,7 +305,7 @@ describe("disposeTerminalTitleState", () => {
 
 		vi.advanceTimersByTime(160);
 
-		const titles = writes.map(payload => /\x1b\]0;([\s\S]*?)\x07/.exec(payload)?.[1]);
+		const titles = observedTitles(writes, windowsTitleMock);
 		expect(titles.length).toBeGreaterThan(0);
 		expect(titles.some(title => title?.includes("⠋") || title?.includes("⠙"))).toBe(true);
 	});
@@ -305,7 +317,7 @@ describe("disposeTerminalTitleState", () => {
 
 		vi.advanceTimersByTime(400);
 
-		const titles = writes.map(payload => /\x1b\]0;([\s\S]*?)\x07/.exec(payload)?.[1]);
+		const titles = observedTitles(writes, windowsTitleMock);
 		expect(titles.length).toBeGreaterThan(0);
 		for (const title of titles) {
 			expect(title).toContain("my-project");
@@ -326,11 +338,11 @@ describe("disposeTerminalTitleState", () => {
 		setSessionTerminalTitle("next-session");
 
 		// The new session's title emitted...
-		expect(writes.some(payload => payload.includes("next-session"))).toBe(true);
+		expect(observedTitles(writes, windowsTitleMock).some(title => title.includes("next-session"))).toBe(true);
 
 		// ...and the spinner is genuinely ticking again, not frozen on one frame.
 		writes.length = 0;
 		vi.advanceTimersByTime(400);
-		expect(writes.filter(payload => payload.includes(OSC_TITLE_SEQ)).length).toBeGreaterThan(0);
+		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
 	});
 });

@@ -888,10 +888,17 @@ describe("terminal title runtime", () => {
 	let ttyDescriptor: PropertyDescriptor | undefined;
 	let windowsTitleMock: WindowsConsoleTitleMock | undefined;
 
-	// Titles emitted (newest last) since the last reset of `writes`; used across
-	// every assertion, so the OSC extraction lives here rather than at each site.
+	// Titles emitted (newest last) since the last reset of `writes` and the native
+	// mock; this win32 host drives the native `SetConsoleTitleW` sink, so OSC-only
+	// extraction would observe nothing — include both sinks.
 	function emittedTitles(): string[] {
-		return writes.map(payload => OSC_TITLE_RE.exec(payload)?.[1]).filter((t): t is string => t !== undefined);
+		const osc = writes.map(payload => OSC_TITLE_RE.exec(payload)?.[1]);
+		return [...osc, ...(windowsTitleMock?.titles ?? [])].filter((t): t is string => t !== undefined);
+	}
+
+	function resetEmitted(): void {
+		writes.length = 0;
+		if (windowsTitleMock) windowsTitleMock.titles.length = 0;
 	}
 
 	beforeEach(() => {
@@ -905,6 +912,7 @@ describe("terminal title runtime", () => {
 		Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 
 		windowsTitleMock = mockWindowsConsoleTitle();
+		windowsTitleMock.succeeds = true;
 		writes = [];
 		stdoutSpy = spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
 			writes.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk as Uint8Array));
@@ -921,6 +929,7 @@ describe("terminal title runtime", () => {
 
 		// Discard the reset's own emissions; each test asserts only its own writes.
 		writes.length = 0;
+		windowsTitleMock.titles.length = 0;
 	});
 
 	afterEach(() => {
@@ -993,7 +1002,8 @@ describe("terminal title runtime", () => {
 		setTerminalTitle("direct title");
 
 		expect(emittedTitles()).toEqual(["direct title"]);
-		expect(writes).toHaveLength(1);
+		expect(writes).toHaveLength(0);
+		if (windowsTitleMock) expect(windowsTitleMock.titles).toEqual(["direct title"]);
 	});
 
 	it("animates the working title on Windows", () => {
@@ -1003,12 +1013,12 @@ describe("terminal title runtime", () => {
 			setTerminalTitleSpinnerStyle("line");
 			setTerminalTitleSpinnerStyle("braille");
 			setSessionTerminalTitle("windows-project");
-			writes.length = 0;
+			resetEmitted();
 
 			setTerminalTitleState("working");
 			expect(emittedTitles()).toEqual(["π ⠋ windows-project"]);
 
-			writes.length = 0;
+			resetEmitted();
 			vi.advanceTimersByTime(160);
 			const titles = emittedTitles();
 			expect(titles.length).toBeGreaterThan(0);
