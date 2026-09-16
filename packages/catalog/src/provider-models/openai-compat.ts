@@ -265,14 +265,17 @@ function modelsDevEffortLadder(model: ModelsDevModel): Effort[] | undefined {
  * the deployment that published it, so the endpoint's own catalog identity is
  * consulted first. `byId` answers when the host is unknown — a gateway id with
  * no catalog provider of its own — and only while every host publishing that
- * id agrees on its tiers; ids whose hosts disagree are dropped from it, so the
- * ladder stays unknown instead of borrowing an arbitrary host's.
+ * id agrees that it takes an effort dial and on which tiers; an id whose hosts
+ * disagree, or that any host publishes with no dial at all, is dropped from
+ * it, so the ladder stays unknown instead of borrowing an arbitrary host's.
  *
  * `withoutLadder` carries the same `provider\0id` key for a row the catalog
  * does publish but with no effort dial on it. The host serving an id outranks
  * every other host on the question of what that deployment accepts, so its
  * silence blocks the bare-id fallback for that id rather than letting a
- * foreign ladder answer in its place.
+ * foreign ladder answer in its place. When the serving host is unknown that
+ * per-host veto cannot fire, which is why a dialless row also disqualifies the
+ * bare id outright.
  */
 interface PublishedEffortLadders {
 	byHost: ReadonlyMap<string, readonly Effort[]>;
@@ -291,7 +294,7 @@ function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 	const byId = new Map<string, readonly Effort[]>();
 	const withoutLadder = new Set<string>();
 	const index: PublishedEffortLadders = { byHost, byId, withoutLadder };
-	const conflicting = new Set<string>();
+	const unshareable = new Set<string>();
 	if (!isRecord(payload)) return index;
 	for (const [providerKey, provider] of Object.entries(payload)) {
 		if (!isRecord(provider) || !isRecord(provider.models)) continue;
@@ -301,16 +304,20 @@ function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
 			if (!ladder) {
 				withoutLadder.add(key);
+				// Some deployment of this id rejects an effort dial; without
+				// knowing which host serves a bare id, none may claim one.
+				byId.delete(modelId);
+				unshareable.add(modelId);
 				continue;
 			}
 			byHost.set(key, ladder);
-			if (conflicting.has(modelId)) continue;
+			if (unshareable.has(modelId)) continue;
 			const shared = byId.get(modelId);
 			if (shared === undefined) {
 				byId.set(modelId, ladder);
 			} else if (shared.length !== ladder.length || shared.some((effort, index) => effort !== ladder[index])) {
 				byId.delete(modelId);
-				conflicting.add(modelId);
+				unshareable.add(modelId);
 			}
 		}
 	}
@@ -443,9 +450,11 @@ function catalogProviderKeys(providerId: string): readonly string[] {
  * catalog hit, and each peeled segment joins the host candidates ahead of the
  * endpoint's own keys: on an aggregator the prefix names the real upstream.
  * A bare id is only accepted from {@link PublishedEffortLadders.byId}, which
- * holds it only while every publishing host agrees on its tiers, and only
- * while no host serving the id published it without an effort dial: that row
- * is this deployment's own answer and outranks any other host's ladder.
+ * holds it only while every publishing host agrees that it takes an effort
+ * dial and on which tiers. A host serving the id that published it without a
+ * dial is this deployment's own answer and outranks any other host's ladder,
+ * so it vetoes the candidate here; a dialless host omp cannot recognize as the
+ * server already kept the id out of `byId` when the index was built.
  */
 function lookupPublishedEffortLadder(
 	ladders: PublishedEffortLadders,

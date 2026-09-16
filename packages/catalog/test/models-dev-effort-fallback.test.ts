@@ -293,6 +293,51 @@ test("a host row without an effort ladder blocks a foreign bare-id ladder", asyn
 	expect(calls).not.toContain(MODELS_DEV_URL);
 });
 
+test("a bare id any host publishes without an effort dial stays unknown", async () => {
+	const calls: string[] = [];
+	// Moonshot hosts none of these ids, so only the bare-id index can answer
+	// and no per-host veto is reachable. Row order differs per id: the dialless
+	// row arrives after the ladder for one and before it for the other.
+	const ladderFirstId = "nebula-8b-thinking";
+	const diallessFirstId = "nebula-7b-thinking";
+	const agreedId = "nebula-6b-thinking";
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					acme: {
+						models: {
+							[ladderFirstId]: catalogRow(["low", "high"]),
+							[diallessFirstId]: catalogRow(),
+							[agreedId]: catalogRow(["low", "high"]),
+						},
+					},
+					zeta: {
+						models: {
+							[ladderFirstId]: catalogRow(),
+							[diallessFirstId]: catalogRow(["low", "high"]),
+							[agreedId]: catalogRow(["low", "high"]),
+						},
+					},
+				},
+			},
+			calls,
+			[ladderFirstId, diallessFirstId, agreedId],
+		),
+	);
+
+	// A host serving the id with no effort dial means some deployment of it
+	// rejects one, so a foreign host's ladder may not speak for it.
+	expect(models?.find(model => model.id === ladderFirstId)?.thinking).toBeUndefined();
+	expect(models?.find(model => model.id === diallessFirstId)?.thinking).toBeUndefined();
+	// Hosts that all publish a dial still answer for the bare id.
+	expect(models?.find(model => model.id === agreedId)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low, Effort.High],
+	});
+	expect(calls).not.toContain(MODELS_DEV_URL);
+});
+
 test("retains a good ladder when the post-TTL fallback fetch fails", async () => {
 	const calls: string[] = [];
 	const routes: Record<string, unknown> = {
