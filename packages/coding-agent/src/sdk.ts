@@ -1339,6 +1339,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 }
 
 async function createAgentSessionScoped(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+	if (options.systemPromptTemplate !== undefined && options.customSystemPrompt !== undefined) {
+		throw new Error("systemPromptTemplate cannot be combined with a literal custom system prompt");
+	}
 	const cwd = options.cwd ?? getProjectDir();
 	const agentDir = options.agentDir ?? getAgentDir();
 	const eventBus = options.eventBus ?? new EventBus();

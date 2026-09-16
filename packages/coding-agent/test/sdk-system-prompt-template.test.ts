@@ -3,18 +3,20 @@ import * as path from "node:path";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
+import { type CreateAgentSessionOptions, createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { CONFIG_DIR_NAME, TempDir } from "@oh-my-pi/pi-utils";
 
 type SystemPromptOption = string | string[] | ((defaultPrompt: string[]) => string | string[]);
+type ExplicitSystemPromptOptions = Pick<CreateAgentSessionOptions, "systemPromptTemplate" | "customSystemPrompt">;
 
 async function withSession<T>(
 	nativeTemplate: string,
 	systemPrompt: SystemPromptOption,
 	fn: (session: AgentSession) => Promise<T>,
+	explicitSystemPromptOptions: ExplicitSystemPromptOptions = {},
 ): Promise<T> {
 	using tempDir = TempDir.createSync("@omp-sdk-system-prompt-template-");
 	const cwd = tempDir.join("project");
@@ -41,6 +43,7 @@ async function withSession<T>(
 			enableLsp: false,
 			skipPythonPreflight: true,
 			systemPrompt,
+			...explicitSystemPromptOptions,
 		});
 		session = result.session;
 		return await fn(session);
@@ -66,6 +69,24 @@ describe("SDK systemPrompt replacements", () => {
 		await withSession(" \n\t", fixedPrompt, async session => {
 			expect(session.systemPrompt).toEqual(fixedPrompt);
 		});
+	});
+
+	it("rejects conflicting explicit template and literal with a fixed string", async () => {
+		await expect(
+			withSession("{{#if eagerTasks}}", "sdk fixed prompt", async () => undefined, {
+				systemPromptTemplate: "explicit {{model}}",
+				customSystemPrompt: "explicit literal",
+			}),
+		).rejects.toThrow("systemPromptTemplate cannot be combined with a literal custom system prompt");
+	});
+
+	it("rejects conflicting empty explicit inputs with empty fixed prompt blocks", async () => {
+		await expect(
+			withSession("{{#if eagerTasks}}", [], async () => undefined, {
+				systemPromptTemplate: "",
+				customSystemPrompt: "",
+			}),
+		).rejects.toThrow("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	});
 
 	it("keeps callback prompts on the generated-template path", async () => {
