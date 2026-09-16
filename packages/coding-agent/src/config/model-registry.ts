@@ -1075,7 +1075,14 @@ export class ModelRegistry {
 			const sharedCatalogProvider = MODELS_DEV_CATALOG_PROVIDER_ID_LOOKUP[providerId] === true;
 			const additiveSharedCatalogProvider = ADDITIVE_MODELS_DEV_CATALOG_PROVIDER_ID_LOOKUP[providerId] === true;
 			if (!cache) {
-				if (sharedCatalogProvider) {
+				const descriptor = PROVIDER_DESCRIPTORS.find(candidate => candidate.providerId === providerId);
+				const discoveryExpected =
+					sharedCatalogProvider ||
+					(descriptor !== undefined &&
+						(this.authStorage.hasAuth(providerId) ||
+							descriptor.allowUnauthenticated === true ||
+							this.#keylessProviders.has(providerId)));
+				if (discoveryExpected) {
 					this.#providerDiscoveryStates.set(providerId, {
 						provider: providerId,
 						status: "idle",
@@ -2096,27 +2103,25 @@ export class ModelRegistry {
 			const models = result.models.map(model =>
 				model.provider === options.providerId ? model : { ...model, provider: options.providerId },
 			);
-			if (options.modelsDev) {
-				const status =
-					result.source === "cache"
-						? "cached"
-						: result.source === "bundled" && result.stale
-							? "unavailable"
-							: result.source === "bundled"
-								? "idle"
-								: result.models.length > 0
-									? "ok"
-									: "empty";
-				this.#providerDiscoveryStates.set(options.providerId, {
-					provider: options.providerId,
-					status,
-					optional: false,
-					stale: result.stale,
-					fetchedAt: result.updatedAt,
-					source: result.source,
-					models: models.map(model => model.id),
-				});
-			}
+			const status =
+				result.source === "cache"
+					? "cached"
+					: result.source === "bundled" && result.stale
+						? "unavailable"
+						: result.source === "bundled"
+							? "idle"
+							: result.models.length > 0
+								? "ok"
+								: "empty";
+			this.#providerDiscoveryStates.set(options.providerId, {
+				provider: options.providerId,
+				status,
+				optional: false,
+				stale: result.stale,
+				fetchedAt: result.updatedAt,
+				source: result.source,
+				models: models.map(model => model.id),
+			});
 			const authoritativeProviders = new Set<string>();
 			if (options.dynamicModelsAuthoritative && !result.stale) {
 				authoritativeProviders.add(options.providerId);
