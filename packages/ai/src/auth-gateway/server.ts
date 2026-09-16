@@ -69,6 +69,13 @@ export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
 	resolveModel: ModelResolver;
 	/** Optional supplier for `/v1/models` listing. Returns the full model array. */
 	listModels?: () => Iterable<Model<Api>>;
+	/**
+	 * Ceiling on retained provider-session states. Defaults to
+	 * {@link AUTH_GATEWAY_MAX_SESSION_STATES}. Each entry can own a Codex
+	 * WebSocket or a GitLab Duo workflow, so a memory-constrained host may want
+	 * fewer; the bound is enforced against entries no request is still holding.
+	 */
+	sessionStateMax?: number;
 }
 
 // `parseBind` lives in ../utils/parse-bind so the gateway and broker can't
@@ -131,15 +138,33 @@ function deriveSessionId(modelId: string, context: Context): string {
 }
 
 /**
- * Resolve the logical session identity for one request. A client-supplied key
- * wins so external session ids line up with the gateway's, but a blank one
- * counts as absent: honouring it would collapse every caller that sends an
- * empty key into one shared credential-sticky, prefix-cache and
- * provider-session bucket.
+ * The client's own session key, or `undefined` when it sent none. A blank key
+ * counts as none: honouring it would collapse every caller that sends an empty
+ * key into one shared credential-sticky, prefix-cache and provider-session
+ * bucket.
  */
-function resolveSessionId(clientKey: string | undefined, modelId: string, context: Context): string {
-	if (clientKey !== undefined && clientKey.trim().length > 0) return clientKey;
-	return deriveSessionId(modelId, context);
+function normalizeClientSessionKey(clientKey: string | undefined): string | undefined {
+	return clientKey !== undefined && clientKey.trim().length > 0 ? clientKey : undefined;
+}
+
+/**
+ * Stable identity of the account a request's credential belongs to.
+ *
+ * `markUsageLimitReached` and the auth-retry resolver switch a session to a
+ * sibling credential, so the provider state retained for that session can
+ * outlive the account that taught it. OAuth rows expose an account id / email
+ * that survives token refresh — fingerprinting the bearer instead would look
+ * like a rotation every time a token refreshes and discard the retained
+ * lessons for nothing. Key-based rows fall back to a hash of the key, never
+ * the key itself: this value is held for the lifetime of the entry.
+ */
+function resolveGatewayAccount(storage: AuthStorage, provider: string, sessionId: string, apiKey: string): string {
+	const identity = storage.getOAuthAccountIdentity(provider, sessionId);
+	if (identity?.accountId) return `account:${identity.accountId}`;
+	if (identity?.email) return `email:${identity.email}`;
+	if (identity?.projectId) return `project:${identity.projectId}`;
+	if (identity?.orgId) return `org:${identity.orgId}`;
+	return `key:${Bun.hash(apiKey).toString(36)}`;
 }
 
 function buildStreamOptions(parsed: ParsedFormatRequest, api: Api, signal: AbortSignal): SimpleStreamOptions {
@@ -182,7 +207,8 @@ function buildStreamOptions(parsed: ParsedFormatRequest, api: Api, signal: Abort
 	// Client-supplied `prompt_cache_key` wins; otherwise derive a stable
 	// key from the model + system + tools so prefix caching engages on
 	// Codex-class backends across turns of the same logical conversation.
-	const promptCacheKey = resolveSessionId(options.promptCacheKey, parsed.modelId, parsed.context);
+	const promptCacheKey =
+		normalizeClientSessionKey(options.promptCacheKey) ?? deriveSessionId(parsed.modelId, parsed.context);
 	opts.promptCacheKey = promptCacheKey;
 	opts.sessionId = promptCacheKey;
 	if (options.thinkingBudgets) {
@@ -476,7 +502,8 @@ async function handleFormatEndpoint(
 	// supplied (so external session ids align), otherwise derive from
 	// modelId + system + tools + first message. Mirrored into
 	// streamOpts.sessionId / promptCacheKey by `buildStreamOptions`.
-	const sessionId = resolveSessionId(parsed.options.promptCacheKey, parsed.modelId, parsed.context);
+	const clientKey = normalizeClientSessionKey(parsed.options.promptCacheKey);
+	const sessionId = clientKey ?? deriveSessionId(parsed.modelId, parsed.context);
 	parsed.options.promptCacheKey = sessionId;
 
 	// pi-ai's stream() does NOT consult AuthStorage — the caller (us) is
@@ -517,8 +544,16 @@ async function handleFormatEndpoint(
 	// Per-session provider learning (sticky strict-tools / fast-mode / thinking
 	// fallbacks, Codex transport sessions). Owned by this gateway instance: the
 	// map is non-serializable, so no client can supply it and every turn would
-	// otherwise re-learn each lesson from a fresh upstream rejection.
-	streamOpts.providerSessionState = sessionStates.acquire(sessionId, model);
+	// otherwise re-learn each lesson from a fresh upstream rejection. The lease
+	// keeps the entry out of reach of eviction until this request is done with
+	// it, so it MUST be released on every exit path.
+	const lease = sessionStates.acquire({
+		clientKey,
+		model,
+		context: parsed.context,
+		account: resolveGatewayAccount(bootOpts.storage, model.provider, sessionId, apiKey),
+	});
+	streamOpts.providerSessionState = lease.states;
 
 	logger.info("auth-gateway request", {
 		requestId,
@@ -565,45 +600,59 @@ async function handleFormatEndpoint(
 				peer,
 			});
 			return route.module.formatError(classified.status, classified.type, classified.message);
+		} finally {
+			// Every non-streaming outcome — answered, upstream error, thrown,
+			// client gone — is done with the provider state here.
+			lease.release();
 		}
 	}
 
-	let events: AssistantMessageEventStream;
+	// A streamed turn outlives this function, so the lease travels with the
+	// event stream and is released when the turn settles. Until that handoff
+	// happens, the `finally` below owns it.
+	let streamOwnsLease = false;
 	try {
+		let events: AssistantMessageEventStream;
+		try {
+			if (controller.signal.aborted) return clientClosedResponse(route);
+			events = streamSimple(model, parsed.context, streamOpts);
+		} catch (error) {
+			const classified = classifyGatewayError(error);
+			logger.warn("auth-gateway streamSimple threw", { format: route.label, error: classified.message, peer });
+			return route.module.formatError(classified.status, classified.type, classified.message);
+		}
 		if (controller.signal.aborted) return clientClosedResponse(route);
-		events = streamSimple(model, parsed.context, streamOpts);
-	} catch (error) {
-		const classified = classifyGatewayError(error);
-		logger.warn("auth-gateway streamSimple threw", { format: route.label, error: classified.message, peer });
-		return route.module.formatError(classified.status, classified.type, classified.message);
-	}
-	if (controller.signal.aborted) return clientClosedResponse(route);
-	void events
-		.result()
-		.then(message => recordGatewayUsage(bootOpts.storage, model, client, message))
-		.catch(() => {});
+		void events
+			.result()
+			.then(message => recordGatewayUsage(bootOpts.storage, model, client, message))
+			.catch(() => {})
+			.finally(() => lease.release());
+		streamOwnsLease = true;
 
-	const sseStream = route.module.encodeStream(events, parsed.modelId, parsed.options, {
-		signal: controller.signal,
-		onCancel: reason => {
-			if (!controller.signal.aborted) {
-				controller.abort(reason instanceof Error ? reason : new Error("client closed request"));
-			}
-		},
-	});
-	return new Response(sseStream, {
-		status: 200,
-		headers: {
-			...gatewayResponseHeaders(model, { requestId }),
-			"Content-Type": "text/event-stream; charset=utf-8",
-			"Cache-Control": "no-cache",
-			Connection: "keep-alive",
-			// Disable proxy buffering (nginx and ingress controllers honor this).
-			// Without it the SSE stream gets held until the buffer flushes, which
-			// stalls the long-thinking-budget calls we exist to support.
-			"X-Accel-Buffering": "no",
-		},
-	});
+		const sseStream = route.module.encodeStream(events, parsed.modelId, parsed.options, {
+			signal: controller.signal,
+			onCancel: reason => {
+				if (!controller.signal.aborted) {
+					controller.abort(reason instanceof Error ? reason : new Error("client closed request"));
+				}
+			},
+		});
+		return new Response(sseStream, {
+			status: 200,
+			headers: {
+				...gatewayResponseHeaders(model, { requestId }),
+				"Content-Type": "text/event-stream; charset=utf-8",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+				// Disable proxy buffering (nginx and ingress controllers honor this).
+				// Without it the SSE stream gets held until the buffer flushes, which
+				// stalls the long-thinking-budget calls we exist to support.
+				"X-Accel-Buffering": "no",
+			},
+		});
+	} finally {
+		if (!streamOwnsLease) lease.release();
+	}
 }
 
 /**
@@ -660,7 +709,8 @@ async function handlePiNative(
 	// up with cache-prefix stickiness — same identity used for both means
 	// the next turn of this conversation reuses the same credential until
 	// it hits a usage cap, then markUsageLimitReached can hand off.
-	const sessionId = resolveSessionId(parsed.options.sessionId, parsed.modelId, parsed.context);
+	const clientKey = normalizeClientSessionKey(parsed.options.sessionId);
+	const sessionId = clientKey ?? deriveSessionId(parsed.modelId, parsed.context);
 	parsed.options.sessionId = sessionId;
 
 	let apiKey: string | undefined;
@@ -684,6 +734,17 @@ async function handlePiNative(
 		);
 	}
 
+	// Per-session provider learning, owned by this gateway instance. The map is
+	// non-serializable, so `parseRequest` cannot accept one from the wire and
+	// every turn would otherwise re-learn each lesson from a fresh upstream
+	// rejection. The lease keeps the entry out of reach of eviction until this
+	// request is done with it, so it MUST be released on every exit path.
+	const lease = sessionStates.acquire({
+		clientKey,
+		model,
+		context: parsed.context,
+		account: resolveGatewayAccount(bootOpts.storage, model.provider, sessionId, apiKey),
+	});
 	// Build the SimpleStreamOptions actually handed to `streamSimple`. We
 	// trust the client's options (already allow-listed by `parseRequest`) and
 	// only inject server-controlled fields. The codex sampling strip mirrors
@@ -693,11 +754,7 @@ async function handlePiNative(
 		apiKey,
 		signal: controller.signal,
 		cursorExternalToolExecutor: true,
-		// Per-session provider learning, owned by this gateway instance. The map
-		// is non-serializable, so `parseRequest` cannot accept one from the wire
-		// and every turn would otherwise re-learn each lesson from a fresh
-		// upstream rejection.
-		providerSessionState: sessionStates.acquire(sessionId, model),
+		providerSessionState: lease.states,
 	};
 	streamOpts.apiKey = buildGatewayApiKeyResolver(
 		bootOpts.storage,
@@ -761,42 +818,56 @@ async function handlePiNative(
 			const classified = classifyGatewayError(error);
 			logger.warn("auth-gateway non-streaming aborted", { format: "pi-native", error: classified.message, peer });
 			return piNative.formatError(classified.status, classified.type, classified.message);
+		} finally {
+			// Every non-streaming outcome — answered, upstream error, thrown,
+			// client gone — is done with the provider state here.
+			lease.release();
 		}
 	}
 
-	let events: AssistantMessageEventStream;
+	// A streamed turn outlives this function, so the lease travels with the
+	// event stream and is released when the turn settles. Until that handoff
+	// happens, the `finally` below owns it.
+	let streamOwnsLease = false;
 	try {
+		let events: AssistantMessageEventStream;
+		try {
+			if (controller.signal.aborted) return aborted();
+			events = streamSimple(model, parsed.context, streamOpts);
+		} catch (error) {
+			const classified = classifyGatewayError(error);
+			logger.warn("auth-gateway streamSimple threw", { format: "pi-native", error: classified.message, peer });
+			return piNative.formatError(classified.status, classified.type, classified.message);
+		}
 		if (controller.signal.aborted) return aborted();
-		events = streamSimple(model, parsed.context, streamOpts);
-	} catch (error) {
-		const classified = classifyGatewayError(error);
-		logger.warn("auth-gateway streamSimple threw", { format: "pi-native", error: classified.message, peer });
-		return piNative.formatError(classified.status, classified.type, classified.message);
-	}
-	if (controller.signal.aborted) return aborted();
-	void events
-		.result()
-		.then(message => recordGatewayUsage(bootOpts.storage, model, client, message))
-		.catch(() => {});
+		void events
+			.result()
+			.then(message => recordGatewayUsage(bootOpts.storage, model, client, message))
+			.catch(() => {})
+			.finally(() => lease.release());
+		streamOwnsLease = true;
 
-	const sseStream = piNative.encodeStream(events, parsed.modelId, parsed.options, {
-		signal: controller.signal,
-		onCancel: reason => {
-			if (!controller.signal.aborted) {
-				controller.abort(reason instanceof Error ? reason : new Error("client closed request"));
-			}
-		},
-	});
-	return new Response(sseStream, {
-		status: 200,
-		headers: {
-			...gatewayResponseHeaders(model, { requestId }),
-			"Content-Type": "text/event-stream; charset=utf-8",
-			"Cache-Control": "no-cache",
-			Connection: "keep-alive",
-			"X-Accel-Buffering": "no",
-		},
-	});
+		const sseStream = piNative.encodeStream(events, parsed.modelId, parsed.options, {
+			signal: controller.signal,
+			onCancel: reason => {
+				if (!controller.signal.aborted) {
+					controller.abort(reason instanceof Error ? reason : new Error("client closed request"));
+				}
+			},
+		});
+		return new Response(sseStream, {
+			status: 200,
+			headers: {
+				...gatewayResponseHeaders(model, { requestId }),
+				"Content-Type": "text/event-stream; charset=utf-8",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+				"X-Accel-Buffering": "no",
+			},
+		});
+	} finally {
+		if (!streamOwnsLease) lease.release();
+	}
 }
 
 /**
@@ -879,7 +950,7 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 	const version = opts.version;
 	// Owned by this server instance so two gateways in one process never share
 	// (or tear down) each other's provider state, and so `close()` can drain it.
-	const sessionStates = new AuthGatewaySessionStateStore();
+	const sessionStates = new AuthGatewaySessionStateStore(opts.sessionStateMax);
 
 	const server = Bun.serve({
 		hostname: bind.hostname,
