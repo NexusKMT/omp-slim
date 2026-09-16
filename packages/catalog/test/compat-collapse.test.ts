@@ -1078,6 +1078,16 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 
 		expect(luna.cursorMaxMode).toBe(true);
 		expect(resolveWireModelId(buildModel(luna as ModelSpec<"cursor-agent">), Effort.Max)).toBe("gpt-5.6-luna-max");
+		// The OR cannot say which tier needed max mode, so the transport reads the
+		// members' own markers per wire id.
+		expect(luna.cursorMaxModeRoutes).toEqual({
+			"gpt-5.6-luna-none": false,
+			"gpt-5.6-luna-low": false,
+			"gpt-5.6-luna-medium": false,
+			"gpt-5.6-luna-high": false,
+			"gpt-5.6-luna-xhigh": true,
+			"gpt-5.6-luna-max": true,
+		});
 	});
 
 	it("lifts the live max-mode flag onto a bundled collapsed row (existing-collapsed merge)", () => {
@@ -1116,6 +1126,8 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 		if (!luna) throw new Error("gpt-5.6-luna did not survive the merge");
 		expect(luna.cursorMaxMode).toBe(true);
 		expect(resolveWireModelId(luna, Effort.Max)).toBe("gpt-5.6-luna-max");
+		expect(luna.cursorMaxModeRoutes?.["gpt-5.6-luna-max"]).toBe(true);
+		expect(luna.cursorMaxModeRoutes?.["gpt-5.6-luna-low"]).toBe(false);
 
 		// A roster that marks no tier leaves the snapshot's own flag alone.
 		const unmarked = collapseBuiltVariants([buildModel(bundled), ...unmarkedTiers]);
@@ -1146,7 +1158,7 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 
 		expect(luna.cursorMaxMode).toBe(true);
 	});
- });
+});
 
 describe("Cursor generic tier routing (issue #9237)", () => {
 	const TIERS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];

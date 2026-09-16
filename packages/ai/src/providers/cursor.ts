@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import http2 from "node:http2";
+import { isCursorMaxModeWireId } from "@oh-my-pi/pi-catalog/compat/collapse";
 import { classifyModel, collapseVariantId } from "@oh-my-pi/pi-catalog/compat/taxonomy";
 import type {
 	ConversationStep,
@@ -5235,6 +5236,40 @@ function extractImages(content: (TextContent | ImageContent)[]) {
 }
 
 /**
+ * Resolve `max_mode` for the wire id a request actually routes to.
+ *
+ * `GetUsableModels` marks max-mode models per raw row and discovery copies that
+ * onto `cursorMaxMode`, so on a row that puts its own id on the wire the marker
+ * is the authority — Cursor serves the whole Opus `-fast` lane in max mode
+ * (`claude-opus-4-8-high-fast` included) and leaves reasoning tiers such as
+ * `claude-4.6-opus-max` out of it, neither of which the wire slug can tell.
+ *
+ * Collapsing a family ORs the members' markers onto the logical row, so there
+ * `cursorMaxMode: true` only means *some* tier needs max mode; sending it for
+ * every tier is the refused `-low` request of issue #9478. The members' own
+ * markers survive per wire id in `cursorMaxModeRoutes`, so the routed id is
+ * looked up there first.
+ *
+ * Bundled rows and routes discovery never advertised have no per-id marker
+ * left, and there the `-xhigh`/`-max` wire suffix is the only per-tier signal.
+ * A collapsed row whose `true` no route's suffix can explain keeps it for every
+ * route: the marker came from a member the suffix rule cannot see.
+ */
+function resolveCursorMaxMode(model: Model<"cursor-agent">, wireModelId: string): boolean {
+	const discovered = model.cursorMaxModeRoutes?.[wireModelId];
+	if (discovered !== undefined) return discovered;
+	const routing = model.thinking?.effortRouting;
+	if (routing === undefined) return model.cursorMaxMode ?? isCursorMaxModeWireId(wireModelId);
+	if (
+		model.cursorMaxMode === true &&
+		!Object.values(routing).some(target => typeof target === "string" && isCursorMaxModeWireId(target))
+	) {
+		return true;
+	}
+	return isCursorMaxModeWireId(wireModelId);
+}
+
+/**
  * Resolve the Cursor Run wire model id and its parameter list.
  *
  * Cursor's `GetUsableModels` lists reasoning models as per-effort sibling
@@ -5264,7 +5299,7 @@ function resolveCursorWireModel(
 	maxMode: boolean;
 } {
 	const wireModelId = requestModelId ?? model.requestModelId ?? model.id;
-	const maxMode = /-(?:xhigh|extra-high|max)(?:-fast)?$/.test(wireModelId);
+	const maxMode = resolveCursorMaxMode(model, wireModelId);
 	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [], maxMode };
 	// `collapseVariantId` keeps the lane in the logical id (`-high-fast` →
 	// base `-fast`) and decodes the KDL effort (`-none` → `off`).
@@ -5292,7 +5327,7 @@ function resolveCursorWireModel(
 		return {
 			modelId: wireModelId,
 			parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "fast", value: "false" })],
-			maxMode: false,
+			maxMode,
 		};
 	}
 	return { modelId: wireModelId, parameters: [], maxMode };
@@ -5405,11 +5440,11 @@ async function buildGrpcRequestForWireMode(
 		turns,
 	});
 
-	const { modelId: wireModelId, parameters: wireParameters, maxMode: cursorMaxMode } = resolveCursorWireModel(
-		model,
-		options?.wireModelId,
-		wireMode,
-	);
+	const {
+		modelId: wireModelId,
+		parameters: wireParameters,
+		maxMode: cursorMaxMode,
+	} = resolveCursorWireModel(model, options?.wireModelId, wireMode);
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
 		displayModelId: model.id,
