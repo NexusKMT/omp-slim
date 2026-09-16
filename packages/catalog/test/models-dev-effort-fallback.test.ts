@@ -132,12 +132,23 @@ test("a provider-wide unknown-class ladder yields to published tiers", async () 
 		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 		if (url === `${baseUrl}/models`) {
 			return Response.json({
-				data: [{ id, features: ["reasoning", "function-calling"], endpoints: ["chat/completions"], max_output_tokens: 32_768 }],
+				data: [
+					{
+						id,
+						features: ["reasoning", "function-calling"],
+						endpoints: ["chat/completions"],
+						max_output_tokens: 32_768,
+					},
+				],
 			});
 		}
 		return Response.json({ novita: { models: { [id]: catalogRow(["low", "high"]) } } });
 	}) as FetchImpl;
-	const models = await novitaModelManagerOptions({ apiKey: "novita-test-key", baseUrl, fetch: fetchImpl }).fetchDynamicModels?.();
+	const models = await novitaModelManagerOptions({
+		apiKey: "novita-test-key",
+		baseUrl,
+		fetch: fetchImpl,
+	}).fetchDynamicModels?.();
 	const model = models?.find(candidate => candidate.id === id);
 
 	// The provider fallback differs from the published ladder, so accepting
