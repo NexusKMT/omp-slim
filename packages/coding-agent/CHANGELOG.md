@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress ([#12177](https://github.com/can1357/oh-my-pi/pull/12177) by [@shivamklr](https://github.com/shivamklr)).
+
 ### Added
 
 - Fixed the `security-reviewer` agent rejecting every valid finding: the finding schema's `optionalProperties` node sat inside `properties`, making a field literally named `optionalProperties` required and leaving `anchor` and `remediation` unreachable ([#12200](https://github.com/can1357/oh-my-pi/pull/12200) by [@dhofheinz](https://github.com/dhofheinz)).
