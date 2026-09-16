@@ -37,6 +37,7 @@ import { type ModelKind, modelKind } from "@oh-my-pi/pi-catalog/types";
 import { getConfigRootDir, isEnoent, logger, VERSION } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { ModelRegistry } from "../config/model-registry";
+import { Settings } from "../config/settings";
 import { type AuthBrokerClientConfig, resolveAuthBrokerConfig } from "../session/auth-broker-config";
 
 export type AuthGatewayAction = "serve" | "token" | "status" | "check";
@@ -241,6 +242,14 @@ export function createSerializedRebuilder(run: (force: boolean) => Promise<void>
 	return rebuild;
 }
 
+async function loadEffectiveAuthAccountPolicyConfig() {
+	const settings = await Settings.loadReadOnly();
+	return loadAuthAccountPolicyConfig({
+		accountPolicies: settings.get("auth.accountPolicies"),
+		usageReservePct: settings.get("retry.usageReservePct"),
+	});
+}
+
 async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	const brokerConfig = await resolveAuthBrokerConfig();
 	if (!brokerConfig) {
@@ -254,7 +263,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	// Build a broker-backed AuthStorage — same pattern as discoverAuthStorage()
 	// in sdk.ts. The gateway never touches local SQLite.
 	const accountPool = await loadAuthBrokerAccountPool();
-	const { accountPolicies, defaultReservePct } = await loadAuthAccountPolicyConfig();
+	const { accountPolicies, defaultReservePct } = await loadEffectiveAuthAccountPolicyConfig();
 	const client = createBrokerClient(brokerConfig);
 	const initialSnapshot = await fetchBrokerSnapshot(client);
 	const store = new RemoteAuthCredentialStore({
@@ -708,7 +717,7 @@ async function runCheck(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	}
 
 	const accountPool = await loadAuthBrokerAccountPool();
-	const { accountPolicies, defaultReservePct } = await loadAuthAccountPolicyConfig();
+	const { accountPolicies, defaultReservePct } = await loadEffectiveAuthAccountPolicyConfig();
 	const client = createBrokerClient(brokerConfig);
 	const initialSnapshot = await fetchBrokerSnapshot(client);
 	const store = new RemoteAuthCredentialStore({
