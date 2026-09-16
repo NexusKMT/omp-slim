@@ -140,6 +140,20 @@ describe("collectEnvSecrets connection URLs", () => {
 		}
 	});
 
+	it("registers the full password when it contains an unescaped at sign", () => {
+		const name = "OMP_TEST_CONNURL_RAW_AT";
+		const pw = "passwrd1@correcthorse";
+		const url = `postgres://app:${pw}@db.internal/shop`;
+		process.env[name] = url;
+		try {
+			const entries = collectEnvSecrets();
+			expect(entries.some(e => e.type === "plain" && e.mode === "obfuscate" && e.content === pw)).toBe(true);
+			expect(new SecretObfuscator(entries).obfuscate(url)).not.toContain("correcthorse");
+		} finally {
+			delete process.env[name];
+		}
+	});
+
 	it("skips connection-URL passwords shorter than the minimum length", () => {
 		const name = "OMP_TEST_CONNURL_SHORT";
 		const url = "postgres://app:pw@db.internal:5432/shop";
