@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed the auth-gateway's `/v1/messages` route reporting `stop_reason: "end_turn"` on a turn that carries a `tool_use` block, so an Anthropic client driving the canonical loop (run tools while `stop_reason === "tool_use"`) never executed the tool it was handed. Providers whose protocol has no separate tool-use stop — Cursor ends the turn with `stop` when it hands a client-declared tool back for the caller to run — now map to `tool_use`, matching what the OpenAI chat wire already does with `tool_calls`.
+- Fixed the auth-gateway's `/v1/messages` route offering Cursor's already-executed native calls (`todo`, `web_fetch`, `connect_scm`, a declined native) to the client: those blocks are stamped resolved by Cursor's exec channel, so they no longer terminate the turn with `tool_use` and no longer reach the wire at all, in either encoder. A client can neither run nor answer them, and repeating one would reapply a side effect the server already committed. Suppressed blocks renumber the ones after them so index-addressed client snapshots stay aligned.
 
 ## [18.2.1] - 2026-09-15
 
