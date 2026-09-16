@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Editors support whitespace-delimited `^` mention autocomplete and expose registered atoms for host-defined chip rendering.
+
+### Changed
+
+- `fuzzyRank` accepts readonly candidate arrays without copying them.
+
 ### Fixed
 
 - Masked inputs no longer expose their text in diagnostic previews.
