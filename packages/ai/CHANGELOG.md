@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.2] - 2026-09-16
+
 ### Added
 
 - Added configurable `baseUrl` support for `bedrock-converse-stream` requests, enabling Amazon Bedrock providers and compatible custom providers to use VPC or PrivateLink endpoints, FIPS hosts, and internal gateways, including endpoints mounted under a path or authenticated with query parameters.

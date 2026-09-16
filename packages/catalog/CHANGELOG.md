@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.2] - 2026-09-16
+
 ### Added
 
 - OpenAI-compatible model discovery now fills in reasoning-effort tiers for unrecognized models using the shared catalog’s published reasoning options, while preserving explicit discovery metadata and reviewed model rules.
