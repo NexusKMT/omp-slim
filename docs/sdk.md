@@ -201,6 +201,8 @@ If restore fails, `modelFallbackMessage` explains fallback.
 6. other stored API-key credential in `agent.db` / broker-backed storage
 7. custom-provider resolver fallback
 
+Configured values are resolved asynchronously through the registry-installed resolver; catalog construction does not execute credential commands. `ModelRegistry.getProviderHeaders(provider)` and `resolveModelHeaders(model, signal?)` return promises. For direct provider requests, await the latter instead of reading config-backed values from `model.headers`. The AI client's `stream()` and `streamSimple()` materialize `model.resolveHeaders` automatically for each request attempt, including authentication retries.
+
 ## Event subscription model
 
 Subscribe with `session.subscribe(listener)`; it returns an unsubscribe function.
