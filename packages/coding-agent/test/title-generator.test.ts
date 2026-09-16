@@ -1002,8 +1002,16 @@ describe("terminal title runtime", () => {
 		setTerminalTitle("direct title");
 
 		expect(emittedTitles()).toEqual(["direct title"]);
-		expect(writes).toHaveLength(0);
-		if (windowsTitleMock) expect(windowsTitleMock.titles).toEqual(["direct title"]);
+		// Sink-specific: the native mock only fires on win32
+		// (`getWindowsConsoleTitleApi` returns null elsewhere), so OSC is the
+		// sink on Linux/macOS. Exactly one sink fires once either way.
+		if (process.platform === "win32") {
+			expect(writes).toHaveLength(0);
+			expect(windowsTitleMock?.titles).toEqual(["direct title"]);
+		} else {
+			expect(writes).toHaveLength(1);
+			expect(windowsTitleMock?.titles ?? []).toEqual([]);
+		}
 	});
 
 	it("animates the working title on Windows", () => {
