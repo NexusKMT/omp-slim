@@ -184,6 +184,14 @@ function parseAuthAccountPolicies(value: unknown): AuthAccountPolicies {
 	});
 }
 
+function parseUsageReservePct(value: unknown): number {
+	const reservePct = value === undefined ? DEFAULT_USAGE_RESERVE_PCT : value;
+	if (typeof reservePct !== "number" || !Number.isFinite(reservePct)) {
+		throw new AIError.ConfigurationError("retry.usageReservePct must be a finite number");
+	}
+	return reservePct;
+}
+
 async function readConfigYaml(agentDir: string): Promise<ConfigSnapshot> {
 	for (const filename of MAIN_CONFIG_FILENAMES) {
 		const configPath = path.join(agentDir, filename);
@@ -223,14 +231,9 @@ export interface AuthAccountPolicyConfig {
 /** Load and strictly validate account-selection policy configuration from the active main config file. */
 export async function loadAuthAccountPolicyConfig(agentDir: string = getAgentDir()): Promise<AuthAccountPolicyConfig> {
 	const snapshot = await readConfigYaml(agentDir);
-	const defaultReservePct =
-		snapshot.usageReservePct === undefined ? DEFAULT_USAGE_RESERVE_PCT : snapshot.usageReservePct;
-	if (typeof defaultReservePct !== "number" || !Number.isFinite(defaultReservePct)) {
-		throw new AIError.ConfigurationError("retry.usageReservePct must be a finite number");
-	}
 	return {
 		accountPolicies: parseAuthAccountPolicies(snapshot.accountPolicies),
-		defaultReservePct,
+		defaultReservePct: parseUsageReservePct(snapshot.usageReservePct),
 	};
 }
 
@@ -355,9 +358,15 @@ export async function discoverAuthStorage(options: DiscoverAuthStorageOptions = 
 		agentDir,
 		configValueResolver: options.configValueResolver,
 	});
-	const accountPolicyConfig = await loadAuthAccountPolicyConfig(agentDir);
-	const accountPolicies = options.accountPolicies ?? accountPolicyConfig.accountPolicies;
-	const defaultReservePct = options.authStorageOptions?.defaultReservePct ?? accountPolicyConfig.defaultReservePct;
+	const suppliedDefaultReservePct = options.authStorageOptions?.defaultReservePct;
+	const needsMainConfigFallback = options.accountPolicies === undefined || suppliedDefaultReservePct === undefined;
+	const accountPolicySnapshot = needsMainConfigFallback ? await readConfigYaml(agentDir) : undefined;
+	const accountPolicies = parseAuthAccountPolicies(
+		options.accountPolicies === undefined ? accountPolicySnapshot?.accountPolicies : options.accountPolicies,
+	);
+	const defaultReservePct = parseUsageReservePct(
+		suppliedDefaultReservePct === undefined ? accountPolicySnapshot?.usageReservePct : suppliedDefaultReservePct,
+	);
 
 	if (brokerConfig) {
 		const accountPool = options.accountPool ?? (await loadAuthBrokerAccountPool());

@@ -1726,13 +1726,21 @@ export class AuthStorage {
 			) {
 				throw new AIError.ConfigurationError(`${path}.reservePct must be a finite number between 0 and 100`);
 			}
-			if (
-				policy.reservePct !== undefined &&
-				this.#resolveUsageProvider(policy.provider as Provider) === undefined &&
-				this.#store.getUsageReport === undefined
-			) {
-				throw new AIError.ConfigurationError(`${path}.reservePct requires a usage provider for ${policy.provider}`);
-			}
+		}
+	}
+
+	#validateAccountPolicyUsageCapability(provider: string): void {
+		const policyIndex = this.#accountPolicies.findIndex(
+			policy => policy.provider === provider && policy.reservePct !== undefined,
+		);
+		if (
+			policyIndex !== -1 &&
+			this.#resolveUsageProvider(provider as Provider) === undefined &&
+			this.#store.getUsageReport === undefined
+		) {
+			throw new AIError.ConfigurationError(
+				`auth.accountPolicies[${policyIndex}].reservePct requires a usage provider for ${provider}`,
+			);
 		}
 	}
 
@@ -5512,6 +5520,7 @@ export class AuthStorage {
 		);
 
 		if (credentials.length === 0) return undefined;
+		this.#validateAccountPolicyUsageCapability(provider);
 
 		const providerKey = this.#getProviderTypeKey(provider, "oauth");
 		const order = this.#getCredentialOrder(providerKey, sessionId, credentials.length);
