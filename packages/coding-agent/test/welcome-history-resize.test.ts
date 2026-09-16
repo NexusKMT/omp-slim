@@ -412,22 +412,26 @@ describe("composer welcome native-history resize", () => {
 			const transcript = new TranscriptContainer();
 			const tail = new MutableComposerTail();
 			composer.setRuntimeChildren([transcript, tail]);
-			composer.start({ playWelcomeIntro: false });
-			await scheduler.settle(terminal);
+			try {
+				composer.start({ playWelcomeIntro: false });
+				await scheduler.settle(terminal);
 
-			for (let i = 1; i <= 15; i++) {
-				transcript.addChild(new WidthTranscriptBlock(i));
+				for (let i = 1; i <= 15; i++) {
+					transcript.addChild(new WidthTranscriptBlock(i));
+				}
+				const tool = new ToolAllocationBlock(2);
+				transcript.addChild(tool);
+
+				composer.ui.requestRender(true, { clearScrollback: true });
+				await scheduler.settle(terminal);
+
+				expect(transcript.blockStates().filter(s => s === "committed").length).toBeGreaterThanOrEqual(10);
+				expect(transcript.blockStates().filter(s => s === "settled").length).toBeLessThanOrEqual(6);
+				expect(tool.allocations[tool.allocations.length - 1]).toBeGreaterThan(1);
+				expect(plainBuffer(terminal)).toContain("block-1@80");
+			} finally {
+				composer.ui.stop();
 			}
-			const tool = new ToolAllocationBlock(2);
-			transcript.addChild(tool);
-
-			composer.ui.requestRender(true, { clearScrollback: true });
-			await scheduler.settle(terminal);
-
-			expect(transcript.blockStates().filter(s => s === "committed").length).toBeGreaterThanOrEqual(10);
-			expect(transcript.blockStates().filter(s => s === "settled").length).toBeLessThanOrEqual(6);
-			expect(tool.allocations[tool.allocations.length - 1]).toBeGreaterThan(1);
-			expect(plainBuffer(terminal)).toContain("block-1@80");
 		});
 
 		it("keeps blocks in viewport and gives tool unconstrained allocation when content fits capacity", async () => {
@@ -442,19 +446,23 @@ describe("composer welcome native-history resize", () => {
 			const transcript = new TranscriptContainer();
 			const tail = new MutableComposerTail();
 			composer.setRuntimeChildren([transcript, tail]);
-			composer.start({ playWelcomeIntro: false });
-			await scheduler.settle(terminal);
+			try {
+				composer.start({ playWelcomeIntro: false });
+				await scheduler.settle(terminal);
 
-			const block1 = new ToolAllocationBlock(2);
-			const tool = new ToolAllocationBlock(2);
-			transcript.addChild(block1);
-			transcript.addChild(tool);
+				const block1 = new ToolAllocationBlock(2);
+				const tool = new ToolAllocationBlock(2);
+				transcript.addChild(block1);
+				transcript.addChild(tool);
 
-			composer.ui.requestRender(true, { clearScrollback: true });
-			await scheduler.settle(terminal);
+				composer.ui.requestRender(true, { clearScrollback: true });
+				await scheduler.settle(terminal);
 
-			expect(transcript.blockStates()).toEqual(["settled", "settled"]);
-			expect(tool.allocations[tool.allocations.length - 1]).toBeGreaterThan(1);
+				expect(transcript.blockStates()).toEqual(["settled", "settled"]);
+				expect(tool.allocations[tool.allocations.length - 1]).toBeGreaterThan(1);
+			} finally {
+				composer.ui.stop();
+			}
 		});
 	});
 });
