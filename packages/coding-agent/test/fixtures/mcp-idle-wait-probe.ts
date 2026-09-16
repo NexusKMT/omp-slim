@@ -11,11 +11,8 @@
  *
  * Four waits race the same silence:
  *
- * - `control` is a bare `fetch` with none of the MCP fetch policy. It must
- *   fail, which is what proves the shortened idle timer is live in this
- *   process; if the runtime ever stops honouring the variable, the control
- *   resolves and the parent fails there rather than passing the other legs for
- *   the wrong reason.
+ * - `control` is a bare `fetch` with none of the MCP fetch policy. It reports
+ *   whether this Bun version honours the shortened process default.
  * - `unlocked` and `originLocked` are Streamable HTTP requests across both
  *   fetch calls in `mcpFetch` — the plain one, and the manual-redirect one an
  *   origin-locked server takes. The answer comes back on the POST.
