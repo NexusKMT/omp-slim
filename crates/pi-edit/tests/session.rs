@@ -192,6 +192,41 @@ async fn hashline_rem_removes_invalid_utf8_file() {
 	assert!(!path.exists(), "invalid UTF-8 file must be deletable");
 	assert!(outcome.text.contains("Deleted legacy.txt"), "{}", outcome.text);
 }
+#[tokio::test]
+async fn create_over_generated_file_still_rejected() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("gen.ts");
+	std::fs::write(&path, "// @generated\nold\n").unwrap();
+	let writer = DiskWriter::default();
+	let err = ws
+		.apply_json(
+			&serde_json::json!({ "path": "gen.ts", "edits": [{ "op": "create", "diff": "new\n" }] }),
+			&writer,
+		)
+		.await
+		.expect_err("generated-file guard must survive the existence-only path");
+	assert!(err.to_string().contains("auto-generated"), "{err}");
+	assert_eq!(writer.requests.lock().len(), 0);
+}
+
+#[tokio::test]
+async fn delete_create_update_replaces_invalid_utf8_file() {
+	let ws = Workspace::new(EditMode::Patch);
+	let path = ws.cwd().join("a.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	let writer = DiskWriter::default();
+	ws.apply_json(
+		&serde_json::json!({ "path": "a.txt", "edits": [
+			{ "op": "delete" },
+			{ "op": "create", "diff": "fresh\n" },
+			{ "op": "update", "diff": "@@\n-fresh\n+final" },
+		] }),
+		&writer,
+	)
+	.await
+	.expect("update after create operates on the new content, not the undecodable bytes");
+	assert_eq!(std::fs::read(&path).unwrap(), b"final\n");
+}
 
 #[tokio::test]
 async fn writer_failure_is_surfaced_verbatim() {

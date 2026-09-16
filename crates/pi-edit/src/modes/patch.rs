@@ -1412,12 +1412,30 @@ pub fn stage_patch(
 			let diff = input
 				.diff
 				.ok_or_else(|| EditError::apply("Create operation requires diff (file content)"))?;
-			// Existence must not decode: an undecodable file still exists.
-			if files.exists(&resolved.absolute) && !allow_create_overwrite {
-				return Err(EditError::apply(format!(
-					"Cannot create {}: file already exists. Use *** Update File to modify it in place.",
-					input.path
-				)));
+			// Existence must not decode, but the generated-file guard must
+			// still run: an undecodable file still exists, and a generated
+			// one still rejects on overwrite. try_read runs the guard before
+			// decoding, so only the undecodable-target error means it passed.
+			match files.try_read(&resolved) {
+				Ok(read) => {
+					if read.is_some() && !allow_create_overwrite {
+						return Err(EditError::apply(format!(
+							"Cannot create {}: file already exists. Use *** Update File to modify it in \
+							 place.",
+							input.path
+						)));
+					}
+				},
+				Err(err) if err.is_invalid_utf8() => {
+					if !allow_create_overwrite {
+						return Err(EditError::apply(format!(
+							"Cannot create {}: file already exists. Use *** Update File to modify it in \
+							 place.",
+							input.path
+						)));
+					}
+				},
+				Err(err) => return Err(err),
 			}
 			let normalized = normalize_create_content(diff);
 			let content = if normalized.ends_with('\n') {
@@ -1580,12 +1598,30 @@ impl ModeEngine for PatchEngine {
 
 		let first = entry_input(path, entries[0])?;
 		let initial_resolved = files.resolve(path, first.op != Operation::Create)?;
-		// Updates need the current text; delete/create-only sequences only need
-		// existence, so an undecodable file must not block them. Unparsable
+		// Updates need the current text unless a create already replaced it:
+		// delete/create-only sequences need existence only, and delete →
+		// create → update operates on the newly created content. Unparsable
 		// entries report from the loop below without forcing a content read.
-		let needs_content = entries
-			.iter()
-			.any(|entry| entry_input(path, entry).is_ok_and(|input| input.op == Operation::Update));
+		let needs_content = {
+			let mut replaced = first.op == Operation::Create;
+			let mut needs = false;
+			for entry in &entries {
+				let Ok(input) = entry_input(path, entry) else {
+					continue;
+				};
+				match input.op {
+					Operation::Create => replaced = true,
+					Operation::Delete => replaced = false,
+					Operation::Update => {
+						if !replaced {
+							needs = true;
+							break;
+						}
+					},
+				}
+			}
+			needs
+		};
 		let (initial, initially_existed) = match files.try_read(&initial_resolved) {
 			Ok(initial) => {
 				let existed = initial.is_some();
