@@ -314,3 +314,21 @@ test("retains a good ladder when the post-TTL fallback fetch fails", async () =>
 	});
 	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
 });
+
+test("does not memoize an empty cold refresh when shared data has no ladder and models.dev fails", async () => {
+	const calls: string[] = [];
+	const routes: Record<string, unknown> = {
+		[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
+	};
+	const fetchImpl = stubFetch(routes, calls, [UNREVIEWED_ID]);
+	const first = await discover(fetchImpl);
+	expect(first?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+	routes[MODELS_DEV_URL] = { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low"]) } } };
+	const second = await discover(fetchImpl);
+	expect(second?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low],
+	});
+	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(2);
+	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
+});

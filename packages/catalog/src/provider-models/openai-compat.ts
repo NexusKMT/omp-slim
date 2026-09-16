@@ -377,44 +377,39 @@ async function fetchPublishedEffortLadders(
 	fetchImpl: FetchImpl | undefined,
 	now: () => number,
 ): Promise<PublishedEffortLadders> {
-	let ladders = EMPTY_PUBLISHED_EFFORT_LADDERS;
-	let answered = false;
-	try {
-		ladders = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl));
-		answered = true;
-	} catch {
-		// Shared payload unavailable this cycle; models.dev may still answer.
-	}
+	const fetchModelsDev = async (signal: AbortSignal): Promise<PublishedEffortLadders> => {
+		const response = await (fetchImpl ?? discoveryFetch())(MODELS_DEV_CATALOG_URL, {
+			method: "GET",
+			headers: { Accept: "application/json", "User-Agent": CATALOG_USER_AGENT },
+			signal,
+		});
+		if (!response.ok) throw new Error(`models.dev catalog fetch failed: ${response.status}`);
+		return indexPublishedEffortLadders((await response.json()) as unknown);
+	};
+	const ladders = await withCatalogDiscoveryTimeout(
+		DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS,
+		async signal => {
+			let shared = EMPTY_PUBLISHED_EFFORT_LADDERS;
+			try {
+				shared = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl, signal));
+			} catch {
+				// Try models.dev within the same deadline.
+			}
+			if (shared.byHost.size > 0) return shared;
+			try {
+				return await fetchModelsDev(signal);
+			} catch {
+				return shared;
+			}
+		},
+	);
 	if (ladders.byHost.size === 0) {
-		try {
-			ladders = indexPublishedEffortLadders(
-				await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, async signal => {
-					const response = await (fetchImpl ?? discoveryFetch())(MODELS_DEV_CATALOG_URL, {
-						method: "GET",
-						headers: { Accept: "application/json", "User-Agent": CATALOG_USER_AGENT },
-						signal,
-					});
-					if (!response.ok) throw new Error(`models.dev catalog fetch failed: ${response.status}`);
-					return (await response.json()) as unknown;
-				}),
-			);
-			answered = true;
-		} catch {
-			// Both sources failed; fall through to the last good index.
-		}
-	}
-	if (ladders.byHost.size === 0) {
-		// A pruned shared payload answers, so `answered` alone cannot tell a
-		// real refresh from one whose only ladder-bearing source failed. The
-		// last index that did carry ladders keeps its timestamp and stays in
-		// place, and a first cycle that reached neither source is not memoized.
 		if (session.memo && session.memo.ladders.byHost.size > 0) return session.memo.ladders;
-		if (!answered) return ladders;
+		return ladders;
 	}
 	session.memo = { at: now(), ladders };
 	return ladders;
 }
-
 /** Test seam: drops the memoized index so a case can serve a different catalog. */
 export function resetPublishedEffortLaddersForTest(fetchImpl?: FetchImpl): void {
 	const session = getPublishedEffortSession(fetchImpl);
