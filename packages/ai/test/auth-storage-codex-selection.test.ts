@@ -2540,7 +2540,9 @@ describe("AuthStorage codex oauth ranking", () => {
 			...healthyHeaders,
 			"x-codex-secondary-used-percent": "100",
 		};
-		expect(authStorage.ingestUsageHeaders("openai-codex", exhaustedHeaders, { sessionId })).toBe(true);
+		expect(
+			authStorage.ingestUsageHeaders("openai-codex", exhaustedHeaders, { sessionId, responseStatus: 429 }),
+		).toBe(true);
 
 		// The next request for the same session must rotate to the sibling
 		// without a wire 429: the ingested snapshot blocks the sticky account.
@@ -2962,6 +2964,23 @@ describe("AuthStorage codex oauth ranking", () => {
 		const counts = await countApiKeySelections(authStorage, "openai-codex", "codex-credit-overage");
 		expectExclusivePreference(counts, "api-acct-credits", "api-acct-dry");
 		expect(readCodexBlock(dbPath, creditRow.id, "chat")).toBeUndefined();
+
+		const sessionId = "codex-credit-overage-headers";
+		expect(await authStorage.getApiKey("openai-codex", sessionId)).toBe("api-acct-credits");
+		expect(
+			authStorage.ingestUsageHeaders(
+				"openai-codex",
+				{
+					"x-codex-primary-used-percent": "100",
+					"x-codex-primary-window-minutes": String(7 * 24 * 60),
+					"x-codex-primary-reset-at": "2000500000",
+				},
+				{ sessionId, responseStatus: 200 },
+			),
+		).toBe(true);
+		expect(await authStorage.getApiKey("openai-codex", sessionId)).toBe("api-acct-credits");
+		expect(readCodexBlock(dbPath, creditRow.id, "chat")).toBeUndefined();
+
 		// The genuinely drained sibling still gets blocked until its plan resets.
 		expect(readCodexBlock(dbPath, dryRow.id, "chat")).toBe(2_000_500_000_000);
 	});

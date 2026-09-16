@@ -426,7 +426,11 @@ function buildAdditionalUsageLimit(args: {
  * ingesting them lets credential selection block an exhausted account before
  * the next request burns a wire 429.
  */
-export function parseCodexRateLimitHeaders(headers: Record<string, string>, now = Date.now()): UsageReport | null {
+export function parseCodexRateLimitHeaders(
+	headers: Record<string, string>,
+	now = Date.now(),
+	context?: { responseStatus?: number },
+): UsageReport | null {
 	const parseWindow = (key: "primary" | "secondary"): ParsedUsageWindow | undefined => {
 		const usedPercent = toNumber(headers[`x-codex-${key}-used-percent`]);
 		if (usedPercent === undefined) return undefined;
@@ -442,8 +446,11 @@ export function parseCodexRateLimitHeaders(headers: Record<string, string>, now 
 	const secondary = parseWindow("secondary");
 	if (!primary && !secondary) return null;
 	const limits: UsageLimit[] = [];
-	if (primary) limits.push(buildUsageLimit({ key: "primary", window: primary, nowMs: now }));
-	if (secondary) limits.push(buildUsageLimit({ key: "secondary", window: secondary, nowMs: now }));
+	const requestSucceeded =
+		context?.responseStatus !== undefined && context.responseStatus >= 200 && context.responseStatus < 300;
+	const verdict = requestSucceeded ? { allowed: true, limitReached: false } : {};
+	if (primary) limits.push(buildUsageLimit({ key: "primary", window: primary, ...verdict, nowMs: now }));
+	if (secondary) limits.push(buildUsageLimit({ key: "secondary", window: secondary, ...verdict, nowMs: now }));
 	return {
 		provider: "openai-codex",
 		fetchedAt: now,
