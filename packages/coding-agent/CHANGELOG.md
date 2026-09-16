@@ -6,6 +6,10 @@
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 
+### Fixed
+
+- A corrupted or externally modified session file no longer traps you in an uncloseable session: after the failed-close error, one more Ctrl+C exits without rewriting the session log ([#12238](https://github.com/can1357/oh-my-pi/issues/12238)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
