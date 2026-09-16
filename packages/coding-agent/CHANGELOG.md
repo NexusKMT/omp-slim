@@ -40,6 +40,10 @@
 
 - Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications ([#12232](https://github.com/can1357/oh-my-pi/pull/12232) by [@aramalipoor](https://github.com/aramalipoor)).
 
+### Fixed
+
+- Fixed browser reuse missing Chromium behind Linux wrapper scripts and spawning a duplicate on a locked profile ([#12236](https://github.com/can1357/oh-my-pi/pull/12236) by [@shivamklr](https://github.com/shivamklr)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
