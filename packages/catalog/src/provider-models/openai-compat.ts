@@ -258,30 +258,55 @@ function modelsDevEffortLadder(model: ModelsDevModel): Effort[] | undefined {
 }
 
 /**
- * Index every published ladder by bare catalog id. When two hosts publish
- * different ladders for the same id the first wins rather than the widest:
- * advertising a tier the upstream rejects is worse than offering one too few.
+ * Published ladders, addressable both by the host that published them and by
+ * bare id.
+ *
+ * `byHost` (keyed `provider\0id`) is authoritative: a ladder is only valid for
+ * the deployment that published it, so the endpoint's own catalog identity is
+ * consulted first. `byId` answers when the host is unknown — a gateway id with
+ * no catalog provider of its own — and only while every host publishing that
+ * id agrees on its tiers; ids whose hosts disagree are dropped from it, so the
+ * ladder stays unknown instead of borrowing an arbitrary host's.
  */
-function indexPublishedEffortLadders(payload: unknown): Map<string, readonly Effort[]> {
-	const ladders = new Map<string, readonly Effort[]>();
-	if (!isRecord(payload)) return ladders;
-	for (const provider of Object.values(payload)) {
-		if (!isRecord(provider) || !isRecord(provider.models)) continue;
-		for (const [modelId, rawModel] of Object.entries(provider.models)) {
-			if (!isRecord(rawModel) || ladders.has(modelId)) continue;
-			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
-			if (ladder) ladders.set(modelId, ladder);
-		}
-	}
-	return ladders;
+interface PublishedEffortLadders {
+	byHost: ReadonlyMap<string, readonly Effort[]>;
+	byId: ReadonlyMap<string, readonly Effort[]>;
 }
 
-let publishedEffortMemo: { at: number; ladders: ReadonlyMap<string, readonly Effort[]> } | undefined;
+function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
+	const byHost = new Map<string, readonly Effort[]>();
+	const byId = new Map<string, readonly Effort[]>();
+	const conflicting = new Set<string>();
+	if (!isRecord(payload)) return { byHost, byId };
+	for (const [providerKey, provider] of Object.entries(payload)) {
+		if (!isRecord(provider) || !isRecord(provider.models)) continue;
+		for (const [modelId, rawModel] of Object.entries(provider.models)) {
+			if (!isRecord(rawModel)) continue;
+			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
+			if (!ladder) continue;
+			byHost.set(`${providerKey}\u0000${modelId}`, ladder);
+			if (conflicting.has(modelId)) continue;
+			const shared = byId.get(modelId);
+			if (shared === undefined) {
+				byId.set(modelId, ladder);
+			} else if (shared.length !== ladder.length || shared.some((effort, index) => effort !== ladder[index])) {
+				byId.delete(modelId);
+				conflicting.add(modelId);
+			}
+		}
+	}
+	return { byHost, byId };
+}
+
+let publishedEffortMemo: { at: number; ladders: PublishedEffortLadders } | undefined;
+let publishedEffortRequest: Promise<PublishedEffortLadders> | undefined;
 
 /**
  * Published effort ladders, memoized for an hour: the catalog moves far slower
  * than a discovery refresh, and every configured provider would otherwise
- * re-index it.
+ * re-index it. A refresh that starts while a request is still in flight joins
+ * that request instead of issuing its own, so refreshing every configured
+ * provider at once downloads the catalog once.
  *
  * The shared catalog payload is the source whenever it carries ladders. It is
  * a field-pruned copy that currently drops `reasoning_options` entirely, so an
@@ -291,14 +316,26 @@ let publishedEffortMemo: { at: number; ladders: ReadonlyMap<string, readonly Eff
  * answer — and a cycle where both fail is not memoized, so the next discovery
  * retries instead of inheriting an hour of emptiness.
  */
-async function loadPublishedEffortLadders(
+function loadPublishedEffortLadders(
 	fetchImpl?: FetchImpl,
 	now: () => number = Date.now,
-): Promise<ReadonlyMap<string, readonly Effort[]>> {
+): Promise<PublishedEffortLadders> {
 	if (publishedEffortMemo && now() - publishedEffortMemo.at < PUBLISHED_EFFORT_TTL_MS) {
-		return publishedEffortMemo.ladders;
+		return Promise.resolve(publishedEffortMemo.ladders);
 	}
-	let ladders = new Map<string, readonly Effort[]>();
+	if (publishedEffortRequest) return publishedEffortRequest;
+	const request = fetchPublishedEffortLadders(fetchImpl, now).finally(() => {
+		if (publishedEffortRequest === request) publishedEffortRequest = undefined;
+	});
+	publishedEffortRequest = request;
+	return request;
+}
+
+async function fetchPublishedEffortLadders(
+	fetchImpl: FetchImpl | undefined,
+	now: () => number,
+): Promise<PublishedEffortLadders> {
+	let ladders: PublishedEffortLadders = { byHost: new Map(), byId: new Map() };
 	let answered = false;
 	try {
 		ladders = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl));
@@ -306,7 +343,7 @@ async function loadPublishedEffortLadders(
 	} catch {
 		// Shared payload unavailable this cycle; models.dev may still answer.
 	}
-	if (ladders.size === 0) {
+	if (ladders.byHost.size === 0) {
 		try {
 			ladders = indexPublishedEffortLadders(
 				await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, async signal => {
@@ -334,18 +371,47 @@ async function loadPublishedEffortLadders(
 /** Test seam: drops the memoized index so a case can serve a different catalog. */
 export function resetPublishedEffortLaddersForTest(): void {
 	publishedEffortMemo = undefined;
+	publishedEffortRequest = undefined;
 }
 
-/** Peel gateway prefixes (`deepseek/deepseek-v4` → `deepseek-v4`) until a catalog hit. */
+/**
+ * The models.dev provider keys this endpoint publishes under. A provider whose
+ * catalog identity differs from its omp id (`moonshot` → `moonshotai`) is
+ * resolved through its descriptors; the omp id stays as a candidate for
+ * providers the descriptors do not cover.
+ */
+function catalogProviderKeys(providerId: string): readonly string[] {
+	const keys = new Set<string>();
+	for (const descriptor of MODELS_DEV_DESCRIPTORS_BY_PROVIDER[providerId] ?? []) keys.add(descriptor.modelsDevKey);
+	keys.add(providerId);
+	return [...keys];
+}
+
+/**
+ * The ladder published for a discovered id, preferring the host that serves it.
+ *
+ * Gateway prefixes are peeled (`deepseek/deepseek-v4` → `deepseek-v4`) until a
+ * catalog hit, and each peeled segment joins the host candidates ahead of the
+ * endpoint's own keys: on an aggregator the prefix names the real upstream.
+ * A bare id is only accepted from {@link PublishedEffortLadders.byId}, which
+ * holds it only while every publishing host agrees on its tiers.
+ */
 function lookupPublishedEffortLadder(
-	ladders: ReadonlyMap<string, readonly Effort[]>,
+	ladders: PublishedEffortLadders,
+	providerKeys: readonly string[],
 	modelId: string,
 ): readonly Effort[] | undefined {
+	const hosts = [...providerKeys];
 	for (let candidate = modelId; ;) {
-		const ladder = ladders.get(candidate);
-		if (ladder) return ladder;
+		for (const host of hosts) {
+			const scoped = ladders.byHost.get(`${host}\u0000${candidate}`);
+			if (scoped) return scoped;
+		}
+		const shared = ladders.byId.get(candidate);
+		if (shared) return shared;
 		const slash = candidate.indexOf("/");
 		if (slash < 0) return undefined;
+		hosts.unshift(candidate.slice(0, slash));
 		candidate = candidate.slice(slash + 1);
 	}
 }
@@ -357,11 +423,12 @@ function lookupPublishedEffortLadder(
  * Source precedence is unchanged: a provider that reports its own thinking
  * surface, and any model whose ladder reviewed rules declare, are left exactly
  * as they are. Only the guess is corrected, and only for ids the catalog
- * actually publishes, so no request is made when every discovered model is
- * already covered.
+ * actually publishes for this endpoint (or publishes unambiguously), so no
+ * request is made when every discovered model is already covered.
  */
 async function applyPublishedEffortLadders<TApi extends Api>(
 	models: readonly ModelSpec<TApi>[] | null,
+	providerId: string,
 	fetchImpl?: FetchImpl,
 ): Promise<readonly ModelSpec<TApi>[] | null> {
 	if (models === null) return null;
@@ -374,10 +441,11 @@ async function applyPublishedEffortLadders<TApi extends Api>(
 	);
 	if (guessed.size === 0) return models;
 	const ladders = await loadPublishedEffortLadders(fetchImpl);
-	if (ladders.size === 0) return models;
+	if (ladders.byHost.size === 0) return models;
+	const providerKeys = catalogProviderKeys(providerId);
 	return models.map(model => {
 		if (!guessed.has(model.id)) return model;
-		const efforts = lookupPublishedEffortLadder(ladders, model.id);
+		const efforts = lookupPublishedEffortLadder(ladders, providerKeys, model.id);
 		return efforts ? { ...model, thinking: { mode: "effort" as const, efforts } } : model;
 	});
 }
@@ -764,6 +832,7 @@ function createOpenAICompatibleModelManagerOptions<TApi extends Api>(
 						mapModel: (entry, defaults) => options.mapModel(entry, defaults, references.get(defaults.id)),
 						fetch: options.config?.fetch,
 					}),
+					options.providerId,
 					options.config?.fetch,
 				),
 		}),

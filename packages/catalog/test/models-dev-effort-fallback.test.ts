@@ -168,3 +168,83 @@ test("an unreachable catalog, or one that knows nothing about the id, leaves the
 	expect(calls).toContain(MODELS_DEV_URL);
 	expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
 });
+
+test("a duplicated id takes the ladder its own host published", async () => {
+	const calls: string[] = [];
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					// Listed first, so a bare-id index would hand this ladder to Moonshot.
+					acme: { models: { [UNREVIEWED_ID]: catalogRow(["minimal", "low"]) } },
+					moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high", "max"]) } },
+				},
+			},
+			calls,
+			[UNREVIEWED_ID],
+		),
+	);
+
+	expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low, Effort.High, Effort.Max],
+	});
+});
+
+test("an id foreign hosts publish differently stays unknown; hosts that agree still answer", async () => {
+	const calls: string[] = [];
+	const agreedId = "quasar-7b-thinking";
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					acme: {
+						models: {
+							[UNREVIEWED_ID]: catalogRow(["minimal", "low"]),
+							[agreedId]: catalogRow(["low", "high"]),
+						},
+					},
+					zeta: {
+						models: {
+							[UNREVIEWED_ID]: catalogRow(["low", "high", "max"]),
+							[agreedId]: catalogRow(["low", "high"]),
+						},
+					},
+				},
+			},
+			calls,
+			[UNREVIEWED_ID, agreedId],
+		),
+	);
+
+	// Neither host is Moonshot's and they disagree: offering either could name a
+	// tier this endpoint rejects, so the ladder stays the neutral guess.
+	expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+	expect(models?.find(candidate => candidate.id === agreedId)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low, Effort.High],
+	});
+});
+
+test("concurrent discovery refreshes share one catalog request", async () => {
+	const calls: string[] = [];
+	const fetchImpl = stubFetch(
+		{
+			[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
+			[MODELS_DEV_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
+		},
+		calls,
+		[UNREVIEWED_ID],
+	);
+
+	const refreshes = await Promise.all([discover(fetchImpl), discover(fetchImpl)]);
+
+	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(1);
+	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+	for (const models of refreshes) {
+		expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Low, Effort.High],
+		});
+	}
+});
