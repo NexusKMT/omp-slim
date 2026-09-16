@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Built-in secret obfuscation now covers AWS access keys, Google API keys, Slack, npm, Stripe (secret/restricted keys and webhook secrets), Hugging Face, SendGrid, JWTs, Bearer header tokens, and PEM private-key blocks.
+
 ## [18.2.0] - 2026-09-15
 
 ### Breaking Changes
