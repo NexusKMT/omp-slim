@@ -951,8 +951,8 @@ describe("terminal title runtime", () => {
 		// spinner prefix. The override wins verbatim.
 		setExtensionTerminalTitle("Deploying prod");
 		expect(emittedTitles().at(-1)).toBe("Deploying prod");
-
-		writes.length = 0;
+		// The `beforeEach` reset already cleared the sync-setup emissions observed
+		// above; no re-reset — the state flips below must not move off the override.
 		setTerminalTitleState("working");
 		setTerminalTitleState("attention");
 		setTerminalTitleState("idle");
@@ -970,7 +970,7 @@ describe("terminal title runtime", () => {
 		// the override. This exercises the timer-driven emission path, not just
 		// the synchronous state setter.
 		setExtensionTerminalTitle("Long extension task");
-		writes.length = 0;
+		resetEmitted();
 
 		// Enter `working` to start the spinner interval, then advance the fake
 		// clock across several tick intervals (interval is 80ms).
@@ -987,7 +987,7 @@ describe("terminal title runtime", () => {
 		// CONTRACT: `setSessionTerminalTitle` supersedes any extension override —
 		// the emitted title tracks the real session, not the stale override.
 		setExtensionTerminalTitle("Stale extension title");
-		writes.length = 0;
+		resetEmitted();
 
 		setSessionTerminalTitle("my-session");
 
@@ -1036,14 +1036,14 @@ describe("terminal title runtime", () => {
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true });
 			process.env.WSL_DISTRO_NAME = "Ubuntu";
 			setSessionTerminalTitle("wsl-project");
-			writes.length = 0;
+			resetEmitted();
 
 			setTerminalTitleState("working");
 			expect(emittedTitles()).toEqual(["π : wsl-project"]);
 
-			writes.length = 0;
+			resetEmitted();
 			vi.advanceTimersByTime(400);
-			expect(writes).toEqual([]);
+			expect(emittedTitles()).toEqual([]);
 		} finally {
 			if (originalWslDistro === undefined) delete process.env.WSL_DISTRO_NAME;
 			else process.env.WSL_DISTRO_NAME = originalWslDistro;
@@ -1068,6 +1068,58 @@ describe("terminal title runtime", () => {
 		}
 	});
 
+	it("falls back to OSC verbatim when a direct title fails the native path on Windows", () => {
+		const originalPlatform = process.platform;
+		const native = windowsTitleMock;
+		if (!native) throw new Error("Windows console title mock not initialized");
+		try {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+			native.succeeds = false;
+			resetEmitted();
+
+			setTerminalTitle("custom direct");
+
+			// The caller's own title is the OSC fallback — not the composed session
+			// state — and the interval is pinned off for later working frames.
+			expect(emittedTitles()).toEqual(["custom direct"]);
+			expect(windowsTitleMock?.titles).toEqual([]);
+			setTerminalTitleState("working");
+			resetEmitted();
+			vi.advanceTimersByTime(400);
+			expect(emittedTitles()).toEqual([]);
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+		}
+	});
+
+	it("pins the working title static when the native path fails mid-spinner on Windows", () => {
+		const originalPlatform = process.platform;
+		const native = windowsTitleMock;
+		if (!native) throw new Error("Windows console title mock not initialized");
+		try {
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+			native.succeeds = true;
+			resetEmitted();
+			setSessionTerminalTitle("windows-project");
+			setTerminalTitleState("working");
+			resetEmitted();
+			// Fail the NEXT native write mid-spinner: the failing animated frame
+			// must collapse to the static `:` separator over OSC, not emit OSC
+			// animation, and the interval must stop so no later frame ticks.
+			native.succeeds = false;
+			setSessionTerminalTitle("windows-project-2");
+
+			expect(emittedTitles().at(-1)).toBe("π : windows-project-2");
+			expect(vi.getTimerCount()).toBe(0);
+			resetEmitted();
+			vi.advanceTimersByTime(400);
+			expect(emittedTitles()).toEqual([]);
+		} finally {
+			Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+		}
+	});
+
 	it("releases the override when an extension sets an empty title", () => {
 		// CONTRACT: `setTitle("")` is the obvious way an extension author clears a
 		// title, so an empty override must RELEASE ownership back to the run-state
@@ -1075,7 +1127,7 @@ describe("terminal title runtime", () => {
 		// title is stranded at the bare brand and the run state can never show again.
 		setSessionTerminalTitle("my-session");
 		setExtensionTerminalTitle("Deploying prod");
-		writes.length = 0;
+		resetEmitted();
 
 		setExtensionTerminalTitle("");
 
@@ -1093,7 +1145,7 @@ describe("terminal title runtime", () => {
 		// `setSessionTerminalTitle` again.
 		setSessionTerminalTitle("my-session");
 		setExtensionTerminalTitle("");
-		writes.length = 0;
+		resetEmitted();
 
 		setTerminalTitleState("working");
 
@@ -1111,7 +1163,7 @@ describe("terminal title runtime", () => {
 		// the run state exactly as `""` did.
 		setSessionTerminalTitle("my-session");
 		setExtensionTerminalTitle("   ");
-		writes.length = 0;
+		resetEmitted();
 
 		setTerminalTitleState("working");
 

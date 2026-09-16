@@ -564,11 +564,26 @@ export function formatSessionTerminalTitle(sessionName: string | undefined, cwd?
  * Repeating the same sanitized title is a no-op on every platform.
  */
 export function setTerminalTitle(title: string): void {
-	// The teardown latch belongs HERE, not only on the composed-state path: this
-	// is the sink every title write funnels through, and it is exported, so a
-	// direct importer firing from a delayed callback after
-	// `disposeTerminalTitleState()` would otherwise write straight into the
-	// parent shell's tab whose title teardown just restored.
+	writeTerminalTitle(title);
+}
+
+/**
+ * The sink every title write funnels through — and it is exported via
+ * {@link setTerminalTitle}, so the teardown latch belongs HERE, not only on
+ * the composed-state path: a direct importer firing from a delayed callback
+ * after `disposeTerminalTitleState()` would otherwise write straight into the
+ * parent shell's tab whose title teardown just restored.
+ *
+ * When `recomposeStaticOnFailure` is set (only the composed working title
+ * passes it), a native-path failure on Windows re-composes the title with the
+ * failure latched — the static `:` separator — instead of emitting the
+ * animated frame that just failed as OSC. Direct titles always preserve
+ * verbatim: the caller's own sanitized title is the OSC fallback. The latch
+ * check runs on every failure, not just the first: a direct write may latch
+ * first, and a later working emit must still collapse to static rather than
+ * emit one animated OSC frame.
+ */
+function writeTerminalTitle(title: string, recomposeStaticOnFailure = false): void {
 	if (terminalTitleRuntime.disposed) return;
 	if (!process.stdout.isTTY || isTerminalHeadless()) return;
 	const next = sanitizeTerminalTitlePart(title) ?? DEFAULT_TERMINAL_TITLE;
@@ -579,12 +594,29 @@ export function setTerminalTitle(title: string): void {
 		// separator exists to avoid. Latch static and stop the interval now.
 		// WSL never reaches this branch (the API getter returns null off win32);
 		// the platform guard keeps a mocked win32 in tests from mislatching.
-		if (process.platform === "win32" && !terminalTitleRuntime.nativeTitleFailed) {
-			terminalTitleRuntime.nativeTitleFailed = true;
-			stopTerminalTitleSpinner();
-			lastTerminalTitle = undefined;
-			emitTerminalTitle();
-			return;
+		if (process.platform === "win32") {
+			if (!terminalTitleRuntime.nativeTitleFailed) {
+				terminalTitleRuntime.nativeTitleFailed = true;
+				stopTerminalTitleSpinner();
+			}
+			if (recomposeStaticOnFailure) {
+				const latched =
+					terminalTitleRuntime.extensionOverride ??
+					buildTerminalTitleWithState(
+						terminalTitleRuntime.label,
+						terminalTitleRuntime.state,
+						terminalTitleRuntime.frame,
+						terminalTitleRuntime.enabled,
+						process.platform,
+						terminalTitleRuntime.style,
+						$env as NodeJS.ProcessEnv,
+						true,
+					);
+				if (latched === lastTerminalTitle) return;
+				writeTitleSequence(`\x1b]0;${latched}\x07`);
+				lastTerminalTitle = latched;
+				return;
+			}
 		}
 		writeTitleSequence(`\x1b]0;${next}\x07`);
 	}
@@ -727,7 +759,7 @@ export function buildTerminalTitleWithState(
 }
 
 function emitTerminalTitle(): void {
-	// The teardown latch lives at the sink (`setTerminalTitle`), so every path
+	// The teardown latch lives at the sink (`writeTerminalTitle`), so every path
 	// here is covered without a second check.
 	// An extension override owns the terminal verbatim; the terminal sink
 	// deduplicates repeated state updates.
@@ -743,7 +775,15 @@ function emitTerminalTitle(): void {
 			$env as NodeJS.ProcessEnv,
 			terminalTitleRuntime.nativeTitleFailed,
 		);
-	setTerminalTitle(next);
+	// The composed working title is the only write that can fail into an
+	// animated OSC frame: on native failure it re-pins static (`:`), while a
+	// direct `setTerminalTitle` preserves its caller's title verbatim.
+	const recomposeStaticOnFailure =
+		terminalTitleRuntime.extensionOverride === undefined &&
+		terminalTitleRuntime.state === "working" &&
+		terminalTitleRuntime.enabled &&
+		!isStaticTitleHost();
+	writeTerminalTitle(next, recomposeStaticOnFailure);
 }
 
 function stopTerminalTitleSpinner(): void {

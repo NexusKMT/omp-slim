@@ -229,7 +229,7 @@ describe("disposeTerminalTitleState", () => {
 		// comment in `shutdown()` claims to prevent.
 		disposeTerminalTitleState();
 
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		setTerminalTitleState("working");
 
 		// Assert on the TIMER, not only the writes: the `emitTerminalTitle` latch
@@ -255,10 +255,10 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("working");
 		disposeTerminalTitleState();
 
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		setSessionTerminalTitle("late-async-session");
 
-		expect(writes).toEqual([]);
+		expect(observedTitles(writes, windowsTitleMock)).toEqual([]);
 		// And nothing re-armed behind the silence: a live interval past shutdown
 		// is a leak no later dispose reaches.
 		expect(vi.getTimerCount()).toBe(0);
@@ -274,7 +274,7 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("idle");
 		disposeTerminalTitleState();
 
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		initTerminalTitleState();
 		setSessionTerminalTitle("same-session");
 
@@ -284,7 +284,7 @@ describe("disposeTerminalTitleState", () => {
 	it("emits the selected glyph set on the next spinner tick", () => {
 		setTerminalTitleSpinnerStyle("line");
 		setTerminalTitleState("working");
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 
 		vi.advanceTimersByTime(400);
 
@@ -301,7 +301,7 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleSpinnerStyle("line");
 		setTerminalTitleSpinnerStyle("nope");
 		setTerminalTitleState("working");
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 
 		vi.advanceTimersByTime(160);
 
@@ -313,7 +313,7 @@ describe("disposeTerminalTitleState", () => {
 	it("emits pulse frames on live ticks", () => {
 		setTerminalTitleSpinnerStyle("pulse");
 		setTerminalTitleState("working");
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 
 		vi.advanceTimersByTime(400);
 
@@ -333,7 +333,7 @@ describe("disposeTerminalTitleState", () => {
 		setTerminalTitleState("working");
 		disposeTerminalTitleState();
 
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		initTerminalTitleState();
 		setSessionTerminalTitle("next-session");
 
@@ -341,7 +341,7 @@ describe("disposeTerminalTitleState", () => {
 		expect(observedTitles(writes, windowsTitleMock).some(title => title.includes("next-session"))).toBe(true);
 
 		// ...and the spinner is genuinely ticking again, not frozen on one frame.
-		writes.length = 0;
+		resetObserved(writes, windowsTitleMock);
 		vi.advanceTimersByTime(400);
 		expect(observedTitles(writes, windowsTitleMock).length).toBeGreaterThan(0);
 	});
