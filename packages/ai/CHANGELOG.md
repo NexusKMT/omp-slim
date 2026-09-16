@@ -14,6 +14,7 @@
 - Retained provider state no longer carries an account-specific lesson across a credential switch. When the gateway moves a session to a sibling account, Anthropic's fast-mode entitlement and OpenAI Responses' stored-response chains are re-probed while endpoint-learned fallbacks (tool-grammar limits, signing-proxy demotions, effort fallbacks) are kept ([#12241](https://github.com/can1357/oh-my-pi/pull/12241) by [@camjac251](https://github.com/camjac251)).
 - The auth gateway no longer closes provider state a request is still streaming through when the retained-session ceiling is reached: an entry an in-flight request holds is skipped when making room and reclaimed as soon as that request ends ([#12241](https://github.com/can1357/oh-my-pi/pull/12241) by [@camjac251](https://github.com/camjac251)).
 - Fixed a ChatGPT account being parked as usage-limited once its plan window was spent, even though it still serves Codex requests from its credit balance and the `codex` CLI on the same login keeps working. Such an account stays selectable and an existing usage-limit block on it clears, while a spent account with no credits, a tripped spend control or a non-plan refusal still blocks ([#12171](https://github.com/can1357/oh-my-pi/pull/12171)).
+- Cursor requests now honor explicit max-mode markers on wire-backed models with effort routing instead of overriding them from the model suffix ([#12219](https://github.com/can1357/oh-my-pi/pull/12219) by [@Xytronix](https://github.com/Xytronix)).
 
 ## [18.2.1] - 2026-09-15
 
