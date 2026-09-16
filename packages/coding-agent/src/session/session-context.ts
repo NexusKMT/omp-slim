@@ -614,6 +614,10 @@ export function buildSessionContext(
 			// its result from far back in the conversation. Skip the orphan head
 			// up to the first turn-start entry: those rows stay on the wire and
 			// in the full-history view; only the collapsed head is trimmed.
+			// Trimmed entries still run handleEntryResetTracking — mode/model
+			// changes in the skipped prefix must keep the cache-miss tracking
+			// state identical to the wire walk, or later kept transitions
+			// compute the wrong before-state and mis-mark retained assistants.
 			let displayHeadFound = !options?.transcript;
 			for (let i = 0; i < compactionIdx; i++) {
 				const entry = path[i];
@@ -622,7 +626,10 @@ export function buildSessionContext(
 				}
 				if (!foundFirstKept) continue;
 				if (!displayHeadFound) {
-					if (!isTurnStartEntry(entry)) continue;
+					if (!isTurnStartEntry(entry)) {
+						handleEntryResetTracking(entry);
+						continue;
+					}
 					displayHeadFound = true;
 				}
 				appendMessage(entry);
