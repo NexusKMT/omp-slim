@@ -4,7 +4,7 @@
 mod common;
 
 use common::{DiskWriter, Workspace};
-use pi_edit::{ApplyRequest, EditMode, session::PreviewBatch};
+use pi_edit::{ApplyRequest, EditMode, FileOp, session::PreviewBatch};
 
 const SOURCE: &str = "fn main() {\n    let x = 1;\n    println!(\"{x}\");\n}\n";
 
@@ -310,6 +310,88 @@ async fn update_after_delete_rejects_missing_file_without_writing() {
 	let err = result.expect_err("update cannot resurrect a deleted file");
 	assert!(err.to_string().contains("File not found"), "{err}");
 	assert!(writer.requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn hashline_streaming_rem_previews_invalid_utf8_deletion_before_later_sections() {
+	let mut ws = Workspace::new(EditMode::Hashline);
+	ws.config.raw_input = true;
+	let path = ws.cwd().join("legacy.txt");
+	std::fs::write(&path, b"name=caf\xe9\n").unwrap();
+	ws.write("next.txt", "next\n");
+	let tag = ws.snapshot("next.txt", "next\n", None);
+	let mut session = ws.session();
+	session.push(&format!("[legacy.txt#FFFF]\nREM\n[next.txt#{tag}]\nREM\n"));
+	let streaming = session.preview();
+	assert!(streaming.streaming);
+	let deletion = streaming
+		.files
+		.iter()
+		.find(|file| file.display == "legacy.txt")
+		.expect("completed deletion section must remain visible while streaming");
+	assert!(deletion.error.is_none(), "{streaming:?}");
+	assert_eq!(deletion.op, Some(FileOp::Delete));
+	assert!(path.exists(), "preview must not delete the file");
+
+	session.finish();
+	let final_preview = session.preview();
+	let deletion = final_preview
+		.files
+		.iter()
+		.find(|file| file.display == "legacy.txt")
+		.expect("final preview must retain the deletion");
+	assert!(deletion.error.is_none(), "{final_preview:?}");
+	assert_eq!(deletion.op, Some(FileOp::Delete));
+	let writer = DiskWriter::default();
+	session
+		.apply(ApplyRequest::default(), &writer)
+		.await
+		.expect("apply deletions");
+	assert!(!path.exists());
+	assert!(!ws.cwd().join("next.txt").exists());
+	assert_eq!(writer.requests.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn hashline_streaming_utf8_bypass_requires_an_allowed_tagged_rem() {
+	for (header, diff, original, expected_error) in [
+		("[legacy.ts#FFFF]", "PUT EOF:\n|new", b"name=caf\xe9\n".as_slice(), "UTF-8"),
+		("[legacy.ts]", "REM", b"name=caf\xe9\n".as_slice(), "UTF-8"),
+		("[legacy.ts#FFFF]", "REM\n|body", b"name=caf\xe9\n".as_slice(), "UTF-8"),
+		("[legacy.ts#FFFF]", "REM", b"// @generated\nname=caf\xe9\n".as_slice(), "auto-generated"),
+	] {
+		let mut ws = Workspace::new(EditMode::Hashline);
+		ws.config.raw_input = true;
+		let path = ws.cwd().join("legacy.ts");
+		std::fs::write(&path, original).unwrap();
+		ws.write("next.txt", "next\n");
+		let tag = ws.snapshot("next.txt", "next\n", None);
+		let mut session = ws.session();
+		session.push(&format!("{header}\n{diff}\n[next.txt#{tag}]\nREM\n"));
+		let preview = session.preview();
+		let rejected = preview
+			.files
+			.iter()
+			.find(|file| file.display == "legacy.ts")
+			.expect("completed invalid section must report its error");
+		assert!(
+			rejected
+				.error
+				.as_deref()
+				.is_some_and(|error| error.contains(expected_error)),
+			"{header} {diff}: {preview:?}"
+		);
+		assert_eq!(rejected.op, None);
+		session.finish();
+		let writer = DiskWriter::default();
+		session
+			.apply(ApplyRequest::default(), &writer)
+			.await
+			.expect_err("invalid deletion must not apply");
+		assert_eq!(std::fs::read(&path).unwrap(), original);
+		assert_eq!(ws.read("next.txt").as_deref(), Some("next\n"));
+		assert!(writer.requests.lock().is_empty());
+	}
 }
 
 #[tokio::test]
