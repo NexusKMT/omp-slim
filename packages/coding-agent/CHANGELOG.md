@@ -23,6 +23,7 @@
 - Cancelled background jobs remain tracked until execution finishes, so cleanup cannot report completion prematurely after retention expires. ([#12278](https://github.com/can1357/oh-my-pi/pull/12278) by [@iliaal](https://github.com/iliaal))
 - Fixed localized edits rewriting unrelated bytes in files with invalid UTF-8; these edits now fail without modifying the file. ([#12277](https://github.com/can1357/oh-my-pi/pull/12277) by [@iliaal](https://github.com/iliaal))
 - Fixed sloppy edits crashing with a char-boundary panic instead of reporting a match error when the file contains multibyte (e.g. CJK) text.
+- Resolved same-path move failures in indexed session storage
 - Restricted and revived subagents retain parent-loaded extension hooks without enabling extension-contributed tools.
 - Revived subagents honor the owning session's extension-discovery restrictions.
 - Secret login answers stay hidden in later prompts and cannot be recovered through undo or yank.
