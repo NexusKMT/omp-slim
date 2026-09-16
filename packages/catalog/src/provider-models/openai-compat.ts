@@ -241,16 +241,12 @@ async function fetchCatalogPayload(
 	return payload;
 }
 
-/** models.dev's own catalog, used only when the shared payload omits effort tiers. */
-const MODELS_DEV_CATALOG_URL = "https://models.dev/api.json";
-const PUBLISHED_EFFORT_TTL_MS = 60 * 60 * 1000;
-
 /**
- * The wire effort tiers models.dev publishes for a model, in canonical order.
+ * The wire effort tiers the catalog publishes for a model, in canonical order.
  * Undefined when the row has no effort-addressed thinking, or names no tier
  * omp knows.
  */
-function modelsDevEffortLadder(model: ModelsDevModel): Effort[] | undefined {
+function publishedEffortLadder(model: ModelsDevModel): Effort[] | undefined {
 	const values = model.reasoning_options?.find(option => option?.type === "effort")?.values;
 	if (!Array.isArray(values)) return undefined;
 	const ladder = THINKING_EFFORTS.filter(effort => values.includes(effort));
@@ -301,7 +297,7 @@ function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 		for (const [modelId, rawModel] of Object.entries(provider.models)) {
 			if (!isRecord(rawModel)) continue;
 			const key = `${providerKey}\u0000${modelId}`;
-			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
+			const ladder = publishedEffortLadder(rawModel as ModelsDevModel);
 			if (!ladder) {
 				withoutLadder.add(key);
 				// Some deployment of this id rejects an effort dial; without
@@ -324,111 +320,28 @@ function indexPublishedEffortLadders(payload: unknown): PublishedEffortLadders {
 	return index;
 }
 
-interface PublishedEffortSession {
-	memo?: { at: number; ladders: PublishedEffortLadders };
-	request?: Promise<PublishedEffortLadders>;
-}
-
 /**
- * Ladder state per fetch context, mirroring the catalog payload sessions: a
- * registry carrying its own {@link FetchImpl} reaches its own mirror under its
- * own credentials, so neither its index nor its in-flight request may answer
- * for an unrelated registry.
+ * The index is tagged onto the catalog payload it was built from, so each
+ * catalog version is indexed once. {@link fetchWellKnownModels} already scopes
+ * payloads by fetch context, coalesces concurrent requests, answers a `304`
+ * with the same object, and hands back the last good payload when a refresh
+ * fails, so the tag inherits all of that lifetime behaviour for free.
  */
-const defaultPublishedEffortSession: PublishedEffortSession = {};
-const publishedEffortSessionsByFetch = new WeakMap<FetchImpl, PublishedEffortSession>();
+const kPublishedEffortLadders = Symbol("catalog.publishedEffortLadders");
 
-function getPublishedEffortSession(fetchImpl: FetchImpl | undefined): PublishedEffortSession {
-	if (!fetchImpl) return defaultPublishedEffortSession;
-	const existing = publishedEffortSessionsByFetch.get(fetchImpl);
-	if (existing) return existing;
-	const created: PublishedEffortSession = {};
-	publishedEffortSessionsByFetch.set(fetchImpl, created);
-	return created;
+interface IndexedCatalogPayload {
+	[kPublishedEffortLadders]?: PublishedEffortLadders;
+}
+
+async function loadPublishedEffortLadders(fetchImpl?: FetchImpl): Promise<PublishedEffortLadders> {
+	const payload = await fetchWellKnownModels(fetchImpl);
+	if (!isRecord(payload)) return EMPTY_PUBLISHED_EFFORT_LADDERS;
+	const tagged = payload as IndexedCatalogPayload;
+	return (tagged[kPublishedEffortLadders] ??= indexPublishedEffortLadders(payload));
 }
 
 /**
- * Published effort ladders, memoized for an hour: the catalog moves far slower
- * than a discovery refresh, and every configured provider would otherwise
- * re-index it. A refresh that starts while a request is still in flight joins
- * that request instead of issuing its own, so refreshing every configured
- * provider at once downloads the catalog once.
- *
- * The shared catalog payload is the source whenever it carries ladders. It is
- * a field-pruned copy that currently drops `reasoning_options` entirely, so an
- * index with no ladder in it falls back to models.dev itself; the extra request
- * stops happening the moment the pruned copy keeps the field. Each source
- * fails on its own — an unreachable shared payload still lets models.dev
- * answer — and a cycle that produces no ladder at all neither replaces nor
- * memoizes over an index that had them, so a transient failure costs a retry
- * on the next discovery rather than an hour without ladders.
- */
-function loadPublishedEffortLadders(
-	fetchImpl?: FetchImpl,
-	now: () => number = Date.now,
-): Promise<PublishedEffortLadders> {
-	const session = getPublishedEffortSession(fetchImpl);
-	if (session.memo && now() - session.memo.at < PUBLISHED_EFFORT_TTL_MS) {
-		return Promise.resolve(session.memo.ladders);
-	}
-	if (session.request) return session.request;
-	const request = fetchPublishedEffortLadders(session, fetchImpl, now).finally(() => {
-		if (session.request === request) session.request = undefined;
-	});
-	session.request = request;
-	return request;
-}
-
-async function fetchPublishedEffortLadders(
-	session: PublishedEffortSession,
-	fetchImpl: FetchImpl | undefined,
-	now: () => number,
-): Promise<PublishedEffortLadders> {
-	const fetchModelsDev = async (signal: AbortSignal): Promise<PublishedEffortLadders> => {
-		const response = await (fetchImpl ?? discoveryFetch())(MODELS_DEV_CATALOG_URL, {
-			method: "GET",
-			headers: { Accept: "application/json", "User-Agent": CATALOG_USER_AGENT },
-			signal,
-		});
-		if (!response.ok) throw new Error(`models.dev catalog fetch failed: ${response.status}`);
-		return indexPublishedEffortLadders((await response.json()) as unknown);
-	};
-	const ladders = await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, async signal => {
-		let shared = EMPTY_PUBLISHED_EFFORT_LADDERS;
-		try {
-			shared = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl, signal));
-		} catch {
-			// Try models.dev within the same deadline.
-		}
-		if (shared.byHost.size > 0) return shared;
-		try {
-			return await fetchModelsDev(signal);
-		} catch {
-			return shared;
-		}
-	});
-	if (ladders.byHost.size === 0) {
-		if (session.memo && session.memo.ladders.byHost.size > 0) return session.memo.ladders;
-		return ladders;
-	}
-	session.memo = { at: now(), ladders };
-	return ladders;
-}
-/** Test seam: drops the memoized index so a case can serve a different catalog. */
-export function resetPublishedEffortLaddersForTest(fetchImpl?: FetchImpl): void {
-	const session = getPublishedEffortSession(fetchImpl);
-	session.memo = undefined;
-	session.request = undefined;
-}
-
-/** Test seam: ages a memoized index past its TTL so the next load refetches. */
-export function expirePublishedEffortLaddersForTest(fetchImpl?: FetchImpl): void {
-	const session = getPublishedEffortSession(fetchImpl);
-	if (session.memo) session.memo = { ...session.memo, at: 0 };
-}
-
-/**
- * The models.dev provider keys this endpoint publishes under. A provider whose
+ * The catalog provider keys this endpoint publishes under. A provider whose
  * catalog identity differs from its omp id (`moonshot` → `moonshotai`) is
  * resolved through its descriptors; the omp id stays as a candidate for
  * providers the descriptors do not cover.
@@ -502,7 +415,9 @@ async function applyPublishedEffortLadders<TApi extends Api>(
 			.map(model => model.id),
 	);
 	if (guessed.size === 0) return models;
-	const ladders = await loadPublishedEffortLadders(fetchImpl);
+	// An unreachable catalog with no prior payload is not a discovery failure:
+	// the endpoint's own listing stands and the guess stays in place.
+	const ladders = await loadPublishedEffortLadders(fetchImpl).catch(() => EMPTY_PUBLISHED_EFFORT_LADDERS);
 	if (ladders.byHost.size === 0) return models;
 	const providerKeys = catalogProviderKeys(providerId);
 	return models.map(model => {

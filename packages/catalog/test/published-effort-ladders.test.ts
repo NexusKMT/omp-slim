@@ -1,25 +1,23 @@
 /**
  * Contract: a discovered reasoning model without a model-scoped effort rule
- * adopts the ladder the catalog publishes for its id, while reviewed ladders
- * and non-reasoning rows stay exactly as they are.
+ * adopts the ladder the shared catalog publishes for its id, while reviewed
+ * ladders and non-reasoning rows stay exactly as they are. The shared catalog
+ * is the only source; nothing else is fetched.
  *
  * Moonshot's mapper marks any `-thinking` variant as reasoning, including
  * unrecognized ids with only a neutral wire default. Novita supplies the
  * complementary case: an unrecognized id with a provider-wide class default.
  */
-import { beforeEach, expect, test, vi } from "bun:test";
+import { expect, test } from "bun:test";
 import { hasModelScopedEffortLadder, resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
-	expirePublishedEffortLaddersForTest,
 	moonshotModelManagerOptions,
 	novitaModelManagerOptions,
-	resetPublishedEffortLaddersForTest,
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 const SHARED_CATALOG_URL = "https://catalog.stencil.so/models.json.zstd";
-const MODELS_DEV_URL = "https://models.dev/api.json";
 const MOONSHOT_BASE_URL = "https://api.moonshot.ai/v1";
 const MOONSHOT_MODELS_URL = `${MOONSHOT_BASE_URL}/models`;
 
@@ -61,10 +59,6 @@ function discover(fetchImpl: FetchImpl): Promise<readonly ModelSpec<"openai-comp
 	);
 }
 
-beforeEach(() => {
-	resetPublishedEffortLaddersForTest();
-});
-
 test("the neutral default and a rule-owned ladder are distinguishable", () => {
 	const spec = {
 		id: UNREVIEWED_ID,
@@ -83,7 +77,7 @@ test("the neutral default and a rule-owned ladder are distinguishable", () => {
 	expect(hasModelScopedEffortLadder({ ...spec, id: REVIEWED_ID })).toBe(true);
 });
 
-test("published tiers replace the guess, read from the shared catalog when it has them", async () => {
+test("published tiers replace the guess", async () => {
 	const calls: string[] = [];
 	const models = await discover(
 		stubFetch(
@@ -101,25 +95,21 @@ test("published tiers replace the guess, read from the shared catalog when it ha
 		Effort.High,
 		Effort.Max,
 	]);
-	// models.dev itself stays untouched while the shared payload carries tiers.
-	expect(calls).not.toContain(MODELS_DEV_URL);
+	// The shared catalog is the only source consulted.
+	expect(calls.filter(url => url !== MOONSHOT_MODELS_URL)).toEqual([SHARED_CATALOG_URL]);
 });
 
-test("falls back to models.dev when the shared catalog publishes no tiers at all, peeling gateway prefixes", async () => {
-	const calls: string[] = [];
+test("gateway prefixes are peeled to find the upstream host's ladder", async () => {
+	const id = `acme/${UNREVIEWED_ID}`;
 	const models = await discover(
 		stubFetch(
-			{
-				[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
-				[MODELS_DEV_URL]: { acme: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
-			},
-			calls,
-			[`acme/${UNREVIEWED_ID}`],
+			{ [SHARED_CATALOG_URL]: { acme: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } } },
+			[],
+			[id],
 		),
 	);
 
-	expect(calls).toContain(MODELS_DEV_URL);
-	expect(models?.find(candidate => candidate.id === `acme/${UNREVIEWED_ID}`)?.thinking).toEqual({
+	expect(models?.find(candidate => candidate.id === id)?.thinking).toEqual({
 		mode: "effort",
 		efforts: [Effort.Low, Effort.High],
 	});
@@ -162,7 +152,6 @@ test("a provider-wide unknown-class ladder yields to published tiers", async () 
 });
 
 test("rule-owned ladders and non-reasoning rows are left alone", async () => {
-	const calls: string[] = [];
 	const models = await discover(
 		stubFetch(
 			{
@@ -175,7 +164,7 @@ test("rule-owned ladders and non-reasoning rows are left alone", async () => {
 					},
 				},
 			},
-			calls,
+			[],
 			[REVIEWED_ID, "plain-chat-9b"],
 		),
 	);
@@ -200,15 +189,21 @@ test("no catalog request when every discovered model's tiers are already known",
 
 test("an unreachable catalog, or one that knows nothing about the id, leaves the guess in place", async () => {
 	const calls: string[] = [];
-	const models = await discover(stubFetch({}, calls, [UNREVIEWED_ID]));
-
+	const unreachable = await discover(stubFetch({}, calls, [UNREVIEWED_ID]));
 	expect(calls).toContain(SHARED_CATALOG_URL);
-	expect(calls).toContain(MODELS_DEV_URL);
-	expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+	expect(unreachable?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+
+	const unknown = await discover(
+		stubFetch(
+			{ [SHARED_CATALOG_URL]: { moonshotai: { models: { "other-model": catalogRow(["low"]) } } } },
+			[],
+			[UNREVIEWED_ID],
+		),
+	);
+	expect(unknown?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
 });
 
 test("a duplicated id takes the ladder its own host published", async () => {
-	const calls: string[] = [];
 	const models = await discover(
 		stubFetch(
 			{
@@ -218,7 +213,7 @@ test("a duplicated id takes the ladder its own host published", async () => {
 					moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high", "max"]) } },
 				},
 			},
-			calls,
+			[],
 			[UNREVIEWED_ID],
 		),
 	);
@@ -266,7 +261,6 @@ test("an inferred host without a dial vetoes a foreign full-id ladder", async ()
 });
 
 test("an id foreign hosts publish differently stays unknown; hosts that agree still answer", async () => {
-	const calls: string[] = [];
 	const agreedId = "quasar-7b-thinking";
 	const models = await discover(
 		stubFetch(
@@ -286,7 +280,7 @@ test("an id foreign hosts publish differently stays unknown; hosts that agree st
 					},
 				},
 			},
-			calls,
+			[],
 			[UNREVIEWED_ID, agreedId],
 		),
 	);
@@ -300,56 +294,7 @@ test("an id foreign hosts publish differently stays unknown; hosts that agree st
 	});
 });
 
-test("concurrent discovery refreshes share one catalog request", async () => {
-	const calls: string[] = [];
-	const fetchImpl = stubFetch(
-		{
-			[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
-			[MODELS_DEV_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
-		},
-		calls,
-		[UNREVIEWED_ID],
-	);
-
-	const refreshes = await Promise.all([discover(fetchImpl), discover(fetchImpl)]);
-
-	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(1);
-	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
-	for (const models of refreshes) {
-		expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toEqual({
-			mode: "effort",
-			efforts: [Effort.Low, Effort.High],
-		});
-	}
-});
-test("isolates published ladders and in-flight requests by fetch implementation", async () => {
-	const callsA: string[] = [];
-	const callsB: string[] = [];
-	const fetchA = stubFetch(
-		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low"]) } } } },
-		callsA,
-		[UNREVIEWED_ID],
-	);
-	const fetchB = stubFetch(
-		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["high"]) } } } },
-		callsB,
-		[UNREVIEWED_ID],
-	);
-	const [modelsA, modelsB] = await Promise.all([discover(fetchA), discover(fetchB)]);
-	expect(modelsA?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
-		mode: "effort",
-		efforts: [Effort.Low],
-	});
-	expect(modelsB?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
-		mode: "effort",
-		efforts: [Effort.High],
-	});
-	expect(callsA.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
-	expect(callsB.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
-});
-
 test("a host row without an effort ladder blocks a foreign bare-id ladder", async () => {
-	const calls: string[] = [];
 	const models = await discover(
 		stubFetch(
 			{
@@ -358,16 +303,14 @@ test("a host row without an effort ladder blocks a foreign bare-id ladder", asyn
 					moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } },
 				},
 			},
-			calls,
+			[],
 			[UNREVIEWED_ID],
 		),
 	);
 	expect(models?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
-	expect(calls).not.toContain(MODELS_DEV_URL);
 });
 
 test("a bare id any host publishes without an effort dial stays unknown", async () => {
-	const calls: string[] = [];
 	// Moonshot hosts none of these ids, so only the bare-id index can answer
 	// and no per-host veto is reachable. Row order differs per id: the dialless
 	// row arrives after the ladder for one and before it for the other.
@@ -394,7 +337,7 @@ test("a bare id any host publishes without an effort dial stays unknown", async 
 					},
 				},
 			},
-			calls,
+			[],
 			[ladderFirstId, diallessFirstId, agreedId],
 		),
 	);
@@ -408,14 +351,57 @@ test("a bare id any host publishes without an effort dial stays unknown", async 
 		mode: "effort",
 		efforts: [Effort.Low, Effort.High],
 	});
-	expect(calls).not.toContain(MODELS_DEV_URL);
 });
 
-test("retains a good ladder when the post-TTL fallback fetch fails", async () => {
+test("concurrent discovery refreshes share one catalog request", async () => {
+	const calls: string[] = [];
+	const fetchImpl = stubFetch(
+		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } } },
+		calls,
+		[UNREVIEWED_ID],
+	);
+
+	const refreshes = await Promise.all([discover(fetchImpl), discover(fetchImpl)]);
+
+	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+	for (const models of refreshes) {
+		expect(models?.find(candidate => candidate.id === UNREVIEWED_ID)?.thinking).toEqual({
+			mode: "effort",
+			efforts: [Effort.Low, Effort.High],
+		});
+	}
+});
+
+test("isolates published ladders by fetch implementation", async () => {
+	const callsA: string[] = [];
+	const callsB: string[] = [];
+	const fetchA = stubFetch(
+		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low"]) } } } },
+		callsA,
+		[UNREVIEWED_ID],
+	);
+	const fetchB = stubFetch(
+		{ [SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["high"]) } } } },
+		callsB,
+		[UNREVIEWED_ID],
+	);
+	const [modelsA, modelsB] = await Promise.all([discover(fetchA), discover(fetchB)]);
+	expect(modelsA?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.Low],
+	});
+	expect(modelsB?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
+		mode: "effort",
+		efforts: [Effort.High],
+	});
+	expect(callsA.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+	expect(callsB.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(1);
+});
+
+test("keeps the last good ladders when a catalog refresh fails", async () => {
 	const calls: string[] = [];
 	const routes: Record<string, unknown> = {
-		[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
-		[MODELS_DEV_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
+		[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } },
 	};
 	const fetchImpl = stubFetch(routes, calls, [UNREVIEWED_ID]);
 	const first = await discover(fetchImpl);
@@ -423,73 +409,12 @@ test("retains a good ladder when the post-TTL fallback fetch fails", async () =>
 		mode: "effort",
 		efforts: [Effort.Low, Effort.High],
 	});
-	expirePublishedEffortLaddersForTest(fetchImpl);
-	routes[MODELS_DEV_URL] = undefined;
+
+	routes[SHARED_CATALOG_URL] = undefined;
 	const second = await discover(fetchImpl);
 	expect(second?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
 		mode: "effort",
 		efforts: [Effort.Low, Effort.High],
 	});
-	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
-});
-
-test("does not memoize an empty cold refresh when shared data has no ladder and models.dev fails", async () => {
-	const calls: string[] = [];
-	const routes: Record<string, unknown> = {
-		[SHARED_CATALOG_URL]: { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } },
-	};
-	const fetchImpl = stubFetch(routes, calls, [UNREVIEWED_ID]);
-	const first = await discover(fetchImpl);
-	expect(first?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
-	routes[MODELS_DEV_URL] = { moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low"]) } } };
-	const second = await discover(fetchImpl);
-	expect(second?.find(model => model.id === UNREVIEWED_ID)?.thinking).toEqual({
-		mode: "effort",
-		efforts: [Effort.Low],
-	});
 	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(2);
-	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
-});
-
-/**
- * The two catalog sources share one deadline, so a shared-catalog leg that
- * burns the whole budget leaves models.dev no fresh window of its own. The
- * deadline is a plain `setTimeout`, so fake timers drive it: no wall-clock
- * wait, no real network.
- */
-test("a blown deadline on the shared leg leaves models.dev no fresh window", async () => {
-	const signalByUrl = new Map<string, AbortSignal | undefined>();
-	const sharedLeg = Promise.withResolvers<void>();
-	const enteredSharedLeg = Promise.withResolvers<void>();
-	const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-		signalByUrl.set(url, init?.signal ?? undefined);
-		if (url.startsWith(MOONSHOT_MODELS_URL)) {
-			return Response.json({ data: [{ id: UNREVIEWED_ID, object: "model" }] });
-		}
-		if (url === SHARED_CATALOG_URL) {
-			enteredSharedLeg.resolve();
-			await sharedLeg.promise;
-			return Response.json({ moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } });
-		}
-		// Real fetch refuses an aborted signal; the stub must too.
-		if (init?.signal?.aborted) throw init.signal.reason;
-		return Response.json({ moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } });
-	}) as FetchImpl;
-
-	vi.useFakeTimers();
-	try {
-		const pending = discover(fetchImpl);
-		await enteredSharedLeg.promise;
-		vi.advanceTimersByTime(10_000);
-		sharedLeg.resolve();
-		const models = await pending;
-
-		// models.dev was reached on the expired deadline, not a new one, so the
-		// ladder stays unknown rather than arriving after twice the budget.
-		expect(signalByUrl.get(MODELS_DEV_URL)?.aborted).toBe(true);
-		expect(models?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
-	} finally {
-		vi.useRealTimers();
-	}
 });

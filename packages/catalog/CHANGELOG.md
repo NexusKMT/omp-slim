@@ -7,9 +7,10 @@
 - Model-cache corruption recovery now preserves private database and sidecar backups and avoids replacing a cache already recovered by another process.
 - Devin (SWE-2, SWE-1.7, GLM-5.2 High) and Kimi Code models now report API-equivalent token pricing when upstream discovery omits cost dimensions; SWE-2 reflects the promotional rate through 2026-12-31 and switches to list price from 2027-01-01 ([#12204](https://github.com/can1357/oh-my-pi/pull/12204) by [@eggpeat](https://github.com/eggpeat)).
 - Devin Fusion composites now record their own headline rate instead of a dispatched component's rate when upstream flattens multiple rate cards into one config, and harness-backed Fusion lanes chat directly instead of failing through the `AssignModel` router path ([#12204](https://github.com/can1357/oh-my-pi/pull/12204) by [@eggpeat](https://github.com/eggpeat)).
+
 ### Added
 
-- OpenAI-compatible discovery fills missing model-specific reasoning effort tiers from the published catalog, replacing neutral wire and provider-wide unknown-class defaults while preserving explicit discovery metadata and model-scoped rules ([#12227](https://github.com/can1357/oh-my-pi/pull/12227) by [@Xytronix](https://github.com/Xytronix)).
+- OpenAI-compatible discovery fills missing reasoning effort tiers for unrecognized models from the shared catalog's published `reasoning_options`, replacing the neutral wire and provider-wide unknown-class guesses while leaving explicit discovery metadata and reviewed model rules untouched ([#12227](https://github.com/can1357/oh-my-pi/pull/12227) by [@Xytronix](https://github.com/Xytronix)).
 
 ## [18.2.1] - 2026-09-15
 
