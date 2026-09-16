@@ -99,4 +99,22 @@ describe("Kimi Code provider catalog", () => {
 		expect(models[0]?.reasoning).toBe(false);
 		expect(models[0]?.thinking).toBeUndefined();
 	});
+
+	it("prices $0-discovered rows instead of recording $0 in usage stats", async () => {
+		// /coding/v1/models carries no pricing: both rows take their
+		// cost-fallback (k3 at the public K3 list; kimi-for-coding at the
+		// K2.7 Code line rate because K2.8 Preview has no public SKU).
+		const models = await discover([LIVE_K3, { ...LIVE_K3, id: "kimi-for-coding" }]);
+
+		expect(models.find(candidate => candidate.id === "k3")?.cost).toMatchObject({
+			input: 3,
+			output: 15,
+			cacheRead: 0.3,
+		});
+		expect(models.find(candidate => candidate.id === "kimi-for-coding")?.cost).toMatchObject({
+			input: 0.95,
+			output: 4,
+			cacheRead: 0.19,
+		});
+	});
 });
