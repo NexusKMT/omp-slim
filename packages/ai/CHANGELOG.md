@@ -5,6 +5,7 @@
 ### Added
 
 - Added `baseUrl` support for `bedrock-converse-stream` requests, so `providers.amazon-bedrock` (or a custom provider using the same API) can route through a VPC/PrivateLink endpoint, a FIPS host, or an internal gateway — including one mounted under a path or authenticated via a query parameter — instead of AWS's hardcoded `bedrock-runtime.{region}.amazonaws.com` ([#12246](https://github.com/can1357/oh-my-pi/pull/12246) by [@rmskkn](https://github.com/rmskkn)).
+
 ### Fixed
 
 - Corrupt credential databases are preserved as private `.corrupt-*` backups and recreated instead of aborting startup; log in again to restore credentials.

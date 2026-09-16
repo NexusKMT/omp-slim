@@ -5,6 +5,7 @@
 ### Added
 
 - Secret obfuscation now registers passwords embedded in connection-URL environment variables (PostgreSQL, MongoDB, MySQL, Redis, AMQP, and any other `scheme://user:password@host` value) regardless of the variable name ([#12233](https://github.com/can1357/oh-my-pi/pull/12233) by [@wtfsayo](https://github.com/wtfsayo)).
+- Built-in secret obfuscation now covers AWS access keys, Google API keys, Slack, npm, Stripe (secret/restricted keys and webhook secrets), Hugging Face, SendGrid, JWTs, Bearer header tokens, and PEM private-key blocks ([#12234](https://github.com/can1357/oh-my-pi/pull/12234) by [@wtfsayo](https://github.com/wtfsayo)).
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 - Added `pulse` terminal-title spinner style to `tui.titleSpinner`: a moon that fills (○◔◑◕●) and empties, alongside the existing braille, dots, and ASCII line sets ([#12250](https://github.com/can1357/oh-my-pi/pull/12250) by [@H4vC](https://github.com/H4vC)).
 
@@ -26,9 +27,6 @@
 - Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications ([#12232](https://github.com/can1357/oh-my-pi/pull/12232) by [@aramalipoor](https://github.com/aramalipoor)).
 - Fixed browser reuse missing Chromium behind Linux wrapper scripts and spawning a duplicate on a locked profile ([#12236](https://github.com/can1357/oh-my-pi/pull/12236) by [@shivamklr](https://github.com/shivamklr)).
 - Explicit model refreshes now re-run command-backed API keys and headers, allowing rotated credentials to recover without restarting omp ([#12172](https://github.com/can1357/oh-my-pi/pull/12172) by [@harshaygadekar](https://github.com/harshaygadekar)).
-
-### Fixed
-
 - Fixed background jobs lingering in `hub jobs` / `/jobs` output for the full retention window after they complete: a settled row whose result was delivered or recovered by a snapshot now clears shortly (~30s) after consumption, while unconsumed rows stay inspectable. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
 - Fixed the collapsed transcript after a compaction whose cut landed mid-turn leading the terminal with stale turn fragments (e.g. a subagent spawn prompt from far back in the conversation); the display head now starts at a turn boundary while the wire context keeps the exact kept region. ([#12252](https://github.com/can1357/oh-my-pi/pull/12252) by [@eggpeat](https://github.com/eggpeat))
 
@@ -397,7 +395,6 @@
 ### Removed
 
 - Removed the dangling `MCPManager.setOnNotification` single-slot setter, which had no callers in the runtime. Replaced by `MCPManager.addNotificationListener` — multi-listener, per-listener error isolation, returns an unsubscribe function.
-- Built-in secret obfuscation now covers AWS access keys, Google API keys, Slack, npm, Stripe (secret/restricted keys and webhook secrets), Hugging Face, SendGrid, JWTs, Bearer header tokens, and PEM private-key blocks.
 
 ## [18.2.0] - 2026-09-15
 
