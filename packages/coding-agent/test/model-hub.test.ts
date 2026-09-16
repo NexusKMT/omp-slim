@@ -1434,6 +1434,48 @@ describe("ModelHub", () => {
 			expect(refreshProvider).toHaveBeenCalledWith("prov-a", "online", { refreshCommandCredentials: true });
 		});
 
+		test("F5 during the hover debounce upgrades the pending catalog refresh", async () => {
+			const model = makeModel("prov-a", "model-a");
+			const refreshProvider = vi.fn(async () => {});
+			const { hub } = createHub({
+				models: [model],
+				registry: { refreshProvider },
+			});
+			installTestTheme();
+
+			hub.handleInput(DOWN); // schedules catalog-only refresh
+			hub.handleInput("\x1b[15~"); // F5 before the 120ms debounce fires
+			await Bun.sleep(40);
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+			expect(refreshProvider).toHaveBeenCalledWith("prov-a", "online", { refreshCommandCredentials: true });
+			await Bun.sleep(140);
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+		});
+
+		test("F5 while a catalog refresh is in flight queues a credential re-mint", async () => {
+			const model = makeModel("prov-a", "model-a");
+			const gate = Promise.withResolvers<void>();
+			const refreshProvider = vi.fn(() => gate.promise);
+			const { hub } = createHub({
+				models: [model],
+				registry: { refreshProvider },
+			});
+			installTestTheme();
+
+			hub.handleInput(DOWN);
+			await Bun.sleep(140);
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+			expect(refreshProvider.mock.calls[0]?.[2]).toBeUndefined();
+
+			hub.handleInput("\x1b[15~");
+			expect(refreshProvider).toHaveBeenCalledTimes(1);
+
+			gate.resolve();
+			await Bun.sleep(0);
+			expect(refreshProvider).toHaveBeenCalledTimes(2);
+			expect(refreshProvider).toHaveBeenLastCalledWith("prov-a", "online", { refreshCommandCredentials: true });
+		});
+
 		test("shows a refreshing status while the provider fetch is in flight", async () => {
 			const model = makeModel("prov-b", "model-b");
 			const gate = Promise.withResolvers<void>();

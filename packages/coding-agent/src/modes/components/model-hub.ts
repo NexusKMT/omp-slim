@@ -245,6 +245,8 @@ export class ModelHubComponent implements Component {
 	// Provider discovery refresh (debounced per sidebar selection, with spinner).
 	#refreshingProviders = new Set<string>();
 	#scheduledProviderRefreshes = new Map<string, Timer>();
+	/** F5 while a catalog-only refresh is in flight: re-run with credentials after it settles. */
+	#pendingCredentialRefreshProviders = new Set<string>();
 	#refreshSpinnerFrame = 0;
 	#refreshSpinnerInterval?: Timer;
 	// Frame geometry from the last render, for mouse hit-testing (the
@@ -312,6 +314,7 @@ export class ModelHubComponent implements Component {
 		for (const [, timer] of this.#scheduledProviderRefreshes) clearTimeout(timer);
 		this.#scheduledProviderRefreshes.clear();
 		this.#refreshingProviders.clear();
+		this.#pendingCredentialRefreshProviders.clear();
 		if (this.#refreshSpinnerInterval) {
 			clearInterval(this.#refreshSpinnerInterval);
 			this.#refreshSpinnerInterval = undefined;
@@ -753,22 +756,43 @@ export class ModelHubComponent implements Component {
 			this.#scheduledProviderRefreshes.delete(providerId);
 			this.#setProviderRefreshing(providerId, false);
 		}
+		for (const providerId of this.#pendingCredentialRefreshProviders) {
+			if (providerId === keepProviderId) continue;
+			this.#pendingCredentialRefreshProviders.delete(providerId);
+		}
 	}
 
 	#scheduleProviderRefresh(providerId: string, options?: { force?: boolean }): void {
 		if (this.#scopedModels.length > 0 || !providerId) return;
-		if (this.#scheduledProviderRefreshes.has(providerId) || this.#refreshingProviders.has(providerId)) return;
+		const force = options?.force === true;
+		if (force) {
+			const pending = this.#scheduledProviderRefreshes.get(providerId);
+			if (pending) {
+				// Selection already queued a catalog-only fetch. F5 upgrades it
+				// instead of returning at the pending-guard and dropping force.
+				clearTimeout(pending);
+				this.#scheduledProviderRefreshes.delete(providerId);
+				autoRefreshedProviders.add(providerId);
+				void this.#refreshProviderInBackground(providerId, true);
+				return;
+			}
+			if (this.#refreshingProviders.has(providerId)) {
+				this.#pendingCredentialRefreshProviders.add(providerId);
+				return;
+			}
+		} else if (this.#scheduledProviderRefreshes.has(providerId) || this.#refreshingProviders.has(providerId)) {
+			return;
+		}
 		// Hovering a provider must not re-fetch on every visit: auto-refresh runs
 		// at most once per provider for the process lifetime. F5 forces a re-fetch.
-		if (!options?.force && autoRefreshedProviders.has(providerId)) return;
+		if (!force && autoRefreshedProviders.has(providerId)) return;
 		this.#setProviderRefreshing(providerId, true);
-		const refreshCommandCredentials = options?.force === true;
 		const timer = setTimeout(() => {
 			// Consume the once-guard only when the fetch actually starts: hopping
 			// through a provider cancels the debounce and must not burn its slot.
 			autoRefreshedProviders.add(providerId);
 			this.#scheduledProviderRefreshes.delete(providerId);
-			void this.#refreshProviderInBackground(providerId, refreshCommandCredentials);
+			void this.#refreshProviderInBackground(providerId, force);
 		}, PROVIDER_REFRESH_DEBOUNCE_MS);
 		this.#scheduledProviderRefreshes.set(providerId, timer);
 	}
@@ -787,6 +811,11 @@ export class ModelHubComponent implements Component {
 			this.#configError = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.#setProviderRefreshing(providerId, false);
+			if (!this.#disposed && this.#pendingCredentialRefreshProviders.delete(providerId)) {
+				this.#setProviderRefreshing(providerId, true);
+				autoRefreshedProviders.add(providerId);
+				void this.#refreshProviderInBackground(providerId, true);
+			}
 			this.#tui.requestRender();
 		}
 	}
