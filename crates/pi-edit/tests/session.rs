@@ -192,6 +192,47 @@ async fn hashline_rem_removes_invalid_utf8_file() {
 	assert!(!path.exists(), "invalid UTF-8 file must be deletable");
 	assert!(outcome.text.contains("Deleted legacy.txt"), "{}", outcome.text);
 }
+
+#[tokio::test]
+async fn hashline_rem_streaming_preview_does_not_error_on_invalid_utf8() {
+	use pi_edit::{
+		EditStore, PathPolicy,
+		session::{Session, SessionConfig},
+	};
+
+	let dir = tempfile::tempdir().expect("tempdir");
+	let cwd = dir.path().canonicalize().expect("canonical tempdir");
+	std::fs::write(cwd.join("legacy.txt"), b"name=caf\xe9\n").unwrap();
+	let config = SessionConfig {
+		mode:               EditMode::Hashline,
+		policy:             PathPolicy {
+			cwd:                  cwd.clone(),
+			home_dir:             cwd,
+			local_sandbox_root:   None,
+			vault_roots:          None,
+			plan_active:          false,
+			block_auto_generated: true,
+		},
+		allow_fuzzy:        true,
+		fuzzy_threshold:    0.95,
+		enforce_seen_lines: false,
+		raw_input:          false,
+	};
+	let mut session = Session::new(config, EditStore::new());
+	// Completed REM section followed by an incomplete trailing section.
+	session.set_args_json(
+		&serde_json::json!({ "input": "[legacy.txt#FFFF]\nREM\n[other.txt#FFFF]\nPUT " }).to_string(),
+	);
+	let batch = session.preview();
+	assert!(batch.streaming);
+	let completed = batch
+		.files
+		.iter()
+		.find(|file| file.display == "legacy.txt")
+		.expect("completed REM section previews");
+	assert_eq!(completed.error, None, "{completed:?}");
+}
+
 #[tokio::test]
 async fn create_over_generated_file_still_rejected() {
 	let ws = Workspace::new(EditMode::Patch);
