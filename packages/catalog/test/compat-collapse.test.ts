@@ -1121,7 +1121,35 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 		const unmarked = collapseBuiltVariants([buildModel(bundled), ...unmarkedTiers]);
 		expect(unmarked.find(model => model.id === "gpt-5.6-luna")?.cursorMaxMode).toBe(false);
 	});
-});
+
+	it("derives max mode from bundled routing when Cursor discovery is unavailable", () => {
+		const bundled: ModelSpec<"cursor-agent"> = {
+			...cursorMemberSpec("gpt-5.6-luna"),
+			name: "GPT-5.6 Luna",
+			cursorMaxMode: false,
+			requestModelId: "gpt-5.6-luna-none",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+				effortRouting: {
+					off: "gpt-5.6-luna-none",
+					[Effort.Low]: "gpt-5.6-luna-low",
+					[Effort.Medium]: "gpt-5.6-luna-medium",
+					[Effort.High]: "gpt-5.6-luna-high",
+					[Effort.XHigh]: "gpt-5.6-luna-xhigh",
+					[Effort.Max]: "gpt-5.6-luna-max",
+				},
+			},
+		};
+		const [luna] = collapseVariants([bundled], { table: cursorTable });
+		if (!luna) throw new Error("bundled GPT-5.6 row disappeared");
+
+		expect(luna.cursorMaxMode).toBe(true);
+		expect(resolveWireModelId(buildModel(luna as ModelSpec<"cursor-agent">), Effort.Max)).toBe(
+			"gpt-5.6-luna-max",
+		);
+	});
+ });
 
 describe("Cursor generic tier routing (issue #9237)", () => {
 	const TIERS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];

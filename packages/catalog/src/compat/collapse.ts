@@ -735,6 +735,23 @@ function reconcileDefaultMember<TSpec extends VariantSpecLike>(
 }
 
 /**
+ * Recover Cursor's max-mode marker for a bundled collapsed row. The bundled
+ * snapshot may contain only the logical row, but its effort routing still
+ * records the wire ids. Cursor's extended tiers use the `-xhigh`/`-max` wire
+ * suffix (with an optional `-fast` lane), so preserve the transport invariant
+ * even when live discovery contributes no raw members.
+ */
+function reconcileCursorMaxModeFromRouting<TSpec extends VariantSpecLike>(spec: TSpec): TSpec {
+	if (spec.provider !== "cursor" || spec.cursorMaxMode === true) return spec;
+	const routing = spec.thinking?.effortRouting;
+	if (routing === undefined) return spec;
+	const hasMaxModeRoute = Object.values(routing).some(
+		(target): target is string => typeof target === "string" && /-(?:xhigh|max)(?:-fast)?$/.test(target),
+	);
+	return hasMaxModeRoute ? { ...spec, cursorMaxMode: true } : spec;
+}
+
+/**
  * Lift `cursorMaxMode: true` from live member rows onto an already-collapsed
  * snapshot. Bundled catalog and cache rows froze the flag from `memberSpecs[0]`
  * — the `-none`/`-low` tier — so the committed `gpt-5.6-*` / `cursor-grok-*`
@@ -794,7 +811,9 @@ function collapseWithTable<TSpec extends VariantSpecLike>(
 			// Recycled extraAliases rows are healed in a later pass.
 			const refreshed =
 				existing !== undefined && existingCollapsed
-					? reconcileDefaultMember(refreshCollapsedThinking(reconciled ?? existing, family, retired), family)
+					? reconcileCursorMaxModeFromRouting(
+						reconcileDefaultMember(refreshCollapsedThinking(reconciled ?? existing, family, retired), family),
+					  )
 					: reconciled;
 			if (refreshed !== undefined && refreshed !== existing) {
 				familyIdBySpecId.set(family.id, family.id);
