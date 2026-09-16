@@ -1,13 +1,39 @@
+/** Shared SQLite opening, error attribution, and result-code classification for persistent stores. */
+import { Database } from "bun:sqlite";
+import { getDbBusyTimeoutMs } from "./env";
+
 /**
- * Shared classifiers for `bun:sqlite` error result codes.
- *
- * Every omp SQLite store (`agent.db` credential/usage store, `models.db` model
- * cache, `history.db`) needs the same two distinctions: a transient BUSY that
- * clears by retrying, and an unrecoverable corruption that never does. Keeping
- * one implementation here prevents the classifiers from drifting between the
- * credential store and the model cache.
+ * Opens and initializes a store, retrying BUSY failures up to four total attempts.
+ * Installs the busy handler before initialization and closes failed connections.
+ * The initializer may run again on a fresh connection; on success it owns the handle.
+ * Final failures retain their SQLite codes and include the database path.
  */
-import type { Database } from "bun:sqlite";
+export async function openSqliteDatabase<T>(dbPath: string, initialize: (db: Database) => T | Promise<T>): Promise<T> {
+	const maxAttempts = 4;
+	const baseDelayMs = 100;
+	for (let attempt = 0; ; attempt++) {
+		let db: Database | undefined;
+		try {
+			db = new Database(dbPath);
+			// WAL recovery can bypass the busy handler; both it and retries are needed (#2421).
+			db.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
+			return await initialize(db);
+		} catch (error) {
+			db?.close();
+			if (!isSqliteBusyError(error) || attempt + 1 >= maxAttempts) {
+				throw annotateSqliteError(error, dbPath);
+			}
+			await Bun.sleep(baseDelayMs * 2 ** attempt);
+		}
+	}
+}
+
+/** Adds the failing store's path to an error without losing SQLite result codes or its original stack. */
+export function annotateSqliteError(error: unknown, dbPath: string): Error {
+	const annotated = error instanceof Error ? error : new Error(String(error));
+	annotated.message = `Database ${JSON.stringify(dbPath)}: ${annotated.message}`;
+	return annotated;
+}
 
 /** Checkpoints committed WAL frames without waiting for concurrent readers. */
 export function checkpointWal(db: Database): void {

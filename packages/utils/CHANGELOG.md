@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `openSqliteDatabase` for store initialization with bounded busy retries, connection cleanup, and path-attributed errors.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added
