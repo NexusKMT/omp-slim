@@ -635,8 +635,10 @@ By default `bedrock-converse-stream` requests go to `bedrock-runtime.{region}.am
 inference-profile prefix), or `AWS_REGION`/`AWS_DEFAULT_REGION`/the AWS profile — falling back to
 `us-east-1`. Set `baseUrl` on `providers.amazon-bedrock` (or on a custom provider using
 `api: bedrock-converse-stream`) to send requests somewhere else instead — a VPC/PrivateLink
-endpoint, a FIPS host, or a gateway. Any path on the `baseUrl` is kept as a prefix, so
-`{baseUrl}/model/{id}/converse-stream` is the final URL:
+endpoint, a FIPS host, or a gateway. Any path or query string on the `baseUrl` is kept — the path
+as a prefix, the query appended to the final URL (and included in SigV4's canonical request when
+signing) — so `{baseUrl}/model/{id}/converse-stream[?query]` is the final URL. That covers gateways
+that authenticate via a query parameter instead of a header:
 
 ```yaml
 providers:

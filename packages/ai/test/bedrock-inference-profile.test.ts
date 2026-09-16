@@ -356,6 +356,17 @@ describe("Bedrock custom baseUrl", () => {
 			).toBe("https://gateway.example.com/bedrock/team/model/anthropic.claude-opus-4-8/converse-stream");
 		});
 	});
+
+	// A gateway authenticated via a query parameter: dropping the query would
+	// silently send an unauthenticated (or misrouted) request.
+	test("preserves a baseUrl query string used for gateway authentication", async () => {
+		await withEnv(NO_AMBIENT, async () => {
+			const gateway = "https://gateway.example.com/bedrock?code=secret-token";
+			expect(await capturedRequestUrl(bedrockModel("anthropic.claude-opus-4-8", gateway))).toBe(
+				"https://gateway.example.com/bedrock/model/anthropic.claude-opus-4-8/converse-stream?code=secret-token",
+			);
+		});
+	});
 });
 
 describe("Bedrock error handling", () => {

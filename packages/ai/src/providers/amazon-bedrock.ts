@@ -463,13 +463,15 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 			// raw dump so the inspector shows exactly what was sent.
 			commandInput = { ...commandInput, requestMetadata: sanitizeRequestMetadata(commandInput.requestMetadata) };
 
-			// `baseUrl` is the origin verbatim, path prefix included, so a gateway mounted
+			// `baseUrl` is the origin verbatim, path prefix (and query, for gateways
+			// that authenticate via a query parameter) included, so a gateway mounted
 			// under a path works. AWS's own host is re-pointed: the catalog can't know the region.
 			const base = new URL(model.baseUrl || `https://bedrock-runtime.${region}.amazonaws.com`);
 			if (AWS_REGIONAL_BEDROCK_HOST.test(base.host)) base.host = `bedrock-runtime.${region}.amazonaws.com`;
 			const host = base.host;
 			const urlPath = `${base.pathname.replace(/\/+$/, "")}/model/${encodeURIComponent(model.id)}/converse-stream`;
-			const url = `${base.origin}${urlPath}`;
+			const query = base.search.slice(1) || undefined;
+			const url = `${base.origin}${urlPath}${base.search}`;
 			rawRequestDump = {
 				provider: model.provider,
 				api: output.api,
@@ -541,6 +543,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					method: "POST",
 					host,
 					path: urlPath,
+					query,
 					body,
 					region,
 					service: "bedrock",
