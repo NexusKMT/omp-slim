@@ -12,7 +12,7 @@ import {
 	pricingPeerFor,
 } from "../compat/behavior";
 import { xaiResponsesReasoningEffortMap } from "../compat/openai";
-import { resolveModelPolicy } from "../compat/resolve";
+import { hasModelScopedEffortLadder, resolveModelPolicy } from "../compat/resolve";
 import { compareRevision, parseRevision } from "../compat/revision";
 import { seedModels } from "../compat/providers";
 import { billingVariantPlain, classifyModel, discoveryVocabulary } from "../compat/taxonomy";
@@ -239,6 +239,147 @@ async function fetchCatalogPayload(
 	session.etag = response.headers.get("etag");
 	session.hasPayload = true;
 	return payload;
+}
+
+/** models.dev's own catalog, used only when the shared payload omits effort tiers. */
+const MODELS_DEV_CATALOG_URL = "https://models.dev/api.json";
+const PUBLISHED_EFFORT_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * The wire effort tiers models.dev publishes for a model, in canonical order.
+ * Undefined when the row has no effort-addressed thinking, or names no tier
+ * omp knows.
+ */
+function modelsDevEffortLadder(model: ModelsDevModel): Effort[] | undefined {
+	const values = model.reasoning_options?.find(option => option?.type === "effort")?.values;
+	if (!Array.isArray(values)) return undefined;
+	const ladder = THINKING_EFFORTS.filter(effort => values.includes(effort));
+	return ladder.length > 0 ? ladder : undefined;
+}
+
+/**
+ * Index every published ladder by bare catalog id. When two hosts publish
+ * different ladders for the same id the first wins rather than the widest:
+ * advertising a tier the upstream rejects is worse than offering one too few.
+ */
+function indexPublishedEffortLadders(payload: unknown): Map<string, readonly Effort[]> {
+	const ladders = new Map<string, readonly Effort[]>();
+	if (!isRecord(payload)) return ladders;
+	for (const provider of Object.values(payload)) {
+		if (!isRecord(provider) || !isRecord(provider.models)) continue;
+		for (const [modelId, rawModel] of Object.entries(provider.models)) {
+			if (!isRecord(rawModel) || ladders.has(modelId)) continue;
+			const ladder = modelsDevEffortLadder(rawModel as ModelsDevModel);
+			if (ladder) ladders.set(modelId, ladder);
+		}
+	}
+	return ladders;
+}
+
+let publishedEffortMemo: { at: number; ladders: ReadonlyMap<string, readonly Effort[]> } | undefined;
+
+/**
+ * Published effort ladders, memoized for an hour: the catalog moves far slower
+ * than a discovery refresh, and every configured provider would otherwise
+ * re-index it.
+ *
+ * The shared catalog payload is the source whenever it carries ladders. It is
+ * a field-pruned copy that currently drops `reasoning_options` entirely, so an
+ * index with no ladder in it falls back to models.dev itself; the extra request
+ * stops happening the moment the pruned copy keeps the field. Each source
+ * fails on its own — an unreachable shared payload still lets models.dev
+ * answer — and a cycle where both fail is not memoized, so the next discovery
+ * retries instead of inheriting an hour of emptiness.
+ */
+async function loadPublishedEffortLadders(
+	fetchImpl?: FetchImpl,
+	now: () => number = Date.now,
+): Promise<ReadonlyMap<string, readonly Effort[]>> {
+	if (publishedEffortMemo && now() - publishedEffortMemo.at < PUBLISHED_EFFORT_TTL_MS) {
+		return publishedEffortMemo.ladders;
+	}
+	let ladders = new Map<string, readonly Effort[]>();
+	let answered = false;
+	try {
+		ladders = indexPublishedEffortLadders(await fetchWellKnownModels(fetchImpl));
+		answered = true;
+	} catch {
+		// Shared payload unavailable this cycle; models.dev may still answer.
+	}
+	if (ladders.size === 0) {
+		try {
+			ladders = indexPublishedEffortLadders(
+				await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, async signal => {
+					const response = await (fetchImpl ?? discoveryFetch())(MODELS_DEV_CATALOG_URL, {
+						method: "GET",
+						headers: { Accept: "application/json", "User-Agent": CATALOG_USER_AGENT },
+						signal,
+					});
+					if (!response.ok) throw new Error(`models.dev catalog fetch failed: ${response.status}`);
+					return (await response.json()) as unknown;
+				}),
+			);
+			answered = true;
+		} catch {
+			// Both sources failed; fall through to the last good index.
+		}
+	}
+	if (!answered) {
+		return publishedEffortMemo?.ladders ?? ladders;
+	}
+	publishedEffortMemo = { at: now(), ladders };
+	return ladders;
+}
+
+/** Test seam: drops the memoized index so a case can serve a different catalog. */
+export function resetPublishedEffortLaddersForTest(): void {
+	publishedEffortMemo = undefined;
+}
+
+/** Peel gateway prefixes (`deepseek/deepseek-v4` → `deepseek-v4`) until a catalog hit. */
+function lookupPublishedEffortLadder(
+	ladders: ReadonlyMap<string, readonly Effort[]>,
+	modelId: string,
+): readonly Effort[] | undefined {
+	for (let candidate = modelId; ;) {
+		const ladder = ladders.get(candidate);
+		if (ladder) return ladder;
+		const slash = candidate.indexOf("/");
+		if (slash < 0) return undefined;
+		candidate = candidate.slice(slash + 1);
+	}
+}
+
+/**
+ * Fill the effort ladder of discovered reasoning models whose tiers omp would
+ * otherwise guess from the neutral wire default.
+ *
+ * Source precedence is unchanged: a provider that reports its own thinking
+ * surface, and any model whose ladder reviewed rules declare, are left exactly
+ * as they are. Only the guess is corrected, and only for ids the catalog
+ * actually publishes, so no request is made when every discovered model is
+ * already covered.
+ */
+async function applyPublishedEffortLadders<TApi extends Api>(
+	models: readonly ModelSpec<TApi>[] | null,
+	fetchImpl?: FetchImpl,
+): Promise<readonly ModelSpec<TApi>[] | null> {
+	if (models === null) return null;
+	const guessed = new Set(
+		models
+			.filter(
+				model => model.reasoning === true && model.thinking === undefined && !hasModelScopedEffortLadder(model),
+			)
+			.map(model => model.id),
+	);
+	if (guessed.size === 0) return models;
+	const ladders = await loadPublishedEffortLadders(fetchImpl);
+	if (ladders.size === 0) return models;
+	return models.map(model => {
+		if (!guessed.has(model.id)) return model;
+		const efforts = lookupPublishedEffortLadder(ladders, model.id);
+		return efforts ? { ...model, thinking: { mode: "effort" as const, efforts } } : model;
+	});
 }
 
 function mapAnthropicModelsDev(payload: unknown, baseUrl: string): ModelSpec<"anthropic-messages">[] {
@@ -609,19 +750,22 @@ function createOpenAICompatibleModelManagerOptions<TApi extends Api>(
 			dropCachedModelIdsOnStaticMismatch: options.dropCachedModelIdsOnStaticMismatch,
 		}),
 		...((!options.requireApiKey || apiKey) && {
-			fetchDynamicModels: () =>
-				fetchOpenAICompatibleModels({
-					api: options.api,
-					provider: options.providerId,
-					baseUrl,
-					apiKey,
-					...(options.headers && { headers: resolveSimpleProviderHeaders(options.headers) }),
-					...(filterModel && {
-						filterModel: (entry, model) => filterModel(entry, model, references),
+			fetchDynamicModels: async () =>
+				applyPublishedEffortLadders(
+					await fetchOpenAICompatibleModels({
+						api: options.api,
+						provider: options.providerId,
+						baseUrl,
+						apiKey,
+						...(options.headers && { headers: resolveSimpleProviderHeaders(options.headers) }),
+						...(filterModel && {
+							filterModel: (entry, model) => filterModel(entry, model, references),
+						}),
+						mapModel: (entry, defaults) => options.mapModel(entry, defaults, references.get(defaults.id)),
+						fetch: options.config?.fetch,
 					}),
-					mapModel: (entry, defaults) => options.mapModel(entry, defaults, references.get(defaults.id)),
-					fetch: options.config?.fetch,
-				}),
+					options.config?.fetch,
+				),
 		}),
 	};
 }
