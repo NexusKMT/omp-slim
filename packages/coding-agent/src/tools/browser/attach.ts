@@ -249,7 +249,9 @@ async function resolveWrapperTarget(wrapperPath: string): Promise<string | null>
 	if (process.platform !== "linux") return null;
 	const stat = await fs.stat(wrapperPath).catch(() => null);
 	if (!stat || !stat.isFile() || stat.size > 65_536) return null;
-	const content = await fs.readFile(wrapperPath, "utf8").catch(() => null);
+	const content = await Bun.file(wrapperPath)
+		.text()
+		.catch(() => null);
 	if (!content || content.charCodeAt(0) === 0x7f) return null;
 	let target: string | null = null;
 	const execRegex = /^\s*exec\s+(?:-a\s+(?:"[^"]*"|'[^']*'|\S+)\s+)?["']?\$(?:HERE|\{HERE\})\/([^\s"'`;}]+)/;
