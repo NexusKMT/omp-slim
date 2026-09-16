@@ -7,7 +7,7 @@
  * reasoning, so an id omp does not recognize still arrives as a reasoning
  * model with no ladder of its own.
  */
-import { beforeEach, expect, test } from "bun:test";
+import { beforeEach, expect, test, vi } from "bun:test";
 import { hasModelScopedEffortLadder, resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
@@ -376,4 +376,47 @@ test("does not memoize an empty cold refresh when shared data has no ladder and 
 	});
 	expect(calls.filter(url => url === SHARED_CATALOG_URL)).toHaveLength(2);
 	expect(calls.filter(url => url === MODELS_DEV_URL)).toHaveLength(2);
+});
+
+/**
+ * The two catalog sources share one deadline, so a shared-catalog leg that
+ * burns the whole budget leaves models.dev no fresh window of its own. The
+ * deadline is a plain `setTimeout`, so fake timers drive it: no wall-clock
+ * wait, no real network.
+ */
+test("a blown deadline on the shared leg leaves models.dev no fresh window", async () => {
+	const signalByUrl = new Map<string, AbortSignal | undefined>();
+	let releaseSharedLeg: (() => void) | undefined;
+	const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+		signalByUrl.set(url, init?.signal ?? undefined);
+		if (url.startsWith(MOONSHOT_MODELS_URL)) {
+			return Response.json({ data: [{ id: UNREVIEWED_ID, object: "model" }] });
+		}
+		if (url === SHARED_CATALOG_URL) {
+			await new Promise<void>(resolve => {
+				releaseSharedLeg = resolve;
+			});
+			return Response.json({ moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } });
+		}
+		// Real fetch refuses an aborted signal; the stub must too.
+		if (init?.signal?.aborted) throw init.signal.reason;
+		return Response.json({ moonshotai: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } } });
+	}) as FetchImpl;
+
+	vi.useFakeTimers();
+	try {
+		const pending = discover(fetchImpl);
+		while (releaseSharedLeg === undefined) await Promise.resolve();
+		vi.advanceTimersByTime(10_000);
+		releaseSharedLeg();
+		const models = await pending;
+
+		// models.dev was reached on the expired deadline, not a new one, so the
+		// ladder stays unknown rather than arriving after twice the budget.
+		expect(signalByUrl.get(MODELS_DEV_URL)?.aborted).toBe(true);
+		expect(models?.find(model => model.id === UNREVIEWED_ID)?.thinking).toBeUndefined();
+	} finally {
+		vi.useRealTimers();
+	}
 });
