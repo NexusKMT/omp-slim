@@ -836,6 +836,12 @@ function collapseWithTable<TSpec extends VariantSpecLike>(
 		if (memberSpecs.some(spec => spec.input.includes("text"))) input.push("text");
 		if (memberSpecs.some(spec => spec.input.includes("image"))) input.push("image");
 
+		// `cursorMaxMode` gates the `max_mode` request flag. The collapsed row
+		// otherwise inherits `memberSpecs[0]`, so a family whose max-mode member
+		// is not the first one would advertise `false` and send `max_mode: false`
+		// on a max-mode wire id. Only the positive case is aggregated — an
+		// unmarked family keeps whatever the first member carried.
+		const cursorMaxMode = memberSpecs.some(spec => spec.cursorMaxMode === true) ? true : undefined;
 		const collapsed: TSpec = {
 			...firstMember,
 			id: family.id,
@@ -844,6 +850,7 @@ function collapseWithTable<TSpec extends VariantSpecLike>(
 			input,
 			contextWindow: maxOrNull(memberSpecs.map(spec => spec.contextWindow)),
 			maxTokens: maxOrNull(memberSpecs.map(spec => spec.maxTokens)),
+			...(cursorMaxMode === undefined ? {} : { cursorMaxMode }),
 		};
 		// The default wire id is the family's declared `defaultMember` when live,
 		// else the highest-priority live member. Omitted when it equals the

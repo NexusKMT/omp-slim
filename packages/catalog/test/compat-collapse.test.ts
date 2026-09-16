@@ -1060,6 +1060,25 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 		expect(resolveWireModelId(model("gpt-5.6-terra-fast"), Effort.High)).toBe("gpt-5.6-terra-high-fast");
 		expect(resolveWireModelId(model("gpt-5.6-terra-fast"), Effort.XHigh)).toBe("gpt-5.6-terra-xhigh-fast");
 	});
+
+	it("keeps the max-mode flag on the collapsed row when only the premium tiers carry it", () => {
+		// Cursor marks the extended-context tiers `maxMode` and leaves the cheap
+		// ones unmarked, so the flag disagrees across a reviewed family whose
+		// first member is the `-none` tier. The collapsed row is what the
+		// cursor-agent transport reads for the `max_mode` request flag, while the
+		// wire id comes from effort routing — dropping the flag sends
+		// `max_mode: false` on a max-mode-only wire id.
+		const maxModeTier = /-(xhigh|max)(-fast)?$/;
+		const collapsed = collapseVariants(
+			RAW_SIBLINGS.map(id => cursorMemberSpec(id, { cursorMaxMode: maxModeTier.test(id) })),
+			{ table: cursorTable },
+		);
+		const luna = collapsed.find(model => model.id === "gpt-5.6-luna");
+		if (!luna) throw new Error("gpt-5.6-luna did not collapse");
+
+		expect(luna.cursorMaxMode).toBe(true);
+		expect(resolveWireModelId(buildModel(luna as ModelSpec<"cursor-agent">), Effort.Max)).toBe("gpt-5.6-luna-max");
+	});
 });
 
 describe("Cursor generic tier routing (issue #9237)", () => {
