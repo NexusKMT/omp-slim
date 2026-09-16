@@ -392,6 +392,7 @@
 ### Removed
 
 - Removed the dangling `MCPManager.setOnNotification` single-slot setter, which had no callers in the runtime. Replaced by `MCPManager.addNotificationListener` — multi-listener, per-listener error isolation, returns an unsubscribe function.
+- Built-in secret obfuscation now covers AWS access keys, Google API keys, Slack, npm, Stripe (secret/restricted keys and webhook secrets), Hugging Face, SendGrid, JWTs, Bearer header tokens, and PEM private-key blocks.
 
 ## [18.2.0] - 2026-09-15
 
