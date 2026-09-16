@@ -6,6 +6,10 @@
 
 - Masked inputs no longer expose their text in diagnostic previews.
 
+### Removed
+
+- Removed the internal `fastTailSplices` and `resetFastTailSplices` Markdown instrumentation exports.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added

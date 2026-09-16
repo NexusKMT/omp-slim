@@ -4,6 +4,7 @@
 
 ### Added
 
+- `stream()` and `streamSimple()` support asynchronous model header resolution for each request attempt, including authentication retries and cancellation.
 - Provider login prompts can request masked entry with `secret: true`.
 
 ## [18.2.2] - 2026-09-16

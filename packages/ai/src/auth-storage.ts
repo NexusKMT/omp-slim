@@ -1636,8 +1636,8 @@ export class AuthStorage {
 	 * Lower priority than {@link setRuntimeApiKey} so a CLI `--api-key`
 	 * still wins for the duration of a single invocation.
 	 */
-	setConfigApiKey(provider: string, apiKey: string): void {
-		this.#configOverrides.set(provider, apiKey);
+	setConfigApiKey(provider: string, apiKeyConfig: string): void {
+		this.#configOverrides.set(provider, apiKeyConfig);
 	}
 
 	/**
@@ -1661,6 +1661,15 @@ export class AuthStorage {
 	 */
 	setFallbackResolver(resolver: (provider: string) => string | undefined): void {
 		this.#fallbackResolver = resolver;
+	}
+	/**
+	 * Install the host's async config-value resolver. Coding-agent uses this so
+	 * every stored/config credential reference shares command caching,
+	 * failure backoff, and process hardening even when AuthStorage was created
+	 * independently and later attached to a registry.
+	 */
+	setConfigValueResolver(resolver: (config: string) => Promise<string | undefined>): void {
+		this.#configValueResolver = resolver;
 	}
 
 	/**
@@ -5961,8 +5970,8 @@ export class AuthStorage {
 		}
 
 		const configKey = this.#configOverrides.get(provider);
-		if (configKey) {
-			return configKey;
+		if (configKey !== undefined) {
+			return await this.#configValueResolver(configKey);
 		}
 
 		await this.#adoptExternalCredentialChanges();
@@ -6029,8 +6038,8 @@ export class AuthStorage {
 		// honor it instead of forwarding an upstream OAuth token that the proxy
 		// won't accept.
 		const configKey = this.#configOverrides.get(provider);
-		if (configKey) {
-			return configKey;
+		if (configKey !== undefined) {
+			return await this.#configValueResolver(configKey);
 		}
 
 		// Precedence: a deliberate OAuth/login credential wins, then an explicit env var,

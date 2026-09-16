@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Retained `readLines()` results no longer change when later chunks reuse the internal buffer.
+- Long sleeps honor elapsed time and re-arm after premature timer wakes without overflowing native timer delays.
+
 ## [18.2.2] - 2026-09-16
 
 ### Added
