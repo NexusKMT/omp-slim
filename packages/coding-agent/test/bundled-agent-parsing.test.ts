@@ -22,7 +22,9 @@ describe("bundled agent parsing", () => {
 
 	it("accepts security-reviewer findings with optional remediation metadata", () => {
 		const securityReviewer = getBundledAgent("security-reviewer");
-		const findingValidator = buildOutputValidator(securityReviewer?.output).validator?.validateSection.get("findings");
+		const findingValidator = buildOutputValidator(securityReviewer?.output).validator?.validateSection.get(
+			"findings",
+		);
 
 		expect(findingValidator).toBeDefined();
 		expect(
