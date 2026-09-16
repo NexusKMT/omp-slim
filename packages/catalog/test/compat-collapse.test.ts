@@ -1079,6 +1079,48 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 		expect(luna.cursorMaxMode).toBe(true);
 		expect(resolveWireModelId(buildModel(luna as ModelSpec<"cursor-agent">), Effort.Max)).toBe("gpt-5.6-luna-max");
 	});
+
+	it("lifts the live max-mode flag onto a bundled collapsed row (existing-collapsed merge)", () => {
+		// The committed bundled row froze `cursorMaxMode: false` from the `-none`
+		// tier. Merging it with live `GetUsableModels` tiers takes the
+		// existing-collapsed pass-through, which keeps the snapshot verbatim — so
+		// the live `-xhigh`/`-max` marks have to be lifted onto the row the
+		// cursor-agent transport reads for the `max_mode` request flag.
+		const bundled: ModelSpec<"cursor-agent"> = {
+			...cursorMemberSpec("gpt-5.6-luna"),
+			name: "GPT-5.6 Luna",
+			reasoning: true,
+			cursorMaxMode: false,
+			requestModelId: "gpt-5.6-luna-none",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
+				requiresEffort: true,
+				effortRouting: {
+					off: "gpt-5.6-luna-none",
+					[Effort.Low]: "gpt-5.6-luna-low",
+					[Effort.Medium]: "gpt-5.6-luna-medium",
+					[Effort.High]: "gpt-5.6-luna-high",
+					[Effort.XHigh]: "gpt-5.6-luna-xhigh",
+					[Effort.Max]: "gpt-5.6-luna-max",
+				},
+			},
+		};
+		const markedTiers = TIERS.map(tier =>
+			buildModel(cursorMemberSpec(`gpt-5.6-luna-${tier}`, { cursorMaxMode: tier === "xhigh" || tier === "max" })),
+		);
+		const unmarkedTiers = TIERS.map(tier => buildModel(cursorMemberSpec(`gpt-5.6-luna-${tier}`)));
+
+		const merged = collapseBuiltVariants([buildModel(bundled), ...markedTiers]);
+		const luna = merged.find(model => model.id === "gpt-5.6-luna");
+		if (!luna) throw new Error("gpt-5.6-luna did not survive the merge");
+		expect(luna.cursorMaxMode).toBe(true);
+		expect(resolveWireModelId(luna, Effort.Max)).toBe("gpt-5.6-luna-max");
+
+		// A roster that marks no tier leaves the snapshot's own flag alone.
+		const unmarked = collapseBuiltVariants([buildModel(bundled), ...unmarkedTiers]);
+		expect(unmarked.find(model => model.id === "gpt-5.6-luna")?.cursorMaxMode).toBe(false);
+	});
 });
 
 describe("Cursor generic tier routing (issue #9237)", () => {

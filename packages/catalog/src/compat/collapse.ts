@@ -735,6 +735,24 @@ function reconcileDefaultMember<TSpec extends VariantSpecLike>(
 }
 
 /**
+ * Lift `cursorMaxMode: true` from live member rows onto an already-collapsed
+ * snapshot. Bundled catalog and cache rows froze the flag from `memberSpecs[0]`
+ * — the `-none`/`-low` tier — so the committed `gpt-5.6-*` / `cursor-grok-*`
+ * rows carry `cursorMaxMode: false`. The existing-collapsed pass-through keeps
+ * the snapshot verbatim, so a live `GetUsableModels` roster that marks the
+ * `-xhigh`/`-max` tiers would be discarded and max-tier requests would keep
+ * sending `max_mode: false` on a max-mode-only wire id. Mirrors the
+ * fresh-collapse aggregation: only the positive case is lifted, so a roster
+ * that marks nothing leaves the snapshot alone. Returns `spec` by reference
+ * when unchanged.
+ */
+function reconcileCursorMaxMode<TSpec extends VariantSpecLike>(spec: TSpec, memberSpecs: readonly TSpec[]): TSpec {
+	if (spec.cursorMaxMode === true) return spec;
+	if (!memberSpecs.some(member => member.cursorMaxMode === true)) return spec;
+	return { ...spec, cursorMaxMode: true };
+}
+
+/**
  * Collapse every family in `table` found in `specs`. Non-member specs pass
  * through verbatim (by reference), order preserved; the collapsed spec
  * replaces the first occurrence of its family.
@@ -788,20 +806,26 @@ function collapseWithTable<TSpec extends VariantSpecLike>(
 		for (const id of rawPresent) familyIdBySpecId.set(id, family.id);
 		if (existing) familyIdBySpecId.set(family.id, family.id);
 
-		if (existingCollapsed && reconciled !== undefined) {
-			// Mixed input: the collapsed entry wins; stale raw members are deduped
-			// away. Retired targets are re-pointed first, then the default wire id
-			// prefers the family's declared member when live and otherwise falls
-			// back to the first member the account actually advertised.
-			replacement.set(family.id, reconcileDefaultMember(reconciled, family, new Set(rawPresent)));
-			continue;
-		}
-
 		const memberSpecs: TSpec[] = [];
 		for (const id of rawPresent) {
 			const member = byId.get(id);
 			if (member !== undefined) memberSpecs.push(member);
 		}
+
+		if (existingCollapsed && reconciled !== undefined) {
+			// Mixed input: the collapsed entry wins; stale raw members are deduped
+			// away. Retired targets are re-pointed first, then the default wire id
+			// prefers the family's declared member when live and otherwise falls
+			// back to the first member the account actually advertised. The live
+			// members still own `cursorMaxMode`: the snapshot froze it from the
+			// lowest tier.
+			replacement.set(
+				family.id,
+				reconcileCursorMaxMode(reconcileDefaultMember(reconciled, family, new Set(rawPresent)), memberSpecs),
+			);
+			continue;
+		}
+
 		const firstMember = memberSpecs[0];
 		if (firstMember === undefined) continue;
 		const presentSet = new Set(rawPresent);
