@@ -138,6 +138,10 @@ async function collectPluginsAtRoot(
 			return (await fs.promises.lstat(target)).isSymbolicLink();
 		} catch (err) {
 			if (isEnoent(err)) return false;
+			// Unreadable means unclassifiable, and the caller only asks in order
+			// to keep a lockfile-only entry: treat it as not linked and let that
+			// entry be skipped with its own warning.
+			if (isUnreadableRoot(err)) return false;
 			throw err;
 		}
 	};
@@ -162,6 +166,13 @@ async function collectPluginsAtRoot(
 			// Lockfile entry without a corresponding node_modules tree means the
 			// link was deleted out from under us; skip silently.
 			if (isEnoent(err)) continue;
+			// One unreadable plugin does not invalidate its siblings, so skip
+			// just this one — loudly, because unlike a deleted link it is a
+			// plugin the user still expects to load.
+			if (isUnreadableRoot(err)) {
+				logger.warn("plugins: skipping unreadable plugin", { name, root, path: pluginPkgPath });
+				continue;
+			}
 			throw err;
 		}
 

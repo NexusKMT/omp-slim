@@ -25,7 +25,7 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 }
 
 /** A plugins root holding one declared, loadable plugin. */
-async function plantRoot(prefix: string): Promise<{ home: string; cwd: string; manifest: string }> {
+async function plantRoot(prefix: string): Promise<{ home: string; cwd: string; manifest: string; pluginsDir: string }> {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 	tempRoots.push(root);
 	const home = path.join(root, "home");
@@ -47,7 +47,7 @@ async function plantRoot(prefix: string): Promise<{ home: string; cwd: string; m
 		plugins: { "declared-plugin": { version: "1.0.0", enabled: true, enabledFeatures: null } },
 		settings: {},
 	});
-	return { home, cwd, manifest };
+	return { home, cwd, manifest, pluginsDir };
 }
 
 // Regression: the plugins manifest is not always readable. A sandboxed run, a
@@ -73,5 +73,30 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 		await fs.chmod(denied.manifest, 0o000);
 		restore.push(denied.manifest);
 		expect(await getEnabledPlugins(denied.cwd, { home: denied.home })).toEqual([]);
+	},
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+	"an unreadable installed plugin is skipped while its siblings still load",
+	async () => {
+		// The root's own manifest and lockfile are readable here, so the guards
+		// above have already passed: enumeration reads each plugin's manifest,
+		// and one denied package.json used to abort the whole collection.
+		const { home, cwd, pluginsDir } = await plantRoot("omp-plugin-sibling-");
+		const otherDir = path.join(pluginsDir, "node_modules", "other-plugin");
+		await fs.mkdir(otherDir, { recursive: true });
+		const otherManifest = path.join(otherDir, "package.json");
+		await writeJson(otherManifest, {
+			name: "other-plugin",
+			version: "2.0.0",
+			omp: { extensions: ["ext.ts"] },
+		});
+		await writeJson(path.join(pluginsDir, "package.json"), {
+			dependencies: { "declared-plugin": "1.0.0", "other-plugin": "2.0.0" },
+		});
+		await fs.chmod(otherManifest, 0o000);
+		restore.push(otherManifest);
+
+		expect((await getEnabledPlugins(cwd, { home })).map(plugin => plugin.name)).toEqual(["declared-plugin"]);
 	},
 );
