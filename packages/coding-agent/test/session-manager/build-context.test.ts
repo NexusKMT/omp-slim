@@ -781,6 +781,46 @@ describe("buildSessionContext", () => {
 			expect(JSON.stringify(wire.messages)).toContain("subagent report");
 		});
 
+		it("keeps a mid-turn suffix when no later turn boundary exists", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "old request"),
+				msg("2", "1", "assistant", "kept assistant suffix"),
+				compaction("3", "2", "Compacted before the suffix", "2"),
+			];
+
+			const transcript = buildSessionContext(entries, undefined, undefined, {
+				transcript: true,
+				collapseCompactedHistory: true,
+			});
+
+			// The summary excludes firstKeptEntryId and everything after it, so
+			// hiding this suffix would make the newest response disappear.
+			expect(transcript.messages.map(m => m.role)).toEqual(["assistant", "compactionSummary"]);
+			expect(JSON.stringify(transcript.messages)).toContain("kept assistant suffix");
+		});
+
+		it("trimmed assistants consume reset state before the first visible turn", () => {
+			const entries: SessionEntry[] = [
+				msg("1", null, "user", "old request"),
+				msg("2", "1", "assistant", "first orphan assistant"),
+				modelChange("3", "2", "anthropic", "claude-test"),
+				msg("4", "3", "assistant", "assistant after the reset"),
+				msg("5", "4", "user", "first visible question"),
+				msg("6", "5", "assistant", "first visible answer"),
+				compaction("7", "6", "Compacted mid-turn", "2"),
+			];
+
+			const transcript = buildSessionContext(entries, undefined, undefined, {
+				transcript: true,
+				collapseCompactedHistory: true,
+			});
+
+			expect(transcript.messages.map(m => m.role)).toEqual(["user", "assistant", "compactionSummary"]);
+			// The hidden assistant after model_change consumed that reset. The
+			// visible assistant uses the same model and is therefore not a miss.
+			expect(transcript.cacheMissExplainedAt).toEqual([false, false, false]);
+		});
+
 		it("trimmed prefix entries still drive cache-miss reset tracking", () => {
 			// Regression (autoreview): a mode_change inside the trimmed orphan
 			// head must still update the reset tracker. Skipping it leaves the

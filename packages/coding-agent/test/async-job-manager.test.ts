@@ -568,10 +568,12 @@ describe("AsyncJobManager", () => {
 			expect(manager.isDeliverySuppressed(jobId)).toBe(true);
 
 			gate.resolve();
+			await scheduler.yield();
 			expect(await manager.drainDeliveries({ timeoutMs: 2_000 })).toBe(true);
-			// The parked-settled path never re-arms the short grace, so the row
-			// stays for the full retention window (default: 5 minutes).
-			expect(manager.getJob(jobId)?.status).toBe("completed");
+			// Once the parked delivery settles, its suppression marker has served
+			// its purpose and the already-consumed row starts the short grace.
+			vi.advanceTimersByTime(25);
+			expect(manager.getJob(jobId)).toBeUndefined();
 			await manager.dispose();
 		} finally {
 			vi.useRealTimers();

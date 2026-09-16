@@ -1117,6 +1117,12 @@ export class AsyncJobManager {
 					this.#jobs.get(delivery.jobId) ?? this.#reconstructEvictedJob(delivery),
 				);
 				delivered = true;
+				// A foreground snapshot may have consumed this result while the
+				// sink receipt was parked. The receipt has now settled, so the
+				// suppression tombstone no longer needs the full retention window.
+				if (this.#consumedJobResults.has(delivery.jobId) && this.#jobs.has(delivery.jobId)) {
+					this.#scheduleEviction(delivery.jobId, this.#consumedResultEvictionMs);
+				}
 			} catch (error) {
 				delivery.attempt += 1;
 				delivery.lastError = error instanceof Error ? error.message : String(error);
@@ -1135,12 +1141,11 @@ export class AsyncJobManager {
 				if (index !== -1) this.#inFlightDeliveries.splice(index, 1);
 				if (this.#deliveries.length > 0) this.#ensureDeliveryLoop();
 			}
-			// Consume only after the attempt left #inFlightDeliveries: the
-			// consumed-grace eviction in #consumeJobResult treats a pending
-			// delivery (queued or in flight) as a parked async-result whose
-			// suppression marker must outlive the row, and a settled attempt
-			// must not count as pending.
-			if (delivered) this.#consumeJobResult(delivery.jobId);
+			// A normally delivered result is consumed only after the attempt left
+			// #inFlightDeliveries, so it can arm the short eviction grace.
+			if (delivered && !this.#consumedJobResults.has(delivery.jobId)) {
+				this.#consumeJobResult(delivery.jobId);
+			}
 		})();
 		delivery.promise = promise;
 		return promise;
