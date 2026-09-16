@@ -109,6 +109,25 @@ async fn apply_rereads_files_changed_after_preview() {
 }
 
 #[tokio::test]
+async fn invalid_utf8_is_rejected_without_rewriting_unrelated_bytes() {
+	let ws = Workspace::new(EditMode::Replace);
+	let path = ws.cwd().join("legacy.txt");
+	let original = b"name=caf\xe9\nalpha\n";
+	std::fs::write(&path, original).unwrap();
+	let writer = DiskWriter::default();
+	let result = ws
+		.apply_json(
+			&serde_json::json!({ "path": "legacy.txt", "old_string": "alpha", "new_string": "beta" }),
+			&writer,
+		)
+		.await;
+	assert_eq!(std::fs::read(&path).unwrap(), original);
+	let error = result.expect_err("invalid UTF-8 must be rejected");
+	assert!(error.to_string().contains("UTF-8"), "{error}");
+	assert!(writer.requests.lock().is_empty());
+}
+
+#[tokio::test]
 async fn writer_failure_is_surfaced_verbatim() {
 	let ws = Workspace::new(EditMode::Replace);
 	ws.write("a.txt", "one\n");

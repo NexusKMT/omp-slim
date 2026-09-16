@@ -133,7 +133,13 @@ impl FileCache {
 		{
 			return Err(EditError::apply(message));
 		}
-		let raw = String::from_utf8_lossy(&bytes).into_owned();
+		let raw = String::from_utf8(bytes).map_err(|err| {
+			EditError::apply(format!(
+				"{} is not valid UTF-8 at byte {}; refusing to edit",
+				resolved.display,
+				err.utf8_error().valid_up_to()
+			))
+		})?;
 		let is_notebook = notebook::is_notebook_path(&resolved.absolute);
 		let (bom, text) = if is_notebook {
 			let editable = notebook::notebook_to_editable_text(&raw, &resolved.display)
