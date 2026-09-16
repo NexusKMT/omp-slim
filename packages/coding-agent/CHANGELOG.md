@@ -32,6 +32,10 @@
 
 - Fixed `--prewalk-into @default` preserving the configured default role when an explicit `--model` selects the startup model, including ordered fallbacks and discovery-backed candidates ([#12191](https://github.com/can1357/oh-my-pi/pull/12191) by [@taibenvenuti](https://github.com/taibenvenuti)).
 
+### Fixed
+
+- A corrupted or externally modified session file no longer traps you in an uncloseable session: after the failed-close error, one more Ctrl+C exits without rewriting the session log ([#12245](https://github.com/can1357/oh-my-pi/pull/12245) by [@xiechimon](https://github.com/xiechimon)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
