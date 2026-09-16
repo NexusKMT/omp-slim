@@ -5,6 +5,12 @@
 ### Added
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
+- Added `pulse` terminal-title spinner style to `tui.titleSpinner`: a moon that fills (○◔◑◕●) and empties, alongside the existing braille, dots, and ASCII line sets.
+
+### Fixed
+
+- Terminal title spinner now animates on native Windows via `SetConsoleTitleW` instead of staying on the static `:` separator; WSL keeps the static separator to avoid the ConPTY write-loop CPU cost.
+- Prewalk now hands off after an edit/write dispatched through an eval cell: Code Mode routes those tools through the eval bridge, so the turn-level result is named `eval` and the old detector never recognized the nested mutation ([#11018](https://github.com/can1357/oh-my-pi/issues/11018)).
 
 ## [18.2.1] - 2026-09-15
 
