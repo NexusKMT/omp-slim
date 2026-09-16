@@ -2,48 +2,30 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress ([#12177](https://github.com/can1357/oh-my-pi/pull/12177) by [@shivamklr](https://github.com/shivamklr)).
-
 ### Added
 
-- Fixed the `security-reviewer` agent rejecting every valid finding: the finding schema's `optionalProperties` node sat inside `properties`, making a field literally named `optionalProperties` required and leaving `anchor` and `remediation` unreachable ([#12200](https://github.com/can1357/oh-my-pi/pull/12200) by [@dhofheinz](https://github.com/dhofheinz)).
+- Secret obfuscation now registers passwords embedded in connection-URL environment variables (PostgreSQL, MongoDB, MySQL, Redis, AMQP, and any other `scheme://user:password@host` value) regardless of the variable name ([#12233](https://github.com/can1357/oh-my-pi/pull/12233) by [@wtfsayo](https://github.com/wtfsayo)).
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 - Added `pulse` terminal-title spinner style to `tui.titleSpinner`: a moon that fills (○◔◑◕●) and empties, alongside the existing braille, dots, and ASCII line sets ([#12250](https://github.com/can1357/oh-my-pi/pull/12250) by [@H4vC](https://github.com/H4vC)).
 
 ### Fixed
 
+- Fixed the `security-reviewer` agent rejecting every valid finding: the finding schema's `optionalProperties` node sat inside `properties`, making a field literally named `optionalProperties` required and leaving `anchor` and `remediation` unreachable ([#12200](https://github.com/can1357/oh-my-pi/pull/12200) by [@dhofheinz](https://github.com/dhofheinz)).
+- `session_stop` hooks that block with a reason now keep the session running until they allow it or the user interrupts, instead of expiring after the advisory-continuation cap or losing to an earlier advisory result; an explicit abort is no longer restarted by a stop hook ([#12187](https://github.com/can1357/oh-my-pi/pull/12187) by [@lbartoszcze](https://github.com/lbartoszcze)).
+- Rebuilding long transcripts after session navigation, agent focus changes, or display-setting changes no longer leaves tool calls collapsed to a single line until the next keypress ([#12177](https://github.com/can1357/oh-my-pi/pull/12177) by [@shivamklr](https://github.com/shivamklr)).
 - Killing a running subagent from Agent Hub now settles and reports its owning background task job instead of leaving parent `hub wait` calls stuck indefinitely ([#12218](https://github.com/can1357/oh-my-pi/issues/12218)).
 - Agent and history database startup errors now identify the failing database file, including corruption found during schema initialization.
 - Corrupt agent and prompt-history databases no longer prevent startup: damaged files are preserved as private `.corrupt-*` backups before creating fresh stores; lost credentials require logging in again.
 - Terminal title spinner now animates on native Windows via `SetConsoleTitleW` instead of staying on the static `:` separator; WSL keeps the static separator to avoid the ConPTY write-loop CPU cost ([#12250](https://github.com/can1357/oh-my-pi/pull/12250) by [@H4vC](https://github.com/H4vC)).
 - Prewalk now hands off after an edit/write dispatched through an eval cell: Code Mode routes those tools through the eval bridge, so the turn-level result is named `eval` and the old detector never recognized the nested mutation ([#11018](https://github.com/can1357/oh-my-pi/issues/11018)).
 - Fixed repeated 0.3–1.5s main-thread stalls (`ui.loop-blocked`) while streaming large edits: TTSR awaited a native `astMatch` pass per `toolcall_delta`, so a streamed 150KB edit paid ~90ms per delta per rule entry; AST rules now run once on the finalized `toolcall_end` while regex rules keep streaming per delta.
-
-### Fixed
-
 - `/handoff` no longer advertises itself in the TUI as handing session context off to a new session; the description now matches the command, which summarizes the session into a handoff document and compacts in place ([#12249](https://github.com/can1357/oh-my-pi/pull/12249) by [@BrahmingWu](https://github.com/BrahmingWu)).
-
-### Fixed
-
 - Deferred cold-cache `retry.fallbackChains` warnings for catalog descriptor providers until discovery settles ([#12223](https://github.com/can1357/oh-my-pi/pull/12223) by [@Dante-dan](https://github.com/Dante-dan)).
-
-### Fixed
-
 - Fixed `--prewalk-into @default` preserving the configured default role when an explicit `--model` selects the startup model, including ordered fallbacks and discovery-backed candidates ([#12191](https://github.com/can1357/oh-my-pi/pull/12191) by [@taibenvenuti](https://github.com/taibenvenuti)).
-
-### Fixed
-
 - A corrupted or externally modified session file no longer traps you in an uncloseable session: after the failed-close error, one more Ctrl+C exits without rewriting the session log ([#12245](https://github.com/can1357/oh-my-pi/pull/12245) by [@xiechimon](https://github.com/xiechimon)).
-
-### Fixed
-
 - Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications ([#12232](https://github.com/can1357/oh-my-pi/pull/12232) by [@aramalipoor](https://github.com/aramalipoor)).
-
-### Fixed
-
 - Fixed browser reuse missing Chromium behind Linux wrapper scripts and spawning a duplicate on a locked profile ([#12236](https://github.com/can1357/oh-my-pi/pull/12236) by [@shivamklr](https://github.com/shivamklr)).
+- Explicit model refreshes now re-run command-backed API keys and headers, allowing rotated credentials to recover without restarting omp ([#12172](https://github.com/can1357/oh-my-pi/pull/12172) by [@harshaygadekar](https://github.com/harshaygadekar)).
 
 ## [18.2.1] - 2026-09-15
 
@@ -124,8 +106,6 @@
 - Moved PTY log replay into the shared project launch broker, so normal CLI and Hub startup no longer load the xterm runtime while launch logs return validated rendered terminal rows.
 
 ### Fixed
-- Explicit model refreshes now re-run command-backed API keys and headers, allowing rotated credentials to recover without restarting omp ([#12172](https://github.com/can1357/oh-my-pi/pull/12172) by [@harshaygadekar](https://github.com/harshaygadekar)).
-- Late non-blocking advisor notes arriving while a terminal primary turn unwinds now stay visible as advisor cards instead of starting an extra primary request ([#12154](https://github.com/can1357/oh-my-pi/pull/12154) by [@korri123](https://github.com/korri123)).
 
 - Late non-blocking advisor notes arriving while a terminal primary turn unwinds now stay visible as advisor cards instead of starting an extra primary request ([#12154](https://github.com/can1357/oh-my-pi/pull/12154) by [@korri123](https://github.com/korri123)).
 - Fixed Perplexity sign-in for SSO-only accounts in `/login` and the setup wizard with isolated browser sign-in and automatic session capture, supporting both secure-prefixed and unprefixed session cookies without manual cookie copying. ([#12064](https://github.com/can1357/oh-my-pi/pull/12064) by [@lance0](https://github.com/lance0))
@@ -412,7 +392,6 @@
 ### Removed
 
 - Removed the dangling `MCPManager.setOnNotification` single-slot setter, which had no callers in the runtime. Replaced by `MCPManager.addNotificationListener` — multi-listener, per-listener error isolation, returns an unsubscribe function.
-- Secret obfuscation now registers passwords embedded in connection-URL environment variables (PostgreSQL, MongoDB, MySQL, Redis, AMQP, and any other `scheme://user:password@host` value) regardless of the variable name.
 
 ## [18.2.0] - 2026-09-15
 
