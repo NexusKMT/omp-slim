@@ -4,13 +4,13 @@
 
 ### Added
 
-- OpenAI-compatible discovery fills missing reasoning effort tiers for unrecognized models from the shared catalog's published `reasoning_options`, replacing the neutral wire and provider-wide unknown-class guesses while leaving explicit discovery metadata and reviewed model rules untouched ([#12227](https://github.com/can1357/oh-my-pi/pull/12227) by [@Xytronix](https://github.com/Xytronix)).
+- OpenAI-compatible model discovery now fills in reasoning-effort tiers for unrecognized models using the shared catalog’s published reasoning options, while preserving explicit discovery metadata and reviewed model rules.
 
 ### Fixed
 
-- Model-cache corruption recovery now preserves private database and sidecar backups and avoids replacing a cache already recovered by another process.
-- Devin (SWE-2, SWE-1.7, GLM-5.2 High) and Kimi Code models now report API-equivalent token pricing when upstream discovery omits cost dimensions; SWE-2 reflects the promotional rate through 2026-12-31 and switches to list price from 2027-01-01 ([#12204](https://github.com/can1357/oh-my-pi/pull/12204) by [@eggpeat](https://github.com/eggpeat)).
-- Devin Fusion composites now record their own headline rate instead of a dispatched component's rate when upstream flattens multiple rate cards into one config, and harness-backed Fusion lanes chat directly instead of failing through the `AssignModel` router path ([#12204](https://github.com/can1357/oh-my-pi/pull/12204) by [@eggpeat](https://github.com/eggpeat)).
+- Fixed recovery of corrupted model caches so private backups are preserved and concurrent recovery cannot overwrite a cache that has already been restored.
+- Fixed pricing for Devin (SWE-2, SWE-1.7, and GLM-5.2 High) and Kimi Code models when upstream discovery omits cost information. SWE-2 now reflects its promotional pricing through December 31, 2026, then switches to list pricing on January 1, 2027.
+- Fixed pricing and chat routing for Devin Fusion models so composite models use their own headline rates and supported Fusion lanes connect directly instead of failing through an incompatible routing path.
 
 ## [18.2.1] - 2026-09-15
 

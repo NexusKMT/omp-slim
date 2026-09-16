@@ -4,20 +4,19 @@
 
 ### Added
 
-- Added `baseUrl` support for `bedrock-converse-stream` requests, so `providers.amazon-bedrock` (or a custom provider using the same API) can route through a VPC/PrivateLink endpoint, a FIPS host, or an internal gateway — including one mounted under a path or authenticated via a query parameter — instead of AWS's hardcoded `bedrock-runtime.{region}.amazonaws.com` ([#12246](https://github.com/can1357/oh-my-pi/pull/12246) by [@rmskkn](https://github.com/rmskkn)).
+- Added configurable `baseUrl` support for `bedrock-converse-stream` requests, enabling Amazon Bedrock providers and compatible custom providers to use VPC or PrivateLink endpoints, FIPS hosts, and internal gateways, including endpoints mounted under a path or authenticated with query parameters.
 
 ### Fixed
 
-- Corrupt credential databases are preserved as private `.corrupt-*` backups and recreated instead of aborting startup; log in again to restore credentials.
-- Fixed malformed Anthropic thinking signatures freezing sessions at 100% CPU by bounding protobuf tags and lengths and preventing signed length overflow.
-- Fixed the auth-gateway's `/v1/messages` route reporting `stop_reason: "end_turn"` on a turn that carries a `tool_use` block, so an Anthropic client driving the canonical loop (run tools while `stop_reason === "tool_use"`) never executed the tool it was handed. Providers whose protocol has no separate tool-use stop — Cursor ends the turn with `stop` when it hands a client-declared tool back for the caller to run — now map to `tool_use`, matching what the OpenAI chat wire already does with `tool_calls` ([#12224](https://github.com/can1357/oh-my-pi/pull/12224) by [@Xytronix](https://github.com/Xytronix)).
-- Fixed the auth-gateway's `/v1/messages` route offering Cursor's already-executed native calls (`todo`, `web_fetch`, `connect_scm`, a declined native) to the client: those blocks are stamped resolved by Cursor's exec channel, so they no longer terminate the turn with `tool_use` and no longer reach the wire at all, in either encoder. A client can neither run nor answer them, and repeating one would reapply a side effect the server already committed. Suppressed blocks renumber the ones after them so index-addressed client snapshots stay aligned ([#12224](https://github.com/can1357/oh-my-pi/pull/12224) by [@Xytronix](https://github.com/Xytronix)).
-- The auth gateway no longer hands two unrelated conversations the same retained provider state when the client sends no session key: the retained map now follows the conversation's own message history, so one chat's rejected request stops silencing another chat's ([#12241](https://github.com/can1357/oh-my-pi/pull/12241) by [@camjac251](https://github.com/camjac251)).
-- Retained provider state no longer carries an account-specific lesson across a credential switch. When the gateway moves a session to a sibling account, Anthropic's fast-mode entitlement and OpenAI Responses' stored-response chains are re-probed while endpoint-learned fallbacks (tool-grammar limits, signing-proxy demotions, effort fallbacks) are kept ([#12241](https://github.com/can1357/oh-my-pi/pull/12241) by [@camjac251](https://github.com/camjac251)).
-- The auth gateway no longer closes provider state a request is still streaming through when the retained-session ceiling is reached: an entry an in-flight request holds is skipped when making room and reclaimed as soon as that request ends ([#12241](https://github.com/can1357/oh-my-pi/pull/12241) by [@camjac251](https://github.com/camjac251)).
-- Fixed a ChatGPT account being parked as usage-limited once its plan window was spent, even though it still serves Codex requests from its credit balance and the `codex` CLI on the same login keeps working. Such an account stays selectable and an existing usage-limit block on it clears, while a spent account with no credits, a tripped spend control or a non-plan refusal still blocks ([#12171](https://github.com/can1357/oh-my-pi/pull/12171) by [@pedropaulovc](https://github.com/pedropaulovc)).
-- Cursor requests now honor explicit max-mode markers on wire-backed models with effort routing instead of overriding them from the model suffix ([#12219](https://github.com/can1357/oh-my-pi/pull/12219) by [@Xytronix](https://github.com/Xytronix)).
-- OpenAI-compatible chat responses that consist only of structured tool calls now report time-to-first-token instead of leaving it blank ([#12213](https://github.com/can1357/oh-my-pi/pull/12213) by [@STRML](https://github.com/STRML)).
+- Corrupt credential databases are now backed up privately and recreated instead of preventing startup; signing in again restores credentials.
+- Fixed malformed Anthropic thinking signatures that could freeze sessions at 100% CPU.
+- Fixed Anthropic-compatible gateway tool-call handling so client-declared tools are reported with `stop_reason: "tool_use"` and already-executed native provider tools are not exposed for clients to run again.
+- Fixed gateway session isolation when clients omit a session key, preventing one conversation's retained provider state from affecting another.
+- Fixed retained provider state across credential switches so account-specific capabilities are re-evaluated while reusable endpoint capabilities remain available.
+- Fixed session retention limits closing provider state while a request is still streaming.
+- ChatGPT accounts that have exhausted a plan's usage window but still have available Codex credit can now continue to be selected for Codex requests.
+- Cursor requests now honor explicit max-mode markers on wire-backed models instead of inferring the mode from the model suffix.
+- OpenAI-compatible chat responses containing only structured tool calls now report time to first token correctly.
 
 ## [18.2.1] - 2026-09-15
 
