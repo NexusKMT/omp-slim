@@ -1141,7 +1141,7 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 				},
 			},
 		};
-		const [luna] = collapseVariants([bundled], { table: cursorTable });
+		const [luna] = collapseBuiltVariants([buildModel(bundled)]);
 		if (!luna) throw new Error("bundled GPT-5.6 row disappeared");
 
 		expect(luna.cursorMaxMode).toBe(true);
