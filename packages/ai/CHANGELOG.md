@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor requests now honor explicit max-mode markers on wire-backed models with effort routing instead of overriding them from the model suffix ([#12219](https://github.com/can1357/oh-my-pi/pull/12219) by [@Xytronix](https://github.com/Xytronix)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Added

@@ -147,6 +147,30 @@ describe("Cursor requestedModel wire shape", () => {
 		expect(low.requestedModel?.maxMode).toBe(false);
 	});
 
+	it("honors an explicit false marker when a routed row puts its own id on the wire", async () => {
+		// Bundled claude-4.6-opus-max is a bare/thinking pair: its own id is
+		// still a wire id, unlike gpt-5.6-sol whose requestModelId names a sibling.
+		const cached = cursorModel("claude-4.6-opus-max", {
+			cursorMaxMode: false,
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortRouting: {
+					off: "claude-4.6-opus-max",
+					[Effort.Minimal]: "claude-4.6-opus-max-thinking",
+					[Effort.Low]: "claude-4.6-opus-max-thinking",
+					[Effort.Medium]: "claude-4.6-opus-max-thinking",
+					[Effort.High]: "claude-4.6-opus-max-thinking",
+				},
+			},
+		});
+		const payload = await capture(cached);
+		expect(payload.requestedModel?.modelId).toBe("claude-4.6-opus-max");
+		expect(payload.modelDetails?.modelId).toBe("claude-4.6-opus-max");
+		expect(payload.requestedModel?.maxMode).toBe(false);
+		expect(payload.modelDetails?.maxMode ?? false).toBe(false);
+	});
+
 	it("falls back to the wire tier for a bundled row discovery never marked", async () => {
 		// Bundled rows froze `cursorMaxMode` from the `-none` member and carry no
 		// per-wire-id markers, so the wire suffix is the only per-tier signal.

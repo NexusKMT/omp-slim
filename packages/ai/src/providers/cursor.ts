@@ -5250,8 +5250,9 @@ function extractImages(content: (TextContent | ImageContent)[]) {
  * markers survive per wire id in `cursorMaxModeRoutes`, so the routed id is
  * looked up there first.
  *
- * Bundled rows and routes discovery never advertised have no per-id marker
- * left, and there the `-xhigh`/`-max` wire suffix is the only per-tier signal.
+ * A row's own wire id still owns its marker even when it has effort routing
+ * (for example a bare/thinking pair). Logical-only bundled rows and routes
+ * discovery never advertised have no per-id marker; only those use the suffix.
  * A collapsed row whose `true` no route's suffix can explain keeps it for every
  * route: the marker came from a member the suffix rule cannot see.
  */
@@ -5259,7 +5260,9 @@ function resolveCursorMaxMode(model: Model<"cursor-agent">, wireModelId: string)
 	const discovered = model.cursorMaxModeRoutes?.[wireModelId];
 	if (discovered !== undefined) return discovered;
 	const routing = model.thinking?.effortRouting;
-	if (routing === undefined) return model.cursorMaxMode ?? isCursorMaxModeWireId(wireModelId);
+	if (routing === undefined || wireModelId === model.id) {
+		return model.cursorMaxMode ?? isCursorMaxModeWireId(wireModelId);
+	}
 	if (
 		model.cursorMaxMode === true &&
 		!Object.values(routing).some(target => typeof target === "string" && isCursorMaxModeWireId(target))
