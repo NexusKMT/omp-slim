@@ -6,6 +6,10 @@
 
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 
+### Fixed
+
+- Fixed silent MCP waits being cut off by an undeclared idle timeout; closing a legacy SSE transport now also cancels pending calls and notifications.
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
