@@ -24,6 +24,10 @@
 
 - Deferred cold-cache `retry.fallbackChains` warnings for catalog descriptor providers until discovery settles ([#12223](https://github.com/can1357/oh-my-pi/pull/12223) by [@Dante-dan](https://github.com/Dante-dan)).
 
+### Fixed
+
+- Fixed `--prewalk-into @default` preserving the configured default role when an explicit `--model` selects the startup model, including ordered fallbacks and discovery-backed candidates ([#12191](https://github.com/can1357/oh-my-pi/pull/12191) by [@taibenvenuti](https://github.com/taibenvenuti)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
