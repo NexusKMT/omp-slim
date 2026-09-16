@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, type Mock, vi } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -17,15 +17,16 @@ import { postmortem, TempDir } from "@oh-my-pi/pi-utils";
 // to swallow the error, reset its own latch, and return without ever exiting —
 // so the process stayed alive and every further Ctrl+C repeated the identical
 // failure. The escape hatch is a second Ctrl+C that exits without writing the
-// session log.
+// session log, and it must be reachable with a SINGLE press after the error
+// message (the double-tap gate would otherwise demand two rapid presses).
 describe("InteractiveMode shutdown when the session write conflicts (#12238)", () => {
 	let authStorage: AuthStorage;
 	let mode: InteractiveMode;
 	let session: AgentSession;
 	let tempDir: TempDir;
-	let quitSpy: ReturnType<typeof vi.spyOn>;
-	let showErrorSpy: ReturnType<typeof vi.spyOn>;
-	let disposeSpy: ReturnType<typeof vi.spyOn>;
+	let quitSpy: Mock<typeof postmortem.quit>;
+	let showErrorSpy: Mock<typeof InteractiveMode.prototype.showError>;
+	let disposeSpy: Mock<typeof session.dispose>;
 
 	beforeAll(() => {
 		initTheme();
@@ -82,6 +83,7 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		expect(quitSpy).not.toHaveBeenCalled();
 		// The latch is cleared so a second Ctrl+C can re-enter shutdown().
 		expect(mode.isShuttingDown).toBe(false);
+		expect(mode.teardownFailed).toBe(true);
 		expect(disposeSpy).toHaveBeenCalledTimes(1);
 	});
 
@@ -93,5 +95,20 @@ describe("InteractiveMode shutdown when the session write conflicts (#12238)", (
 		// the teardown that already failed once (dispose stays memoized at 1 call).
 		expect(quitSpy).toHaveBeenCalledTimes(1);
 		expect(disposeSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("a single Ctrl+C keypress after the failure reaches the escape hatch", async () => {
+		await mode.shutdown(); // arms the escape hatch and shows the message
+		quitSpy.mockClear();
+
+		// The user-facing path: one Ctrl+C, long after the original gesture, so the
+		// 500ms double-tap gate would normally just clear the editor. With a failed
+		// teardown armed it must route straight into shutdown()'s force-quit.
+		mode.lastSigintTime = 0; // a single, non-double-tapped press
+		mode.handleCtrlC();
+		await Promise.resolve();
+
+		expect(quitSpy).toHaveBeenCalledTimes(1);
+		expect(disposeSpy).toHaveBeenCalledTimes(1); // never re-runs the doomed teardown
 	});
 });

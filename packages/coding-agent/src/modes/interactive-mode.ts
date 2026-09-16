@@ -856,6 +856,13 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * escape hatch: exit without writing the session log.
 	 */
 	#teardownFailed = false;
+	/** True once a graceful `shutdown()` teardown failed at the memoized
+	 *  dispose stage. Surfaced to the input controller so the next single
+	 *  Ctrl+C skips the double-tap gate and runs `shutdown()` — which
+	 *  force-quits — instead of merely clearing the editor (#12238). */
+	get teardownFailed(): boolean {
+		return this.#teardownFailed;
+	}
 	/** True once `shutdown()` has begun teardown. Surfaced to the input
 	 *  controller so a Ctrl+C arriving while teardown is in flight can hard-
 	 *  abort the remaining work instead of stacking another no-op call. */
