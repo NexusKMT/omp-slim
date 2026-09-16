@@ -15,6 +15,10 @@
 - Prewalk now hands off after an edit/write dispatched through an eval cell: Code Mode routes those tools through the eval bridge, so the turn-level result is named `eval` and the old detector never recognized the nested mutation ([#11018](https://github.com/can1357/oh-my-pi/issues/11018)).
 - Fixed repeated 0.3–1.5s main-thread stalls (`ui.loop-blocked`) while streaming large edits: TTSR awaited a native `astMatch` pass per `toolcall_delta`, so a streamed 150KB edit paid ~90ms per delta per rule entry; AST rules now run once on the finalized `toolcall_end` while regex rules keep streaming per delta.
 
+### Fixed
+
+- `/handoff` no longer advertises itself in the TUI as handing session context off to a new session; the description now matches the command, which summarizes the session into a handoff document and compacts in place ([#12249](https://github.com/can1357/oh-my-pi/pull/12249) by [@BrahmingWu](https://github.com/BrahmingWu)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes
