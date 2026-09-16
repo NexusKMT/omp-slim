@@ -11,9 +11,11 @@ import type {
 	ElementHandle,
 	ElementScreenshotOptions,
 	HTTPResponse,
+	JSHandle,
 	KeyboardTypeOptions,
 	KeyInput,
 	Page,
+	Realm,
 	SerializedAXNode,
 	Target,
 } from "puppeteer-core";
@@ -69,6 +71,14 @@ declare module "puppeteer-core" {
 	interface Frame {
 		/** Puppeteer's main JavaScript realm, retained by our pinned runtime patch. */
 		mainRealm(): Realm;
+	}
+	interface Realm {
+		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
+		adoptHandle<T extends JSHandle>(handle: T): Promise<T>;
+	}
+	interface JSHandle {
+		/** Realm that created this handle (`@internal` upstream, stripped from published types). */
+		readonly realm: Realm;
 	}
 }
 
@@ -399,6 +409,36 @@ async function runGuardedHandleAction<T>(
 		).catch(() => undefined);
 		throw error;
 	}
+}
+
+/**
+ * Re-home element handles in `args` into `realm` so they can be passed to an
+ * evaluation there. The stealth patch resolves selectors (`tab.waitForSelector`,
+ * `tab.$`, …) in Puppeteer's isolated world while `tab.evaluate` runs in the main
+ * world; CDP rejects a handle used outside the context that created it. Only DOM
+ * element handles can cross worlds (via backend node id) — other handles pass
+ * through untouched. `dispose()` releases the adopted copies, never the originals.
+ */
+async function adoptElementArgs(
+	realm: Realm,
+	args: unknown[],
+): Promise<{ args: unknown[]; dispose: () => Promise<void> }> {
+	const adopted: JSHandle[] = [];
+	const out: unknown[] = args.slice();
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		const handle = arg instanceof Object && "asElement" in arg ? (arg as JSHandle).asElement() : null;
+		if (!handle || handle.realm === realm) continue;
+		const copy = await realm.adoptHandle(handle);
+		adopted.push(copy);
+		out[i] = copy;
+	}
+	return {
+		args: out,
+		dispose: async () => {
+			await Promise.all(adopted.map(h => h.dispose().catch(() => undefined)));
+		},
+	};
 }
 
 /**
@@ -1778,14 +1818,16 @@ export class WorkerCore {
 			},
 			evaluate: (fn, ...args) =>
 				op("tab.evaluate()", INF, sig =>
-					untilAborted(sig, () =>
-						typeof fn === "string"
-							? page.mainFrame().mainRealm().evaluate(fn)
-							: page
-									.mainFrame()
-									.mainRealm()
-									.evaluate(fn as (...a: unknown[]) => unknown, ...args),
-					),
+					untilAborted(sig, async () => {
+						const realm = page.mainFrame().mainRealm();
+						if (typeof fn === "string") return realm.evaluate(fn);
+						const { args: adopted, dispose } = await adoptElementArgs(realm, args);
+						try {
+							return await realm.evaluate(fn as (...a: unknown[]) => unknown, ...adopted);
+						} finally {
+							await dispose();
+						}
+					}),
 				) as never,
 			scrollIntoView: selector =>
 				op(
