@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed malformed Anthropic thinking signatures freezing sessions at 100% CPU by bounding protobuf tags and lengths and preventing signed length overflow.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added
