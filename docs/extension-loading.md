@@ -249,6 +249,23 @@ Common cases:
 - invalid factory export (non-function)
 - exception thrown while executing factory
 
+### Restricted children and revival
+
+Restricted task/eval children rebind the parent's already-imported extension
+factories to their own session. Hooks and providers remain available without
+ambient extension discovery. Extension tools cannot widen the restricted tool
+set or replace built-ins, including through late registration. New extension
+paths, loaded parent-bound instances, and additional inline factories remain
+excluded.
+
+Revived children inherit the current owning session's extension roots and
+prepared factories, not extension authority from a saved transcript. Cold
+discovery without prepared factories respects the owner's explicit-only or
+merged roots.
+
+Extension factories still execute host code when rebound; tool restrictions are
+not an extension sandbox. Existing per-module load-failure handling is unchanged.
+
 ### Runtime isolation model
 
 - Extensions are **not sandboxed** (same process/runtime).

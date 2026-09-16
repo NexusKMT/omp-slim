@@ -299,6 +299,9 @@ Only after work capable of appending session entries has settled does disposal c
 - Set `restrictToolNames: true` to limit the session to the names in
   `toolNames`. Restricted sessions disable ambient MCP, extensions, custom
   commands, and LSP by default.
+- Restricted children retain hooks/providers from the parent's
+  `preloadedPreparedExtensions`, rebound to their own session. Contributed tools
+  cannot extend or replace the restricted tool set, even when registered later.
 - In a restricted session, SDK-supplied `customTools` are excluded unless
   `allowRestrictedCustomTools: true` and their names also appear in
   `toolNames`.
@@ -320,8 +323,13 @@ const { session } = await createAgentSession({
   inline factories still load
 - `preloadedExtensions`: reuse an extension set loaded early by the same
   session-owning process. Never pass loaded extension instances from a parent
-  to another session; use `preloadedExtensionPaths` so each session gets its
+  to another session; use `preloadedPreparedExtensions` so each session gets its
   own `ExtensionAPI` binding.
+- `preloadedPreparedExtensions`: already-imported factories to rebind, including
+  in restricted children; does not reevaluate the module graph.
+- `extensionRoots`: a live owner-root provider for child discovery and revival.
+  Its explicit roots, discovery mode, and configured roots take precedence over
+  the child's local extension-loading inputs.
 
 ### Runtime tool set changes
 

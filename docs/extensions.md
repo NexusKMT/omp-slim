@@ -560,9 +560,10 @@ Two lifecycle constraints, which apply to both seams:
 - **The registries are process-wide.** A process can host several sessions (a subagent
   gets its own runner), so a handler may be consulted for a denied write or delete
   from any session in the process — not only the one whose extension registered it.
-  This is deliberate: a subagent spawned with restricted tools loads no extensions of
-  its own, and a host that registers once in its top-level session still expects its
-  subagents' writes brokered. `req.sessionId` names the session that issued the
+  This is deliberate: a host that registers once in its top-level session still
+  expects its subagents' writes brokered, including sessions without inherited
+  extension factories. Restricted children retain parent-loaded hooks but do not
+  discover ambient extensions. `req.sessionId` names the session that issued the
   mutation (`undefined` when it did not come from a tool call), and
   `ctx.sessionManager.getSessionId()` names the handler's own — compare them to make
   the decision per session. It matters most before prompting: `ctx.ui` belongs to the
