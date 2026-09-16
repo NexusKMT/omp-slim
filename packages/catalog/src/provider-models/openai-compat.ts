@@ -443,9 +443,10 @@ function catalogProviderKeys(providerId: string): readonly string[] {
 /**
  * The ladder published for a discovered id, preferring the host that serves it.
  *
- * Gateway prefixes are peeled (`deepseek/deepseek-v4` → `deepseek-v4`) until a
- * catalog hit, and each peeled segment joins the host candidates ahead of the
- * endpoint's own keys: on an aggregator the prefix names the real upstream.
+ * Gateway prefixes are peeled (`deepseek/deepseek-v4` → `deepseek-v4`), and
+ * each peeled segment joins the host candidates ahead of the endpoint's own
+ * keys: on an aggregator the prefix names the real upstream. All host-scoped
+ * candidates are checked before accepting any shared-id fallback.
  * A bare id is only accepted from {@link PublishedEffortLadders.byId}, which
  * holds it only while every publishing host agrees that it takes an effort
  * dial and on which tiers. A host serving the id that published it without a
@@ -459,6 +460,7 @@ function lookupPublishedEffortLadder(
 	modelId: string,
 ): readonly Effort[] | undefined {
 	const hosts = [...providerKeys];
+	let shared: readonly Effort[] | undefined;
 	for (let candidate = modelId; ;) {
 		let dialless = false;
 		for (const host of hosts) {
@@ -468,10 +470,9 @@ function lookupPublishedEffortLadder(
 			dialless ||= ladders.withoutLadder.has(key);
 		}
 		if (dialless) return undefined;
-		const shared = ladders.byId.get(candidate);
-		if (shared) return shared;
+		shared ??= ladders.byId.get(candidate);
 		const slash = candidate.indexOf("/");
-		if (slash < 0) return undefined;
+		if (slash < 0) return shared;
 		hosts.unshift(candidate.slice(0, slash));
 		candidate = candidate.slice(slash + 1);
 	}
@@ -479,7 +480,7 @@ function lookupPublishedEffortLadder(
 
 /**
  * Fill the effort ladder of discovered reasoning models whose tiers omp would
- * otherwise guess from the neutral wire default.
+ * otherwise guess from the neutral wire or provider-wide unknown-class default.
  *
  * Source precedence is unchanged: a provider that reports its own thinking
  * surface, and any model whose ladder reviewed rules declare, are left exactly

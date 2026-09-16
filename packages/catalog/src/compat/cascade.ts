@@ -327,9 +327,9 @@ export function resolveCascadeRules(cascade: CompiledCascade, target: ResolveTar
 
 /**
  * Whether the effort ladder this target resolves to comes from a rule scoped
- * to the model's identity (class, family, revision, or an explicit model
- * selector), rather than a provider/api-wide rule that any unknown id at that
- * provider inherits.
+ * to the model's identity (a recognized class, family, revision, or an explicit
+ * model selector), rather than a provider/api-wide or fallback unknown-class
+ * rule that any unrecognized id at that provider inherits.
  *
  * Discovery reads this to tell reviewed tiers apart from a blanket default, so
  * catalog-published tiers can correct the latter and never the former.
@@ -342,7 +342,7 @@ export function hasModelScopedEffortsRule(target: ResolveTarget): boolean {
 	const winner = winners.efforts?.rule.compiled;
 	if (winner === undefined) return false;
 	return (
-		winner.class !== undefined ||
+		(winner.class !== undefined && winner.class !== "unknown") ||
 		winner.family !== undefined ||
 		winner.revision !== undefined ||
 		winner.models !== undefined

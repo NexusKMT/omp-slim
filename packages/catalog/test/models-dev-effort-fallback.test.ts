@@ -1,11 +1,11 @@
 /**
- * Contract: a discovered reasoning model whose effort tiers no rule declares
- * adopts the ladder the catalog publishes for its id, while rule-owned ladders
+ * Contract: a discovered reasoning model without a model-scoped effort rule
+ * adopts the ladder the catalog publishes for its id, while reviewed ladders
  * and non-reasoning rows stay exactly as they are.
  *
- * Moonshot is the fixture because its mapper marks any `-thinking` variant as
- * reasoning, so an id omp does not recognize still arrives as a reasoning
- * model with no ladder of its own.
+ * Moonshot's mapper marks any `-thinking` variant as reasoning, including
+ * unrecognized ids with only a neutral wire default. Novita supplies the
+ * complementary case: an unrecognized id with a provider-wide class default.
  */
 import { beforeEach, expect, test, vi } from "bun:test";
 import { hasModelScopedEffortLadder, resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
@@ -13,6 +13,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
 	expirePublishedEffortLaddersForTest,
 	moonshotModelManagerOptions,
+	novitaModelManagerOptions,
 	resetPublishedEffortLaddersForTest,
 } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
@@ -124,6 +125,31 @@ test("falls back to models.dev when the shared catalog publishes no tiers at all
 	});
 });
 
+test("a provider-wide unknown-class ladder yields to published tiers", async () => {
+	const baseUrl = "https://api.novita.ai/openai/v1";
+	const id = "acme/nebula-9b";
+	const fetchImpl = (async (input: string | URL | Request) => {
+		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+		if (url === `${baseUrl}/models`) {
+			return Response.json({
+				data: [{ id, features: ["reasoning", "function-calling"], endpoints: ["chat/completions"], max_output_tokens: 32_768 }],
+			});
+		}
+		return Response.json({ novita: { models: { [id]: catalogRow(["low", "high"]) } } });
+	}) as FetchImpl;
+	const models = await novitaModelManagerOptions({ apiKey: "novita-test-key", baseUrl, fetch: fetchImpl }).fetchDynamicModels?.();
+	const model = models?.find(candidate => candidate.id === id);
+
+	// The provider fallback differs from the published ladder, so accepting
+	// the catalog's tiers cannot pass by inheriting the existing default.
+	expect(resolveModelPolicy({ ...model!, thinking: undefined }).thinking?.efforts).not.toEqual([
+		Effort.Low,
+		Effort.High,
+	]);
+	expect(model?.thinking?.efforts).toEqual([Effort.Low, Effort.High]);
+	expect(resolveModelPolicy(model!).thinking?.efforts).toEqual([Effort.Low, Effort.High]);
+});
+
 test("rule-owned ladders and non-reasoning rows are left alone", async () => {
 	const calls: string[] = [];
 	const models = await discover(
@@ -190,6 +216,42 @@ test("a duplicated id takes the ladder its own host published", async () => {
 		mode: "effort",
 		efforts: [Effort.Low, Effort.High, Effort.Max],
 	});
+});
+
+test("an inferred host ladder outranks a foreign full-id ladder", async () => {
+	const id = `acme/${UNREVIEWED_ID}`;
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					zeta: { models: { [id]: catalogRow(["minimal", "low"]) } },
+					acme: { models: { [UNREVIEWED_ID]: catalogRow(["low", "high"]) } },
+				},
+			},
+			[],
+			[id],
+		),
+	);
+
+	expect(models?.find(model => model.id === id)?.thinking?.efforts).toEqual([Effort.Low, Effort.High]);
+});
+
+test("an inferred host without a dial vetoes a foreign full-id ladder", async () => {
+	const id = `acme/${UNREVIEWED_ID}`;
+	const models = await discover(
+		stubFetch(
+			{
+				[SHARED_CATALOG_URL]: {
+					zeta: { models: { [id]: catalogRow(["minimal", "low"]) } },
+					acme: { models: { [UNREVIEWED_ID]: catalogRow() } },
+				},
+			},
+			[],
+			[id],
+		),
+	);
+
+	expect(models?.find(model => model.id === id)?.thinking).toBeUndefined();
 });
 
 test("an id foreign hosts publish differently stays unknown; hosts that agree still answer", async () => {
@@ -386,7 +448,8 @@ test("does not memoize an empty cold refresh when shared data has no ladder and 
  */
 test("a blown deadline on the shared leg leaves models.dev no fresh window", async () => {
 	const signalByUrl = new Map<string, AbortSignal | undefined>();
-	let releaseSharedLeg: (() => void) | undefined;
+	const sharedLeg = Promise.withResolvers<void>();
+	const enteredSharedLeg = Promise.withResolvers<void>();
 	const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 		signalByUrl.set(url, init?.signal ?? undefined);
@@ -394,9 +457,8 @@ test("a blown deadline on the shared leg leaves models.dev no fresh window", asy
 			return Response.json({ data: [{ id: UNREVIEWED_ID, object: "model" }] });
 		}
 		if (url === SHARED_CATALOG_URL) {
-			await new Promise<void>(resolve => {
-				releaseSharedLeg = resolve;
-			});
+			enteredSharedLeg.resolve();
+			await sharedLeg.promise;
 			return Response.json({ moonshotai: { models: { [UNREVIEWED_ID]: catalogRow() } } });
 		}
 		// Real fetch refuses an aborted signal; the stub must too.
@@ -407,9 +469,9 @@ test("a blown deadline on the shared leg leaves models.dev no fresh window", asy
 	vi.useFakeTimers();
 	try {
 		const pending = discover(fetchImpl);
-		while (releaseSharedLeg === undefined) await Promise.resolve();
+		await enteredSharedLeg.promise;
 		vi.advanceTimersByTime(10_000);
-		releaseSharedLeg();
+		sharedLeg.resolve();
 		const models = await pending;
 
 		// models.dev was reached on the expired deadline, not a new one, so the

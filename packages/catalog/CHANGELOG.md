@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- OpenAI-compatible discovery fills missing model-specific reasoning effort tiers from the published catalog, replacing neutral wire and provider-wide unknown-class defaults while preserving explicit discovery metadata and model-scoped rules ([#12227](https://github.com/can1357/oh-my-pi/pull/12227) by [@Xytronix](https://github.com/Xytronix)).
+
 ## [18.2.1] - 2026-09-15
 
 ### Added
