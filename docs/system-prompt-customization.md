@@ -24,6 +24,8 @@ Primary implementation:
 
 Explicit CLI or SDK custom input suppresses native custom-prompt discovery. A template source and an explicit literal custom prompt cannot be combined (including an explicitly supplied empty string): `systemPromptTemplate` conflicts with `customSystemPrompt` in the SDK, and `systemPromptTemplate` conflicts with `customPrompt` / `resolvedCustomPrompt` in `buildSystemPrompt`. These combinations fail clearly instead of silently choosing one.
 
+An explicitly empty literal override also suppresses discovered `SYSTEM.md` and `SYSTEM_TEMPLATE.md` files. It does not disable OMP's generated instructions; use the SDK's full `systemPrompt` replacement for that.
+
 Without an explicit custom source, discovery is project-first, then user-level. Within each scope OMP checks every configured base for `SYSTEM_TEMPLATE.md` before checking any base for `SYSTEM.md`; therefore a project `.claude/SYSTEM_TEMPLATE.md` beats a project `.omp/SYSTEM.md`. Each filename uses the existing base order:
 
 1. `<cwd>/.omp/<file>`, `<cwd>/.claude/<file>`, `<cwd>/.codex/<file>`, `<cwd>/.gemini/<file>`
@@ -192,7 +194,7 @@ Generated title output has an enforced normalization contract even with a custom
 
 ## Full provider-facing replacement (SDK only)
 
-`CreateAgentSessionOptions.systemPrompt` is a different, lower-level API. A string or array replaces the fully rendered default blocks; a callback receives the rendered block array and returns its replacement. This can omit all generated context and safety blocks.
+`CreateAgentSessionOptions.systemPrompt` is a different, lower-level API. A fixed string or array replaces every generated block without discovering or rendering a system-prompt template, so an unused empty or malformed `SYSTEM_TEMPLATE.md` cannot prevent startup. A callback still receives the generated block array and returns its replacement; normal template discovery and errors apply to that route. Either form can omit all generated context and safety blocks.
 
 `CreateAgentSessionOptions.systemPromptTemplate` is the compositional SDK API described above: it accepts raw Handlebars source, replaces block 0, and keeps the generated footer, context/append route, safety blocks, active-repository context, and provider tool schemas. It is mutually exclusive with `customSystemPrompt`. The exported `buildSystemPrompt({ systemPromptTemplate })` option has the same raw-text contract and conflict behavior.
 

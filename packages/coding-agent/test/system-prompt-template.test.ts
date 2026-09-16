@@ -132,6 +132,24 @@ describe("system prompt Handlebars templates", () => {
 		});
 	});
 
+	for (const key of ["customPrompt", "resolvedCustomPrompt"] as const) {
+		it(`keeps always-apply rules when ${key} is explicitly empty`, async () => {
+			await withDiscoveryHome(async ({ cwd, projectConfig }) => {
+				await Bun.write(path.join(projectConfig, "SYSTEM.md"), literalDataTemplate);
+				const result = await buildSystemPrompt(
+					options(cwd, {
+						[key]: "",
+						alwaysApplyRules: [
+							{ name: "required", path: path.join(cwd, "required.md"), content: literalDataTemplate },
+						],
+					}),
+				);
+				// Ignored SYSTEM.md content must not suppress the rule as a duplicate.
+				expect(result.systemPrompt.join("\n")).toContain(literalDataTemplate.trim());
+			});
+		});
+	}
+
 	it("fails a malformed discovered template instead of falling back to SYSTEM.md", async () => {
 		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
 			await Bun.write(path.join(projectConfig, "SYSTEM_TEMPLATE.md"), "{{#if eagerTasks}}");

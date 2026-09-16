@@ -1183,7 +1183,7 @@ export function applyResolvedSystemPromptInputs(
 	resolvedSystemPrompt: string | undefined,
 	resolvedAppendPrompt: string | undefined,
 ): void {
-	if (resolvedSystemPrompt) {
+	if (resolvedSystemPrompt !== undefined) {
 		options.customSystemPrompt = resolvedSystemPrompt;
 	}
 	if (resolvedAppendPrompt) {

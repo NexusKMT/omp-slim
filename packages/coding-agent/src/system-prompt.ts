@@ -427,7 +427,7 @@ export async function loadSystemPromptTemplateFile(filePath: string): Promise<st
 /** Resolve input as file path or literal string */
 export async function resolvePromptInput(input: string | undefined, description: string): Promise<string | undefined> {
 	if (!input) {
-		return undefined;
+		return input;
 	} else if (input.includes("\n")) {
 		return input;
 	}
@@ -891,9 +891,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	// An explicit literal prompt or selected template owns block 0; the secondary
 	// capability-path SYSTEM.md walk-up must not silently augment either.
 	const callerControlsCustomPrompt =
-		resolvedSystemPromptTemplate !== undefined ||
-		(typeof resolvedCustomPromptInput === "string" && resolvedCustomPromptInput.length > 0) ||
-		(typeof customPrompt === "string" && customPrompt.length > 0);
+		hasExplicitCustomPrompt || resolvedSystemPromptTemplate !== undefined || resolvedCustomPromptInput !== undefined;
 	const systemPromptCustomizationPromise: Promise<string | null> = callerControlsCustomPrompt
 		? Promise.resolve(null)
 		: logger.time("loadSystemPromptFiles", loadSystemPromptFiles, { cwd: resolvedCwd });
