@@ -160,10 +160,14 @@ function normalizeClientSessionKey(clientKey: string | undefined): string | unde
  */
 function resolveGatewayAccount(storage: AuthStorage, provider: string, sessionId: string, apiKey: string): string {
 	const identity = storage.getOAuthAccountIdentity(provider, sessionId);
-	if (identity?.accountId) return `account:${identity.accountId}`;
-	if (identity?.email) return `email:${identity.email}`;
-	if (identity?.projectId) return `project:${identity.projectId}`;
-	if (identity?.orgId) return `org:${identity.orgId}`;
+	if (identity) {
+		return `oauth:${JSON.stringify([
+			identity.accountId ?? "",
+			identity.email ?? "",
+			identity.projectId ?? "",
+			identity.orgId ?? "",
+		])}`;
+	}
 	return `key:${Bun.hash(apiKey).toString(36)}`;
 }
 
@@ -340,6 +344,7 @@ function buildGatewayApiKeyResolver(
 	requestSignal: AbortSignal,
 	format: string,
 	peer: string,
+	onResolvedKey: (apiKey: string) => void,
 ): ApiKeyResolver {
 	let lastKey = initialKey;
 	return async ({ lastChance, error, signal }) => {
@@ -355,6 +360,7 @@ function buildGatewayApiKeyResolver(
 				forceRefresh: true,
 			});
 			lastKey = refreshed ?? lastKey;
+			if (refreshed) onResolvedKey(refreshed);
 			return refreshed;
 		}
 		const next = await refreshGatewayApiKeyAfterAuthError(
@@ -369,6 +375,7 @@ function buildGatewayApiKeyResolver(
 			peer,
 		);
 		lastKey = next ?? lastKey;
+		if (next) onResolvedKey(next);
 		return next;
 	};
 }
@@ -532,15 +539,6 @@ async function handleFormatEndpoint(
 	}
 
 	const streamOpts = buildStreamOptions(parsed, model.api, controller.signal);
-	streamOpts.apiKey = buildGatewayApiKeyResolver(
-		bootOpts.storage,
-		model,
-		sessionId,
-		apiKey,
-		controller.signal,
-		route.label,
-		peer,
-	);
 	// Per-session provider learning (sticky strict-tools / fast-mode / thinking
 	// fallbacks, Codex transport sessions). Owned by this gateway instance: the
 	// map is non-serializable, so no client can supply it and every turn would
@@ -554,6 +552,17 @@ async function handleFormatEndpoint(
 		account: resolveGatewayAccount(bootOpts.storage, model.provider, sessionId, apiKey),
 	});
 	streamOpts.providerSessionState = lease.states;
+	streamOpts.apiKey = buildGatewayApiKeyResolver(
+		bootOpts.storage,
+		model,
+		sessionId,
+		apiKey,
+		controller.signal,
+		route.label,
+		peer,
+		resolvedKey =>
+			lease.updateAccount(resolveGatewayAccount(bootOpts.storage, model.provider, sessionId, resolvedKey)),
+	);
 
 	logger.info("auth-gateway request", {
 		requestId,
@@ -764,6 +773,8 @@ async function handlePiNative(
 		controller.signal,
 		"pi-native",
 		peer,
+		resolvedKey =>
+			lease.updateAccount(resolveGatewayAccount(bootOpts.storage, model.provider, sessionId, resolvedKey)),
 	);
 	if (model.api === "openai-codex-responses") {
 		delete streamOpts.temperature;

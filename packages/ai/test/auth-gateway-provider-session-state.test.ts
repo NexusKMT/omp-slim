@@ -17,8 +17,9 @@ import { clearCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { AuthGatewaySessionStateStore, startAuthGateway } from "@oh-my-pi/pi-ai/auth-gateway";
 import type { AuthGatewayServerHandle, AuthGatewaySessionStateRequest } from "@oh-my-pi/pi-ai/auth-gateway";
 import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
+import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
-import type { Api, Context, Model } from "@oh-my-pi/pi-ai/types";
+import type { Api, Context, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withOfficialAnthropicEndpoint } from "./helpers";
 
@@ -133,11 +134,18 @@ interface GatewayFixture {
 async function startGateway(
 	model: Model<Api>,
 	provider: string,
-	options?: { sessionStateMax?: number },
+	options?: { sessionStateMax?: number; apiKeys?: string[] },
 ): Promise<GatewayFixture> {
 	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "gw-session-state-"));
 	const storage = await AuthStorage.create(path.join(dir, "auth.db"));
-	storage.setRuntimeApiKey(provider, "sk-ant-api-test");
+	if (options?.apiKeys) {
+		await storage.set(
+			provider,
+			options.apiKeys.map(key => ({ type: "api_key", key })),
+		);
+	} else {
+		storage.setRuntimeApiKey(provider, "sk-ant-api-test");
+	}
 	const handle = startAuthGateway({
 		bind: "127.0.0.1:0",
 		bearerTokens: ["test-token"],
@@ -359,24 +367,45 @@ describe("auth-gateway provider session state", () => {
 		}
 	});
 
-	it("keeps one map per session across a credential switch instead of splitting by account", () => {
-		const store = new AuthGatewaySessionStateStore();
-		const closed: string[] = [];
-		const first = store.acquire(stateRequest("session-a", "account:one"));
-		first.states.set("endpoint-lesson", { close: () => closed.push("endpoint-lesson") });
-		first.release();
-
-		const rotated = store.acquire(stateRequest("session-a", "account:two"));
-
-		// Keying by credential would fragment lessons that hold for the endpoint
-		// whoever calls it (tool-grammar limits, signing-proxy demotions) and
-		// re-pay them per account. The switch keeps the entry and its records;
-		// only the account-dependent flags inside them are reset.
-		expect(rotated.states).toBe(first.states);
-		expect(rotated.states.get("endpoint-lesson")).toBeDefined();
-		expect(closed).toEqual([]);
-		expect(store.size).toBe(1);
-		rotated.release();
+	it("re-probes account-scoped state before retrying with a sibling credential", async () => {
+		registerMockApi();
+		const observed: Array<{ fastModeDisabled: boolean; strictToolsDisabled: boolean }> = [];
+		let attempt = 0;
+		const mock = createMockModel({
+			provider: "mock",
+			id: "gw-session-account-retry",
+			handler: (_context, options) => {
+				const states = options?.providerSessionState;
+				if (!states) throw new Error("expected retained provider state");
+				if (attempt++ === 0) {
+					states.set("anthropic-messages", {
+						fastModeDisabled: true,
+						strictToolsDisabled: true,
+						close: () => {},
+					} as ProviderSessionState & { fastModeDisabled: boolean; strictToolsDisabled: boolean });
+					throw new ProviderHttpError("expired credential", 401);
+				}
+				const state = states.get("anthropic-messages") as
+					| (ProviderSessionState & { fastModeDisabled: boolean; strictToolsDisabled: boolean })
+					| undefined;
+				if (!state) throw new Error("expected Anthropic provider state");
+				observed.push({
+					fastModeDisabled: state.fastModeDisabled,
+					strictToolsDisabled: state.strictToolsDisabled,
+				});
+				return { content: ["ok"] };
+			},
+		});
+		const gateway = await startGateway(mock, "mock", { apiKeys: ["key-one", "key-two"] });
+		try {
+			expect(await priorityTurn(gateway.handle, "session-a", mock.id)).toMatchObject({ status: 200 });
+			expect(mock.calls.map(call => call.options?.apiKey)).toHaveLength(2);
+			expect(new Set(mock.calls.map(call => call.options?.apiKey)).size).toBe(2);
+			expect(observed).toEqual([{ fastModeDisabled: false, strictToolsDisabled: true }]);
+		} finally {
+			await gateway.cleanup();
+			clearCustomApis();
+		}
 	});
 
 	it("closes the provider state it evicts at the session ceiling", () => {

@@ -51,6 +51,8 @@ type SessionDisposeReason = "evict" | "shutdown";
 export interface AuthGatewaySessionStateLease {
 	/** The map to hand to `streamSimple` as `providerSessionState`. */
 	readonly states: Map<string, ProviderSessionState>;
+	/** Reset account-scoped records if an in-request auth retry switches accounts. */
+	updateAccount(account: string): void;
 	/** Give up this request's claim. Idempotent. */
 	release(): void;
 }
@@ -74,9 +76,8 @@ export interface AuthGatewaySessionStateRequest {
 	 * Stable identity of the account this request's credential resolved to.
 	 * A change means the gateway switched the session to a sibling credential,
 	 * so the account-dependent lessons in the retained map are re-probed. The
-	 * comparison happens here, at a request boundary, rather than inside the
-	 * retry that rotated: a provider mid-attempt is reading the very records
-	 * that would be reset under it.
+	 * comparison happens on acquire and whenever an in-request auth retry
+	 * resolves a sibling credential.
 	 */
 	account: string;
 }
@@ -231,6 +232,11 @@ export class AuthGatewaySessionStateStore {
 		let released = false;
 		return {
 			states: session.states,
+			updateAccount: (account: string): void => {
+				if (session.account === account) return;
+				resetAccountScopedProviderSessionState(session.states);
+				session.account = account;
+			},
 			release: (): void => {
 				if (released) return;
 				released = true;
