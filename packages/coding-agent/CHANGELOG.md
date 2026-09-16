@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- Killing a running subagent from Agent Hub now settles and reports its owning background task job instead of leaving parent `hub wait` calls stuck indefinitely ([#12218](https://github.com/can1357/oh-my-pi/issues/12218)).
 - Agent and history database startup errors now identify the failing database file, including corruption found during schema initialization.
 - Corrupt agent and prompt-history databases no longer prevent startup: damaged files are preserved as private `.corrupt-*` backups before creating fresh stores; lost credentials require logging in again.
 - Terminal title spinner now animates on native Windows via `SetConsoleTitleW` instead of staying on the static `:` separator; WSL keeps the static separator to avoid the ConPTY write-loop CPU cost ([#12250](https://github.com/can1357/oh-my-pi/pull/12250) by [@H4vC](https://github.com/H4vC)).
