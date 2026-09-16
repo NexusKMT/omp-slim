@@ -5261,9 +5261,11 @@ function resolveCursorWireModel(
 ): {
 	modelId: string;
 	parameters: RequestedModel_ModelParameterbytes[];
+	maxMode: boolean;
 } {
 	const wireModelId = requestModelId ?? model.requestModelId ?? model.id;
-	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [] };
+	const maxMode = /-(?:xhigh|extra-high|max)(?:-fast)?$/.test(wireModelId);
+	if (wireMode === "discovered") return { modelId: wireModelId, parameters: [], maxMode };
 	// `collapseVariantId` keeps the lane in the logical id (`-high-fast` →
 	// base `-fast`) and decodes the KDL effort (`-none` → `off`).
 	const collapsed = collapseVariantId("cursor", wireModelId);
@@ -5271,11 +5273,12 @@ function resolveCursorWireModel(
 	const base = effort !== undefined ? collapsed.logicalId : undefined;
 	if (effort !== undefined && base && classifyModel("cursor", base).class === "openai") {
 		if (effort === "off") {
-			return { modelId: base, parameters: [] };
+			return { modelId: base, parameters: [], maxMode };
 		}
 		if ((THINKING_EFFORTS as readonly string[]).includes(effort)) {
 			return {
 				modelId: base,
+				maxMode,
 				parameters: [
 					create(RequestedModel_ModelParameterbytesSchema, { id: "reasoning", value: collapsed.effort }),
 				],
@@ -5289,9 +5292,10 @@ function resolveCursorWireModel(
 		return {
 			modelId: wireModelId,
 			parameters: [create(RequestedModel_ModelParameterbytesSchema, { id: "fast", value: "false" })],
+			maxMode: false,
 		};
 	}
-	return { modelId: wireModelId, parameters: [] };
+	return { modelId: wireModelId, parameters: [], maxMode };
 }
 
 async function buildGrpcRequestForWireMode(
@@ -5401,12 +5405,11 @@ async function buildGrpcRequestForWireMode(
 		turns,
 	});
 
-	const { modelId: wireModelId, parameters: wireParameters } = resolveCursorWireModel(
+	const { modelId: wireModelId, parameters: wireParameters, maxMode: cursorMaxMode } = resolveCursorWireModel(
 		model,
 		options?.wireModelId,
 		wireMode,
 	);
-	const cursorMaxMode = model.cursorMaxMode === true;
 	const modelDetails = create(ModelDetailsSchema, {
 		modelId: wireModelId,
 		displayModelId: model.id,

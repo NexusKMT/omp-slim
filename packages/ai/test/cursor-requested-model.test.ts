@@ -19,10 +19,11 @@ function cursorModel(id: string): Model<"cursor-agent"> {
 	});
 }
 
-function capture(model: Model<"cursor-agent">): Promise<AgentRunRequest> {
+function capture(model: Model<"cursor-agent">, wireModelId?: string): Promise<AgentRunRequest> {
 	const { promise, resolve, reject } = Promise.withResolvers<AgentRunRequest>();
 	streamCursor(model, { messages: [{ role: "user", content: "pong", timestamp: 0 }] } satisfies Context, {
 		apiKey: "test-token",
+		wireModelId,
 		onPayload: payload => {
 			if (payload && typeof payload === "object" && "$typeName" in payload) {
 				resolve(payload as AgentRunRequest);
@@ -58,6 +59,18 @@ describe("Cursor requestedModel wire shape", () => {
 		expect(payload.requestedModel?.parameters).toEqual([
 			expect.objectContaining({ id: "reasoning", value: "xhigh" }),
 		]);
+	});
+
+	 it("derives max_mode from the routed wire tier, not the collapsed model", async () => {
+		const model = cursorModel("gpt-5.6-sol");
+		const off = await capture(model, "gpt-5.6-sol-none");
+		const low = await capture(model, "gpt-5.6-sol-low");
+		const xhigh = await capture(model, "gpt-5.6-sol-xhigh");
+		const max = await capture(model, "gpt-5.6-sol-max");
+		expect(off.requestedModel?.maxMode).toBe(false);
+		expect(low.requestedModel?.maxMode).toBe(false);
+		expect(xhigh.requestedModel?.maxMode).toBe(true);
+		expect(max.requestedModel?.maxMode).toBe(true);
 	});
 
 	it("normalizes an off-tier sibling to the base id with no parameters", async () => {
