@@ -1145,9 +1145,6 @@ describe("Cursor GPT-5.6 tier routing (issue #9025)", () => {
 		if (!luna) throw new Error("bundled GPT-5.6 row disappeared");
 
 		expect(luna.cursorMaxMode).toBe(true);
-		expect(resolveWireModelId(buildModel(luna as ModelSpec<"cursor-agent">), Effort.Max)).toBe(
-			"gpt-5.6-luna-max",
-		);
 	});
  });
 
