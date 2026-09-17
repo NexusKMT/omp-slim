@@ -10,7 +10,7 @@ import { type Component, matchesKey, ProcessTerminal, TUI, truncateToWidth } fro
 import { formatDuration } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { closeDaemonClients, type DaemonBrokerClient } from "../launch/client";
-import type { DaemonSnapshot, DaemonSpec } from "../launch/protocol";
+import type { DaemonSnapshot, DaemonSpec } from "@oh-my-pi/pi-tui/tools/hub";
 import {
 	collapseCommand,
 	collectReports,

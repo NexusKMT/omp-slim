@@ -18,12 +18,12 @@ import {
 	Text,
 } from "@oh-my-pi/pi-tui";
 import { getSessionsDir } from "@oh-my-pi/pi-utils";
-import { DynamicBorder } from "../modes/components/dynamic-border";
-import { OverlayPanel } from "../modes/components/overlay-box";
-import { TranscriptBlock } from "../modes/components/transcript-container";
-import { getSelectListTheme, getSymbolTheme, theme } from "../modes/theme/theme";
+import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
+import { OverlayPanel } from "@oh-my-pi/pi-tui/chrome/overlay-box";
+import { TranscriptBlock } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import { getSelectListTheme, getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { InteractiveModeContext } from "../modes/types";
-import { formatBytes } from "../tools/render-utils";
+import { formatBytes } from "@oh-my-pi/pi-tui/render/render-utils";
 import { openPath } from "../utils/open";
 import { DebugLogViewerComponent } from "./log-viewer";
 import { collectMemoryStats, type ProfilerSession, startCpuProfile } from "./profiler";

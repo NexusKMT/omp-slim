@@ -8,7 +8,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { type ThemeColor, theme } from "../modes/theme/theme";
+import { type ThemeColor, theme } from "@oh-my-pi/pi-tui/theme";
 
 /** Distinct states of a realtime call connection. */
 export type LivePhase = "connecting" | "listening" | "working" | "speaking" | "muted" | "error";

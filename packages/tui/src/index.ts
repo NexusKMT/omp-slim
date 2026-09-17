@@ -47,6 +47,8 @@ export type * from "./symbols";
 export * from "./terminal";
 // Terminal image support
 export * from "./terminal-capabilities";
+// Theme runtime (active theme singleton, loaders, shimmer, session accents, path → language)
+export * from "./theme";
 // TTY ID
 export * from "./ttyid";
 export * from "./tui";

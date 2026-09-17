@@ -1,5 +1,5 @@
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
-import type { ASIData, ASIValue, MetricDirection, NumericMetricMap } from "./types";
+import type { ASIData, ASIValue, MetricDirection, NumericMetricMap } from "@oh-my-pi/pi-tui/tools/autoresearch";
 
 export const METRIC_LINE_PREFIX = "METRIC";
 export const ASI_LINE_PREFIX = "ASI";
@@ -65,30 +65,6 @@ export function mergeAsi(base: ASIData | null, override: ASIData | undefined): A
 		...base,
 		...override,
 	};
-}
-
-export function commas(value: number): string {
-	const sign = value < 0 ? "-" : "";
-	const digits = String(Math.trunc(Math.abs(value)));
-	const groups: string[] = [];
-	for (let index = digits.length; index > 0; index -= 3) {
-		groups.unshift(digits.slice(Math.max(0, index - 3), index));
-	}
-	return sign + groups.join(",");
-}
-
-export function fmtNum(value: number, decimals: number = 0): string {
-	if (decimals <= 0) return commas(Math.round(value));
-	const absolute = Math.abs(value);
-	const whole = Math.floor(absolute);
-	const fraction = (absolute - whole).toFixed(decimals).slice(1);
-	return `${value < 0 ? "-" : ""}${commas(whole)}${fraction}`;
-}
-
-export function formatNum(value: number | null, unit: string): string {
-	if (value === null) return "-";
-	if (Number.isInteger(value)) return `${fmtNum(value)}${unit}`;
-	return `${fmtNum(value, 2)}${unit}`;
 }
 
 export function formatElapsed(milliseconds: number): string {

@@ -35,7 +35,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { generateGitCommit } from "../../commit/conventional/service";
-import { theme, warmHighlighter } from "../../modes/theme/theme";
+import { theme, warmHighlighter } from "@oh-my-pi/pi-tui/theme";
 import { aiStage } from "./ai-stage";
 import { AvatarLoader } from "./avatar";
 import { pill, softPill, tintChip } from "./colors";

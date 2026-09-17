@@ -7,7 +7,7 @@ import type { ExtensionContext, ExtensionFactory } from "../extensibility/extens
 import commandResumeTemplate from "./command-resume.md" with { type: "text" };
 import { createDashboardController } from "./dashboard";
 import { ensureAutoresearchBranch } from "./git";
-import { formatNum } from "./helpers";
+import { formatNum } from "@oh-my-pi/pi-tui/tools/autoresearch";
 import promptTemplate from "./prompt.md" with { type: "text" };
 import setupPromptTemplate from "./prompt-setup.md" with { type: "text" };
 import resumeMessageTemplate from "./resume-message.md" with { type: "text" };
@@ -26,7 +26,8 @@ import { createInitExperimentTool } from "./tools/init-experiment";
 import { createLogExperimentTool } from "./tools/log-experiment";
 import { createRunExperimentTool } from "./tools/run-experiment";
 import { createUpdateNotesTool } from "./tools/update-notes";
-import type { AutoresearchRuntime, ExperimentResult, PendingRunSummary } from "./types";
+import type { AutoresearchRuntime, PendingRunSummary } from "./types";
+import type { ExperimentResult } from "@oh-my-pi/pi-tui/tools/autoresearch";
 
 const EXPERIMENT_TOOL_NAMES = ["init_experiment", "run_experiment", "log_experiment", "update_notes"];
 

@@ -1,8 +1,10 @@
 import { matchesKey, replaceTabs, ScrollView, Text, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { Theme } from "../modes/theme/theme";
-import { formatElapsed, formatNum, isBetter } from "./helpers";
+import type { Theme } from "@oh-my-pi/pi-tui/theme";
+import { formatElapsed, isBetter } from "./helpers";
+import { formatNum } from "@oh-my-pi/pi-tui/tools/autoresearch";
 import { currentResults, findBaselineMetric, findBaselineRunNumber, findBaselineSecondary } from "./state";
-import type { AutoresearchRuntime, DashboardController, ExperimentResult, ExperimentState } from "./types";
+import type { AutoresearchRuntime, DashboardController } from "./types";
+import type { ExperimentResult, ExperimentState } from "@oh-my-pi/pi-tui/tools/autoresearch";
 
 export function createDashboardController(): DashboardController {
 	let overlayTui: { requestRender(): void } | null = null;

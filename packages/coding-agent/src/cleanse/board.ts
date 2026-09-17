@@ -13,7 +13,7 @@
 import { formatDuration, formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { createLiveBoard, type LiveBoardOutput } from "../cli/live-board";
-import type { AgentProgress } from "../task/types";
+import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
 import type { CleanseCheckerDescriptor } from "./checkers";
 import type { CleanseAgentOutcome, CleanseAssignment, CleanseCheckResult } from "./types";
 

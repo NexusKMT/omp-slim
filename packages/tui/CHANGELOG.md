@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added image input validation and automatic conversion for unsupported formats
+- Added MCP Add Wizard for streamlined server configuration
+- Added support for video preview rendering in chat
+- Added interactive task list renderer for managing subtasks
+- Added `autoresearch` tool renderer for tracking experiments
+- Enhanced merge conflict rendering with side-by-side diff support
+- Improved output rendering for GitHub workflow jobs and runs
+- Added performance improvements for long-running bash streaming output
+- Added the `dark-celestial` built-in theme: a twilight dark palette with pink/coral accents, purple keywords, cyan functions, and peach strings.
+
 ## [18.2.4] - 2026-09-17
 
 ### Fixed

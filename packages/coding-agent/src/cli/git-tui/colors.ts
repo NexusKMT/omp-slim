@@ -4,7 +4,7 @@
  * theme's own canvas, and filled pill buttons pick their label contrast from
  * the button color's luminance.
  */
-import { theme } from "../../modes/theme/theme";
+import { theme } from "@oh-my-pi/pi-tui/theme";
 
 export function hexChannels(hex: string): [number, number, number] {
 	const value = Number.parseInt(hex.replace("#", ""), 16);

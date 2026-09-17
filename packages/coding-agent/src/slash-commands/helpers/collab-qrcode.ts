@@ -1,7 +1,7 @@
 import { type Component, Ellipsis, truncateToWidth, visibleWidth } from "@oh-my-pi/pi-tui";
-import type { AnimationFrame, TranscriptPresentationTarget } from "../../modes/components/transcript-container";
-import { fgOrPlain } from "../../modes/theme/theme";
-import { urlHyperlinkAlways } from "../../tui";
+import type { AnimationFrame, TranscriptPresentationTarget } from "@oh-my-pi/pi-tui/chrome/transcript-container";
+import { fgOrPlain } from "@oh-my-pi/pi-tui/theme";
+import { urlHyperlinkAlways } from "@oh-my-pi/pi-tui/render";
 import { QrCode, renderQrHalfBlocks } from "../../utils/qrcode";
 
 /** Scheme-less display form of a collab browser deep link, OSC-8 linked. */

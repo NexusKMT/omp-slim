@@ -4,14 +4,16 @@ import type { RunRow, SessionRow } from "./storage";
 import type {
 	AutoresearchControlEntryData,
 	AutoresearchRuntime,
+	ReconstructedControlState,
+	RuntimeStore,
+} from "./types";
+import type {
 	ExperimentResult,
 	ExperimentState,
 	MetricDef,
 	MetricDirection,
 	NumericMetricMap,
-	ReconstructedControlState,
-	RuntimeStore,
-} from "./types";
+} from "@oh-my-pi/pi-tui/tools/autoresearch";
 
 export function createExperimentState(): ExperimentState {
 	return {

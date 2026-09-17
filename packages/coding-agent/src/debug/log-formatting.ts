@@ -1,5 +1,5 @@
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "../tools/render-utils";
+import { replaceTabs, truncateToWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui/render/render-utils";
 
 export function formatDebugLogLine(line: string, maxWidth: number): string {
 	const sanitized = sanitizeText(line);

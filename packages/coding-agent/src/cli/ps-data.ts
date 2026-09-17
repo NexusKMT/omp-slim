@@ -21,13 +21,8 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { createDaemonBrokerClient, type DaemonBrokerClient } from "../launch/client";
 import { canonicalProjectDir, daemonRuntimeDir, readDaemonScopeMeta } from "../launch/paths";
 import { readLiveDaemonBrokerPid } from "../launch/presence";
-import {
-	type DaemonSnapshot,
-	type DaemonSpec,
-	type DaemonState,
-	parseDaemonSnapshot,
-	parseDaemonSpec,
-} from "../launch/protocol";
+import { type DaemonSnapshot, type DaemonSpec, type DaemonState } from "@oh-my-pi/pi-tui/tools/hub";
+import { parseDaemonSnapshot, parseDaemonSpec } from "../launch/protocol";
 
 /** One broker scope: a project runtime dir or a machine-global service dir. */
 export interface PsScope {

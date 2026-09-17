@@ -12,7 +12,7 @@ import {
 	DiffPane,
 } from "../src/cli/git-tui/diff-pane";
 import { GitModel } from "../src/cli/git-tui/state";
-import { initTheme } from "../src/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 const RED_PNG = Buffer.from(
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",

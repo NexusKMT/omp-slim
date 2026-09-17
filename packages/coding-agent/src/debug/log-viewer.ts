@@ -9,8 +9,8 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { bottomBorder, divider, row, topBorder } from "../modes/components/overlay-box";
-import { theme } from "../modes/theme/theme";
+import { bottomBorder, divider, row, topBorder } from "@oh-my-pi/pi-tui/chrome/overlay-box";
+import { theme } from "@oh-my-pi/pi-tui/theme";
 import { copyToClipboard } from "../utils/clipboard";
 import {
 	formatDebugLogExpandedLines,

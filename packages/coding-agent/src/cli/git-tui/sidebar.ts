@@ -21,7 +21,7 @@ import {
 	visibleWidth,
 } from "@oh-my-pi/pi-tui";
 import type { ConventionalCommit } from "../../commit/types";
-import { getEditorTheme, theme } from "../../modes/theme/theme";
+import { getEditorTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { type AvatarLoader, identiconLines } from "./avatar";
 import { pill, selectionBgAnsi, softPill, tintChip, withBg } from "./colors";
 import type { ChangedFile, GitModel } from "./state";

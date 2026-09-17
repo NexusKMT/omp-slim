@@ -5,7 +5,7 @@ import {
 	encodeRgbPng,
 	ProtocolProbeComponent,
 } from "@oh-my-pi/pi-coding-agent/debug/protocol-probe";
-import { initTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { getImageDimensions, ImageBudget, ImageProtocol, TERMINAL } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {

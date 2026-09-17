@@ -6,7 +6,7 @@ import { $ } from "bun";
 import { AvatarLoader } from "../src/cli/git-tui/avatar";
 import { Sidebar, type SidebarAction } from "../src/cli/git-tui/sidebar";
 import { GitModel } from "../src/cli/git-tui/state";
-import { initTheme } from "../src/modes/theme/theme";
+import { initTheme } from "@oh-my-pi/pi-tui/theme";
 
 beforeAll(async () => {
 	await initTheme(false);

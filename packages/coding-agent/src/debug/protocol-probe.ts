@@ -27,8 +27,8 @@ import {
 	Text,
 	type TextSizingScale,
 } from "@oh-my-pi/pi-tui";
-import { DynamicBorder } from "../modes/components/dynamic-border";
-import { theme } from "../modes/theme/theme";
+import { DynamicBorder } from "@oh-my-pi/pi-tui/chrome/dynamic-border";
+import { theme } from "@oh-my-pi/pi-tui/theme";
 
 const PNG_SIGNATURE = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 
