@@ -41,9 +41,11 @@
 - Fixed stale-tag anchor recovery landing a hunk in an identically shaped sibling construct — the next entry of the same dict, list, or block — when the line map aligned the anchor's row with its duplicate; recovery now refuses a remap whose enclosing constructs differ and reports the stale tag instead ([#12369](https://github.com/can1357/oh-my-pi/pull/12369) by [@pedropaulovc](https://github.com/pedropaulovc)).
 - Fixed the generation tok/s readout (`composer.tokenRate`) staying blank while viewing a subagent and losing the main session's reading on return; each session now meters its own stream, and the reading survives focus round-trips and resumes.
 - Fixed subagent HUD labels (and plan filenames) showing the prompt's own example text — e.g. every spawn labelled `Audit client fetch calls for abort-signal wiring` — on small tiny/smol models that echoed the few-shot examples.
+- File line counting now scans with the native substring search instead of a per-character loop.
+- Session statistics now accumulate role, tool-call, and usage counts in a single pass instead of re-walking the message list.
+- Session persistence recomputes truncated line counts without allocating a transient line array.
 
 ## [18.2.4] - 2026-09-17
-
 ### Added
 
 - Added an optional live generation speed readout via `composer.tokenRate`, showing smoothed tokens-per-second output in the working row and keeping the rate visible between turns.

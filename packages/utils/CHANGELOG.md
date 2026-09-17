@@ -14,6 +14,11 @@
 - Exported paletteToRgb utility function
 - Added stringifyYamlConfig utility to strip trailing spaces from YAML block headers
 
+### Fixed
+
+- `stringifyJson` now tries the plain serializer first and only retries with bigint coercion when a bigint is actually present, avoiding the replacer slow path on every call.
+- `$which` cache keys embed the raw lookup options instead of their hashes, so distinct PATH/cwd combinations can no longer collide and return each other's binary.
+
 ## [18.2.3] - 2026-09-17
 
 ### Fixed

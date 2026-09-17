@@ -177,7 +177,7 @@ export const enum WhichCachePolicy {
 export interface WhichOptions extends Bun.WhichOptions {
 	/**
 	 * Cache policy for the lookup.
-	 * Defaults to `WhichCachePolicy.Fresh`.
+	 * Defaults to `WhichCachePolicy.Cached`.
 	 */
 	cache?: WhichCachePolicy;
 	/**
@@ -216,14 +216,17 @@ export const whichFresh =
 		? darwinWhich
 		: (command: string, options?: Bun.WhichOptions): string | null => Bun.which(command, options);
 
-// Derive stable cache key from command and lookup options
+// Derive stable cache key from command and lookup options. The key embeds the
+// raw option strings (not their hashes): two distinct PATH/cwd combinations
+// must never share a cache entry and return each other's binary. Fields are
+// length-prefixed so a separator byte inside cwd/PATH cannot alias two
+// distinct tuples onto one key.
 function cacheKey(command: string, options?: Bun.WhichOptions): CacheKey {
 	if (!options) return command;
 	if (!options.cwd && !options.PATH) return command;
-	let h = Bun.hash(command);
-	if (options.cwd) h = Bun.hash(options.cwd, h);
-	if (options.PATH) h = Bun.hash(options.PATH, h);
-	return h;
+	const cwd = options.cwd ?? "";
+	const binPath = options.PATH ?? "";
+	return `${command.length}:${command}${cwd.length}:${cwd}${binPath.length}:${binPath}`;
 }
 
 /**

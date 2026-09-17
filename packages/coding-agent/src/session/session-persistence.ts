@@ -230,8 +230,16 @@ function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string
 			typeof lineCountEntry[1] === "number"
 		) {
 			const content = contentEntry[1];
+			// Native indexOf scan, not split: identical count (N newlines ⇒
+			// N+1 lines) without the transient line array.
+			let lineCount = 1;
+			let pos = content.indexOf("\n");
+			while (pos !== -1) {
+				lineCount++;
+				pos = content.indexOf("\n", pos + 1);
+			}
 			const updatedEntries = entries.map(([childKey, value]) =>
-				childKey === "lineCount" ? ([childKey, content.split("\n").length] as const) : ([childKey, value] as const),
+				childKey === "lineCount" ? ([childKey, lineCount] as const) : ([childKey, value] as const),
 			);
 			return Object.fromEntries(updatedEntries);
 		}
