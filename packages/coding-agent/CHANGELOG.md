@@ -19,6 +19,7 @@
 - Fixed a subagent burning its whole run on `yield` calls that never finish it: a turn whose only tool call is an incremental `yield` no longer slips past the soft request budget, and the reminder ladder's forced final `yield` now ends the run even when the model answers with another incremental section. ([#12351](https://github.com/can1357/oh-my-pi/pull/12351) by [@pedropaulovc](https://github.com/pedropaulovc))
 - Fixed `edit` applying hashline hunks the tool documents as rejected: a hunk anchored on a line the tagged read never displayed was auto-repaired onto a neighbouring statement instead of refused, so `edit.enforceSeenLines` now defaults on and such a hunk is rejected with the actual content of the anchored lines ([#12369](https://github.com/can1357/oh-my-pi/pull/12369) by [@pedropaulovc](https://github.com/pedropaulovc)).
 - Fixed stale-tag anchor recovery landing a hunk in an identically shaped sibling construct — the next entry of the same dict, list, or block — when the line map aligned the anchor's row with its duplicate; recovery now refuses a remap whose enclosing constructs differ and reports the stale tag instead ([#12369](https://github.com/can1357/oh-my-pi/pull/12369) by [@pedropaulovc](https://github.com/pedropaulovc)).
+- Fixed the generation tok/s readout (`composer.tokenRate`) staying blank while viewing a subagent and losing the main session's reading on return; each session now meters its own stream, and the reading survives focus round-trips and resumes.
 
 ## [18.2.4] - 2026-09-17
 

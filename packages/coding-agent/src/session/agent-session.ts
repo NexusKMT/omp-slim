@@ -240,6 +240,7 @@ import type { EditMode } from "@oh-my-pi/pi-tui/tools/edit";
 import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
 import { normalizeModelContextImages } from "../utils/image-loading";
+import { TokenRateMeter } from "../utils/token-rate";
 import { videoPreviewSource } from "@oh-my-pi/pi-tui/prompt/video";
 import { resumeCommand } from "../utils/resume-command";
 import { generateSessionTitle } from "../utils/title-generator";
@@ -1291,8 +1292,13 @@ export class AgentSession {
 
 	#codeModeState: { namespacesInfo?: unknown };
 
+	/** Live generation tok/s for the working row; fed by this session's own streamed deltas. */
+	readonly tokenRate: TokenRateMeter;
+
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
+		this.tokenRate = new TokenRateMeter(text => this.agent.tokenizer.countTokens(text));
+		this.#reseedTokenRate();
 		this.#codeModeState = config.codeModeState ?? {};
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
@@ -3056,6 +3062,20 @@ export class AgentSession {
 		return true;
 	}
 
+	/** Re-seed the rate meter from the last completed assistant turn after a conversation swap (resume, branch switch). */
+	#reseedTokenRate(): void {
+		const messages = this.agent.state.messages;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i];
+			if (message?.role !== "assistant") continue;
+			const assistant = message as AssistantMessage;
+			if (assistant.duration === undefined) continue;
+			this.tokenRate.seed(assistant.usage.output, assistant.duration);
+			return;
+		}
+		this.tokenRate.reset();
+	}
+
 	#processAgentEvent = async (event: AgentEvent): Promise<void> => {
 		const eventPromptGeneration = this.#promptGeneration;
 		// A fresh run supersedes the previously settled (and pruned) refusal
@@ -3214,6 +3234,24 @@ export class AgentSession {
 		// it could land behind the new message's first deltas and clear them.
 		if (event.type === "turn_start") this.#ttsr.onTurnStart();
 		if (event.type === "message_start" && event.message.role === "assistant") this.#ttsr.onAssistantMessageStart();
+
+		// Meter generation per session: each session tracks its own stream, so a
+		// background subagent holds a live reading by the time it is focused and
+		// the main session's reading survives focus round-trips.
+		if (event.type === "message_start" && event.message.role === "assistant") {
+			this.tokenRate.begin(event.message.timestamp);
+		} else if (event.type === "message_update" && event.message.role === "assistant") {
+			const delta = event.assistantMessageEvent;
+			if (delta.type === "text_delta" || delta.type === "thinking_delta" || delta.type === "toolcall_delta") {
+				this.tokenRate.push(delta.delta);
+			}
+		} else if (event.type === "message_end" && event.message.role === "assistant") {
+			const assistant = event.message as AssistantMessage;
+			this.tokenRate.end(
+				assistant.usage.output,
+				assistant.duration !== undefined ? assistant.timestamp + assistant.duration : undefined,
+			);
+		}
 
 		if (event.type !== "agent_end") {
 			try {
@@ -8335,6 +8373,7 @@ export class AgentSession {
 			try {
 				this.#releaseQueuedTtsrReservations();
 				this.agent.reset();
+				this.tokenRate.reset();
 				if (options?.drop && previousSessionFile) {
 					try {
 						await this.sessionManager.dropSession(previousSessionFile);
@@ -9621,6 +9660,7 @@ export class AgentSession {
 			}
 
 			this.agent.replaceMessages(sessionContext.messages);
+			this.#reseedTokenRate();
 			this.#advisors.resetSessionState({ preserveCost: true });
 			this.#todo.syncFromBranch();
 			this.#modelMentions.syncFromBranch();

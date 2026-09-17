@@ -176,7 +176,7 @@ import { getEditorCommand, openInEditor } from "../utils/external-editor";
 import { resumeCommand } from "../utils/resume-command";
 import { getSessionAccentAnsi, getSessionAccentHex } from "@oh-my-pi/pi-tui/theme/session-color";
 import { messageHasDisplayableThinking } from "@oh-my-pi/pi-tui/chat/thinking-display";
-import { TokenRateMeter } from "../utils/token-rate";
+import type { TokenRateMeter } from "../utils/token-rate";
 import {
 	disposeTerminalTitleState,
 	initTerminalTitleState,
@@ -811,7 +811,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	streamingMessage: AssistantMessage | undefined = undefined;
 	lastAssistantUsage: Usage | undefined = undefined;
 	servedModelTracker = new ServedModelTracker();
-	tokenRate = new TokenRateMeter(text => this.session.agent.tokenizer.countTokens(text));
 	loadingAnimation: Loader | undefined = undefined;
 	autoCompactionLoader: Loader | undefined = undefined;
 	retryLoader: Loader | undefined = undefined;
@@ -827,6 +826,12 @@ export class InteractiveMode implements InteractiveModeContext {
 		const name = this.sessionManager.getSessionName();
 		if (!name) return undefined;
 		return `\x1b[2;3m${sanitizeStatusText(name)}\x1b[23;22m`;
+	}
+	/** Live gen tok/s for the working row: the viewed session's own meter, so a
+	 * focused subagent shows its own reading and the main session's survives
+	 * focus round-trips. */
+	get tokenRate(): TokenRateMeter {
+		return this.viewSession.tokenRate;
 	}
 	/** Generation tok/s: live while streaming, the last reading between
 	 * turns, blank until a run has produced enough tokens to measure. */
@@ -1090,7 +1095,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.streamingMessage = undefined;
 		this.lastAssistantUsage = undefined;
 		this.servedModelTracker = new ServedModelTracker();
-		this.tokenRate.reset();
 		this.pendingTools.clear();
 	}
 	readonly #uiHelpers: UiHelpers;
