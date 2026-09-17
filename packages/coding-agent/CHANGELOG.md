@@ -12,7 +12,7 @@
 
 ### Fixed
 
-- Fixed subagents losing their configured retry fallback chain when their primary model is also the default model ([#12368](https://github.com/can1357/oh-my-pi/issues/12368)).
+- Fixed subagents losing their configured retry fallback chain when their primary model is also the default model ([#12377](https://github.com/can1357/oh-my-pi/pull/12377) by [@Dante-dan](https://github.com/Dante-dan)).
 
 - Fixed the `edit` tool splicing a literal `…` into the file when a `<SM:FIND>` opened or closed with an ellipsis (a line-end `…` spanning the rest of a line, or a whole-line `…` at either edge) and `<SM:PUT>` re-emitted it. An edge gap captures nothing, so the matching `<SM:PUT>` ellipsis now re-emits nothing and the anchor keeps its own newline; an identical `<SM:FIND>`/`<SM:PUT>` pair reports no change instead of writing the marker. A leading gap combined with an inner gap no longer panics.
 - Fixed startup aborting when the plugins directory exists but cannot be read — a sandboxed run, a restrictive mode, or a manifest symlinked into a denied path; the unreadable root is now skipped with a warning.
