@@ -4,9 +4,11 @@
 
 ### Added
 
-- Added automatic format-correction retries to `TextJudge` for malformed model outputs
-- Added `guardState` option to `TextBackend` to optionally disable safety warnings in prompts
-- `judgment` module: a `Judge` interface for typed questions (choice / yes-no `noul` / score) over JSON state, with `TypeSafeJudge` (TypeSafe System One API, credential rotation on 401, retry-after-aware backoff) and `TextJudge` + `chatTextBackend`. Text judgments render top-level fields as XML tags, nested values as YAML, and guard state as inert data so agent-tuned models classify instead of executing embedded requests.
+- Added the `judgment` module for typed questions over JSON state, including choice, yes/no, and score judgments through the `Judge` interface.
+- Added `TypeSafeJudge` support with TypeSafe System One authentication, credential rotation on unauthorized responses, and retry-aware backoff.
+- Added `TextJudge` and `chatTextBackend` for model-based judgments, with structured state rendering and safeguards that prevent embedded requests from being executed.
+- Added automatic format-correction retries to `TextJudge` when models return malformed output.
+- Added the `guardState` option to `TextBackend` to control whether safety guidance is included in prompts.
 
 ## [18.2.3] - 2026-09-17
 
