@@ -2903,10 +2903,8 @@ export class AgentSession {
 	}
 
 	#persistMessageEnd(message: AgentMessage, promptGeneration: number): void {
-		// Session transitions bump the prompt generation before replacing the
-		// transcript. A message_end handler may still be awaiting an extension at
-		// that boundary; never let its delayed persistence append the previous
-		// conversation to the replacement session.
+		// Session transitions may replace the transcript before a queued commit
+		// runs. Never append the previous conversation to the replacement session.
 		if (this.#promptGeneration !== promptGeneration) {
 			// The message has already left the agent queue. If it was a deferred TTSR
 			// delivery, queue cleanup cannot clear its reservation.

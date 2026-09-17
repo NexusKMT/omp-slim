@@ -227,7 +227,7 @@ describe("AgentSession mid-run threshold compaction", () => {
 		expect(observedContexts[1].join("\n")).toContain("ACTIVE-GOAL-MID-RUN-COMPACTED");
 	});
 
-	it("does not wait for message persistence below the mid-run threshold", async () => {
+	it("continues below the mid-run threshold while message_end notifications remain pending", async () => {
 		const releaseMessageEnd = Promise.withResolvers<void>();
 		const messageEndEntered = Promise.withResolvers<void>();
 		const nextProviderCall = Promise.withResolvers<void>();
@@ -341,12 +341,28 @@ describe("AgentSession mid-run threshold compaction", () => {
 			},
 		);
 		mockCompaction("INTERRUPTED-TURN-COMPACTED");
+		const finalDisplayed = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (
+				event.type === "message_end" &&
+				event.message.role === "assistant" &&
+				event.message.content.some(block => block.type === "text" && block.text === "All done.")
+			) {
+				finalDisplayed.resolve();
+			}
+		});
 		const registry = AgentRegistry.global();
 		const childId = `steering-${tempDir.path()}`;
 		const ref = registry.register({ id: childId, displayName: "task", kind: "sub", parentId: "Main", session });
 		const prompt = session.prompt("Wait for instructions");
 		try {
-			expect(await raceWithTimeout(toolStarted.promise.then(() => true), 2_000, false)).toBe(true);
+			expect(
+				await raceWithTimeout(
+					toolStarted.promise.then(() => true),
+					2_000,
+					false,
+				),
+			).toBe(true);
 			await session.deliverIrcMessage({
 				id: "parent-interrupt",
 				from: "Main",
@@ -354,18 +370,47 @@ describe("AgentSession mid-run threshold compaction", () => {
 				body: "Handle the changed assignment",
 				ts: Date.now(),
 			});
-			expect(await raceWithTimeout(resultListenerEntered.promise.then(() => true), 2_000, false)).toBe(true);
-			expect(await raceWithTimeout(nextProviderCall.promise.then(() => true), 2_000, false)).toBe(true);
+			expect(
+				await raceWithTimeout(
+					resultListenerEntered.promise.then(() => true),
+					2_000,
+					false,
+				),
+			).toBe(true);
+			expect(
+				await raceWithTimeout(
+					nextProviderCall.promise.then(() => true),
+					2_000,
+					false,
+				),
+			).toBe(true);
 
 			const context = observedContexts[1].join("\n");
 			expect(context).toContain("Handle the changed assignment");
 			expect(context).toContain("INTERRUPTED-TURN-COMPACTED");
 			expect(session.agent.peekSteeringQueue()).toEqual([]);
+			expect(
+				await raceWithTimeout(
+					finalDisplayed.promise.then(() => true),
+					2_000,
+					false,
+				),
+			).toBe(true);
+			expect(
+				await raceWithTimeout(
+					prompt.then(() => true),
+					2_000,
+					false,
+				),
+			).toBe(true);
 		} finally {
 			finishWait.resolve();
 			releaseResultListener.resolve();
-			await prompt;
-			registry.unregister(childId, ref);
+			try {
+				await prompt;
+			} finally {
+				registry.unregister(childId, ref);
+			}
 		}
 	});
 

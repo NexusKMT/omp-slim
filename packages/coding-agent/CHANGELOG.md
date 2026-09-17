@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Fixed subagents leaving parent messages queued after a tool interruption when an extension notification stalls.
+
 - Fixed the `edit` tool splicing a literal `…` into the file when a `<SM:FIND>` opened or closed with an ellipsis (a line-end `…` spanning the rest of a line, or a whole-line `…` at either edge) and `<SM:PUT>` re-emitted it. An edge gap captures nothing, so the matching `<SM:PUT>` ellipsis now re-emits nothing and the anchor keeps its own newline; an identical `<SM:FIND>`/`<SM:PUT>` pair reports no change instead of writing the marker. A leading gap combined with an inner gap no longer panics.
 - Fixed the `edit` tool treating a closing tag glued to a content line (`foo</SM:FIND>`, `bar</SM:PUT>`) as part of the text, which reported `has 0 occurrences` against an anchor that was in the file; glued open and close tags now delimit the block.
 - Fixed `edit` copy-ready corrections and retries omitting the `path=` on `<SM:EDIT>`, so resending them verbatim failed with `Missing file target`.
