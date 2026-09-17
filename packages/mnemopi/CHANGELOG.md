@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- The sqlite-vec table shape is memoized per database instead of probing `sqlite_master` on every insert and search.
-- Import loops hoist existence checks to cached statements and probe vec availability once instead of per row.
+- Improved SQLite vector search and import performance by reducing repeated database metadata checks.
 
 ## [18.2.1] - 2026-09-15
 
