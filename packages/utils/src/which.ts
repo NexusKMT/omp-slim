@@ -218,14 +218,13 @@ export const whichFresh =
 
 // Derive stable cache key from command and lookup options. The key embeds the
 // raw option strings (not their hashes): two distinct PATH/cwd combinations
-// must never share a cache entry and return each other's binary. Fields are
-// length-prefixed so a separator byte inside cwd/PATH cannot alias two
-// distinct tuples onto one key.
+// must never share a cache entry and return each other's binary. Every lookup
+// uses the length-prefixed tuple encoding — including the no-options case —
+// so a raw command can never alias an encoded (command, cwd, PATH) tuple and
+// a separator byte inside cwd/PATH cannot alias two distinct tuples.
 function cacheKey(command: string, options?: Bun.WhichOptions): CacheKey {
-	if (!options) return command;
-	if (!options.cwd && !options.PATH) return command;
-	const cwd = options.cwd ?? "";
-	const binPath = options.PATH ?? "";
+	const cwd = options?.cwd ?? "";
+	const binPath = options?.PATH ?? "";
 	return `${command.length}:${command}${cwd.length}:${cwd}${binPath.length}:${binPath}`;
 }
 
