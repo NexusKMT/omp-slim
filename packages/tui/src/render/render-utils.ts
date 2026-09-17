@@ -117,6 +117,12 @@ export const PREVIEW_LIMITS = {
 /** Default number of terminal output rows shown before expansion. */
 export const DEFAULT_TERMINAL_PREVIEW_LINES = 10;
 
+/** Match a Markdown fenced-code opener and capture its indentation and marker. */
+export const FENCE_RE = /^( {0,3})([`~]{3,})/;
+
+/** Shared empty link-target lookup for renderers without interactive links. */
+export const EMPTY_LINK_TARGETS: ReadonlyMap<string, string> = new Map();
+
 /** Default display width reserved for a resolved model badge. */
 export const FEED_MODEL_BADGE_WIDTH = 30;
 
@@ -452,7 +458,8 @@ export function formatTitle(label: string, theme: Theme, options?: ToolUITitleOp
 // Diagnostic Formatting
 // =============================================================================
 
-interface ParsedDiagnostic {
+/** Parsed diagnostic location, severity, and optional source and code metadata. */
+export interface ParsedDiagnostic {
 	filePath: string;
 	line: number;
 	col: number;
@@ -462,7 +469,8 @@ interface ParsedDiagnostic {
 	code?: string;
 }
 
-function sanitizeDiagnosticDisplayText(text: string): string {
+/** Expand tabs in diagnostic text for terminal display. */
+export function sanitizeDiagnosticDisplayText(text: string): string {
 	return replaceTabs(text);
 }
 
@@ -479,7 +487,8 @@ function getSeverityRank(severity: ParsedDiagnostic["severity"]): number {
 	}
 }
 
-function parseDiagnosticMessage(msg: string): ParsedDiagnostic | null {
+/** Parse a diagnostic location and message, including optional source and code. */
+export function parseDiagnosticMessage(msg: string): ParsedDiagnostic | null {
 	const match = msg.match(/^(.+?):(\d+):(\d+)\s+\[(\w+)\]\s+(?:\[([^\]]+)\]\s+)?(.+?)(?:\s+\(([^)]+)\))?$/);
 	if (!match) return null;
 	return {

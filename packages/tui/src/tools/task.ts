@@ -18,7 +18,7 @@ import { formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { RenderResultOptions } from "./renderer";
 import { formatContextUsage } from "../chrome/context-thresholds";
 import { getMarkdownTheme, type Theme } from "../theme/theme";
-import { stripGeneratedOutputNotice, stripRawOutputArtifactNotice } from "./output-meta";
+import { stripGeneratedOutputNotice, stripRawOutputArtifactNotice, stripTrailingNotice } from "./output-meta";
 import {
 	capPreviewLines,
 	FEED_MODEL_BADGE_WIDTH,
@@ -255,11 +255,11 @@ function getRenderYieldLabels(type: RenderYieldItem["type"]): string[] {
 function formatYieldPreview(item: RenderYieldItem): string {
 	if (item.useLastTurn === true && item.data === undefined) return "last assistant turn";
 	if (item.data === undefined) return "last assistant turn";
-	if (typeof item.data === "string") return previewLine(replaceTabs(sanitizeText(item.data)), 70);
+	if (typeof item.data === "string") return previewLine(sanitizeText(item.data), 70);
 	try {
-		return previewLine(replaceTabs(sanitizeText(JSON.stringify(item.data) ?? "null")), 70);
+		return previewLine(sanitizeText(JSON.stringify(item.data) ?? "null"), 70);
 	} catch {
-		return previewLine(replaceTabs(sanitizeText(String(item.data))), 70);
+		return previewLine(sanitizeText(String(item.data)), 70);
 	}
 }
 
@@ -311,15 +311,6 @@ function extractMissingYieldWarning(output: string): { warning?: string; rest: s
 const BASH_WALL_TIME_NOTICE_RE = /^Wall time: \d+(?:\.\d+)? seconds$/u;
 const BASH_EXIT_CODE_NOTICE_RE = /^Command exited with code -?\d+$/u;
 
-function stripRecentOutputNoticeLine(text: string): string {
-	const trimmed = text.trimEnd();
-	const lineStart = trimmed.lastIndexOf("\n");
-	const candidateStart = lineStart === -1 ? 0 : lineStart + 1;
-	const line = trimmed.slice(candidateStart);
-	if (!BASH_WALL_TIME_NOTICE_RE.test(line) && !BASH_EXIT_CODE_NOTICE_RE.test(line)) return text;
-	return trimmed.slice(0, lineStart === -1 ? 0 : lineStart).trimEnd();
-}
-
 function sanitizeRecentOutput(output: string): string {
 	let text = sanitizeText(output).trimEnd();
 	while (text) {
@@ -333,7 +324,10 @@ function sanitizeRecentOutput(output: string): string {
 			text = withoutOutputNotice;
 			continue;
 		}
-		const withoutRuntimeNotice = stripRecentOutputNoticeLine(text);
+		const withoutRuntimeNotice = stripTrailingNotice(
+			text,
+			line => BASH_WALL_TIME_NOTICE_RE.test(line) || BASH_EXIT_CODE_NOTICE_RE.test(line),
+		);
 		if (withoutRuntimeNotice !== text) {
 			text = withoutRuntimeNotice;
 			continue;

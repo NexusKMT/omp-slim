@@ -28,7 +28,7 @@ import type {
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { sanitizeStatusText } from "../chrome/shared";
 import { getThemeEpoch, theme } from "../theme";
-import { type CompactionBoundaries, getToolSchemaMetadataRevision } from "./context-usage";
+import { type CompactionBoundaries, EMPTY_STRING_PARTS, getToolSchemaMetadataRevision } from "./context-usage";
 import {
 	type CodexResetFireworksEvent,
 	type CodexResetUsageSnapshot,
@@ -371,7 +371,6 @@ interface ActiveMeter {
 }
 
 const EMPTY_MESSAGES: readonly AgentMessage[] = [];
-const EMPTY_STRING_PARTS: readonly string[] = [];
 const STATUS_USAGE_START_DELAY_MS = 0;
 const STATUS_USAGE_REFRESH_TIMEOUT_MS = 2_000;
 

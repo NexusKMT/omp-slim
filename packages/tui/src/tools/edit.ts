@@ -176,8 +176,6 @@ export interface EditRenderContext {
 	renderDiff?: (diffText: string, options?: { filePath?: string }) => string;
 }
 
-const EDIT_STREAMING_PREVIEW_LINES = 12;
-
 /**
  * Lazily grown per-file preview cache slots: the file count of a streaming
  * multi-file patch is discovered mid-stream, so a fixed-size array would
@@ -489,7 +487,7 @@ function formatStreamingDiff(
 	// the cheap raw-line wrap walk keeps the per-chunk cost bounded.
 	// innerWidth/budget are in the cache salt so a resize re-slices.
 	const innerWidth = Math.max(1, width - 2);
-	const budget = expanded ? previewWindowRows() : Math.min(EDIT_STREAMING_PREVIEW_LINES, previewWindowRows());
+	const budget = expanded ? previewWindowRows() : Math.min(PREVIEW_LIMITS.EXPANDED_LINES, previewWindowRows());
 	let text = cachedRenderedString(cache, uiTheme, expanded, `${rawPath}:${innerWidth}:${budget}`, diff, () => {
 		// "Cursor" tail window: pin the last rows to the bottom so freshly streamed
 		// changes stay on screen. The whole-file diff is recomputed every chunk and

@@ -20,7 +20,7 @@ import {
 	type OverlayOptions,
 	visibleWidth,
 } from "../index";
-import { formatDuration } from "../chrome/format";
+import { formatCoarseDuration } from "../chrome/format";
 import { theme } from "../theme/theme";
 import { matchesAppInterrupt } from "../keybinding-matchers";
 
@@ -203,7 +203,7 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
 		overlay.hide();
 		const heldMs = agentPauseGate.resume();
 		if (heldMs !== undefined) {
-			host.showStatus(`Resumed after ${formatDuration(heldMs)} — agents are running again.`);
+			host.showStatus(`Resumed after ${formatCoarseDuration(heldMs)} — agents are running again.`);
 		}
 	}
 }

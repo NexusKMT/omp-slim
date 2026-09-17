@@ -55,7 +55,6 @@ import {
 	fuzzyAgentMatch,
 	modelBadge,
 	type RosterRender,
-	sanitizeDisplayText,
 	sanitizeLine,
 	statusGlyph,
 	statusText,
@@ -63,6 +62,7 @@ import {
 	treeContinuation,
 	treeMetadataIndent,
 } from "./agent-hub-renderer";
+import { sanitizeDisplaySingleLine } from "./extensions/display-text";
 import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
 import type { AgentRoleDisplay } from "./agent-hub-renderer";
 import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
@@ -1061,8 +1061,8 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			add(theme.bold(theme.fg("accent", label)));
 		};
 
-		add(`${statusGlyph(ref.status)} ${theme.bold(sanitizeDisplayText(ref.displayName || ref.id))}`);
-		if (ref.displayName && ref.displayName !== ref.id) add(theme.fg("dim", sanitizeDisplayText(ref.id)));
+		add(`${statusGlyph(ref.status)} ${theme.bold(sanitizeDisplaySingleLine(ref.displayName || ref.id))}`);
+		if (ref.displayName && ref.displayName !== ref.id) add(theme.fg("dim", sanitizeDisplaySingleLine(ref.id)));
 		const lifecycleDetails = [
 			metrics ? formatMetricDuration(metrics) : undefined,
 			`active ${formatAge(Math.max(1, Math.round((Date.now() - ref.lastActivity) / 1000)))}`,
@@ -1106,7 +1106,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 
 		section("Lineage");
 		add(
-			`Spawned by ${sanitizeDisplayText(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
+			`Spawned by ${sanitizeDisplaySingleLine(ref.parentId ?? MAIN_AGENT_ID)}${children.length > 0 ? ` · ${children.length} children` : ""}`,
 		);
 		if (children.length > 0) add(theme.fg("dim", formatChildIds(children, width)));
 		add(theme.fg("dim", `Registered ${formatLocalDateTimeWithOffset(new Date(ref.createdAt))}`));
@@ -1165,11 +1165,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const branch = treeMode
 			? treeBranch(ref, max, this.#treeDepthById, this.#treeParentById, this.#treeLastSiblingById)
 			: "";
-		const id = sanitizeDisplayText(ref.id);
+		const id = sanitizeDisplaySingleLine(ref.id);
 		const styledId = selected ? theme.bold(theme.fg("accent", id)) : theme.bold(id);
 		const fields: string[] = [`${cursor} ${branch}${statusGlyph(ref.status)} ${styledId}`];
 		if (this.#viewMode === "roster" && ref.parentId && ref.parentId !== MAIN_AGENT_ID) {
-			fields.push(theme.fg("dim", `↳ ${sanitizeDisplayText(ref.parentId)}`));
+			fields.push(theme.fg("dim", `↳ ${sanitizeDisplaySingleLine(ref.parentId)}`));
 		}
 		if (ref.kind === "advisor") {
 			fields.push(theme.fg("warning", "read-only"));

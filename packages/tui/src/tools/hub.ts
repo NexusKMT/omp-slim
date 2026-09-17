@@ -1,4 +1,5 @@
 import { styleTerminalRow } from "./terminal-output";
+import { TERMINAL_STATES } from "../apps/ps-data";
 import type { Component } from "../tui";
 import { Text } from "../components/text";
 import { visibleWidth } from "../utils";
@@ -311,9 +312,6 @@ export interface LaunchToolDetails {
 	spec?: DaemonSpec;
 }
 
-/** Terminal daemon lifecycle states — the process is no longer running. */
-export const TERMINAL_STATES: Partial<Record<DaemonState, true>> = { exited: true, failed: true };
-
 /**
  * Human sentences for the readiness conditions still unmet, e.g.
  * `port 5173 on 127.0.0.1 never accepted connections`. `ready` (from the start
@@ -375,7 +373,6 @@ function toJobRenderArgs(args: HubRenderArgs | undefined): JobRenderArgs | undef
 	}
 }
 
-const COLLAPSED_LIST_LIMIT = PREVIEW_LIMITS.COLLAPSED_ITEMS;
 const LABEL_MAX_WIDTH = 60;
 const PREVIEW_LINES_COLLAPSED = 1;
 const PREVIEW_LINES_EXPANDED = 4;
@@ -567,7 +564,7 @@ export function jobsRenderResult(
 				{
 					items: sortedJobs,
 					expanded,
-					maxCollapsed: COLLAPSED_LIST_LIMIT,
+					maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
 					itemType: "job",
 					renderItem: (job, context) => {
 						const rowWidth = Math.max(0, width - (context.prefixWidth ?? 0));
@@ -679,7 +676,7 @@ export function jobsRenderResult(
 							{
 								items: agents,
 								expanded,
-								maxCollapsed: COLLAPSED_LIST_LIMIT,
+								maxCollapsed: PREVIEW_LIMITS.COLLAPSED_ITEMS,
 								itemType: "agent",
 								renderItem: (agent, context) => {
 									const rowWidth = Math.max(0, width - (context.prefixWidth ?? 0));
@@ -1012,7 +1009,7 @@ function messageAge(ts: number | undefined): string {
 	return formatAge(Math.max(1, Math.round((Date.now() - ts) / 1000)));
 }
 
-function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
+function firstTextBlock(result: { content: Array<{ type: string; text?: string }> }): string {
 	return result.content.find(part => part.type === "text")?.text?.trim() ?? "";
 }
 
@@ -1073,7 +1070,7 @@ function renderErrorResult(
 	args: HubRenderArgs | undefined,
 	theme: Theme,
 ): string[] {
-	const text = textContent(result) || "IRC call failed.";
+	const text = firstTextBlock(result) || "IRC call failed.";
 	return [
 		renderStatusLine({ icon: "error", title: callTitle(args, theme), meta: messagingCallMeta(args) }, theme),
 		formatErrorDetail(text, theme),
@@ -1143,7 +1140,7 @@ function renderSendResult(
 
 	// Pre-delivery failures (validation) and empty broadcasts carry no receipts.
 	if (receipts.length === 0) {
-		const text = textContent(result) || (result.isError ? "Send failed." : "Nothing to deliver.");
+		const text = firstTextBlock(result) || (result.isError ? "Send failed." : "Nothing to deliver.");
 		return [
 			renderStatusLine({ icon: result.isError ? "error" : "warning", title }, theme),
 			result.isError ? formatErrorDetail(text, theme) : `  ${theme.fg("muted", replaceTabs(text))}`,
@@ -1219,7 +1216,7 @@ function renderWaitResult(
 ): string[] {
 	const waited = details.waited;
 	if (!waited) {
-		const text = textContent(result) || "No message arrived.";
+		const text = firstTextBlock(result) || "No message arrived.";
 		return [
 			renderStatusLine(
 				{ icon: "warning", title: `IRC ${theme.nav.back} ${args?.from?.trim() || "anyone"}`, meta: ["timed out"] },
@@ -1336,7 +1333,7 @@ function buildResultLines(
 		case "list":
 			return result.isError ? renderErrorResult(result, args, theme) : renderListResult(details, expanded, theme);
 		default: {
-			const text = textContent(result) || (result.isError ? "Hub call failed." : "Done.");
+			const text = firstTextBlock(result) || (result.isError ? "Hub call failed." : "Done.");
 			return [
 				renderStatusLine({ icon: result.isError ? "error" : "success", title: callTitle(args, theme) }, theme),
 				result.isError ? formatErrorDetail(text, theme) : `  ${theme.fg("muted", replaceTabs(text))}`,

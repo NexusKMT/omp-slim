@@ -52,7 +52,8 @@ import {
 	visibleWidth,
 } from "./utils";
 
-const SEGMENT_RESET = "\x1b[0m";
+/** Full-attribute reset terminating each rendered content row. */
+export const SEGMENT_RESET = "\x1b[0m";
 /**
  * Per-line terminator written after every non-image content row. It closes both
  * SGR state and any in-flight OSC 8 hyperlink so styles/links cannot bleed

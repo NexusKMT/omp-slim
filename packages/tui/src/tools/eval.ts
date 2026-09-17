@@ -19,6 +19,7 @@ import {
 } from "./json-tree";
 import { formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
 import {
+	DEFAULT_TERMINAL_PREVIEW_LINES,
 	FEED_MODEL_BADGE_WIDTH,
 	formatBadge,
 	formatDuration,
@@ -83,8 +84,8 @@ export interface EvalToolDetails {
 	};
 }
 
-/** Default collapsed eval output preview height. */
-export const EVAL_DEFAULT_PREVIEW_LINES = 10;
+/** Default collapsed eval output preview height; kept as a named alias (consumed by chat/tool-execution). */
+export const EVAL_DEFAULT_PREVIEW_LINES: number = DEFAULT_TERMINAL_PREVIEW_LINES;
 
 function languageForHighlighter(language: EvalLanguage | undefined): "python" | "javascript" {
 	if (language === "js") return "javascript";

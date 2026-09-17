@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Updated byte size formatting in CLI outputs to use KB instead of KiB
+- Updated time duration displays throughout the CLI to use a coarser, more readable format
 - Keyless Parallel web search now leads the default provider chain ahead of Perplexity.
 
 ### Fixed

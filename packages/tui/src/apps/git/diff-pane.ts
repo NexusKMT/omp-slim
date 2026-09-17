@@ -21,7 +21,7 @@ import { replaceTabs, sliceWithWidth, truncateToWidth, visibleWidth } from "../.
 import { formatBytes, sanitizeText } from "@oh-my-pi/pi-utils";
 import { getLanguageFromPath } from "../../lang-from-path";
 import { createHighlightStream, theme } from "../../theme/theme";
-import { bgAnsi, canvasHex, fgAnsi, mixHex, pill, selectionBgAnsi, textHex, withBg } from "./colors";
+import { bgAnsiHex, canvasHex, fgAnsiHex, mixHex, pill, selectionBgAnsi, textHex, withBg } from "./colors";
 import { DIFF_CONTEXT_LINES, type FileAssetSide, type FileStreamUpdate } from "./state";
 
 /** Column ranges (inclusive start, exclusive end) carrying intraline emphasis. */
@@ -521,12 +521,12 @@ function palette(): DiffPalette {
 	const key = `${added}\u0000${removed}\u0000${accent}\u0000${dark}\u0000${canvas}\u0000${text}`;
 	if (paletteCache?.key === key) return paletteCache.palette;
 	const built: DiffPalette = {
-		addSoft: bgAnsi(mixHex(canvas, added, dark ? 0.18 : 0.24)),
-		addStrong: bgAnsi(mixHex(canvas, added, dark ? 0.42 : 0.48)),
-		delSoft: bgAnsi(mixHex(canvas, removed, dark ? 0.18 : 0.24)),
-		delStrong: bgAnsi(mixHex(canvas, removed, dark ? 0.42 : 0.48)),
-		fillAdd: bgAnsi(mixHex(canvas, added, 0.07)),
-		fillDel: bgAnsi(mixHex(canvas, removed, 0.07)),
+		addSoft: bgAnsiHex(mixHex(canvas, added, dark ? 0.18 : 0.24)),
+		addStrong: bgAnsiHex(mixHex(canvas, added, dark ? 0.42 : 0.48)),
+		delSoft: bgAnsiHex(mixHex(canvas, removed, dark ? 0.18 : 0.24)),
+		delStrong: bgAnsiHex(mixHex(canvas, removed, dark ? 0.42 : 0.48)),
+		fillAdd: bgAnsiHex(mixHex(canvas, added, 0.07)),
+		fillDel: bgAnsiHex(mixHex(canvas, removed, 0.07)),
 		mapAdd: added,
 		mapDel: removed,
 		mapChange: mixHex(added, removed, 0.5),
@@ -1342,9 +1342,9 @@ export class DiffPane {
 		const isDel = side === "old" && row.kind !== "context";
 		const isAdd = side === "new" && row.kind !== "context";
 		const gutterText = isDel
-			? `${fgAnsi(colors.gutterDel) + oldLabel + " ".repeat(gutter + 1)}\x1b[0m`
+			? `${fgAnsiHex(colors.gutterDel) + oldLabel + " ".repeat(gutter + 1)}\x1b[0m`
 			: isAdd
-				? `${" ".repeat(gutter)}${fgAnsi(colors.gutterAdd)}${newLabel}\x1b[0m `
+				? `${" ".repeat(gutter)}${fgAnsiHex(colors.gutterAdd)}${newLabel}\x1b[0m `
 				: theme.fg("dim", `${oldLabel}${newLabel} `);
 		const text = this.#displayText(row, side);
 		const marks = side === "old" ? row.oldMarks : row.newMarks;
@@ -1384,7 +1384,7 @@ export class DiffPane {
 		if (present && first) {
 			const label = String(num).padStart(gutter);
 			gutterText = changed
-				? `${fgAnsi(side === "old" ? colors.gutterDel : colors.gutterAdd) + label}\x1b[0m`
+				? `${fgAnsiHex(side === "old" ? colors.gutterDel : colors.gutterAdd) + label}\x1b[0m`
 				: theme.fg("dim", label);
 		} else {
 			gutterText = " ".repeat(gutter);
@@ -1483,8 +1483,8 @@ export class DiffPane {
 			if (topColor === null && bottomColor === null) {
 				lines.push(" ");
 			} else {
-				const fg = fgAnsi(topColor ?? bottomColor ?? "#000000");
-				const bg = bottomColor ? bgAnsi(bottomColor) : "";
+				const fg = fgAnsiHex(topColor ?? bottomColor ?? "#000000");
+				const bg = bottomColor ? bgAnsiHex(bottomColor) : "";
 				lines.push(`${fg}${bg}▀\x1b[0m`);
 			}
 		}

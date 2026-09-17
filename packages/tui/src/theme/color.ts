@@ -1,6 +1,11 @@
 import { detectTerminalId, getTerminalInfo } from "../terminal-capabilities";
 import type { ColorMode, ColorValue } from "./schema";
 
+/** SGR reset for the foreground color only, leaving other attributes intact. */
+export const FG_RESET = "\x1b[39m";
+/** SGR reset for the background color only, leaving other attributes intact. */
+export const BG_RESET = "\x1b[49m";
+
 // ============================================================================
 // Color Utilities
 // ============================================================================

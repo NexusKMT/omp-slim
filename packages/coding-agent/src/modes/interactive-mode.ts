@@ -12,7 +12,7 @@ import {
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, Message, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Model, Usage, UsageReport } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { execReplace } from "@oh-my-pi/pi-natives";
 import type {
@@ -128,7 +128,7 @@ import type { SessionManager } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
-import { formatDuration } from "@oh-my-pi/pi-tui/chrome/format";
+import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
 import { STTController, type SttState } from "../stt";
 import { resolveCliEntryCmd } from "../subprocess/worker-client";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
@@ -5035,7 +5035,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			`Objective: ${goal.objective}`,
 			`Status: ${goal.status}${state?.enabled ? "" : " (paused)"}`,
 			`Tokens: ${budgetLine}`,
-			`Time spent: ${formatDuration(goal.timeUsedSeconds * 1000)}`,
+			`Time spent: ${formatCoarseDuration(goal.timeUsedSeconds * 1000)}`,
 		];
 		this.showStatus(lines.join("\n"));
 	}
@@ -6184,10 +6184,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	truncateTranscriptFromMessage(message: AgentMessage): boolean {
 		return this.#uiHelpers.truncateTranscriptFromMessage(message);
-	}
-
-	getUserMessageText(message: Message): string {
-		return this.#uiHelpers.getUserMessageText(message);
 	}
 
 	findLastAssistantMessage(): AssistantMessage | undefined {

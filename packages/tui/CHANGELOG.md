@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added HubFrame component for consistent fullscreen sidebar and footer layouts
+- Added scrollable sidebar navigation with focus tracking for overlay screens
+- Added interactive footer chip rendering in overlays with mouse hit-testing
 - Added composable forms, menus, split layouts, disclosures, tree views, tool cards, and data widgets for terminal extensions and standalone apps.
 - Added the full coding-agent terminal UI to this package: theme runtime (`@oh-my-pi/pi-tui/theme`), render primitives (`/render`), shared chrome (`/chrome`), tool renderers and registry (`/tools`), chat transcript components (`/chat/*`), overlays and hubs (`/overlays/*`), status line (`/status-line`), composer and autocomplete (`/prompt/*`), setup wizard (`/setup/*`), and standalone apps (`/apps/*`: git TUI, process top, debug viewers, boards, pickers). Components take host capabilities through structural interfaces and setters instead of reading application settings.
 - Added image input validation and automatic conversion for unsupported formats
@@ -15,6 +18,13 @@
 - Improved output rendering for GitHub workflow jobs and runs
 - Added performance improvements for long-running bash streaming output
 - Added the `dark-celestial` built-in theme: a twilight dark palette with pink/coral accents, purple keywords, cyan functions, and peach strings.
+
+### Changed
+
+- Standardized form labels, descriptions, and styling across overlays
+- Improved text rendering to collapse newlines instead of trimming in overlays
+- Refined output notice stripping for more consistent tool output displays
+- Improved alignment and layout consistency in agent and model hub screens
 
 ## [18.2.4] - 2026-09-17
 

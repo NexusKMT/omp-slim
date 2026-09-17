@@ -1,21 +1,9 @@
-import { padding, truncateToWidth, visibleWidth } from "../../utils";
+import { centerLine, fitLine } from "../../utils";
 import { gradientLogo, PI_LOGO } from "../../prompt/welcome";
 import { theme } from "../../theme/theme";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
 
 export const SETUP_OUTRO_MS = 1200;
-
-function centerLine(line: string, width: number): string {
-	const lineWidth = visibleWidth(line);
-	if (lineWidth >= width) return truncateToWidth(line, width);
-	const left = Math.floor((width - lineWidth) / 2);
-	return padding(left) + line + padding(width - left - lineWidth);
-}
-
-function clampLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
 
 export function renderSetupOutro(width: number, height: number, elapsedMs: number): string[] {
 	const frame = Math.floor(elapsedMs / SETUP_TICK_MS);
@@ -31,5 +19,5 @@ export function renderSetupOutro(width: number, height: number, elapsedMs: numbe
 	for (let i = 0; i < content.length && start + i < lines.length; i++) {
 		lines[start + i] = centerLine(content[i] ?? "", width);
 	}
-	return lines.map(line => clampLine(line, width));
+	return lines.map(line => fitLine(line, width));
 }

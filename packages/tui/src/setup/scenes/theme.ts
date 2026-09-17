@@ -1,4 +1,4 @@
-import { padding, truncateToWidth, visibleWidth } from "../../utils";
+import { fitLine, padding, visibleWidth } from "../../utils";
 import { type SgrMouseEvent } from "../../mouse";
 import { type SelectItem, SelectList } from "../../components/select-list";
 import { Text } from "../../components/text";
@@ -28,11 +28,6 @@ const CURATED_ITEMS: readonly SelectItem[] = [
 	{ value: "ansi", label: "ANSI-safe", description: "ASCII glyphs with the dark terminal theme" },
 	{ value: "browse", label: "Browse all…", description: "Show every built-in and custom theme" },
 ];
-
-function fitLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
 
 function fillStyledLine(content: string, width: number): string {
 	return content + padding(Math.max(0, width - visibleWidth(content)));

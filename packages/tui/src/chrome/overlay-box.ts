@@ -7,17 +7,13 @@
  * colors so all outlined overlays read identically.
  */
 import { type Component, visibleWidth } from "../tui";
-import { Ellipsis, padding, truncateToWidth } from "../utils";
+import { Ellipsis, truncateToWidth } from "../utils";
+import { padToWidth } from "../render/utils";
 import { type ThemeColor, theme } from "../theme/index";
 /** Pad or truncate a (possibly ANSI-styled) string to exactly `width` columns. */
 export function fit(text: string, width: number): string {
 	if (width <= 0) return "";
-	const w = visibleWidth(text);
-	if (w === width) return text;
-	if (w < width) return text + padding(width - w);
-	const cut = truncateToWidth(text, width);
-	const cw = visibleWidth(cut);
-	return cw < width ? cut + padding(width - cw) : cut;
+	return padToWidth(text, width);
 }
 
 function paint(s: string, color: ThemeColor = "border"): string {

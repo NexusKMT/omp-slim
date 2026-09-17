@@ -147,7 +147,7 @@ export function formatCompactQuota(
 	return `Quota: ${lines.join(" │ ")}`;
 }
 
-function previewLine(text: string | undefined): string {
+function previewLineOrNone(text: string | undefined): string {
 	if (!text?.trim()) return "(none)";
 	const first = text.trim().split("\n", 1)[0] ?? "";
 	return first.length > PREVIEW_WIDTH ? `${first.slice(0, PREVIEW_WIDTH - 1)}…` : first;
@@ -486,7 +486,11 @@ export class AdvisorConfigOverlayComponent implements Component {
 			description: this.#advisorSummary(advisor),
 		}));
 		items.push({ value: "add", label: "+ Add advisor" });
-		items.push({ value: "shared", label: "Shared instructions", description: previewLine(this.#doc.instructions) });
+		items.push({
+			value: "shared",
+			label: "Shared instructions",
+			description: previewLineOrNone(this.#doc.instructions),
+		});
 		items.push({ value: "scope", label: `Scope: ${this.#scope}`, description: `→ ${this.#otherScope()}` });
 		items.push({ value: "save", label: "Save & apply" });
 		items.push({ value: "close", label: "Close" });
@@ -577,7 +581,7 @@ export class AdvisorConfigOverlayComponent implements Component {
 		}
 		items.push(
 			{ value: "tools", label: "Tools", description: toolsDescription },
-			{ value: "instructions", label: "Instructions", description: previewLine(advisor.instructions) },
+			{ value: "instructions", label: "Instructions", description: previewLineOrNone(advisor.instructions) },
 			{ value: "delete", label: "Delete this advisor" },
 			{ value: "back", label: "Back" },
 		);

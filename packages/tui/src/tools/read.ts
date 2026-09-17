@@ -212,7 +212,7 @@ export function readSelectorRangeStart(selector: string): number | undefined {
 // TUI Renderer
 // =============================================================================
 
-interface ReadRenderArgs {
+export interface ReadRenderArgs {
 	path?: unknown;
 	file_path?: unknown;
 	// Legacy fields from old schema — tolerated for in-flight tool calls during transition
@@ -241,9 +241,9 @@ function firstReadSelectorLine(sel: string | undefined): number | undefined {
  * target when the structured `resolvedPath` isn't set (the common plain-file and
  * image reads only record the path in `meta.source`). URL/internal sources are
  * not fs paths, so only `type: "path"` qualifies. */
-function readSourceFsPath(details: ReadToolDetails | undefined): string | undefined {
+export function readSourceFsPath(details: ReadToolDetails | undefined): string | undefined {
 	const source = details?.meta?.source;
-	return source?.type === "path" ? source.value : undefined;
+	return source?.type === "path" && typeof source.value === "string" ? source.value : undefined;
 }
 
 function formatReadPathLink(
