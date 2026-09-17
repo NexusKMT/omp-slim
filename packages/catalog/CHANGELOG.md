@@ -1,11 +1,20 @@
 # Changelog
 
 ## [Unreleased]
+
 ### Fixed
 
 - Fixed Union Alpha using the wrong API on OpenCode Go and Zen; it now uses the Messages endpoint ([#12380](https://github.com/can1357/oh-my-pi/pull/12380) by [@Dante-dan](https://github.com/Dante-dan)).
 
-- Fixed Yolo-Auto advertising 1M context for Qwen Flash: `qwen3.8-flash` and the paid `yolo` route now resolve to the documented 256K deployment window with the Qwen chat-template reasoning dialect, and `qwen3.8-flash` is the provider default.
+## [18.2.5] - 2026-09-17
+
+### Added
+
+- Added the `stencil` authentication provider for `omp stream`, supporting OAuth code + PKCE sign-in with `auth.stencil.so`, configurable via `STENCIL_API_KEY`, `STENCIL_AUTH_URL`, and `STENCIL_BASE_URL`. This is an authentication-only provider, not a model provider; OAuth-code login configuration also supports `base-url` and `auth-url` nodes with `{base}` and `{auth}` URL placeholders.
+
+### Fixed
+
+- Corrected Yolo-Auto metadata for Qwen Flash: `qwen3.8-flash` and the paid `yolo` route now report the documented 256K context window and use the Qwen chat-template reasoning dialect, with `qwen3.8-flash` as the provider default.
 
 ## [18.2.4] - 2026-09-17
 
