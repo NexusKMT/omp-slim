@@ -5784,6 +5784,31 @@ export const SETTINGS_SCHEMA = {
 			options: TTS_LOCAL_VOICE_OPTIONS,
 		},
 	},
+	"providers.judgmentProvider": {
+		type: "enum",
+		values: ["auto", "typesafe", "llm"] as const,
+		default: "auto",
+		ui: {
+			tab: "providers",
+			group: "Tiny Model",
+			label: "Judgment Provider",
+			description:
+				"Preferred backend for typed judgments (auto-thinking difficulty, Smart unexpected-stop detection, git AI staging, eval judge()). Auto uses TypeSafe when authenticated; failed TypeSafe requests fall back through tiny, smol, default, then the active session model.",
+			options: [
+				{ value: "auto", label: "Auto", description: "TypeSafe when authenticated, else the LLM bridge (default)" },
+				{
+					value: "typesafe",
+					label: "TypeSafe",
+					description: "Prefer TypeSafe; fall back through the online model roles on failure",
+				},
+				{
+					value: "llm",
+					label: "LLM",
+					description: "Never TypeSafe; keyword prompts to the tiny/smol or local model",
+				},
+			],
+		},
+	},
 	"providers.tinyModel": {
 		type: "enum",
 		values: TINY_TITLE_MODEL_VALUES,
