@@ -3806,6 +3806,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			get cwd() {
 				return sessionManager.getCwd();
 			},
+			get skillHintVisible() {
+				return toolSession.skillHintVisible;
+			},
 			hasEditTool: true,
 			requireYieldTool: false,
 			getSessionId: () => {

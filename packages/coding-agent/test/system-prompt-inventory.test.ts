@@ -787,10 +787,7 @@ describe("system prompt tool inventory", () => {
 	it("advertises loaded skills through real provider tool definitions", async () => {
 		const session = {
 			...makeToolSession(Settings.isolated()),
-			// The wire hint visibility belongs to the session's rebuild lifecycle;
-			// this fixture asserts the descriptor presentation, so it opts in the
-			// same way `SessionTools` does after a rebuild with loaded skills.
-			skillHintVisible: true,
+			skillHintVisible: undefined as boolean | undefined,
 			skills: [
 				{
 					name: "provider-skill",
@@ -814,6 +811,15 @@ describe("system prompt tool inventory", () => {
 		expect(JSON.stringify(read.parameters.toJsonSchema())).toContain("skill://");
 		expect(bash.description).toContain("`skill://<name>`");
 		expect(systemPrompt.join("\n\n")).toContain("`skill://<name>`");
+
+		// Standalone sessions derive visibility; an explicit managed snapshot wins.
+		session.skillHintVisible = false;
+		expect(JSON.stringify(read.parameters.toJsonSchema())).not.toContain("skill://");
+		expect(bash.description).not.toContain("skill://");
+		session.settings.set("skillful", false);
+		session.skillHintVisible = true;
+		expect(JSON.stringify(read.parameters.toJsonSchema())).toContain("skill://");
+		expect(bash.description).toContain("skill://");
 	});
 
 	it("keeps visible skills when no tools map is provided", async () => {
