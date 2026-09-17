@@ -1,7 +1,9 @@
 import {
 	STREAM_CLOSE_BAD_CHANNEL,
+	STREAM_CLOSE_FORBIDDEN,
 	STREAM_CLOSE_HOST_CONFLICT,
 	STREAM_CLOSE_PROTO_MISMATCH,
+	STREAM_CLOSE_UNAUTHORIZED,
 	STREAM_PROTO,
 	type StreamChatMessage,
 	type StreamHostFrame,
@@ -20,6 +22,8 @@ export interface StreamServerFatalError {
 export interface StreamServerClientOptions {
 	url: string;
 	title: string;
+	/** Bearer token for the host socket, resolved before every dial; null aborts with an unauthorized fatal. */
+	token: () => Promise<string | null>;
 	/** Current pane snapshots, emitted immediately after every host hello. */
 	replay: () => Iterable<StreamPaneFrame>;
 	onFrame: (frame: StreamServerToHost) => void;
@@ -46,7 +50,7 @@ export class StreamServerClient {
 
 	start(): void {
 		if (this.#closed || this.#socket || this.#retryTimer) return;
-		this.#connect();
+		void this.#connect();
 	}
 
 	/** Send only on the current open socket. Disconnected deltas are represented by the next replay. */
@@ -79,11 +83,25 @@ export class StreamServerClient {
 		}
 	}
 
-	#connect(): void {
+	async #connect(): Promise<void> {
 		if (this.#closed) return;
+		let token: string | null;
+		try {
+			token = await this.#options.token();
+		} catch (error) {
+			this.#failUnauthorized(
+				`could not read the stencil.so credential: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return;
+		}
+		if (this.#closed) return;
+		if (!token) {
+			this.#failUnauthorized("no stencil.so credential");
+			return;
+		}
 		let socket: WebSocket;
 		try {
-			socket = new WebSocket(this.#options.url);
+			socket = new WebSocket(this.#options.url, { headers: { Authorization: `Bearer ${token}` } });
 		} catch {
 			this.#scheduleReconnect();
 			return;
@@ -118,6 +136,11 @@ export class StreamServerClient {
 		};
 	}
 
+	#failUnauthorized(message: string): void {
+		this.#closed = true;
+		this.#options.onFatal({ code: STREAM_CLOSE_UNAUTHORIZED, message });
+	}
+
 	#scheduleReconnect(dropped = false): void {
 		if (this.#closed || this.#retryTimer) return;
 		const attempt = this.#attempt++;
@@ -125,7 +148,7 @@ export class StreamServerClient {
 		if (dropped) this.#options.onDisconnect?.(delay);
 		this.#retryTimer = setTimeout(() => {
 			this.#retryTimer = undefined;
-			this.#connect();
+			void this.#connect();
 		}, delay);
 	}
 }
@@ -137,6 +160,8 @@ function reconnectDelay(attempt: number): number {
 
 function fatalCloseMessage(code: number, reason: string): string | undefined {
 	if (code === STREAM_CLOSE_HOST_CONFLICT) return "channel already has a live host";
+	if (code === STREAM_CLOSE_UNAUTHORIZED) return reason || "stream server rejected the stencil.so credential";
+	if (code === STREAM_CLOSE_FORBIDDEN) return reason || "channel belongs to another stencil.so account";
 	if (code === STREAM_CLOSE_BAD_CHANNEL || code === STREAM_CLOSE_PROTO_MISMATCH) {
 		return reason || `stream server rejected the connection (${code})`;
 	}

@@ -15,6 +15,7 @@ import {
 } from "@oh-my-pi/pi-wire";
 import { encodeStreamFrame, STREAM_LOCAL_PROTO, type StreamSessionFrame, type StreamStreamerFrame } from "./protocol";
 import { streamSocketEndpoint } from "./paths";
+import { runStreamTui, type StreamTuiInfo } from "./console-tui";
 import { StreamServerClient, type StreamServerFatalError } from "./server-client";
 
 const MAX_LOCAL_LINE_BYTES = 4 * 1024 * 1024;
@@ -36,24 +37,44 @@ interface LocalConnection {
 }
 
 export interface StreamUrls {
-	viewerUrl: string;
 	hostUrl: string;
 }
 
-export interface StreamMuxHostOptions {
+export type StreamConsoleEvent =
+	| {
+			t: "link";
+			state: "connecting" | "live" | "reconnecting" | "stopped";
+			detail?: string;
+			channel?: string;
+			user?: string;
+	  }
+	| { t: "pane"; action: "attached" | "closed"; id: number; title: string; cols: number; rows: number }
+	| { t: "viewers"; n: number }
+	| { t: "chat"; msg: StreamChatMessage }
+	| { t: "title"; title: string }
+	| { t: "error"; message: string }
+	| { t: "notice"; message: string };
+
+interface StreamConnectionOptions {
 	projectDir: string;
-	channel: string;
 	title: string;
-	viewerUrl: string;
 	hostUrl: string;
-	print?: (line: string) => void;
-	printError?: (line: string) => void;
+	/** Bearer token resolver for the host socket (see `StreamCredential`). */
+	token: () => Promise<string | null>;
 	/** Test seam; production uses the server client's normal retry policy. */
 	reconnectDelay?: (attempt: number) => number;
 }
 
-/** Convert a public stream base URL into its viewer and host WebSocket routes. */
-export function resolveStreamUrls(baseUrl: string, channel: string): StreamUrls {
+export interface StreamMuxHostOptions extends StreamConnectionOptions {
+	onEvent: (event: StreamConsoleEvent) => void;
+}
+
+export interface StreamConsoleOptions extends StreamConnectionOptions {
+	noTui?: boolean;
+}
+
+/** Convert a public stream base URL into its identity-derived host WebSocket route. */
+export function resolveStreamUrls(baseUrl: string): StreamUrls {
 	let base: URL;
 	try {
 		base = new URL(baseUrl);
@@ -66,25 +87,17 @@ export function resolveStreamUrls(baseUrl: string, channel: string): StreamUrls 
 	base.hash = "";
 	base.search = "";
 	base.pathname = base.pathname.replace(/\/+$/, "");
-	const publicUrl = new URL(base.toString());
-	if (publicUrl.protocol === "ws:") publicUrl.protocol = "http:";
-	if (publicUrl.protocol === "wss:") publicUrl.protocol = "https:";
 	const socketUrl = new URL(base.toString());
 	if (socketUrl.protocol === "http:") socketUrl.protocol = "ws:";
 	if (socketUrl.protocol === "https:") socketUrl.protocol = "wss:";
-	const publicBase = publicUrl.toString().replace(/\/$/, "");
 	const socketBase = socketUrl.toString().replace(/\/$/, "");
-	return {
-		viewerUrl: `${publicBase}${STREAM_ROUTES.page(channel)}`,
-		hostUrl: `${socketBase}${STREAM_ROUTES.host(channel)}`,
-	};
+	return { hostUrl: `${socketBase}${STREAM_ROUTES.host}` };
 }
 
 /** Local session multiplexer and materialized-state owner for one live channel. */
 export class StreamMuxHost {
 	readonly #options: StreamMuxHostOptions;
-	readonly #print: (line: string) => void;
-	readonly #printError: (line: string) => void;
+	readonly #onEvent: (event: StreamConsoleEvent) => void;
 	readonly #client: StreamServerClient;
 	readonly #connections = new Set<LocalConnection>();
 	readonly #panes = new Map<number, PaneState>();
@@ -93,23 +106,29 @@ export class StreamMuxHost {
 	#endpoint?: string;
 	#nextPaneId = 1;
 	#viewerCount?: number;
+	#channel = "";
+	#viewerUrl = "";
 	#title: string;
 	#started = false;
 	#closing = false;
 
 	constructor(options: StreamMuxHostOptions) {
 		this.#options = options;
-		this.#print = options.print ?? (line => console.log(line));
-		this.#printError = options.printError ?? (line => console.error(line));
+		this.#onEvent = options.onEvent;
 		this.#title = options.title;
 		this.#client = new StreamServerClient({
 			url: options.hostUrl,
 			title: options.title,
+			token: options.token,
 			replay: () => this.#replayFrames(),
 			onFrame: frame => this.#handleServerFrame(frame),
 			onFatal: error => void this.#handleFatal(error),
 			onDisconnect: delayMs =>
-				this.#printError(`stream server connection lost; retrying in ${Math.round(delayMs / 1000)}s`),
+				this.#onEvent({
+					t: "link",
+					state: "reconnecting",
+					detail: `retrying in ${Math.round(delayMs / 1000)}s`,
+				}),
 			reconnectDelay: options.reconnectDelay,
 		});
 	}
@@ -139,9 +158,9 @@ export class StreamMuxHost {
 			throw error;
 		}
 		process.once("exit", this.#removeSocketSync);
-		this.#print(`streaming #${this.#options.channel}`);
-		this.#print(`title: ${this.#title}`);
-		this.#print(`watch: ${this.#options.viewerUrl}`);
+		this.#onEvent({ t: "notice", message: "connecting your stencil.so channel" });
+		this.#onEvent({ t: "title", title: this.#title });
+		this.#onEvent({ t: "link", state: "connecting" });
 		this.#client.start();
 		return endpoint;
 	}
@@ -156,10 +175,6 @@ export class StreamMuxHost {
 		if (trimmed.startsWith("/title ")) {
 			const title = trimmed.slice(7).trim();
 			if (!title) return;
-			if (title.length > STREAM_TITLE_MAX) {
-				this.#printError(`title must be at most ${STREAM_TITLE_MAX} characters`);
-				return;
-			}
 			this.setTitle(title);
 			return;
 		}
@@ -167,9 +182,15 @@ export class StreamMuxHost {
 	}
 
 	setTitle(title: string): void {
-		this.#title = title;
+		const trimmed = title.trim();
+		if (!trimmed) return;
+		if (trimmed.length > STREAM_TITLE_MAX) {
+			this.#onEvent({ t: "error", message: `title must be at most ${STREAM_TITLE_MAX} characters` });
+			return;
+		}
+		this.#title = trimmed;
 		this.#client.setTitle(this.#title);
-		this.#print(`title: ${this.#title}`);
+		this.#onEvent({ t: "title", title: this.#title });
 	}
 
 	async close(reason = "stream ended", exitCode = 0): Promise<void> {
@@ -184,6 +205,7 @@ export class StreamMuxHost {
 		this.#connections.clear();
 		this.#panes.clear();
 		this.#client.close();
+		this.#onEvent({ t: "link", state: "stopped", detail: reason });
 
 		const server = this.#server;
 		this.#server = undefined;
@@ -271,19 +293,19 @@ export class StreamMuxHost {
 		};
 		connection.pane = pane;
 		this.#panes.set(pane.id, pane);
-		connection.socket.write(
-			encodeStreamFrame({
-				t: "welcome",
-				proto: STREAM_LOCAL_PROTO,
-				channel: this.#options.channel,
-				url: this.#options.viewerUrl,
-			}),
-		);
+		connection.socket.write(encodeStreamFrame(this.#sessionWelcome()));
 		if (this.#viewerCount !== undefined) {
 			connection.socket.write(encodeStreamFrame({ t: "viewers", n: this.#viewerCount }));
 		}
 		this.#client.send({ t: "pane-open", pane: pane.id, title: pane.title, cols: pane.cols, rows: pane.rows });
-		this.#print(`pane attached: #${pane.id} ${pane.title} ${pane.cols}x${pane.rows}`);
+		this.#onEvent({
+			t: "pane",
+			action: "attached",
+			id: pane.id,
+			title: pane.title,
+			cols: pane.cols,
+			rows: pane.rows,
+		});
 		return true;
 	}
 
@@ -340,7 +362,14 @@ export class StreamMuxHost {
 		if (!pane || !this.#panes.delete(pane.id)) return;
 		if (!this.#closing) {
 			this.#client.send({ t: "pane-close", pane: pane.id });
-			this.#print(`pane closed: #${pane.id} ${pane.title}`);
+			this.#onEvent({
+				t: "pane",
+				action: "closed",
+				id: pane.id,
+				title: pane.title,
+				cols: pane.cols,
+				rows: pane.rows,
+			});
 		}
 	}
 
@@ -358,27 +387,40 @@ export class StreamMuxHost {
 			case "welcome":
 				if (frame.proto !== STREAM_PROTO) {
 					const message = `stream protocol mismatch (server ${frame.proto}, client ${STREAM_PROTO})`;
-					this.#printError(message);
+					this.#onEvent({ t: "error", message });
 					void this.close(message, 1);
 					return;
 				}
-				this.#print(`live: ${frame.url || this.#options.viewerUrl}`);
+				this.#channel = frame.channel;
+				this.#viewerUrl = frame.url;
+				this.#broadcast(this.#sessionWelcome());
+				this.#onEvent({
+					t: "link",
+					state: "live",
+					detail: frame.url,
+					channel: frame.channel,
+					user: frame.user,
+				});
 				break;
 			case "viewers":
 				this.#broadcast({ t: "viewers", n: frame.n });
 				if (frame.n !== this.#viewerCount) {
 					this.#viewerCount = frame.n;
-					this.#print(`viewers: ${frame.n}`);
+					this.#onEvent({ t: "viewers", n: frame.n });
 				}
 				break;
 			case "chat":
 				this.#broadcast({ t: "chat", msg: frame.msg });
-				this.#print(formatChat(frame.msg));
+				this.#onEvent({ t: "chat", msg: frame.msg });
 				break;
 			case "error":
-				this.#printError(`stream server: ${frame.message}`);
+				this.#onEvent({ t: "error", message: `stream server: ${frame.message}` });
 				break;
 		}
+	}
+
+	#sessionWelcome(): StreamStreamerFrame {
+		return { t: "welcome", proto: STREAM_LOCAL_PROTO, channel: this.#channel, url: this.#viewerUrl };
 	}
 
 	#broadcast(frame: StreamStreamerFrame): void {
@@ -390,29 +432,88 @@ export class StreamMuxHost {
 
 	async #handleFatal(error: StreamServerFatalError): Promise<void> {
 		const message =
-			error.code === STREAM_CLOSE_HOST_CONFLICT
-				? `channel '${this.#options.channel}' already has a live host`
-				: error.message;
-		this.#printError(message);
+			error.code === STREAM_CLOSE_HOST_CONFLICT ? "your channel already has a live host" : error.message;
+		this.#onEvent({ t: "error", message });
 		await this.close(message, 1);
 	}
 }
 
+/** Render stream events as the original line-oriented console output. */
+export function logConsoleSink(): (event: StreamConsoleEvent) => void {
+	return event => {
+		switch (event.t) {
+			case "link":
+				if (event.state === "live") {
+					process.stdout.write(`live: ${event.detail ?? ""}\n`);
+				} else if (event.state === "reconnecting") {
+					process.stderr.write(`stream server connection lost; ${event.detail ?? "reconnecting"}\n`);
+				}
+				break;
+			case "pane":
+				process.stdout.write(
+					event.action === "attached"
+						? `pane attached: #${event.id} ${event.title} ${event.cols}x${event.rows}\n`
+						: `pane closed: #${event.id} ${event.title}\n`,
+				);
+				break;
+			case "viewers":
+				process.stdout.write(`viewers: ${event.n}\n`);
+				break;
+			case "chat":
+				process.stdout.write(`${formatChat(event.msg)}\n`);
+				break;
+			case "title":
+				process.stdout.write(`title: ${event.title}\n`);
+				break;
+			case "error":
+				process.stderr.write(`${event.message}\n`);
+				break;
+			case "notice":
+				process.stdout.write(`${event.message}\n`);
+				break;
+		}
+	};
+}
+
 /** Run the foreground console UX until a signal or fatal server rejection. */
-export async function runStreamConsole(options: StreamMuxHostOptions): Promise<number> {
-	const host = new StreamMuxHost(options);
+export async function runStreamConsole(options: StreamConsoleOptions): Promise<number> {
+	const interactive = process.stdout.isTTY === true && process.stdin.isTTY === true && !options.noTui;
+	const events: StreamConsoleEvent[] = [];
+	const listeners = new Set<(event: StreamConsoleEvent) => void>();
+	const sink = interactive
+		? (event: StreamConsoleEvent): void => {
+				if (listeners.size === 0) events.push(event);
+				for (const listener of listeners) listener(event);
+			}
+		: logConsoleSink();
+	const host = new StreamMuxHost({ ...options, onEvent: sink });
 	await host.start();
-	const input = readline.createInterface({ input: process.stdin, terminal: false });
-	input.on("line", line => host.sendChat(line));
+
 	const stop = (): void => {
 		void host.close("stream stopped");
 	};
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);
+
+	let input: readline.Interface | undefined;
 	try {
+		if (interactive) {
+			const info: StreamTuiInfo = {
+				title: options.title,
+				initialEvents: events.slice(),
+				subscribe(listener) {
+					listeners.add(listener);
+					return () => listeners.delete(listener);
+				},
+			};
+			await runStreamTui(host, info);
+		} else {
+			input = readline.createInterface({ input: process.stdin, terminal: false });
+			input.on("line", line => host.sendChat(line));
+		}
 		return await host.wait();
 	} finally {
-		input.close();
+		input?.close();
 		process.off("SIGINT", stop);
 		process.off("SIGTERM", stop);
 	}

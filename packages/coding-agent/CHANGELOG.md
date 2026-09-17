@@ -8,7 +8,10 @@
 
 ### Added
 
-- Added `omp stream <channel> [--title …]`: livestream your terminal at `live.omp.sh/<channel>` with viewer chat. Every omp session started in the same directory while the streamer runs is shown as its own pane (and removed when it exits); only redacted screen rows leave the machine — env/`secrets.yml` values, dotenv values, credential shapes, and `stream.redactPatterns` are masked before they cross even the local socket. Settings: `stream.serverUrl`, `stream.redactPatterns`.
+- Added `--server` flag to `omp stream` to override the default stream server URL
+- Added `omp stream [--title …]`: livestream your terminal at `live.omp.sh/<your Stencil username>` with viewer chat; the server derives the channel from your signed-in account. Every omp session started in the same directory while the streamer runs is shown as its own pane (and removed when it exits); only redacted screen rows leave the machine — env/`secrets.yml` values, dotenv values, credential shapes, and `stream.redactPatterns` are masked before they cross even the local socket. Settings: `stream.serverUrl`, `stream.redactPatterns`.
+- Added **Stencil (stencil.so account)** to `/login`; `omp stream` requires it (or `STENCIL_API_KEY`) and presents it as the host bearer, so channels are owned by your account.
+- `omp stream` is now a full-screen chat console (owner chat, `/title`, history, live badge, viewer count, panes); `--no-tui` keeps the line log.
 
 ### Changed
 

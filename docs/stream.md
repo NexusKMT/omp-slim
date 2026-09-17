@@ -1,21 +1,25 @@
 # Stream: Livestream Your Terminal
 
-`omp stream` broadcasts your omp sessions to `live.omp.sh/<channel>` — a Twitch-style page with the live terminal and a chat column. Viewers see exactly what your terminal shows (minus secrets); they cannot type into the session.
+`omp stream` broadcasts your omp sessions to `live.omp.sh/<username>` — a Twitch-style page with the live terminal and a chat column. Viewers see exactly what your terminal shows (minus secrets); they cannot type into the session.
 
 Stream is independent from [Collab](collab.md). Collab replicates the session itself (entries, events, prompts) to guests who can drive the agent; Stream sends only rendered screen rows, one way, to an audience.
 
 ## Quick start
 
+Streaming needs a stencil.so account. Sign in once from any omp session with `/login` → **Stencil (stencil.so account)**; the credential is stored with your other logins and refreshed automatically. For scripts and local development, `STENCIL_API_KEY=<token>` overrides the stored credential; `STENCIL_AUTH_URL` re-bases the sign-in (`auth.stencil.so`) and `STENCIL_BASE_URL` the Stencil API (`api.stencil.so`) at a local server.
+
+Your Stencil username is the channel. The server derives it from the bearer token, so `omp stream` takes no channel argument.
+
 In the directory you work in:
 
 ```
-omp stream my-channel --title "Refactoring the parser"
+omp stream --title "Refactoring the parser"
 ```
 
 prints
 
 ```
-● live.omp.sh/my-channel  "Refactoring the parser"
+● live.omp.sh/your_username  "Refactoring the parser"
   waiting for sessions in /work/proj …
 ```
 
@@ -25,21 +29,26 @@ Sessions that were already running before `omp stream` started are not attached 
 
 ### Streamer console
 
-| Input           | Effect                                        |
-| --------------- | --------------------------------------------- |
-| `<text>` + Enter | Send a chat message as the streamer          |
-| `/title <text>` | Change the stream title                       |
-| Ctrl-C          | Stop streaming (sessions detach, channel goes offline) |
+On a terminal, `omp stream` is a full-screen chat console: header with the live badge, channel, title, your stencil.so handle, viewer URL, viewer count and attached panes; a log of chat and events; and an input line at the bottom.
 
-The console also prints pane attach/detach lines, viewer-count changes, and every chat message.
+| Input            | Effect                                                  |
+| ---------------- | ------------------------------------------------------- |
+| `<text>` + Enter | Send a chat message as the channel owner                |
+| `/title <text>`  | Change the stream title                                 |
+| `/quit`, Ctrl-C  | Stop streaming (sessions detach, channel goes offline)  |
+| Up / Down        | Recall previous messages                                |
+
+`--no-tui` (or a non-TTY stdout/stdin) falls back to a line log where stdin lines are chat.
 
 ### Options and settings
 
 | Flag / setting            | Meaning                                                                          |
 | ------------------------- | -------------------------------------------------------------------------------- |
-| `<channel>`               | Path segment of the viewer URL: lowercase letters, digits, dashes; 1–32 chars     |
+| Channel                   | Your Stencil username, derived by the server from the bearer token               |
 | `--title <text>`          | Stream title (default: directory name)                                           |
 | `--server <url>`          | Stream server base (default: `stream.serverUrl`)                                 |
+| `--no-tui`                | Line-log console instead of the full-screen chat                                 |
+| `STENCIL_API_KEY`         | Bearer token override; otherwise the `/login` Stencil credential is used         |
 | `stream.serverUrl`        | Default server, `https://live.omp.sh`                                            |
 | `stream.redactPatterns`   | Extra regular expressions masked from every streamed row                         |
 
@@ -71,6 +80,6 @@ Redaction cannot know about secrets it has never seen: a token pasted from elsew
 
 ## Server
 
-`live.omp.sh` is a small Go service (stencil `apps/live`): channel directory (`GET /api/channels`, `GET /api/channels/<name>`), homepage previews (`GET /api/channels/<name>/preview` — the first pane's viewport, never counted as a viewer), one host socket per channel (`/ws/host/<name>`), viewer sockets (`/ws/watch/<name>`), chat with per-viewer rate limiting, and the web UI (terminal rows render in the full Berkeley Mono Nerd Font served from `/fonts/`). Wire shapes live in `@oh-my-pi/pi-wire/stream`.
+`live.omp.sh` is a small Go service (stencil `apps/live`): channel directory (`GET /api/channels`, `GET /api/channels/<name>`), homepage previews (`GET /api/channels/<name>/preview` — the first pane's viewport, never counted as a viewer), an identity-derived host socket (`/ws/host`), viewer sockets (`/ws/watch/<name>`), chat with per-viewer rate limiting, and the web UI (terminal rows render in the full Berkeley Mono Nerd Font served from `/fonts/`). Wire shapes live in `@oh-my-pi/pi-wire/stream`.
 
-Channel names are first-come per server process; accounts and ownership are on the way. Until then, if `omp stream` reports `channel already has a live host`, pick another name.
+Hosts authenticate with the stencil.so bearer (`Authorization: Bearer …` on the host socket); the server verifies it against the issuer's JWKS (`LIVE_ISSUER`, `LIVE_TOKEN_AUDIENCE`) or, for local development, a static `LIVE_DEBUG_TOKENS` list paired with `STENCIL_API_KEY`. It derives each host channel directly from the authenticated Stencil username, so viewers always find an account at `live.omp.sh/<username>`. Viewers stay anonymous.

@@ -1,6 +1,6 @@
 /**
  * Wire types for `omp stream`: Twitch-style live screen sharing at
- * `live.omp.sh/<channel>`.
+ * `live.omp.sh/<username>`.
  *
  * Independent from collab. A publisher (`omp stream`) sends plaintext JSON
  * screen deltas for one or more panes (one pane per omp session attached in
@@ -13,14 +13,14 @@
  * secrets before a row leaves the session process.
  */
 
-/** Default stream server; `omp stream` dials `wss://live.omp.sh/ws/host/<channel>`. */
+/** Default stream server; its host route derives the channel from the bearer identity. */
 export const DEFAULT_STREAM_URL = "https://live.omp.sh";
 
 /** Protocol version carried in `hello`/`snapshot`; the server rejects mismatches. */
 export const STREAM_PROTO = 1;
 
-/** Channel names are URL path segments: lowercase alphanumerics and dashes, 1–32 chars. */
-export const STREAM_CHANNEL_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+/** Channel names are Stencil usernames: lowercase letters, numbers, and underscores; 3–32 chars. */
+export const STREAM_CHANNEL_NAME_RE = /^[a-z0-9][a-z0-9_]{2,31}$/;
 
 /** Longest accepted stream and pane title. */
 export const STREAM_TITLE_MAX = 120;
@@ -76,7 +76,8 @@ export interface StreamChatMessage {
 
 /** Server → publisher. */
 export type StreamServerToHost =
-	| { t: "welcome"; proto: number; channel: string; url: string }
+	/** `user` is the stencil.so username the bearer resolved to; shown as the host's chat name. */
+	| { t: "welcome"; proto: number; channel: string; url: string; user?: string }
 	| { t: "viewers"; n: number }
 	| { t: "chat"; msg: StreamChatMessage }
 	| { t: "error"; message: string };
@@ -88,6 +89,8 @@ export interface StreamChannelInfo {
 	live: boolean;
 	viewers: number;
 	panes: number;
+	/** stencil.so username of the channel owner (the first authenticated host). */
+	owner?: string;
 	/** Unix milliseconds of the current live session; absent when offline. */
 	startedAt?: number;
 }
@@ -129,12 +132,21 @@ export type StreamViewerFrame = { t: "chat"; name: string; text: string };
 export const STREAM_CLOSE_HOST_CONFLICT = 4009;
 export const STREAM_CLOSE_BAD_CHANNEL = 4004;
 export const STREAM_CLOSE_PROTO_MISMATCH = 4010;
+/** Host bearer token missing, expired, or not issued by the stencil.so issuer. */
+export const STREAM_CLOSE_UNAUTHORIZED = 4401;
+/** Channel is owned by a different stencil.so account. */
+export const STREAM_CLOSE_FORBIDDEN = 4403;
+
+/** Provider id under which `/login` stores the stencil.so credential; `STENCIL_API_KEY` overrides it. */
+export const STREAM_AUTH_PROVIDER = "stencil";
+export const STREAM_AUTH_ENV = "STENCIL_API_KEY";
 
 /** HTTP/WS route layout of the stream server, relative to `DEFAULT_STREAM_URL`. */
 export const STREAM_ROUTES = {
 	channels: "/api/channels",
 	channel: (name: string) => `/api/channels/${name}`,
-	host: (name: string) => `/ws/host/${name}`,
+	/** The server derives the host channel from the authenticated username. */
+	host: "/ws/host",
 	watch: (name: string) => `/ws/watch/${name}`,
 	page: (name: string) => `/${name}`,
 } as const;

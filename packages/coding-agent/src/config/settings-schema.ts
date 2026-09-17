@@ -2454,7 +2454,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Stream",
 			label: "Stream Server",
 			description:
-				"Live stream server used by `omp stream` (https://host[:port]); viewers watch at <base>/<channel>",
+				"Live stream server used by `omp stream` (https://host[:port]); viewers watch at <base>/<your Stencil username>",
 		},
 	},
 

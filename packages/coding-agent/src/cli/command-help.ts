@@ -115,7 +115,7 @@ export const sshHelp = { description: "Manage SSH host configurations" } satisfi
 export const statsHelp = { description: "View usage statistics" } satisfies CommandMetadata;
 
 export const streamHelp = {
-	description: "Broadcast local omp session screens and chat to a public live channel",
+	description: "Broadcast local omp session screens and chat to your public live channel",
 } satisfies CommandMetadata;
 
 export const tinyModelsHelp = {

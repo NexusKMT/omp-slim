@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { STREAM_HISTORY_LIMIT, STREAM_PROTO, type StreamHostFrame, type StreamServerToHost } from "@oh-my-pi/pi-wire";
 import { STREAM_LOCAL_PROTO, type StreamStreamerFrame } from "../../src/stream/protocol";
-import { StreamMuxHost } from "../../src/stream/streamer";
+import { resolveStreamUrls, StreamMuxHost, type StreamConsoleEvent } from "../../src/stream/streamer";
 
 type HostSocketData = Record<string, never>;
 
@@ -71,6 +71,9 @@ function startFakeStreamServer(port = 0): FakeStreamServer {
 		hostname: "127.0.0.1",
 		port,
 		fetch(request, bunServer): Response | undefined {
+			if (request.headers.get("authorization") !== "Bearer contract-token") {
+				return new Response("unauthorized", { status: 401 });
+			}
 			if (bunServer.upgrade(request, { data: {} })) return undefined;
 			return new Response("upgrade failed", { status: 400 });
 		},
@@ -88,6 +91,7 @@ function startFakeStreamServer(port = 0): FakeStreamServer {
 						proto: STREAM_PROTO,
 						channel: "contract-test",
 						url: `http://127.0.0.1:${server.port}/contract-test`,
+						user: "contract-host",
 					};
 					socket.send(JSON.stringify(welcome));
 				}
@@ -145,20 +149,25 @@ async function connectSession(endpoint: string): Promise<FakeSession> {
 	};
 }
 
+describe("resolveStreamUrls", () => {
+	it("uses the identity-derived host endpoint", () => {
+		expect(resolveStreamUrls("https://live.omp.sh")).toEqual({ hostUrl: "wss://live.omp.sh/ws/host" });
+	});
+});
+
 describe("StreamMuxHost", () => {
 	it("materializes patch, reset, and bounded history state across reconnect replays", async () => {
 		const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-stream-test-"));
 		projectDirs.push(projectDir);
 		const firstServer = startFakeStreamServer();
 		const port = firstServer.port;
+		const events: StreamConsoleEvent[] = [];
 		const host = new StreamMuxHost({
 			projectDir,
-			channel: "contract-test",
 			title: "Contract test",
-			viewerUrl: `http://127.0.0.1:${port}/contract-test`,
-			hostUrl: `ws://127.0.0.1:${port}/ws/host/contract-test`,
-			print: () => {},
-			printError: () => {},
+			hostUrl: `ws://127.0.0.1:${port}/ws/host`,
+			token: () => Promise.resolve("contract-token"),
+			onEvent: event => events.push(event),
 			reconnectDelay: () => 10,
 		});
 		hosts.push(host);
@@ -194,6 +203,26 @@ describe("StreamMuxHost", () => {
 			} satisfies StreamServerToHost),
 		);
 		await session.waitForFrame(frame => frame.t === "chat");
+		expect(events).toContainEqual({
+			t: "link",
+			state: "live",
+			detail: `http://127.0.0.1:${port}/contract-test`,
+			channel: "contract-test",
+			user: "contract-host",
+		});
+		expect(events).toContainEqual({
+			t: "pane",
+			action: "attached",
+			id: 1,
+			title: "Pane one",
+			cols: 80,
+			rows: 2,
+		});
+		expect(events).toContainEqual({ t: "viewers", n: 7 });
+		expect(events).toContainEqual({
+			t: "chat",
+			msg: { id: 1, name: "viewer", text: "hello", ts: 1_700_000_000_000 },
+		});
 		expect(session.frames.find(frame => frame.t === "viewers")).toEqual({ t: "viewers", n: 7 });
 		expect(session.frames.find(frame => frame.t === "chat")).toEqual({
 			t: "chat",
