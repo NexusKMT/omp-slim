@@ -8,6 +8,9 @@
 import * as os from "node:os";
 import type { Component } from "../../tui";
 import { visibleWidth, wrapTextWithAnsi } from "../../utils";
+import { KeyValueList } from "../../components/key-value-list";
+import { Section } from "../../components/section";
+import { renderTableRow } from "../../components/table";
 import { theme } from "../../theme";
 import { expandKeyHint, PREVIEW_LIMITS, replaceTabs, shortenPath } from "../../render/render-utils";
 import {
@@ -132,12 +135,13 @@ export class InspectorPanel implements Component {
 		if (kind.surface.length > 0) lines.push(...kind.surface);
 		if (kind.contents.length > 0) lines.push(...kind.contents);
 		if (kind.preview) {
-			lines.push(theme.fg("muted", kind.preview.heading));
-			lines.push(this.#rule());
 			const reserved = kind.config.length + 1;
-			const remaining = this.#height > 0 ? Math.max(4, this.#height - lines.length - reserved) : PREVIEW_LINE_BUDGET;
-			this.#pushPreview(lines, kind.preview.text, width, remaining);
-			lines.push("");
+			// +2 preserves the heading/rule budget the section composes around the body.
+			const remaining =
+				this.#height > 0 ? Math.max(4, this.#height - (lines.length + 2) - reserved) : PREVIEW_LINE_BUDGET;
+			const previewBody: string[] = [];
+			this.#pushPreview(previewBody, kind.preview.text, width, remaining);
+			lines.push(...this.#section(kind.preview.heading, previewBody, width));
 		}
 		if (kind.config.length > 0) lines.push(...kind.config);
 		return lines;
@@ -197,65 +201,65 @@ export class InspectorPanel implements Component {
 		const config: string[] = [];
 
 		if (snap && snap.tools.length > 0) {
-			contents.push(theme.fg("muted", "Tools"));
-			contents.push(this.#rule());
+			const toolsBody: string[] = [];
 			const { shown, hidden } = visibleMcpTools(snap.tools, this.#expanded ? snap.tools.length : MCP_TOOL_BUDGET);
 			let collapsedArgs = false;
 			for (const tool of shown) {
-				contents.push(`  ${theme.fg("accent", tool.name)}`);
+				toolsBody.push(`  ${theme.fg("accent", tool.name)}`);
 				if (tool.title && tool.title !== tool.name) {
-					contents.push(`    ${theme.fg("muted", tool.title)}`);
+					toolsBody.push(`    ${theme.fg("muted", tool.title)}`);
 				}
-				if (tool.description) this.#pushWrapped(contents, tool.description, width, "    ");
+				if (tool.description) this.#pushWrapped(toolsBody, tool.description, width, "    ");
 				const params = toolParamsFromSchema(tool.parameters);
 				const inline = this.#expanded || params.length <= MCP_INLINE_ARG_LIMIT;
 				if (inline) {
-					this.#pushParams(contents, params, width, "    ");
+					this.#pushParams(toolsBody, params, width, "    ");
 				} else if (params.length > 0) {
 					collapsedArgs = true;
-					contents.push(`    ${theme.fg("dim", `${params.length} args`)}`);
+					toolsBody.push(`    ${theme.fg("dim", `${params.length} args`)}`);
 				}
-				contents.push("");
+				toolsBody.push("");
 			}
 			if (hidden > 0) {
-				contents.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
-				contents.push("");
+				toolsBody.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
+				toolsBody.push("");
 			} else if (collapsedArgs) {
-				contents.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
-				contents.push("");
+				toolsBody.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
+				toolsBody.push("");
 			}
+			contents.push(...this.#section("Tools", toolsBody, width));
 		}
 
 		if (snap && snap.resources.length > 0) {
-			contents.push(theme.fg("muted", "Resources"));
-			contents.push(this.#rule());
+			const resourcesBody: string[] = [];
 			const { shown, hidden } = visibleMcpTools(
 				snap.resources,
 				this.#expanded ? snap.resources.length : MCP_TOOL_BUDGET,
 			);
 			for (const resource of shown) {
-				contents.push(`  ${theme.fg("accent", resource.name)}`);
+				resourcesBody.push(`  ${theme.fg("accent", resource.name)}`);
 			}
 			if (hidden > 0) {
-				contents.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
+				resourcesBody.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
 			}
-			contents.push("");
+			resourcesBody.push("");
+			contents.push(...this.#section("Resources", resourcesBody, width));
 		}
 
 		if (snap && snap.prompts.length > 0) {
-			contents.push(theme.fg("muted", "Prompts"));
-			contents.push(this.#rule());
+			const promptsBody: string[] = [];
 			const { shown, hidden } = visibleMcpTools(
 				snap.prompts,
 				this.#expanded ? snap.prompts.length : MCP_TOOL_BUDGET,
 			);
 			for (const prompt of shown) {
-				contents.push(`  ${theme.fg("accent", prompt.name)}`);
+				promptsBody.push(`  ${theme.fg("accent", prompt.name)}`);
 			}
 			if (hidden > 0) {
-				contents.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
+				promptsBody.push(theme.fg("dim", `  … ${hidden} more (${expandKeyHint()} to expand)`));
 			}
-			contents.push("");
+			promptsBody.push("");
+			contents.push(...this.#section("Prompts", promptsBody, width));
 		}
 
 		if (snap?.command)
@@ -285,38 +289,37 @@ export class InspectorPanel implements Component {
 		const data = toolInspectorData(ext, lives, this.#source);
 		const surface: string[] = [];
 		if (data.factory.length > 1) {
-			surface.push(theme.fg("muted", "Tools"));
-			surface.push(this.#rule());
+			const factoryBody: string[] = [];
 			let collapsedArgs = false;
 			for (const tool of data.factory) {
-				surface.push(`  ${theme.fg("accent", tool.name)}`);
+				factoryBody.push(`  ${theme.fg("accent", tool.name)}`);
 				if (tool.label && tool.label !== tool.name) {
-					surface.push(`    ${theme.fg("muted", tool.label)}`);
+					factoryBody.push(`    ${theme.fg("muted", tool.label)}`);
 				}
-				if (tool.description) this.#pushWrapped(surface, tool.description, width, "    ");
+				if (tool.description) this.#pushWrapped(factoryBody, tool.description, width, "    ");
 				const params = toolParamsFromSchema(tool.parameters);
 				const inline = this.#expanded || params.length <= MCP_INLINE_ARG_LIMIT;
 				if (inline) {
-					this.#pushParams(surface, params, width, "    ");
+					this.#pushParams(factoryBody, params, width, "    ");
 				} else if (params.length > 0) {
 					collapsedArgs = true;
-					surface.push(`    ${theme.fg("dim", `${params.length} args`)}`);
+					factoryBody.push(`    ${theme.fg("dim", `${params.length} args`)}`);
 				}
-				surface.push("");
+				factoryBody.push("");
 			}
 			if (collapsedArgs) {
-				surface.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
-				surface.push("");
+				factoryBody.push(theme.fg("dim", `  … args (${expandKeyHint()} to expand)`));
+				factoryBody.push("");
 			}
+			surface.push(...this.#section("Tools", factoryBody, width));
 			return { description: data.description, surface, contents: [], config: [] };
 		}
 		if (lives.length === 0 && data.params.length === 0) {
 			return { description: data.description, surface: [], contents: [], config: [] };
 		}
-		surface.push(theme.fg("muted", "Arguments"));
-		surface.push(this.#rule());
-		this.#pushParams(surface, data.params, width, "  ");
-		surface.push("");
+		const argsBody: string[] = [];
+		this.#pushParams(argsBody, data.params, width, "  ");
+		surface.push(...this.#section("Arguments", argsBody, width));
 		return {
 			title: data.label,
 			description: data.description,
@@ -330,19 +333,19 @@ export class InspectorPanel implements Component {
 		const width = this.#width;
 		const data = ruleInspectorData(ext, this.#source);
 		const surface: string[] = [];
-		surface.push(theme.fg("muted", "Applies"));
-		surface.push(this.#rule());
-		if (data.alwaysApply) surface.push(`  ${theme.fg("accent", "always")}`);
-		if (data.globs) this.#pushLabeled(surface, "globs", data.globs.join(", "), width);
-		if (data.condition) this.#pushLabeledList(surface, "condition", data.condition, width);
-		if (data.astCondition) this.#pushLabeledList(surface, "ast", data.astCondition, width);
-		if (data.scope) this.#pushLabeledList(surface, "scope", data.scope, width);
-		if (data.agents) this.#pushLabeledList(surface, "agents", data.agents, width);
-		if (data.interruptMode) this.#pushLabeled(surface, "interrupt", data.interruptMode, width, "dim");
+		const appliesBody: string[] = [];
+		if (data.alwaysApply) appliesBody.push(`  ${theme.fg("accent", "always")}`);
+		if (data.globs) this.#pushLabeled(appliesBody, "globs", data.globs.join(", "), width);
+		if (data.condition) this.#pushLabeledList(appliesBody, "condition", data.condition, width);
+		if (data.astCondition) this.#pushLabeledList(appliesBody, "ast", data.astCondition, width);
+		if (data.scope) this.#pushLabeledList(appliesBody, "scope", data.scope, width);
+		if (data.agents) this.#pushLabeledList(appliesBody, "agents", data.agents, width);
+		if (data.interruptMode) this.#pushLabeled(appliesBody, "interrupt", data.interruptMode, width, "dim");
 		if (!data.alwaysApply && !data.globs && !data.condition && !data.astCondition && !data.agents) {
-			surface.push(theme.fg("dim", "  (no apply conditions)"));
+			appliesBody.push(theme.fg("dim", "  (no apply conditions)"));
 		}
-		surface.push("");
+		appliesBody.push("");
+		surface.push(...this.#section("Applies", appliesBody, width));
 		return {
 			description: data.description,
 			surface,
@@ -382,12 +385,12 @@ export class InspectorPanel implements Component {
 	#commandKind(ext: Extension): KindView {
 		const data = commandInspectorData(ext);
 		const surface: string[] = [];
-		surface.push(theme.fg("muted", "Invocation"));
-		surface.push(this.#rule());
-		surface.push(`  ${theme.fg("accent", `/${sanitizeDisplayText(ext.name)}`)}`);
-		if (data.argumentHint) this.#pushLabeled(surface, "hint", data.argumentHint, this.#width, "dim");
-		if (data.usesArguments) surface.push(`  ${theme.fg("dim", "accepts $ARGUMENTS")}`);
-		surface.push("");
+		const invocationBody: string[] = [];
+		invocationBody.push(`  ${theme.fg("accent", `/${sanitizeDisplayText(ext.name)}`)}`);
+		if (data.argumentHint) this.#pushLabeled(invocationBody, "hint", data.argumentHint, this.#width, "dim");
+		if (data.usesArguments) invocationBody.push(`  ${theme.fg("dim", "accepts $ARGUMENTS")}`);
+		invocationBody.push("");
+		surface.push(...this.#section("Invocation", invocationBody, this.#width));
 		return {
 			description: data.description,
 			surface,
@@ -400,11 +403,11 @@ export class InspectorPanel implements Component {
 	#hookKind(ext: Extension): KindView {
 		const data = hookInspectorData(ext);
 		const surface: string[] = [];
-		surface.push(theme.fg("muted", "Hook"));
-		surface.push(this.#rule());
-		if (data.hookType) this.#pushLabeled(surface, "when", data.hookType, this.#width);
-		if (data.tool) this.#pushLabeled(surface, "tool", data.tool, this.#width);
-		surface.push("");
+		const hookBody: string[] = [];
+		if (data.hookType) this.#pushLabeled(hookBody, "when", data.hookType, this.#width);
+		if (data.tool) this.#pushLabeled(hookBody, "tool", data.tool, this.#width);
+		hookBody.push("");
+		surface.push(...this.#section("Hook", hookBody, this.#width));
 		return { description: ext.description, surface, contents: [], config: [] };
 	}
 
@@ -434,10 +437,10 @@ export class InspectorPanel implements Component {
 		const data = instructionInspectorData(ext);
 		const surface: string[] = [];
 		if (data.applyTo) {
-			surface.push(theme.fg("muted", "Applies"));
-			surface.push(this.#rule());
-			this.#pushLabeled(surface, "files", data.applyTo, this.#width);
-			surface.push("");
+			const filesBody: string[] = [];
+			this.#pushLabeled(filesBody, "files", data.applyTo, this.#width);
+			filesBody.push("");
+			surface.push(...this.#section("Applies", filesBody, this.#width));
 		}
 		return {
 			description: ext.description,
@@ -451,10 +454,8 @@ export class InspectorPanel implements Component {
 	#fallbackKind(ext: Extension): KindView {
 		const surface: string[] = [];
 		if (ext.trigger) {
-			surface.push(theme.fg("muted", "Trigger"));
-			surface.push(this.#rule());
-			surface.push(`  ${theme.fg("accent", ext.trigger)}`);
-			surface.push("");
+			const triggerBody: string[] = [`  ${theme.fg("accent", ext.trigger)}`, ""];
+			surface.push(...this.#section("Trigger", triggerBody, this.#width));
 		}
 		return { description: ext.description, surface, contents: [], config: [] };
 	}
@@ -529,16 +530,11 @@ export class InspectorPanel implements Component {
 		width: number,
 		valueColor: "accent" | "dim" | "success" = "accent",
 	): void {
-		const prefix = `  ${label.padEnd(10)} `;
-		const indent = " ".repeat(visibleWidth(prefix));
-		const wrapped = wrapTextWithAnsi(
-			theme.fg(valueColor, sanitizeDisplayText(value)),
-			Math.max(8, width - indent.length),
+		const list = new KeyValueList(
+			[{ label, value: sanitizeDisplayText(value), valueStyle: text => theme.fg(valueColor, text) }],
+			{ indent: "  ", labelWidth: 10, gap: " ", minValueWidth: 8, labelOverflow: "allow" },
 		);
-		lines.push(`${prefix}${wrapped[0] ?? ""}`);
-		for (const extra of wrapped.slice(1)) {
-			lines.push(`${indent}${extra}`);
-		}
+		lines.push(...list.render(width));
 	}
 
 	#pushLabeledList(lines: string[], label: string, items: string[], width: number): void {
@@ -566,10 +562,23 @@ export class InspectorPanel implements Component {
 			return;
 		}
 		for (const param of params) {
-			const nameCol = theme.fg("accent", param.name.padEnd(12));
-			const typeCol = theme.fg("muted", param.type.padEnd(10));
-			const reqCol = param.required ? theme.fg("warning", param.flag) : theme.fg("dim", param.flag);
-			lines.push(`${indent}${nameCol} ${typeCol} ${reqCol}`);
+			const required = param.required;
+			lines.push(
+				renderTableRow(
+					[
+						{ text: param.name },
+						{ text: param.type },
+						{ text: param.flag, style: flag => theme.fg(required ? "warning" : "dim", flag) },
+					],
+					[
+						{ width: 12, align: "left", overflow: "allow", style: name => theme.fg("accent", name) },
+						{ width: 10, align: "left", overflow: "allow", style: type => theme.fg("muted", type) },
+						{ width: visibleWidth(param.flag), align: "left", overflow: "allow" },
+					],
+					undefined,
+					{ gap: " ", indent, fit: false },
+				),
+			);
 			if (param.description) this.#pushWrapped(lines, param.description, width, `${indent}  `);
 		}
 	}
@@ -609,6 +618,23 @@ export class InspectorPanel implements Component {
 		for (const line of wrapped.length > 0 ? wrapped : [""]) {
 			lines.push(`${indent}${line}`);
 		}
+	}
+
+	#section(title: string, body: string[], width: number): string[] {
+		// Section owns the one trailing spacer; callers retain interior blank
+		// rows between repeated entries without doubling the section boundary.
+		const sectionBody = body.at(-1) === "" ? body.slice(0, -1) : body;
+		return [
+			...new Section({
+				title,
+				body: sectionBody,
+				titleStyle: heading => theme.fg("muted", heading),
+				ruleStyle: rule => theme.fg("dim", rule),
+				ruleGlyph: "─",
+				ruleWidth: 40,
+				blankAfter: true,
+			}).render(width),
+		];
 	}
 
 	#rule(): string {

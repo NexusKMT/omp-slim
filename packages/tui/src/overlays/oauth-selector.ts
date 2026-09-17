@@ -3,7 +3,6 @@ import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai/oauth/types";
 import {
 	Container,
 	extractPrintableText,
-	fuzzyFilter,
 	matchesKey,
 	ScrollView,
 	type SgrMouseEvent,
@@ -13,6 +12,8 @@ import {
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { MenuSelection } from "../components/menu-selection";
+import { centeredViewportRange } from "../components/scroll-viewport";
 
 const OAUTH_SELECTOR_MAX_VISIBLE = 10;
 
@@ -48,10 +49,7 @@ const ORIGIN_LABELS = {
  */
 export class OAuthSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
-	#allProviders: OAuthProviderInfo[] = [];
-	#filteredProviders: OAuthProviderInfo[] = [];
-	#searchQuery = "";
-	#selectedIndex: number = 0;
+	#menu: MenuSelection<OAuthProviderInfo>;
 	#hoveredIndex: number | null = null;
 	/** First provider index of the visible ScrollView window (last #updateList). */
 	#scrollStart = 0;
@@ -87,6 +85,10 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#onCancelCallback = onCancel;
 		this.#validateAuthCallback = options?.validateAuth;
 		this.#requestRenderCallback = options?.requestRender;
+		this.#menu = new MenuSelection<OAuthProviderInfo>([], {
+			getKey: provider => provider.id,
+			getSearchText: provider => this.#getProviderSearchText(provider),
+		});
 		// Load all OAuth providers
 		this.#loadProviders(options?.disabledProviders);
 		// Create list container
@@ -128,20 +130,21 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		if (this.#mode === "logout") {
 			// Logout stays unfiltered by `disabledProviders`: a now-disabled
 			// provider may still hold stored credentials worth removing.
-			this.#allProviders = providers.filter(provider => this.#hasSelectableAuth(provider.id));
+			this.#menu.setItems(providers.filter(provider => this.#hasSelectableAuth(provider.id)));
 		} else {
 			const disabled = new Set(disabledProviders);
 			// Hide a login entry when either its own id or the provider id it
 			// stores credentials under is disabled, so alias logins (e.g.
 			// `openai-codex-device` ⇒ `openai-codex`) disappear alongside the
 			// model provider they authenticate.
-			this.#allProviders = providers.filter(
-				provider =>
-					!disabled.has(provider.id) &&
-					!(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
+			this.#menu.setItems(
+				providers.filter(
+					provider =>
+						!disabled.has(provider.id) &&
+						!(provider.storeCredentialsAs && disabled.has(provider.storeCredentialsAs)),
+				),
 			);
 		}
-		this.#filteredProviders = this.#allProviders;
 	}
 
 	#startValidation(): void {
@@ -150,7 +153,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		this.#validationGeneration = generation;
 
 		let pending = 0;
-		for (const provider of this.#allProviders) {
+		for (const provider of this.#menu.items) {
 			if (!this.#hasSelectableAuth(provider.id)) {
 				this.#authState.delete(provider.id);
 				continue;
@@ -235,16 +238,16 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 
 	#isSearchEnabled(): boolean {
-		return this.#allProviders.length > this.#maxVisible;
+		return this.#menu.items.length > this.#maxVisible;
 	}
 
 	#shouldRenderSearchStatus(): boolean {
-		return this.#isSearchEnabled() || this.#searchQuery.length > 0;
+		return this.#isSearchEnabled() || this.#menu.query.length > 0;
 	}
 
 	#renderStatusLine(_total: number): string {
-		const query = this.#searchQuery.trim();
-		const suffix = query ? `Search: ${this.#searchQuery}` : "Type to search";
+		const query = this.#menu.query.trim();
+		const suffix = query ? `Search: ${this.#menu.query}` : "Type to search";
 		return theme.fg("muted", suffix);
 	}
 
@@ -262,11 +265,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 
 	#setSearchQuery(query: string): void {
-		this.#searchQuery = query;
-		this.#filteredProviders = query.trim()
-			? fuzzyFilter(this.#allProviders, query, provider => this.#getProviderSearchText(provider))
-			: this.#allProviders;
-		this.#selectedIndex = 0;
+		this.#menu.setQuery(query, false);
 		this.#statusMessage = undefined;
 		this.#updateList();
 	}
@@ -275,8 +274,8 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		if (!this.#isSearchEnabled()) return false;
 
 		if (matchesKey(keyData, "backspace")) {
-			if (this.#searchQuery.length === 0) return false;
-			const chars = [...this.#searchQuery];
+			if (this.#menu.query.length === 0) return false;
+			const chars = [...this.#menu.query];
 			chars.pop();
 			this.#setSearchQuery(chars.join(""));
 			return true;
@@ -284,30 +283,27 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 		const printableText = extractPrintableText(keyData);
 		if (printableText === undefined) return false;
-		if (this.#searchQuery.length === 0 && printableText.trim().length === 0) return false;
+		if (this.#menu.query.length === 0 && printableText.trim().length === 0) return false;
 
-		this.#setSearchQuery(this.#searchQuery + printableText);
+		this.#setSearchQuery(this.#menu.query + printableText);
 		return true;
 	}
 
 	#updateList(): void {
 		this.#listContainer.clear();
 
-		const total = this.#filteredProviders.length;
+		const items = this.#menu.visibleItems;
+		const total = items.length;
 		const maxVisible = this.#maxVisible;
-		const startIndex =
-			total <= maxVisible
-				? 0
-				: Math.max(0, Math.min(this.#selectedIndex - Math.floor(maxVisible / 2), total - maxVisible));
-		const endIndex = Math.min(startIndex + maxVisible, total);
+		const { start: startIndex, end: endIndex } = centeredViewportRange(this.#menu.selectedIndex, total, maxVisible);
 		this.#scrollStart = startIndex;
 		this.#visibleCount = endIndex - startIndex;
 
 		const rows: string[] = [];
 		for (let i = startIndex; i < endIndex; i++) {
-			const provider = this.#filteredProviders[i];
+			const provider = items[i];
 			if (!provider) continue;
-			const isSelected = i === this.#selectedIndex;
+			const isSelected = i === this.#menu.selectedIndex;
 			const isAvailable = provider.available;
 			const statusIndicator = this.#getStatusIndicator(provider.id);
 
@@ -344,7 +340,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 		if (total === 0) {
 			const message =
-				this.#allProviders.length === 0
+				this.#menu.items.length === 0
 					? this.#mode === "login"
 						? "No OAuth providers available"
 						: "No stored provider credentials to log out"
@@ -370,35 +366,25 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 		// Up arrow
 		if (matchesSelectUp(keyData)) {
-			if (this.#filteredProviders.length > 0) {
-				this.#selectedIndex =
-					this.#selectedIndex === 0 ? this.#filteredProviders.length - 1 : this.#selectedIndex - 1;
-			}
+			this.#menu.move(-1, true);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		}
 		// Down arrow
 		else if (matchesSelectDown(keyData)) {
-			if (this.#filteredProviders.length > 0) {
-				this.#selectedIndex =
-					this.#selectedIndex === this.#filteredProviders.length - 1 ? 0 : this.#selectedIndex + 1;
-			}
+			this.#menu.move(1, true);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		}
 		// Page up - jump up by one visible page
 		else if (matchesKey(keyData, "pageUp")) {
-			if (this.#filteredProviders.length > 0) {
-				this.#selectedIndex = Math.max(0, this.#selectedIndex - this.#maxVisible);
-			}
+			this.#menu.move(-this.#maxVisible, false);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		}
 		// Page down - jump down by one visible page
 		else if (matchesKey(keyData, "pageDown")) {
-			if (this.#filteredProviders.length > 0) {
-				this.#selectedIndex = Math.min(this.#filteredProviders.length - 1, this.#selectedIndex + this.#maxVisible);
-			}
+			this.#menu.move(this.#maxVisible, false);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		}
@@ -410,7 +396,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 	/** Confirm the selected provider (Enter or mouse click). */
 	#confirmSelection(): void {
-		const selectedProvider = this.#filteredProviders[this.#selectedIndex];
+		const selectedProvider = this.#menu.selectedItem;
 		if (selectedProvider?.available) {
 			this.#statusMessage = undefined;
 			this.stopValidation();
@@ -423,10 +409,8 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 	/** Move the selection one step for a wheel notch (clamped, no wrap). */
 	handleWheel(delta: -1 | 1): void {
-		if (this.#filteredProviders.length === 0) return;
-		const next = Math.max(0, Math.min(this.#selectedIndex + delta, this.#filteredProviders.length - 1));
-		if (next === this.#selectedIndex) return;
-		this.#selectedIndex = next;
+		if (this.#menu.visibleItems.length === 0) return;
+		if (!this.#menu.move(delta, false)) return;
 		this.#statusMessage = undefined;
 		this.#updateList();
 	}
@@ -444,7 +428,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		}
 		const localRow = line - LIST_ROW_OFFSET;
 		const index = localRow >= 0 && localRow < this.#visibleCount ? this.#scrollStart + localRow : undefined;
-		const target = index !== undefined && index < this.#filteredProviders.length ? index : null;
+		const target = index !== undefined && index < this.#menu.visibleItems.length ? index : null;
 		if (event.motion) {
 			if (target !== this.#hoveredIndex) {
 				this.#hoveredIndex = target;
@@ -453,8 +437,8 @@ export class OAuthSelectorComponent extends OverlayPanel {
 			return;
 		}
 		if (!event.leftClick || target === null) return;
-		if (target !== this.#selectedIndex) {
-			this.#selectedIndex = target;
+		if (target !== this.#menu.selectedIndex) {
+			this.#menu.setSelectedIndex(target);
 			this.#statusMessage = undefined;
 		}
 		this.#confirmSelection();

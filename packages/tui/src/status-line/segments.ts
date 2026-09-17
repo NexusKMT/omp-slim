@@ -16,6 +16,8 @@ import { shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render
 import { fileHyperlink } from "../render/hyperlink";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { summarizeLoopCondition } from "./loop";
+import { formatMetric } from "../components/metric";
+import { formatBillingSummary } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
 import type { RenderedSegment, SegmentContext, StatusLineSegment, StatusLineSegmentId } from "./types";
@@ -81,41 +83,29 @@ function stripDisplayRoot(pwd: string): string {
 	return pwd;
 }
 
-function normalizePremiumRequests(value: number): number {
-	return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-function formatSpend(amount: number, usingSubscription: boolean, uiTheme: Theme): string {
-	const formatted = amount.toFixed(2);
-	if (!usingSubscription) return `$${formatted}`;
-	if (uiTheme.getSymbolPreset() === "nerd") {
-		const icon = uiTheme.icon.subscription;
-		return icon ? `${icon} ${formatted}` : `S${formatted}`;
-	}
-	return `S${formatted}`;
-}
-
-function formatAdvisorSpend(amount: number, usingSubscription: boolean, uiTheme: Theme): string {
-	const spend = formatSpend(amount, usingSubscription, uiTheme);
-	const icon = uiTheme.icon.advisor;
-	if (icon && icon !== "(adv)") {
-		return `${icon} ${spend}`;
-	}
-	return `${spend} (adv)`;
-}
-
-function formatSpendPlaceholder(usingSubscription: boolean, uiTheme: Theme): string {
-	if (!usingSubscription) return "$…";
-	if (uiTheme.getSymbolPreset() === "nerd" && uiTheme.icon.subscription) {
-		return `${uiTheme.icon.subscription} …`;
-	}
-	return "S…";
-}
-
-function formatAdvisorSpendPlaceholder(usingSubscription: boolean, uiTheme: Theme): string {
-	const spend = formatSpendPlaceholder(usingSubscription, uiTheme);
-	const icon = uiTheme.icon.advisor;
-	if (icon && icon !== "(adv)") return `${icon} ${spend}`;
-	return `${spend} (adv)`;
+/**
+ * Single-field usage counter (`token_in`, `token_out`, `cache_read`,
+ * `cache_write`). Hidden on zero, startup-placeholder aware, icon omitted when
+ * the symbol preset leaves it empty — mirroring {@link withIcon}.
+ */
+function singleStatSegment(
+	id: StatusLineSegmentId,
+	field: "input" | "output" | "cacheRead" | "cacheWrite",
+	iconKey: "input" | "output" | "cache",
+	color: ThemeColor,
+): StatusLineSegment {
+	return {
+		id,
+		render(ctx) {
+			const value = ctx.usageStats[field];
+			if (!value) return { content: "", visible: false };
+			const content = formatMetric({
+				leading: theme.icon[iconKey] || undefined,
+				value: statusValue(ctx, formatNumber(value)),
+			});
+			return { content: theme.fg(color, content ?? ""), visible: true };
+		},
+	};
 }
 
 const NORMALIZED_SCRATCH_ROOTS: readonly string[] = (() => {
@@ -531,27 +521,9 @@ const subagentsSegment: StatusLineSegment = {
 	},
 };
 
-const tokenInSegment: StatusLineSegment = {
-	id: "token_in",
-	render(ctx) {
-		const { input } = ctx.usageStats;
-		if (!input) return { content: "", visible: false };
+const tokenInSegment: StatusLineSegment = singleStatSegment("token_in", "input", "input", "statusLineSpend");
 
-		const content = withIcon(theme.icon.input, statusValue(ctx, formatNumber(input)));
-		return { content: theme.fg("statusLineSpend", content), visible: true };
-	},
-};
-
-const tokenOutSegment: StatusLineSegment = {
-	id: "token_out",
-	render(ctx) {
-		const { output } = ctx.usageStats;
-		if (!output) return { content: "", visible: false };
-
-		const content = withIcon(theme.icon.output, statusValue(ctx, formatNumber(output)));
-		return { content: theme.fg("statusLineOutput", content), visible: true };
-	},
-};
+const tokenOutSegment: StatusLineSegment = singleStatSegment("token_out", "output", "output", "statusLineOutput");
 
 const tokenTotalSegment: StatusLineSegment = {
 	id: "token_total",
@@ -564,8 +536,11 @@ const tokenTotalSegment: StatusLineSegment = {
 		const total = input + output + cacheWrite + orchestrationInput + orchestrationOutput;
 		if (!total) return { content: "", visible: false };
 
-		const content = withIcon(theme.icon.tokens, statusValue(ctx, formatNumber(total)));
-		return { content: theme.fg("statusLineSpend", content), visible: true };
+		const content = formatMetric({
+			leading: theme.icon.tokens || undefined,
+			value: statusValue(ctx, formatNumber(total)),
+		});
+		return { content: theme.fg("statusLineSpend", content ?? ""), visible: true };
 	},
 };
 
@@ -575,8 +550,11 @@ const tokenRateSegment: StatusLineSegment = {
 		const { tokensPerSecond } = ctx.usageStats;
 		if (!tokensPerSecond) return { content: "", visible: false };
 
-		const content = withIcon(theme.icon.throughput, `${statusValue(ctx, tokensPerSecond.toFixed(1))} tok/s`);
-		return { content: theme.fg("statusLineOutput", content), visible: true };
+		const content = formatMetric({
+			leading: theme.icon.throughput || undefined,
+			value: `${statusValue(ctx, tokensPerSecond.toFixed(1))} tok/s`,
+		});
+		return { content: theme.fg("statusLineOutput", content ?? ""), visible: true };
 	},
 };
 
@@ -585,48 +563,36 @@ const costSegment: StatusLineSegment = {
 	render(ctx) {
 		const { cost, premiumRequests } = ctx.usageStats;
 		const advisorCost = ctx.session.getAdvisorCost?.() ?? 0;
-		const normalizedPremiumRequests = normalizePremiumRequests(premiumRequests);
 		const state = ctx.session.state;
 		const pricingPeriod = state.model?.cost
 			? getTimeBasedPricingPeriod(state.model.cost, ctx.now?.getTime())
 			: undefined;
 		const usingSubscription = state.model ? (ctx.session.modelRegistry?.isUsingOAuth(state.model) ?? false) : false;
 
-		if (!cost && !advisorCost && !usingSubscription && !normalizedPremiumRequests && !pricingPeriod) {
-			return { content: "", visible: false };
-		}
+		// Resolve the advisor subscription flag lazily: with no active advisor
+		// it walks the whole model catalog (getAvailable → hasAuth per provider
+		// → credential-file reads), and the status line re-renders at the
+		// working-spinner cadence, so an eager per-frame probe pinned CPU (#10129).
+		const billing = formatBillingSummary(
+			{
+				cost,
+				usingSubscription,
+				premiumRequests,
+				fractionDigits: 2,
+				startupPlaceholder: ctx.startupPlaceholder,
+				pricingPeriod,
+				advisor: advisorCost
+					? {
+							cost: advisorCost,
+							usingSubscription: ctx.session.isAdvisorUsingSubscription?.() ?? false,
+						}
+					: undefined,
+			},
+			theme,
+		);
+		if (!billing) return { content: "", visible: false };
 
-		const billingParts: string[] = [];
-		if (cost || pricingPeriod) {
-			billingParts.push(
-				ctx.startupPlaceholder
-					? formatSpendPlaceholder(usingSubscription, theme)
-					: formatSpend(cost, usingSubscription, theme),
-			);
-		} else if (usingSubscription) {
-			billingParts.push(
-				theme.getSymbolPreset() === "nerd" && theme.icon.subscription ? theme.icon.subscription : "(sub)",
-			);
-		}
-		if (pricingPeriod) billingParts.push(pricingPeriod === "peak" ? "↑" : "↓");
-		if (normalizedPremiumRequests) {
-			billingParts.push(`★ ${statusValue(ctx, formatNumber(normalizedPremiumRequests))}`);
-		}
-		if (advisorCost) {
-			const prefix = billingParts.length ? "+ " : "";
-			// Resolve the advisor subscription flag lazily: with no active advisor
-			// it walks the whole model catalog (getAvailable → hasAuth per provider
-			// → credential-file reads), and the status line re-renders at the
-			// working-spinner cadence, so an eager per-frame probe pinned CPU (#10129).
-			const advisorUsingSubscription = ctx.session.isAdvisorUsingSubscription?.() ?? false;
-			const spend = ctx.startupPlaceholder
-				? formatAdvisorSpendPlaceholder(advisorUsingSubscription, theme)
-				: formatAdvisorSpend(advisorCost, advisorUsingSubscription, theme);
-			billingParts.push(`${prefix}${spend}`);
-		}
-		if (billingParts.length === 0) return { content: "", visible: false };
-
-		return { content: theme.fg("statusLineCost", billingParts.join(" ")), visible: true };
+		return { content: theme.fg("statusLineCost", billing), visible: true };
 	},
 };
 
@@ -736,29 +702,14 @@ const hostnameSegment: StatusLineSegment = {
 	},
 };
 
-const cacheReadSegment: StatusLineSegment = {
-	id: "cache_read",
-	render(ctx) {
-		const { cacheRead } = ctx.usageStats;
-		if (!cacheRead) return { content: "", visible: false };
+const cacheReadSegment: StatusLineSegment = singleStatSegment("cache_read", "cacheRead", "cache", "statusLineSpend");
 
-		const parts = [theme.icon.cache, statusValue(ctx, formatNumber(cacheRead))].filter(Boolean);
-		const content = parts.join(" ");
-		return { content: theme.fg("statusLineSpend", content), visible: true };
-	},
-};
-
-const cacheWriteSegment: StatusLineSegment = {
-	id: "cache_write",
-	render(ctx) {
-		const { cacheWrite } = ctx.usageStats;
-		if (!cacheWrite) return { content: "", visible: false };
-
-		const parts = [theme.icon.cache, statusValue(ctx, formatNumber(cacheWrite))].filter(Boolean);
-		const content = parts.join(" ");
-		return { content: theme.fg("statusLineOutput", content), visible: true };
-	},
-};
+const cacheWriteSegment: StatusLineSegment = singleStatSegment(
+	"cache_write",
+	"cacheWrite",
+	"cache",
+	"statusLineOutput",
+);
 
 const cacheHitSegment: StatusLineSegment = {
 	id: "cache_hit",
@@ -857,6 +808,29 @@ function pickUsageColor(percent: number): "muted" | "warning" | "error" {
 	return "muted";
 }
 
+/**
+ * One quota window (`5h`, `1d`, `7d`, `mo`). The integer policy (round vs
+ * floor) and the reset unit (minutes vs hours) stay explicit at each call site:
+ * monthly floors like the Cursor/OpenCode dashboards, the rest round, and
+ * short windows reset in minutes while long windows reset in hours.
+ */
+function formatQuotaWindow(
+	ctx: SegmentContext,
+	label: string,
+	percent: number,
+	reset: number | undefined,
+	resetUnit: "m" | "h",
+	integer: "round" | "floor",
+): string {
+	const whole = integer === "floor" ? Math.floor(percent) : Math.round(percent);
+	const pctText = theme.fg(pickUsageColor(percent), `${statusValue(ctx, `${whole}`)}%`);
+	const resetText =
+		reset !== undefined
+			? theme.fg("muted", ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(reset, resetUnit)})`)
+			: "";
+	return `${label} ${pctText}${resetText}`;
+}
+
 function formatUsageReset(value: number, unit: "m" | "h"): string {
 	if (unit === "m") {
 		// Short-window reset timers retain minute precision.
@@ -887,55 +861,19 @@ const usageSegment: StatusLineSegment = {
 			if (tier) parts.push(accentFg(ctx, "accent", tier));
 		}
 		if (u.fiveHour) {
-			const pct = u.fiveHour.percent;
-			const pctText = theme.fg(pickUsageColor(pct), `${statusValue(ctx, `${Math.round(pct)}`)}%`);
-			const reset =
-				u.fiveHour.resetMinutes !== undefined
-					? theme.fg(
-							"muted",
-							ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(u.fiveHour.resetMinutes, "m")})`,
-						)
-					: "";
-			parts.push(`5h ${pctText}${reset}`);
+			parts.push(formatQuotaWindow(ctx, "5h", u.fiveHour.percent, u.fiveHour.resetMinutes, "m", "round"));
 		}
 		if (u.daily) {
-			const pct = u.daily.percent;
-			const pctText = theme.fg(pickUsageColor(pct), `${statusValue(ctx, `${Math.round(pct)}`)}%`);
-			const reset =
-				u.daily.resetMinutes !== undefined
-					? theme.fg(
-							"muted",
-							ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(u.daily.resetMinutes, "m")})`,
-						)
-					: "";
-			parts.push(`1d ${pctText}${reset}`);
+			parts.push(formatQuotaWindow(ctx, "1d", u.daily.percent, u.daily.resetMinutes, "m", "round"));
 		}
 		if (u.sevenDay) {
-			const pct = u.sevenDay.percent;
-			const pctText = theme.fg(pickUsageColor(pct), `${statusValue(ctx, `${Math.round(pct)}`)}%`);
-			const reset =
-				u.sevenDay.resetHours !== undefined
-					? theme.fg(
-							"muted",
-							ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(u.sevenDay.resetHours, "h")})`,
-						)
-					: "";
-			parts.push(`7d ${pctText}${reset}`);
+			parts.push(formatQuotaWindow(ctx, "7d", u.sevenDay.percent, u.sevenDay.resetHours, "h", "round"));
 		}
 		if (u.monthly) {
-			const pct = u.monthly.percent;
 			// Cursor and OpenCode Go (normalize gates monthly to those providers).
 			// Both floor used percents upstream (Cursor's dashboard shows 1.88 →
 			// "1% used"; OpenCode's endpoint already emits floored integers).
-			const pctText = theme.fg(pickUsageColor(pct), `${statusValue(ctx, `${Math.floor(pct)}`)}%`);
-			const reset =
-				u.monthly.resetHours !== undefined
-					? theme.fg(
-							"muted",
-							ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(u.monthly.resetHours, "h")})`,
-						)
-					: "";
-			parts.push(`mo ${pctText}${reset}`);
+			parts.push(formatQuotaWindow(ctx, "mo", u.monthly.percent, u.monthly.resetHours, "h", "floor"));
 		}
 		const content = withIcon(theme.icon.time, parts.join(theme.sep.dot));
 		return { content, visible: true };

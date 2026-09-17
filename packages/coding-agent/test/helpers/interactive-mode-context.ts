@@ -239,6 +239,9 @@ export function createInteractiveModeContext(overrides: ContextOverrides = {}): 
 		get effectiveHideThinkingBlock() {
 			return this.hideThinkingBlock;
 		},
+		get assistantImagesVisible() {
+			return contextSettings.get("terminal.showImages");
+		},
 		hasDisplayableThinkingContent: false,
 		noteDisplayableThinkingContent: vi.fn(() => false),
 		proseOnlyThinking: true,

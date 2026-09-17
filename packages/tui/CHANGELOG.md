@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added composable forms, menus, split layouts, disclosures, tree views, tool cards, and data widgets for terminal extensions and standalone apps.
+- Added the full coding-agent terminal UI to this package: theme runtime (`@oh-my-pi/pi-tui/theme`), render primitives (`/render`), shared chrome (`/chrome`), tool renderers and registry (`/tools`), chat transcript components (`/chat/*`), overlays and hubs (`/overlays/*`), status line (`/status-line`), composer and autocomplete (`/prompt/*`), setup wizard (`/setup/*`), and standalone apps (`/apps/*`: git TUI, process top, debug viewers, boards, pickers). Components take host capabilities through structural interfaces and setters instead of reading application settings.
 - Added image input validation and automatic conversion for unsupported formats
 - Added MCP Add Wizard for streamlined server configuration
 - Added support for video preview rendering in chat

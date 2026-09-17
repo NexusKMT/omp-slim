@@ -28,15 +28,8 @@ import {
 	truncateDiffByHunk,
 } from "../render/render-utils";
 import type { ToolActivityContext, ToolActivitySummary } from "./renderer";
-import {
-	fileHyperlink,
-	framedBlock,
-	Hasher,
-	type RenderCache,
-	renderStatusLine,
-	truncateToWidth,
-	WidthAwareText,
-} from "../render";
+import { fileHyperlink, Hasher, type RenderCache, renderStatusLine, truncateToWidth, WidthAwareText } from "../render";
+import { framedToolCard } from "../render/tool-card";
 import { HL_FILE_PREFIX, HL_FILE_SUFFIX, HL_MOVE_KEYWORD, HL_REM_KEYWORD } from "./hashline-format";
 
 /** Edit payload syntax selected by the caller. */
@@ -922,7 +915,7 @@ export const editToolRenderer = {
 			return renderInlineEditRow(uiTheme, { op, rename, rawPath, pending: true });
 		}
 		const callPreviewCaches: RenderedStringCache[] = [];
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, ({ width }) => {
 			// No status icon on the head row: it's the head of the framed block,
 			// and native-scrollback commits are prefix-only — an animated glyph
 			// would pin the commit boundary at the top, and the pending hourglass
@@ -951,10 +944,9 @@ export const editToolRenderer = {
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: applyPatchError ? "error" : "pending",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: applyPatchError ? "error" : "pending",
 				borderColor: applyPatchError ? "error" : "borderMuted",
-				width,
 				contentPaddingLeft: 0,
 			};
 		});
@@ -1033,7 +1025,7 @@ function renderSingleFileResult(
 	const renderedDiffCache = createRenderedStringCache();
 	const statsSuffixCache = createRenderedStringCache();
 
-	return framedBlock(uiTheme, width => {
+	return framedToolCard(uiTheme, ({ width }) => {
 		const { expanded, renderContext } = options;
 		// A finalized result is authoritative: its `details` describe exactly
 		// what happened. The shared streaming `editDiffPreview` is a call-phase
@@ -1124,10 +1116,9 @@ function renderSingleFileResult(
 
 		return {
 			header,
-			sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-			state: isError ? "error" : options.isPartial ? "pending" : "success",
+			sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+			phase: isError ? "error" : options.isPartial ? "partial" : "success",
 			borderColor: isError ? "error" : "borderMuted",
-			width,
 			contentPaddingLeft: 0,
 		};
 	});

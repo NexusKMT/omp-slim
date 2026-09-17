@@ -183,6 +183,7 @@ function makeRenderCtx(
 		toolOutputExpanded: false,
 		hideToolActivity,
 		hideThinkingBlock: false,
+		assistantImagesVisible: showImages,
 		focusedAgentId: undefined,
 		editor: { addToHistory: vi.fn() },
 		viewSession: {

@@ -1,16 +1,24 @@
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthPrompt } from "@oh-my-pi/pi-ai/oauth/types";
-import { Container, getKeybindings, Input, Spacer, Text, type TUI, wrapTextWithAnsi } from "../index";
+import { Container, getKeybindings, Spacer, Text, type TUI, wrapTextWithAnsi } from "../index";
 import { theme } from "../theme/theme";
 import { urlHyperlinkAlways, WidthAwareText } from "../render/index";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { TextFormField, type FormFieldTheme } from "../components/form";
+
+const formTheme: FormFieldTheme = {
+	label: text => theme.bold(theme.fg("accent", text)),
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("dim", text),
+};
 
 /**
  * Login dialog component - replaces editor during OAuth login flow
  */
 export class LoginDialogComponent extends OverlayPanel {
 	#contentContainer: Container;
-	#input: Input;
+	#input: TextFormField;
 	#tui: TUI;
 	#onComplete: (success: boolean, message?: string) => void;
 	#openUrl: (url: string) => void;
@@ -39,18 +47,24 @@ export class LoginDialogComponent extends OverlayPanel {
 		this.#input = this.#createInput();
 	}
 
-	#createInput(): Input {
-		const input = new Input();
-		input.onSubmit = value => {
-			const resolve = this.#inputResolver;
-			if (!resolve) return;
-			this.#clearInputHandlers();
-			resolve(value);
-		};
-		input.onEscape = () => {
-			this.#cancel();
-		};
-		return input;
+	#createInput(secret = false): TextFormField {
+		return new TextFormField({
+			theme: formTheme,
+			secret,
+			empty: "submit",
+			spaceBeforeControl: false,
+			spaceAfterControl: false,
+			onSubmit: value => {
+				const resolve = this.#inputResolver;
+				if (!resolve) return;
+				this.#clearInputHandlers();
+				resolve(value);
+			},
+			onCancel: () => {
+				this.#cancel();
+			},
+			requestRender: () => this.#tui.requestRender(),
+		});
 	}
 
 	get signal(): AbortSignal {
@@ -154,14 +168,13 @@ export class LoginDialogComponent extends OverlayPanel {
 		// Multi-step flows keep prior answers visible, except secrets.
 		const mounted = this.#contentContainer.children.indexOf(this.#input);
 		if (mounted !== -1) {
-			const value = this.#input.mask ? "********" : this.#input.getValue();
-			const answer = new Text(theme.fg("dim", `${this.#input.prompt}${value}`), 0, 0);
+			const value = this.#input.input.mask ? "********" : this.#input.getValue();
+			const answer = new Text(theme.fg("dim", `${this.#input.input.prompt}${value}`), 0, 0);
 			this.#contentContainer.removeChild(this.#input);
 			this.#contentContainer.children.splice(mounted, 0, answer);
 		}
 		// A new prompt must not recover a previous secret through undo or yank.
-		this.#input = this.#createInput();
-		this.#input.mask = prompt.secret === true;
+		this.#input = this.#createInput(prompt.secret === true);
 		this.#contentContainer.addChild(new Spacer(1));
 		this.#contentContainer.addChild(new Text(theme.fg("text", prompt.message), 0, 0));
 		if (prompt.placeholder) {

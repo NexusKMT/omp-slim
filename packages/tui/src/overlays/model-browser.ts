@@ -29,6 +29,8 @@ import {
 	matchesSelectPageUp,
 	matchesSelectUp,
 } from "../keybinding-matchers";
+import { MenuSelection } from "../components/menu-selection";
+import { clampScrollOffset, scrollOffsetForRow } from "../components/scroll-viewport";
 
 /** Canonical display ordering of built-in model roles. */
 export type ModelRole = "default" | "smol" | "slow" | "vision" | "plan" | "commit" | "tiny" | "task" | "advisor";
@@ -596,13 +598,16 @@ type PerfMode = "off" | "tps" | "full";
 export class ModelBrowser implements Component {
 	#settings: ModelBrowserSource;
 	#searchInput = new Input();
-	#baseItems: ModelBrowserItem[] = [];
-	#visibleItems: ModelBrowserItem[] = [];
+	#menu = new MenuSelection<ModelBrowserItem>([], {
+		getKey: item => item.selector,
+		getSearchText: modelSearchText,
+		isDisabled: item => item.id === "separator",
+		filter: (items, query) => this.#filterItems(items, query),
+	});
 	#roles: RoleAssignments = {};
 	#mruOrder: ReadonlyArray<string> = [];
 	#affinity: SearchAffinity = { models: new Map(), providers: new Map() };
 	#perf: ReadonlyMap<string, ModelBrowserPerf> = new Map();
-	#selectedIndex = 0;
 	#hoveredIndex: number | null = null;
 	#maxVisible = 10;
 	#showProvider: boolean;
@@ -644,8 +649,8 @@ export class ModelBrowser implements Component {
 	/** Replace the scope's base items; the live query re-applies and selection is pinned by selector. */
 	setItems(items: ModelBrowserItem[]): void {
 		const selectedKey = this.getSelected()?.selector;
-		this.#baseItems = items;
-		this.#applyQuery();
+		this.#menu.setItems(this.#insertSeparator(items), selectedKey);
+		this.onSelectionChange?.(this.getSelected());
 		if (selectedKey) {
 			this.selectSelector(selectedKey);
 		}
@@ -707,24 +712,42 @@ export class ModelBrowser implements Component {
 	}
 
 	getSelected(): ModelBrowserItem | undefined {
-		return this.#visibleItems[this.#selectedIndex];
+		return this.#menu.selectedItem;
 	}
 
 	get visibleCount(): number {
-		return this.#visibleItems.length;
+		return this.#menu.visibleItems.length;
 	}
 
 	/** Move selection to `selector`; false when it is not in the current view. */
 	selectSelector(selector: string): boolean {
-		const index = this.#visibleItems.findIndex(item => item.selector === selector);
-		if (index < 0) return false;
-		this.#selectedIndex = this.#coerceSelectedIndex(index);
+		if (!this.#menu.setSelectedKey(selector)) return false;
 		this.#ensureSelectedVisible();
 		return true;
 	}
 
 	#isDisabled(item: ModelBrowserItem): boolean {
 		return item.id === "separator";
+	}
+
+	/**
+	 * Rank base items for the live query and seat the recent/role separator.
+	 * Runs inside the menu filter for non-blank queries; the blank-query path
+	 * re-seats via {@link #applyQuery} because the menu passes items through
+	 * unfiltered when the query is blank.
+	 */
+	#filterItems(items: readonly ModelBrowserItem[], query: string): readonly ModelBrowserItem[] {
+		const base = items.filter(item => !this.#isDisabled(item));
+		const ranked = this.#preserveQueryOrder
+			? query.trim()
+				? fuzzyRank(base, query, modelSearchText).map(result => result.item)
+				: base
+			: rankModelItems(query, base, {
+					roles: this.#roles,
+					mruOrder: this.#mruOrder,
+					affinity: this.#affinity,
+				});
+		return this.#insertSeparator(ranked);
 	}
 
 	/** True when `item`'s context window is smaller than the live session token count (grayed row; hosts compact before switching). */
@@ -735,36 +758,20 @@ export class ModelBrowser implements Component {
 		return contextWindow > 0 && this.#currentContextTokens > contextWindow;
 	}
 
-	#coerceSelectedIndex(index: number): number {
-		const maxIndex = this.#visibleItems.length - 1;
-		if (maxIndex < 0) return 0;
-		const clamped = Math.max(0, Math.min(index, maxIndex));
-		const clampedItem = this.#visibleItems[clamped];
-		if (clampedItem && !this.#isDisabled(clampedItem)) return clamped;
-		for (let i = clamped + 1; i <= maxIndex; i++) {
-			const item = this.#visibleItems[i];
-			if (item && !this.#isDisabled(item)) return i;
-		}
-		for (let i = clamped - 1; i >= 0; i--) {
-			const item = this.#visibleItems[i];
-			if (item && !this.#isDisabled(item)) return i;
-		}
-		return clamped;
-	}
-
 	/** Clamp a window start into `[0, total - maxVisible]`. */
 	#clampWindowStart(start: number): number {
-		return Math.max(0, Math.min(start, this.#visibleItems.length - this.#maxVisible));
+		return clampScrollOffset(start, this.#menu.visibleItems.length, this.#maxVisible);
 	}
 
 	/** Scroll just enough to keep the selected row inside the window. */
 	#ensureSelectedVisible(): void {
-		if (this.#selectedIndex < this.#windowStart) {
-			this.#windowStart = this.#selectedIndex;
-		} else if (this.#selectedIndex >= this.#windowStart + this.#maxVisible) {
-			this.#windowStart = this.#selectedIndex - this.#maxVisible + 1;
-		}
-		this.#windowStart = this.#clampWindowStart(this.#windowStart);
+		this.#windowStart = scrollOffsetForRow(
+			this.#windowStart,
+			this.#menu.selectedIndex,
+			this.#menu.visibleItems.length,
+			this.#maxVisible,
+			"nearest",
+		);
 	}
 
 	/**
@@ -772,29 +779,10 @@ export class ModelBrowser implements Component {
 	 * wrap at the ends; `wrap: false` (page/home/end jumps) clamps instead.
 	 */
 	moveSelection(delta: number, options: { wrap?: boolean } = {}): void {
-		const count = this.#visibleItems.length;
-		if (count === 0) return;
-		if (options.wrap ?? true) {
-			let index = this.#selectedIndex;
-			for (let step = 0; step < count; step++) {
-				index = (index + delta + count) % count;
-				const item = this.#visibleItems[index];
-				if (item && !this.#isDisabled(item)) {
-					this.#setSelectedIndex(index);
-					return;
-				}
-			}
-			return;
+		if (this.#menu.move(delta, options.wrap ?? true)) {
+			this.#ensureSelectedVisible();
+			this.onSelectionChange?.(this.getSelected());
 		}
-		const target = Math.max(0, Math.min(this.#selectedIndex + delta, count - 1));
-		this.#setSelectedIndex(this.#coerceSelectedIndex(target));
-	}
-
-	#setSelectedIndex(index: number): void {
-		if (index === this.#selectedIndex) return;
-		this.#selectedIndex = index;
-		this.#ensureSelectedVisible();
-		this.onSelectionChange?.(this.getSelected());
 	}
 
 	#isRecentOrRole(item: ModelBrowserItem): boolean {
@@ -833,50 +821,50 @@ export class ModelBrowser implements Component {
 
 	/** Whether the new result list keeps every selectable choice through the previous selection unchanged. */
 	#hasStableChoicePrefix(previousItems: ReadonlyArray<ModelBrowserItem>, previousSelectedIndex: number): boolean {
+		const current = this.#menu.visibleItems;
 		let currentIndex = 0;
 		for (let previousIndex = 0; previousIndex <= previousSelectedIndex; previousIndex++) {
 			const previous = previousItems[previousIndex];
 			if (!previous || this.#isDisabled(previous)) continue;
 
-			let current: ModelBrowserItem | undefined;
-			while (currentIndex < this.#visibleItems.length) {
-				const candidate = this.#visibleItems[currentIndex++];
+			let found: ModelBrowserItem | undefined;
+			while (currentIndex < current.length) {
+				const candidate = current[currentIndex++];
 				if (candidate && !this.#isDisabled(candidate)) {
-					current = candidate;
+					found = candidate;
 					break;
 				}
 			}
-			if (current?.selector !== previous.selector) return false;
+			if (found?.selector !== previous.selector) return false;
 		}
 		return true;
 	}
 
 	#applyQuery(selection: "clamp" | "reset-changed-prefix" = "clamp"): void {
-		const previousItems = this.#visibleItems;
-		const previousSelectedIndex = this.#selectedIndex;
-		const previousSelected = previousItems[previousSelectedIndex];
 		const query = this.#searchInput.getValue();
-		const items = this.#preserveQueryOrder
-			? query.trim()
-				? fuzzyRank(this.#baseItems, query, modelSearchText).map(result => result.item)
-				: this.#baseItems
-			: rankModelItems(query, this.#baseItems, {
-					roles: this.#roles,
-					mruOrder: this.#mruOrder,
-					affinity: this.#affinity,
-				});
-		this.#visibleItems = this.#insertSeparator(items);
+		const previousItems = this.#menu.visibleItems;
+		const previousSelectedIndex = this.#menu.selectedIndex;
+		const previousSelected = previousItems[previousSelectedIndex];
+		if (!query.trim()) {
+			// The menu passes items through unfiltered on a blank query, so
+			// re-seat the separator on the fresh base order here.
+			const base = this.#menu.items.filter(item => !this.#isDisabled(item));
+			this.#menu.setQuery("", false);
+			this.#menu.setItems(
+				this.#insertSeparator(base),
+				selection === "clamp" ? previousSelected?.selector : undefined,
+			);
+		} else if (selection === "reset-changed-prefix") {
+			this.#menu.setQuery(query, false);
+		} else {
+			this.#menu.setQuery(query, true);
+		}
 		if (
 			selection === "reset-changed-prefix" &&
 			previousSelected &&
 			this.#hasStableChoicePrefix(previousItems, previousSelectedIndex)
 		) {
-			const selectedIndex = this.#visibleItems.findIndex(item => item.selector === previousSelected.selector);
-			this.#selectedIndex = this.#coerceSelectedIndex(selectedIndex);
-		} else if (selection === "reset-changed-prefix") {
-			this.#selectedIndex = this.#coerceSelectedIndex(0);
-		} else {
-			this.#selectedIndex = this.#coerceSelectedIndex(Math.min(this.#selectedIndex, this.#visibleItems.length - 1));
+			this.#menu.setSelectedKey(previousSelected.selector);
 		}
 		this.#ensureSelectedVisible();
 		this.onSelectionChange?.(this.getSelected());
@@ -904,11 +892,11 @@ export class ModelBrowser implements Component {
 			return;
 		}
 		if (matchesKey(data, "home")) {
-			this.moveSelection(-this.#visibleItems.length, { wrap: false });
+			this.moveSelection(-this.#menu.visibleItems.length, { wrap: false });
 			return;
 		}
 		if (matchesKey(data, "end")) {
-			this.moveSelection(this.#visibleItems.length, { wrap: false });
+			this.moveSelection(this.#menu.visibleItems.length, { wrap: false });
 			return;
 		}
 		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
@@ -955,13 +943,14 @@ export class ModelBrowser implements Component {
 		}
 		if (!event.leftClick) return;
 		const index = this.#hoverIndexAt(line);
-		const item = index !== null ? this.#visibleItems[index] : undefined;
+		const item = index !== null ? this.#menu.visibleItems[index] : undefined;
 		if (index === null || !item) return;
 		// ModelBrowserSource idiom: click selects, click-again activates.
-		if (index === this.#selectedIndex) {
+		if (index === this.#menu.selectedIndex) {
 			this.onActivate?.(item);
-		} else {
-			this.#setSelectedIndex(index);
+		} else if (this.#menu.setSelectedIndex(index)) {
+			this.#ensureSelectedVisible();
+			this.onSelectionChange?.(this.getSelected());
 		}
 	}
 	/** Drop the hover band. Hosts call this when the pointer leaves the browser pane. */
@@ -974,7 +963,7 @@ export class ModelBrowser implements Component {
 		const listLine = line - LIST_ROW_START;
 		if (listLine < 0 || listLine >= this.#windowCount) return null;
 		const index = this.#windowStart + listLine;
-		const item = this.#visibleItems[index];
+		const item = this.#menu.visibleItems[index];
 		if (!item || this.#isDisabled(item)) return null;
 		return index;
 	}
@@ -1119,7 +1108,7 @@ export class ModelBrowser implements Component {
 		lines.push(` ${searchIcon} ${this.#searchInput.render(inputWidth)[0] ?? ""}`);
 		lines.push("");
 
-		const total = this.#visibleItems.length;
+		const total = this.#menu.visibleItems.length;
 		// The window is persistent state: wheel scrolling panned it, keyboard
 		// navigation snapped it to the selection. Re-clamp here because items
 		// or maxVisible may have changed since.
@@ -1142,7 +1131,7 @@ export class ModelBrowser implements Component {
 			let intelligenceWidth = 0;
 			let perfWidth = 0;
 			for (let i = startIndex; i < endIndex; i++) {
-				const item = this.#visibleItems[i];
+				const item = this.#menu.visibleItems[i];
 				if (!item) continue;
 				ctxWidth = Math.max(ctxWidth, visibleWidth(formatContext(item.model)));
 				costWidth = Math.max(costWidth, visibleWidth(formatCostPair(item.model)));
@@ -1154,13 +1143,13 @@ export class ModelBrowser implements Component {
 
 			const rows: string[] = [];
 			for (let i = startIndex; i < endIndex; i++) {
-				const item = this.#visibleItems[i];
+				const item = this.#menu.visibleItems[i];
 				if (!item) continue;
 				rows.push(
 					this.#renderRow(
 						item,
 						width - 1,
-						i === this.#selectedIndex,
+						i === this.#menu.selectedIndex,
 						i === this.#hoveredIndex,
 						ctxWidth,
 						costWidth,

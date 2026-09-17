@@ -9,13 +9,8 @@ import type { ToolDefinition } from "../../extensibility/extensions";
 import { computeRunModifiedPaths, getCurrentAutoresearchBranch, parseWorkDirDirtyPaths } from "../git";
 import { ensureNumericMetricMap, mergeAsi, pathMatchesSpec, sanitizeAsi, tryGitPrefix, tryGitStatus } from "../helpers";
 import { formatNum } from "@oh-my-pi/pi-tui/tools/autoresearch";
-import {
-	buildExperimentState,
-	computeConfidence,
-	currentResults,
-	findBaselineSecondary,
-	findBestKeptMetric,
-} from "../state";
+import { currentResults, findBaselineSecondary } from "@oh-my-pi/pi-tui/apps/autoresearch-data";
+import { buildExperimentState, computeConfidence, findBestKeptMetric } from "../state";
 import { openAutoresearchStorageIfExists, type SessionRow } from "../storage";
 import type {
 	ASIData,

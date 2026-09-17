@@ -3,12 +3,16 @@
  *
  * Interactive multi-step wizard for adding MCP servers.
  */
-import { Container, Input, matchesKey, replaceTabs, Spacer, Text, truncateToWidth } from "../index";
+import { Container, matchesKey, replaceTabs, Spacer, Text, truncateToWidth, wrapTextWithAnsi } from "../index";
+import type { Component } from "../tui";
 import { getMCPConfigPath, getProjectDir } from "@oh-my-pi/pi-utils";
 import { shortenPath } from "../render/render-utils";
-import { theme } from "../theme/theme";
+import { getSelectListTheme, theme } from "../theme/theme";
 import { matchesAppInterrupt, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { TextFormField, type FormFieldTheme } from "../components/form";
+import { SelectList } from "../components/select-list";
+import { WizardStep, type WizardStepKind } from "../components/wizard-step";
 
 type TransportType = "stdio" | "http" | "sse";
 type AuthMethod = "none" | "oauth" | "manual";
@@ -78,7 +82,7 @@ export interface MCPAddWizardDeps {
 	fetchResourceMetadataScopes(resourceMetadataUrl: string): Promise<string | undefined>;
 }
 
-type WizardStep =
+type MCPWizardStep =
 	| "name"
 	| "transport"
 	| "command"
@@ -159,9 +163,22 @@ function sanitize(text: string): string {
 	return truncateToWidth(replaceTabs(text), MAX_DISPLAY_WIDTH);
 }
 
+const mcpFormTheme: FormFieldTheme = {
+	label: text => text,
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("muted", text),
+};
+
+interface WizardChoiceOption {
+	readonly label: string;
+	/** Shown dimmed beneath the row while the row is not highlighted. */
+	readonly description?: string;
+}
+
 export class MCPAddWizard extends OverlayPanel {
 	#deps: MCPAddWizardDeps;
-	#currentStep: WizardStep = "name";
+	#currentStep: MCPWizardStep = "name";
 	#state: WizardState = {
 		name: "",
 		transport: null,
@@ -187,9 +204,13 @@ export class MCPAddWizard extends OverlayPanel {
 	};
 
 	#contentContainer: Container;
-	#inputField: Input | null = null;
+	#step: WizardStep | null = null;
+	#stepKind: WizardStepKind = "input";
+	#inputField: TextFormField | null = null;
 	#selectedIndex = 0;
 	#validationError: string | null = null;
+	#oauthErrorLines: readonly string[] | null = null;
+	#oauthErrorHeading: { text: string; tone: "error" | "muted" } | null = null;
 	#onCompleteCallback: (name: string, config: MCPAddWizardConfig, scope: Scope) => void;
 	#onCancelCallback: () => void;
 	#onOAuthCallback:
@@ -255,8 +276,116 @@ export class MCPAddWizard extends OverlayPanel {
 		this.#onRenderCallback?.();
 	}
 
+	/** Mount a step as the wizard body. Overlay chrome is unbounded, so no height budget applies. */
+	#show(step: WizardStep): void {
+		step.setMaxHeight(undefined);
+		this.#step = step;
+		this.#contentContainer.clear();
+		this.#contentContainer.addChild(step);
+	}
+
+	#inputStep(options: {
+		heading: string;
+		prompt: string;
+		initial: string;
+		hint: string;
+		details?: readonly string[];
+		optional: boolean;
+		error?: string | null;
+	}): void {
+		this.#stepKind = "input";
+		const field = new TextFormField({
+			theme: mcpFormTheme,
+			label: options.prompt,
+			details: options.details?.map(detail => new Text(theme.fg("muted", detail), 0, 0)),
+			summary: options.error
+				? [new Text(theme.fg("error", `✗ ${sanitize(options.error)}`), 0, 0), new Spacer(1)]
+				: undefined,
+			hint: options.hint,
+			initialValue: options.initial,
+			empty: options.optional ? "submit" : "reject",
+			emptyError: " ",
+			onSubmit: () => this.#saveInputAndProceed(),
+			onCancel: () => this.#cancelInputStep(),
+		});
+		this.#inputField = field;
+		this.#show(
+			new WizardStep({
+				kind: "input",
+				heading: new Text(theme.fg("accent", options.heading), 0, 0),
+				content: field,
+			}),
+		);
+	}
+
+	#choiceStep(options: {
+		heading: string;
+		headingTone?: "accent" | "error" | "muted";
+		intro?: Component;
+		choices: readonly WizardChoiceOption[];
+		hint: string;
+		kind?: WizardStepKind;
+	}): void {
+		const tone = options.headingTone ?? "accent";
+		const items = options.choices.map((choice, index) => ({
+			value: String(index),
+			label: choice.label,
+			description: choice.description,
+		}));
+		const list = new SelectList(items, MAX_DISPLAY_WIDTH * Math.max(1, items.length), getSelectListTheme(), {
+			search: "never",
+			renderItem: ({ item, selected, width }) => {
+				const prefix = selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
+				const label = selected ? theme.fg("accent", item.label) : item.label;
+				const lines = wrapTextWithAnsi(prefix + label, width);
+				if (item.description && !selected) {
+					lines.push(...wrapTextWithAnsi(`    ${theme.fg("dim", item.description)}`, width));
+				}
+				return lines;
+			},
+		});
+		list.setSelectedIndex(this.#selectedIndex);
+		this.#stepKind = options.kind ?? "choice";
+		this.#show(
+			new WizardStep({
+				kind: this.#stepKind,
+				heading: new Text(theme.fg(tone, options.heading), 0, 0),
+				intro: options.intro,
+				content: list,
+				footer: new Text(theme.fg("muted", options.hint), 0, 0),
+			}),
+		);
+	}
+
+	#asyncStep(
+		heading: string,
+		headingTone: "accent" | "success" | "warning" | "error" | "muted",
+		body: Component,
+		footer?: Component,
+	): void {
+		this.#stepKind = "async";
+		this.#inputField = null;
+		this.#show(
+			new WizardStep({
+				kind: "async",
+				heading: new Text(theme.fg(headingTone, heading), 0, 0),
+				content: body,
+				footer,
+			}),
+		);
+	}
+
+	#cancelInputStep(): void {
+		if (this.#currentStep === "name") {
+			this.#onCancelCallback();
+			return;
+		}
+		this.#goBack();
+	}
+
 	#renderStep(): void {
 		this.#contentContainer.clear();
+		this.#step = null;
 		this.#inputField = null; // Reset input field
 
 		switch (this.#currentStep) {
@@ -318,226 +447,138 @@ export class MCPAddWizard extends OverlayPanel {
 	}
 
 	#renderNameStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 1: Server Name")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter a unique name for this server:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.name);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-
-		// Show validation error if any
-		if (this.#validationError) {
-			this.#contentContainer.addChild(new Text(theme.fg("error", `✗ ${sanitize(this.#validationError)}`), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-		}
-
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[Only letters, numbers, dash, underscore, dot, colon]"), 0, 0),
-		);
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to cancel]"), 0, 0));
+		this.#inputStep({
+			heading: "Step 1: Server Name",
+			prompt: "Enter a unique name for this server:",
+			initial: this.#state.name,
+			hint: "[Only letters, numbers, dash, underscore, dot, colon]\n[Enter to continue, Esc to cancel]",
+			optional: false,
+			error: this.#validationError,
+		});
 	}
 
 	#renderTransportStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 2: Transport Type")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Select the transport type:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		const options = [
-			{ value: "stdio" as const, label: "stdio (Local process)" },
-			{ value: "http" as const, label: "http (HTTP server)" },
-			{ value: "sse" as const, label: "sse (Server-Sent Events)" },
-		];
-
-		for (let i = 0; i < options.length; i++) {
-			const option = options[i];
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", option.label) : option.label;
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
-		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to cancel]"), 0, 0),
-		);
+		this.#choiceStep({
+			heading: "Step 2: Transport Type",
+			intro: new Text("Select the transport type:", 0, 0),
+			choices: [
+				{ label: "stdio (Local process)" },
+				{ label: "http (HTTP server)" },
+				{ label: "sse (Server-Sent Events)" },
+			],
+			hint: "[↑↓ to navigate, Enter to select, Esc to cancel]",
+		});
 	}
 
 	#renderCommandStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 3: Command")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the command to run:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.command);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "Step 3: Command",
+			prompt: "Enter the command to run:",
+			initial: this.#state.command,
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderArgsStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 4: Arguments (Optional)")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter command arguments (space-separated):", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.args);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Press Enter to skip or continue]"), 0, 0));
+		this.#inputStep({
+			heading: "Step 4: Arguments (Optional)",
+			prompt: "Enter command arguments (space-separated):",
+			initial: this.#state.args,
+			hint: "[Press Enter to skip or continue]",
+			optional: true,
+		});
 	}
 
 	#renderUrlStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step 3: Server URL")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the server URL:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.url);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-
-		// Show validation error if any
-		if (this.#validationError) {
-			this.#contentContainer.addChild(new Text(theme.fg("error", `✗ ${sanitize(this.#validationError)}`), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-		}
-
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Must start with http:// or https://]"), 0, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "Step 3: Server URL",
+			prompt: "Enter the server URL:",
+			initial: this.#state.url,
+			hint: "[Must start with http:// or https://]\n[Enter to continue, Esc to go back]",
+			optional: false,
+			error: this.#validationError,
+		});
 	}
 
 	#renderAuthLocationStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: How to provide the key?")));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		const options = [
-			{ value: "env" as const, label: "Environment variable" },
-			{ value: "header" as const, label: "HTTP header" },
-		];
-
-		for (let i = 0; i < options.length; i++) {
-			const option = options[i];
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", option.label) : option.label;
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
-		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#choiceStep({
+			heading: "Step: How to provide the key?",
+			choices: [{ label: "Environment variable" }, { label: "HTTP header" }],
+			hint: "[↑↓ to navigate, Enter to select, Esc to go back]",
+		});
 	}
 
 	#renderEnvVarNameStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Environment Variable Name")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the environment variable name:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.envVarName);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "Step: Environment Variable Name",
+			prompt: "Enter the environment variable name:",
+			initial: this.#state.envVarName,
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderHeaderNameStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: HTTP Header Name")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the HTTP header name:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.headerName);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "Step: HTTP Header Name",
+			prompt: "Enter the HTTP header name:",
+			initial: this.#state.headerName,
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderScopeStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Configuration Scope")));
-		this.#contentContainer.addChild(new Spacer(1));
-
 		const cwd = getProjectDir();
-
 		const userPathLabel = shortenPath(getMCPConfigPath("user", cwd));
 		const projectPathLabel = shortenPath(getMCPConfigPath("project", cwd));
-		const options = [
-			{ value: "user" as const, label: `User level (${userPathLabel})` },
-			{ value: "project" as const, label: `Project level (${projectPathLabel})` },
-		];
-
-		for (let i = 0; i < options.length; i++) {
-			const option = options[i];
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", option.label) : option.label;
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
-		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#choiceStep({
+			heading: "Step: Configuration Scope",
+			choices: [{ label: `User level (${userPathLabel})` }, { label: `Project level (${projectPathLabel})` }],
+			hint: "[↑↓ to navigate, Enter to select, Esc to go back]",
+		});
 	}
 
 	#renderConfirmStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Review Configuration")));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		// Show summary
-		this.#contentContainer.addChild(new Text(`Name: ${theme.fg("accent", this.#state.name)}`, 0, 0));
-		this.#contentContainer.addChild(new Text(`Type: ${this.#state.transport}`, 0, 0));
+		const summary = new Container();
+		summary.addChild(new Text(`Name: ${theme.fg("accent", this.#state.name)}`, 0, 0));
+		summary.addChild(new Text(`Type: ${this.#state.transport}`, 0, 0));
 
 		if (this.#state.transport === "stdio") {
-			this.#contentContainer.addChild(new Text(`Command: ${this.#state.command}`, 0, 0));
+			summary.addChild(new Text(`Command: ${this.#state.command}`, 0, 0));
 			if (this.#state.args) {
-				this.#contentContainer.addChild(new Text(`Args: ${this.#state.args}`, 0, 0));
+				summary.addChild(new Text(`Args: ${this.#state.args}`, 0, 0));
 			}
 		} else {
-			this.#contentContainer.addChild(new Text(`URL: ${sanitize(this.#state.url)}`, 0, 0));
+			summary.addChild(new Text(`URL: ${sanitize(this.#state.url)}`, 0, 0));
 		}
 
 		// Auth info
 		if (this.#state.authMethod === "none") {
-			this.#contentContainer.addChild(new Text("Auth: None", 0, 0));
+			summary.addChild(new Text("Auth: None", 0, 0));
 		} else if (this.#state.authMethod === "oauth") {
-			this.#contentContainer.addChild(new Text("Auth: OAuth (authenticated)", 0, 0));
+			summary.addChild(new Text("Auth: OAuth (authenticated)", 0, 0));
 		} else if (this.#state.authMethod === "manual") {
 			if (this.#state.authLocation === "env") {
-				this.#contentContainer.addChild(new Text(`Auth: API key via env (${this.#state.envVarName})`, 0, 0));
+				summary.addChild(new Text(`Auth: API key via env (${this.#state.envVarName})`, 0, 0));
 			} else {
-				this.#contentContainer.addChild(new Text(`Auth: API key via header (${this.#state.headerName})`, 0, 0));
+				summary.addChild(new Text(`Auth: API key via header (${this.#state.headerName})`, 0, 0));
 			}
 		}
 
 		const scopeLabel = this.#state.scope === "user" ? "User level" : "Project level";
-		this.#contentContainer.addChild(new Text(`Scope: ${scopeLabel}`, 0, 0));
+		summary.addChild(new Text(`Scope: ${scopeLabel}`, 0, 0));
+		summary.addChild(new Spacer(1));
+		summary.addChild(new Text("Save this configuration?", 0, 0));
 
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Save this configuration?", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		const options = ["Yes", "No"];
-		for (let i = 0; i < options.length; i++) {
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", options[i]) : options[i];
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
-		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#choiceStep({
+			heading: "Review Configuration",
+			intro: summary,
+			choices: [{ label: "Yes" }, { label: "No" }],
+			hint: "[↑↓ to navigate, Enter to select, Esc to go back]",
+			kind: "confirm",
+		});
 	}
 
 	handleInput(keyData: string): void {
@@ -557,6 +598,16 @@ export class MCPAddWizard extends OverlayPanel {
 			return;
 		}
 
+		// Input steps own Enter/Escape through the field (submit/back or cancel).
+		if (this.#inputField) {
+			this.#step?.handleInput(keyData);
+			return;
+		}
+
+		// Async steps ignore selection/submit keys. Escape still follows the
+		// controller's existing back path when no in-flight OAuth abort owns it.
+		if (this.#stepKind === "async" && !matchesAppInterrupt(keyData)) return;
+
 		// Handle Escape (always handled by wizard)
 		if (matchesAppInterrupt(keyData)) {
 			if (this.#currentStep === "name") {
@@ -566,18 +617,6 @@ export class MCPAddWizard extends OverlayPanel {
 			}
 			// Go back to previous step
 			this.#goBack();
-			return;
-		}
-
-		// If we have an input field, let it handle the input
-		if (this.#inputField) {
-			// Handle Enter to proceed
-			if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-				this.#saveInputAndProceed();
-				return;
-			}
-			// Pass all other keys to the input field
-			this.#inputField.handleInput(keyData);
 			return;
 		}
 
@@ -886,137 +925,96 @@ export class MCPAddWizard extends OverlayPanel {
 	}
 
 	#renderAuthMethodStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "Step: Authentication Method")));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		const options = [
-			{ value: "oauth" as const, label: "OAuth flow (web-based)", desc: "(opens browser)" },
-			{ value: "manual" as const, label: "Manual API key/token", desc: "(paste or use shell command)" },
-		];
-
-		for (let i = 0; i < options.length; i++) {
-			const option = options[i];
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", option.label) : option.label;
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
-			if (!isSelected) {
-				this.#contentContainer.addChild(new Text(`    ${theme.fg("dim", option.desc)}`, 0, 0));
-			}
-		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		this.#choiceStep({
+			heading: "Step: Authentication Method",
+			choices: [
+				{ label: "OAuth flow (web-based)", description: "(opens browser)" },
+				{ label: "Manual API key/token", description: "(paste or use shell command)" },
+			],
+			hint: "[↑↓ to navigate, Enter to select, Esc to go back]",
+		});
 	}
 
 	#renderOAuthAuthUrlStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Authorization URL")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the OAuth authorization endpoint:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.oauthAuthUrl);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/authorize"), 0, 0),
-		);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "OAuth: Authorization URL",
+			prompt: "Enter the OAuth authorization endpoint:",
+			initial: this.#state.oauthAuthUrl,
+			details: ["e.g., https://auth.example.com/oauth/authorize"],
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderOAuthTokenUrlStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Token URL")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter the OAuth token endpoint:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.oauthTokenUrl);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., https://auth.example.com/oauth/token"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "OAuth: Token URL",
+			prompt: "Enter the OAuth token endpoint:",
+			initial: this.#state.oauthTokenUrl,
+			details: ["e.g., https://auth.example.com/oauth/token"],
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderOAuthClientIdStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Client ID")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter your OAuth client ID:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.oauthClientId);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "OAuth: Client ID",
+			prompt: "Enter your OAuth client ID:",
+			initial: this.#state.oauthClientId,
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	#renderOAuthClientSecretStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Client Secret (Optional)")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter your OAuth client secret:", 0, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Leave empty for PKCE-only flows)"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.oauthClientSecret);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "OAuth: Client Secret (Optional)",
+			prompt: "Enter your OAuth client secret:",
+			initial: this.#state.oauthClientSecret,
+			details: ["(Leave empty for PKCE-only flows)"],
+			hint: "[Enter to continue, Esc to go back]",
+			optional: true,
+		});
 	}
 
 	#renderOAuthScopesStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth: Scopes (Optional)")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter OAuth scopes (space-separated):", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.oauthScopes);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "e.g., read write"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "OAuth: Scopes (Optional)",
+			prompt: "Enter OAuth scopes (space-separated):",
+			initial: this.#state.oauthScopes,
+			details: ["e.g., read write"],
+			hint: "[Enter to continue, Esc to go back]",
+			optional: true,
+		});
 	}
 
 	#renderOAuthErrorStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth authentication failed"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Choose next action:", 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		const options = ["Retry OAuth authentication", "Edit OAuth settings"];
-		for (let i = 0; i < options.length; i++) {
-			const isSelected = i === this.#selectedIndex;
-			const prefix = isSelected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
-			const text = isSelected ? theme.fg("accent", options[i]) : options[i];
-			this.#contentContainer.addChild(new Text(prefix + text, 0, 0));
+		const intro = new Container();
+		const errorLines = this.#oauthErrorLines ?? [];
+		for (let index = 0; index < errorLines.length; index++) {
+			intro.addChild(new Text(errorLines[index] ?? "", 0, 0));
+			intro.addChild(new Spacer(1));
 		}
-
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-		);
+		intro.addChild(new Text("Choose next action:", 0, 0));
+		this.#choiceStep({
+			heading: this.#oauthErrorHeading?.text ?? "OAuth authentication failed",
+			headingTone: this.#oauthErrorHeading?.tone ?? "error",
+			intro,
+			choices: [{ label: "Retry OAuth authentication" }, { label: "Edit OAuth settings" }],
+			hint: "[↑↓ to navigate, Enter to select, Esc to go back]",
+		});
 	}
 
 	#renderApiKeyStep(): void {
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "API Key Required")));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Enter your API key or token:", 0, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Supports !command for password manager)"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-
-		this.#inputField = new Input();
-		this.#inputField.setValue(this.#state.apiKey);
-		this.#contentContainer.addChild(this.#inputField);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "[Enter to continue, Esc to go back]"), 0, 0));
+		this.#inputStep({
+			heading: "API Key Required",
+			prompt: "Enter your API key or token:",
+			initial: this.#state.apiKey,
+			details: ["(Supports !command for password manager)"],
+			hint: "[Enter to continue, Esc to go back]",
+			optional: false,
+		});
 	}
 
 	/**
@@ -1038,11 +1036,9 @@ export class MCPAddWizard extends OverlayPanel {
 			await this.#onTestConnectionCallback(testConfig);
 
 			// Success! No auth required
-			this.#contentContainer.clear();
-			this.#contentContainer.addChild(new Text(theme.fg("success", "✓ Connection successful!"), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text("No authentication required", 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
+			const successBody = new Container();
+			successBody.addChild(new Text("No authentication required", 0, 0));
+			this.#asyncStep("✓ Connection successful!", "success", successBody);
 
 			setTimeout(() => {
 				this.#state.authMethod = "none";
@@ -1088,34 +1084,25 @@ export class MCPAddWizard extends OverlayPanel {
 					this.#state.oauthResourceIsFallback = !oauth.resource && this.#state.transport !== "stdio";
 					this.#state.authMethod = "oauth";
 
-					this.#contentContainer.clear();
-					this.#contentContainer.addChild(new Text(theme.fg("success", "✓ OAuth detected"), 0, 0));
-					this.#contentContainer.addChild(new Spacer(1));
-					this.#contentContainer.addChild(new Text("Launching browser for authorization...", 0, 0));
-					this.#contentContainer.addChild(new Spacer(1));
+					const oauthBody = new Container();
+					oauthBody.addChild(new Text("Launching browser for authorization...", 0, 0));
+					this.#asyncStep("✓ OAuth detected", "success", oauthBody);
 
 					void this.#launchOAuthFlow();
 					return;
 				}
 
 				// OAuth metadata unavailable: fallback to manual API key.
-				this.#contentContainer.clear();
-				this.#contentContainer.addChild(new Text(theme.fg("warning", "⚠ Authentication required"), 0, 0));
-				this.#contentContainer.addChild(new Spacer(1));
-				this.#contentContainer.addChild(new Text("OAuth parameters could not be discovered.", 0, 0));
-				this.#contentContainer.addChild(new Text("Provide API key/token manually.", 0, 0));
-				this.#contentContainer.addChild(new Spacer(1));
 				this.#currentStep = "apikey";
 				this.#renderStep();
 			} else {
 				// Not an auth error - just a connection failure
 				const errorMsg = sanitize(error instanceof Error ? error.message : String(error));
-				this.#contentContainer.clear();
-				this.#contentContainer.addChild(new Text(theme.fg("error", "✗ Connection failed"), 0, 0));
-				this.#contentContainer.addChild(new Spacer(1));
-				this.#contentContainer.addChild(new Text(errorMsg, 0, 0));
-				this.#contentContainer.addChild(new Spacer(1));
-				this.#contentContainer.addChild(new Text(theme.fg("muted", "Adding server anyway..."), 0, 0));
+				const failureBody = new Container();
+				failureBody.addChild(new Text(errorMsg, 0, 0));
+				failureBody.addChild(new Spacer(1));
+				failureBody.addChild(new Text(theme.fg("muted", "Adding server anyway..."), 0, 0));
+				this.#asyncStep("✗ Connection failed", "error", failureBody);
 
 				setTimeout(() => {
 					this.#state.authMethod = "none";
@@ -1208,37 +1195,39 @@ export class MCPAddWizard extends OverlayPanel {
 
 	async #launchOAuthFlow(): Promise<void> {
 		if (!this.#onOAuthCallback) {
-			this.#contentContainer.clear();
-			this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth flow not available"), 0, 0));
-			this.#renderStep();
+			const unavailableBody = new Container();
+			unavailableBody.addChild(new Text("OAuth login cannot start without a host OAuth handler.", 0, 0));
+			this.#asyncStep("OAuth flow not available", "error", unavailableBody);
 			this.#requestRender();
 			return;
 		}
 
 		// Validate OAuth configuration
 		if (!this.#state.oauthAuthUrl || !this.#state.oauthTokenUrl) {
-			this.#contentContainer.clear();
-			this.#contentContainer.addChild(new Text(theme.fg("error", "OAuth configuration incomplete"), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text("Authorization and Token URLs are required.", 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(theme.fg("muted", "[Press Esc to go back]"), 0, 0));
+			const incompleteBody = new Container();
+			incompleteBody.addChild(new Text("Authorization and Token URLs are required.", 0, 0));
+			this.#asyncStep(
+				"OAuth configuration incomplete",
+				"error",
+				incompleteBody,
+				new Text(theme.fg("muted", "[Press Esc to go back]"), 0, 0),
+			);
 			this.#requestRender();
 			return;
 		}
 
 		// Show "Authenticating..." message
-		this.#contentContainer.clear();
-		this.#contentContainer.addChild(new Text(theme.fg("accent", "OAuth Authentication"), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text("Launching OAuth flow...", 0, 0));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "Browser will open automatically."), 0, 0));
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(
-			new Text(theme.fg("warning", "If browser doesn't open, copy the URL from chat."), 0, 0),
+		const authBody = new Container();
+		authBody.addChild(new Text("Launching OAuth flow...", 0, 0));
+		authBody.addChild(new Text(theme.fg("muted", "Browser will open automatically."), 0, 0));
+		authBody.addChild(new Spacer(1));
+		authBody.addChild(new Text(theme.fg("warning", "If browser doesn't open, copy the URL from chat."), 0, 0));
+		this.#asyncStep(
+			"OAuth Authentication",
+			"accent",
+			authBody,
+			new Text(theme.fg("muted", "(Press Esc to cancel)"), 0, 0),
 		);
-		this.#contentContainer.addChild(new Spacer(1));
-		this.#contentContainer.addChild(new Text(theme.fg("muted", "(Press Esc to cancel)"), 0, 0));
 		this.#requestRender();
 
 		this.#oauthAbort = new AbortController();
@@ -1271,14 +1260,13 @@ export class MCPAddWizard extends OverlayPanel {
 			this.#state.oauthResource = oauthResult.resource ?? oauthResource;
 
 			// Show success message
-			this.#contentContainer.clear();
-			this.#contentContainer.addChild(new Text(theme.fg("success", "✓ Authentication successful!"), 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(theme.fg("muted", "Running connection health check..."), 0, 0));
+			const healthBody = new Container();
+			healthBody.addChild(new Text(theme.fg("muted", "Running connection health check..."), 0, 0));
 			const spinnerFrames = theme.spinnerFrames;
 			const initialFrame = spinnerFrames[0] ?? "|";
 			const healthText = new Text(theme.fg("muted", `${initialFrame} Checking server connection...`), 0, 0);
-			this.#contentContainer.addChild(healthText);
+			healthBody.addChild(healthText);
+			this.#asyncStep("✓ Authentication successful!", "success", healthBody);
 
 			let spinnerIndex = 0;
 			const spinner = setInterval(() => {
@@ -1317,8 +1305,8 @@ export class MCPAddWizard extends OverlayPanel {
 				healthText.setText(theme.fg("success", "✓ Health check passed"));
 			} else {
 				healthText.setText(theme.fg("warning", "⚠ Health check failed (will still save config)"));
-				this.#contentContainer.addChild(new Spacer(1));
-				this.#contentContainer.addChild(new Text(theme.fg("muted", healthError), 0, 0));
+				healthBody.addChild(new Spacer(1));
+				healthBody.addChild(new Text(theme.fg("muted", healthError), 0, 0));
 			}
 			this.#requestRender();
 
@@ -1338,49 +1326,26 @@ export class MCPAddWizard extends OverlayPanel {
 			// stay meaningful. Name-matching avoids importing controller types.
 			const cancelled = error instanceof Error && error.name === "MCPOAuthCancelledError";
 			const errorMsg = sanitize(error instanceof Error ? error.message : String(error));
-			this.#contentContainer.clear();
-			this.#contentContainer.addChild(
-				new Text(
-					cancelled ? theme.fg("muted", "○ OAuth cancelled") : theme.fg("error", "✗ OAuth authentication failed"),
-					0,
-					0,
-				),
-			);
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(errorMsg, 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-
-			// Provide helpful tips based on error type
+			const tipLines: string[] = [errorMsg];
 			if (cancelled) {
-				this.#contentContainer.addChild(
-					new Text(theme.fg("muted", "Tip: Choose Retry to launch the browser again."), 0, 0),
-				);
+				tipLines.push(theme.fg("muted", "Tip: Choose Retry to launch the browser again."));
 			} else if (errorMsg.includes("timeout") || errorMsg.includes("timed out")) {
-				this.#contentContainer.addChild(
-					new Text(theme.fg("muted", "Tip: Complete authorization faster next time"), 0, 0),
-				);
+				tipLines.push(theme.fg("muted", "Tip: Complete authorization faster next time"));
 			} else if (errorMsg.includes("Invalid OAuth URLs")) {
-				this.#contentContainer.addChild(
-					new Text(theme.fg("muted", "Tip: Check that the OAuth URLs are correct"), 0, 0),
-				);
+				tipLines.push(theme.fg("muted", "Tip: Check that the OAuth URLs are correct"));
 			} else if (errorMsg.includes("ECONNREFUSED")) {
-				this.#contentContainer.addChild(
-					new Text(theme.fg("muted", "Tip: Verify the OAuth server is accessible"), 0, 0),
-				);
+				tipLines.push(theme.fg("muted", "Tip: Verify the OAuth server is accessible"));
 			}
-
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(new Text(`${theme.fg("accent", "→ ")}Retry`, 0, 0));
-			this.#contentContainer.addChild(new Text("  Edit OAuth settings", 0, 0));
-			this.#contentContainer.addChild(new Spacer(1));
-			this.#contentContainer.addChild(
-				new Text(theme.fg("muted", "[↑↓ to navigate, Enter to select, Esc to go back]"), 0, 0),
-			);
-			this.#requestRender();
 
 			// Set up as a selector step
 			this.#selectedIndex = 0;
 			this.#currentStep = "oauth-error";
+			this.#oauthErrorHeading = cancelled
+				? { text: "○ OAuth cancelled", tone: "muted" }
+				: { text: "✗ OAuth authentication failed", tone: "error" };
+			this.#oauthErrorLines = tipLines;
+			this.#renderStep();
+			this.#requestRender();
 		} finally {
 			this.#oauthAbort = null;
 		}

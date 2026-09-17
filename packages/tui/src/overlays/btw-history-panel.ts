@@ -28,7 +28,8 @@ import {
 import { sanitizeErrorLine } from "../chrome/error-block";
 import { sanitizeDisplayLine, sanitizeDisplayText } from "./extensions/display-text";
 import { editorKey, rawKeyHint } from "../chrome/keybinding-hints";
-import { bottomBorder, fit, row, splitBodyWidth, splitRow, topBorder } from "../chrome/overlay-box";
+import { bottomBorder, fit, row, topBorder } from "../chrome/overlay-box";
+import { SplitPane } from "../components/layout/split-pane";
 import { clampSelection, contentRowWidth, padLinesToHeight, renderScrollableList } from "../chrome/selector-helpers";
 
 interface BtwHistoryPanelOptions {
@@ -87,6 +88,38 @@ export class BtwHistoryPanel implements Component, Focusable {
 		height: 1,
 		scrollbar: "auto",
 		theme: { track: text => theme.fg("muted", text), thumb: text => theme.fg("accent", text) },
+	});
+	// Persistent two-pane layouts: the body (list + answer) and the one-row
+	// pane focus labels above it. Both share sizing so divider geometry
+	// matches; framed decorations apply only when the panel draws a frame.
+	#listCache: readonly string[] = [];
+	#detailCache: readonly string[] = [];
+	#bodyHeightLast = 1;
+	readonly #framePrefix = () => `${theme.fg("border", theme.boxRound.vertical)} `;
+	readonly #frameDivider = () => ` ${theme.fg("border", theme.boxRound.vertical)} `;
+	readonly #frameSuffix = () => ` ${theme.fg("border", theme.boxRound.vertical)}`;
+	#listPaneLines = (_width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? this.#bodyHeightLast));
+		return padLinesToHeight(this.#listCache, rows).slice(0, rows);
+	};
+	#detailPaneLines = (_width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? this.#bodyHeightLast));
+		return padLinesToHeight(this.#detailCache, rows).slice(0, rows);
+	};
+	readonly #split = new SplitPane({
+		left: this.#listPaneLines,
+		right: this.#detailPaneLines,
+		leftSize: { ratio: 0.42, max: 46 },
+		splitAt: 96,
+		narrowPane: "left",
+	});
+	readonly #labels = new SplitPane({
+		left: () => [this.#focusLabel("list")],
+		right: () => [this.#focusLabel("answer")],
+		leftSize: { ratio: 0.42, max: 46 },
+		splitAt: 96,
+		narrowPane: "left",
+		height: 1,
 	});
 	readonly #timeFormat = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 	readonly #dateFormat = new Intl.DateTimeFormat("en", {
@@ -152,6 +185,8 @@ export class BtwHistoryPanel implements Component, Focusable {
 		this.#turns = [];
 		this.#composer?.input.invalidate();
 		this.#detailDirty = true;
+		this.#split.invalidate();
+		this.#labels.invalidate();
 	}
 
 	#selectedIndex(): number {
@@ -444,8 +479,17 @@ export class BtwHistoryPanel implements Component, Focusable {
 		if (width === 0 || height === 0) return [];
 		const framed = width >= 12 && height >= 8;
 		const inner = Math.max(1, width - (framed ? 4 : 0));
-		const wide = framed && width >= 96;
-		const listWidth = Math.min(46, Math.floor(width * 0.42));
+		const narrowPane = this.#focus === "answer" ? "right" : "left";
+		const framePrefix = framed ? this.#framePrefix : undefined;
+		const frameDivider = framed ? this.#frameDivider : undefined;
+		const frameSuffix = framed ? this.#frameSuffix : undefined;
+		this.#split.setNarrowPane(narrowPane);
+		this.#split.setDecorations(framePrefix, frameDivider, frameSuffix);
+		this.#labels.setNarrowPane(narrowPane);
+		this.#labels.setDecorations(framePrefix, frameDivider, frameSuffix);
+		const geometry = framed ? this.#split.measure(width) : undefined;
+		const wide = geometry?.mode === "split";
+		const listWidth = wide && geometry?.left ? geometry.left.width : inner;
 		const record = this.#selected();
 		const composer = this.#composer;
 		const latest = record ? getBtwLatestTurn(record) : undefined;
@@ -481,7 +525,7 @@ export class BtwHistoryPanel implements Component, Focusable {
 			composerLines.push(...composer.input.render(inner));
 		}
 		let bodyHeight = Math.max(composer ? 0 : 1, height - chrome - composerLines.length);
-		const detailWidth = wide ? splitBodyWidth(width, listWidth) : inner;
+		const detailWidth = wide && geometry?.right ? geometry.right.width : inner;
 		const detailScroll = this.#detail.getScrollOffset();
 		let detail = wide || this.#focus === "answer" ? this.#renderDetail(detailWidth, bodyHeight) : undefined;
 		const showNavigation = framed && !composer && (this.#focus === "list" || this.#detail.getMaxScrollOffset() > 0);
@@ -501,18 +545,16 @@ export class BtwHistoryPanel implements Component, Focusable {
 		const lines: string[] = [];
 		if (framed) {
 			lines.push(topBorder(width, "BTW history"));
-			lines.push(
-				wide
-					? splitRow(this.#focusLabel("list"), this.#focusLabel("answer"), width, listWidth)
-					: row(this.#focusLabel(this.#focus), width),
-			);
+			lines.push(this.#labels.render(width)[0] ?? "");
 		} else if (height >= 3) {
 			lines.push(truncateToWidth(this.#focusLabel(this.#focus), width));
 		}
-		if (wide) {
-			const list = this.#renderList(listWidth, bodyHeight);
-			for (let index = 0; index < bodyHeight; index++)
-				lines.push(splitRow(list[index] ?? "", detail?.[index] ?? "", width, listWidth));
+		if (framed) {
+			this.#bodyHeightLast = bodyHeight;
+			this.#detailCache = detail ?? [];
+			this.#listCache = wide || this.#focus === "list" ? this.#renderList(listWidth, bodyHeight) : [];
+			this.#split.setHeight(bodyHeight);
+			lines.push(...this.#split.render(width));
 		} else {
 			const body = this.#focus === "list" ? this.#renderList(inner, bodyHeight) : (detail ?? []);
 			for (const line of padLinesToHeight(body, bodyHeight)) lines.push(framed ? row(line, width) : line);

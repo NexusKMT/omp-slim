@@ -36,6 +36,7 @@ export interface SessionSelectorEntry {
 import { shortenPath } from "../render/render-utils";
 import { HookSelectorComponent } from "./hook-selector";
 import { bottomBorder, OverlayPanel, row, topBorder } from "../chrome/overlay-box";
+import { MenuSelection, getMenuWindow } from "../components/menu-selection";
 
 /**
  * Themed glyph + colored label for a session's lifecycle status, or `undefined`
@@ -298,8 +299,7 @@ const FUZZY_SCAN_CHUNK_COUNT = 150;
  * Custom session list component with multi-line items and search
  */
 class SessionList<T extends SessionSelectorEntry> implements Component {
-	#filteredSessions: T[] = [];
-	#selectedIndex: number = 0;
+	#menu: MenuSelection<T>;
 	// Maps a 0-based line within this list's own render to a filtered-session
 	// index, or undefined for chrome rows (search line, blanks, scrollbar gap).
 	// Rebuilt every render so the picker's mouse hit-testing tracks the live
@@ -327,7 +327,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 	onRequestRender?: () => void;
 
 	// ── Incremental search state ──────────────────────────────────────────
-	// #filteredSessions is always composed from these three inputs (see
+	// The menu's visible list is always composed from these three inputs (see
 	// #composeFiltered), so late-arriving fuzzy chunks and the debounced
 	// history merge can land in any order without clobbering each other.
 	/** Recency-ranked sessions whose text contains every query token verbatim. */
@@ -365,13 +365,16 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		this.#getCurrentSessionPath =
 			typeof currentSessionPath === "function" ? currentSessionPath : () => currentSessionPath;
 		this.#historyMatcher = historyMatcher;
-		this.#filteredSessions = sessions;
+		this.#menu = new MenuSelection<T>(sessions, {
+			getKey: session => session.path,
+			getSearchText: sessionSearchText,
+		});
 		this.#selectCurrentSession();
 		this.#searchInput = new Input();
 
 		// Handle Enter in search input - select current item
 		this.#searchInput.onSubmit = () => {
-			const selected = this.#filteredSessions[this.#selectedIndex];
+			const selected = this.#menu.selectedItem;
 			if (selected) {
 				this.onSelect?.(selected);
 			}
@@ -405,8 +408,8 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 	#selectCurrentSession(): void {
 		const currentPath = this.#getCurrentSessionPath();
 		if (!currentPath) return;
-		const index = this.#filteredSessions.findIndex(s => s.path === currentPath);
-		if (index >= 0) this.#selectedIndex = index;
+		const index = this.#menu.visibleItems.findIndex(s => s.path === currentPath);
+		if (index >= 0) this.#menu.setSelectedIndex(index);
 	}
 
 	/** Replace the visible dataset, e.g. when toggling folder/all-projects scope. */
@@ -414,7 +417,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		this.#allSessions = sessions;
 		this.#showCwd = showCwd;
 		if (pinnedIds !== undefined) this.#pinnedIds = pinnedIds;
-		this.#selectedIndex = 0;
+		this.#menu.setSelectedIndex(0);
 		this.#filterSessions(this.#searchInput.getValue());
 		this.#selectCurrentSession();
 	}
@@ -436,8 +439,8 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		this.#hadFilterQuery = tokens.length > 0;
 		this.#lastFilterQuery = query;
 		if (tokens.length === 0) {
-			this.#filteredSessions = this.#allSessions;
-			this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
+			const keepIndex = Math.min(this.#menu.selectedIndex, Math.max(0, this.#allSessions.length - 1));
+			this.#menu.setItems(this.#allSessions, keepIndex >= 0 ? this.#allSessions[keepIndex]?.path : undefined);
 			if (hadQuery) this.#selectCurrentSession();
 			this.#scheduleHistoryMerge(query);
 			return;
@@ -468,7 +471,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		// and async compose (fuzzy chunks / history merge) only clamp so an
 		// arrow selection survives. A live-session index > 0 would otherwise
 		// land on a lower-ranked match after the first keystroke.
-		if (queryChanged) this.#selectedIndex = 0;
+		if (queryChanged) this.#menu.setSelectedIndex(0);
 		this.#scheduleHistoryMerge(query);
 	}
 
@@ -501,7 +504,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 	}
 
 	/**
-	 * Rebuild {@link #filteredSessions} with title matches first, then other
+	 * Rebuild the menu's visible list with title matches first, then other
 	 * prompt-history hits, literal matches (recency), and fuzzy-only hits (score).
 	 */
 	#composeFiltered(): void {
@@ -509,12 +512,15 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		const base: T[] = [];
 		for (const match of this.#literalRanked) base.push(match.session);
 		for (const match of this.#fuzzyRanked) base.push(match.session);
-		this.#filteredSessions = prioritizeTitleMatches(
+		const composed = prioritizeTitleMatches(
 			this.#historyIds.length > 0 ? mergeSessionRanking(this.#allSessions, base, this.#historyIds) : base,
 			tokenizeSessionQuery(this.#searchInput.getValue()),
 			this.#literalRanked,
 		);
-		this.#selectedIndex = Math.min(this.#selectedIndex, Math.max(0, this.#filteredSessions.length - 1));
+		// Async chunks and the history merge only clamp the cursor so an arrow
+		// selection survives recomposition; the query path resets explicitly.
+		const keepIndex = Math.min(this.#menu.selectedIndex, Math.max(0, composed.length - 1));
+		this.#menu.setItems(composed, keepIndex >= 0 ? composed[keepIndex]?.path : undefined);
 	}
 
 	/**
@@ -562,11 +568,11 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		const index = this.#allSessions.findIndex(s => s.path === sessionPath);
 		if (index === -1) return;
 		this.#allSessions.splice(index, 1);
-		// Re-filter to update filteredSessions
+		// Re-filter to update the composed result set
 		this.#filterSessions(this.#searchInput.getValue());
-		// Adjust selectedIndex if we deleted the last item or beyond
-		if (this.#selectedIndex >= this.#filteredSessions.length) {
-			this.#selectedIndex = Math.max(0, this.#filteredSessions.length - 1);
+		// Adjust selection if we deleted the last item or beyond
+		if (this.#menu.selectedIndex >= this.#menu.visibleItems.length) {
+			this.#menu.setSelectedIndex(Math.max(0, this.#menu.visibleItems.length - 1));
 		}
 	}
 
@@ -577,16 +583,16 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 
 	/** Wheel notch: move the selection one step (clamped, no wrap). */
 	handleWheel(delta: -1 | 1): void {
-		if (this.#filteredSessions.length === 0) return;
+		if (this.#menu.visibleItems.length === 0) return;
 		this.#selectionMoved = true;
-		this.#selectedIndex = Math.max(0, Math.min(this.#filteredSessions.length - 1, this.#selectedIndex + delta));
+		this.#menu.move(delta, false);
 	}
 
 	/** Mouse click: select the session under the pointer and resume it. */
 	selectAndConfirm(index: number): void {
-		const session = this.#filteredSessions[index];
+		const session = this.#menu.visibleItems[index];
 		if (!session) return;
-		this.#selectedIndex = index;
+		this.#menu.setSelectedIndex(index);
 		this.onSelect?.(session);
 	}
 
@@ -602,7 +608,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		lines.push(...this.#searchInput.render(width));
 		lines.push(""); // Blank line after search
 
-		if (this.#filteredSessions.length === 0) {
+		if (this.#menu.visibleItems.length === 0) {
 			if (this.#showCwd) {
 				lines.push(truncateToWidth(theme.fg("muted", "No sessions found"), width));
 			} else {
@@ -631,30 +637,20 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 			return date.toLocaleDateString();
 		};
 
-		// Pack the window around the selection by actual line height (3 lines
+		// Window the list around the selection by actual line height (3 lines
 		// per session, 4 when a title adds a preview line) until the viewport
 		// budget is spent, so short sessions never strand blank rows a
 		// worst-case count-based window would leave (then padded by
 		// fill-height).
-		const filtered = this.#filteredSessions;
+		const filtered = this.#menu.visibleItems;
 		const itemHeight = (session: T): number => (session.title ? 4 : 3);
 		const budget = this.#lineBudget();
-		let startIndex = this.#selectedIndex;
-		let endIndex = this.#selectedIndex + 1;
-		let used = itemHeight(filtered[this.#selectedIndex]!);
-		// Alternate growth below/above the selection to keep it roughly centered.
-		for (let preferDown = true; ; preferDown = !preferDown) {
-			const canDown = endIndex < filtered.length && used + itemHeight(filtered[endIndex]!) <= budget;
-			const canUp = startIndex > 0 && used + itemHeight(filtered[startIndex - 1]!) <= budget;
-			if (!canDown && !canUp) break;
-			if (canDown && (preferDown || !canUp)) {
-				used += itemHeight(filtered[endIndex]!);
-				endIndex++;
-			} else {
-				startIndex--;
-				used += itemHeight(filtered[startIndex]!);
-			}
-		}
+		const {
+			startIndex,
+			endIndex,
+			rowOffset: offsetRows,
+			totalRows: rawTotalRows,
+		} = getMenuWindow(filtered.map(itemHeight), this.#menu.selectedIndex, budget);
 
 		// Each session block is built into sessionLines, then wrapped by ScrollView
 		// so the right-edge scrollbar is proportional at the physical-line level.
@@ -665,8 +661,9 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		const currentPath = this.#getCurrentSessionPath();
 		for (let i = startIndex; i < endIndex; i++) {
 			const blockStart = sessionLines.length;
-			const session = this.#filteredSessions[i];
-			const isSelected = i === this.#selectedIndex;
+			const session = filtered[i];
+			if (!session) continue;
+			const isSelected = i === this.#menu.selectedIndex;
 
 			// Normalize first message to single line
 			const normalizedMessage = session.firstMessage.replace(/\n/g, " ").trim();
@@ -730,16 +727,10 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 
 		// Wrap the rendered window in a ScrollView for a proportional right-edge
 		// bar, with exact physical-line totals from the per-session heights.
-		let totalRows = 0;
-		let offsetRows = 0;
-		for (let i = 0; i < filtered.length; i++) {
-			if (i === startIndex) offsetRows = totalRows;
-			totalRows += itemHeight(filtered[i]!);
-		}
 		// The last session's separator blank is never rendered (see the block
 		// loop above), so exclude it or a fully visible list would still show a
 		// scrollbar.
-		totalRows -= 1;
+		const totalRows = rawTotalRows - 1;
 		const sv = new ScrollView(sessionLines, {
 			height: sessionLines.length,
 			scrollbar: "auto",
@@ -767,7 +758,7 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 			matchesKey(keyData, "delete") ||
 			(matchesKey(keyData, "backspace") && this.#searchInput.getValue().length === 0)
 		) {
-			const selected = this.#filteredSessions[this.#selectedIndex];
+			const selected = this.#menu.selectedItem;
 			if (selected && this.onDeleteRequest) {
 				this.onDeleteRequest(selected);
 			}
@@ -776,30 +767,30 @@ class SessionList<T extends SessionSelectorEntry> implements Component {
 		// Up arrow
 		if (matchesSelectUp(keyData)) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - 1);
+			this.#menu.move(-1, false);
 			return;
 		}
 		// Down arrow
 		if (matchesSelectDown(keyData)) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.min(this.#filteredSessions.length - 1, this.#selectedIndex + 1);
+			this.#menu.move(1, false);
 			return;
 		}
 		// Page up - jump up by maxVisible items
 		if (matchesKey(keyData, "pageUp")) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.#pageSize());
+			this.#menu.move(-this.#pageSize(), false);
 			return;
 		}
 		// Page down - jump down by maxVisible items
 		if (matchesKey(keyData, "pageDown")) {
 			this.#selectionMoved = true;
-			this.#selectedIndex = Math.min(this.#filteredSessions.length - 1, this.#selectedIndex + this.#pageSize());
+			this.#menu.move(this.#pageSize(), false);
 			return;
 		}
 		// Enter
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const selected = this.#filteredSessions[this.#selectedIndex];
+			const selected = this.#menu.selectedItem;
 			if (selected && this.onSelect) {
 				this.onSelect(selected);
 			}

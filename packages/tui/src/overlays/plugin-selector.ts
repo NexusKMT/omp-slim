@@ -57,13 +57,13 @@ export class PluginSelectorComponent extends OverlayPanel {
 					marketplaceCount === 0
 						? "Add a marketplace first: /marketplace add <source>"
 						: "Configured marketplaces have no plugins",
+				disabled: true,
 			});
 		}
 
 		this.#selectList = new SelectList(items, Math.min(items.length, 20), getSelectListTheme());
 
 		this.#selectList.onSelect = item => {
-			if (item.value === "__empty__") return;
 			const [name, marketplace, scope] = splitPluginId(item.value);
 			if (name && marketplace) {
 				callbacks.onSelect(name, marketplace, scope);

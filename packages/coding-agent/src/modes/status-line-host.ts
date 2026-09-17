@@ -36,9 +36,7 @@ export const statusLineHost: StatusLineHost<StatusLineHostSession> = {
 	getSessionSettingsRevision: session => session.settings?.revision ?? 0,
 	goalStatusInFooter: session => (session.settings ?? settings).get("goal.statusInFooter"),
 	activeAccount: (session, provider) =>
-		session.sessionId === undefined
-			? undefined
-			: session.modelRegistry?.authStorage?.getOAuthAccountIdentity(provider, session.sessionId),
+		session.modelRegistry?.authStorage?.getOAuthAccountIdentity(provider, session.sessionId),
 	canFetchUsageReports: session => typeof session.fetchUsageReports === "function",
 	fetchUsageReports: (session, signal) => session.fetchUsageReports?.(signal) ?? Promise.resolve(null),
 	resolveActiveRepo: resolveActiveRepoContextSync,

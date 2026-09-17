@@ -32,7 +32,7 @@ import {
 	resolveBenchTargets,
 	type StreamSimpleFn,
 } from "./bench-runtime";
-import { createLiveBoard, type LiveBoardOutput } from "./live-board";
+import { createLiveBoard, type LiveBoardOutput } from "@oh-my-pi/pi-tui/chrome/live-board";
 
 const DEFAULT_PAR = 4;
 const DEFAULT_CACHE_MAX_TOKENS = 64;

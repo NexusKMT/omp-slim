@@ -1,7 +1,10 @@
 import type { AuthStorage } from "@oh-my-pi/pi-ai";
 import { PASTE_CODE_LOGIN_PROVIDERS } from "@oh-my-pi/pi-ai";
 import type { OAuthPrompt, OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
-import { type Component, type Focusable } from "../../tui";
+import { type Component, type Focusable, Container } from "../../tui";
+import { Spacer } from "../../components/spacer";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
 import { Input } from "../../components/input";
 import { matchesKey } from "../../keys";
 import { type SgrMouseEvent } from "../../mouse";
@@ -84,8 +87,7 @@ export class SignInTab implements SetupTab {
 	#loginAbort: AbortController | undefined;
 	#loggingInProvider: string | undefined;
 	#disposed = false;
-	/** Render line where the provider selector begins. */
-	#selectorRowStart = 2;
+	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
@@ -108,6 +110,7 @@ export class SignInTab implements SetupTab {
 	}
 
 	invalidate(): void {
+		this.#step?.invalidate();
 		this.#selector.invalidate();
 		this.#prompt?.input.invalidate();
 	}
@@ -129,49 +132,78 @@ export class SignInTab implements SetupTab {
 	/** Forward mouse to the provider selector; pointer is inert during an active login or code prompt. */
 	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
 		if (this.#loggingInProvider || this.#prompt) return;
-		this.#selector.routeMouse(event, line - this.#selectorRowStart, col);
+		this.#step?.routeMouse(event, line, col);
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const lines: string[] = [];
-		if (this.#loggingInProvider) {
-			lines.push(theme.bold(`Signing in to ${this.#loggingInProvider}`));
-		} else {
-			// Hint + blank cost two rows; the wizard subtitle already explains
-			// this panel, so on short screens the rows go to the provider list
-			// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
-			if (maxLines === undefined || maxLines >= 17 + 2) {
-				lines.push(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), "");
-			}
-			this.#selectorRowStart = lines.length;
-			if (maxLines !== undefined) this.#selector.setMaxHeight(maxLines - lines.length);
-			lines.push(...this.#selector.render(width));
+		// Hint + blank cost two rows; the wizard subtitle already explains
+		// this panel, so on short screens the rows go to the provider list
+		// instead (17 = full selector: 4 chrome above, 10 rows, 3 below).
+		let intro: Container | undefined;
+		if (this.#loggingInProvider === undefined && (maxLines === undefined || maxLines >= 17 + 2)) {
+			intro = new Container();
+			intro.addChild(
+				new Text(theme.fg("muted", "Pick a provider to sign in — you can connect more than one."), 0, 0),
+			);
+			intro.addChild(new Spacer(1));
 		}
-
+		const tail = new Container();
 		const urlLines = this.#authUrl ? wrapTextWithAnsi(theme.fg("dim", this.#authUrl), width) : [];
 		if (this.#authUrl) {
-			lines.push(
-				theme.fg("accent", `Browser login: ${loginUrlLink(this.#authUrl)} ${loginCopyHint()}`),
-				...urlLines.slice(0, 2),
+			tail.addChild(
+				new Text(theme.fg("accent", `Browser login: ${loginUrlLink(this.#authUrl)} ${loginCopyHint()}`), 0, 0),
 			);
+			// Keep one URL row above the prompt; repeat the complete wrapped URL
+			// below so the input remains visible in the wizard's short viewport.
+			if (urlLines[0]) tail.addChild(new Text(urlLines[0], 0, 0));
 			if (this.#authLaunchUrl) {
-				lines.push(theme.fg("dim", `Local shortcut (this machine only): ${this.#authLaunchUrl}`));
+				tail.addChild(
+					new Text(theme.fg("dim", `Local shortcut (this machine only): ${this.#authLaunchUrl}`), 0, 0),
+				);
 			}
 		}
 		if (this.#prompt) {
-			lines.push(theme.fg("warning", this.#prompt.message));
+			tail.addChild(new Text(theme.fg("warning", this.#prompt.message), 0, 0));
 			if (this.#prompt.placeholder) {
-				lines.push(theme.fg("dim", this.#prompt.placeholder));
+				tail.addChild(new Text(theme.fg("dim", this.#prompt.placeholder), 0, 0));
 			}
-			lines.push(this.#prompt.input.render(width)[0] ?? "");
+			tail.addChild(this.#prompt.input);
 		}
-		if (urlLines.length > 2) {
-			lines.push(...urlLines);
+		if (urlLines.length > 1) {
+			for (const line of urlLines) {
+				tail.addChild(new Text(line, 0, 0));
+			}
 		}
-		if (this.#statusLines.length > 0) {
-			lines.push(...this.#statusLines.flatMap(line => wrapTextWithAnsi(line, width)));
+		for (const line of this.#statusLines) {
+			for (const wrapped of wrapTextWithAnsi(line, width)) {
+				tail.addChild(new Text(wrapped, 0, 0));
+			}
 		}
-		return lines;
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				content: this.#selector,
+				gap: 0,
+				fitContent: budget => {
+					if (budget !== undefined) this.#selector.setMaxHeight(budget);
+				},
+			});
+		}
+		if (this.#loggingInProvider) {
+			this.#step.setKind("async");
+			this.#step.setHeading(new Text(theme.bold(`Signing in to ${this.#loggingInProvider}`), 0, 0));
+			this.#step.setIntro(undefined);
+			this.#step.setContent(tail);
+			this.#step.setStatus(undefined);
+		} else {
+			this.#step.setKind("choice");
+			this.#step.setHeading(undefined);
+			this.#step.setIntro(intro);
+			this.#step.setContent(this.#selector);
+			this.#step.setStatus(tail);
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	#createSelector(): OAuthSelectorComponent {

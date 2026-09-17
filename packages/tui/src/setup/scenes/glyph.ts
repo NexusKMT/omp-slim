@@ -1,5 +1,7 @@
-import { routeSelectListMouse, type SgrMouseEvent } from "../../mouse";
+import { type SgrMouseEvent } from "../../mouse";
 import { type SelectItem, SelectList } from "../../components/select-list";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
 import { getSelectListTheme, type SymbolPreset, setSymbolPreset, theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
 
@@ -30,8 +32,7 @@ class GlyphSceneController implements SetupSceneController {
 	#selectList: SelectList;
 	#previewRequest = 0;
 	#committing = false;
-	/** Render line where the select list begins. */
-	#listRowStart = 0;
+	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
@@ -51,7 +52,8 @@ class GlyphSceneController implements SetupSceneController {
 	}
 
 	invalidate(): void {
-		this.#selectList.invalidate();
+		if (this.#step) this.#step.invalidate();
+		else this.#selectList.invalidate();
 	}
 
 	handleInput(data: string): void {
@@ -63,20 +65,30 @@ class GlyphSceneController implements SetupSceneController {
 			this.#preview(preset);
 			return;
 		}
-		this.#selectList.handleInput(data);
+		if (this.#step) this.#step.handleInput(data);
+		else this.#selectList.handleInput(data);
 	}
 
 	/** Wheel moves the highlight (live preview); hover lights the row under the pointer; click confirms it. */
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
 		if (this.#committing) return;
-		routeSelectListMouse(this.#selectList, event, line - this.#listRowStart);
+		this.#step?.routeMouse(event, line, col);
 	}
 
-	render(width: number): readonly string[] {
-		const lines = [theme.fg("muted", "If a row shows boxes, tofu, or misaligned icons, pick another."), ""];
-		this.#listRowStart = lines.length;
-		lines.push(...this.#selectList.render(width));
-		return lines;
+	render(width: number, maxLines?: number): readonly string[] {
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				intro: new Text(theme.fg("muted", "If a row shows boxes, tofu, or misaligned icons, pick another."), 0, 0),
+				content: this.#selectList,
+				minContentLines: GLYPH_ITEMS.length,
+				fitContent: () => {
+					this.#selectList.setMaxVisible(GLYPH_ITEMS.length);
+				},
+			});
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	async #commit(preset: SymbolPreset): Promise<void> {

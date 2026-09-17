@@ -71,7 +71,7 @@ import {
 } from "../keybinding-matchers";
 import { CountdownTimer } from "../chrome/countdown-timer";
 import { editorKey } from "../chrome/keybinding-hints";
-import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
+import { OverlayPanel, PanelDivider, PanelRows } from "../chrome/overlay-box";
 import { handleTabSwitchKey } from "../chrome/selector-helpers";
 
 const OTHER_OPTION = "Other (type your own)";
@@ -406,8 +406,8 @@ function renderRowLabel(
 	const cursor = selected ? theme.fg("accent", `${theme.nav.cursor} `) : "  ";
 	const label = renderInlineMarkdown(rowItem.label, mdTheme, t => theme.fg(color, t));
 	const noteMarker = state.note && state.noteRowKey === rowItem.key ? theme.fg("success", "  ✎ note") : "";
-	// `width` is already the inner content width consumed by row(); when a
-	// scrollbar is needed, renderRows() calls this again with one less column.
+	// `width` is already the inner content width supplied by OverlayPanel; when
+	// a scrollbar is needed, renderRows() calls this again with one less column.
 	// Keep the cursor, option marker, first wrapped label line, and optional
 	// note marker within that budget so the outer fit() never truncates them.
 	const noteWidth = noteMarker ? visibleWidth(noteMarker) : 0;
@@ -504,6 +504,10 @@ export class AskDialogComponent implements Component {
 	#contentWidth = 76;
 	#headerExpandable = false;
 	#descExpandable = false;
+	readonly #panel: OverlayPanel;
+	readonly #headerRegion: PanelRows;
+	readonly #bodyRegion: PanelRows;
+	readonly #footerRegion: PanelRows;
 	readonly #questions: ExtensionAskDialogQuestion[];
 
 	constructor(
@@ -536,6 +540,16 @@ export class AskDialogComponent implements Component {
 				() => this.#handleTimeout(),
 			);
 		}
+		this.#panel = new OverlayPanel("Ask");
+		this.#headerRegion = new PanelRows();
+		this.#bodyRegion = new PanelRows();
+		this.#footerRegion = new PanelRows();
+		this.#footerRegion.setHeight(1);
+		this.#panel.addChild(this.#headerRegion);
+		this.#panel.addChild(new PanelDivider());
+		this.#panel.addChild(this.#bodyRegion);
+		this.#panel.addChild(new PanelDivider());
+		this.#panel.addChild(this.#footerRegion);
 	}
 
 	invalidate(): void {
@@ -543,11 +557,13 @@ export class AskDialogComponent implements Component {
 		this.#previewCache.clear();
 		this.#overflowLayouts = new WeakMap();
 		this.#tabBar?.invalidate();
+		this.#panel.invalidate();
 	}
 
 	dispose(): void {
 		this.#closed = true;
 		this.#countdown?.dispose();
+		this.#panel.dispose();
 	}
 	/**
 	 * Toggle truncated question headers and option descriptions. Returns false
@@ -615,9 +631,9 @@ export class AskDialogComponent implements Component {
 		const tabBarRows = this.#hasSubmitTab() ? 1 : 0;
 		const maxTitleRows = Math.max(1, totalRows - 5 - MIN_BODY_ROWS - tabBarRows);
 		const headerLines = this.#renderHeader(innerWidth, maxTitleRows);
-		// topBorder(1) + header(N) + divider(1) + divider(1) + footer(1) +
-		// bottomBorder(1) = N + 5 fixed rows outside the body. Without the
-		// bottomBorder term the dialog overflowed the viewport by one row
+		// top border (1) + header(N) + two dividers + footer(1) + bottom
+		// border (1) = N + 5 fixed rows outside the body. Without the bottom
+		// border term the dialog overflowed the viewport by one row
 		// (PRRT_kwDOQxs0bc6OFbDY).
 		const fixedRows = 1 + headerLines.length + 1 + 1 + 1 + 1;
 		const bodyRows = Math.max(MIN_BODY_ROWS, totalRows - fixedRows);
@@ -626,15 +642,12 @@ export class AskDialogComponent implements Component {
 			? this.#renderSubmitBody(innerWidth, bodyRows)
 			: this.#renderQuestionBody(innerWidth, bodyRows);
 		const footer = this.#footerHintText(bodyLines.indicator);
-		return [
-			topBorder(width, this.#titleText()),
-			...headerLines.map(line => row(line, width)),
-			divider(width),
-			...bodyLines.lines.map(line => row(line, width)),
-			divider(width),
-			row(theme.fg("dim", footer), width),
-			bottomBorder(width),
-		];
+		this.#panel.title = this.#titleText();
+		this.#headerRegion.setLines(headerLines);
+		this.#bodyRegion.setLines(bodyLines.lines);
+		this.#bodyRegion.setHeight(bodyRows);
+		this.#footerRegion.setLines([theme.fg("dim", footer)]);
+		return this.#panel.render(width);
 	}
 
 	#dialogHeight(width: number, termRows: number): number {

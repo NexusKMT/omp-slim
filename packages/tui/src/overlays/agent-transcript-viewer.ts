@@ -17,7 +17,6 @@ import type * as fs from "node:fs";
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import type { Component, TUI } from "../tui";
 import { Editor } from "../components/editor";
-import { ScrollView } from "../components/scroll-view";
 import { matchesKey } from "../keys";
 import { routeSgrMouseInput } from "../mouse";
 import { formatDuration, formatNumber, logger } from "@oh-my-pi/pi-utils";
@@ -31,8 +30,13 @@ import { getEditorTheme, theme } from "../theme/theme";
 import { matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import type { AgentHubRemote } from "./agent-hub";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
-import { DynamicBorder } from "../chrome/dynamic-border";
+import {
+	TranscriptBrowser,
+	type TranscriptBrowserFrame,
+	type TranscriptBrowserRenderContext,
+} from "../chat/transcript-browser";
 import { sanitizeErrorLine } from "../chrome/error-block";
+import type { ScrollRangeAnchor } from "../components/scroll-view";
 import { formatContextUsage } from "../chrome/context-thresholds";
 
 /** Parsed message and model metadata relevant to a transcript viewer. */
@@ -142,8 +146,7 @@ function statusBadge(status: AgentStatus): string {
 
 export class AgentTranscriptViewer implements Component {
 	#builder: ChatTranscriptBuilder;
-	#scrollView: ScrollView;
-	#followBottom = true;
+	#browser: TranscriptBrowser;
 	#editor: Editor | undefined;
 	#notice: string | undefined;
 	#expanded = false;
@@ -178,10 +181,10 @@ export class AgentTranscriptViewer implements Component {
 			proseOnlyThinking: deps.proseOnlyThinking,
 			requestRender: deps.requestRender,
 		});
-		this.#scrollView = new ScrollView([], {
-			height: 10,
-			scrollbar: "auto",
-			theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
+		this.#browser = new TranscriptBrowser({
+			getHeight: () => this.#deps.ui.terminal?.rows || process.stdout.rows || 40,
+			frame: context => this.#frame(context),
+			followBottom: true,
 		});
 		if (this.#sendable) {
 			this.#editor = new Editor(getEditorTheme());
@@ -463,8 +466,7 @@ export class AgentTranscriptViewer implements Component {
 		if (data.startsWith("\x1b[<")) {
 			routeSgrMouseInput(data, event => {
 				if (event.wheel !== null) {
-					this.#scrollView.scroll(event.wheel * 3);
-					this.#syncFollow();
+					this.#browser.scroll(event.wheel * 3);
 					this.#deps.requestRender();
 				}
 				return true;
@@ -510,31 +512,25 @@ export class AgentTranscriptViewer implements Component {
 		}
 	}
 
-	/** Returns true when the key was a scroll command. ScrollView owns the offset. */
+	/** Returns true when the key was a scroll command. The browser owns the offset. */
 	#handleScroll(data: string): boolean {
-		if (this.#scrollView.handleScrollKey(data)) {
-			this.#syncFollow();
+		if (this.#browser.handleScrollKey(data)) {
 			this.#deps.requestRender();
 			return true;
 		}
 		if (matchesKey(data, "j") || matchesSelectDown(data)) {
-			this.#scrollView.scroll(1);
+			this.#browser.scroll(1);
 		} else if (matchesKey(data, "k") || matchesSelectUp(data)) {
-			this.#scrollView.scroll(-1);
+			this.#browser.scroll(-1);
 		} else if (data === "g") {
-			this.#scrollView.scrollToTop();
+			this.#browser.scrollToTop();
 		} else if (data === "G") {
-			this.#scrollView.scrollToBottom();
+			this.#browser.scrollToBottom();
 		} else {
 			return false;
 		}
-		this.#syncFollow();
 		this.#deps.requestRender();
 		return true;
-	}
-
-	#syncFollow(): void {
-		this.#followBottom = this.#scrollView.getScrollOffset() >= this.#scrollView.getMaxScrollOffset();
 	}
 
 	#submit(text: string): void {
@@ -569,56 +565,52 @@ export class AgentTranscriptViewer implements Component {
 	// ========================================================================
 
 	render(width: number): readonly string[] {
-		const termHeight = process.stdout.rows || 40;
-		// `innerWidth` widths the editor/notice chrome (gutter-prefixed below).
-		// `contentWidth` widths the transcript: ScrollView reserves the last column
-		// for the scrollbar, and the transcript components carry their own 1-col left
-		// gutter — so body rows are emitted WITHOUT an extra outer space, sharing that
-		// gutter with the header/footer (which add one). Stacking both shifted the body
-		// one column right of the title.
-		const innerWidth = Math.max(20, width - 2);
-		const contentWidth = Math.max(1, width - 1);
+		const lines = this.#browser.render(width);
+		if (this.#initialEntryId && this.#browser.hasAnchored(this.#initialEntryId)) {
+			this.#initialEntryId = undefined;
+		}
+		return lines;
+	}
+
+	#frame(context: TranscriptBrowserRenderContext): TranscriptBrowserFrame {
+		// The transcript components carry their own 1-col left gutter, so body
+		// rows are emitted WITHOUT an extra outer space; header/footer rows are
+		// returned raw and the browser adds the one-column inset.
+		const { contentWidth, chromeWidth } = context;
 		const ref = this.#deps.registry.get(this.#deps.agentId);
 
 		const headerLines = this.#headerLines(ref?.status, ref?.kind, ref?.parentId);
 		const footerLines = this.#footerLines();
 		const noticeLine = this.#notice
-			? ` ${theme.fg("error", sanitizeErrorLine(this.#notice, innerWidth))}`
+			? theme.fg("error", sanitizeErrorLine(this.#notice, chromeWidth))
 			: this.#remoteError && !this.#builder.isEmpty
-				? ` ${theme.fg("error", sanitizeErrorLine(this.#remoteError, innerWidth))}`
+				? theme.fg("error", sanitizeErrorLine(this.#remoteError, chromeWidth))
 				: undefined;
-		const editorLines = this.#editor ? this.#editor.render(innerWidth) : [];
-
-		// Chrome: top border + header rows + divider border + (notice) + editor + footer + bottom border.
-		const chrome = headerLines.length + 2 + editorLines.length + footerLines.length + (noticeLine ? 1 : 0) + 1;
-		const viewportHeight = Math.max(3, termHeight - chrome);
+		// The editor carries no outer gutter; it renders at chrome width and the
+		// browser insets each row.
+		const editorLines = this.#editor ? this.#editor.render(chromeWidth) : [];
 
 		const contentLines = this.#builder.isEmpty
 			? [` ${theme.fg("dim", this.#placeholder(Math.max(10, contentWidth - 1)))}`]
 			: this.#builder.container.render(contentWidth);
-		this.#scrollView.setLines(contentLines);
-		this.#scrollView.setHeight(viewportHeight);
+		let anchor: ScrollRangeAnchor | undefined;
 		if (this.#initialEntryId) {
 			const targetRow = this.#builder.rowForEntry(this.#initialEntryId);
 			if (targetRow !== undefined) {
-				this.#followBottom = false;
-				this.#scrollView.setScrollOffset(Math.max(0, targetRow - 1));
-				this.#initialEntryId = undefined;
+				anchor = {
+					id: this.#initialEntryId,
+					start: targetRow,
+					end: targetRow + 1,
+					mode: "once",
+					alignment: "start",
+				};
 			}
-		} else if (this.#followBottom) {
-			this.#scrollView.scrollToBottom();
 		}
-
-		const lines: string[] = [];
-		lines.push(...new DynamicBorder().render(width));
-		for (const headerLine of headerLines) lines.push(` ${headerLine}`);
-		lines.push(...new DynamicBorder().render(width));
-		for (const row of this.#scrollView.render(width)) lines.push(row);
-		if (noticeLine) lines.push(noticeLine);
-		for (const editorLine of editorLines) lines.push(` ${editorLine}`);
-		lines.push(...footerLines);
-		lines.push(...new DynamicBorder().render(width));
-		return lines;
+		return {
+			header: headerLines,
+			body: { lines: contentLines, anchor },
+			footer: [...(noticeLine ? [noticeLine] : []), ...editorLines, ...footerLines],
+		};
 	}
 
 	#headerLines(status: AgentStatus | undefined, kind: string | undefined, parentId: string | undefined): string[] {
@@ -634,11 +626,11 @@ export class AgentTranscriptViewer implements Component {
 	#footerLines(): string[] {
 		const lines: string[] = [];
 		const statsLine = this.#statsLine();
-		if (statsLine) lines.push(` ${statsLine}`);
+		if (statsLine) lines.push(statsLine);
 		const hint = this.#editor
 			? `Enter:send  Esc:close  ${this.#deps.expandKeys[0] ?? "ctrl+o"}:expand  empty input → j/k:scroll  g/G:top/bottom`
 			: `Esc:close  ${this.#deps.expandKeys[0] ?? "ctrl+o"}:expand  j/k:scroll  g/G:top/bottom`;
-		lines.push(` ${theme.fg("dim", hint)}`);
+		lines.push(theme.fg("dim", hint));
 		return lines;
 	}
 

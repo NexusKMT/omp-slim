@@ -38,7 +38,7 @@ export function renderFileList(options: FileListOptions, theme: Theme): string[]
 			itemType: "file",
 			renderItem: entry => {
 				const isDirectory = entry.isDirectory ?? entry.path.endsWith("/");
-				const displayPath = isDirectory && entry.path.endsWith("/") ? entry.path : entry.path;
+				const displayPath = entry.path;
 				const lang = isDirectory ? undefined : getLanguageFromPath(displayPath);
 				const icon = !showIcons
 					? ""

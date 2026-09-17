@@ -1,6 +1,7 @@
 import type { TextContent } from "@oh-my-pi/pi-ai";
 import { type Component } from "../tui";
 import { Box } from "../components/box";
+import { Disclosure } from "../components/disclosure";
 import { Container } from "../tui";
 import { Markdown } from "../components/markdown";
 import { Spacer } from "../components/spacer";
@@ -25,13 +26,18 @@ import { type UserBubbleOptions, UserMessageComponent, userBubbleColor } from ".
  * toggle) appends the rendered skill prompt.
  */
 export class SkillMessageComponent extends Container {
-	#expanded = false;
 	// Canonical and replayed skill cards finalize immediately so they retire to
 	// native scrollback like any settled block. An optimistically-painted
 	// `/skill:` row (issue #11217) is instead held live until its canonical
 	// `message_start` reconciles it, so it stays removable and never leaves a
 	// duplicate behind in scrollback if reconcile swaps it out.
 	#transcriptBlockFinalized = true;
+	// Controlled expansion delegate. In callout mode it is the prompt-only
+	// disclosure nested inside the single continuous SkillCallout rail; in
+	// inline mode it pairs the user bubble summary with a lazy SkillCallout
+	// body. Rebuilt (unmaterialized) on invalidate so header/body pick up the
+	// current theme without eagerly constructing the expanded prompt.
+	#disclosure: Disclosure | undefined;
 
 	readonly #message: CustomMessage<SkillPromptDetails>;
 	readonly #imageLinks?: readonly (string | undefined)[];
@@ -45,10 +51,7 @@ export class SkillMessageComponent extends Container {
 	}
 
 	setExpanded(expanded: boolean): void {
-		if (this.#expanded !== expanded) {
-			this.#expanded = expanded;
-			this.#rebuild();
-		}
+		this.#disclosure?.setExpanded(expanded);
 	}
 
 	/**
@@ -72,11 +75,17 @@ export class SkillMessageComponent extends Container {
 	}
 
 	override invalidate(): void {
-		super.invalidate();
 		this.#rebuild();
 	}
 
+	override dispose(): void {
+		this.#disclosure?.dispose();
+		super.dispose();
+	}
+
 	#rebuild(): void {
+		const expanded = this.#disclosure?.expanded ?? false;
+		this.#disclosure?.dispose();
 		this.clear();
 		const details = this.#message.details;
 		const name = details?.name?.trim() || "unknown";
@@ -96,18 +105,44 @@ export class SkillMessageComponent extends Container {
 			skillPath: candidate => (candidate === name ? details?.path : undefined),
 		};
 
-		const header = new Text(this.#header(label, details), 0, 0);
 		if (!leading) {
-			this.addChild(new UserMessageComponent(display, bubble));
-			if (this.#expanded) this.addChild(new SkillCallout([header, ...this.#promptSection(bubble)]));
+			this.#disclosure = new Disclosure({
+				summary: new UserMessageComponent(display, bubble),
+				// Prompt extraction and Markdown layout stay lazy: the factory
+				// runs on the first expanded render, reading the current theme.
+				body: () =>
+					new SkillCallout([new Text(this.#header(label, details), 0, 0), ...this.#promptSection(bubble)]),
+				expanded,
+			});
+			this.addChild(this.#disclosure);
 			return;
 		}
 
 		const body = display.slice(label.length).trim();
-		const children: Component[] = [header];
+		const children: Component[] = [new Text(this.#header(label, details), 0, 0)];
 		if (body) children.push(new Spacer(1), this.#markdown(body, bubble));
-		if (this.#expanded) children.push(...this.#promptSection(bubble));
+		// The prompt disclosure nests inside the one callout so the
+		// skill-colored rail stays continuous across summary and detail.
+		const promptDisclosure = new Disclosure({
+			body: () => this.#promptFragment(bubble),
+			expanded,
+		});
+		// The rail box and its Markdown always ignore tight viewports.
+		promptDisclosure.setIgnoreTight(true);
+		this.#disclosure = promptDisclosure;
+		children.push(promptDisclosure);
 		this.addChild(new SkillCallout(children));
+	}
+
+	/**
+	 * Expanded prompt section (leading mode detail slot): raw rows appended to
+	 * the outer callout, matching the pre-Disclosure layout of a single rail
+	 * with no duplicate header.
+	 */
+	#promptFragment(bubble: UserBubbleOptions): Component {
+		const fragment = new Container();
+		for (const child of this.#promptSection(bubble)) fragment.addChild(child);
+		return fragment;
 	}
 
 	#markdown(text: string, bubble: UserBubbleOptions): Markdown {

@@ -28,7 +28,6 @@ import {
 	matchesKey,
 	padding,
 	routeSgrMouseInput,
-	ScrollView,
 	sliceByColumn,
 	type TUI,
 	truncateToWidth,
@@ -38,13 +37,12 @@ import type { TranscriptEntryLike as TranscriptEntry } from "../chat/transcript-
 import { theme } from "../theme/theme";
 import { matchesAppToolsExpand, matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
-import { DynamicBorder } from "../chrome/dynamic-border";
+import { TranscriptBrowser, type TranscriptBrowserFrame } from "../chat/transcript-browser";
 import { fit } from "../chrome/overlay-box";
 import {
 	appendOutlineEntries,
 	type ComposedColumn,
 	composeOutlineColumn,
-	OutlineRowCache,
 	type OutlineTarget,
 	isUserTurnEntry,
 	outlineVisibility,
@@ -85,8 +83,6 @@ interface SiblingColumn {
 	label: string;
 }
 
-/** Rows the frame chrome occupies: top rule, header, rule, footer hint, bottom rule. */
-const CHROME_ROWS = 5;
 /** Blank columns between branch-strip columns. */
 const STRIP_GAP = 2;
 /** Duration of the branch-swap camera slide. */
@@ -94,17 +90,14 @@ const SLIDE_MS = 160;
 
 export class RewindSelectorComponent implements Component {
 	#builder: ChatTranscriptBuilder;
-	#scrollView: ScrollView;
-	#border = new DynamicBorder();
+	#browser: TranscriptBrowser;
 	#targets: OutlineTarget[] = [];
 	#selected = 0;
 	/** Per-main-target "renders at least one non-blank row", refreshed each frame. */
 	#mainVisible: boolean[] | undefined;
 	/** Same, for the active sibling column. */
 	#siblingVisible: boolean[] | undefined;
-	#scrollToSelection = true;
 	#expanded = false;
-	#rowCache = new OutlineRowCache();
 
 	// Branch strip: present when the selected turn has sibling branches.
 	// Column 0 is the current path; siblings follow in tree order.
@@ -124,10 +117,9 @@ export class RewindSelectorComponent implements Component {
 		this.#builder = this.#newBuilder();
 		this.#targets = appendOutlineEntries(this.#builder, entries);
 		this.#selected = Math.max(0, this.#targets.length - 1);
-		this.#scrollView = new ScrollView([], {
-			height: 10,
-			scrollbar: "auto",
-			theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
+		this.#browser = new TranscriptBrowser({
+			getHeight: () => this.deps.ui.terminal?.rows || process.stdout.rows || 40,
+			frame: context => this.#frame(context.contentWidth),
 		});
 	}
 
@@ -155,6 +147,7 @@ export class RewindSelectorComponent implements Component {
 		for (const columns of this.#variantCache.values()) {
 			for (const column of columns) column.builder.container.invalidate();
 		}
+		this.#browser.invalidate();
 	}
 
 	dispose(): void {
@@ -203,7 +196,6 @@ export class RewindSelectorComponent implements Component {
 		const from = this.#slidePosition(now);
 		this.#slide = { from, to: variant, startedAt: now };
 		this.#activeVariant = variant;
-		this.#scrollToSelection = true;
 		this.#slideTimer ??= setInterval(() => {
 			if (!this.#slide || Date.now() - this.#slide.startedAt >= SLIDE_MS) this.#stopSlide();
 			this.deps.requestRender();
@@ -237,9 +229,7 @@ export class RewindSelectorComponent implements Component {
 				if (event.wheel !== null) {
 					// A wheel notch at either end moves nothing: repainting it
 					// anyway makes the frame twitch under a fast wheel.
-					const before = this.#scrollView.getScrollOffset();
-					this.#scrollView.scroll(event.wheel * 3);
-					if (this.#scrollView.getScrollOffset() !== before) this.deps.requestRender();
+					if (this.#browser.scroll(event.wheel * 3)) this.deps.requestRender();
 				}
 				return true;
 			});
@@ -287,7 +277,7 @@ export class RewindSelectorComponent implements Component {
 			return;
 		}
 		// Page/home/end/shift+arrow scrolling without moving the selection.
-		if (this.#scrollView.handleScrollKey(data)) {
+		if (this.#browser.handleScrollKey(data)) {
 			this.deps.requestRender();
 		}
 	}
@@ -300,7 +290,6 @@ export class RewindSelectorComponent implements Component {
 			while (index >= 0 && index < targets.length && this.#siblingVisible?.[index] === false) index += delta;
 			if (index >= 0 && index < targets.length) {
 				this.#siblingSelected = index;
-				this.#scrollToSelection = true;
 				this.deps.requestRender();
 			} else if (delta === -1) {
 				// Off the top of an alternate: return to the current path above the fork.
@@ -323,7 +312,6 @@ export class RewindSelectorComponent implements Component {
 				this.#activeVariant = 0;
 				this.#siblingSelected = 0;
 				this.#stopSlide();
-				this.#scrollToSelection = true;
 				this.deps.requestRender();
 				return;
 			}
@@ -340,25 +328,19 @@ export class RewindSelectorComponent implements Component {
 	// ========================================================================
 
 	render(width: number): readonly string[] {
-		const termHeight = process.stdout.rows || 40;
-		// ScrollView reserves the last column for the scrollbar; the outline
-		// consumes two columns each side ("┆ " / " ┆"), unselected rows a
-		// matching two-column left gutter so blocks never shift while stepping.
-		const contentWidth = Math.max(1, width - 1);
-		const children = this.#builder.container.children;
-		const mainInner = Math.max(10, contentWidth - 4);
-		const childRows = this.#rowCache.rows(children, mainInner);
+		return this.#browser.render(width);
+	}
 
-		this.#mainVisible = outlineVisibility(childRows, this.#targets);
-		if (!this.#isMainSelectable(this.#selected)) {
+	#frame(contentWidth: number): TranscriptBrowserFrame {
+		// The outline consumes two columns each side ("┆ " / " ┆"), unselected
+		// rows a matching two-column left gutter so blocks never shift while stepping.
+		const children = this.#builder.container.children;
+		const prepared = this.#browser.prepareOutline(children, this.#targets, this.#selected, contentWidth);
+		this.#mainVisible = prepared.visible;
+		if (prepared.selected !== this.#selected) {
 			// The current target collapsed (e.g. expansion toggle): rest on the
-			// nearest visible one above, falling back to the nearest below.
-			let above = this.#selected - 1;
-			while (above >= 0 && !this.#isMainSelectable(above)) above--;
-			let below = this.#selected + 1;
-			while (below < this.#targets.length && !this.#isMainSelectable(below)) below++;
-			if (above >= 0) this.#selected = above;
-			else if (below < this.#targets.length) this.#selected = below;
+			// nearest visible one and leave the strip.
+			this.#selected = prepared.selected;
 			this.#activeVariant = 0;
 			this.#siblingSelected = 0;
 		}
@@ -366,42 +348,37 @@ export class RewindSelectorComponent implements Component {
 		const columns = this.#stripColumns();
 		const composed =
 			columns.length > 0
-				? this.#renderStrip(childRows, columns, contentWidth)
-				: composeOutlineColumn(
-						childRows,
-						0,
-						children.length,
-						this.#targets,
-						this.#selected,
-						contentWidth,
-						undefined,
-					);
-		const lines = composed.lines;
-
-		const viewportHeight = Math.max(3, termHeight - CHROME_ROWS);
-		this.#scrollView.setLines(lines);
-		this.#scrollView.setHeight(viewportHeight);
-		if (this.#scrollToSelection && composed.selStart >= 0) {
-			const offset = this.#scrollView.getScrollOffset();
-			const top = Math.max(0, composed.selStart - 1);
-			const bottom = Math.min(lines.length, composed.selEnd + 1);
-			if (top < offset) this.#scrollView.setScrollOffset(top);
-			else if (bottom > offset + viewportHeight) this.#scrollView.setScrollOffset(bottom - viewportHeight);
-			this.#scrollToSelection = false;
-		}
-
-		const output: string[] = [];
-		output.push(...this.#border.render(width));
-		output.push(
-			` ${theme.icon.rewind} ${theme.bold("Rewind")}${theme.sep.dot}${theme.fg("dim", "pick the point to continue from")}`,
-		);
-		output.push(...this.#border.render(width));
-		output.push(...this.#scrollView.render(width));
+				? this.#renderStrip(prepared.childRows, columns, contentWidth)
+				: this.#browser.composeOutline({
+						children,
+						targets: this.#targets,
+						selected: this.#selected,
+						columnWidth: contentWidth,
+						prepared,
+					}).column;
 		const position = this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : "";
 		const lateral = columns.length > 0 ? "←/→ branches" : "←/→ user turns";
-		output.push(` ${theme.fg("dim", `${position}↑/↓ step  ${lateral}  enter rewind  ctrl+o expand  esc cancel`)}`);
-		output.push(...this.#border.render(width));
-		return output;
+		return {
+			header: [
+				`${theme.icon.rewind} ${theme.bold("Rewind")}${theme.sep.dot}${theme.fg("dim", "pick the point to continue from")}`,
+			],
+			body: {
+				lines: composed.lines,
+				anchor: this.#outlineAnchor(composed),
+			},
+			footer: [theme.fg("dim", `${position}↑/↓ step  ${lateral}  enter rewind  ctrl+o expand  esc cancel`)],
+		};
+	}
+
+	/** Selection anchor keyed by the outlined turn/sibling identity plus its composed range. */
+	#outlineAnchor(composed: ComposedColumn): { id: string; start: number; end: number } | undefined {
+		if (composed.selStart < 0) return undefined;
+		const outlined = this.#outlinedTarget();
+		const id =
+			this.#activeVariant > 0
+				? `rewind:sibling:${this.#stripColumns()[this.#activeVariant - 1]?.rootId ?? this.#activeVariant}:${outlined?.entryId ?? this.#siblingSelected}`
+				: `rewind:main:${outlined?.turnId ?? this.#selected}`;
+		return { id, start: composed.selStart, end: composed.selEnd };
 	}
 
 	/**
@@ -411,14 +388,16 @@ export class RewindSelectorComponent implements Component {
 	#renderStrip(mainRows: (readonly string[])[], columns: SiblingColumn[], contentWidth: number): ComposedColumn {
 		const anchor = this.#targets[this.#selected]!;
 		const colWidth = Math.max(24, Math.floor((contentWidth - STRIP_GAP) / 2));
-		const colInner = Math.max(10, colWidth - 4);
 		const count = columns.length + 1;
 
 		// Shared history above the fork, full width, never outlined.
 		const prefix = composeOutlineColumn(mainRows, 0, anchor.start, [], -1, contentWidth, undefined);
 
 		// Column 0: the current path from the fork down, re-rendered at column width.
-		const suffixRows = this.#rowCache.rows(this.#builder.container.children.slice(anchor.start), colInner);
+		const suffixRows = this.#browser.renderOutlineRows(
+			this.#builder.container.children.slice(anchor.start),
+			colWidth,
+		);
 		const suffixTargets = this.#targets.slice(this.#selected).map(target => ({
 			...target,
 			start: target.start - anchor.start,
@@ -437,7 +416,7 @@ export class RewindSelectorComponent implements Component {
 		];
 		for (let index = 0; index < columns.length; index++) {
 			const column = columns[index]!;
-			const rows = this.#rowCache.rows(column.builder.container.children, colInner);
+			const rows = this.#browser.renderOutlineRows(column.builder.container.children, colWidth);
 			if (this.#activeVariant === index + 1) {
 				this.#siblingVisible = outlineVisibility(rows, column.targets);
 			}

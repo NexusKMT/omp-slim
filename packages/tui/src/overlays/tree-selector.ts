@@ -54,28 +54,7 @@ import { shortenPath } from "../render/render-utils";
 import { canonicalizeMessage } from "../chat/thinking-display";
 import { resolveAssistantErrorPresentation } from "../chat/transcript-render-helpers";
 import { OverlayPanel, PanelDivider } from "../chrome/overlay-box";
-import { centeredWindow, contentRowWidth, renderScrollableList } from "../chrome/selector-helpers";
-
-/** Gutter info: position (displayIndent where connector was) and whether to show │ */
-interface GutterInfo {
-	position: number; // displayIndent level where the connector was shown
-	show: boolean; // true = show │, false = show spaces
-}
-
-/** Flattened tree node for navigation */
-interface FlatNode {
-	node: TreeSelectorNode;
-	/** Indentation level (each level = 3 chars) */
-	indent: number;
-	/** Whether to show connector (├─ or └─) - true if parent has multiple children */
-	showConnector: boolean;
-	/** If showConnector, true = last sibling (└─), false = not last (├─) */
-	isLast: boolean;
-	/** Gutter info for each ancestor branch point */
-	gutters: GutterInfo[];
-	/** True if this node is a root under a virtual branching root (multiple roots) */
-	isVirtualRootChild: boolean;
-}
+import { TreeView, type TreeRow } from "../components/tree-view";
 
 /** Filter mode for tree display */
 type FilterMode = TreeFilterMode;
@@ -175,15 +154,16 @@ function stripSystemWrapperTags(content: string): string {
 const SEARCH_TEXT_LIMIT = 200;
 
 class TreeList implements Component {
-	#flatNodes: FlatNode[] = [];
-	#filteredNodes: FlatNode[] = [];
-	#selectedIndex = 0;
+	#tree: TreeView<TreeSelectorNode, string>;
+	#roots: TreeSelectorNode[] = [];
+	#rootIds: Set<string> = new Set();
+	#nodeById: Map<string, TreeSelectorNode> = new Map();
 	#filterMode: FilterMode;
 	#searchQuery = "";
 	#toolCallMap: Map<string, ToolCallInfo> = new Map();
 	#multipleRoots = false;
 	#activePathIds: Set<string> = new Set();
-	#lastSelectedId: string | null = null;
+	#containsActive: Map<TreeSelectorNode, boolean> = new Map();
 
 	onSelect?: (entryId: string, options: { summarize: boolean }) => void;
 	onCancel?: () => void;
@@ -198,124 +178,60 @@ class TreeList implements Component {
 	) {
 		this.#filterMode = initialFilterMode;
 		this.#multipleRoots = tree.length > 1;
-		this.#flatNodes = this.#flattenTree(tree);
-		this.#buildActivePath();
-		this.#applyFilter();
+		this.#indexSession(tree);
+		this.#tree = new TreeView<TreeSelectorNode, string>({
+			roots: this.#roots,
+			getKey: node => node.entry.id,
+			getChildren: node => this.#orderedChildren(node),
+			getChildDepth: (_node, row, children) =>
+				children.length > 1 || (this.#multipleRoots && row.parentKey === undefined) ? row.depth + 1 : row.depth,
+			theme,
+			filter: this.#buildFilter(),
+			maxRows: maxVisibleLines,
+			scrollbar: true,
+			scrollbarTheme: {
+				track: text => theme.fg("muted", text),
+				thumb: text => theme.fg("accent", text),
+			},
+			renderPrefix: (row, context) => this.#renderGutter(row, context.width, context.windowRows),
+			renderLeading: (_item, context) => (context.selected ? theme.fg("accent", "› ") : "  "),
+			renderRow: (node, context) => this.#renderTreeRow(node, context.selected),
+			styleSelected: line => theme.bg("selectedBg", line),
+		});
 
-		// Start with initialSelectedId if provided, otherwise current leaf
+		// Start with initialSelectedId if provided, otherwise current leaf.
+		// A null target selects the last row; unknown ids resolve to their
+		// nearest visible ancestor inside TreeView.
 		const targetId = initialSelectedId ?? currentLeafId;
-		this.#selectedIndex = this.#findNearestVisibleIndex(targetId);
-		this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? null;
-	}
-
-	/** Build the set of entry IDs on the path from root to current leaf */
-	#buildActivePath(): void {
-		this.#activePathIds.clear();
-		if (!this.currentLeafId) return;
-
-		// Build a map of id -> entry for parent lookup
-		const entryMap = new Map<string, FlatNode>();
-		for (const flatNode of this.#flatNodes) {
-			entryMap.set(flatNode.node.entry.id, flatNode);
-		}
-
-		// Walk from leaf to root
-		let currentId: string | null = this.currentLeafId;
-		while (currentId) {
-			this.#activePathIds.add(currentId);
-			const node = entryMap.get(currentId);
-			if (!node) break;
-			currentId = node.node.entry.parentId ?? null;
+		if (targetId === null || targetId === undefined) {
+			this.#tree.setSelectionIndex(this.#tree.rows.length - 1);
+		} else {
+			this.#tree.setSelectedKey(targetId);
 		}
 	}
 
 	/**
-	 * Find the index of the nearest visible entry, walking up the parent chain if needed.
-	 * Returns the index in filteredNodes, or the last index as fallback.
+	 * Session-specific projection index. Iteratively collects tool calls for
+	 * later lookup, maps ids to nodes/parents, marks active-descendant
+	 * membership, orders the current branch first, and records the active
+	 * path. Hierarchy shape, filtering, and selection live in TreeView.
 	 */
-	#findNearestVisibleIndex(entryId: string | null): number {
-		if (this.#filteredNodes.length === 0) return 0;
-
-		// Build a map for parent lookup
-		const entryMap = new Map<string, FlatNode>();
-		for (const flatNode of this.#flatNodes) {
-			entryMap.set(flatNode.node.entry.id, flatNode);
-		}
-
-		// Build a map of visible entry IDs to their indices in filteredNodes
-		const visibleIdToIndex = new Map<string, number>(this.#filteredNodes.map((node, i) => [node.node.entry.id, i]));
-
-		// Walk from entryId up to root, looking for a visible entry
-		let currentId = entryId;
-		while (currentId !== null) {
-			const index = visibleIdToIndex.get(currentId);
-			if (index !== undefined) return index;
-			const node = entryMap.get(currentId);
-			if (!node) break;
-			currentId = node.node.entry.parentId ?? null;
-		}
-
-		// Fallback: last visible entry
-		return this.#filteredNodes.length - 1;
-	}
-
-	#flattenTree(roots: TreeSelectorNode[]): FlatNode[] {
-		const result: FlatNode[] = [];
+	#indexSession(roots: TreeSelectorNode[]): void {
 		this.#toolCallMap.clear();
+		this.#containsActive.clear();
+		this.#nodeById.clear();
+		this.#activePathIds.clear();
 
-		// A real branch point adds one indentation level. Linear conversation
-		// chains retain that level so their text stays aligned with the branch
-		// head instead of drifting right after every fork.
-
-		// Stack items: [node, indent, showConnector, isLast, gutters, isVirtualRootChild]
-		type StackItem = [TreeSelectorNode, number, boolean, boolean, GutterInfo[], boolean];
-		const stack: StackItem[] = [];
-
-		// Determine which subtrees contain the active leaf (to sort current branch first)
-		// Use iterative post-order traversal to avoid stack overflow
-		const containsActive = new Map<TreeSelectorNode, boolean>();
-		const leafId = this.currentLeafId;
-		{
-			// Build list in pre-order, then process in reverse for post-order effect
-			const allNodes: TreeSelectorNode[] = [];
-			const preOrderStack: TreeSelectorNode[] = [...roots];
-			while (preOrderStack.length > 0) {
-				const node = preOrderStack.pop()!;
-				allNodes.push(node);
-				// Push children in reverse so they're processed left-to-right
-				for (let i = node.children.length - 1; i >= 0; i--) {
-					preOrderStack.push(node.children[i]);
-				}
-			}
-			// Process in reverse (post-order): children before parents
-			for (let i = allNodes.length - 1; i >= 0; i--) {
-				const node = allNodes[i];
-				let has = leafId !== null && node.entry.id === leafId;
-				for (const child of node.children) {
-					if (containsActive.get(child)) {
-						has = true;
-					}
-				}
-				containsActive.set(node, has);
-			}
-		}
-
-		// Add roots in reverse order, prioritizing the one containing the active leaf
-		// If multiple roots, treat them as children of a virtual root that branches
-		const multipleRoots = roots.length > 1;
-		const orderedRoots = [...roots].sort((a, b) => Number(containsActive.get(b)) - Number(containsActive.get(a)));
-		for (let i = orderedRoots.length - 1; i >= 0; i--) {
-			const isLast = i === orderedRoots.length - 1;
-			stack.push([orderedRoots[i], multipleRoots ? 1 : 0, multipleRoots, isLast, [], multipleRoots]);
-		}
-
-		while (stack.length > 0) {
-			const [node, indent, showConnector, isLast, gutters, isVirtualRootChild] = stack.pop()!;
-
-			// Extract tool calls from assistant messages for later lookup
+		const parentIds = new Map<string, string | null>();
+		const allNodes: TreeSelectorNode[] = [];
+		const visitStack: TreeSelectorNode[] = [...roots];
+		while (visitStack.length > 0) {
+			const node = visitStack.pop()!;
+			allNodes.push(node);
+			this.#nodeById.set(node.entry.id, node);
 			const entry = node.entry;
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				const content = (entry.message as { content?: unknown }).content;
+			if (entry.type === "message" && entry.message.role === "assistant" && "content" in entry.message) {
+				const content = entry.message.content;
 				if (Array.isArray(content)) {
 					for (const block of content) {
 						if (typeof block === "object" && block !== null && "type" in block && block.type === "toolCall") {
@@ -325,65 +241,74 @@ class TreeList implements Component {
 					}
 				}
 			}
-
-			result.push({ node, indent, showConnector, isLast, gutters, isVirtualRootChild });
-
-			const children = node.children;
-			const multipleChildren = children.length > 1;
-
-			// Order children so the branch containing the active leaf comes first
-			const orderedChildren = (() => {
-				const prioritized: TreeSelectorNode[] = [];
-				const rest: TreeSelectorNode[] = [];
-				for (const child of children) {
-					if (containsActive.get(child)) {
-						prioritized.push(child);
-					} else {
-						rest.push(child);
-					}
-				}
-				return [...prioritized, ...rest];
-			})();
-
-			// Real branch points add visual depth, and a virtual root's direct
-			// children (the session roots) nest one level under the shared column-0
-			// root. Linear continuations otherwise stay aligned with their head.
-			const childIndent = multipleChildren || isVirtualRootChild ? indent + 1 : indent;
-
-			// Build gutters for children
-			// If this node showed a connector, add a gutter entry for descendants
-			// Only add gutter if connector is actually displayed (not suppressed for virtual root children)
-			const connectorDisplayed = showConnector && !isVirtualRootChild;
-			// When connector is displayed, add a gutter entry at the connector's position
-			// Connector is at position (displayIndent - 1), so gutter should be there too
-			const currentDisplayIndent = this.#multipleRoots ? Math.max(0, indent - 1) : indent;
-			const connectorPosition = Math.max(0, currentDisplayIndent - 1);
-			const childGutters: GutterInfo[] = connectorDisplayed
-				? [...gutters, { position: connectorPosition, show: !isLast }]
-				: gutters;
-
-			// Add children in reverse order
-			for (let i = orderedChildren.length - 1; i >= 0; i--) {
-				const childIsLast = i === orderedChildren.length - 1;
-				stack.push([orderedChildren[i], childIndent, multipleChildren, childIsLast, childGutters, false]);
+			for (let i = node.children.length - 1; i >= 0; i--) {
+				const child = node.children[i];
+				parentIds.set(child.entry.id, node.entry.id);
+				visitStack.push(child);
 			}
 		}
+		for (const root of roots) {
+			if (!parentIds.has(root.entry.id)) parentIds.set(root.entry.id, null);
+		}
 
-		return result;
+		// Post-order active-descendant membership (children before parents).
+		const leafId = this.currentLeafId;
+		for (let i = allNodes.length - 1; i >= 0; i--) {
+			const node = allNodes[i];
+			let has = leafId !== null && node.entry.id === leafId;
+			for (const child of node.children) {
+				if (this.#containsActive.get(child)) {
+					has = true;
+					break;
+				}
+			}
+			this.#containsActive.set(node, has);
+		}
+
+		// Current branch first; stable sort preserves domain order otherwise.
+		this.#roots = [...roots].sort(
+			(a, b) => Number(this.#containsActive.get(b)) - Number(this.#containsActive.get(a)),
+		);
+		this.#rootIds = new Set(this.#roots.map(root => root.entry.id));
+
+		// Active path from the current leaf back to its root.
+		let currentId: string | null = this.currentLeafId;
+		while (currentId) {
+			this.#activePathIds.add(currentId);
+			const parentId = parentIds.get(currentId);
+			if (parentId === undefined || parentId === null) break;
+			currentId = parentId;
+		}
+	}
+
+	/** Children with the branch containing the active leaf first. */
+	#orderedChildren(node: TreeSelectorNode): readonly TreeSelectorNode[] {
+		const children = node.children;
+		let hasActive = false;
+		for (const child of children) {
+			if (this.#containsActive.get(child)) {
+				hasActive = true;
+				break;
+			}
+		}
+		if (!hasActive) return children;
+		return [...children].sort((a, b) => Number(this.#containsActive.get(b)) - Number(this.#containsActive.get(a)));
 	}
 
 	#applyFilter(): void {
-		// Update lastSelectedId only when we have a valid selection (non-empty list)
-		// This preserves the selection when switching through empty filter results
-		if (this.#filteredNodes.length > 0) {
-			this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? this.#lastSelectedId;
-		}
+		// TreeView retains the nearest visible selection (including an anchor
+		// through empty filter results) when the predicate is replaced.
+		this.#tree.setFilter(this.#buildFilter());
+	}
 
+	/** Visible-row predicate combining the assistant-text rule, filter mode, and fuzzy query. */
+	#buildFilter(): (node: TreeSelectorNode, row: TreeRow<TreeSelectorNode, string>) => boolean {
+		const filterMode = this.#filterMode;
+		const leafId = this.currentLeafId;
 		const searchTokens = this.#searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
-
-		this.#filteredNodes = this.#flatNodes.filter(flatNode => {
-			const entry = flatNode.node.entry;
-			const isCurrentLeaf = entry.id === this.currentLeafId;
+		return node => {
+			const entry = node.entry;
+			const isCurrentLeaf = entry.id === leafId;
 
 			// Skip assistant messages with only tool calls (no text) unless error/aborted
 			// Always show current leaf so active position is visible
@@ -415,7 +340,7 @@ class TreeList implements Component {
 				entry.type === "mode_change" ||
 				entry.type === "reset_boundary";
 
-			switch (this.#filterMode) {
+			switch (filterMode) {
 				case "user-only":
 					// Just user requests (plain prompts and user-invoked skill/collab prompts)
 					passesFilter = isUserRequestEntry(entry);
@@ -426,7 +351,7 @@ class TreeList implements Component {
 					break;
 				case "labeled-only":
 					// Just labeled entries
-					passesFilter = flatNode.node.label !== undefined;
+					passesFilter = node.label !== undefined;
 					break;
 				case "all":
 					// Show everything
@@ -442,25 +367,12 @@ class TreeList implements Component {
 
 			// Apply fuzzy search filter
 			if (searchTokens.length > 0) {
-				const nodeText = this.#getSearchableText(flatNode.node);
+				const nodeText = this.#getSearchableText(node);
 				return searchTokens.every(token => fuzzyMatch(token, nodeText).matches);
 			}
 
 			return true;
-		});
-
-		// Try to preserve cursor on the same node, or find nearest visible ancestor
-		if (this.#lastSelectedId) {
-			this.#selectedIndex = this.#findNearestVisibleIndex(this.#lastSelectedId);
-		} else if (this.#selectedIndex >= this.#filteredNodes.length) {
-			// Clamp index if out of bounds
-			this.#selectedIndex = Math.max(0, this.#filteredNodes.length - 1);
-		}
-
-		// Update lastSelectedId to the actual selection (may have changed due to parent walk)
-		if (this.#filteredNodes.length > 0) {
-			this.#lastSelectedId = this.#filteredNodes[this.#selectedIndex]?.node.entry.id ?? this.#lastSelectedId;
-		}
+		};
 	}
 
 	/** Get searchable text content from a node */
@@ -557,23 +469,26 @@ class TreeList implements Component {
 		return parts.join(" ");
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.#tree.invalidate();
+	}
+
+	dispose(): void {
+		this.#tree.dispose();
+	}
 
 	getSearchQuery(): string {
 		return this.#searchQuery;
 	}
 
 	getSelectedNode(): TreeSelectorNode | undefined {
-		return this.#filteredNodes[this.#selectedIndex]?.node;
+		return this.#tree.selectedItem;
 	}
 
 	updateNodeLabel(entryId: string, label: string | undefined): void {
-		for (const flatNode of this.#flatNodes) {
-			if (flatNode.node.entry.id === entryId) {
-				flatNode.node.label = label;
-				break;
-			}
-		}
+		const node = this.#nodeById.get(entryId);
+		if (node) node.label = label;
+		this.#tree.invalidate();
 	}
 
 	#getFilterLabel(): string {
@@ -593,150 +508,40 @@ class TreeList implements Component {
 
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
+		const totalCount = this.#tree.allRows.length;
 
-		if (this.#filteredNodes.length === 0) {
+		if (this.#tree.rows.length === 0) {
 			// Three empty-state shapes:
-			//  - flatNodes empty               → no entries at all (truly fresh session).
+			//  - no rows at all                → no entries at all (truly fresh session).
 			//  - search query rejects everything → tell the user the search is the cause.
 			//  - filter mode rejects everything  → tell the user the filter is the cause and
 			//    how to widen it. Otherwise fresh sessions whose only persisted entries are
 			//    `model_change` + `thinking_level_change` (both hidden by the default filter)
 			//    read as "broken /tree" — see #1909.
-			if (this.#flatNodes.length === 0) {
+			if (totalCount === 0) {
 				lines.push(truncateToWidth(theme.fg("muted", "No entries found"), width));
 				lines.push(truncateToWidth(theme.fg("muted", `(0/0)${this.#getFilterLabel()}`), width));
 			} else if (this.#searchQuery.length > 0) {
 				lines.push(truncateToWidth(theme.fg("muted", `No entries match search "${this.#searchQuery}"`), width));
 				lines.push(truncateToWidth(theme.fg("muted", "Press Backspace to clear the search"), width));
-				lines.push(
-					truncateToWidth(theme.fg("muted", `(0/${this.#flatNodes.length})${this.#getFilterLabel()}`), width),
-				);
+				lines.push(truncateToWidth(theme.fg("muted", `(0/${totalCount})${this.#getFilterLabel()}`), width));
 			} else {
 				const filterLabel = this.#getFilterLabel().trim() || "[default]";
 				lines.push(
 					truncateToWidth(
-						theme.fg("muted", `${this.#flatNodes.length} entries hidden by the current filter ${filterLabel}`),
+						theme.fg("muted", `${totalCount} entries hidden by the current filter ${filterLabel}`),
 						width,
 					),
 				);
 				lines.push(truncateToWidth(theme.fg("muted", "Press Alt+A to show all, Alt+D for default"), width));
-				lines.push(
-					truncateToWidth(theme.fg("muted", `(0/${this.#flatNodes.length})${this.#getFilterLabel()}`), width),
-				);
+				lines.push(truncateToWidth(theme.fg("muted", `(0/${totalCount})${this.#getFilterLabel()}`), width));
 			}
 			return lines;
 		}
 
-		const { startIndex, endIndex } = centeredWindow(
-			this.#selectedIndex,
-			this.#filteredNodes.length,
-			this.maxVisibleLines,
-		);
-
-		// Cap the per-row gutter prefix so a content budget is always preserved.
-		// Each indent level renders as 3 cells; deep branching would otherwise eat the
-		// entire viewport (issue #1144). Reserve at least MIN_CONTENT_COLS for entry
-		// text — or half the viewport, whichever is larger — and compress older gutter
-		// levels off-screen behind a leading ellipsis when the row would exceed budget.
-		const MIN_CONTENT_COLS = 24;
-		const OVERHEAD_COLS = 4; // cursor (2) + a touch of breathing room
-		const contentReserve = Math.max(MIN_CONTENT_COLS, Math.floor(width / 2));
-		const maxIndentLevels = Math.max(1, Math.floor((width - contentReserve - OVERHEAD_COLS) / 3));
-
-		const rowWidth = contentRowWidth(width, this.#filteredNodes.length, this.maxVisibleLines);
-		const rows: string[] = [];
-
-		// One horizontal scroll position for the whole window: a per-row offset
-		// would put a different tree depth in the same column on each line, so
-		// connectors and gutters would stop describing one shape.
-		const depthOf = (flatNode: FlatNode): number =>
-			this.#multipleRoots ? Math.max(0, flatNode.indent - 1) : flatNode.indent;
-		const windowDepths = this.#filteredNodes.slice(startIndex, endIndex).map(depthOf);
-		const deepest = windowDepths.length > 0 ? Math.max(...windowDepths) : 0;
-		const windowOffset = Math.max(0, deepest - maxIndentLevels);
-
-		for (let i = startIndex; i < endIndex; i++) {
-			const flatNode = this.#filteredNodes[i];
-			const entry = flatNode.node.entry;
-			const isSelected = i === this.#selectedIndex;
-
-			// Build line: cursor + prefix + path marker + label + content
-			const cursor = isSelected ? theme.fg("accent", "› ") : "  ";
-
-			// If multiple roots, shift display (roots at 0, not 1)
-			const displayIndent = depthOf(flatNode);
-
-			// Build prefix with gutters at their correct positions, clamped to
-			// `maxIndentLevels` cells so the content always fits. When clamped, the
-			// leftmost cells represent the deepest visible ancestors and a `…` marker
-			// indicates older branch context has been compressed.
-			const hasConnector = flatNode.showConnector && !flatNode.isVirtualRootChild;
-			const connectorSymbol = hasConnector ? (flatNode.isLast ? theme.tree.last : theme.tree.branch) : "";
-			const connectorChars = hasConnector ? Array.from(connectorSymbol) : [];
-			const scrollOffset = Math.min(windowOffset, displayIndent);
-			const renderedIndent = displayIndent - scrollOffset;
-			const connectorPositionDisplay = hasConnector ? renderedIndent - 1 : -1;
-			// Linear rows reuse their branch head's depth. Existing sibling
-			// gutters remain visible; terminal gutters remain terminated.
-
-			// Build prefix char by char, placing gutters and connector at their positions
-			const totalChars = renderedIndent * 3;
-			const prefixChars: string[] = [];
-			for (let i = 0; i < totalChars; i++) {
-				const level = Math.floor(i / 3);
-				const originalLevel = level + scrollOffset;
-				const posInLevel = i % 3;
-
-				// Check if there's a gutter at this level (translated to original tree depth)
-				const gutter = flatNode.gutters.find(g => g.position === originalLevel);
-				if (gutter) {
-					// Gutters follow standard tree semantics: `│` only while more
-					// siblings continue below (`show`), space below a `└─`.
-					if (posInLevel === 0) {
-						prefixChars.push(gutter.show ? theme.tree.vertical : " ");
-					} else {
-						prefixChars.push(" ");
-					}
-				} else if (hasConnector && level === connectorPositionDisplay) {
-					// Connector at this level
-					if (posInLevel === 0) {
-						prefixChars.push(connectorChars[0] ?? " ");
-					} else if (posInLevel === 1) {
-						prefixChars.push(connectorChars[1] ?? theme.tree.horizontal);
-					} else {
-						prefixChars.push(connectorChars[2] ?? " ");
-					}
-				} else {
-					prefixChars.push(" ");
-				}
-			}
-			// Mark the leftmost cell when ancestors were compressed off-screen.
-			if (scrollOffset > 0 && prefixChars.length > 0) {
-				prefixChars[0] = "…";
-			}
-			const prefix = prefixChars.join("");
-
-			// Active path marker - shown right before the entry text
-			const isOnActivePath = this.#activePathIds.has(entry.id);
-			const pathMarker = isOnActivePath ? theme.fg("accent", `${theme.md.bullet} `) : "";
-
-			const label = flatNode.node.label ? theme.fg("warning", `[${flatNode.node.label}] `) : "";
-			const content = this.#getEntryDisplayText(flatNode.node, isSelected);
-
-			let line = cursor + theme.fg("dim", prefix) + pathMarker + label + content;
-			if (isSelected) {
-				line = theme.bg("selectedBg", line);
-			}
-			rows.push(truncateToWidth(line, rowWidth));
-		}
-
-		lines.push(
-			...renderScrollableList(rows, {
-				width,
-				totalRows: this.#filteredNodes.length,
-				scrollOffset: startIndex,
-			}),
-		);
+		// Hierarchy, selection-centered windowing, and the scrollbar all live
+		// in TreeView; the gutter/row builders below only shape its lines.
+		lines.push(...this.#tree.render(width));
 
 		const filterLabel = this.#getFilterLabel();
 		if (filterLabel) {
@@ -744,6 +549,102 @@ class TreeList implements Component {
 		}
 
 		return lines;
+	}
+
+	/** Entry text after the tree gutter: active-path marker, label, and display row. */
+	#renderTreeRow(node: TreeSelectorNode, selected: boolean): string {
+		// Active path marker - shown right before the entry text
+		const isOnActivePath = this.#activePathIds.has(node.entry.id);
+		const pathMarker = isOnActivePath ? theme.fg("accent", `${theme.md.bullet} `) : "";
+		const label = node.label ? theme.fg("warning", `[${node.label}] `) : "";
+		return `${pathMarker}${label}${this.#getEntryDisplayText(node, selected)}`;
+	}
+
+	/**
+	 * Custom gutter geometry over TreeView rows. Connectors draw only at real
+	 * branch points (`siblingCount > 1`); session roots under the virtual
+	 * multi-root stay connector-free, and linear chains keep their branch
+	 * head's depth. Gutter depth is capped like before (issue #1144): each
+	 * level renders as 3 cells, older levels compress behind a leading `…`,
+	 * and one shared horizontal offset keeps every row describing one shape.
+	 */
+	#renderGutter(
+		row: TreeRow<TreeSelectorNode, string>,
+		width: number,
+		windowRows: readonly TreeRow<TreeSelectorNode, string>[],
+	): { first: string; continuation: string } {
+		// Cap the per-row gutter prefix so a content budget is always preserved.
+		// Reserve at least MIN_CONTENT_COLS for entry text — or half the
+		// viewport, whichever is larger — and compress older gutter levels
+		// off-screen behind a leading ellipsis when the row would exceed budget.
+		const MIN_CONTENT_COLS = 24;
+		const OVERHEAD_COLS = 4; // cursor (2) + a touch of breathing room
+		const contentReserve = Math.max(MIN_CONTENT_COLS, Math.floor(width / 2));
+		const maxIndentLevels = Math.max(1, Math.floor((width - contentReserve - OVERHEAD_COLS) / 3));
+
+		// One horizontal scroll position for the whole window: a per-row offset
+		// would put a different tree depth in the same column on each line, so
+		// connectors and gutters would stop describing one shape.
+		let deepest = row.depth;
+		for (const windowRow of windowRows) {
+			deepest = Math.max(deepest, windowRow.depth);
+		}
+		const windowOffset = Math.max(0, deepest - maxIndentLevels);
+
+		const displayIndent = row.depth;
+		const hasConnector = row.parentKey !== undefined && row.siblingCount > 1;
+		const connectorSymbol = hasConnector ? (row.isLast ? theme.tree.last : theme.tree.branch) : "";
+		const connectorChars = hasConnector ? Array.from(connectorSymbol) : [];
+		const scrollOffset = Math.min(windowOffset, displayIndent);
+		const renderedIndent = displayIndent - scrollOffset;
+		const connectorPositionDisplay = hasConnector ? renderedIndent - 1 : -1;
+		// Linear rows reuse their branch head's depth. Existing sibling
+		// gutters remain visible; terminal gutters remain terminated.
+
+		// Build prefix char by char, placing gutters and connector at their positions
+		const totalChars = renderedIndent * 3;
+		const prefixChars: string[] = [];
+		for (let i = 0; i < totalChars; i++) {
+			const level = Math.floor(i / 3);
+			const originalDepth = level + scrollOffset;
+			const posInLevel = i % 3;
+
+			// An ancestor branch point draws its gutter at its own depth minus
+			// one — the level its connector occupied. Session roots never emit
+			// gutters; their connectors are suppressed.
+			const gutterAncestor = row.ancestors.find(
+				ancestor =>
+					ancestor.depth - 1 === originalDepth &&
+					ancestor.siblingCount > 1 &&
+					!(this.#multipleRoots && this.#rootIds.has(ancestor.key)),
+			);
+			if (gutterAncestor) {
+				// Gutters follow standard tree semantics: `│` only while more
+				// siblings continue below, space below a `└─`.
+				if (posInLevel === 0) {
+					prefixChars.push(gutterAncestor.isLast ? " " : theme.tree.vertical);
+				} else {
+					prefixChars.push(" ");
+				}
+			} else if (hasConnector && level === connectorPositionDisplay) {
+				// Connector at this level
+				if (posInLevel === 0) {
+					prefixChars.push(connectorChars[0] ?? " ");
+				} else if (posInLevel === 1) {
+					prefixChars.push(connectorChars[1] ?? theme.tree.horizontal);
+				} else {
+					prefixChars.push(connectorChars[2] ?? " ");
+				}
+			} else {
+				prefixChars.push(" ");
+			}
+		}
+		// Mark the leftmost cell when ancestors were compressed off-screen.
+		if (scrollOffset > 0 && prefixChars.length > 0) {
+			prefixChars[0] = "…";
+		}
+		const prefix = theme.fg("dim", prefixChars.join(""));
+		return { first: prefix, continuation: prefix };
 	}
 
 	#getEntryDisplayText(node: TreeSelectorNode, isSelected: boolean): string {
@@ -971,37 +872,33 @@ class TreeList implements Component {
 		}
 	}
 
-	#moveToAdjacentTurn(direction: -1 | 1): void {
-		for (
-			let index = this.#selectedIndex + direction;
-			index >= 0 && index < this.#filteredNodes.length;
-			index += direction
-		) {
-			const entry = this.#filteredNodes[index]?.node.entry;
-			if (entry?.type === "message" && (entry.message.role === "user" || entry.message.role === "assistant")) {
-				this.#selectedIndex = index;
-				return;
-			}
-		}
-	}
-
 	handleInput(keyData: string): void {
 		if (matchesSelectUp(keyData)) {
-			this.#selectedIndex = this.#selectedIndex === 0 ? this.#filteredNodes.length - 1 : this.#selectedIndex - 1;
+			this.#tree.moveSelection(-1, true);
 		} else if (matchesSelectDown(keyData)) {
-			this.#selectedIndex = this.#selectedIndex === this.#filteredNodes.length - 1 ? 0 : this.#selectedIndex + 1;
+			this.#tree.moveSelection(1, true);
 		} else if (matchesKey(keyData, "alt+up")) {
-			this.#moveToAdjacentTurn(-1);
+			this.#tree.moveSelectionWhere(
+				node =>
+					node.entry.type === "message" &&
+					(node.entry.message.role === "user" || node.entry.message.role === "assistant"),
+				-1,
+			);
 		} else if (matchesKey(keyData, "alt+down")) {
-			this.#moveToAdjacentTurn(1);
+			this.#tree.moveSelectionWhere(
+				node =>
+					node.entry.type === "message" &&
+					(node.entry.message.role === "user" || node.entry.message.role === "assistant"),
+				1,
+			);
 		} else if (matchesKey(keyData, "home")) {
-			this.#selectedIndex = 0;
+			this.#tree.setSelectionIndex(0);
 		} else if (matchesKey(keyData, "end")) {
-			this.#selectedIndex = Math.max(0, this.#filteredNodes.length - 1);
+			this.#tree.setSelectionIndex(this.#tree.rows.length - 1);
 		} else if (matchesSelectPageUp(keyData) || matchesKey(keyData, "left")) {
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - this.maxVisibleLines);
+			this.#tree.moveSelection(-this.maxVisibleLines);
 		} else if (matchesSelectPageDown(keyData) || matchesKey(keyData, "right")) {
-			this.#selectedIndex = Math.min(this.#filteredNodes.length - 1, this.#selectedIndex + this.maxVisibleLines);
+			this.#tree.moveSelection(this.maxVisibleLines);
 		} else if (
 			matchesKey(keyData, "shift+enter") ||
 			matchesKey(keyData, "shift+return") ||
@@ -1009,14 +906,14 @@ class TreeList implements Component {
 			keyData === "\x1b[13;2~" // Shift+Enter legacy CSI ~ form — also accepted by the composer (editor.ts:1466)
 		) {
 			// Summarize-and-switch: fork with a branch summary without the extra prompt.
-			const selected = this.#filteredNodes[this.#selectedIndex];
+			const selected = this.#tree.selectedItem;
 			if (selected && this.onSelect) {
-				this.onSelect(selected.node.entry.id, { summarize: true });
+				this.onSelect(selected.entry.id, { summarize: true });
 			}
 		} else if (matchesKey(keyData, "enter") || matchesKey(keyData, "return")) {
-			const selected = this.#filteredNodes[this.#selectedIndex];
+			const selected = this.#tree.selectedItem;
 			if (selected && this.onSelect) {
-				this.onSelect(selected.node.entry.id, { summarize: false });
+				this.onSelect(selected.entry.id, { summarize: false });
 			}
 		} else if (matchesAppInterrupt(keyData)) {
 			if (this.#searchQuery) {
@@ -1060,9 +957,9 @@ class TreeList implements Component {
 				this.#applyFilter();
 			}
 		} else if (matchesKey(keyData, "shift+l") && !this.#searchQuery) {
-			const selected = this.#filteredNodes[this.#selectedIndex];
+			const selected = this.#tree.selectedItem;
 			if (selected && this.onLabelEdit) {
-				this.onLabelEdit(selected.node.entry.id, selected.node.label);
+				this.onLabelEdit(selected.entry.id, selected.label);
 			}
 		} else {
 			const printableText = extractPrintableText(keyData);

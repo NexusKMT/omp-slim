@@ -7,7 +7,8 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { RenderResultOptions } from "./renderer";
 import type { Theme } from "../theme/theme";
 
-import { framedBlock, renderStatusLine, renderTreeList } from "../render";
+import { renderStatusLine, renderTreeList } from "../render";
+import { framedToolCard } from "../render/tool-card";
 
 import { formatErrorDetail, formatMoreItems, PREVIEW_LIMITS, pluralize, replaceTabs } from "../render/render-utils";
 
@@ -467,12 +468,11 @@ export const todoToolRenderer = {
 		if (result.isError) {
 			const errorText = result.content?.find(content => content.type === "text")?.text ?? "Todo operation failed";
 			const header = renderStatusLine({ icon: "error", title: "Todo" }, uiTheme);
-			return framedBlock(uiTheme, width => ({
+			return framedToolCard(uiTheme, () => ({
 				header,
-				sections: [{ lines: formatErrorDetail(errorText, uiTheme).split("\n") }],
-				state: "error",
+				sections: [{ content: formatErrorDetail(errorText, uiTheme).split("\n") }],
+				phase: "error",
 				borderColor: "error",
-				width,
 			}));
 		}
 
@@ -504,7 +504,7 @@ export const todoToolRenderer = {
 			return new Text(`${header}\n  ${uiTheme.fg("dim", fallback)}`, 0, 0);
 		}
 
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, () => {
 			const { expanded, spinnerFrame } = options;
 			const multiPhase = phases.length > 1;
 			const indent = multiPhase ? "  " : "";
@@ -567,11 +567,10 @@ export const todoToolRenderer = {
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: options.isPartial ? "pending" : "success",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: options.isPartial ? "partial" : "success",
 				borderColor: "borderMuted",
 				applyBg: false,
-				width,
 			};
 		});
 	},

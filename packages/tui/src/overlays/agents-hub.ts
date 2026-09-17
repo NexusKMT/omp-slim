@@ -36,7 +36,9 @@ import {
 	type ModelBrowserSource,
 	sortModelItems,
 } from "./model-browser";
-import { bottomBorder, dividerSplit, row, splitBodyWidth, splitRow, topBorderSplit } from "../chrome/overlay-box";
+import { bottomBorder, dividerSplit, PanelRows, row, topBorderSplit } from "../chrome/overlay-box";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
 
 /** One agent with its per-agent settings overrides resolved for display. */
 export interface HubAgent {
@@ -212,11 +214,50 @@ export class AgentsHubComponent implements Component {
 	#createError: string | null = null;
 	#createStreamingText = "";
 
-	// Frame geometry from the last render, for mouse hit-testing.
-	#contentRowStart = 1;
-	#contentRowCount = 0;
-	#sidebarWidthLast = SIDEBAR_MIN_WIDTH;
-	#footerRow = 0;
+	// Persistent fullscreen frame: top, growing two-pane body, split divider,
+	// footer, bottom. The fullscreen overlay paints from screen row 0, so mouse
+	// rows map 1:1 into the stack; the sidebar width is fixed per render.
+	#renderSidebarPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? 10));
+		const lines = this.#renderSidebar(width, rows);
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	#renderBodyPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(1, Math.floor(height ?? 10));
+		const lines: string[] = [this.#statusRow(width)];
+		if (this.#createActive) {
+			lines.push(...this.#renderCreate(width, rows - 1));
+		} else if (this.#assigning) {
+			this.#browser.setMaxVisible(rows - 1 - 5);
+			this.#browser.setFocused(true);
+			lines.push(...this.#browser.render(width));
+		} else {
+			lines.push(...this.#renderList(width, rows - 1));
+		}
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	readonly #split = new SplitPane({
+		left: this.#renderSidebarPane,
+		right: this.#renderBodyPane,
+		prefix: () => `${theme.fg("border", theme.boxRound.vertical)} `,
+		divider: () => ` ${theme.fg("border", theme.boxRound.vertical)} `,
+		suffix: () => ` ${theme.fg("border", theme.boxRound.vertical)}`,
+	});
+	readonly #frameTop = new PanelRows();
+	readonly #frameDivider = new PanelRows();
+	readonly #frameFooter = new PanelRows();
+	readonly #frameBottom = new PanelRows();
+	readonly #frame = new Stack({
+		children: [
+			{ content: this.#frameTop, height: 1 },
+			{ content: this.#split, grow: 1 },
+			{ content: this.#frameDivider, height: 1 },
+			{ content: this.#frameFooter, height: 1 },
+			{ content: this.#frameBottom, height: 1 },
+		],
+	});
 	/** First agent-list row's offset in body-line coordinates (after the status row). */
 	#listRowStart = 2;
 
@@ -243,7 +284,9 @@ export class AgentsHubComponent implements Component {
 	}
 
 	dispose(): void {}
-	invalidate(): void {}
+	invalidate(): void {
+		this.#frame.invalidate();
+	}
 
 	// ═══════════════════════════════════════════════════════════════════════
 	// Data pipeline
@@ -885,19 +928,31 @@ export class AgentsHubComponent implements Component {
 	// ═══════════════════════════════════════════════════════════════════════
 
 	#routeMouseEvent(event: SgrMouseEvent): boolean {
-		const contentLine = event.row - this.#contentRowStart;
-		const overContent = contentLine >= 0 && contentLine < this.#contentRowCount;
-		const sidebarColEnd = 2 + this.#sidebarWidthLast;
-		const bodyColStart = this.#sidebarWidthLast + 5;
-		const overSidebar = overContent && event.col >= 0 && event.col < sidebarColEnd;
-		const overBody = overContent && event.col >= bodyColStart;
+		const hit = this.#frame.locate(event.row, event.col);
+		const bodyHeight = this.#frame.childRect(1)?.height ?? 0;
+		let contentLine = -1;
+		let overSidebar = false;
+		let overBody = false;
+		if (hit && hit.index === 1) {
+			const pane = this.#split.locate(hit.line, hit.col);
+			if (pane?.pane === "left") {
+				overSidebar = true;
+				contentLine = pane.line;
+			} else if (pane?.pane === "right") {
+				overBody = true;
+				contentLine = pane.line;
+			}
+		}
+		const overContent = contentLine >= 0 && contentLine < bodyHeight;
+		overSidebar = overSidebar && overContent;
+		overBody = overBody && overContent;
 		const bodyLine = contentLine - 1; // body row 0 is the status row
 
-		if (event.row === this.#footerRow && this.#strip?.kind === "chips") {
+		if (hit && hit.index === 3 && this.#strip?.kind === "chips") {
 			const strip = this.#strip;
 			if (event.leftClick) {
 				for (const range of this.#chipRanges) {
-					if (event.col >= range.start && event.col < range.end) {
+					if (hit.col >= range.start && hit.col < range.end) {
 						strip.index = range.index;
 						this.#activateStripChip();
 						return true;
@@ -915,7 +970,7 @@ export class AgentsHubComponent implements Component {
 
 		if (event.wheel !== null) {
 			if (overSidebar) {
-				const maxScroll = Math.max(0, this.#entries.length - this.#contentRowCount);
+				const maxScroll = Math.max(0, this.#entries.length - bodyHeight);
 				this.#sidebarScroll = Math.max(0, Math.min(this.#sidebarScroll + event.wheel, maxScroll));
 			} else if (overBody) {
 				this.#rowIndex = Math.max(0, Math.min(this.#rows.length - 1, this.#rowIndex + event.wheel));
@@ -1248,36 +1303,17 @@ export class AgentsHubComponent implements Component {
 		return truncateToWidth(line, width);
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const height = this.#terminalRows();
 		const sidebarWidth = this.#sidebarWidth();
-		this.#sidebarWidthLast = sidebarWidth;
-		const bodyWidth = splitBodyWidth(width, sidebarWidth);
 		const contentRows = Math.max(10, height - 4);
-		this.#contentRowCount = contentRows;
-
-		const bodyLines: string[] = [this.#statusRow(bodyWidth)];
-		if (this.#createActive) {
-			bodyLines.push(...this.#renderCreate(bodyWidth, contentRows - 1));
-		} else if (this.#assigning) {
-			this.#browser.setMaxVisible(contentRows - 1 - 5);
-			this.#browser.setFocused(true);
-			bodyLines.push(...this.#browser.render(bodyWidth));
-		} else {
-			bodyLines.push(...this.#renderList(bodyWidth, contentRows - 1));
-		}
-
-		const sidebarLines = this.#renderSidebar(sidebarWidth, contentRows);
-		const out: string[] = [];
-		out.push(topBorderSplit(width, "Agents", sidebarWidth));
-		this.#contentRowStart = out.length;
-		for (let i = 0; i < contentRows; i++) {
-			out.push(splitRow(sidebarLines[i] ?? "", bodyLines[i] ?? "", width, sidebarWidth));
-		}
-		out.push(dividerSplit(width, sidebarWidth));
-		this.#footerRow = out.length;
-		out.push(row(this.#renderFooter(width - 4), width));
-		out.push(bottomBorder(width));
-		return out;
+		this.#split.setLeftSize({ fixed: sidebarWidth });
+		const leftWidth = this.#split.measure(width).left?.width ?? 0;
+		this.#frameTop.setLines([topBorderSplit(width, "Agents", leftWidth)]);
+		this.#frameDivider.setLines([dividerSplit(width, leftWidth)]);
+		this.#frameFooter.setLines([row(this.#renderFooter(width - 4), width)]);
+		this.#frameBottom.setLines([bottomBorder(width)]);
+		this.#frame.setHeight(contentRows + 4);
+		return this.#frame.render(width);
 	}
 }

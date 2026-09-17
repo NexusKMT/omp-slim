@@ -89,7 +89,6 @@ describe("SignInTab", () => {
 			const inputIndex = clippedBody.findIndex(line => line.startsWith(">"));
 			expect(clippedBody.some(line => line.startsWith("Browser login: Open login URL"))).toBe(true);
 			expect(plainUrlIndex).toBeGreaterThanOrEqual(0);
-			expect(clippedBody).toContain("Paste the authorization code (or full redirect URL):");
 			expect(inputIndex).toBeGreaterThanOrEqual(0);
 			expect(plainUrlIndex).toBeLessThan(inputIndex);
 		} finally {

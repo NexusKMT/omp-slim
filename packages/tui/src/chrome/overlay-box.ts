@@ -7,7 +7,7 @@
  * colors so all outlined overlays read identically.
  */
 import { type Component, visibleWidth } from "../tui";
-import { padding, truncateToWidth } from "../utils";
+import { Ellipsis, padding, truncateToWidth } from "../utils";
 import { type ThemeColor, theme } from "../theme/index";
 /** Pad or truncate a (possibly ANSI-styled) string to exactly `width` columns. */
 export function fit(text: string, width: number): string {
@@ -110,14 +110,80 @@ export function splitRow(sidebar: string, body: string, width: number, sidebarWi
 	return `${bar} ${fit(sidebar, sidebarWidth)} ${bar} ${fit(body, bodyWidth)} ${bar}`;
 }
 
-/** Sentinel child rendered by {@link OverlayPanel} as a `├───┤` section rule. */
-export class PanelDivider implements Component {
-	render(): readonly string[] {
-		return [];
+const NO_LINES: readonly string[] = [];
+
+interface PanelRowsMemo {
+	width: number;
+	height: number | undefined;
+	lines: readonly string[];
+	result: readonly string[];
+}
+
+/**
+ * Mutable row region for composing an {@link OverlayPanel}. Callers provide
+ * already-styled logical rows and may pin the region to an exact height; extra
+ * rows are clipped and missing rows are filled. This keeps dialog body budgets
+ * in the layout component instead of duplicating border and padding math in
+ * every overlay.
+ */
+export class PanelRows implements Component {
+	#lines: readonly string[] = NO_LINES;
+	#height: number | undefined;
+	#memo: PanelRowsMemo | undefined;
+
+	/** Replace the region rows. Byte-identical rows retain the previous render identity. */
+	setLines(lines: readonly string[]): void {
+		if (
+			lines === this.#lines ||
+			(lines.length === this.#lines.length && lines.every((line, index) => line === this.#lines[index]))
+		) {
+			return;
+		}
+		this.#lines = lines;
+		this.#memo = undefined;
+	}
+
+	/** Pin the region to exactly `height` rows, or pass `undefined` for its natural height. */
+	setHeight(height: number | undefined): void {
+		const next = height === undefined ? undefined : Number.isFinite(height) ? Math.max(0, Math.trunc(height)) : 0;
+		if (next === this.#height) return;
+		this.#height = next;
+		this.#memo = undefined;
+	}
+
+	invalidate(): void {
+		this.#memo = undefined;
+	}
+
+	render(width: number): readonly string[] {
+		const safeWidth = Number.isFinite(width) ? Math.max(0, Math.trunc(width)) : 0;
+		const memo = this.#memo;
+		if (
+			memo !== undefined &&
+			memo.width === safeWidth &&
+			memo.height === this.#height &&
+			memo.lines === this.#lines
+		) {
+			return memo.result;
+		}
+
+		const rowCount = this.#height ?? this.#lines.length;
+		const result: string[] = [];
+		for (let index = 0; index < rowCount; index++) {
+			const line = this.#lines[index] ?? "";
+			result.push(visibleWidth(line) > safeWidth ? truncateToWidth(line, safeWidth) : line);
+		}
+		this.#memo = { width: safeWidth, height: this.#height, lines: this.#lines, result };
+		return result;
 	}
 }
 
-const NO_LINES: readonly string[] = [];
+/** Sentinel child rendered by {@link OverlayPanel} as a `├───┤` section rule. */
+export class PanelDivider implements Component {
+	render(): readonly string[] {
+		return NO_LINES;
+	}
+}
 
 interface OverlayPanelMemo {
 	width: number;
@@ -207,6 +273,7 @@ export class OverlayPanel implements Component {
 	}
 
 	render(width: number): readonly string[] {
+		width = Number.isFinite(width) ? Math.max(0, Math.trunc(width)) : 0;
 		const innerWidth = Math.max(1, width - 4);
 		// Children render every frame (renders may carry side effects); the memo
 		// only skips re-wrapping unchanged rows in border chrome.
@@ -232,6 +299,11 @@ export class OverlayPanel implements Component {
 			for (const line of childLines[i] ?? NO_LINES) result.push(row(line, width));
 		}
 		result.push(bottomBorder(width));
+		if (width < 4) {
+			for (let index = 0; index < result.length; index++) {
+				result[index] = truncateToWidth(result[index]!, width, Ellipsis.Omit);
+			}
+		}
 		this.#memo = { width, title: this.#title, children: [...this.children], childLines, result };
 		return result;
 	}

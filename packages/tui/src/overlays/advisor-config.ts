@@ -22,7 +22,6 @@ import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import {
 	type Component,
 	Input,
-	type MouseRoutable,
 	routeSgrMouseInput,
 	type SelectItem,
 	SelectList,
@@ -34,16 +33,10 @@ import { getSelectListTheme, theme } from "../theme";
 import { sanitizeDisplayWarnings } from "../render/render-utils";
 import { HookEditorComponent } from "./hook-editor";
 import { buildBrowserItems, ModelBrowser, type ModelBrowserSource, sortModelItems } from "./model-browser";
-import {
-	bottomBorder,
-	divider,
-	dividerSplit,
-	row,
-	splitBodyWidth,
-	splitRow,
-	topBorder,
-	topBorderSplit,
-} from "../chrome/overlay-box";
+import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
+import { isLayoutMouseRoutable } from "../components/layout/geometry";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
 
 export interface AdvisorConfig {
 	name: string;
@@ -217,10 +210,44 @@ export class AdvisorConfigOverlayComponent implements Component {
 	#footerHint = "";
 	#previewScroll = 0;
 
-	// Frame geometry from the last render (the frame paints from screen row 0,
-	// so SGR `event.row`/`event.col` — already 0-based — index it directly).
-	#bodyRowStart = 0;
-	#dividerCol = 0;
+	// Persistent frame: top, growing two-pane body, divider, footer, bottom.
+	// The frame paints from screen row 0, so SGR `event.row`/`event.col` —
+	// already 0-based — index directly into the stack. The list screen splits
+	// (sidebar + preview); every other screen forces the narrow left pane.
+	#bodyRowsLast = 3;
+	#renderActivePane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? this.#bodyRowsLast));
+		const lines = [...this.#active.render(width)];
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	#renderPreviewPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? this.#bodyRowsLast));
+		const lines = [...this.#previewWindow(width, rows)];
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	readonly #split = new SplitPane({
+		left: this.#renderActivePane,
+		right: this.#renderPreviewPane,
+		leftSize: { ratio: 0.34, min: 22, max: 42 },
+		prefix: () => `${theme.fg("border", theme.boxRound.vertical)} `,
+		divider: () => ` ${theme.fg("border", theme.boxRound.vertical)} `,
+		suffix: () => ` ${theme.fg("border", theme.boxRound.vertical)}`,
+	});
+	readonly #frameTop = new PanelRows();
+	readonly #frameDivider = new PanelRows();
+	readonly #frameFooter = new PanelRows();
+	readonly #frameBottom = new PanelRows();
+	readonly #frame = new Stack({
+		children: [
+			{ content: this.#frameTop, height: 1 },
+			{ content: this.#split, grow: 1 },
+			{ content: this.#frameDivider, height: 1 },
+			{ content: this.#frameFooter, height: 1 },
+			{ content: this.#frameBottom, height: 1 },
+		],
+	});
 
 	constructor(
 		tui: TUI,
@@ -256,32 +283,20 @@ export class AdvisorConfigOverlayComponent implements Component {
 	render(width: number): readonly string[] {
 		const height = Math.max(14, process.stdout.rows || 40);
 		const bodyRows = Math.max(3, height - 4);
+		this.#bodyRowsLast = bodyRows;
 		const title = `Advisor configuration · ${this.#scope}${this.#dirty ? "  ● unsaved" : ""}`;
-		const out: string[] = [];
-
-		if (this.#screen === "list") {
-			const sidebarWidth = Math.max(22, Math.min(42, Math.floor(width * 0.34)));
-			this.#dividerCol = sidebarWidth + 3;
-			const bodyWidth = splitBodyWidth(width, sidebarWidth);
-			const sidebar = this.#active.render(sidebarWidth);
-			const preview = this.#previewWindow(bodyWidth, bodyRows);
-			out.push(topBorderSplit(width, title, sidebarWidth));
-			this.#bodyRowStart = out.length;
-			for (let i = 0; i < bodyRows; i++) {
-				out.push(splitRow(sidebar[i] ?? "", preview[i] ?? "", width, sidebarWidth));
-			}
-			out.push(dividerSplit(width, sidebarWidth));
-		} else {
-			out.push(topBorder(width, title));
-			this.#bodyRowStart = out.length;
-			const lines = this.#active.render(Math.max(1, width - 4));
-			for (let i = 0; i < bodyRows; i++) out.push(row(lines[i] ?? "", width));
-			out.push(divider(width));
-		}
-
-		out.push(row(theme.fg("dim", this.#footerHint), width));
-		out.push(bottomBorder(width));
-		return out;
+		this.#split.setNarrowPane(this.#screen === "list" ? undefined : "left");
+		this.#split.setSplitAt(this.#screen === "list" ? 0 : Number.MAX_SAFE_INTEGER);
+		this.#split.setHeight(bodyRows);
+		const geometry = this.#split.measure(width);
+		const isSplit = geometry.mode === "split";
+		const leftWidth = geometry.left?.width ?? 0;
+		this.#frameTop.setLines([isSplit ? topBorderSplit(width, title, leftWidth) : topBorder(width, title)]);
+		this.#frameDivider.setLines([isSplit ? dividerSplit(width, leftWidth) : divider(width)]);
+		this.#frameFooter.setLines([row(theme.fg("dim", this.#footerHint), width)]);
+		this.#frameBottom.setLines([bottomBorder(width)]);
+		this.#frame.setHeight(bodyRows + 4);
+		return this.#frame.render(width);
 	}
 
 	// ───────────────────────────── input ─────────────────────────────
@@ -300,18 +315,22 @@ export class AdvisorConfigOverlayComponent implements Component {
 	}
 
 	#routeMouseEvent(event: SgrMouseEvent): boolean {
-		// Right pane of the split (the preview) only scrolls; everything left of the
-		// divider routes into the active list/component at frame-local coordinates.
-		if (this.#screen === "list" && event.col >= this.#dividerCol) {
-			if (event.wheel !== null) {
-				this.#previewScroll = Math.max(0, this.#previewScroll + event.wheel);
-				this.#cb.requestRender();
+		const hit = this.#frame.locate(event.row, event.col);
+		if (hit && hit.index === 1) {
+			const pane = this.#split.locate(hit.line, hit.col);
+			// Right pane of the split (the preview) only scrolls; the left pane
+			// routes into the active list/component at pane-local coordinates.
+			if (pane?.pane === "right") {
+				if (event.wheel !== null) {
+					this.#previewScroll = Math.max(0, this.#previewScroll + event.wheel);
+					this.#cb.requestRender();
+				}
+				return true;
 			}
-			return true;
-		}
-		const el = this.#active as Partial<MouseRoutable>;
-		if (typeof el.routeMouse === "function") {
-			el.routeMouse(event, event.row - this.#bodyRowStart, event.col);
+			if (pane?.pane === "left" && isLayoutMouseRoutable(this.#active)) {
+				this.#active.routeMouse(event, pane.line, pane.col);
+				return true;
+			}
 			return true;
 		}
 		return false;

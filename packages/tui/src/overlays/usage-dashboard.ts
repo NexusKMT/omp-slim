@@ -21,7 +21,7 @@ import {
 	matchesSelectPageUp,
 	matchesSelectUp,
 } from "../keybinding-matchers";
-import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
+import { OverlayPanel, PanelDivider, PanelRows } from "../chrome/overlay-box";
 
 /** Local calendar-day activity consumed by the usage heatmap. */
 export interface DailyActivityPoint {
@@ -324,6 +324,10 @@ export class UsageDashboardComponent implements Component {
 	#detailCache: { width: number; lines: string[] } | null = null;
 	#lastViewportRows = 10;
 	#closed = false;
+	readonly #panel: OverlayPanel;
+	readonly #header: PanelRows;
+	readonly #body: PanelRows;
+	readonly #footer: PanelRows;
 	readonly #closeController = new AbortController();
 
 	constructor(options: UsageDashboardOptions) {
@@ -331,6 +335,16 @@ export class UsageDashboardComponent implements Component {
 		this.#options = options;
 		this.#nowMs = Date.now();
 		this.#cards = buildProviderCards(options.reports, this.#nowMs);
+		this.#panel = new OverlayPanel("Usage");
+		this.#header = new PanelRows();
+		this.#header.setHeight(1);
+		this.#body = new PanelRows();
+		this.#footer = new PanelRows();
+		this.#footer.setHeight(1);
+		this.#panel.addChild(this.#header);
+		this.#panel.addChild(this.#body);
+		this.#panel.addChild(new PanelDivider());
+		this.#panel.addChild(this.#footer);
 		void this.#loadActivity();
 	}
 
@@ -349,9 +363,15 @@ export class UsageDashboardComponent implements Component {
 		}
 	}
 
+	invalidate(): void {
+		this.#detailCache = null;
+		this.#panel.invalidate();
+	}
+
 	dispose(): void {
 		this.#closed = true;
 		this.#closeController.abort();
+		this.#panel.dispose();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -569,18 +589,14 @@ export class UsageDashboardComponent implements Component {
 		const checkedText = latestFetchedAt ? `checked ${formatDuration(this.#nowMs - latestFetchedAt)} ago` : "";
 		const title = this.#view === "detail" ? "Usage · Details" : "Usage";
 
-		const out: string[] = [];
-		out.push(topBorder(width, title));
-		out.push(row(checkedText ? theme.fg("dim", checkedText) : "", width));
-		for (let i = 0; i < contentRows; i++) {
-			out.push(row(contentSource[this.#scroll + i] ?? "", width));
-		}
-		out.push(divider(width));
 		const scrollHint = maxScroll > 0 ? "↑/↓ scroll · " : "";
 		const hint = this.#view === "detail" ? `${scrollHint}Esc back` : `${scrollHint}↵ details · Esc close`;
-		out.push(row(theme.fg("dim", hint), width));
-		out.push(bottomBorder(width));
-		return out;
+		this.#panel.title = title;
+		this.#header.setLines([checkedText ? theme.fg("dim", checkedText) : ""]);
+		this.#body.setLines(contentSource.slice(this.#scroll, this.#scroll + contentRows));
+		this.#body.setHeight(contentRows);
+		this.#footer.setLines([theme.fg("dim", hint)]);
+		return this.#panel.render(width);
 	}
 
 	#scrollBy(delta: number): void {

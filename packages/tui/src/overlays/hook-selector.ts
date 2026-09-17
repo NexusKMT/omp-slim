@@ -6,7 +6,6 @@ import {
 	Container,
 	Ellipsis,
 	extractPrintableText,
-	fuzzyFilter,
 	type MarkdownTheme,
 	matchesKey,
 	padding,
@@ -29,6 +28,7 @@ import {
 import { CountdownTimer } from "../chrome/countdown-timer";
 import { OverlayPanel } from "../chrome/overlay-box";
 import { renderSegmentTrack } from "../chrome/segment-track";
+import { MenuSelection, getMenuWindow } from "../components/menu-selection";
 
 /** One segment of a {@link HookSelectorSlider} — a label and an optional
  *  detail line (e.g. the resolved model name) shown beneath the track while
@@ -161,9 +161,7 @@ type FilteredOption = { option: HookSelectorOption; index: number };
 
 export class HookSelectorComponent extends OverlayPanel {
 	#options: HookSelectorOption[];
-	#filteredOptions: FilteredOption[];
-	#searchQuery = "";
-	#selectedIndex: number;
+	#menu: MenuSelection<FilteredOption>;
 	#disabledIndices: Set<number>;
 	#selectionMarker: "radio" | "checkbox" | undefined;
 	#checkedIndices: Set<number>;
@@ -193,12 +191,20 @@ export class HookSelectorComponent extends OverlayPanel {
 		super(title.split(/\r?\n/, 1)[0] ?? "");
 
 		this.#options = options.map(normalizeHookSelectorOption);
-		this.#filteredOptions = this.#options.map((option, index) => ({ option, index }));
 		this.#disabledIndices = new Set(
 			(opts?.disabledIndices ?? []).filter(
 				index => Number.isInteger(index) && index >= 0 && index < this.#options.length,
 			),
 		);
+		this.#menu = new MenuSelection<FilteredOption>(
+			this.#options.map((option, index) => ({ option, index })),
+			{
+				getKey: filtered => String(filtered.index),
+				getSearchText: filtered => `${filtered.option.label} ${filtered.option.description ?? ""}`,
+				isDisabled: filtered => this.#disabledIndices.has(filtered.index),
+			},
+		);
+		this.#menu.setSelectedIndex(opts?.initialIndex ?? 0);
 		this.#selectionMarker = opts?.selectionMarker;
 		this.#checkedIndices = new Set(
 			(opts?.checkedIndices ?? []).filter(
@@ -206,7 +212,6 @@ export class HookSelectorComponent extends OverlayPanel {
 			),
 		);
 		this.#markableCount = Math.max(0, Math.min(opts?.markableCount ?? this.#options.length, this.#options.length));
-		this.#selectedIndex = this.#coerceSelectedIndex(opts?.initialIndex ?? 0);
 		this.#maxVisible = Math.max(3, opts?.maxVisible ?? 12);
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
@@ -241,8 +246,8 @@ export class HookSelectorComponent extends OverlayPanel {
 				() => {
 					opts?.onTimeout?.();
 					// Auto-select current option on timeout (typically the first/recommended option)
-					const selected = this.#filteredOptions[this.#selectedIndex];
-					if (selected && !this.#isDisabled(selected.index)) {
+					const selected = this.#menu.selectedItem;
+					if (selected && !this.#menu.isDisabled(selected)) {
 						this.#onSelectCallback(selected.option.label);
 					} else {
 						this.#onCancelCallback();
@@ -270,41 +275,11 @@ export class HookSelectorComponent extends OverlayPanel {
 		return this.#disabledIndices.has(index);
 	}
 
-	/** Clamp `index` into range, then walk forward (and finally backward) to the
-	 *  nearest enabled option so the cursor never lands on a disabled row. */
-	#coerceSelectedIndex(index: number): number {
-		if (this.#filteredOptions.length === 0) return -1;
-		const maxIndex = this.#filteredOptions.length - 1;
-		const clamped = Math.max(0, Math.min(index, maxIndex));
-		const clampedOption = this.#filteredOptions[clamped];
-		if (clampedOption && !this.#isDisabled(clampedOption.index)) return clamped;
-		for (let i = clamped + 1; i <= maxIndex; i++) {
-			const option = this.#filteredOptions[i];
-			if (option && !this.#isDisabled(option.index)) return i;
-		}
-		for (let i = clamped - 1; i >= 0; i--) {
-			const option = this.#filteredOptions[i];
-			if (option && !this.#isDisabled(option.index)) return i;
-		}
-		return clamped;
-	}
-
 	/** Move the cursor by `delta`, skipping disabled rows, stopping at the first
 	 *  enabled option reached or at the list edge. */
 	#moveSelection(delta: number): void {
-		if (this.#filteredOptions.length === 0) return;
-		const maxIndex = this.#filteredOptions.length - 1;
-		let index = this.#selectedIndex;
-		while (true) {
-			const next = Math.max(0, Math.min(index + delta, maxIndex));
-			if (next === index) return;
-			index = next;
-			const option = this.#filteredOptions[index];
-			if (option && !this.#isDisabled(option.index)) {
-				this.#selectedIndex = index;
-				this.#updateList();
-				return;
-			}
+		if (this.#menu.move(delta, false)) {
+			this.#updateList();
 		}
 	}
 
@@ -414,79 +389,29 @@ export class HookSelectorComponent extends OverlayPanel {
 		return rows;
 	}
 
-	#getVisibleOptionRange(
-		total: number,
-		renderWidth?: number,
-		mdTheme: MarkdownTheme = getMarkdownTheme(),
-		compact = false,
-	): { startIndex: number; endIndex: number } {
-		if (total === 0) return { startIndex: 0, endIndex: 0 };
-
-		// In compact mode every option contributes only its label rows; the
-		// highlighted option's description is layered on afterwards (see
-		// #updateList), so the window is sized to keep as many labels visible as
-		// possible rather than letting one long description swallow the budget.
+	/**
+	 * Visual row budget for the option window. In compact mode every option
+	 * contributes only its label rows; the highlighted option's description is
+	 * layered on afterwards (see #updateList), so the window is sized to keep
+	 * as many labels visible as possible rather than letting one long
+	 * description swallow the budget.
+	 */
+	#windowRowCounts(
+		items: readonly FilteredOption[],
+		renderWidth: number | undefined,
+		mdTheme: MarkdownTheme,
+		compact: boolean,
+	): number[] {
 		const descMode: number | "full" = compact ? 0 : "full";
-		const rowBudget = Math.max(1, this.#maxVisible);
-		const selectedIndex = Math.max(0, Math.min(this.#selectedIndex, total - 1));
-		let startIndex = selectedIndex;
-		let endIndex = selectedIndex + 1;
-		let rows = this.#optionRowCount(
-			this.#filteredOptions[selectedIndex]!.option,
-			renderWidth,
-			true,
-			mdTheme,
-			descMode,
+		return items.map((filtered, i) =>
+			this.#optionRowCount(filtered.option, renderWidth, i === this.#menu.selectedIndex, mdTheme, descMode),
 		);
-		let beforeRows = 0;
-		const targetBeforeRows = Math.max(0, Math.floor((rowBudget - rows) / 2));
-
-		while (startIndex > 0) {
-			const cost = this.#optionRowCount(
-				this.#filteredOptions[startIndex - 1]!.option,
-				renderWidth,
-				false,
-				mdTheme,
-				descMode,
-			);
-			if (beforeRows + cost > targetBeforeRows || rows + cost > rowBudget) break;
-			startIndex--;
-			beforeRows += cost;
-			rows += cost;
-		}
-
-		while (endIndex < total) {
-			const cost = this.#optionRowCount(
-				this.#filteredOptions[endIndex]!.option,
-				renderWidth,
-				false,
-				mdTheme,
-				descMode,
-			);
-			if (rows + cost > rowBudget) break;
-			endIndex++;
-			rows += cost;
-		}
-
-		while (startIndex > 0) {
-			const cost = this.#optionRowCount(
-				this.#filteredOptions[startIndex - 1]!.option,
-				renderWidth,
-				false,
-				mdTheme,
-				descMode,
-			);
-			if (rows + cost > rowBudget) break;
-			startIndex--;
-			rows += cost;
-		}
-
-		return { startIndex, endIndex };
 	}
 
 	#updateList(renderWidth = this.#lastRenderWidth): void {
 		const rows: SelectorRow[] = [];
-		const total = this.#filteredOptions.length;
+		const items = this.#menu.visibleItems;
+		const total = items.length;
 		const mdTheme = getMarkdownTheme();
 		// Compact mode kicks in exactly when the fully-expanded list (all
 		// descriptions) would overflow the row budget — the same condition that
@@ -494,15 +419,22 @@ export class HookSelectorComponent extends OverlayPanel {
 		// only the highlighted option's description, so the whole menu stays
 		// visible on short terminals instead of collapsing to a single entry.
 		const compact = this.#isSearchEnabled(renderWidth, mdTheme);
-		const { startIndex, endIndex } = this.#getVisibleOptionRange(total, renderWidth, mdTheme, compact);
+		const { startIndex, endIndex } =
+			total === 0
+				? { startIndex: 0, endIndex: 0 }
+				: getMenuWindow(
+						this.#windowRowCounts(items, renderWidth, mdTheme, compact),
+						this.#menu.selectedIndex,
+						Math.max(1, this.#maxVisible),
+					);
 
 		let selectedDescRows = 0;
 		if (compact && renderWidth !== undefined) {
 			let labelRows = 0;
 			for (let i = startIndex; i < endIndex; i++) {
-				const filtered = this.#filteredOptions[i];
+				const filtered = items[i];
 				if (filtered === undefined) continue;
-				labelRows += this.#optionRowCount(filtered.option, renderWidth, i === this.#selectedIndex, mdTheme, 0);
+				labelRows += this.#optionRowCount(filtered.option, renderWidth, i === this.#menu.selectedIndex, mdTheme, 0);
 			}
 			// Reserve one row for the status line; give the remainder to the
 			// highlighted option's description.
@@ -510,9 +442,9 @@ export class HookSelectorComponent extends OverlayPanel {
 		}
 
 		for (let i = startIndex; i < endIndex; i++) {
-			const filtered = this.#filteredOptions[i];
+			const filtered = items[i];
 			if (filtered === undefined) continue;
-			const isSelected = i === this.#selectedIndex;
+			const isSelected = i === this.#menu.selectedIndex;
 			const isDisabled = this.#isDisabled(filtered.index);
 			const descMode: number | "full" = compact ? (isSelected ? selectedDescRows : 0) : "full";
 			// Highlight the whole option block (label + wrapped description rows)
@@ -591,26 +523,21 @@ export class HookSelectorComponent extends OverlayPanel {
 	}
 
 	#shouldRenderSearchStatus(renderWidth = this.#lastRenderWidth, mdTheme?: MarkdownTheme): boolean {
-		return this.#isSearchEnabled(renderWidth, mdTheme) || this.#searchQuery.length > 0;
+		return this.#isSearchEnabled(renderWidth, mdTheme) || this.#menu.query.length > 0;
 	}
 
 	#renderStatusLine(total: number): string {
-		const selectedCount = total === 0 ? 0 : this.#selectedIndex + 1;
+		const selectedCount = total === 0 ? 0 : this.#menu.selectedIndex + 1;
 		const count =
-			this.#searchQuery.trim() && total !== this.#options.length
+			this.#menu.query.trim() && total !== this.#options.length
 				? `${selectedCount}/${total} of ${this.#options.length}`
 				: `${selectedCount}/${total}`;
-		const suffix = this.#searchQuery.trim() ? `  Search: ${this.#searchQuery}` : "  Type to search";
+		const suffix = this.#menu.query.trim() ? `  Search: ${this.#menu.query}` : "  Type to search";
 		return theme.fg("dim", `  (${count})${suffix}`);
 	}
 
 	#setSearchQuery(query: string): void {
-		this.#searchQuery = query;
-		const indexedOptions = this.#options.map((option, index) => ({ option, index }));
-		this.#filteredOptions = query.trim()
-			? fuzzyFilter(indexedOptions, query, item => `${item.option.label} ${item.option.description ?? ""}`)
-			: indexedOptions;
-		this.#selectedIndex = this.#coerceSelectedIndex(0);
+		this.#menu.setQuery(query, false);
 		this.#updateList();
 	}
 
@@ -618,8 +545,8 @@ export class HookSelectorComponent extends OverlayPanel {
 		if (!this.#isSearchEnabled()) return false;
 
 		if (matchesKey(keyData, "backspace")) {
-			if (this.#searchQuery.length === 0) return false;
-			const chars = [...this.#searchQuery];
+			if (this.#menu.query.length === 0) return false;
+			const chars = [...this.#menu.query];
 			chars.pop();
 			this.#setSearchQuery(chars.join(""));
 			return true;
@@ -627,9 +554,9 @@ export class HookSelectorComponent extends OverlayPanel {
 
 		const printableText = extractPrintableText(keyData);
 		if (printableText === undefined) return false;
-		if (this.#searchQuery.length === 0 && printableText.trim().length === 0) return false;
+		if (this.#menu.query.length === 0 && printableText.trim().length === 0) return false;
 
-		this.#setSearchQuery(this.#searchQuery + printableText);
+		this.#setSearchQuery(this.#menu.query + printableText);
 		return true;
 	}
 
@@ -639,12 +566,12 @@ export class HookSelectorComponent extends OverlayPanel {
 	 *  type-to-search is active, digits stay searchable. Checkbox menus only
 	 *  move the cursor — confirmation stays on `enter`. */
 	#handleQuickSelect(keyData: string): boolean {
-		if (this.#searchQuery.length > 0 || keyData.length !== 1 || keyData < "1" || keyData > "9") return false;
-		const targetIndex = this.#filteredOptions.findIndex(({ option }) => option.label.startsWith(`${keyData}. `));
+		if (this.#menu.query.length > 0 || keyData.length !== 1 || keyData < "1" || keyData > "9") return false;
+		const targetIndex = this.#menu.visibleItems.findIndex(({ option }) => option.label.startsWith(`${keyData}. `));
 		if (targetIndex < 0) return false;
-		const target = this.#filteredOptions[targetIndex];
+		const target = this.#menu.visibleItems[targetIndex];
 		if (!target || this.#isDisabled(target.index)) return true;
-		this.#selectedIndex = targetIndex;
+		this.#menu.setSelectedIndex(targetIndex);
 		this.#updateList();
 		if (this.#selectionMarker !== "checkbox") this.#onSelectCallback(target.option.label);
 		return true;
@@ -674,8 +601,8 @@ export class HookSelectorComponent extends OverlayPanel {
 		} else if (matchesSelectDown(keyData) || (!this.#isSearchEnabled() && matchesKey(keyData, "j"))) {
 			this.#moveSelection(1);
 		} else if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const selected = this.#filteredOptions[this.#selectedIndex];
-			if (selected && !this.#isDisabled(selected.index)) this.#onSelectCallback(selected.option.label);
+			const selected = this.#menu.selectedItem;
+			if (selected && !this.#menu.isDisabled(selected)) this.#onSelectCallback(selected.option.label);
 		} else if (
 			matchesKey(keyData, "left") ||
 			(this.#slider && !this.#isSearchEnabled() && matchesKey(keyData, "h"))

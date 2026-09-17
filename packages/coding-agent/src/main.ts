@@ -26,7 +26,7 @@ import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/arg
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
-import type { selectSession } from "./cli/session-picker";
+import type { SessionPickerOptions } from "@oh-my-pi/pi-tui/apps/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
 import { getLatestRelease } from "./cli/update-cli";
 import { findConfigFile } from "./config";
@@ -124,9 +124,34 @@ async function loadInteractiveModeConstructor() {
 	return (await import("./modes/interactive-mode")).InteractiveMode;
 }
 
+type SessionPicker = (
+	sessions: SessionInfo[],
+	options?: SessionPickerOptions<SessionInfo>,
+) => Promise<SessionInfo | null>;
+
 /** Resume/import-only graph boundary; ordinary launches never construct a picker. */
-async function loadSessionPicker(): Promise<typeof selectSession> {
-	return (await import("./cli/session-picker")).selectSession;
+async function loadSessionPicker(): Promise<SessionPicker> {
+	const [{ selectSession }, { HistoryStorage }, { loadPinnedSessionIds }, { FileSessionStorage }] = await Promise.all([
+		import("@oh-my-pi/pi-tui/apps/session-picker"),
+		import("./session/history-storage"),
+		import("./session/session-pins"),
+		import("./session/session-storage"),
+	]);
+	return (sessions, options) => {
+		const storage = new FileSessionStorage();
+		return selectSession(sessions, options, {
+			loadPinnedIds: loadPinnedSessionIds,
+			loadHistoryMatcher: () => {
+				const history = HistoryStorage.open();
+				return query => history.matchingSessionIds(query);
+			},
+			deleteSession: async session => {
+				await storage.deleteSessionWithArtifacts(session.path);
+				return true;
+			},
+			loadAllSessions: () => SessionManager.listAll(storage),
+		});
+	};
 }
 
 /** Join-only graph boundary; the full built-in slash-command registry is otherwise unnecessary at startup. */
@@ -1589,7 +1614,7 @@ export async function buildSessionOptions(
 interface RunRootCommandDependencies {
 	createAgentSession?: typeof createAgentSession;
 	discoverAuthStorage?: typeof discoverAuthStorage;
-	selectSession?: typeof selectSession;
+	selectSession?: SessionPicker;
 	runAcpMode?: RunAcpMode;
 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
 	settings?: Settings;

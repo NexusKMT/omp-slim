@@ -1,4 +1,5 @@
 import { Box } from "../components/box";
+import { Disclosure } from "../components/disclosure";
 import { type Component } from "../tui";
 import { Markdown } from "../components/markdown";
 import { formatNumber } from "@oh-my-pi/pi-utils";
@@ -25,44 +26,33 @@ interface SummaryDividerOptions {
 	detailMarkdown: () => string;
 }
 
-class SummaryDividerComponent implements Component {
-	#expanded = false;
-	#cache?: { width: number; lines: string[] };
-	#detail?: Box;
+/**
+ * Width-aware divider banner shared as every history-collapse summary row:
+ * blank, the labeled rule (or the bare label when too narrow to frame), blank.
+ */
+class DividerSummary implements Component {
+	readonly #label: () => string;
+	#cache: { width: number; lines: readonly string[] } | undefined;
 
-	readonly #options: SummaryDividerOptions;
-
-	constructor(options: SummaryDividerOptions) {
-		this.#options = options;
-	}
-
-	setExpanded(expanded: boolean): void {
-		if (this.#expanded === expanded) return;
-		this.#expanded = expanded;
-		this.#cache = undefined;
+	constructor(label: () => string) {
+		this.#label = label;
 	}
 
 	invalidate(): void {
 		this.#cache = undefined;
-		// Theme may have changed — rebuild the detail box lazily on next render.
-		this.#detail = undefined;
 	}
 
 	render(width: number): readonly string[] {
 		width = Math.max(1, width);
-		if (this.#cache?.width === width) {
-			return this.#cache.lines;
-		}
-		const lines = this.#expanded
-			? ["", this.#divider(width), "", ...this.#detailBox().render(width)]
-			: ["", this.#divider(width), ""];
+		if (this.#cache?.width === width) return this.#cache.lines;
+		const lines = ["", this.#divider(width), ""];
 		this.#cache = { width, lines };
 		return lines;
 	}
 
 	#divider(width: number): string {
 		const rule = theme.tree.horizontal;
-		const label = this.#options.label();
+		const label = this.#label();
 		// sep.dot ships pre-padded (" · "); trim so the hint joins with single spaces.
 		const hint = `${theme.sep.dot.trim()} ctrl+o`;
 		const plainWidth = Bun.stringWidth(`${label} ${hint}`, { countAnsiEscapeCodes: false });
@@ -80,9 +70,66 @@ class SummaryDividerComponent implements Component {
 			theme.fg("dim", rule.repeat(right))
 		);
 	}
+}
+
+/**
+ * Common summary/detail delegate behind the compaction, handoff, and branch
+ * banners: the width-aware divider is always shown while the Markdown detail
+ * box is constructed lazily only on the first expanded render and retained
+ * across collapse/re-expand cycles.
+ */
+class SummaryMessageComponent implements Component {
+	#disclosure: Disclosure;
+	#ignoreTight: boolean | undefined;
+	#disposed = false;
+
+	readonly #options: SummaryDividerOptions;
+
+	constructor(options: SummaryDividerOptions) {
+		this.#options = options;
+		this.#disclosure = this.#createDisclosure(false);
+	}
+
+	setExpanded(expanded: boolean): void {
+		this.#disclosure.setExpanded(expanded);
+	}
+
+	setIgnoreTight(ignore: boolean): this {
+		if (this.#disposed || this.#ignoreTight === ignore) return this;
+		this.#ignoreTight = ignore;
+		this.#disclosure.setIgnoreTight(ignore);
+		return this;
+	}
+
+	invalidate(): void {
+		if (this.#disposed) return;
+		// Theme may have changed — rebuild the delegate unmaterialized so the
+		// detail box picks up fresh styling lazily on its next expanded render.
+		const expanded = this.#disclosure.expanded;
+		this.#disclosure.dispose();
+		this.#disclosure = this.#createDisclosure(expanded);
+		if (this.#ignoreTight !== undefined) this.#disclosure.setIgnoreTight(this.#ignoreTight);
+	}
+
+	dispose(): void {
+		if (this.#disposed) return;
+		this.#disposed = true;
+		this.#disclosure.dispose();
+	}
+
+	render(width: number): readonly string[] {
+		return this.#disclosure.render(width);
+	}
+
+	#createDisclosure(expanded: boolean): Disclosure {
+		return new Disclosure({
+			summary: new DividerSummary(this.#options.label),
+			body: () => this.#detailBox(),
+			expanded,
+		});
+	}
 
 	#detailBox(): Box {
-		if (this.#detail) return this.#detail;
 		const box = new Box(1, 1, t => theme.bg("customMessageBg", t));
 		box.setIgnoreTight(true);
 		box.addChild(
@@ -90,7 +137,6 @@ class SummaryDividerComponent implements Component {
 				color: (text: string) => theme.fg("customMessageText", text),
 			}),
 		);
-		this.#detail = box;
 		return box;
 	}
 }
@@ -107,60 +153,40 @@ class SummaryDividerComponent implements Component {
  * full history); only the LLM context was reset. Expanding (ctrl+o) reveals
  * the compaction summary below the divider.
  */
-export class CompactionSummaryMessageComponent implements Component {
-	#divider: SummaryDividerComponent;
-
-	readonly #message: CompactionSummaryMessage;
-
+export class CompactionSummaryMessageComponent extends SummaryMessageComponent {
 	constructor(message: CompactionSummaryMessage) {
-		this.#message = message;
-
-		this.#divider = new SummaryDividerComponent({
+		super({
 			// A dead-end warning stamped by the progress guard badges the bar;
 			// the full text lives in the ctrl+o detail block below.
-			label: () => this.#label(),
-			detailMarkdown: () => this.#detailMarkdown(),
+			label: () => compactionLabel(message),
+			detailMarkdown: () => compactionDetailMarkdown(message),
 		});
 	}
+}
 
-	#label(): string {
-		const name = (this.#message.method && COMPACTION_METHOD_LABELS[this.#message.method]) || "compacted";
-		let label = `${theme.icon.camera} ${name}`;
-		const amount = compactionAmount(this.#message);
-		if (amount) label += `${theme.sep.dot}${amount}`;
-		if (this.#message.warning) label += ` ${theme.fg("warning", theme.icon.warning)}`;
-		return label;
-	}
+function compactionLabel(message: CompactionSummaryMessage): string {
+	const name = (message.method && COMPACTION_METHOD_LABELS[message.method]) || "compacted";
+	let label = `${theme.icon.camera} ${name}`;
+	const amount = compactionAmount(message);
+	if (amount) label += `${theme.sep.dot}${amount}`;
+	if (message.warning) label += ` ${theme.fg("warning", theme.icon.warning)}`;
+	return label;
+}
 
-	setExpanded(expanded: boolean): void {
-		this.#divider.setExpanded(expanded);
-	}
-
-	invalidate(): void {
-		this.#divider.invalidate();
-	}
-
-	render(width: number): readonly string[] {
-		return this.#divider.render(width);
-	}
-
-	#detailMarkdown(): string {
-		const tokenLine =
-			this.#message.tokensBefore > 0
-				? this.#message.tokensAfter !== undefined
-					? `Compacted from ${this.#message.tokensBefore.toLocaleString()} to ${this.#message.tokensAfter.toLocaleString()} tokens`
-					: `Compacted from ${this.#message.tokensBefore.toLocaleString()} tokens`
-				: this.#message.tokensAfter !== undefined
-					? `Compacted to ${this.#message.tokensAfter.toLocaleString()} tokens`
-					: "Compacted context";
-		const frameCount = this.#message.images?.length ?? 0;
-		const frameNote =
-			frameCount > 0 ? `\n\n_${frameCount} snapcompact frame${frameCount === 1 ? "" : "s"} attached_` : "";
-		const warningNote = this.#message.warning
-			? `\n\n${theme.icon.warning} **Warning:** ${this.#message.warning}`
-			: "";
-		return `**${tokenLine}**${warningNote}\n\n${this.#message.summary}${frameNote}`;
-	}
+function compactionDetailMarkdown(message: CompactionSummaryMessage): string {
+	const tokenLine =
+		message.tokensBefore > 0
+			? message.tokensAfter !== undefined
+				? `Compacted from ${message.tokensBefore.toLocaleString()} to ${message.tokensAfter.toLocaleString()} tokens`
+				: `Compacted from ${message.tokensBefore.toLocaleString()} tokens`
+			: message.tokensAfter !== undefined
+				? `Compacted to ${message.tokensAfter.toLocaleString()} tokens`
+				: "Compacted context";
+	const frameCount = message.images?.length ?? 0;
+	const frameNote =
+		frameCount > 0 ? `\n\n_${frameCount} snapcompact frame${frameCount === 1 ? "" : "s"} attached_` : "";
+	const warningNote = message.warning ? `\n\n${theme.icon.warning} **Warning:** ${message.warning}` : "";
+	return `**${tokenLine}**${warningNote}\n\n${message.summary}${frameNote}`;
 }
 
 /**
@@ -168,35 +194,15 @@ export class CompactionSummaryMessageComponent implements Component {
  * so the LLM sees the handoff-specific developer context. Render it with the
  * same divider affordance as `/compact` instead of the generic `[handoff]` box.
  */
-export class HandoffSummaryMessageComponent implements Component {
-	#divider: SummaryDividerComponent;
-
-	readonly #message: CustomMessage<unknown>;
-
+export class HandoffSummaryMessageComponent extends SummaryMessageComponent {
 	constructor(message: CustomMessage<unknown>) {
-		this.#message = message;
-
-		this.#divider = new SummaryDividerComponent({
+		super({
 			label: () => `${theme.icon.context} handed-off`,
-			detailMarkdown: () => this.#detailMarkdown(),
+			detailMarkdown: () => {
+				const document = extractHandoffDocument(getCustomMessageText(message));
+				return `**Handoff context**\n\n${document || "_No handoff content._"}`;
+			},
 		});
-	}
-
-	setExpanded(expanded: boolean): void {
-		this.#divider.setExpanded(expanded);
-	}
-
-	invalidate(): void {
-		this.#divider.invalidate();
-	}
-
-	render(width: number): readonly string[] {
-		return this.#divider.render(width);
-	}
-
-	#detailMarkdown(): string {
-		const document = extractHandoffDocument(getCustomMessageText(this.#message));
-		return `**Handoff context**\n\n${document || "_No handoff content._"}`;
 	}
 }
 
@@ -215,30 +221,12 @@ export function createHandoffSummaryMessageComponent(
  * with the same slim divider as `/compact` and handoff rather than a `[branch]`
  * box, so every history-collapse point reads as one consistent banner.
  */
-export class BranchSummaryMessageComponent implements Component {
-	#divider: SummaryDividerComponent;
-
-	readonly #message: BranchSummaryMessage;
-
+export class BranchSummaryMessageComponent extends SummaryMessageComponent {
 	constructor(message: BranchSummaryMessage) {
-		this.#message = message;
-
-		this.#divider = new SummaryDividerComponent({
+		super({
 			label: () => `${theme.icon.branch} branch`,
-			detailMarkdown: () => `**Branch summary**\n\n${this.#message.summary}`,
+			detailMarkdown: () => `**Branch summary**\n\n${message.summary}`,
 		});
-	}
-
-	setExpanded(expanded: boolean): void {
-		this.#divider.setExpanded(expanded);
-	}
-
-	invalidate(): void {
-		this.#divider.invalidate();
-	}
-
-	render(width: number): readonly string[] {
-		return this.#divider.render(width);
 	}
 }
 

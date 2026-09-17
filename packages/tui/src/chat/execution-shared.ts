@@ -2,19 +2,18 @@
  * Shared rendering primitives for bash/eval execution components.
  *
  * Each helper isolates a piece of structure both components share verbatim
- * (frame layout, collapsed preview, post-run status line). Differences in
+ * (frame layout and post-run status line). Differences in
  * how each component prepares its header, output lines, or sixel masking
  * stay in their respective files.
  */
 
 import { Loader } from "../components/loader";
 import { Text } from "../components/text";
-import { type Component, Container, type TUI } from "../tui";
+import { Container, type TUI } from "../tui";
 import { getSymbolTheme, theme } from "../theme/theme";
 import type { OutputArtifactError } from "../tools/streaming-output";
 import { formatArtifactErrorNotice, formatTruncationMetaNotice, type TruncationMeta } from "../tools/output-meta";
 import { DynamicBorder } from "../chrome/dynamic-border";
-import { truncateToVisualLines } from "../chrome/visual-truncate";
 
 export type ExecutionStatus = "running" | "complete" | "cancelled" | "error";
 
@@ -49,17 +48,6 @@ export function buildExecutionFrame(
 
 	parent.addChild(new DynamicBorder(borderColor));
 	return { contentContainer, loader };
-}
-
-/**
- * Wrap a styled preview block in a render-time visual-line truncator.
- * Recomputed per render width so wrapping stays in sync with terminal size.
- */
-export function createCollapsedPreview(previewText: string, previewLines: number): Component {
-	return {
-		render: (width: number) => truncateToVisualLines(previewText, previewLines, width, 1).visualLines,
-		invalidate: () => {},
-	};
 }
 
 /**

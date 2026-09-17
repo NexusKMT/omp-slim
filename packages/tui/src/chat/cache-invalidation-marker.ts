@@ -1,6 +1,6 @@
 import type { Usage } from "@oh-my-pi/pi-ai";
-import { type Component } from "../tui";
 import { formatNumber } from "@oh-my-pi/pi-utils";
+import { MessageDividerComponent } from "../chrome/message-divider";
 import { theme } from "../theme";
 
 /**
@@ -65,8 +65,6 @@ export function detectCacheInvalidation(prev: Usage | undefined, current: Usage)
 	return { reprocessedTokens };
 }
 
-const CACHE_INVALIDATION_RULE_WIDTH = 10;
-
 /**
  * Slim left-aligned divider rendered after an assistant turn whose request lost
  * the prompt cache. It trails streamed content because usage arrives at message
@@ -77,40 +75,20 @@ const CACHE_INVALIDATION_RULE_WIDTH = 10;
  *
  *   ────────── ⊘ cache miss · 50.9k tokens
  */
-export class CacheInvalidationMarkerComponent implements Component {
-	#cache?: { width: number; lines: string[] };
-
-	readonly #info: CacheInvalidation;
-
+export class CacheInvalidationMarkerComponent extends MessageDividerComponent {
 	constructor(info: CacheInvalidation) {
-		this.#info = info;
-	}
-
-	invalidate(): void {
-		this.#cache = undefined;
-	}
-
-	render(width: number): readonly string[] {
-		width = Math.max(1, width);
-		if (this.#cache?.width === width) {
-			return this.#cache.lines;
-		}
-		const lines = ["", this.#divider(width), ""];
-		this.#cache = { width, lines };
-		return lines;
-	}
-
-	#divider(width: number): string {
-		const icon = theme.icon.cacheMiss;
-		const head = icon ? `${icon} cache miss` : "cache miss";
-		const tokens = this.#info.reprocessedTokens;
-		const label = tokens > 0 ? `${head} ${theme.sep.dot.trim()} ${formatNumber(tokens)} tokens` : head;
-		const labelWidth = Bun.stringWidth(label, { countAnsiEscapeCodes: false });
-		const ruleWidth = Math.min(CACHE_INVALIDATION_RULE_WIDTH, width - labelWidth - 1);
-		if (ruleWidth < 1) {
-			// Too narrow to frame — emit the bare label.
-			return theme.fg("muted", label);
-		}
-		return `${theme.fg("dim", theme.tree.horizontal.repeat(ruleWidth))} ${theme.fg("muted", label)}`;
+		super({
+			label: () => {
+				const icon = theme.icon.cacheMiss;
+				const head = icon ? `${icon} cache miss` : "cache miss";
+				const tokens = info.reprocessedTokens;
+				return tokens > 0 ? `${head} ${theme.sep.dot.trim()} ${formatNumber(tokens)} tokens` : head;
+			},
+			labelColor: "muted",
+			ruleColor: "dim",
+			ruleWidth: 10,
+			// Too narrow to frame — preserve the legacy bare label.
+			truncateWhenNarrow: false,
+		});
 	}
 }

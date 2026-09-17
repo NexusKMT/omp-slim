@@ -114,7 +114,7 @@ import {
 	onExtendedContextChanged,
 	onModelRolesChanged,
 } from "../config/settings";
-import { RawSseDebugBuffer } from "../debug/raw-sse-buffer";
+import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import { getEditStore } from "../edit/store";
 import { releaseCompletionHandles } from "../eval/completion-bridge";
 import type { EvalPreludeDefinition } from "../eval/preludes";

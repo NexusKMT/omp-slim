@@ -2,6 +2,8 @@ import { Container, matchesKey, ScrollView, Spacer, TruncatedText } from "../ind
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { MenuSelection } from "../components/menu-selection";
+import { centeredViewportRange } from "../components/scroll-viewport";
 
 const RESET_SELECTOR_MAX_VISIBLE = 10;
 
@@ -25,20 +27,28 @@ export interface ResetUsageAccount {
  */
 export class ResetUsageSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
-	#accounts: ResetUsageAccount[];
-	#selectedIndex = 0;
-	#pendingIndex: number | null = null;
+	#menu: MenuSelection<ResetUsageAccount>;
 	#statusMessage: string | undefined;
 	#onSelectCallback: (account: ResetUsageAccount) => void;
 	#onCancelCallback: () => void;
 
 	constructor(accounts: ResetUsageAccount[], onSelect: (account: ResetUsageAccount) => void, onCancel: () => void) {
 		super("Spend a saved rate-limit reset");
-		this.#accounts = accounts;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
-		const firstRedeemable = accounts.findIndex(account => account.availableCount > 0);
-		this.#selectedIndex = firstRedeemable >= 0 ? firstRedeemable : 0;
+		const firstRedeemable = accounts.find(account => account.availableCount > 0);
+		this.#menu = new MenuSelection<ResetUsageAccount>(
+			accounts,
+			{
+				getKey: account =>
+					`${account.target.credentialId ?? ""}:${account.target.accountId ?? ""}:${account.target.email ?? ""}:${account.label}`,
+				getSearchText: account => account.label,
+				requiresConfirmation: account => account.availableCount > 0,
+			},
+			firstRedeemable
+				? `${firstRedeemable.target.credentialId ?? ""}:${firstRedeemable.target.accountId ?? ""}:${firstRedeemable.target.email ?? ""}:${firstRedeemable.label}`
+				: undefined,
+		);
 
 		this.#listContainer = new Container();
 		this.addChild(this.#listContainer);
@@ -48,19 +58,16 @@ export class ResetUsageSelectorComponent extends OverlayPanel {
 	#updateList(): void {
 		this.#listContainer.clear();
 
-		const total = this.#accounts.length;
+		const items = this.#menu.visibleItems;
+		const total = items.length;
 		const maxVisible = RESET_SELECTOR_MAX_VISIBLE;
-		const startIndex =
-			total <= maxVisible
-				? 0
-				: Math.max(0, Math.min(this.#selectedIndex - Math.floor(maxVisible / 2), total - maxVisible));
-		const endIndex = Math.min(startIndex + maxVisible, total);
+		const { start: startIndex, end: endIndex } = centeredViewportRange(this.#menu.selectedIndex, total, maxVisible);
 
 		const rows: string[] = [];
 		for (let i = startIndex; i < endIndex; i++) {
-			const account = this.#accounts[i];
+			const account = items[i];
 			if (!account) continue;
-			const isSelected = i === this.#selectedIndex;
+			const isSelected = i === this.#menu.selectedIndex;
 			const redeemable = account.availableCount > 0;
 			const countLabel = account.error
 				? account.error
@@ -97,7 +104,7 @@ export class ResetUsageSelectorComponent extends OverlayPanel {
 			);
 		}
 
-		const pending = this.#pendingIndex !== null ? this.#accounts[this.#pendingIndex] : undefined;
+		const pending = items.find(item => this.#menu.isPending(item));
 		const hint = pending
 			? theme.fg("warning", `Press Enter again to spend 1 reset for ${pending.label}, Esc to cancel`)
 			: theme.fg("muted", "↑/↓ select · ↵ spend a reset · Esc cancel");
@@ -111,8 +118,7 @@ export class ResetUsageSelectorComponent extends OverlayPanel {
 
 	handleInput(keyData: string): void {
 		if (matchesSelectCancel(keyData)) {
-			if (this.#pendingIndex !== null) {
-				this.#pendingIndex = null;
+			if (this.#menu.cancelConfirmation()) {
 				this.#statusMessage = undefined;
 				this.#updateList();
 				return;
@@ -122,46 +128,43 @@ export class ResetUsageSelectorComponent extends OverlayPanel {
 		}
 
 		if (matchesSelectUp(keyData)) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = this.#selectedIndex === 0 ? this.#accounts.length - 1 : this.#selectedIndex - 1;
-			}
-			this.#pendingIndex = null;
+			this.#menu.cancelConfirmation();
+			this.#menu.move(-1, true);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		} else if (matchesSelectDown(keyData)) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = this.#selectedIndex === this.#accounts.length - 1 ? 0 : this.#selectedIndex + 1;
-			}
-			this.#pendingIndex = null;
+			this.#menu.cancelConfirmation();
+			this.#menu.move(1, true);
 			this.#statusMessage = undefined;
 			this.#updateList();
 		} else if (matchesKey(keyData, "pageUp")) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = Math.max(0, this.#selectedIndex - RESET_SELECTOR_MAX_VISIBLE);
-			}
-			this.#pendingIndex = null;
+			this.#menu.cancelConfirmation();
+			this.#menu.move(-RESET_SELECTOR_MAX_VISIBLE, false);
+			this.#statusMessage = undefined;
 			this.#updateList();
 		} else if (matchesKey(keyData, "pageDown")) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = Math.min(this.#accounts.length - 1, this.#selectedIndex + RESET_SELECTOR_MAX_VISIBLE);
-			}
-			this.#pendingIndex = null;
+			this.#menu.cancelConfirmation();
+			this.#menu.move(RESET_SELECTOR_MAX_VISIBLE, false);
+			this.#statusMessage = undefined;
 			this.#updateList();
 		} else if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const account = this.#accounts[this.#selectedIndex];
+			const account = this.#menu.selectedItem;
 			if (!account) return;
 			if (account.availableCount <= 0) {
 				this.#statusMessage = "That account has no saved resets to spend.";
 				this.#updateList();
 				return;
 			}
-			if (this.#pendingIndex === this.#selectedIndex) {
-				this.#onSelectCallback(account);
+			const result = this.#menu.requestActivation();
+			if (result.kind === "pending") {
+				this.#statusMessage = undefined;
+				this.#updateList();
 				return;
 			}
-			this.#pendingIndex = this.#selectedIndex;
-			this.#statusMessage = undefined;
-			this.#updateList();
+			if (result.kind === "confirmed") {
+				this.#onSelectCallback(result.item);
+				return;
+			}
 		}
 	}
 }

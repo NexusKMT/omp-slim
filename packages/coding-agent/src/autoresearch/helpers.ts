@@ -1,5 +1,5 @@
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
-import type { ASIData, ASIValue, MetricDirection, NumericMetricMap } from "@oh-my-pi/pi-tui/tools/autoresearch";
+import type { ASIData, ASIValue, NumericMetricMap } from "@oh-my-pi/pi-tui/tools/autoresearch";
 
 export const METRIC_LINE_PREFIX = "METRIC";
 export const ASI_LINE_PREFIX = "ASI";
@@ -67,16 +67,6 @@ export function mergeAsi(base: ASIData | null, override: ASIData | undefined): A
 	};
 }
 
-export function formatElapsed(milliseconds: number): string {
-	const totalSeconds = Math.floor(milliseconds / 1000);
-	const minutes = Math.floor(totalSeconds / 60);
-	const seconds = totalSeconds % 60;
-	if (minutes > 0) {
-		return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-	}
-	return `${seconds}s`;
-}
-
 export function killTree(pid: number, signal: NodeJS.Signals | number = "SIGTERM"): void {
 	try {
 		process.kill(-pid, signal);
@@ -87,10 +77,6 @@ export function killTree(pid: number, signal: NodeJS.Signals | number = "SIGTERM
 			// Process already exited.
 		}
 	}
-}
-
-export function isBetter(current: number, best: number, direction: MetricDirection): boolean {
-	return direction === "lower" ? current < best : current > best;
 }
 
 export function inferMetricUnitFromName(name: string): string {

@@ -1,11 +1,9 @@
 import type { Component } from "../tui";
-import { ImageProtocol, TERMINAL } from "../terminal-capabilities";
 import { getProjectDir } from "@oh-my-pi/pi-utils";
-import { truncateToVisualLines } from "../chrome/visual-truncate";
 import { highlightCode, type Theme } from "../theme/theme";
 import { renderStatusLine } from "../render/status-line";
-import { CachedOutputBlock, markFramedBlockComponent, outputBlockContentWidth } from "../render/output-block";
-import { getSixelLineMask } from "../render/sixel";
+import { framedToolCard, type ToolCardSnapshot } from "../render/tool-card";
+import { formatOutputPaneLines } from "../render/output-pane";
 import {
 	capPreviewLines,
 	DEFAULT_TERMINAL_PREVIEW_LINES,
@@ -271,33 +269,23 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 		renderCall(args: TArgs, options: RenderResultOptions, uiTheme: Theme): Component {
 			const renderArgs = toBashRenderArgs(args, config);
 			const cmdLines = formatBashCommandLines(renderArgs, uiTheme);
-			const outputBlock = new CachedOutputBlock();
-			return markFramedBlockComponent({
-				render: (width: number): readonly string[] => {
-					const header =
-						config.showHeader === false
-							? undefined
-							: renderStatusLine(
-									{
-										icon: options.spinnerFrame !== undefined ? "running" : "pending",
-										spinnerFrame: options.spinnerFrame,
-										title: config.resolveTitle(args, options),
-									},
-									uiTheme,
-								);
-					return outputBlock.render(
-						{
-							header,
-							state: options.spinnerFrame !== undefined ? "running" : "pending",
-							sections: [{ lines: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
-							width,
-						},
-						uiTheme,
-					);
-				},
-				invalidate: () => {
-					outputBlock.invalidate();
-				},
+			return framedToolCard(uiTheme, () => {
+				const header =
+					config.showHeader === false
+						? undefined
+						: renderStatusLine(
+								{
+									icon: options.spinnerFrame !== undefined ? "running" : "pending",
+									spinnerFrame: options.spinnerFrame,
+									title: config.resolveTitle(args, options),
+								},
+								uiTheme,
+							);
+				return {
+					header,
+					phase: options.spinnerFrame !== undefined ? "running" : "pending",
+					sections: [{ content: capPreviewLines(cmdLines, uiTheme, { expanded: options.expanded }) }],
+				};
 			});
 		},
 
@@ -333,27 +321,28 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 									},
 							uiTheme,
 						);
-			const outputBlock = new CachedOutputBlock();
-
 			// Per-instance cache for the expensive inner lines computation. Mirrors
 			// the eval-renderer pattern (`eval-render.ts:709-752`): without this,
 			// every TUI repaint (one per keystroke when a long transcript is on
-			// screen) re-runs `split` / `replaceTabs` / `truncateToVisualLines` over
-			// the whole stored output for every bash row in scrollback. With a
+			// screen) re-runs `split` / `replaceTabs` / visual capping over the
+			// whole stored output for every bash row in scrollback. With a
 			// 50KB-tail bash result times hundreds of rows, that re-rendering is
 			// what pinned the main thread in issue #2081 and made keystrokes feel
-			// like the CPU was at 100%. The cache key includes every render input
-			// that materially affects the produced lines.
+			// like the CPU was at 100%. The cache holds the ToolCard snapshot (not
+			// the final framed rows) so the fast path preserves array identity.
+			// The cache key includes every render input that materially affects
+			// the produced lines.
 			let cachedWidth: number | undefined;
 			let cachedPreviewLines: number | undefined;
 			let cachedExpanded: boolean | undefined;
 			let cachedRawOutput: string | undefined;
 			let cachedIsPartial: boolean | undefined;
-			let cachedLines: readonly string[] | undefined;
 			let cachedPreviewWindow: number | undefined;
+			let cachedSnapshot: ToolCardSnapshot | undefined;
 
-			return markFramedBlockComponent({
-				render: (width: number): readonly string[] => {
+			return framedToolCard(
+				uiTheme,
+				({ width, contentWidth }) => {
 					// REACTIVE: read mutable options at render time
 					const { renderContext } = options;
 					const expanded = renderContext?.expanded ?? options.expanded;
@@ -368,7 +357,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					const previewWindow = previewWindowRows();
 
 					if (
-						cachedLines !== undefined &&
+						cachedSnapshot !== undefined &&
 						cachedWidth === width &&
 						cachedPreviewLines === previewLines &&
 						cachedExpanded === expanded &&
@@ -376,7 +365,7 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 						cachedIsPartial === isPartial &&
 						cachedPreviewWindow === previewWindow
 					) {
-						return cachedLines;
+						return cachedSnapshot;
 					}
 					const withoutBackground = stripBackgroundNotice(rawOutput, details?.async);
 					const strippedOutput = stripOutputNotice(withoutBackground, details?.meta);
@@ -427,64 +416,43 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 						warningLine = formatStyledTruncationWarning(details.meta, uiTheme) ?? undefined;
 					}
 
-					const outputLines: string[] = [];
+					// Cap the collapsed/streaming output to a viewport-sized tail and
+					// measure it at the box's INNER width. Otherwise a growing tail
+					// window scrolls its (mutating) rows above the live-region window
+					// and the engine re-commits a fresh snapshot every frame —
+					// spraying duplicate expand banners into native scrollback (the
+					// box never overflows the viewport now). Sixel payload rows stay
+					// unstyled and uncapped via uncapSixel.
 					const hasOutput = displayOutput.trim().length > 0;
-					const rawOutputLines = displayOutput.split("\n");
-					const sixelLineMask =
-						TERMINAL.imageProtocol === ImageProtocol.Sixel ? getSixelLineMask(rawOutputLines) : undefined;
-					const hasSixelOutput = sixelLineMask?.some(Boolean) ?? false;
-					if (hasOutput) {
-						if (hasSixelOutput) {
-							outputLines.push(
-								...rawOutputLines.map((line, index) =>
-									sixelLineMask?.[index] ? line : uiTheme.fg("toolOutput", replaceTabs(line)),
-								),
-							);
-						} else if (expanded) {
-							outputLines.push(...rawOutputLines.map(line => uiTheme.fg("toolOutput", replaceTabs(line))));
-						} else {
-							const styledOutput = rawOutputLines
-								.map(line => uiTheme.fg("toolOutput", replaceTabs(line)))
-								.join("\n");
-							const textContent = styledOutput;
-							// Cap the collapsed/streaming output to a viewport-sized tail and
-							// measure it at the box's INNER width. Otherwise a growing tail
-							// window scrolls its (mutating) rows above the live-region window
-							// and the engine re-commits a fresh snapshot every frame —
-							// spraying duplicate "… ctrl+o to expand" banners into native
-							// scrollback (the box never overflows the viewport now).
-							const previewBudget = Math.min(previewLines, previewWindow);
-							const result = truncateToVisualLines(textContent, previewBudget, outputBlockContentWidth(width));
-							if (result.skippedCount > 0) {
-								outputLines.push(
-									uiTheme.fg(
-										"dim",
-										`… (${result.skippedCount} earlier lines, showing ${result.visualLines.length} of ${result.skippedCount + result.visualLines.length}) (ctrl+o to expand)`,
-									),
-								);
-							}
-							outputLines.push(...result.visualLines);
-						}
-					}
-					if (timeoutLine) outputLines.push(timeoutLine);
-					if (warningLine) outputLines.push(warningLine);
-
-					const framed = outputBlock.render(
+					const formatted = formatOutputPaneLines(
 						{
-							header,
-							state: isPartial ? "pending" : isError ? (isTimeout ? "warning" : "error") : "success",
-							sections: [
-								{
-									// Viewport-sized tail window in every state — streaming and final
-									// render identically; only ctrl+o uncaps.
-									lines: capPreviewLines(cmdLines ?? [], uiTheme, { expanded }),
-								},
-								{ label: uiTheme.fg("toolTitle", "Output"), lines: outputLines },
-							],
-							width,
+							lines: hasOutput ? displayOutput.split("\n") : [],
+							expanded,
+							collapsedMaxLines: Math.min(previewLines, previewWindow),
+							edge: "tail",
+							visual: true,
+							width: contentWidth,
+							styleLine: line => uiTheme.fg("toolOutput", replaceTabs(line)),
+							uncapSixel: true,
 						},
 						uiTheme,
 					);
+					const outputLines: string[] = [...formatted.lines];
+					if (timeoutLine) outputLines.push(timeoutLine);
+					if (warningLine) outputLines.push(warningLine);
+
+					const snapshot: ToolCardSnapshot = {
+						header,
+						phase: isPartial ? "partial" : isError ? (isTimeout ? "warning" : "error") : "success",
+						sections: [
+							{
+								// Viewport-sized tail window in every state — streaming and final
+								// render identically; only ctrl+o uncaps.
+								content: capPreviewLines(cmdLines ?? [], uiTheme, { expanded }),
+							},
+							{ label: uiTheme.fg("toolTitle", "Output"), content: outputLines },
+						],
+					};
 
 					cachedWidth = width;
 					cachedPreviewLines = previewLines;
@@ -492,20 +460,21 @@ export function createShellRenderer<TArgs>(config: ShellRendererConfig<TArgs>) {
 					cachedRawOutput = rawOutput;
 					cachedIsPartial = isPartial;
 					cachedPreviewWindow = previewWindow;
-					cachedLines = framed;
-					return framed;
+					cachedSnapshot = snapshot;
+					return snapshot;
 				},
-				invalidate: () => {
-					outputBlock.invalidate();
-					cachedLines = undefined;
-					cachedWidth = undefined;
-					cachedPreviewLines = undefined;
-					cachedExpanded = undefined;
-					cachedRawOutput = undefined;
-					cachedIsPartial = undefined;
-					cachedPreviewWindow = undefined;
+				{
+					onInvalidate: () => {
+						cachedSnapshot = undefined;
+						cachedWidth = undefined;
+						cachedPreviewLines = undefined;
+						cachedExpanded = undefined;
+						cachedRawOutput = undefined;
+						cachedIsPartial = undefined;
+						cachedPreviewWindow = undefined;
+					},
 				},
-			});
+			);
 		},
 		mergeCallAndResult: true,
 		inline: true,

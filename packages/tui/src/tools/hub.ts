@@ -5,16 +5,8 @@ import { visibleWidth } from "../utils";
 import { formatAge, pluralize } from "@oh-my-pi/pi-utils";
 import { shimmerEnabled, shimmerText } from "../theme/shimmer";
 import type { Theme, ThemeColor } from "../theme/theme";
-import {
-	Ellipsis,
-	Hasher,
-	type RenderCache,
-	renderStatusLine,
-	renderTreeList,
-	truncateToWidth,
-	framedBlock,
-	outputBlockContentWidth,
-} from "../render/index";
+import { Ellipsis, Hasher, type RenderCache, renderStatusLine, renderTreeList, truncateToWidth } from "../render/index";
+import { framedToolCard } from "../render/tool-card";
 import { formatArtifactErrorNotice, stripOutputNotice, type OutputMeta } from "./output-meta";
 import {
 	FEED_MODEL_BADGE_WIDTH,
@@ -942,22 +934,20 @@ export function launchRenderResult(
 	);
 
 	if (op === "logs") {
-		return framedBlock(theme, width => {
-			const innerWidth = outputBlockContentWidth(width);
-			const rows = body.map(line => truncateToWidth(line, innerWidth));
+		return framedToolCard(theme, ({ contentWidth }) => {
+			const rows = body.map(line => truncateToWidth(line, contentWidth));
 			return {
 				header,
-				state: options.isPartial ? "pending" : failed ? "error" : "success",
+				phase: options.isPartial ? "partial" : failed ? "error" : "success",
 				sections: [
 					{
 						label: theme.fg("toolTitle", "Output"),
-						lines: capPreviewLines(rows, theme, {
+						content: capPreviewLines(rows, theme, {
 							expanded: options.expanded,
 							max: DEFAULT_TERMINAL_PREVIEW_LINES,
 						}),
 					},
 				],
-				width,
 			};
 		});
 	}

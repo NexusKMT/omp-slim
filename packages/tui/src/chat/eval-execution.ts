@@ -10,10 +10,10 @@ import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { highlightCode, theme } from "../theme/theme";
 import type { OutputArtifactError } from "../tools/streaming-output";
 import type { TruncationMeta } from "../tools/output-meta";
+import { OutputPane } from "../render/output-pane";
 import {
 	buildExecutionFrame,
 	buildStatusFooter,
-	createCollapsedPreview,
 	type ExecutionColorKey,
 	type ExecutionStatus,
 	resolveExecutionStatus,
@@ -25,7 +25,6 @@ const MAX_DISPLAY_LINE_CHARS = 4000;
 export type EvalExecutionLanguage = "python" | "js";
 
 export class EvalExecutionComponent extends Container {
-	#outputLines: string[] = [];
 	#status: ExecutionStatus = "running";
 	#exitCode: number | undefined = undefined;
 	#loader: Loader;
@@ -38,6 +37,7 @@ export class EvalExecutionComponent extends Container {
 	// observe that.
 	#blockVersion = 0;
 	#contentContainer: Container;
+	#outputPane: OutputPane;
 	readonly #code: string;
 	readonly #excludeFromContext: boolean;
 	readonly #language: EvalExecutionLanguage;
@@ -66,6 +66,18 @@ export class EvalExecutionComponent extends Container {
 		const { contentContainer, loader } = buildExecutionFrame(this, ui, colorKey);
 		this.#contentContainer = contentContainer;
 		this.#loader = loader;
+		this.#outputPane = new OutputPane(theme, {
+			expanded: false,
+			collapsedMaxLines: PREVIEW_LINES,
+			edge: "tail",
+			visual: true,
+			paddingX: 1,
+			leadingBlank: true,
+			showHiddenMarker: false,
+			showExpandHint: false,
+			styleLine: line => theme.fg("muted", line),
+			normalizeLine: line => this.#clampDisplayLine(line),
+		});
 
 		this.#contentContainer.addChild(this.#formatHeader(colorKey));
 		this.#contentContainer.addChild(this.#loader);
@@ -87,6 +99,7 @@ export class EvalExecutionComponent extends Container {
 	setExpanded(expanded: boolean): void {
 		if (this.#expanded !== expanded) this.#blockVersion++;
 		this.#expanded = expanded;
+		this.#outputPane.setExpanded(expanded);
 		this.#updateDisplay();
 	}
 
@@ -97,16 +110,7 @@ export class EvalExecutionComponent extends Container {
 
 	appendOutput(chunk: string): void {
 		// Chunk is pre-sanitized by OutputSink.push() — no need to sanitize again.
-		const newLines = chunk.split("\n").map(line => this.#clampDisplayLine(line));
-		if (this.#outputLines.length > 0 && newLines.length > 0) {
-			this.#outputLines[this.#outputLines.length - 1] = this.#clampDisplayLine(
-				`${this.#outputLines[this.#outputLines.length - 1]}${newLines[0]}`,
-			);
-			this.#outputLines.push(...newLines.slice(1));
-		} else {
-			this.#outputLines.push(...newLines);
-		}
-
+		this.#outputPane.append(chunk);
 		this.#updateDisplay();
 	}
 
@@ -119,6 +123,7 @@ export class EvalExecutionComponent extends Container {
 		this.#status = resolveExecutionStatus(exitCode, cancelled);
 		this.#truncation = options?.truncation;
 		this.#artifactError = options?.artifactError;
+		this.#outputPane.finish();
 		if (options?.output !== undefined) {
 			this.#setOutput(options.output);
 		}
@@ -128,26 +133,16 @@ export class EvalExecutionComponent extends Container {
 	}
 
 	#updateDisplay(): void {
-		const availableLines = this.#outputLines;
-		const previewLogicalLines = availableLines.slice(-PREVIEW_LINES);
 		// Only the collapsed preview hides lines; when expanded the footer must
 		// not keep advertising hidden lines / ctrl+o.
-		const hiddenLineCount = this.#expanded ? 0 : availableLines.length - previewLogicalLines.length;
+		const hiddenLineCount = this.#expanded ? 0 : Math.max(0, this.#outputPane.lineCount - PREVIEW_LINES);
 
 		this.#contentContainer.clear();
 
 		const colorKey: ExecutionColorKey = this.#excludeFromContext ? "dim" : "pythonMode";
 		this.#contentContainer.addChild(this.#formatHeader(colorKey));
 
-		if (availableLines.length > 0) {
-			if (this.#expanded) {
-				const displayText = availableLines.map(line => theme.fg("muted", line)).join("\n");
-				this.#contentContainer.addChild(new Text(`\n${displayText}`, 1, 0));
-			} else {
-				const styledOutput = previewLogicalLines.map(line => theme.fg("muted", line)).join("\n");
-				this.#contentContainer.addChild(createCollapsedPreview(`\n${styledOutput}`, PREVIEW_LINES));
-			}
-		}
+		if (this.#outputPane.lineCount > 0) this.#contentContainer.addChild(this.#outputPane);
 
 		if (this.#status === "running") {
 			this.#contentContainer.addChild(this.#loader);
@@ -173,11 +168,11 @@ export class EvalExecutionComponent extends Container {
 
 	#setOutput(output: string): void {
 		const clean = sanitizeText(output);
-		this.#outputLines = clean ? clean.split("\n").map(line => this.#clampDisplayLine(line)) : [];
+		this.#outputPane.setText(clean);
 	}
 
 	getOutput(): string {
-		return this.#outputLines.join("\n");
+		return this.#outputPane.getText();
 	}
 
 	getCode(): string {

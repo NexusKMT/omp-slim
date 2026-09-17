@@ -1,5 +1,7 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { SgrMouseEvent } from "../../mouse";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
 import { buildBrowserItems, ModelBrowser, resolveRoleAssignments, sortModelItems } from "../../overlays/model-browser";
 import { theme } from "../../theme/theme";
 import type { SetupScene, SetupSceneController, SetupSceneHost } from "./types";
@@ -15,7 +17,7 @@ class ModelSceneController implements SetupSceneController {
 	#status: string | undefined;
 	#selecting = false;
 	#disposed = false;
-	#browserRowStart = 2;
+	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
@@ -40,29 +42,43 @@ class ModelSceneController implements SetupSceneController {
 	}
 
 	invalidate(): void {
-		this.#browser.invalidate();
+		if (this.#step) this.#step.invalidate();
+		else this.#browser.invalidate();
 	}
 
 	handleInput(data: string): void {
 		if (this.#selecting) return;
-		this.#browser.handleInput(data);
+		if (this.#step) this.#step.handleInput(data);
+		else this.#browser.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number): void {
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
 		if (this.#selecting) return;
-		this.#browser.routeMouse(event, line - this.#browserRowStart);
+		this.#step?.routeMouse(event, line, col);
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const lines = [
+		const intro = new Text(
 			this.#status ?? theme.fg("muted", "Type to search. Enter saves the highlighted model as your default."),
-			"",
-		];
-		const budget = maxLines === undefined ? MAX_VISIBLE_MODELS : maxLines - lines.length - BROWSER_FRAME_ROWS;
-		this.#browser.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE_MODELS, budget)));
-		this.#browserRowStart = lines.length;
-		lines.push(...this.#browser.render(width));
-		return lines;
+			0,
+			0,
+		);
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				intro,
+				content: this.#browser,
+				minContentLines: 1,
+				fitContent: budget => {
+					const visible = budget === undefined ? MAX_VISIBLE_MODELS : budget - BROWSER_FRAME_ROWS;
+					this.#browser.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE_MODELS, visible)));
+				},
+			});
+		} else {
+			this.#step.setIntro(intro);
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	#syncModels(): void {

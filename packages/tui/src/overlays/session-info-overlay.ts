@@ -1,7 +1,7 @@
 import { type Component, Ellipsis, matchesKey, ScrollView, Text, truncateToWidth } from "../index";
 import { theme } from "../theme/theme";
 import { matchesSelectCancel } from "../keybinding-matchers";
-import { OverlayPanel, PanelDivider } from "../chrome/overlay-box";
+import { OverlayPanel, PanelDivider, PanelRows } from "../chrome/overlay-box";
 
 const FOOTER_HINT = "↑/↓ scroll · Esc close";
 const PANEL_CHROME_ROWS = 4;
@@ -20,7 +20,7 @@ export class SessionInfoOverlay implements Component {
 	readonly #panel: OverlayPanel;
 	readonly #info: Text;
 	readonly #scrollView: ScrollView;
-	readonly #footer: Text;
+	readonly #footer: PanelRows;
 	#lastInfoWidth: number | undefined;
 	#lastInfoLines: readonly string[] | undefined;
 	#lastHeight: number | undefined;
@@ -38,8 +38,8 @@ export class SessionInfoOverlay implements Component {
 				thumb: text => theme.fg("accent", text),
 			},
 		});
-		this.#footer = new Text(FOOTER_HINT, 0, 0);
-		this.#footer.setStyleFn(text => theme.fg("dim", text));
+		this.#footer = new PanelRows();
+		this.#footer.setHeight(1);
 		this.#panel = new OverlayPanel("Session Info");
 		this.#panel.addChild(this.#scrollView);
 		this.#panel.addChild(new PanelDivider());
@@ -74,7 +74,7 @@ export class SessionInfoOverlay implements Component {
 
 	render(width: number): readonly string[] {
 		const innerWidth = Math.max(1, width - 4);
-		this.#footer.setText(truncateToWidth(FOOTER_HINT, innerWidth));
+		this.#footer.setLines([theme.fg("dim", truncateToWidth(FOOTER_HINT, innerWidth))]);
 
 		const maxBodyHeight = Math.max(1, this.#host.terminal.rows - PANEL_CHROME_ROWS);
 		const fullWidthInfoLines = this.#info.render(innerWidth);

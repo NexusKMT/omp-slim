@@ -65,16 +65,9 @@ import {
 } from "./agent-hub-renderer";
 import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
 import type { AgentRoleDisplay } from "./agent-hub-renderer";
-import {
-	bottomBorder,
-	divider,
-	dividerSplit,
-	row,
-	splitBodyWidth,
-	splitRow,
-	topBorder,
-	topBorderSplit,
-} from "../chrome/overlay-box";
+import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
 
 /** Two-pane mode needs a useful roster and a readable inspector. */
 const SPLIT_MIN_WIDTH = 96;
@@ -261,8 +254,43 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#hasFallbackLiveSessions = false;
 	/** On narrow terminals Tab replaces the roster with the selected-agent inspector. */
 	#narrowDetailsOpen = false;
-	#lastRenderWasSplit = false;
-	#lastSplitRosterWidth: number | undefined;
+	/** Pane-local roster hits from the last body render, translated to frame lines after layout. */
+	#paneHitRows: Array<number | undefined> = [];
+	#contentRowsLast = 1;
+	#renderRosterPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(1, Math.floor(height ?? this.#contentRowsLast));
+		const roster = this.#renderRosterPanel(width, rows, this.#observedById);
+		this.#paneHitRows = roster.hitRows;
+		return roster.lines;
+	};
+	#renderDetailPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(1, Math.floor(height ?? this.#contentRowsLast));
+		return this.#renderDetailPanel(this.#rows[this.#selectedRow], width, rows, this.#observedById);
+	};
+	readonly #split = new SplitPane({
+		left: this.#renderRosterPane,
+		right: this.#renderDetailPane,
+		leftSize: { ratio: 0.58, min: ROSTER_MIN_WIDTH },
+		rightMinWidth: DETAIL_MIN_WIDTH,
+		splitAt: SPLIT_MIN_WIDTH,
+		narrowPane: "left",
+		prefix: () => `${theme.fg("border", theme.boxRound.vertical)} `,
+		divider: () => ` ${theme.fg("border", theme.boxRound.vertical)} `,
+		suffix: () => ` ${theme.fg("border", theme.boxRound.vertical)}`,
+	});
+	readonly #frameTop = new PanelRows();
+	readonly #frameDivider = new PanelRows();
+	readonly #frameFooter = new PanelRows();
+	readonly #frameBottom = new PanelRows();
+	readonly #frame = new Stack({
+		children: [
+			{ content: this.#frameTop, height: 1 },
+			{ content: this.#split, grow: 1 },
+			{ content: this.#frameDivider, height: 1 },
+			{ content: this.#frameFooter, height: 1 },
+			{ content: this.#frameBottom, height: 1 },
+		],
+	});
 	/** Scroll offset for the selected-agent inspector when its content overflows. */
 	#detailScrollOffset = 0;
 	#detailAgentId: string | undefined;
@@ -386,8 +414,11 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	handleInput(keyData: string): void {
 		if (
 			routeSgrMouseInput(keyData, event => {
-				const split = this.#lastSplitRosterWidth;
-				if (split !== undefined && event.wheel === null && event.col > split + 2) return false;
+				if (event.wheel === null && this.#section === "agents" && this.#split.mode === "split") {
+					const frameHit = this.#frame.locate(event.row, event.col);
+					const pane = frameHit?.index === 1 ? this.#split.locate(frameHit.line, frameHit.col) : undefined;
+					if (frameHit?.index === 1 && pane?.pane !== "left") return false;
+				}
 				return routeSelectListMouse(this, event, event.row);
 			})
 		) {
@@ -765,53 +796,35 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 	#renderTable(width: number, termHeight: number): string[] {
 		this.#hitRows.length = 0;
 		const contentRows = Math.max(1, termHeight - 4);
-		const observedById = this.#observedById;
-		const split = this.#splitRosterWidth(width);
-		this.#lastRenderWasSplit = split !== undefined;
-		this.#lastSplitRosterWidth = split;
+		this.#contentRowsLast = contentRows;
+		this.#paneHitRows = [];
 		const selected = this.#rows[this.#selectedRow];
-		const lines: string[] = [];
-
-		if (split !== undefined) {
-			const detailWidth = splitBodyWidth(width, split);
-			const roster = this.#renderRosterPanel(split, contentRows, observedById);
-			const details = this.#renderDetailPanel(selected, detailWidth, contentRows, observedById);
-			lines.push(topBorderSplit(width, "Agent Hub", split));
-			for (let i = 0; i < contentRows; i++) {
-				const hit = roster.hitRows[i];
-				if (hit !== undefined) this.#hitRows[lines.length] = hit;
-				lines.push(splitRow(roster.lines[i] ?? "", details[i] ?? "", width, split));
-			}
-			lines.push(dividerSplit(width, split));
-			lines.push(row(this.#footer(false, Math.max(1, width - 4)), width));
-			lines.push(bottomBorder(width));
-			return lines;
-		}
-
+		this.#split.setNarrowPane(this.#narrowDetailsOpen ? "right" : "left");
+		this.#split.setHeight(contentRows);
+		const geometry = this.#split.measure(width);
+		const isSplit = geometry.mode === "split";
 		const innerWidth = Math.max(1, width - 4);
-		if (this.#narrowDetailsOpen && selected) {
-			const details = this.#renderDetailPanel(selected, innerWidth, contentRows, observedById);
-			lines.push(topBorder(width, `Agent Hub · ${selected.id}`));
-			for (const detail of details) lines.push(row(detail, width));
+		let topLine: string;
+		if (isSplit) {
+			topLine = topBorderSplit(width, "Agent Hub", geometry.left?.width ?? 0);
+		} else if (this.#narrowDetailsOpen && selected) {
+			topLine = topBorder(width, `Agent Hub · ${selected.id}`);
 		} else {
-			const roster = this.#renderRosterPanel(innerWidth, contentRows, observedById);
-			lines.push(topBorder(width, "Agent Hub"));
-			for (let i = 0; i < contentRows; i++) {
-				const hit = roster.hitRows[i];
-				if (hit !== undefined) this.#hitRows[lines.length] = hit;
-				lines.push(row(roster.lines[i] ?? "", width));
-			}
+			topLine = topBorder(width, "Agent Hub");
 		}
-		lines.push(divider(width));
-		lines.push(row(this.#footer(this.#narrowDetailsOpen, innerWidth), width));
-		lines.push(bottomBorder(width));
+		const dividerLine = isSplit && geometry.left ? dividerSplit(width, geometry.left.width) : divider(width);
+		this.#frameTop.setLines([topLine]);
+		this.#frameDivider.setLines([dividerLine]);
+		this.#frameFooter.setLines([row(this.#footer(isSplit ? false : this.#narrowDetailsOpen, innerWidth), width)]);
+		this.#frameBottom.setLines([bottomBorder(width)]);
+		this.#frame.setHeight(contentRows + 4);
+		const lines = [...this.#frame.render(width)];
+		const bodyRow = this.#frame.childRect(1)?.row ?? 1;
+		for (let i = 0; i < this.#paneHitRows.length; i++) {
+			const hit = this.#paneHitRows[i];
+			if (hit !== undefined) this.#hitRows[bodyRow + i] = hit;
+		}
 		return lines;
-	}
-
-	#splitRosterWidth(width: number): number | undefined {
-		if (width < SPLIT_MIN_WIDTH) return undefined;
-		const rosterWidth = Math.max(ROSTER_MIN_WIDTH, Math.min(Math.floor(width * 0.58), width - DETAIL_MIN_WIDTH - 7));
-		return splitBodyWidth(width, rosterWidth) >= DETAIL_MIN_WIDTH ? rosterWidth : undefined;
 	}
 
 	#footer(showingNarrowDetails: boolean, availableWidth: number): string {
@@ -1382,7 +1395,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 				this.#agentFilter = "";
 				this.#refreshRows();
 				this.#requestRender();
-			} else if (this.#narrowDetailsOpen && !this.#lastRenderWasSplit) {
+			} else if (this.#narrowDetailsOpen && this.#split.mode !== "split") {
 				this.#narrowDetailsOpen = false;
 				this.#requestRender();
 			} else {
@@ -1395,12 +1408,12 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			this.#requestRender();
 			return;
 		}
-		if ((matchesKey(keyData, "tab") || keyData === "\t") && !this.#lastRenderWasSplit) {
+		if ((matchesKey(keyData, "tab") || keyData === "\t") && this.#split.mode !== "split") {
 			if (this.#rows.length > 0) this.#narrowDetailsOpen = !this.#narrowDetailsOpen;
 			this.#requestRender();
 			return;
 		}
-		if (this.#lastRenderWasSplit || this.#narrowDetailsOpen) {
+		if (this.#split.mode === "split" || this.#narrowDetailsOpen) {
 			if (matchesKey(keyData, "pageUp")) {
 				this.#scrollDetails(-1);
 				return;
@@ -1418,7 +1431,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 			return;
 		}
 		if (matchesKey(keyData, "left")) {
-			if (this.#narrowDetailsOpen && !this.#lastRenderWasSplit) {
+			if (this.#narrowDetailsOpen && this.#split.mode !== "split") {
 				this.#narrowDetailsOpen = false;
 				this.#requestRender();
 				return;

@@ -1,7 +1,9 @@
-import { Container, matchesKey, ScrollView, Spacer, TruncatedText } from "../index";
+import { Container, matchesKey, ScrollView, TruncatedText } from "../index";
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { MenuSelection } from "../components/menu-selection";
+import { centeredViewportRange } from "../components/scroll-viewport";
 
 const LOGOUT_SELECTOR_MAX_VISIBLE = 10;
 
@@ -17,9 +19,7 @@ export interface LogoutAccount {
 /** Account picker for `/logout` after the provider has been selected. */
 export class LogoutAccountSelectorComponent extends OverlayPanel {
 	#listContainer: Container;
-	#accounts: LogoutAccount[];
-	#selectedIndex = 0;
-	#statusMessage: string | undefined;
+	#menu: MenuSelection<LogoutAccount>;
 	#onSelectCallback: (account: LogoutAccount) => void;
 	#onCancelCallback: () => void;
 
@@ -30,11 +30,17 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		onCancel: () => void,
 	) {
 		super(`Select ${providerName} account to log out`);
-		this.#accounts = accounts;
 		this.#onSelectCallback = onSelect;
 		this.#onCancelCallback = onCancel;
-		const activeIndex = accounts.findIndex(account => account.active);
-		this.#selectedIndex = activeIndex >= 0 ? activeIndex : 0;
+		const active = accounts.find(account => account.active);
+		this.#menu = new MenuSelection<LogoutAccount>(
+			accounts,
+			{
+				getKey: account => String(account.credentialId),
+				getSearchText: account => `${account.label} ${account.detail} ${account.provider}`,
+			},
+			active ? String(active.credentialId) : undefined,
+		);
 
 		this.#listContainer = new Container();
 		this.addChild(this.#listContainer);
@@ -44,21 +50,18 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 	#updateList(): void {
 		this.#listContainer.clear();
 
-		const total = this.#accounts.length;
+		const items = this.#menu.visibleItems;
+		const total = items.length;
 		const maxVisible = LOGOUT_SELECTOR_MAX_VISIBLE;
-		const startIndex =
-			total <= maxVisible
-				? 0
-				: Math.max(0, Math.min(this.#selectedIndex - Math.floor(maxVisible / 2), total - maxVisible));
-		const endIndex = Math.min(startIndex + maxVisible, total);
+		const { start: startIndex, end: endIndex } = centeredViewportRange(this.#menu.selectedIndex, total, maxVisible);
 
 		const rows: string[] = [];
 		for (let i = startIndex; i < endIndex; i++) {
-			const account = this.#accounts[i];
+			const account = items[i];
 			if (!account) continue;
 			const activeTag = account.active ? theme.fg("muted", " (active)") : "";
 			const detail = account.detail ? theme.fg("dim", `  ${account.detail}`) : "";
-			if (i === this.#selectedIndex) {
+			if (i === this.#menu.selectedIndex) {
 				rows.push(`${theme.fg("accent", `${theme.nav.cursor} ${account.label}`)}${activeTag}${detail}`);
 			} else {
 				rows.push(`  ${account.label}${activeTag}${detail}`);
@@ -83,11 +86,6 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		this.#listContainer.addChild(
 			new TruncatedText(theme.fg("muted", "↑/↓ select · ↵ log out account · Esc cancel"), 0, 0),
 		);
-
-		if (this.#statusMessage) {
-			this.#listContainer.addChild(new Spacer(1));
-			this.#listContainer.addChild(new TruncatedText(theme.fg("warning", this.#statusMessage), 0, 0));
-		}
 	}
 
 	handleInput(keyData: string): void {
@@ -97,34 +95,19 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		}
 
 		if (matchesSelectUp(keyData)) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = this.#selectedIndex === 0 ? this.#accounts.length - 1 : this.#selectedIndex - 1;
-			}
-			this.#statusMessage = undefined;
+			this.#menu.move(-1, true);
 			this.#updateList();
 		} else if (matchesSelectDown(keyData)) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = this.#selectedIndex === this.#accounts.length - 1 ? 0 : this.#selectedIndex + 1;
-			}
-			this.#statusMessage = undefined;
+			this.#menu.move(1, true);
 			this.#updateList();
 		} else if (matchesKey(keyData, "pageUp")) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = Math.max(0, this.#selectedIndex - LOGOUT_SELECTOR_MAX_VISIBLE);
-			}
-			this.#statusMessage = undefined;
+			this.#menu.move(-LOGOUT_SELECTOR_MAX_VISIBLE, false);
 			this.#updateList();
 		} else if (matchesKey(keyData, "pageDown")) {
-			if (this.#accounts.length > 0) {
-				this.#selectedIndex = Math.min(
-					this.#accounts.length - 1,
-					this.#selectedIndex + LOGOUT_SELECTOR_MAX_VISIBLE,
-				);
-			}
-			this.#statusMessage = undefined;
+			this.#menu.move(LOGOUT_SELECTOR_MAX_VISIBLE, false);
 			this.#updateList();
 		} else if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const account = this.#accounts[this.#selectedIndex];
+			const account = this.#menu.selectedItem;
 			if (!account) return;
 			this.#onSelectCallback(account);
 		}

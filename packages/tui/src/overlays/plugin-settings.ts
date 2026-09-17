@@ -8,12 +8,11 @@
 import {
 	type Component,
 	Container,
-	Input,
 	matchesKey,
 	type SelectItem,
 	SelectList,
 	type SettingItem,
-	SettingsList,
+	type SgrMouseEvent,
 	Spacer,
 	Text,
 } from "../index";
@@ -21,6 +20,8 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme";
 import { shortenPath } from "../render/render-utils";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { FormField, SelectFormField, TextFormField, type FormFieldTheme } from "../components/form";
+import { SettingsFormField } from "../components/settings-list";
 
 /** Setting metadata consumed by the plugin settings UI. */
 export type PluginSettingSchema = {
@@ -135,7 +136,8 @@ function marketplaceEnabled(summary: InstalledPluginSummary): boolean {
 async function buildPluginConfigItems(
 	plugin: InstalledPlugin,
 	manager: PluginSettingsManager,
-	onConfigChange: (key: string, value: unknown) => void,
+	onConfigChange: (key: string, value: unknown) => void | Promise<void>,
+	requestRender?: () => void,
 ): Promise<SettingItem[]> {
 	const schemaSettings = plugin.manifest.settings;
 	if (!schemaSettings) return [];
@@ -162,16 +164,18 @@ async function buildPluginConfigItems(
 				description: schema.description || `Configure ${key}`,
 				currentValue: String(currentValue ?? schema.default ?? ""),
 				submenu: (cv, done) =>
-					new ConfigEnumSubmenu(
+					createConfigEnumPanel(
 						key,
 						schema.description || `Select value for ${key}`,
 						schema.values,
 						cv,
 						value => {
-							onConfigChange(key, value);
+							const result = onConfigChange(key, value);
 							done(value);
+							return result;
 						},
 						() => done(),
+						requestRender,
 					),
 			});
 		} else {
@@ -181,16 +185,18 @@ async function buildPluginConfigItems(
 				description: schema.description || `Configure ${key}`,
 				currentValue: displayValue,
 				submenu: (cv, done) =>
-					new ConfigInputSubmenu(
+					createConfigInputPanel(
 						key,
 						schema,
 						cv === "(not set)" ? "" : cv,
 						value => {
 							const parsed = schema.type === "number" ? Number(value) : value;
-							onConfigChange(key, parsed);
+							const result = onConfigChange(key, parsed);
 							done(String(value));
+							return result;
 						},
 						() => done(),
+						requestRender,
 					),
 			});
 		}
@@ -320,7 +326,9 @@ export class PluginListComponent extends OverlayPanel {
 export interface PluginDetailCallbacks {
 	onEnabledChange: (enabled: boolean) => void;
 	onFeatureChange: (feature: string, enabled: boolean) => void;
-	onConfigChange: (key: string, value: unknown) => void;
+	onConfigChange: (key: string, value: unknown) => void | Promise<void>;
+	/** Schedules a frame after an asynchronous config submission settles. */
+	requestRender?: () => void;
 	onBack: () => void;
 }
 
@@ -331,7 +339,7 @@ export interface PluginDetailCallbacks {
  * - Config settings
  */
 export class PluginDetailComponent extends OverlayPanel {
-	#settingsList!: SettingsList;
+	#settingsList!: SettingsFormField;
 
 	constructor(
 		private plugin: InstalledPlugin,
@@ -350,10 +358,6 @@ export class PluginDetailComponent extends OverlayPanel {
 		const manifest = plugin.manifest;
 
 		this.title = plugin.name;
-		if (manifest.description) {
-			this.addChild(new Text(theme.fg("muted", manifest.description), 0, 0));
-		}
-		this.addChild(new Spacer(1));
 
 		const items: SettingItem[] = [];
 
@@ -388,13 +392,23 @@ export class PluginDetailComponent extends OverlayPanel {
 			}
 		}
 
-		items.push(...(await buildPluginConfigItems(plugin, this.manager, this.callbacks.onConfigChange)));
+		items.push(
+			...(await buildPluginConfigItems(
+				plugin,
+				this.manager,
+				this.callbacks.onConfigChange,
+				this.callbacks.requestRender,
+			)),
+		);
 
-		this.#settingsList = new SettingsList(
+		this.#settingsList = new SettingsFormField({
+			fieldTheme: formTheme,
+			description: manifest.description || undefined,
 			items,
-			Math.min(items.length, 10),
-			getSettingsListTheme(),
-			(id, newValue) => {
+			maxVisible: Math.min(items.length, 10),
+			settingsTheme: getSettingsListTheme(),
+			hint: DETAIL_FOOTER_HINT,
+			onChange: (id, newValue) => {
 				if (id === "__enabled__") {
 					this.callbacks.onEnabledChange(newValue === "true");
 					this.plugin = { ...this.plugin, enabled: newValue === "true" };
@@ -417,12 +431,10 @@ export class PluginDetailComponent extends OverlayPanel {
 					}
 				}
 			},
-			this.callbacks.onBack,
-		);
+			onCancel: this.callbacks.onBack,
+		});
 
 		this.addChild(this.#settingsList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "Enter to edit · Esc to go back"), 0, 0));
 	}
 
 	handleInput(data: string): void {
@@ -449,7 +461,7 @@ export interface MarketplacePluginDetailCallbacks {
  * runtime package and metadata from the installed-plugins registry.
  */
 export class MarketplacePluginDetailComponent extends OverlayPanel {
-	#settingsList!: SettingsList;
+	#settingsList!: SettingsFormField;
 
 	constructor(
 		private plugin: InstalledPluginSummary,
@@ -469,8 +481,11 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 		try {
 			const runtimePlugin = await this.manager.getPlugin(fallbackName, { path: entry.installPath });
 			if (!runtimePlugin) return;
-			const configItems = await buildPluginConfigItems(runtimePlugin, this.manager, (key, value) =>
-				this.callbacks.onConfigChange(runtimePlugin.name, key, value),
+			const configItems = await buildPluginConfigItems(
+				runtimePlugin,
+				this.manager,
+				(key, value) => this.callbacks.onConfigChange(runtimePlugin.name, key, value),
+				this.callbacks.requestRender,
 			);
 			this.#render(runtimePlugin, configItems);
 			this.callbacks.requestRender?.();
@@ -491,8 +506,6 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 		this.title = plugin.id;
 		const subtitleParts = [`[${plugin.scope}]`];
 		if (plugin.shadowedBy) subtitleParts.push(`${theme.status.shadowed} shadowed by ${plugin.shadowedBy}`);
-		this.addChild(new Text(theme.fg("muted", subtitleParts.join(" ")), 0, 0));
-		this.addChild(new Spacer(1));
 
 		const items: SettingItem[] = [
 			{
@@ -504,11 +517,30 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 			},
 			...configItems,
 		];
-		this.#settingsList = new SettingsList(
+		const summary: Component[] = [
+			new Text(theme.fg("dim", `version       ${entry?.version ?? "(unknown)"}`), 0, 0),
+			new Text(theme.fg("dim", `scope         ${plugin.scope}`), 0, 0),
+			new Text(
+				theme.fg("dim", `install path  ${entry?.installPath ? shortenPath(entry.installPath) : "(unknown)"}`),
+				0,
+				0,
+			),
+			new Text(theme.fg("dim", `installed at  ${entry?.installedAt ?? "(unknown)"}`), 0, 0),
+			new Text(theme.fg("dim", `last updated  ${entry?.lastUpdated ?? "(unknown)"}`), 0, 0),
+		];
+		if (entry?.gitCommitSha) {
+			summary.push(new Text(theme.fg("dim", `git sha       ${entry.gitCommitSha}`), 0, 0));
+		}
+		summary.push(new Spacer(1));
+		this.#settingsList = new SettingsFormField({
+			fieldTheme: formTheme,
+			description: subtitleParts.join(" ") || undefined,
 			items,
-			Math.min(items.length, 10),
-			getSettingsListTheme(),
-			(id, newValue) => {
+			maxVisible: Math.min(items.length, 10),
+			settingsTheme: getSettingsListTheme(),
+			summary,
+			hint: DETAIL_FOOTER_HINT,
+			onChange: (id, newValue) => {
 				if (id === "__enabled__") {
 					const next = newValue === "true";
 					this.callbacks.onEnabledChange(next);
@@ -523,28 +555,10 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 					}
 				}
 			},
-			this.callbacks.onBack,
-		);
+			onCancel: this.callbacks.onBack,
+		});
 
 		this.addChild(this.#settingsList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", `version       ${entry?.version ?? "(unknown)"}`), 0, 0));
-		this.addChild(new Text(theme.fg("dim", `scope         ${plugin.scope}`), 0, 0));
-		this.addChild(
-			new Text(
-				theme.fg("dim", `install path  ${entry?.installPath ? shortenPath(entry.installPath) : "(unknown)"}`),
-				0,
-				0,
-			),
-		);
-		this.addChild(new Text(theme.fg("dim", `installed at  ${entry?.installedAt ?? "(unknown)"}`), 0, 0));
-		this.addChild(new Text(theme.fg("dim", `last updated  ${entry?.lastUpdated ?? "(unknown)"}`), 0, 0));
-		if (entry?.gitCommitSha) {
-			this.addChild(new Text(theme.fg("dim", `git sha       ${entry.gitCommitSha}`), 0, 0));
-		}
-
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "Enter to edit · Esc to go back"), 0, 0));
 	}
 
 	handleInput(data: string): void {
@@ -556,102 +570,108 @@ export class MarketplacePluginDetailComponent extends OverlayPanel {
 // Config Submenus
 // =============================================================================
 
+const formTheme: FormFieldTheme = {
+	label: text => theme.bold(theme.fg("accent", text)),
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("dim", text),
+};
+
+/** Shared footer hint for plugin detail lists. */
+const DETAIL_FOOTER_HINT = "Enter to edit · Esc to go back";
+
 /**
- * Submenu for enum config values.
+ * Thin OverlayPanel boundary around a shared form field. The panel title stays
+ * the setting key; input, paste, focus, and mouse all forward to the field.
  */
-class ConfigEnumSubmenu extends OverlayPanel {
-	#selectList: SelectList;
+class ConfigFieldPanel extends OverlayPanel {
+	#field: FormField;
 
-	constructor(
-		key: string,
-		description: string,
-		values: string[],
-		currentValue: string,
-		onSelect: (value: string) => void,
-		onCancel: () => void,
-	) {
+	constructor(key: string, field: FormField) {
 		super(key);
-		if (description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", description), 0, 0));
-		}
-		this.addChild(new Spacer(1));
+		this.#field = field;
+		this.addChild(field);
+	}
 
-		const items: SelectItem[] = values.map(v => ({ value: v, label: v }));
-		this.#selectList = new SelectList(items, Math.min(items.length, 8), getSelectListTheme());
+	get focused(): boolean {
+		return this.#field.focused;
+	}
 
-		const currentIndex = values.indexOf(currentValue);
-		if (currentIndex !== -1) {
-			this.#selectList.setSelectedIndex(currentIndex);
-		}
+	set focused(value: boolean) {
+		this.#field.focused = value;
+	}
 
-		this.#selectList.onSelect = item => onSelect(item.value);
-		this.#selectList.onCancel = onCancel;
-
-		this.addChild(this.#selectList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "Enter to select · Esc to cancel"), 0, 0));
+	setUseTerminalCursor(useTerminalCursor: boolean): void {
+		this.#field.setUseTerminalCursor(useTerminalCursor);
 	}
 
 	handleInput(data: string): void {
-		this.#selectList.handleInput(data);
+		this.#field.handleInput(data);
+	}
+
+	pasteText(text: string): void {
+		this.#field.pasteText(text);
+	}
+
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
+		// OverlayPanel contributes one top-border row and a two-column body inset.
+		this.#field.routeMouse(event, line - 1, col - 2);
 	}
 }
 
-/**
- * Submenu for string/number config values with text input.
- */
-class ConfigInputSubmenu extends OverlayPanel {
-	#input: Input;
+/** Enum setting submenu backed by a shared select field. */
+function createConfigEnumPanel(
+	key: string,
+	description: string,
+	values: string[],
+	currentValue: string,
+	onSelect: (value: string) => void | Promise<void>,
+	onCancel: () => void,
+	requestRender?: () => void,
+): Component {
+	const field = new SelectFormField({
+		theme: formTheme,
+		description: description || undefined,
+		leadingSpace: true,
+		items: values.map(v => ({ value: v, label: v })),
+		currentValue,
+		maxVisible: 8,
+		selectTheme: getSelectListTheme(),
+		hint: "Enter to select · Esc to cancel",
+		onSubmit: onSelect,
+		onCancel,
+		requestRender,
+	});
+	return new ConfigFieldPanel(key, field);
+}
 
-	constructor(
-		key: string,
-		schema: PluginSettingSchema,
-		currentValue: string,
-		private readonly onSubmit: (value: string) => void,
-		private readonly onCancel: () => void,
-	) {
-		super(key);
-		if (schema.description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", schema.description), 0, 0));
-		}
-
-		// Type hint
-		let hint = `Type: ${schema.type}`;
-		if (schema.type === "number") {
-			const numSchema = schema as { min?: number; max?: number };
-			if (numSchema.min !== undefined || numSchema.max !== undefined) {
-				hint += ` (${numSchema.min ?? ""}..${numSchema.max ?? ""})`;
-			}
-		}
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", hint), 0, 0));
-
-		this.addChild(new Spacer(1));
-
-		// Input field
-		this.#input = new Input();
-		if (!schema.secret && currentValue) {
-			this.#input.setValue(currentValue);
-		}
-
-		this.#input.onSubmit = value => {
-			if (value.trim()) {
-				this.onSubmit(value);
-			} else {
-				this.onCancel();
-			}
-		};
-
-		this.addChild(this.#input);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "Enter to save · Esc to cancel"), 0, 0));
+/** String/number setting submenu backed by a shared text field. */
+function createConfigInputPanel(
+	key: string,
+	schema: PluginSettingSchema,
+	currentValue: string,
+	onSubmit: (value: string) => void | Promise<void>,
+	onCancel: () => void,
+	requestRender?: () => void,
+): Component {
+	let typeHint = `Type: ${schema.type}`;
+	if (schema.type === "number" && (schema.min !== undefined || schema.max !== undefined)) {
+		typeHint += ` (${schema.min ?? ""}..${schema.max ?? ""})`;
 	}
-
-	handleInput(data: string): void {
-		handleInputOrEscape(data, this.#input, this.onCancel);
-	}
+	const field = new TextFormField({
+		theme: formTheme,
+		description: schema.description || undefined,
+		details: [...(schema.description ? [new Spacer(1)] : []), new Text(theme.fg("dim", typeHint), 0, 0)],
+		leadingSpace: true,
+		secret: schema.secret,
+		initialValue: !schema.secret ? currentValue : undefined,
+		empty: "cancel",
+		hint: "Enter to save · Esc to cancel",
+		onSubmit,
+		onCancel,
+		requestRender,
+	});
+	return new ConfigFieldPanel(key, field);
 }
 
 // =============================================================================
@@ -707,26 +727,26 @@ export class PluginSettingsComponent extends Container {
 		// would also leave the tab permanently blank: this method is invoked
 		// fire-and-forget from the constructor, so nothing awaits it.
 		const [npmPlugins, marketplacePlugins] = await Promise.all([
-			this.#manager.list().catch(err => {
+			this.#manager.list().catch((err): InstalledPlugin[] => {
 				logger.error("Settings → Plugins: failed to list npm plugins", {
 					error: err instanceof Error ? err.message : String(err),
 				});
-				return [] as InstalledPlugin[];
+				return [];
 			}),
 			this.#host
 				.createMarketplaceManager()
 				.then(mgr => mgr.listInstalledPlugins())
-				.catch(err => {
+				.catch((err): InstalledPluginSummary[] => {
 					logger.error("Settings → Plugins: failed to list marketplace plugins", {
 						error: err instanceof Error ? err.message : String(err),
 					});
-					return [] as InstalledPluginSummary[];
+					return [];
 				}),
 		]);
 
 		const entries: PluginListEntry[] = [
-			...npmPlugins.map(plugin => ({ kind: "npm" as const, plugin })),
-			...marketplacePlugins.map(plugin => ({ kind: "marketplace" as const, plugin })),
+			...npmPlugins.map((plugin): PluginListEntry => ({ kind: "npm", plugin })),
+			...marketplacePlugins.map((plugin): PluginListEntry => ({ kind: "marketplace", plugin })),
 		];
 
 		this.#viewComponent = new PluginListComponent(entries, {
@@ -770,6 +790,7 @@ export class PluginSettingsComponent extends Container {
 				await this.callbacks.onPluginChanged();
 			},
 			onBack: () => this.#showPluginList(),
+			requestRender: this.callbacks.requestRender,
 		});
 
 		this.addChild(this.#viewComponent);

@@ -6,7 +6,7 @@ import { type Theme, theme } from "../theme/theme";
 import type { OutputMeta } from "./output-meta";
 import { truncate } from "@oh-my-pi/pi-utils";
 import { renderStatusLine, urlHyperlink } from "../render";
-import { CachedOutputBlock, markFramedBlockComponent } from "../render/output-block";
+import { framedToolCard } from "../render/tool-card";
 import { formatExpandHint, getDomain, sanitizeDisplayLines } from "../render/render-utils";
 import { applyListLimit } from "./list-limit";
 import { formatStyledArtifactReference } from "./output-meta";
@@ -131,12 +131,11 @@ export function renderReadUrlResult(
 		const description = urlText ? formatReadUrlDescription(urlText) : undefined;
 		const header = renderStatusLine({ icon: "error", title: "Read", description }, uiTheme);
 		const errorLines = sanitizeDisplayLines(errorText).map(line => uiTheme.fg("error", line));
-		const outputBlock = new CachedOutputBlock();
-		return markFramedBlockComponent({
-			render: (width: number) =>
-				outputBlock.render({ header, state: "error", sections: [{ lines: errorLines }], width }, uiTheme),
-			invalidate: () => outputBlock.invalidate(),
-		});
+		return framedToolCard(uiTheme, () => ({
+			header,
+			phase: "error",
+			sections: [{ content: errorLines }],
+		}));
 	}
 
 	const description = formatReadUrlDescription(details.finalUrl);
@@ -182,12 +181,11 @@ export function renderReadUrlResult(
 		metadataLines.push(`${uiTheme.fg("muted", "Notes:")} ${details.notes.join("; ")}`);
 	}
 
-	const outputBlock = new CachedOutputBlock();
 	let lastExpanded: boolean | undefined;
 	let contentPreviewLines: string[] | undefined;
-
-	return markFramedBlockComponent({
-		render: (width: number) => {
+	return framedToolCard(
+		uiTheme,
+		() => {
 			const { expanded } = options;
 
 			if (contentPreviewLines === undefined || lastExpanded !== expanded) {
@@ -206,27 +204,23 @@ export function renderReadUrlResult(
 					contentPreviewLines.push(uiTheme.fg("muted", `… ${remaining} more lines${hint ? ` ${hint}` : ""}`));
 				}
 				lastExpanded = expanded;
-				outputBlock.invalidate();
 			}
 
-			return outputBlock.render(
-				{
-					header,
-					state: truncated ? "warning" : "success",
-					sections: [
-						{ label: uiTheme.fg("toolTitle", "Metadata"), lines: metadataLines },
-						{ label: uiTheme.fg("toolTitle", "Content Preview"), lines: contentPreviewLines },
-					],
-					width,
-					applyBg: false,
-				},
-				uiTheme,
-			);
+			return {
+				header,
+				phase: truncated ? "warning" : "success",
+				sections: [
+					{ label: uiTheme.fg("toolTitle", "Metadata"), content: metadataLines },
+					{ label: uiTheme.fg("toolTitle", "Content Preview"), content: contentPreviewLines },
+				],
+				applyBg: false,
+			};
 		},
-		invalidate: () => {
-			outputBlock.invalidate();
-			contentPreviewLines = undefined;
-			lastExpanded = undefined;
+		{
+			onInvalidate: () => {
+				lastExpanded = undefined;
+				contentPreviewLines = undefined;
+			},
 		},
-	});
+	);
 }

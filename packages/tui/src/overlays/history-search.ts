@@ -30,7 +30,9 @@ export interface HistorySource {
 }
 import { rawKeyHint } from "../chrome/keybinding-hints";
 import { OverlayPanel } from "../chrome/overlay-box";
-import { centeredWindow, contentRowWidth, renderScrollableList } from "../chrome/selector-helpers";
+import { contentRowWidth, renderScrollableList } from "../chrome/selector-helpers";
+import { MenuSelection } from "../components/menu-selection";
+import { centeredViewportRange } from "../components/scroll-viewport";
 
 /** Visible result rows; also the jump distance for PageUp/PageDown. */
 const MAX_VISIBLE = 10;
@@ -88,19 +90,16 @@ function relativeTime(epochSeconds: number): string {
 }
 
 class HistoryResultsList implements Component {
-	#results: HistorySearchEntry[] = [];
+	#menu: MenuSelection<HistorySearchEntry>;
 	#tokens: string[] = [];
-	#selectedIndex = 0;
 	#maxVisible = MAX_VISIBLE;
 
-	setResults(results: HistorySearchEntry[], selectedIndex: number, tokens: string[]): void {
-		this.#results = results;
-		this.#selectedIndex = selectedIndex;
-		this.#tokens = tokens;
+	constructor(menu: MenuSelection<HistorySearchEntry>) {
+		this.#menu = menu;
 	}
 
-	setSelectedIndex(selectedIndex: number): void {
-		this.#selectedIndex = selectedIndex;
+	setTokens(tokens: string[]): void {
+		this.#tokens = tokens;
 	}
 
 	invalidate(): void {
@@ -109,8 +108,9 @@ class HistoryResultsList implements Component {
 
 	render(width: number): readonly string[] {
 		const lines: string[] = [];
+		const items = this.#menu.visibleItems;
 
-		if (this.#results.length === 0) {
+		if (items.length === 0) {
 			const message = this.#tokens.length > 0 ? "No matching history" : "No history yet";
 			lines.push(theme.fg("muted", `  ${theme.status.info} ${message}`));
 			return lines;
@@ -119,14 +119,19 @@ class HistoryResultsList implements Component {
 		const cursorSymbol = `${theme.nav.cursor} `;
 		const gutterWidth = visibleWidth(cursorSymbol);
 
-		const { startIndex, endIndex } = centeredWindow(this.#selectedIndex, this.#results.length, this.#maxVisible);
+		const { start: startIndex, end: endIndex } = centeredViewportRange(
+			this.#menu.selectedIndex,
+			items.length,
+			this.#maxVisible,
+		);
 
-		const rowWidth = contentRowWidth(width, this.#results.length, this.#maxVisible);
+		const rowWidth = contentRowWidth(width, items.length, this.#maxVisible);
 		const rows: string[] = [];
 
 		for (let i = startIndex; i < endIndex; i++) {
-			const entry = this.#results[i];
-			const isSelected = i === this.#selectedIndex;
+			const entry = items[i];
+			if (!entry) continue;
+			const isSelected = i === this.#menu.selectedIndex;
 
 			const timeStr = relativeTime(entry.created_at);
 			const timeWidth = visibleWidth(timeStr);
@@ -152,7 +157,7 @@ class HistoryResultsList implements Component {
 			);
 		}
 
-		lines.push(...renderScrollableList(rows, { width, totalRows: this.#results.length, scrollOffset: startIndex }));
+		lines.push(...renderScrollableList(rows, { width, totalRows: items.length, scrollOffset: startIndex }));
 		return lines;
 	}
 }
@@ -160,8 +165,7 @@ class HistoryResultsList implements Component {
 export class HistorySearchComponent extends OverlayPanel {
 	#historyStorage: HistorySource;
 	#searchInput: Input;
-	#results: HistorySearchEntry[] = [];
-	#selectedIndex = 0;
+	#menu: MenuSelection<HistorySearchEntry>;
 	#resultsList: HistoryResultsList;
 	#onSelect: (prompt: string) => void;
 	#onCancel: () => void;
@@ -173,9 +177,13 @@ export class HistorySearchComponent extends OverlayPanel {
 		this.#onSelect = onSelect;
 		this.#onCancel = onCancel;
 
+		this.#menu = new MenuSelection<HistorySearchEntry>([], {
+			getKey: entry => `${entry.created_at}:${entry.prompt}`,
+			getSearchText: entry => entry.prompt,
+		});
 		this.#searchInput = new Input();
 		this.#searchInput.onSubmit = () => {
-			const selected = this.#results[this.#selectedIndex];
+			const selected = this.#menu.selectedItem;
 			if (selected) {
 				this.#onSelect(selected.prompt);
 			}
@@ -184,7 +192,7 @@ export class HistorySearchComponent extends OverlayPanel {
 			this.#onCancel();
 		};
 
-		this.#resultsList = new HistoryResultsList();
+		this.#resultsList = new HistoryResultsList(this.#menu);
 
 		const dot = theme.fg("dim", theme.sep.dot);
 		const hint = [rawKeyHint("↑↓", "navigate"), rawKeyHint("enter", "select"), rawKeyHint("esc", "cancel")].join(dot);
@@ -202,49 +210,37 @@ export class HistorySearchComponent extends OverlayPanel {
 
 	handleInput(keyData: string): void {
 		if (matchesSelectUp(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - 1);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.move(-1, false);
 			return;
 		}
 
 		if (matchesSelectDown(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.min(this.#results.length - 1, this.#selectedIndex + 1);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.move(1, false);
 			return;
 		}
 
 		if (matchesSelectPageUp(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.max(0, this.#selectedIndex - MAX_VISIBLE);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.move(-MAX_VISIBLE, false);
 			return;
 		}
 
 		if (matchesSelectPageDown(keyData)) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = Math.min(this.#results.length - 1, this.#selectedIndex + MAX_VISIBLE);
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.move(MAX_VISIBLE, false);
 			return;
 		}
 
 		if (matchesKey(keyData, "home")) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = 0;
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.moveToBoundary("first");
 			return;
 		}
 
 		if (matchesKey(keyData, "end")) {
-			if (this.#results.length === 0) return;
-			this.#selectedIndex = this.#results.length - 1;
-			this.#resultsList.setSelectedIndex(this.#selectedIndex);
+			this.#menu.moveToBoundary("last");
 			return;
 		}
 
 		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			const selected = this.#results[this.#selectedIndex];
+			const selected = this.#menu.selectedItem;
 			if (selected) {
 				this.#onSelect(selected.prompt);
 			}
@@ -262,10 +258,11 @@ export class HistorySearchComponent extends OverlayPanel {
 
 	#updateResults(): void {
 		const query = this.#searchInput.getValue().trim();
-		this.#results = query
+		const results = query
 			? this.#historyStorage.search(query, this.#resultLimit)
 			: this.#historyStorage.getRecent(this.#resultLimit);
-		this.#selectedIndex = 0;
-		this.#resultsList.setResults(this.#results, this.#selectedIndex, query ? queryTokens(query) : []);
+		this.#menu.setItems(results);
+		this.#menu.moveToBoundary("first");
+		this.#resultsList.setTokens(query ? queryTokens(query) : []);
 	}
 }

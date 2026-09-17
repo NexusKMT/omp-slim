@@ -10,7 +10,6 @@ import {
 	type ImageBudget,
 	Input,
 	matchesKey,
-	replaceTabs,
 	routeSelectListMouse,
 	routeSgrMouseInput,
 	type SelectItem,
@@ -18,10 +17,8 @@ import {
 	type SettingItem,
 	SettingsList,
 	type SgrMouseEvent,
-	Spacer,
 	type Tab,
 	TabBar,
-	Text,
 	truncateToWidth,
 	visibleWidth,
 } from "../index";
@@ -45,186 +42,80 @@ import { getTabBarTheme } from "../chrome/shared";
 import { type ComposerPreviewStatusSource, ComposerShapePreview } from "./composer-shape-preview";
 import { getComposerShapeOptions } from "./composer-shape-registry";
 import { bottomBorder, divider, row, topBorder } from "../chrome/overlay-box";
-import { handleInputOrEscape, PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
+import { PluginSettingsComponent, type PluginSettingsHost } from "./plugin-settings";
 import { getSettingDef, getSettingsForTab, type SettingDef } from "./settings-defs";
 import { SnapcompactShapePreview } from "./snapcompact-shape-preview";
 import { getPreset } from "../status-line/presets";
+import { FormField, SelectFormField, TextFormField, type FormFieldTheme } from "../components/form";
+
+const formTheme: FormFieldTheme = {
+	label: text => theme.bold(theme.fg("accent", text)),
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("dim", text),
+};
 
 /**
- * A submenu component for selecting from a list of options.
+ * Free-text string setting field backed by the shared text form field.
+ * Current values prefill, including secrets retained behind Input masking;
+ * submitting an empty string clears the setting and validation errors stay inline.
  */
-/**
- * Submenu component for free-text string settings.
- * Mirrors the ConfigInputSubmenu pattern from plugin-settings.ts.
- */
-class TextInputSubmenu extends Container {
-	#input: Input;
-	#error: Text;
-	readonly #onSubmit: (value: string) => void;
-	readonly #onCancel: () => void;
-
-	constructor(
-		label: string,
-		description: string,
-		currentValue: string,
-		secret: boolean,
-		onSubmit: (value: string) => void,
-		onCancel: () => void,
-	) {
-		super();
-		this.#onSubmit = onSubmit;
-		this.#onCancel = onCancel;
-
-		this.addChild(new Text(theme.bold(theme.fg("accent", label)), 0, 0));
-		if (description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", description), 0, 0));
-		}
-		this.addChild(new Spacer(1));
-
-		this.#input = new Input();
-		this.#input.mask = secret;
-		if (currentValue) {
-			this.#input.setValue(currentValue);
-		}
-		this.#error = new Text("", 0, 0);
-		this.#input.onSubmit = value => {
-			try {
-				this.#onSubmit(value); // empty string clears the setting
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				this.#error.setText(theme.fg("error", truncateToWidth(replaceTabs(message).replace(/[\r\n]+/g, " "), 100)));
-			}
-		};
-		this.addChild(this.#input);
-		this.addChild(new Spacer(1));
-		this.addChild(this.#error);
-		this.addChild(new Text(theme.fg("dim", "  Enter to save · Esc to cancel · Clear field to unset"), 0, 0));
-	}
-
-	handleInput(data: string): void {
-		handleInputOrEscape(data, this.#input, this.#onCancel);
-	}
+function createSettingsTextField(
+	label: string,
+	description: string,
+	currentValue: string,
+	secret: boolean,
+	onSubmit: (value: string) => void | Promise<void>,
+	onCancel: () => void,
+	requestRender?: () => void,
+): TextFormField {
+	return new TextFormField({
+		theme: formTheme,
+		label,
+		description: description || undefined,
+		secret,
+		initialValue: currentValue || undefined,
+		empty: "submit",
+		hint: "  Enter to save · Esc to cancel · Clear field to unset",
+		onSubmit,
+		onCancel,
+		requestRender,
+	});
 }
 
-class SelectSubmenu extends Container {
-	#selectList: SelectList;
-	#previewText: Text | null = null;
-	#previewUpdateRequestId: number = 0;
-	#selectListLineOffset = 0;
-	readonly #getPreview: (() => string) | undefined;
-
-	constructor(
-		title: string,
-		description: string,
-		options: ReadonlyArray<SelectItem>,
-		currentValue: string,
-		onSelect: (value: string) => void,
-		onCancel: () => void,
-		onSelectionChange?: (value: string) => void | Promise<void>,
-		getPreview?: () => string,
-		footer?: Component,
-	) {
-		super();
-		this.#getPreview = getPreview;
-
-		// Title
-		this.addChild(new Text(theme.bold(theme.fg("accent", title)), 0, 0));
-
-		// Description
-		if (description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", description), 0, 0));
-		}
-
-		// Preview (if provided)
-		if (getPreview) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
-			this.#previewText = new Text(getPreview(), 0, 0);
-			this.addChild(this.#previewText);
-		}
-
-		// Spacer
-		this.addChild(new Spacer(1));
-
-		// Select list
-		this.#selectList = new SelectList(options, Math.min(options.length, 10), getSelectListTheme());
-
-		// Pre-select current value
-		const currentIndex = options.findIndex(o => o.value === currentValue);
-		if (currentIndex !== -1) {
-			this.#selectList.setSelectedIndex(currentIndex);
-		}
-
-		this.#selectList.onSelect = item => {
-			onSelect(item.value);
-		};
-
-		this.#selectList.onCancel = onCancel;
-
-		if (onSelectionChange) {
-			this.#selectList.onSelectionChange = item => {
-				const requestId = ++this.#previewUpdateRequestId;
-				const result = onSelectionChange(item.value);
-				if (result && typeof (result as Promise<void>).then === "function") {
-					void (result as Promise<void>).finally(() => {
-						if (requestId === this.#previewUpdateRequestId) {
-							this.#updatePreview();
-						}
-					});
-					return;
-				}
-				if (requestId === this.#previewUpdateRequestId) {
-					this.#updatePreview();
-				}
-			};
-		}
-
-		this.addChild(this.#selectList);
-
-		// Hint
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to select · Esc to go back"), 0, 0));
-
-		// Footer (e.g. the snapcompact shape preview) below the interactive rows,
-		// so the list never shifts while browsing.
-		if (footer) {
-			this.addChild(new Spacer(1));
-			this.addChild(footer);
-		}
-	}
-
-	#updatePreview(): void {
-		if (this.#previewText && this.#getPreview) {
-			this.#previewText.setText(this.#getPreview());
-		}
-	}
-
-	/**
-	 * Concatenate children like Container.render, recording where the select
-	 * list lands so routed mouse events can be hit-tested against it.
-	 */
-	override render(width: number): readonly string[] {
-		const lines: string[] = [];
-		for (const child of this.children) {
-			const childLines = child.render(Math.max(1, width));
-			if (child === this.#selectList) {
-				this.#selectListLineOffset = lines.length;
-			}
-			lines.push(...childLines);
-		}
-		return lines;
-	}
-
-	/** Mouse routed from the host: wheel steps, hover lights, click confirms. */
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		routeSelectListMouse(this.#selectList, event, line - this.#selectListLineOffset);
-	}
-
-	handleInput(data: string): void {
-		this.#selectList.handleInput(data);
-	}
+/**
+ * Single-choice setting field backed by the shared select form field.
+ * Preserves the current selection, live async previews, footer previews,
+ * and select/cancel dispatch of the bespoke submenu it replaces.
+ */
+function createSettingsSelectField(
+	title: string,
+	description: string,
+	options: ReadonlyArray<SelectItem>,
+	currentValue: string,
+	onSelect: (value: string) => void,
+	onCancel: () => void,
+	onSelectionChange?: (value: string) => void | Promise<void>,
+	getPreview?: () => string,
+	footer?: Component,
+	requestRender?: () => void,
+): SelectFormField {
+	return new SelectFormField({
+		theme: formTheme,
+		label: title,
+		description: description || undefined,
+		items: options,
+		currentValue,
+		maxVisible: 10,
+		selectTheme: getSelectListTheme(),
+		getPreview,
+		onSelectionChange,
+		onSubmit: onSelect,
+		onCancel,
+		hint: "  Enter to select · Esc to go back",
+		footer,
+		requestRender,
+	});
 }
 
 /**
@@ -234,9 +125,9 @@ class SelectSubmenu extends Container {
  */
 class MultiSelectSubmenu extends Container {
 	#selectList!: SelectList;
+	#field!: FormField;
 	#value: string[];
 	#cursor = 0;
-	#selectListLineOffset = 0;
 	#pressedItemId: string | undefined;
 	#dropItemId: string | undefined;
 	readonly #title: string;
@@ -269,12 +160,6 @@ class MultiSelectSubmenu extends Container {
 
 	#rebuild(): void {
 		this.clear();
-		this.addChild(new Text(theme.bold(theme.fg("accent", this.#title)), 0, 0));
-		if (this.#description) {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.fg("muted", this.#description), 0, 0));
-		}
-		this.addChild(new Spacer(1));
 
 		const items = this.#options.map((option): SelectItem => {
 			const position = this.#value.indexOf(option.value);
@@ -293,13 +178,16 @@ class MultiSelectSubmenu extends Container {
 			this.#cursor = this.#options.findIndex(option => option.value === item.value);
 		};
 		this.#selectList.onCancel = this.#onClose;
-		this.addChild(this.#selectList);
-
-		this.addChild(new Spacer(1));
 		const hint = this.#ordered
 			? "  Click to toggle · drag selected items to reorder · ←/→ move · 1-9 place · Esc to go back"
 			: "  Click/Enter/Space to toggle · Esc to go back";
-		this.addChild(new Text(theme.fg("dim", hint), 0, 0));
+		this.#field = new FormField(this.#selectList, {
+			theme: formTheme,
+			label: this.#title,
+			description: this.#description || undefined,
+			hint,
+		});
+		this.addChild(this.#field);
 	}
 
 	#apply(next: string[]): void {
@@ -341,23 +229,12 @@ class MultiSelectSubmenu extends Container {
 		this.#apply(next);
 	}
 
-	/** Concatenate children, recording the select list's line offset for mouse routing. */
-	override render(width: number): readonly string[] {
-		const lines: string[] = [];
-		for (const child of this.children) {
-			const childLines = child.render(Math.max(1, width));
-			if (child === this.#selectList) {
-				this.#selectListLineOffset = lines.length;
-			}
-			lines.push(...childLines);
-		}
-		return lines;
-	}
-
 	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		const itemIndex = this.#selectList.hitTest(line - this.#selectListLineOffset);
+		const controlLine = this.#field.controlLineAt(line);
+		if (controlLine === undefined) return;
+		const itemIndex = this.#selectList.hitTest(controlLine);
 		if (event.wheel !== null) {
-			routeSelectListMouse(this.#selectList, event, line - this.#selectListLineOffset);
+			routeSelectListMouse(this.#selectList, event, controlLine);
 			return;
 		}
 		if (event.motion) {
@@ -416,7 +293,7 @@ class MultiSelectSubmenu extends Container {
 }
 
 class ProviderLimitsSubmenu extends Container {
-	#selectList: SelectList | undefined;
+	#listField: SelectFormField | undefined;
 	readonly #settings: SettingsHost;
 	readonly #providers: readonly string[];
 	readonly #onChange: (value: Record<string, number>) => void;
@@ -446,19 +323,6 @@ class ProviderLimitsSubmenu extends Container {
 
 	#showProviderList(): void {
 		this.clear();
-		this.addChild(new Text(theme.bold(theme.fg("accent", "Max In-Flight Requests")), 0, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(
-			new Text(
-				theme.fg(
-					"muted",
-					"Select a provider, enter a positive number to cap concurrent LLM requests, or clear it for unlimited.",
-				),
-				0,
-				0,
-			),
-		);
-		this.addChild(new Spacer(1));
 
 		const limits = this.#settings.normalizeProviderLimits(this.#settings.get("providers.maxInFlightRequests"));
 		const providerItems = this.#providerIds().map((provider): SelectItem => {
@@ -474,34 +338,51 @@ class ProviderLimitsSubmenu extends Container {
 				? []
 				: [{ value: "__clear_all", label: "Clear all limits", description: "Make every provider unlimited" }];
 		const items = [...providerItems, ...clearItem];
-		this.#selectList = new SelectList(items, Math.min(Math.max(items.length, 1), 12), getSelectListTheme());
-		this.#selectList.onSelect = item => {
-			if (item.value === "__clear_all") {
-				this.#settings.set("providers.maxInFlightRequests", {});
-				this.#onChange({});
-				this.#showProviderList();
-				this.#requestRender?.();
-				return;
-			}
-			this.#showProviderEditor(item.value);
-		};
-		this.#selectList.onCancel = this.#onCancel;
-		this.addChild(this.#selectList);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "  Enter to edit provider · Esc to go back"), 0, 0));
+		this.#listField = new SelectFormField({
+			theme: formTheme,
+			label: "Max In-Flight Requests",
+			description:
+				"Select a provider, enter a positive number to cap concurrent LLM requests, or clear it for unlimited.",
+			items,
+			maxVisible: 12,
+			selectTheme: getSelectListTheme(),
+			hint: "  Enter to edit provider · Esc to go back",
+			onSubmit: value => {
+				if (value === "__clear_all") {
+					this.#settings.set("providers.maxInFlightRequests", {});
+					this.#onChange({});
+					this.#showProviderList();
+					this.#requestRender?.();
+					return;
+				}
+				this.#showProviderEditor(value);
+			},
+			onCancel: this.#onCancel,
+			requestRender: this.#requestRender,
+		});
+		this.addChild(this.#listField);
 	}
 
 	#showProviderEditor(provider: string): void {
 		const limits = this.#settings.normalizeProviderLimits(this.#settings.get("providers.maxInFlightRequests"));
 		this.clear();
-		this.#selectList = undefined;
+		this.#listField = undefined;
 		this.addChild(
-			new TextInputSubmenu(
-				`Max In-Flight Requests: ${provider}`,
-				"Enter a positive number. Decimals round down. Clear the field to make this provider unlimited.",
-				limits[provider]?.toString() ?? "",
-				false,
-				value => {
+			new TextFormField({
+				theme: formTheme,
+				label: `Max In-Flight Requests: ${provider}`,
+				description:
+					"Enter a positive number. Decimals round down. Clear the field to make this provider unlimited.",
+				initialValue: limits[provider]?.toString() ?? undefined,
+				empty: "submit",
+				hint: "  Enter to save · Esc to cancel · Clear field to unset",
+				validate: value => {
+					if (value.trim() === "") return undefined;
+					const limit = Number(value.trim());
+					if (!Number.isFinite(limit) || limit <= 0) return "Limit must be a positive number.";
+					return undefined;
+				},
+				onSubmit: value => {
 					const next = { ...limits };
 					const trimmed = value.trim();
 					if (trimmed === "") {
@@ -517,17 +398,22 @@ class ProviderLimitsSubmenu extends Container {
 					this.#showProviderList();
 					this.#requestRender?.();
 				},
-				() => {
+				onCancel: () => {
 					this.#showProviderList();
 					this.#requestRender?.();
 				},
-			),
+				requestRender: this.#requestRender,
+			}),
 		);
 	}
 
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
+		this.#listField?.routeMouse(event, line, col);
+	}
+
 	handleInput(data: string): void {
-		if (this.#selectList) {
-			this.#selectList.handleInput(data);
+		if (this.#listField) {
+			this.#listField.handleInput(data);
 			return;
 		}
 		this.children[0]?.handleInput?.(data);
@@ -1092,7 +978,7 @@ export class SettingsSelectorComponent implements Component {
 		def: SettingDef & { type: "submenu" },
 		currentValue: string,
 		done: (value?: string) => void,
-	): Container {
+	): Component {
 		let options = def.options;
 
 		// Special case: inject runtime options for thinking level
@@ -1180,7 +1066,7 @@ export class SettingsSelectorComponent implements Component {
 		const isThemeSetting = def.path === "theme.dark" || def.path === "theme.light";
 		const getPreview = isThemeSetting ? this.#callbacks.getStatusLinePreview : undefined;
 
-		return new SelectSubmenu(
+		return createSettingsSelectField(
 			def.label,
 			def.description,
 			options,
@@ -1197,6 +1083,7 @@ export class SettingsSelectorComponent implements Component {
 			onPreview,
 			getPreview,
 			footer,
+			this.#context.requestRender,
 		);
 	}
 
@@ -1207,13 +1094,13 @@ export class SettingsSelectorComponent implements Component {
 		def: SettingDef & { type: "text" },
 		_currentValue: string,
 		done: (value?: string) => void,
-	): Container {
+	): Component {
 		this.#textInputActive = true;
 		const wrappedDone = (value?: string) => {
 			this.#textInputActive = false;
 			done(value);
 		};
-		return new TextInputSubmenu(
+		return createSettingsTextField(
 			def.label,
 			def.description,
 			this.#formatTextInputEditValue(def.path, this.#context.settings.get(def.path)),
@@ -1226,6 +1113,7 @@ export class SettingsSelectorComponent implements Component {
 				wrappedDone(this.#formatTextInputValue(def, this.#context.settings.get(def.path)));
 			},
 			() => wrappedDone(),
+			this.#context.requestRender,
 		);
 	}
 

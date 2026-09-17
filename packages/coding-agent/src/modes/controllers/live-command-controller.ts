@@ -2,7 +2,7 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
 import { LiveSessionController, type LiveSessionControllerOptions, type LiveTranscript } from "../../live/controller";
 import { LIVE_MODEL } from "../../live/protocol";
-import { LiveVisualizer } from "../../live/visualizer";
+import { LiveVisualizer } from "@oh-my-pi/pi-tui/apps/live-visualizer";
 import { vocalizer } from "../../tts/vocalizer";
 import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import type { CustomEditor } from "@oh-my-pi/pi-tui/prompt/custom-editor";

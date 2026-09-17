@@ -1,8 +1,8 @@
-import { Text } from "../components/text";
 import type { BackgroundTanDispatchDetails, CustomMessage } from "./messages";
 import { replaceTabs } from "../render/render-utils";
 import { theme } from "../theme";
-import { TranscriptBlock } from "../chrome/transcript-container";
+import type { TranscriptBlock } from "../chrome/transcript-container";
+import { TranscriptStatusBlock } from "../chrome/transcript-status";
 
 const TAN_WORK_PREVIEW_LENGTH = 56;
 
@@ -22,15 +22,14 @@ export function createBackgroundTanDispatchBlock(message: CustomMessage<unknown>
 	const details = (message as CustomMessage<Partial<BackgroundTanDispatchDetails>>).details;
 	const jobId = details?.jobId ?? "unknown";
 	const work = details?.work ? previewWork(details.work) : undefined;
-	const line = [
-		theme.fg("muted", `${theme.icon.output} Tangent dispatched`),
-		theme.fg("dim", "[task]"),
-		theme.fg("accent", jobId),
-		work ? theme.fg("dim", `${theme.format.dash} ${work}`) : undefined,
-	]
-		.filter(Boolean)
-		.join(" ");
-	const block = new TranscriptBlock();
-	block.addChild(new Text(line, 1, 0));
-	return block;
+	return new TranscriptStatusBlock([
+		{
+			parts: [
+				theme.fg("muted", `${theme.icon.output} Tangent dispatched`),
+				theme.fg("dim", "[task]"),
+				theme.fg("accent", jobId),
+				work ? theme.fg("dim", `${theme.format.dash} ${work}`) : undefined,
+			],
+		},
+	]);
 }

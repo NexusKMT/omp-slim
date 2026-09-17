@@ -1,51 +1,27 @@
 /** Anchored `/cleanse` overlay rendering the host's live board above the editor. */
-import { Spacer, Text, type TUI } from "../index";
+import { Text, type TUI } from "../index";
 import { SPINNER_FRAMES } from "../theme/symbols";
 import type { AgentProgress } from "../tools/task";
 import { replaceTabs } from "../render/render-utils";
 import { theme } from "../theme/theme";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { StreamingPanelContent, type StreamingPanelPresentation } from "../chrome/streaming-panel";
+import type {
+	CleanseBoardModel,
+	CleanseCheckerDescriptor,
+	CleanseCheckResult,
+	CleanseAssignment,
+	CleanseAgentOutcome,
+} from "../apps/cleanse-board";
 
 const SPINNER_INTERVAL_MS = 80;
 const MAX_LOG_LINES = 14;
 const CLEANSE_SPINNER_FRAMES = SPINNER_FRAMES.unicode.activity;
 
-export interface CleansePanelChecker {
-	id: string;
-	label: string;
-}
-
-export interface CleansePanelCheckResult extends CleansePanelChecker {
-	diagnostics: readonly unknown[];
-}
-
-export interface CleansePanelAssignment {
-	index: number;
-	groups: readonly { file?: string }[];
-}
-
-export interface CleansePanelAgentOutcome {
-	name: string;
-	success: boolean;
-	error?: string;
-}
-
 export type CleansePanelRunStatus = "clean" | "unresolved" | "unsupported" | "cancelled";
 
-/** Host-owned live board state; finishing work returns its permanent log line. */
-export interface CleansePanelModel {
-	phase(text: string | undefined): void;
-	checkerStarted(checker: CleansePanelChecker): void;
-	checkerFinished(check: CleansePanelCheckResult, durationMs: number): string;
-	repairFinished(): void;
-	agentStarted(name: string, assignment: CleansePanelAssignment): void;
-	agentProgress(name: string, progress: AgentProgress): void;
-	agentFinished(outcome: CleansePanelAgentOutcome, assignment: CleansePanelAssignment): string;
-	renderLive(spinner: string): readonly string[];
-}
-
 interface CleansePanelComponentOptions {
-	model: CleansePanelModel;
+	model: CleanseBoardModel;
 	/** Free-form request shown in the header; omitted for checker-discovery runs. */
 	request?: string;
 	tui: TUI;
@@ -58,18 +34,21 @@ export class CleansePanelComponent extends OverlayPanel {
 	readonly interactive = true;
 
 	readonly #tui: TUI;
-	readonly #model: CleansePanelModel;
+	readonly #model: CleanseBoardModel;
 	readonly #logLines: string[] = [];
 	#outcome: CleansePanelOutcome | undefined;
 	#errorMessage: string | undefined;
 	#frame = 0;
 	#timer: NodeJS.Timeout | undefined;
 	#liveClosed = false;
+	readonly #content: StreamingPanelContent;
 
 	constructor(options: CleansePanelComponentOptions) {
 		super(options.request ? `/cleanse ${replaceTabs(options.request)}` : "/cleanse");
 		this.#tui = options.tui;
 		this.#model = options.model;
+		this.#content = new StreamingPanelContent(() => this.#presentation());
+		this.addChild(this.#content);
 		this.#timer = setInterval(() => {
 			this.#frame = (this.#frame + 1) % CLEANSE_SPINNER_FRAMES.length;
 			this.#rebuild();
@@ -94,12 +73,12 @@ export class CleansePanelComponent extends OverlayPanel {
 		this.#rebuild();
 	}
 
-	checkerStarted(checker: CleansePanelChecker): void {
+	checkerStarted(checker: CleanseCheckerDescriptor): void {
 		this.#model.checkerStarted(checker);
 		this.#rebuild();
 	}
 
-	checkerFinished(check: CleansePanelCheckResult, durationMs: number): void {
+	checkerFinished(check: CleanseCheckResult, durationMs: number): void {
 		this.log(this.#model.checkerFinished(check, durationMs));
 	}
 
@@ -108,7 +87,7 @@ export class CleansePanelComponent extends OverlayPanel {
 		this.#rebuild();
 	}
 
-	agentStarted(name: string, assignment: CleansePanelAssignment): void {
+	agentStarted(name: string, assignment: CleanseAssignment): void {
 		this.#model.agentStarted(name, assignment);
 		this.#rebuild();
 	}
@@ -117,7 +96,7 @@ export class CleansePanelComponent extends OverlayPanel {
 		this.#model.agentProgress(name, progress);
 	}
 
-	agentFinished(outcome: CleansePanelAgentOutcome, assignment: CleansePanelAssignment): void {
+	agentFinished(outcome: CleanseAgentOutcome, assignment: CleanseAssignment): void {
 		this.log(this.#model.agentFinished(outcome, assignment));
 	}
 
@@ -153,25 +132,22 @@ export class CleansePanelComponent extends OverlayPanel {
 		this.#timer = undefined;
 	}
 
+	#presentation(): StreamingPanelPresentation {
+		const liveLines = this.#liveClosed
+			? []
+			: this.#model.renderLive(CLEANSE_SPINNER_FRAMES[this.#frame] ?? CLEANSE_SPINNER_FRAMES[0]);
+		return {
+			sections: [
+				this.#logLines.length > 0 ? this.#logLines.map(line => new Text(replaceTabs(line), 0, 0)) : undefined,
+				liveLines.length > 0 ? liveLines.map(line => new Text(replaceTabs(line), 0, 0)) : undefined,
+				this.#errorMessage ? new Text(theme.fg("error", replaceTabs(this.#errorMessage)), 0, 0) : undefined,
+			],
+			footer: this.#footerLine(),
+		};
+	}
+
 	#rebuild(): void {
-		this.clear();
-		this.addChild(new Spacer(1));
-		if (this.#logLines.length > 0) {
-			for (const line of this.#logLines) this.addChild(new Text(replaceTabs(line), 0, 0));
-			this.addChild(new Spacer(1));
-		}
-		if (!this.#liveClosed) {
-			const liveLines = this.#model.renderLive(CLEANSE_SPINNER_FRAMES[this.#frame] ?? CLEANSE_SPINNER_FRAMES[0]);
-			if (liveLines.length > 0) {
-				for (const line of liveLines) this.addChild(new Text(replaceTabs(line), 0, 0));
-				this.addChild(new Spacer(1));
-			}
-		}
-		if (this.#errorMessage) {
-			this.addChild(new Text(theme.fg("error", replaceTabs(this.#errorMessage)), 0, 0));
-			this.addChild(new Spacer(1));
-		}
-		this.addChild(new Text(this.#footerLine(), 0, 0));
+		this.#content.refresh();
 		this.#tui.requestRender();
 	}
 

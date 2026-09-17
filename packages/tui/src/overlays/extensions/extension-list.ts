@@ -10,7 +10,9 @@ import { matchesKey } from "../../keys";
 import { padding, truncateToWidth, visibleWidth } from "../../utils";
 import { theme } from "../../theme";
 import { matchesSelectDown, matchesSelectUp } from "../../keybinding-matchers";
-import { clampSelection, contentRowWidth, renderScrollableList, searchableChar } from "../../chrome/selector-helpers";
+import { contentRowWidth, renderScrollableList, searchableChar } from "../../chrome/selector-helpers";
+import { MenuSelection } from "../../components/menu-selection";
+import { scrollOffsetForRow, viewportRange } from "../../components/scroll-viewport";
 import { sanitizeDisplayLine } from "./display-text";
 import {
 	formatExtensionListHint,
@@ -49,6 +51,35 @@ export interface ExtensionListCallbacks {
 
 const DEFAULT_MAX_VISIBLE = 15;
 
+/** Stable identity for menu selection retention across rebuilds and filtering. */
+function getListItemKey(item: ListItem): string {
+	switch (item.type) {
+		case "master":
+			return `master:${item.providerId}`;
+		case "user-source":
+			return `user-source:${item.providerId}`;
+		case "kind-header":
+			return `kind:${item.kind}`;
+		case "extension":
+			// Shadowed same-name rows share the winner's id; the source path disambiguates them.
+			return `extension:${item.item.id}:${item.item.path}`;
+	}
+}
+
+/** Searchable text for a flattened row (the menu filter rebuilds via applyFilter; this covers headers/switches). */
+function getListItemSearchText(item: ListItem): string {
+	switch (item.type) {
+		case "master":
+			return `Enable ${item.providerName} Master Switch ${item.providerId}`;
+		case "user-source":
+			return `Load ${item.providerName} config user source ${item.providerId}`;
+		case "kind-header":
+			return `${item.label} ${item.kind}`;
+		case "extension":
+			return `${item.item.displayName} ${item.item.name} ${item.item.description ?? ""} ${item.item.trigger ?? ""}`;
+	}
+}
+
 /** Flattened list item for rendering */
 type ListItem =
 	| { type: "master"; providerId: string; providerName: string; enabled: boolean }
@@ -57,10 +88,8 @@ type ListItem =
 	| { type: "extension"; item: Extension };
 
 export class ExtensionList implements Component {
-	#listItems: ListItem[] = [];
-	#selectedIndex = 0;
+	#menu: MenuSelection<ListItem>;
 	#scrollOffset = 0;
-	#searchQuery = "";
 	#focused = false;
 	#masterSwitchProvider: string | null = null;
 	#maxVisible: number;
@@ -81,18 +110,24 @@ export class ExtensionList implements Component {
 		this.#mcpSource = callbacks.mcpSource;
 		this.#toolSource = callbacks.toolSource;
 		this.#maxVisible = maxVisible ?? DEFAULT_MAX_VISIBLE;
-		this.#rebuildList();
+		this.#menu = new MenuSelection<ListItem>(this.#buildListItems(""), {
+			getKey: getListItemKey,
+			getSearchText: getListItemSearchText,
+			filter: (_items, query) => this.#buildListItems(query),
+		});
 	}
 
 	setMaxVisible(maxVisible: number): void {
 		this.#maxVisible = maxVisible;
-		this.#clampSelection();
+		this.#syncScroll();
 	}
 
 	setExtensions(extensions: Extension[]): void {
 		this.#extensions = extensions;
-		this.#rebuildList();
-		this.#clampSelection();
+		const keepIndex = this.#menu.selectedIndex;
+		this.#menu.setItems(this.#buildListItems(""));
+		this.#menu.setSelectedIndex(keepIndex);
+		this.#syncScroll();
 	}
 
 	setFocused(focused: boolean): void {
@@ -101,7 +136,8 @@ export class ExtensionList implements Component {
 
 	setMasterSwitchProvider(providerId: string | null): void {
 		this.#masterSwitchProvider = providerId;
-		this.#rebuildList();
+		this.#menu.setItems(this.#buildListItems(""));
+		this.#syncScroll();
 	}
 
 	setMcpSource(source: MCPRuntimeSource | undefined): void {
@@ -113,30 +149,28 @@ export class ExtensionList implements Component {
 	}
 
 	getSearchQuery(): string {
-		return this.#searchQuery;
+		return this.#menu.query;
 	}
 
 	resetSelection(): void {
-		this.#selectedIndex = 0;
+		this.#menu.moveToBoundary("first");
 		this.#scrollOffset = 0;
 		this.#notifySelectionChange();
 	}
 
 	getSelectedExtension(): Extension | null {
-		const item = this.#listItems[this.#selectedIndex];
+		const item = this.#menu.selectedItem;
 		return item?.type === "extension" ? item.item : null;
 	}
 
 	/** Get the currently selected kind header (for preview purposes) */
 	getSelectedKind(): ExtensionKind | null {
-		const item = this.#listItems[this.#selectedIndex];
+		const item = this.#menu.selectedItem;
 		return item?.type === "kind-header" ? item.kind : null;
 	}
 
 	setSearchQuery(query: string): void {
-		this.#searchQuery = query;
-		this.#rebuildList();
-		this.#selectedIndex = 0;
+		this.#menu.setQuery(query, false);
 		this.#scrollOffset = 0;
 		this.#notifySelectionChange();
 	}
@@ -154,12 +188,14 @@ export class ExtensionList implements Component {
 
 		// Search bar
 		const searchPrefix = theme.fg("muted", "Search: ");
-		const searchText = this.#searchQuery || (this.#focused ? "" : theme.fg("dim", "type to filter"));
+		const query = this.#menu.query;
+		const searchText = query || (this.#focused ? "" : theme.fg("dim", "type to filter"));
 		const cursor = this.#focused ? theme.fg("accent", "_") : "";
 		lines.push(searchPrefix + searchText + cursor);
 		lines.push("");
 
-		if (this.#listItems.length === 0) {
+		const items = this.#menu.visibleItems;
+		if (items.length === 0) {
 			lines.push(theme.fg("muted", "  No extensions found for this provider."));
 			return lines;
 		}
@@ -170,18 +206,18 @@ export class ExtensionList implements Component {
 			this.#callbacks.getProviders?.().find(provider => provider.id === this.#masterSwitchProvider)?.enabled ===
 				false;
 
-		// Calculate visible range
-		const startIdx = this.#scrollOffset;
-		const endIdx = Math.min(startIdx + this.#maxVisible, this.#listItems.length);
+		// Calculate visible range (one fixed row per item)
+		const { start: startIdx, end: endIdx } = viewportRange(items.length, this.#maxVisible, this.#scrollOffset);
 
 		// Reserve the rightmost column for the scrollbar when overflowing
-		const rowWidth = contentRowWidth(width, this.#listItems.length, this.#maxVisible);
+		const rowWidth = contentRowWidth(width, items.length, this.#maxVisible);
 
 		// Render visible items
 		const rows: string[] = [];
 		for (let i = startIdx; i < endIdx; i++) {
-			const listItem = this.#listItems[i];
-			const isSelected = this.#focused && i === this.#selectedIndex;
+			const listItem = items[i];
+			if (!listItem) continue;
+			const isSelected = this.#focused && i === this.#menu.selectedIndex;
 			const isHovered = this.#focused && i === this.#hoveredIndex && !isSelected;
 
 			let rowStr: string;
@@ -202,7 +238,7 @@ export class ExtensionList implements Component {
 		lines.push(
 			...renderScrollableList(rows, {
 				width,
-				totalRows: this.#listItems.length,
+				totalRows: items.length,
 				scrollOffset: this.#scrollOffset,
 			}),
 		);
@@ -392,19 +428,23 @@ export class ExtensionList implements Component {
 		return text + padding(targetWidth - width);
 	}
 
-	#rebuildList(): void {
-		this.#listItems = [];
+	/**
+	 * Rebuild the flattened list for `query`: a flat applyFilter hit list while
+	 * searching, otherwise the master-switch rows (provider scope) or the
+	 * kind-grouped ALL view with headers.
+	 */
+	#buildListItems(query: string): ListItem[] {
+		const items: ListItem[] = [];
 
 		// Apply search filter
-		const filtered =
-			this.#searchQuery.length > 0 ? applyFilter(this.#extensions, this.#searchQuery) : this.#extensions;
+		const filtered = query.length > 0 ? applyFilter(this.#extensions, query) : this.#extensions;
 
 		// When searching, show flat list
-		if (this.#searchQuery.length > 0) {
+		if (query.length > 0) {
 			for (const ext of filtered) {
-				this.#listItems.push({ type: "extension", item: ext });
+				items.push({ type: "extension", item: ext });
 			}
-			return;
+			return items;
 		}
 
 		// Provider-specific view: Master switch + flat list
@@ -413,14 +453,14 @@ export class ExtensionList implements Component {
 			const provider = this.#callbacks.getProviders?.().find(provider => provider.id === this.#masterSwitchProvider);
 			const enabled = provider?.enabled ?? true;
 
-			this.#listItems.push({
+			items.push({
 				type: "master",
 				providerId: this.#masterSwitchProvider,
 				providerName,
 				enabled,
 			});
 			if (provider?.foreignUserSource) {
-				this.#listItems.push({
+				items.push({
 					type: "user-source",
 					providerId: this.#masterSwitchProvider,
 					providerName,
@@ -429,9 +469,9 @@ export class ExtensionList implements Component {
 			}
 
 			for (const ext of filtered) {
-				this.#listItems.push({ type: "extension", item: ext });
+				items.push({ type: "extension", item: ext });
 			}
-			return;
+			return items;
 		}
 
 		// ALL view: Group by kind with headers
@@ -456,21 +496,22 @@ export class ExtensionList implements Component {
 		];
 
 		for (const kind of kindOrder) {
-			const items = byKind.get(kind);
-			if (!items || items.length === 0) continue;
+			const kindItems = byKind.get(kind);
+			if (!kindItems || kindItems.length === 0) continue;
 
-			this.#listItems.push({
+			items.push({
 				type: "kind-header",
 				kind,
 				label: this.#getKindLabel(kind),
 				icon: this.#getKindIcon(kind),
-				count: items.length,
+				count: kindItems.length,
 			});
 
-			for (const ext of items) {
-				this.#listItems.push({ type: "extension", item: ext });
+			for (const ext of kindItems) {
+				items.push({ type: "extension", item: ext });
 			}
 		}
+		return items;
 	}
 
 	#getKindLabel(kind: ExtensionKind): string {
@@ -500,15 +541,20 @@ export class ExtensionList implements Component {
 		}
 	}
 
-	#clampSelection(): void {
-		const next = clampSelection(this.#selectedIndex, this.#scrollOffset, this.#listItems.length, this.#maxVisible);
-		this.#selectedIndex = next.selectedIndex;
-		this.#scrollOffset = next.scrollOffset;
+	/** Keep the selection inside the one-row fixed viewport. */
+	#syncScroll(): void {
+		this.#scrollOffset = scrollOffsetForRow(
+			this.#scrollOffset,
+			this.#menu.selectedIndex,
+			this.#menu.visibleItems.length,
+			this.#maxVisible,
+			"nearest",
+		);
 	}
 
 	/** Toggle the selected item, or flip the provider master switch when on it. */
 	#activateSelected(): void {
-		const item = this.#listItems[this.#selectedIndex];
+		const item = this.#menu.selectedItem;
 		if (item?.type === "master") {
 			this.#callbacks.onMasterToggle?.(item.providerId);
 		} else if (item?.type === "user-source") {
@@ -544,7 +590,7 @@ export class ExtensionList implements Component {
 		const rowLine = line - 2;
 		if (rowLine < 0 || rowLine >= this.#visibleCount) return null;
 		const index = this.#scrollOffset + rowLine;
-		return index < this.#listItems.length ? index : null;
+		return index < this.#menu.visibleItems.length ? index : null;
 	}
 
 	/** Wheel notch: move the selection (and the inspector) one row. */
@@ -557,11 +603,11 @@ export class ExtensionList implements Component {
 	handleClick(line: number): void {
 		const index = this.hitTest(line);
 		if (index === null) return;
-		if (index === this.#selectedIndex) {
+		if (index === this.#menu.selectedIndex) {
 			this.#activateSelected();
 			return;
 		}
-		this.#selectedIndex = index;
+		this.#menu.setSelectedIndex(index);
 		this.#notifySelectionChange();
 	}
 
@@ -587,8 +633,8 @@ export class ExtensionList implements Component {
 
 		// Backspace: Delete from search query
 		if (matchesKey(data, "backspace")) {
-			if (this.#searchQuery.length > 0) {
-				this.setSearchQuery(this.#searchQuery.slice(0, -1));
+			if (this.#menu.query.length > 0) {
+				this.setSearchQuery(this.#menu.query.slice(0, -1));
 			}
 			return;
 		}
@@ -596,26 +642,20 @@ export class ExtensionList implements Component {
 		// Printable characters -> search
 		const char = searchableChar(data);
 		if (char !== null) {
-			this.setSearchQuery(this.#searchQuery + char);
+			this.setSearchQuery(this.#menu.query + char);
 		}
 	}
 
 	#moveSelectionUp(): void {
-		if (this.#selectedIndex > 0) {
-			this.#selectedIndex--;
-			if (this.#selectedIndex < this.#scrollOffset) {
-				this.#scrollOffset = this.#selectedIndex;
-			}
+		if (this.#menu.move(-1, false)) {
+			this.#syncScroll();
 			this.#notifySelectionChange();
 		}
 	}
 
 	#moveSelectionDown(): void {
-		if (this.#selectedIndex < this.#listItems.length - 1) {
-			this.#selectedIndex++;
-			if (this.#selectedIndex >= this.#scrollOffset + this.#maxVisible) {
-				this.#scrollOffset = this.#selectedIndex - this.#maxVisible + 1;
-			}
+		if (this.#menu.move(1, false)) {
+			this.#syncScroll();
 			this.#notifySelectionChange();
 		}
 	}

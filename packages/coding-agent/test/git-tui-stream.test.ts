@@ -10,7 +10,7 @@ import {
 	buildLineSelectionPatch,
 	type DiffBuildOptions,
 	DiffPane,
-} from "../src/cli/git-tui/diff-pane";
+} from "@oh-my-pi/pi-tui/apps/git/diff-pane";
 import { GitModel } from "../src/cli/git-tui/state";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 

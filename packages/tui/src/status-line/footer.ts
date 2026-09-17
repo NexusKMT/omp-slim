@@ -7,6 +7,8 @@ import { theme } from "../theme";
 import type { FooterHost, FooterSession } from "./host";
 import { shortenPath } from "../render/render-utils";
 import { sanitizeStatusText } from "../chrome/shared";
+import { formatMetric } from "../components/metric";
+import { formatBillingSummary } from "./metrics";
 import { formatContextUsage, getContextUsageLevel, getContextUsageThemeColor } from "../chrome/context-thresholds";
 
 /**
@@ -208,35 +210,29 @@ export class FooterComponent implements Component {
 		}
 
 		// Build stats line
-		const statsParts = [];
-		if (totalInput) statsParts.push(`↑${formatNumber(totalInput)}`);
-		if (totalOutput) statsParts.push(`↓${formatNumber(totalOutput)}`);
-		if (totalCacheRead) statsParts.push(`R${formatNumber(totalCacheRead)}`);
-		if (totalCacheWrite) statsParts.push(`W${formatNumber(totalCacheWrite)}`);
+		const statsParts: string[] = [];
+		for (const [glyph, amount] of [
+			["↑", totalInput],
+			["↓", totalOutput],
+			["R", totalCacheRead],
+			["W", totalCacheWrite],
+		] as const) {
+			const part = formatMetric({
+				leading: glyph,
+				separator: "",
+				value: amount ? formatNumber(amount) : undefined,
+			});
+			if (part !== undefined) statsParts.push(part);
+		}
 
 		// Show billing summary with subscription and premium-request indicators
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
-		const { auto: autoIcon, subscription: subscriptionIcon } = theme.icon;
-		const normalizedPremiumRequests = Math.round((totalPremiumRequests + Number.EPSILON) * 100) / 100;
-		if (totalCost || usingSubscription || normalizedPremiumRequests) {
-			const billingParts: string[] = [];
-			if (totalCost) {
-				const formatted = totalCost.toFixed(3);
-				if (usingSubscription) {
-					const spend =
-						theme.getSymbolPreset() === "nerd" && subscriptionIcon
-							? `${subscriptionIcon} ${formatted}`
-							: `S${formatted}`;
-					billingParts.push(spend);
-				} else {
-					billingParts.push(`$${formatted}`);
-				}
-			} else if (usingSubscription) {
-				billingParts.push(theme.getSymbolPreset() === "nerd" && subscriptionIcon ? subscriptionIcon : "(sub)");
-			}
-			if (normalizedPremiumRequests) billingParts.push(`★ ${formatNumber(normalizedPremiumRequests)}`);
-			if (billingParts.length > 0) statsParts.push(billingParts.join(" "));
-		}
+		const { auto: autoIcon } = theme.icon;
+		const billing = formatBillingSummary(
+			{ cost: totalCost, usingSubscription, premiumRequests: totalPremiumRequests, fractionDigits: 3 },
+			theme,
+		);
+		if (billing) statsParts.push(billing);
 		// Colorize context percentage based on usage
 		let contextPercentStr: string;
 		const autoIndicator = this.#autoCompactEnabled && autoIcon ? ` ${autoIcon}` : "";

@@ -1,11 +1,19 @@
 /**
  * Simple text input component for hooks.
  */
-import { Input, matchesKey, Spacer, Text, type TUI } from "../index";
+import { Spacer, type TUI } from "../index";
 import { theme } from "../theme/theme";
 import { matchesAppInterrupt } from "../keybinding-matchers";
 import { CountdownTimer } from "../chrome/countdown-timer";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { Form, TextFormField, type FormFieldTheme } from "../components/form";
+
+const formTheme: FormFieldTheme = {
+	label: text => theme.bold(theme.fg("accent", text)),
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("dim", text),
+};
 
 export interface HookInputOptions {
 	tui?: TUI;
@@ -14,7 +22,8 @@ export interface HookInputOptions {
 }
 
 export class HookInputComponent extends OverlayPanel {
-	#input: Input;
+	#field: TextFormField;
+	#form: Form;
 	#onSubmitCallback: (value: string) => void;
 	#onCancelCallback: () => void;
 	#baseTitle: string;
@@ -33,8 +42,6 @@ export class HookInputComponent extends OverlayPanel {
 		this.#onCancelCallback = onCancel;
 		this.#baseTitle = title;
 
-		this.addChild(new Spacer(1));
-
 		if (opts?.timeout && opts.timeout > 0 && opts.tui) {
 			this.#countdown = new CountdownTimer(
 				opts.timeout,
@@ -47,34 +54,38 @@ export class HookInputComponent extends OverlayPanel {
 			);
 		}
 
-		this.#input = new Input();
-		this.addChild(this.#input);
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("dim", "enter submit  esc cancel"), 0, 0));
+		this.#field = new TextFormField({
+			theme: formTheme,
+			hint: "enter submit  esc cancel",
+			empty: "submit",
+			onSubmit: value => this.#onSubmitCallback(value),
+			onCancel: () => this.#onCancelCallback(),
+		});
+		this.#form = new Form({
+			fields: [this.#field],
+			onCancel: () => this.#onCancelCallback(),
+			isCancel: matchesAppInterrupt,
+		});
+		this.addChild(this.#form);
 		this.addChild(new Spacer(1));
 	}
 
 	handleInput(keyData: string): void {
 		// Reset countdown on any interaction
 		this.#countdown?.reset();
-		if (matchesKey(keyData, "enter") || matchesKey(keyData, "return") || keyData === "\n") {
-			this.#onSubmitCallback(this.#input.getValue());
-		} else if (matchesAppInterrupt(keyData)) {
-			this.#onCancelCallback();
-		} else {
-			this.#input.handleInput(keyData);
-		}
+		this.#form.handleInput(keyData);
 	}
 
 	/** Route non-bracketed paste transports (e.g. kitty's OSC 5522 enhanced clipboard)
-	 *  into the inner input, mirroring bracketed-paste semantics. Pasting counts as
+	 *  into the inner field, mirroring bracketed-paste semantics. Pasting counts as
 	 *  interaction, so the timeout countdown resets like any keystroke. */
 	pasteText(text: string): void {
 		this.#countdown?.reset();
-		this.#input.pasteText(text);
+		this.#form.pasteText(text);
 	}
 
 	override dispose(): void {
 		this.#countdown?.dispose();
+		super.dispose();
 	}
 }

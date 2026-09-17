@@ -1,5 +1,6 @@
 import { applyBackgroundToLine, padding, visibleWidth } from "../utils";
 import { type Component, Container } from "../tui";
+import { Disclosure } from "../components/disclosure";
 import { Markdown } from "../components/markdown";
 import { formatBytes } from "@oh-my-pi/pi-utils";
 import { ensureThemeSync, getMarkdownTheme, theme } from "../theme";
@@ -168,6 +169,33 @@ export class UserMessageComponent extends Container implements ReactionTarget {
 }
 
 /**
+ * Always-visible dim summary row for a collapsed synthetic input. Kept as a
+ * small domain renderer so the width-truncated label never pays Markdown
+ * layout; the heavy body lives in the {@link Disclosure} detail slot.
+ */
+class SyntheticSummary implements Component {
+	readonly #summary: string;
+	#cache: { width: number; lines: readonly string[] } | undefined;
+
+	constructor(summary: string) {
+		this.#summary = summary;
+	}
+
+	invalidate(): void {
+		this.#cache = undefined;
+	}
+
+	render(width: number): readonly string[] {
+		width = Math.max(1, width);
+		if (this.#cache?.width === width) return this.#cache.lines;
+		const hint = `${theme.sep.dot.trim()} ctrl+o`;
+		const lines = [` ${theme.fg("dim", truncateSummary(`${this.#summary} ${hint}`, Math.max(10, width - 1)))}`];
+		this.#cache = { width, lines };
+		return lines;
+	}
+}
+
+/**
  * Collapsed placeholder for a synthetic (agent-attributed) user input in the
  * file/remote-backed transcript viewer — chiefly the advisor's `Session update`
  * replay dumps, which can each be hundreds of KiB of Markdown and, on cold open,
@@ -181,10 +209,7 @@ export class UserMessageComponent extends Container implements ReactionTarget {
  * observability data stays intact in `__advisor.jsonl`.
  */
 export class CollapsedSyntheticMessageComponent implements Component {
-	#expanded = false;
-	#cache?: { width: number; lines: readonly string[] };
-	#body?: UserMessageComponent;
-	readonly #summary: string;
+	#disclosure: Disclosure;
 
 	readonly #text: string;
 	readonly #imageLinks?: readonly (string | undefined)[];
@@ -193,42 +218,34 @@ export class CollapsedSyntheticMessageComponent implements Component {
 		this.#text = text;
 		this.#imageLinks = imageLinks;
 
-		this.#summary = summarizeSyntheticInput(text);
+		// The heavy UserMessageComponent is constructed lazily only on the
+		// first expanded render and retained across collapse/re-expand cycles.
+		this.#disclosure = new Disclosure({
+			summary: new SyntheticSummary(summarizeSyntheticInput(text)),
+			body: () => new UserMessageComponent(this.#text, { synthetic: true, imageLinks: this.#imageLinks }),
+		});
 	}
 
 	/** ctrl+o toggle: reveal/hide the full Markdown body. */
 	setExpanded(expanded: boolean): void {
-		if (this.#expanded === expanded) return;
-		this.#expanded = expanded;
-		this.#cache = undefined;
+		this.#disclosure.setExpanded(expanded);
+	}
+
+	setIgnoreTight(ignore: boolean): this {
+		this.#disclosure.setIgnoreTight(ignore);
+		return this;
 	}
 
 	invalidate(): void {
-		this.#cache = undefined;
-		this.#body?.invalidate?.();
+		this.#disclosure.invalidate();
 	}
 
 	dispose(): void {
-		this.#body?.dispose?.();
+		this.#disclosure.dispose();
 	}
 
 	render(width: number): readonly string[] {
-		width = Math.max(1, width);
-		if (this.#cache?.width === width) return this.#cache.lines;
-		const lines = this.#expanded ? this.#renderExpanded(width) : [` ${this.#summaryRow(width)}`];
-		this.#cache = { width, lines };
-		return lines;
-	}
-
-	#renderExpanded(width: number): readonly string[] {
-		if (!this.#body)
-			this.#body = new UserMessageComponent(this.#text, { synthetic: true, imageLinks: this.#imageLinks });
-		return [` ${this.#summaryRow(width)}`, ...this.#body.render(width)];
-	}
-
-	#summaryRow(width: number): string {
-		const hint = `${theme.sep.dot.trim()} ctrl+o`;
-		return theme.fg("dim", truncateSummary(`${this.#summary} ${hint}`, Math.max(10, width - 1)));
+		return this.#disclosure.render(width);
 	}
 }
 

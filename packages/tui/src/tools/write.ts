@@ -3,7 +3,8 @@ import type { Component } from "../tui";
 import { Text } from "../components/text";
 import { getLanguageFromPath } from "../lang-from-path";
 import { createHighlightStream, highlightCode, type Theme } from "../theme/theme";
-import { fileHyperlink, framedBlock, renderStatusLine } from "../render";
+import { fileHyperlink, renderStatusLine } from "../render";
+import { framedToolCard } from "../render/tool-card";
 import {
 	cachedRenderedString,
 	createRenderedStringCache,
@@ -377,7 +378,7 @@ export const writeToolRenderer = {
 		// back to the normalizing stringify.
 		const content = typeof args.content === "string" ? args.content : normalizeDisplayText(args.content);
 		const streamingCache = createRenderedStringCache();
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, () => {
 			const body = content
 				? formatStreamingContent(
 						content,
@@ -398,10 +399,9 @@ export const writeToolRenderer = {
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: "pending",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: "pending",
 				borderColor: "borderMuted",
-				width,
 			};
 		});
 	},
@@ -439,12 +439,11 @@ export const writeToolRenderer = {
 				{ icon: "error", title: "Write", description: `${langIcon} ${pathDisplay}` },
 				uiTheme,
 			);
-			return framedBlock(uiTheme, width => ({
+			return framedToolCard(uiTheme, () => ({
 				header,
-				sections: [{ lines: formatErrorDetail(errorText, uiTheme).split("\n") }],
-				state: "error",
+				sections: [{ content: formatErrorDetail(errorText, uiTheme).split("\n") }],
+				phase: "error",
 				borderColor: "error",
-				width,
 			}));
 		}
 
@@ -469,7 +468,7 @@ export const writeToolRenderer = {
 		const diagnostics = result.details?.diagnostics;
 
 		const previewCache = createRenderedStringCache();
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, () => {
 			const { expanded } = options;
 			let body = renderContentPreview(fileContent, expanded, lang, uiTheme, previewCache);
 			if (isPartial && progressText) {
@@ -494,10 +493,9 @@ export const writeToolRenderer = {
 			while (bodyLines.length > 0 && bodyLines[0].trim() === "") bodyLines.shift();
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: isPartial ? "pending" : "success",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: isPartial ? "partial" : "success",
 				borderColor: "borderMuted",
-				width,
 			};
 		});
 	},

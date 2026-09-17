@@ -5,7 +5,8 @@ import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ExtensionContext, ExtensionFactory } from "../extensibility/extensions";
 import commandResumeTemplate from "./command-resume.md" with { type: "text" };
-import { createDashboardController } from "./dashboard";
+import { createDashboardController } from "@oh-my-pi/pi-tui/apps/autoresearch-dashboard";
+import { currentResults, findBaselineMetric, findBaselineRunNumber } from "@oh-my-pi/pi-tui/apps/autoresearch-data";
 import { ensureAutoresearchBranch } from "./git";
 import { formatNum } from "@oh-my-pi/pi-tui/tools/autoresearch";
 import promptTemplate from "./prompt.md" with { type: "text" };
@@ -15,9 +16,6 @@ import {
 	buildExperimentState,
 	createExperimentState,
 	createRuntimeStore,
-	currentResults,
-	findBaselineMetric,
-	findBaselineRunNumber,
 	findBestKeptMetric,
 	reconstructControlState,
 } from "./state";

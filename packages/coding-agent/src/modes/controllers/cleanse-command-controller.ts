@@ -4,9 +4,9 @@
  * cancel-then-dismiss (mirroring the `/omfg` panel).
  */
 import { runCleanse } from "../../cleanse";
-import { CleanseBoardModel } from "../../cleanse/board";
+import { CleanseBoardModel } from "@oh-my-pi/pi-tui/apps/cleanse-board";
 import type { CleanseCheckerDescriptor } from "../../cleanse/checkers";
-import type { CleanseTargetChoice } from "../../cleanse/types";
+import type { CleanseTargetChoice } from "@oh-my-pi/pi-tui/apps/cleanse-picker";
 import { CleansePanelComponent } from "@oh-my-pi/pi-tui/overlays/cleanse-panel";
 import type { InteractiveModeContext } from "../types";
 

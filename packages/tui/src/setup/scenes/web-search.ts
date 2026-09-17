@@ -1,5 +1,9 @@
-import { routeSelectListMouse, type SgrMouseEvent } from "../../mouse";
+import { type SgrMouseEvent } from "../../mouse";
 import { type SelectItem, SelectList } from "../../components/select-list";
+import { Spacer } from "../../components/spacer";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
+import { Container } from "../../tui";
 import { truncateToWidth } from "../../utils";
 import { SEARCH_PROVIDER_OPTIONS, type SearchProviderId } from "../../tools/web-search";
 import { getSelectListTheme, theme } from "../../theme/theme";
@@ -31,8 +35,7 @@ export class WebSearchTab implements SetupTab {
 	#availability = new Map<SearchProviderId, Availability>();
 	#status: string[] = [];
 	#disposed = false;
-	/** Render line where the select list begins. */
-	#listRowStart = 0;
+	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
@@ -58,16 +61,18 @@ export class WebSearchTab implements SetupTab {
 	}
 
 	handleInput(data: string): void {
-		this.#list.handleInput(data);
+		if (this.#step) this.#step.handleInput(data);
+		else this.#list.handleInput(data);
 	}
 
 	/** Wheel moves the highlight; hover lights the row under the pointer; click confirms it. */
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		routeSelectListMouse(this.#list, event, line - this.#listRowStart);
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
+		this.#step?.routeMouse(event, line, col);
 	}
 
 	invalidate(): void {
-		this.#list.invalidate();
+		if (this.#step) this.#step.invalidate();
+		else this.#list.invalidate();
 	}
 
 	dispose(): void {
@@ -75,22 +80,38 @@ export class WebSearchTab implements SetupTab {
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const lines = [theme.fg("muted", "Choose the provider the web_search tool should prefer."), ""];
-		this.#listRowStart = lines.length;
-		if (maxLines !== undefined) {
-			// Above: hint + blank. Below: the list's own search-status row plus
-			// blank + readiness line. Shrinking keeps the selection centered.
-			this.#list.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE, maxLines - 5)));
-		}
-		lines.push(...this.#list.render(width));
+		const intro = new Text(theme.fg("muted", "Choose the provider the web_search tool should prefer."), 0, 0);
+		const status = new Container();
 		const selected = this.#list.getSelectedItem();
 		if (selected) {
-			lines.push("", ...this.#readinessLines(selected.value).map(line => truncateToWidth(line, width)));
+			for (const line of this.#readinessLines(selected.value)) {
+				status.addChild(new Text(truncateToWidth(line, width), 0, 0));
+			}
 		}
-		if (this.#status.length > 0) {
-			lines.push("", ...this.#status.map(line => truncateToWidth(line, width)));
+		if (selected && this.#status.length > 0) status.addChild(new Spacer(1));
+		for (const line of this.#status) {
+			status.addChild(new Text(truncateToWidth(line, width), 0, 0));
 		}
-		return lines;
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				intro,
+				content: this.#list,
+				status,
+				minContentLines: 1,
+				fitContent: budget => {
+					// Above: hint + blank. Below: the list's own search-status row plus
+					// blank + readiness line. Shrinking keeps the selection centered.
+					const visible = budget === undefined ? MAX_VISIBLE : budget - 1;
+					this.#list.setMaxVisible(Math.max(1, Math.min(MAX_VISIBLE, visible)));
+				},
+			});
+		} else {
+			this.#step.setIntro(intro);
+			this.#step.setStatus(status);
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	#onHighlight(value: string): void {

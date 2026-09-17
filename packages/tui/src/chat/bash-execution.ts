@@ -15,12 +15,12 @@ import { theme } from "../theme/theme";
 import type { OutputArtifactError } from "../tools/streaming-output";
 import type { TruncationMeta } from "../tools/output-meta";
 import { resolveImageOptions } from "../render/render-utils";
+import { OutputPane } from "../render/output-pane";
 import { loadXtermTerminal, readTerminalRows, styleTerminalRow } from "../tools/terminal-output";
 import { getSixelLineMask, isSixelPassthroughEnabled, sanitizeWithOptionalSixelPassthrough } from "../render/sixel";
 import {
 	buildExecutionFrame,
 	buildStatusFooter,
-	createCollapsedPreview,
 	type ExecutionStatus,
 	resolveExecutionStatus,
 } from "./execution-shared";
@@ -63,6 +63,7 @@ export class BashExecutionComponent extends Container {
 	#displayDirty = false;
 	#chunkGate = false;
 	#contentContainer: Container;
+	#outputPane: OutputPane;
 	#headerText: Text;
 	#ui: TUI;
 	// PTY replay state: raw terminal bytes stream into a headless xterm and the
@@ -90,6 +91,17 @@ export class BashExecutionComponent extends Container {
 		const { contentContainer, loader } = buildExecutionFrame(this, ui, colorKey);
 		this.#contentContainer = contentContainer;
 		this.#loader = loader;
+		this.#outputPane = new OutputPane(theme, {
+			expanded: false,
+			collapsedMaxLines: PREVIEW_LINES,
+			edge: "tail",
+			visual: true,
+			paddingX: 1,
+			leadingBlank: true,
+			showHiddenMarker: false,
+			showExpandHint: false,
+			styleLine: line => this.#styleDisplayLine(line),
+		});
 
 		// Command header
 		this.#headerText = new Text(theme.fg(colorKey, theme.bold(`$ ${command}`)), 1, 0);
@@ -116,6 +128,7 @@ export class BashExecutionComponent extends Container {
 	setExpanded(expanded: boolean): void {
 		if (this.#expanded !== expanded) this.#blockVersion++;
 		this.#expanded = expanded;
+		this.#outputPane.setExpanded(expanded);
 		this.#updateDisplay();
 	}
 
@@ -288,7 +301,6 @@ export class BashExecutionComponent extends Container {
 
 		// Full output is shown when expanded or when sixel passthrough renders
 		// the raw payload; the collapsed preview shows only the tail window.
-		const previewLogicalLines = availableLines.slice(-PREVIEW_LINES);
 		const sixelLineMask =
 			TERMINAL.imageProtocol === ImageProtocol.Sixel && isSixelPassthroughEnabled()
 				? getSixelLineMask(availableLines)
@@ -297,7 +309,9 @@ export class BashExecutionComponent extends Container {
 		const showingAllLines = this.#expanded || hasSixelOutput;
 		// Only the collapsed preview hides lines; when the full output is shown
 		// the footer must not keep advertising hidden lines / ctrl+o.
-		const hiddenLineCount = showingAllLines ? 0 : availableLines.length - previewLogicalLines.length;
+		const hiddenLineCount = showingAllLines ? 0 : Math.max(0, availableLines.length - PREVIEW_LINES);
+		this.#outputPane.configure({ uncapSixel: hasSixelOutput });
+		this.#outputPane.setLines(availableLines);
 
 		// Rebuild content container
 		this.#contentContainer.clear();
@@ -306,18 +320,7 @@ export class BashExecutionComponent extends Container {
 		this.#contentContainer.addChild(this.#headerText);
 
 		// Output
-		if (availableLines.length > 0) {
-			if (showingAllLines) {
-				const displayText = availableLines
-					.map((line, index) => (sixelLineMask?.[index] ? line : this.#styleDisplayLine(line)))
-					.join("\n");
-				this.#contentContainer.addChild(new Text(`\n${displayText}`, 1, 0));
-			} else {
-				// Use shared visual truncation utility, recomputed per render width
-				const styledOutput = previewLogicalLines.map(line => this.#styleDisplayLine(line)).join("\n");
-				this.#contentContainer.addChild(createCollapsedPreview(`\n${styledOutput}`, PREVIEW_LINES));
-			}
-		}
+		if (availableLines.length > 0) this.#contentContainer.addChild(this.#outputPane);
 
 		for (let index = 0; index < this.#images.length; index++) {
 			const image = this.#images[index]!;

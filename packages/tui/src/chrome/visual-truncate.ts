@@ -2,6 +2,7 @@
  * Shared utility for truncating text to visual lines (accounting for line wrapping).
  * Used by both tool-execution.ts and bash-execution.ts for consistent behavior.
  */
+import { viewportRange } from "../components/scroll-viewport";
 import { Text } from "../components/text";
 export interface VisualTruncateResult {
 	/** The visual lines to display */
@@ -62,8 +63,8 @@ export function truncateToVisualLines(
 	}
 
 	// Take the last N visual lines
-	const truncatedLines = allVisualLines.slice(-maxVisualLines);
-	const skippedCount = allVisualLines.length - maxVisualLines;
+	const range = viewportRange(allVisualLines.length, maxVisualLines, allVisualLines.length);
+	const truncatedLines = allVisualLines.slice(range.start, range.end);
 
-	return { visualLines: truncatedLines, skippedCount };
+	return { visualLines: truncatedLines, skippedCount: range.start };
 }

@@ -1,6 +1,9 @@
 import { padding, truncateToWidth, visibleWidth } from "../../utils";
-import { routeSelectListMouse, type SgrMouseEvent } from "../../mouse";
+import { type SgrMouseEvent } from "../../mouse";
 import { type SelectItem, SelectList } from "../../components/select-list";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
+import { Container } from "../../tui";
 import {
 	enableAutoTheme,
 	getAvailableThemes,
@@ -91,8 +94,7 @@ class ThemeSceneController implements SetupSceneController {
 	#message: string | undefined;
 	#previewRequest = 0;
 	#disposed = false;
-	/** Render line where the select list began, or -1 while it is not shown. */
-	#listRowStart = -1;
+	#step: WizardStep | undefined;
 	readonly #originalTheme = getCurrentThemeName();
 	readonly #originalSymbolPreset: SymbolPreset;
 	readonly #originalColorBlindMode: boolean;
@@ -111,6 +113,7 @@ class ThemeSceneController implements SetupSceneController {
 	}
 
 	invalidate(): void {
+		this.#step?.invalidate();
 		this.#selectList.invalidate();
 	}
 
@@ -125,45 +128,61 @@ class ThemeSceneController implements SetupSceneController {
 	}
 
 	/** Wheel moves the highlight (live preview); hover lights the row under the pointer; click confirms it. */
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		// Mirror the pre-helper flow: wheel/motion are always processed, but a
-		// hidden list (#listRowStart < 0, e.g. while loading all themes) must
-		// never hit-test a row — route through a line that resolves to undefined.
-		const listLine = this.#listRowStart >= 0 ? line - this.#listRowStart : Number.NEGATIVE_INFINITY;
-		routeSelectListMouse(this.#selectList, event, listLine);
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
+		if (this.#loadingAllThemes) {
+			this.#selectList.routeMouse(event, Number.NEGATIVE_INFINITY, col);
+			return;
+		}
+		this.#step?.routeMouse(event, line, col);
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const budget = maxLines ?? Number.POSITIVE_INFINITY;
-		const lines = [
-			theme.fg("muted", "Theme changes preview live. Nothing is saved until you press Enter."),
-			this.#mode === "all"
-				? theme.fg("dim", "Browsing all themes · Esc returns to curated choices")
-				: theme.fg("dim", "Esc skips this step"),
-			"",
-		];
+		const intro = new Container();
+		intro.addChild(
+			new Text(theme.fg("muted", "Theme changes preview live. Nothing is saved until you press Enter."), 0, 0),
+		);
+		intro.addChild(
+			new Text(
+				this.#mode === "all"
+					? theme.fg("dim", "Browsing all themes · Esc returns to curated choices")
+					: theme.fg("dim", "Esc skips this step"),
+				0,
+				0,
+			),
+		);
 		// The mock status-line/editor block is decorative — the wizard itself
 		// re-renders in the highlighted theme — so it yields to the list when
 		// it would squeeze the window below the six curated rows (+1 for the
 		// list's own search-status row).
-		const preview = renderThemePreview(width);
-		if (budget - lines.length - (preview.length + 1) - 1 >= CURATED_ITEMS.length) {
-			lines.push(...preview, "");
+		const preview = new Container();
+		for (const line of renderThemePreview(width)) {
+			preview.addChild(new Text(line, 0, 0));
 		}
-		if (this.#loadingAllThemes) {
-			this.#listRowStart = -1;
-			lines.push(theme.fg("dim", "Loading themes…"));
+		const loading = this.#loadingAllThemes ? new Text(theme.fg("dim", "Loading themes…"), 0, 0) : undefined;
+		const status = this.#message ? new Text(this.#message, 0, 0) : undefined;
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: loading ? "async" : "choice",
+				intro,
+				preview: { component: preview, optional: true },
+				content: loading ?? this.#selectList,
+				status,
+				minContentLines: CURATED_ITEMS.length + 1,
+				fitContent: budget => {
+					if (this.#loadingAllThemes) return;
+					const visible = budget === undefined ? 10 : budget - 1;
+					this.#selectList.setMaxVisible(Math.max(1, Math.min(10, visible)));
+				},
+			});
 		} else {
-			this.#listRowStart = lines.length;
-			if (maxLines !== undefined) {
-				this.#selectList.setMaxVisible(Math.max(1, Math.min(10, budget - lines.length - 1)));
-			}
-			lines.push(...this.#selectList.render(width));
+			this.#step.setKind(loading ? "async" : "choice");
+			this.#step.setIntro(intro);
+			this.#step.setPreview({ component: preview, optional: true });
+			this.#step.setContent(loading ?? this.#selectList);
+			this.#step.setStatus(status);
 		}
-		if (this.#message) {
-			lines.push("", this.#message);
-		}
-		return lines;
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	#createSelectList(items: readonly SelectItem[], selectedIndex: number): SelectList {

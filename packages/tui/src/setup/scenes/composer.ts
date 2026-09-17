@@ -1,5 +1,8 @@
-import { routeSelectListMouse, type SgrMouseEvent } from "../../mouse";
+import { type SgrMouseEvent } from "../../mouse";
 import { type SelectItem, SelectList } from "../../components/select-list";
+import { Container } from "../../tui";
+import { Text } from "../../components/text";
+import { WizardStep } from "../../components/wizard-step";
 import type { ComposerShape } from "../../overlays/composer-shape-registry";
 import { renderComposerShapePreview } from "../../overlays/composer-shape-preview";
 import { getComposerShapeOptions } from "../../overlays/composer-shape-registry";
@@ -14,7 +17,7 @@ class ComposerSceneController implements SetupSceneController {
 	#items: readonly SelectItem[];
 	#currentShape: ComposerShape = "band";
 	#committing = false;
-	#listRowStart = 0;
+	#step: WizardStep | undefined;
 
 	readonly #host: SetupSceneHost;
 
@@ -48,7 +51,8 @@ class ComposerSceneController implements SetupSceneController {
 	}
 
 	invalidate(): void {
-		this.#selectList.invalidate();
+		if (this.#step) this.#step.invalidate();
+		else this.#selectList.invalidate();
 	}
 
 	handleInput(data: string): void {
@@ -59,26 +63,43 @@ class ComposerSceneController implements SetupSceneController {
 			this.#preview(this.#shapes[quickIndex] ?? "band");
 			return;
 		}
-		this.#selectList.handleInput(data);
+		if (this.#step) this.#step.handleInput(data);
+		else this.#selectList.handleInput(data);
 	}
 
-	routeMouse(event: SgrMouseEvent, line: number, _col: number): void {
-		const listLine = line - this.#listRowStart;
-		routeSelectListMouse(this.#selectList, event, listLine);
+	routeMouse(event: SgrMouseEvent, line: number, col: number): void {
+		this.#step?.routeMouse(event, line, col);
 	}
 
 	render(width: number, maxLines?: number): readonly string[] {
-		const budget = maxLines ?? Number.POSITIVE_INFINITY;
-		const lines = [theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."), ""];
-
-		const previewLines = renderComposerShapePreview(this.#currentShape, width, this.#host.ctx.statusLine);
-		if (budget - lines.length - previewLines.length - 2 >= this.#items.length) {
-			lines.push(theme.fg("muted", "Preview:"), ...previewLines, "");
+		const intro = new Text(
+			theme.fg("muted", "Select a layout; live preview updates below. Press Enter to confirm."),
+			0,
+			0,
+		);
+		const preview = new Container();
+		preview.addChild(new Text(theme.fg("muted", "Preview:"), 0, 0));
+		for (const line of renderComposerShapePreview(this.#currentShape, width, this.#host.ctx.statusLine)) {
+			preview.addChild(new Text(line, 0, 0));
 		}
-
-		this.#listRowStart = lines.length;
-		lines.push(...this.#selectList.render(width));
-		return lines;
+		const items = this.#items.length;
+		if (!this.#step) {
+			this.#step = new WizardStep({
+				kind: "choice",
+				intro,
+				preview: { component: preview, optional: true },
+				content: this.#selectList,
+				minContentLines: items,
+				fitContent: () => {
+					this.#selectList.setMaxVisible(items);
+				},
+			});
+		} else {
+			this.#step.setIntro(intro);
+			this.#step.setPreview({ component: preview, optional: true });
+		}
+		this.#step.setMaxHeight(maxLines);
+		return this.#step.render(width);
 	}
 
 	async #commit(shape: ComposerShape): Promise<void> {

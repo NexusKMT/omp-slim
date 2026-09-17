@@ -37,7 +37,9 @@ import {
 	TRUNCATE_LENGTHS,
 	truncateToWidth,
 } from "../render/render-utils";
-import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../render/index";
+import { renderStatusLine } from "../render/index";
+import { framedToolCard } from "../render/tool-card";
+import { renderJsonTreeLines } from "./json-tree";
 import { repairDoubleEncodedJsonString } from "./task-repair-args";
 import { getSubprocessToolRenderer } from "./subprocess";
 import { assembleYieldResult } from "./task-yield-assembly";
@@ -282,16 +284,6 @@ function renderTypedYieldSections(value: unknown, continuePrefix: string, expand
 	return lines;
 }
 
-function formatJsonScalar(value: unknown, _theme: Theme): string {
-	if (value === null) return "null";
-	if (typeof value === "string") {
-		const trimmed = truncateToWidth(sanitizeText(value), 70);
-		return `"${trimmed}"`;
-	}
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	return "";
-}
-
 /** Formats sanitized task identifiers as hierarchy breadcrumbs. */
 export function formatTaskId(id: string): string {
 	// Ids are name-based (e.g. "Anna", "Anna-2"); a "." separates nesting levels
@@ -314,149 +306,6 @@ function extractMissingYieldWarning(output: string): { warning?: string; rest: s
 		.join("\n")
 		.replace(/^\s*\n+/, "");
 	return { warning: firstLine, rest };
-}
-
-function buildTreePrefix(ancestors: boolean[], theme: Theme): string {
-	return ancestors.map(hasNext => (hasNext ? `${theme.tree.vertical}  ` : "   ")).join("");
-}
-
-function renderJsonTreeLines(
-	value: unknown,
-	theme: Theme,
-	maxDepth: number,
-	maxLines: number,
-): { lines: string[]; truncated: boolean } {
-	const lines: string[] = [];
-	let truncated = false;
-
-	const iconObject = theme.styledSymbol("icon.folder", "muted");
-	const iconArray = theme.styledSymbol("icon.package", "muted");
-	const iconScalar = theme.styledSymbol("icon.file", "muted");
-
-	const pushLine = (line: string) => {
-		if (lines.length >= maxLines) {
-			truncated = true;
-			return false;
-		}
-		lines.push(line);
-		return true;
-	};
-
-	const renderNode = (val: unknown, key: string | undefined, ancestors: boolean[], isLast: boolean, depth: number) => {
-		if (lines.length >= maxLines) {
-			truncated = true;
-			return;
-		}
-
-		const connector = isLast ? theme.tree.last : theme.tree.branch;
-		const prefix = `${buildTreePrefix(ancestors, theme)}${theme.fg("dim", connector)} `;
-		const scalar = formatJsonScalar(val, theme);
-
-		if (scalar) {
-			const label = key ? theme.fg("muted", sanitizeText(key)) : theme.fg("muted", "value");
-			pushLine(`${prefix}${iconScalar} ${label}: ${theme.fg("dim", scalar)}`);
-			return;
-		}
-
-		if (Array.isArray(val)) {
-			const header = key ? theme.fg("muted", sanitizeText(key)) : theme.fg("muted", "array");
-			pushLine(`${prefix}${iconArray} ${header}`);
-			if (val.length === 0) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"[]",
-					)}`,
-				);
-				return;
-			}
-			if (depth >= maxDepth) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"…",
-					)}`,
-				);
-				return;
-			}
-			const nextAncestors = [...ancestors, !isLast];
-			for (let i = 0; i < val.length; i++) {
-				renderNode(val[i], `[${i}]`, nextAncestors, i === val.length - 1, depth + 1);
-				if (lines.length >= maxLines) {
-					truncated = true;
-					return;
-				}
-			}
-			return;
-		}
-
-		if (val && typeof val === "object") {
-			const header = key ? theme.fg("muted", sanitizeText(key)) : theme.fg("muted", "object");
-			pushLine(`${prefix}${iconObject} ${header}`);
-			const entries = Object.entries(val as Record<string, unknown>);
-			if (entries.length === 0) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"{}",
-					)}`,
-				);
-				return;
-			}
-			if (depth >= maxDepth) {
-				pushLine(
-					`${buildTreePrefix([...ancestors, !isLast], theme)}${theme.fg("dim", theme.tree.last)} ${theme.fg(
-						"dim",
-						"…",
-					)}`,
-				);
-				return;
-			}
-			const nextAncestors = [...ancestors, !isLast];
-			for (let i = 0; i < entries.length; i++) {
-				const [childKey, child] = entries[i];
-				renderNode(child, childKey, nextAncestors, i === entries.length - 1, depth + 1);
-				if (lines.length >= maxLines) {
-					truncated = true;
-					return;
-				}
-			}
-			return;
-		}
-
-		const label = key ? theme.fg("muted", sanitizeText(key)) : theme.fg("muted", "value");
-		pushLine(`${prefix}${iconScalar} ${label}: ${theme.fg("dim", sanitizeText(String(val)))}`);
-	};
-
-	const renderRoot = (val: unknown) => {
-		if (Array.isArray(val)) {
-			for (let i = 0; i < val.length; i++) {
-				renderNode(val[i], `[${i}]`, [], i === val.length - 1, 1);
-				if (lines.length >= maxLines) {
-					truncated = true;
-					return;
-				}
-			}
-			return;
-		}
-		if (val && typeof val === "object") {
-			const entries = Object.entries(val as Record<string, unknown>);
-			for (let i = 0; i < entries.length; i++) {
-				const [childKey, child] = entries[i];
-				renderNode(child, childKey, [], i === entries.length - 1, 1);
-				if (lines.length >= maxLines) {
-					truncated = true;
-					return;
-				}
-			}
-			return;
-		}
-		renderNode(val, undefined, [], true, 0);
-	};
-
-	renderRoot(value);
-
-	return { lines, truncated };
 }
 
 const BASH_WALL_TIME_NOTICE_RE = /^Wall time: \d+(?:\.\d+)? seconds$/u;
@@ -530,7 +379,16 @@ function renderOutputSection(
 					return lines;
 				}
 
-				const tree = renderJsonTreeLines(parsed, theme, expanded ? 6 : 2, expanded ? 24 : 6);
+				const tree = renderJsonTreeLines(parsed, theme, {
+					maxDepth: expanded ? 6 : 2,
+					maxLines: expanded ? 24 : 6,
+					maxScalarLen: 70,
+					sanitizeText,
+					hiddenRootKeys: [],
+					multilineStrings: true,
+					rootConnectors: "siblings",
+					escapeStringWhitespace: false,
+				});
 				if (tree.lines.length > 0) {
 					for (const line of tree.lines) {
 						lines.push(`${continuePrefix}  ${line}`);
@@ -572,7 +430,16 @@ function renderOutputSection(
 
 			// Expanded: tree format
 			lines.push(`${continuePrefix}${theme.fg("dim", "Output")}`);
-			const tree = renderJsonTreeLines(parsed, theme, expanded ? 6 : 2, expanded ? 24 : 6);
+			const tree = renderJsonTreeLines(parsed, theme, {
+				maxDepth: expanded ? 6 : 2,
+				maxLines: expanded ? 24 : 6,
+				maxScalarLen: 70,
+				sanitizeText,
+				hiddenRootKeys: [],
+				multilineStrings: true,
+				rootConnectors: "siblings",
+				escapeStringWhitespace: false,
+			});
 			if (tree.lines.length > 0) {
 				for (const line of tree.lines) {
 					lines.push(`${continuePrefix}  ${line}`);
@@ -778,7 +645,7 @@ function renderTaskItemLines(tasks: TaskItem[] | undefined, theme: Theme): strin
 }
 
 /** One renderable frame section: optional label, body rows, leading divider. */
-type TaskRenderSection = { label?: string; lines: readonly string[]; separator?: boolean };
+type TaskRenderSection = { label?: string; content: readonly string[]; separator?: boolean };
 type AssignmentSectionRenderer = (width: number) => TaskRenderSection;
 
 // Default output-block layout is: left border + one-cell content inset + right
@@ -826,7 +693,7 @@ function createMarkdownSectionRenderer(text: string, theme: Theme): AssignmentSe
 	const markdown = new Markdown(text, 0, 0, getMarkdownTheme(), {
 		color: line => theme.fg("muted", line),
 	});
-	return width => ({ lines: markdown.render(Math.max(1, width - ASSIGNMENT_FRAME_INSET)) });
+	return width => ({ content: markdown.render(Math.max(1, width - ASSIGNMENT_FRAME_INSET)) });
 }
 
 /**
@@ -847,8 +714,8 @@ export function renderCall(args: TaskParams, options: TaskRenderOptions, theme: 
 	);
 	const assignmentSection = createAssignmentSectionRenderer(args, theme);
 	const contextSection = createContextSectionRenderer(args, theme);
-	return framedBlock(theme, width => {
-		const sections: Array<{ label?: string; lines: readonly string[]; separator?: boolean }> = [];
+	return framedToolCard(theme, ({ width }) => {
+		const sections: TaskRenderSection[] = [];
 
 		// The call preview only exists to surface the dispatched agent while the
 		// args stream in. Once a result snapshot exists, `renderResult` draws the
@@ -866,16 +733,15 @@ export function renderCall(args: TaskParams, options: TaskRenderOptions, theme: 
 			if (assignmentSection) sections.push(assignmentSection(width));
 			const callLines = renderTaskCallLines(args, theme);
 			// Guarded: an empty trailing section would still draw its divider.
-			if (callLines.length > 0) sections.push({ separator: true, lines: callLines });
+			if (callLines.length > 0) sections.push({ separator: true, content: callLines });
 		}
 
 		return {
 			header,
 			headerMeta: showIsolated ? "isolated" : undefined,
 			sections,
-			state: "pending",
+			phase: "pending",
 			borderColor: "borderMuted",
-			width,
 		};
 	});
 }
@@ -1587,16 +1453,15 @@ export function renderResult(
 					},
 					theme,
 				);
-		return framedBlock(theme, width => ({
+		return framedToolCard(theme, ({ width }) => ({
 			header,
 			sections: [
 				...(contextSection ? [contextSection(width)] : []),
 				...(assignmentSection ? [assignmentSection(width)] : []),
-				...(text ? [{ separator: true, lines: [theme.fg("dim", truncateToWidth(text, width))] }] : []),
+				...(text ? [{ separator: true, content: [theme.fg("dim", truncateToWidth(text, width))] }] : []),
 			],
-			state: errored ? "error" : "success",
+			phase: errored ? "error" : "success",
 			borderColor: errored ? "error" : "borderMuted",
-			width,
 		}));
 	}
 
@@ -1648,12 +1513,11 @@ export function renderResult(
 		theme,
 	);
 
-	return framedBlock(theme, width => {
+	return framedToolCard(theme, ({ width, contentWidth }) => {
 		const { expanded, isPartial, spinnerFrame } = options;
 		const frozen = options.renderContext?.frozen === true;
 		const nowMs = options.renderContext?.nowMs ?? Date.now();
 		const lines: string[] = [];
-		const contentWidth = outputBlockContentWidth(width);
 
 		// Result rows win once any exist; progress rows for spawns without a
 		// result (a mixed call's async subset) render as a supplement below.
@@ -1743,7 +1607,7 @@ export function renderResult(
 			);
 		}
 
-		const state = isPartial ? "running" : isError ? "error" : mergeFailed ? "warning" : "success";
+		const phase = isPartial ? "partial" : isError ? "error" : mergeFailed ? "warning" : "success";
 		const borderColor = isError ? "error" : "borderMuted";
 
 		if (lines.length === 0) {
@@ -1753,11 +1617,10 @@ export function renderResult(
 				sections: [
 					...(contextSection ? [contextSection(width)] : []),
 					...(assignmentSection ? [assignmentSection(width)] : []),
-					{ separator: true, lines: [theme.fg("dim", truncateToWidth(text, width))] },
+					{ separator: true, content: [theme.fg("dim", truncateToWidth(text, width))] },
 				],
-				state,
+				phase,
 				borderColor,
-				width,
 			};
 		}
 
@@ -1784,11 +1647,10 @@ export function renderResult(
 			sections: [
 				...(contextSection ? [contextSection(width)] : []),
 				...(assignmentSection ? [assignmentSection(width)] : []),
-				...(lines.length > 0 ? [{ separator: true, lines }] : []),
+				...(lines.length > 0 ? [{ separator: true, content: lines }] : []),
 			],
-			state,
+			phase,
 			borderColor,
-			width,
 		};
 	});
 }

@@ -3,7 +3,8 @@ import { Text } from "../components/text";
 import { formatNumber, formatDuration } from "@oh-my-pi/pi-utils";
 import type { Theme, ThemeColor } from "../theme/theme";
 import { formatErrorDetail, TRUNCATE_LENGTHS } from "../render/render-utils";
-import { framedBlock, renderStatusLine, truncateToWidth } from "../render/index";
+import { renderStatusLine, truncateToWidth } from "../render/index";
+import { framedToolCard } from "../render/tool-card";
 import type { RenderResultOptions, ToolRenderer } from "./renderer";
 /** Lifecycle state of a tracked goal. */
 export type GoalStatus = "active" | "paused" | "budget-limited" | "complete" | "dropped";
@@ -93,12 +94,11 @@ export const goalToolRenderer = {
 
 		if (result.isError) {
 			const header = renderStatusLine({ icon: "error", title: "Goal", description }, uiTheme);
-			return framedBlock(uiTheme, width => ({
+			return framedToolCard(uiTheme, () => ({
 				header,
-				sections: [{ lines: formatErrorDetail(fallbackText || "Goal tool failed", uiTheme).split("\n") }],
-				state: "error",
+				sections: [{ content: formatErrorDetail(fallbackText || "Goal tool failed", uiTheme).split("\n") }],
+				phase: "error",
 				borderColor: "error",
-				width,
 			}));
 		}
 
@@ -137,17 +137,16 @@ export const goalToolRenderer = {
 		lines.push(uiTheme.fg("dim", metaParts.join(" · ")));
 
 		const report = details?.completionBudgetReport;
-		const sections: Array<{ label?: string; lines: string[] }> = [{ lines }];
+		const sections: Array<{ label?: string; content: string[] }> = [{ content: lines }];
 		if (report) {
-			sections.push({ label: "Report", lines: report.split("\n").map(line => uiTheme.fg("muted", line)) });
+			sections.push({ label: "Report", content: report.split("\n").map(line => uiTheme.fg("muted", line)) });
 		}
 
-		return framedBlock(uiTheme, width => ({
+		return framedToolCard(uiTheme, () => ({
 			header,
 			sections,
-			state: "success",
+			phase: "success",
 			borderColor: "borderMuted",
-			width,
 		}));
 	},
 

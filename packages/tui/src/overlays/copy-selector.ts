@@ -15,15 +15,7 @@
  * mouse selection nor cmd-click.
  */
 import type { AgentTool } from "@oh-my-pi/pi-agent-core";
-import {
-	type Component,
-	matchesKey,
-	routeSgrMouseInput,
-	ScrollView,
-	type TUI,
-	truncateToWidth,
-	visibleWidth,
-} from "../index";
+import { type Component, matchesKey, routeSgrMouseInput, type TUI, truncateToWidth, visibleWidth } from "../index";
 import type { MessageRenderer } from "../chat/extension-types";
 import {
 	isUserRequestEntry,
@@ -37,15 +29,13 @@ import { highlightCode, type ThemeColor, theme } from "../theme/theme";
 import { commandFromToolCall, extractBlocks, extractLinks } from "./copy-targets";
 import { matchesAppToolsExpand, matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
-import { DynamicBorder } from "../chrome/dynamic-border";
+import { TranscriptBrowser, type TranscriptBrowserFrame } from "../chat/transcript-browser";
 import {
 	appendOutlineEntries,
 	type ComposedColumn,
 	composeOutlineColumn,
-	OutlineRowCache,
 	type OutlineTarget,
 	outlineRows,
-	outlineVisibility,
 } from "../chat/transcript-outline";
 
 export interface CopySelectorDeps {
@@ -78,14 +68,10 @@ interface CopyBlock {
 	href?: string;
 }
 
-/** Rows the frame chrome occupies: top rule, header, rule, footer hint, bottom rule. */
-const CHROME_ROWS = 5;
 /** Preview rows shown per block in the descended view; copy always takes the full text. */
 const BLOCK_PREVIEW_LINES = 12;
 /** The copy picker's outline stroke — green, distinct from the rewind selector's accent. */
 const OUTLINE_COLOR: ThemeColor = "success";
-/** Rows above the scroll view: top rule, header, rule. Mouse rows map through this offset. */
-const CONTENT_TOP = 3;
 /**
  * Entries replayed when the picker opens. Replaying a long session's whole
  * branch costs seconds before the first frame (one component built and
@@ -104,12 +90,10 @@ interface ControlRegion {
 
 export class CopySelectorComponent implements Component {
 	#builder: ChatTranscriptBuilder;
-	#scrollView: ScrollView;
-	#border = new DynamicBorder();
+	#browser: TranscriptBrowser;
 	#targets: OutlineTarget[] = [];
 	#selected = 0;
 	#visible: boolean[] | undefined;
-	#scrollToSelection = true;
 	#expanded = false;
 	/** Inner blocks of the selected turn while descended, else undefined. */
 	#blocks: CopyBlock[] | undefined;
@@ -117,7 +101,6 @@ export class CopySelectorComponent implements Component {
 	#blockCache = new Map<string, CopyBlock[]>();
 	/** Click targets of the last render, keyed by composed-column line index. */
 	#controls = new Map<number, ControlRegion[]>();
-	#rowCache = new OutlineRowCache();
 
 	/** Whole branch; the picker may currently replay only its tail. */
 	#entries: TranscriptEntry[];
@@ -133,10 +116,9 @@ export class CopySelectorComponent implements Component {
 		this.#truncated = tail.length < entries.length;
 		this.#builder = this.#replay(tail);
 		this.#selected = Math.max(0, this.#targets.length - 1);
-		this.#scrollView = new ScrollView([], {
-			height: 10,
-			scrollbar: "auto",
-			theme: { track: t => theme.fg("dim", t), thumb: t => theme.fg("accent", t) },
+		this.#browser = new TranscriptBrowser({
+			getHeight: () => this.deps.ui.terminal?.rows || process.stdout.rows || 40,
+			frame: context => this.#frame(context.contentWidth),
 		});
 	}
 
@@ -174,7 +156,6 @@ export class CopySelectorComponent implements Component {
 		this.#selected = restored >= 0 ? restored : Math.max(0, this.#targets.length - 1);
 		this.#blocks = undefined;
 		this.#blockSelected = 0;
-		this.#scrollToSelection = true;
 		this.deps.requestRender();
 	}
 
@@ -185,6 +166,7 @@ export class CopySelectorComponent implements Component {
 
 	invalidate(): void {
 		this.#builder.container.invalidate();
+		this.#browser.invalidate();
 	}
 
 	dispose(): void {
@@ -209,9 +191,7 @@ export class CopySelectorComponent implements Component {
 				if (event.wheel !== null) {
 					// A wheel notch at either end moves nothing: repainting it
 					// anyway makes the frame twitch under a fast wheel.
-					const before = this.#scrollView.getScrollOffset();
-					this.#scrollView.scroll(event.wheel * 3);
-					if (this.#scrollView.getScrollOffset() !== before) this.deps.requestRender();
+					if (this.#browser.scroll(event.wheel * 3)) this.deps.requestRender();
 					return true;
 				}
 				if (event.leftClick) this.#click(event.row, event.col);
@@ -246,7 +226,6 @@ export class CopySelectorComponent implements Component {
 			if (blocks.length === 0) return;
 			this.#blocks = blocks;
 			this.#blockSelected = 0;
-			this.#scrollToSelection = true;
 			this.deps.requestRender();
 			return;
 		}
@@ -276,7 +255,7 @@ export class CopySelectorComponent implements Component {
 			return;
 		}
 		// Page/home/end/shift+arrow scrolling without moving the selection.
-		if (this.#scrollView.handleScrollKey(data)) {
+		if (this.#browser.handleScrollKey(data)) {
 			this.deps.requestRender();
 		}
 	}
@@ -284,17 +263,18 @@ export class CopySelectorComponent implements Component {
 	#ascend(): void {
 		this.#blocks = undefined;
 		this.#blockSelected = 0;
-		this.#scrollToSelection = true;
 		this.deps.requestRender();
 	}
 
 	/** A left click at terminal (row, col): act if it lands on a caption control. */
 	#click(row: number, col: number): void {
 		if (!this.#blocks) return;
-		const line = row - CONTENT_TOP + this.#scrollView.getScrollOffset();
+		const point = this.#browser.toContentPoint(row, col);
+		if (!point) return;
+		const line = point.row;
 		const regions = this.#controls.get(line);
 		if (!regions) return;
-		const hit = regions.find(region => col >= region.start && col < region.end);
+		const hit = regions.find(region => point.col >= region.start && point.col < region.end);
 		if (!hit) return;
 		const block = this.#blocks[hit.blockIndex];
 		if (!block) return;
@@ -311,7 +291,6 @@ export class CopySelectorComponent implements Component {
 			const next = this.#blockSelected + delta;
 			if (next >= 0 && next < this.#blocks.length) {
 				this.#blockSelected = next;
-				this.#scrollToSelection = true;
 				this.deps.requestRender();
 			}
 			return;
@@ -320,7 +299,6 @@ export class CopySelectorComponent implements Component {
 		while (index >= 0 && index < this.#targets.length) {
 			if (this.#visible?.[index] !== false) {
 				this.#selected = index;
-				this.#scrollToSelection = true;
 				this.deps.requestRender();
 				return;
 			}
@@ -333,21 +311,17 @@ export class CopySelectorComponent implements Component {
 	// ========================================================================
 
 	render(width: number): readonly string[] {
-		const termHeight = process.stdout.rows || 40;
-		const contentWidth = Math.max(1, width - 1);
-		const children = this.#builder.container.children;
-		const inner = Math.max(10, contentWidth - 4);
-		const childRows = this.#rowCache.rows(children, inner);
+		return this.#browser.render(width);
+	}
 
-		this.#visible = outlineVisibility(childRows, this.#targets);
-		if (this.#visible[this.#selected] === false) {
-			let above = this.#selected - 1;
-			while (above >= 0 && this.#visible[above] === false) above--;
-			let below = this.#selected + 1;
-			while (below < this.#targets.length && this.#visible[below] === false) below++;
-			if (above >= 0) this.#selected = above;
-			else if (below < this.#targets.length) this.#selected = below;
+	#frame(contentWidth: number): TranscriptBrowserFrame {
+		const children = this.#builder.container.children;
+		const prepared = this.#browser.prepareOutline(children, this.#targets, this.#selected, contentWidth);
+		this.#visible = prepared.visible;
+		if (prepared.selected !== this.#selected) {
+			this.#selected = prepared.selected;
 			this.#blocks = undefined;
+			this.#blockSelected = 0;
 		}
 
 		const target = this.#targets[this.#selected];
@@ -356,9 +330,17 @@ export class CopySelectorComponent implements Component {
 		this.#controls = new Map();
 		if (this.#blocks && target) {
 			// Descended: the turn's rendered region is replaced by its block stack.
-			const before = composeOutlineColumn(childRows, 0, target.start, [], -1, contentWidth, undefined);
+			const before = composeOutlineColumn(prepared.childRows, 0, target.start, [], -1, contentWidth, undefined);
 			const stack = this.#composeBlocks(this.#blocks, contentWidth, before.lines.length);
-			const after = composeOutlineColumn(childRows, target.end, children.length, [], -1, contentWidth, undefined);
+			const after = composeOutlineColumn(
+				prepared.childRows,
+				target.end,
+				children.length,
+				[],
+				-1,
+				contentWidth,
+				undefined,
+			);
 			composed = {
 				lines: [...before.lines, ...stack.lines, ...after.lines],
 				selStart: stack.selStart >= 0 ? before.lines.length + stack.selStart : -1,
@@ -366,50 +348,42 @@ export class CopySelectorComponent implements Component {
 			};
 		} else {
 			// The caption on the outline advertises Right's descent into blocks.
-			composed = composeOutlineColumn(
-				childRows,
-				0,
-				children.length,
-				this.#targets,
-				this.#selected,
-				contentWidth,
-				undefined,
-				{
+			composed = this.#browser.composeOutline({
+				children,
+				targets: this.#targets,
+				selected: this.#selected,
+				columnWidth: contentWidth,
+				prepared,
+				style: {
 					color: OUTLINE_COLOR,
 					caption: blocks.length > 0 ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} →` : undefined,
 				},
-			);
+			}).column;
 		}
 
-		const viewportHeight = Math.max(3, termHeight - CHROME_ROWS);
-		this.#scrollView.setLines(composed.lines);
-		this.#scrollView.setHeight(viewportHeight);
-		if (this.#scrollToSelection && composed.selStart >= 0) {
-			const offset = this.#scrollView.getScrollOffset();
-			const top = Math.max(0, composed.selStart - 1);
-			const bottom = Math.min(composed.lines.length, composed.selEnd + 1);
-			if (top < offset) this.#scrollView.setScrollOffset(top);
-			else if (bottom > offset + viewportHeight) this.#scrollView.setScrollOffset(bottom - viewportHeight);
-			this.#scrollToSelection = false;
-		}
-
-		const output: string[] = [];
-		output.push(...this.#border.render(width));
-		output.push(
-			` ${theme.cmd.copy} ${theme.bold("Copy")}${theme.sep.dot}${theme.fg("dim", "pick what to put on the clipboard")}`,
-		);
-		output.push(...this.#border.render(width));
-		output.push(...this.#scrollView.render(width));
 		const selectedBlock = this.#blocks?.[this.#blockSelected];
 		const openHint = selectedBlock?.href && this.deps.onOpen ? "  o open" : "";
 		const hint = this.#blocks
 			? `${this.#blockSelected + 1}/${this.#blocks.length}  ↑/↓ block  ←/esc back  enter copy${openHint}  click ${theme.cmd.copy}/${theme.cmd.share}`
 			: `${this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : ""}↑/↓ step  ${blocks.length > 0 ? "→ blocks  " : ""}enter copy  ${this.#truncated ? "a earlier turns  " : ""}ctrl+o expand  esc close`;
-		// The hint grows with the load-all affordance; an over-width row would
-		// wrap and shift the mouse rows CONTENT_TOP/CHROME_ROWS assume.
-		output.push(` ${theme.fg("dim", truncateToWidth(hint, Math.max(0, width - 1)))}`);
-		output.push(...this.#border.render(width));
-		return output;
+		const anchorId = target
+			? this.#blocks
+				? `copy:${target.turnId}:block:${this.#blockSelected}`
+				: `copy:${target.turnId}`
+			: undefined;
+		return {
+			header: [
+				`${theme.cmd.copy} ${theme.bold("Copy")}${theme.sep.dot}${theme.fg("dim", "pick what to put on the clipboard")}`,
+			],
+			body: {
+				lines: composed.lines,
+				anchor:
+					anchorId !== undefined && composed.selStart >= 0
+						? { id: anchorId, start: composed.selStart, end: composed.selEnd }
+						: undefined,
+			},
+			footer: [theme.fg("dim", hint)],
+		};
 	}
 
 	/**

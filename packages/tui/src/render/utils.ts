@@ -5,8 +5,6 @@ import type { Theme, ThemeBg } from "../theme/theme";
 import { padding, visibleWidth } from "../utils";
 import type { State } from "./types";
 
-export { Ellipsis, truncateToWidth } from "../utils";
-
 /** Cached typed-array scratch space for hashing non-string primitives. */
 const hashBuf = new ArrayBuffer(8);
 const hashView = new DataView(hashBuf);

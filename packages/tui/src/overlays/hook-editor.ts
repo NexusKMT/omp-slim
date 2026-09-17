@@ -12,6 +12,14 @@ import { BracketedPasteHandler } from "../bracketed-paste";
 import { getEditorTheme, theme } from "../theme/theme";
 import { matchesAppExternalEditor, matchesAppFollowUp, matchesAppInterrupt } from "../keybinding-matchers";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { FormField, type FormFieldTheme } from "../components/form";
+
+const formTheme: FormFieldTheme = {
+	label: text => theme.bold(theme.fg("accent", text)),
+	description: text => theme.fg("muted", text),
+	error: text => theme.fg("error", text),
+	hint: text => theme.fg("dim", text),
+};
 
 export interface HookEditorOptions {
 	/** Edit text with the host's configured external editor. */
@@ -30,6 +38,7 @@ export interface HookEditorOptions {
 /** Interactive multiline dialog used by hooks and the ask tool's Other response. */
 export class HookEditorComponent extends OverlayPanel implements Focusable {
 	#editor: Editor;
+	#field: FormField;
 	#onSubmitCallback: (value: string) => void;
 	#onCancelCallback: () => void;
 	#tui: TUI;
@@ -62,12 +71,6 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 		this.#promptStyle = options?.promptStyle ?? false;
 		this.#externalEditor = options?.externalEditor;
 
-		this.addChild(new Spacer(1));
-		if (detailLines.length > 0) {
-			for (const line of detailLines) this.addChild(new Text(theme.fg("accent", line), 0, 0));
-			this.addChild(new Spacer(1));
-		}
-
 		// Editor
 		this.#editor = new Editor(getEditorTheme());
 		if (this.#promptStyle) {
@@ -83,27 +86,30 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 		if (prefill) {
 			this.#editor.setText(prefill);
 		}
-		this.addChild(this.#editor);
-
-		this.addChild(new Spacer(1));
-
 		// Hint
 		const hint = this.#promptStyle
 			? "enter or ctrl+q submit  esc cancel  ctrl+g external editor"
 			: "ctrl+q/ctrl+enter submit  esc cancel  ctrl+g external editor";
-		this.addChild(new Text(theme.fg("dim", hint), 0, 0));
+		this.#field = new FormField(this.#editor, {
+			theme: formTheme,
+			details:
+				detailLines.length > 0
+					? [new Spacer(1), ...detailLines.map(line => new Text(theme.fg("accent", line), 0, 0))]
+					: undefined,
+			hint,
+		});
+		this.addChild(this.#field);
 		this.addChild(new Spacer(1));
 	}
 
 	/** Keep the nested editor's software/hardware cursor mode aligned with the dialog focus target. */
 	setUseTerminalCursor(useTerminalCursor: boolean): void {
-		if (this.#editor.getUseTerminalCursor() === useTerminalCursor) return;
-		this.#editor.setUseTerminalCursor(useTerminalCursor);
+		this.#field.setUseTerminalCursor(useTerminalCursor);
 	}
 
 	/** Render the dialog after forwarding its focus state to the nested editor. */
 	override render(width: number): readonly string[] {
-		this.#editor.focused = this.focused;
+		this.#field.focused = this.focused;
 		return super.render(width);
 	}
 

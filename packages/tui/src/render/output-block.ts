@@ -4,11 +4,11 @@
 import { ImageProtocol, TERMINAL } from "../terminal-capabilities";
 import type { Theme, ThemeColor } from "../theme/theme";
 import type { Component } from "../tui";
-import { padding, visibleWidth, wrapTextWithAnsi } from "../utils";
+import { Ellipsis, padding, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
 import { getSixelLineMask } from "./sixel";
 import type { State } from "./types";
 import type { RenderCache } from "./utils";
-import { getStateBgColor, Hasher, padToWidth, truncateToWidth } from "./utils";
+import { getStateBgColor, Hasher, padToWidth } from "./utils";
 
 /** Sections and presentation options for a bordered output block. */
 export interface OutputBlockOptions {
@@ -190,6 +190,7 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 	const renderContent = (inner: string): string =>
 		`${border(v)}${contentLeftPadding}${inner}${contentRightPadding}${border(v)}`;
 
+	const clipFrame = lineWidth < Math.max(visibleWidth(cap) + 2, contentPaddingLeft + contentPaddingRight + 2);
 	const lines: string[] = [];
 	for (let r = 0; r < H; r++) {
 		const row = rows[r]!;
@@ -199,7 +200,7 @@ export function renderOutputBlock(options: OutputBlockOptions, theme: Theme): st
 		}
 		const line =
 			row.kind === "bar" ? renderBar(row) : row.kind === "bottom" ? renderBottom(row) : renderContent(row.inner);
-		lines.push(padToWidth(line, lineWidth, bgFn));
+		lines.push(padToWidth(clipFrame ? truncateToWidth(line, lineWidth, Ellipsis.Omit) : line, lineWidth, bgFn));
 	}
 
 	return lines;
@@ -263,21 +264,4 @@ export class CachedOutputBlock {
 		}
 		return h.digest();
 	}
-}
-
-/**
- * Build a self-framing tool component backed by a cached output block. The
- * `build` callback returns the block options for a given width; the cache
- * dedupes re-renders. Pass `borderColor: "borderMuted"` for the dim "legacy"
- * look that does not compete with the state-colored framed tools.
- */
-export function framedBlock(theme: Theme, build: (width: number) => OutputBlockOptions): Component {
-	const block = new CachedOutputBlock();
-	// Marked so the tool-execution container treats it as self-framing (renders
-	// flush, no extra padding/background) the same way `markFramedBlockComponent`
-	// blocks are treated.
-	return markFramedBlockComponent({
-		render: (width: number): readonly string[] => block.render(build(width), theme),
-		invalidate: () => block.invalidate(),
-	});
 }

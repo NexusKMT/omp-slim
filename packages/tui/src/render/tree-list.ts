@@ -3,7 +3,8 @@
  */
 
 import type { Theme } from "../theme/theme";
-import { replaceTabs, visibleWidth } from "../utils";
+import { visibleWidth } from "../utils";
+import { TreeView } from "../components/tree-view";
 import { formatMoreItems } from "./render-utils";
 import type { TreeContext } from "./types";
 import { getTreeBranch, getTreeContinuePrefix } from "./utils";
@@ -31,6 +32,8 @@ export interface TreeListOptions<T> {
 	renderItem: (item: T, context: TreeContext) => string | string[];
 }
 
+type TreeListRow = { kind: "item"; index: number; lines: string[] } | { kind: "summary"; text: string };
+
 /** Render tree items with themed branches and optional expansion. */
 export function renderTreeList<T>(options: TreeListOptions<T>, theme: Theme): string[] {
 	const {
@@ -55,37 +58,33 @@ export function renderTreeList<T>(options: TreeListOptions<T>, theme: Theme): st
 		visibleWidth(lastContinuePrefix),
 	);
 
+	const toItemRow = (itemIndex: number): TreeListRow => {
+		const rendered = renderItem(items[itemIndex], {
+			index: itemIndex,
+			isLast: false,
+			depth: 0,
+			theme,
+			prefix: "",
+			continuePrefix: "",
+			prefixWidth,
+		});
+		return { kind: "item", index: itemIndex, lines: Array.isArray(rendered) ? rendered : rendered ? [rendered] : [] };
+	};
+
 	// Caller-driven collapse: render exactly the provided items (the caller
 	// already picked/capped them) plus an optional trailing summary row. The
 	// walking-viewport todo policy uses this so item selection lives in the
 	// todo domain, not here.
 	if (!expanded && options.trailingSummary !== undefined) {
 		const summary = options.trailingSummary;
-		const lines: string[] = [];
+		const roots: TreeListRow[] = [];
 		for (let i = 0; i < items.length; i++) {
-			const rendered = renderItem(items[i], {
-				index: i,
-				isLast: false,
-				depth: 0,
-				theme,
-				prefix: "",
-				continuePrefix: "",
-				prefixWidth,
-			});
-			const itemLines = Array.isArray(rendered) ? rendered : rendered ? [rendered] : [];
-			if (itemLines.length === 0) continue;
-			const isLast = summary === "" && i === items.length - 1;
-			const prefix = isLast ? lastPrefix : branchPrefix;
-			const continuePrefix = isLast ? lastContinuePrefix : branchContinuePrefix;
-			lines.push(`${prefix}${replaceTabs(itemLines[0]!)}`);
-			for (let j = 1; j < itemLines.length; j++) {
-				lines.push(`${continuePrefix}${replaceTabs(itemLines[j]!)}`);
-			}
+			roots.push(toItemRow(i));
 		}
 		if (summary !== "") {
-			lines.push(`${lastPrefix}${theme.fg("muted", summary)}`);
+			roots.push({ kind: "summary", text: theme.fg("muted", summary) });
 		}
-		return lines;
+		return renderTreeListRows(roots, theme);
 	}
 
 	const candidateIndices: number[] = [];
@@ -157,29 +156,33 @@ export function renderTreeList<T>(options: TreeListOptions<T>, theme: Theme): st
 
 	const hasSummary = !expanded && remaining > 0 && (linesBudget === Infinity || fittedLineCount < linesBudget);
 
-	// Emit pre-rendered content with correct isLast-based branch prefixes.
-	const lines: string[] = [];
-
+	const roots: TreeListRow[] = [];
 	if (truncateFrom === "start" && hasSummary) {
-		lines.push(`${branchPrefix}${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
+		roots.push({ kind: "summary", text: theme.fg("muted", formatMoreItems(remaining, itemType)) });
 	}
-
 	for (let i = displayedSlice.start; i < displayedSlice.end; i++) {
-		const isLast =
-			truncateFrom === "start" ? i === displayedSlice.end - 1 : !hasSummary && i === displayedSlice.end - 1;
-		const prefix = isLast ? lastPrefix : branchPrefix;
-		const continuePrefix = isLast ? lastContinuePrefix : branchContinuePrefix;
-		const itemLines = preRendered[i]!;
-		if (itemLines.length === 0) continue;
-		lines.push(`${prefix}${replaceTabs(itemLines[0]!)}`);
-		for (let j = 1; j < itemLines.length; j++) {
-			lines.push(`${continuePrefix}${replaceTabs(itemLines[j]!)}`);
-		}
+		roots.push({ kind: "item", index: candidateIndices[i], lines: preRendered[i]! });
 	}
-
 	if (truncateFrom === "end" && hasSummary) {
-		lines.push(`${lastPrefix}${theme.fg("muted", formatMoreItems(remaining, itemType))}`);
+		roots.push({ kind: "summary", text: theme.fg("muted", formatMoreItems(remaining, itemType)) });
 	}
+	return renderTreeListRows(roots, theme);
+}
 
-	return lines;
+/**
+ * Emit pre-rendered item/summary roots through the shared keyed hierarchy.
+ * Roots are siblings in display order, so the first N-1 rows draw `├` and the
+ * final row draws `└` — matching the historical branch/continuation geometry.
+ * Formatting adapters render unbounded, so truncation stays disabled here.
+ */
+function renderTreeListRows(roots: TreeListRow[], theme: Theme): string[] {
+	const tree = new TreeView<TreeListRow, number>({
+		roots,
+		getKey: item => (item.kind === "summary" ? -1 : item.index),
+		getChildren: () => [],
+		theme,
+		truncateRows: false,
+		renderRow: item => (item.kind === "summary" ? [item.text] : item.lines),
+	});
+	return [...tree.render(Number.POSITIVE_INFINITY)];
 }

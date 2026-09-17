@@ -19,13 +19,13 @@ import { parseWorkDirDirtyPaths } from "../git";
 import {
 	EXPERIMENT_MAX_BYTES,
 	EXPERIMENT_MAX_LINES,
-	formatElapsed,
 	parseAsiLines,
 	parseMetricLines,
 	tryGitPrefix,
 	tryGitStatus,
 } from "../helpers";
 import { formatNum } from "@oh-my-pi/pi-tui/tools/autoresearch";
+import { formatElapsed } from "@oh-my-pi/pi-tui/apps/autoresearch-data";
 import { buildExperimentState } from "../state";
 import { openAutoresearchStorageIfExists } from "../storage";
 import type { AutoresearchToolFactoryOptions } from "../types";

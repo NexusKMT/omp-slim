@@ -6,6 +6,7 @@ import { formatContextUsage } from "../chrome/context-thresholds";
 import { truncateToVisualLines } from "../chrome/visual-truncate";
 import { getMarkdownTheme, type Theme } from "../theme/theme";
 import { markFramedBlockComponent, outputBlockContentWidth, renderCodeCell } from "../render/index";
+import { formatOutputPaneLines } from "../render/output-pane";
 import { formatEvalCodeForDisplay } from "./eval-format/index";
 import {
 	JSON_TREE_MAX_DEPTH_COLLAPSED,
@@ -546,29 +547,41 @@ function formatCellOutputLines(
 	// at the box's inner content width. Bound the collapsed tail by VISUAL rows
 	// at that width so a long-line tail can't wrap into more rows than budgeted
 	// and scroll its mutating preview above the live-region window — the
-	// duplicate "ctrl+o to expand" scrollback spray.
+	// duplicate "ctrl+o to expand" scrollback spray. The caller appends its own
+	// exact hidden-count row, so the pane marker stays off here.
 	const innerWidth = outputBlockContentWidth(width);
 
 	if (cell.hasMarkdown && cell.status !== "error") {
 		const md = new Markdown(cell.output, 0, 0, getMarkdownTheme());
 		const allLines = md.render(innerWidth);
-		const displayLines = expanded ? allLines : allLines.slice(-previewLines);
-		const hiddenCount = allLines.length - displayLines.length;
-		return { lines: displayLines, hiddenCount };
+		const formatted = formatOutputPaneLines(
+			{
+				lines: allLines,
+				expanded,
+				collapsedMaxLines: previewLines,
+				edge: "tail",
+				showHiddenMarker: false,
+			},
+			theme,
+		);
+		return { lines: formatted.lines, hiddenCount: formatted.hiddenCount };
 	}
 
-	const styledOutput = cell.output
-		.split("\n")
-		.map(line => {
-			const cleaned = replaceTabs(line);
-			return cell.status === "error" ? theme.fg("error", cleaned) : theme.fg("toolOutput", cleaned);
-		})
-		.join("\n");
-	if (expanded) {
-		return { lines: styledOutput.split("\n"), hiddenCount: 0 };
-	}
-	const { visualLines, skippedCount } = truncateToVisualLines(styledOutput, previewLines, innerWidth);
-	return { lines: visualLines, hiddenCount: skippedCount };
+	const isError = cell.status === "error";
+	const formatted = formatOutputPaneLines(
+		{
+			lines: cell.output.split("\n"),
+			expanded,
+			collapsedMaxLines: previewLines,
+			edge: "tail",
+			visual: true,
+			width: innerWidth,
+			styleLine: line => theme.fg(isError ? "error" : "toolOutput", replaceTabs(line)),
+			showHiddenMarker: false,
+		},
+		theme,
+	);
+	return { lines: formatted.lines, hiddenCount: formatted.hiddenCount };
 }
 
 /** Render eval code cells, structured display output, and progress events. */

@@ -2,7 +2,8 @@ import type { ToolRenderer } from "./renderer";
 import { type Component, padding, Text, visibleWidth } from "../index";
 import type { RenderResultOptions } from "./renderer";
 import type { Theme, ThemeColor } from "../theme/theme";
-import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../render";
+import { outputBlockContentWidth, renderStatusLine } from "../render";
+import { framedToolCard } from "../render/tool-card";
 
 import { formatShortSha, pushLine } from "./gh-format";
 import {
@@ -268,7 +269,7 @@ function buildWatchSections(
 	theme: Theme,
 	options: RenderResultOptions,
 	width: number,
-): Array<{ label?: string; lines: string[] }> {
+): Array<{ label?: string; content: string[] }> {
 	const main: string[] = [];
 
 	if (watch.note) {
@@ -291,14 +292,14 @@ function buildWatchSections(
 		}
 	}
 
-	const sections: Array<{ label?: string; lines: string[] }> = [];
+	const sections: Array<{ label?: string; content: string[] }> = [];
 	if (main.length > 0) {
-		sections.push({ lines: main });
+		sections.push({ content: main });
 	}
 
 	const failed = renderFailedLogs(watch.failedLogs ?? [], width, theme, options.expanded);
 	if (failed.length > 0) {
-		sections.push({ label: "failed logs", lines: failed });
+		sections.push({ label: "failed logs", content: failed });
 	}
 
 	return sections;
@@ -358,7 +359,7 @@ function renderFallbackComponent(
 		return new Text(`${header}\n${colored}`, 0, 0);
 	}
 
-	return framedBlock(theme, width => {
+	return framedToolCard(theme, ({ width }) => {
 		const lineWidth = outputBlockContentWidth(width || FALLBACK_WIDTH);
 		const expanded = options.expanded;
 		const limit = expanded ? allLines.length : Math.min(allLines.length, PREVIEW_LIMITS.OUTPUT_EXPANDED);
@@ -377,11 +378,10 @@ function renderFallbackComponent(
 		}
 		return {
 			header,
-			sections: out.length > 0 ? [{ lines: out }] : [],
-			state: isError ? "error" : "success",
+			sections: out.length > 0 ? [{ content: out }] : [],
+			phase: isError ? "error" : "success",
 			borderColor: isError ? "error" : "borderMuted",
 			applyBg: false,
-			width,
 		};
 	});
 }
@@ -443,32 +443,39 @@ export const githubToolRenderer = {
 		const watch = result.details?.watch;
 		if (watch) {
 			const isError = result.isError === true;
+			const isPartial = options.isPartial === true;
 			const header = renderStatusLine(
-				isError
+				isPartial
 					? {
-							icon: "error",
+							icon: options.spinnerFrame !== undefined ? "running" : "pending",
+							spinnerFrame: options.spinnerFrame,
 							title: "GitHub Run Watch",
-							titleColor: "error",
 							meta: [getWatchHeader(watch)],
 						}
-					: {
-							iconOverride: uiTheme.styledSymbol("tool.gh", "accent"),
-							title: "GitHub Run Watch",
-							titleColor: "accent",
-							meta: [getWatchHeader(watch)],
-						},
+					: isError
+						? {
+								icon: "error",
+								title: "GitHub Run Watch",
+								titleColor: "error",
+								meta: [getWatchHeader(watch)],
+							}
+						: {
+								iconOverride: uiTheme.styledSymbol("tool.gh", "accent"),
+								title: "GitHub Run Watch",
+								titleColor: "accent",
+								meta: [getWatchHeader(watch)],
+							},
 				uiTheme,
 			);
-			return framedBlock(uiTheme, width => {
+			return framedToolCard(uiTheme, ({ width }) => {
 				const innerWidth = outputBlockContentWidth(width || FALLBACK_WIDTH);
 				const sections = buildWatchSections(watch, uiTheme, options, innerWidth);
 				return {
 					header,
 					sections,
-					state: isError ? "error" : "success",
+					phase: isPartial ? "partial" : isError ? "error" : "success",
 					borderColor: isError ? "error" : "borderMuted",
 					applyBg: false,
-					width,
 				};
 			});
 		}

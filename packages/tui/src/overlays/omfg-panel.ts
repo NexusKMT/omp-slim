@@ -1,7 +1,8 @@
-import { type Component, Markdown, Spacer, Text, type TUI } from "../index";
+import { type Component, Markdown, Text, type TUI } from "../index";
 import { replaceTabs } from "../render/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { StreamingPanelContent } from "../chrome/streaming-panel";
 
 export type OmfgPanelState =
 	| "generating"
@@ -26,10 +27,16 @@ export class OmfgPanelComponent extends OverlayPanel {
 	#savedPath: string | undefined;
 	#errorMessage: string | undefined;
 	#closed = false;
+	readonly #content: StreamingPanelContent;
 
 	constructor(options: OmfgPanelComponentOptions) {
 		super(`/omfg ${replaceTabs(options.complaint)}`);
 		this.#tui = options.tui;
+		this.#content = new StreamingPanelContent(() => ({
+			sections: [new Text(theme.fg("muted", replaceTabs(this.#status)), 0, 0), this.#contentComponent()],
+			footer: this.#footerLine(),
+		}));
+		this.addChild(this.#content);
 		this.#rebuild();
 	}
 
@@ -91,13 +98,7 @@ export class OmfgPanelComponent extends OverlayPanel {
 	}
 
 	#rebuild(): void {
-		this.clear();
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", replaceTabs(this.#status)), 0, 0));
-		this.addChild(new Spacer(1));
-		this.addChild(this.#contentComponent());
-		this.addChild(new Spacer(1));
-		this.addChild(new Text(this.#footerLine(), 0, 0));
+		this.#content.refresh();
 		this.#tui.requestRender();
 	}
 

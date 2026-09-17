@@ -41,7 +41,9 @@ import {
 	resolveRoleAssignments,
 	sortModelItems,
 } from "./model-browser";
-import { bottomBorder, dividerSplit, row, splitBodyWidth, splitRow, topBorderSplit } from "../chrome/overlay-box";
+import { bottomBorder, dividerSplit, PanelRows, row, topBorderSplit } from "../chrome/overlay-box";
+import { SplitPane } from "../components/layout/split-pane";
+import { Stack } from "../components/layout/stack";
 import { renderSegmentTrack } from "../chrome/segment-track";
 
 /**
@@ -271,12 +273,51 @@ export class ModelHubComponent implements Component {
 	#pendingCredentialRefreshProviders = new Set<string>();
 	#refreshSpinnerFrame = 0;
 	#refreshSpinnerInterval?: Timer;
-	// Frame geometry from the last render, for mouse hit-testing (the
-	// fullscreen overlay paints from screen row 0, so mouse rows map 1:1).
-	#contentRowStart = 1;
-	#contentRowCount = 0;
-	#sidebarWidthLast = SIDEBAR_MIN_WIDTH;
-	#footerRow = 0;
+	// Persistent fullscreen frame: top, growing two-pane body, split divider,
+	// footer, bottom. The fullscreen overlay paints from screen row 0, so mouse
+	// rows map 1:1 into the stack; the sidebar width is fixed per render.
+	#renderSidebarPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(0, Math.floor(height ?? 10));
+		const lines = this.#renderSidebar(width, rows);
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	#renderBodyPane = (width: number, height: number | undefined): readonly string[] => {
+		const rows = Math.max(1, Math.floor(height ?? 10));
+		const lines: string[] = [this.#statusRow(width)];
+		const entry = this.#activeEntry();
+		if (entry.kind === "roles" && this.#assigning === null) {
+			lines.push(...this.#renderRolesView(width, rows - 1));
+		} else if (entry.kind === "provider" && entry.locked && this.#assigning === null) {
+			lines.push(...this.#renderLockedView(entry, width, rows - 1));
+		} else {
+			this.#browser.setMaxVisible(rows - 1 - 5);
+			this.#browser.setFocused(this.#focus === "list");
+			lines.push(...this.#browser.render(width));
+		}
+		while (lines.length < rows) lines.push("");
+		return lines.slice(0, rows);
+	};
+	readonly #split = new SplitPane({
+		left: this.#renderSidebarPane,
+		right: this.#renderBodyPane,
+		prefix: () => `${theme.fg("border", theme.boxRound.vertical)} `,
+		divider: () => ` ${theme.fg("border", theme.boxRound.vertical)} `,
+		suffix: () => ` ${theme.fg("border", theme.boxRound.vertical)}`,
+	});
+	readonly #frameTop = new PanelRows();
+	readonly #frameDivider = new PanelRows();
+	readonly #frameFooter = new PanelRows();
+	readonly #frameBottom = new PanelRows();
+	readonly #frame = new Stack({
+		children: [
+			{ content: this.#frameTop, height: 1 },
+			{ content: this.#split, grow: 1 },
+			{ content: this.#frameDivider, height: 1 },
+			{ content: this.#frameFooter, height: 1 },
+			{ content: this.#frameBottom, height: 1 },
+		],
+	});
 	#chipRanges: ChipRange[] = [];
 	#lockedLoginLine: number | null = null;
 	#rolesRowStart = 1;
@@ -343,7 +384,9 @@ export class ModelHubComponent implements Component {
 		}
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.#frame.invalidate();
+	}
 
 	// ═══════════════════════════════════════════════════════════════════════
 	// Data pipeline
@@ -1776,22 +1819,33 @@ export class ModelHubComponent implements Component {
 
 	#routeMouseEvent(event: SgrMouseEvent): boolean {
 		if (this.#assignmentPending) return true;
-		const contentLine = event.row - this.#contentRowStart;
-		const overContent = contentLine >= 0 && contentLine < this.#contentRowCount;
-		const sidebarColStart = 2;
-		const sidebarColEnd = sidebarColStart + this.#sidebarWidthLast;
-		const bodyColStart = this.#sidebarWidthLast + 5;
-		const overSidebar = overContent && event.col >= 0 && event.col < sidebarColEnd;
-		const overBody = overContent && event.col >= bodyColStart;
+		const hit = this.#frame.locate(event.row, event.col);
+		const bodyHeight = this.#frame.childRect(1)?.height ?? 0;
+		let contentLine = -1;
+		let overSidebar = false;
+		let overBody = false;
+		if (hit && hit.index === 1) {
+			const pane = this.#split.locate(hit.line, hit.col);
+			if (pane?.pane === "left") {
+				overSidebar = true;
+				contentLine = pane.line;
+			} else if (pane?.pane === "right") {
+				overBody = true;
+				contentLine = pane.line;
+			}
+		}
+		const overContent = contentLine >= 0 && contentLine < bodyHeight;
+		overSidebar = overSidebar && overContent;
+		overBody = overBody && overContent;
 		const bodyLine = contentLine - 1; // body row 0 is the status row
 		const entry = this.#activeEntry();
 
-		// Footer strip chips.
-		if (event.row === this.#footerRow && this.#strip) {
+		// Footer strip chips (columns stay in frame coordinates).
+		if (hit && hit.index === 3 && this.#strip) {
 			const strip = this.#strip;
 			if (event.leftClick && strip.kind !== "roleName") {
 				for (const range of this.#chipRanges) {
-					if (event.col >= range.start && event.col < range.end) {
+					if (hit.col >= range.start && hit.col < range.end) {
 						strip.index = range.index;
 						this.#activateStripChip();
 						return true;
@@ -1804,7 +1858,7 @@ export class ModelHubComponent implements Component {
 		if (event.wheel !== null) {
 			if (overSidebar) {
 				// Wheel pans the sidebar viewport; picking a scope is click/keys only.
-				const maxScroll = Math.max(0, this.#entries.length - this.#contentRowCount);
+				const maxScroll = Math.max(0, this.#entries.length - bodyHeight);
 				this.#sidebarScroll = Math.max(0, Math.min(this.#sidebarScroll + event.wheel, maxScroll));
 				this.#sidebarHover = this.#sidebarEntryIndexAt(contentLine);
 			} else if (overBody) {
@@ -2353,38 +2407,17 @@ export class ModelHubComponent implements Component {
 		return truncateToWidth(line, width);
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		const height = Math.max(16, this.#tui.terminal?.rows || process.stdout.rows || 40);
 		const sidebarWidth = this.#sidebarWidth();
-		this.#sidebarWidthLast = sidebarWidth;
-		const bodyWidth = splitBodyWidth(width, sidebarWidth);
 		const contentRows = Math.max(10, height - 4);
-		this.#contentRowCount = contentRows;
-
-		const entry = this.#activeEntry();
-		const bodyLines: string[] = [this.#statusRow(bodyWidth)];
-		if (entry.kind === "roles" && this.#assigning === null) {
-			bodyLines.push(...this.#renderRolesView(bodyWidth, contentRows - 1));
-		} else if (entry.kind === "provider" && entry.locked && this.#assigning === null) {
-			bodyLines.push(...this.#renderLockedView(entry, bodyWidth, contentRows - 1));
-		} else {
-			this.#browser.setMaxVisible(contentRows - 1 - 5);
-			this.#browser.setFocused(this.#focus === "list");
-			bodyLines.push(...this.#browser.render(bodyWidth));
-		}
-
-		const sidebarLines = this.#renderSidebar(sidebarWidth, contentRows);
-
-		const out: string[] = [];
-		out.push(topBorderSplit(width, "Models", sidebarWidth));
-		this.#contentRowStart = out.length;
-		for (let i = 0; i < contentRows; i++) {
-			out.push(splitRow(sidebarLines[i] ?? "", bodyLines[i] ?? "", width, sidebarWidth));
-		}
-		out.push(dividerSplit(width, sidebarWidth));
-		this.#footerRow = out.length;
-		out.push(row(this.#renderFooter(width - 4), width));
-		out.push(bottomBorder(width));
-		return out;
+		this.#split.setLeftSize({ fixed: sidebarWidth });
+		const leftWidth = this.#split.measure(width).left?.width ?? 0;
+		this.#frameTop.setLines([topBorderSplit(width, "Models", leftWidth)]);
+		this.#frameDivider.setLines([dividerSplit(width, leftWidth)]);
+		this.#frameFooter.setLines([row(this.#renderFooter(width - 4), width)]);
+		this.#frameBottom.setLines([bottomBorder(width)]);
+		this.#frame.setHeight(contentRows + 4);
+		return this.#frame.render(width);
 	}
 }

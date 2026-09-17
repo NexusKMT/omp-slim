@@ -8,7 +8,7 @@ import {
 	type BuiltinSlashCommandRuntime,
 	executeBuiltinSlashCommand,
 } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
-import { CollabQrCodeComponent } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/collab-qrcode";
+import { CollabQrCodeComponent } from "@oh-my-pi/pi-tui/chrome/collab-qrcode";
 import { Text, visibleWidth } from "@oh-my-pi/pi-tui";
 
 beforeAll(async () => {

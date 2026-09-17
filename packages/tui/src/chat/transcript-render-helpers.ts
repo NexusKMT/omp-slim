@@ -6,7 +6,6 @@
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { type Component } from "../tui";
-import { Text } from "../components/text";
 import { formatBytes, formatDuration } from "@oh-my-pi/pi-utils";
 import type { JobSnapshot } from "../tools/hub";
 import type { DaemonSnapshot } from "../tools/hub";
@@ -16,7 +15,8 @@ import { formatArtifactErrorNotice, type OutputMeta } from "../tools/output-meta
 import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../render/render-utils";
 import { canonicalizeMessage } from "./thinking-display";
 import { ToolActivityContainer } from "../chrome/tool-activity";
-import { TranscriptBlock } from "../chrome/transcript-container";
+import { type TranscriptBlock } from "../chrome/transcript-container";
+import { TranscriptStatusBlock, type TranscriptStatusRow } from "../chrome/transcript-status";
 import { theme } from "../theme";
 
 type CustomOrHookMessage = Extract<AgentMessage, { role: "custom" | "hookMessage" }>;
@@ -55,28 +55,27 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
 						durationMs: details?.durationMs,
 					},
 				];
-	const block = new TranscriptBlock();
+	const rows: TranscriptStatusRow[] = [];
 	for (const job of jobs) {
 		const jobId = job.jobId ?? "unknown";
 		const typeLabel = job.type ? `[${job.type}]` : "[job]";
 		const duration = typeof job.durationMs === "number" ? formatDuration(job.durationMs) : undefined;
-		const line = [
-			theme.fg("success", `${theme.status.done} Background job completed`),
-			theme.fg("dim", typeLabel),
-			theme.fg("accent", jobId),
-			duration ? theme.fg("dim", `(${duration})`) : undefined,
-		]
-			.filter(Boolean)
-			.join(" ");
-		block.addChild(new Text(line, 1, 0));
+		rows.push({
+			parts: [
+				theme.fg("success", `${theme.status.done} Background job completed`),
+				theme.fg("dim", typeLabel),
+				theme.fg("accent", jobId),
+				duration ? theme.fg("dim", `(${duration})`) : undefined,
+			],
+		});
 		if (job.meta?.artifactError) {
-			block.addChild(new Text(theme.fg("warning", formatArtifactErrorNotice(job.meta.artifactError)), 1, 0));
+			rows.push({ parts: [theme.fg("warning", formatArtifactErrorNotice(job.meta.artifactError))] });
 		}
 	}
 	if (details?.meta?.artifactError) {
-		block.addChild(new Text(theme.fg("warning", formatArtifactErrorNotice(details.meta.artifactError)), 1, 0));
+		rows.push({ parts: [theme.fg("warning", formatArtifactErrorNotice(details.meta.artifactError))] });
 	}
-	return new ToolActivityContainer(block);
+	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
 }
 
 /**
@@ -86,10 +85,10 @@ export function buildAsyncResultBlock(message: CustomOrHookMessage): ToolActivit
  */
 export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolActivityContainer {
 	const details = (message as CustomMessage<{ daemons?: DaemonSnapshot[] }>).details;
-	const block = new TranscriptBlock();
+	const rows: TranscriptStatusRow[] = [];
 	const daemons = details?.daemons ?? [];
 	if (daemons.length === 0 && typeof message.content === "string") {
-		block.addChild(new Text(theme.fg("dim", `${theme.status.done} ${message.content}`), 1, 0));
+		rows.push({ parts: [theme.fg("dim", `${theme.status.done} ${message.content}`)] });
 	}
 	for (const daemon of daemons) {
 		const failed = daemon.state === "failed" || (daemon.exitCode !== undefined && daemon.exitCode !== 0);
@@ -97,19 +96,18 @@ export function buildLaunchCompletionBlock(message: CustomOrHookMessage): ToolAc
 			daemon.exitedAt !== undefined && daemon.startedAt !== undefined
 				? formatDuration(daemon.exitedAt - daemon.startedAt)
 				: undefined;
-		const line = [
-			failed
-				? theme.fg("error", `${theme.status.error} Supervised process failed`)
-				: theme.fg("success", `${theme.status.done} Supervised process completed`),
-			theme.fg("accent", daemon.name),
-			daemon.exitCode !== undefined ? theme.fg("dim", `(exit ${daemon.exitCode})`) : undefined,
-			duration ? theme.fg("dim", `(${duration})`) : undefined,
-		]
-			.filter(Boolean)
-			.join(" ");
-		block.addChild(new Text(line, 1, 0));
+		rows.push({
+			parts: [
+				failed
+					? theme.fg("error", `${theme.status.error} Supervised process failed`)
+					: theme.fg("success", `${theme.status.done} Supervised process completed`),
+				theme.fg("accent", daemon.name),
+				daemon.exitCode !== undefined ? theme.fg("dim", `(exit ${daemon.exitCode})`) : undefined,
+				duration ? theme.fg("dim", `(${duration})`) : undefined,
+			],
+		});
 	}
-	return new ToolActivityContainer(block);
+	return new ToolActivityContainer(new TranscriptStatusBlock(rows));
 }
 
 /**
@@ -160,7 +158,7 @@ export function buildIrcMessageCard(message: CustomOrHookMessage, getExpanded: (
  * (1).
  */
 export function buildFileMentionBlock(files: FileMentionMessage["files"], indent: number): TranscriptBlock {
-	const block = new TranscriptBlock();
+	const rows: TranscriptStatusRow[] = [];
 	for (const file of files) {
 		let suffix: string;
 		if (file.skippedReason === "tooLarge" || file.skippedReason === "binary") {
@@ -173,13 +171,16 @@ export function buildFileMentionBlock(files: FileMentionMessage["files"], indent
 					? "(unknown lines)"
 					: `(${file.lineCount} lines)`;
 		}
-		const text = `${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")} ${theme.fg(
-			"accent",
-			file.path,
-		)} ${theme.fg("dim", suffix)}`;
-		block.addChild(new Text(text, indent, 0));
+		rows.push({
+			parts: [
+				`${theme.fg("dim", `${theme.tree.last} `)}${theme.fg("muted", "Read")}`,
+				theme.fg("accent", file.path),
+				theme.fg("dim", suffix),
+			],
+			indent,
+		});
 	}
-	return block;
+	return new TranscriptStatusBlock(rows);
 }
 
 /**

@@ -7,7 +7,8 @@ import type { RenderResultOptions, ToolRenderer } from "./renderer";
 import { getLanguageFromPath } from "../lang-from-path";
 import type { Theme } from "../theme/theme";
 import { fileHyperlink, renderCodeCell, renderMarkdownCell, renderStatusLine } from "../render";
-import { CachedOutputBlock, markFramedBlockComponent } from "../render/output-block";
+import { markFramedBlockComponent } from "../render/output-block";
+import { framedToolCard } from "../render/tool-card";
 import { type ReadUrlToolDetails, renderReadUrlCall, renderReadUrlResult } from "./fetch";
 import { formatFullOutputReference, formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
 import { formatBytes, sanitizeDisplayLines, shortenPath, wrapBrackets } from "../render/render-utils";
@@ -331,12 +332,11 @@ export const readToolRenderer = {
 			}
 			const header = renderStatusLine({ icon: "error", title }, uiTheme);
 			const errorLines = sanitizeDisplayLines(errorText).map(line => uiTheme.fg("error", line));
-			const outputBlock = new CachedOutputBlock();
-			return markFramedBlockComponent({
-				render: (width: number) =>
-					outputBlock.render({ header, state: "error", sections: [{ lines: errorLines }], width }, uiTheme),
-				invalidate: () => outputBlock.invalidate(),
-			});
+			return framedToolCard(uiTheme, () => ({
+				header,
+				phase: "error",
+				sections: [{ content: errorLines }],
+			}));
 		}
 		const details = result.details;
 		const rawText = result.content?.find(c => c.type === "text")?.text ?? "";
@@ -387,25 +387,16 @@ export const readToolRenderer = {
 				? sanitizeDisplayLines(contentText).map(line => uiTheme.fg("toolOutput", line))
 				: [];
 			const lines = [...detailLines, ...warningLines];
-			const outputBlock = new CachedOutputBlock();
-			return markFramedBlockComponent({
-				render: (width: number) =>
-					outputBlock.render(
-						{
-							header,
-							state: "success",
-							sections: [
-								{
-									label: uiTheme.fg("toolTitle", "Details"),
-									lines: lines.length > 0 ? lines : [uiTheme.fg("dim", "(image)")],
-								},
-							],
-							width,
-						},
-						uiTheme,
-					),
-				invalidate: () => outputBlock.invalidate(),
-			});
+			return framedToolCard(uiTheme, () => ({
+				header,
+				phase: "success",
+				sections: [
+					{
+						label: uiTheme.fg("toolTitle", "Details"),
+						content: lines.length > 0 ? lines : [uiTheme.fg("dim", "(image)")],
+					},
+				],
+			}));
 		}
 
 		const suffix = details?.suffixResolution;

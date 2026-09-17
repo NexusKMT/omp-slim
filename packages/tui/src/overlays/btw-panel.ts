@@ -1,8 +1,9 @@
-import { type Component, Markdown, Spacer, Text, type TUI } from "../index";
+import { type Component, Markdown, Text, type TUI } from "../index";
 import { replaceTabs } from "../render/render-utils";
 import { getMarkdownTheme, theme } from "../theme/theme";
 import { sanitizeErrorLine } from "../chrome/error-block";
 import { OverlayPanel } from "../chrome/overlay-box";
+import { StreamingPanelContent } from "../chrome/streaming-panel";
 
 type BtwPanelState = "running" | "complete" | "branching" | "aborted" | "error";
 
@@ -11,25 +12,6 @@ interface BtwPanelComponentOptions {
 	tui: TUI;
 	canBranch?: () => boolean;
 	canFollowUp?: () => boolean;
-}
-
-class BtwFooter implements Component {
-	#getLine: () => string;
-	#line: string | undefined;
-	#text: Text | undefined;
-
-	constructor(getLine: () => string) {
-		this.#getLine = getLine;
-	}
-
-	render(width: number): readonly string[] {
-		const line = this.#getLine();
-		if (line !== this.#line || !this.#text) {
-			this.#line = line;
-			this.#text = new Text(line, 0, 0);
-		}
-		return this.#text.render(width);
-	}
 }
 
 export class BtwPanelComponent extends OverlayPanel {
@@ -43,6 +25,7 @@ export class BtwPanelComponent extends OverlayPanel {
 	#closed = false;
 	#copied = false;
 	#baseTitle: string;
+	readonly #content: StreamingPanelContent;
 
 	constructor(options: BtwPanelComponentOptions) {
 		const baseTitle = `/btw ${replaceTabs(options.question)}`;
@@ -51,6 +34,11 @@ export class BtwPanelComponent extends OverlayPanel {
 		this.#tui = options.tui;
 		this.#canBranch = options.canBranch;
 		this.#canFollowUp = options.canFollowUp;
+		this.#content = new StreamingPanelContent(() => ({
+			sections: [this.#contentComponent()],
+			footer: () => this.#footerLine(),
+		}));
+		this.addChild(this.#content);
 		this.#rebuild();
 	}
 
@@ -132,11 +120,7 @@ export class BtwPanelComponent extends OverlayPanel {
 	}
 
 	#rebuild(): void {
-		this.clear();
-		this.addChild(new Spacer(1));
-		this.addChild(this.#contentComponent());
-		this.addChild(new Spacer(1));
-		this.addChild(new BtwFooter(() => this.#footerLine()));
+		this.#content.refresh();
 		// Component-scoped: a rebuild replaces only this panel's own children
 		// (streaming deltas arrive per token, and a full compose would re-walk
 		// the whole transcript each time). Before the panel is mounted the TUI

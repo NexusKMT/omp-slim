@@ -16,7 +16,8 @@
 import type { Component } from "../../tui";
 import { matchesKey } from "../../keys";
 import { parseSgrMouse } from "../../mouse";
-import { padding, truncateToWidth, visibleWidth } from "../../utils";
+import { SplitPane, type SplitPaneHit } from "../../components/layout/split-pane";
+import { Stack } from "../../components/layout/stack";
 import { ScrollView } from "../../components/scroll-view";
 import { TabBar, type Tab } from "../../components/tab-bar";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -29,7 +30,7 @@ import {
 	matchesSelectPageUp,
 } from "../../keybinding-matchers";
 import { expandKeyHint } from "../../render/render-utils";
-import { bottomBorder, divider, row, topBorder } from "../../chrome/overlay-box";
+import { bottomBorder, divider, PanelRows, row, topBorder } from "../../chrome/overlay-box";
 import { ExtensionList } from "./extension-list";
 import { InspectorPanel, type ToolRuntimeSource } from "./inspector-panel";
 import type { ExtensionInspectorSource } from "./inspector-model";
@@ -100,12 +101,27 @@ export class ExtensionDashboard implements Component {
 	#tabBar!: TabBar;
 	#body!: TwoColumnBody;
 	#refreshToken = 0;
-	// Frame geometry from the last render, for SGR mouse hit-testing. The
-	// fullscreen overlay paints from screen row 0, so mouse rows map 1:1.
-	#tabRowStart = 0;
-	#tabRowCount = 0;
-	#bodyRowStart = 0;
-	#bodyRowCount = 0;
+	// Persistent fullscreen frame: top, tabs, divider, body, divider, footer,
+	// bottom. The fullscreen overlay paints from screen row 0, so mouse rows
+	// map 1:1 into the stack.
+	readonly #frameTop = new PanelRows();
+	readonly #frameTabs = new PanelRows();
+	readonly #frameUpperDivider = new PanelRows();
+	readonly #frameBody = new PanelRows();
+	readonly #frameLowerDivider = new PanelRows();
+	readonly #frameFooter = new PanelRows();
+	readonly #frameBottom = new PanelRows();
+	readonly #frame = new Stack({
+		children: [
+			{ content: this.#frameTop, height: 1 },
+			{ content: this.#frameTabs },
+			{ content: this.#frameUpperDivider, height: 1 },
+			{ content: this.#frameBody },
+			{ content: this.#frameLowerDivider, height: 1 },
+			{ content: this.#frameFooter, height: 1 },
+			{ content: this.#frameBottom, height: 1 },
+		],
+	});
 
 	onClose?: () => void;
 	onRequestRender?: () => void;
@@ -193,7 +209,7 @@ export class ExtensionDashboard implements Component {
 	/**
 	 * Fullscreen frame: titled top border, the tab row(s), a divider, the
 	 * two-column body sized to fill the viewport, a divider, the footer hint, and
-	 * the bottom border. Records row geometry for mouse hit-testing.
+	 * the bottom border.
 	 */
 	render(width: number): readonly string[] {
 		const height = Math.max(14, this.#terminalRows());
@@ -209,24 +225,19 @@ export class ExtensionDashboard implements Component {
 		const toolFrame = snapshotToolRuntimeSource(this.#toolSource);
 		this.#mainList.setToolSource(toolFrame);
 		this.#inspector.setToolSource(toolFrame);
-		const bodyLines = this.#body.render(innerWidth);
 
-		const out: string[] = [];
-		out.push(topBorder(width, "Extension Control Center"));
-		this.#tabRowStart = out.length;
-		this.#tabRowCount = tabLines.length;
-		for (const line of tabLines) out.push(row(line, width));
-		out.push(divider(width));
-		this.#bodyRowStart = out.length;
-		this.#bodyRowCount = contentRows;
-		for (let i = 0; i < contentRows; i++) out.push(row(bodyLines[i] ?? "", width));
-		out.push(divider(width));
-		out.push(row(theme.fg("dim", extFooter()), width));
-		out.push(bottomBorder(width));
-		return out;
+		this.#frameTop.setLines([topBorder(width, "Extension Control Center")]);
+		this.#frameTabs.setLines(tabLines.map(line => row(line, width)));
+		this.#frameUpperDivider.setLines([divider(width)]);
+		this.#frameBody.setLines(this.#body.render(innerWidth).map(line => row(line, width)));
+		this.#frameLowerDivider.setLines([divider(width)]);
+		this.#frameFooter.setLines([row(theme.fg("dim", extFooter()), width)]);
+		this.#frameBottom.setLines([bottomBorder(width)]);
+		return this.#frame.render(width);
 	}
 
 	invalidate(): void {
+		this.#frame.invalidate();
 		this.#tabBar.invalidate();
 		this.#mainList.invalidate();
 		this.#inspector.invalidate();
@@ -243,13 +254,23 @@ export class ExtensionDashboard implements Component {
 
 		// row() insets content by two columns (border + space).
 		const innerCol = event.col - 2;
-		const tabLine = event.row - this.#tabRowStart;
-		const overTabs = tabLine >= 0 && tabLine < this.#tabRowCount;
-		const bodyLine = event.row - this.#bodyRowStart;
-		const overBody = bodyLine >= 0 && bodyLine < this.#bodyRowCount;
-		const leftWidth = this.#body.leftWidth;
-		const overList = overBody && innerCol < leftWidth;
-		const overInspector = overBody && innerCol >= leftWidth + 3;
+		const tabRect = this.#frame.childRect(1);
+		const tabLine = tabRect ? event.row - tabRect.row : -1;
+		const overTabs = tabRect !== undefined && tabLine >= 0 && tabLine < tabRect.height;
+		const bodyHit = this.#frame.locate(event.row, event.col);
+		let paneLine = -1;
+		let overList = false;
+		let overInspector = false;
+		if (bodyHit && bodyHit.index === 3) {
+			const pane = this.#body.locate(bodyHit.line, bodyHit.col - 2);
+			if (pane?.pane === "left") {
+				overList = true;
+				paneLine = pane.line;
+			} else if (pane?.pane === "right") {
+				overInspector = true;
+				paneLine = pane.line;
+			}
+		}
 
 		if (event.wheel !== null) {
 			if (overList) {
@@ -265,7 +286,7 @@ export class ExtensionDashboard implements Component {
 		if (event.motion) {
 			const hoveredTab = overTabs ? this.#tabBar.tabAt(tabLine, innerCol) : undefined;
 			this.#tabBar.setHoverTab(hoveredTab && !hoveredTab.muted ? hoveredTab.id : null);
-			this.#mainList.setHoverIndex(overList ? this.#mainList.hitTest(bodyLine) : null);
+			this.#mainList.setHoverIndex(overList ? this.#mainList.hitTest(paneLine) : null);
 			this.onRequestRender?.();
 			return;
 		}
@@ -278,7 +299,7 @@ export class ExtensionDashboard implements Component {
 			return;
 		}
 		if (overList) {
-			this.#mainList.handleClick(bodyLine);
+			this.#mainList.handleClick(paneLine);
 			this.onRequestRender?.();
 		}
 	}
@@ -540,32 +561,57 @@ export class ExtensionDashboard implements Component {
 
 /**
  * Two-column body: inventory list on the left, inspector on the right, split by
- * a vertical rule. The inspector is a {@link ScrollView} viewport so long detail
- * panes scroll (wheel) with an auto scrollbar; the left list manages its own
- * windowing. Records the left-column width so the host can hit-test panes.
+ * a dim vertical rule. The inspector is a {@link ScrollView} viewport so long
+ * detail panes scroll (wheel) with an auto scrollbar; the left list manages its
+ * own windowing. Pane-local hit-testing goes through the owned split.
  */
 class TwoColumnBody implements Component {
 	#maxHeight: number;
 	#rightScroll = 0;
 	#rightTotal = 0;
-	#leftWidth = 0;
 
 	readonly #leftPane: ExtensionList;
 	readonly #rightPane: InspectorPanel;
+	readonly #split: SplitPane;
+
+	#renderInspectorPane = (width: number, height: number | undefined): readonly string[] => {
+		const numLines = Math.max(0, Math.floor(height ?? this.#maxHeight));
+		const inspectorWidth = Math.max(0, width - 2);
+		this.#rightPane.setHeight(numLines);
+		const rightLines = this.#rightPane.render(inspectorWidth);
+		this.#rightTotal = rightLines.length;
+		const maxScroll = Math.max(0, this.#rightTotal - numLines);
+		if (this.#rightScroll > maxScroll) this.#rightScroll = maxScroll;
+		const rightView = new ScrollView(rightLines, {
+			height: numLines,
+			scrollbar: "auto",
+			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
+		});
+		rightView.setScrollOffset(this.#rightScroll);
+		return rightView.render(width);
+	};
 
 	constructor(leftPane: ExtensionList, rightPane: InspectorPanel, maxHeight: number) {
 		this.#leftPane = leftPane;
 		this.#rightPane = rightPane;
 		this.#maxHeight = maxHeight;
+		this.#split = new SplitPane({
+			left: this.#leftPane,
+			right: this.#renderInspectorPane,
+			leftSize: { ratio: 0.5 },
+			divider: () => theme.fg("dim", ` ${theme.boxRound.vertical} `),
+			height: maxHeight,
+		});
 	}
 
 	setMaxHeight(maxHeight: number): void {
 		this.#maxHeight = maxHeight;
+		this.#split.setHeight(maxHeight);
 	}
 
-	/** Content width of the left (list) column from the last render. */
-	get leftWidth(): number {
-		return this.#leftWidth;
+	/** Pane-local hit test from the last render. */
+	locate(line: number, col: number): SplitPaneHit | undefined {
+		return this.#split.locate(line, col);
 	}
 
 	resetInspectorScroll(): void {
@@ -588,41 +634,12 @@ class TwoColumnBody implements Component {
 	}
 
 	render(width: number): readonly string[] {
-		const leftWidth = Math.floor(width * 0.5);
-		this.#leftWidth = leftWidth;
-		const rightWidth = Math.max(0, width - leftWidth - 3);
-		const numLines = this.#maxHeight;
-		const inspectorWidth = Math.max(0, rightWidth - 2);
-
-		const leftLines = this.#leftPane.render(leftWidth);
-		this.#rightPane.setHeight(numLines);
-		const rightLines = this.#rightPane.render(inspectorWidth);
-		this.#rightTotal = rightLines.length;
-		const maxScroll = Math.max(0, this.#rightTotal - numLines);
-		if (this.#rightScroll > maxScroll) this.#rightScroll = maxScroll;
-
-		const rightView = new ScrollView(rightLines, {
-			height: numLines,
-			scrollbar: "auto",
-			theme: { track: t => theme.fg("muted", t), thumb: t => theme.fg("accent", t) },
-		});
-		rightView.setScrollOffset(this.#rightScroll);
-		const rightRendered = rightView.render(rightWidth);
-
-		const combined: string[] = [];
-		const separator = theme.fg("dim", ` ${theme.boxRound.vertical} `);
-		for (let i = 0; i < numLines; i++) {
-			const left = truncateToWidth(leftLines[i] ?? "", leftWidth);
-			const leftPadded = left + padding(Math.max(0, leftWidth - visibleWidth(left)));
-			const right = rightRendered[i] ?? "";
-			combined.push(leftPadded + separator + right);
-		}
-
-		return combined;
+		this.#split.setHeight(this.#maxHeight);
+		return this.#split.render(width);
 	}
 
 	invalidate(): void {
-		this.#leftPane.invalidate?.();
+		this.#split.invalidate();
 		this.#rightPane.invalidate?.();
 	}
 }

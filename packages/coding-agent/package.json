@@ -454,14 +454,6 @@
       "types": "./src/modes/components/extensions/*.ts",
       "import": "./src/modes/components/extensions/*.ts"
     },
-    "./modes/components/status-line": {
-      "types": "./src/modes/components/status-line/index.ts",
-      "import": "./src/modes/components/status-line/index.ts"
-    },
-    "./modes/components/status-line/*": {
-      "types": "./src/modes/components/status-line/*.ts",
-      "import": "./src/modes/components/status-line/*.ts"
-    },
     "./modes/controllers/*": {
       "types": "./src/modes/controllers/*.ts",
       "import": "./src/modes/controllers/*.ts"
@@ -478,7 +470,6 @@
       "types": "./src/plan-mode/*.ts",
       "import": "./src/plan-mode/*.ts"
     },
-    "./prompts/*": "./src/prompts/*.md",
     "./registry/*": {
       "types": "./src/registry/*.ts",
       "import": "./src/registry/*.ts"
@@ -563,6 +554,7 @@
       "types": "./src/web/search/providers/*.ts",
       "import": "./src/web/search/providers/*.ts"
     },
+    "./prompts/*": "./src/prompts/*.md",
     "./*.js": "./src/*.ts"
   }
 }

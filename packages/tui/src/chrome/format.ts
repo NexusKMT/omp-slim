@@ -1,3 +1,4 @@
+import { renderProgressBar } from "../components/progress-bar";
 import { shimmerText } from "../theme/shimmer";
 import { theme as currentTheme, type Theme } from "../theme/theme";
 
@@ -45,10 +46,21 @@ function resolveProgressBarTheme(uiTheme: ProgressBarTheme | undefined): Progres
  */
 export function renderAsciiBar(fraction: number | undefined, width = 24, uiTheme?: ProgressBarTheme): string {
 	const progressBarTheme = resolveProgressBarTheme(uiTheme);
-	if (fraction === undefined) return `[${shimmerText("·".repeat(width), progressBarTheme)}]`;
-	const clamped = Math.min(Math.max(fraction, 0), 1);
-	const filled = Math.round(clamped * width);
-	const pct = Math.round(clamped * 100);
-	const bar = `${"█".repeat(filled)}${"░".repeat(Math.max(0, width - filled))}`;
-	return `[${shimmerText(bar, progressBarTheme)}] ${pct}%`;
+	const shimmer = (text: string): string => shimmerText(text, progressBarTheme);
+	if (fraction === undefined) {
+		return renderProgressBar(undefined, width, {
+			prefix: "[",
+			suffix: "]",
+			style: { filled: "·", empty: "·", indeterminate: "·", styleBar: shimmer },
+		});
+	}
+	return renderProgressBar(fraction, width, {
+		min: 0,
+		max: 1,
+		prefix: "[",
+		suffix: "]",
+		showPercentage: true,
+		formatPercentage: value => `${Math.round(value * 100)}%`,
+		style: { filled: "█", empty: "░", styleBar: shimmer },
+	});
 }

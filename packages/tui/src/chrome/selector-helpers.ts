@@ -5,6 +5,7 @@
  * padding. Behaviour is identical to the per-component copies these helpers
  * replace.
  */
+import { centeredViewportRange, scrollOffsetForRow, viewportOverflows } from "../components/scroll-viewport";
 import { extractPrintableText, matchesKey } from "../keys";
 import { ScrollView } from "../components/scroll-view";
 import { theme } from "../theme/index";
@@ -37,9 +38,8 @@ export function centeredWindow(
 	total: number,
 	maxVisible: number,
 ): { startIndex: number; endIndex: number } {
-	const startIndex = Math.max(0, Math.min(selectedIndex - Math.floor(maxVisible / 2), total - maxVisible));
-	const endIndex = Math.min(startIndex + maxVisible, total);
-	return { startIndex, endIndex };
+	const range = centeredViewportRange(selectedIndex, total, maxVisible);
+	return { startIndex: range.start, endIndex: range.end };
 }
 
 /**
@@ -47,8 +47,7 @@ export function centeredWindow(
  * scrollbar when the list overflows its visible window.
  */
 export function contentRowWidth(width: number, total: number, maxVisible: number): number {
-	const overflow = total > maxVisible;
-	return Math.max(0, width - (overflow ? 1 : 0));
+	return Math.max(0, width - (viewportOverflows(total, maxVisible) ? 1 : 0));
 }
 
 /**
@@ -68,12 +67,7 @@ export function clampSelection(
 
 	const selected = Math.max(0, Math.min(selectedIndex, total - 1));
 
-	let scroll = scrollOffset;
-	if (selected < scroll) {
-		scroll = selected;
-	} else if (selected >= scroll + maxVisible) {
-		scroll = selected - maxVisible + 1;
-	}
+	const scroll = scrollOffsetForRow(scrollOffset, selected, total, maxVisible, "nearest");
 
 	return { selectedIndex: selected, scrollOffset: scroll };
 }

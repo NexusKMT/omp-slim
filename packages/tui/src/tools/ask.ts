@@ -15,7 +15,8 @@ import type { RenderResultOptions } from "./renderer";
 
 import { getMarkdownTheme, type Theme } from "../theme/theme";
 
-import { framedBlock, outputBlockContentWidth, renderStatusLine } from "../render";
+import { outputBlockContentWidth, renderStatusLine } from "../render";
+import { framedToolCard } from "../render/tool-card";
 
 import { formatErrorMessage, formatMeta, formatTitle, sanitizeCarriageReturns } from "../render/render-utils";
 
@@ -296,7 +297,7 @@ export const askToolRenderer = {
 		const questions = normalizeRenderQuestions(args.questions);
 		if (questions && questions.length > 0) {
 			const header = `${label} ${uiTheme.fg("muted", `${questions.length} questions`)}`;
-			return framedBlock(uiTheme, width => {
+			return framedToolCard(uiTheme, ({ width }) => {
 				const sections = questions.map(q => {
 					const meta: string[] = [];
 					if (q.multi) meta.push("multi");
@@ -307,21 +308,20 @@ export const askToolRenderer = {
 					const lines = q.options?.length
 						? [...mdLines, ...renderQuestionOptionLines(uiTheme, mdTheme, q.options, q.multi)]
 						: mdLines;
-					return { label: `${uiTheme.fg("dim", `[${q.id}]`)}${metaStr}`, lines };
+					return { label: `${uiTheme.fg("dim", `[${q.id}]`)}${metaStr}`, content: lines };
 				});
-				return { header, sections, state: "pending", borderColor: "borderMuted", width };
+				return { header, sections, phase: "pending", borderColor: "borderMuted" };
 			});
 		}
 
 		// Single question
 		if (typeof args.question !== "string" || !args.question) {
 			const errorLine = formatErrorMessage("No question provided", uiTheme);
-			return framedBlock(uiTheme, width => ({
+			return framedToolCard(uiTheme, () => ({
 				header: errorLine,
 				sections: [],
-				state: "error",
+				phase: "error",
 				borderColor: "error",
-				width,
 			}));
 		}
 
@@ -332,7 +332,7 @@ export const askToolRenderer = {
 		if (questionOptions?.length) meta.push(`options:${questionOptions.length}`);
 		const header = `${label}${formatMeta(meta, uiTheme)}`;
 		const multi = args.multi;
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, ({ width }) => {
 			// md() returns a shared cached array (module-level Markdown LRU) — copy before appending.
 			const mdLines = md(question, width);
 			const bodyLines = questionOptions?.length
@@ -340,10 +340,9 @@ export const askToolRenderer = {
 				: mdLines;
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: "pending",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: "pending",
 				borderColor: "borderMuted",
-				width,
 			};
 		});
 	},
@@ -372,12 +371,11 @@ export const askToolRenderer = {
 		if (details.chatRedirect) {
 			const header = renderStatusLine({ icon: "info", title: "Ask", meta: ["chat redirect"] }, uiTheme);
 			const questions = details.questions ?? [];
-			return framedBlock(uiTheme, width => ({
+			return framedToolCard(uiTheme, ({ width }) => ({
 				header,
-				sections: questions.length > 0 ? [{ lines: questions.flatMap(q => md(q, width)) }] : [],
-				state: "warning",
+				sections: questions.length > 0 ? [{ content: questions.flatMap(q => md(q, width)) }] : [],
+				phase: "warning",
 				borderColor: "borderMuted",
-				width,
 			}));
 		}
 
@@ -398,7 +396,7 @@ export const askToolRenderer = {
 				},
 				uiTheme,
 			);
-			return framedBlock(uiTheme, width => {
+			return framedToolCard(uiTheme, ({ width }) => {
 				const rawResults = rawDetails.results ?? [];
 				const sections = results.map((r, index) => {
 					// Sanitizing preserves order and length, so raw indices align with `r`.
@@ -418,14 +416,13 @@ export const askToolRenderer = {
 							selectedIndicesFor(raw?.options, raw?.selectedOptions),
 						),
 					];
-					return { label: uiTheme.fg("dim", `[${r.id}]`), lines };
+					return { label: uiTheme.fg("dim", `[${r.id}]`), content: lines };
 				});
 				return {
 					header,
 					sections,
-					state: hasAnySelection ? "success" : "warning",
+					phase: hasAnySelection ? "success" : "warning",
 					borderColor: "borderMuted",
-					width,
 				};
 			});
 		}
@@ -454,7 +451,7 @@ export const askToolRenderer = {
 		const dCustom = details.customInput;
 		const dNote = details.note;
 		const dTimedOut = details.timedOut;
-		return framedBlock(uiTheme, width => {
+		return framedToolCard(uiTheme, ({ width }) => {
 			// md() returns a shared cached array (module-level Markdown LRU) — copy before appending.
 			const bodyLines = [
 				...md(question, width),
@@ -476,10 +473,9 @@ export const askToolRenderer = {
 			}
 			return {
 				header,
-				sections: bodyLines.length > 0 ? [{ lines: bodyLines }] : [],
-				state: hasSelection ? "success" : "warning",
+				sections: bodyLines.length > 0 ? [{ content: bodyLines }] : [],
+				phase: hasSelection ? "success" : "warning",
 				borderColor: "borderMuted",
-				width,
 			};
 		});
 	},

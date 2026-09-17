@@ -1,5 +1,8 @@
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { Ellipsis, padding, visibleWidth } from "../utils";
+import { Ellipsis, visibleWidth } from "../utils";
+import { formatMetricRow } from "../components/metric";
+import { renderProgressBar } from "../components/progress-bar";
+import { renderTableRow } from "../components/table";
 import { formatDuration, formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { ThemeColor } from "../theme/theme";
 import { type AgentRecordLike, MAIN_AGENT_ID } from "./agent-hub-types";
@@ -141,34 +144,57 @@ export function formatCost(cost: number): string {
 }
 
 export function formatMetrics(metrics: AgentMetrics): string {
-	return [
-		formatCost(metrics.cost),
-		formatMetricDuration(metrics) ?? "time —",
-		`${formatNumber(metrics.requests)} req`,
-		`${formatNumber(metrics.tools)} tools`,
-		`${formatNumber(metrics.tokens)} tok`,
-	].join(theme.sep.dot);
+	return formatMetricRow(
+		[
+			{ value: formatCost(metrics.cost) },
+			{ value: formatMetricDuration(metrics) ?? "time —" },
+			{ value: `${formatNumber(metrics.requests)} req` },
+			{ value: `${formatNumber(metrics.tools)} tools` },
+			{ value: `${formatNumber(metrics.tokens)} tok` },
+		],
+		{ separator: theme.sep.dot },
+	);
 }
 
 /** Row-grid variant of {@link formatMetrics}: fixed-width cells so every agent's metadata
  * line shares one column layout instead of flowing after wrapped text. Cost is left-aligned
  * so the line starts flush; the numeric cells are right-aligned so units line up. */
 export function formatMetricColumns(metrics: AgentMetrics, age: string): string {
-	const cost = formatCost(metrics.cost);
-	return [
-		cost + padding(8 - visibleWidth(cost)),
-		alignRightCell(formatMetricDuration(metrics) ?? "—", 13),
-		alignRightCell(`${formatNumber(metrics.requests)} req`, 8),
-		alignRightCell(`${formatNumber(metrics.tools)} tools`, 9),
-		alignRightCell(`${formatNumber(metrics.tokens)} tok`, 8),
-		alignRightCell(age, 8),
-	].join(" ");
+	return renderTableRow(
+		[
+			{ text: formatCost(metrics.cost) },
+			{ text: formatMetricDuration(metrics) ?? "—" },
+			{ text: `${formatNumber(metrics.requests)} req` },
+			{ text: `${formatNumber(metrics.tools)} tools` },
+			{ text: `${formatNumber(metrics.tokens)} tok` },
+			{ text: age },
+		],
+		[
+			{ width: 8, align: "left", overflow: "allow" },
+			{ width: 13, align: "right", overflow: "truncate" },
+			{ width: 8, align: "right", overflow: "truncate" },
+			{ width: 9, align: "right", overflow: "truncate" },
+			{ width: 8, align: "right", overflow: "truncate" },
+			{ width: 8, align: "right", overflow: "truncate" },
+		],
+		undefined,
+		{ gap: " ", fit: false },
+	);
 }
 
 export function contextGauge(tokens: number, window: number): string {
 	const ratio = Math.max(0, Math.min(1, tokens / window));
-	const filled = Math.round(ratio * 10);
-	return `${theme.fg("accent", "━".repeat(filled))}${theme.fg("dim", "─".repeat(10 - filled))} ${formatNumber(tokens)}/${formatNumber(window)} ${Math.round(ratio * 100)}%`;
+	const bar = renderProgressBar(ratio, 10, {
+		min: 0,
+		max: 1,
+		style: {
+			filled: "━",
+			empty: "─",
+			styleFilled: text => theme.fg("accent", text),
+			styleEmpty: text => theme.fg("dim", text),
+		},
+	});
+	return `${bar} ${formatNumber(tokens)}/${formatNumber(window)} ${Math.round(ratio * 100)}%`;
 }
 
 /** Fit a child-id preview without joining an arbitrarily large child set. */
@@ -286,7 +312,7 @@ export function fuzzyAgentMatch(query: string, target: string): boolean {
 
 /** Right-align `text` inside a fixed-width cell, truncating overflow. */
 export function alignRightCell(text: string, width: number): string {
-	const visible = visibleWidth(text);
-	if (visible > width) return truncateToWidth(text, width);
-	return `${" ".repeat(width - visible)}${text}`;
+	return renderTableRow([{ text }], [{ width, align: "right", overflow: "truncate" }], undefined, {
+		fit: false,
+	});
 }
