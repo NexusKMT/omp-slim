@@ -702,12 +702,7 @@ export const evalToolRenderer = {
 							lines.push("");
 						}
 					}
-					if (jsonLines.length > 0) {
-						if (lines.length > 0) {
-							lines.push("");
-						}
-						lines.push(...jsonLines);
-					}
+					lines.push(...jsonLines);
 					if (timeoutLine) {
 						lines.push(timeoutLine);
 					}

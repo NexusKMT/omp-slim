@@ -24,6 +24,8 @@
 
 ### Changed
 
+- Overhauled JSON tree visualization with syntax highlighting, item counts, and improved indentation
+- Simplified JSON tree layout by removing icons and updating root connector styling
 - Enhanced agent task and evaluation displays with improved layout truncation and metric support
 - Updated live spinner animations to use theme-consistent frames
 - Standardized form labels, descriptions, and styling across overlays

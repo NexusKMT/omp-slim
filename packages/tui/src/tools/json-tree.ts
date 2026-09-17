@@ -5,7 +5,7 @@ import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { TreeView, treeRowPrefix } from "../components/tree-view";
 import { truncateToWidth } from "../render/render-utils";
-import type { Theme } from "../theme/theme";
+import type { Theme, ThemeColor } from "../theme/theme";
 
 /** Max depth for JSON tree rendering */
 export const JSON_TREE_MAX_DEPTH_COLLAPSED = 2;
@@ -165,8 +165,12 @@ export interface JsonTreeRenderOptions {
 	multilineStrings?: boolean;
 	/** Escape inline tabs/newlines as JSON-style sequences. Defaults to true. */
 	escapeStringWhitespace?: boolean;
-	/** Existing argument trees draw every root object key with a terminal connector. */
-	rootConnectors?: "all-last" | "siblings";
+	/**
+	 * Root row gutter. `hooked` (default) attaches the tree to the block above:
+	 * the first root draws `└ •`, the rest ` •`, and nested rows branch from
+	 * under the bullet. `siblings` draws standard `├─`/`└─` root connectors.
+	 */
+	rootConnectors?: "hooked" | "siblings";
 }
 
 type JsonTreeNodeKind = "array" | "object" | "scalar" | "placeholder";
@@ -177,7 +181,7 @@ interface JsonTreeNode {
 	value: unknown;
 	depth: number;
 	kind: JsonTreeNodeKind;
-	placeholder?: "[]" | "{}" | "…";
+	placeholder?: "…";
 	children?: readonly JsonTreeNode[];
 }
 
@@ -226,8 +230,7 @@ export function renderJsonTreeLines(
 	const hiddenRootKeys = options.hiddenRootKeys ?? DEFAULT_HIDDEN_ROOT_KEYS;
 	const multilineStrings = options.multilineStrings ?? true;
 	const escapeStringWhitespace = options.escapeStringWhitespace ?? true;
-	const rootConnectors = options.rootConnectors ?? "all-last";
-	const forceTerminalRootConnectors = rootConnectors === "all-last" && isRecord(value);
+	const hookedRoots = (options.rootConnectors ?? "hooked") === "hooked";
 	let nextId = 0;
 
 	const node = (nodeValue: unknown, key: string | undefined, depth: number): JsonTreeNode => ({
@@ -251,10 +254,12 @@ export function renderJsonTreeLines(
 		roots = [node(value, undefined, 0)];
 	}
 
-	const iconObject = theme.styledSymbol("icon.folder", "muted");
-	const iconArray = theme.styledSymbol("icon.package", "muted");
-	const iconScalar = theme.styledSymbol("icon.file", "muted");
 	const prefixStyle = { vertical: (symbol: string) => symbol };
+	const hook = theme.tree.hook;
+	const hookPad = " ".repeat(Bun.stringWidth(hook));
+	const bullet = theme.format.bullet;
+	// Nested rows drop the root's three-cell gutter and branch from under the root label.
+	const rootGutter = `${hookPad} ${" ".repeat(Bun.stringWidth(bullet))} `;
 	let renderedLineCount = 0;
 	let scalarTruncated = false;
 
@@ -267,16 +272,7 @@ export function renderJsonTreeLines(
 			if (item.kind === "array" && Array.isArray(item.value)) {
 				const values = item.value;
 				if (values.length === 0) {
-					children = [
-						{
-							id: nextId++,
-							key: undefined,
-							value: undefined,
-							depth: item.depth + 1,
-							kind: "placeholder",
-							placeholder: "[]",
-						},
-					];
+					children = [];
 				} else if (item.depth >= maxDepth) {
 					children = [
 						{
@@ -306,16 +302,7 @@ export function renderJsonTreeLines(
 						},
 					];
 				} else if (keys.length === 0) {
-					children = [
-						{
-							id: nextId++,
-							key: undefined,
-							value: undefined,
-							depth: item.depth + 1,
-							kind: "placeholder",
-							placeholder: "{}",
-						},
-					];
+					children = [];
 				} else {
 					const objectChildren: JsonTreeNode[] = [];
 					for (const key in record) objectChildren.push(node(record[key], key, item.depth + 1));
@@ -329,16 +316,13 @@ export function renderJsonTreeLines(
 		maxLines,
 		theme,
 		renderPrefix: itemRow => {
-			if (!forceTerminalRootConnectors) return treeRowPrefix(itemRow, theme, prefixStyle);
-			const ancestors =
-				itemRow.ancestors.length === 0
-					? itemRow.ancestors
-					: [{ ...itemRow.ancestors[0]!, isLast: true }, ...itemRow.ancestors.slice(1)];
-			return treeRowPrefix(
-				{ ...itemRow, ancestors, isLast: itemRow.parentKey === undefined || itemRow.isLast },
-				theme,
-				prefixStyle,
-			);
+			if (!hookedRoots) return treeRowPrefix(itemRow, theme, prefixStyle);
+			if (itemRow.ancestors.length === 0) {
+				const lead = itemRow.siblingIndex === 0 ? theme.fg("dim", hook) : hookPad;
+				return { first: `${lead} ${theme.fg("dim", bullet)} `, continuation: rootGutter };
+			}
+			const inner = treeRowPrefix({ ...itemRow, ancestors: itemRow.ancestors.slice(1) }, theme, prefixStyle);
+			return { first: `${rootGutter}${inner.first}`, continuation: `${rootGutter}${inner.continuation}` };
 		},
 		renderRow: item => {
 			let body: readonly string[];
@@ -350,43 +334,50 @@ export function renderJsonTreeLines(
 			if (item.kind === "placeholder") {
 				body = [theme.fg("dim", item.placeholder ?? "…")];
 			} else if (item.kind === "array") {
-				body = [`${iconArray} ${label}`];
+				body = [`${label} ${theme.fg("dim", `[${(item.value as unknown[]).length}]`)}`];
 			} else if (item.kind === "object") {
-				body = [`${iconObject} ${label}`];
-			} else if (typeof item.value === "string" && multilineStrings) {
+				body = [`${label} ${theme.fg("dim", `{${Object.keys(item.value as object).length}}`)}`];
+			} else if (typeof item.value === "string") {
 				const sanitized = sanitize(item.value);
-				if (sanitized.includes("\n")) {
+				if (multilineStrings && sanitized.includes("\n")) {
 					const sourceLines = sanitized.split("\n");
 					const available = Math.max(1, maxLines - renderedLineCount);
 					const displayedCount = Math.min(sourceLines.length, Math.max(1, available - 1));
+					const head = `${label}: `;
+					// Continuation rows sit under the opening quote.
+					const indent = " ".repeat(Bun.stringWidth(Bun.stripANSI(head)) + 1);
 					const scalarLines = [
-						`${iconScalar} ${label}: ${theme.fg("dim", `"${truncateToWidth(sourceLines[0] ?? "", maxScalarLen)}`)}`,
+						`${head}${theme.fg("syntaxString", `"${truncateToWidth(sourceLines[0] ?? "", maxScalarLen)}`)}`,
 					];
 					for (let index = 1; index < displayedCount; index++) {
 						scalarLines.push(
-							`   ${theme.fg("dim", ` ${truncateToWidth(sourceLines[index] ?? "", maxScalarLen)}`)}`,
+							`${indent}${theme.fg("syntaxString", truncateToWidth(sourceLines[index] ?? "", maxScalarLen))}`,
 						);
 					}
 					if (sourceLines.length > displayedCount) {
 						scalarTruncated = true;
-						scalarLines.push(`   ${theme.fg("dim", ` …(${sourceLines.length - displayedCount} more lines)"`)}`);
+						scalarLines.push(
+							`${indent}${theme.fg("dim", `…(${sourceLines.length - displayedCount} more lines)"`)}`,
+						);
 					} else {
 						const lastIndex = scalarLines.length - 1;
-						scalarLines[lastIndex] = `${scalarLines[lastIndex]}${theme.fg("dim", '"')}`;
+						scalarLines[lastIndex] = `${scalarLines[lastIndex]}${theme.fg("syntaxString", '"')}`;
 					}
 					body = scalarLines;
 				} else {
 					const scalar = escapeStringWhitespace
 						? formatScalar(sanitized, maxScalarLen)
 						: `"${truncateToWidth(sanitized, maxScalarLen)}"`;
-					body = [`${iconScalar} ${label}: ${theme.fg("dim", scalar)}`];
+					body = [`${label}: ${theme.fg("syntaxString", scalar)}`];
 				}
 			} else {
-				const scalar =
-					typeof item.value === "string"
-						? formatScalar(sanitize(item.value), maxScalarLen)
-						: formatScalar(item.value, maxScalarLen);
-				body = [`${iconScalar} ${label}: ${theme.fg("dim", sanitize(scalar))}`];
+				const color: ThemeColor =
+					typeof item.value === "number"
+						? "syntaxNumber"
+						: typeof item.value === "boolean" || item.value === null || item.value === undefined
+							? "syntaxKeyword"
+							: "dim";
+				body = [`${label}: ${theme.fg(color, sanitize(formatScalar(item.value, maxScalarLen)))}`];
 			}
 			renderedLineCount += body.length;
 			return body;
