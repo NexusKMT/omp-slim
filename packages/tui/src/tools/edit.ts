@@ -2,7 +2,7 @@
  * Edit tool renderer.
  */
 
-import { editInspect } from "@oh-my-pi/pi-natives";
+import { type EditInspection, editInspect } from "@oh-my-pi/pi-natives";
 import type { Component } from "../tui";
 import { sliceWithWidth, visibleWidth, wrapTextWithAnsi } from "../utils";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
@@ -111,6 +111,14 @@ export interface EditToolDetails {
 // TUI Renderer
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Memoized native inspection of the streamed payload, tagged onto the args it came from. */
+const kInspectedInput = Symbol("edit.inspectedInput");
+
+type InspectedInput = { mode: EditMode; input: string } & (
+	| { entries: InspectedInputEntry[]; error?: undefined }
+	| { entries?: undefined; error: unknown }
+);
+
 interface EditRenderArgs {
 	path?: unknown;
 	file_path?: unknown;
@@ -131,6 +139,7 @@ interface EditRenderArgs {
 	__partialJson?: string;
 	// Hashline mode fields
 	edits?: EditRenderEntry[];
+	[kInspectedInput]?: InspectedInput;
 }
 
 type EditRenderEntry = {
@@ -659,8 +668,25 @@ function getHashlineInputRenderSummary(
 	return { entries: getHashlineInputSections(input) };
 }
 
-function inspectInputEntries(mode: EditMode, input: string): InspectedInputEntry[] {
-	const inspection = editInspect(mode, JSON.stringify({ input }));
+/**
+ * Per-file entries of a possibly partial payload. The native inspect re-parses
+ * the whole payload, and the call header and compact activity row both ask on
+ * every frame, so the answer (or the parser's rejection) is memoized on `args`
+ * for as long as `input` is unchanged.
+ */
+function inspectInputEntries(args: EditRenderArgs, mode: EditMode, input: string): InspectedInputEntry[] {
+	const cached = args[kInspectedInput];
+	if (cached && cached.mode === mode && cached.input === input) {
+		if (cached.entries) return cached.entries;
+		throw cached.error;
+	}
+	let inspection: EditInspection;
+	try {
+		inspection = editInspect(mode, JSON.stringify({ input }));
+	} catch (error) {
+		args[kInspectedInput] = { mode, input, error };
+		throw error;
+	}
 	const entries = new Map<string, InspectedInputEntry>();
 	for (const path of inspection.paths) entries.set(path, { path });
 	for (const intent of inspection.fileOps) {
@@ -673,7 +699,9 @@ function inspectInputEntries(mode: EditMode, input: string): InspectedInputEntry
 		}
 		entries.set(intent.path, entry);
 	}
-	return [...entries.values()];
+	const result = [...entries.values()];
+	args[kInspectedInput] = { mode, input, entries: result };
+	return result;
 }
 
 /** Per-file descriptors for a possibly partial sloppy payload. */
@@ -684,7 +712,7 @@ function getSloppyInputRenderSummary(
 	const input = args.input ?? args._input;
 	if (editMode !== "sloppy" || typeof input !== "string") return undefined;
 	try {
-		const entries = inspectInputEntries("sloppy", input);
+		const entries = inspectInputEntries(args, "sloppy", input);
 		return entries.length > 0 ? { entries } : undefined;
 	} catch {
 		return undefined;
@@ -698,7 +726,7 @@ function getApplyPatchRenderSummary(
 ): ApplyPatchRenderSummary | undefined {
 	if ((editMode !== undefined && editMode !== "apply_patch") || typeof args.input !== "string") return undefined;
 	try {
-		return { entries: inspectInputEntries("apply_patch", args.input) };
+		return { entries: inspectInputEntries(args, "apply_patch", args.input) };
 	} catch (err) {
 		const error = err instanceof Error ? err.message : String(err);
 		return isPartial && error === MISSING_APPLY_PATCH_END_ERROR ? { entries: [] } : { entries: [], error };
