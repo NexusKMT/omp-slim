@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added getDotenvEnvValues helper to retrieve environment values sourced from dotenv
+- Added callback support to filterChildShellEnv for custom processing of filtered values
 - Exported paletteToRgb utility function
 - Added stringifyYamlConfig utility to strip trailing spaces from YAML block headers
 

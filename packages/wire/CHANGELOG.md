@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the `omp stream` wire contract (`@oh-my-pi/pi-wire/stream`): pane screen-delta frames, viewer snapshot/chat frames, channel directory shapes, and the `live.omp.sh` route layout.
+
 ## [16.3.0] - 2026-07-02
 
 ### Breaking Changes

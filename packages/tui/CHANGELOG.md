@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added stream segment to status line for displaying live viewer counts
 - Added details and notes fields to todo items
 - Added support for inline summary rendering of structured task outputs
 - Added `TUIOptions.onPaint` / `TUI.setPaintListener` so hosts can observe the rows each paint commits to scrollback and the live viewport (used by `omp stream`).

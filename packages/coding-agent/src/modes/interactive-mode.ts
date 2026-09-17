@@ -139,6 +139,8 @@ import { tinyTitleClient } from "../tiny/title-client";
 import { isMCPToolName } from "../tools/builtin-names";
 import type { LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
+import { StreamPublisher } from "../stream/publisher";
+import { StreamRedactor } from "../stream/redactor";
 import {
 	FEED_MODEL_BADGE_WIDTH,
 	formatFeedModelBadge,
@@ -909,6 +911,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	/** Owned room; use {@link collabController}.host for current-session reuse and links. */
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
+	#streamPublisher: StreamPublisher | undefined;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
@@ -1598,6 +1601,28 @@ export class InteractiveMode implements InteractiveModeContext {
 		// tree before session_start hooks/reconciliation continue; renderNow keeps
 		// TUI's multiplexer, output-backlog, and image safety gates.
 		this.ui.renderNow();
+
+		const streamCwd = this.sessionManager.getCwd();
+		this.#streamPublisher =
+			(await StreamPublisher.connectLazy({
+				cwd: streamCwd,
+				sessionId: this.sessionManager.getSessionId(),
+				title: path.basename(streamCwd),
+				tui: this.ui,
+				loadRedactor: () => StreamRedactor.load(streamCwd, this.settings.get("stream.redactPatterns")),
+				onStatus: status => {
+					this.statusLine.setStreamStatus(status);
+					this.ui.requestRender();
+				},
+				onChat: message => {
+					const chat = truncateToWidth(
+						replaceTabs(sanitizeText(`${message.name}: ${message.text}`)).replace(/[\r\n]+/g, " "),
+						TRUNCATE_LENGTHS.LINE,
+					);
+					this.showStatus(chat);
+				},
+			})) ?? undefined;
+		if (this.#streamPublisher) this.ui.renderNow();
 
 		// Prewarm the local tiny-title worker off the submit hot path: spawn it
 		// now, idle and unref'd, so the first submit reuses a live subprocess
@@ -5440,6 +5465,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	stop(): void {
 		this.#appearanceRefreshRequest = undefined;
+		this.#streamPublisher?.dispose();
+		this.#streamPublisher = undefined;
 		// Last chance to refresh the startup status placeholder for the next launch.
 		this.#persistComposerStatus();
 		if (this.loadingAnimation) {
@@ -5614,6 +5641,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.showStatus("Still closing… (flushing memory backend / network)");
 		}, STILL_CLOSING_DELAY_MS);
 		try {
+			this.#streamPublisher?.dispose();
+			this.#streamPublisher = undefined;
 			// Guests get goodbye and the registry entry disappears before the
 			// session is disposed, under the same still-closing progress notice.
 			await this.collabController.shutdown("host exited");

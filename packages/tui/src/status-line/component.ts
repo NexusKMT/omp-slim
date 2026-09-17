@@ -527,6 +527,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 	 */
 	#vibeWorkerTokenRate: (() => number | null) | null = null;
 	#collabStatus: CollabStatus | null = null;
+	#streamStatus: { viewers: number } | null = null;
 	#focusedAgentId: string | undefined;
 	#activeRepoCache: ActiveRepoCache | undefined;
 
@@ -912,6 +913,12 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			return;
 		}
 		this.#collabStatus = status;
+		this.#invalidateStatusLineRenderCache();
+	}
+
+	setStreamStatus(status: { viewers: number } | null): void {
+		if (this.#streamStatus?.viewers === status?.viewers) return;
+		this.#streamStatus = status;
 		this.#invalidateStatusLineRenderCache();
 	}
 
@@ -2123,6 +2130,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 			vibeMode: this.#vibeModeStatus,
 			vim: this.#vimStatus,
 			collab: this.#collabStatus,
+			stream: this.#streamStatus,
 			usageStats,
 			contextPercent,
 			contextTokens,

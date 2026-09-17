@@ -6,6 +6,10 @@
 
 - Moved every terminal-UI module (theme, tool renderers, chat/overlay/status-line/composer components, setup wizard, git/ps/debug apps) to `@oh-my-pi/pi-tui`; `@oh-my-pi/pi-coding-agent/modes/theme/*`, `/modes/components/*`, `/tui/*`, `/tools/render-utils` and related subpaths no longer exist. Names re-exported from the package root (`Theme`, `theme`, hook/editor components, tool Details types) are unchanged.
 
+### Added
+
+- Added `omp stream <channel> [--title …]`: livestream your terminal at `live.omp.sh/<channel>` with viewer chat. Every omp session started in the same directory while the streamer runs is shown as its own pane (and removed when it exits); only redacted screen rows leave the machine — env/`secrets.yml` values, dotenv values, credential shapes, and `stream.redactPatterns` are masked before they cross even the local socket. Settings: `stream.serverUrl`, `stream.redactPatterns`.
+
 ### Changed
 
 - Refined prompt structure for parent IRC messages to improve interruption reliability

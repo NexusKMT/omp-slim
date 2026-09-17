@@ -755,6 +755,15 @@ const collabSegment: StatusLineSegment = {
 	},
 };
 
+const streamSegment: StatusLineSegment = {
+	id: "stream",
+	render(ctx) {
+		if (!ctx.stream) return { content: "", visible: false };
+		const viewers = statusValue(ctx, `${ctx.stream.viewers}`);
+		return { content: theme.fg("thinkingHigh", `● LIVE ${viewers}`), visible: true };
+	},
+};
+
 /**
  * Vim modal state, in the shape Vim itself uses: the mode, the half-typed command echoed beside it
  * (`showcmd`), and the Visual selection size. Hidden entirely when `tui.vimMode` is off, so it
@@ -910,6 +919,7 @@ export const SEGMENTS: Record<StatusLineSegmentId, StatusLineSegment> = {
 	session_name: sessionNameSegment,
 	usage: usageSegment,
 	collab: collabSegment,
+	stream: streamSegment,
 	vim: vimSegment,
 };
 
