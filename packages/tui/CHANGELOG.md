@@ -34,6 +34,12 @@
 - Refined output notice stripping for more consistent tool output displays
 - Improved alignment and layout consistency in agent and model hub screens
 
+### Fixed
+
+- Editor undo snapshots now copy the line array instead of running structuredClone over the whole buffer on every edit keystroke.
+- ScrollView rows now pad with the shared space buffer instead of allocating per-row padding strings.
+- Streaming Markdown skips the whole-document tab scan on append-only frames, expanding only the streamed delta.
+
 ## [18.2.4] - 2026-09-17
 
 ### Fixed
