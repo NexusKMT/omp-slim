@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- SSE `raw` wire lines are captured only when a reader opts in; the default token path returns empty `raw` with no per-line slices.
+- The rotating file sink holds one append fd per active file instead of open/write/close per log line.
+
 ### Added
 
 - Added getDotenvEnvValues helper to retrieve environment values sourced from dotenv

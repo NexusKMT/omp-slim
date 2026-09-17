@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Steady-state `StablePrefix.build` calls now return early on unchanged live references instead of re-normalizing the tool catalog and re-stringifying every schema per model call.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added

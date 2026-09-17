@@ -745,7 +745,58 @@ interface EditCallFacts {
 	hasHashlineLineEdits: boolean;
 }
 
+/**
+ * Length gate for the streamed-preview facts path: payloads only grow while
+ * streaming, so facts recompute only after K new bytes (the header/path/op
+ * fields tolerate a small lag) or when the payload shrinks (rewind). The
+ * final frame (`isPartial === false`) always recomputes. This turns the
+ * per-frame O(n) stringify+parse+scan into O(n^2/K) total per call.
+ */
+const EDIT_FACTS_MIN_GROWTH = 512;
+let lastFactsCache:
+	| {
+			editArgs: EditRenderArgs;
+			isPartial: boolean;
+			editMode: EditMode | undefined;
+			length: number;
+			facts: EditCallFacts;
+	  }
+	| undefined;
+
+function editFactsInputLength(editArgs: EditRenderArgs): number {
+	const input = editArgs.input ?? editArgs._input;
+	if (typeof input === "string") return input.length;
+	// Structured `edits[]` calls carry no `input` string; their facts derive
+	// from the array, so length-gate on its size instead of a constant 0
+	// (which would reuse forever after the first compute).
+	return Array.isArray(editArgs.edits) ? editArgs.edits.length : 0;
+}
+
 function resolveEditCallFacts(
+	editArgs: EditRenderArgs,
+	isPartial: boolean,
+	editMode: EditMode | undefined,
+): EditCallFacts {
+	const cached = lastFactsCache;
+	if (
+		cached !== undefined &&
+		cached.editArgs === editArgs &&
+		cached.isPartial === isPartial &&
+		cached.editMode === editMode
+	) {
+		const length = editFactsInputLength(editArgs);
+		// Same args object, still growing gradually: reuse. A rewind
+		// (shorter), a jump past the gate, or the final frame recomputes.
+		if (isPartial && length >= cached.length && length - cached.length < EDIT_FACTS_MIN_GROWTH) {
+			return cached.facts;
+		}
+	}
+	const facts = resolveEditCallFactsUncached(editArgs, isPartial, editMode);
+	lastFactsCache = { editArgs, isPartial, editMode, length: editFactsInputLength(editArgs), facts };
+	return facts;
+}
+
+function resolveEditCallFactsUncached(
 	editArgs: EditRenderArgs,
 	isPartial: boolean,
 	editMode: EditMode | undefined,

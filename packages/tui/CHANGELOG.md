@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Transcript containers memoize stable-prefix row counts and reuse unchanged prefix arrays instead of re-rendering the prefix to read its length per frame.
+- Assistant stable renders cache up to 64 prefix snapshots instead of thrashing a 2-entry LRU across per-frame count variants.
+- Select lists memoize sanitized labels and descriptions per item instead of re-sanitizing up to 3x per item per frame.
+- Edit call facts recompute only after payload growth past a threshold (final frame always) with a last-input cache, instead of re-parsing the whole streamed payload per reveal frame.
+
 ### Added
 
 - Added stream segment to status line for displaying live viewer counts
