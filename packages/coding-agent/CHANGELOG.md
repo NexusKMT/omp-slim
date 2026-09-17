@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- Fixed `edit` auto-repair silently stalling the tool result for 60s when the `smol` model didn't answer; the ceiling is now 20s and the repair start and timeout (with the model name) are logged.
 - Fixed subagents leaving parent messages queued after a tool interruption when an extension notification stalls.
 - Fixed `browser.open({ app: { relay: true } })` hanging into the 30s tool timeout when the relay extension is not installed or nothing is listening; the open now fails immediately with the actionable "extension never connected" / "not reachable" message, and only waits out the 35s service-worker revival window when an extension has connected before.
 - Bash calls cache the `.envrc` walk-up result per directory and memoize the filtered parent environment instead of re-walking and re-copying per call.
