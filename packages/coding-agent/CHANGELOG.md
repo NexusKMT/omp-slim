@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Refined prompt structure for parent IRC messages to improve interruption reliability
 - Refined plan filename generation to prioritize concise subject-based titles
 - Refined subagent task labeling instructions to focus on concrete actions rather than assignment text
 - Updated byte size formatting in CLI outputs to use KB instead of KiB
