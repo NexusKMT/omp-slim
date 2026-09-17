@@ -462,12 +462,6 @@ const noOpUIContext: ExtensionUIContext = {
 // AgentSession Class
 // ============================================================================
 
-type MessageEndPersistenceSlot = {
-	readonly promise: Promise<void>;
-	persist: (persistMessage: () => void) => Promise<void>;
-	release: () => void;
-};
-
 type PostPromptSkipReason = "aborted" | "stale-generation";
 
 type AgentContinueSkipReason =
@@ -2579,16 +2573,6 @@ export class AgentSession {
 		return queued;
 	}
 
-	/**
-	 * Orders subscriber fan-out across concurrent `#emitSessionEvent` calls.
-	 * Extension emits only await when the event type has handlers, so an event
-	 * with no handlers could otherwise overtake an earlier event still inside
-	 * its extension emit — an instant refusal delivered its assistant
-	 * `message_end` to the TUI before its own `message_start`, skipping the
-	 * turn-ending error render entirely.
-	 */
-	#subscriberEmitGate: Promise<void> = Promise.resolve();
-
 	async #emitSessionEvent(event: AgentSessionEvent, options: { detachExtensions?: boolean } = {}): Promise<void> {
 		if (event.type === "tool_execution_update") {
 			// Returned background calls have no later tool result to persist their
@@ -2603,40 +2587,26 @@ export class AgentSession {
 			void this.#queueExtensionEvent(event);
 			return;
 		}
-		// Take a FIFO ticket before the extension emit: extension deliveries for
-		// consecutive events still run concurrently, but subscriber fan-out waits
-		// for every earlier event's fan-out (or deferral) to happen first.
-		const previousGate = this.#subscriberEmitGate;
-		const { promise: gate, resolve: releaseGate } = Promise.withResolvers<void>();
-		this.#subscriberEmitGate = gate;
-		try {
-			const extensionEmit = this.#emitExtensionEvent(event);
-			if (options.detachExtensions) {
-				void extensionEmit.catch(error => {
-					logger.warn("Detached session event extension emit failed", {
-						type: event.type,
-						error: error instanceof Error ? error.message : String(error),
-					});
-				});
-			} else {
-				await extensionEmit;
-			}
-			await previousGate;
-			// Hold the wire-level agent_end until in-flight prompts unwind. Subscribers
-			// (rpc-mode, ACP, Cursor) treat agent_end as the "session is idle" signal;
-			// emitting while #promptInFlightCount > 0 lets a client fire its next
-			// `prompt` into a session that still reports isStreaming === true. Flush
-			// happens in #endInFlight / #resetInFlight. A later agent_end (e.g. from
-			// an auto-compaction turn that starts before the original prompt unwinds)
-			// supersedes the pending one, which is what subscribers want — they only
-			// care about the final settle.
-			if (event.type === "agent_end" && this.#promptInFlightCount > 0) {
-				this.#pendingAgentEndEmit = event;
-				return;
-			}
+		// Deliver synchronously before awaiting extension notifications. This keeps
+		// starts/results in emission order without letting a stalled observer block
+		// unrelated events, mid-turn maintenance, or queued steering.
+		// RPC/ACP consumers may submit again on agent_end, so defer that frame
+		// until the owning prompt unwinds and the session actually becomes idle.
+		if (event.type === "agent_end" && this.#promptInFlightCount > 0) {
+			this.#pendingAgentEndEmit = event;
+		} else {
 			this.#emit(event);
-		} finally {
-			releaseGate();
+		}
+		const extensionEmit = this.#emitExtensionEvent(event);
+		if (options.detachExtensions) {
+			void extensionEmit.catch(error => {
+				logger.warn("Detached session event extension emit failed", {
+					type: event.type,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		} else {
+			await extensionEmit;
 		}
 	}
 
@@ -2736,34 +2706,19 @@ export class AgentSession {
 		}
 	};
 
-	#createMessageEndPersistenceSlot(message: AgentMessage): MessageEndPersistenceSlot | undefined {
+	/** Commit messages in emission order without waiting for notification listeners. */
+	#queueMessageEndPersistence(message: AgentMessage, promptGeneration: number): Promise<void> {
 		const key = sessionMessagePersistenceKey(message);
-		if (!key) return undefined;
-		const previous = this.#messageEndPersistenceTail;
-		const { promise, resolve } = Promise.withResolvers<void>();
-		const clear = () => {
-			if (this.#pendingMessageEndPersistence.get(key) === promise) {
-				this.#pendingMessageEndPersistence.delete(key);
-			}
-		};
-		this.#pendingMessageEndPersistence.set(key, promise);
-		this.#messageEndPersistenceTail = promise.catch(() => {});
-		return {
-			promise,
-			persist: async persistMessage => {
-				await previous;
-				try {
-					persistMessage();
-				} finally {
-					resolve();
-					clear();
+		const pending = this.#messageEndPersistenceTail
+			.then(() => this.#persistMessageEnd(message, promptGeneration))
+			.finally(() => {
+				if (key !== undefined && this.#pendingMessageEndPersistence.get(key) === pending) {
+					this.#pendingMessageEndPersistence.delete(key);
 				}
-			},
-			release: () => {
-				resolve();
-				clear();
-			},
-		};
+			});
+		if (key !== undefined) this.#pendingMessageEndPersistence.set(key, pending);
+		this.#messageEndPersistenceTail = pending.catch(() => {});
+		return pending;
 	}
 
 	async #waitForSessionMessagePersistence(message: AgentMessage): Promise<void> {
@@ -3190,8 +3145,6 @@ export class AgentSession {
 			this.agent.steer(checkpointReminder);
 		}
 
-		const messageEndPersistence =
-			event.type === "message_end" ? this.#createMessageEndPersistenceSlot(event.message) : undefined;
 		// Local completion time for prompt→yield timing: stamped here, not by the
 		// provider, so the usage row's Δ is exact and provider-independent — some
 		// providers never report `duration` (gitlab-duo) or stamp `timestamp` at
@@ -3199,6 +3152,12 @@ export class AgentSession {
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			event.message.completedAt = Date.now();
 		}
+		// Turn-boundary maintenance awaits this commit before draining steering;
+		// extension notifications must not own or delay the persistence work.
+		const messageEndPersistence =
+			event.type === "message_end"
+				? this.#queueMessageEndPersistence(event.message, eventPromptGeneration)
+				: undefined;
 
 		// Deobfuscate assistant message content for display emission — the LLM echoes back
 		// obfuscated placeholders, but listeners (TUI, extensions, exporters) must see real
@@ -3260,13 +3219,7 @@ export class AgentSession {
 			} catch (error) {
 				if (event.type === "message_end") {
 					try {
-						if (messageEndPersistence) {
-							await messageEndPersistence.persist(() =>
-								this.#persistMessageEnd(event.message, eventPromptGeneration),
-							);
-						} else {
-							this.#persistMessageEnd(event.message, eventPromptGeneration);
-						}
+						await messageEndPersistence;
 					} catch (persistenceError) {
 						logger.warn("Failed to persist message after session event emission failed", {
 							error: String(persistenceError),
@@ -3335,11 +3288,7 @@ export class AgentSession {
 
 		// Handle session persistence
 		if (event.type === "message_end") {
-			if (messageEndPersistence) {
-				await messageEndPersistence.persist(() => this.#persistMessageEnd(event.message, eventPromptGeneration));
-			} else {
-				this.#persistMessageEnd(event.message, eventPromptGeneration);
-			}
+			await messageEndPersistence;
 			if (this.#promptGeneration !== eventPromptGeneration) return;
 			if (interruptedThinkingMessage) {
 				this.sessionManager.appendCustomMessageEntry(
