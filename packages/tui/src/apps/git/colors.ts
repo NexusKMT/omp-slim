@@ -4,32 +4,35 @@
  * theme's own canvas, and filled pill buttons pick their label contrast from
  * the button color's luminance.
  */
+import { colorLuma, hexToRgb, rgbToHex } from "@oh-my-pi/pi-utils/color";
+import { colorToAnsi } from "../../theme/color";
 import { theme } from "../../theme/theme";
 
 /** Decode a hex color into RGB channels. */
 export function hexChannels(hex: string): [number, number, number] {
-	const value = Number.parseInt(hex.replace("#", ""), 16);
-	return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+	const { r, g, b } = hexToRgb(hex);
+	return [r, g, b];
 }
 
 /** Linear blend of two hex colors (`t` = 0 → `a`, 1 → `b`). */
 export function mixHex(a: string, b: string, t: number): string {
-	const ca = hexChannels(a);
-	const cb = hexChannels(b);
-	const out = ca.map((channel, i) => Math.round(channel + (cb[i] - channel) * t));
-	return `#${out.map(channel => channel.toString(16).padStart(2, "0")).join("")}`;
+	const ca = hexToRgb(a);
+	const cb = hexToRgb(b);
+	return rgbToHex({
+		r: ca.r + (cb.r - ca.r) * t,
+		g: ca.g + (cb.g - ca.g) * t,
+		b: ca.b + (cb.b - ca.b) * t,
+	});
 }
 
 /** Encode a truecolor background escape sequence. */
 export function bgAnsiHex(hex: string): string {
-	const [r, g, b] = hexChannels(hex);
-	return `\x1b[48;2;${r};${g};${b}m`;
+	return colorToAnsi(hex, "truecolor").replace("\x1b[38;", "\x1b[48;");
 }
 
 /** Encode a truecolor foreground escape sequence. */
 export function fgAnsiHex(hex: string): string {
-	const [r, g, b] = hexChannels(hex);
-	return `\x1b[38;2;${r};${g};${b}m`;
+	return colorToAnsi(hex, "truecolor");
 }
 
 /** True when the theme sits on a dark surface. */
@@ -51,8 +54,7 @@ export function textHex(): string {
 
 /** Perceptual luminance of a hex color (0..1). */
 export function luminance(hex: string): number {
-	const [r, g, b] = hexChannels(hex);
-	return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+	return colorLuma(hex)!;
 }
 
 /**

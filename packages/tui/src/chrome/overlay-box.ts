@@ -10,11 +10,6 @@ import { type Component, visibleWidth } from "../tui";
 import { Ellipsis, truncateToWidth } from "../utils";
 import { padToWidth } from "../render/utils";
 import { type ThemeColor, theme } from "../theme/index";
-/** Pad or truncate a (possibly ANSI-styled) string to exactly `width` columns. */
-export function fit(text: string, width: number): string {
-	if (width <= 0) return "";
-	return padToWidth(text, width);
-}
 
 function paint(s: string, color: ThemeColor = "border"): string {
 	return theme.fg(color, s);
@@ -48,7 +43,7 @@ export function bottomBorder(width: number, color?: ThemeColor): string {
 /** Wrap pre-styled content in vertical borders with single-column insets. */
 export function row(content: string, width: number, color?: ThemeColor): string {
 	const box = theme.boxRound;
-	return `${paint(box.vertical, color)} ${fit(content, Math.max(0, width - 4))} ${paint(box.vertical, color)}`;
+	return `${paint(box.vertical, color)} ${width > 4 ? padToWidth(content, width - 4) : ""} ${paint(box.vertical, color)}`;
 }
 
 /**
@@ -103,7 +98,7 @@ export function splitRow(sidebar: string, body: string, width: number, sidebarWi
 	const box = theme.boxRound;
 	const bodyWidth = splitBodyWidth(width, sidebarWidth);
 	const bar = paint(box.vertical);
-	return `${bar} ${fit(sidebar, sidebarWidth)} ${bar} ${fit(body, bodyWidth)} ${bar}`;
+	return `${bar} ${sidebarWidth > 0 ? padToWidth(sidebar, sidebarWidth) : ""} ${bar} ${bodyWidth > 0 ? padToWidth(body, bodyWidth) : ""} ${bar}`;
 }
 
 const NO_LINES: readonly string[] = [];

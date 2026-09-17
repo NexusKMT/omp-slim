@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Refined plan filename generation to prioritize concise subject-based titles
+- Refined subagent task labeling instructions to focus on concrete actions rather than assignment text
 - Updated byte size formatting in CLI outputs to use KB instead of KiB
 - Updated time duration displays throughout the CLI to use a coarser, more readable format
 - Keyless Parallel web search now leads the default provider chain ahead of Perplexity.
@@ -15,11 +17,14 @@
 ### Fixed
 
 - Fixed the `edit` tool splicing a literal `…` into the file when a `<SM:FIND>` opened or closed with an ellipsis (a line-end `…` spanning the rest of a line, or a whole-line `…` at either edge) and `<SM:PUT>` re-emitted it. An edge gap captures nothing, so the matching `<SM:PUT>` ellipsis now re-emits nothing and the anchor keeps its own newline; an identical `<SM:FIND>`/`<SM:PUT>` pair reports no change instead of writing the marker. A leading gap combined with an inner gap no longer panics.
+- Fixed the `edit` tool treating a closing tag glued to a content line (`foo</SM:FIND>`, `bar</SM:PUT>`) as part of the text, which reported `has 0 occurrences` against an anchor that was in the file; glued open and close tags now delimit the block.
+- Fixed `edit` copy-ready corrections and retries omitting the `path=` on `<SM:EDIT>`, so resending them verbatim failed with `Missing file target`.
 - Fixed startup aborting when the plugins directory exists but cannot be read — a sandboxed run, a restrictive mode, or a manifest symlinked into a denied path; the unreadable root is now skipped with a warning.
 - Fixed a subagent burning its whole run on `yield` calls that never finish it: a turn whose only tool call is an incremental `yield` no longer slips past the soft request budget, and the reminder ladder's forced final `yield` now ends the run even when the model answers with another incremental section. ([#12351](https://github.com/can1357/oh-my-pi/pull/12351) by [@pedropaulovc](https://github.com/pedropaulovc))
 - Fixed `edit` applying hashline hunks the tool documents as rejected: a hunk anchored on a line the tagged read never displayed was auto-repaired onto a neighbouring statement instead of refused, so `edit.enforceSeenLines` now defaults on and such a hunk is rejected with the actual content of the anchored lines ([#12369](https://github.com/can1357/oh-my-pi/pull/12369) by [@pedropaulovc](https://github.com/pedropaulovc)).
 - Fixed stale-tag anchor recovery landing a hunk in an identically shaped sibling construct — the next entry of the same dict, list, or block — when the line map aligned the anchor's row with its duplicate; recovery now refuses a remap whose enclosing constructs differ and reports the stale tag instead ([#12369](https://github.com/can1357/oh-my-pi/pull/12369) by [@pedropaulovc](https://github.com/pedropaulovc)).
 - Fixed the generation tok/s readout (`composer.tokenRate`) staying blank while viewing a subagent and losing the main session's reading on return; each session now meters its own stream, and the reading survives focus round-trips and resumes.
+- Fixed subagent HUD labels (and plan filenames) showing the prompt's own example text — e.g. every spawn labelled `Audit client fetch calls for abort-signal wiring` — on small tiny/smol models that echoed the few-shot examples.
 
 ## [18.2.4] - 2026-09-17
 

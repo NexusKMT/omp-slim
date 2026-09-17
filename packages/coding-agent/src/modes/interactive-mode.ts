@@ -277,9 +277,8 @@ import type {
 	InteractiveSelectorDialogOptions,
 	RenderSessionContextOptions,
 	SubmittedUserInput,
-	TodoItem,
-	TodoPhase,
 } from "./types";
+import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import { UiHelpers } from "./utils/ui-helpers";
 
 const STILL_CLOSING_DELAY_MS = 3_000;

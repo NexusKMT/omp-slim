@@ -1,4 +1,5 @@
 import { expect, it } from "bun:test";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -89,6 +90,8 @@ it("loads the computer worker module directly outside a declared CLI host", asyn
 it("dispatches the computer worker from a single npm-style host bundle", async () => {
 	using outDir = TempDir.createSync("@omp-computer-worker-bundle-");
 	const packageDir = path.resolve(import.meta.dir, "../..");
+	const nodeModulesDir = path.resolve(packageDir, "../../node_modules");
+	fs.symlinkSync(nodeModulesDir, outDir.join("node_modules"), process.platform === "win32" ? "junction" : "dir");
 	const output = await Bun.build({
 		entrypoints: [path.join(packageDir, "test/fixtures/computer-worker-bundled-host.ts")],
 		outdir: outDir.path(),

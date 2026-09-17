@@ -1,6 +1,7 @@
 import { type Component, type OverlayFocusOwner } from "../tui";
 import { matchesKey } from "../keys";
-import { centerLine, fitLine, padding } from "../utils";
+import { centerLine, padding } from "../utils";
+import { padToWidth } from "../render/utils";
 import { routeSgrMouseInput, type SgrMouseEvent } from "../mouse";
 import { APP_NAME } from "@oh-my-pi/pi-utils";
 import { gradientLogo, PI_LOGO } from "../prompt/welcome";
@@ -19,7 +20,7 @@ const SCENE_TRANSITION_MS = 420;
 
 function indentLine(line: string, width: number, indent: number): string {
 	const prefix = padding(Math.min(indent, Math.max(0, width - 1)));
-	return fitLine(prefix + line, width);
+	return width > 0 ? padToWidth(prefix + line, width) : "";
 }
 /** Stable per-row jitter in [0,1) for the dissolve reveal order. */
 function rowNoise(y: number): number {
@@ -214,7 +215,7 @@ export class SetupWizardComponent implements Component, OverlayFocusOwner {
 	}
 
 	#fitToScreen(lines: string[], width: number, height: number): string[] {
-		const fitted = lines.slice(0, height).map(line => fitLine(line, width));
+		const fitted = lines.slice(0, height).map(line => (width > 0 ? padToWidth(line, width) : ""));
 		while (fitted.length < height) {
 			fitted.push(padding(width));
 		}

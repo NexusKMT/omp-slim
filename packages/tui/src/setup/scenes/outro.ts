@@ -1,4 +1,5 @@
-import { centerLine, fitLine } from "../../utils";
+import { centerLine } from "../../utils";
+import { padToWidth } from "../../render/utils";
 import { gradientLogo, PI_LOGO } from "../../prompt/welcome";
 import { theme } from "../../theme/theme";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
@@ -19,5 +20,5 @@ export function renderSetupOutro(width: number, height: number, elapsedMs: numbe
 	for (let i = 0; i < content.length && start + i < lines.length; i++) {
 		lines[start + i] = centerLine(content[i] ?? "", width);
 	}
-	return lines.map(line => fitLine(line, width));
+	return lines.map(line => (width > 0 ? padToWidth(line, width) : ""));
 }

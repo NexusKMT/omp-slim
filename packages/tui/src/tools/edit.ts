@@ -14,6 +14,7 @@ import type { Theme } from "../theme/theme";
 import type { OutputMeta } from "./output-meta";
 import {
 	cachedRenderedString,
+	cappedHeadLines,
 	createRenderedStringCache,
 	formatDiagnostics,
 	formatExpandHint,
@@ -418,13 +419,13 @@ function hasEditCallPayload(args: EditRenderArgs, renderContext: EditRenderConte
 }
 
 function renderPlainTextPreview(text: string, uiTheme: Theme, _filePath?: string): string {
-	const previewLines = sanitizeText(text).split("\n");
+	const previewLines = cappedHeadLines(sanitizeText(text).split("\n"), CALL_TEXT_PREVIEW_LINES);
 	let preview = "\n\n";
-	for (const line of previewLines.slice(0, CALL_TEXT_PREVIEW_LINES)) {
+	for (const line of previewLines.lines) {
 		preview += `${uiTheme.fg("toolOutput", truncateToWidth(replaceTabs(line), CALL_TEXT_PREVIEW_WIDTH))}\n`;
 	}
-	if (previewLines.length > CALL_TEXT_PREVIEW_LINES) {
-		preview += uiTheme.fg("dim", `… ${previewLines.length - CALL_TEXT_PREVIEW_LINES} more lines`);
+	if (previewLines.hidden > 0) {
+		preview += uiTheme.fg("dim", `… ${previewLines.hidden} more lines`);
 	}
 	return preview.trimEnd();
 }

@@ -23,6 +23,7 @@ import {
 	type ToolUIColor,
 	type ToolUIStatus,
 	capPreviewLines,
+	cappedHeadLines,
 	createCachedComponent,
 	DEFAULT_TERMINAL_PREVIEW_LINES,
 	formatMoreItems,
@@ -1026,12 +1027,16 @@ function bodyLines(
 	const indent = options.indent ?? "";
 	const tone = options.tone ?? "toolOutput";
 	const max = expanded ? BODY_LINES_EXPANDED : (options.collapsedLines ?? BODY_LINES_COLLAPSED);
-	const total = body.split("\n").filter(line => line.trim()).length;
-	const quote = theme.fg("dim", theme.md.quoteBorder);
-	const lines = getPreviewLines(body, max, BODY_LINE_WIDTH, Ellipsis.Unicode).map(
-		line => `${indent}${quote} ${theme.fg(tone, replaceTabs(line))}`,
+	const preview = cappedHeadLines(
+		body.split("\n").filter(line => line.trim()),
+		max,
 	);
-	const hidden = total - Math.min(total, max);
+	const quote = theme.fg("dim", theme.md.quoteBorder);
+	const lines = preview.lines.map(
+		line =>
+			`${indent}${quote} ${theme.fg(tone, replaceTabs(truncateToWidth(line.trim(), BODY_LINE_WIDTH, Ellipsis.Unicode)))}`,
+	);
+	const hidden = preview.hidden;
 	if (hidden > 0) {
 		lines.push(`${indent}${quote} ${theme.fg("dim", `… +${hidden} more ${hidden === 1 ? "line" : "lines"}`)}`);
 	}

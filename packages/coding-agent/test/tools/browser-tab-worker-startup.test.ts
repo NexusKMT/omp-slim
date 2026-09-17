@@ -24,8 +24,7 @@ const CHROMIUM_AVAILABLE = await chromiumAvailable();
 // proves the binary execs (`chrome --version` exits 0 with no X server).
 // Never open a desktop window during ordinary test runs; exercise this manual
 // viewport smoke test only with OMP_TEST_VISIBLE_BROWSER=1.
-const VISIBLE_BROWSER_AVAILABLE =
-	process.env.OMP_TEST_VISIBLE_BROWSER === "1" && (await visibleBrowserAvailable());
+const VISIBLE_BROWSER_AVAILABLE = process.env.OMP_TEST_VISIBLE_BROWSER === "1" && (await visibleBrowserAvailable());
 
 class FakeStartupWorker {
 	#errorHandlers = new Set<(error: Error) => void>();

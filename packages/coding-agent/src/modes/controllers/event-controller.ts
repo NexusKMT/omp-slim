@@ -20,7 +20,8 @@ import { ToolExecutionComponent, type ToolExecutionHandle, toolRenderName } from
 import { TtsrNotificationComponent } from "@oh-my-pi/pi-tui/chat/ttsr-notification";
 import { createUsageRowBlock, turnElapsedMs } from "@oh-my-pi/pi-tui/overlays/usage-row";
 import { getSymbolTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import type { InteractiveModeContext, TodoPhase } from "../../modes/types";
+import type { InteractiveModeContext } from "../../modes/types";
+import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 import idleRecapPrompt from "../../prompts/system/recap-user.md" with { type: "text" };
 import type { AgentSessionEvent } from "../../session/agent-session";
 import {

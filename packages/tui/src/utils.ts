@@ -217,12 +217,6 @@ export function centerLine(line: string, width: number): string {
 	return padding(left) + line + padding(width - left - lineWidth);
 }
 
-/** Truncate a line to `width` columns and pad the remainder with spaces. */
-export function fitLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
-}
-
 // Grapheme segmenter (shared instance)
 const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 

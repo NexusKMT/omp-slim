@@ -38,21 +38,29 @@ import { isLayoutMouseRoutable } from "../components/layout/geometry";
 import { SplitPane } from "../components/layout/split-pane";
 import { Stack } from "../components/layout/stack";
 
+/** One advisor declared in `WATCHDOG.yml`; its instructions specialize the shared baseline. */
 export interface AdvisorConfig {
 	name: string;
+	/** Model selector with an optional `:level` thinking suffix, resolved like any other model override. */
 	model?: string;
+	/** Built-in tool names, including mutating tools; omitted uses read/grep/glob plus available recall, empty grants none. */
 	tools?: string[];
 	instructions?: string;
+	/** Defaults to true; false retains the advisor in the roster and status displays without building its runtime. */
 	enabled?: boolean;
+	/** Maximum non-blocker notes per advisor prompt update (default 4); blockers are exempt. */
 	maxNotesPerUpdate?: number;
 }
 
+/** Which level a `WATCHDOG.yml` lives at: the project root or the user agent dir. */
 export type AdvisorConfigScope = "project" | "user";
 
+/** Editable raw contents of one `WATCHDOG.yml`, without cross-level merging or `@import` expansion, for exact round trips. */
 export interface WatchdogConfigDoc {
 	instructions?: string;
 	maxNotesPerUpdate?: number;
 	advisors: AdvisorConfig[];
+	/** Per-entry problems found while loading (dropped entries). Shown when the file becomes active in the editor. */
 	warnings?: string[];
 }
 

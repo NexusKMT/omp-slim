@@ -47,6 +47,7 @@ import type { EventController } from "./controllers/event-controller";
 import type { LoopConditionConfig, LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
 import type { OAuthManualInputManager } from "./oauth-manual-input";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
+import type { TodoItem, TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
 
 export type CompactionQueuedMessage = {
 	text: string;
@@ -76,20 +77,6 @@ export type SubmittedUserInput = {
 	streamingBehavior?: "steer" | "followUp";
 	cancelled: boolean;
 	started: boolean;
-};
-
-export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
-
-export type TodoItem = {
-	content: string;
-	status: TodoStatus;
-	details?: string;
-	notes?: string[];
-};
-
-export type TodoPhase = {
-	name: string;
-	tasks: TodoItem[];
 };
 
 export interface InteractiveModeInitOptions {

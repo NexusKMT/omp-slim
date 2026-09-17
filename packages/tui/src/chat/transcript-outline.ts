@@ -15,7 +15,7 @@ import {
 import type { SessionMessageEntryLike as SessionMessageEntry } from "./transcript-entry";
 import { type ThemeColor, theme } from "../theme";
 import type { ChatTranscriptBuilder } from "./chat-transcript-builder";
-import { fit } from "../chrome/overlay-box";
+import { padToWidth } from "../render/utils";
 import { isUsageRowBlock } from "../overlays/usage-row";
 
 /** One selectable transcript item: a message entry plus its rendered block range. */
@@ -172,7 +172,7 @@ export function outlineRows(rows: readonly string[], innerWidth: number, style: 
 	const lines: string[] = [
 		outlineRule(theme.boxRound.topLeft, theme.boxRound.topRight, innerWidth, color, style.caption),
 	];
-	for (const row of rows) lines.push(`${vertical} ${fit(row, innerWidth)} ${vertical}`);
+	for (const row of rows) lines.push(`${vertical} ${innerWidth > 0 ? padToWidth(row, innerWidth) : ""} ${vertical}`);
 	lines.push(outlineRule(theme.boxRound.bottomLeft, theme.boxRound.bottomRight, innerWidth, color));
 	return lines;
 }

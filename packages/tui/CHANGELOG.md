@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added details and notes fields to todo items
+- Added support for inline summary rendering of structured task outputs
+- Added `TUIOptions.onPaint` / `TUI.setPaintListener` so hosts can observe the rows each paint commits to scrollback and the live viewport (used by `omp stream`).
 - Added HubFrame component for consistent fullscreen sidebar and footer layouts
 - Added scrollable sidebar navigation with focus tracking for overlay screens
 - Added interactive footer chip rendering in overlays with mouse hit-testing
@@ -21,6 +24,8 @@
 
 ### Changed
 
+- Enhanced agent task and evaluation displays with improved layout truncation and metric support
+- Updated live spinner animations to use theme-consistent frames
 - Standardized form labels, descriptions, and styling across overlays
 - Improved text rendering to collapse newlines instead of trimming in overlays
 - Refined output notice stripping for more consistent tool output displays

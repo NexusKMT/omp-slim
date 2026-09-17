@@ -4,6 +4,7 @@
 
 ### Added
 
+- Exported paletteToRgb utility function
 - Added stringifyYamlConfig utility to strip trailing spaces from YAML block headers
 
 ## [18.2.3] - 2026-09-17

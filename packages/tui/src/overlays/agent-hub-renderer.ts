@@ -273,19 +273,6 @@ export function treeMetadataIndent(maxWidth: number, maxDepth: number): number {
 	return Math.min(Math.max(0, maxWidth - 1), TREE_DETAIL_BASE_INDENT + Math.max(0, maxDepth) * TREE_SEGMENT_WIDTH);
 }
 
-/** Case-insensitive scattered-subsequence match used by the agent filter. */
-export function fuzzyAgentMatch(query: string, target: string): boolean {
-	const q = query.toLowerCase();
-	const t = target.toLowerCase();
-	if (q.length === 0) return true;
-	if (q.length > t.length) return false;
-	let i = 0;
-	for (let j = 0; j < t.length && i < q.length; j += 1) {
-		if (q[i] === t[j]) i += 1;
-	}
-	return i === q.length;
-}
-
 /** Right-align `text` inside a fixed-width cell, truncating overflow. */
 export function alignRightCell(text: string, width: number): string {
 	return renderTableRow([{ text }], [{ width, align: "right", overflow: "truncate" }], undefined, {

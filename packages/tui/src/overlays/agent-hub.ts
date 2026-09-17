@@ -52,7 +52,6 @@ import {
 	formatMetricDuration,
 	formatMetrics,
 	formatRoleBadge,
-	fuzzyAgentMatch,
 	modelBadge,
 	type RosterRender,
 	sanitizeLine,
@@ -65,6 +64,7 @@ import {
 import { sanitizeDisplaySingleLine } from "./extensions/display-text";
 import { AgentTranscriptViewer, type AgentTranscriptSource } from "./agent-transcript-viewer";
 import type { AgentRoleDisplay } from "./agent-hub-renderer";
+import { fuzzyMatch } from "../fuzzy";
 import { bottomBorder, divider, dividerSplit, PanelRows, row, topBorder, topBorderSplit } from "../chrome/overlay-box";
 import { SplitPane } from "../components/layout/split-pane";
 import { Stack } from "../components/layout/stack";
@@ -575,7 +575,7 @@ export class AgentHubOverlayComponent<TRecord extends AgentRecordLike = AgentRec
 		const query = this.#agentFilter.trim();
 		const rosterRows =
 			query.length > 0
-				? ordered.filter(ref => fuzzyAgentMatch(query, `${ref.id} ${ref.displayName ?? ""}`))
+				? ordered.filter(ref => fuzzyMatch(query, `${ref.id} ${ref.displayName ?? ""}`).matches)
 				: ordered;
 
 		if (this.#viewMode === "tree") {
