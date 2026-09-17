@@ -6,8 +6,8 @@
  *
  * Run: bun packages/catalog/bench/classify.bench.ts
  */
-import { classifyModel } from "../src/compat/taxonomy";
 import { globMatch } from "../src/compat/cascade";
+import { classifyModel } from "../src/compat/taxonomy";
 
 const IDS: Array<[string, string]> = [
 	["cursor", "claude-opus-4-8"],
