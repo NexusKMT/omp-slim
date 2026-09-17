@@ -10,7 +10,7 @@
 
 ### Changed
 
-- The difficulty, unexpected-stop, and AI-staging classifiers share one judgment interface; without TypeSafe, or when a TypeSafe request fails, they fall back through the `tiny`, `smol`, `default`, and active-session models. Agent-tuned small models receive guarded JSON state so they classify requests instead of emitting tool calls. AI staging now asks one yes/no question per file in a single batched request instead of echoing paths.
+- The difficulty, unexpected-stop, and AI-staging classifiers share one judgment interface; without TypeSafe, or when a TypeSafe request fails, they fall back through the `tiny`, `smol`, `default`, and active-session models. Text backends receive XML-field state with nested YAML; chat models get anti-execution guards and forced structured correction, while local bucket classifiers get XML-shaped examples. AI staging now asks one yes/no question per file in a single batched request instead of echoing paths.
 
 ## [18.2.3] - 2026-09-17
 
