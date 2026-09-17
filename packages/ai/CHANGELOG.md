@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.3] - 2026-09-17
+
 ### Added
 
 - `stream()` and `streamSimple()` support asynchronous model header resolution for each request attempt, including authentication retries and cancellation.

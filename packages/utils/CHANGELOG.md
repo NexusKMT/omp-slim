@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.3] - 2026-09-17
+
 ### Fixed
 
 - Optimized model configuration command execution by deduplicating requests and adding failure backoff

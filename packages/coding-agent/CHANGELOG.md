@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.3] - 2026-09-17
+
 ### Breaking Changes
 
 - Config-backed headers now resolve asynchronously through `ModelRegistry.getProviderHeaders()` or `resolveModelHeaders()`; removed the synchronous `config/model-config-values` module.

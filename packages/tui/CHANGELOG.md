@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.3] - 2026-09-17
+
 ### Added
 
 - Editors support whitespace-delimited `^` mention autocomplete and expose registered atoms for host-defined chip rendering.
