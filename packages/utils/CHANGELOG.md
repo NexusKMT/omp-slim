@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added utilities for reading dotenv-sourced environment values, customizing filtered child-shell environment values, converting color palettes to RGB, and cleaning trailing spaces from YAML block headers.
+- Added utilities for reading dotenv-sourced environment values, customizing filtered child-shell environment values, converting color palettes to RGB, cleaning trailing spaces from YAML block headers, and counting newlines in text.
 
 ### Fixed
 
