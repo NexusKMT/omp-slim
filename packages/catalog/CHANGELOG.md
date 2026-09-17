@@ -3,6 +3,8 @@
 ## [Unreleased]
 ### Fixed
 
+- Fixed Union Alpha using the wrong API on OpenCode Go and Zen; it now uses the Messages endpoint ([#12359](https://github.com/can1357/oh-my-pi/issues/12359)).
+
 - Fixed Yolo-Auto advertising 1M context for Qwen Flash: `qwen3.8-flash` and the paid `yolo` route now resolve to the documented 256K deployment window with the Qwen chat-template reasoning dialect, and `qwen3.8-flash` is the provider default.
 
 ## [18.2.4] - 2026-09-17
