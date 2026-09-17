@@ -1,5 +1,4 @@
 import { expect, it } from "bun:test";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -88,25 +87,21 @@ it("loads the computer worker module directly outside a declared CLI host", asyn
 });
 
 it("dispatches the computer worker from a single npm-style host bundle", async () => {
+	using outDir = TempDir.createSync("@omp-computer-worker-bundle-");
 	const packageDir = path.resolve(import.meta.dir, "../..");
-	const outDir = fs.mkdtempSync(path.join(packageDir, ".computer-worker-bundle-"));
-	try {
-		const output = await Bun.build({
-			entrypoints: [path.join(packageDir, "test/fixtures/computer-worker-bundled-host.ts")],
-			outdir: outDir,
-			naming: "cli.js",
-			target: "bun",
-			external: ["@oh-my-pi/pi-natives"],
-			define: { "process.env.PI_BUNDLED": JSON.stringify("true") },
-			throw: false,
-		});
-		expect(output.logs).toEqual([]);
-		expect(output.outputs.map(file => path.basename(file.path))).toEqual(["cli.js"]);
-		const response = await pingComputerWorker(output.outputs[0]!.path, "computer-npm-bundle");
-		expect(response).toEqual({ type: "pong", id: "computer-npm-bundle" });
-	} finally {
-		fs.rmSync(outDir, { recursive: true, force: true });
-	}
+	const output = await Bun.build({
+		entrypoints: [path.join(packageDir, "test/fixtures/computer-worker-bundled-host.ts")],
+		outdir: outDir.path(),
+		naming: "cli.js",
+		target: "bun",
+		external: ["@oh-my-pi/pi-natives"],
+		define: { "process.env.PI_BUNDLED": JSON.stringify("true") },
+		throw: false,
+	});
+	expect(output.logs).toEqual([]);
+	expect(output.outputs.map(file => path.basename(file.path))).toEqual(["cli.js"]);
+	const response = await pingComputerWorker(output.outputs[0]!.path, "computer-npm-bundle");
+	expect(response).toEqual({ type: "pong", id: "computer-npm-bundle" });
 });
 
 it("keeps non-computer selectors isolated in a compiled single-entry worker host", async () => {
