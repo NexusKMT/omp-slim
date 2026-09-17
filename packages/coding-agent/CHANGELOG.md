@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.4] - 2026-09-17
+
 ### Added
 
 - Added an optional live generation speed readout via `composer.tokenRate`, showing smoothed tokens-per-second output in the working row and keeping the rate visible between turns.

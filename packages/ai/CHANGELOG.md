@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.4] - 2026-09-17
+
 ### Added
 
 - Added the `judgment` module for typed questions over JSON state, including choice, yes/no, and score judgments through the `Judge` interface.

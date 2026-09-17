@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.4] - 2026-09-17
+
 ### Added
 
 - Added `typesafe` authentication for TypeSafe System One judgments via the `TYPESAFE_API_KEY` configuration and API-key validation against the TypeSafe models endpoint.
