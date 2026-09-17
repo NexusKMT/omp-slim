@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Fixed
 
 - Improved session and fork-detection polling performance, reducing unnecessary filesystem and database work when monitoring sessions.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Fixed
 
 - Improved SQLite vector search and import performance by reducing repeated database metadata checks.

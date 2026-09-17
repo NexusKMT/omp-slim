@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Added
 
 - Added support for templating and custom base and authentication URLs in OAuth flows.

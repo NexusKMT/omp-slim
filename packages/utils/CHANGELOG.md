@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Added
 
 - Added utilities for reading dotenv-sourced environment values, customizing filtered child-shell environment values, converting color palettes to RGB, cleaning trailing spaces from YAML block headers, and counting newlines in text.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Breaking Changes
 
 - Moved terminal UI modules—including themes, tool renderers, chat, overlay, status-line, composer, setup wizard, and Git/PS/debug apps—to `@oh-my-pi/pi-tui`. The corresponding `@oh-my-pi/pi-coding-agent` subpaths no longer exist; names re-exported from the package root remain unchanged.

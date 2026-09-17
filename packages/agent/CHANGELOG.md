@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Fixed
 
 - Improved agent performance by reducing redundant tool-schema processing during repeated model calls and optimizing streamed tool-call argument parsing.

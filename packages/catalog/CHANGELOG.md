@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Added
 
 - Added the `stencil` authentication provider for `omp stream`, supporting OAuth code + PKCE sign-in with `auth.stencil.so`, configurable via `STENCIL_API_KEY`, `STENCIL_AUTH_URL`, and `STENCIL_BASE_URL`. This is an authentication-only provider, not a model provider; OAuth-code login configuration also supports `base-url` and `auth-url` nodes with `{base}` and `{auth}` URL placeholders.

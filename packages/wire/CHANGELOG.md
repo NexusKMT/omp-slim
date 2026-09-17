@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.5] - 2026-09-17
+
 ### Added
 
 - Added the `omp stream` wire contract (`@oh-my-pi/pi-wire/stream`) for pane screen updates, viewer snapshots and chat, channel metadata, and `live.omp.sh` stream routes.
