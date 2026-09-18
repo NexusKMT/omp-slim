@@ -179,38 +179,38 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(lastBlock.cache_control?.type).toBe("ephemeral");
 	});
 
-	it("keeps the rolling tail breakpoint past interior per-call context", async () => {
-		const messages: Message[] = [
-			{ role: "user", content: "stable user", timestamp: 1 },
-			assistantMessage("stable assistant", 2),
-		];
-		const perCallMessage: Message = {
-			role: "developer",
-			content: "per-call context",
-			attribution: "agent",
-			timestamp: 3,
+	it("keeps the rolling tail breakpoint advancing past interior per-call context", async () => {
+		const buildHistory = (turns: number): Message[] => {
+			const messages: Message[] = [
+				{ role: "user", content: "stable user", timestamp: 1 },
+				assistantMessage("stable assistant", 2),
+			];
+			const perCallMessage: Message = {
+				role: "developer",
+				content: "per-call context",
+				attribution: "agent",
+				timestamp: 3,
+			};
+			markPerCallContextMessage(perCallMessage);
+			messages.push(perCallMessage);
+			for (let turn = 1; turn <= turns; turn++) {
+				messages.push({ role: "user", content: `later user ${turn}`, timestamp: turn * 2 + 2 });
+				messages.push(assistantMessage(`later assistant ${turn}`, turn * 2 + 3));
+			}
+			return messages;
 		};
-		markPerCallContextMessage(perCallMessage);
-		messages.push(perCallMessage);
-		for (let turn = 1; turn <= 15; turn++) {
-			messages.push({ role: "user", content: `later user ${turn}`, timestamp: turn * 2 + 2 });
-			messages.push(assistantMessage(`later assistant ${turn}`, turn * 2 + 3));
-		}
-
-		const body = await captureWireBody(undefined, { ...CONTEXT, messages });
-
-		// The interior per-call mark must not freeze the anchor: the tail
-		// breakpoint advances to the newest messages instead of stalling at
-		// the mark, so the growing tail is not re-billed every turn.
-		expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
-		const cached = findCachedMessageIndices(body);
-		const last = (body.messages?.length ?? 0) - 1;
-		// The transcript ends with an assistant turn, so the wire closes with
-		// a neutral `Continue.` pad (last): the newest-message breakpoint sits
-		// on the last real assistant (last - 1), plus the decimation
-		// checkpoint. Neither stalls at the interior per-call mark.
-		expect(cached).toContain(last - 1);
-		expect(cached).toHaveLength(2);
+		// The interior per-call mark truncates the reusable prefix at the mark
+		// but must not freeze the tail: across two successive histories the
+		// tail breakpoint index must advance with the new messages.
+		const tailBreakpoint = async (turns: number): Promise<number> => {
+			const body = await captureWireBody(undefined, { ...CONTEXT, messages: buildHistory(turns) });
+			expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
+			const cached = findCachedMessageIndices(body);
+			return Math.max(...cached);
+		};
+		const first = await tailBreakpoint(15);
+		const second = await tailBreakpoint(16);
+		expect(second).toBeGreaterThan(first);
 	});
 
 	it("stays within Anthropic's 4-breakpoint budget", async () => {

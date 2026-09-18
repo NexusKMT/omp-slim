@@ -3954,18 +3954,21 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	const messageEnd = hasTrailingAssistantPad ? trailingIndex - 1 : trailingIndex;
 
 	// A breakpoint caches every preceding byte, not only the decorated message.
-	// A turn-scoped message is absent next request, so every later index shifts
-	// and no later breakpoint can match — those still truncate the candidate
-	// range below. A per-call message is different: it is rebuilt with fresh
-	// bytes, so the bytes at its own position miss, but everything after it is
-	// ordinary persisted history with stable bytes that matches on its own.
-	// Truncating the whole range at the first per-call mark (a fixed interior
-	// index for the rest of the session) would freeze the anchor and re-bill
-	// the growing tail every turn, so per-call marks no longer truncate.
+	// A per-call or turn-scoped message is rebuilt next request, so a prefix
+	// spanning it cannot match — but only at its own position. Messages after
+	// the mark are ordinary persisted history with stable bytes, so a later
+	// breakpoint still matches everything after the mark. The cost is bounded
+	// to re-billing the marked bytes themselves, not the growing tail.
+	// Hence two anchors, not a truncation: the newest candidate at or before
+	// the first per-call/turn-scoped message (when one exists) pins the
+	// reusable prefix behind the mark, and the rolling tail candidates pin
+	// the suffix after it. Turn-scoped `clear_at` messages are absent next
+	// request, so they still truncate the decimation range (ordinals would
+	// shift), but per-call marks no longer freeze the tail.
 	let stableMessageEnd = messageEnd;
 	for (let index = 0; index <= messageEnd; index++) {
 		const message = params.messages[index];
-		if (message && message.clear_at === "next_user_message") {
+		if (message && (message.clear_at === "next_user_message" || isPerCallContextMessage(message))) {
 			stableMessageEnd = index - 1;
 			break;
 		}
@@ -3986,17 +3989,21 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	// Stable historical decimation checkpoint every 15 user turns (15th, 30th, 45th...)
 	const decimationIndices = userIndices.filter((_, ordinal) => (ordinal + 1) % ANTHROPIC_DECIMATION_INTERVAL === 0);
 
-	// Collect up to 2 trailing candidates from the reusable prefix, skipping
-	// mid-conversation tool-control messages. They contain only tool_addition /
-	// tool_removal blocks, so cache_control is always rejected there; parking
-	// the rolling window on one spends the tail breakpoint on a decoration
-	// that always fails, and with decimation checkpoints present the remaining
-	// breakpoints land on already-cached history while the growing tail is
-	// re-billed as uncached input every turn.
+	// Collect up to 2 trailing candidates from the message tail, skipping
+	// per-call messages, turn-scoped messages, and mid-conversation
+	// tool-control messages. A per-call tail candidate is rebuilt next request
+	// (fresh timestamps on appended probes, fresh redaction bytes), so a
+	// breakpoint on it cannot match — it would spend the tail anchor on bytes
+	// that never repeat while the persisted history behind it goes uncached.
+	// Turn-scoped messages are absent next request for the same reason, and
+	// tool controls reject cache_control outright. The walk starts at the
+	// message tail (not the truncated prefix end) so the anchor advances every
+	// turn; the sub-prefix candidate below covers the reusable region behind
+	// a mark.
 	const trailingCandidates: number[] = [];
-	for (let index = stableMessageEnd; index >= 0 && trailingCandidates.length < 2; index--) {
+	for (let index = messageEnd; index >= 0 && trailingCandidates.length < 2; index--) {
 		const message = params.messages[index];
-		if (!message) continue;
+		if (!message || message.clear_at === "next_user_message" || isPerCallContextMessage(message)) continue;
 		if (
 			message.role === "system" &&
 			typeof message.content !== "string" &&
@@ -4008,9 +4015,13 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 		}
 		trailingCandidates.push(index);
 	}
+	// Prioritize:
 	// 1. Most recent trailing message
 	// 2. Latest decimation checkpoints (newest first) to maintain stable long-context anchors
-	// 3. Second trailing message
+	// 3. Newest message at or before the first per-call/turn-scoped mark, so a
+	//    volatile interior message costs only its own re-billed bytes instead
+	//    of invalidating the whole reusable prefix behind it
+	// 4. Second trailing message
 	const candidateIndices: number[] = [];
 	if (trailingCandidates.length > 0) {
 		candidateIndices.push(trailingCandidates[0]);
@@ -4019,6 +4030,9 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 		if (!candidateIndices.includes(decimationIndices[i])) {
 			candidateIndices.push(decimationIndices[i]);
 		}
+	}
+	if (stableMessageEnd < messageEnd && stableMessageEnd >= 0 && !candidateIndices.includes(stableMessageEnd)) {
+		candidateIndices.push(stableMessageEnd);
 	}
 	for (const index of trailingCandidates) {
 		if (!candidateIndices.includes(index)) {
