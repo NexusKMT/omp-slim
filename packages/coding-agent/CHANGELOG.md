@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed support for the env parameter in the bash tool
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed
