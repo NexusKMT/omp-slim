@@ -4113,16 +4113,24 @@ function applyHeadCaching(
 	if (systemBlocks && systemBlocks.length > 0) {
 		// Anchor on the last stable block so a volatile recall suffix refresh
 		// re-bills only the suffix, not the whole head. The skip-if-decorated
-		// check covers only the stable prefix: the OAuth path pre-decorates its
-		// identity block, which must not suppress the stable-boundary anchor —
-		// otherwise the only system breakpoint sits before the stable prompt
-		// and a recall refresh re-bills it. All-volatile (or a stable tail
-		// after a mid-array volatile block) keeps tail anchoring.
+		// check applies only when there is no volatile suffix (previous
+		// behavior): with a suffix present the boundary anchor is added
+		// whenever the anchor block itself lacks a breakpoint, even if the
+		// OAuth path pre-decorated its identity block — otherwise the only
+		// system breakpoint sits before the stable prompt and a recall
+		// refresh re-bills it. The message budget in `applyPromptCaching`
+		// shrinks accordingly (4 minus head breakpoints). All-volatile falls
+		// back to tail anchoring (previous behavior).
 		const suffixStart = stableSystemSuffixStart(systemBlocks);
-		const anchorIndex = suffixStart === systemBlocks.length ? systemBlocks.length - 1 : suffixStart - 1;
-		if (anchorIndex >= 0 && !systemBlocks.slice(0, suffixStart).some(block => block.cache_control != null)) {
+		if (suffixStart === systemBlocks.length) {
+			if (!systemBlocks.some(block => block.cache_control != null)) {
+				const lastBlock = systemBlocks[systemBlocks.length - 1];
+				if (lastBlock) lastBlock.cache_control = cloneAnthropicCacheControl(cacheControl);
+			}
+		} else {
+			const anchorIndex = suffixStart === 0 ? systemBlocks.length - 1 : suffixStart - 1;
 			const anchor = systemBlocks[anchorIndex];
-			if (anchor) anchor.cache_control = cloneAnthropicCacheControl(cacheControl);
+			if (anchor && anchor.cache_control == null) anchor.cache_control = cloneAnthropicCacheControl(cacheControl);
 		}
 	}
 }

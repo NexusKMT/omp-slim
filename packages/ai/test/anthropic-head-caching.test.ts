@@ -634,12 +634,17 @@ describe("anthropic head caching (general API-key path)", () => {
 			{ role: "user", content: "again", timestamp: 3 },
 		]);
 		expect(countCacheBreakpoints(after)).toBeLessThanOrEqual(4);
-		// The breakpoint stays on the stable prefix (index 1 + 2 OAuth identity blocks),
-		// never on the volatile recall suffix at the tail.
+		// The boundary breakpoint sits on the last stable block: with 2 OAuth
+		// identity blocks + 2 stable prompt blocks + 1 recall suffix, the
+		// anchor is index 3 — not the pre-decorated identity block (index 1)
+		// and not the volatile suffix at the tail (index 4).
 		const systemAfter = textSystemBlocks(after);
-		const cachedSystem = systemAfter.findIndex(block => "cache_control" in block && block.cache_control != null);
-		expect(cachedSystem).toBe(breakpointBefore);
-		expect(cachedSystem).toBeLessThan(systemAfter.length - 1);
+		const cachedSystem = systemAfter
+			.map((block, index) => ("cache_control" in block && block.cache_control != null ? index : -1))
+			.filter(index => index >= 0);
+		expect(cachedSystem).toContain(systemAfter.length - 2);
+		expect(cachedSystem).not.toContain(systemAfter.length - 1);
+		expect(systemBlocksBefore.length).toBe(systemAfter.length);
 		// Stable prefix bytes survive the recall refresh: strip the volatile
 		// suffix and the per-turn cache_control, then compare.
 		const stableText = (body: MessageCreateParams): string[] =>
@@ -647,5 +652,18 @@ describe("anthropic head caching (general API-key path)", () => {
 				.filter(block => !block.text.startsWith("<memories>"))
 				.map(block => block.text);
 		expect(stableText(after)).toEqual(stableText(before));
+	});
+
+	it("falls back to tail anchoring when every system block is volatile", async () => {
+		const body = await captureWireBody(undefined, {
+			systemPrompt: ["<memories>\nonly recall\n</memories>"],
+			tools: [],
+			messages: [{ role: "user", content: "hello", timestamp: 1 }],
+		});
+		const systemAfter = textSystemBlocks(body);
+		const cachedSystem = systemAfter
+			.map((block, index) => ("cache_control" in block && block.cache_control != null ? index : -1))
+			.filter(index => index >= 0);
+		expect(cachedSystem).toContain(systemAfter.length - 1);
 	});
 });
