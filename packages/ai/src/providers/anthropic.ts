@@ -3954,12 +3954,18 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 	const messageEnd = hasTrailingAssistantPad ? trailingIndex - 1 : trailingIndex;
 
 	// A breakpoint caches every preceding byte, not only the decorated message.
-	// Once per-call or turn-scoped content appears, no later message can anchor a
-	// prefix reusable by the next request.
+	// A turn-scoped message is absent next request, so every later index shifts
+	// and no later breakpoint can match — those still truncate the candidate
+	// range below. A per-call message is different: it is rebuilt with fresh
+	// bytes, so the bytes at its own position miss, but everything after it is
+	// ordinary persisted history with stable bytes that matches on its own.
+	// Truncating the whole range at the first per-call mark (a fixed interior
+	// index for the rest of the session) would freeze the anchor and re-bill
+	// the growing tail every turn, so per-call marks no longer truncate.
 	let stableMessageEnd = messageEnd;
 	for (let index = 0; index <= messageEnd; index++) {
 		const message = params.messages[index];
-		if (message && (message.clear_at === "next_user_message" || isPerCallContextMessage(message))) {
+		if (message && message.clear_at === "next_user_message") {
 			stableMessageEnd = index - 1;
 			break;
 		}
@@ -4002,8 +4008,6 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 		}
 		trailingCandidates.push(index);
 	}
-
-	// Prioritize:
 	// 1. Most recent trailing message
 	// 2. Latest decimation checkpoints (newest first) to maintain stable long-context anchors
 	// 3. Second trailing message

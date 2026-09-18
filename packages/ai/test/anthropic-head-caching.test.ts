@@ -179,7 +179,7 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(lastBlock.cache_control?.type).toBe("ephemeral");
 	});
 
-	it("keeps rolling and decimation breakpoints before per-call context", async () => {
+	it("keeps the rolling tail breakpoint past interior per-call context", async () => {
 		const messages: Message[] = [
 			{ role: "user", content: "stable user", timestamp: 1 },
 			assistantMessage("stable assistant", 2),
@@ -199,7 +199,18 @@ describe("anthropic head caching (general API-key path)", () => {
 
 		const body = await captureWireBody(undefined, { ...CONTEXT, messages });
 
-		expect(findCachedMessageIndices(body)).toEqual([0, 1]);
+		// The interior per-call mark must not freeze the anchor: the tail
+		// breakpoint advances to the newest messages instead of stalling at
+		// the mark, so the growing tail is not re-billed every turn.
+		expect(countCacheBreakpoints(body)).toBeLessThanOrEqual(4);
+		const cached = findCachedMessageIndices(body);
+		const last = (body.messages?.length ?? 0) - 1;
+		// The transcript ends with an assistant turn, so the wire closes with
+		// a neutral `Continue.` pad (last): the newest-message breakpoint sits
+		// on the last real assistant (last - 1), plus the decimation
+		// checkpoint. Neither stalls at the interior per-call mark.
+		expect(cached).toContain(last - 1);
+		expect(cached).toHaveLength(2);
 	});
 
 	it("stays within Anthropic's 4-breakpoint budget", async () => {
