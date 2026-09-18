@@ -13,7 +13,7 @@
  * a 400 so the request short-circuits.
  */
 import { describe, expect, it } from "bun:test";
-import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
+import type { MessageCreateParams, TextBlockParam } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type {
 	AssistantMessage,
@@ -102,6 +102,12 @@ function countCacheBreakpoints(body: MessageCreateParams): number {
 		}
 	}
 	return count;
+}
+
+function textSystemBlocks(body: MessageCreateParams): TextBlockParam[] {
+	const system = body.system;
+	if (!Array.isArray(system)) return [];
+	return system.filter((block): block is TextBlockParam => typeof block !== "string");
 }
 
 function findCachedMessageIndices(body: MessageCreateParams): number[] {
@@ -618,11 +624,10 @@ describe("anthropic head caching (general API-key path)", () => {
 		};
 		const messages: Message[] = [{ role: "user", content: "hello", timestamp: 1 }];
 		const before = await captureRecall("<memories>\nrecall v1\n</memories>", messages);
-		const systemBefore = (before.system ?? []).map(block => (typeof block === "string" ? block : block.text));
-		const breakpointBefore = systemBefore.findIndex(text => {
-			const block = (before.system ?? [])[systemBefore.indexOf(text)];
-			return typeof block === "object" && block !== null && "cache_control" in block && block.cache_control != null;
-		});
+		const systemBlocksBefore = textSystemBlocks(before);
+		const breakpointBefore = systemBlocksBefore.findIndex(
+			block => "cache_control" in block && block.cache_control != null,
+		);
 		const after = await captureRecall("<memories>\nrecall v2\n</memories>", [
 			...messages,
 			assistantMessage("hi there", 2),
@@ -631,19 +636,16 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(countCacheBreakpoints(after)).toBeLessThanOrEqual(4);
 		// The breakpoint stays on the stable prefix (index 1 + 2 OAuth identity blocks),
 		// never on the volatile recall suffix at the tail.
-		const systemAfter = after.system ?? [];
-		const cachedSystem = systemAfter.findIndex(
-			block =>
-				typeof block === "object" && block !== null && "cache_control" in block && block.cache_control != null,
-		);
+		const systemAfter = textSystemBlocks(after);
+		const cachedSystem = systemAfter.findIndex(block => "cache_control" in block && block.cache_control != null);
 		expect(cachedSystem).toBe(breakpointBefore);
 		expect(cachedSystem).toBeLessThan(systemAfter.length - 1);
 		// Stable prefix bytes survive the recall refresh: strip the volatile
 		// suffix and the per-turn cache_control, then compare.
 		const stableText = (body: MessageCreateParams): string[] =>
-			(body.system ?? [])
-				.filter(block => typeof block !== "string" && !block.text.startsWith("<memories>"))
-				.map(block => (typeof block === "string" ? block : block.text));
+			textSystemBlocks(body)
+				.filter(block => !block.text.startsWith("<memories>"))
+				.map(block => block.text);
 		expect(stableText(after)).toEqual(stableText(before));
 	});
 });

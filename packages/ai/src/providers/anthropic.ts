@@ -4110,14 +4110,20 @@ function applyHeadCaching(
 		}
 	}
 
-	if (systemBlocks && systemBlocks.length > 0 && !systemBlocks.some(block => block.cache_control != null)) {
+	if (systemBlocks && systemBlocks.length > 0) {
 		// Anchor on the last stable block so a volatile recall suffix refresh
-		// re-bills only the suffix, not the whole head. All-volatile (or a
-		// stable tail after a mid-array volatile block) keeps tail anchoring.
+		// re-bills only the suffix, not the whole head. The skip-if-decorated
+		// check covers only the stable prefix: the OAuth path pre-decorates its
+		// identity block, which must not suppress the stable-boundary anchor —
+		// otherwise the only system breakpoint sits before the stable prompt
+		// and a recall refresh re-bills it. All-volatile (or a stable tail
+		// after a mid-array volatile block) keeps tail anchoring.
 		const suffixStart = stableSystemSuffixStart(systemBlocks);
 		const anchorIndex = suffixStart === systemBlocks.length ? systemBlocks.length - 1 : suffixStart - 1;
-		const anchor = anchorIndex >= 0 ? systemBlocks[anchorIndex] : systemBlocks[systemBlocks.length - 1];
-		if (anchor) anchor.cache_control = cloneAnthropicCacheControl(cacheControl);
+		if (anchorIndex >= 0 && !systemBlocks.slice(0, suffixStart).some(block => block.cache_control != null)) {
+			const anchor = systemBlocks[anchorIndex];
+			if (anchor) anchor.cache_control = cloneAnthropicCacheControl(cacheControl);
+		}
 	}
 }
 
@@ -4201,11 +4207,15 @@ function getAnthropicControlState(
 ): AnthropicControlState | undefined {
 	if (!state) return undefined;
 	const root = messages[0];
+	// Key on the stable system prefix, not the full array: a volatile recall
+	// suffix refresh must resolve the same baseline or the declared-tool,
+	// effort, and control-transition state it preserves is lost with it.
+	const stablePrefix = system?.slice(0, stableSystemSuffixStart(system)) ?? null;
 	const fingerprint = String(
 		Bun.hash(
 			JSON.stringify([
 				sessionId ?? "",
-				system?.map(block => block.text) ?? null,
+				stablePrefix?.map(block => block.text) ?? null,
 				root ? anthropicControlMessageProjection(root) : null,
 			]),
 		),
