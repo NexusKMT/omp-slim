@@ -4035,15 +4035,45 @@ function applyPromptCaching(params: MessageCreateParamsStreaming, cacheControl?:
 }
 
 /**
+ * Trailing system-prompt segments carrying per-turn volatile content (memory
+ * recall blocks). They are rendered by the coding agent as their own
+ * `systemPrompt` array elements and always appended last, so on the wire they
+ * form a volatile suffix after the stable prefix. The system cache breakpoint
+ * anchors on the last stable segment instead of the array tail, so a recall
+ * refresh re-bills only the suffix and the message tail for one turn while
+ * the tools+stable-system prefix stays a cache hit. The fingerprint in
+ * `planStableAnthropicSystem` is scoped the same way, so a recall-only change
+ * no longer resets the tool/control baselines either.
+ *
+ * Detection is by our own markup, not model identity: recall blocks always
+ * open with `<memories>`. Stable segments containing recalled text elsewhere
+ * (e.g. quoted in conversation) are unaffected — only a leading tag counts.
+ */
+const VOLATILE_SYSTEM_SEGMENT_MARKERS = ["<memories>"];
+
+function stableSystemSuffixStart(systemBlocks: readonly AnthropicSystemBlock[]): number {
+	for (let index = 0; index < systemBlocks.length; index++) {
+		const text = systemBlocks[index]?.text ?? "";
+		if (VOLATILE_SYSTEM_SEGMENT_MARKERS.some(marker => text.startsWith(marker))) return index;
+	}
+	return systemBlocks.length;
+}
+
+/**
  * Anchor cache_control on the stable request head — the last (non-deferred)
- * tool definition and the last system block. The canonical cache order is
- * tools → system → messages, so a breakpoint on the final system block caches
- * the entire tools+system prefix, and the extra tool breakpoint keeps the tool
+ * tool definition and the last stable system block. The canonical cache order is
+ * tools → system → messages, so a breakpoint on the final stable system block caches
+ * the entire tools+stable-system prefix, and the extra tool breakpoint keeps the tool
  * definitions cached even when the system text changes. This guarantees the
  * large, unchanging head is a cache hit on every turn regardless of how the
  * message tail churns — the breakpoint placement first-party Anthropic clients
  * (Claude Code, Pi) use. Without it, the general API-key path anchors only the
  * moving message tail, so tail churn re-writes the whole head uncached.
+ *
+ * Volatile trailing segments (memory recall) sit after the breakpoint, so a
+ * recall refresh re-bills only the suffix and the tail for one turn instead of
+ * the whole head. When every system block is volatile there is no stable
+ * boundary and the breakpoint stays on the array tail (previous behavior).
  *
  * Anthropic allows at most 4 cache breakpoints per request. At most one is
  * spent on tools and one on system here, leaving the remaining budget for
@@ -4081,8 +4111,13 @@ function applyHeadCaching(
 	}
 
 	if (systemBlocks && systemBlocks.length > 0 && !systemBlocks.some(block => block.cache_control != null)) {
-		const lastBlock = systemBlocks[systemBlocks.length - 1];
-		if (lastBlock) lastBlock.cache_control = cloneAnthropicCacheControl(cacheControl);
+		// Anchor on the last stable block so a volatile recall suffix refresh
+		// re-bills only the suffix, not the whole head. All-volatile (or a
+		// stable tail after a mid-array volatile block) keeps tail anchoring.
+		const suffixStart = stableSystemSuffixStart(systemBlocks);
+		const anchorIndex = suffixStart === systemBlocks.length ? systemBlocks.length - 1 : suffixStart - 1;
+		const anchor = anchorIndex >= 0 ? systemBlocks[anchorIndex] : systemBlocks[systemBlocks.length - 1];
+		if (anchor) anchor.cache_control = cloneAnthropicCacheControl(cacheControl);
 	}
 }
 
@@ -4216,14 +4251,16 @@ function syncAnthropicControlState(state: AnthropicControlState, messages: reado
 }
 
 /**
- * Keep the top-level `system` array byte-stable across a session. The blocks
- * captured on the first request are replayed verbatim (with the current
- * request's cache breakpoints) while their text is unchanged. A text change
+ * Keep the top-level `system` array byte-stable across a session. The stable
+ * prefix captured on the first request is replayed verbatim (with the current
+ * request's cache breakpoints) while its text is unchanged; the volatile
+ * recall suffix always passes through current-turn. A stable-prefix change
  * re-baselines instead of duplicating the prompt as a mid-conversation
  * system message: omp's system prompt is one rendered segment that embeds
  * the tool roster, so replaying a second copy on every later request would
  * cost the full prompt again per change. The prefix rewrite is absorbed by
- * `prefix_mismatch_behavior: "drop_block"` and one cache miss.
+ * `prefix_mismatch_behavior: "drop_block"` and one cache miss, while a
+ * recall-only change keeps the tool/control baselines intact.
  */
 function planStableAnthropicSystem(
 	current: AnthropicSystemBlock[] | undefined,
@@ -4231,16 +4268,21 @@ function planStableAnthropicSystem(
 	enabled: boolean,
 ): AnthropicSystemBlock[] | undefined {
 	if (!state || !enabled) return current;
-	const fingerprint = JSON.stringify(current?.map(block => block.text) ?? null);
+	const suffixStart = stableSystemSuffixStart(current ?? []);
+	const fingerprint = JSON.stringify(current?.slice(0, suffixStart).map(block => block.text) ?? null);
 	if (state.systemFingerprint !== fingerprint) {
 		resetAnthropicControlState(state);
 		state.systemFingerprint = fingerprint;
-		state.stableSystemBlocks = current?.map(block => ({ type: block.type, text: block.text }));
+		state.stableSystemBlocks = current?.slice(0, suffixStart).map(block => ({ type: block.type, text: block.text }));
 	}
-	return state.stableSystemBlocks?.map((block, index) => {
-		const cacheControl = current?.[index]?.cache_control;
-		return cacheControl ? { ...block, cache_control: cloneAnthropicCacheControl(cacheControl) } : { ...block };
-	});
+	const stableReplay =
+		state.stableSystemBlocks?.map((block, index) => {
+			const cacheControl = current?.[index]?.cache_control;
+			return cacheControl ? { ...block, cache_control: cloneAnthropicCacheControl(cacheControl) } : { ...block };
+		}) ?? [];
+	const suffix = current?.slice(suffixStart).map(block => ({ ...block })) ?? [];
+	const replayed = [...stableReplay, ...suffix];
+	return replayed.length > 0 ? replayed : undefined;
 }
 
 function anthropicToolDefinitionKey(tool: AnthropicWireTool): string {

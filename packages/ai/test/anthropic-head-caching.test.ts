@@ -592,4 +592,58 @@ describe("anthropic head caching (general API-key path)", () => {
 		expect(cached).toContain(69);
 		expect(cached).toHaveLength(4);
 	});
+	it("keeps the head breakpoint on the stable prefix when the recall suffix refreshes", async () => {
+		const oAuthModel = buildModel({ ...MODEL_SPEC, id: "claude-opus-5", name: "Claude Opus 5" });
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		const captureRecall = (recall: string, messages: Message[]): Promise<MessageCreateParams> => {
+			const controller = new AbortController();
+			const { promise, resolve } = Promise.withResolvers<MessageCreateParams>();
+			const stream = streamAnthropic(
+				oAuthModel,
+				{ systemPrompt: ["You are helpful.", "Follow the house style.", recall], messages, tools: CONTEXT.tools },
+				{
+					apiKey: "sk-ant-api-test",
+					signal: controller.signal,
+					isOAuth: true,
+					sessionId: "sess-recall",
+					providerSessionState,
+					onPayload: payload => {
+						resolve(payload as unknown as MessageCreateParams);
+						controller.abort();
+					},
+				},
+			);
+			void stream.result().catch(() => undefined);
+			return promise;
+		};
+		const messages: Message[] = [{ role: "user", content: "hello", timestamp: 1 }];
+		const before = await captureRecall("<memories>\nrecall v1\n</memories>", messages);
+		const systemBefore = (before.system ?? []).map(block => (typeof block === "string" ? block : block.text));
+		const breakpointBefore = systemBefore.findIndex(text => {
+			const block = (before.system ?? [])[systemBefore.indexOf(text)];
+			return typeof block === "object" && block !== null && "cache_control" in block && block.cache_control != null;
+		});
+		const after = await captureRecall("<memories>\nrecall v2\n</memories>", [
+			...messages,
+			assistantMessage("hi there", 2),
+			{ role: "user", content: "again", timestamp: 3 },
+		]);
+		expect(countCacheBreakpoints(after)).toBeLessThanOrEqual(4);
+		// The breakpoint stays on the stable prefix (index 1 + 2 OAuth identity blocks),
+		// never on the volatile recall suffix at the tail.
+		const systemAfter = after.system ?? [];
+		const cachedSystem = systemAfter.findIndex(
+			block =>
+				typeof block === "object" && block !== null && "cache_control" in block && block.cache_control != null,
+		);
+		expect(cachedSystem).toBe(breakpointBefore);
+		expect(cachedSystem).toBeLessThan(systemAfter.length - 1);
+		// Stable prefix bytes survive the recall refresh: strip the volatile
+		// suffix and the per-turn cache_control, then compare.
+		const stableText = (body: MessageCreateParams): string[] =>
+			(body.system ?? [])
+				.filter(block => typeof block !== "string" && !block.text.startsWith("<memories>"))
+				.map(block => (typeof block === "string" ? block : block.text));
+		expect(stableText(after)).toEqual(stableText(before));
+	});
 });
