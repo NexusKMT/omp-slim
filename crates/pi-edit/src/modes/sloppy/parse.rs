@@ -1688,6 +1688,9 @@ fn finish_pattern(
 						matches.sort_by_key(|candidate| candidate.match_start);
 						let first = &matches[0];
 						let second = &matches[1];
+						if first.match_end > second.match_start {
+							return Err(ambiguity);
+						}
 						if content[first.match_end..second.match_start]
 							.trim()
 							.is_empty()

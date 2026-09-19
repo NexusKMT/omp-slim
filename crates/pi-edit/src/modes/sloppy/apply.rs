@@ -2085,7 +2085,11 @@ fn duplicate_collapse_span(
 	let match_start = normalized_index_at(&normalized, candidate.start);
 	let match_end = normalized_index_at(&normalized, candidate.end);
 	for overlap in (MIN_OVERLAP..=rewrite.len().min(match_start)).rev() {
-		if normalized.text[match_start - overlap..match_start] != rewrite[..overlap] {
+		if !normalized
+			.text
+			.get(match_start - overlap..match_start)
+			.is_some_and(|prefix| rewrite.starts_with(prefix))
+		{
 			continue;
 		}
 		let mut start = normalized
@@ -2108,7 +2112,11 @@ fn duplicate_collapse_span(
 			.min(normalized.text.len().saturating_sub(match_end)))
 		.rev()
 	{
-		if normalized.text[match_end..match_end + overlap] != rewrite[rewrite.len() - overlap..] {
+		if !normalized
+			.text
+			.get(match_end..match_end + overlap)
+			.is_some_and(|suffix| rewrite.ends_with(suffix))
+		{
 			continue;
 		}
 		let mut end = normalized

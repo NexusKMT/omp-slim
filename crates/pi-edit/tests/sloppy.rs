@@ -2,7 +2,7 @@ mod common;
 
 use common::{DiskWriter, Workspace, run_fixture};
 use pi_edit::{
-	EditMode, EditStore, ModeEngine,
+	EditError, EditMode, EditStore, ModeEngine,
 	files::FileCache,
 	modes::sloppy::{
 		SloppyEngine,
@@ -233,6 +233,47 @@ async fn after_rejects_empty_actions_and_missing_anchors_without_writing() {
 		assert!(writer.requests.lock().is_empty());
 		assert_eq!(workspace.read("a.txt").unwrap(), "anchor\n");
 	}
+}
+
+#[tokio::test]
+async fn no_op_recovery_respects_utf8_boundaries_in_source_and_replacement() {
+	for (before, anchor) in [
+		("abcdefgh\n══════\n", "abcdefgh"),
+		("══════\nabcdefgh\n", "abcdefgh"),
+		("0123456789\nabcdefgh😀\n", "abcdefgh😀"),
+		("😀abcdefgh\n0123456789\n", "😀abcdefgh"),
+	] {
+		let workspace = Workspace::new(EditMode::Sloppy);
+		workspace.write("a.txt", before);
+		let writer = DiskWriter::default();
+		let input = format!(
+			"<SM:EDIT path=\"a.txt\">\n<SM:FIND>\n{anchor}\n</SM:FIND>\n<SM:PUT>\n{anchor}\n</SM:\
+			 PUT>\n</SM:EDIT>\n"
+		);
+		let error = workspace
+			.apply_raw(&input, &writer)
+			.await
+			.expect_err("an unchanged edit reports a no-op instead of panicking");
+		assert!(matches!(error, EditError::Match(_)));
+		assert!(writer.requests.lock().is_empty());
+		assert_eq!(workspace.read("a.txt").unwrap(), before);
+	}
+}
+
+#[tokio::test]
+async fn overlapping_desired_matches_are_rejected_without_collapsing_source() {
+	let workspace = Workspace::new(EditMode::Sloppy);
+	let before = "abcabcabc\n";
+	workspace.write("a.txt", before);
+	let writer = DiskWriter::default();
+	let error = workspace
+		.apply_raw("<SM:EDIT path=\"a.txt\">\nabcabc", &writer)
+		.await
+		.expect_err("overlapping matches are not adjacent duplicate blocks");
+	assert!(matches!(error, EditError::Match(_)));
+	assert!(error.to_string().contains("ambiguous"));
+	assert!(writer.requests.lock().is_empty());
+	assert_eq!(workspace.read("a.txt").unwrap(), before);
 }
 
 #[test]

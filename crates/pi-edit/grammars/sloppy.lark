@@ -20,7 +20,8 @@ pair: find (put | after)
 find: "<SM:FIND>" LF content_line* "</SM:FIND>" LF
 put: "<SM:PUT>" LF content_line* "</SM:PUT>" LF
    | "<SM:PUT></SM:PUT>" LF
-after: "<SM:AFTER>" LF content_line+ "</SM:AFTER>" LF
+// Keep empty insertions decodable; execution rejects them without writing.
+after: "<SM:AFTER>" LF content_line* "</SM:AFTER>" LF
 content_line: TEXT LF | LF
 TEXT: /[^\n]+/
 
