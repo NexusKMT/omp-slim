@@ -683,7 +683,10 @@ export async function findMostRecentNonEmptySession(
 	sessionDir: string,
 	storage: SessionStorage = new FileSessionStorage(),
 ): Promise<string | null> {
-	const sessions = await scanSessionDir(sessionDir, storage, false);
+	// Status on: answered-ness comes from the tail lifecycle, not the 4 KB
+	// prefix, so a transcript whose first assistant record starts past the
+	// prefix is never skipped.
+	const sessions = await scanSessionDir(sessionDir, storage, true);
 	return sessions.find(session => !isEmptySession(session))?.path ?? null;
 }
 

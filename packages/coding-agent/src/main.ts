@@ -149,7 +149,7 @@ async function loadSessionPicker(): Promise<SessionPicker> {
 				await storage.deleteSessionWithArtifacts(session.path);
 				return true;
 			},
-			loadAllSessions: () => SessionManager.listAll(storage),
+			loadAllSessions: () => SessionManager.listAllForPicker(storage),
 		});
 	};
 }
