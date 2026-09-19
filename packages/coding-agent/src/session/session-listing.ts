@@ -468,11 +468,18 @@ async function scanSessionFile(
 
 		firstMessage ||= extractFirstDisplayMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
-		// Either window may hold the only copy of an assistant record: the 4 KB
-		// prefix can cut one mid-line (lenient parse drops it) and the tail
-		// carries the transcript end. A trailing user turn must not mask an
-		// earlier assistant reply, so scan both for assistant markers.
+		// Either bounded window may hold the only copy of an assistant record,
+		// and neither may: a >prefix record before a >suffix tail leaves the
+		// middle unexamined. When both windows miss, ask the backend for a full
+		// line-boundary scan rather than trusting the gap.
 		assistantTurns = Math.max(assistantTurns, countAssistantMarkers(content), countAssistantMarkers(suffix));
+		if (assistantTurns === 0 && storage.hasAssistantTurn) {
+			try {
+				if (await storage.hasAssistantTurn(file)) assistantTurns = 1;
+			} catch {
+				// Backend unreadable: keep the bounded-window evidence.
+			}
+		}
 		const info: SessionInfo = {
 			path: file,
 			id: header.id,

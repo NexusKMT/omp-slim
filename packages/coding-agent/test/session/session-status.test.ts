@@ -116,7 +116,21 @@ describe("SessionManager.list session status (tail derivation)", () => {
 			"mid-assistant-pending",
 		]);
 	});
+
+	it("keeps a titleless session whose only assistant record fits in neither window", async () => {
+		const imageBlock = { type: "image", data: "a".repeat(5000), mimeType: "image/png" };
+		const bigAssistant = "b".repeat(40_000);
+		const storage = seed({
+			"middle-gap-assistant":
+				msg({ role: "user", content: [imageBlock] }) + assistant("stop", [textBlock(bigAssistant)]),
+		});
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([
+			"middle-gap-assistant",
+		]);
+	});
+
 	it("reports unknown rather than misclassifying when the final message exceeds the tail window", async () => {
+		// A completed turn whose final assistant message is larger than the 32 KiB
 		// tail window: the window only captures a fragment of that final line, which
 		// fails to parse. The picker must surface 'unknown', never a wrong status.
 		const huge = "x".repeat(40_000);

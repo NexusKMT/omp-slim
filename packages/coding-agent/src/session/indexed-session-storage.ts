@@ -288,6 +288,16 @@ export class IndexedSessionStorage implements SessionStorage {
 		return [title ? overlayTitleSlotPrefix(prefix, prefixLimit, title) : prefix, suffix];
 	}
 
+	async hasAssistantTurn(path: string): Promise<boolean> {
+		for (const line of (await this.readText(path)).split("\n")) {
+			if (line.length === 0 || line.charCodeAt(0) !== 123) continue;
+			const typeIndex = line.indexOf('"type"');
+			if (typeIndex === -1 || !line.includes('"message"', typeIndex)) continue;
+			if (line.includes('"role":"assistant"') || line.includes('"role": "assistant"')) return true;
+		}
+		return false;
+	}
+
 	async writeText(path: string, content: string): Promise<void> {
 		await this.#awaitPath(path);
 		const previous = this.#index.get(path);
