@@ -3574,7 +3574,8 @@ export class SessionManager {
 						session =>
 							path.resolve(session.path) !== breadcrumbFile &&
 							session.cwd &&
-							path.resolve(session.cwd) === resolvedCwd,
+							path.resolve(session.cwd) === resolvedCwd &&
+							!isEmptySession(session),
 					);
 					if (localSession) {
 						newestInTargetDir = localSession.path;
