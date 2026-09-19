@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed valid required null values inside tool argument unions being removed before dispatch.
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed
