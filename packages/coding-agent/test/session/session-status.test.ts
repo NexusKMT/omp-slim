@@ -95,8 +95,18 @@ describe("SessionManager.list session status (tail derivation)", () => {
 			"named-user-only",
 		]);
 	});
+
+	it("keeps a titleless session whose first assistant turn starts past the prefix", async () => {
+		const bigImage = `data:image/png;base64,${"a".repeat(5000)}`;
+		const storage = seed({
+			"late-assistant": user(bigImage) + assistant("stop", [textBlock("answered")]),
+		});
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([
+			"late-assistant",
+		]);
+	});
+
 	it("reports unknown rather than misclassifying when the final message exceeds the tail window", async () => {
-		// A completed turn whose final assistant message is larger than the 32 KiB
 		// tail window: the window only captures a fragment of that final line, which
 		// fails to parse. The picker must surface 'unknown', never a wrong status.
 		const huge = "x".repeat(40_000);

@@ -654,15 +654,19 @@ export async function listAllSessions(
 	}
 }
 /**
- * True when a scanned session is a 0-turn stub with no display name: zero
- * assistant turns and neither a title nor a first prompt worth showing. Covers
- * header-only records (`newSession()` boundaries, `ensureOnDisk()` stubs,
- * drafts) and user-only sessions whose prompt text never made the prefix scan.
- * A title or first prompt is user intent worth resuming, so named 0-turn
- * sessions stay discoverable. The picker and `--continue` skip these; every
- * other consumer (GC, ACP, `resolveResumableSession`) keeps the unfiltered scan.
+ * True when a scanned session is a 0-turn stub with no display name: the tail
+ * lifecycle shows no assistant activity (pending user-only or unscannable)
+ * and neither a title nor a first prompt worth showing. Covers header-only
+ * records (`newSession()` boundaries, `ensureOnDisk()` stubs, drafts) and
+ * user-only sessions whose prompt text never made the prefix scan. A title or
+ * first prompt is user intent worth resuming, so named 0-turn sessions stay
+ * discoverable. The tail — not the 4 KB prefix — decides answered-ness, so a
+ * transcript whose first assistant record starts past the prefix is never
+ * elided. The picker and `--continue` skip these; every other consumer (GC,
+ * ACP, `resolveResumableSession`) keeps the unfiltered scan.
  */
 export function isEmptySession(session: SessionInfo): boolean {
+	if (session.status !== undefined && session.status !== "pending" && session.status !== "unknown") return false;
 	if ((session.assistantTurns ?? 1) > 0) return false;
 	if (sanitizeSessionName(session.title)) return false;
 	if (sanitizeSessionName(session.firstMessage === "(no messages)" ? undefined : session.firstMessage)) return false;
@@ -763,7 +767,7 @@ export async function getRecentSessions(
 			recent.push({ path: file, name: indexed, timeAgo: formatTimeAgo(stat.mtime) });
 			continue;
 		}
-		const info = await scanSessionFile(file, storage, false, stat);
+		const info = await scanSessionFile(file, storage, true, stat);
 		if (!info || isEmptySession(info)) continue;
 		const title = sanitizeSessionName(info.title);
 		if (useIndex && title && info.id) recordSessionTitle(info.id, title);
