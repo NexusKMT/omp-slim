@@ -1923,6 +1923,7 @@ export class SelectorController {
 				},
 				historyMatcher,
 				loadAllSessions: () => SessionManager.listAllForPicker(),
+				pinnedIds,
 				// Live getter so detach/newSession stays accurate; tolerant of partial
 				// contexts and in-memory sessions (undefined file means no marker).
 				currentSessionPath: () => this.ctx.sessionManager.getSessionFile?.() ?? undefined,

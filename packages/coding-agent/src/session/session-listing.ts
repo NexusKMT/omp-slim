@@ -269,19 +269,29 @@ function extractStringProperty(source: string, name: string, startIndex = 0): st
 	return decodeJsonStringFragment(source.slice(valueStart));
 }
 
-function countMessageMarkers(content: string): number {
+function countRoleMarkers(content: string, role: "assistant" | "user" | "message"): number {
+	const key = role === "message" ? '"type"' : '"role"';
+	const want = role === "message" ? "message" : role;
 	let count = 0;
 	let index = 0;
 	while (index < content.length) {
-		const typeIndex = content.indexOf('"type"', index);
-		if (typeIndex === -1) break;
-		const colonIndex = content.indexOf(":", typeIndex + 6);
+		const keyIndex = content.indexOf(key, index);
+		if (keyIndex === -1) break;
+		const colonIndex = content.indexOf(":", keyIndex + key.length);
 		if (colonIndex === -1) break;
-		const type = extractStringProperty(content, "type", typeIndex);
-		if (type === "message") count++;
+		const value = extractStringProperty(content, role === "message" ? "type" : "role", keyIndex);
+		if (value === want) count++;
 		index = colonIndex + 1;
 	}
 	return count;
+}
+
+function countMessageMarkers(content: string): number {
+	return countRoleMarkers(content, "message");
+}
+
+function countAssistantMarkers(content: string): number {
+	return countRoleMarkers(content, "assistant");
 }
 
 function extractFirstDisplayMessageFromPrefix(content: string): string | undefined {
@@ -458,6 +468,10 @@ async function scanSessionFile(
 
 		firstMessage ||= extractFirstDisplayMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
+		// The 4 KB prefix may cut an assistant record mid-line so the lenient
+		// parse drops it; marker-scan the raw prefix so a truncated assistant
+		// turn still counts as answered and is never elided as 0-turn.
+		assistantTurns = Math.max(assistantTurns, countAssistantMarkers(content));
 		const info: SessionInfo = {
 			path: file,
 			id: header.id,
