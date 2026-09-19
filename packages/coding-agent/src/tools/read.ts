@@ -830,8 +830,9 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		// Frozen at the last prompt rebuild (managed sessions). SDK consumers
 		// building a bare ToolSession lack the rebuild lifecycle, so fall back
 		// to the derived form (skillful && skills) instead of dropping the hint.
-		const hasSkills = (this.session.skillHintVisible ??
-			(this.session.settings.get("skillful") && (this.session.skills?.length ?? 0) > 0)) === true;
+		const hasSkills =
+			(this.session.skillHintVisible ??
+				(this.session.settings.get("skillful") && (this.session.skills?.length ?? 0) > 0)) === true;
 		if (this.session.settings.get("memory.backend") === "off") {
 			return hasSkills ? readSchemaWithoutMemoryWithSkills : readSchemaWithoutMemory;
 		}
