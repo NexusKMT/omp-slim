@@ -395,7 +395,8 @@ export class InputController {
 					// The tree selector rebinds Alt+L for its `labeled-only` filter
 					// and mounts inline (no overlay), so its own binding stays
 					// authoritative here — same defer as the tools toggle above.
-					if (this.ctx.ui.getFocused() instanceof TreeSelectorComponent) return undefined;
+					if (this.ctx.ui.getFocused() instanceof TreeSelectorComponent && matchesKey(data, "alt+l"))
+						return undefined;
 					this.ctx.resetDisplayAfterAppearanceRefresh();
 					return { consume: true };
 				}
