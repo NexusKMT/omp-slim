@@ -468,10 +468,11 @@ async function scanSessionFile(
 
 		firstMessage ||= extractFirstDisplayMessageFromPrefix(content) ?? "";
 		const messageCount = Math.max(parsedMessageCount, countMessageMarkers(content));
-		// The 4 KB prefix may cut an assistant record mid-line so the lenient
-		// parse drops it; marker-scan the raw prefix so a truncated assistant
-		// turn still counts as answered and is never elided as 0-turn.
-		assistantTurns = Math.max(assistantTurns, countAssistantMarkers(content));
+		// Either window may hold the only copy of an assistant record: the 4 KB
+		// prefix can cut one mid-line (lenient parse drops it) and the tail
+		// carries the transcript end. A trailing user turn must not mask an
+		// earlier assistant reply, so scan both for assistant markers.
+		assistantTurns = Math.max(assistantTurns, countAssistantMarkers(content), countAssistantMarkers(suffix));
 		const info: SessionInfo = {
 			path: file,
 			id: header.id,

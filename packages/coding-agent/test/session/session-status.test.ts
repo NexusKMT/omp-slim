@@ -106,6 +106,16 @@ describe("SessionManager.list session status (tail derivation)", () => {
 		]);
 	});
 
+	it("keeps a pending session whose assistant reply sits mid-transcript", async () => {
+		const bigImage = `data:image/png;base64,${"a".repeat(5000)}`;
+		const storage = seed({
+			"mid-assistant-pending":
+				user(bigImage) + assistant("stop", [textBlock("answered")]) + user("awaiting follow-up"),
+		});
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([
+			"mid-assistant-pending",
+		]);
+	});
 	it("reports unknown rather than misclassifying when the final message exceeds the tail window", async () => {
 		// tail window: the window only captures a fragment of that final line, which
 		// fails to parse. The picker must surface 'unknown', never a wrong status.
