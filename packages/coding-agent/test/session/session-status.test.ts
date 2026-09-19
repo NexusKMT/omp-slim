@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import { isAssistantMessageLine } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { SessionStatus } from "@oh-my-pi/pi-coding-agent/session/session-listing";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { MemorySessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
-
 const SESSION_DIR = "/sessions/status-proj";
 
 function line(obj: unknown): string {
@@ -129,6 +129,36 @@ describe("SessionManager.list session status (tail derivation)", () => {
 		]);
 	});
 
+	it("keeps a gap assistant record serialized with valid JSON whitespace", async () => {
+		expect(isAssistantMessageLine('{"type" : "message", "message": {"role" : "assistant"}}')).toBe(true);
+		expect(isAssistantMessageLine('{"type":"message","message":{"role":\t"assistant"}}')).toBe(true);
+		const imageBlock = { type: "image", data: "a".repeat(5000), mimeType: "image/png" };
+		const bigAssistant = "b".repeat(40_000);
+		const userLine = JSON.stringify({ role: "user", content: [imageBlock] });
+		const asstRecord = JSON.stringify({
+			type: "message",
+			id: "e-gap",
+			parentId: null,
+			timestamp: new Date().toISOString(),
+			message: {
+				role: "assistant",
+				provider: "anthropic",
+				model: "m",
+				stopReason: "stop",
+				content: [{ type: "text", text: bigAssistant }],
+			},
+		})
+			.replace('"type":', '"type" :')
+			.replace('"role":', '"role" :');
+		const storage = new MemorySessionStorage();
+		storage.writeTextSync(
+			`${SESSION_DIR}/gap-whitespace.jsonl`,
+			`${JSON.stringify({ type: "session", version: 3, id: "gap-whitespace", cwd: "/proj", timestamp: new Date().toISOString() })}\n${userLine}\n${asstRecord}\n`,
+		);
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([
+			"gap-whitespace",
+		]);
+	});
 	it("reports unknown rather than misclassifying when the final message exceeds the tail window", async () => {
 		// A completed turn whose final assistant message is larger than the 32 KiB
 		// tail window: the window only captures a fragment of that final line, which

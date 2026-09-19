@@ -8,6 +8,7 @@ import * as logger from "@oh-my-pi/pi-utils/logger";
 import { peekFileEnds } from "@oh-my-pi/pi-utils/peek-file";
 import { Snowflake } from "@oh-my-pi/pi-utils/snowflake";
 import { toError } from "@oh-my-pi/pi-utils/type-guards";
+import { isAssistantMessageLine } from "./session-entries";
 import { overlayTitleSlotContent, type SessionTitleUpdate, serializeTitleSlot } from "./session-title-slot";
 
 const utf8Decoder = new TextDecoder("utf-8");
@@ -685,10 +686,7 @@ export class FileSessionStorage implements SessionStorage {
 		const fileHandle = await fsp.open(path, "r");
 		try {
 			for await (const line of fileHandle.readLines()) {
-				if (line.length === 0 || line.charCodeAt(0) !== 123) continue;
-				const typeIndex = line.indexOf('"type"');
-				if (typeIndex === -1 || !line.includes('"message"', typeIndex)) continue;
-				if (line.includes('"role":"assistant"') || line.includes('"role": "assistant"')) return true;
+				if (isAssistantMessageLine(line)) return true;
 			}
 			return false;
 		} finally {
@@ -1199,10 +1197,7 @@ export class MemorySessionStorage implements SessionStorage {
 		const entry = this.#files.get(path);
 		if (!entry) throw new Error(`File not found: ${path}`);
 		for (const line of materializeMemoryEntry(entry).split("\n")) {
-			if (line.length === 0 || line.charCodeAt(0) !== 123) continue;
-			const typeIndex = line.indexOf('"type"');
-			if (typeIndex === -1 || !line.includes('"message"', typeIndex)) continue;
-			if (line.includes('"role":"assistant"') || line.includes('"role": "assistant"')) return true;
+			if (isAssistantMessageLine(line)) return true;
 		}
 		return false;
 	}
