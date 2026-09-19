@@ -126,7 +126,8 @@ describe("SessionManager.continueRecent /new boundary", () => {
 			await relaunched.close();
 		}
 	});
-	it("-c skips an empty newest stub and continues the latest non-empty session", async () => {
+
+	it("-c skips an empty newest stub when the breadcrumb belongs to another project", async () => {
 		const old = SessionManager.create(cwd);
 		old.appendMessage({ role: "user", content: "real work", timestamp: 1 });
 		old.appendMessage(makeAssistantMessage());
@@ -135,9 +136,21 @@ describe("SessionManager.continueRecent /new boundary", () => {
 		if (!oldFile) throw new Error("Expected persisted old session file");
 		await old.close();
 
-		// Newest file is an untitled header-only stub (e.g. ACP session/new)
-		// with no breadcrumb pointing at it: -c falls back past it.
+		// All writes below share one terminal, so the breadcrumb points at the
+		// foreign project while -c runs in cwd: the different-cwd branch.
 		process.env.TMUX_PANE = "%new-boundary-skip-empty-terminal";
+		const stubFile = SessionManager.createEmptySessionFile(cwd);
+		expect(fs.existsSync(stubFile)).toBe(true);
+
+		const cwdOther = path.join(testAgentDir, "other-project");
+		fs.mkdirSync(cwdOther, { recursive: true });
+		const other = SessionManager.create(cwdOther);
+		other.appendMessage({ role: "user", content: "other work", timestamp: 1 });
+		other.appendMessage(makeAssistantMessage());
+		await other.flush();
+		await other.close();
+
+		// Newest file in cwd is the untitled stub; -c must fall back past it.
 		const relaunched = await SessionManager.continueRecent(cwd);
 		try {
 			expect(path.resolve(relaunched.getSessionFile() ?? "")).toBe(path.resolve(oldFile));

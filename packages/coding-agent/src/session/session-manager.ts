@@ -3563,7 +3563,7 @@ export class SessionManager {
 				// When an explicit sessionDir is reused across the move, the stale
 				// breadcrumb file may be the newest entry there; prefer a genuine
 				// current-cwd session.
-				let newestInTargetDir = await findMostRecentSession(dir, storage);
+				let newestInTargetDir = await findMostRecentNonEmptySession(dir, storage);
 				const breadcrumbFile = path.resolve(breadcrumb.sessionFile);
 				const breadcrumbCwdMissing = !fs.existsSync(breadcrumbCwd);
 				const newestIsBreadcrumb = newestInTargetDir ? path.resolve(newestInTargetDir) === breadcrumbFile : false;
