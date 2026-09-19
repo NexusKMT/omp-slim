@@ -59,8 +59,6 @@ describe("SessionManager.list session status (tail derivation)", () => {
 			// `stop` but with an unanswered tool call → the loop was cut off before
 			// running it, so this is interrupted rather than complete.
 			"stop-with-pending-tool": user("go") + assistant("stop", [toolCallBlock()]),
-			// Header only, no messages → nothing to classify.
-			"header-only": "",
 		});
 
 		const status = await statusById(storage);
@@ -71,9 +69,32 @@ describe("SessionManager.list session status (tail derivation)", () => {
 		expect(status.get("error")).toBe("error");
 		expect(status.get("pending")).toBe("pending");
 		expect(status.get("stop-with-pending-tool")).toBe("interrupted");
-		expect(status.get("header-only")).toBe("unknown");
 	});
 
+	it("excludes untitled header-only sessions from the picker list but keeps them in raw list", async () => {
+		const storage = seed({ "header-only": "" });
+		expect((await SessionManager.list("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual(["header-only"]);
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([]);
+	});
+	it("keeps titled header-only sessions in the picker list", async () => {
+		const storage = new MemorySessionStorage();
+		storage.writeTextSync(
+			`${SESSION_DIR}/titled-empty.jsonl`,
+			`${JSON.stringify({ type: "session", version: 3, id: "titled-empty", cwd: "/proj", title: "Named stub", timestamp: new Date().toISOString() })}\n`,
+		);
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id)).toEqual([
+			"titled-empty",
+		]);
+	});
+
+	it("elides unnamed 0-turn stubs from the picker but keeps named 0-turn sessions", async () => {
+		const storage = new MemorySessionStorage();
+		storage.writeTextSync(`${SESSION_DIR}/named-user-only.jsonl`, header("named-user-only") + user("typed prompt"));
+		storage.writeTextSync(`${SESSION_DIR}/blank-stub.jsonl`, header("blank-stub"));
+		expect((await SessionManager.listForPicker("/proj", SESSION_DIR, storage)).map(s => s.id).sort()).toEqual([
+			"named-user-only",
+		]);
+	});
 	it("reports unknown rather than misclassifying when the final message exceeds the tail window", async () => {
 		// A completed turn whose final assistant message is larger than the 32 KiB
 		// tail window: the window only captures a fragment of that final line, which

@@ -39,6 +39,8 @@ export interface SessionInfo {
 	created: Date;
 	modified: Date;
 	messageCount: number;
+	/** Persisted assistant turns; zero means the agent never replied (0-turn session). */
+	assistantTurns?: number;
 	/** File size in bytes on disk; used for compact list rendering. */
 	size: number;
 	firstMessage: string;
@@ -424,6 +426,7 @@ async function scanSessionFile(
 		}
 
 		let parsedMessageCount = 0;
+		let assistantTurns = 0;
 		let firstMessage = "";
 		const allMessages: string[] = [];
 		let shortSummary: string | undefined;
@@ -437,6 +440,7 @@ async function scanSessionFile(
 
 			if (entry.type === "message" && entry.message) {
 				parsedMessageCount++;
+				if (entry.message.role === "assistant") assistantTurns++;
 
 				if (entry.message.role === "user" || entry.message.role === "assistant") {
 					const messageText = textContent(entry.message.content, " ");
@@ -463,6 +467,7 @@ async function scanSessionFile(
 			created: new Date(header.timestamp ?? ""),
 			modified: mtime,
 			messageCount,
+			assistantTurns,
 			size,
 			firstMessage: firstMessage || "(no messages)",
 			allMessagesText: allMessages.length > 0 ? allMessages.join(" ") : firstMessage,
@@ -634,6 +639,35 @@ export async function listAllSessions(
 		return [];
 	}
 }
+/**
+ * True when a scanned session is a 0-turn stub with no display name: zero
+ * assistant turns and neither a title nor a first prompt worth showing. Covers
+ * header-only records (`newSession()` boundaries, `ensureOnDisk()` stubs,
+ * drafts) and user-only sessions whose prompt text never made the prefix scan.
+ * A title or first prompt is user intent worth resuming, so named 0-turn
+ * sessions stay discoverable. The picker and `--continue` skip these; every
+ * other consumer (GC, ACP, `resolveResumableSession`) keeps the unfiltered scan.
+ */
+export function isEmptySession(session: SessionInfo): boolean {
+	if ((session.assistantTurns ?? 1) > 0) return false;
+	if (sanitizeSessionName(session.title)) return false;
+	if (sanitizeSessionName(session.firstMessage === "(no messages)" ? undefined : session.firstMessage)) return false;
+	return true;
+}
+
+/** Picker-facing view of a session list: empties dropped, pinned sessions kept. */
+export function filterSessionsForPicker(sessions: SessionInfo[], pinnedIds: ReadonlySet<string>): SessionInfo[] {
+	return sessions.filter(session => pinnedIds.has(session.id) || !isEmptySession(session));
+}
+
+/** Most recent session with resumable content, skipping 0-turn empties. Exported for testing. */
+export async function findMostRecentNonEmptySession(
+	sessionDir: string,
+	storage: SessionStorage = new FileSessionStorage(),
+): Promise<string | null> {
+	const sessions = await scanSessionDir(sessionDir, storage, false);
+	return sessions.find(session => !isEmptySession(session))?.path ?? null;
+}
 
 /** Exported for testing */
 export async function findMostRecentSession(
@@ -716,7 +750,7 @@ export async function getRecentSessions(
 			continue;
 		}
 		const info = await scanSessionFile(file, storage, false, stat);
-		if (!info) continue;
+		if (!info || isEmptySession(info)) continue;
 		const title = sanitizeSessionName(info.title);
 		if (useIndex && title && info.id) recordSessionTitle(info.id, title);
 		recent.push({ path: file, name: sessionDisplayName(info), timeAgo: formatTimeAgo(info.modified) });
