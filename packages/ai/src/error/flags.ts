@@ -1,5 +1,5 @@
 import { isUnexpectedSocketCloseMessage } from "@oh-my-pi/pi-utils/fetch-retry";
-import type { Api, AssistantMessage } from "../types";
+import type { Api, AssistantMessage, Usage } from "../types";
 import { AwsCredentialsError } from "./aws";
 import {
 	AnthropicConnectionError,
@@ -862,14 +862,21 @@ export function attach<E extends object>(error: E, id: number): E {
 	return error;
 }
 
+/** Overflow-classification evidence, including errors received before token usage is available. */
+export interface ContextOverflowMessage extends Pick<AssistantMessage, "errorId" | "stopReason" | "errorMessage"> {
+	readonly usage?: Pick<Usage, "input" | "cacheRead" | "cacheWrite">;
+}
+
 /** Provider-reported usage proves context-window excess — authoritative, compaction-owned (#9235). */
-export function isUsageBackedContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
-	if (!contextWindow) return false;
-	const inputTokens = message.usage.input + message.usage.cacheRead + message.usage.cacheWrite;
+export function isUsageBackedContextOverflow(message: ContextOverflowMessage, contextWindow?: number): boolean {
+	const usage = message.usage;
+	if (!contextWindow || !usage) return false;
+	const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
 	return inputTokens > contextWindow;
 }
 
-export function isContextOverflow(message: AssistantMessage, contextWindow?: number): boolean {
+/** Classify overflow from error flags, available token usage, or provider error text. */
+export function isContextOverflow(message: ContextOverflowMessage, contextWindow?: number): boolean {
 	if (is(message.errorId, Flag.ContextOverflow)) return true;
 	if (isUsageBackedContextOverflow(message, contextWindow)) return true;
 	return message.stopReason === "error" && !!message.errorMessage && matchesOverflowText(message.errorMessage);
@@ -889,7 +896,7 @@ export function isPayloadRejection(message: AssistantMessage): boolean {
  *  Usage-backed overflows are authoritative window excesses and never ambiguous. */
 export function isTextAmbiguousContextOverflow(
 	errorId: number,
-	message: AssistantMessage | undefined,
+	message: ContextOverflowMessage | undefined,
 	contextWindow?: number,
 ): boolean {
 	const overflowFlagged =

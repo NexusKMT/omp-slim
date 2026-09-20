@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Anthropic organization-level OAuth permission errors (`oauth_not_allowed_for_organization`) being treated as fatal failures instead of rotating to a sibling credential.
+- Fixed error classification crashing when a provider error arrives without token usage.
 
 ## [18.2.6] - 2026-09-18
 
