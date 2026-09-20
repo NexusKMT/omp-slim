@@ -73,7 +73,6 @@ import {
 } from "./config/model-resolver";
 import { formatModelSelectorValue, parseModelString } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
-import { applyProviderGlobalsFromSettings } from "./config/provider-globals";
 import { buildServiceTierByFamily } from "./config/service-tier";
 import { Settings, type SkillsSettings } from "./config/settings";
 import { CursorExecHandlers, type CursorMcpResourceAdapter } from "./cursor";
@@ -254,6 +253,7 @@ import { formatLocalCalendarDate } from "@oh-my-pi/pi-tui/chrome/local-date";
 import { normalizePromptPath } from "./utils/prompt-path";
 import { buildNamedToolChoice } from "./utils/tool-choice";
 import { VibeSessionRegistry } from "./vibe/runtime";
+import { registerLocalInferenceApi } from "./tiny/local-inference-api";
 import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 type McpNotificationEntry = {
@@ -1333,6 +1333,7 @@ export function createAutoLearnCaptureRunner(
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	registerLocalInferenceApi();
 	const extensionRoots = options.extensionRoots?.();
 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
@@ -1461,9 +1462,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				})
 			: undefined;
 	discoveredSkillsPromise?.catch(() => {});
-
-	// Initialize provider preferences from settings
-	applyProviderGlobalsFromSettings(settings);
 
 	const sessionManager =
 		options.sessionManager ??
