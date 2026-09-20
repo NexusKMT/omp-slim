@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- Eval `judge()`/`completion()` fan-out is capped at 32 in-flight requests, so a cell that spawns hundreds of handles no longer floods every judge/tier fallback (including self-hosted models) at once.
+- Judgments skip a judge candidate for five minutes after its account rejects a request (401/402/403) instead of re-paying the rejected call and credential rotation on every judgment.
+- Fixed contradictory `systemPromptTemplate` and `customSystemPrompt` options being accepted with a fixed full `systemPrompt` replacement, including empty values ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Fixed resume clutter: elide 0-turn sessions from the /resume menu; -c similarly skips empty sessions.
 - Fixed image and speech fallback models disappearing after discovery and false incompatibility warnings for providers without credentials.
 
