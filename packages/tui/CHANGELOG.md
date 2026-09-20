@@ -64,6 +64,9 @@
 ### Fixed
 
 - Prevented magic keywords from triggering spelling autocorrect and underlining
+### Added
+
+- Added the native annotation overlay for diffs and text, with inline/external note editing, empty-note deletion, cancellation, and `/copy`-backed session selection without auto-submission
 
 ## [18.2.5] - 2026-09-17
 

@@ -17,6 +17,9 @@
 - Unified terminal OAuth flow logic across `omp login` and `omp auth-broker login`
 - Included identity account/organization info in terminal login success messages
 - Changed judgment fallback to consider only native candidates, preventing prompted models from replacing failed natives
+- Enhanced browser resilience with configurable HTTPS error ignoring, domain allow-listing, and automatic tab recycling for security-sensitive state changes
+- Added `Target.getTargets` to the browser relay's CDP surface so clients can enumerate eligible pages without attaching to or claiming them.
+- Added native `/annotate` for local/PR code-review diffs and latest/session/clipboard text, reusing `/copy` selection with editable/deletable notes, paste-only text flows, and bounded selected-model context for older long session text
 
 ### Fixed
 
