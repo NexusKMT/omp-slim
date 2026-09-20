@@ -8,6 +8,7 @@
 ### Fixed
 
 - Fixed the session tree (`/tree`) exhausting memory and freezing the machine on long conversations.
+- Fixed the session tree redrawing and searching slowly on long conversations.
 
 ## [18.2.5] - 2026-09-17
 
