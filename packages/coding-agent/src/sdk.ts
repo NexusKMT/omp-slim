@@ -24,10 +24,8 @@ import type {
 } from "@oh-my-pi/pi-ai";
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
-import {
-	getOpenAICodexTransportDetails,
-	prewarmOpenAICodexResponses,
-} from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
 import { FALLBACK_DIALECT, preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { $env, $flag } from "@oh-my-pi/pi-utils/env";
@@ -4173,13 +4171,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		if (model?.api === "openai-codex-responses") {
 			// `.api` equality doesn't narrow the generic; the guard makes this cast sound.
 			const codexModel = model as Model<"openai-codex-responses">;
-			const codexTransport = getOpenAICodexTransportDetails(codexModel, {
-				sessionId: providerSessionId,
-				baseUrl: codexModel.baseUrl,
-				preferWebsockets: preferOpenAICodexWebsockets,
-				providerSessionState: session.providerSessionState,
-			});
-			if (codexTransport.websocketPreferred) {
+			if (isOpenAICodexWebSocketPreferred(codexModel, { preferWebsockets: preferOpenAICodexWebsockets })) {
 				void (async () => {
 					try {
 						const codexPrewarmApiKey = options.getApiKey

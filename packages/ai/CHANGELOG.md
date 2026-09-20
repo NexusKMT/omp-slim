@@ -8,6 +8,9 @@
 - Fixed error classification crashing when a provider error arrives without token usage.
 ### Breaking Changes
 
+### Breaking Changes
+
+- Import Anthropic streaming and provider request helpers from `@oh-my-pi/pi-ai/providers/anthropic` rather than the package root.
 - Moved `NO_AUTH_SENTINEL` from `providers/openai-shared` to `auth-retry`.
 
 ## [18.2.6] - 2026-09-18
