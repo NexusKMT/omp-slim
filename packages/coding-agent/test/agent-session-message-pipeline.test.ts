@@ -61,6 +61,8 @@ function createModelRegistryStub(key = "key") {
 	return {
 		getApiKey: vi.fn(async () => key),
 		resolver: vi.fn(() => async () => key),
+		authStorage: { ingestUsageHeaders: vi.fn(), getOAuthAccountId: vi.fn() },
+		hasLazyRuntimeMetadata: vi.fn(() => false),
 	};
 }
 
@@ -237,6 +239,58 @@ describe("AgentSession message pipeline", () => {
 		await expect(session.runEphemeralTurn({ promptText: "Question?", signal: controller.signal })).rejects.toThrow();
 		expect(contextSpy).not.toHaveBeenCalled();
 		expect(calls).toBe(0);
+	});
+
+	it.each(["payload", "response"] as const)("forwards side-turn aborts into %s lifecycle callbacks", async kind => {
+		const controller = new AbortController();
+		const entered = Promise.withResolvers<void>();
+		const session = new AgentSession({
+			agent: new Agent({
+				initialState: { model: getBundledModel("openai", "gpt-4o-mini"), systemPrompt: [], tools: [] },
+			}),
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry: createModelRegistryStub() as never,
+			onPayload:
+				kind === "payload"
+					? async (_payload, _model, signal) => {
+							entered.resolve();
+							await Promise.race([
+								new Promise<never>((_resolve, reject) =>
+									signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+								),
+								Bun.sleep(100).then(() => {
+									throw new Error("payload hook was not aborted");
+								}),
+							]);
+						}
+					: undefined,
+			onResponse:
+				kind === "response"
+					? async (_response, _model, signal) => {
+							entered.resolve();
+							await Promise.race([
+								new Promise<never>((_resolve, reject) =>
+									signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+								),
+								Bun.sleep(100).then(() => {
+									throw new Error("response hook was not aborted");
+								}),
+							]);
+						}
+					: undefined,
+			sideStreamFn: async (_model, _context, options) => {
+				if (kind === "payload") await options?.onPayload?.({}, _model);
+				else await options?.onResponse?.({ status: 200, headers: {} }, _model);
+				return new AssistantMessageEventStream();
+			},
+		});
+		sessions.push(session);
+
+		const turn = session.runEphemeralTurn({ promptText: "Question?", signal: controller.signal });
+		await entered.promise;
+		controller.abort(new Error("cancelled"));
+		await expect(turn).rejects.toThrow("cancelled");
 	});
 
 	it("rejects a side turn when its model instance changes during context preparation", async () => {

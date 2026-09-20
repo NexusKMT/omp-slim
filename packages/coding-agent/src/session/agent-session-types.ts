@@ -493,6 +493,10 @@ export type RestoredQueuedMessage = { text: string; images?: ImageContent[] };
 /** Options for the same ephemeral side turn used by /btw. */
 export interface EphemeralTurnOptions {
 	promptText: string;
+	/** Detached prior side-turn messages to prepend to this request. They are copied and never appended to the session history. */
+	history?: readonly Message[];
+	/** Opaque provider-lineage key for a series of related side turns. Rotate it after cancellation or failure before retrying. */
+	conversationKey?: string;
 	/** Omit tool definitions and request no tool calls. Rejects before inference on transports with mandatory native tools (Cursor). Tool calls are never executed, even when this option is omitted. */
 	tools?: false;
 	/** Optional positive safe-integer output-token cap. Transports that omit or overwrite caller output limits reject this option before inference. */

@@ -1730,7 +1730,11 @@ export class ExtensionRunner {
 	}
 
 	/** Runs request payload hooks with the model used for that provider request. */
-	async emitBeforeProviderRequest(payload: unknown, model?: Model): Promise<BeforeProviderRequestEventResult> {
+	async emitBeforeProviderRequest(
+		payload: unknown,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<BeforeProviderRequestEventResult> {
 		const ctx = this.createContext(model);
 		let currentPayload = payload;
 
@@ -1749,6 +1753,8 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
 				);
 				if (handlerResult !== undefined) {
 					currentPayload = handlerResult;
@@ -1760,7 +1766,11 @@ export class ExtensionRunner {
 	}
 
 	/** Runs response hooks with the model that produced that provider response. */
-	async emitAfterProviderResponse(response: ProviderResponseMetadata, model?: Model): Promise<void> {
+	async emitAfterProviderResponse(
+		response: ProviderResponseMetadata,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<void> {
 		const ctx = this.createContext(model);
 
 		for (const ext of this.extensions) {
@@ -1775,7 +1785,7 @@ export class ExtensionRunner {
 					requestId: response.requestId,
 					metadata: response.metadata,
 				};
-				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs);
+				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs, undefined, signal);
 			}
 		}
 	}
