@@ -4255,6 +4255,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"find.enabled": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tools",
+			group: "Available Tools",
+			label: "Find (semantic grep)",
+			description:
+				"Enable the find tool: natural-language search for files and line ranges, judged by the judge model role",
+		},
+	},
+
 	// Optional tools
 
 	"debug.enabled": {
