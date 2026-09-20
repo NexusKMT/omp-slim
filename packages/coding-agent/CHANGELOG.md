@@ -11,6 +11,7 @@
 ### Added
 
 - Added eval `judge_batch(states, questions)` / `judgeBatch(...)`: the host judges every state under one bounded run that outlives the cell, and cells pull settled items across turns with `await b.drain(timeout)` / `drain_iter`, `b.status()`, `b.results()`, `b.failed()`; per-item failures are recorded, never raised, and the batch id is a background job (`hub wait`, auto-delivered summary, `judge_batch.attach(id)` after a reset).
+- Added the `jevify` magic keyword (`magicKeywords.jevify`): a hidden notice that makes the agent freeze its rubric up front, classify bulk items with the eval kernel's `judge()`, and read only what the judge flags.
 - Added `omp web-search` as an alias of `omp search`.
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 - Customize the system prompt with Handlebars using live settings and tool data via `SYSTEM_TEMPLATE.md`, `--system-prompt-template`, or the SDK ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).

@@ -162,6 +162,8 @@ import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/hub";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
+import { JEVIFY_NOTICE } from "../modes/jevify";
+import { containsJevify } from "@oh-my-pi/pi-tui/prompt/jevify";
 import { renderOrchestrateNotice } from "../modes/orchestrate";
 import { containsOrchestrate } from "@oh-my-pi/pi-tui/prompt/orchestrate";
 import { theme } from "@oh-my-pi/pi-tui/theme";
@@ -6228,7 +6230,7 @@ export class AgentSession {
 		return this.#providerBoundary.normalizeAgentMessageImages(message);
 	}
 
-	#magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow"): boolean {
+	#magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow" | "jevify"): boolean {
 		return this.settings.get("magicKeywords.enabled") && this.settings.get(`magicKeywords.${keyword}`);
 	}
 
@@ -6278,6 +6280,17 @@ export class AgentSession {
 					timestamp,
 				});
 			}
+		}
+		// The contract is entirely about the eval kernel's `judge()` helper.
+		if (this.#magicKeywordEnabled("jevify") && containsJevify(text) && this.getEnabledToolNames().includes("eval")) {
+			keywordNotices.push({
+				role: "custom",
+				customType: "jevify-notice",
+				content: JEVIFY_NOTICE,
+				display: false,
+				attribution: "user",
+				timestamp,
+			});
 		}
 		return keywordNotices;
 	}
@@ -6364,7 +6377,7 @@ export class AgentSession {
 		const templated = expandPromptTemplates ? expandPromptTemplate(text, [...this.#promptTemplates]) : text;
 		const expandedText = options?.synthetic ? templated : this.#modelMentions.expandMentions(templated);
 
-		// Magic keywords ("ultrathink", "orchestrate"): append hidden system notices after the
+		// Magic keywords ("ultrathink", "orchestrate", "workflowz", "jevify"): append hidden system notices after the
 		// user's message that steer this turn. User-authored prompts only — synthetic /
 		// agent-initiated turns never trigger them.
 		const keywordNotices = options?.synthetic ? [] : this.#createMagicKeywordNotices(expandedText);

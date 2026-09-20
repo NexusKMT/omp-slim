@@ -2191,7 +2191,7 @@ export const SETTINGS_SCHEMA = {
 			tab: "interaction",
 			group: "Magic Keywords",
 			label: "Magic Keywords",
-			description: "Enable hidden notices for standalone ultrathink, orchestrate, and workflowz keywords",
+			description: "Enable hidden notices for standalone ultrathink, orchestrate, workflowz, and jevify keywords",
 		},
 	},
 
@@ -2225,6 +2225,17 @@ export const SETTINGS_SCHEMA = {
 			group: "Magic Keywords",
 			label: "Workflow Keyword",
 			description: "Let standalone workflowz append its hidden eval workflow notice",
+		},
+	},
+
+	"magicKeywords.jevify": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "interaction",
+			group: "Magic Keywords",
+			label: "Jevify Keyword",
+			description: "Let standalone jevify append its hidden bulk-judge classification notice",
 		},
 	},
 
