@@ -5,6 +5,9 @@
 ### Added
 
 - Added kind-filtered image, web, speech, dictation, and judge role selection with editable default fallback chains in the model hub.
+### Fixed
+
+- Fixed the session tree (`/tree`) exhausting memory and freezing the machine on long conversations.
 
 ## [18.2.5] - 2026-09-17
 
