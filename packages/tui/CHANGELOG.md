@@ -8,6 +8,7 @@
 
 ### Added
 
+- Added Glyph Protocol support for rendering icons without requiring patched fonts
 - Added `setMagicKeywords` for dynamic configuration of highlightable magic keywords
 
 ### Fixed

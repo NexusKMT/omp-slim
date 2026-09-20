@@ -560,7 +560,11 @@ export const SETTINGS_SCHEMA = {
 			description: "Glyph set for icons and symbols (Unicode, Nerd Font, or ASCII)",
 			options: [
 				{ value: "unicode", label: "Unicode", description: "Standard symbols (default)" },
-				{ value: "nerd", label: "Nerd Font", description: "Requires Nerd Font" },
+				{
+					value: "nerd",
+					label: "Nerd Font",
+					description: "Requires a Nerd Font, or a Glyph Protocol terminal (icons ship in-band)",
+				},
 				{ value: "ascii", label: "ASCII", description: "Maximum compatibility" },
 			],
 		},
