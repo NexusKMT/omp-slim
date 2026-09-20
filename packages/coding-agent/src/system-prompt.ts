@@ -394,12 +394,13 @@ export interface SystemPromptOverride {
 /** Project overrides beat user overrides; templates beat literal prompts within a scope. */
 export async function discoverSystemPromptOverride(cwd?: string): Promise<SystemPromptOverride | undefined> {
 	for (const scope of [
-		{ cwd, user: false },
-		{ cwd, project: false },
-	]) {
-		const templatePath = findConfigFile("SYSTEM_TEMPLATE.md", scope);
+		{ name: "project", user: false },
+		{ name: "user", project: false },
+	] as const) {
+		const scopeOptions = { cwd, user: scope.user, project: scope.project };
+		const templatePath = findConfigFile("SYSTEM_TEMPLATE.md", scopeOptions);
 		if (templatePath) {
-			if (scope.project === false) {
+			if (scope.name === "user") {
 				const result = await loadCapability<SystemPromptFile>(systemPromptCapability.id, {
 					cwd: cwd ?? getProjectDir(),
 				});
@@ -410,7 +411,7 @@ export async function discoverSystemPromptOverride(cwd?: string): Promise<System
 			}
 			return { kind: "template", path: templatePath };
 		}
-		const textPath = findConfigFile("SYSTEM.md", scope);
+		const textPath = findConfigFile("SYSTEM.md", scopeOptions);
 		if (textPath) return { kind: "text", path: textPath };
 	}
 	return undefined;
