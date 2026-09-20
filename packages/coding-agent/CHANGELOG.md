@@ -20,6 +20,7 @@
 
 ### Changed
 
+- Refined system prompt instructions for XML tag handling and agent persona
 - Updated sloppy edit tool syntax to use plain text headers instead of XML tags
 - Improved startup performance by validating provider-qualified model selectors against only the relevant provider catalog.
 - Reduced launch time for npm and compiled builds by embedding the model catalog more efficiently.
