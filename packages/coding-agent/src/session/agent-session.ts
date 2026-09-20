@@ -118,6 +118,7 @@ import {
 import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import { getEditStore } from "../edit/store";
 import { releaseCompletionHandles } from "../eval/completion-bridge";
+import { releaseJudgmentBatches } from "../eval/judgment-batch-bridge";
 import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PythonResult } from "../eval/py/executor";
 import { WorkPoolRegistry } from "../task/workpool";
@@ -2307,6 +2308,7 @@ export class AgentSession {
 	#cancelOwnAsyncJobs(reason?: unknown): void {
 		if (!this.#agentId) return;
 		releaseCompletionHandles(this.#agentId);
+		releaseJudgmentBatches(this.#agentId);
 		WorkPoolRegistry.global().releaseOwner(this.#agentId);
 		const manager = this.#asyncJobManager;
 		manager?.cancelAll({ ownerId: this.#agentId }, reason);

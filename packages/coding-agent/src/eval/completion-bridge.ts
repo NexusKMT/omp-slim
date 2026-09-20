@@ -69,7 +69,7 @@ export interface EvalCompletionBridgeOptions {
 	emitStatus?: (event: JsStatusEvent) => void;
 }
 
-/** Terminal payload of a retained handle; `judge()` handles share the registry and report no tier. */
+/** Terminal payload of a retained handle. */
 export interface EvalCompletionResult {
 	text: string;
 	/** Structured payload; when present the cell receives it in place of `text`. */
@@ -97,14 +97,15 @@ const COMPLETION_HANDLE_RETENTION_MS = 30 * 60 * 1000;
 const completionHandles = new Map<string, CompletionHandleEntry>();
 
 /**
- * Process-wide ceiling on eval handles executing at once. A cell that fans out
- * hundreds of `judge()`/`completion()` calls otherwise opens every request
- * simultaneously and, once the primary candidate rejects, floods each fallback
- * in the role chain (including self-hosted models that serve requests serially).
- * Queued handles report `running` until admitted.
+ * Process-wide ceiling on eval model requests executing at once, shared by
+ * `completion()` handles, `judge()`, and `judge_batch()` items. A cell that
+ * fans out hundreds of calls otherwise opens every request simultaneously and,
+ * once the primary candidate rejects, floods each fallback in the role chain
+ * (including self-hosted models that serve requests serially). Queued handles
+ * report `running` until admitted.
  */
 export const EVAL_HANDLE_CONCURRENCY = 32;
-const evalHandleSlots = new Semaphore(EVAL_HANDLE_CONCURRENCY);
+export const evalRequestSlots = new Semaphore(EVAL_HANDLE_CONCURRENCY);
 
 /** Resolve a retained completion handle by id. */
 export function getCompletionHandle(id: string): CompletionHandleEntry | undefined {
@@ -442,11 +443,11 @@ export function retainCompletionHandle(
 	};
 	completionHandles.set(id, entry);
 	const run = async (): Promise<EvalCompletionResult> => {
-		await evalHandleSlots.acquire(signal);
+		await evalRequestSlots.acquire(signal);
 		try {
 			return await execute(signal);
 		} finally {
-			evalHandleSlots.release();
+			evalRequestSlots.release();
 		}
 	};
 	entry.promise = run()

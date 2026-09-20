@@ -6,9 +6,11 @@
 
 - Image generation overrides now use `model` selectors, and web search CLI overrides use `--model` instead of `--provider`.
 - Removed support for the env parameter in the bash tool
+- Eval `judge(state, questions)` is now awaited and returns the answers directly; `JudgmentHandle` and judgment support in `wait()` are gone.
 
 ### Added
 
+- Added eval `judge_batch(states, questions)` / `judgeBatch(...)`: the host judges every state under one bounded run that outlives the cell, and cells pull settled items across turns with `await b.drain(timeout)` / `drain_iter`, `b.status()`, `b.results()`, `b.failed()`; per-item failures are recorded, never raised, and the batch id is a background job (`hub wait`, auto-delivered summary, `judge_batch.attach(id)` after a reset).
 - Added `omp web-search` as an alias of `omp search`.
 - Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
 - Customize the system prompt with Handlebars using live settings and tool data via `SYSTEM_TEMPLATE.md`, `--system-prompt-template`, or the SDK ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
