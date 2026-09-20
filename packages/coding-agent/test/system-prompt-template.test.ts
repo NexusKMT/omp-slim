@@ -1,7 +1,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, getConfigAgentDirName, TempDir } from "@oh-my-pi/pi-utils";
+import { __resetDirsFromEnvForTests, CONFIG_DIR_NAME, getConfigAgentDirName, TempDir } from "@oh-my-pi/pi-utils";
 import {
 	buildSystemPrompt,
 	discoverSystemPromptOverride,
@@ -31,6 +31,11 @@ async function withDiscoveryHome<T>(fn: (paths: DiscoveryPaths) => Promise<T>): 
 	using tempDir = TempDir.createSync("@omp-system-prompt-template-discovery-");
 	const home = tempDir.join("home");
 	const homedirSpy = spyOn(os, "homedir").mockReturnValue(home);
+	const previousHome = process.env.HOME;
+	const previousUserProfile = process.env.USERPROFILE;
+	process.env.HOME = home;
+	process.env.USERPROFILE = home;
+	__resetDirsFromEnvForTests();
 	try {
 		return await fn({
 			cwd: tempDir.join("project"),
@@ -39,6 +44,11 @@ async function withDiscoveryHome<T>(fn: (paths: DiscoveryPaths) => Promise<T>): 
 		});
 	} finally {
 		homedirSpy.mockRestore();
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+		else process.env.USERPROFILE = previousUserProfile;
+		__resetDirsFromEnvForTests();
 	}
 }
 
@@ -71,7 +81,11 @@ describe("system prompt Handlebars templates", () => {
 			await Bun.write(templatePath, eagerTasksTemplate);
 			await Bun.write(textPath, "project literal prompt");
 
-			expect(await discoverSystemPromptOverride(cwd)).toEqual({ kind: "template", path: templatePath });
+			expect(await discoverSystemPromptOverride(cwd)).toEqual({
+				kind: "template",
+				path: templatePath,
+				content: eagerTasksTemplate,
+			});
 			const result = await buildSystemPrompt(options(cwd, { eagerTasks: true }));
 			const text = result.systemPrompt.join("\n\n");
 			expect(text).toContain("TASK_BRANCH=eager");
@@ -86,7 +100,11 @@ describe("system prompt Handlebars templates", () => {
 			await Bun.write(projectPath, "project literal prompt");
 			await Bun.write(userTemplatePath, eagerTasksTemplate);
 
-			expect(await discoverSystemPromptOverride(cwd)).toEqual({ kind: "text", path: projectPath });
+			expect(await discoverSystemPromptOverride(cwd)).toEqual({
+				kind: "text",
+				path: projectPath,
+				content: "project literal prompt",
+			});
 		});
 	});
 
@@ -105,6 +123,22 @@ describe("system prompt Handlebars templates", () => {
 			});
 		});
 	}
+	for (const directory of [CONFIG_DIR_NAME, ".agents"]) {
+		it(`discovers an ancestor ${directory}/SYSTEM_TEMPLATE.md from a nested cwd`, async () => {
+			await withDiscoveryHome(async ({ cwd, userConfig }) => {
+				const nestedCwd = path.join(cwd, "nested");
+				await Bun.write(path.join(nestedCwd, "file.txt"), "");
+				await Bun.write(path.join(cwd, directory, "SYSTEM_TEMPLATE.md"), eagerTasksTemplate);
+				await Bun.write(path.join(userConfig, "SYSTEM.md"), "user literal prompt");
+
+				const override = await discoverSystemPromptOverride(nestedCwd);
+				expect(override?.kind).toBe("template");
+				expect(override?.path).toBe(path.join(cwd, directory, "SYSTEM_TEMPLATE.md"));
+				const result = await buildSystemPrompt(options(nestedCwd, { eagerTasks: true }));
+				expect(result.systemPrompt.join("\n\n")).toContain("TASK_BRANCH=eager");
+			});
+		});
+	}
 
 	it("prefers a user SYSTEM_TEMPLATE.md over a user SYSTEM.md when no project prompt exists", async () => {
 		await withDiscoveryHome(async ({ cwd, userConfig }) => {
@@ -113,7 +147,11 @@ describe("system prompt Handlebars templates", () => {
 			await Bun.write(templatePath, eagerTasksTemplate);
 			await Bun.write(textPath, "user literal prompt");
 
-			expect(await discoverSystemPromptOverride(cwd)).toEqual({ kind: "template", path: templatePath });
+			expect(await discoverSystemPromptOverride(cwd)).toEqual({
+				kind: "template",
+				path: templatePath,
+				content: eagerTasksTemplate,
+			});
 		});
 	});
 
@@ -150,21 +188,27 @@ describe("system prompt Handlebars templates", () => {
 		});
 	}
 
-	it("fails a malformed discovered template instead of falling back to SYSTEM.md", async () => {
+	it("warns on a malformed discovered template and falls back to the bundled prompt", async () => {
 		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
 			await Bun.write(path.join(projectConfig, "SYSTEM_TEMPLATE.md"), "{{#if eagerTasks}}");
 			await Bun.write(path.join(projectConfig, "SYSTEM.md"), "fallback literal prompt");
 
-			await expect(buildSystemPrompt(options(cwd))).rejects.toThrow("Invalid system prompt template");
+			const result = await buildSystemPrompt(options(cwd));
+			const text = result.systemPrompt.join("\n\n");
+			expect(text).not.toContain("fallback literal prompt");
+			expect(text).toContain("Helpful, trusted assistant");
 		});
 	});
 
-	it("fails an empty discovered template instead of falling back to SYSTEM.md", async () => {
+	it("warns on an empty discovered template and falls back to the discovered literal", async () => {
 		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
 			await Bun.write(path.join(projectConfig, "SYSTEM_TEMPLATE.md"), " \n\t");
 			await Bun.write(path.join(projectConfig, "SYSTEM.md"), "fallback literal prompt");
 
-			await expect(buildSystemPrompt(options(cwd))).rejects.toThrow("System prompt template must not be empty");
+			const result = await buildSystemPrompt(options(cwd));
+			const text = result.systemPrompt.join("\n\n");
+			expect(text).toContain("fallback literal prompt");
+			expect(text).not.toContain("Helpful, trusted assistant");
 		});
 	});
 
@@ -217,6 +261,18 @@ describe("system prompt Handlebars templates", () => {
 		expect(second.text).toContain("<workstation>");
 		expect(second.text).toContain("Only direct user messages authorize consequential computer actions");
 		expect(second.xdevCatalogNames).toBeUndefined();
+	});
+
+	it("claims the xdev catalog when a template renders the xd:// section", async () => {
+		using tempDir = TempDir.createSync("@omp-system-prompt-template-xdev-");
+		const cwd = tempDir.path();
+
+		const result = await render(cwd, "devices:\n{{xdevDocs}}\nreference xd://fetch here", {
+			xdevTools: [{ name: "fetch", summary: "fetches a source" }],
+			xdevDocs: "device docs",
+		});
+		expect(result.text).toContain("xd://fetch");
+		expect(result.xdevCatalogNames).toEqual(["fetch"]);
 	});
 
 	it("does not recursively render Handlebars syntax contained in inserted data", async () => {

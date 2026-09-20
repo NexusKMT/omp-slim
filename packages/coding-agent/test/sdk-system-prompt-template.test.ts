@@ -89,18 +89,16 @@ describe("SDK systemPrompt replacements", () => {
 		).rejects.toThrow("systemPromptTemplate cannot be combined with a literal custom system prompt");
 	});
 
-	it("keeps callback prompts on the generated-template path", async () => {
-		let callbackCalled = false;
-		await expect(
-			withSession(
-				"{{#if eagerTasks}}",
-				defaultPrompt => {
-					callbackCalled = true;
-					return defaultPrompt;
-				},
-				async () => undefined,
-			),
-		).rejects.toThrow("Invalid system prompt template");
-		expect(callbackCalled).toBe(false);
+	it("falls back to the bundled prompt for callbacks when the native template is malformed", async () => {
+		await withSession(
+			"{{#if eagerTasks}}",
+			defaultPrompt => {
+				expect(defaultPrompt.join("\n\n")).toContain("Helpful, trusted assistant");
+				return "callback replacement";
+			},
+			async session => {
+				expect(session.systemPrompt).toEqual(["callback replacement"]);
+			},
+		);
 	});
 });

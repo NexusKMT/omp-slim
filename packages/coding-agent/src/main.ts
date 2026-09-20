@@ -1259,12 +1259,18 @@ export async function buildSessionOptions(
 	const titleSystemPromptSource = discoverTitleSystemPromptFile(cwd);
 	const [resolvedSystemPrompt, resolvedAppendPrompt, titleSystemPrompt, resolvedSystemPromptTemplate] =
 		await Promise.all([
-			discoveredOverride?.content !== undefined
+			discoveredOverride?.kind === "text"
 				? Promise.resolve(discoveredOverride.content)
 				: resolvePromptInput(systemPromptSource, "system prompt"),
 			resolvePromptInput(appendPromptSource, "append system prompt"),
 			resolvePromptInput(titleSystemPromptSource, "title system prompt"),
-			templatePath === undefined ? Promise.resolve(undefined) : loadSystemPromptTemplateFile(templatePath),
+			// Discovered templates arrive pre-loaded from the capability; only
+			// explicit CLI paths hit the strict file loader here.
+			discoveredOverride?.kind === "template" && parsed.systemPromptTemplate === undefined
+				? Promise.resolve(discoveredOverride.content)
+				: templatePath === undefined
+					? Promise.resolve(undefined)
+					: loadSystemPromptTemplateFile(templatePath),
 		]);
 
 	if (sessionManager) {

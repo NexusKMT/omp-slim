@@ -391,33 +391,33 @@ export interface SystemPromptOverride {
 	content?: string;
 }
 
-/** Project overrides beat user overrides; templates beat literal prompts within a scope. */
+/**
+ * Unified discovery for literal and template overrides. Project scope beats
+ * user scope; within each scope a template beats a literal. Ancestor walk-up
+ * and `.agent/.agents` coverage come from the capability providers, so a
+ * repo-root template wins from a nested cwd and needs no `findConfigFile`
+ * back-check.
+ */
 export async function discoverSystemPromptOverride(cwd?: string): Promise<SystemPromptOverride | undefined> {
-	for (const scope of [
-		{ name: "project", user: false },
-		{ name: "user", project: false },
-	] as const) {
-		const scopeOptions = { cwd, user: scope.user, project: scope.project };
-		const templatePath = findConfigFile("SYSTEM_TEMPLATE.md", scopeOptions);
-		if (templatePath) {
-			if (scope.name === "user") {
-				const result = await loadCapability<SystemPromptFile>(systemPromptCapability.id, {
-					cwd: cwd ?? getProjectDir(),
-				});
-				const projectPrompt = result.items.find(item => item.level === "project");
-				if (projectPrompt) {
-					return { kind: "text", path: projectPrompt.path, content: projectPrompt.content };
-				}
+	const result = await loadCapability<SystemPromptFile>(systemPromptCapability.id, {
+		cwd: cwd ?? getProjectDir(),
+	});
+	for (const level of ["project", "user"] as const) {
+		const template = result.items.find(item => item.level === level && (item.kind ?? "text") === "template");
+		if (template) {
+			if (!template.content.trim()) {
+				logger.warn("Ignoring empty system prompt template", { path: template.path });
+				continue;
 			}
-			return { kind: "template", path: templatePath };
+			return { kind: "template", path: template.path, content: template.content };
 		}
-		const textPath = findConfigFile("SYSTEM.md", scopeOptions);
-		if (textPath) return { kind: "text", path: textPath };
+		const text = result.items.find(item => item.level === level && (item.kind ?? "text") === "text");
+		if (text) return { kind: "text", path: text.path, content: text.content };
 	}
 	return undefined;
 }
 
-/** Unlike literal prompt inputs, template paths never fall back to inline text. */
+/** Unlike literal prompt inputs, explicit template paths never fall back to inline text. */
 export async function loadSystemPromptTemplateFile(filePath: string): Promise<string> {
 	const text = await Bun.file(filePath).text();
 	if (!text.trim()) {
@@ -831,14 +831,21 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	}
 	if (resolvedSystemPromptTemplate === undefined && !hasExplicitCustomPrompt) {
 		const override = await discoverSystemPromptOverride(resolvedCwd);
-		if (override?.kind === "template") {
-			resolvedSystemPromptTemplate = await loadSystemPromptTemplateFile(override.path);
+		if (override?.kind === "template" && override.content !== undefined) {
+			resolvedSystemPromptTemplate = override.content;
 		} else if (override?.content !== undefined) {
 			resolvedCustomPromptInput = override.content;
 		}
 	}
+	const hasDiscoveredTemplate =
+		resolvedSystemPromptTemplate !== undefined && options.systemPromptTemplate === undefined;
 	if (resolvedSystemPromptTemplate !== undefined && !resolvedSystemPromptTemplate.trim()) {
-		throw new Error("System prompt template must not be empty");
+		if (hasDiscoveredTemplate) {
+			logger.warn("Ignoring empty discovered system prompt template; using the bundled prompt");
+			resolvedSystemPromptTemplate = undefined;
+		} else {
+			throw new Error("System prompt template must not be empty");
+		}
 	}
 
 	const prepDefaults = {
@@ -1147,10 +1154,15 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 	try {
 		rendered = prompt.render(selectedTemplate, data);
 	} catch (error) {
-		if (resolvedSystemPromptTemplate !== undefined) {
+		if (resolvedSystemPromptTemplate === undefined) throw error;
+		if (!hasDiscoveredTemplate) {
 			throw new Error(`Invalid system prompt template: ${String(error)}`, { cause: error });
 		}
-		throw error;
+		logger.warn("Ignoring invalid discovered system prompt template; using the bundled prompt", {
+			error: String(error),
+		});
+		resolvedSystemPromptTemplate = undefined;
+		rendered = prompt.render(systemPromptTemplate, data);
 	}
 	const systemPrompt = [rendered];
 	if (computerEnabled) {
@@ -1168,10 +1180,11 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		systemPrompt.push(activeRepoContextPrompt);
 	}
 
-	// Only the bundled template guarantees delivery of the xd:// device catalog.
-	// User templates can omit it, so do not claim those devices were delivered.
+	// Claim delivery only when the rendered block 0 actually carries the xd://
+	// section, so a template that references {{xdevDocs}} keeps mount-notice
+	// dedupe while one that omits it stays honest.
 	const xdevCatalogNames =
-		!resolvedCustomPrompt && resolvedSystemPromptTemplate === undefined && xdevTools.length > 0
+		!resolvedCustomPrompt && xdevTools.length > 0 && rendered.includes("xd://")
 			? xdevTools.map(mounted => mounted.name)
 			: undefined;
 	return { systemPrompt, xdevCatalogNames };

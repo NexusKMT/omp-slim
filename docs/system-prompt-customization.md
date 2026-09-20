@@ -28,16 +28,11 @@ Programmatic API options use separate contracts, not CLI flags; see [Programmati
 
 That empty literal suppresses discovered `SYSTEM.md` and `SYSTEM_TEMPLATE.md`, but does not disable OMP-generated instructions; only the programmatic `CreateAgentSessionOptions.systemPrompt` full-replacement option does that.
 
-Without an explicit custom source, discovery is project-first, then user-level. Within each scope OMP checks every configured base for `SYSTEM_TEMPLATE.md` before checking any base for `SYSTEM.md`; therefore a project `.claude/SYSTEM_TEMPLATE.md` beats a project `.omp/SYSTEM.md`. For each filename, the first matching listed base wins:
+Without an explicit custom source, discovery is project-first, then user-level. Within each scope a template beats a literal: project `SYSTEM_TEMPLATE.md` beats project `SYSTEM.md`, which beats user `SYSTEM_TEMPLATE.md`, which beats user `SYSTEM.md`. Both filenames resolve through the same capability providers, so ancestor walk-up (repo-root `.omp` from a nested cwd) and `.agent` / `.agents` directories apply to templates exactly as they do to literals. `.claude`, `.codex`, and `.gemini` bases resolve at the launch cwd and user home.
 
-1. `<cwd>/.omp/<file>`, `<cwd>/.claude/<file>`, `<cwd>/.codex/<file>`, `<cwd>/.gemini/<file>`
-2. `~/.omp/agent/<file>`, `~/.claude/<file>`, `~/.codex/<file>`, `~/.gemini/<file>`
+The native user path follows the active profile: with `omp --profile work`, `~/.omp/agent` becomes `~/.omp/profiles/work/agent`. `PI_CONFIG_DIR` changes the native config-directory name. This shared config lookup does not use `PI_CODING_AGENT_DIR` as an arbitrary replacement base. An explicit CLI flag or programmatic API option still wins over every discovered file. See [Configuration usage](./config-usage.md) for the shared config-directory contract.
 
-The native user path follows the active profile: with `omp --profile work`, `~/.omp/agent` becomes `~/.omp/profiles/work/agent`. `PI_CONFIG_DIR` changes the native config-directory name. This shared config lookup does not use `PI_CODING_AGENT_DIR` as an arbitrary replacement base.
-
-Template-file discovery does **not** walk ancestors: starting OMP in `<repo>/packages/api` does not discover `<repo>/.omp/SYSTEM_TEMPLATE.md`. Before accepting a user-level template, OMP also checks its existing project-level `SYSTEM.md` capability providers. Their ancestor `.omp/SYSTEM.md` and supported `.agent` / `.agents` prompts take precedence over a global template. An explicit CLI flag or programmatic API option still wins over these discovered capability providers. See [Configuration usage](./config-usage.md) for the shared config-directory contract.
-
-`SYSTEM_TEMPLATE.md` is always read as a file. `--system-prompt-template <path>` is also a strict file path: a missing, unreadable, or non-file path is an error, never a literal prompt. An empty or malformed Handlebars template is an error; OMP does not fall back to `SYSTEM.md` or the bundled prompt.
+`--system-prompt-template <path>` is a strict file path: a missing, unreadable, empty, or malformed template is an error, never a literal prompt. Discovered `SYSTEM_TEMPLATE.md` files degrade instead of bricking startup: an empty discovered template falls through to the discovered literal (or the bundled prompt when no literal exists), and a malformed discovered template warns and renders the bundled prompt. Discovered templates are read once through capability discovery; later runtime rebuilds re-render that in-memory source.
 
 ### Text or file resolution
 
@@ -84,7 +79,7 @@ generated block — the append text is emitted unchanged, without a heading.
 
 `SYSTEM_TEMPLATE.md` and `--system-prompt-template <path>` select raw Handlebars source from a file. Programmatic callers can instead pass raw Handlebars source through `CreateAgentSessionOptions.systemPromptTemplate` or `buildSystemPrompt({ systemPromptTemplate })`; those programmatic options are the template itself, not a path. Each route is rendered instead of the bundled `system-prompt.md` with the same live data and registered helpers as that bundled template.
 
-Generated blocks that are outside block 0 remain normal: the project/environment footer (including generated context and append material), computer safety, active nested-repository context, and provider tool schemas are retained. Data-driven sections that normally live inside the bundled template are not appended by magic. `skills`, `rules`, `alwaysApplyRules`, `toolInventory`, `xdevTools`, and `xdevDocs` are available to the template, but each is emitted only if the template references it. In particular, omitting `{{toolInventory}}` or `{{xdevDocs}}` omits that in-block catalog. A raw template result never reports delivered xdev catalog metadata, even when it references `{{xdevDocs}}`.
+Generated blocks that are outside block 0 remain normal: the project/environment footer (including generated context and append material), computer safety, active nested-repository context, and provider tool schemas are retained. Data-driven sections that normally live inside the bundled template are not appended by magic. `skills`, `rules`, `alwaysApplyRules`, `toolInventory`, `xdevTools`, and `xdevDocs` are available to the template, but each is emitted only if the template references it. In particular, omitting `{{toolInventory}}` or `{{xdevDocs}}` omits that in-block catalog. Mount-notice dedupe follows the rendered output: a template whose block 0 contains an `xd://` reference claims the catalog, one that omits it does not.
 
 The generated project/footer route already renders `contextFiles` and `appendPrompt` once. A template SHOULD NOT render those fields in block 0 unless it intentionally wants duplicate copies.
 
