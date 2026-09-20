@@ -6,9 +6,16 @@
 
 - Added `renderMermaidAscii`: a native Mermaid → ASCII/Unicode renderer (flowcharts, state, sequence, class, ER diagrams and xycharts) producing byte-identical output to the TypeScript renderer in `@oh-my-pi/pi-utils`, including color modes, themes, and direction overrides.
 - Package exports now include a `default` condition so CommonJS `require()` (e.g. bytecode bundles) can load the native bindings.
+- Package exports now include a `default` condition so CommonJS `require()` (e.g. bytecode bundles) can load the native bindings.
+- Added `renderMermaidAscii`: a native Mermaid → ASCII/Unicode renderer for flowcharts, state, sequence, class, ER diagrams and xycharts, including color modes, themes, and direction overrides.
+
+### Changed
+
+- Mermaid flowcharts follow dependencies regardless of declaration order, reduce crossings, align branches, and wrap long node labels without truncation.
 
 ### Fixed
 
+- Fixed misaligned Mermaid arrowheads and duplicate edge junctions beside mixed-width node shapes.
 - Fixed sloppy edit grammar compatibility with Codex constrained decoding.
 
 ## [18.2.1] - 2026-09-15
