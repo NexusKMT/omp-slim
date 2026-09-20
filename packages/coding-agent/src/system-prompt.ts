@@ -393,16 +393,19 @@ export interface SystemPromptOverride {
 
 /**
  * Unified discovery for literal and template overrides. Project scope beats
- * user scope; within each scope a template beats a literal. Ancestor walk-up
+ * user scope; within each scope a literal beats a template: SYSTEM.md is the
+ * long-established override, so an existing literal keeps working until its
+ * author deliberately removes it in favor of a template. Ancestor walk-up
  * and `.agent/.agents` coverage come from the capability providers, so a
- * repo-root template wins from a nested cwd and needs no `findConfigFile`
- * back-check.
+ * repo-root file wins from a nested cwd.
  */
 export async function discoverSystemPromptOverride(cwd?: string): Promise<SystemPromptOverride | undefined> {
 	const result = await loadCapability<SystemPromptFile>(systemPromptCapability.id, {
 		cwd: cwd ?? getProjectDir(),
 	});
 	for (const level of ["project", "user"] as const) {
+		const text = result.items.find(item => item.level === level && (item.kind ?? "text") === "text");
+		if (text) return { kind: "text", path: text.path, content: text.content };
 		const template = result.items.find(item => item.level === level && (item.kind ?? "text") === "template");
 		if (template) {
 			if (!template.content.trim()) {
@@ -411,8 +414,6 @@ export async function discoverSystemPromptOverride(cwd?: string): Promise<System
 			}
 			return { kind: "template", path: template.path, content: template.content };
 		}
-		const text = result.items.find(item => item.level === level && (item.kind ?? "text") === "text");
-		if (text) return { kind: "text", path: text.path, content: text.content };
 	}
 	return undefined;
 }

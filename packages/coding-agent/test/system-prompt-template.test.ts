@@ -74,7 +74,7 @@ async function render(
 }
 
 describe("system prompt Handlebars templates", () => {
-	it("prefers a project SYSTEM_TEMPLATE.md over a project SYSTEM.md", async () => {
+	it("prefers a project SYSTEM.md over a project SYSTEM_TEMPLATE.md", async () => {
 		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
 			const templatePath = path.join(projectConfig, "SYSTEM_TEMPLATE.md");
 			const textPath = path.join(projectConfig, "SYSTEM.md");
@@ -82,14 +82,14 @@ describe("system prompt Handlebars templates", () => {
 			await Bun.write(textPath, "project literal prompt");
 
 			expect(await discoverSystemPromptOverride(cwd)).toEqual({
-				kind: "template",
-				path: templatePath,
-				content: eagerTasksTemplate,
+				kind: "text",
+				path: textPath,
+				content: "project literal prompt",
 			});
 			const result = await buildSystemPrompt(options(cwd, { eagerTasks: true }));
 			const text = result.systemPrompt.join("\n\n");
-			expect(text).toContain("TASK_BRANCH=eager");
-			expect(text).not.toContain("project literal prompt");
+			expect(text).toContain("project literal prompt");
+			expect(text).not.toContain("TASK_BRANCH=eager");
 		});
 	});
 
@@ -140,7 +140,7 @@ describe("system prompt Handlebars templates", () => {
 		});
 	}
 
-	it("prefers a user SYSTEM_TEMPLATE.md over a user SYSTEM.md when no project prompt exists", async () => {
+	it("prefers a user SYSTEM.md over a user SYSTEM_TEMPLATE.md when no project prompt exists", async () => {
 		await withDiscoveryHome(async ({ cwd, userConfig }) => {
 			const templatePath = path.join(userConfig, "SYSTEM_TEMPLATE.md");
 			const textPath = path.join(userConfig, "SYSTEM.md");
@@ -148,9 +148,9 @@ describe("system prompt Handlebars templates", () => {
 			await Bun.write(textPath, "user literal prompt");
 
 			expect(await discoverSystemPromptOverride(cwd)).toEqual({
-				kind: "template",
-				path: templatePath,
-				content: eagerTasksTemplate,
+				kind: "text",
+				path: textPath,
+				content: "user literal prompt",
 			});
 		});
 	});
@@ -188,14 +188,25 @@ describe("system prompt Handlebars templates", () => {
 		});
 	}
 
-	it("warns on a malformed discovered template and falls back to the bundled prompt", async () => {
+	it("prefers the discovered literal without rendering a same-scope malformed template", async () => {
 		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
 			await Bun.write(path.join(projectConfig, "SYSTEM_TEMPLATE.md"), "{{#if eagerTasks}}");
 			await Bun.write(path.join(projectConfig, "SYSTEM.md"), "fallback literal prompt");
 
 			const result = await buildSystemPrompt(options(cwd));
 			const text = result.systemPrompt.join("\n\n");
-			expect(text).not.toContain("fallback literal prompt");
+			expect(text).toContain("fallback literal prompt");
+			expect(text).not.toContain("Helpful, trusted assistant");
+		});
+	});
+
+	it("warns on a malformed discovered template and falls back to the bundled prompt", async () => {
+		await withDiscoveryHome(async ({ cwd, projectConfig }) => {
+			await Bun.write(path.join(projectConfig, "SYSTEM_TEMPLATE.md"), "{{#if eagerTasks}}");
+
+			const result = await buildSystemPrompt(options(cwd));
+			const text = result.systemPrompt.join("\n\n");
+			expect(text).not.toContain("TASK_BRANCH=");
 			expect(text).toContain("Helpful, trusted assistant");
 		});
 	});

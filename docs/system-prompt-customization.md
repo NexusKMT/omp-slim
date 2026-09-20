@@ -17,8 +17,8 @@ Primary implementation:
 | --------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `--system-prompt-template <path>`       | CLI                    | Strictly reads `<path>` as Handlebars source and replaces the bundled default instruction block. Highest custom-prompt precedence. |
 | `--system-prompt <text-or-file>`        | CLI                    | Existing plain-text custom route. Highest custom-prompt precedence. Mutually exclusive with the template flag.                     |
-| `SYSTEM_TEMPLATE.md`                    | Discovered config file | Raw Handlebars source. Used only when no explicit plain or template override is supplied.                                          |
-| `SYSTEM.md`                             | Discovered config file | Existing plain-text custom route. Used only when no template override is found.                                                    |
+| `SYSTEM_TEMPLATE.md`                    | Discovered config file | Raw Handlebars source. Used only when no explicit override and no discovered `SYSTEM.md` is supplied.                              |
+| `SYSTEM.md`                             | Discovered config file | Existing plain-text custom route. Used only when no explicit override is supplied.                                                 |
 | `--append-system-prompt <text-or-file>` | CLI                    | Adds plain text to the rendered prompt. Highest append precedence.                                                                 |
 | `APPEND_SYSTEM.md`                      | Discovered config file | Existing plain-text append route; used when the append flag is absent.                                                             |
 
@@ -28,11 +28,11 @@ Programmatic API options use separate contracts, not CLI flags; see [Programmati
 
 That empty literal suppresses discovered `SYSTEM.md` and `SYSTEM_TEMPLATE.md`, but does not disable OMP-generated instructions; only the programmatic `CreateAgentSessionOptions.systemPrompt` full-replacement option does that.
 
-Without an explicit custom source, discovery is project-first, then user-level. Within each scope a template beats a literal: project `SYSTEM_TEMPLATE.md` beats project `SYSTEM.md`, which beats user `SYSTEM_TEMPLATE.md`, which beats user `SYSTEM.md`. Both filenames resolve through the same capability providers, so ancestor walk-up (repo-root `.omp` from a nested cwd) and `.agent` / `.agents` directories apply to templates exactly as they do to literals. `.claude`, `.codex`, and `.gemini` bases resolve at the launch cwd and user home.
+Without an explicit custom source, discovery is project-first, then user-level. Within each scope a literal beats a template: project `SYSTEM.md` beats project `SYSTEM_TEMPLATE.md`, which beats user `SYSTEM.md`, which beats user `SYSTEM_TEMPLATE.md`. `SYSTEM.md` is the long-established override, so an existing literal keeps working until its author deliberately removes it in favor of a template. Both filenames resolve through the same capability providers, so ancestor walk-up (repo-root `.omp` from a nested cwd) and `.agent` / `.agents` directories apply to templates exactly as they do to literals. `.claude`, `.codex`, and `.gemini` bases resolve at the launch cwd and user home.
 
 The native user path follows the active profile: with `omp --profile work`, `~/.omp/agent` becomes `~/.omp/profiles/work/agent`. `PI_CONFIG_DIR` changes the native config-directory name. This shared config lookup does not use `PI_CODING_AGENT_DIR` as an arbitrary replacement base. An explicit CLI flag or programmatic API option still wins over every discovered file. See [Configuration usage](./config-usage.md) for the shared config-directory contract.
 
-`--system-prompt-template <path>` is a strict file path: a missing, unreadable, empty, or malformed template is an error, never a literal prompt. Discovered `SYSTEM_TEMPLATE.md` files degrade instead of bricking startup: an empty discovered template falls through to the discovered literal (or the bundled prompt when no literal exists), and a malformed discovered template warns and renders the bundled prompt. Discovered templates are read once through capability discovery; later runtime rebuilds re-render that in-memory source.
+`--system-prompt-template <path>` is a strict file path: a missing, unreadable, empty, or malformed template is an error, never a literal prompt. Discovered `SYSTEM_TEMPLATE.md` files degrade instead of bricking startup: an empty discovered template is skipped (the discovered literal, if any, already won discovery), and a malformed discovered template without a same-scope literal warns and renders the bundled prompt. A same-scope literal always wins discovery, so a malformed template beside a literal is never rendered. Discovered templates are read once through capability discovery; later runtime rebuilds re-render that in-memory source.
 
 ### Text or file resolution
 
@@ -135,6 +135,7 @@ OMP still adds the generated context, skills, rules, and project/environment foo
 2. Edit the prose while keeping the required Handlebars blocks and live-data placeholders.
 3. NEVER copy a rendered `/dump` prompt: it freezes settings, tool catalogs, and mounted-device data.
 4. Diff your template against the shipped source path when updating OMP.
+5. Remove or rename any same-scope `SYSTEM.md`: a discovered literal beats a discovered template, so the template takes effect only once the literal is gone.
 
 ### Supply a Handlebars template
 
