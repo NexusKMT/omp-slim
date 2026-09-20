@@ -2,56 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added gradient highlighting for "jevify" magic keyword in prompt prose
-- Added kind-filtered image, web, speech, dictation, and judge role selection with editable default fallback chains in the model hub.
-- **Reactive Surface (`@oh-my-pi/pi-tui/reactive`)**: Re-exports standard Solid primitives (`createSignal`, `createMemo`, `createEffect`, `createRoot`, `createStore`, `produce`, `reconcile`, `Show`, `For`, etc.) alongside TUI-specific hooks: `useClock`, `useTheme`, `useKeymap`, `useFocus`, `createLayoutEffect`, and `createCommitEffect`.
-- **Intrinsic Element Vocabulary**: Declared intrinsic elements in JSX namespace for the universal host tree: `<stack>`, `<row>`, `<box>`, `<sized>`, `<rail>`, `<scroll>`, `<split>`, `<frame>`, `<hr>`, `<text>`, `<span>`, `<br>`, `<cursor>`, `<raw>`, `<path>`, `<link>`, `<icon>`, `<status>`, `<badge>`, `<meta>`, `<preview>`, `<code>`, `<pre>`, `<diff>`, `<markdown>`, `<json>`, `<table>`, `<progress>`, `<spinner>`, `<shimmer>`, `<duration>`, `<timestamp>`, `<choice>`, `<select>`, `<tabs>`, `<tree>`, `<input>`, `<editor>`, `<terminal>`, `<image>`, `<qr>`, `<transcript>`, `<transcript-block>`.
-- **Shared Compositions (`@oh-my-pi/pi-tui/view/*`)**: Reusable high-level function components: `ToolCard`, `ToolHeader`, `Card`, `Section`, `KeyValue`, `List`, `TreeList`, `FileList`, `AgentRow`, `JsonTree`, `Kbd`, `Hints`, `Notice`, `Bar`, `MoreItems`, `ExpandHint`, `TruncationNotice`, `DiffStats`, `StatusIcon`.
-- **Root Mounting API (`@oh-my-pi/pi-tui/root`)**: Added `render(view, options): RootHandle` connecting the Solid reactive root to the retained host tree and compositor.
-- **Document Model (`@oh-my-pi/pi-tui/document/document`)**: Added `TextDocument` and `OutputDocument` factories (`createDocument`, `createOutputDocument`, `documentFromSnapshots`) supporting offset-based delta changes and incremental range-based syntax token caching.
-- **Testing Substrate (`@oh-my-pi/pi-tui/testing`)**: Added `mountForTest(view, options): TestRoot` and `renderToRows(view, width)` with `Counters` performance tracking and deterministic `FakeClock`.
-- **Overlays (`@oh-my-pi/pi-tui/overlay`)**: Added `<Portal to="overlay">` for modal and floating surfaces.
-
-### Changed
-
-- **Compositor and Damage Pipeline**: Switched from whole-frame and pull-based `requestRender()` invalidation to fine-grained damage classification (`Damage.Paint`, `Damage.Text`, `Damage.Layout`, `Damage.Link`, `Damage.Interaction`). The compositor repaints only dirty subtrees and replays cached `RichText` runs for clean subtrees.
-- **Transcript Architecture**: Structured the chat transcript using `<transcript>` and `<transcript-block>` elements with explicit append-only retirement and monotonic `HistoryBatch` contracts.
-- Streaming code and argument previews now handle nested template literals and incomplete JSON consistently.
-- Dev-mode startup no longer recompiles every Solid TSX module with Babel on each launch: compiled output is cached in `~/.omp/cache/solid-tsx-cache.db`, keyed by source content and compiler inputs.
-
-### Removed
-
-- Removed `Mount` class (`packages/tui/src/mount.ts`).
-- Removed legacy custom JSX reconciler and instance tree (`packages/tui/src/jsx/*`).
-- Removed per-tool repaint hacks (`forceFirstResultViewportRepaint`, `forceResultViewportRepaintOnSettle`, `#resetDisplayForResultTopologyChange`).
-- Removed manual rendering caches (`RenderCache`, `Hasher` xxHash64 helper) and imperative timers (`sharedSpinnerTimer`, `#todoStrikeInterval`).
-
-### Fixed
-
-- Restored colors for standalone added lines in streamed and completed edit diffs.
-- Restored settings search editors, selection highlights, and immediate display of changed values.
-- Restored full-width Alt+P picking and fullscreen model-hub panes, aligned roles, dialogs, and focus return.
-- Kept completed tool output intact while streaming prose retires into scrollback; only oversized active tools use summaries.
-- Fixed late welcome animations pinning history after a session change.
-- Fixed failed overlay dismissal leaving theme subscriptions active.
-- Fixed multiline diagnostics repeating file paths, breaking tree alignment, and losing indentation when wrapped.
-- Restored idle editor spacing while keeping occupied band-style status rows flush with the editor.
-- Fixed `createSolidJsxEntrypointPlugin` demoting the build entrypoint to a non-entry module, which folded its `import.meta.main` launch guard to `false`.
-- Fixed completed read groups blocking scrollback.
-- Fixed history replay showing stale output after a retired background tool completes.
-- Restored historical tool and composer layouts, colors, glyphs, wrapping, and collapsed previews across narrow and wide terminals.
-- Restored editor typing and cursor visibility, overlay search and Escape focus return, and immediate display of externally restored drafts.
-- Restored transparent backgrounds for grep and glob results.
-- Restored compact bracketed edit statistics and visible collapsed diffs, previews, and errors.
-- Fixed metadata rendering crashing when a label contains styled text.
-- Fixed resizing committed tool history crashing after its animation subscriptions were released.
-- Kept live transcript repaint and hit-testing costs bounded after long sessions retire messages into scrollback.
-- Fixed scoped-theme selectors and setup previews failing before the global application theme is initialized.
-- Fixed terminal JSX text displaying HTML entities instead of literal characters.
-- Multi-line text inside a padded bubble (for example a markdown soft break in a user message) could reach the terminal as a raw line feed, shifting every later row and duplicating tool headers in scrollback across repaints.
-
 ## [18.2.5] - 2026-09-17
 
 ### Added

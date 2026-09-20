@@ -4,45 +4,37 @@
 
 ### Breaking Changes
 
-- Image generation overrides now use `model` selectors, and web search CLI overrides use `--model` instead of `--provider`.
-- Removed support for the env parameter in the bash tool
-- Eval `judge(state, questions)` is now awaited and returns the answers directly; `JudgmentHandle` and judgment support in `wait()` are gone.
+- Image-generation overrides now use model selectors, and web-search CLI overrides use --model instead of --provider.
+- Removed the bash tool's env parameter.
+- Eval judge(state, questions) is now awaited and returns answers directly; JudgmentHandle and judgment support in wait() have been removed.
 
 ### Added
 
-- Added eval `judge_batch(states, questions)` / `judgeBatch(...)`: the host judges every state under one bounded run that outlives the cell, and cells pull settled items across turns with `await b.drain(timeout)` / `drain_iter`, `b.status()`, `b.results()`, `b.failed()`; per-item failures are recorded, never raised, and the batch id is a background job (`hub wait`, auto-delivered summary, `judge_batch.attach(id)` after a reset).
-- Added the `jevify` magic keyword (`magicKeywords.jevify`): a hidden notice that makes the agent freeze its rubric up front, classify bulk items with the eval kernel's `judge()`, and read only what the judge flags.
-- Added `omp web-search` as an alias of `omp search`.
-- Added `tui.titleSpinner` (`braille` | `dots` | `line`, default `braille`) to pick the terminal-title working-state spinner glyphs alongside the existing `tui.titleState` on/off toggle.
-- Customize the system prompt with Handlebars using live settings and tool data via `SYSTEM_TEMPLATE.md`, `--system-prompt-template`, or the SDK ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-
-### Fixed
-
-- Fixed contradictory `systemPromptTemplate` and `customSystemPrompt` options being accepted with a fixed full `systemPrompt` replacement, including empty values ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-- Added `Target.getTargets` to the browser relay's CDP surface so clients can enumerate eligible pages without attaching to or claiming them.
-- Added image, web, speech, dictation, judge, and memory model roles with ordered fallbacks, automatic migration of legacy backend settings, and `omp models --kind` filtering.
-- Added native OpenRouter image generation and model-selected web-plugin search, plus live TypeSafe judge-model discovery.
-- Fixed Codex rejecting the sloppy edit tool's grammar.
+- Added batch evaluation with judge_batch(states, questions) / judgeBatch(...), including bounded background execution, incremental result and status access, per-item failure reporting, and the ability to wait for or reattach to jobs across turns or after a reset.
+- Added the jevify magic keyword to have the agent establish an evaluation rubric before classifying bulk items and inspect only items flagged by the judge.
+- Added omp web-search as an alias for omp search.
+- Added tui.titleSpinner configuration to select the terminal-title working-state spinner (braille, dots, or line).
+- Added Handlebars-based system prompt templates through SYSTEM_TEMPLATE.md, --system-prompt-template, and the SDK, with access to live settings and tool data.
+- Added configurable image, web, speech, dictation, judge, and memory model roles with ordered fallbacks, legacy backend-setting migration, and omp models --kind filtering.
+- Added native OpenRouter image generation, model-selected web-plugin search, and live discovery of TypeSafe judge models.
 
 ### Changed
 
-- Startup no longer composes the entire bundled model catalog to validate kind-role fallback chains; provider-qualified selectors are checked against their providers' slices.
-### Changed
-
-- npm and compiled builds embed `models.json` as JSON text instead of an object literal, cutting ~100 ms from bundle launch.
+- Improved startup performance by validating provider-qualified model selectors against only the relevant provider catalog.
+- Reduced launch time for npm and compiled builds by embedding the model catalog more efficiently.
 
 ### Fixed
 
-- Eval `judge()`/`completion()` fan-out is capped at 32 in-flight requests, so a cell that spawns hundreds of handles no longer floods every judge/tier fallback (including self-hosted models) at once.
-- Judgments skip a judge candidate for five minutes after its account rejects a request (401/402/403) instead of re-paying the rejected call and credential rotation on every judgment.
-- Fixed contradictory `systemPromptTemplate` and `customSystemPrompt` options being accepted with a fixed full `systemPrompt` replacement, including empty values ([#12194](https://github.com/can1357/oh-my-pi/pull/12194) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-- Fixed resume clutter: elide 0-turn sessions from the /resume menu; -c similarly skips empty sessions.
-- Fixed image and speech fallback models disappearing after discovery and false incompatibility warnings for providers without credentials.
-
-- Fixed Edit calls getting stuck generating repeated closing tags after an empty `SM:AFTER` insertion.
-- Fixed Edit previews and application panicking on Unicode no-op edits and overlapping duplicate matches.
-- Fixed live subagent messages getting stuck behind persisted-agent discovery, and roster discovery looping on dot-named transcripts.
-- Fixed llama.cpp discovery of PrismML Bonsai 2 27B GGUFs: built-in and custom-named providers now share catalog rules for chat-completions routing and the Qwen 3.8 thinking ladder (`low`/`medium`/`xhigh`), including cached models.
+- Fixed system prompt configuration validation so systemPromptTemplate and customSystemPrompt cannot conflict with a full systemPrompt replacement, including when values are empty.
+- Added browser-relay support for listing eligible pages without attaching to or claiming them.
+- Fixed Codex compatibility with the sloppy edit tool.
+- Capped concurrent eval judge and completion requests to prevent large fan-outs from overwhelming judge and fallback models.
+- Temporarily avoids retrying judgment requests with credentials that recently failed due to authorization or billing errors.
+- Fixed image and speech fallback models disappearing after discovery and eliminated incorrect incompatibility warnings for providers without credentials.
+- Fixed resume and continue flows to hide empty sessions.
+- Fixed edit operations that could loop after empty insertions or fail on Unicode no-op and overlapping duplicate matches.
+- Fixed live subagent messages being delayed by agent discovery and roster discovery looping on dot-named transcripts.
+- Fixed llama.cpp discovery and routing for PrismML Bonsai 2 27B GGUF models, including support for cached models and the Qwen 3.8 thinking-level ladder.
 
 ## [18.2.6] - 2026-09-18
 
