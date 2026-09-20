@@ -217,6 +217,22 @@ describe("retry fallback selector resolution", () => {
 		});
 		expect(resolveRetryFallbackChainKey(exactHigh, high, model)).toBe(high);
 	});
+
+	it("uses the default chain when the live model matches no role primary (#12421)", () => {
+		const live = "openrouter/google/gemini-2.5-flash";
+		const context = createContext(
+			{
+				default: ["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
+				slow: ["openai/gpt-4o-mini"],
+			},
+			{ default: "google/gemini-2.5-flash", slow: "openai/gpt-4o-mini" },
+		);
+		expect(resolveRetryFallbackChainKey(context, live)).toBe("default");
+		expect(findRetryFallbackCandidates(context, "default", live).map(candidate => candidate.raw)).toEqual([
+			"openai/gpt-4o-mini",
+			"google/gemini-2.5-flash",
+		]);
+	});
 });
 
 describe("retry fallback kind-role validation", () => {
