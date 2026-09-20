@@ -22,6 +22,9 @@
 ### Changed
 
 - Startup no longer composes the entire bundled model catalog to validate kind-role fallback chains; provider-qualified selectors are checked against their providers' slices.
+### Changed
+
+- npm and compiled builds embed `models.json` as JSON text instead of an object literal, cutting ~100 ms from bundle launch.
 
 ### Fixed
 
