@@ -126,7 +126,7 @@ describe("ChainJudge", () => {
 		});
 
 		expect(answer).toBe("high");
-		expect(kinds).toEqual(["typesafe", "local", "online"]);
+		expect(kinds).toEqual(["native", "local", "online"]);
 		expect(localPrompt).toContain("trivial");
 		expect(localPrompt).toContain("moderate");
 		expect(localPrompt).toContain("hard");

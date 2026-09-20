@@ -7,6 +7,7 @@
 import {
 	type AssistantMessage,
 	chatTextBackend,
+	isJudgmentApi,
 	type Judge,
 	type JudgeOptions,
 	type JudgmentRequest,
@@ -71,15 +72,15 @@ interface RegistryWithRejections extends ModelRegistry {
 	[kRejections]?: Map<string, number>;
 }
 
-/** Which backend a judge-role candidate routes to. */
-export type JudgeKind = "typesafe" | "local" | "online";
+/** Which backend a judge-role candidate routes to: native System One decisions, on-device keywords, or a chat model. */
+export type JudgeKind = "native" | "local" | "online";
 
 /** Classify a role candidate by model API, never by provider identity. */
 export function kindOf(candidate: RoleChainCandidate): JudgeKind;
 export function kindOf(model: Model): JudgeKind;
 export function kindOf(value: RoleChainCandidate | Model): JudgeKind {
 	const model = "model" in value ? value.model : value;
-	if (model.api === TYPESAFE_PROVIDER) return "typesafe";
+	if (isJudgmentApi(model.api)) return "native";
 	if (model.api === "local-inference") return "local";
 	return "online";
 }
@@ -166,40 +167,37 @@ export class ChainJudge implements Judge {
 
 	async #createJudge(candidate: RoleChainCandidate, signal: AbortSignal | undefined): Promise<Judge | undefined> {
 		const model = candidate.model;
-		switch (kindOf(candidate)) {
-			case "typesafe": {
-				if (!(await this.#deps.registry.getApiKey(model, this.#deps.sessionId, { signal }))) return undefined;
-				const judge = new TypeSafeJudge({
-					apiKey: this.#deps.registry.resolver(model, this.#deps.sessionId),
-					model: model.id,
-					baseUrl: model.baseUrl,
-				});
-				return usageReportingTypeSafeJudge(judge, this.#deps.onUsage);
-			}
-			case "local":
-				return new TextJudge(new LocalTextBackend(model.id));
-			case "online": {
-				if (!(await this.#deps.registry.getApiKey(model, this.#deps.sessionId, { signal }))) return undefined;
-				// Resolve metadata after getApiKey so the session-sticky credential is recorded first.
-				const metadata = this.#deps.metadataResolver?.(model.provider);
-				const backend = chatTextBackend(model, {
-					apiKey: this.#deps.registry.resolver(model, this.#deps.sessionId),
-					sessionId: this.#deps.sessionId,
-					metadata,
-					onAttempt: attempt =>
-						this.#deps.onUsage?.({
-							role: "judge",
-							api: attempt.api,
-							provider: attempt.provider,
-							model: attempt.model,
-							usage: attempt.usage,
-							stopReason: attempt.stopReason,
-							errorMessage: attempt.errorMessage,
-						}),
-				});
-				return new TextJudge(backend);
-			}
+		if (model.api === "local-inference") return new TextJudge(new LocalTextBackend(model.id));
+		if (!(await this.#deps.registry.getApiKey(model, this.#deps.sessionId, { signal }))) return undefined;
+		const apiKey = this.#deps.registry.resolver(model, this.#deps.sessionId);
+		if (isJudgmentApi(model.api)) {
+			const judge = new TypeSafeJudge({
+				apiKey,
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				baseUrl: model.baseUrl,
+			});
+			return usageReportingTypeSafeJudge(judge, this.#deps.onUsage);
 		}
+		// Resolve metadata after getApiKey so the session-sticky credential is recorded first.
+		const metadata = this.#deps.metadataResolver?.(model.provider);
+		const backend = chatTextBackend(model, {
+			apiKey,
+			sessionId: this.#deps.sessionId,
+			metadata,
+			onAttempt: attempt =>
+				this.#deps.onUsage?.({
+					role: "judge",
+					api: attempt.api,
+					provider: attempt.provider,
+					model: attempt.model,
+					usage: attempt.usage,
+					stopReason: attempt.stopReason,
+					errorMessage: attempt.errorMessage,
+				}),
+		});
+		return new TextJudge(backend);
 	}
 }
 
