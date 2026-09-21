@@ -37,6 +37,7 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
+import { rpcUnknownCommandResponse, selectRpcEntries } from "./rpc-compat";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
 import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
@@ -1327,6 +1328,34 @@ export async function runRpcMode(
 				return success(id, "get_available_commands", { commands: await getAvailableCommands() });
 			}
 
+			case "get_commands": {
+				// Pi-compatible alias: same catalog, no duplicated logic.
+				return success(id, "get_commands", { commands: await getAvailableCommands() });
+			}
+
+			case "get_entries": {
+				try {
+					return success(
+						id,
+						"get_entries",
+						selectRpcEntries(
+							session.sessionManager.getEntries(),
+							session.sessionManager.getLeafId(),
+							command.since,
+						),
+					);
+				} catch (err) {
+					return error(id, "get_entries", err instanceof Error ? err.message : String(err), "unknown_since");
+				}
+			}
+
+			case "get_tree": {
+				return success(id, "get_tree", {
+					tree: session.sessionManager.getTree(),
+					leafId: session.sessionManager.getLeafId(),
+				});
+			}
+
 			case "set_todos": {
 				session.setTodoPhases(command.phases);
 				return success(id, "set_todos", { todoPhases: session.getTodoPhases() });
@@ -1440,6 +1469,14 @@ export async function runRpcMode(
 					return success(id, "cycle_thinking_level", null);
 				}
 				return success(id, "cycle_thinking_level", { level });
+			}
+
+			case "get_available_thinking_levels": {
+				// Preserve OMP semantics: live levels for the selected model,
+				// only the command/response shape is Pi-compatible.
+				return success(id, "get_available_thinking_levels", {
+					levels: [...session.getAvailableThinkingLevels()],
+				});
 			}
 
 			// =================================================================
@@ -1657,8 +1694,8 @@ export async function runRpcMode(
 			}
 
 			default: {
-				const unknownCommand = command as { type: string };
-				return error(undefined, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
+				const unknownCommand = command as { type: string; id?: string };
+				return rpcUnknownCommandResponse({ type: unknownCommand.type, id: id ?? unknownCommand.id });
 			}
 		}
 	};
