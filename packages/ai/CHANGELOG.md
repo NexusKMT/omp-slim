@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Bedrock rejecting tool-enabled requests when tool descriptions are inlined into the system prompt.
+
 ## [18.2.8] - 2026-09-21
 
 ### Added
