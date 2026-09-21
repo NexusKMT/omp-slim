@@ -98,7 +98,7 @@ These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless not
 | `CLINE_API_KEY`                 | ClinePass subscription + free-tier auth          | Using the `cline-pass` provider                                | Official Cline API-key variable                                                                     |
 | `YOLO_AUTO_API_KEY`             | Yolo-Auto auth                                   | Using `yolo-auto` provider                                     | Flat-rate Qwen models; validated against `https://yolo-auto.com/v1/models`                          |
 | `WAFER_SERVERLESS_API_KEY`      | Wafer Serverless auth                            | Using `wafer-serverless` provider                              | Pay-as-you-go Wafer SKU; validated against `https://pass.wafer.ai/v1/models`                        |
-| `SINGULARITYAPI_API_KEY`        | SingularityAPI auth                              | Using `singularityapi` provider                                | Reserved DeepSeek lanes; validated against `https://api.singularityapi.tech/v1/models`              |
+| `GITLAB_TOKEN`                  | GitLab Duo auth                                  | Using `gitlab-duo` / `gitlab-duo-agent` providers              | Both GitLab providers read the same token                                                           |
 | `BASETEN_API_KEY`               | Baseten auth                                     | Using `baseten` provider                                       | Also configured via the interactive API-key login (`/login baseten`, key from the Baseten dashboard) |
 | `COREWEAVE_API_KEY` / `WANDB_API_KEY` | CoreWeave Serverless Inference auth        | Using `coreweave` provider                                     | Either variable works (W&B fallback). `COREWEAVE_PROJECT` (fallback `WANDB_INFERENCE_PROJECT`) supplies the required `OpenAI-Project` header |
 | `SAKANA_API_KEY` / `FUGU_API_KEY` | Sakana AI auth                                 | Using `sakana` provider                                        | Either variable works; `SAKANA_BASE_URL` / `FUGU_BASE_URL` override the request base URL            |
@@ -106,6 +106,7 @@ These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless not
 | `AIAND_API_KEY`                 | ai& auth                                         | Using `aiand` provider                                         |                                                                                                     |
 | `GMI_API_KEY`                   | GMI Cloud auth                                   | Using `gmi-cloud` provider                                     |                                                                                                     |
 | `MODEL_API_KEY` / `META_API_KEY` | Meta Model API auth                             | Using `meta` provider                                          | Either variable works                                                                               |
+| `SINGULARITYAPI_API_KEY`        | SingularityAPI auth                              | Using `singularityapi` provider                                | Reserved DeepSeek lanes; validated against `https://api.singularityapi.tech/v1/models`              |
 
 ### GitHub/Copilot tokens
 
