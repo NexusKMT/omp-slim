@@ -175,6 +175,7 @@ import {
 import { getRestorableSessionModels } from "./session/session-context";
 import { SessionManager } from "./session/session-manager";
 import { collectMountedMCPToolRoutes, projectMountedMCPXdevGuidance } from "./session/session-tools";
+import { CacheWarmer } from "./session/cache-warmer";
 import { createSettingsAwareStreamFn } from "./session/settings-stream-fn";
 import { SnapcompactInlineTransformer } from "./session/snapcompact-inline";
 import { createSnapcompactSavingsRecorder } from "./session/snapcompact-savings-journal";
@@ -3640,6 +3641,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			wrapStreamFnWithProviderConcurrency(settings, createSettingsAwareStreamFn(settings)),
 			blobBroker,
 		);
+		// Prompt-cache warmer for the main agent loop only: replays the last
+		// request through the same settings-aware wrapper just before the entry
+		// would expire, so idle gaps do not force a full-prefix cache re-write.
+		const cacheWarmer = new CacheWarmer({
+			stream: (model, context, streamOptions) => settingsAwareStreamFn(model, context, streamOptions),
+			getPromptTokens: () => session.lastPromptTokens(),
+			getMode: () => settings.get("providers.cacheWarming"),
+			decide: event => extensionRunner.emitCacheWarmingDecision(event),
+		});
 		const codeModeState: { namespacesInfo?: unknown } = {};
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
@@ -3704,9 +3714,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					notifyFirstChatDispatch = undefined;
 					try {
 						cb();
-					} catch (err) {
+					} catch (error) {
 						logger.warn("onFirstChatDispatch hook threw", {
-							error: err instanceof Error ? err.message : String(err),
+							error: error instanceof Error ? error.message : String(error),
 						});
 					}
 				}
@@ -3714,14 +3724,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
-				return settingsAwareStreamFn(streamModel, context, {
+				const merged: SimpleStreamOptions = {
 					...streamOptions,
-					anthropicCacheRefresh: true,
 					forceReasoningOff: externalThinking || streamOptions?.forceReasoningOff,
 					...(codeModeState.namespacesInfo === undefined
 						? {}
 						: { toolNamespacesInfo: codeModeState.namespacesInfo }),
-				});
+				};
+				const stream = settingsAwareStreamFn(streamModel, context, merged);
+				// Main-loop requests only: side-channel and advisor calls carry a
+				// suffixed sessionId and must not take over the warmer.
+				if (streamOptions?.sessionId === session.sessionId) {
+					session.startCacheWarming(streamModel, context, merged);
+				}
+				return stream;
 			},
 			cursorExecHandlers,
 			getCursorTools: () => (toolSession.xdev ? listXdevTools(toolSession.xdev) : []),
@@ -3850,6 +3866,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// streamed and parsed on the main thread.
 		session = new AgentSession({
 			codeModeState,
+			cacheWarmer,
 			advisorWatchdogPrompt,
 			advisorContextPrompt,
 			advisorMemoryPrompt,
