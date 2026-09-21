@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.8] - 2026-09-21
+
 ### Added
 
 - Added comprehensive browser automation tools for accessibility auditing, React inspection, console and network monitoring, performance tracing, semantic DOM queries, tab management, screen recording with cursor overlays, downloads, custom initialization scripts, persistent storage, and WebMCP cross-frame tool discovery.

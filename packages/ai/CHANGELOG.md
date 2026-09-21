@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.8] - 2026-09-21
+
 ### Added
 
 - Added support for text embeddings, document reranking, video generation, image generation across multiple providers, audio speech synthesis, and audio transcription services.
