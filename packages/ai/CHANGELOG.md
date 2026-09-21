@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `TypeSafeJudgeOptions.headers`, sent on every System One judgment request so proxy gateways can require routing or custom authentication headers.
+
 ## [18.2.7] - 2026-09-21
 
 ### Breaking Changes
