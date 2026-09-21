@@ -63,7 +63,8 @@ describe("SingularityAPI provider support", () => {
 			expect(model.reasoning).toBe(true);
 			expect(model.thinking).toMatchObject({ mode: "effort", efforts: ["low", "high", "max"] });
 			expect(model.contextWindow).toBe(1000000);
-			expect(model.maxTokens).toBe(384000);
+			// The deployment serves ~272K max output, below the documented 384K.
+			expect(model.maxTokens).toBe(272000);
 			expect(model.compat.maxTokensField).toBe("max_tokens");
 		}
 	});

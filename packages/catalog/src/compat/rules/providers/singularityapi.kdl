@@ -19,7 +19,12 @@ provider "singularityapi" {
 	// deepseek/flash by taxonomy, but their bare `/v1/models` rows carry no
 	// reasoning metadata, so neutral discovery would leave the effort dial
 	// dark. These rules own the reviewed V4 Flash surface: low/high/max
-	// ladder, max_tokens wire field, and the 1M/384K documented window.
+	// ladder, max_tokens wire field, and the 1M context window. Output is
+	// capped below the documented 384K: the deployment serves at most
+	// ~272K output tokens per the live serving config (user-observed
+	// 2026-09-22; unprobed — the reservation gate 403s outside booked hours
+	// before any output-limit validation runs, so the boundary cannot be
+	// mapped without spending lane time).
 	// Glob (not exact) selectors: cascade `exact` matching is
 	// case-sensitive while the compiler lowercases exact values, so an
 	// exact rule could never match the wire's mixed-case ids.
@@ -29,7 +34,7 @@ provider "singularityapi" {
 		thinking-efforts "low" "high" "max"
 		limits-patch {
 			context-window 1000000
-			max-tokens 384000
+			max-tokens 272000
 		}
 	}
 }
