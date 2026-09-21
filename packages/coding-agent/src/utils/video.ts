@@ -608,11 +608,7 @@ export async function buildChangedFrameContactSheetPng(
 						signal,
 					);
 					const labelSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${RECORDING_CONTACT_THUMB_WIDTH}" height="30"><rect width="100%" height="100%" fill="#000" fill-opacity=".7"/><text x="8" y="22" fill="#fff" font-size="18" font-family="monospace">${label}</text></svg>`;
-					const labelPng = await rasterizeSvg(
-						Buffer.from(labelSvg),
-						RECORDING_CONTACT_THUMB_WIDTH,
-						30,
-					);
+					const labelPng = await rasterizeSvg(Buffer.from(labelSvg), RECORDING_CONTACT_THUMB_WIDTH, 30);
 					await Bun.write(labelPaths[i]!, labelPng);
 					await runFfmpeg(
 						[
