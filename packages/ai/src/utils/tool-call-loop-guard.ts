@@ -101,7 +101,7 @@ export class ToolCallLoopGuard {
 			this.#count = 1;
 		}
 
-		if (this.#count !== this.#threshold) return null;
+	if (this.#count < this.#threshold) return null;
 		const reportCall = toolCalls.find(tc => !this.#exemptTools.has(tc.name)) ?? toolCalls[0]!;
 		return {
 			kind: "repeated_tool_call",
