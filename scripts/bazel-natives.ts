@@ -222,6 +222,31 @@ async function installAddon(sourcePath: string, destPath: string): Promise<void>
 	}
 }
 
+/**
+ * Confirm a freshly installed host addon can actually be loaded.
+ *
+ * A cross-compiled addon cannot be probed here, but a host-platform one can,
+ * and an addon the host loader rejects is worse than a failed build: it
+ * installs cleanly, so the failure surfaces much later as a bare
+ * `process.dlopen` error in whatever first imports the runtime, with nothing
+ * pointing back at the build that produced it. Loading happens in a child so a
+ * successful probe does not keep the file mapped in this process.
+ */
+export async function verifyHostAddonLoads(destPath: string): Promise<void> {
+	const probe =
+		`try { process.dlopen({ exports: {} }, ${JSON.stringify(destPath)}); } ` +
+		"catch (error) { console.error(error && error.message ? error.message : String(error)); process.exit(1); }";
+	const proc = Bun.spawn([process.execPath, "-e", probe], { stdout: "ignore", stderr: "pipe" });
+	const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+	if (exitCode === 0) return;
+	throw new Error(
+		`built addon ${path.basename(destPath)} cannot be loaded on this host (${process.platform}-${process.arch}):\n` +
+			`${stderr.trim()}\n` +
+			"The addon was produced and installed successfully, so this is a defect in the build that made it, " +
+			"not in the loader that rejected it.",
+	);
+}
+
 /** Build and install the host addon through the local Cargo/N-API path. */
 async function buildLocalHostAddon(host: HostInfo, destDir: string): Promise<void> {
 	const script = path.join(repoRoot, "packages/natives/scripts/build-bindings.ts");
@@ -241,6 +266,7 @@ async function buildLocalHostAddon(host: HostInfo, destDir: string): Promise<voi
 		await installAddon(builtPath, path.join(destDir, filename));
 	}
 	console.log(`installed ${filename} → ${path.join(destDir, filename)}`);
+	await verifyHostAddonLoads(path.join(destDir, filename));
 }
 
 async function main(): Promise<void> {
@@ -346,11 +372,13 @@ async function main(): Promise<void> {
 		seen.set(base, output);
 	}
 	await fs.mkdir(destDir, { recursive: true });
+	const hostAddonFilename = resolveLocalHostAddon(host).filename;
 	for (const output of outputs) {
 		const absolute = path.isAbsolute(output) ? output : path.join(repoRoot, output);
 		const destPath = path.join(destDir, path.basename(output));
 		await installAddon(absolute, destPath);
 		console.log(`installed ${path.basename(output)} → ${destPath}`);
+		if (path.basename(output) === hostAddonFilename) await verifyHostAddonLoads(destPath);
 	}
 }
 
