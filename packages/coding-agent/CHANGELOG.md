@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed multi-second UI freezes after every turn in long sessions caused by rescanning the whole provider context with every credential regex on each request; built-in patterns now skip text that contains none of their literal prefixes (1018 ms → 19 ms on a 716 KB context) ([#12666](https://github.com/can1357/oh-my-pi/pull/12666) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 ### Added
 
 - Added comprehensive browser tools for accessibility audits, React internals inspection, console/network monitoring, and performance tracing
@@ -15,11 +12,13 @@
 
 ### Changed
 
+- Updated bash tool prompt to broaden available auxiliary utilities and removed truncation footer note
 - Updated background job notice to inject output as follow‑up and discourage polling
 - Enhanced browser resilience with configurable HTTPS error ignoring, domain allow-listing, and automatic tab recycling for security-sensitive state changes
 
 ### Fixed
 
+- Fixed multi-second UI freezes after every turn in long sessions caused by rescanning the whole provider context with every credential regex on each request; built-in patterns now skip text that contains none of their literal prefixes (1018 ms → 19 ms on a 716 KB context) ([#12666](https://github.com/can1357/oh-my-pi/pull/12666) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
 - Added support for buffered cloud transcription using OpenAI-compatible models
 - Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
