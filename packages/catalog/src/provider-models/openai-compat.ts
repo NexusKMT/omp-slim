@@ -55,6 +55,7 @@ import {
 	mergeCopilotApiHeaders,
 	parseGitHubCopilotApiKey,
 } from "../wire/github-copilot";
+import { normalizeSingularityApiBaseUrl } from "../wire/singularityapi";
 import { createBundledReferenceMap, createReferenceResolver, toModelSpec } from "./bundled-references";
 import { getDefaultModelDiscoveryBaseUrl, resolveModelCacheProviderId } from "./cache-provider-id";
 import { getClinePassModelMetadata } from "./cline-pass";
@@ -7411,21 +7412,25 @@ export interface SingularityApiModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
-const SINGULARITYAPI_BASE_URL = "https://api.singularityapi.tech/v1";
-
 /**
  * SingularityAPI reserved-inference gateway: OpenAI-compatible chat
- * completions fronted by LiteLLM. The cache follows the configured endpoint
- * while the roster resolves per credential at discovery time; unknown lane
- * ids keep neutral discovery metadata instead of borrowed foreign pricing.
+ * completions fronted by LiteLLM. The roster is lane-scoped, so the
+ * authoritative cache namespace is hashed from the resolved credential **and**
+ * the endpoint: switching keys — or pointing at a self-hosted proxy that
+ * publishes its own roster — misses the prior namespace and re-discovers,
+ * instead of serving lanes the current key cannot call until the TTL expires.
+ * Lane ids that no KDL rule describes keep neutral discovery metadata rather
+ * than borrowed foreign pricing, with the gateway-wide wire shape applied by
+ * the provider rule in `rules/providers/singularityapi.kdl`.
  */
 export function singularityApiModelManagerOptions(
 	config?: SingularityApiModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
-	const baseUrl = config?.baseUrl?.trim().replace(/\/+$/, "") || SINGULARITYAPI_BASE_URL;
+	const baseUrl = normalizeSingularityApiBaseUrl(config?.baseUrl);
 	return {
 		providerId: "singularityapi",
+		cacheProviderId: resolveModelCacheProviderId("singularityapi", { apiKey, baseUrl }),
 		dynamicModelsAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: () =>
