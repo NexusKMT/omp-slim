@@ -117,4 +117,26 @@ describe("composer shape preview", () => {
 
 		expect(getComposerShapeOptions().some(option => option.value === "extension-dock")).toBe(false);
 	});
+
+	it("uses the full overlay width instead of clipping the status band (issue #12500)", async () => {
+		await setTheme("dark");
+		const seenWidths: number[] = [];
+		const status = {
+			getTopBorder: (width: number) => ({ content: "", width }),
+			getStandaloneTopBorder: (width: number) => ({ content: "", width }),
+			getBandTopBorder: (width: number) => {
+				seenWidths.push(width);
+				return { content: "", width };
+			},
+			renderBottomBar: (width: number) => {
+				seenWidths.push(width);
+				return "";
+			},
+		};
+
+		renderComposerShapePreview("band", 200, status);
+
+		expect(seenWidths.length).toBeGreaterThan(0);
+		for (const width of seenWidths) expect(width).toBe(200);
+	});
 });
