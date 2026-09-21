@@ -1,0 +1,14 @@
+// SingularityAPI reserved-inference gateway (api.singularityapi.tech, a
+// LiteLLM front end for reserved DeepSeek lanes). The live `/v1/models`
+// roster owns membership: keys are lane-scoped `sk-...` bearer tokens issued
+// from the dashboard, and a bogus key is rejected with 401
+// `token_not_found_in_db` (verified 2026-09-21), so no rows are frozen here.
+// Deliberately no `discovery` node: that node enrolls a provider in
+// generate-models.ts, which would freeze one account's lane snapshot into
+// models.json. The roster is per-key credential-scoped, so the provider stays
+// runtime-only and `dynamic-models-authoritative` prunes stale rows.
+provider "singularityapi" {
+	default-model "deepseek-v4-flash"
+	env "SINGULARITYAPI_API_KEY"
+	dynamic-models-authoritative #true
+}

@@ -7400,3 +7400,42 @@ export function charmHyperModelManagerOptions(
 			}),
 	};
 }
+
+// ---------------------------------------------------------------------------
+// SingularityAPI
+// ---------------------------------------------------------------------------
+
+export interface SingularityApiModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+const SINGULARITYAPI_BASE_URL = "https://api.singularityapi.tech/v1";
+
+/**
+ * SingularityAPI reserved-inference gateway: OpenAI-compatible chat
+ * completions fronted by LiteLLM. The cache follows the configured endpoint
+ * while the roster resolves per credential at discovery time; unknown lane
+ * ids keep neutral discovery metadata instead of borrowed foreign pricing.
+ */
+export function singularityApiModelManagerOptions(
+	config?: SingularityApiModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl?.trim().replace(/\/+$/, "") || SINGULARITYAPI_BASE_URL;
+	return {
+		providerId: "singularityapi",
+		dynamicModelsAuthoritative: true,
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: "singularityapi",
+					baseUrl,
+					apiKey,
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
