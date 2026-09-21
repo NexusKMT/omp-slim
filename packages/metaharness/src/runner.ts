@@ -63,6 +63,8 @@ export interface Config {
 	agentArgs: string[];
 	/** omp tool allowlist (`--tools`); `null` keeps omp's default tool set. */
 	tools: string[] | null;
+	/** Extra omp settings written into the container config (dotted key → JSON value). */
+	settings: Record<string, unknown>;
 
 	agent: string;
 	install: "source" | "local" | "published";
@@ -107,6 +109,7 @@ function defaultConfig(): Config {
 		thinking: null,
 		agentArgs: [],
 		tools: null,
+		settings: {},
 
 		agent: "omp",
 		install: "source",
@@ -157,6 +160,7 @@ Model / agent:
       --no-build                 Skip packing; reuse newest tarball in bench dir (--install local)
       --agent-arg <arg>          Extra arg forwarded verbatim to the in-container omp CLI (repeatable)
       --tools <a,b,c>            omp tool allowlist; enables the find tool when listed
+      --setting <key=value>      omp setting for the container config, e.g. edit.mode=sloppy (repeatable; JSON values)
       --env <KEY[=VALUE]>        Forward env into omp container (repeatable).
                                  KEY alone forwards host value; host PI_* auto-forwarded.
 
@@ -260,6 +264,20 @@ export function parseArgs(argv: string[]): Config {
 			case "--agent-arg":
 				cfg.agentArgs.push(take(arg));
 				break;
+			case "--setting": {
+				const spec = take(arg);
+				const eq = spec.indexOf("=");
+				if (eq <= 0) throw new Error("--setting expects key=value");
+				const raw = spec.slice(eq + 1);
+				let value: unknown = raw;
+				try {
+					value = JSON.parse(raw);
+				} catch {
+					// bare strings stay strings
+				}
+				cfg.settings[spec.slice(0, eq)] = value;
+				break;
+			}
 			case "--tools":
 				cfg.tools = take(arg)
 					.split(",")
@@ -1459,6 +1477,7 @@ export function buildHarborEnv(
 	if (cfg.thinking) env.OMP_BENCH_THINKING = cfg.thinking;
 	if (cfg.agentArgs.length > 0) env.OMP_BENCH_AGENT_ARGS = JSON.stringify(cfg.agentArgs);
 	if (cfg.tools) env.OMP_BENCH_TOOLS = cfg.tools.join(",");
+	if (Object.keys(cfg.settings).length > 0) env.OMP_BENCH_SETTINGS = JSON.stringify(cfg.settings);
 	if (cfg.webSearch) env.OMP_BENCH_WEB_SEARCH = "1";
 	env.OMP_BENCH_GATEWAY = cfg.gateway ? "1" : "0";
 	if (cfg.gateway) {
