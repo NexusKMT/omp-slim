@@ -18,6 +18,7 @@ import type { ToolSession } from "..";
 import { formatPathRelativeToCwd, normalizePathLikeInput, resolveToCwd } from "../path-utils";
 import { toolResult } from "../tool-result";
 import { runCascade } from "./cascade";
+import { isOmpScopePath, materializeOmpScope } from "./omp-scope";
 import { rankedHeat } from "./passages";
 
 const findSchema = type({
@@ -25,7 +26,7 @@ const findSchema = type({
 	grep_keywords: type("string[]").describe(
 		"identifiers or terms likely to appear verbatim in matching source; steer lexical pre-ranking. [] when unsure",
 	),
-	"path?": type("string").describe('directory to search. Omitted -> the workspace root (".")'),
+	"path?": type("string").describe('directory to search, or an `omp://` docs scope (`omp://` for all harness docs, `omp://<file>.md` for one). Omitted -> the workspace root (".")'),
 });
 
 export type FindToolInput = typeof findSchema.infer;
@@ -70,34 +71,47 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 		const query = params.query.trim();
 		if (query.length === 0) throw new ToolError("`query` must be a non-empty description");
 		const cwd = this.session.cwd;
-		const root = await this.#resolveRoot(params.path, cwd);
-		const scopePath =
-			root === path.resolve(cwd) ? undefined : formatPathRelativeToCwd(root, cwd, { trailingSlash: true });
-		const registry = this.session.modelRegistry;
-		if (!registry) throw new ToolError("find has no model registry to resolve a judge from");
-		const judge = resolveJudge({
-			settings: this.session.settings,
-			registry,
-			sessionId: this.session.getSessionId?.() ?? undefined,
-			onUsage: journalJudgmentUsage(this.session.sessionManager, "find"),
-		});
-		const started = performance.now();
-		const result = await runCascade({
-			root,
-			query,
-			extraKeywords: params.grep_keywords,
-			judge,
-			includeHidden: false,
-			signal,
-			onProgress: message => onUpdate?.({ content: [{ type: "text", text: message }] }),
-		});
-		const elapsedMs = performance.now() - started;
-		const { stats, threshold, keywords } = result;
-		// Cascade paths are root-relative; the model and renderer want cwd-relative
-		// so `read` and hyperlinks resolve without knowing the scope.
-		const hits = result.hits.map(hit => ({ ...hit, rel: formatPathRelativeToCwd(path.join(root, hit.rel), cwd) }));
-		const details: FindToolDetails = { query, keywords, threshold, hits, stats, elapsedMs, cwd, scopePath };
-
+		const rawScopeInput = params.path === undefined ? "" : normalizePathLikeInput(params.path);
+		// Harness docs are virtual (no `sourcePath`), so the directory-walking
+		// cascade cannot read them in place: search a temp materialization and
+		// remap hits back to `omp://` URLs, the same shape `grep` uses for archives.
+		const ompScope = isOmpScopePath(rawScopeInput)
+			? await materializeOmpScope(rawScopeInput, { cwd })
+			: undefined;
+		try {
+			const root = ompScope?.dir ?? (await this.#resolveRoot(params.path, cwd));
+			const scopePath =
+				ompScope?.scopePath ??
+				(root === path.resolve(cwd) ? undefined : formatPathRelativeToCwd(root, cwd, { trailingSlash: true }));
+			const registry = this.session.modelRegistry;
+			if (!registry) throw new ToolError("find has no model registry to resolve a judge from");
+			const judge = resolveJudge({
+				settings: this.session.settings,
+				registry,
+				sessionId: this.session.getSessionId?.() ?? undefined,
+				onUsage: journalJudgmentUsage(this.session.sessionManager, "find"),
+			});
+			const started = performance.now();
+			const result = await runCascade({
+				root,
+				query,
+				extraKeywords: params.grep_keywords,
+				judge,
+				includeHidden: false,
+				signal,
+				onProgress: message => onUpdate?.({ content: [{ type: "text", text: message }] }),
+			});
+			const elapsedMs = performance.now() - started;
+			const { stats, threshold, keywords } = result;
+			// Cascade paths are root-relative; the model and renderer want
+			// resolvable paths (`read`-relative for files, URLs for docs) without
+			// knowing the scope.
+			const toRel =
+				ompScope?.toOmpRel ?? ((rel: string) => formatPathRelativeToCwd(path.join(root, rel), cwd));
+			const hits = result.hits.map(hit => ({ ...hit, rel: toRel(hit.rel) }));
+			const details: FindToolDetails = { query, keywords, threshold, hits, stats, elapsedMs, cwd, scopePath };
+		// `omp://` hits are URLs, not cwd-relative paths — they resolve through
+		// the `read` tool, including with `:start-end` selectors.
 		const where = scopePath === undefined ? "" : ` in ${scopePath}`;
 		const out: string[] = [];
 		if (hits.length === 0) {
@@ -127,6 +141,9 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 		if (stats.requests > 0 && stats.errors === stats.requests) builder.error();
 		else if (hits.length === 0) builder.useless();
 		return builder.done();
+		} finally {
+			await ompScope?.cleanup();
+		}
 	}
 
 	/** Absolute search root: `path` under cwd, which must be an existing directory. */

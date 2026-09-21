@@ -8,6 +8,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { FindTool } from "@oh-my-pi/pi-coding-agent/tools/jfind";
 import { runCascade } from "@oh-my-pi/pi-coding-agent/tools/jfind/cascade";
 import { keywordsFromQuery } from "@oh-my-pi/pi-coding-agent/tools/jfind/keywords";
+import { isOmpScopePath, materializeOmpScope } from "@oh-my-pi/pi-coding-agent/tools/jfind/omp-scope";
 import {
 	mergeHeat,
 	type Passage,
@@ -264,6 +265,15 @@ describe("jfind cascade", () => {
 		} finally {
 			await removeWithRetries(dir);
 		}
+	});
+	it("detects omp scopes and rejects unknown docs and range selectors before judging", async () => {
+		expect(isOmpScopePath("omp://")).toBe(true);
+		expect(isOmpScopePath("OMP://tools/read.md")).toBe(true);
+		expect(isOmpScopePath("packages/tui")).toBe(false);
+		await expect(materializeOmpScope("omp://nope.md")).rejects.toThrow("Documentation file not found");
+		await expect(materializeOmpScope("omp://tools/read.md:1-10")).rejects.toThrow(
+			"Line-range selector requires a single file",
+		);
 	});
 
 	it("rejects a scope path that is missing or not a directory before spending any judgment", async () => {

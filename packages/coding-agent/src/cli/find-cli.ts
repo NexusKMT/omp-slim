@@ -12,6 +12,7 @@ import { resolveJudge } from "../judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
 import { expandPath } from "../tools/path-utils";
 import { type CascadeResult, runCascade } from "../tools/jfind/cascade";
+import { isOmpScopePath, materializeOmpScope } from "../tools/jfind/omp-scope";
 import { rankedHeat } from "../tools/jfind/passages";
 
 export interface FindCommandArgs {
@@ -37,9 +38,15 @@ function gauge(p: number): string {
 	return scoreStyle(p)("━".repeat(filled)) + chalk.dim("─".repeat(GAUGE_WIDTH - filled));
 }
 
-function printReport(cmd: FindCommandArgs, root: string, result: CascadeResult, elapsedMs: number): void {
+function printReport(
+	cmd: FindCommandArgs,
+	root: string,
+	result: CascadeResult,
+	elapsedMs: number,
+	scopeLabel?: string,
+): void {
 	const { hits, stats, threshold } = result;
-	const rel = path.relative(process.cwd(), root) || ".";
+	const rel = scopeLabel ?? (path.relative(process.cwd(), root) || ".");
 	console.log("");
 	if (hits.length === 0) {
 		console.log(
@@ -78,44 +85,52 @@ export async function runFindCommand(cmd: FindCommandArgs): Promise<void> {
 		console.error(chalk.red("Error: query is required"));
 		process.exit(1);
 	}
-	const root = path.resolve(expandPath(cmd.path));
+	const log = cmd.quiet ? () => {} : (message: string) => console.error(chalk.dim(message));
+	const ompScope = isOmpScopePath(cmd.path) ? await materializeOmpScope(cmd.path) : undefined;
 	try {
-		if (!(await fs.stat(root)).isDirectory()) {
-			console.error(chalk.red(`Error: not a directory: ${cmd.path}`));
+		const root = ompScope?.dir ?? path.resolve(expandPath(cmd.path));
+		try {
+			if (!(await fs.stat(root)).isDirectory()) {
+				console.error(chalk.red(`Error: not a directory: ${cmd.path}`));
+				process.exit(1);
+			}
+		} catch (error) {
+			if (!isEnoent(error)) throw error;
+			console.error(chalk.red(`Error: path not found: ${cmd.path}`));
 			process.exit(1);
 		}
-	} catch (error) {
-		if (!isEnoent(error)) throw error;
-		console.error(chalk.red(`Error: path not found: ${cmd.path}`));
-		process.exit(1);
-	}
 
-	const log = cmd.quiet ? () => {} : (message: string) => console.error(chalk.dim(message));
-	log("resolving judge");
-	const settings = await Settings.init({ cwd: root });
-	const authStorage = await discoverAuthStorage();
-	try {
-		const registry = new ModelRegistry(authStorage);
-		await registry.refresh();
-		await loadCliExtensionProviders(registry, settings, root);
-		const judge = resolveJudge({ settings, registry, sessionId: Bun.randomUUIDv7() });
-		const started = performance.now();
-		const result = await runCascade({
-			root,
-			query: cmd.query.trim(),
-			extraKeywords: cmd.keywords,
-			judge,
-			includeHidden: cmd.hidden,
-			onProgress: log,
-		});
-		const elapsedMs = performance.now() - started;
-		if (cmd.json) {
-			console.log(JSON.stringify({ query: cmd.query, root, elapsedMs, ...result }, null, 2));
-		} else {
-			printReport(cmd, root, result, elapsedMs);
+		const displayRoot = ompScope?.scopePath ?? root;
+		const settings = await Settings.init({ cwd: ompScope ? process.cwd() : root });
+		const authStorage = await discoverAuthStorage();
+		try {
+			const registry = new ModelRegistry(authStorage);
+			await registry.refresh();
+			await loadCliExtensionProviders(registry, settings, root);
+			const judge = resolveJudge({ settings, registry, sessionId: Bun.randomUUIDv7() });
+			const started = performance.now();
+			const raw = await runCascade({
+				root,
+				query: cmd.query.trim(),
+				extraKeywords: cmd.keywords,
+				judge,
+				includeHidden: cmd.hidden,
+				onProgress: log,
+			});
+			const result: CascadeResult = ompScope
+				? { ...raw, hits: raw.hits.map(hit => ({ ...hit, rel: ompScope.toOmpRel(hit.rel) })) }
+				: raw;
+			const elapsedMs = performance.now() - started;
+			if (cmd.json) {
+				console.log(JSON.stringify({ query: cmd.query, root: displayRoot, elapsedMs, ...result }, null, 2));
+			} else {
+				printReport(cmd, root, result, elapsedMs, displayRoot);
+			}
+			if (result.stats.requests > 0 && result.stats.errors === result.stats.requests) process.exit(1);
+		} finally {
+			authStorage.close();
 		}
-		if (result.stats.requests > 0 && result.stats.errors === result.stats.requests) process.exit(1);
 	} finally {
-		authStorage.close();
+		await ompScope?.cleanup();
 	}
 }
