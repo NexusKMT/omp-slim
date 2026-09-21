@@ -749,7 +749,12 @@ describe("structured subagent primitive", () => {
 
 		const settled = await runStructuredSubagent(request());
 
-		expect(settled.result.structuredOutput).toEqual({ source: "agent", mode: "permissive", status: "unavailable", error });
+		expect(settled.result.structuredOutput).toEqual({
+			source: "agent",
+			mode: "permissive",
+			status: "unavailable",
+			error,
+		});
 		expect(settled.result.structuredOutput).not.toHaveProperty("data");
 	});
 
