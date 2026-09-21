@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed SuperGrok (xai-oauth) Grok 4.7 missing its thinking-level options and reporting null context limits; it now carries the documented 500K window and low/medium/high/xhigh ladder ([#12697](https://github.com/can1357/oh-my-pi/issues/12697)).
+
 ## [18.2.8] - 2026-09-21
 
 ### Added
