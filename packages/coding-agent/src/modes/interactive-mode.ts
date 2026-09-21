@@ -1453,6 +1453,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			name: loaded.command.name,
 			description: `${loaded.command.description} (${loaded.source})`,
 			icon: getSlashCommandTypeIcon(loaded.path.startsWith("mcp:") ? "mcp" : "prompt"),
+			getArgumentCompletions: loaded.command.getArgumentCompletions,
 		}));
 
 		const skillCommandList = this.#rebuildSkillCommandsFromSession();

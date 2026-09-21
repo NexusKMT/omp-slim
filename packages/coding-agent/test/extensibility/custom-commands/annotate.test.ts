@@ -493,6 +493,38 @@ describe("/annotate contracts", () => {
 		});
 	});
 
+	it("completes spaced file paths without quotes and keeps quoted text literal", async () => {
+		await withTempDir(async directory => {
+			const relativePath = "nested folder/source file.txt";
+			await mkdir(join(directory, "nested folder"), { recursive: true });
+			await writeFile(join(directory, relativePath), "completion source", "utf8");
+			const api = { ...API, cwd: directory } as unknown as CustomCommandAPI;
+			const command = new AnnotateCommand(api);
+
+			const empty = await command.getArgumentCompletions?.("");
+			expect(empty?.map(item => item.label)).toEqual([
+				"last",
+				"session",
+				"code-review",
+				"<file path>",
+				'"prompt text"',
+			]);
+
+			const partial = await command.getArgumentCompletions?.("se");
+			expect(partial?.map(item => item.label)).toEqual(["session"]);
+
+			const fileMatches = await command.getArgumentCompletions?.("./nested folder/source");
+			expect(fileMatches?.map(item => item.value)).toContain("./nested folder/source file.txt");
+			expect(fileMatches?.every(item => !item.value.startsWith('"'))).toBe(true);
+
+			const literalMatches = await command.getArgumentCompletions?.('"nested folder/source');
+			expect(literalMatches?.map(item => item.value)).toEqual(['"nested folder/source"']);
+			expect(literalMatches?.some(item => item.value.includes("source file.txt"))).toBe(false);
+			const whitespaceLiteralMatches = await command.getArgumentCompletions?.('  "nested folder/source');
+			expect(whitespaceLiteralMatches?.map(item => item.value)).toEqual(['  "nested folder/source"']);
+		});
+	});
+
 	it("keeps a long file selected from the source menu verbatim without requesting a model summary", async () => {
 		await withTempDir(async directory => {
 			const relativePath = "source with spaces.txt";

@@ -3,6 +3,8 @@ import type {
 	CustomCommandAPI,
 	CustomCommandContext,
 } from "../../../../extensibility/custom-commands/types";
+import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
+import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import type {
 	CodeReviewOverlayResult,
 	LocalReviewKind,
@@ -82,6 +84,95 @@ function parseAnnotationSourceKind(args: string): AnnotationSourceKind | undefin
 
 function splitReviewArgs(args: string): string[] {
 	return args.trim() ? args.trim().split(/\s+/) : [];
+}
+
+const ANNOTATE_MODE_COMPLETIONS: readonly AutocompleteItem[] = [
+	{
+		value: "last ",
+		label: "last",
+		description: "Annotate the latest assistant reply",
+	},
+	{
+		value: "session ",
+		label: "session",
+		description: "Annotate a message or code block from this session",
+	},
+	{
+		value: "code-review ",
+		label: "code-review",
+		description: "Annotate local changes or a GitHub pull request",
+	},
+];
+
+const ANNOTATE_GUIDANCE_COMPLETIONS: readonly AutocompleteItem[] = [
+	{
+		value: "./",
+		label: "<file path>",
+		description: "Annotate a file by path",
+		hint: "Annotate a file; paths with spaces stay unquoted",
+	},
+	{
+		value: '"',
+		label: '"prompt text"',
+		description: "Annotate literal prompt text",
+		hint: "Wrap literal prompt text in matching quotes",
+	},
+];
+
+function buildUnclosedLiteralCompletion(argumentPrefix: string, quote: '"' | "'"): AutocompleteItem {
+	const value = `${argumentPrefix}${quote}`;
+	return {
+		value,
+		label: value,
+		hint: "Finish with the matching quote to annotate literal prompt text",
+	};
+}
+
+async function getAnnotateArgumentCompletions(
+	argumentPrefix: string,
+	fileProvider: CombinedAutocompleteProvider,
+): Promise<AutocompleteItem[] | null> {
+	const trimmed = argumentPrefix.trim();
+	if (trimmed.length === 0) {
+		return [...ANNOTATE_MODE_COMPLETIONS, ...ANNOTATE_GUIDANCE_COMPLETIONS];
+	}
+
+	const first = trimmed[0];
+	if (first === '"' || first === "'") {
+		if (trimmed.length < 2 || trimmed[trimmed.length - 1] !== first) {
+			// Keep the generic provider from treating an unfinished literal as a
+			// quoted filename and offer the matching closing quote instead.
+			return [buildUnclosedLiteralCompletion(argumentPrefix, first)];
+		}
+		return null;
+	}
+
+	if (!/\s/.test(trimmed) && !/\s$/.test(argumentPrefix)) {
+		const lower = trimmed.toLowerCase();
+		const modes = ANNOTATE_MODE_COMPLETIONS.filter(item => item.label.toLowerCase().startsWith(lower));
+		if (modes.length > 0) return modes;
+	}
+
+	if (/^(?:last|session|code-review)$/i.test(trimmed) && /\s$/.test(argumentPrefix)) return null;
+
+	// Code-review's remainder is free-form focus/PR text, not a file path.
+	if (/^code-review(?:\s|$)/i.test(trimmed)) return null;
+
+	// Quote the synthetic path only while querying the shared provider. This
+	// preserves spaces in the complete path token; returned values are unquoted
+	// because annotate treats any user-entered quotes as literal prompt syntax.
+	const syntheticLine = `/annotate "${trimmed}`;
+	const result = await fileProvider.getForceFileSuggestions([syntheticLine], 0, syntheticLine.length);
+	if (!result) return null;
+	const items = result.items.map(item => ({
+		...item,
+		value: item.value.startsWith('"')
+			? item.value.endsWith('"')
+				? item.value.slice(1, -1)
+				: item.value.slice(1)
+			: item.value,
+	}));
+	return items.length > 0 ? items : null;
 }
 
 async function finishCodeReview(
@@ -228,8 +319,14 @@ export async function runAnnotateCommand(
 export class AnnotateCommand implements CustomCommand {
 	name = "annotate";
 	description = "Annotate a diff or text from a file, prompt, latest reply, or session";
+	readonly #fileCompletionProvider: CombinedAutocompleteProvider;
 
-	constructor(private readonly api: CustomCommandAPI) {}
+	constructor(private readonly api: CustomCommandAPI) {
+		this.#fileCompletionProvider = new CombinedAutocompleteProvider([], api.cwd);
+	}
+
+	getArgumentCompletions: SlashCommand["getArgumentCompletions"] = argumentPrefix =>
+		getAnnotateArgumentCompletions(argumentPrefix, this.#fileCompletionProvider);
 
 	execute(args: string[], ctx: CustomCommandContext, rawArgs?: string): Promise<string | undefined> {
 		return runAnnotateCommand(this.api, rawArgs ?? args.join(" "), ctx);

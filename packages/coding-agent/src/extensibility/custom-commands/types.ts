@@ -10,6 +10,7 @@ import type * as TypeBox from "@oh-my-pi/omptype/typebox";
 import type * as zod from "@oh-my-pi/omptype/zod";
 import type { ExtensionUIContext } from "../extensions/types";
 import type { ExecOptions, ExecResult, HookCommandContext } from "../../extensibility/hooks/types";
+import type { SlashCommand } from "@oh-my-pi/pi-tui";
 import type * as PiCodingAgent from "../../index";
 
 // Re-export for custom commands to use
@@ -86,6 +87,8 @@ export interface CustomCommand {
 	name: string;
 	/** Description shown in command autocomplete */
 	description: string;
+	/** Optional argument completions shown in the slash-command autocomplete UI. */
+	getArgumentCompletions?: SlashCommand["getArgumentCompletions"];
 	/**
 	 * Execute the command.
 	 * @param args - Parsed command arguments

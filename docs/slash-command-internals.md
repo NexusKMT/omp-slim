@@ -27,6 +27,8 @@ This document describes how slash commands are discovered, deduplicated, surface
 
 `/annotate` opens a source menu when no source argument is supplied.
 
+Typing `/annotate ` offers completion rows for `last`, `session`, and `code-review`, plus `./` file-path and quoted-literal starters. File suggestions keep paths with spaces unquoted; text that starts with a quote remains literal and never receives filename suggestions.
+
 | Command | Source |
 |---|---|
 | `/annotate code-review [focus]` | Local base-branch, working-copy, or commit diff, or a GitHub PR |
