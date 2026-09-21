@@ -61,11 +61,12 @@ describe("SingularityAPI provider support", () => {
 				maxTokens: null,
 			});
 			expect(model.reasoning).toBe(true);
-			expect(model.thinking).toMatchObject({ mode: "effort", efforts: ["low", "high", "max"] });
-			expect(model.contextWindow).toBe(1000000);
-			// The deployment serves ~272K max output, below the documented 384K.
-			expect(model.maxTokens).toBe(272000);
+			expect(model.thinking).toMatchObject({ mode: "effort", efforts: ["low", "high", "xhigh", "max"] });
+			expect(model.contextWindow).toBe(262144);
+			expect(model.input).toEqual(["text", "image"]);
 			expect(model.compat.maxTokensField).toBe("max_tokens");
+			expect(model.compat.reasoningContentField).toBe("reasoning");
+			expect(model.compat.reasoningDisableMode).toBe("none-effort");
 		}
 	});
 	test("registers discovery, defaults, and the API key environment name", () => {

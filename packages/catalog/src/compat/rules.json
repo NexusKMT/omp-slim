@@ -7272,15 +7272,21 @@
 				"wire": { "includeEncryptedReasoning": false, "streamIdleTimeoutMs": 0 }
 			},
 			{
-				"source": "providers/singularityapi.kdl:31",
+				"source": "providers/singularityapi.kdl:26",
 				"providers": ["singularityapi"],
 				"models": [
 					{ "kind": "glob", "value": "*deepseek-v4-flash-0731" },
 					{ "kind": "glob", "value": "*deepseek-v4.1-flash" }
 				],
-				"wire": { "maxTokensField": "max_tokens" },
-				"thinking": { "upgradeNeutral": true, "efforts": ["low", "high", "max"] },
-				"catalog": { "limitsPatch": { "contextWindow": 1000000, "maxTokens": 272000 } }
+				"wire": {
+					"maxTokensField": "max_tokens",
+					"reasoningDisableMode": "none-effort",
+					"reasoningContentField": "reasoning",
+					"clampOutputToModelMax": true,
+					"stripImageInput": false
+				},
+				"thinking": { "upgradeNeutral": true, "efforts": ["low", "high", "xhigh", "max"] },
+				"catalog": { "inputModalities": ["text", "image"], "limitsPatch": { "contextWindow": 262144 } }
 			},
 			{
 				"source": "providers/synthetic.kdl:10",

@@ -12,29 +12,36 @@ provider "singularityapi" {
 	env "SINGULARITYAPI_API_KEY"
 	dynamic-models-authoritative #true
 
-	// The gateway serves the DeepSeek V4 Flash family behind its own
-	// `deepseek-ai/*` lane ids (verified against live `/v1/models`
-	// 2026-09-22: `deepseek-ai/DeepSeek-V4-Flash-0731` pinned snapshot,
-	// `deepseek-ai/DeepSeek-V4.1-Flash` current lane). Both classify
-	// deepseek/flash by taxonomy, but their bare `/v1/models` rows carry no
-	// reasoning metadata, so neutral discovery would leave the effort dial
-	// dark. These rules own the reviewed V4 Flash surface: low/high/max
-	// ladder, max_tokens wire field, and the 1M context window. Output is
-	// capped below the documented 384K: the deployment serves at most
-	// ~272K output tokens per the live serving config (user-observed
-	// 2026-09-22; unprobed — the reservation gate 403s outside booked hours
-	// before any output-limit validation runs, so the boundary cannot be
-	// mapped without spending lane time).
+	// Model guide (dashboard): the lane runs DeepSeek V4.1 Flash. Send
+	// `deepseek-ai/DeepSeek-V4.1-Flash`; the short alias
+	// `deepseek-v4.1-flash` is accepted too. Context is 262,144 tokens
+	// prompt+completion (not the documented 1M); an overflowing max_tokens
+	// is reduced automatically, and a prompt within ~1K of the limit 400s.
+	// Both ids classify deepseek/flash by taxonomy, but bare `/v1/models`
+	// rows carry no reasoning metadata, so neutral discovery would leave
+	// the effort dial dark.
 	// Glob (not exact) selectors: cascade `exact` matching is
 	// case-sensitive while the compiler lowercases exact values, so an
 	// exact rule could never match the wire's mixed-case ids.
 	models "*deepseek-v4-flash-0731" "*deepseek-v4.1-flash" {
 		thinking-upgrade-neutral #true
 		max-tokens-field "max_tokens"
-		thinking-efforts "low" "high" "max"
+		// Guide effort vocabulary: low, high, xhigh, max, integer 1-100,
+		// and "none" to force off (off by default). Integers have no
+		// catalog axis; the named ladder is owned here.
+		thinking-efforts "low" "high" "xhigh" "max"
+		reasoning-disable-mode "none-effort"
+		// Reasoning streams as message.reasoning / delta.reasoning.
+		reasoning-content-field "reasoning"
+		clamp-output-to-model-max #true
+		// Guide: up to 8 image_url parts per request (PNG/JPEG, data URL
+		// or public https). Declared here as well as clearing the class
+		// strip: live discovery seeds input ["text"], and the wire guard
+		// requires the declared modality.
+		input-modalities "text" "image"
+		strip-image-input #false
 		limits-patch {
-			context-window 1000000
-			max-tokens 272000
+			context-window 262144
 		}
 	}
 }
