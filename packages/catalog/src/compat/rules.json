@@ -7272,6 +7272,17 @@
 				"wire": { "includeEncryptedReasoning": false, "streamIdleTimeoutMs": 0 }
 			},
 			{
+				"source": "providers/singularityapi.kdl:26",
+				"providers": ["singularityapi"],
+				"models": [
+					{ "kind": "glob", "value": "*deepseek-v4-flash-0731" },
+					{ "kind": "glob", "value": "*deepseek-v4.1-flash" }
+				],
+				"wire": { "maxTokensField": "max_tokens" },
+				"thinking": { "upgradeNeutral": true, "efforts": ["low", "high", "max"] },
+				"catalog": { "limitsPatch": { "contextWindow": 1000000, "maxTokens": 384000 } }
+			},
+			{
 				"source": "providers/synthetic.kdl:10",
 				"class": "unknown",
 				"providers": ["synthetic"],
@@ -11873,7 +11884,7 @@
 		},
 		"singularityapi": {
 			"id": "singularityapi",
-			"defaultModel": "deepseek-v4-flash",
+			"defaultModel": "deepseek-ai/DeepSeek-V4.1-Flash",
 			"envVars": ["SINGULARITYAPI_API_KEY"],
 			"dynamicModelsAuthoritative": true
 		},

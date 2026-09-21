@@ -8,7 +8,28 @@
 // models.json. The roster is per-key credential-scoped, so the provider stays
 // runtime-only and `dynamic-models-authoritative` prunes stale rows.
 provider "singularityapi" {
-	default-model "deepseek-v4-flash"
+	default-model "deepseek-ai/DeepSeek-V4.1-Flash"
 	env "SINGULARITYAPI_API_KEY"
 	dynamic-models-authoritative #true
+
+	// The gateway serves the DeepSeek V4 Flash family behind its own
+	// `deepseek-ai/*` lane ids (verified against live `/v1/models`
+	// 2026-09-22: `deepseek-ai/DeepSeek-V4-Flash-0731` pinned snapshot,
+	// `deepseek-ai/DeepSeek-V4.1-Flash` current lane). Both classify
+	// deepseek/flash by taxonomy, but their bare `/v1/models` rows carry no
+	// reasoning metadata, so neutral discovery would leave the effort dial
+	// dark. These rules own the reviewed V4 Flash surface: low/high/max
+	// ladder, max_tokens wire field, and the 1M/384K documented window.
+	// Glob (not exact) selectors: cascade `exact` matching is
+	// case-sensitive while the compiler lowercases exact values, so an
+	// exact rule could never match the wire's mixed-case ids.
+	models "*deepseek-v4-flash-0731" "*deepseek-v4.1-flash" {
+		thinking-upgrade-neutral #true
+		max-tokens-field "max_tokens"
+		thinking-efforts "low" "high" "max"
+		limits-patch {
+			context-window 1000000
+			max-tokens 384000
+		}
+	}
 }

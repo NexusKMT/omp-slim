@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { singularityApiModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
@@ -44,13 +45,35 @@ describe("SingularityAPI provider support", () => {
 			baseUrl: "https://api.singularityapi.tech/v1",
 		});
 	});
+
+	test("identifies the prefixed DeepSeek V4 Flash lane ids as the reviewed Flash family", () => {
+		for (const id of ["deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek-ai/DeepSeek-V4.1-Flash"]) {
+			const model = buildModel({
+				id,
+				name: id,
+				api: "openai-completions",
+				provider: "singularityapi",
+				baseUrl: "https://api.singularityapi.tech/v1",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: null,
+				maxTokens: null,
+			});
+			expect(model.reasoning).toBe(true);
+			expect(model.thinking).toMatchObject({ mode: "effort", efforts: ["low", "high", "max"] });
+			expect(model.contextWindow).toBe(1000000);
+			expect(model.maxTokens).toBe(384000);
+			expect(model.compat.maxTokensField).toBe("max_tokens");
+		}
+	});
 	test("registers discovery, defaults, and the API key environment name", () => {
 		const descriptor = PROVIDER_DESCRIPTORS.find(item => item.providerId === "singularityapi");
 		expect(descriptor).toMatchObject({
-			defaultModel: "deepseek-v4-flash",
+			defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash",
 			dynamicModelsAuthoritative: true,
 		});
-		expect(DEFAULT_MODEL_PER_PROVIDER.singularityapi).toBe("deepseek-v4-flash");
+		expect(DEFAULT_MODEL_PER_PROVIDER.singularityapi).toBe("deepseek-ai/DeepSeek-V4.1-Flash");
 
 		delete Bun.env.SINGULARITYAPI_API_KEY;
 		expect(getEnvApiKey("singularityapi")).toBeUndefined();
