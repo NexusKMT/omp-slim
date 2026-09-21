@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Bedrock rejecting tool-enabled requests when tool descriptions are inlined into the system prompt.
+- Fixed Bedrock rejecting tool-enabled requests when tool descriptions are inlined into the system prompt ([#12732](https://github.com/can1357/oh-my-pi/pull/12732) by [@mustafaabidali](https://github.com/mustafaabidali)).
 
 ## [18.2.8] - 2026-09-21
 
