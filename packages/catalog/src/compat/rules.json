@@ -7281,7 +7281,7 @@
 				"wire": {
 					"maxTokensField": "max_tokens",
 					"reasoningDisableMode": "none-effort",
-					"reasoningContentField": "reasoning",
+					"reasoningContentField": "reasoning_content",
 					"clampOutputToModelMax": true,
 					"stripImageInput": false
 				},

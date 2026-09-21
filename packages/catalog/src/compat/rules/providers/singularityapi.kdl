@@ -31,8 +31,12 @@ provider "singularityapi" {
 		// catalog axis; the named ladder is owned here.
 		thinking-efforts "low" "high" "xhigh" "max"
 		reasoning-disable-mode "none-effort"
-		// Reasoning streams as message.reasoning / delta.reasoning.
-		reasoning-content-field "reasoning"
+		// Reasoning arrives as top-level `reasoning_content` on the final
+		// message and streamed deltas (verified live 2026-09-22); the
+		// dashboard guide's `message.reasoning` / `delta.reasoning` shape
+		// does not appear on the wire (`provider_specific_fields.reasoning`
+		// mirrors it, but is not a request field).
+		reasoning-content-field "reasoning_content"
 		clamp-output-to-model-max #true
 		// Guide: up to 8 image_url parts per request (PNG/JPEG, data URL
 		// or public https). Declared here as well as clearing the class

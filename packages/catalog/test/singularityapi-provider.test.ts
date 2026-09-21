@@ -65,7 +65,9 @@ describe("SingularityAPI provider support", () => {
 			expect(model.contextWindow).toBe(262144);
 			expect(model.input).toEqual(["text", "image"]);
 			expect(model.compat.maxTokensField).toBe("max_tokens");
-			expect(model.compat.reasoningContentField).toBe("reasoning");
+			// Live wire (2026-09-22): reasoning arrives as top-level
+			// `reasoning_content`, not the guide's `message.reasoning`.
+			expect(model.compat.reasoningContentField).toBe("reasoning_content");
 			expect(model.compat.reasoningDisableMode).toBe("none-effort");
 		}
 	});
