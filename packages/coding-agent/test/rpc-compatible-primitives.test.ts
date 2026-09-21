@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { isRecord, readJsonl } from "@oh-my-pi/pi-utils";
-import { rpcUnknownCommandResponse, selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat";
+import { selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat";
 import { readRpcInputFrames } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-input";
 import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
@@ -44,24 +44,9 @@ describe("RPC Pi-compatible get_entries slice", () => {
 });
 
 describe("RPC ordinary error correlation", () => {
-	test("unknown command preserves the caller id", () => {
-		const response = rpcUnknownCommandResponse({ type: "nope", id: "corr-1" });
-		expect(response).toEqual({
-			id: "corr-1",
-			type: "response",
-			command: "nope",
-			success: false,
-			error: "Unknown command: nope",
-		});
-	});
-
-	test("unknown command without id stays uncorrelated", () => {
-		const response = rpcUnknownCommandResponse({ type: "nope" });
-		expect(response.id).toBeUndefined();
-		expect(response.command).toBe("nope");
-		expect(response.success).toBe(false);
-	});
-
+	// Unknown-command id preservation is covered against the live server below
+	// (`unknown-1`); the dispatcher reuses the shared error helper, so no
+	// second unit surface is kept for it.
 	test("malformed JSON remains safely uncorrelated and the reader continues", async () => {
 		const input = new Blob([
 			"this is not json\n",
@@ -132,17 +117,13 @@ async function withRpcServer<T>(
 	};
 	const next = async (): Promise<RpcFrame> => {
 		for (let waited = 0; waited < 300; waited++) {
-			const readyIndex = queue.findIndex(frame => frame.type === "ready");
-			if (readyIndex !== -1) {
-				queue.splice(readyIndex, 1);
-				continue;
-			}
-			const availableCommandsIndex = queue.findIndex(frame => frame.type === "available_commands_update");
-			if (availableCommandsIndex !== -1) {
-				queue.splice(availableCommandsIndex, 1);
-				continue;
-			}
-			if (queue.length > 0) return queue.shift()!;
+			// Only command responses correlate with `send`; unsolicited frames
+			// (ready, available_commands_update, extension_ui_request widget
+			// state, etc.) are dropped so they cannot steal another command's
+			// correlation slot.
+			const responseIndex = queue.findIndex(frame => frame.type === "response");
+			if (responseIndex !== -1) return queue.splice(responseIndex, 1)[0]!;
+			queue.length = 0;
 			if (readerDone) throw new Error(`RPC stream ended early: ${await stderrPromise} ${String(readerError ?? "")}`);
 			await Bun.sleep(100);
 		}
@@ -163,7 +144,7 @@ async function withRpcServer<T>(
 }
 
 describe("RPC Pi-compatible primitives (live server)", () => {
-	test("get_entries, get_tree, thinking levels, and get_commands alias", async () => {
+	test("get_entries, get_tree, thinking levels, and command-discovery dialect", async () => {
 		await withRpcServer(async (send, next) => {
 			send({ type: "get_entries", id: "entries-base" });
 			const entriesBase = await next();
@@ -188,19 +169,34 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 			expect(levels.id).toBe("levels");
 			expect(levels.command).toBe("get_available_thinking_levels");
 			expect(levels.success).toBe(true);
-			expect(Array.isArray((levels.data as { levels: unknown[] }).levels)).toBe(true);
+			const discovered = (levels.data as { levels: unknown[] }).levels;
+			// Pi-compatible discovery: selectable levels with `off` first.
+			expect(discovered.length).toBeGreaterThan(0);
+			expect(discovered[0]).toBe("off");
+			for (const level of discovered) expect(typeof level).toBe("string");
 
+			// Every discovered level must be settable: `off` round-trips.
+			send({ type: "set_thinking_level", id: "set-off", level: "off" });
+			const setOff = await next();
+			expect(setOff.id).toBe("set-off");
+			expect(setOff.success).toBe(true);
+			send({ type: "get_state", id: "state-off" });
+			const stateOff = await next();
+			expect((stateOff.data as { thinkingLevel: unknown }).thinkingLevel).toBe("off");
+
+			// Command discovery stays an OMP dialect: the Pi-spelled alias is
+			// intentionally not served (see issue #6).
 			send({ type: "get_available_commands", id: "cmds-a" });
 			const available = await next();
+			expect(available.id).toBe("cmds-a");
+			expect(available.command).toBe("get_available_commands");
 			expect(available.success).toBe(true);
+			expect(Array.isArray((available.data as { commands: unknown[] }).commands)).toBe(true);
 			send({ type: "get_commands", id: "cmds-b" });
 			const alias = await next();
 			expect(alias.id).toBe("cmds-b");
 			expect(alias.command).toBe("get_commands");
-			expect(alias.success).toBe(true);
-			expect((alias.data as { commands: unknown[] }).commands).toEqual(
-				(available.data as { commands: unknown[] }).commands,
-			);
+			expect(alias.success).toBe(false);
 		});
 	}, 60000);
 

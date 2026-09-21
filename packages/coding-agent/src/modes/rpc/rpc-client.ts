@@ -729,15 +729,6 @@ export class RpcClient {
 	}
 
 	/**
-	 * Pi-compatible alias for {@link getAvailableCommands}. Same catalog, no
-	 * duplicated logic on the server.
-	 */
-	async getCommands(): Promise<RpcAvailableSlashCommand[]> {
-		const response = await this.#send({ type: "get_commands" });
-		return this.#getData<{ commands: RpcAvailableSlashCommand[] }>(response).commands;
-	}
-
-	/**
 	 * Pi-compatible append-history read. Delegates to the canonical
 	 * `SessionManager` on the server: no `since` returns all entries in append
 	 * order, `since` returns entries strictly after the matching durable entry.

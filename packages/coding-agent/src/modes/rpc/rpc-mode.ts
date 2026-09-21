@@ -10,6 +10,7 @@
  * - Events: AgentSessionEvent objects streamed as they occur
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
+import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { $env, isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
@@ -37,7 +38,7 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
-import { rpcUnknownCommandResponse, selectRpcEntries } from "./rpc-compat";
+import { selectRpcEntries } from "./rpc-compat";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
 import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
@@ -1328,11 +1329,6 @@ export async function runRpcMode(
 				return success(id, "get_available_commands", { commands: await getAvailableCommands() });
 			}
 
-			case "get_commands": {
-				// Pi-compatible alias: same catalog, no duplicated logic.
-				return success(id, "get_commands", { commands: await getAvailableCommands() });
-			}
-
 			case "get_entries": {
 				try {
 					return success(
@@ -1472,10 +1468,12 @@ export async function runRpcMode(
 			}
 
 			case "get_available_thinking_levels": {
-				// Preserve OMP semantics: live levels for the selected model,
-				// only the command/response shape is Pi-compatible.
+				// Pi-compatible discovery: the selectable levels for the live model,
+				// including `off` (which `set_thinking_level` accepts but the
+				// effort-only helper excludes). OMP-only `auto`/`inherit` are
+				// intentionally omitted — that selector stays an OMP dialect.
 				return success(id, "get_available_thinking_levels", {
-					levels: [...session.getAvailableThinkingLevels()],
+					levels: [ThinkingLevel.Off, ...session.getAvailableThinkingLevels()],
 				});
 			}
 
@@ -1694,8 +1692,8 @@ export async function runRpcMode(
 			}
 
 			default: {
-				const unknownCommand = command as { type: string; id?: string };
-				return rpcUnknownCommandResponse({ type: unknownCommand.type, id: id ?? unknownCommand.id });
+				const unknownCommand = command as { type: string };
+				return error(id, unknownCommand.type, `Unknown command: ${unknownCommand.type}`);
 			}
 		}
 	};

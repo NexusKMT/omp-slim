@@ -37,7 +37,6 @@ export type RpcCommand =
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_fast_mode"; enabled: boolean }
 	| { id?: string; type: "get_available_commands" }
-	| { id?: string; type: "get_commands" }
 	| { id?: string; type: "get_entries"; since?: string }
 	| { id?: string; type: "get_tree" }
 	| { id?: string; type: "set_todos"; phases: TodoPhase[] }
@@ -224,13 +223,6 @@ export type RpcResponse =
 			id?: string;
 			type: "response";
 			command: "get_available_commands";
-			success: true;
-			data: { commands: RpcAvailableSlashCommand[] };
-	  }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_commands";
 			success: true;
 			data: { commands: RpcAvailableSlashCommand[] };
 	  }
