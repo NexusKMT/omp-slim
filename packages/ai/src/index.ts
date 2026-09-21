@@ -1,12 +1,15 @@
 export { type Type, type } from "@oh-my-pi/omptype";
 export * from "./api-registry";
 export type * from "./auth-broker";
-export type { AuthGatewayBootOptions, ModelResolver } from "./auth-gateway/server";
+export type { AuthGatewayBootOptions, ModelResolver } from "./auth-gateway/dispatch";
 export * from "./auth-gateway/types";
 export * from "./auth-retry";
 export * from "./auth-storage";
 export * from "./error/rate-limit";
+export * from "./images";
 export * from "./judgment";
+export * from "./speech";
+export * from "./transcription";
 export * from "./oneshot-retry";
 export * from "./provider-details";
 export * from "./provider-session-state";

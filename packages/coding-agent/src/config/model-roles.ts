@@ -82,7 +82,7 @@ export const MODEL_ROLES: Record<ModelRole, ModelRoleInfo> = {
 		name: "Dictation",
 		color: "warning",
 		section: "kind",
-		accepts: model => modelKind(model) === "stt",
+		accepts: model => modelKind(model) === "stt" && model.api === "local-inference",
 	},
 	judge: { tag: "JUDGE", name: "Judge", color: "muted", section: "kind", accepts: acceptsJudge },
 };

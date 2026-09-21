@@ -5,6 +5,7 @@ provider "openai" {
 	env "OPENAI_API_KEY"
 	kind-apis {
 		image "openai-responses"
+		stt "openai-transcriptions"
 	}
 
 	// Daybreak models are approval-gated first-party Responses models that are
@@ -33,9 +34,39 @@ provider "openai" {
 			cost input=12.5 output=75 cache-read=1.25 cache-write=15.625
 			limits context=400000 max-tokens=128000
 		}
+
+		// Catalog cost fields are per 1M tokens: GPT transcribers map documented
+		// audio-input/output-token rates directly. Whisper's $0.006/min duration
+		// tariff has no token-cost representation, so it remains zero and the
+		// transcription response's provider-reported usage/cost is authoritative.
+		model "whisper-1" name="Whisper 1" api="openai-transcriptions" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=0 output=0 cache-read=0 cache-write=0
+			limits
+			supports-tools #false
+		}
+		model "gpt-4o-transcribe" name="GPT-4o Transcribe" api="openai-transcriptions" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=2.5 output=10 cache-read=0 cache-write=0
+			limits context=16000 max-tokens=2000
+			supports-tools #false
+		}
+		model "gpt-4o-mini-transcribe" name="GPT-4o Mini Transcribe" api="openai-transcriptions" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=1.25 output=5 cache-read=0 cache-write=0
+			limits context=16000 max-tokens=2000
+			supports-tools #false
+		}
 	}
 
 	// Replaces the strict-mode provider whitelist entry.
+	models "whisper-1" "gpt-4o-transcribe" "gpt-4o-mini-transcribe" {
+		kind "stt"
+	}
+
 	supports-strict-mode #true
 	// Replaces both OpenAI tool-call id-limit baselines.
 	uses-openai-tool-call-id-limit #true
