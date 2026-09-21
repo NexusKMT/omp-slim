@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed a stale workspace addon failing as `<symbol> is not a function` inside whichever tool used it first: `native/index.js` now exports a throwing stub naming the symbol, the addon path, the loaded and expected releases, and the rebuild command. Current addons keep exporting `undefined` for symbols their build does not implement, so capability probes are unchanged.
+- Fixed a stale workspace addon failing as `<symbol> is not a function` inside whichever tool used it first; the missing export now names the addon, the loaded and expected releases, and `bun run build:native` ([#12698](https://github.com/can1357/oh-my-pi/pull/12698) by [@iacore](https://github.com/iacore)).
 
 ## [18.2.7] - 2026-09-21
 
