@@ -1,6 +1,9 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed
+
+- Fixed skill hints drifting from the active prompt after discarded rebuilds or in advisor sessions ([#12148](https://github.com/can1357/oh-my-pi/pull/12148) by [@jerome-benoit](https://github.com/jerome-benoit)).
 
 ## [18.2.8] - 2026-09-21
 
@@ -20,7 +23,6 @@
 ### Fixed
 
 - Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
-- Fixed skill hints drifting from the active prompt after discarded rebuilds or in advisor sessions ([#12148](https://github.com/can1357/oh-my-pi/pull/12148) by [@jerome-benoit](https://github.com/jerome-benoit)).
 - Added support for buffered cloud transcription using OpenAI-compatible models
 - Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
 - Prevented LSP client from hanging when a request is aborted while waiting for a previous write
