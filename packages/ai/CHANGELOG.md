@@ -5,6 +5,9 @@
 ### Added
 
 - Added `TypeSafeJudgeOptions.headers`, sent on every System One judgment request so proxy gateways can require routing or custom authentication headers.
+- Added support for text embeddings
+- Added support for document reranking
+- Added support for video generation
 - Added support for image generation across multiple providers
 - Added support for audio speech synthesis
 - Added support for audio transcription services
@@ -14,6 +17,10 @@
 
 - Updated API response headers to report costs based on usage totals
 - Added optional `kind` field to model list responses
+
+### Fixed
+
+- Fixed detection of Claude usage limit errors
 
 ## [18.2.7] - 2026-09-21
 

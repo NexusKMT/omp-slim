@@ -9,6 +9,9 @@
 ### Fixed
 
 - Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
+- Added support for buffered cloud transcription using OpenAI-compatible models
+- Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
+
 ### Fixed
 
 - Prevented LSP client from hanging when a request is aborted while waiting for a previous write

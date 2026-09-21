@@ -165,10 +165,20 @@ const CREDENTIAL_SYNC_INTERVAL_MS = 10 * 1000;
  * Catalog kinds the gateway has a route for: chat (`/v1/chat/completions`,
  * `/v1/messages`, `/v1/responses`, `/v1/pi/stream`), judge (`/v1/systemone`),
  * image (`/v1/images/*`), tts (`/v1/audio/speech`), stt
- * (`/v1/audio/transcriptions`). Other kinds (tiny, search) have no wire and
- * stay off the served catalog so `/v1/models` never advertises them.
+ * (`/v1/audio/transcriptions`), embedding (`/v1/embeddings`), rerank
+ * (`/v1/rerank`), video (`/v1/videos/*`). Other kinds (tiny, search) have no
+ * wire and stay off the served catalog so `/v1/models` never advertises them.
  */
-const GATEWAY_MODEL_KINDS: readonly ModelKind[] = ["chat", "judge", "image", "tts", "stt"];
+const GATEWAY_MODEL_KINDS: readonly ModelKind[] = [
+	"chat",
+	"judge",
+	"image",
+	"tts",
+	"stt",
+	"embedding",
+	"rerank",
+	"video",
+];
 
 /** Every registry model of a kind the gateway can route, bundled catalog order within each kind. */
 export function gatewayRoutableModels(registry: ModelRegistry): Model<Api>[] {

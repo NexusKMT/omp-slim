@@ -4,6 +4,7 @@ provider "openai" {
 	default-model "gpt-5.5"
 	env "OPENAI_API_KEY"
 	kind-apis {
+		embedding "openai-embeddings"
 		image "openai-responses"
 		stt "openai-transcriptions"
 	}
@@ -60,13 +61,39 @@ provider "openai" {
 			limits context=16000 max-tokens=2000
 			supports-tools #false
 		}
+		// OpenAI publishes embedding prices per million input tokens; embedding
+		// responses have no output-token charge.
+		model "text-embedding-3-small" name="Text Embedding 3 Small" api="openai-embeddings" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=0.02 output=0 cache-read=0 cache-write=0
+			limits context=8192
+			supports-tools #false
+		}
+		model "text-embedding-3-large" name="Text Embedding 3 Large" api="openai-embeddings" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=0.13 output=0 cache-read=0 cache-write=0
+			limits context=8192
+			supports-tools #false
+		}
+		model "text-embedding-ada-002" name="Text Embedding Ada 002" api="openai-embeddings" base-url="https://api.openai.com/v1" {
+			reasoning #false
+			input "text"
+			cost input=0.1 output=0 cache-read=0 cache-write=0
+			limits context=8192
+			supports-tools #false
+		}
 	}
 
-	// Replaces the strict-mode provider whitelist entry.
 	models "whisper-1" "gpt-4o-transcribe" "gpt-4o-mini-transcribe" {
 		kind "stt"
 	}
+	models "text-embedding-3-small" "text-embedding-3-large" "text-embedding-ada-002" {
+		kind "embedding"
+	}
 
+	// Replaces the strict-mode provider whitelist entry.
 	supports-strict-mode #true
 	// Replaces both OpenAI tool-call id-limit baselines.
 	uses-openai-tool-call-id-limit #true

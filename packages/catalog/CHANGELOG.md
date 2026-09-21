@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added support for embedding, rerank, and video generation capabilities in OpenRouter provider
 - Added support for speech-to-text (STT) capabilities in OpenAI provider
 - Added five STT models to OpenRouter provider
 - Added support for TTS and STT API capabilities in OpenRouter provider

@@ -58,10 +58,13 @@ import {
 	resolvePeer,
 	withCors,
 } from "./http";
+import { handleEmbeddings } from "./routes/embeddings";
 import { handleImageEdits, handleImageGenerations } from "./routes/images";
+import { handleRerank } from "./routes/rerank";
 import { handleSpeech } from "./routes/speech";
 import { handleSystemOne } from "./routes/systemone";
 import { handleTranscriptions } from "./routes/transcriptions";
+import { handleVideoContent, handleVideoPoll, handleVideoSubmit } from "./routes/video";
 import { AuthGatewaySessionStateStore } from "./session-state";
 import type {
 	AuthGatewayServerHandle,
@@ -224,6 +227,9 @@ const KIND_ROUTES: Partial<Record<ModelKind, string>> = {
 	image: "POST /v1/images/generations",
 	tts: "POST /v1/audio/speech",
 	stt: "POST /v1/audio/transcriptions",
+	embedding: "POST /v1/embeddings",
+	rerank: "POST /v1/rerank",
+	video: "POST /v1/videos",
 };
 
 /** Chat routes cannot drive a non-chat model; name the route that does, or `undefined` for chat models. */
@@ -713,8 +719,8 @@ async function handleCredentialsCheck(storage: AuthStorage, signal: AbortSignal)
  * size and capability-gate discovered models: `context_length`,
  * `max_output_tokens`, `input_modalities`, and `supports_tools` (only emitted
  * when the catalog explicitly reports `false`; absent means usable). `kind` is
- * emitted for non-chat rows (`judge`, `image`, `tts`, `stt`) so clients can
- * keep them off chat routes; absent means chat.
+ * emitted for non-chat rows (`judge`, `image`, `tts`, `stt`, `embedding`,
+ * `rerank`, `video`) so clients can keep them off chat routes; absent means chat.
  */
 interface ModelListRow {
 	id: string;
@@ -752,6 +758,9 @@ function handleModelsList(opts: AuthGatewayBootOptions): Response {
 	}
 	return json(200, { object: "list", data });
 }
+
+/** `GET /v1/videos/:id` (poll) and `GET /v1/videos/:id/content` (download); group 1 = id, group 2 = `/content`. */
+const VIDEO_JOB_PATH = /^\/v1\/videos\/([^/]+)(\/content)?$/;
 
 export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServerHandle {
 	const bind = parseBind(opts.bind ?? DEFAULT_AUTH_GATEWAY_BIND);
@@ -833,6 +842,29 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 				// Speech-to-text, OpenAI multipart or OpenRouter JSON base64 wire.
 				if (req.method === "POST" && pathname === "/v1/audio/transcriptions") {
 					return withCors(await handleTranscriptions(opts, req, peer), req);
+				}
+
+				// Embeddings, OpenAI wire (OpenRouter is compatible).
+				if (req.method === "POST" && pathname === "/v1/embeddings") {
+					return withCors(await handleEmbeddings(opts, req, peer), req);
+				}
+
+				// Rerank, OpenRouter wire.
+				if (req.method === "POST" && pathname === "/v1/rerank") {
+					return withCors(await handleRerank(opts, req, peer), req);
+				}
+
+				// Video generation, OpenRouter's asynchronous wire: submit, then poll
+				// and download by the gateway-issued job id (stateless — the id
+				// encodes provider, model, and upstream job).
+				if (req.method === "POST" && pathname === "/v1/videos") {
+					return withCors(await handleVideoSubmit(opts, req, peer), req);
+				}
+				const videoJob = req.method === "GET" ? VIDEO_JOB_PATH.exec(pathname) : null;
+				if (videoJob) {
+					const gatewayId = decodeURIComponent(videoJob[1]);
+					const handler = videoJob[2] ? handleVideoContent : handleVideoPoll;
+					return withCors(await handler(opts, req, peer, gatewayId), req);
 				}
 
 				// Model catalog.
