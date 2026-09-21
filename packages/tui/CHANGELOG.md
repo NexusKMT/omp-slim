@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated Bash tool background notice to inject output as follow‑up and discourage polling
+
 ## [18.2.7] - 2026-09-21
 
 ### Breaking Changes

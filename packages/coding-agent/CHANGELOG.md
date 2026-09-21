@@ -15,6 +15,7 @@
 
 ### Changed
 
+- Updated background job notice to inject output as follow‑up and discourage polling
 - Enhanced browser resilience with configurable HTTPS error ignoring, domain allow-listing, and automatic tab recycling for security-sensitive state changes
 
 ### Fixed
