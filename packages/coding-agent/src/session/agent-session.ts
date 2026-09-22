@@ -1744,6 +1744,11 @@ export class AgentSession {
 		this.#loopGuards = new LoopGuards(streamGuardsHost);
 		this.#agentId = config.agentId;
 		this.#agentKind = config.agentKind ?? "main";
+		// A subagent's streamed text reaches no output sink until the run settles
+		// (the parent sees only the yield), so a failed turn's partial prose is
+		// replay-safe and transient provider errors after it stay retryable —
+		// same buffering contract print mode declares via setTextOutputCommitted.
+		this.#textOutputCommitted = this.#agentKind === "main";
 		this.#scoutAllowedBySpawnPolicy = config.scoutAllowedBySpawnPolicy ?? true;
 		this.#providerSessionId = config.providerSessionId;
 		this.#inheritedProviderPromptCacheKey =

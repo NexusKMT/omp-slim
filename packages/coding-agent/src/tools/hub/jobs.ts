@@ -8,7 +8,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 
 import type { AsyncJob, AsyncJobDetails, AsyncJobManager, AsyncJobType } from "../../async";
 
-import { renderStructuredJson } from "../../session/async-job-delivery";
+import { renderStructuredJson, structuredStatusLabel } from "../../session/async-job-delivery";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
 import { parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
@@ -273,7 +273,7 @@ export function buildJobResult(
 			}
 			if (j.structured) {
 				const hasData = Object.hasOwn(j.structured, "data");
-				let header = `Structured output: schema ${j.structured.status}`;
+				let header = `Structured output: ${structuredStatusLabel(j.structured.status)}`;
 				if (j.structured.error) header += `: ${j.structured.error}`;
 				// Valid results never inline the JSON here — it duplicates the
 				// `<output>` block above (or breaks mid-JSON once truncated at
