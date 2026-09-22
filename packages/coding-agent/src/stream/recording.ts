@@ -37,6 +37,10 @@ export interface RecordingHeader {
 	rows: number;
 	title: string;
 	createdAt: string;
+	/** Clip description, set by `omp clip --description`. */
+	description?: string;
+	/** Uploading Stencil username, stamped by the clip server. */
+	owner?: string;
 }
 
 /** One timestamped screen frame; `at` is milliseconds since the recording started. */

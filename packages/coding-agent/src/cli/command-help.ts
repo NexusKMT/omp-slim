@@ -32,6 +32,10 @@ export const collabHelp = {
 		"List active local Collab host metadata without URLs; use collab link <instanceId|pid> to retrieve a control link (--view for view-only)",
 } satisfies CommandMetadata;
 
+export const clipHelp = {
+	description: "Upload a /record recording to live.omp.sh as a public clip and print its URL",
+} satisfies CommandMetadata;
+
 export const commitHelp = { description: "Generate a commit message and update changelogs" } satisfies CommandMetadata;
 
 export const completionsHelp = {

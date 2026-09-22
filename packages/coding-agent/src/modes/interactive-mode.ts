@@ -6542,7 +6542,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			const elapsed = active.elapsedMs;
 			await active.stop();
 			this.statusLine.setRecording(false);
-			this.showStatus(`Saved ${formatDuration(elapsed)} recording to ${active.path} · replay: omp play`);
+			this.showStatus(
+				`Saved ${formatDuration(elapsed)} recording to ${active.path} · replay: omp play · share: omp clip`,
+			);
 			return;
 		}
 		if (this.#recorderStarting) return;
