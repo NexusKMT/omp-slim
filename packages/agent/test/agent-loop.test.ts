@@ -3780,15 +3780,15 @@ describe("agentLoop event-driven steering watch", () => {
 		expect(waitCalls).toBe(1);
 	});
 
-	it("does not skip later chained tools when a steering callback throws mid-batch", async () => {
-		const toolSchema = type({ value: "string" });
+	it("preserves completed results and later tools when a steering callback throws", async () => {
+		const toolSchema = type({ value: "string", exclusive: "boolean" });
 		const executed: string[] = [];
 		const tool: AgentTool<typeof toolSchema, { value: string }> = {
 			name: "echo",
 			label: "Echo",
 			description: "Echo tool",
 			parameters: toolSchema,
-			concurrency: "exclusive",
+			concurrency: args => (args.exclusive ? "exclusive" : "shared"),
 			async execute(_toolCallId, params) {
 				executed.push(params.value);
 				return { content: [{ type: "text", text: `echoed: ${params.value}` }], details: { value: params.value } };
@@ -3800,8 +3800,24 @@ describe("agentLoop event-driven steering watch", () => {
 			responses: [
 				{
 					content: [
-						{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } },
-						{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "second" } },
+						{
+							type: "toolCall",
+							id: "tool-1",
+							name: "echo",
+							arguments: { value: "first-exclusive", exclusive: true },
+						},
+						{
+							type: "toolCall",
+							id: "tool-2",
+							name: "echo",
+							arguments: { value: "shared-sibling", exclusive: false },
+						},
+						{
+							type: "toolCall",
+							id: "tool-3",
+							name: "echo",
+							arguments: { value: "next-exclusive", exclusive: true },
+						},
 					],
 				},
 				{ content: ["done"] },
@@ -3829,11 +3845,13 @@ describe("agentLoop event-driven steering watch", () => {
 			}
 		}
 
-		// Both exclusive tools run; the second is not skipped for a phantom steer.
-		expect(executed).toEqual(["first", "second"]);
-		const secondResult = results.find(r => r.toolCallId === "tool-2");
-		const secondBlock = secondResult?.content?.[0];
-		expect(secondBlock?.type === "text" ? secondBlock.text : "").toBe("echoed: second");
+		expect(executed).toEqual(["first-exclusive", "shared-sibling", "next-exclusive"]);
+		expect(
+			results.map(result => {
+				const block = result.content?.[0];
+				return block?.type === "text" ? block.text : "";
+			}),
+		).toEqual(["echoed: first-exclusive", "echoed: shared-sibling", "echoed: next-exclusive"]);
 	});
 });
 
