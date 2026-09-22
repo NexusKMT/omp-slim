@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.9] - 2026-09-22
+
 ### Fixed
 
 - Local OpenAI-compatible backends—including llama.cpp, LM Studio, vLLM, Ollama, and custom loopback or LAN hosts—now support maxTokens values above 64k without incorrectly applying the hosted OpenAI limit.

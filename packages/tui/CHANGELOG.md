@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.9] - 2026-09-22
+
 ### Added
 
 - Added terminal detection and capability support for otty and rio, including Kitty graphics and true-color support where available, plus otty hyperlinks and notifications.

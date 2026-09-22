@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.9] - 2026-09-22
+
 ### Fixed
 
 - Fixed custom OpenAI-compatible extension streamers failing when no compatibility configuration was provided.
