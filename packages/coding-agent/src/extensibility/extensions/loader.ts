@@ -195,35 +195,16 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		private readonly cwd: string,
 		public readonly events: EventBus,
 	) {
-		this.on = this.on.bind(this);
-		this.registerTool = this.registerTool.bind(this);
-		this.registerFileWriteFallback = this.registerFileWriteFallback.bind(this);
-		this.registerFileDeleteFallback = this.registerFileDeleteFallback.bind(this);
-		this.registerCommand = this.registerCommand.bind(this);
-		this.setLabel = this.setLabel.bind(this);
-		this.registerShortcut = this.registerShortcut.bind(this);
-		this.registerFlag = this.registerFlag.bind(this);
-		this.registerMessageRenderer = this.registerMessageRenderer.bind(this);
-		this.registerAssistantThinkingRenderer = this.registerAssistantThinkingRenderer.bind(this);
-		this.registerComposerShape = this.registerComposerShape.bind(this);
-		this.getFlag = this.getFlag.bind(this);
-		this.sendMessage = this.sendMessage.bind(this);
-		this.sendUserMessage = this.sendUserMessage.bind(this);
-		this.appendEntry = this.appendEntry.bind(this);
-		this.exec = this.exec.bind(this);
-		this.getActiveTools = this.getActiveTools.bind(this);
-		this.getAllTools = this.getAllTools.bind(this);
-		this.setActiveTools = this.setActiveTools.bind(this);
-		this.getCommands = this.getCommands.bind(this);
-		this.setModel = this.setModel.bind(this);
-		this.getThinkingLevel = this.getThinkingLevel.bind(this);
-		this.setThinkingLevel = this.setThinkingLevel.bind(this);
-		this.getServiceTiers = this.getServiceTiers.bind(this);
-		this.setServiceTier = this.setServiceTier.bind(this);
-		this.getSessionName = this.getSessionName.bind(this);
-		this.setSessionName = this.setSessionName.bind(this);
-		this.registerProvider = this.registerProvider.bind(this);
-		this.unregisterProvider = this.unregisterProvider.bind(this);
+		// Extensions destructure `pi.on` or forward API methods as callbacks, so every
+		// prototype method must keep its receiver when detached. Walk the prototype
+		// rather than listing methods: a new method is bound without touching this.
+		const prototype = ConcreteExtensionAPI.prototype;
+		for (const name of Object.getOwnPropertyNames(prototype)) {
+			if (name === "constructor") continue;
+			const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+			if (typeof descriptor?.value !== "function") continue;
+			Object.defineProperty(this, name, { value: descriptor.value.bind(this), writable: true, configurable: true });
+		}
 	}
 
 	on<F extends HandlerFn>(event: string, handler: F): void {
