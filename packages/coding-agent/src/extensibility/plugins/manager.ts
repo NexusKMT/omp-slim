@@ -494,6 +494,17 @@ export class PluginManager {
 					await this.#removeDependencyEntry(pkgJsonPath, existingActualName);
 				}
 			}
+			// `bun install` appends a manifest edge rather than replacing it, so
+			// reinstalling over a stale (or already duplicated) entry leaves two
+			// keys and the next install dies with DependencyLoop. Prune the edge
+			// first; rollback restores the original package.json on failure, and
+			// the parse/rewrite also collapses any pre-existing duplicates (#12296).
+			if (!gitSource) {
+				const npmName = extractPackageName(spec.packageName);
+				if (npmName in depsBefore) {
+					await this.#removeDependencyEntry(pkgJsonPath, npmName);
+				}
+			}
 
 			// Step 1: write the spec into plugins/package.json + node_modules.
 			// npm specs resolve through bun's manifest (packument) cache, which honors
