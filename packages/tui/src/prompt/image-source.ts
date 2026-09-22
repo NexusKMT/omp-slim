@@ -39,11 +39,13 @@ export function tagImageAttachmentSource(
 	};
 }
 
+function isImageAttachmentSource(value: unknown): value is ImageAttachmentSource {
+	return isRecord(value) && typeof value.path === "string" && (value.kind === "image" || value.kind === "video");
+}
+
 /** Return the original local source of an image attachment, or undefined for payloads with no source file (clipboard bitmaps). */
 export function imageAttachmentSource(image: ImageContent): ImageAttachmentSource | undefined {
 	if (!(kImageAttachmentSource in image)) return undefined;
 	const source = image[kImageAttachmentSource];
-	return isRecord(source) && typeof source.path === "string" && (source.kind === "image" || source.kind === "video")
-		? source
-		: undefined;
+	return isImageAttachmentSource(source) ? source : undefined;
 }
