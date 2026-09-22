@@ -38,6 +38,7 @@ type ReasoningEffort = NonNullable<ParsedRequest["options"]["reasoning"]>;
 
 function isReasoningEffort(value: unknown): value is ReasoningEffort {
 	return (
+		value === "none" ||
 		value === "minimal" ||
 		value === "low" ||
 		value === "medium" ||
