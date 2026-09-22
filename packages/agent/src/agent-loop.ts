@@ -1112,7 +1112,11 @@ function resolveAsides(entries: AsideMessage[] | undefined): AgentMessage[] {
 
 function discardAsides(messages: readonly AgentMessage[], error: Error): void {
 	for (const message of messages) {
-		(message as CommittableAsideMessage)[ASIDE_MESSAGE_DISCARD]?.(error);
+		try {
+			(message as CommittableAsideMessage)[ASIDE_MESSAGE_DISCARD]?.(error);
+		} catch (discardError) {
+			logger.error("Aside discard hook threw", { error: discardError });
+		}
 	}
 }
 
@@ -1672,13 +1676,7 @@ async function runLoopBody(
 
 		endAgentStream(stream, newMessages, telemetry, stepCounter.count);
 	} finally {
-		try {
-			discardAsides(pendingMessages, new Error("Aside message was not committed before the agent loop ended"));
-		} catch (discardError) {
-			// A throwing host discard hook must never replace the in-flight loop
-			// error (or a clean exit) by escaping the finally — log and swallow.
-			logger.error("discardAsides threw while ending the agent loop", { error: discardError });
-		}
+		discardAsides(pendingMessages, new Error("Aside message was not committed before the agent loop ended"));
 		if (!preserveSoftRequirementState) {
 			softRequirementState.id = undefined;
 			softRequirementState.forcedToolChoice = undefined;
