@@ -9,7 +9,7 @@
  * and binary files are staged whole.
  */
 import * as path from "node:path";
-import type { ScoreQuestion } from "@oh-my-pi/pi-ai";
+import type { ChoiceQuestion, ScoreQuestion } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import type { VcsHunkSelection } from "@oh-my-pi/pi-natives";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
@@ -27,15 +27,20 @@ import type { AiStageOutcome } from "@oh-my-pi/pi-tui/apps/git/git-tui";
 const CONCURRENCY = 64;
 /** Head-truncation bound for a unit's change text. */
 const UNIT_CHARS = 2400;
-/** Probability of the top level ("part of it") at or above which a unit is staged. */
-const STAGE_THRESHOLD = 0.5;
+/**
+ * Probability of the top level ("part of it") at or above which a unit is
+ * staged. Genuine matches score ≥ 0.7 (measured on a mixed tree and small
+ * fixtures); same-area noise settles around 0.5–0.65 when the instruction
+ * names nothing in the tree, so 0.6 trims it without costing recall.
+ */
+const STAGE_THRESHOLD = 0.6;
 
 /**
  * Each unit is judged with the whole changed-path list as contrast. Without
  * it, an isolated yes/no lets anything sharing vocabulary with the instruction
  * drift to 0.55–0.8 (measured on a 278-hunk tree: 105 accepted for a
  * 23-hunk feature); with the tree and an explicit "tangential" level, the same
- * tree yields zero false positives at {@link STAGE_THRESHOLD}.
+ * tree yields zero false positives and 16 of the feature's hunks.
  */
 const UNIT_QUESTION: ScoreQuestion = {
 	type: "score",
@@ -49,6 +54,25 @@ const UNIT_QUESTION: ScoreQuestion = {
 };
 /** Index of the "part of it" level in {@link UNIT_QUESTION}. */
 const PART_OF_IT = "2";
+
+/** Highest-scoring accepted units shown together in the verification pick. */
+const VERIFY_CANDIDATES = 8;
+/** Per-candidate change text bound in the verification pick. */
+const VERIFY_CHARS = 600;
+/**
+ * Probability of `none` at or above which the run stages nothing. When the
+ * instruction names work that is not in the tree, per-unit scores of the
+ * nearest same-area changes still drift to 0.6–0.85; only a question with an
+ * explicit "none of these" alternative separates that (0.55–0.7) from a real
+ * match (0.03–0.37, measured across feature, kind-of-edit, and by-name asks).
+ */
+const NONE_THRESHOLD = 0.5;
+/** Choice key for "the instruction describes none of the candidates". */
+const NONE = "none";
+const VERIFY_INSTRUCTIONS =
+	"The user is staging a git commit and described which changes they want. `candidates` are the changed units in the tree that scored highest for that description, each with its path, kind, and changed lines. Which candidate is most clearly the change the user described — or is none of them actually it?";
+const VERIFY_NONE_CRITERION =
+	"None of the candidates is the change the user described; they only share an area or vocabulary with it.";
 
 /** Options for {@link aiStage}. */
 export interface AiStageOptions {
@@ -123,7 +147,7 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 					hunk: hunk.index + 1,
 					untracked: false,
 					kind: deleted.has(diff.filename) ? "deleted file" : "hunk",
-					change: changed.length <= UNIT_CHARS ? changed : `${changed.slice(0, UNIT_CHARS)}\n…`,
+					change: bound(changed, UNIT_CHARS),
 				});
 			}
 		}
@@ -159,12 +183,49 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 					{ signal: workerSignal },
 				);
 				onProgress?.(`Judging ${++settled}/${units.length} changes…`);
-				return answers.belongs.probabilities[PART_OF_IT] >= STAGE_THRESHOLD;
+				return answers.belongs.probabilities[PART_OF_IT];
 			},
 			signal,
 		);
 		if (aborted) throw signal?.reason instanceof Error ? signal.reason : new AIError.AbortError("staging aborted");
-		const accepted = verdicts(results);
+		const scores = verdicts(results);
+		const accepted = scores.map(score => score >= STAGE_THRESHOLD);
+
+		// Per-unit scores rank well but have no null hypothesis: when the
+		// instruction describes nothing in the tree, the nearest same-area
+		// changes still clear the threshold. One pick over the strongest
+		// candidates with an explicit `none` option supplies it.
+		const ranked = units
+			.map((unit, index) => ({ unit, score: scores[index] }))
+			.filter(entry => entry.score >= STAGE_THRESHOLD)
+			.sort((a, b) => b.score - a.score)
+			.slice(0, VERIFY_CANDIDATES);
+		if (ranked.length > 0) {
+			onProgress?.("Verifying…");
+			const criteria: Record<string, string | null> = { [NONE]: VERIFY_NONE_CRITERION };
+			const candidates = ranked.map(({ unit }, index) => {
+				criteria[`c${index}`] = null;
+				return {
+					key: `c${index}`,
+					path: unit.path,
+					kind: unit.kind,
+					...(unit.change === undefined ? {} : { change: bound(unit.change, VERIFY_CHARS) }),
+				};
+			});
+			const question: ChoiceQuestion = { type: "choice", instructions: VERIFY_INSTRUCTIONS, criteria };
+			const { answers } = await judge.judge(
+				{ state: { instruction, candidates }, questions: { pick: question } },
+				{ signal },
+			);
+			if (answers.pick.probabilities[NONE] >= NONE_THRESHOLD) {
+				logger.debug("git ai-stage: verification rejected every candidate", {
+					instruction,
+					none: answers.pick.probabilities[NONE],
+					candidates: candidates.map(candidate => candidate.path),
+				});
+				accepted.fill(false);
+			}
+		}
 
 		const indicesByPath = new Map<string, number[]>();
 		const binaryAccepted: string[] = [];
@@ -212,11 +273,11 @@ export async function aiStage(options: AiStageOptions): Promise<AiStageOutcome> 
 }
 
 /**
- * Collapse settled judgments to verdicts. A failed judgment rejects just its
- * unit so one flaky request cannot sink the run — unless every unit failed,
+ * Collapse settled judgments to per-unit scores. A failed judgment scores its
+ * unit 0 so one flaky request cannot sink the run — unless every unit failed,
  * which means the backend is broken and the first error surfaces.
  */
-function verdicts(results: readonly (PromiseSettledResult<boolean> | undefined)[]): boolean[] {
+function verdicts(results: readonly (PromiseSettledResult<number> | undefined)[]): number[] {
 	let failures = 0;
 	let firstError: unknown;
 	const out = results.map(result => {
@@ -228,7 +289,7 @@ function verdicts(results: readonly (PromiseSettledResult<boolean> | undefined)[
 				error: result.reason instanceof Error ? result.reason.message : String(result.reason),
 			});
 		}
-		return false;
+		return 0;
 	});
 	if (results.length > 0 && failures === results.length) {
 		throw firstError instanceof Error ? firstError : new Error(String(firstError));
@@ -248,4 +309,9 @@ async function readHead(filePath: string, signal: AbortSignal | undefined): Prom
 		if (isEnoent(error)) return null;
 		throw error;
 	}
+}
+
+/** Head-truncate `text` to `limit` characters with an ellipsis marker. */
+function bound(text: string, limit: number): string {
+	return text.length <= limit ? text : `${text.slice(0, limit)}\n…`;
 }

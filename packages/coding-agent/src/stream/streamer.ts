@@ -61,7 +61,7 @@ interface StreamConnectionOptions {
 	projectDir: string;
 	title: string;
 	hostUrl: string;
-	/** Bearer token resolver for the host socket (see `StreamCredential`). */
+	/** Bearer token resolver for the host socket (see `StencilCredential`). */
 	token: () => Promise<string | null>;
 	/** Test seam; production uses the server client's normal retry policy. */
 	reconnectDelay?: (attempt: number) => number;

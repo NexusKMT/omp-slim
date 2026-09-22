@@ -4,7 +4,7 @@ import { isEnoent } from "@oh-my-pi/pi-utils";
 import { Args, CliUsageError, Command, Flags } from "@oh-my-pi/pi-utils/cli";
 import { clipHelp as commandHelp } from "../cli/command-help";
 import { Settings } from "../config/settings";
-import { StreamCredential } from "../stream/auth";
+import { StencilCredential } from "../stencil/credential";
 import { uploadClip } from "../stream/clip-upload";
 import { latestRecording, recordingsDir } from "../stream/recording";
 
@@ -46,11 +46,11 @@ export default class Clip extends Command {
 		}
 
 		const settings = await Settings.loadReadOnly({ cwd: process.cwd() });
-		const credential = new StreamCredential();
+		const credential = new StencilCredential();
 		try {
 			const token = await credential.resolve();
 			if (!token) {
-				process.stderr.write(`clip: ${StreamCredential.missingMessage}\n`);
+				process.stderr.write(`clip: ${StencilCredential.missingMessage}\n`);
 				process.exitCode = 1;
 				return;
 			}

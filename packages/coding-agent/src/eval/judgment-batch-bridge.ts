@@ -399,7 +399,10 @@ export class JudgmentBatch {
 			}
 		}
 		if (signal.aborted) return { key: input.key, error: "cancelled" };
-		return { key: input.key, error: lastError instanceof Error ? lastError.message : String(lastError) };
+		return {
+			key: input.key,
+			error: lastError instanceof Error ? lastError.message : String(lastError),
+		};
 	}
 
 	#lastError(): string | undefined {
