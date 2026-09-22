@@ -116,24 +116,35 @@ describe("SessionManager.moveTo", () => {
 		await session.ensureOnDisk();
 		const oldFile = session.getSessionFile()!;
 		const oldArtifacts = oldFile.slice(0, -6);
-		await fsp.mkdir(oldArtifacts);
+		await fsp.mkdir(path.join(oldArtifacts, "child"), { recursive: true });
 		await Bun.write(path.join(oldArtifacts, "1.bash.log"), "saved output");
+		await Bun.write(path.join(oldArtifacts, "child", "2.bash.log"), "nested output");
 		const rename = fs.promises.rename.bind(fs.promises);
+		const link = fs.promises.link.bind(fs.promises);
 		const renameSpy = spyOn(fs.promises, "rename").mockImplementation(async (from, to) => {
-			if (from.toString() === oldFile || from.toString() === oldArtifacts) {
+			if (from.toString() === oldFile || from.toString().startsWith(oldArtifacts)) {
 				throw Object.assign(new Error("cross-device move"), { code: "EXDEV" });
 			}
 			return rename(from, to);
+		});
+		const linkSpy = spyOn(fs.promises, "link").mockImplementation(async (from, to) => {
+			if (from.toString().startsWith(oldArtifacts)) {
+				throw Object.assign(new Error("cross-device link"), { code: "EXDEV" });
+			}
+			return link(from, to);
 		});
 		try {
 			await session.moveTo(cwdB);
 		} finally {
 			renameSpy.mockRestore();
+			linkSpy.mockRestore();
 		}
 		const newFile = session.getSessionFile()!;
 		expect(fs.existsSync(oldFile)).toBe(false);
+		expect(fs.existsSync(oldArtifacts)).toBe(false);
 		expect(getHeader(await loadEntriesFromFile(newFile))?.cwd).toBe(cwdB);
 		expect(await Bun.file(path.join(newFile.slice(0, -6), "1.bash.log")).text()).toBe("saved output");
+		expect(await Bun.file(path.join(newFile.slice(0, -6), "child", "2.bash.log")).text()).toBe("nested output");
 		await session.close();
 	});
 
