@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed live models that match no `retry.fallbackChains` role primary (e.g. Fable after `/model`) resolving no chain, so a wait longer than `retry.maxDelayMs` aborted the session instead of walking `default` ([#12421](https://github.com/can1357/oh-my-pi/issues/12421)).
+- Fixed skill hints drifting from the active prompt after discarded rebuilds or in advisor sessions ([#12148](https://github.com/can1357/oh-my-pi/pull/12148) by [@jerome-benoit](https://github.com/jerome-benoit)).
 
 ## [18.2.8] - 2026-09-21
 
@@ -27,6 +28,10 @@
 
 ### Fixed
 
+- Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
+- Added support for buffered cloud transcription using OpenAI-compatible models
+- Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
+- Prevented LSP client from hanging when a request is aborted while waiting for a previous write
 - Improved responsiveness in long sessions by significantly reducing the time required to scan provider context for credential patterns.
 - Fixed native judges failing to honor configured request headers, enabling authenticated and header-routed judge providers to work as configured.
 - Fixed LSP requests hanging when aborted while waiting for an earlier write to complete.
@@ -61,6 +66,12 @@
 
 ### Fixed
 
+- Fixed the `edit` tool splicing a literal `…` into the file when a `<SM:FIND>` opened or closed with an ellipsis (a line-end `…` spanning the rest of a line, or a whole-line `…` at either edge) and `<SM:PUT>` re-emitted it. An edge gap captures nothing, so the matching `<SM:PUT>` ellipsis now re-emits nothing and the anchor keeps its own newline; an identical `<SM:FIND>`/`<SM:PUT>` pair reports no change instead of writing the marker. A leading gap combined with an inner gap no longer panics.
+- Fixed startup aborting when the plugins directory exists but cannot be read — a sandboxed run, a restrictive mode, or a manifest symlinked into a denied path; the unreadable root is now skipped with a warning.
+- Fixed Edit calls getting stuck generating repeated closing tags after an empty `SM:AFTER` insertion.
+- Fixed Edit previews and application panicking on Unicode no-op edits and overlapping duplicate matches.
+- Fixed live subagent messages getting stuck behind persisted-agent discovery, and roster discovery looping on dot-named transcripts.
+- Fixed llama.cpp discovery of PrismML Bonsai 2 27B GGUFs: built-in and custom-named providers now share catalog rules for chat-completions routing and the Qwen 3.8 thinking ladder (`low`/`medium`/`xhigh`), including cached models.
 - Fixed system prompt configuration validation so systemPromptTemplate and customSystemPrompt cannot conflict with a full systemPrompt replacement, including when values are empty.
 - Added browser-relay support for listing eligible pages without attaching to or claiming them.
 - Fixed Codex compatibility with the sloppy edit tool.
