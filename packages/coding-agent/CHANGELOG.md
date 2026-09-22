@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.10] - 2026-09-22
+
 ### Added
 
 - Added live benchmark results table with real-time model ranking and per-kind performance metrics
@@ -22,7 +24,6 @@
 ### Added
 
 - Added Claude saved resets to usage views and `/usage reset`, with automatic blocked-limit recovery and expiring-reset redemption controlled by `claudeResets`.
-
 - Added support for searching embedded harness documentation with `find` and `omp find` using `omp://` scopes, including file-specific searches and `:start-end` selectors; results open directly through canonical `omp://` URLs.
 
 ### Changed

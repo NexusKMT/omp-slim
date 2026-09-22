@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.10] - 2026-09-22
+
 ### Changed
 
 - Added support for multiple concurrent TUI paint listeners to enable simultaneous session recording and streaming
