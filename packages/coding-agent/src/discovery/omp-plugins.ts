@@ -38,7 +38,7 @@ import {
 	scanSkillsFromDir,
 } from "./helpers";
 import { listOmpExtensionRoots, type OmpExtensionRoot } from "./omp-extension-roots";
-import { resolvePluginStdioPaths, substitutePluginRoot } from "./substitute-plugin-root";
+import { resolvePluginStdioPaths } from "./substitute-plugin-root";
 
 const PROVIDER_ID = "omp-plugins";
 const DISPLAY_NAME = "OMP Extension Packages";
@@ -313,7 +313,10 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 			logger.warn(`[omp-plugins] Invalid JSON in ${mcpPath}`);
 			continue;
 		}
-		const servers = expandEnvVarsDeep(parsed.mcpServers);
+		const servers = expandEnvVarsDeep(parsed.mcpServers, {
+			CLAUDE_PLUGIN_ROOT: root.path,
+			OMP_PLUGIN_ROOT: root.path,
+		});
 		if (!servers || typeof servers !== "object" || Array.isArray(servers)) continue;
 
 		for (const [serverName, serverCfg] of Object.entries(servers)) {
@@ -323,15 +326,9 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 				warnings.push(`[omp-plugins] Skipping MCP server "${serverName}" in ${mcpPath}: missing command or url`);
 				continue;
 			}
-			// Substitute ${CLAUDE_PLUGIN_ROOT}/${OMP_PLUGIN_ROOT} placeholders
-			// with the plugin root path. expandEnvVarsDeep only sees real env
-			// vars and cannot resolve the loader-supplied token. See #12792.
-			const substitutedCommand = substitutePluginRoot(cfg.command, root.path);
-			const substitutedCwd = cfg.cwd !== undefined ? substitutePluginRoot(cfg.cwd, root.path) : undefined;
-			const substitutedArgs = cfg.args !== undefined ? substitutePluginRoot(cfg.args, root.path) : undefined;
 			// Root relative command/cwd at the plugin's config directory, not the
 			// session cwd (MCP stdio spawning resolves relative values there).
-			const rooted = resolvePluginStdioPaths({ command: substitutedCommand, cwd: substitutedCwd }, root.path);
+			const rooted = resolvePluginStdioPaths({ command: cfg.command, cwd: cfg.cwd }, root.path);
 			const requestIdFormat = parseRequestIdFormat(cfg.requestIdFormat);
 			items.push({
 				name: serverName,
@@ -339,7 +336,7 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 				...(cfg.timeout !== undefined && { timeout: cfg.timeout }),
 				...(requestIdFormat !== undefined && { requestIdFormat }),
 				...(rooted.command !== undefined && { command: rooted.command }),
-				...(substitutedArgs !== undefined && { args: substitutedArgs }),
+				...(cfg.args !== undefined && { args: cfg.args }),
 				...(cfg.env !== undefined && { env: cfg.env }),
 				...(rooted.cwd !== undefined && { cwd: rooted.cwd }),
 				...(cfg.url !== undefined && { url: cfg.url }),
