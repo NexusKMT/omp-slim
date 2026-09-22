@@ -57,6 +57,7 @@ function createClient(cwd: string, config: ServerConfig): LspClient {
 		isReading: false,
 		status: "ready",
 		lastActivity: Date.now(),
+		startedAt: Date.now(),
 		writeQueue: Promise.resolve(),
 		activeProgressTokens: new Set(),
 		projectLoaded: Promise.resolve(),
@@ -521,6 +522,50 @@ describe("LSP diagnostics freshness", () => {
 		expect(result?.diagnostics?.errored).toBe(true);
 		expect(result?.diagnostics?.messages?.some(m => m.includes("real error"))).toBe(true);
 		expect(result?.diagnostics?.messages?.some(m => m.includes("stale error"))).toBe(false);
+	});
+
+	it("defers an empty unversioned cold-server publish until analysis finishes", async () => {
+		const filePath = path.join(tempDir.path(), "cold.ts");
+		const uri = fileToUri(filePath);
+		const clock = new VirtualClock(Date.now());
+		installVirtualTime(clock);
+		const client = createClient(tempDir.path(), TEST_SERVER);
+
+		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
+		vi.spyOn(lspConfig, "getServersForFile").mockReturnValue([["test-lsp", TEST_SERVER]]);
+		vi.spyOn(lspClient, "getOrCreateClient").mockResolvedValue(client);
+		vi.spyOn(lspClient, "syncContent").mockImplementation(async mockClient => {
+			mockClient.openFiles.set(uri, { version: 1, languageId: "typescript" });
+		});
+		vi.spyOn(lspClient, "notifySaved").mockImplementation(async mockClient => {
+			clock.in(10, () => {
+				publishDiagnostics(mockClient, uri, [], null);
+			});
+			clock.in(700, () => {
+				publishDiagnostics(mockClient, uri, [createDiagnostic("completed analysis error")], null);
+			});
+		});
+
+		const late = Promise.withResolvers<FileDiagnosticsResult>();
+		const handle = {
+			onDeferredDiagnostics: (diagnostics: FileDiagnosticsResult) => late.resolve(diagnostics),
+			signal: new AbortController().signal,
+			finalize: () => {},
+		};
+		const writethrough = createLspWritethrough(tempDir.path(), { enableFormat: false, enableDiagnostics: true });
+		const inline = await writethrough(
+			filePath,
+			"export const value: number = 'x';\n",
+			undefined,
+			undefined,
+			undefined,
+			() => handle,
+		);
+
+		expect(inline.diagnostics).toBeUndefined();
+		const lateResult = await late.promise;
+		expect(lateResult.errored).toBe(true);
+		expect(lateResult.messages.some(message => message.includes("completed analysis error"))).toBe(true);
 	});
 
 	it("matches published diagnostics when the server renormalizes the document URI", async () => {
