@@ -947,6 +947,20 @@ describe("Cursor Grok tier routing (issue #8803)", () => {
 		expect(model("cursor-grok-4.5").thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High]);
 	});
 
+	it("collapses built Grok 4.7 rows before their per-row effort ladders leak (#12773)", () => {
+		const collapsed = collapseBuiltVariants(
+			["grok-4.7-low", "grok-4.7-medium", "grok-4.7-high", "grok-4.7-xhigh"].map(id =>
+				buildModel({ ...cursorMemberSpec(id), reasoning: true }),
+			),
+		);
+		expect(collapsed.map(model => model.id)).toEqual(["grok-4.7"]);
+
+		const grok = collapsed[0];
+		if (!grok) throw new Error("grok-4.7 did not collapse");
+		expect(grok.thinking?.efforts).toEqual([Effort.Low, Effort.Medium, Effort.High, Effort.XHigh]);
+		expect(resolveWireModelId(grok, Effort.XHigh)).toBe("grok-4.7-xhigh");
+	});
+
 	it("defaults the collapsed row to -medium and clamps effort-less to -medium (issue #9478)", () => {
 		const collapsed = collapseVariants(
 			RAW_SIBLINGS.map(id => cursorMemberSpec(id)),
