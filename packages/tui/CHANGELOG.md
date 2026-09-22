@@ -6,6 +6,10 @@
 
 - Coalesced status event updates for progress-based operations to reduce TUI render overhead
 
+### Fixed
+
+- Fixed startup release notes requiring an Escape keypress before they could be scrolled.
+
 ## [18.2.9] - 2026-09-22
 
 ### Added
