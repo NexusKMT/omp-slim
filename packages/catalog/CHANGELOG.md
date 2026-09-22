@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Updated default models for anthropic, amazon-bedrock, cloudflare-ai-gateway, kilo, litellm, opencode-zen, vercel-ai-gateway, and zenmux to claude-opus-5-5
+- Updated default model for commandcode to claude-sonnet-5
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed
