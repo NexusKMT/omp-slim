@@ -168,7 +168,10 @@ describe("bedrock in-stream failure classification", () => {
 
 	it("keeps a validationException frame terminal at 400", async () => {
 		const failed = await failWithFrame(
-			exceptionFrame("validationException", "The input fails to satisfy the constraints specified by Amazon Bedrock."),
+			exceptionFrame(
+				"validationException",
+				"The input fails to satisfy the constraints specified by Amazon Bedrock.",
+			),
 		);
 		expect(failed.errorStatus).toBe(400);
 		expect(failed.errorId === undefined || !retriable(failed.errorId)).toBe(true);

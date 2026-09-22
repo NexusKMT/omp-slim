@@ -642,12 +642,16 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 					const payload = safeParsePayload(message.payload) as { message?: string } | undefined;
 					const errorMessage = payload?.message || new TextDecoder().decode(message.payload);
 					const text = `${exceptionType}: ${errorMessage}`;
-					throw new AIError.BedrockApiError(text, bedrockStreamExceptionStatus(exceptionType), { code: exceptionType });
+					throw new AIError.BedrockApiError(text, bedrockStreamExceptionStatus(exceptionType), {
+						code: exceptionType,
+					});
 				}
 				if (messageType === "error") {
 					const code = message.headers[":error-code"] || "UnknownError";
 					const errorMessage = message.headers[":error-message"] || new TextDecoder().decode(message.payload);
-					throw new AIError.BedrockApiError(`${code}: ${errorMessage}`, bedrockStreamExceptionStatus(code), { code });
+					throw new AIError.BedrockApiError(`${code}: ${errorMessage}`, bedrockStreamExceptionStatus(code), {
+						code,
+					});
 				}
 				if (messageType !== "event") continue;
 
