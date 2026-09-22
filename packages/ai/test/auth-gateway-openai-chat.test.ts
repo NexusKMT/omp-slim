@@ -272,7 +272,7 @@ describe("auth-gateway openai-chat: parseRequest", () => {
 		expect(tool.toolName).toBe("submit_move");
 	});
 
-	it("preserves reasoning_effort:\"none\" as an explicit reasoning-off request", () => {
+	it('preserves reasoning_effort:"none" as an explicit reasoning-off request', () => {
 		const parsed = parseRequest({
 			model: "openai-codex/gpt-5.6-luna",
 			messages: [{ role: "user", content: "hello" }],

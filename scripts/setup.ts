@@ -15,7 +15,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 const repoRoot = path.join(import.meta.dir, "..");
 
-
 const argv = process.argv.slice(2);
 const passthrough: string[] = [];
 for (let i = 0; i < argv.length; i++) {

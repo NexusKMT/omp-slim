@@ -174,11 +174,14 @@ async function waitForSettlement(
 		// TimeoutOverflowWarning): re-arm in max-size chunks (#12375).
 		let remaining = timeoutMs;
 		const arm = (): void => {
-			timeout = setTimeout(() => {
-				remaining -= MAX_TIMER_MS;
-				if (remaining > 0) arm();
-				else deferred.resolve("timeout");
-			}, Math.min(Math.max(0, remaining), MAX_TIMER_MS));
+			timeout = setTimeout(
+				() => {
+					remaining -= MAX_TIMER_MS;
+					if (remaining > 0) arm();
+					else deferred.resolve("timeout");
+				},
+				Math.min(Math.max(0, remaining), MAX_TIMER_MS),
+			);
 			timeout.unref?.();
 		};
 		arm();
