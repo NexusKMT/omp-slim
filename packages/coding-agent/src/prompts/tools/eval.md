@@ -7,7 +7,17 @@ Work incrementally: imports → define → test → use, each its own cell. Re-r
 {{#if py}}Top-level `await` works; `asyncio.run(…)` raises error.{{/if}}
 {{#if js}}JS runs under **Bun**: globals (`Bun.file`, `Bun.write`, `Bun.$`, `fetch`, `Buffer`) available; top-level `await`/`return` work.{{/if}}
 
-On error, fix and re-run only the failing step.
+On error, fix and re-run only the failing step. Earlier statements may already have produced side effects.
+
+<instruction>
+- Reusable setup → write a script once, then use `{{#if py}}%load ./setup.py{{else}}%load ./setup.ts{{/if}}` as `code`. Definitions persist; source is not echoed. Quote paths containing spaces; `local://` works.
+- `%load` executes again only when explicitly called. Editing a file alone does not reload it.
+{{#if py}}- Missing Python dependency → identify its distribution, then use `%pip install pillow` as `code`; it installs into the kernel's interpreter. Import names can differ (`PIL` → `pillow`); do not install an exception's name blindly.{{/if}}
+{{#if js}}- Missing JS dependency → use `%bun add csv-parse` as `code`.{{/if}}
+- Percent commands are standalone cells. After installation, retry only the failed import/step—not earlier side effects.
+{{#if js}}- JS packages go to a managed environment reused across sessions in the same project; kernel variables remain separate. Rare explicit target change → `%environment project` (permits project dependency changes) or `%environment managed`.{{#unless autoProvision}} Automatic environment provisioning is disabled: use an existing environment or `%environment project`.{{/unless}}{{/if}}
+- Package installation preserves kernel state. A kernel-loss notice means setup must be loaded again. Compaction alone does not reset a live kernel.
+</instruction>
 
 <prelude>
 {{#ifAll py js}}Python: sync, kwargs. JS: async, ONE trailing object literal, never positional.{{else}}{{#if py}}Sync; kwargs.{{/if}}{{#if js}}Async; ONE trailing object literal, never positional.{{/if}}{{/ifAll}}
@@ -60,7 +70,7 @@ Acyclic waves of handles:
 {{/if}}
 
 <critical>
-Prior top-level names survive into the next cell — reuse; NEVER re-import/re-declare. Re-read only if file changed since last read.
+Prior top-level names survive into the next cell — reuse; NEVER repeat successful setup. After installing a missing dependency, retry its failed import, not the whole failed cell. Re-read only if file changed since last read.
 </critical>
 
 {{#if autoBackgroundEnabled}}Long-running cells may auto-background by the configured threshold and deliver later; the kernel stays busy until the cell finishes.

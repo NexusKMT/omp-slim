@@ -3995,6 +3995,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"eval.autoProvision": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "shell",
+			group: "Eval & Runtimes",
+			label: "Eval Environment Provisioning",
+			description: "Automatically create the managed JavaScript eval package environment on first install",
+		},
+	},
+
 	"eval.tools.enabled": {
 		type: "boolean",
 		default: true,

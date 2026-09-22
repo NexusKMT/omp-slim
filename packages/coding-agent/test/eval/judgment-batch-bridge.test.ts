@@ -483,7 +483,7 @@ const authStorage = createInMemoryAuthStorage();
 authStorage.setRuntimeApiKey("p", "test-key");
 const modelRegistry = new ModelRegistry(authStorage, "/nonexistent/judgment-batch-py-models.yml");
 vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([SMOL]);
-const session = { settings, modelRegistry, getSessionId: () => "sess-py", getAgentId: () => "Main" };
+const session = { cwd: ${JSON.stringify(tempDir.path())}, settings, modelRegistry, getSessionId: () => "sess-py", getAgentId: () => "Main" };
 vi.spyOn(ai, "completeSimple").mockImplementation(async (_model, context) => {
 	const user = context.messages.find(message => message.role === "user");
 	const prompt = typeof user?.content === "string" ? user.content : JSON.stringify(user?.content);
