@@ -1,10 +1,9 @@
-import { toModelSpec } from "../provider-models/bundled-references";
 import type { Model } from "../types";
-import { resolveModelPolicy } from "./resolve";
+import { resolveCatalogPolicy } from "./catalog-policy";
 
 /** Whether discovery and transport policy allow preserving a caller's output cap. */
 export function supportsOutputTokenLimit(model: Model): boolean {
-	const policy = resolveModelPolicy(toModelSpec(model)).catalog;
+	const policy = resolveCatalogPolicy(model);
 	return (
 		model.omitMaxOutputTokens !== true &&
 		policy.omitMaxOutputTokens !== true &&

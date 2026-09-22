@@ -66,6 +66,20 @@ describe("compat compiler grammar", () => {
 		).toThrow(/providers\/test\.kdl:2.*unknown directive `default-model`/);
 	});
 
+	test("boolean-valued axes reject non-boolean scalars", () => {
+		// KDL rejects a bare `false` keyword already, but a quoted `"false"` is a
+		// string: `=== true` / `!== false` consumers would read it as the opposite
+		// intent, so the vocabulary has to reject it at compile time.
+		expect(() =>
+			compileCascade([
+				{
+					file: "providers/test.kdl",
+					text: 'on-api "cursor-agent" {\n\tpreserves-max-output-tokens "false"\n}',
+				},
+			]),
+		).toThrow(/providers\/test\.kdl:2.*axis `preserves-max-output-tokens` rejects value `false`/);
+	});
+
 	test("malformed scalar shape is rejected", () => {
 		expect(() =>
 			compileCascade([{ file: "classes/test.kdl", text: 'class "openai" {\n\tsupports-store #true #false\n}' }]),

@@ -7400,7 +7400,7 @@
 				"thinking": { "mode": "effort" }
 			},
 			{
-				"source": "providers/tool-free-history.kdl:3",
+				"source": "providers/tool-free-history.kdl:4",
 				"apis": ["bedrock-converse-stream"],
 				"catalog": { "requiresToolFreeHistoryForToolOptOut": true }
 			},
