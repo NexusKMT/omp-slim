@@ -114,6 +114,7 @@
 - Updated `omp bench` default profile to `chat` and improved CLI flag documentation
 - Coalesced judgment batch drain operations for better performance under high load
 - `omp usage` capacity rows now report a model-scoped quota cap (for example Anthropic's Fable weekly cap) as its own meter instead of folding it into the shared window it caps, so a spent scoped cap no longer reads as a partly-spent shared pool; routing copies of one shared upstream pool stay merged.
+- `write xd://<tool>` now honors a device's `lenientArgValidation`: on a schema mismatch the raw arguments reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` plus the full tool doc ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.2.9] - 2026-09-22
 
