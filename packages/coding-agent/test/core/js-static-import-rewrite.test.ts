@@ -10,6 +10,11 @@ const IMPORT = "import";
 const dyn = (rest: string) => `${IMPORT}${rest}`;
 
 describe("rewriteImports", () => {
+	it("does not let a source filename inject executable lines", () => {
+		const filename = 'cell.js\nthrow new Error("filename executed")';
+		expect(indirectEval("40 + 2", filename)).toBe(42);
+	});
+
 	it("rewrites a top-level default import", async () => {
 		const out = await rewriteImports(`${IMPORT} foo from "bar";\nconsole.log(foo);`);
 		expect(out).toContain('await __omp_import__("bar")');
