@@ -17,7 +17,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { verifyHostAddonLoads } from "../../../scripts/bazel-natives";
+import {
+	ADDON_LOAD_FAILURE_EXPLANATION,
+	type HostInfo,
+	hostProbeFilename,
+	verifyHostAddonLoads,
+} from "../../../scripts/bazel-natives";
 
 async function failureOf(operation: Promise<void>): Promise<unknown> {
 	return operation.then(
@@ -41,9 +46,12 @@ describe("verifyHostAddonLoads", () => {
 			const message = failure instanceof Error ? failure.message : String(failure);
 			expect(message).toContain(path.basename(addon));
 			expect(message).toContain(`${process.platform}-${process.arch}`);
-			// The loader's own words are preserved: without them the operator
-			// cannot tell a signature rejection from a malformed image.
-			expect(message.length).toBeGreaterThan(path.basename(addon).length + 40);
+			// The loader's own output is the whole point of the message: without
+			// it an operator cannot tell a rejected signature from a malformed
+			// image. Everything but the header and our closing sentence is that
+			// output, so assert on what is left rather than on total length.
+			const loaderOutput = message.split("\n").slice(1).join("\n").replace(ADDON_LOAD_FAILURE_EXPLANATION, "");
+			expect(loaderOutput.trim()).not.toBe("");
 		} finally {
 			await rm(directory, { recursive: true, force: true });
 		}
@@ -54,5 +62,32 @@ describe("verifyHostAddonLoads", () => {
 		if (!(await Bun.file(addon).exists())) return; // no built addon in this checkout
 
 		expect(await failureOf(verifyHostAddonLoads(addon))).toBeUndefined();
+	});
+});
+
+describe("hostProbeFilename", () => {
+	const glibcArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false };
+	const glibcX64Baseline: HostInfo = { platform: "linux", arch: "x64", avx2: false };
+
+	test("never probes a musl addon on a glibc host, though both spell the filename the same", () => {
+		// The release matrix installs //:natives-linux-musl-arm64 on a glibc
+		// runner, and its output is named pi_natives.linux-arm64.node — the very
+		// name the host's own target uses. Probing it dlopens a musl image on
+		// glibc, which fails on the loader ("libc.so: cannot open shared object
+		// file") and would turn a valid artifact into a failed release build.
+		expect(hostProbeFilename(["linux-musl-arm64"], glibcArm64)).toBeNull();
+		expect(hostProbeFilename(["linux-musl-x64-baseline"], glibcX64Baseline)).toBeNull();
+	});
+
+	test("probes the host's own target, however it was requested", () => {
+		expect(hostProbeFilename(["linux-arm64"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
+		expect(hostProbeFilename(["host"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
+		expect(hostProbeFilename(["linux-x64-baseline"], glibcX64Baseline)).toBe("pi_natives.linux-x64-baseline.node");
+	});
+
+	test("skips cross-compiled targets and an ISA the host cannot run", () => {
+		expect(hostProbeFilename(["win32-x64-baseline", "darwin-arm64"], glibcArm64)).toBeNull();
+		// A baseline-only host never claims the modern x64 addon as its own.
+		expect(hostProbeFilename(["linux-x64-modern"], glibcX64Baseline)).toBeNull();
 	});
 });

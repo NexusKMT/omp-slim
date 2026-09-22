@@ -102,23 +102,47 @@ export function resolveTargetLabels(names: string[], host: HostInfo): string[] {
 	return labels;
 }
 
+/** Addon targets a request expands to: pseudo-target `host` and aggregates resolved, deduplicated. */
+export function resolveTargetMembers(names: string[], host: HostInfo): string[] {
+	const members: string[] = [];
+	for (const name of names) {
+		const resolved = name === "host" ? hostTargetName(host) : name;
+		for (const member of AGGREGATE_TARGETS[resolved] ?? [resolved]) {
+			if (!(member in ADDON_OUTPUTS)) throw new Error(`Unknown native target "${name}"`);
+			if (!members.includes(member)) members.push(member);
+		}
+	}
+	return members;
+}
+
 /**
  * Workspace-relative output paths by bazel-bin convention:
  * bazel-bin/natives-<t>/<canonical>.node. Fallback when cquery is unavailable.
  */
 export function conventionOutputPaths(names: string[], host: HostInfo): string[] {
-	const paths: string[] = [];
-	for (const name of names) {
-		const resolved = name === "host" ? hostTargetName(host) : name;
-		const members = AGGREGATE_TARGETS[resolved] ?? [resolved];
-		for (const member of members) {
-			const out = ADDON_OUTPUTS[member];
-			if (!out) throw new Error(`Unknown native target "${name}"`);
-			const p = `bazel-bin/natives-${member}/${out}`;
-			if (!paths.includes(p)) paths.push(p);
-		}
+	return resolveTargetMembers(names, host).map(member => `bazel-bin/natives-${member}/${ADDON_OUTPUTS[member]}`);
+}
+
+/**
+ * Canonical filename this host may probe, or null when the invocation builds
+ * no addon for the host's own target.
+ *
+ * The filename alone cannot decide this: musl targets deliberately reuse the
+ * gnu canonical names, so `pi_natives.linux-arm64.node` may be a musl image
+ * that a glibc builder must not dlopen — the release matrix installs exactly
+ * that artifact on a glibc runner. Only the host's own target is probed, and
+ * one invocation can never hold both spellings of a basename because the
+ * install loop refuses duplicates.
+ */
+export function hostProbeFilename(names: string[], host: HostInfo): string | null {
+	let hostTarget: string;
+	try {
+		hostTarget = hostTargetName(host);
+	} catch {
+		return null; // no addon target for this host: nothing built here is native to it
 	}
-	return paths;
+	if (!resolveTargetMembers(names, host).includes(hostTarget)) return null;
+	return ADDON_OUTPUTS[hostTarget] ?? null;
 }
 
 /** Parse `bazel cquery --output=files` stdout into deduplicated .node paths. */
@@ -222,6 +246,11 @@ async function installAddon(sourcePath: string, destPath: string): Promise<void>
 	}
 }
 
+/** Trailing sentence of a probe failure; the loader's own output precedes it. */
+export const ADDON_LOAD_FAILURE_EXPLANATION =
+	"The addon was produced and installed successfully, so this is a defect in the build that made it, " +
+	"not in the loader that rejected it.";
+
 /**
  * Confirm a freshly installed host addon can actually be loaded.
  *
@@ -241,9 +270,7 @@ export async function verifyHostAddonLoads(destPath: string): Promise<void> {
 	if (exitCode === 0) return;
 	throw new Error(
 		`built addon ${path.basename(destPath)} cannot be loaded on this host (${process.platform}-${process.arch}):\n` +
-			`${stderr.trim()}\n` +
-			"The addon was produced and installed successfully, so this is a defect in the build that made it, " +
-			"not in the loader that rejected it.",
+			`${stderr.trim()}\n${ADDON_LOAD_FAILURE_EXPLANATION}`,
 	);
 }
 
@@ -372,13 +399,13 @@ async function main(): Promise<void> {
 		seen.set(base, output);
 	}
 	await fs.mkdir(destDir, { recursive: true });
-	const hostAddonFilename = resolveLocalHostAddon(host).filename;
+	const probeFilename = hostProbeFilename(options.targets, host);
 	for (const output of outputs) {
 		const absolute = path.isAbsolute(output) ? output : path.join(repoRoot, output);
 		const destPath = path.join(destDir, path.basename(output));
 		await installAddon(absolute, destPath);
 		console.log(`installed ${path.basename(output)} → ${destPath}`);
-		if (path.basename(output) === hostAddonFilename) await verifyHostAddonLoads(destPath);
+		if (probeFilename && path.basename(output) === probeFilename) await verifyHostAddonLoads(destPath);
 	}
 }
 
