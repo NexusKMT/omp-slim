@@ -202,7 +202,7 @@ describe("ToolCallLoopGuard", () => {
 				usage: zeroUsage,
 				stopReason: "toolUse",
 				timestamp: Date.now(),
-			},
+			} satisfies AssistantMessage,
 			toolResults: [],
 		});
 		expect(guard.recordTurn(turn("a"))).toBeNull();
