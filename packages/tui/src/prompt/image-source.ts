@@ -44,6 +44,6 @@ export function imageAttachmentSource(image: ImageContent): ImageAttachmentSourc
 	if (!(kImageAttachmentSource in image)) return undefined;
 	const source = image[kImageAttachmentSource];
 	return isRecord(source) && typeof source.path === "string" && (source.kind === "image" || source.kind === "video")
-		? { path: source.path, kind: source.kind }
+		? source
 		: undefined;
 }
