@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Detected the otty terminal (`TERM_PROGRAM=otty`) with the Kitty graphics protocol, Unicode placeholder placement, OSC 8 hyperlinks and OSC 99 notifications; Sixel is absent and unverified capabilities (DECCARA, text sizing) keep conservative defaults ([#12665](https://github.com/can1357/oh-my-pi/pull/12665) by [@xiechimon](https://github.com/xiechimon)).
+
 ## [18.2.8] - 2026-09-21
 
 ### Changed
