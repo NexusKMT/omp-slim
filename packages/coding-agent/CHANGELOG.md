@@ -11,6 +11,7 @@
 
 ### Added
 
+- Added the `before_subagent_spawn` extension event so extensions can choose, reorder, or block a subagent's model selection before it resolves ([#12907](https://github.com/can1357/oh-my-pi/pull/12907) by [@aloyzzz](https://github.com/aloyzzz)).
 - Added support for searching embedded harness documentation with `find` and `omp find` using `omp://` scopes, including file-specific searches and `:start-end` selectors; results open directly through canonical `omp://` URLs.
 
 ### Changed
