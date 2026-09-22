@@ -3,7 +3,7 @@ import type { ApiKeyResolver, FetchImpl, UsageProvider } from "@oh-my-pi/pi-ai";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
-import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
+import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import type {
 	Api,
@@ -43,6 +43,7 @@ import {
 	resolveOllamaModelCacheProviderId,
 } from "@oh-my-pi/pi-catalog/provider-models";
 import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
+import { modelKind, type ModelKind } from "@oh-my-pi/pi-catalog/types";
 import { getAgentDir, isBunTestRuntime, logger, wrapFetchForExtraCa } from "@oh-my-pi/pi-utils";
 import { resolveProviderModelReference } from "../config/model-resolver";
 import { generateCodexAttestation } from "../live/attestation";
@@ -76,6 +77,7 @@ import {
 	ensureLlamaCppV1BaseUrl,
 	getImplicitOllamaBaseUrl,
 	getOllamaContextLengthOverride,
+	isDiscoveryAuthRejection,
 	normalizeBareDiscoveryBaseUrl,
 	normalizeLiteLLMDiscoveryBaseUrl,
 	normalizeLlamaCppBaseUrl,
@@ -247,6 +249,8 @@ export class ModelRegistry {
 	#catalogMetrics = new CatalogMetricsIndex();
 	#internedStaticModels: Map<string, Model<Api>> = new Map();
 	#providerLookupSnapshots: Map<string, Model<Api>[]> = new Map();
+	#fullKindSnapshotSource: Model<Api>[] | undefined;
+	#fullKindSnapshots: Partial<Record<ModelKind, Model<Api>[]>> = {};
 	#customProviderApiKeys: Map<string, string> = new Map();
 	// Every command-backed (`!cmd`) config value a provider carries — apiKey plus
 	// provider/model-override header values — keyed by provider. The 401 auth
@@ -1011,14 +1015,14 @@ export class ModelRegistry {
 			this.#loadBuiltInModels(this.#providerOverrides, providerFilter),
 		);
 		if (this.#cachedAuthoritativeProviders.size > 0) {
-			builtInModels = dropProviderModels(builtInModels, this.#cachedAuthoritativeProviders);
+			builtInModels = dropProviderModels(builtInModels, this.#cachedAuthoritativeProviders, { kind: "chat" });
 		}
 		let resolvedDefaults = this.#mergeResolvedModels(
 			this.#mergeResolvedModels(builtInModels, cachedStandardModels),
 			select(this.#cachedDiscoverableModels),
 		);
 		if (this.#runtimeAuthoritativeProviders.size > 0) {
-			resolvedDefaults = dropProviderModels(resolvedDefaults, this.#runtimeAuthoritativeProviders);
+			resolvedDefaults = dropProviderModels(resolvedDefaults, this.#runtimeAuthoritativeProviders, { kind: "chat" });
 		}
 		resolvedDefaults = this.#mergeResolvedModels(resolvedDefaults, select(this.#runtimeDiscoveredModels));
 		const withConfigModels = this.#mergeCustomModels(resolvedDefaults, select(this.#customModelOverlays));
@@ -1404,6 +1408,9 @@ export class ModelRegistry {
 
 	#addImplicitDiscoverableProviders(configuredProviders: Set<string>): void {
 		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
+		for (const provider of ["local", "web"]) {
+			if (!disabledProviders.has(provider)) this.#keylessProviders.add(provider);
+		}
 		const hasOllamaEndpointOverride = Boolean(Bun.env.OLLAMA_BASE_URL?.trim() || Bun.env.OLLAMA_HOST?.trim());
 		if (!configuredProviders.has("ollama") && !disabledProviders.has("ollama")) {
 			this.#discoverableProviders.push({
@@ -1695,7 +1702,7 @@ export class ModelRegistry {
 			);
 		}
 		if (authoritativeProviders.size > 0) {
-			baseModels = dropProviderModels(baseModels, authoritativeProviders);
+			baseModels = dropProviderModels(baseModels, authoritativeProviders, { kind: "chat" });
 		}
 		const resolved = this.#mergeResolvedModels(baseModels, discoveredModels);
 		const withConfigModels = this.#mergeCustomModels(resolved, this.#customModelOverlays);
@@ -1795,6 +1802,7 @@ export class ModelRegistry {
 
 		const providerId = providerConfig.provider;
 		let discoveryError: string | undefined;
+		let discoveryAuthRejected = false;
 		const fetchDynamicModels = async (): Promise<readonly ModelSpec<Api>[] | null> => {
 			try {
 				const resolvedHeaders = await resolveConfigHeaders(providerConfig.headers);
@@ -1807,6 +1815,11 @@ export class ModelRegistry {
 				return models.map(toModelSpec);
 			} catch (error) {
 				discoveryError = error instanceof Error ? error.message : String(error);
+				// A 401/403 means the endpoint is reachable but rejected the
+				// request's credentials (or the keyless assumption). Surface it
+				// as an auth failure instead of a generic outage so the hub can
+				// tell the user to sign in (issue #12281).
+				discoveryAuthRejected = isDiscoveryAuthRejection(error);
 				return null;
 			}
 		};
@@ -1831,7 +1844,9 @@ export class ModelRegistry {
 		const status = discoveryError
 			? result.models.length > 0
 				? "cached"
-				: "unavailable"
+				: discoveryAuthRejected
+					? "unauthenticated"
+					: "unavailable"
 			: effectiveStrategy === "offline"
 				? cached
 					? "cached"
@@ -2183,9 +2198,13 @@ export class ModelRegistry {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const previous = this.#providerDiscoveryStates.get(options.providerId);
+			// Same auth-rejection surfacing as the configured-discovery path: a
+			// 401/403 with nothing to serve is a credential problem, not an
+			// outage (issue #12281).
+			const authRejected = (previous?.models.length ?? 0) === 0 && isDiscoveryAuthRejection(error);
 			this.#providerDiscoveryStates.set(options.providerId, {
 				provider: options.providerId,
-				status: "unavailable",
+				status: authRejected ? "unauthenticated" : "unavailable",
 				optional: previous?.optional ?? false,
 				stale: true,
 				...(previous?.fetchedAt !== undefined ? { fetchedAt: previous.fetchedAt } : {}),
@@ -2469,11 +2488,23 @@ export class ModelRegistry {
 	}
 
 	/**
-	 * Get all models (built-in + custom).
-	 * If custom config had errors, returns only built-in models.
+	 * Get all models (built-in + custom) of one catalog kind.
+	 * If custom config had errors, returns only built-in models. The default
+	 * excludes role-specific runners so existing session callers remain chat-only.
+	 * Pass `"all"` to retrieve the complete catalog.
 	 */
-	getAll(): Model<Api>[] {
-		return this.#ensureFullSnapshot();
+	getAll(kind: ModelKind | "all" = "chat"): Model<Api>[] {
+		const models = this.#ensureFullSnapshot();
+		if (kind === "all") return models;
+		if (this.#fullKindSnapshotSource !== models) {
+			this.#fullKindSnapshotSource = models;
+			this.#fullKindSnapshots = {};
+		}
+		const cached = this.#fullKindSnapshots[kind];
+		if (cached) return cached;
+		const filtered = models.filter(model => modelKind(model) === kind);
+		this.#fullKindSnapshots[kind] = filtered;
+		return filtered;
 	}
 
 	/**
@@ -2488,9 +2519,17 @@ export class ModelRegistry {
 		return provider => {
 			let available = byProvider.get(provider);
 			if (available === undefined) {
+				// A provider whose only credential is a keyless-fallback marker
+				// (empty paste at an optional-key login, e.g. `vllm-local`) is
+				// configured-but-keyless: `hasAuth` no longer counts it, but its
+				// models stay usable exactly like an `auth: none` endpoint's
+				// (issue #12281). Implicit local providers are already covered
+				// by `#keylessProviders`.
 				available =
 					!disabledProviders.has(provider) &&
-					(this.#keylessProviders.has(provider) || this.authStorage.hasAuth(provider));
+					(this.#keylessProviders.has(provider) ||
+						this.authStorage.hasAuth(provider) ||
+						this.authStorage.hasKeylessPlaceholder(provider));
 				byProvider.set(provider, available);
 			}
 			return available;
@@ -2498,16 +2537,20 @@ export class ModelRegistry {
 	}
 
 	/**
-	 * Get authenticated models for an explicit provider set without materializing
+	 * Get available models for an explicit provider set without materializing
 	 * unrelated cached catalogs. Startup role resolution uses this before the
-	 * full model picker is needed.
+	 * full model picker is needed. The default excludes role-specific runners;
+	 * pass `"all"` when the caller is intentionally selecting across kinds.
 	 */
-	getAvailableForProviders(providers: ReadonlySet<string>): Model<Api>[] {
+	getAvailableForProviders(providers: ReadonlySet<string>, kind: ModelKind | "all" = "chat"): Model<Api>[] {
 		const requested = new Set([...providers].map(provider => provider.trim().toLowerCase()).filter(Boolean));
 		const isProviderAvailable = this.#createProviderAvailabilityCheck();
 		if (this.#hasFullSnapshot) {
 			return this.#models.filter(
-				model => requested.has(model.provider.toLowerCase()) && isProviderAvailable(model.provider),
+				model =>
+					requested.has(model.provider.toLowerCase()) &&
+					isProviderAvailable(model.provider) &&
+					(kind === "all" || modelKind(model) === kind),
 			);
 		}
 		const availableProviders = new Set(
@@ -2515,15 +2558,17 @@ export class ModelRegistry {
 				provider => requested.has(provider.toLowerCase()) && isProviderAvailable(provider),
 			),
 		);
-		return this.#composeStaticModels(availableProviders);
+		const models = this.#composeStaticModels(availableProviders);
+		return kind === "all" ? models : models.filter(model => modelKind(model) === kind);
 	}
 
 	/**
-	 * Get only models that have auth configured.
-	 * This is a fast check that doesn't refresh OAuth tokens.
+	 * Get available models of one catalog kind.
+	 * This is a fast auth check that doesn't refresh OAuth tokens. The default
+	 * is chat-only; pass `"all"` to include authenticated and keyless runners.
 	 */
-	getAvailable(): Model<Api>[] {
-		return this.getAvailableForProviders(new Set(this.#knownStaticProviders()));
+	getAvailable(kind: ModelKind | "all" = "chat"): Model<Api>[] {
+		return this.getAvailableForProviders(new Set(this.#knownStaticProviders()), kind);
 	}
 
 	/**
@@ -2629,6 +2674,19 @@ export class ModelRegistry {
 	 */
 	find(provider: string, modelId: string): Model<Api> | undefined {
 		return resolveProviderModelReference(provider, modelId, this.#modelsForProviderLookup(provider));
+	}
+
+	/**
+	 * One provider's full catalog (every kind, credentials ignored) without
+	 * materializing the whole bundled catalog. Startup validation of
+	 * provider-qualified selectors uses this: `getAll()` composes ~5k models
+	 * through the compat classifier, which costs ~80ms on the first paint path.
+	 */
+	getProviderModels(provider: string): Model<Api>[] {
+		const normalizedProvider = provider.trim().toLowerCase();
+		return this.#modelsForProviderLookup(provider).filter(
+			model => model.provider.toLowerCase() === normalizedProvider,
+		);
 	}
 
 	/**

@@ -2,14 +2,33 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Local OpenAI-compatible backends (llama.cpp, LM Studio, vLLM, local Ollama, and loopback/LAN custom hosts) now honor `maxTokens` above 64k instead of silently clamping output to the hosted OpenAI ceiling ([#12433](https://github.com/can1357/oh-my-pi/pull/12433) by [@ton-anywhere](https://github.com/ton-anywhere)).
+- Fixed Union Alpha using the wrong API on OpenCode Go and Zen; it now uses the Messages endpoint ([#12380](https://github.com/can1357/oh-my-pi/pull/12380) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed SuperGrok (xai-oauth) Grok 4.7 missing its thinking-level options and reporting null context limits; it now carries the documented 500K window and low/medium/high/xhigh ladder ([#12697](https://github.com/can1357/oh-my-pi/issues/12697)).
+- GPT-OSS models on Google Antigravity and Gemini CLI now preserve function call/response IDs in tool history ([#12771](https://github.com/can1357/oh-my-pi/pull/12771) by [@tuandinh0801](https://github.com/tuandinh0801)).
+
+## [18.2.8] - 2026-09-21
+
 ### Added
 
-- Added `buildDiscoveredModel` helper for custom providers
-- Added support for glob-based patterns in identity overrides
+- Expanded OpenRouter provider support with embedding, reranking, video generation, text-to-speech, and speech-to-text capabilities, including five new speech-to-text models.
+- Added speech-to-text support to the OpenAI provider.
+
+## [18.2.7] - 2026-09-21
+
+### Added
+
+- Added model-kind and grounded-search capability metadata, along with catalogs for local inference and search-engine models.
+- Added OpenRouter image-model discovery and live TypeSafe judge-model discovery.
+- Added the `buildDiscoveredModel` helper for defining custom providers.
+- Added glob-based patterns for identity overrides.
 
 ### Changed
 
-- Centralized llama.cpp Qwen routing and thinking policy in KDL, with reviewed Bonsai lineage aliases and shared backend policy for custom provider names.
+- Updated input cost for TypeSafe models to 0.042
+- Improved model routing and thinking-policy handling for llama.cpp Qwen models, Bonsai lineage aliases, and custom provider names.
 
 ## [18.2.5] - 2026-09-17
 
@@ -176,9 +195,9 @@
 ### Fixed
 
 - Fixed OpenCode Go/Zen live model discovery (`GET /v1/models`) missing `x-opencode-session` and omp's `User-Agent`: discovery requests now attribute with the stable install id so the requests OpenCode flags as `Bun fetch` carry the required session header.
-	- Fixed GPT-6 Astra requests through GitHub Copilot failing with an unsupported endpoint error ([#10874](https://github.com/can1357/oh-my-pi/pull/10874) by [@xpcmdshell](https://github.com/xpcmdshell)).
-	- Fixed GPT-6 Astra showing as free with a 272K-token window in the OpenAI Codex catalog by applying its documented pricing; `/extended-context` enables the wire-advertised 872K-token maximum ([#10980](https://github.com/can1357/oh-my-pi/pull/10980) by [@H4vC](https://github.com/H4vC)).
-	- Made extended-context catalog rebuilds faster by resolving each model's maximum window once per process ([#11039](https://github.com/can1357/oh-my-pi/pull/11039) by [@H4vC](https://github.com/H4vC)).
+   - Fixed GPT-6 Astra requests through GitHub Copilot failing with an unsupported endpoint error ([#10874](https://github.com/can1357/oh-my-pi/pull/10874) by [@xpcmdshell](https://github.com/xpcmdshell)).
+   - Fixed GPT-6 Astra showing as free with a 272K-token window in the OpenAI Codex catalog by applying its documented pricing; `/extended-context` enables the wire-advertised 872K-token maximum ([#10980](https://github.com/can1357/oh-my-pi/pull/10980) by [@H4vC](https://github.com/H4vC)).
+   - Made extended-context catalog rebuilds faster by resolving each model's maximum window once per process ([#11039](https://github.com/can1357/oh-my-pi/pull/11039) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.1.9] - 2026-09-04
 

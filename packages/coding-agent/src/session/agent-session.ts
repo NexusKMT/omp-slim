@@ -118,6 +118,7 @@ import {
 import { RawSseDebugBuffer } from "@oh-my-pi/pi-tui/apps/debug/raw-sse-buffer";
 import { getEditStore } from "../edit/store";
 import { releaseCompletionHandles } from "../eval/completion-bridge";
+import { releaseJudgmentBatches } from "../eval/judgment-batch-bridge";
 import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PythonResult } from "../eval/py/executor";
 import { WorkPoolRegistry } from "../task/workpool";
@@ -161,15 +162,11 @@ import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/hub";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
-import { renderOrchestrateNotice } from "../modes/orchestrate";
-import { containsOrchestrate } from "@oh-my-pi/pi-tui/prompt/orchestrate";
+import { MAGIC_KEYWORDS, type MagicKeywordContext, type MagicKeywordId } from "../modes/magic-keywords";
+import { containsMagicKeyword } from "@oh-my-pi/pi-tui/prompt/magic-keywords";
 import { theme } from "@oh-my-pi/pi-tui/theme";
 import { parseTurnBudget } from "../modes/turn-budget";
-import { ULTRATHINK_NOTICE } from "../modes/ultrathink";
-import { containsUltrathink } from "@oh-my-pi/pi-tui/prompt/ultrathink";
 import { computeNonMessageTokens } from "@oh-my-pi/pi-tui/status-line/context-usage";
-import { renderWorkflowNotice } from "../modes/workflow";
-import { containsWorkflow } from "@oh-my-pi/pi-tui/prompt/workflow";
 import { type PlanApprovalDetails, resolveApprovedPlan } from "../plan-mode/approved-plan";
 import { listPlanFiles, readPlanFile } from "../plan-mode/plan-files";
 import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
@@ -178,6 +175,7 @@ import goalModeContextPrompt from "../prompts/goals/goal-mode-context.md" with {
 import goalTodoContextPrompt from "../prompts/goals/goal-todo-context.md" with { type: "text" };
 import autoContinuePrompt from "../prompts/system/auto-continue.md" with { type: "text" };
 import checkpointActiveNoticeTemplate from "../prompts/system/checkpoint-active-notice.md" with { type: "text" };
+import imageAttachmentPrompt from "../prompts/system/image-attachment.md" with { type: "text" };
 import interruptedThinkingTemplate from "../prompts/system/interrupted-thinking.md" with { type: "text" };
 import planModeActivePrompt from "../prompts/system/plan-mode-active.md" with { type: "text" };
 import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" with { type: "text" };
@@ -242,7 +240,7 @@ import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { extractFileMentions, generateFileMentionMessages } from "../utils/file-mentions";
 import { normalizeModelContextImages } from "../utils/image-loading";
 import { TokenRateMeter } from "../utils/token-rate";
-import { videoPreviewSource } from "@oh-my-pi/pi-tui/prompt/video";
+import { imageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
 import { resumeCommand } from "../utils/resume-command";
 import { generateSessionTitle } from "../utils/title-generator";
 import { buildNamedToolChoice, isToolChoiceActive } from "../utils/tool-choice";
@@ -1625,6 +1623,12 @@ export class AgentSession {
 		// injection boundary, but also expose a non-consuming interrupt peek so
 		// `hub` waits can return early before the boundary drains them.
 		this.agent.hasIrcInterrupts = () => this.#irc.hasInterrupts();
+		// Completion notices (finished background jobs, exited supervised
+		// processes) queue here for the same boundary; peeking them lets a
+		// `hub wait` on something else return early instead of sitting on the
+		// notice for its whole window.
+		this.agent.hasBackgroundCompletions = () =>
+			this.yieldQueue.has(LAUNCH_COMPLETION_MESSAGE_TYPE) || this.yieldQueue.has(ASYNC_RESULT_MESSAGE_TYPE);
 		this.agent.setAsideMessageProvider(() => {
 			const thunks: AsideMessage[] = this.#irc.drainPending().map(record => () => record);
 			thunks.push(...this.yieldQueue.drainLazy());
@@ -1732,7 +1736,6 @@ export class AgentSession {
 			model: () => this.model,
 			isDisposed: () => this.#isDisposed,
 			promptGeneration: () => this.#promptGeneration,
-			localProtocolOptions: () => this.#localProtocolOptions(),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			schedulePostPromptTask: task => this.#schedulePostPromptTask(task),
 			discardAssistantTurn: message => this.#recovery.discardAssistantTurn(message),
@@ -1741,6 +1744,11 @@ export class AgentSession {
 		this.#loopGuards = new LoopGuards(streamGuardsHost);
 		this.#agentId = config.agentId;
 		this.#agentKind = config.agentKind ?? "main";
+		// A subagent's streamed text reaches no output sink until the run settles
+		// (the parent sees only the yield), so a failed turn's partial prose is
+		// replay-safe and transient provider errors after it stay retryable —
+		// same buffering contract print mode declares via setTextOutputCommitted.
+		this.#textOutputCommitted = this.#agentKind === "main";
 		this.#scoutAllowedBySpawnPolicy = config.scoutAllowedBySpawnPolicy ?? true;
 		this.#providerSessionId = config.providerSessionId;
 		this.#inheritedProviderPromptCacheKey =
@@ -1761,13 +1769,6 @@ export class AgentSession {
 			});
 		}
 		this.agent.setAssistantMessageEventInterceptor((message, assistantMessageEvent) => {
-			const event: AgentEvent = {
-				type: "message_update",
-				message,
-				assistantMessageEvent,
-			};
-			this.#streamingEditGuard.preCache(event);
-			this.#streamingEditGuard.maybeAbort(event);
 			this.#loopGuards.onAssistantEvent(message, assistantMessageEvent);
 		});
 		// Tool-result hook owns synchronous post-tool actions that must affect the current loop.
@@ -2307,6 +2308,7 @@ export class AgentSession {
 	#cancelOwnAsyncJobs(reason?: unknown): void {
 		if (!this.#agentId) return;
 		releaseCompletionHandles(this.#agentId);
+		releaseJudgmentBatches(this.#agentId);
 		WorkPoolRegistry.global().releaseOwner(this.#agentId);
 		const manager = this.#asyncJobManager;
 		manager?.cancelAll({ ownerId: this.#agentId }, reason);
@@ -3267,22 +3269,6 @@ export class AgentSession {
 		if (event.type === "tool_stream_update") this.#streamingEditGuard.maybeAbort(event);
 
 		if (await this.#ttsr.checkMessageUpdate(event)) return;
-
-		if (
-			event.type === "message_update" &&
-			(event.assistantMessageEvent.type === "toolcall_start" ||
-				event.assistantMessageEvent.type === "toolcall_delta" ||
-				event.assistantMessageEvent.type === "toolcall_end")
-		) {
-			this.#streamingEditGuard.preCache(event);
-		}
-
-		if (
-			event.type === "message_update" &&
-			(event.assistantMessageEvent.type === "toolcall_end" || event.assistantMessageEvent.type === "toolcall_delta")
-		) {
-			this.#streamingEditGuard.maybeAbort(event);
-		}
 
 		// Handle session persistence
 		if (event.type === "message_end") {
@@ -4687,6 +4673,7 @@ export class AgentSession {
 		this.yieldQueue.clear();
 		this.agent.setAsideMessageProvider(undefined);
 		this.agent.hasIrcInterrupts = undefined;
+		this.agent.hasBackgroundCompletions = undefined;
 		this.#advisors.stopRuntime();
 		this.#eval.beginDispose();
 	}
@@ -6192,21 +6179,28 @@ export class AgentSession {
 	}
 
 	/**
-	 * Emit source paths for video contact-sheet images as hidden user context.
-	 * The visible message deliberately contains only its `[Video #N]` marker and
-	 * preview image, while the agent gets the path required for `read` frame
-	 * subselectors without exposing the user's filesystem layout in the TUI.
+	 * Emit source paths for file-backed attachments (path-pasted/drag-and-dropped
+	 * images, video contact-sheet previews) as hidden user context. The visible
+	 * message deliberately contains only its `[Image #N]`/`[Video #N]` marker and
+	 * the attachment itself, while the agent gets the path required to act on the
+	 * original file (e.g. `read`, or video frame subselectors) without exposing
+	 * the user's filesystem layout in the TUI. Clipboard bitmaps have no backing
+	 * file and are skipped — no path is invented for them.
 	 */
-	#createVideoAttachmentNotices(images: readonly ImageContent[] | undefined, timestamp: number): CustomMessage[] {
+	#createAttachmentSourceNotices(images: readonly ImageContent[] | undefined, timestamp: number): CustomMessage[] {
 		if (!images?.length) return [];
 		const notices: CustomMessage[] = [];
 		for (let index = 0; index < images.length; index++) {
-			const sourcePath = videoPreviewSource(images[index]!);
-			if (!sourcePath) continue;
+			const source = imageAttachmentSource(images[index]!);
+			if (!source) continue;
+			const isVideo = source.kind === "video";
 			notices.push({
 				role: "custom",
-				customType: "video-attachment",
-				content: prompt.render(videoAttachmentPrompt, { index: String(index + 1), path: sourcePath }),
+				customType: isVideo ? "video-attachment" : "image-attachment",
+				content: prompt.render(isVideo ? videoAttachmentPrompt : imageAttachmentPrompt, {
+					index: String(index + 1),
+					path: source.path,
+				}),
 				display: false,
 				attribution: "user",
 				timestamp,
@@ -6226,7 +6220,7 @@ export class AgentSession {
 		return this.#providerBoundary.normalizeAgentMessageImages(message);
 	}
 
-	#magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow"): boolean {
+	#magicKeywordEnabled(keyword: MagicKeywordId): boolean {
 		return this.settings.get("magicKeywords.enabled") && this.settings.get(`magicKeywords.${keyword}`);
 	}
 
@@ -6235,47 +6229,27 @@ export class AgentSession {
 		const turnBudget = parseTurnBudget(text);
 		this.sessionManager.beginTurnBudget(turnBudget?.total ?? null, turnBudget?.hard ?? false);
 		const keywordNotices: CustomMessage[] = [];
-		if (this.#magicKeywordEnabled("ultrathink") && containsUltrathink(text)) {
+		let context: MagicKeywordContext | undefined;
+		for (const keyword of MAGIC_KEYWORDS) {
+			if (!this.#magicKeywordEnabled(keyword.id) || !containsMagicKeyword(text, keyword.word)) continue;
+			context ??= {
+				tools: this.getEnabledToolNames(),
+				taskBatch: this.settings.get("task.batch"),
+				scoutAvailable: this.#isScoutAvailable(),
+				evalTools: this.settings.get("eval.tools.enabled"),
+			};
+			// A notice whose contract needs an inactive tool would demand an
+			// unavailable capability; skip it rather than mislead the model.
+			const tools = context.tools;
+			if (!keyword.requires.every(tool => tools.includes(tool))) continue;
 			keywordNotices.push({
 				role: "custom",
-				customType: "ultrathink-notice",
-				content: ULTRATHINK_NOTICE,
+				customType: `${keyword.id}-notice`,
+				content: keyword.notice(context),
 				display: false,
 				attribution: "user",
 				timestamp,
 			});
-		}
-		if (this.#magicKeywordEnabled("orchestrate") && containsOrchestrate(text)) {
-			const enabledToolNames = this.getEnabledToolNames();
-			// The contract is entirely about `task` subagent dispatch; without the
-			// task tool the notice would demand an unavailable capability.
-			if (enabledToolNames.includes("task")) {
-				keywordNotices.push({
-					role: "custom",
-					customType: "orchestrate-notice",
-					content: renderOrchestrateNotice({ tools: enabledToolNames }),
-					display: false,
-					attribution: "user",
-					timestamp,
-				});
-			}
-		}
-		if (this.#magicKeywordEnabled("workflow") && containsWorkflow(text)) {
-			const enabledToolNames = this.getEnabledToolNames();
-			if (enabledToolNames.includes("task") && enabledToolNames.includes("eval")) {
-				keywordNotices.push({
-					role: "custom",
-					customType: "workflow-notice",
-					content: renderWorkflowNotice({
-						taskBatch: this.settings.get("task.batch"),
-						scoutAvailable: this.#isScoutAvailable(),
-						evalTools: this.settings.get("eval.tools.enabled"),
-					}),
-					display: false,
-					attribution: "user",
-					timestamp,
-				});
-			}
 		}
 		return keywordNotices;
 	}
@@ -6362,7 +6336,7 @@ export class AgentSession {
 		const templated = expandPromptTemplates ? expandPromptTemplate(text, [...this.#promptTemplates]) : text;
 		const expandedText = options?.synthetic ? templated : this.#modelMentions.expandMentions(templated);
 
-		// Magic keywords ("ultrathink", "orchestrate"): append hidden system notices after the
+		// Magic keywords (see modes/magic-keywords.ts): append hidden system notices after the
 		// user's message that steer this turn. User-authored prompts only — synthetic /
 		// agent-initiated turns never trigger them.
 		const keywordNotices = options?.synthetic ? [] : this.#createMagicKeywordNotices(expandedText);
@@ -6420,7 +6394,7 @@ export class AgentSession {
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTodoPrelude(expandedText) : undefined;
 		const eagerTaskPrelude =
 			!options?.synthetic && !hasPendingUserDirective ? this.#todo.createEagerTaskPrelude(expandedText) : undefined;
-		const videoAttachmentNotices = this.#createVideoAttachmentNotices(options?.images, submittedAt);
+		const attachmentSourceNotices = this.#createAttachmentSourceNotices(options?.images, submittedAt);
 		const normalizedImages = await this.#normalizeImagesForModel(options?.images);
 
 		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -6500,12 +6474,12 @@ export class AgentSession {
 				prependMessages:
 					preludeMessages.length > 0 ||
 					keywordNotices.length > 0 ||
-					videoAttachmentNotices.length > 0 ||
+					attachmentSourceNotices.length > 0 ||
 					imageDescriptionNotice
 						? [
 								...preludeMessages,
 								...keywordNotices,
-								...videoAttachmentNotices,
+								...attachmentSourceNotices,
 								...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
 							]
 						: undefined,
@@ -7274,7 +7248,7 @@ export class AgentSession {
 		// The pre-dispatch re-check in prompt() arrives with normalization and the
 		// vision description already done — reuse them instead of paying a second
 		// vision-model request for the same attachment.
-		const videoAttachmentNotices = this.#createVideoAttachmentNotices(images, timestamp ?? Date.now());
+		const attachmentSourceNotices = this.#createAttachmentSourceNotices(images, timestamp ?? Date.now());
 		const normalizedImages = preprocessed ? preprocessed.images : await this.#normalizeImagesForModel(images);
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (normalizedImages?.length) {
@@ -7302,7 +7276,7 @@ export class AgentSession {
 		}
 		this.#allowQueuedMessageDrainRetry();
 		if (mode === "followUp") {
-			for (const notice of videoAttachmentNotices) this.agent.followUp(notice);
+			for (const notice of attachmentSourceNotices) this.agent.followUp(notice);
 			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
 			this.agent.followUp({
 				role: "user",
@@ -7311,7 +7285,7 @@ export class AgentSession {
 				timestamp: timestamp ?? Date.now(),
 			});
 		} else {
-			for (const notice of videoAttachmentNotices) this.agent.steer(notice);
+			for (const notice of attachmentSourceNotices) this.agent.steer(notice);
 			if (imageDescriptionNotice) this.agent.steer(imageDescriptionNotice);
 			this.agent.steer({
 				role: "user",
@@ -7905,6 +7879,11 @@ export class AgentSession {
 	/** Skills loaded by SDK (empty if --no-skills or skills: [] was passed) */
 	get skills(): readonly Skill[] {
 		return this.#tools.skills;
+	}
+
+	/** Frozen skill-URI hint visibility snapshot (see {@link SessionTools.skillHintVisible}). */
+	getSkillHintVisible(): boolean {
+		return this.#tools.skillHintVisible;
 	}
 
 	/** Skill loading warnings captured by SDK */

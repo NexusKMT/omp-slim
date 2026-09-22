@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a stale workspace addon failing as `<symbol> is not a function` inside whichever tool used it first; the missing export now names the addon, the loaded and expected releases, and `bun run build:native` ([#12698](https://github.com/can1357/oh-my-pi/pull/12698) by [@iacore](https://github.com/iacore)).
+
+## [18.2.7] - 2026-09-21
+
+### Added
+
+- Added `renderMermaidAscii`, a native Mermaid-to-ASCII/Unicode renderer supporting flowcharts, state, sequence, class, ER, and xychart diagrams with color modes, themes, and direction overrides.
+- Added a `default` package export condition so CommonJS consumers, including bytecode bundles, can load the native bindings.
+
+### Changed
+
+- Improved Mermaid flowchart rendering to respect dependency order, reduce crossings, align branches, and wrap long labels without truncation.
+
+### Fixed
+
+- Fixed Mermaid rendering issues involving arrowhead alignment and duplicate edge junctions around mixed-width node shapes.
+- Fixed sloppy edit grammar compatibility with Codex constrained decoding.
+
 ## [18.2.1] - 2026-09-15
 
 ### Added
