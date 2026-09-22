@@ -975,4 +975,35 @@ describe("SessionManager.moveTo", () => {
 		expect(await fsp.readFile(path.join(homeArtifactsDir, "unique.md"), "utf8")).toBe("moves fine");
 		expect(await fsp.readdir(awayArtifactsDir)).toEqual(["raced.md"]);
 	});
+
+	it("restores a copied session file when artifact relocation fails", async () => {
+		const session = SessionManager.create(cwdA);
+		session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
+		session.appendMessage(makeAssistantMessage());
+		await session.flush();
+
+		const oldFile = session.getSessionFile()!;
+		const oldArtifactsDir = oldFile.slice(0, -6);
+		await session.saveArtifact("keep me", "bash");
+
+		const realRename = fs.promises.rename.bind(fs.promises);
+		const renameSpy = spyOn(fs.promises, "rename").mockImplementation(async (source, target) => {
+			const resolvedSource = path.resolve(source.toString());
+			if (resolvedSource === path.resolve(oldFile)) {
+				throw Object.assign(new Error("EXDEV: cross-device link not permitted"), { code: "EXDEV" });
+			}
+			if (resolvedSource === path.resolve(oldArtifactsDir)) {
+				throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+			}
+			return realRename(source, target);
+		});
+		try {
+			await expect(session.moveTo(cwdB)).rejects.toThrow("EACCES");
+		} finally {
+			renameSpy.mockRestore();
+		}
+
+		expect(fs.existsSync(oldFile)).toBe(true);
+		expect(hasAssistantEntry(await loadEntriesFromFile(oldFile))).toBe(true);
+	});
 });
