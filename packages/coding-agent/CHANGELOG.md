@@ -6,6 +6,10 @@
 
 - `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
 
+### Fixed
+
+- Restored `askToolRenderer` on the extension namespace (`pi.pi.askToolRenderer`) after the pi-tui renderer migration dropped it, so extensions that shadow the built-in ask tool can keep the native rendering again. ([#12694](https://github.com/can1357/oh-my-pi/pull/12694) by [@xiechimon](https://github.com/xiechimon))
+
 ## [18.2.8] - 2026-09-21
 
 ### Added
