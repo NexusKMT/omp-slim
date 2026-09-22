@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed auth-broker usage reports crossing between Team members who share workspace account and organization IDs, preventing healthy credentials from inheriting sibling usage blocks ([#12560](https://github.com/can1357/oh-my-pi/issues/12560)).
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed
