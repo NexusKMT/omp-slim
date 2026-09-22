@@ -865,7 +865,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 				? { state: "depleted", accounts: [{ credentialId: 1, credentialType: "oauth", state: "depleted" }] }
 				: { state: "healthy", accounts: [{ credentialId: 2, credentialType: "oauth", state: "healthy" }] },
 		);
-		const { session } = await createAgentSession({
+		const { session, modelFallbackMessage } = await createAgentSession({
 			...options,
 			modelPatternFallbackRole: "subagent:usage-aware",
 			settings,
@@ -874,6 +874,11 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		try {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-fallback-model");
+			expect(modelFallbackMessage).toContain(
+				"runtime-provider/runtime-model -> runtime-provider/runtime-fallback-model",
+			);
+			expect(modelFallbackMessage).toMatch(/preflight/i);
+			expect(modelFallbackMessage).toMatch(/no request.*source model/i);
 		} finally {
 			await session.dispose();
 		}

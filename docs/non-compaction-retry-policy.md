@@ -212,8 +212,19 @@ Session-level retry events:
 
 - `auto_retry_start { attempt, maxAttempts, delayMs, errorMessage, errorId? }`
 - `auto_retry_end { success, attempt, finalError?, retryErrors? }`
-- `retry_fallback_applied { from, to, role }`
+- `retry_fallback_applied { from, to, role, reason? }`
 - `retry_fallback_succeeded { model, role }`
+
+`to` includes the effective thinking level after target-model clamping.
+The optional `reason` explains the decision using the triggering health snapshot
+or provider error. The TUI displays it below the source-to-target warning.
+Usage preflight notices distinguish plan-ineligible accounts, exhausted or
+blocked accounts, and the configured reserve threshold. They include the earliest
+reported reset when available,
+and state that no request was sent to the source model for that attempt.
+Startup quota skips use the same explanation in `modelFallbackMessage`.
+Request-failure notices include the provider's error instead of implying a
+preflight skip.
 
 On success, `auto_retry_end` also carries additive `retryErrors`: one `RetryErrorUpdate` (`entryId`, `persistenceKey?`, `note`, `retryRecovery`) per persisted error entry left behind by the retry chain, recording how recovery happened (`recovery`: `plain`/`wait`/`credential`/`model`, plus a human-readable `note` such as `rate-limited; switched account; retried`) and which successful message superseded each error (`supersededBy` with timestamp/provider/model/responseId). Extensions and RPC consumers receive the same fields.
 
