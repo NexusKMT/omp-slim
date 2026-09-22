@@ -6,6 +6,10 @@
 
 - `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
 
+### Fixed
+
+- Model discovery rejected with 401/403 now surfaces an authentication error in the /models hub instead of a silently empty model list. ([#12436](https://github.com/can1357/oh-my-pi/pull/12436) by [@xiechimon](https://github.com/xiechimon))
+
 ## [18.2.8] - 2026-09-21
 
 ### Added
@@ -74,7 +78,6 @@
 
 - Fixed clipboard paste stalling on an empty clipboard; image and text clipboard reads now run concurrently so the empty-clipboard status surfaces after the slower read instead of the sum of both.
 - Fixed memory recall blocks carrying a minute-resolution `Current time` stamp that dirtied the cached system prompt on every refresh; recall rows already carry dates, so the stamp is removed.
-- Model discovery rejected with 401/403 now surfaces an authentication error in the /models hub instead of a silently empty model list. ([#12281](https://github.com/can1357/oh-my-pi/issues/12281))
 - Fixed `omp auth-broker token` and `omp auth-gateway token` exiting silently without creating a token on Windows when no token file exists yet; token and config reads now use `node:fs` instead of `Bun.file`.
 
 ## [18.2.5] - 2026-09-17
