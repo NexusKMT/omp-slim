@@ -3629,6 +3629,62 @@ describe("agentLoop event-driven steering watch", () => {
 
 		expect(waitCalls).toBe(1);
 	});
+
+	it("does not skip later chained tools when a steering callback throws mid-batch", async () => {
+		const toolSchema = type({ value: "string" });
+		const executed: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			concurrency: "exclusive",
+			async execute(_toolCallId, params) {
+				executed.push(params.value);
+				return { content: [{ type: "text", text: `echoed: ${params.value}` }], details: { value: params.value } };
+			},
+		};
+
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "first" } },
+						{ type: "toolCall", id: "tool-2", name: "echo", arguments: { value: "second" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: identityConverter,
+			interruptMode: "immediate",
+			// A transient host-callback failure after the first tool ran must not
+			// reject the trailing checkSteering and poison the ordering chain.
+			hasSteeringMessages: () => {
+				if (executed.length >= 1) throw new Error("transient steering-callback failure");
+				return { queued: false };
+			},
+			getSteeringMessages: async () => [],
+		};
+
+		const results: ToolResultMessage[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) {
+			if (event.type === "message_end" && event.message.role === "toolResult") {
+				results.push(event.message);
+			}
+		}
+
+		// Both exclusive tools run; the second is not skipped for a phantom steer.
+		expect(executed).toEqual(["first", "second"]);
+		const secondResult = results.find(r => r.toolCallId === "tool-2");
+		const secondBlock = secondResult?.content?.[0];
+		expect(secondBlock?.type === "text" ? secondBlock.text : "").toBe("echoed: second");
+	});
 });
 
 describe("agentLoop pre-model-call gate", () => {

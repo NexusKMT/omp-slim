@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a rejecting host steering callback (`hasSteeringMessages`/`hasIrcInterrupts`) during a tool batch skipping every later chained tool with a phantom "Skipped due to pending steering message" result; the trailing steering probe in `runTool` is now guarded like the watch loop ([#12544](https://github.com/can1357/oh-my-pi/issues/12544)).
+
 ## [18.2.5] - 2026-09-17
 
 ### Fixed

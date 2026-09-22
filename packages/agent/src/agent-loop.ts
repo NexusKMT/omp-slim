@@ -3270,7 +3270,13 @@ async function executeToolCalls(
 			toolName: toolCall.name,
 		});
 
-		await checkSteering();
+		// Best-effort steering probe: its own failure is surfaced by the
+		// dedicated watch path (which guards the identical call), so a rejecting
+		// host `hasSteeringMessages`/`hasIrcInterrupts` callback must not reject
+		// this task. An unguarded rejection here fires after the tool already
+		// ran and poisons the `start.then(runTool)` ordering chain, skipping
+		// every later chained record with a phantom "pending steering" result.
+		await checkSteering().catch(() => undefined);
 	};
 
 	let lastExclusive: Promise<void> = Promise.resolve();
