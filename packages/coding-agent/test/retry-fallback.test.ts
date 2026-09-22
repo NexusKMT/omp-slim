@@ -228,9 +228,10 @@ describe("retry fallback selector resolution", () => {
 			{ default: "google/gemini-2.5-flash", slow: "openai/gpt-4o-mini" },
 		);
 		expect(resolveRetryFallbackChainKey(context, live)).toBe("default");
+		// The effective chain leads with `default`'s primary, then the configured entries.
 		expect(findRetryFallbackCandidates(context, "default", live).map(candidate => candidate.raw)).toEqual([
-			"openai/gpt-4o-mini",
 			"google/gemini-2.5-flash",
+			"openai/gpt-4o-mini",
 		]);
 	});
 });
