@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.8] - 2026-09-21
+
 ### Added
 
 - Added `Model.promptCache` — per-retention-tier prompt-cache entry lifetimes in seconds (`short` / `long`). The bundled catalog annotates direct-Anthropic models (5 min / 1 h); custom models and `modelOverrides` opt in via the models.yml `promptCache` key. Consumers use it to schedule prompt-cache warming against a known entry lifetime ([#12691](https://github.com/can1357/oh-my-pi/issues/12691)).
@@ -9,6 +11,8 @@
 - Added support for speech-to-text (STT) capabilities in OpenAI provider
 - Added five STT models to OpenRouter provider
 - Added support for TTS and STT API capabilities in OpenRouter provider
+- Expanded OpenRouter provider support with embedding, reranking, video generation, text-to-speech, and speech-to-text capabilities, including five new speech-to-text models.
+- Added speech-to-text support to the OpenAI provider.
 
 ## [18.2.7] - 2026-09-21
 

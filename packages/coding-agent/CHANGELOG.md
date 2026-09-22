@@ -10,17 +10,28 @@
 - Added semantic DOM querying support for roles, test-ids, labels, and placeholders to improve element interaction reliability
 - Added `typesafe` and `openrouter-decisions` to the `models.yml` provider/model `api` values, so a native judge can be declared as a custom provider with `baseUrl`, `apiKey`, and `headers`.
 - Added prompt-cache warming (ported from upstream pi): the main agent loop re-sends its last request with a one-token output budget shortly before the prompt-cache entry expires, so idle gaps do not force a full-prefix cache re-write. Scheduled at 90% of the model's declared cache lifetime with a cost-aware decision — a refresh fires only when the expected avoided-miss cost clears the refresh cost by $0.05 (idle gaps use a 15% continuation probability). Governed by the new global `providers.cacheWarming` setting (`off` / `streaming` / `idle`, default `idle`); models without a declared `promptCache` lifetime are never warmed, extensions can override each decision via the new `cache_warming_decision` event, and warmed usage persists as `cache-warm` model-usage entries so session totals include its cost. Replaces the previous Anthropic-only fixed keep-alive refresh loop ([#12691](https://github.com/can1357/oh-my-pi/issues/12691)).
+- `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
+
+## [18.2.8] - 2026-09-21
+
+### Added
+
+- Added comprehensive browser automation tools for accessibility auditing, React inspection, console and network monitoring, performance tracing, semantic DOM queries, tab management, screen recording with cursor overlays, downloads, custom initialization scripts, persistent storage, and WebMCP cross-frame tool discovery.
+- Added support for buffered cloud transcription with OpenAI-compatible models.
+- Added visual change detection for video processing, including FFMPEG analysis and SVG overlays.
+- Added support for declaring native judges through custom providers using the `typesafe` and `openrouter-decisions` API values, with configurable base URLs, API keys, and headers.
 
 ### Changed
 
-- Enhanced browser resilience with configurable HTTPS error ignoring, domain allow-listing, and automatic tab recycling for security-sensitive state changes
+- Expanded browser security and resilience controls with configurable HTTPS error handling, domain allow-listing, and automatic tab recycling when security-sensitive state changes.
+- Updated background job notifications to deliver output as follow-up messages and discourage unnecessary polling.
+- Expanded the bash tool's documented auxiliary utilities and removed its truncation footer notice.
 
 ### Fixed
 
-- Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
-- Added support for buffered cloud transcription using OpenAI-compatible models
-- Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
-- Prevented LSP client from hanging when a request is aborted while waiting for a previous write
+- Improved responsiveness in long sessions by significantly reducing the time required to scan provider context for credential patterns.
+- Fixed native judges failing to honor configured request headers, enabling authenticated and header-routed judge providers to work as configured.
+- Fixed LSP requests hanging when aborted while waiting for an earlier write to complete.
 
 ## [18.2.7] - 2026-09-21
 
