@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed typed Enter being swallowed into a literal newline when an event-loop stall batched keystrokes into one stdin read; the unbracketed raw-paste heuristic is now disabled on terminals that confirm bracketed-paste support ([#12540](https://github.com/can1357/oh-my-pi/issues/12540)).
+
 ## [18.2.5] - 2026-09-17
 
 ### Added
