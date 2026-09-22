@@ -219,6 +219,34 @@ export async function clickElement(
 	);
 }
 
+/**
+ * Focus, clear any existing value, then retype.
+ *
+ * Every step is a DOM evaluation or an input dispatch, so this works on tabs
+ * that produce no animation frames — unlike Puppeteer's `Locator.fill`, whose
+ * viewport/stability/enabled preconditions wait on `requestAnimationFrame`
+ * and `IntersectionObserver` callbacks that a backgrounded headless tab never
+ * delivers (#12892).
+ *
+ * `type` overrides how the value is entered, for callers that need their own
+ * abort-aware keyboard loop.
+ */
+export async function fillViaHandle(
+	handle: ElementHandle,
+	value: string,
+	signal?: AbortSignal,
+	type: (text: string) => Promise<unknown> = text => handle.type(text, { delay: 0 }),
+): Promise<void> {
+	await untilAborted(signal, () =>
+		handle.evaluate(el => {
+			const node = el as unknown as { value?: string; focus?: () => void };
+			node.focus?.();
+			if ("value" in node) node.value = "";
+		}),
+	);
+	await untilAborted(signal, () => type(value));
+}
+
 /** Resolve text-query matches to the first visible clickable candidate in document order. */
 export async function resolveActionableQueryHandlerClickTarget(
 	handles: ElementHandle[],

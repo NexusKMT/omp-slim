@@ -11,6 +11,7 @@ import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const TAB_NAME = `interactions-${crypto.randomUUID()}`;
+const STARVED_TAB_NAME = `starved-${crypto.randomUUID()}`;
 let tempDir = "";
 let uploadPath = "";
 
@@ -144,4 +145,39 @@ return { during, after };`,
 			await invoke({ action: "close", name: TAB_NAME, kill: true }).catch(() => undefined);
 		}
 	}, 30_000);
+
+	// Backgrounded headless tabs deliver no animation frames, which stalls every
+	// Puppeteer `Locator` precondition (viewport/stability/enabled) forever.
+	// Virtual time pinned at "pause" reproduces that state deterministically.
+	test("fills page and frame selectors on a tab that produces no animation frames", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const starvedHtml = `<!doctype html><input id="q" value="stale">
+<iframe id="inner" srcdoc='<!doctype html><input id="deep" value="stale">'></iframe>`;
+		const context = { session, toolCallId: "browser-starved" };
+		await prelude.invoke(
+			{ action: "open", name: STARVED_TAB_NAME, url: `data:text/html,${encodeURIComponent(starvedHtml)}` },
+			context,
+		);
+		try {
+			const result = await prelude.invoke(
+				{
+					action: "run",
+					name: STARVED_TAB_NAME,
+					code: `await tab.waitFor("#inner");
+const cdp = await page.createCDPSession();
+await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
+await tab.fill("#q", "typed");
+const inner = await tab.frame("#inner");
+await inner.fill("#deep", "nested");
+return { page: await tab.value("#q"), frame: await inner.value("#deep") };`,
+					timeout: 25,
+				},
+				context,
+			);
+			expect(valueFrom<{ page: string; frame: string }>(result)).toEqual({ page: "typed", frame: "nested" });
+		} finally {
+			await prelude.invoke({ action: "close", name: STARVED_TAB_NAME, kill: true }, context).catch(() => undefined);
+		}
+	}, 40_000);
 });
