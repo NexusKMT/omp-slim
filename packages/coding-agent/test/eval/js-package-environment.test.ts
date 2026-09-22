@@ -64,7 +64,8 @@ describe("persistent JavaScript package environments", () => {
 		const sessionId = `js-package:${crypto.randomUUID()}`;
 		const session = makeSession(workspace.path(), sessionId);
 		const options = executorOptions(session, sessionId);
-		managedRoots.push(resolveJsPackageEnvironment(workspace.path()).root);
+		const environmentRoot = resolveJsPackageEnvironment(workspace.path()).root;
+		managedRoots.push(environmentRoot);
 
 		const seeded = await executeJs("var packageSeed = 40;", options);
 		expect(seeded.exitCode).toBe(0);
@@ -107,9 +108,13 @@ describe("persistent JavaScript package environments", () => {
 		expect(importedFromModule.exitCode).toBe(0);
 		expect(importedFromModule.output.trim()).toBe("3");
 
-		for (const projectArtifact of ["package.json", "bun.lock", "node_modules"]) {
-			await expect(fs.access(path.join(workspace.path(), projectArtifact))).rejects.toBeDefined();
-		}
+		const managedManifest: { dependencies?: Record<string, string> } = await Bun.file(
+			path.join(environmentRoot, "package.json"),
+		).json();
+		expect({
+			projectEntries: (await fs.readdir(workspace.path())).sort(),
+			managedDependencies: managedManifest.dependencies,
+		}).toEqual({ projectEntries: ["scripts"], managedDependencies: { [packageName]: expect.any(String) } });
 	}, 30_000);
 
 	it("refuses an implicit managed environment bootstrap when auto-provisioning is disabled", async () => {
