@@ -39,6 +39,7 @@
 
 ### Fixed
 
+- Fixed plural browser queries failing when compiled binaries expose shallow stack traces ([#12902](https://github.com/can1357/oh-my-pi/pull/12902) by [@Dante-dan](https://github.com/Dante-dan)).
 - Fixed JavaScript `eval` assignments in cells containing top-level `await` so they persist into subsequent cells.
 - Fixed skill hints becoming out of sync with the active prompt after discarded rebuilds and in advisor sessions.
 - Restored `pi.pi.askToolRenderer` for extensions that replace the built-in ask tool, preserving native rendering.
