@@ -10,10 +10,6 @@
 
 - Updated read tool prompt to always decode images inline and require explicit `:img` for SVG rendering
 
-### Removed
-
-- Removed support for image query (`?q=`) and bare image path handling in the read tool
-
 ### Fixed
 
 - Fixed live models that match no `retry.fallbackChains` role primary (e.g. Fable after `/model`) resolving no chain, so a wait longer than `retry.maxDelayMs` aborted the session instead of walking `default` ([#12421](https://github.com/can1357/oh-my-pi/issues/12421)).
@@ -37,6 +33,14 @@
 - Edits targeting auto-generated files now return a tool-scoped rejection instead of aborting the whole turn ([#12499](https://github.com/can1357/oh-my-pi/pull/12499) by [@Dante-dan](https://github.com/Dante-dan)).
 - Subagents with an ordered model fallback keep it reachable on startup when the parent default role shares the same primary model ([#12377](https://github.com/can1357/oh-my-pi/pull/12377) by [@Dante-dan](https://github.com/Dante-dan)).
 - omp-plugins MCP servers now substitute `${CLAUDE_PLUGIN_ROOT}`/`${OMP_PLUGIN_ROOT}` in `command`, `args`, and `cwd` ([#12801](https://github.com/can1357/oh-my-pi/pull/12801) by [@holny](https://github.com/holny)).
+- Fixed auth-broker MCP OAuth credentials retaining their refresh endpoint and client metadata across repeated token rotations ([#12563](https://github.com/can1357/oh-my-pi/issues/12563)).
+- Fixed Edit application panicking the worker on sloppy selection edits whose `⟪…⟫` markers resolve to overlapping spans over multibyte (e.g. CJK) content; the unmappable selection now surfaces as a match error ([#12529](https://github.com/can1357/oh-my-pi/issues/12529)).
+- Fixed local memory consolidation stranding on Windows when a project's cwd casing drifted across launches (`C:\...\Documents` vs `...\documents`): scope keys now fold case on case-insensitive filesystems so one directory maps to one scope, preventing an empty-scope Phase 2 from wiping the shared `MEMORY.md`/`memory_summary.md`/`skills/` ([#12596](https://github.com/can1357/oh-my-pi/issues/12596)).
+- Fixed first-time Xcode MCP connections on macOS by allowing the signed `omp` binary to request Apple Events automation access ([#12572](https://github.com/can1357/oh-my-pi/issues/12572)).
+
+### Removed
+
+- Removed support for image query (`?q=`) and bare image path handling in the read tool
 
 ## [18.2.8] - 2026-09-21
 
@@ -99,15 +103,6 @@
 - Fixed edit operations that could loop after empty insertions or fail on Unicode no-op and overlapping duplicate matches.
 - Fixed live subagent messages being delayed by agent discovery and roster discovery looping on dot-named transcripts.
 - Fixed llama.cpp discovery and routing for PrismML Bonsai 2 27B GGUF models, including support for cached models and the Qwen 3.8 thinking-level ladder.
-- Fixed auth-broker MCP OAuth credentials retaining their refresh endpoint and client metadata across repeated token rotations ([#12563](https://github.com/can1357/oh-my-pi/issues/12563)).
-- Fixed resume clutter: elide 0-turn sessions from the /resume menu; -c similarly skips empty sessions.
-- Fixed Edit calls getting stuck generating repeated closing tags after an empty `SM:AFTER` insertion.
-- Fixed Edit previews and application panicking on Unicode no-op edits and overlapping duplicate matches.
-- Fixed Edit application panicking the worker on sloppy selection edits whose `⟪…⟫` markers resolve to overlapping spans over multibyte (e.g. CJK) content; the unmappable selection now surfaces as a match error ([#12529](https://github.com/can1357/oh-my-pi/issues/12529)).
-- Fixed live subagent messages getting stuck behind persisted-agent discovery, and roster discovery looping on dot-named transcripts.
-- Fixed llama.cpp discovery of PrismML Bonsai 2 27B GGUFs: built-in and custom-named providers now share catalog rules for chat-completions routing and the Qwen 3.8 thinking ladder (`low`/`medium`/`xhigh`), including cached models.
-- Fixed local memory consolidation stranding on Windows when a project's cwd casing drifted across launches (`C:\...\Documents` vs `...\documents`): scope keys now fold case on case-insensitive filesystems so one directory maps to one scope, preventing an empty-scope Phase 2 from wiping the shared `MEMORY.md`/`memory_summary.md`/`skills/` ([#12596](https://github.com/can1357/oh-my-pi/issues/12596)).
-- Fixed first-time Xcode MCP connections on macOS by allowing the signed `omp` binary to request Apple Events automation access ([#12572](https://github.com/can1357/oh-my-pi/issues/12572)).
 
 ## [18.2.6] - 2026-09-18
 

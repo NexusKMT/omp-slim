@@ -12,6 +12,8 @@
 
 - Composer shape previews now use the full overlay width instead of clipping at 96 columns ([#12713](https://github.com/can1357/oh-my-pi/pull/12713) by [@F0Rextasy](https://github.com/F0Rextasy)).
 - Fixed recalled one-line prompts placing the caret at the start when reached with Up but at the end when reached with Down; a history entry that fits on one visual row now always opens at the end, while multi-row entries keep their top/bottom anchors ([#12814](https://github.com/can1357/oh-my-pi/pull/12814) by [@H4vC](https://github.com/H4vC)).
+- Restored modified keys and terminal notifications over SSH in tmux by resolving the attached client's terminal type ([#12539](https://github.com/can1357/oh-my-pi/pull/12539) by [@CzBiX](https://github.com/CzBiX)).
+- Fixed typed Enter being swallowed into a literal newline when an event-loop stall batched keystrokes into one stdin read; the unbracketed raw-paste heuristic is now disabled on terminals that confirm bracketed-paste support ([#12540](https://github.com/can1357/oh-my-pi/issues/12540)).
 
 ## [18.2.8] - 2026-09-21
 
@@ -37,12 +39,6 @@
 ### Fixed
 
 - Prevented magic keywords from triggering spelling autocorrect and underlining
-### Fixed
-
-- Restored modified keys and terminal notifications over SSH in tmux by resolving the attached client's terminal type ([#12539](https://github.com/can1357/oh-my-pi/pull/12539) by [@CzBiX](https://github.com/CzBiX)).
-### Fixed
-
-- Fixed typed Enter being swallowed into a literal newline when an event-loop stall batched keystrokes into one stdin read; the unbracketed raw-paste heuristic is now disabled on terminals that confirm bracketed-paste support ([#12540](https://github.com/can1357/oh-my-pi/issues/12540)).
 
 ## [18.2.5] - 2026-09-17
 

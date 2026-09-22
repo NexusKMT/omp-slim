@@ -6,6 +6,7 @@
 
 - A provider stream that ends without a `done`/`error` event and produced zero events now appends the finalized trailing assistant message to the replay context and emits `message_start`/`message_end`, matching the done/error-event path ([#12605](https://github.com/can1357/oh-my-pi/pull/12605) by [@xiechimon](https://github.com/xiechimon)).
 - Fixed a rejecting host steering callback (`hasSteeringMessages`/`hasIrcInterrupts`) during a tool batch skipping every later chained tool with a phantom "Skipped due to pending steering message" result; the trailing steering probe in `runTool` is now guarded like the watch loop ([#12544](https://github.com/can1357/oh-my-pi/issues/12544)).
+- Host aside-commit and discard callbacks that throw no longer leave the stream pending or mask the original loop error ([#12815](https://github.com/can1357/oh-my-pi/pull/12815) by [@roboomp](https://github.com/roboomp)).
 
 ## [18.2.5] - 2026-09-17
 

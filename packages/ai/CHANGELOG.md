@@ -13,6 +13,9 @@
 - Fixed OpenAI-compatible Gemini gateways losing message-level thought signatures when replaying tool-call history.
 - The Chat Completions auth-gateway now accepts `reasoning_effort: "none"` and preserves explicit reasoning-off through provider dispatch ([#12789](https://github.com/can1357/oh-my-pi/pull/12789) by [@holny](https://github.com/holny)).
 - Bedrock in-stream `internalServerException`/`serviceUnavailableException`/`throttlingException` frames are now classified as retryable service errors instead of terminal 400s ([#12775](https://github.com/can1357/oh-my-pi/pull/12775) by [@nick-maderight](https://github.com/nick-maderight)).
+- Fixed the Anthropic prompt-cache keep-alive refresh 400ing when it replayed a forced-tool turn: the zero-output (`max_tokens: 0`) refresh now drops the inherited forced `tool_choice`, which Anthropic rejects with `max_tokens: 0` ([#12597](https://github.com/can1357/oh-my-pi/issues/12597)).
+- Fixed auth-broker usage reports crossing between Team members who share workspace account and organization IDs, preventing healthy credentials from inheriting sibling usage blocks ([#12560](https://github.com/can1357/oh-my-pi/issues/12560)).
+- OpenAI Codex requests no longer hang when a non-2xx response stalls its error body; the pre-response deadline now bounds the read ([#12831](https://github.com/can1357/oh-my-pi/pull/12831) by [@roboomp](https://github.com/roboomp)).
 
 ## [18.2.8] - 2026-09-21
 
@@ -41,8 +44,6 @@
 
 - Anthropic organization-level OAuth permission errors now reliably rotate to sibling credentials and persist blocks across usage reports.
 - Fixed error handling for provider responses that do not include token usage information.
-- Fixed the Anthropic prompt-cache keep-alive refresh 400ing when it replayed a forced-tool turn: the zero-output (`max_tokens: 0`) refresh now drops the inherited forced `tool_choice`, which Anthropic rejects with `max_tokens: 0` ([#12597](https://github.com/can1357/oh-my-pi/issues/12597)).
-- Fixed auth-broker usage reports crossing between Team members who share workspace account and organization IDs, preventing healthy credentials from inheriting sibling usage blocks ([#12560](https://github.com/can1357/oh-my-pi/issues/12560)).
 
 ## [18.2.6] - 2026-09-18
 
@@ -120,7 +121,7 @@
 - Fixed openai-responses replay wedging a repaired orphan tool-result note between another call's `function_call` and `function_call_output`, which broke round pairing on strict validators (e.g. DeepSeek) with `400 No tool output found for tool call …`: orphan-output/call repair now runs before the interleaved-message hoist, so any injected note is relocated out of the tool-call batch ([#11473](https://github.com/can1357/oh-my-pi/issues/11473)).
 - A stale Anthropic tier block (`tier:fable`, `tier:mythos`) is now cleared once a live usage report shows headroom on both the tier row and the shared windows, instead of idling a usable account until the reported reset. Healing requires a live report, and a credential held by an unscoped block spends no usage request on a probe that cannot lift it ([#11334](https://github.com/can1357/oh-my-pi/pull/11334) by [@AshishKumar4](https://github.com/AshishKumar4)).
 - A running session now picks up credentials another process committed: adding an account in a second terminal is visible to credential selection and rotation without restarting the session, and a session's pinned account is re-resolved by row id so a row another process deleted cannot hand its slot to a sibling ([#11329](https://github.com/can1357/oh-my-pi/pull/11329) by [@AshishKumar4](https://github.com/AshishKumar4)).
-- Fixed rate-limit/overload failures that arrive *inside* an HTTP 200 body (Azure, LiteLLM-style aggregators, and reverse proxies that already committed to the stream) not advancing `retry.fallbackChains`: a `{"error":{…}}`/`{"code":429}` chunk or a plain-text throttle frame (`429 Too Many Requests`, an nginx page) is now classified as a retryable 429/5xx through the same path an HTTP-status 429 takes, so a busy provider backs off and fails over instead of ending the session. Only bodies the provider actually reported are used: no status is inferred from error wording, and an unreadable body can no longer consume a credential.
+- Fixed rate-limit/overload failures that arrive _inside_ an HTTP 200 body (Azure, LiteLLM-style aggregators, and reverse proxies that already committed to the stream) not advancing `retry.fallbackChains`: a `{"error":{…}}`/`{"code":429}` chunk or a plain-text throttle frame (`429 Too Many Requests`, an nginx page) is now classified as a retryable 429/5xx through the same path an HTTP-status 429 takes, so a busy provider backs off and fails over instead of ending the session. Only bodies the provider actually reported are used: no status is inferred from error wording, and an unreadable body can no longer consume a credential.
 - Fixed tool schema normalization and cycle detection for frozen, sealed, and nonextensible schemas.
 - Reduced memory retained by `complete()` and `completeSimple()` while streaming responses.
 - Antigravity quota summaries now identify Claude/GPT routing copies as one shared upstream pool while preserving model-specific quota selection ([#11268](https://github.com/can1357/oh-my-pi/issues/11268)).
