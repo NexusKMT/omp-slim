@@ -17,8 +17,9 @@ import findDescription from "../../prompts/tools/find.md" with { type: "text" };
 import type { ToolSession } from "..";
 import { formatPathRelativeToCwd, normalizePathLikeInput, resolveToCwd } from "../path-utils";
 import { toolResult } from "../tool-result";
+import { isOmpDocsScope } from "../../internal-urls/omp-scope";
 import { runCascade } from "./cascade";
-import { isOmpScopePath, materializeOmpScope } from "./omp-scope";
+import { materializeOmpScope, type OmpScope } from "./omp-scope";
 import { rankedHeat } from "./passages";
 
 const findSchema = type({
@@ -26,7 +27,9 @@ const findSchema = type({
 	grep_keywords: type("string[]").describe(
 		"identifiers or terms likely to appear verbatim in matching source; steer lexical pre-ranking. [] when unsure",
 	),
-	"path?": type("string").describe('directory to search, or an `omp://` docs scope (`omp://` for all harness docs, `omp://<file>.md` for one). Omitted -> the workspace root (".")'),
+	"path?": type("string").describe(
+		'directory to search, or an `omp://` docs scope (`omp://` for all harness docs, `omp://<file>.md` for one). Omitted -> the workspace root (".")',
+	),
 });
 
 export type FindToolInput = typeof findSchema.infer;
@@ -75,9 +78,11 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 		// Harness docs are virtual (no `sourcePath`), so the directory-walking
 		// cascade cannot read them in place: search a temp materialization and
 		// remap hits back to `omp://` URLs, the same shape `grep` uses for archives.
-		const ompScope = isOmpScopePath(rawScopeInput)
-			? await materializeOmpScope(rawScopeInput, { cwd })
-			: undefined;
+		let ompScope: OmpScope | undefined;
+		if (isOmpDocsScope(rawScopeInput)) {
+			onUpdate?.({ content: [{ type: "text", text: "materializing omp:// docs" }] });
+			ompScope = await materializeOmpScope(rawScopeInput, { cwd, signal });
+		}
 		try {
 			const root = ompScope?.dir ?? (await this.#resolveRoot(params.path, cwd));
 			const scopePath =
@@ -106,41 +111,42 @@ export class FindTool implements AgentTool<typeof findSchema, FindToolDetails> {
 			// Cascade paths are root-relative; the model and renderer want
 			// resolvable paths (`read`-relative for files, URLs for docs) without
 			// knowing the scope.
-			const toRel =
-				ompScope?.toOmpRel ?? ((rel: string) => formatPathRelativeToCwd(path.join(root, rel), cwd));
+			const toRel = ompScope?.toOmpRel ?? ((rel: string) => formatPathRelativeToCwd(path.join(root, rel), cwd));
 			const hits = result.hits.map(hit => ({ ...hit, rel: toRel(hit.rel) }));
 			const details: FindToolDetails = { query, keywords, threshold, hits, stats, elapsedMs, cwd, scopePath };
-		// `omp://` hits are URLs, not cwd-relative paths — they resolve through
-		// the `read` tool, including with `:start-end` selectors.
-		const where = scopePath === undefined ? "" : ` in ${scopePath}`;
-		const out: string[] = [];
-		if (hits.length === 0) {
-			out.push(`no hits for "${query}"${where} (τ ${threshold.toFixed(2)})`);
-		} else {
-			out.push(`${hits.length} hit(s) for "${query}"${where} (τ ${threshold.toFixed(2)}), strongest first`, "");
-			for (const hit of hits) {
-				const coverage = hit.truncated ? `${hit.linesSeen} lines judged, partial` : `${hit.linesSeen} lines judged`;
-				out.push(`${hit.rel}  ${hit.contentScore.toFixed(2)}  ${coverage}`);
-				for (const range of rankedHeat(hit.ranges, RANGES_SHOWN)) {
-					const span = range.start === range.end ? String(range.start) : `${range.start}-${range.end}`;
-					out.push(`  ${hit.rel}:${span}  ${range.p.toFixed(2)}  ${range.snippet}`);
+			// `omp://` hits are URLs, not cwd-relative paths — they resolve through
+			// the `read` tool, including with `:start-end` selectors.
+			const where = scopePath === undefined ? "" : ` in ${scopePath}`;
+			const out: string[] = [];
+			if (hits.length === 0) {
+				out.push(`no hits for "${query}"${where} (τ ${threshold.toFixed(2)})`);
+			} else {
+				out.push(`${hits.length} hit(s) for "${query}"${where} (τ ${threshold.toFixed(2)}), strongest first`, "");
+				for (const hit of hits) {
+					const coverage = hit.truncated
+						? `${hit.linesSeen} lines judged, partial`
+						: `${hit.linesSeen} lines judged`;
+					out.push(`${hit.rel}  ${hit.contentScore.toFixed(2)}  ${coverage}`);
+					for (const range of rankedHeat(hit.ranges, RANGES_SHOWN)) {
+						const span = range.start === range.end ? String(range.start) : `${range.start}-${range.end}`;
+						out.push(`  ${hit.rel}:${span}  ${range.p.toFixed(2)}  ${range.snippet}`);
+					}
 				}
 			}
-		}
-		out.push(
-			"",
-			`listed ${stats.listed} · judged ${stats.judged} · read ${stats.filesRead} files (${formatBytes(stats.fileBytes)}) · ${stats.requests} requests · ${formatNumber(stats.inputTokens)} tokens · $${stats.cost.toFixed(4)} · ${formatDuration(elapsedMs)} wall / ${formatDuration(stats.apiMs)} api`,
-		);
-		if (stats.failures.length > 0) {
 			out.push(
-				`${stats.errors} of ${stats.requests} requests failed:`,
-				...stats.failures.map(failure => `  ${failure}`),
+				"",
+				`listed ${stats.listed} · judged ${stats.judged} · read ${stats.filesRead} files (${formatBytes(stats.fileBytes)}) · ${stats.requests} requests · ${formatNumber(stats.inputTokens)} tokens · $${stats.cost.toFixed(4)} · ${formatDuration(elapsedMs)} wall / ${formatDuration(stats.apiMs)} api`,
 			);
-		}
-		const builder = toolResult(details).text(out.join("\n"));
-		if (stats.requests > 0 && stats.errors === stats.requests) builder.error();
-		else if (hits.length === 0) builder.useless();
-		return builder.done();
+			if (stats.failures.length > 0) {
+				out.push(
+					`${stats.errors} of ${stats.requests} requests failed:`,
+					...stats.failures.map(failure => `  ${failure}`),
+				);
+			}
+			const builder = toolResult(details).text(out.join("\n"));
+			if (stats.requests > 0 && stats.errors === stats.requests) builder.error();
+			else if (hits.length === 0) builder.useless();
+			return builder.done();
 		} finally {
 			await ompScope?.cleanup();
 		}

@@ -10,9 +10,10 @@ import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { resolveJudge } from "../judgment";
 import { discoverAuthStorage, loadCliExtensionProviders } from "../sdk";
+import { isOmpDocsScope } from "../internal-urls/omp-scope";
 import { expandPath } from "../tools/path-utils";
 import { type CascadeResult, runCascade } from "../tools/jfind/cascade";
-import { isOmpScopePath, materializeOmpScope } from "../tools/jfind/omp-scope";
+import { materializeOmpScope, type OmpScope } from "../tools/jfind/omp-scope";
 import { rankedHeat } from "../tools/jfind/passages";
 
 export interface FindCommandArgs {
@@ -86,7 +87,11 @@ export async function runFindCommand(cmd: FindCommandArgs): Promise<void> {
 		process.exit(1);
 	}
 	const log = cmd.quiet ? () => {} : (message: string) => console.error(chalk.dim(message));
-	const ompScope = isOmpScopePath(cmd.path) ? await materializeOmpScope(cmd.path) : undefined;
+	let ompScope: OmpScope | undefined;
+	if (isOmpDocsScope(cmd.path)) {
+		log("materializing omp:// docs");
+		ompScope = await materializeOmpScope(cmd.path, { cwd: process.cwd() });
+	}
 	try {
 		const root = ompScope?.dir ?? path.resolve(expandPath(cmd.path));
 		try {
@@ -101,12 +106,16 @@ export async function runFindCommand(cmd: FindCommandArgs): Promise<void> {
 		}
 
 		const displayRoot = ompScope?.scopePath ?? root;
-		const settings = await Settings.init({ cwd: ompScope ? process.cwd() : root });
+		// An `omp://` scope searches a temp corpus, but settings and extensions
+		// still belong to the caller's project: one base for both, or a docs
+		// scope would silently drop project extensions (and their providers).
+		const baseCwd = ompScope ? process.cwd() : root;
+		const settings = await Settings.init({ cwd: baseCwd });
 		const authStorage = await discoverAuthStorage();
 		try {
 			const registry = new ModelRegistry(authStorage);
 			await registry.refresh();
-			await loadCliExtensionProviders(registry, settings, root);
+			await loadCliExtensionProviders(registry, settings, baseCwd);
 			const judge = resolveJudge({ settings, registry, sessionId: Bun.randomUUIDv7() });
 			const started = performance.now();
 			const raw = await runCascade({

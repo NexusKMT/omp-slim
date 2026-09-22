@@ -7,7 +7,15 @@ import * as path from "node:path";
 import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import { renderProgressBar } from "../components/progress-bar";
 import { Text } from "../components/text";
-import { Ellipsis, fileHyperlink, getTreeBranch, renderStatusLine, renderTreeList, truncateToWidth, uriHyperlink } from "../render";
+import {
+	Ellipsis,
+	fileHyperlink,
+	getTreeBranch,
+	renderStatusLine,
+	renderTreeList,
+	truncateToWidth,
+	uriHyperlink,
+} from "../render";
 import {
 	createCachedComponent,
 	formatCount,

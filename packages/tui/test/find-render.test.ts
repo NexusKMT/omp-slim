@@ -88,7 +88,12 @@ describe("findToolRenderer", () => {
 			],
 		};
 		const lines = findToolRenderer
-			.renderResult({ content: [{ type: "text", text: "" }], details: ompDetails }, { expanded: true, isPartial: false }, uiTheme, args)
+			.renderResult(
+				{ content: [{ type: "text", text: "" }], details: ompDetails },
+				{ expanded: true, isPartial: false },
+				uiTheme,
+				args,
+			)
 			.render(200);
 		const uris = extractLinkUris(lines.join("\n"));
 		expect(uris).toContain("omp://tools/read.md");
