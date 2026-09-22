@@ -9307,6 +9307,7 @@ export class AgentSession {
 		if (!model) {
 			throw new Error("No active model on session");
 		}
+		const modelDescription = `${model.provider}/${model.id} (${model.api})`;
 		const sessionGeneration = this.#sessionGeneration;
 		const assertEphemeralTurnReady = () => {
 			args.signal?.throwIfAborted();
@@ -9330,19 +9331,19 @@ export class AgentSession {
 			(model.thinking?.mode === "budget" || model.thinking?.mode === "anthropic-budget-effort");
 		if (cappedBudgetThinking && model.thinking?.requiresEffort && !model.thinking.suppressWhenOff) {
 			throw new Error(
-				"This model requires budget thinking and cannot preserve maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.",
+				`Model ${modelDescription} requires budget thinking and cannot preserve maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.`,
 			);
 		}
 		if (args.tools === false && requiresNativeTools(model)) {
 			throw new Error(
-				"This model does not support tools: false for ephemeral turns because its transport requires native tools.",
+				`Model ${modelDescription} does not support tools: false for ephemeral turns because its transport requires native tools.`,
 			);
 		}
 		// Do not silently start an unbounded request when discovery or transport
 		// policy says the output limit will be omitted or overwritten.
 		if (args.maxTokens !== undefined && !supportsOutputTokenLimit(model)) {
 			throw new Error(
-				"This model does not support maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.",
+				`Model ${modelDescription} does not support maxTokens for ephemeral turns. Omit the cap or use a model that supports output limits.`,
 			);
 		}
 		assertEphemeralTurnReady();
@@ -9360,7 +9361,7 @@ export class AgentSession {
 		);
 		if (args.tools === false && requiresToolFreeHistoryForToolOptOut(model) && toolHistory) {
 			throw new Error(
-				"This model's transport cannot support tools: false with historical tool calls. Omit tools: false or start from tool-free history.",
+				`Model ${modelDescription} cannot support tools: false with historical tool calls. Omit tools: false or start from tool-free history.`,
 			);
 		}
 		// Apply after context transforms, without mutating a potentially shared context.
