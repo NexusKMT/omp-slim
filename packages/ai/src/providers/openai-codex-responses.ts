@@ -4297,8 +4297,8 @@ async function openCodexSseEventStream(
 		} finally {
 			// A successful streaming body is governed by the iterator-level idle
 			// watchdog, so disarm the pre-response guard the instant headers arrive.
-			// Keep it armed for a non-2xx response (or a thrown fetch): the error
-			// body is still consumed under this deadline — by fetchWithRetry's
+			// Keep it armed for a non-2xx response: the error body is still
+			// consumed under this deadline — by fetchWithRetry's
 			// retry-status inspection and by CodexApiError.fromResponse — otherwise a
 			// server that sends headers then stalls the body hangs the turn past every
 			// configured first-event/idle deadline (issue #12664).

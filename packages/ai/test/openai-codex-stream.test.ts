@@ -2555,8 +2555,8 @@ describe("openai-codex streaming", () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 		const token = createCodexTestToken();
-		vi.useFakeTimers();
 		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const callerAbort = new AbortController();
 		const { promise: requestStarted, resolve: markRequestStarted } = Promise.withResolvers<void>();
 		let requestCount = 0;
 		const fetchMock: FetchImpl = async (input, init) => {
@@ -2570,16 +2570,24 @@ describe("openai-codex streaming", () => {
 		const resultPromise = streamOpenAICodexResponses(model, createCodexTestContext(), {
 			apiKey: token,
 			fetch: fetchMock,
+			signal: callerAbort.signal,
 			streamFirstEventTimeoutMs: 10,
 		}).result();
 		await requestStarted;
-		// Without a live deadline across the error-body read, this hangs until the
-		// caller/global deadline fires; the pre-response guard must abort it at 10ms.
-		vi.advanceTimersByTime(10);
-		const result = await resultPromise;
+		const backstop = Promise.withResolvers<never>();
+		// Bun fake timers incorrectly fire this production watchdog after clearTimeout,
+		// so use the platform clock to ensure the test fails if the body remains stuck.
+		const backstopTimer = setTimeout(() => {
+			callerAbort.abort();
+			backstop.reject(new Error("stalled error body exceeded the test backstop"));
+		}, 1_000);
+		let result;
+		try {
+			result = await Promise.race([resultPromise, backstop.promise]);
+		} finally {
+			clearTimeout(backstopTimer);
+		}
 
-		// The turn settles at the 10ms deadline instead of hanging until the
-		// caller/global backstop, surfacing the pre-response watchdog timeout.
 		expect(requestCount).toBe(1);
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("timed out");
