@@ -13,8 +13,8 @@ does not skip: invoking it without any required credential is an error.
 
 ## How it works
 
-1. `ci:release:build-binaries` builds and **ad-hoc** signs the binary (so it can
-   run on the build runner).
+1. `ci:release:build-binaries` builds and **ad-hoc** signs the binary with the
+   required entitlements (so it can run on the build runner).
 2. `scripts/ci-macos-sign.sh` then:
    - imports the Developer ID cert into a throwaway keychain;
    - re-signs with `--options runtime --timestamp` (hardened runtime + secure
