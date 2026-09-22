@@ -272,6 +272,15 @@ describe("auth-gateway openai-chat: parseRequest", () => {
 		expect(tool.toolName).toBe("submit_move");
 	});
 
+	it("accepts reasoning_effort:\"none\" on Chat Completions (auth-gateway #12781)", () => {
+		const parsed = parseRequest({
+			model: "openai-codex/gpt-5.6-luna",
+			messages: [{ role: "user", content: "hello" }],
+			reasoning_effort: "none",
+		});
+		expect(parsed.options.reasoning).toBe("none");
+	});
+
 	it("leaves toolName empty when no matching tool_call_id and no wire name", () => {
 		const parsed = parseRequest({
 			model: "m",
