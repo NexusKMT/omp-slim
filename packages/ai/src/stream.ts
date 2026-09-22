@@ -2216,6 +2216,9 @@ function mapOptionsForApi<TApi extends Api>(
 					openrouterVariant: options?.openrouterVariant,
 					maxTokensExplicit: rawOptions?.maxTokens !== undefined,
 					disableReasoning: options?.disableReasoning,
+					// Forwarded, not folded: the Responses record reads both flags
+					// itself (`applyResponsesCompatPolicy`).
+					forceReasoningOff: options?.forceReasoningOff,
 					textVerbosity: options?.textVerbosity,
 					promptCache: options?.promptCache,
 					statefulResponses: options?.statefulResponses,
@@ -2224,7 +2227,8 @@ function mapOptionsForApi<TApi extends Api>(
 			return castApi<"openai-completions">({
 				...base,
 				reasoning: resolveOpenAiReasoningEffort(model, options),
-				disableReasoning: options?.disableReasoning,
+				// `OpenAICompletionsOptions` carries no forceReasoningOff; fold it.
+				disableReasoning: options?.disableReasoning || options?.forceReasoningOff,
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				openrouterVariant: options?.openrouterVariant,
@@ -2237,7 +2241,8 @@ function mapOptionsForApi<TApi extends Api>(
 			return castApi<"openai-completions">({
 				...base,
 				reasoning: resolveOpenAiReasoningEffort(model, options),
-				disableReasoning: options?.disableReasoning,
+				// `OpenAICompletionsOptions` carries no forceReasoningOff; fold it.
+				disableReasoning: options?.disableReasoning || options?.forceReasoningOff,
 				toolChoice: mapOpenAiToolChoice(options?.toolChoice),
 				serviceTier: options?.serviceTier,
 				openrouterVariant: options?.openrouterVariant,
