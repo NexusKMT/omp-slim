@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed a stale workspace addon failing as `<symbol> is not a function` inside whichever tool used it first; the missing export now names the addon, the loaded and expected releases, and `bun run build:native` ([#12698](https://github.com/can1357/oh-my-pi/pull/12698) by [@iacore](https://github.com/iacore)).
-- Background bash jobs no longer hang forever when one output chunk forward wedges; the bridge disconnects after a bounded stall ([#12832](https://github.com/can1357/oh-my-pi/pull/12832) by [@roboomp](https://github.com/roboomp)).
+- Fixed stale workspace addons failing when first used; the error now identifies the addon and provides the command to rebuild native addons.
+- Fixed background bash jobs hanging indefinitely when output forwarding stalls.
 
 ## [18.2.7] - 2026-09-21
 

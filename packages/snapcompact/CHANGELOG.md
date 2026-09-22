@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Summaries no longer advertise a `¶think:` scope when thinking is excluded from the archive ([#12703](https://github.com/can1357/oh-my-pi/pull/12703) by [@F0Rextasy](https://github.com/F0Rextasy)).
+- Fixed summaries incorrectly advertising a `¶think:` scope when thinking content is excluded from the archive.
 
 ## [18.2.1] - 2026-09-15
 
