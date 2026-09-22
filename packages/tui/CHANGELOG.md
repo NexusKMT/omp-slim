@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed startup release notes requiring an Escape keypress before they could be scrolled.
+- Fixed startup release notes requiring an Escape keypress before they could be scrolled ([#12906](https://github.com/can1357/oh-my-pi/pull/12906) by [@michaelr](https://github.com/michaelr)).
 
 ## [18.2.9] - 2026-09-22
 
