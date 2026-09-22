@@ -113,6 +113,7 @@ import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type:
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentHubRegistry } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
+import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import {
 	type AgentSession,
@@ -511,20 +512,28 @@ class JudgmentBatchProgressHud implements Component {
 
 	#renderRow(progress: JudgmentBatchProgress, width: number): string {
 		const countText = `${progress.done}/${progress.total}`;
+		// Zero cost means unpriced (local/native without catalog pricing), not free — omit rather than show $0.
+		const costText = progress.cost > 0 ? ` · ${formatCost(progress.cost)}` : "";
 		const failedText = progress.failed > 0 ? ` · ${progress.failed} failed` : "";
 		const compactFailedText = progress.failed > 0 ? ` +${progress.failed}!` : "";
 		let failure = failedText;
 		if (
 			failure &&
-			visibleWidth(countText) + visibleWidth(failure) + JUDGMENT_BATCH_PROGRESS_MIN_BAR_WIDTH + 1 > width &&
-			visibleWidth(countText) + visibleWidth(compactFailedText) <= width
+			visibleWidth(countText) +
+				visibleWidth(costText) +
+				visibleWidth(failure) +
+				JUDGMENT_BATCH_PROGRESS_MIN_BAR_WIDTH +
+				1 >
+				width &&
+			visibleWidth(countText) + visibleWidth(costText) + visibleWidth(compactFailedText) <= width
 		) {
 			failure = compactFailedText;
 		}
 
 		const styledCount = theme.bold(theme.fg("text", countText));
+		const styledCost = costText ? theme.fg("dim", costText) : "";
 		const styledFailure = failure ? theme.fg("warning", failure) : "";
-		let tail = `${styledCount}${styledFailure}`;
+		let tail = `${styledCount}${styledCost}${styledFailure}`;
 		let remaining = width - visibleWidth(tail);
 		if (remaining > 1) {
 			const barWidth = Math.min(JUDGMENT_BATCH_PROGRESS_BAR_WIDTH, remaining - 1);
