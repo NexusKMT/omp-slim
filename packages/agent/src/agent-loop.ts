@@ -599,18 +599,18 @@ export function agentLoop(
 	const stream = createAgentStream();
 
 	(async () => {
-		const newMessages: AgentMessage[] = [...prompts];
-		const currentContext: AgentContext = {
-			...context,
-			messages: [...context.messages, ...prompts],
-		};
-		for (const prompt of prompts) {
-			(prompt as CommittableAsideMessage)[ASIDE_MESSAGE_COMMIT]?.();
-		}
-
-		stream.push({ type: "agent_start" });
-
 		try {
+			const newMessages: AgentMessage[] = [...prompts];
+			const currentContext: AgentContext = {
+				...context,
+				messages: [...context.messages, ...prompts],
+			};
+			for (const prompt of prompts) {
+				(prompt as CommittableAsideMessage)[ASIDE_MESSAGE_COMMIT]?.();
+			}
+
+			stream.push({ type: "agent_start" });
+
 			await runLoop(currentContext, newMessages, config, signal, stream, streamFn, prompts);
 		} catch (err) {
 			stream.fail(err);
@@ -668,12 +668,12 @@ export function agentLoopContinue(
 	const stream = createAgentStream();
 
 	(async () => {
-		const newMessages: AgentMessage[] = [];
-		const currentContext: AgentContext = { ...context, messages: [...context.messages] };
-
-		stream.push({ type: "agent_start" });
-
 		try {
+			const newMessages: AgentMessage[] = [];
+			const currentContext: AgentContext = { ...context, messages: [...context.messages] };
+
+			stream.push({ type: "agent_start" });
+
 			await runLoop(currentContext, newMessages, config, signal, stream, streamFn);
 		} catch (err) {
 			stream.fail(err);
@@ -1672,7 +1672,13 @@ async function runLoopBody(
 
 		endAgentStream(stream, newMessages, telemetry, stepCounter.count);
 	} finally {
-		discardAsides(pendingMessages, new Error("Aside message was not committed before the agent loop ended"));
+		try {
+			discardAsides(pendingMessages, new Error("Aside message was not committed before the agent loop ended"));
+		} catch (discardError) {
+			// A throwing host discard hook must never replace the in-flight loop
+			// error (or a clean exit) by escaping the finally — log and swallow.
+			logger.error("discardAsides threw while ending the agent loop", { error: discardError });
+		}
 		if (!preserveSoftRequirementState) {
 			softRequirementState.id = undefined;
 			softRequirementState.forcedToolChoice = undefined;
