@@ -7538,7 +7538,10 @@ export class AuthStorage {
 		if (oauthSource) return oauthSource;
 		const loginApiKeySource = describeStored(
 			"api_key",
-			credential => credential.type === "api_key" && credential.source === "login",
+			credential =>
+				credential.type === "api_key" &&
+				credential.source === "login" &&
+				!this.#isKeylessFallbackCredential(provider, credential),
 		);
 		if (loginApiKeySource) return loginApiKeySource;
 		if (getEnvApiKey(provider)) return `env (over ${baseLabel})`;

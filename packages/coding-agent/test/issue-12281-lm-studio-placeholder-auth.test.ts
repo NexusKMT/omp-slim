@@ -204,6 +204,10 @@ describe("issue #12281 — lm-studio empty-fallback placeholder vs. wire auth", 
 		if (origin !== undefined) {
 			violations.push(`getCredentialOrigin=${JSON.stringify(origin)} — /login would show "logged in"`);
 		}
+		const source = storage.describeCredentialSource("lm-studio");
+		if (source !== undefined) {
+			violations.push(`describeCredentialSource=${JSON.stringify(source)} — /session would show an auth source`);
+		}
 
 		const registry = bootRegistry(storage);
 		await registry.refresh("online");
