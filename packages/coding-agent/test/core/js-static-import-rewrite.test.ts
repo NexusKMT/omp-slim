@@ -206,6 +206,24 @@ describe("wrapCode cross-cell persistence", () => {
 		}
 	});
 
+	it("keeps async-cell function closures attached to retained global bindings", async () => {
+		const globals = globalThis as Record<string, unknown>;
+		const wrapped = await wrapCode(
+			"await Promise.resolve();\nvar ompClosureTotal = 42;\nfunction ompClosureAnswer() { return ompClosureTotal; }",
+		);
+		expect(wrapped.asyncWrapped).toBe(true);
+		try {
+			await indirectEval(wrapped.source);
+			expect((globals.ompClosureAnswer as () => number)()).toBe(42);
+			indirectEval("ompClosureTotal += 1;");
+			expect(globals.ompClosureTotal).toBe(43);
+			expect((globals.ompClosureAnswer as () => number)()).toBe(43);
+		} finally {
+			delete globals.ompClosureAnswer;
+			delete globals.ompClosureTotal;
+		}
+	});
+
 	it("publishes explicit top-level var declarations from async-wrapped cells", async () => {
 		const globals = globalThis as Record<string, unknown>;
 		const wrapped = await wrapCode("await Promise.resolve();\nvar ompPersistedVar = 5;");
