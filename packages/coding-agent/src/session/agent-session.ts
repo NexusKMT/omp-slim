@@ -1770,7 +1770,6 @@ export class AgentSession {
 				message,
 				assistantMessageEvent,
 			};
-			this.#streamingEditGuard.preCache(event);
 			this.#streamingEditGuard.maybeAbort(event);
 			this.#loopGuards.onAssistantEvent(message, assistantMessageEvent);
 		});
@@ -3272,15 +3271,6 @@ export class AgentSession {
 		if (event.type === "tool_stream_update") this.#streamingEditGuard.maybeAbort(event);
 
 		if (await this.#ttsr.checkMessageUpdate(event)) return;
-
-		if (
-			event.type === "message_update" &&
-			(event.assistantMessageEvent.type === "toolcall_start" ||
-				event.assistantMessageEvent.type === "toolcall_delta" ||
-				event.assistantMessageEvent.type === "toolcall_end")
-		) {
-			this.#streamingEditGuard.preCache(event);
-		}
 
 		if (
 			event.type === "message_update" &&
