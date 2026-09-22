@@ -6665,20 +6665,27 @@ export class AgentSession {
 			images.length > 0 ? images : undefined,
 			this.#promptGeneration,
 			signal,
+			"queued",
 		);
 	};
 
-	/** Stage extension results; committing them must remain synchronous with delivery validation. */
+	/**
+	 * Stage extension results; committing them must remain synchronous with delivery validation.
+	 *
+	 * `signal` cancels awaited setup (memory auto-recall) for both direct and queued turns.
+	 * `origin` decides the disposal contract: a direct prompt admitted before {@link beginDispose}
+	 * still runs to a settled turn, while a queued turn never starts on a disposed session.
+	 */
 	async #prepareAgentStart(
 		message: AgentMessage,
 		prompt: string,
 		images: ImageContent[] | undefined,
 		generation: number,
-		signal?: AbortSignal,
+		signal: AbortSignal | undefined,
+		origin: "direct" | "queued",
 	): Promise<QueuedMessagePreparation & { baseXdevCatalogDelivered: boolean }> {
 		const sessionGeneration = this.#sessionGeneration;
-		// Preserve ordinary prompt disposal semantics, but never begin a queued turn on a disposed session.
-		const alreadyDisposing = this.#isDisposed && signal === undefined;
+		const alreadyDisposing = this.#isDisposed && origin === "direct";
 		const isCurrent = () =>
 			this.#promptGeneration === generation &&
 			this.#sessionGeneration === sessionGeneration &&
@@ -6747,9 +6754,9 @@ export class AgentSession {
 				},
 			};
 		}
-		if (signal !== undefined) {
-			// Only queued preparation receives a signal. Block its settle drain before Agent
-			// converts this error into an assistant message and resolves the running turn.
+		if (origin === "queued") {
+			// Block the queued settle drain before Agent converts this error into an
+			// assistant message and resolves the running turn.
 			this.#queuedMessageDrainBlocked = true;
 		}
 		throw new AgentStartPolicyChangedError();
@@ -6879,6 +6886,7 @@ export class AgentSession {
 				options?.images,
 				generation,
 				setupAbort.signal,
+				"direct",
 			);
 			const preparedMessages = preparation.commit();
 			if (!preparedMessages) return false;

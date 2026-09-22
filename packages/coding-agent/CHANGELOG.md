@@ -10,8 +10,13 @@
 
 - Updated read tool prompt to always decode images inline and require explicit `:img` for SVG rendering
 
+### Removed
+
+- Removed support for image query (`?q=`) and bare image path handling in the read tool
+
 ### Fixed
 
+- Queued turns now respect session disposal and are blocked when the session is disposed
 - JavaScript Eval reassignments made in cells containing top-level `await` now persist into later cells ([#10987](https://github.com/can1357/oh-my-pi/issues/10987)).
 - Fixed Wayland keyboard input resolving characters through a fixed US layout instead of the compositor's active XKB group ([#12534](https://github.com/can1357/oh-my-pi/issues/12534)).
 - Fixed live models that match no `retry.fallbackChains` role primary (e.g. Fable after `/model`) resolving no chain, so a wait longer than `retry.maxDelayMs` aborted the session instead of walking `default` ([#12421](https://github.com/can1357/oh-my-pi/issues/12421)).
@@ -40,10 +45,6 @@
 - Fixed local memory consolidation stranding on Windows when a project's cwd casing drifted across launches (`C:\...\Documents` vs `...\documents`): scope keys now fold case on case-insensitive filesystems so one directory maps to one scope, preventing an empty-scope Phase 2 from wiping the shared `MEMORY.md`/`memory_summary.md`/`skills/` ([#12596](https://github.com/can1357/oh-my-pi/issues/12596)).
 - Fixed first-time Xcode MCP connections on macOS by allowing the signed `omp` binary to request Apple Events automation access ([#12572](https://github.com/can1357/oh-my-pi/issues/12572)).
 - Pressing Esc now cancels an in-flight Hindsight auto-recall instead of leaving the prompt blocked until the recall timeout ([#12833](https://github.com/can1357/oh-my-pi/pull/12833) by [@roboomp](https://github.com/roboomp)).
-
-### Removed
-
-- Removed support for image query (`?q=`) and bare image path handling in the read tool
 
 ## [18.2.8] - 2026-09-21
 
