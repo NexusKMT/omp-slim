@@ -208,6 +208,38 @@ function createNoProgressCodexSse(signal: AbortSignal | undefined): Response {
 	return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
+/**
+ * Non-2xx response whose error body is delivered partially and then stalls
+ * forever unless the request signal aborts. Mirrors a server (or proxy) that
+ * flushes error headers plus an incomplete JSON body and holds the socket open —
+ * the shape that used to bypass the Codex pre-response deadline (issue #12664).
+ * Wiring the body stream to the fetch signal lets the armed pre-response
+ * watchdog abort the read exactly as a real socket would.
+ */
+function createStalledErrorResponse(status: number, signal: AbortSignal | undefined): Response {
+	const encoder = new TextEncoder();
+	let abortListener: (() => void) | undefined;
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(encoder.encode('{"error":{"message":"synthetic incomplete'));
+			abortListener = () => {
+				if (abortListener) signal?.removeEventListener("abort", abortListener);
+				const reason = signal?.reason;
+				controller.error(reason instanceof Error ? reason : new Error("request aborted"));
+			};
+			if (signal?.aborted) {
+				queueMicrotask(() => abortListener?.());
+			} else {
+				signal?.addEventListener("abort", abortListener, { once: true });
+			}
+		},
+		cancel() {
+			if (abortListener) signal?.removeEventListener("abort", abortListener);
+		},
+	});
+	return new Response(stream, { status, headers: { "content-type": "application/json" } });
+}
+
 function encodeWebSocketMessage(value: Record<string, unknown>): Uint8Array {
 	return new TextEncoder().encode(JSON.stringify(value));
 }
@@ -2514,6 +2546,43 @@ describe("openai-codex streaming", () => {
 		expect(signals[1]?.aborted).toBe(false);
 		expect(result.stopReason).toBe("stop");
 		expect(result.content.find(block => block.type === "text")?.text).toBe("Recovered after watchdog timeout");
+	});
+
+	it.each([
+		["non-retryable 403 parsed by CodexApiError.fromResponse", 403],
+		["retryable 503 inspected by fetchWithRetry", 503],
+	] as const)("bounds a stalled error body with the pre-response deadline (%s)", async (_label, status) => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const token = createCodexTestToken();
+		vi.useFakeTimers();
+		vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+		const { promise: requestStarted, resolve: markRequestStarted } = Promise.withResolvers<void>();
+		let requestCount = 0;
+		const fetchMock: FetchImpl = async (input, init) => {
+			requestCount += 1;
+			const requestSignal = getRequestSignal(input, init);
+			markRequestStarted();
+			return createStalledErrorResponse(status, requestSignal);
+		};
+		const model = { ...createCodexTestModel("https://chatgpt.com/backend-api"), preferWebsockets: false };
+
+		const resultPromise = streamOpenAICodexResponses(model, createCodexTestContext(), {
+			apiKey: token,
+			fetch: fetchMock,
+			streamFirstEventTimeoutMs: 10,
+		}).result();
+		await requestStarted;
+		// Without a live deadline across the error-body read, this hangs until the
+		// caller/global deadline fires; the pre-response guard must abort it at 10ms.
+		vi.advanceTimersByTime(10);
+		const result = await resultPromise;
+
+		// The turn settles at the 10ms deadline instead of hanging until the
+		// caller/global backstop, surfacing the pre-response watchdog timeout.
+		expect(requestCount).toBe(1);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("timed out");
 	});
 
 	it("bounds Codex SSE socket-close attempts and preserves the default when omitted", async () => {
