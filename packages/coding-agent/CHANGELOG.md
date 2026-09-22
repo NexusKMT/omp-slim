@@ -40,6 +40,8 @@
 - Fixed MCP OAuth credentials retaining their refresh endpoint and client metadata across repeated token rotations.
 - Fixed local model and provider retry behavior for streamed and partially buffered failures.
 - Fixed memory and session cleanup issues that could leave stale artifacts or inconsistent state.
+- `lsp.formatOnWrite` now prefers a dedicated `isLinter` formatter server when a type-checker also claims the file ([#12847](https://github.com/can1357/oh-my-pi/pull/12847) by [@roboomp](https://github.com/roboomp)).
+- `/extensions` no longer shows OMP-installed marketplace capabilities as disabled behind the foreign-plugin opt-in gate ([#12849](https://github.com/can1357/oh-my-pi/pull/12849) by [@roboomp](https://github.com/roboomp)).
 
 ### Removed
 
