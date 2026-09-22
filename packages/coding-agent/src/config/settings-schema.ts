@@ -4256,14 +4256,24 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	"find.enabled": {
-		type: "boolean",
-		default: false,
+		type: "enum",
+		values: ["auto", "on", "off"] as const,
+		default: "auto",
 		ui: {
 			tab: "tools",
 			group: "Available Tools",
 			label: "Find (semantic grep)",
 			description:
-				"Enable the find tool: natural-language search for files and line ranges, judged by the judge model role",
+				"Enable the find tool: natural-language search for files and line ranges, judged by the judge model role. Auto enables it only when the judge role resolves to a native TypeSafe jev model",
+			options: [
+				{
+					value: "auto",
+					label: "Auto",
+					description: "Enable when the judge role resolves to a native TypeSafe jev model",
+				},
+				{ value: "on", label: "On", description: "Always enable, whichever model the judge role resolves to" },
+				{ value: "off", label: "Off", description: "Disable the find tool" },
+			],
 		},
 	},
 
