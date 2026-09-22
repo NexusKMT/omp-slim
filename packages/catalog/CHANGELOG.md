@@ -7,6 +7,7 @@
 - Local OpenAI-compatible backends (llama.cpp, LM Studio, vLLM, local Ollama, and loopback/LAN custom hosts) now honor `maxTokens` above 64k instead of silently clamping output to the hosted OpenAI ceiling ([#12433](https://github.com/can1357/oh-my-pi/pull/12433) by [@ton-anywhere](https://github.com/ton-anywhere)).
 
 - Fixed Union Alpha using the wrong API on OpenCode Go and Zen; it now uses the Messages endpoint ([#12380](https://github.com/can1357/oh-my-pi/pull/12380) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed SuperGrok (xai-oauth) Grok 4.7 missing its thinking-level options and reporting null context limits; it now carries the documented 500K window and low/medium/high/xhigh ladder ([#12697](https://github.com/can1357/oh-my-pi/issues/12697)).
 
 ## [18.2.8] - 2026-09-21
 
