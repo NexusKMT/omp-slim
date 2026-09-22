@@ -281,7 +281,7 @@ describe("jfind cascade", () => {
 		expect(isOmpDocsScope("packages/tui")).toBe(false);
 		await expect(materializeOmpScope("omp://nope.md")).rejects.toThrow("Documentation file not found");
 		await expect(materializeOmpScope("omp://tools/read.md:1-10")).rejects.toThrow(
-			"Line-range selector requires a single file",
+			"line-range selectors are not supported",
 		);
 	});
 
@@ -309,19 +309,23 @@ describe("jfind cascade", () => {
 		const rels = new Set(completions.map(completion => completion.value));
 
 		const scope = await materializeOmpScope("omp://");
-		const materialized = await materializedRels(scope.dir);
-		expect(materialized).toHaveLength(rels.size);
-		expect(materialized).toContain("tools/read.md");
-		expect(await Bun.file(path.join(scope.dir, "tools", "read.md")).text()).toBe(
-			(await InternalUrlRouter.instance().resolve("omp://tools/read.md")).content,
-		);
-		await scope.cleanup();
-		expect(
-			await fs.stat(scope.dir).then(
-				() => true,
-				() => false,
-			),
-		).toBe(false);
+		try {
+			const materialized = await materializedRels(scope.dir);
+			expect(materialized).toHaveLength(rels.size);
+			expect(materialized).toContain("tools/read.md");
+			expect(await Bun.file(path.join(scope.dir, "tools", "read.md")).text()).toBe(
+				(await InternalUrlRouter.instance().resolve("omp://tools/read.md")).content,
+			);
+			await scope.cleanup();
+			expect(
+				await fs.stat(scope.dir).then(
+					() => true,
+					() => false,
+				),
+			).toBe(false);
+		} finally {
+			await scope.cleanup();
+		}
 	});
 
 	it("rejects a scope path that is missing or not a directory before spending any judgment", async () => {

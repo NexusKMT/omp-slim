@@ -110,6 +110,7 @@ export async function runFindCommand(cmd: FindCommandArgs): Promise<void> {
 		// still belong to the caller's project: one base for both, or a docs
 		// scope would silently drop project extensions (and their providers).
 		const baseCwd = ompScope ? process.cwd() : root;
+		log("resolving judge");
 		const settings = await Settings.init({ cwd: baseCwd });
 		const authStorage = await discoverAuthStorage();
 		try {
@@ -133,9 +134,11 @@ export async function runFindCommand(cmd: FindCommandArgs): Promise<void> {
 			if (cmd.json) {
 				console.log(JSON.stringify({ query: cmd.query, root: displayRoot, elapsedMs, ...result }, null, 2));
 			} else {
-				printReport(cmd, root, result, elapsedMs, displayRoot);
+				printReport(cmd, root, result, elapsedMs, ompScope?.scopePath);
 			}
-			if (result.stats.requests > 0 && result.stats.errors === result.stats.requests) process.exit(1);
+			// `exitCode`, not `exit`: process.exit skips the finally blocks below,
+			// orphaning the materialized omp corpus and skipping authStorage.close().
+			if (result.stats.requests > 0 && result.stats.errors === result.stats.requests) process.exitCode = 1;
 		} finally {
 			authStorage.close();
 		}

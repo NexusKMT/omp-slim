@@ -40,9 +40,11 @@ export async function materializeOmpScope(rawInput: string, context?: ResolveCon
 	const toOmpRel = (rel: string): string => `omp://${rel.replace(/\\/g, "/")}`;
 	try {
 		// `find` searches whole files, so a trailing `:N-M` would silently be
-		// ignored downstream — reject the same way a file scope would.
+		// ignored downstream — reject it with the reason instead.
 		const { path: url, sel } = splitInternalUrlSel(input);
-		if (sel !== undefined) throw new ToolError(`Line-range selector requires a single file, not a scope: ${input}`);
+		if (sel !== undefined) {
+			throw new ToolError(`find searches whole files; line-range selectors are not supported: ${input}`);
+		}
 		let rel: string;
 		try {
 			rel = ompDocRel(parseInternalUrl(url));
