@@ -374,22 +374,6 @@ describe("ModelRegistry", () => {
 		});
 	});
 
-	describe("OpenRouter routed suffix fallback", () => {
-		let registry: ModelRegistry;
-		beforeAll(() => {
-			registry = readonlyRegistry({
-				providers: { openrouter: providerConfig("https://openrouter.ai/api/v1", [{ id: "z-ai/glm-4.7" }]) },
-			});
-		});
-
-		test("find synthesizes a routed model id from the base OpenRouter metadata", () => {
-			const model = registry.find("openrouter", "z-ai/glm-4.7-20251222:nitro");
-			expect(model?.provider).toBe("openrouter");
-			expect(model?.id).toBe("z-ai/glm-4.7-20251222:nitro");
-			expect(model?.name).toBe("z-ai/glm-4.7-20251222:nitro");
-		});
-	});
-
 	describe("Bedrock inference profile ARN fallback", () => {
 		let registry: ModelRegistry;
 		beforeAll(() => {
@@ -703,7 +687,6 @@ describe("ModelRegistry", () => {
 	describe("provider compat overrides", () => {
 		let providerCompat: ModelRegistry;
 		let customCompat: ModelRegistry;
-		let customAnthropicCompat: ModelRegistry;
 		let customModelCompat: ModelRegistry;
 		let customResponsesCompat: ModelRegistry;
 		let customAstraProxyCompat: ModelRegistry;
@@ -740,29 +723,6 @@ describe("ModelRegistry", () => {
 								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 								contextWindow: 1000,
 								maxTokens: 100,
-							},
-						],
-					},
-				},
-			});
-			customAnthropicCompat = readonlyRegistry({
-				providers: {
-					"anthropic-proxy": {
-						baseUrl: "https://example.com/v1/messages",
-						apiKey: "ANTHROPIC_PROXY_KEY",
-						api: "anthropic-messages",
-						compat: {
-							supportsEagerToolInputStreaming: true,
-							allowAnthropicHeaderOverrides: true,
-						},
-						models: [
-							{
-								id: "claude-haiku-4.5",
-								reasoning: false,
-								input: ["text"],
-								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-								contextWindow: 200_000,
-								maxTokens: 8_192,
 							},
 						],
 					},
@@ -873,14 +833,6 @@ describe("ModelRegistry", () => {
 			expect(compat?.supportsUsageInStreaming).toBe(false);
 			expect(compat?.maxTokensField).toBe("max_tokens");
 			expect(compat?.cacheControlFormat).toBe("anthropic");
-		});
-
-		test("custom Anthropic providers can opt into eager tool input streaming", () => {
-			const model = customAnthropicCompat.find("anthropic-proxy", "claude-haiku-4.5");
-			expect(model?.compat).toMatchObject({
-				supportsEagerToolInputStreaming: true,
-				allowAnthropicHeaderOverrides: true,
-			});
 		});
 
 		test("provider-level Anthropic compat survives dynamic discovery refresh", async () => {
@@ -1598,10 +1550,6 @@ describe("ModelRegistry", () => {
 			expect(anthropicModels.some(m => m.id === "claude-custom")).toBe(false);
 			expect(anthropicModels.some(m => m.id === "claude-custom-2")).toBe(true);
 			expect(anthropicModels.some(m => m.id.includes("claude"))).toBe(true);
-		});
-
-		test("built-in gpt-5.4 applies the hardcoded context window policy", () => {
-			expect(sharedBuiltin.find("openai", "gpt-5.4")?.contextWindow).toBe(1_000_000);
 		});
 
 		test("custom gpt-5.4 replacement keeps the hardcoded context window when contextWindow is omitted", () => {

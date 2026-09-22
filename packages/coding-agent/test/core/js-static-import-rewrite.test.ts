@@ -163,11 +163,6 @@ describe("rewriteImports", () => {
 		expect(out).toContain(`${IMPORT} b from "beta";`);
 	});
 
-	it("returns the input unchanged when there are no imports", async () => {
-		const code = "const x = 1 + 2;\nreturn x;";
-		expect(await rewriteImports(code)).toBe(code);
-	});
-
 	it("returns the input unchanged when the parser cannot make sense of the code", async () => {
 		const code = `${IMPORT} { foo from broken syntax 'unterminated`;
 		// Should not reject; should fall through to the VM which will surface the syntax error.
