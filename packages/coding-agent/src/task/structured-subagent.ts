@@ -135,7 +135,7 @@ export interface EffectiveSubagentPolicy {
 	agentName: string;
 	agent: AgentDefinition;
 	effectiveAgent: AgentDefinition;
-	modelOverride?: string | string[];
+	modelOverride?: string[];
 	/** Explicit pre-expansion model role alias selected for this run. */
 	modelRole?: string;
 	/** Extension routing note explaining a `before_subagent_spawn` model replacement. */
@@ -319,31 +319,7 @@ export async function resolveEffectiveSubagentPolicy(
 	// Role identity and patterns come from one call so they cannot be derived
 	// from different sources: the expansion below discards the alias, and the
 	// child's inherited retry-fallback chain is keyed off the role.
-	const { patterns, role: modelRole } = resolveAgentModelSelection(modelResolution);
-	let modelOverride = patterns;
-	let modelRoute: string | undefined;
-	const spawnKey =
-		request.identity?.id ??
-		request.identity?.label ??
-		(request.parentToolCallId !== undefined ? `${request.parentToolCallId}:${request.index ?? 0}` : undefined);
-	const spawnResult = await request.session.emitBeforeSubagentSpawn?.({
-		type: "before_subagent_spawn",
-		agent: agentName,
-		invocationKind: request.invocationKind,
-		modelRole,
-		patterns,
-		spawnKey,
-	});
-	if (spawnResult?.block) {
-		throw new StructuredSubagentError("preflight", spawnResult.reason ?? "Subagent spawn blocked by extension.");
-	}
-	if (spawnResult?.model !== undefined) {
-		const replacement = resolveConfiguredModelPatterns(spawnResult.model, request.session.settings);
-		if (replacement.length > 0) {
-			modelOverride = replacement;
-			modelRoute = spawnResult.note;
-		}
-	}
+	const { patterns: modelOverride, role: modelRole } = resolveAgentModelSelection(modelResolution);
 	const isolationEnabled = request.session.settings.get("task.isolation.enabled");
 	const isIsolated = request.isolation?.requested === true;
 	if (isIsolated && !isolationEnabled) {
@@ -359,7 +335,6 @@ export async function resolveEffectiveSubagentPolicy(
 		effectiveAgent,
 		modelOverride,
 		modelRole,
-		modelRoute,
 		serviceTierOverride,
 		parentActiveModelPattern,
 		schema,
@@ -378,6 +353,42 @@ export async function resolveEffectiveSubagentPolicy(
 				(request.session.enableIrc !== false &&
 					isIrcEnabled(request.session.settings, request.session.taskDepth ?? 0))),
 	};
+}
+
+/**
+ * Fire `before_subagent_spawn` for an actual child dispatch. Kept out of
+ * {@link resolveEffectiveSubagentPolicy} because frontends run that as a
+ * side-effect-free preflight too; stateful routing handlers must see exactly
+ * one event per spawned child.
+ */
+async function applySpawnHook(
+	request: StructuredSubagentRequest,
+	policy: EffectiveSubagentPolicy,
+): Promise<EffectiveSubagentPolicy> {
+	const emit = request.session.emitBeforeSubagentSpawn;
+	if (!emit) return policy;
+	const spawnKey =
+		request.identity?.id ??
+		request.identity?.label ??
+		(request.parentToolCallId !== undefined ? `${request.parentToolCallId}:${request.index ?? 0}` : undefined);
+	const spawnResult = await emit(
+		{
+			type: "before_subagent_spawn",
+			agent: policy.agentName,
+			invocationKind: request.invocationKind,
+			modelRole: policy.modelRole,
+			patterns: policy.modelOverride ?? [],
+			spawnKey,
+		},
+		request.signal,
+	);
+	if (spawnResult?.block) {
+		throw new StructuredSubagentError("preflight", spawnResult.reason ?? "Subagent spawn blocked by extension.");
+	}
+	if (spawnResult?.model === undefined) return policy;
+	const replacement = resolveConfiguredModelPatterns(spawnResult.model, request.session.settings);
+	if (replacement.length === 0) return policy;
+	return { ...policy, modelOverride: replacement, modelRoute: spawnResult.note };
 }
 
 /** Reserve a session-global agent id only after preflight has succeeded. */
@@ -644,7 +655,7 @@ function attachStructuredOutputMetadata(result: SingleResult, schema: Structured
  * lease or child dispatch; callers keep responsibility for their result text.
  */
 export async function runStructuredSubagent(request: StructuredSubagentRequest): Promise<StructuredSubagentResult> {
-	const policy = await resolveEffectiveSubagentPolicy(request);
+	const policy = await applySpawnHook(request, await resolveEffectiveSubagentPolicy(request));
 	const lease = await leaseArtifacts(request.session, request.invocationKind);
 	let changesApplied: boolean | null = null;
 	let mergeSummary = "";

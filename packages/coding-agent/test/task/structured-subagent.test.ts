@@ -407,7 +407,7 @@ describe("structured subagent primitive", () => {
 		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
 	});
 
-	it("lets before_subagent_spawn replace model patterns without dropping role identity", async () => {
+	it("lets before_subagent_spawn replace model patterns at dispatch without dropping role identity", async () => {
 		mockDiscovery({ ...AGENT, model: ["@definition"] });
 		const childSession = session({ modelRoles: { definition: "anthropic/claude-opus-4-5" } });
 		const events: BeforeSubagentSpawnEvent[] = [];
@@ -415,10 +415,22 @@ describe("structured subagent primitive", () => {
 			events.push(event);
 			return { model: "openai/gpt-4o", note: "pool test" };
 		};
-		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
-		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
-		expect(policy.modelRole).toBe("definition");
-		expect(policy.modelRoute).toBe("pool test");
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		// Frontend preflight is side-effect free: stateful routers must not advance.
+		await resolveEffectiveSubagentPolicy(request({ session: childSession }));
+		expect(events).toEqual([]);
+
+		const settled = await runStructuredSubagent(request({ session: childSession, retainArtifacts: true }));
+		expect(dispatched[0]).toMatchObject({
+			modelOverride: ["openai/gpt-4o"],
+			modelRole: "definition",
+			modelRoute: "pool test",
+		});
 		expect(events).toEqual([
 			{
 				type: "before_subagent_spawn",
@@ -428,25 +440,19 @@ describe("structured subagent primitive", () => {
 				patterns: ["anthropic/claude-opus-4-5"],
 			},
 		]);
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 
-	it("leaves the route unset when the hook does not replace the model", async () => {
-		mockDiscovery();
-		const childSession = session();
-		childSession.emitBeforeSubagentSpawn = async () => ({ note: "ignored without a model" });
-		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
-		expect(policy.modelRoute).toBeUndefined();
-	});
-
-	it("rejects preflight when an extension blocks the spawn", async () => {
+	it("rejects dispatch before leasing artifacts when an extension blocks the spawn", async () => {
 		mockDiscovery();
 		const blockedSession = session();
 		blockedSession.emitBeforeSubagentSpawn = async () => ({ block: true, reason: "pool exhausted" });
-		const error = await resolveEffectiveSubagentPolicy(request({ session: blockedSession })).catch(
-			(cause: unknown) => cause,
-		);
+		const run = vi.spyOn(executorModule, "runSubprocess");
+		const error = await runStructuredSubagent(request({ session: blockedSession })).catch((cause: unknown) => cause);
 		expect(error).toBeInstanceOf(StructuredSubagentError);
 		expect(error as StructuredSubagentError).toMatchObject({ kind: "preflight", message: "pool exhausted" });
+		expect(run).not.toHaveBeenCalled();
+		expect(artifactsDirsFromRegistry()).toEqual([]);
 	});
 
 	it("does not assign a role when a child uses an explicit model selector", async () => {

@@ -383,9 +383,13 @@ export interface ToolSession {
 	getServiceTierByFamily?: () => ServiceTierByFamily | undefined;
 	/**
 	 * Fires `before_subagent_spawn` on this session's extensions before a child's
-	 * model resolves. Undefined when the session has no extension runner.
+	 * model resolves. `signal` cancels awaiting handlers. Undefined when the
+	 * session has no extension runner.
 	 */
-	emitBeforeSubagentSpawn?(event: BeforeSubagentSpawnEvent): Promise<BeforeSubagentSpawnEventResult | undefined>;
+	emitBeforeSubagentSpawn?(
+		event: BeforeSubagentSpawnEvent,
+		signal?: AbortSignal,
+	): Promise<BeforeSubagentSpawnEventResult | undefined>;
 	/** Auth storage for passing to subagents (avoids re-discovery) */
 	authStorage?: import("../session/auth-storage").AuthStorage;
 	/** Model registry for passing to subagents (avoids re-discovery) */

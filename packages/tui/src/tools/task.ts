@@ -636,6 +636,18 @@ function renderDescriptionLines(description: string, prefix: string, width: numb
 	return wrapTextWithAnsi(description, contentWidth).map(line => `${boundedPrefix}${theme.fg("dim", line)}`);
 }
 
+/** `routed:` note from a `before_subagent_spawn` model replacement; empty when unrouted. */
+function renderRouteLine(route: string | undefined, continuePrefix: string, maxWidth: number, theme: Theme): string[] {
+	if (!route) return [];
+	return [
+		truncateTaskRow(
+			`${continuePrefix}${theme.fg("dim", `routed: ${replaceTabs(sanitizeText(route))}`)}`,
+			maxWidth,
+			"",
+		),
+	];
+}
+
 /**
  * Render streaming progress for a single agent.
  */
@@ -688,6 +700,7 @@ function renderAgentProgress(
 	if (fullDescription && !row.descriptionShown) {
 		lines.push(...renderDescriptionLines(fullDescription, continuePrefix, maxWidth, theme));
 	}
+	lines.push(...renderRouteLine(progress.resolvedModelRoute, continuePrefix, maxWidth, theme));
 
 	lines.push(...renderTaskSection(progress.assignment ?? progress.task, continuePrefix, expanded, theme));
 
@@ -1029,15 +1042,7 @@ function renderAgentResult(
 	if (fullDescription && !description) {
 		lines.push(...renderDescriptionLines(fullDescription, continuePrefix, maxWidth, theme));
 	}
-	if (result.resolvedModelRoute) {
-		lines.push(
-			truncateTaskRow(
-				`${continuePrefix}${theme.fg("dim", `routed: ${replaceTabs(sanitizeText(result.resolvedModelRoute))}`)}`,
-				maxWidth,
-				"",
-			),
-		);
-	}
+	lines.push(...renderRouteLine(result.resolvedModelRoute, continuePrefix, maxWidth, theme));
 
 	lines.push(...renderTaskSection(result.assignment ?? result.task, continuePrefix, expanded, theme));
 
