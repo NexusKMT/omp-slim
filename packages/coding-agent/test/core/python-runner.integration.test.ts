@@ -297,13 +297,13 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 		using tempDir = TempDir.createSync("@python-runner-shadow-plan-");
 		const kernel = await PythonKernel.start({ cwd: tempDir.path() });
 		try {
-			await expect(kernel.shadowPlan('tool.read({"path": "src/a.py"})')).resolves.toMatchObject({
+			await expect(kernel.shadowPlan('await tool.read({"path": "src/a.py"})')).resolves.toMatchObject({
 				operations: [
 					{
 						kind: "tool",
 						call: {
-							id: "py:0::0",
-							siteId: "py:0",
+							id: "py:6::0",
+							siteId: "py:6",
 							name: "read",
 							args: {
 								kind: "object",
@@ -314,7 +314,7 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 					},
 				],
 			});
-			await expect(kernel.shadowPlan("tool.read({'path': str(True)})")).resolves.toMatchObject({
+			await expect(kernel.shadowPlan("await tool.read({'path': str(True)})")).resolves.toMatchObject({
 				operations: [
 					{
 						call: {
@@ -336,23 +336,23 @@ describe.skipIf(!SHOULD_RUN)("python runner subprocess", () => {
 				],
 			});
 			const mappingAttribute = await kernel.shadowPlan(
-				['cfg = {"path": "secret.txt"}', 'tool.read({"path": cfg.path})'].join("\n"),
+				['cfg = {"path": "secret.txt"}', 'await tool.read({"path": cfg.path})'].join("\n"),
 			);
 			expect(mappingAttribute?.operations).toEqual([]);
 			expect(mappingAttribute?.barrier?.reason).toBe("unsupported Python statement");
-			const jsonDumps = await kernel.shadowPlan('tool.read({"path": json.dumps({"a": 1})})');
+			const jsonDumps = await kernel.shadowPlan('await tool.read({"path": json.dumps({"a": 1})})');
 			expect(jsonDumps?.operations).toEqual([]);
 			expect(jsonDumps?.barrier?.reason).toBe("unsupported Python statement");
-			const ambiguousAddition = await kernel.shadowPlan("if [] + []:\n    tool.read({'path': 'wrong'})");
+			const ambiguousAddition = await kernel.shadowPlan("if [] + []:\n    await tool.read({'path': 'wrong'})");
 			expect(ambiguousAddition?.operations).toEqual([]);
 			expect(ambiguousAddition?.barrier?.reason).toBe("unsupported Python condition");
-			const stringAddition = await kernel.shadowPlan("tool.read({'path': 'src/' + 'a.py'})");
+			const stringAddition = await kernel.shadowPlan("await tool.read({'path': 'src/' + 'a.py'})");
 			expect(stringAddition?.barrier).toBeUndefined();
 			expect(stringAddition?.operations).toHaveLength(1);
-			const invalidJoin = await kernel.shadowPlan("tool.read({'path': ''.join(['secret', 1, '.txt'])})");
+			const invalidJoin = await kernel.shadowPlan("await tool.read({'path': ''.join(['secret', 1, '.txt'])})");
 			expect(invalidJoin?.operations).toEqual([]);
 			expect(invalidJoin?.barrier?.reason).toBe("unsupported Python statement");
-			const formattedValue = await kernel.shadowPlan('tool.read({"path": f"{\'secret\'!r}"})');
+			const formattedValue = await kernel.shadowPlan('await tool.read({"path": f"{\'secret\'!r}"})');
 			expect(formattedValue?.operations).toEqual([]);
 			expect(formattedValue?.barrier?.reason).toBe("unsupported Python statement");
 			const completion = await kernel.shadowPlan("completion('constant')");
