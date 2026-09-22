@@ -8,7 +8,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { $env, prompt, Snowflake } from "@oh-my-pi/pi-utils";
-import { resolveAgentModelSelection } from "../config/model-resolver";
+import { resolveAgentModelSelection, resolveConfiguredModelPatterns } from "../config/model-resolver";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { LocalProtocolOptions } from "../internal-urls";
@@ -138,6 +138,8 @@ export interface EffectiveSubagentPolicy {
 	modelOverride?: string | string[];
 	/** Explicit pre-expansion model role alias selected for this run. */
 	modelRole?: string;
+	/** Extension routing note explaining a `before_subagent_spawn` model replacement. */
+	modelRoute?: string;
 	/** Exact-name `task.agentServiceTierOverrides` entry for this agent, applied after model resolution. */
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	parentActiveModelPattern?: string;
@@ -317,7 +319,31 @@ export async function resolveEffectiveSubagentPolicy(
 	// Role identity and patterns come from one call so they cannot be derived
 	// from different sources: the expansion below discards the alias, and the
 	// child's inherited retry-fallback chain is keyed off the role.
-	const { patterns: modelOverride, role: modelRole } = resolveAgentModelSelection(modelResolution);
+	const { patterns, role: modelRole } = resolveAgentModelSelection(modelResolution);
+	let modelOverride = patterns;
+	let modelRoute: string | undefined;
+	const spawnKey =
+		request.identity?.id ??
+		request.identity?.label ??
+		(request.parentToolCallId !== undefined ? `${request.parentToolCallId}:${request.index ?? 0}` : undefined);
+	const spawnResult = await request.session.emitBeforeSubagentSpawn?.({
+		type: "before_subagent_spawn",
+		agent: agentName,
+		invocationKind: request.invocationKind,
+		modelRole,
+		patterns,
+		spawnKey,
+	});
+	if (spawnResult?.block) {
+		throw new StructuredSubagentError("preflight", spawnResult.reason ?? "Subagent spawn blocked by extension.");
+	}
+	if (spawnResult?.model !== undefined) {
+		const replacement = resolveConfiguredModelPatterns(spawnResult.model, request.session.settings);
+		if (replacement.length > 0) {
+			modelOverride = replacement;
+			modelRoute = spawnResult.note;
+		}
+	}
 	const isolationEnabled = request.session.settings.get("task.isolation.enabled");
 	const isIsolated = request.isolation?.requested === true;
 	if (isIsolated && !isolationEnabled) {
@@ -333,6 +359,7 @@ export async function resolveEffectiveSubagentPolicy(
 		effectiveAgent,
 		modelOverride,
 		modelRole,
+		modelRoute,
 		serviceTierOverride,
 		parentActiveModelPattern,
 		schema,
@@ -433,6 +460,7 @@ function buildExecutorOptions(
 		acquiredAt: request.acquiredAt,
 		modelOverride: policy.modelOverride,
 		modelRole: policy.modelRole,
+		modelRoute: policy.modelRoute,
 		serviceTierOverride: policy.serviceTierOverride,
 		parentActiveModelPattern: policy.parentActiveModelPattern,
 		thinkingLevel: policy.effectiveAgent.thinkingLevel,

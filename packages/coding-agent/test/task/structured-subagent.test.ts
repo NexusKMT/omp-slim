@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { BeforeSubagentSpawnEvent } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import {
 	artifactsDirsFromRegistry,
 	resetRegisteredArtifactDirsForTests,
@@ -404,6 +405,48 @@ describe("structured subagent primitive", () => {
 
 		expect(policy.modelRole).toBe("definition");
 		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
+	});
+
+	it("lets before_subagent_spawn replace model patterns without dropping role identity", async () => {
+		mockDiscovery({ ...AGENT, model: ["@definition"] });
+		const childSession = session({ modelRoles: { definition: "anthropic/claude-opus-4-5" } });
+		const events: BeforeSubagentSpawnEvent[] = [];
+		childSession.emitBeforeSubagentSpawn = async event => {
+			events.push(event);
+			return { model: "openai/gpt-4o", note: "pool test" };
+		};
+		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
+		expect(policy.modelOverride).toEqual(["openai/gpt-4o"]);
+		expect(policy.modelRole).toBe("definition");
+		expect(policy.modelRoute).toBe("pool test");
+		expect(events).toEqual([
+			{
+				type: "before_subagent_spawn",
+				agent: "worker",
+				invocationKind: "task",
+				modelRole: "definition",
+				patterns: ["anthropic/claude-opus-4-5"],
+			},
+		]);
+	});
+
+	it("leaves the route unset when the hook does not replace the model", async () => {
+		mockDiscovery();
+		const childSession = session();
+		childSession.emitBeforeSubagentSpawn = async () => ({ note: "ignored without a model" });
+		const policy = await resolveEffectiveSubagentPolicy(request({ session: childSession }));
+		expect(policy.modelRoute).toBeUndefined();
+	});
+
+	it("rejects preflight when an extension blocks the spawn", async () => {
+		mockDiscovery();
+		const blockedSession = session();
+		blockedSession.emitBeforeSubagentSpawn = async () => ({ block: true, reason: "pool exhausted" });
+		const error = await resolveEffectiveSubagentPolicy(request({ session: blockedSession })).catch(
+			(cause: unknown) => cause,
+		);
+		expect(error).toBeInstanceOf(StructuredSubagentError);
+		expect(error as StructuredSubagentError).toMatchObject({ kind: "preflight", message: "pool exhausted" });
 	});
 
 	it("does not assign a role when a child uses an explicit model selector", async () => {
