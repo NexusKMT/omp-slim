@@ -1493,6 +1493,7 @@ const streamOpenAICompletionsOnce = (
 									[messageThoughtSignature.field]: messageThoughtSignature.signature,
 								},
 							});
+							messageThoughtSignature = undefined;
 							break;
 						}
 					}
