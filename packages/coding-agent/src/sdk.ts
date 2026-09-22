@@ -2590,7 +2590,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						if (modelFallbackEnabled) {
 							usageFallbackTriggered = true;
 							usageFallbackReason ??= {
-								from: pattern,
+								from: formatModelSelectorValue(
+									formatModelStringWithRouting(primary.model),
+									primary.thinkingLevel,
+								),
 								reason: describeUsageFallback(usageHealth, settings.get("retry.usageReservePct")),
 							};
 							continue;
@@ -2608,7 +2611,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						) {
 							usageFallbackTriggered = true;
 							usageFallbackReason ??= {
-								from: pattern,
+								from: formatModelSelectorValue(
+									formatModelStringWithRouting(primary.model),
+									primary.thinkingLevel,
+								),
 								reason: describeUsageFallback(usageHealth, settings.get("retry.usageReservePct")),
 							};
 							continue;

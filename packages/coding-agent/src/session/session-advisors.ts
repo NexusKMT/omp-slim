@@ -1704,7 +1704,7 @@ export class SessionAdvisors {
 				await this.#host.emitSessionEvent({
 					type: "retry_fallback_applied",
 					from: currentSelector,
-					to: formatRetryFallbackSelector(candidate, nextThinkingLevel),
+					to: selector.raw,
 					role,
 					reason: `Advisor request failed: ${message}`,
 				});

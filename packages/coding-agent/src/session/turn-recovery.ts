@@ -1918,7 +1918,7 @@ export class TurnRecovery {
 		await this.#host.emitSessionEvent({
 			type: "retry_fallback_applied",
 			from: currentSelector,
-			to: formatRetryFallbackSelector(candidate, this.#host.thinkingLevel()),
+			to: selector.raw,
 			role,
 			reason: options?.reason,
 		});

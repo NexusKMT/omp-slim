@@ -215,12 +215,13 @@ Session-level retry events:
 - `retry_fallback_applied { from, to, role, reason? }`
 - `retry_fallback_succeeded { model, role }`
 
-`to` includes the effective thinking level after target-model clamping.
+`from`, `to`, and `role` retain their existing selector semantics.
 The optional `reason` explains the decision using the triggering health snapshot
-or provider error. The TUI displays it below the source-to-target warning.
+or provider error. The TUI displays a sanitized, bounded preview below the
+source-to-target warning; extensions and RPC receive the complete reason.
 Usage preflight notices distinguish plan-ineligible accounts, exhausted or
-blocked accounts, and the configured reserve threshold. They include the earliest
-reported reset when available,
+blocked accounts, and the configured reserve threshold. They include the time
+until the earliest reported future reset when available,
 and state that no request was sent to the source model for that attempt.
 Startup quota skips use the same explanation in `modelFallbackMessage`.
 Request-failure notices include the provider's error instead of implying a
