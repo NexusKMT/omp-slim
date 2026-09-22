@@ -478,7 +478,10 @@ export class MnemopiSessionState {
 		return formatRecallBlock(results);
 	}
 
-	async beforeAgentStartPrompt(promptText: string, signal?: AbortSignal): Promise<MemoryPromptPreparation | undefined> {
+	async beforeAgentStartPrompt(
+		promptText: string,
+		signal?: AbortSignal,
+	): Promise<MemoryPromptPreparation | undefined> {
 		if (!this.config.autoRecall || this.hasRecalledForFirstTurn) return undefined;
 		const latestPrompt = promptText.trim();
 		if (!latestPrompt) return undefined;

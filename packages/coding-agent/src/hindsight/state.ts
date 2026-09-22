@@ -428,7 +428,10 @@ export class HindsightSessionState {
 		}
 	}
 
-	async beforeAgentStartPrompt(promptText: string, signal?: AbortSignal): Promise<MemoryPromptPreparation | undefined> {
+	async beforeAgentStartPrompt(
+		promptText: string,
+		signal?: AbortSignal,
+	): Promise<MemoryPromptPreparation | undefined> {
 		if (this.config.mentalModelsEnabled && this.mentalModelsLoadPromise && this.mentalModelsLoadedAt === undefined) {
 			await Promise.race([this.mentalModelsLoadPromise, Bun.sleep(MENTAL_MODEL_FIRST_TURN_DEADLINE_MS)]);
 		}
