@@ -61,15 +61,20 @@ describe("GitLab Duo catalog mapping", () => {
 
 describe("GitLab Duo reasoning-off dispatch", () => {
 	it("honors disableReasoning for capped Anthropic-routed requests", async () => {
-		const model = getGitLabDuoModels().find(candidate => candidate.id === "duo-chat-opus-4-6");
+		// Budget-mode thinking is the case that raises `max_tokens` from a
+		// thinking budget, so the cap assertion has to run on this route.
+		const model = getGitLabDuoModels().find(candidate => candidate.id === "duo-chat-sonnet-4-5");
 		if (!model) throw new Error("GitLab Duo Anthropic model is missing");
 		const anthropicSpy = spyOn(registerBuiltins, "streamAnthropic");
+		let payload: { max_tokens?: number; thinking?: { type?: string } } | undefined;
+		const controller = new AbortController();
 
 		await streamGitLabDuo(model, context, {
 			apiKey: "gitlab-thinking-token",
 			maxTokens: 32,
 			reasoning: Effort.Medium,
 			disableReasoning: true,
+			signal: controller.signal,
 			fetch: async input => {
 				if (String(input).includes("/direct_access")) {
 					return new Response(JSON.stringify({ token: "direct-access-token", headers: {} }), {
@@ -79,18 +84,17 @@ describe("GitLab Duo reasoning-off dispatch", () => {
 				}
 				throw new Error("the payload hook should stop the proxy request before fetch");
 			},
-			onPayload: () => {
-				throw new Error("stop after dispatch capture");
+			onPayload: captured => {
+				payload = captured as { max_tokens?: number; thinking?: { type?: string } };
+				controller.abort();
+				return undefined;
 			},
 		}).result();
 
 		expect(anthropicSpy).toHaveBeenCalledTimes(1);
-		expect(anthropicSpy.mock.calls[0]?.[2]).toMatchObject({
-			maxTokens: 32,
-			thinkingEnabled: false,
-			thinkingBudgetTokens: undefined,
-			reasoning: undefined,
-		});
+		if (!payload) throw new Error("the capped Anthropic request payload was not captured");
+		expect(payload.max_tokens).toBe(32);
+		expect(payload.thinking).toEqual({ type: "disabled" });
 	});
 
 	it("forwards reasoning-off flags to the OpenAI-routed transports", async () => {
