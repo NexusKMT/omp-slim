@@ -5,6 +5,7 @@
 ### Added
 
 - Detected the otty terminal (`TERM_PROGRAM=otty`) with the Kitty graphics protocol, Unicode placeholder placement, OSC 8 hyperlinks and OSC 99 notifications; Sixel is absent and unverified capabilities (DECCARA, text sizing) keep conservative defaults ([#12665](https://github.com/can1357/oh-my-pi/pull/12665) by [@xiechimon](https://github.com/xiechimon)).
+- Detected the rio terminal (`TERM_PROGRAM=rio`) with Kitty graphics protocol and true color; unverified capabilities (hyperlinks, notifications, DECCARA) keep conservative defaults until proven in that terminal ([#12205](https://github.com/can1357/oh-my-pi/issues/12205)) ([#12263](https://github.com/can1357/oh-my-pi/pull/12263) by [@danilouchoa](https://github.com/danilouchoa)).
 
 ## [18.2.8] - 2026-09-21
 

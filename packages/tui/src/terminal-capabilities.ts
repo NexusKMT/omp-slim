@@ -38,6 +38,7 @@ export type TerminalId =
 	| "warp"
 	| "orca"
 	| "otty"
+	| "rio"
 	| "base"
 	| "trueColor";
 
@@ -677,6 +678,11 @@ const KNOWN_TERMINALS = Object.freeze({
 	// OSC 66 text sizing are unverified, so those stay on conservative defaults;
 	// synchronized output is left to the runtime DECRQM probe.
 	otty: new TerminalInfo("otty", ImageProtocol.Kitty, true, true, NotifyProtocol.Osc99),
+	// rio ships the Kitty graphics protocol — direct placement plus U=1 Unicode
+	// placeholders verified by the reporter (#12205). Everything unproven stays
+	// conservative: hyperlinks, DECCARA, screen-to-scrollback, and notifications
+	// keep the base defaults until verified in that terminal.
+	rio: new TerminalInfo("rio", ImageProtocol.Kitty, true, false),
 });
 
 /** Resolve terminal identity from environment markers used by common emulators. */
@@ -714,6 +720,7 @@ export function detectTerminalId(env: NodeJS.ProcessEnv = Bun.env): TerminalId {
 		if (caseEq(TERM_PROGRAM, "warpterminal")) return "warp";
 		if (caseEq(TERM_PROGRAM, "orca")) return "orca";
 		if (caseEq(TERM_PROGRAM, "otty")) return "otty";
+		if (caseEq(TERM_PROGRAM, "rio")) return "rio";
 	}
 
 	if (TERM?.toLowerCase().includes("ghostty")) return "ghostty";
