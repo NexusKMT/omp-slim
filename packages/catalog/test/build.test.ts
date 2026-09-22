@@ -895,6 +895,27 @@ describe("local OpenAI-compat output clamp", () => {
 		).toBe(true);
 	});
 
+	it("uses providerType when clamping aliased Responses backends", () => {
+		expect(
+			resolveModelPolicy(
+				responsesSpec({
+					provider: "workbench",
+					providerType: "llama.cpp",
+					baseUrl: "https://vllm.example.com/v1",
+				}),
+			).compat.clampOutputToModelMax,
+		).toBe(true);
+		expect(
+			resolveModelPolicy(
+				responsesSpec({
+					provider: "workbench",
+					providerType: "litellm",
+					baseUrl: "http://127.0.0.1:4000/v1",
+				}),
+			).compat.clampOutputToModelMax,
+		).toBe(false);
+	});
+
 	it("leaves clampOutputToModelMax off for LiteLLM Responses even on loopback", () => {
 		expect(
 			resolveModelPolicy(responsesSpec({ provider: "litellm", baseUrl: "http://127.0.0.1:4000/v1" })).compat
