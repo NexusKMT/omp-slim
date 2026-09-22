@@ -17,6 +17,7 @@
 - Fixed Edit previews and application panicking on Unicode no-op edits and overlapping duplicate matches.
 - Fixed live subagent messages getting stuck behind persisted-agent discovery, and roster discovery looping on dot-named transcripts.
 - Fixed llama.cpp discovery of PrismML Bonsai 2 27B GGUFs: built-in and custom-named providers now share catalog rules for chat-completions routing and the Qwen 3.8 thinking ladder (`low`/`medium`/`xhigh`), including cached models.
+- Fixed local memory consolidation stranding on Windows when a project's cwd casing drifted across launches (`C:\...\Documents` vs `...\documents`): scope keys now fold case on case-insensitive filesystems so one directory maps to one scope, preventing an empty-scope Phase 2 from wiping the shared `MEMORY.md`/`memory_summary.md`/`skills/` ([#12596](https://github.com/can1357/oh-my-pi/issues/12596)).
 
 ## [18.2.6] - 2026-09-18
 
