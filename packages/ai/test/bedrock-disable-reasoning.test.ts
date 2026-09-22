@@ -62,13 +62,17 @@ async function capture(
 	options: SimpleStreamOptions,
 ): Promise<ThinkingPayload> {
 	const controller = new AbortController();
-	const { promise, resolve } = Promise.withResolvers<ThinkingPayload>();
+	const { promise, resolve, reject } = Promise.withResolvers<ThinkingPayload>();
 	void streamSimple(model, context, {
 		apiKey: "test-key",
 		signal: controller.signal,
 		...options,
 		onPayload: payload => {
-			if (!isThinkingPayload(payload)) throw new Error("expected a Bedrock request payload");
+			if (!isThinkingPayload(payload)) {
+				reject(new Error("expected a Bedrock request payload"));
+				controller.abort();
+				return undefined;
+			}
 			resolve(payload);
 			controller.abort();
 			return undefined;
