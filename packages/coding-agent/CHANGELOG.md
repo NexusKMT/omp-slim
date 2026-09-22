@@ -10,6 +10,7 @@
 ### Changed
 
 - Coalesced judgment batch drain operations for better performance under high load
+
 ### Fixed
 
 - TTSR whole-buffer lookahead conditions now avoid repeated starting-position scans during streamed writes ([#12261](https://github.com/can1357/oh-my-pi/issues/12261), [#12887](https://github.com/can1357/oh-my-pi/pull/12887) by [@Dante-dan](https://github.com/Dante-dan)).

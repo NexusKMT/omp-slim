@@ -287,16 +287,18 @@ const INLINE_FLAG_PREFIX = /^\(\?([a-z]+)\)/;
 const TRANSLATABLE_INLINE_FLAGS = /^[ims]+$/;
 
 /**
- * A sequence of positive lookaheads whose bodies all begin with `[\s\S]*`
+ * A sequence of positive lookaheads whose bodies all begin with greedy `[\s\S]*`
  * has the same result at index zero as it does at any later index. Each body
  * can consume the prefix itself before testing its predicate, so asking the
  * RegExp engine to retry the sequence at every character only repeats work.
+ * Lazy `[\s\S]*?` prefixes are excluded because captures chosen by one
+ * lookahead can make a later backreference depend on the starting position.
  */
 function canMatchWholeBufferFromStart(source: string): boolean {
 	let offset = 0;
 	let lookaheads = 0;
 	const prefix = "(?=[\\s\\S]*";
-	while (source.startsWith(prefix, offset)) {
+	while (source.startsWith(prefix, offset) && source[offset + prefix.length] !== "?") {
 		let depth = 1;
 		let inCharacterClass = false;
 		let end = -1;
