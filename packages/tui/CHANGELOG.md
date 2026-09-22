@@ -6,6 +6,10 @@
 
 - Coalesced status event updates for progress-based operations to reduce TUI render overhead
 
+### Fixed
+
+- Kept usage quota names distinguishable with aligned bars and bounded, sanitized labels in narrow and multi-column dashboards ([#12903](https://github.com/can1357/oh-my-pi/pull/12903) by [@lockwo](https://github.com/lockwo)).
+
 ## [18.2.9] - 2026-09-22
 
 ### Added
