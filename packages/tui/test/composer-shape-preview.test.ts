@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { renderComposerShapePreview } from "../src/overlays/composer-shape-preview";
 import { getComposerShapeOptions, installExtensionComposerShape } from "../src/overlays/composer-shape-registry";
 import { initTheme, setTheme } from "../src/theme/theme";
-import type { ComposerStyle } from "../src/index";
+import { type ComposerStyle, visibleWidth } from "../src/index";
 
 beforeAll(async () => {
 	await initTheme();
@@ -120,23 +120,16 @@ describe("composer shape preview", () => {
 
 	it("uses the full overlay width instead of clipping the status band (issue #12500)", async () => {
 		await setTheme("dark");
-		const seenWidths: number[] = [];
 		const status = {
 			getTopBorder: (width: number) => ({ content: "", width }),
 			getStandaloneTopBorder: (width: number) => ({ content: "", width }),
-			getBandTopBorder: (width: number) => {
-				seenWidths.push(width);
-				return { content: "", width };
-			},
-			renderBottomBar: (width: number) => {
-				seenWidths.push(width);
-				return "";
-			},
+			getBandTopBorder: (width: number) => ({ content: " ".repeat(width - 6) + "STATUS", width }),
+			renderBottomBar: () => "",
 		};
 
-		renderComposerShapePreview("band", 200, status);
+		const [statusBand] = renderComposerShapePreview("band", 200, status);
 
-		expect(seenWidths.length).toBeGreaterThan(0);
-		for (const width of seenWidths) expect(width).toBe(200);
+		expect(visibleWidth(statusBand ?? "")).toBe(200);
+		expect(statusBand).toEndWith("STATUS");
 	});
 });
