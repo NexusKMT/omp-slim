@@ -688,11 +688,24 @@ function normalizeOptionalNullsForSchema(
 		if (!Array.isArray(branches)) return { value, changed: false };
 
 		// Prefer an already matching branch before trying repairs against other
-		// alternatives. A closed sibling can delete null-valued keys that are
-		// required (and nullable) in the matching branch.
+		// alternatives. Normalize each match independently: a closed sibling can
+		// delete nullable keys and invalidate itself while a later matching branch
+		// still requires that data.
 		for (const branch of branches) {
-			if (branchMatchesSchema(branch, value, root)) {
-				return normalizeOptionalNullsForSchema(branch, value, isRoot, root, insideContent, speculativeUnion);
+			if (!branchMatchesSchema(branch, value, root)) continue;
+			const normalized = normalizeOptionalNullsForSchema(
+				branch,
+				value,
+				isRoot,
+				root,
+				insideContent,
+				speculativeUnion,
+			);
+			if (
+				branchMatchesSchema(branch, normalized.value, root) &&
+				branchMatchesSchema(schemaObject, normalized.value, root)
+			) {
+				return normalized;
 			}
 		}
 
@@ -867,7 +880,9 @@ function normalizeOptionalNullsForSchema(
 	//
 	// At the root level unknown null-valued keys stay intact; the
 	// post-validation `preserveUnknownRootFields` pass re-attaches root extras.
-	if (!isRoot && schemaObject.additionalProperties === false) {
+	// They also stay intact while guessing a union branch because another
+	// candidate may require the nullable data.
+	if (!isRoot && !speculativeUnion && schemaObject.additionalProperties === false) {
 		const knownKeys = new Set(Object.keys(properties));
 		for (const key of Object.keys(nextValue)) {
 			if (knownKeys.has(key)) continue;
