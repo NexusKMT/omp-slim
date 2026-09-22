@@ -630,6 +630,21 @@ index 3d68f887920ded269eb641273a5a13dee235ae1d..dcdd86c8697c0dbd2dd2162c9a739dd9
      }
      mainRealm() {
          return this.#world;
+diff --git a/lib/puppeteer/common/util.js b/lib/puppeteer/common/util.js
+--- a/lib/puppeteer/common/util.js
++++ b/lib/puppeteer/common/util.js
+@@ -38,7 +38,10 @@ export class PuppeteerURL {
+     static fromCallSite(functionName, site) {
+         const url = new PuppeteerURL();
+         url.#functionName = functionName;
+-        url.#siteString = site.toString();
++        // Bun's compiled binaries can expose fewer structured stack frames than
++        // Puppeteer's fixed call-site offset expects. Source attribution is
++        // best-effort and must not make the evaluated function unusable.
++        url.#siteString = site?.toString() ?? '';
+         return url;
+     }
+     static parse = (url) => {
 diff --git a/lib/puppeteer/common/QueryHandler.js b/lib/puppeteer/common/QueryHandler.js
 index 8c406cf90e0f9d899efaa5acb6a636a86f32e37e..185ef5954b2b95b708855ed68e8327a8c51f9e70 100644
 --- a/lib/puppeteer/common/QueryHandler.js
