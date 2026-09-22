@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Custom extension APIs that wrap the OpenAI-completions streamer now resolve neutral wire defaults and honor declared compatibility overrides instead of crashing on an undefined compatibility record ([#12562](https://github.com/can1357/oh-my-pi/issues/12562)).
 - Signing in to a local provider (lm-studio, llama.cpp, vllm) with an empty key paste no longer reports the provider as logged in while its requests go out unauthenticated. ([#12436](https://github.com/can1357/oh-my-pi/pull/12436) by [@xiechimon](https://github.com/xiechimon))
 - Fixed every turn failing with `400 Invalid schema for function '<tool>' … Missing '<param>'` on Vercel AI Gateway models served from a non-Anthropic upstream (e.g. `openai/gpt-5.6-sol`): the translated strict-tool rejection now triggers the existing non-strict retry instead of failing the turn ([#12760](https://github.com/can1357/oh-my-pi/pull/12760) by [@primitive-type](https://github.com/primitive-type)).
 - Expired AWS SSO access tokens are now refreshed via the SSO OIDC `refresh_token` grant instead of failing with `sso-token-expired`, so Bedrock profiles keep working between `aws sso login` runs the same way the AWS CLI does ([#12736](https://github.com/can1357/oh-my-pi/pull/12736) by [@nwbb](https://github.com/nwbb)).
