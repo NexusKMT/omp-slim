@@ -3335,6 +3335,12 @@
 				"thinking": { "efforts": ["minimal", "low", "medium", "high", "xhigh"] }
 			},
 			{
+				"source": "classes/gpt-oss.kdl:16",
+				"class": "gpt-oss",
+				"providers": ["google-antigravity", "google-gemini-cli"],
+				"wire": { "supportsFunctionPartId": true }
+			},
+			{
 				"source": "classes/gpt-oss.kdl:3",
 				"class": "gpt-oss",
 				"thinking": { "efforts": ["low", "medium", "high"] }
