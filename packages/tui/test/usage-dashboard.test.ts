@@ -9,6 +9,7 @@ import {
 	UsageDashboardComponent,
 } from "@oh-my-pi/pi-tui/overlays/usage-dashboard";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 
 function day(day: string, cost: number, requests = 1): DailyActivityPoint {
 	return { day, cost, requests };
@@ -239,6 +240,39 @@ describe("buildProviderCards", () => {
 describe("UsageDashboardComponent", () => {
 	beforeAll(async () => {
 		await initTheme(false);
+	});
+	it("keeps quota names distinguishable beside or above their bars", async () => {
+		const now = Date.now();
+		const { promise: rendered, resolve: markRendered } = Promise.withResolvers<void>();
+		const component = new UsageDashboardComponent({
+			reports: [
+				report("anthropic", "user@example.test", [
+					limit("anthropic", "account", "7d", "Claude 7 Day", 1, "exhausted", now + 3_600_000),
+					limit("anthropic", "account", "fable", "Claude 7 Day (Fable)", 0.16, "ok", now + 3_600_000),
+					limit("anthropic", "account", "extra", "Claude Extra Usage", 0.05, "ok"),
+				]),
+			],
+			renderDetail: () => "",
+			loadActivity: async push => {
+				push([]);
+			},
+			requestRender: () => markRendered(),
+			onClose: () => {},
+		});
+		try {
+			await rendered;
+			for (const width of [36, 60]) {
+				const lines = component.render(width);
+				const output = Bun.stripANSI(lines.join("\n"));
+				expect(output).toContain("Claude 7 Day (Fable)");
+				expect(output).toContain("Claude Extra Usage");
+				expect(output).toContain("84%");
+				expect(output).toContain("95%");
+				for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+			}
+		} finally {
+			component.dispose();
+		}
 	});
 	it("renders specific error reason when activity loading fails instead of generic DB read error", async () => {
 		const { promise: rendered, resolve: markRendered } = Promise.withResolvers<void>();

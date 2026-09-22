@@ -7,7 +7,15 @@
  */
 import * as os from "node:os";
 import { resolveUsedFraction, type UsageLimit, type UsageReport } from "@oh-my-pi/pi-ai";
-import { type Component, matchesKey, replaceTabs, routeSgrMouseInput, truncateToWidth, visibleWidth } from "../index";
+import {
+	type Component,
+	matchesKey,
+	replaceTabs,
+	routeSgrMouseInput,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../index";
 import { colorLuma, formatDuration, hexToRgb, rgbToHex, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatProviderName } from "../chrome/format";
 import {
@@ -458,34 +466,43 @@ export class UsageDashboardComponent implements Component {
 
 		const hidden = card.windows.length - CARD_MAX_WINDOWS;
 		const visibleWindows = card.windows.slice(0, CARD_MAX_WINDOWS);
-		// Fixed columns across every row of the card so bars all start and end
-		// at the same x: label | bar | pct | reset. The reset column sizes to
-		// the card's widest countdown instead of flexing per row.
+		// Keep bar columns aligned. If complete labels cannot fit beside the
+		// bars, put them above the bars instead of hiding quota distinctions.
 		const resetWidth = visibleWindows.reduce(
 			(max, window) => Math.max(max, window.resetMs !== undefined ? formatDuration(window.resetMs).length : 0),
 			0,
 		);
-		const labelWidth = Math.min(16, Math.max(6, width - 24));
-		const barWidth = Math.max(5, width - 2 - labelWidth - 1 - 5 - (resetWidth > 0 ? resetWidth + 1 : 0));
-		for (const window of visibleWindows) {
-			const tagPlain = window.windowTag
-				? truncateToWidth(window.windowTag, Math.max(2, Math.floor(labelWidth / 2) - 1))
-				: "";
-			const baseWidth = tagPlain ? labelWidth - visibleWidth(tagPlain) - 1 : labelWidth;
-			const basePlain = truncateToWidth(window.label, baseWidth).padEnd(baseWidth);
-			const label = tagPlain
-				? `${theme.fg("muted", basePlain)} ${theme.fg("dim", tagPlain)}`
-				: theme.fg("muted", basePlain);
+		const contentWidth = Math.max(1, width - 2);
+		const labels = visibleWindows.map(window =>
+			window.windowTag
+				? `${theme.fg("muted", window.label)} ${theme.fg("dim", window.windowTag)}`
+				: theme.fg("muted", window.label),
+		);
+		const labelWidth = Math.max(0, ...labels.map(label => visibleWidth(label)));
+		const suffixWidth = 5 + (resetWidth > 0 ? resetWidth + 1 : 0);
+		const stacked = contentWidth - labelWidth - 1 - suffixWidth < 5;
+		const barWidth = Math.max(1, contentWidth - (stacked ? 0 : labelWidth + 1) - suffixWidth);
+		for (const [index, window] of visibleWindows.entries()) {
+			const label = labels[index]!;
+			const prefix = stacked ? "" : `${label}${" ".repeat(labelWidth - visibleWidth(label))} `;
+			if (stacked) {
+				for (const line of wrapTextWithAnsi(label, contentWidth)) lines.push(`  ${line}`);
+			}
 			if (window.fraction === undefined) {
 				const text = theme.fg("dim", window.usedText ?? "no data");
-				lines.push(truncateToWidth(`  ${label} ${text}`, width));
+				for (const line of wrapTextWithAnsi(`${prefix}${text}`, contentWidth)) lines.push(`  ${line}`);
 				continue;
 			}
 			const freePct = Math.max(0, Math.round((1 - window.fraction) * 100));
 			const pctText = theme.fg(this.#statusColor(window.status), `${freePct}%`.padStart(5));
 			const resetPlain = window.resetMs !== undefined ? formatDuration(window.resetMs) : "";
 			const resetText = resetWidth > 0 ? ` ${theme.fg("dim", resetPlain.padStart(resetWidth))}` : "";
-			lines.push(`  ${label} ${this.#miniBar(window.fraction, window.status, barWidth)}${pctText}${resetText}`);
+			for (const line of wrapTextWithAnsi(
+				`${prefix}${this.#miniBar(window.fraction, window.status, barWidth)}${pctText}${resetText}`,
+				contentWidth,
+			)) {
+				lines.push(`  ${line}`);
+			}
 		}
 		if (hidden > 0) lines.push(`  ${theme.fg("dim", `+${hidden} more`)}`);
 		return lines;
