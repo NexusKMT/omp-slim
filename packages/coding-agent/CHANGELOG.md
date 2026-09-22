@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added live benchmark results table with real-time model ranking and per-kind performance metrics
+- Added dedicated prefill throughput reporting for prefill-focused benchmarks
 - Added `/record` slash command to capture terminal sessions as replayable `.ompcast` files
 - Added `omp play` CLI for terminal-based playback of session recordings
 - Added intent descriptions to judgment batching
@@ -11,6 +13,7 @@
 
 ### Changed
 
+- Updated `omp bench` default profile to `chat` and improved CLI flag documentation
 - Coalesced judgment batch drain operations for better performance under high load
 
 ## [18.2.9] - 2026-09-22
