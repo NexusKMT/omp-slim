@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added `/record` slash command to capture terminal sessions as replayable `.ompcast` files
+- Added `omp play` CLI for terminal-based playback of session recordings
 - Added intent descriptions to judgment batching
 - Added live progress tracking for judgment batches in the TUI
 

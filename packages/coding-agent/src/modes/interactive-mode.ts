@@ -45,6 +45,7 @@ import { isInsideTerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-capabilit
 import {
 	$env,
 	adjustHsv,
+	formatDuration,
 	formatNumber,
 	getProjectDir,
 	hsvToRgb,
@@ -144,6 +145,7 @@ import { isMCPToolName } from "../tools/builtin-names";
 import type { LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
 import { StreamPublisher } from "../stream/publisher";
+import { newRecordingPath, SessionRecorder } from "../stream/recording";
 import { StreamRedactor } from "../stream/redactor";
 import {
 	FEED_MODEL_BADGE_WIDTH,
@@ -994,6 +996,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	collabHost?: CollabHost;
 	collabGuest?: CollabGuestLink;
 	#streamPublisher: StreamPublisher | undefined;
+	#recorder: SessionRecorder | undefined;
+	#recorderStarting = false;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
@@ -5600,6 +5604,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#appearanceRefreshRequest = undefined;
 		this.#streamPublisher?.dispose();
 		this.#streamPublisher = undefined;
+		void this.#recorder?.stop();
+		this.#recorder = undefined;
 		// Last chance to refresh the startup status placeholder for the next launch.
 		this.#persistComposerStatus();
 		if (this.loadingAnimation) {
@@ -5777,6 +5783,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		try {
 			this.#streamPublisher?.dispose();
 			this.#streamPublisher = undefined;
+			await this.#recorder?.stop();
+			this.#recorder = undefined;
 			// Guests get goodbye and the registry entry disappears before the
 			// session is disposed, under the same still-closing progress notice.
 			await this.collabController.shutdown("host exited");
@@ -6524,6 +6532,37 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.ui.requestRender();
 			},
 		});
+	}
+
+	/** Start a `/record` screen capture, or stop the running one and report where it was saved. */
+	async toggleRecording(): Promise<void> {
+		const active = this.#recorder;
+		if (active) {
+			this.#recorder = undefined;
+			const elapsed = active.elapsedMs;
+			await active.stop();
+			this.statusLine.setRecording(false);
+			this.showStatus(`Saved ${formatDuration(elapsed)} recording to ${active.path} · replay: omp play`);
+			return;
+		}
+		if (this.#recorderStarting) return;
+		this.#recorderStarting = true;
+		const cwd = this.sessionManager.getCwd();
+		try {
+			this.#recorder = await SessionRecorder.start({
+				tui: this.ui,
+				redactor: await StreamRedactor.load(cwd, this.settings.get("stream.redactPatterns")),
+				title: this.sessionManager.getSessionName() || path.basename(cwd),
+				path: newRecordingPath(this.sessionManager.getSessionId()),
+			});
+		} catch (error) {
+			this.showError(`Could not start recording: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		} finally {
+			this.#recorderStarting = false;
+		}
+		this.statusLine.setRecording(true);
+		this.showStatus(`Recording to ${this.#recorder.path} · /record again to stop`);
 	}
 
 	/** Start or stop the Codex-backed realtime voice surface. */
