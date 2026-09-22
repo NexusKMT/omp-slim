@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored modified keys and terminal notifications over SSH in tmux by resolving the attached client's terminal type ([#12539](https://github.com/can1357/oh-my-pi/pull/12539) by [@CzBiX](https://github.com/CzBiX)).
+
 ## [18.2.5] - 2026-09-17
 
 ### Added
