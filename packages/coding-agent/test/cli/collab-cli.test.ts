@@ -156,6 +156,23 @@ describe("Collab CLI", () => {
 		}
 	});
 
+	it("renders no activity token for a host that does not report busy", async () => {
+		const dir = await makeTmpDir();
+		const legacy: HostFixture = {
+			snapshot: { ...BRAVO.snapshot, instanceId: "host-charlie", sessionId: "sess-charlie", busy: null },
+			controlUrl: "https://collab.test/#charlie-CONTROL-url",
+			viewUrl: "https://collab.test/#charlie-VIEW-url",
+		};
+		await publish(dir, legacy);
+		const out = collector();
+		await runCommand(["list"], dir, out);
+
+		const text = out.plain();
+		expect(text).toContain("host-charlie");
+		// An older host reports nothing, and the row guesses nothing.
+		expect(text).not.toMatch(/working|idle/);
+	});
+
 	it("emits repeatable, two-space metadata-only JSON for list and the default action with -j", async () => {
 		const dir = await makeTmpDir();
 		await publish(dir, BRAVO);
