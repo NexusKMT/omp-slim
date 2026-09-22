@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI Codex requests using an outdated client version for GPT-6 Sol and Luna ([#12885](https://github.com/can1357/oh-my-pi/pull/12885) by [@itsddvn](https://github.com/itsddvn)).
+
 ## [18.2.6] - 2026-09-18
 
 ### Fixed
