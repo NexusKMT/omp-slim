@@ -322,7 +322,6 @@ describe("TTSR stream buffers", () => {
 			update(message, {
 				type: "toolcall_end",
 				contentIndex: 0,
-				delta: "",
 				partial: message as never,
 				toolCall: {
 					type: "toolCall",
