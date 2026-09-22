@@ -1166,8 +1166,12 @@ async function rewriteLegacyExtensionSource(
 			replacements.push({ ...reference, replacement });
 		}
 	}
-	const withImports = applySpecifierReplacements(source, replacements);
-	return rewriteExtensionSpecifiers(withImports, importerPath);
+	// Resolve `require()` targets against the original source rather than the
+	// import-rewritten text: the rewrite embeds a per-load `?mtime=` tag, which
+	// would give every load a fresh parse-cache key and force a Babel reparse.
+	// Import and require references never overlap, so one pass applies both.
+	replacements.push(...(await collectExtensionSpecifierReplacements(source, importerPath)));
+	return applySpecifierReplacements(source, replacements);
 }
 
 /** Test seam for compiled-binary legacy extension source rewriting. */
@@ -1890,16 +1894,16 @@ async function resolveExtensionCommonJsRequire(specifier: string, importerPath: 
 }
 
 /**
- * Rewrite CommonJS graph specifiers that cannot resolve from the bridge's
+ * Resolve the CommonJS graph specifiers that cannot resolve from the bridge's
  * generated function: bare `require()` calls and, for graph-owned CommonJS
  * sources, import specifiers. Resolved targets are retained for synchronous
  * lazy hydration after load-time source caches clear.
  */
-async function rewriteExtensionSpecifiers(
+async function collectExtensionSpecifierReplacements(
 	source: string,
 	importerPath: string,
 	rewriteImports = false,
-): Promise<string> {
+): Promise<Array<ExtensionSpecifierReference & { replacement: string }>> {
 	const references = getExtensionSourceAnalysis(source, importerPath).references;
 	const resolvedSpecifierTargets = new Map<string, string>();
 	const replacements: Array<ExtensionSpecifierReference & { replacement: string }> = [];
@@ -1926,7 +1930,7 @@ async function rewriteExtensionSpecifiers(
 		replacements.push({ ...reference, replacement });
 	}
 	extensionSynchronousSpecifierTargets.set(importerPath, resolvedSpecifierTargets);
-	return applySpecifierReplacements(source, replacements);
+	return replacements;
 }
 
 function rewriteExtensionSpecifiersFromCache(source: string, importerPath: string): string {
@@ -1947,7 +1951,7 @@ function rewriteExtensionSpecifiersFromCache(source: string, importerPath: strin
 /**
  * Whether a module's source contains a bare require that resolves to a native
  * `.node` addon — i.e. a napi-rs style loader that must be hooked into the
- * extension graph so {@link rewriteExtensionSpecifiers} can pin its
+ * extension graph so {@link collectExtensionSpecifierReplacements} can pin its
  * platform-package requires to absolute paths.
  */
 async function moduleRequiresNativeAddon(modulePath: string): Promise<boolean> {
@@ -2328,7 +2332,10 @@ async function collectExtensionModules(entryRealPath: string): Promise<Extension
 	}
 	for (const [modulePath, source] of modules) {
 		if (commonJsPaths.has(modulePath)) {
-			modules.set(modulePath, await rewriteExtensionSpecifiers(source, modulePath, true));
+			modules.set(
+				modulePath,
+				applySpecifierReplacements(source, await collectExtensionSpecifierReplacements(source, modulePath, true)),
+			);
 		} else if (synchronousSourcePaths.has(modulePath)) {
 			modules.set(modulePath, await rewriteLegacyExtensionSource(source, modulePath));
 		}

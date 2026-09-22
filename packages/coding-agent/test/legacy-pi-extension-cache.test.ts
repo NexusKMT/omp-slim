@@ -41,8 +41,9 @@ test("warm extension analysis preserves import rewriting without reparsing", asy
 
 	expect(await runProbe(cacheRoot)).toBe('import value from "./dependency.js?mtime=7";\n');
 
-	expect(await runProbe(cacheRoot, probePath, ["--expect-cache-hit"])).toBe(
-		'import value from "./dependency.js?mtime=7";\n',
+	// Each real load uses a fresh tag; the warm run must still hit the cache.
+	expect(await runProbe(cacheRoot, probePath, ["--expect-cache-hit", "--tag=8"])).toBe(
+		'import value from "./dependency.js?mtime=8";\n',
 	);
 });
 
