@@ -17,6 +17,7 @@
 - Fixed the Anthropic prompt-cache keep-alive refresh 400ing when it replayed a forced-tool turn: the zero-output (`max_tokens: 0`) refresh now drops the inherited forced `tool_choice`, which Anthropic rejects with `max_tokens: 0` ([#12597](https://github.com/can1357/oh-my-pi/issues/12597)).
 - Fixed auth-broker usage reports crossing between Team members who share workspace account and organization IDs, preventing healthy credentials from inheriting sibling usage blocks ([#12560](https://github.com/can1357/oh-my-pi/issues/12560)).
 - OpenAI Codex requests no longer hang when a non-2xx response stalls its error body; the pre-response deadline now bounds the read ([#12831](https://github.com/can1357/oh-my-pi/pull/12831) by [@roboomp](https://github.com/roboomp)).
+- Kimi usage now shows the monthly total and code quotas alongside the 5-hour window instead of dropping them ([#12855](https://github.com/can1357/oh-my-pi/pull/12855) by [@roboomp](https://github.com/roboomp)).
 
 ## [18.2.8] - 2026-09-21
 
