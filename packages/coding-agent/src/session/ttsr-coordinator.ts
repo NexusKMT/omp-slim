@@ -512,6 +512,7 @@ export class TtsrCoordinator {
 			this.#emitTriggerOnce(matchContext, matches);
 			return false;
 		}
+		this.#addPendingInjections(matches);
 		if (!shouldInterrupt) return false;
 
 		this.#abortPending = true;
