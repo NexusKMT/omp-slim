@@ -41,6 +41,7 @@
 
 - Anthropic organization-level OAuth permission errors now reliably rotate to sibling credentials and persist blocks across usage reports.
 - Fixed error handling for provider responses that do not include token usage information.
+- Fixed the Anthropic prompt-cache keep-alive refresh 400ing when it replayed a forced-tool turn: the zero-output (`max_tokens: 0`) refresh now drops the inherited forced `tool_choice`, which Anthropic rejects with `max_tokens: 0` ([#12597](https://github.com/can1357/oh-my-pi/issues/12597)).
 
 ## [18.2.6] - 2026-09-18
 
