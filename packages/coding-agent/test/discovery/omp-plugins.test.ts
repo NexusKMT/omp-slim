@@ -571,6 +571,37 @@ test(".mcp.json expands environment placeholders recursively", async () => {
 	}
 });
 
+test(".mcp.json substitutes ${CLAUDE_PLUGIN_ROOT} and ${OMP_PLUGIN_ROOT} with the plugin root (#12792)", async () => {
+	writeFile(
+		path.join(ext, ".mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				claude: {
+					command: "node",
+					args: ["${CLAUDE_PLUGIN_ROOT}/bin/server.js"],
+					cwd: "${OMP_PLUGIN_ROOT}",
+				},
+				plain: { command: "echo", args: ["hello"] },
+			},
+		}),
+	);
+	writeFile(path.join(project, ".omp", "settings.json"), JSON.stringify({ extensions: [ext] }));
+
+	const servers = await loadFromPlugin<{
+		name: string;
+		command?: string;
+		args?: string[];
+		cwd?: string;
+	}>(mcpCapability.id, ctx());
+	const claude = servers.find(s => s.name === "claude");
+	const plain = servers.find(s => s.name === "plain");
+
+	expect(claude?.args).toEqual([path.join(ext, "bin", "server.js")]);
+	expect(claude?.cwd).toBe(ext);
+	// Servers without placeholders must not be rewritten.
+	expect(plain?.args).toEqual(["hello"]);
+});
+
 test("relative path-like command and cwd resolve against the plugin config directory", async () => {
 	writeFile(
 		path.join(ext, ".mcp.json"),
