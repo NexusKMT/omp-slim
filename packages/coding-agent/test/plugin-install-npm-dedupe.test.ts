@@ -117,4 +117,29 @@ describe("PluginManager.install npm idempotency", () => {
 		const raw = await Bun.file(pluginsPkgJson).text();
 		expect(keyCount(raw)).toBe(1);
 	});
+
+	test("a malformed full-spec key from an earlier upgrade is removed", async () => {
+		await Bun.write(
+			pluginsPkgJson,
+			JSON.stringify(
+				{
+					name: "omp-plugins",
+					private: true,
+					dependencies: {
+						"npm:pi-lens@4.1.6": "npm:pi-lens@4.1.6",
+						"pi-lens": "npm:pi-lens@4.1.6",
+					},
+				},
+				null,
+				2,
+			),
+		);
+		mockAppendingBunInstall();
+
+		const mgr = new PluginManager(tmpRoot);
+		await mgr.install("npm:pi-lens@4.2.0");
+
+		const dependencies = (await Bun.file(pluginsPkgJson).json()).dependencies;
+		expect(dependencies).toEqual({ "pi-lens": "npm:pi-lens@4.2.0" });
+	});
 });
