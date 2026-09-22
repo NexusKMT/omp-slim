@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `omp usage` capacity rows now report a model-scoped quota cap (for example Anthropic's Fable weekly cap) as its own meter instead of folding it into the shared window it caps, so a spent scoped cap no longer reads as a partly-spent shared pool; routing copies of one shared upstream pool stay merged.
+
 ## [18.2.9] - 2026-09-22
 
 ### Added

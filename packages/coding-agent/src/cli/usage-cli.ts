@@ -488,10 +488,20 @@ export interface ProviderWindowStat {
 	remainingAccounts: number;
 }
 
+/**
+ * Meter identity for a limit that holds its own quota pool inside a window. A model-scoped
+ * allowance is a separate pool from the umbrella window it caps - `claude.ts` marks the Fable
+ * weekly cap `tier` without `shared` precisely so it cannot gate Opus or Sonnet requests - and
+ * reporting it separately keeps a spent scoped cap visible next to the umbrella remainder.
+ * `sharedGroup` is the opposite signal: one upstream pool reported under several routing labels,
+ * which the collapse pass already merges, so it never becomes a meter. Codex meters that carry no
+ * tier fall back to the limit-id slug.
+ */
 function meterForLimit(report: UsageReport, limit: UsageLimit): string | undefined {
-	if (report.provider !== "openai-codex") return undefined;
+	if (limit.scope.sharedGroup !== undefined) return undefined;
 	const tier = limit.scope.tier?.trim().toLowerCase();
 	if (tier) return tier;
+	if (report.provider !== "openai-codex") return undefined;
 	const slug = limit.id.toLowerCase().split(":")[1];
 	return slug && slug !== "primary" && slug !== "secondary" ? slug : "chat";
 }
@@ -500,8 +510,9 @@ function meterForLimit(report: UsageReport, limit: UsageLimit): string | undefin
  * Aggregate one provider's reports into per-window quota capacity stats.
  *
  * Limits are bucketed by window duration (5h, 7d, ...). Within a bucket each
- * account contributes its single highest used fraction. Codex keeps each meter
- * in its own bucket because chat and Spark can share a window duration.
+ * account contributes its single highest used fraction. Limits that hold their
+ * own pool inside a window keep their own bucket: a model-scoped tier cap, and
+ * Codex chat versus Spark, which can share a window duration.
  */
 export function computeProviderWindowStats(reports: UsageReport[]): ProviderWindowStat[] {
 	const buckets = new Map<string, { window: string; durationMs?: number; meter?: string; fractions: number[] }>();
