@@ -274,6 +274,9 @@
 - Fixed OpenCode Go and Zen requests by including the required stable per-conversation session identification.
 - Improved Anthropic prompt caching so explicit cache breakpoints preserve reusable tools and system prompts when the message tail changes.
 - Anthropic and OpenRouter 402 credit-exhaustion errors ("would exceed your available credits", "Insufficient credits") now switch to a sibling account instead of stopping the turn with a retry hint.
+### Fixed
+
+- Fixed OpenAI-compatible Gemini gateways losing message-level thought signatures when replaying tool-call history.
 
 ## [18.1.5] - 2026-09-03
 
