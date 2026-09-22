@@ -53,3 +53,11 @@ describe("Windows release binary target", () => {
 		});
 	});
 });
+
+describe("macOS release binary entitlements", () => {
+	it("allows Xcode MCP automation through Apple Events", async () => {
+		const entitlements = await Bun.file(path.join(repoRoot, "scripts/macos-entitlements.plist")).text();
+
+		expect(entitlements).toContain("<key>com.apple.security.automation.apple-events</key>\n\t<true/>");
+	});
+});

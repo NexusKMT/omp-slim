@@ -17,6 +17,7 @@
 - Fixed Edit previews and application panicking on Unicode no-op edits and overlapping duplicate matches.
 - Fixed live subagent messages getting stuck behind persisted-agent discovery, and roster discovery looping on dot-named transcripts.
 - Fixed llama.cpp discovery of PrismML Bonsai 2 27B GGUFs: built-in and custom-named providers now share catalog rules for chat-completions routing and the Qwen 3.8 thinking ladder (`low`/`medium`/`xhigh`), including cached models.
+- Fixed first-time Xcode MCP connections on macOS by allowing the signed `omp` binary to request Apple Events automation access ([#12572](https://github.com/can1357/oh-my-pi/issues/12572)).
 
 ## [18.2.6] - 2026-09-18
 
