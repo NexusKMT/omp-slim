@@ -10,7 +10,6 @@ import { GeminiHeaderRunDetector } from "@oh-my-pi/pi-ai/utils/thinking-loop";
 import { type RepeatedToolCallDetection, ToolCallLoopGuard } from "@oh-my-pi/pi-ai/utils/tool-call-loop-guard";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
-import type { LocalProtocolOptions } from "../internal-urls";
 import geminiToolReminderTemplate from "../prompts/system/gemini-tool-call-reminder.md" with { type: "text" };
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import type { CustomMessage } from "./messages";
@@ -39,13 +38,12 @@ export interface StreamGuardsHost {
 	model(): Model | undefined;
 	isDisposed(): boolean;
 	promptGeneration(): number;
-	localProtocolOptions(): LocalProtocolOptions;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
 	schedulePostPromptTask(task: (signal: AbortSignal) => Promise<void>): void;
 	discardAssistantTurn(message: AssistantMessage): void;
 }
 
-/** Guards streamed edit calls against generated files and invalid final previews. */
+/** Guards streamed edit calls against invalid final previews. */
 export class StreamingEditGuard {
 	readonly #host: StreamGuardsHost;
 	#abortTriggered = false;
