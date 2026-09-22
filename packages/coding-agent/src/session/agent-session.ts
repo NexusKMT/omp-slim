@@ -800,6 +800,14 @@ export class AgentSession {
 	#postPromptTasksPromise: Promise<void> | undefined = undefined;
 	#postPromptTasksResolve: (() => void) | undefined = undefined;
 	#postPromptTasksAbortController = new AbortController();
+	/**
+	 * Cancels the current turn's pre-dispatch setup (memory-backend auto-recall and
+	 * other awaited preparation in {@link #prepareAgentStart}) when {@link abort} runs.
+	 * Bumping {@link #promptGeneration} only makes the cooperative `isCurrent()` checks
+	 * return false; a blocking network recall cannot observe that until it resolves, so
+	 * Esc would otherwise stall for the full recall timeout (issue #12668).
+	 */
+	#promptSetupAbortController: AbortController | undefined;
 	#activeAgentContinue: ActiveAgentContinue | undefined;
 	#agentContinueSchedulerToken = 0;
 
@@ -6681,7 +6689,7 @@ export class AgentSession {
 			await this.#memory.transition;
 			if (!isCurrent()) return cancelled;
 			const sourceBase = this.#tools.baseSystemPrompt;
-			const basePreparation = await this.#tools.buildSystemPromptForAgentStart(prompt, isCurrent);
+			const basePreparation = await this.#tools.buildSystemPromptForAgentStart(prompt, isCurrent, signal);
 			if (!isCurrent()) return cancelled;
 			const result = await this.#extensionRunner?.emitBeforeAgentStart(prompt, images, basePreparation.systemPrompt);
 			if (!isCurrent()) return cancelled;
@@ -6763,6 +6771,8 @@ export class AgentSession {
 		this.#beginInFlight();
 		const generation = this.#promptGeneration;
 		this.#promptSequence++;
+		const setupAbort = new AbortController();
+		this.#promptSetupAbortController = setupAbort;
 		try {
 			await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
@@ -6863,7 +6873,13 @@ export class AgentSession {
 				}
 			}
 
-			const preparation = await this.#prepareAgentStart(message, expandedText, options?.images, generation);
+			const preparation = await this.#prepareAgentStart(
+				message,
+				expandedText,
+				options?.images,
+				generation,
+				setupAbort.signal,
+			);
 			const preparedMessages = preparation.commit();
 			if (!preparedMessages) return false;
 			messages.push(...preparedMessages);
@@ -6965,6 +6981,7 @@ export class AgentSession {
 			this.#tools.clearTurnSystemPromptOverride();
 			this.#usagePreflightReadyForNextModelCall = false;
 			this.#endInFlight();
+			if (this.#promptSetupAbortController === setupAbort) this.#promptSetupAbortController = undefined;
 		}
 	}
 
@@ -8202,6 +8219,9 @@ export class AgentSession {
 			for (const controller of this.#usagePreflightAbortControllers) controller.abort();
 			this.abortRetry();
 			this.#promptGeneration++;
+			// Cancel any awaited pre-dispatch setup (e.g. Hindsight auto-recall) so the
+			// admitted submission unwinds now instead of at the recall timeout (#12668).
+			this.#promptSetupAbortController?.abort(options?.reason);
 			this.#scheduledHiddenNextTurnGeneration = undefined;
 			// Abort the handoff first so generic compaction cancellation cannot replace
 			// the harness reason with an unreasoned "Handoff cancelled".
