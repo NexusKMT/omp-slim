@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import { isRecord, readJsonl } from "@oh-my-pi/pi-utils";
+import { isRecord, readJsonl, TempDir } from "@oh-my-pi/pi-utils";
 import { selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat";
 import { readRpcInputFrames } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-input";
-import type { SessionEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 
 function customEntry(id: string, parentId: string | null): SessionEntry {
 	return { type: "custom", id, parentId, timestamp: new Date().toISOString(), customType: "probe" };
@@ -62,6 +64,77 @@ describe("RPC ordinary error correlation", () => {
 		expect(parseErrors).toHaveLength(1);
 		expect(parseErrors[0]).toContain("Failed to parse command");
 		expect(frames).toEqual([{ type: "get_state", id: "after-bad-line" }]);
+	});
+});
+
+describe("RPC durable history (persisted SessionManager)", () => {
+	// Guards the contract Orca's delta sync depends on: a regression that
+	// reorders append-history, drops branch siblings, or loses IDs/parentage
+	// across close/reopen breaks `get_entries(since)` consumers. No LLM is
+	// involved — the history is built with canonical SessionManager APIs.
+	test("linear history, branch siblings, and resume preserve IDs/parentage/tree/leaf", async () => {
+		await using cwdDir = await TempDir.create("rpc-durable-cwd-");
+		await using sessionsDir = await TempDir.create("rpc-durable-sessions-");
+		const cwd = cwdDir.path();
+		const sessionDir = sessionsDir.path();
+
+		type TreeShape = { id: string; children: TreeShape[] };
+		const shape = (nodes: SessionTreeNode[]): TreeShape[] =>
+			nodes.map(node => ({ id: node.entry.id, children: shape(node.children) }));
+
+		const first = SessionManager.create(cwd, sessionDir);
+		await first.ensureOnDisk();
+		const sessionFile = first.getSessionFile();
+		expect(sessionFile).toBeDefined();
+
+		const a = first.appendCustomEntry("step", { n: 1 });
+		const b = first.appendCustomEntry("step", { n: 2 });
+		const c = first.appendCustomEntry("step", { n: 3 });
+		expect(first.getEntries().map(entry => entry.id)).toEqual([a, b, c]);
+		expect(first.getLeafId()).toBe(c);
+
+		// Move the leaf back: append-history is stable while the leaf moves.
+		first.branch(a);
+		expect(first.getLeafId()).toBe(a);
+		expect(first.getEntries().map(entry => entry.id)).toEqual([a, b, c]);
+
+		// Append on the moved leaf: the tree gains a sibling subtree.
+		const d = first.appendCustomEntry("step", { n: 4 });
+		expect(first.getEntries().map(entry => entry.id)).toEqual([a, b, c, d]);
+		expect(first.getEntry(d)?.parentId).toBe(a);
+		expect(first.getLeafId()).toBe(d);
+		expect(shape(first.getTree())).toEqual([
+			{
+				id: a,
+				children: [
+					{ id: b, children: [{ id: c, children: [] }] },
+					{ id: d, children: [] },
+				],
+			},
+		]);
+
+		const parents = new Map(first.getEntries().map(entry => [entry.id, entry.parentId] as const));
+		const treeShape = shape(first.getTree());
+		await first.close();
+
+		const second = await SessionManager.open(sessionFile!, sessionDir, new FileSessionStorage(), {
+			suppressBreadcrumb: true,
+		});
+		try {
+			expect(second.getEntries().map(entry => entry.id)).toEqual([a, b, c, d]);
+			for (const entry of second.getEntries()) {
+				expect(entry.parentId).toBe(parents.get(entry.id)!);
+			}
+			expect(shape(second.getTree())).toEqual(treeShape);
+			expect(second.getLeafId()).toBe(d);
+
+			// The exact algorithm Orca runs: delta since a durable cursor on reloaded state.
+			const delta = selectRpcEntries(second.getEntries(), second.getLeafId(), b);
+			expect(delta.entries.map(entry => entry.id)).toEqual([c, d]);
+			expect(delta.leafId).toBe(d);
+		} finally {
+			await second.close();
+		}
 	});
 });
 
