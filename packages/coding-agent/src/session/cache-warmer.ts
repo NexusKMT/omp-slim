@@ -239,9 +239,7 @@ export class CacheWarmer {
 		// which only ever over-warms a longer-lived entry.
 		const apiKey = request.options.apiKey;
 		const isOAuthToken =
-			request.model.api === "anthropic-messages" &&
-			typeof apiKey === "string" &&
-			isAnthropicOAuthToken(apiKey);
+			request.model.api === "anthropic-messages" && typeof apiKey === "string" && isAnthropicOAuthToken(apiKey);
 		const ttlMs = getPromptCacheTtlMs(request.model, request.options, isOAuthToken);
 		if (ttlMs === undefined) {
 			this.#stop(

@@ -3689,14 +3689,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// request through the same settings-aware wrapper just before the entry
 		// would expire, so idle gaps do not force a full-prefix cache re-write.
 		// Spawned/one-shot sessions opt out via `cacheWarming: false`.
-		const cacheWarmer: CacheWarmer | undefined = options.cacheWarming === false
-			? undefined
-			: new CacheWarmer({
-					stream: (model, context, streamOptions) => settingsAwareStreamFn(model, context, streamOptions),
-					getPromptTokens: () => session.lastPromptTokens(),
-					getMode: () => settings.get("providers.cacheWarming"),
-					decide: event => extensionRunner.emitCacheWarmingDecision(event),
-				});
+		const cacheWarmer: CacheWarmer | undefined =
+			options.cacheWarming === false
+				? undefined
+				: new CacheWarmer({
+						stream: (model, context, streamOptions) => settingsAwareStreamFn(model, context, streamOptions),
+						getPromptTokens: () => session.lastPromptTokens(),
+						getMode: () => settings.get("providers.cacheWarming"),
+						decide: event => extensionRunner.emitCacheWarmingDecision(event),
+					});
 		const codeModeState: { namespacesInfo?: unknown } = {};
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
