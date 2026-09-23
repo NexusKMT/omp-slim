@@ -1208,16 +1208,20 @@ export class ExtensionRunner {
 			getSystemPrompt: () => this.#getSystemPromptFn(),
 			runEphemeralTurn: runEphemeralTurn
 				? async options => {
-						const hook = this.#ephemeralTurnBlocker.getStore();
-						if (hook) throw new Error(`runEphemeralTurn cannot be called from a ${hook} hook`);
-						// Resolve at call time so saved contexts inherit the active handler's
-						// cancellation too. Keep an aborted scope after a handler times out.
+						if (this.#ephemeralTurnBlocker.getStore()) {
+							throw new Error("runEphemeralTurn cannot be called recursively from an ephemeral turn hook");
+						}
+						// Resolve at call time so a running handler's cancellation is inherited.
+						// A saved context must not retain a completed handler's stale signal.
+						const registrationScope = this.#toolRegistrationScope.getStore();
 						const signals = [
 							options.signal,
 							delegation?.signal,
-							this.#toolRegistrationScope.getStore()?.signal,
+							registrationScope && !registrationScope.closed ? registrationScope.signal : undefined,
 						].filter((signal): signal is AbortSignal => signal !== undefined);
-						return runEphemeralTurn(signals.length ? { ...options, signal: AbortSignal.any(signals) } : options);
+						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () =>
+							runEphemeralTurn(signals.length ? { ...options, signal: AbortSignal.any(signals) } : options),
+						);
 					}
 				: undefined,
 			localProtocolOptions: this.localProtocolOptions,
@@ -1322,18 +1326,13 @@ export class ExtensionRunner {
 						registrationScope.signal = handlerSignal;
 						let result: R | undefined;
 						try {
-							const blockingHook =
-								this.#ephemeralTurnBlocker.getStore() ??
-								(["context", "before_provider_request", "after_provider_response"].includes(event.type)
-									? event.type
-									: undefined);
 							const handlerContext = createHandlerContext(
 								ctx,
 								handlerSignal,
 								event.type === "tool_call" ? budget : undefined,
 							);
 							result = await this.#toolRegistrationScope.run(registrationScope, () =>
-								this.#ephemeralTurnBlocker.run(blockingHook, () => handler(event, handlerContext)),
+								handler(event, handlerContext),
 							);
 						} catch (error) {
 							handlerFailure = { error };

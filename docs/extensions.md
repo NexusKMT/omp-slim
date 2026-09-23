@@ -243,6 +243,8 @@ Run the same side-turn pipeline as `/btw` using the current model and conversati
 if (!ctx.runEphemeralTurn) {
   throw new Error("This host does not support ephemeral turns");
 }
+await requireConsultationConsent(remoteCaller);
+await auditConsultationRequest(remoteCaller, remoteQuestion);
 const { replyText } = await ctx.runEphemeralTurn({
   promptText: remoteQuestion,
   tools: false,

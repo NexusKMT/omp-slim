@@ -187,11 +187,13 @@ export class SessionProviderBoundary {
 				const sessionPayload = options.signal
 					? await sessionOnPayload(payload, model, options.signal)
 					: await sessionOnPayload(payload, model);
+				options.signal?.throwIfAborted();
 				const sessionResolvedPayload = sessionPayload ?? payload;
 				if (!requestOnPayload) return sessionResolvedPayload;
 				const requestPayload = options.signal
 					? await requestOnPayload(sessionResolvedPayload, model, options.signal)
 					: await requestOnPayload(sessionResolvedPayload, model);
+				options.signal?.throwIfAborted();
 				return requestPayload ?? sessionResolvedPayload;
 			};
 		}

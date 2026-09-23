@@ -527,7 +527,7 @@ describe("AgentSession message pipeline", () => {
 	);
 
 	it.each(["context", "before_provider_request", "after_provider_response"] as const)(
-		"rejects side turns inside %s hooks, including saved contexts",
+		"allows side turns started from %s hooks, including saved contexts",
 		async hook => {
 			const runtime = new ExtensionRuntime();
 			const manager = SessionManager.inMemory();
@@ -576,11 +576,10 @@ describe("AgentSession message pipeline", () => {
 			if (hook === "context") await runner.emitContext([]);
 			else if (hook === "before_provider_request") await runner.emitBeforeProviderRequest({});
 			else await runner.emitAfterProviderResponse({ status: 200, headers: {} });
-			expect(failures).toHaveLength(2);
-			for (const failure of failures) expect(failure).toContain(`cannot be called from a ${hook} hook`);
-			expect(inference).not.toHaveBeenCalled();
+			expect(failures).toHaveLength(0);
+			expect(inference).toHaveBeenCalledTimes(2);
 			await saved.runEphemeralTurn!({ promptText: "Question?" });
-			expect(inference).toHaveBeenCalledTimes(1);
+			expect(inference).toHaveBeenCalledTimes(3);
 		},
 	);
 
@@ -900,6 +899,27 @@ describe("AgentSession message pipeline", () => {
 		expect(sessionOnPayload).toHaveBeenCalledWith({ original: true }, undefined);
 		expect(requestOnPayload).toHaveBeenCalledWith({ original: true, session: true }, undefined);
 		expect(result).toEqual({ original: true, session: true });
+	});
+
+	it("does not dispatch a provider payload after its hook aborts the request", async () => {
+		const controller = new AbortController();
+		const requestOnPayload = vi.fn(async () => ({ replaced: true }));
+		const session = new AgentSession({
+			agent: createAgent(),
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry: {} as never,
+			onPayload: async () => controller.abort(new Error("cancelled by payload hook")),
+		});
+		sessions.push(session);
+
+		const prepared = session.prepareSimpleStreamOptions({
+			apiKey: "key",
+			signal: controller.signal,
+			onPayload: requestOnPayload,
+		});
+		await expect(prepared.onPayload?.({ original: true })).rejects.toThrow("cancelled by payload hook");
+		expect(requestOnPayload).not.toHaveBeenCalled();
 	});
 	it("lets an extension stream a context-aware side turn without persisting its exchange", async () => {
 		const api = "test-ephemeral-side-channel";
