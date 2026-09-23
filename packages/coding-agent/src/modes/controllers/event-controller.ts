@@ -32,7 +32,7 @@ import {
 	resolveAbortLabel,
 } from "../../session/messages";
 import { type ApprovalMode, resolveApproval } from "../../tools/approval";
-import { previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
+import { previewLine, PREVIEW_LIMITS, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
 import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import { writeDeviceDispatch } from "../../tools/resolve";
 import { nextActionableTask } from "../../tools/todo";
@@ -2340,7 +2340,10 @@ export class EventController {
 	async #handleRetryFallbackApplied(
 		event: Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>,
 	): Promise<void> {
-		this.ctx.showWarning(`Fallback: ${event.from} -> ${event.to}`);
+		const reason = event.reason
+			? `\n${previewLine(sanitizeText(event.reason), TRUNCATE_LENGTHS.LINE * PREVIEW_LIMITS.COLLAPSED_LINES)}`
+			: "";
+		this.ctx.showWarning(`Fallback: ${event.from} -> ${event.to}${reason}`);
 	}
 
 	async #handleRetryFallbackSucceeded(
