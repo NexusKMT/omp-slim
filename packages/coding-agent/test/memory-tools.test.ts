@@ -416,6 +416,36 @@ describe("retain.execute (Mnemopi backend)", () => {
 		expect(text).toContain("fact three");
 	});
 
+	// A write that returns no id stored nothing, so reporting the whole batch as
+	// stored misleads the caller about both the failure and what was kept.
+	it("reports what a batch stored when a later write fails instead of claiming success", async () => {
+		const settings = Settings.isolated({ "memory.backend": "mnemopi" });
+		const state = registerMnemopiState();
+		const remember = state.rememberScoped.bind(state);
+		const storedIds: string[] = [];
+		let writes = 0;
+		vi.spyOn(state, "rememberScoped").mockImplementation((memory, options) => {
+			writes += 1;
+			if (writes === 2) return undefined;
+			const id = remember(memory, options);
+			if (id) storedIds.push(id);
+			return id;
+		});
+
+		const tool = MemoryRetainTool.createIf(makeSession(settings))!;
+		const error = await tool
+			.execute("call-mnemopi-partial", {
+				items: [{ content: "fact kept" }, { content: "fact lost" }, { content: "fact never tried" }],
+			})
+			.catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain("did not store item 2 of 3");
+		expect((error as Error).message).toContain(`item 1 (id ${storedIds[0]})`);
+		expect(writes).toBe(2);
+		expect(state.getScopedRetainTarget().memory.get(storedIds[0]!)).toMatchObject({ content: "fact kept" });
+	});
+
 	it("isolates memories between projects when scoping is per-project", async () => {
 		const settings = Settings.isolated({
 			"memory.backend": "mnemopi",

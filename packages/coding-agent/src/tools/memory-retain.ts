@@ -43,8 +43,12 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 				throw new Error("Mnemopi backend is not initialised for this session.");
 			}
 
-			for (const item of params.items) {
-				state.rememberScoped(item.content, {
+			// A write that returns no id stored nothing. Stop there and say what the
+			// batch kept, so the caller retries only what failed instead of trusting
+			// a success count.
+			const storedIds: string[] = [];
+			for (const [index, item] of params.items.entries()) {
+				const id = state.rememberScoped(item.content, {
 					source: "coding-agent-retain",
 					importance: 0.75,
 					metadata: {
@@ -59,6 +63,16 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 					veracity: "tool",
 					memoryType: "fact",
 				});
+				if (id === undefined) {
+					const kept =
+						storedIds.length === 0
+							? "Nothing was stored."
+							: `Stored before the failure and kept: ${storedIds.map((storedId, storedIndex) => `item ${storedIndex + 1} (id ${storedId})`).join(", ")}.`;
+					throw new Error(
+						`Mnemopi did not store item ${index + 1} of ${params.items.length}. ${kept} Later items were not attempted.`,
+					);
+				}
+				storedIds.push(id);
 			}
 
 			const count = params.items.length;
