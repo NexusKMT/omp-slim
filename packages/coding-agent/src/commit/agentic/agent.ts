@@ -59,6 +59,7 @@ export async function runCommitAgentSession(input: CommitAgentInput): Promise<Co
 		cwd: input.cwd,
 		authStorage: input.authStorage,
 		modelRegistry: input.modelRegistry,
+		cacheWarming: false,
 		settings: input.settings,
 		model: input.model,
 		thinkingLevel: input.thinkingLevel,

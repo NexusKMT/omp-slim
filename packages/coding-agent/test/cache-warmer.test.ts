@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import type { AssistantMessage, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
-import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
@@ -27,7 +26,7 @@ function makeModel(): Model {
 		promptCache: { short: 300, long: 3600 },
 		contextWindow: 200_000,
 		maxTokens: 8_192,
-	}) as Model;
+	});
 }
 
 function makeMessage(overrides: Partial<Omit<AssistantMessage, "timestamp">> = {}): AssistantMessage {
@@ -53,7 +52,7 @@ function makeMessage(overrides: Partial<Omit<AssistantMessage, "timestamp">> = {
 
 interface Harness {
 	warmer: CacheWarmer;
-	streamCalls: Array<{ model: Model; options: SimpleStreamOptions }>;
+	streamCalls: Array<{ model: Model; options?: SimpleStreamOptions }>;
 	promptTokens: number;
 	mode: "off" | "streaming" | "idle";
 	current: boolean;
@@ -69,9 +68,9 @@ function harness(overrides: Partial<CacheWarmerDeps> = {}): Harness {
 	h.current = true;
 	const deps: CacheWarmerDeps = {
 		stream: (model, _context, options) => {
-			// Refresh replays always carry an options object; the cast records that contract.
-			h.streamCalls.push({ model, options: options as SimpleStreamOptions });
-			return { result: () => Promise.resolve(makeMessage()) } as unknown as AssistantMessageEventStream;
+			h.streamCalls.push({ model, options });
+			const message = makeMessage();
+			return { result: () => Promise.resolve(message) };
 		},
 		getPromptTokens: () => h.promptTokens,
 		getMode: () => h.mode,
@@ -131,9 +130,9 @@ describe("cache warming scheduling math", () => {
 
 	test("skips budget-based Anthropic thinking but allows adaptive thinking and other providers", () => {
 		const model = makeModel();
-		model.thinking = { mode: "anthropic-budget-effort" } as Model["thinking"];
+		model.thinking = { mode: "anthropic-budget-effort", efforts: [Effort.High] };
 		expect(isReplayable(model, { reasoning: Effort.High })).toBe(false);
-		model.thinking = { mode: "anthropic-adaptive" } as Model["thinking"];
+		model.thinking = { mode: "anthropic-adaptive", efforts: [Effort.High] };
 		expect(isReplayable(model, { reasoning: Effort.High })).toBe(true);
 		expect(isReplayable(model, { reasoning: Effort.High, forceReasoningOff: true })).toBe(true);
 		expect(isReplayable(model, undefined)).toBe(true);
@@ -170,7 +169,7 @@ describe("cache warmer lifecycle", () => {
 		vi.advanceTimersByTime(SONNET_5M_DELAY_MS);
 		await drain();
 		expect(h.streamCalls).toHaveLength(1);
-		expect(h.streamCalls[0].options.maxTokens).toBe(1);
+		expect(h.streamCalls[0]?.options?.maxTokens).toBe(1);
 		expect(h.warmed).toHaveLength(1);
 		expect(h.warmer.status.state).toBe("scheduled");
 	});

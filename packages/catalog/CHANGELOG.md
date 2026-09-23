@@ -6,7 +6,7 @@
 
 ### Added
 
-- Added `Model.promptCache` — per-retention-tier prompt-cache entry lifetimes in seconds (`short` / `long`). The bundled catalog annotates direct-Anthropic models (5 min / 1 h); custom models and `modelOverrides` opt in via the models.yml `promptCache` key. Consumers use it to schedule prompt-cache warming against a known entry lifetime ([#12691](https://github.com/can1357/oh-my-pi/issues/12691)).
+- Added `Model.promptCache` — per-retention-tier prompt-cache entry lifetimes in seconds (`short` / `long`). Declared per provider in `rules/providers/<id>.kdl` via the `prompt-cache` node (bundled: direct Anthropic, 5 min / 1 h); custom models and `modelOverrides` opt in via the models.yml `promptCache` key. Consumers use it to schedule prompt-cache warming against a known entry lifetime, ported from [earendil-works/pi](https://github.com/earendil-works/pi) ([#12691](https://github.com/can1357/oh-my-pi/issues/12691)).
 - Added support for embedding, rerank, and video generation capabilities in OpenRouter provider
 - Added support for speech-to-text (STT) capabilities in OpenAI provider
 - Added five STT models to OpenRouter provider

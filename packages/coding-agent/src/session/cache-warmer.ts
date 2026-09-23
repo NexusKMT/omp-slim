@@ -14,7 +14,6 @@
  * override) declares a lifetime for the retention tier the request used, so
  * providers whose replay behavior is unvalidated are never touched.
  */
-import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import {
 	type Api,
 	type AssistantMessage,
@@ -25,6 +24,7 @@ import {
 	type Usage,
 } from "@oh-my-pi/pi-ai";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
+import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";
 import type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult } from "../extensibility/shared-events";
 
 export type { CacheWarmingDecisionEvent, CacheWarmingDecisionEventResult };
@@ -56,9 +56,27 @@ export function getCacheWarmingDelayMs(ttlMs: number): number | undefined {
  * Lifetime of the prompt cache entry a request writes, from the model's
  * `promptCache` tier for the retention the request used. Undefined when the
  * model has no lifetime for that tier or caching is off.
+ *
+ * Mirrors the Anthropic provider's retention default: OAuth subscriber seats
+ * write 1h entries where the model supports them, so an OAuth request with no
+ * explicit retention schedules against the `long` tier. `resolveCacheRetention`
+ * keeps an explicit option or `PI_CACHE_RETENTION` ahead of the fallback.
+ * Callers that cannot inspect the credential pass `false` — that direction of
+ * mismatch only over-warms a longer-lived entry (cheap reads), never misses one.
  */
-export function getPromptCacheTtlMs(model: Model<Api>, options: SimpleStreamOptions | undefined): number | undefined {
-	const retention = resolveCacheRetention(options?.cacheRetention);
+export function getPromptCacheTtlMs(
+	model: Model<Api>,
+	options: SimpleStreamOptions | undefined,
+	isOAuthToken = false,
+): number | undefined {
+	// Mirror the provider's OAuth default (see `getCacheControl`): subscriber
+	// seats write 1h entries where the model supports long retention.
+	const supportsLongCacheRetention =
+		model.api === "anthropic-messages" &&
+		isOAuthToken &&
+		(model as Model<"anthropic-messages">).compat.supportsLongCacheRetention;
+	const fallback = supportsLongCacheRetention ? "long" : "short";
+	const retention = resolveCacheRetention(options?.cacheRetention, fallback);
 	if (retention === "none") return undefined;
 	const seconds = model.promptCache?.[retention];
 	return seconds === undefined ? undefined : seconds * 1000;
@@ -150,9 +168,14 @@ interface ActiveRun extends CacheWarmRequest {
 export interface CacheWarmerDeps {
 	/**
 	 * Streams a warm request. Must apply the same settings/provider wrapper the
-	 * real turn used so the replay lands on the same cache key.
+	 * real turn used so the replay lands on the same cache key. Only the
+	 * completed message is consumed.
 	 */
-	stream: StreamFn;
+	stream: (
+		model: Model<Api>,
+		context: Context,
+		options: SimpleStreamOptions | undefined,
+	) => { result(): Promise<AssistantMessage> } | Promise<{ result(): Promise<AssistantMessage> }>;
 	/** Prompt size (input + cacheRead + cacheWrite) of the most recent real provider response. */
 	getPromptTokens: () => number;
 	/** Current warming mode, read live so setting changes apply without re-arming. */
@@ -160,6 +183,9 @@ export interface CacheWarmerDeps {
 	/** Extension override hook; failures fall back to the warmer's own decision. */
 	decide?: (event: CacheWarmingDecisionEvent) => Promise<CacheWarmingAction>;
 }
+
+/** Extension decide calls must answer inside the ten-second expiry margin. */
+const CACHE_WARMING_DECIDE_TIMEOUT_MS = 2_000;
 
 /**
  * Keeps one prompt cache entry alive by re-sending its request with a
@@ -208,7 +234,15 @@ export class CacheWarmer {
 			this.#stop("request cannot be replayed safely");
 			return;
 		}
-		const ttlMs = getPromptCacheTtlMs(request.model, request.options);
+		// Mirror the provider's OAuth detection: a string key can be classified
+		// directly; resolver/credential-storage keys fall back to the short tier,
+		// which only ever over-warms a longer-lived entry.
+		const apiKey = request.options.apiKey;
+		const isOAuthToken =
+			request.model.api === "anthropic-messages" &&
+			typeof apiKey === "string" &&
+			isAnthropicOAuthToken(apiKey);
+		const ttlMs = getPromptCacheTtlMs(request.model, request.options, isOAuthToken);
 		if (ttlMs === undefined) {
 			this.#stop(
 				resolveCacheRetention(request.options.cacheRetention) === "none"
@@ -295,13 +329,19 @@ export class CacheWarmer {
 		const decide = this.#deps.decide;
 		if (decide) {
 			try {
-				action = await decide({
-					type: "cache_warming_decision",
-					warmCost,
-					missCost,
-					continuationProbability,
-					action,
-				});
+				// A slow extension must not push the replay past the expiry margin:
+				// on timeout the warmer's own decision stands.
+				const decided = await Promise.race([
+					decide({
+						type: "cache_warming_decision",
+						warmCost,
+						missCost,
+						continuationProbability,
+						action,
+					}).then(override => ({ override })),
+					Bun.sleep(CACHE_WARMING_DECIDE_TIMEOUT_MS).then(() => undefined),
+				]);
+				if (decided) action = decided.override;
 			} catch {
 				// Extension failures fall back to the warmer's own decision.
 			}

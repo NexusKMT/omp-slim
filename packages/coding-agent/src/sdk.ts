@@ -426,6 +426,13 @@ export interface CreateAgentSessionOptions {
 	/** OpenAI service-tier override for this session. `null` omits `service_tier`. */
 	openAIServiceTier?: ServiceTier | null;
 	/**
+	 * Enable prompt-cache warming for this session's main loop. Defaults to
+	 * `true`; one-shot and spawned sessions (task subagents, standalone
+	 * compaction, agentic commit) pass `false` so short-lived sessions never
+	 * schedule background warm requests.
+	 */
+	cacheWarming?: boolean;
+	/**
 	 * Per-family service tiers for this session, replacing the `tier.*` settings
 	 * and any persisted tier history. Called once the initial model is final —
 	 * after deferred `modelPattern` resolution and auth fallback — so the caller
@@ -3644,12 +3651,15 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// Prompt-cache warmer for the main agent loop only: replays the last
 		// request through the same settings-aware wrapper just before the entry
 		// would expire, so idle gaps do not force a full-prefix cache re-write.
-		const cacheWarmer = new CacheWarmer({
-			stream: (model, context, streamOptions) => settingsAwareStreamFn(model, context, streamOptions),
-			getPromptTokens: () => session.lastPromptTokens(),
-			getMode: () => settings.get("providers.cacheWarming"),
-			decide: event => extensionRunner.emitCacheWarmingDecision(event),
-		});
+		// Spawned/one-shot sessions opt out via `cacheWarming: false`.
+		const cacheWarmer: CacheWarmer | undefined = options.cacheWarming === false
+			? undefined
+			: new CacheWarmer({
+					stream: (model, context, streamOptions) => settingsAwareStreamFn(model, context, streamOptions),
+					getPromptTokens: () => session.lastPromptTokens(),
+					getMode: () => settings.get("providers.cacheWarming"),
+					decide: event => extensionRunner.emitCacheWarmingDecision(event),
+				});
 		const codeModeState: { namespacesInfo?: unknown } = {};
 		const transformToolCallArguments = (args: Record<string, unknown>): Record<string, unknown> => {
 			let result = args;
@@ -3732,11 +3742,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						: { toolNamespacesInfo: codeModeState.namespacesInfo }),
 				};
 				const stream = settingsAwareStreamFn(streamModel, context, merged);
-				// Main-loop requests only: side-channel and advisor calls carry a
-				// suffixed sessionId and must not take over the warmer.
-				if (streamOptions?.sessionId === session.sessionId) {
-					session.startCacheWarming(streamModel, context, merged);
-				}
+				// Every request through this streamFn is this session's own main
+				// loop (side-channel, advisor, and maintenance requests use
+				// dedicated wrappers), so it owns the warmer.
+				session.startCacheWarming(streamModel, context, merged);
 				return stream;
 			},
 			cursorExecHandlers,
