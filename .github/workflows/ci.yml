@@ -151,13 +151,23 @@ jobs:
          - uses: ./.github/actions/bun-install
          - name: Verify Rust license compliance (cargo-deny 0.20.2)
            run: |
-              cargo install --locked --version 0.20.2 cargo-deny
+              # Prebuilt, checksum-verified release binary: `cargo install`
+              # compiled cargo-deny from source on every run (~135 s).
+              ver=0.20.2
+              case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;; esac
+              name="cargo-deny-$ver-$arch-unknown-linux-musl"
+              base="https://github.com/EmbarkStudios/cargo-deny/releases/download/$ver"
+              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz" "$base/$name.tar.gz"
+              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz.sha256" "$base/$name.tar.gz.sha256"
+              (cd "$RUNNER_TEMP" && echo "$(cut -d' ' -f1 "$name.tar.gz.sha256")  $name.tar.gz" | sha256sum -c -)
+              tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+              mkdir -p "$HOME/.cargo/bin"
+              install -m 0755 "$RUNNER_TEMP/$name/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
               # `--offline` needs every workspace crate already in the registry
               # cache. PR runs use a fresh GitHub-hosted runner (see runs-on
-              # above), where the only prior cargo work is the cargo-deny
-              # install, so nothing populates the index for our own graph and
-              # resolution fails. Non-PR events land on omp-kata, whose Cargo
-              # cache is warm, which is why main stayed green. Fetch first.
+              # above) with no prior cargo work, so nothing populates the index
+              # for our own graph and resolution fails. Non-PR events land on
+              # omp-kata, whose Cargo cache is warm. Fetch first.
               cargo fetch --locked
               cargo deny --locked --offline check licenses sources
          - name: Type check workspace
@@ -317,11 +327,25 @@ jobs:
               summary=$(sed -E 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/bazel-build.log" | grep -E '[0-9]+ processes:' | tail -1 || true)
               echo "::notice title=Bazel build summary::${summary:-no process summary found}"
 
-         - name: Upload native addon artifacts
+         # Split upload: every TS test job needs only the linux-x64 pair, but
+         # downloading the full ~250 MB six-addon artifact cost ~100 s per job
+         # on omp-kata. The native-artifacts action fetches `native-addons`
+         # (everything else) only when a consumer asks for a non-x64 target.
+         - name: Upload linux-x64 native addon artifact
+           uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+           with:
+              name: natives-linux-x64
+              path: bazel-bin/natives-linux-x64-*/*.node
+              if-no-files-found: error
+              retention-days: 1
+         - name: Upload remaining native addon artifacts
+           if: github.event_name != 'pull_request'
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
               name: native-addons
-              path: bazel-bin/natives-*/*.node
+              path: |
+                 bazel-bin/natives-*/*.node
+                 !bazel-bin/natives-linux-x64-*/*.node
               if-no-files-found: error
               retention-days: 1
 
@@ -333,7 +357,6 @@ jobs:
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -356,7 +379,6 @@ jobs:
       timeout-minutes: 20
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -374,7 +396,6 @@ jobs:
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -392,7 +413,6 @@ jobs:
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -410,7 +430,6 @@ jobs:
       timeout-minutes: 25
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -423,14 +442,21 @@ jobs:
            run: bun run ci:test:coding-agent:runtime
 
    test_coding_agent_native:
-      name: Test coding-agent native/unit (TS)
+      name: "Test coding-agent native/unit (TS) ${{ matrix.shard }}"
       runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-22.04' || 'omp-kata' }}
       needs: [native_addons]
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       timeout-minutes: 25
+      # The longest PR job, so it runs as two shards on hosted PR runners. Main
+      # keeps one: omp-kata caps at 8 runners and the fan-out already fills it.
+      # No required check keys on this job name (branch protection and
+      # rulesets are off for main/omp2), so the per-shard names are safe.
+      strategy:
+         fail-fast: false
+         matrix:
+            shard: ${{ fromJSON(github.event_name == 'pull_request' && '["1/2","2/2"]' || '["1/1"]') }}
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -438,6 +464,7 @@ jobs:
          - name: Test coding-agent native/unit bucket
            env:
               OMP_TEST_CONCURRENCY: "4"
+              OMP_TEST_SHARD: ${{ matrix.shard }}
            run: bun run ci:test:coding-agent:native
 
    test_smoke:
@@ -448,7 +475,6 @@ jobs:
       timeout-minutes: 15
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -463,7 +489,6 @@ jobs:
       if: ${{ !cancelled() && needs.native_addons.result == 'success' }}
       steps:
          - uses: actions/checkout@v4
-         - uses: ./.github/actions/setup-system-deps
          - uses: ./.github/actions/bun-install
          - uses: ./.github/actions/native-artifacts
            with:
@@ -707,7 +732,7 @@ jobs:
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
          # Native-host addons exist only on these runners; export them so
          # release_native_leaves can publish every leaf package after the
-         # validation gate. Other leaves reuse the native-addons artifact.
+         # validation gate. Other leaves reuse the native_addons artifacts.
          - name: Upload native-host addon artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
