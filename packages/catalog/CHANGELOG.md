@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added StepFun as a built-in provider with `step-5-preview` and live `/v1/models` discovery ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
+
 ## [18.2.10] - 2026-09-22
 
 ### Changed
