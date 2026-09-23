@@ -4,13 +4,13 @@
 
 ### Added
 
-- Added Skills configuration section to settings
-- Enabled OSC 8 hyperlinks on rio ([#12922](https://github.com/can1357/oh-my-pi/pull/12922) by [@abcfy2](https://github.com/abcfy2))
+- Added a Skills section to the settings.
+- Enabled OSC 8 hyperlinks in rio.
 
 ### Fixed
 
-- Fixed startup release notes requiring an Escape keypress before they could be scrolled ([#12906](https://github.com/can1357/oh-my-pi/pull/12906) by [@michaelr](https://github.com/michaelr)).
-- Kept usage quota names distinguishable with aligned bars and bounded, sanitized labels in narrow and multi-column dashboards ([#12903](https://github.com/can1357/oh-my-pi/pull/12903) by [@lockwo](https://github.com/lockwo)).
+- Fixed scrolling startup release notes without requiring an initial Escape keypress.
+- Improved usage quota display so names remain distinguishable and readable in narrow and multi-column dashboards.
 
 ## [18.2.10] - 2026-09-22
 

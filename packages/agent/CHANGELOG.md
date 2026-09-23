@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed background job completions interrupting foreground bash and eval calls, which made them auto-background repeatedly ([#12869](https://github.com/can1357/oh-my-pi/issues/12869))
+- Fixed background job completions interrupting foreground Bash and eval calls, which could cause those calls to be repeatedly moved into the background.
 
 ## [18.2.9] - 2026-09-22
 

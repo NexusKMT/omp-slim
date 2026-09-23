@@ -4,12 +4,12 @@
 
 ### Added
 
-- Added StepFun as a built-in provider with `step-5-preview` and live `/v1/models` discovery ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
+- Added built-in StepFun provider support for the step-5-preview model, including live model discovery.
 
 ### Fixed
 
-- Fixed zero estimated costs for OpenAI Codex GPT-6 Sol and Luna plain and worker routes ([#12885](https://github.com/can1357/oh-my-pi/pull/12885) by [@itsddvn](https://github.com/itsddvn)).
-- Fixed GitHub Copilot Grok 4.x models failing because they were sent to the Chat Completions API instead of Responses ([#12901](https://github.com/can1357/oh-my-pi/issues/12901))
+- Fixed cost estimation for OpenAI Codex GPT-6 Sol and Luna models across standard and worker routes.
+- Fixed GitHub Copilot Grok 4.x models failing to make requests.
 
 ## [18.2.10] - 2026-09-22
 

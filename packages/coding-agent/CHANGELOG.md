@@ -2,37 +2,15 @@
 
 ## [Unreleased]
 
-### Added
-
-- Introduced `question` field for TTSR rules, enabling semantic judgment of assistant output
-- Implemented judge-model integration using `noul` (yes/no) questions for completed assistant replies, thinking, and tool calls
-- Added support for `astCondition` triggers for structural code-matching during tool-write operations
-- Added `/omfg` rule generation and validation support for judged questions and structural AST patterns
-- Introduced Skillshare registry support for searching, installing, and managing skill extensions
-- Added CLI `skill` and TUI `/skills` commands for registry interactions
-- Implemented project-scoped and global skill installation with integrity validation
-- Added StepFun to the `/login` provider list and `STEPFUN_API_KEY` to the `--help` environment list ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
-- Added `maxContextWindow` to custom `models` entries and `modelOverrides`, so `/extended-context on` can use a larger window on custom providers ([#12923](https://github.com/can1357/oh-my-pi/pull/12923) by [@LingLambda](https://github.com/LingLambda)).
-- Added the `before_subagent_spawn` extension event to reroute or block each subagent before it resolves its model ([#12907](https://github.com/can1357/oh-my-pi/pull/12907) by [@aloyzzz](https://github.com/aloyzzz)).
-- Added Pi-compatible `get_entries`, `get_tree`, and `get_available_thinking_levels` RPC commands ([#12900](https://github.com/can1357/oh-my-pi/pull/12900) by [@44madfire](https://github.com/44madfire)).
-- Model fallback warnings now explain why the fallback happened, and fallback events carry the cause for extensions and RPC clients ([#12904](https://github.com/can1357/oh-my-pi/pull/12904) by [@lockwo](https://github.com/lockwo)).
-
-### Changed
-
-- Non-interrupting warnings are now delivered as aside messages when judgment verdicts indicate rule violations
-- Optimized TTSR registry to prefilter judged rules before triggering model calls, minimizing judgment costs
-- Extensions load faster on warm starts: their dependencies are no longer re-parsed on every launch ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
-- The first highlighted code block, bash preview, or diff no longer stalls the screen while syntax highlighting initializes ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
-
 ### Fixed
 
-- The Todo tracker now reflects nested `eval` Todo updates, including when a cell fails after committing ([#12921](https://github.com/can1357/oh-my-pi/pull/12921) by [@tommymorgan](https://github.com/tommymorgan)).
-- Output schemas written as JSON Schema without a root `type` keep their `items` and `required` keywords, so structured-output tools no longer fail strict-mode validation ([#12893](https://github.com/can1357/oh-my-pi/issues/12893))
-- TTSR whole-buffer lookahead conditions now avoid repeated starting-position scans during streamed writes ([#12261](https://github.com/can1357/oh-my-pi/issues/12261), [#12887](https://github.com/can1357/oh-my-pi/pull/12887) by [@Dante-dan](https://github.com/Dante-dan)).
-- Fixed plural browser queries failing when compiled binaries expose shallow stack traces ([#12902](https://github.com/can1357/oh-my-pi/pull/12902) by [@Dante-dan](https://github.com/Dante-dan)).
-- Fixed browser `tab.fill` timing out after 8 seconds on pages whose animation frames stall ([#12892](https://github.com/can1357/oh-my-pi/issues/12892))
-- Fixed LSP diagnostics returning an empty result on the first edit while a freshly started server is still analyzing ([#12889](https://github.com/can1357/oh-my-pi/issues/12889))
-- `/shake thinking` now reports how many tokens it freed ([#12916](https://github.com/can1357/oh-my-pi/pull/12916) by [@Gablinas](https://github.com/Gablinas))
+- Fixed nested `eval` Todo updates not being reflected by the Todo tracker, including cases where a cell fails after committing an update.
+- Fixed strict-mode structured-output validation for JSON Schemas without a root `type`, preserving their `items` and `required` keywords.
+- Improved streamed TTSR whole-buffer matching to avoid repeated scans from the beginning of the buffer.
+- Fixed plural browser queries when compiled binaries provide shallow stack traces.
+- Fixed browser `tab.fill` timing out on pages whose animation frames stall.
+- Fixed the first LSP diagnostics request returning no results while a newly started language server is still analyzing.
+- `/shake thinking` now reports the number of tokens freed.
 
 ## [18.2.10] - 2026-09-22
 
