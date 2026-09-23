@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex usage now shows the current subscription plan after an account's plan changes ([#12928](https://github.com/can1357/oh-my-pi/pull/12928) by [@haesol-shin](https://github.com/haesol-shin)).
+
 ## [18.2.11] - 2026-09-23
 
 ### Fixed
