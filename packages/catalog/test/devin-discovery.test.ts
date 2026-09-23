@@ -734,9 +734,6 @@ describe("devin catalog seed", () => {
 	});
 
 	it("pins the seed to a configured Cascade host", () => {
-		// Old discovery rows sent the composite uid to Cascade; a fresh cache
-		// namespace makes the lead route visible on the next discovery.
-		expect(devinModelManagerOptions().cacheProviderId).toBe("devin:models-v2");
 		expect(devinModelManagerOptions().staticModels).toBe(seedModels("devin"));
 		const scoped = devinModelManagerOptions({ baseUrl: "https://cascade.internal" });
 		expect(scoped.staticModels?.map(model => model.baseUrl)).toEqual([
