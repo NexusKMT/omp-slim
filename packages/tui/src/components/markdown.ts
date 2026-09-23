@@ -3002,9 +3002,11 @@ export class Markdown implements Component {
 			}
 
 			case "blockquote": {
+				const quoteStyle = (text: string) => this.#theme.quote(this.#theme.italic(text));
+				const quoteStylePrefix = this.#getStylePrefix(quoteStyle);
 				const quoteInlineStyleContext: InlineStyleContext = {
 					applyText: (text: string) => text,
-					stylePrefix: "",
+					stylePrefix: quoteStylePrefix,
 				};
 				const quoteContentWidth = Math.max(1, width - 2);
 				const quoteTokens = token.tokens || [];
