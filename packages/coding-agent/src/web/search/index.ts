@@ -144,7 +144,9 @@ async function executeSearch(
 	const candidates = params.model
 		? (() => {
 				const resolved = resolveModelRoleValue(params.model, pool, { settings });
-				return resolved.model ? [{ model: resolved.model, explicit: true }] : [];
+				return resolved.model
+					? [{ model: resolved.model, explicit: true, thinkingLevel: resolved.thinkingLevel }]
+					: [];
 			})()
 		: resolveRoleChain("web", settings, pool);
 
@@ -211,6 +213,7 @@ async function executeSearch(
 				timeoutMs,
 				authStorage,
 				model: candidate.model,
+				thinkingLevel: candidate.thinkingLevel,
 				modelRegistry,
 				explicit: candidate.explicit,
 				sessionId,

@@ -2608,10 +2608,10 @@ describe("effort-tier variant aliases", () => {
 		}),
 	];
 
-	test("provider-qualified retired tier ids resolve to the collapsed model", () => {
+	test("provider-qualified retired tier ids preserve their routed effort", () => {
 		const result = parseModelPattern("google-antigravity/gemini-3.5-flash-low", variantModels);
 		expect(result.model?.id).toBe("gemini-3.5-flash");
-		expect(result.thinkingLevel).toBeUndefined();
+		expect(result.thinkingLevel).toBe(Effort.High);
 	});
 
 	test("retired tier ids keep explicit :level suffixes", () => {

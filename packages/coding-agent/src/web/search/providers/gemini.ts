@@ -17,8 +17,10 @@ import {
 	withAuth,
 	withOAuthAccess,
 } from "@oh-my-pi/pi-ai";
+import { resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { parseCloudflareAiGatewayCredential } from "@oh-my-pi/pi-catalog/wire/cloudflare-ai-gateway";
 import { getAntigravityUserAgent, getGeminiCliHeaders } from "@oh-my-pi/pi-catalog/wire/gemini-headers";
+import { type ConfiguredThinkingLevel, concreteThinkingLevel, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import { fetchWithRetry, USER_AGENT } from "@oh-my-pi/pi-utils";
 
 import type { SearchCitation, SearchResponse, SearchSource } from "../types";
@@ -75,6 +77,7 @@ export interface GeminiSearchParams extends GeminiToolParams {
 	timeoutMs?: number;
 	authStorage: AuthStorage;
 	model: Model<Api>;
+	thinkingLevel?: ConfiguredThinkingLevel;
 	modelRegistry: ModelRegistry;
 	sessionId?: string;
 	fetch?: FetchImpl;
@@ -551,7 +554,10 @@ async function callGeminiDeveloperSearch(
  * Executes a web search using Google Gemini with Google Search grounding.
  */
 export async function searchGemini(params: GeminiSearchParams): Promise<SearchResponse> {
-	const selectedModel = params.model.id;
+	const selectedModel = resolveWireModelId(
+		params.model,
+		toReasoningEffort(concreteThinkingLevel(params.thinkingLevel)),
+	);
 	// Gemini's googleSearch grounding forwards the query to Google Search, which
 	// understands the classic operator set natively. Normalize directive aliases
 	// (domain: → site:, since: → after:, …) to canonical Google forms; leave
@@ -694,6 +700,7 @@ export class GeminiProvider extends SearchProvider {
 			timeoutMs: params.timeoutMs,
 			authStorage: params.authStorage,
 			model: params.model,
+			thinkingLevel: params.thinkingLevel,
 			modelRegistry: params.modelRegistry,
 			sessionId: params.sessionId,
 			fetch: params.fetch,
