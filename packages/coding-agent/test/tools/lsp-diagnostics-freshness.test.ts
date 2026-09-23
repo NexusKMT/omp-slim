@@ -5,7 +5,7 @@ import { createLspWritethrough } from "@oh-my-pi/pi-coding-agent/lsp";
 import { type FileDiagnosticsResult, FileFormatResult } from "@oh-my-pi/pi-tui/tools/lsp";
 import * as lspClient from "@oh-my-pi/pi-coding-agent/lsp/client";
 import * as lspConfig from "@oh-my-pi/pi-coding-agent/lsp/config";
-import { formatContent } from "@oh-my-pi/pi-coding-agent/lsp/diagnostics";
+import { formatContent, INLINE_DIAGNOSTICS_WAIT_TIMEOUT_MS } from "@oh-my-pi/pi-coding-agent/lsp/diagnostics";
 import type { Diagnostic, LinterClient, LspClient, ServerConfig } from "@oh-my-pi/pi-coding-agent/lsp/types";
 import { EquivalentUriMap, fileToUri } from "@oh-my-pi/pi-coding-agent/lsp/utils";
 import type { DeferredDiagnosticsEntry, ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
@@ -529,6 +529,17 @@ describe("LSP diagnostics freshness", () => {
 		const uri = fileToUri(filePath);
 		const clock = new VirtualClock(Date.now());
 		installVirtualTime(clock);
+		// Let diagnostic polls advance the clock; a racing 500ms timeout must not
+		// skip past the 250ms settle window before the poll loop observes it.
+		vi.spyOn(Bun, "sleep").mockImplementation(((ms: number) => {
+			if (ms === INLINE_DIAGNOSTICS_WAIT_TIMEOUT_MS) {
+				const timeout = Promise.withResolvers<void>();
+				clock.in(ms, timeout.resolve);
+				return timeout.promise;
+			}
+			clock.advance(ms);
+			return Promise.resolve();
+		}) as typeof Bun.sleep);
 		const client = createClient(tempDir.path(), TEST_SERVER);
 
 		vi.spyOn(lspConfig, "loadConfig").mockReturnValue({ servers: {}, idleTimeoutMs: undefined });
