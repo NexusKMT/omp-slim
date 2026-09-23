@@ -728,6 +728,19 @@ export class AgentSession implements SettingsScope {
 	#slashCommands: FileSlashCommand[];
 	/** Tail of the serialized {@link refreshSkillsAndCommands} chain. */
 	#skillsAndCommandsRefresh: Promise<void> = Promise.resolve();
+	/**
+	 * Raw text the caller originally submitted for a queued plain `role: "user"`
+	 * message — before slash/custom-command rewriting, prompt-template expansion,
+	 * or `^model` mention substitution. Recorded by `#queueUserMessage`, the same
+	 * point `#queueCustomMessage` stamps `__queueChipText` for skill invocations;
+	 * a side map (not a message field) because `UserMessage` has no free-form
+	 * details slot to carry it, and it must never reach the model or persisted
+	 * session content. `removeQueuedMessage` matches against it so an RPC client
+	 * removing by the exact text it submitted can find its own transformed queued
+	 * entry without unsafely replaying a (possibly side-effecting) slash/custom
+	 * command.
+	 */
+	readonly #queuedMessageRawText = new WeakMap<AgentMessage, string>();
 
 	// Event subscription state
 	#unsubscribeAgent?: () => void;
@@ -6925,6 +6938,7 @@ export class AgentSession implements SettingsScope {
 				timestamp: submittedAt,
 				attribution: promptAttribution,
 				prependMessages: keywordNotices,
+				rawText: typedText,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -6976,6 +6990,7 @@ export class AgentSession implements SettingsScope {
 				timestamp: submittedAt,
 				attribution: promptAttribution,
 				prependMessages: keywordNotices,
+				rawText: typedText,
 				preprocessed: {
 					images: normalizedImages,
 					descriptionNotice: imageDescriptionNotice,
@@ -7738,6 +7753,7 @@ export class AgentSession implements SettingsScope {
 		await this.#queueUserMessage(expandedText, images, "steer", {
 			timestamp: submittedAt,
 			attribution: options?.attribution,
+			rawText: text,
 		});
 	}
 
@@ -7762,6 +7778,7 @@ export class AgentSession implements SettingsScope {
 			await this.#queueUserMessage(expandedText, images, "followUp", {
 				timestamp: submittedAt,
 				attribution: options?.attribution,
+				rawText: text,
 			});
 			return;
 		}
@@ -7827,6 +7844,12 @@ export class AgentSession implements SettingsScope {
 			timestamp?: number;
 			attribution?: MessageAttribution;
 			prependMessages?: readonly CustomMessage[];
+			/** Text the caller originally submitted, before slash/custom-command
+			 *  rewriting, prompt-template expansion, or `^model` mention substitution.
+			 *  Recorded via `#queuedMessageRawText` so `removeQueuedMessage` can match
+			 *  it later. Defaults to `text` (the common case: no transformation ran,
+			 *  so raw and queued content are identical). */
+			rawText?: string;
 			/**
 			 * Set only when image normalization and the vision description already
 			 * ran for this prompt; its presence suppresses both here. Companions
@@ -7841,6 +7864,7 @@ export class AgentSession implements SettingsScope {
 	): Promise<void> {
 		const attribution = options?.attribution ?? "user";
 		const timestamp = options?.timestamp;
+		const rawText = options?.rawText ?? text;
 		const preprocessed = options?.preprocessed;
 		const prependMessages = options?.prependMessages ?? [];
 		// Captured before any await below so the aside branch can detect a
@@ -7876,7 +7900,9 @@ export class AgentSession implements SettingsScope {
 			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
 			const records: AgentMessage[] = [...prependMessages];
 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
-			records.push({ role: "user", content, attribution, timestamp: timestamp ?? Date.now() });
+			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
+			this.#queuedMessageRawText.set(userMessage, rawText);
+			records.push(userMessage);
 			this.#irc.queueAside(records);
 			// The awaits above (image normalization / vision description) can span the run's
 			// settle, so the run may already be idle by the time the record lands in the aside
@@ -7891,23 +7917,27 @@ export class AgentSession implements SettingsScope {
 			for (const notice of prependMessages) this.agent.followUp(notice);
 			for (const notice of attachmentSourceNotices) this.agent.followUp(notice);
 			if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
-			this.agent.followUp({
+			const userMessage: AgentMessage = {
 				role: "user",
 				content,
 				attribution,
 				timestamp: timestamp ?? Date.now(),
-			});
+			};
+			this.#queuedMessageRawText.set(userMessage, rawText);
+			this.agent.followUp(userMessage);
 		} else {
 			for (const notice of prependMessages) this.agent.steer(notice);
 			for (const notice of attachmentSourceNotices) this.agent.steer(notice);
 			if (imageDescriptionNotice) this.agent.steer(imageDescriptionNotice);
-			this.agent.steer({
+			const userMessage: AgentMessage = {
 				role: "user",
 				content,
 				steering: true,
 				attribution,
 				timestamp: timestamp ?? Date.now(),
-			});
+			};
+			this.#queuedMessageRawText.set(userMessage, rawText);
+			this.agent.steer(userMessage);
 		}
 		this.#scheduleIdleQueueDrain();
 	}
@@ -8500,19 +8530,24 @@ export class AgentSession implements SettingsScope {
 
 	/**
 	 * Remove the first matching user message and its hidden companions from one queue.
-	 * Matches queue-chip text or its prompt-template expansion. A missing or already
-	 * delivered target changes nothing; repeated calls may remove further duplicates.
+	 * Matches the raw text the caller originally submitted — recorded by
+	 * `#queueUserMessage` before any slash/custom-command rewrite, prompt-template
+	 * expansion, or `^model` mention substitution — first, then the queued chip
+	 * text itself (exact). Raw-text matching covers every transformation `prompt()`
+	 * can apply, including the slash/custom-command step no replay can safely
+	 * redo (custom commands can have side effects); the chip-text fallback keeps
+	 * exact matches working for callers that already hold the queued text (e.g. a
+	 * skill invocation's `__queueChipText`, or untransformed text). A missing or
+	 * already delivered target changes nothing; repeated calls may remove further
+	 * duplicates.
 	 */
 	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
-		const expandedText = expandPromptTemplate(text, [...this.#promptTemplates]);
 		let index = selected.findIndex(
-			message => isUserAuthoredQueuedMessage(message) && queueChipText(message) === text,
+			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
 		);
-		if (index < 0 && expandedText !== text) {
-			index = selected.findIndex(
-				message => isUserAuthoredQueuedMessage(message) && queueChipText(message) === expandedText,
-			);
+		if (index < 0) {
+			index = selected.findIndex(message => isUserAuthoredQueuedMessage(message) && queueChipText(message) === text);
 		}
 		if (index < 0) return false;
 
