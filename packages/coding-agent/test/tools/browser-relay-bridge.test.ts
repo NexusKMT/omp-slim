@@ -12,10 +12,13 @@ type ExtRpc<Op extends RelayRpcRequest["op"]> = { t: "rpc"; id: number } & Extra
 class FakeExtSocket implements RelaySocket {
 	readonly messages: RelayToExtMessage[] = [];
 	readonly #acked = new Set<number>();
+	closed = false;
 	send(text: string): void {
 		this.messages.push(JSON.parse(text) as RelayToExtMessage);
 	}
-	close(): void {}
+	close(): void {
+		this.closed = true;
+	}
 	rpcs<Op extends RelayRpcRequest["op"]>(op: Op): Array<ExtRpc<Op>> {
 		return this.messages.filter((msg): msg is ExtRpc<Op> => msg.t === "rpc" && msg.op === op);
 	}
@@ -110,6 +113,7 @@ async function attachPage(
 	cdp: FakeCdpSocket,
 	connId: number,
 	tabId: number,
+	extSeq = 1,
 ): Promise<string> {
 	const attachId = ++msgSeq;
 	bridge.cdpMessage(
@@ -117,7 +121,7 @@ async function attachPage(
 		JSON.stringify({
 			id: attachId,
 			method: "Target.attachToTarget",
-			params: { targetId: `PAGE${tabId}`, flatten: true },
+			params: { targetId: `PAGE${extSeq}.${tabId}`, flatten: true },
 		}),
 	);
 	ack(bridge, ext, "attach");
@@ -159,15 +163,15 @@ describe("RelayBridge target discovery", () => {
 			| { targetInfos: Array<{ targetId: string; type: string }> }
 			| undefined;
 		expect(first?.targetInfos.map(info => [info.targetId, info.type]).sort()).toEqual([
-			["PAGE1", "page"],
-			["PAGE2", "page"],
+			["PAGE1.1", "page"],
+			["PAGE1.2", "page"],
 		]);
 		bridge.extMessage(ext, JSON.stringify({ t: "tabRemoved", tabId: 2 }));
 		bridge.cdpMessage(connId, JSON.stringify({ id: 2, method: "Target.getTargets" }));
 		const second = cdp.messages.find(message => message.id === 2)?.result as
 			| { targetInfos: Array<{ targetId: string }> }
 			| undefined;
-		expect(second?.targetInfos.map(info => info.targetId)).toEqual(["PAGE1"]);
+		expect(second?.targetInfos.map(info => info.targetId)).toEqual(["PAGE1.1"]);
 		expect(ext.messages.filter(message => message.t === "rpc")).toEqual([]);
 	});
 });
@@ -532,7 +536,7 @@ describe("RelayBridge attachment release", () => {
 		const reattachId = ++msgSeq;
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		ack(bridge, ext, "attach");
 		await flush();
@@ -556,7 +560,7 @@ describe("RelayBridge attachment release", () => {
 		const reattachId = ++msgSeq;
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		await flush();
 		// Only the initial attach has reached the extension while detach is pending.
@@ -670,7 +674,7 @@ describe("RelayBridge attachment release", () => {
 		const reattachId = ++msgSeq;
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		await flush();
 		expect(replacement.pending("attach")).toHaveLength(1);
@@ -687,7 +691,7 @@ describe("RelayBridge attachment release", () => {
 		const connId = bridge.cdpConnected(cdp);
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: ++msgSeq, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: ++msgSeq, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		expect(ext.pending("attach")).toHaveLength(1);
 
@@ -698,7 +702,7 @@ describe("RelayBridge attachment release", () => {
 		const retryId = ++msgSeq;
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: retryId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: retryId, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		await flush();
 		expect(replacement.pending("attach")).toHaveLength(1);
@@ -726,7 +730,7 @@ describe("RelayBridge attachment release", () => {
 		const reattachId = ++msgSeq;
 		bridge.cdpMessage(
 			connId,
-			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1" } }),
+			JSON.stringify({ id: reattachId, method: "Target.attachToTarget", params: { targetId: "PAGE1.1" } }),
 		);
 		await flush();
 
@@ -889,5 +893,104 @@ describe("RelayBridge attachment release", () => {
 				message => message.sessionId === sessionId && message.method === "Runtime.executionContextCreated",
 			),
 		).toEqual([]);
+	});
+});
+
+describe("RelayBridge multiple extension instances", () => {
+	function connectInstance(
+		bridge: RelayBridge,
+		socket: FakeExtSocket,
+		instanceId: string,
+		tabs: TabSnapshot[],
+		attachedTabIds: number[] = [],
+	): void {
+		bridge.extConnected(socket);
+		bridge.extMessage(
+			socket,
+			JSON.stringify({
+				t: "hello",
+				instanceId,
+				userAgent: "test",
+				browserVersion: instanceId === "edge" ? "Edg/151.0.0.0" : "Chrome/151.0.0.0",
+				tabs,
+				attachedTabIds,
+			}),
+		);
+	}
+
+	it("keeps each browser's tabs listed when two instances connect", () => {
+		const bridge = new RelayBridge({});
+		const chrome = new FakeExtSocket();
+		const edge = new FakeExtSocket();
+		connectInstance(bridge, chrome, "chrome", [
+			tab({ tabId: 1, title: "Chrome tab", url: "https://chrome.example/" }),
+		]);
+		connectInstance(bridge, edge, "edge", [tab({ tabId: 1, title: "Edge tab", url: "https://edge.example/" })]);
+		expect(
+			bridge
+				.listTargets()
+				.map(t => [t.title, t.id])
+				.sort(),
+		).toEqual([
+			["Chrome tab", "PAGE1.1"],
+			["Edge tab", "PAGE2.1"],
+		]);
+	});
+
+	it("scopes the hello GC to the reconnecting instance", () => {
+		const bridge = new RelayBridge({});
+		const chrome = new FakeExtSocket();
+		connectInstance(bridge, chrome, "chrome", [
+			tab({ tabId: 1, title: "Chrome tab", url: "https://chrome.example/" }),
+		]);
+		const edge = new FakeExtSocket();
+		connectInstance(bridge, edge, "edge", [tab({ tabId: 1, title: "Edge tab", url: "https://edge.example/" })]);
+		// Edge reconnects without its tab: its own tab goes, Chrome's tab stays.
+		bridge.extClosed(edge);
+		const edge2 = new FakeExtSocket();
+		connectInstance(bridge, edge2, "edge", []);
+		expect(bridge.listTargets().map(t => t.title)).toEqual(["Chrome tab"]);
+	});
+
+	it("replaces the socket but keeps the registry when the same instance reconnects", () => {
+		const bridge = new RelayBridge({});
+		const first = new FakeExtSocket();
+		connectInstance(bridge, first, "chrome", [
+			tab({ tabId: 1, title: "Chrome tab", url: "https://chrome.example/" }),
+		]);
+		const second = new FakeExtSocket();
+		connectInstance(bridge, second, "chrome", [
+			tab({ tabId: 1, title: "Chrome tab", url: "https://chrome.example/" }),
+		]);
+		expect(first.closed).toBe(true);
+		// One listing per physical tab, not one per connection.
+		expect(bridge.listTargets()).toHaveLength(1);
+	});
+
+	it("routes rpcs to the browser instance that owns the tab", async () => {
+		const bridge = new RelayBridge({});
+		const chrome = new FakeExtSocket();
+		const edge = new FakeExtSocket();
+		connectInstance(bridge, chrome, "chrome", [
+			tab({ tabId: 1, title: "Chrome tab", url: "https://chrome.example/" }),
+		]);
+		connectInstance(bridge, edge, "edge", [tab({ tabId: 1, title: "Edge tab", url: "https://edge.example/" })]);
+		const chromeCdp = new FakeCdpSocket();
+		const chromeConn = bridge.cdpConnected(chromeCdp);
+		const edgeCdp = new FakeCdpSocket();
+		const edgeConn = bridge.cdpConnected(edgeCdp);
+		// Same chrome tabId (1) in both browsers: routing must disambiguate by instance.
+		const chromeSession = await attachPage(bridge, chrome, chromeCdp, chromeConn, 1, 1);
+		const edgeSession = await attachPage(bridge, edge, edgeCdp, edgeConn, 1, 2);
+		bridge.cdpMessage(
+			chromeConn,
+			JSON.stringify({ id: ++msgSeq, sessionId: chromeSession, method: "Runtime.enable" }),
+		);
+		bridge.cdpMessage(edgeConn, JSON.stringify({ id: ++msgSeq, sessionId: edgeSession, method: "Runtime.enable" }));
+		await flush();
+		const chromeSends = chrome.rpcs("send").map(rpc => rpc.tabId);
+		const edgeSends = edge.rpcs("send").map(rpc => rpc.tabId);
+		expect(chromeSends).toEqual([1]);
+		expect(edgeSends).toEqual([1]);
 	});
 });
