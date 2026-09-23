@@ -8,7 +8,7 @@ import {
 	getChangelogPath,
 	parseChangelog,
 	RECENT_CHANGELOG_ENTRY_LIMIT,
-} from "../../src/utils/changelog";
+} from "@oh-my-pi/pi-coding-agent/utils/changelog";
 
 function versionHeadings(markdown: string): string[] {
 	return markdown.match(/^## \[[^\]]+\]/gm) ?? [];

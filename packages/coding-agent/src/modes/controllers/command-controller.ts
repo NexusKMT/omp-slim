@@ -657,14 +657,15 @@ export class CommandController {
 		const entriesToShow = selectChangelogEntries(allEntries, view);
 		const changelogMarkdown =
 			entriesToShow.length > 0 ? renderChangelogEntries(entriesToShow).markdown : "No changelog entries found.";
-		const explicitLast = args.trim().toLowerCase().startsWith("last");
+		const shown = entriesToShow.length;
+		const titleCount = shown > 0 ? shown : view.kind === "last" ? view.count : shown;
 		const title =
 			view.kind === "full"
 				? "Full Changelog"
-				: explicitLast
-					? view.count === 1
+				: view.kind === "last"
+					? titleCount === 1
 						? "Last Release"
-						: `Last ${view.count} Releases`
+						: `Last ${titleCount} Releases`
 					: "Recent Changes";
 		const hint =
 			view.kind === "full"
