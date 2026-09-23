@@ -610,10 +610,19 @@ OMP initializes OTLP export only when at least one signal has an endpoint. `OTEL
 | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`                                                                                   | Common endpoint fallback                                                                        |
 | `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`, `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Per-signal endpoint; wins over the common endpoint                                              |
+| `OTEL_EXPORTER_OTLP_HEADERS`                                                                                    | Common OTLP request headers, as a `key=value,key2=value2` list with percent-encoded values       |
+| `OTEL_EXPORTER_OTLP_TRACES_HEADERS`, `OTEL_EXPORTER_OTLP_LOGS_HEADERS`, `OTEL_EXPORTER_OTLP_METRICS_HEADERS`    | Per-signal request headers; merged per key over the common headers, which they override          |
 | `OTEL_TRACES_EXPORTER`, `OTEL_LOGS_EXPORTER`, `OTEL_METRICS_EXPORTER`                                           | A list containing `none` disables that signal                                                   |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` and per-signal `..._PROTOCOL` variants                                            | Only `http/protobuf` is enabled by this runtime; another explicit protocol disables that signal |
 | `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`                                                                 | OpenTelemetry resource metadata                                                                 |
 | `OTEL_LOG_LEVEL`                                                                                                | Minimum exported OMP log level                                                                  |
+
+Header values are percent-decoded, so encode spaces and the `,`/`=` delimiters:
+
+```bash
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:8000/v1/traces"
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="authorization=Bearer%20$LAMINAR_PROJECT_API_KEY"
+```
 
 ---
 
@@ -625,5 +634,6 @@ Treat these as secrets; do not log or commit them:
 - Cloud credentials (`AWS_*`, `GOOGLE_APPLICATION_CREDENTIALS` path may expose service-account material)
 - Search/provider auth vars (`EXA_API_KEY`, `BRAVE_API_KEY`, `PERPLEXITY_API_KEY`, Anthropic search keys)
 - Foundry mTLS material (`CLAUDE_CODE_CLIENT_CERT`, `CLAUDE_CODE_CLIENT_KEY`, `NODE_EXTRA_CA_CERTS` when it points to private CA bundles)
+- OTLP exporter headers (`OTEL_EXPORTER_OTLP_HEADERS` and the per-signal `..._{TRACES,LOGS,METRICS}_HEADERS` variants) — they carry ingest bearer tokens/project keys
 
 Python runtime also explicitly strips many common key vars before spawning kernel subprocesses (`packages/coding-agent/src/eval/py/runtime.ts`).
