@@ -6266,12 +6266,13 @@ export class AgentSession {
 
 	/**
 	 * Emit source paths for file-backed attachments (path-pasted/drag-and-dropped
-	 * images, video contact-sheet previews) as hidden user context. The visible
-	 * message deliberately contains only its `[Image #N]`/`[Video #N]` marker and
-	 * the attachment itself, while the agent gets the path required to act on the
-	 * original file (e.g. `read`, or video frame subselectors) without exposing
-	 * the user's filesystem layout in the TUI. Clipboard bitmaps have no backing
-	 * file and are skipped — no path is invented for them.
+	 * images, clipboard images committed to the session artifact directory, video
+	 * contact-sheet previews) as hidden user context. The visible message
+	 * deliberately contains only its `[Image #N]`/`[Video #N]` marker and the
+	 * attachment itself, while the agent gets the path required to act on the file
+	 * (e.g. `read`, uploads, or video frame subselectors) without exposing the
+	 * user's filesystem layout in the TUI. Attachments without a file on disk are
+	 * skipped — no path is invented for them.
 	 */
 	#createAttachmentSourceNotices(images: readonly ImageContent[] | undefined, timestamp: number): CustomMessage[] {
 		if (!images?.length) return [];
