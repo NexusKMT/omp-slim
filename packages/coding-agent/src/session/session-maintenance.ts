@@ -772,9 +772,21 @@ export class SessionMaintenance {
 
 		if (mode === "thinking") {
 			const branchEntries = this.#host.sessionManager.getBranch();
+			const latestCompaction = getLatestCompactionEntry(branchEntries);
+			const compactionIndex = latestCompaction ? branchEntries.lastIndexOf(latestCompaction) : -1;
+			const hasRemoteReplacementHistory = getOpenAiRemoteCompactionPayload(latestCompaction) !== undefined;
+			let anchorIndex = -1;
+			for (let index = branchEntries.length - 1; index > compactionIndex; index--) {
+				const entry = branchEntries[index];
+				if (entry.type !== "message" || !isTranscriptUsageAnchor(entry.message)) continue;
+				anchorIndex = index;
+				break;
+			}
 			let removed = 0;
 			let tokensFreed = 0;
-			for (const entry of branchEntries) {
+			let anchoredTokensRemoved = 0;
+			const countOptions = { excludeEncryptedReasoning: true } as const;
+			for (const [index, entry] of branchEntries.entries()) {
 				if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 				const message = entry.message;
 				const kept = message.content.filter(
@@ -782,22 +794,23 @@ export class SessionMaintenance {
 				);
 				const dropped = message.content.length - kept.length;
 				if (dropped === 0) continue;
-				// Measure the whole turn before and after rather than tokenizing the
-				// dropped blocks alone: `countMessage` is what context accounting
-				// charges, and it charges the opaque `thinkingSignature` /
-				// `redactedThinking.data` payloads riding beside the reasoning text
-				// (#2275). On a thinking-heavy session those payloads are the larger
-				// share of the saving, so summing block text alone would under-report.
-				const before = this.#tokenizer.countMessage(message);
+				// Match the stored-context floor: opaque signatures and encrypted
+				// reasoning bytes do not have a reliable provider-token equivalent.
+				const before = this.#tokenizer.countMessage(message, countOptions);
 				// Provider serializers omit empty assistant turns, so don't invent model-authored text.
 				message.content = kept;
 				invalidateMessageCache(message);
-				tokensFreed += Math.max(0, before - this.#tokenizer.countMessage(message));
+				const saved = Math.max(0, before - this.#tokenizer.countMessage(message, countOptions));
+				tokensFreed += saved;
+				if (index < anchorIndex && (!hasRemoteReplacementHistory || index > compactionIndex)) {
+					anchoredTokensRemoved += saved;
+				}
 				removed += dropped;
 			}
 			if (removed === 0) {
 				return { mode, toolResultsDropped: 0, blocksDropped: 0, thinkingBlocksDropped: 0, tokensFreed: 0 };
 			}
+			this.#host.recordAnchoredHistoryRewrite(anchoredTokensRemoved);
 			await this.#host.sessionManager.rewriteEntries();
 			const sessionContext = this.#host.buildDisplaySessionContext();
 			this.#host.agent.replaceMessages(sessionContext.messages);

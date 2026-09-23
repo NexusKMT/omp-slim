@@ -403,20 +403,20 @@ describe("AgentSession shake", () => {
 			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
 
 			const tokenizer = new Tokenizer();
-			const tokensBefore = tokenizer.countMessage(mixed);
-			const thinkingOnlyBefore = tokenizer.countMessage(thinkingOnly);
+			const tokensBefore = tokenizer.countMessage(mixed, { excludeEncryptedReasoning: true });
+			const thinkingOnlyBefore = tokenizer.countMessage(thinkingOnly, { excludeEncryptedReasoning: true });
 
 			const result = await session.shake("thinking");
 
 			expect(result.thinkingBlocksDropped).toBe(3);
 			expect(mixed.content).toEqual([{ type: "text", text: "visible answer" }]);
 			expect(thinkingOnly.content).toEqual([]);
-			expect(tokenizer.countMessage(mixed)).toBeLessThan(tokensBefore);
-			// The reported saving is exactly what context accounting now charges
-			// less. It was a hardcoded 0, so the operator was told a count of blocks
-			// and never the size of the hole it made.
+			expect(tokenizer.countMessage(mixed, { excludeEncryptedReasoning: true })).toBeLessThan(tokensBefore);
 			const measuredSaving =
-				tokensBefore + thinkingOnlyBefore - tokenizer.countMessage(mixed) - tokenizer.countMessage(thinkingOnly);
+				tokensBefore +
+				thinkingOnlyBefore -
+				tokenizer.countMessage(mixed, { excludeEncryptedReasoning: true }) -
+				tokenizer.countMessage(thinkingOnly, { excludeEncryptedReasoning: true });
 			expect(measuredSaving).toBeGreaterThan(0);
 			expect(result.tokensFreed).toBe(measuredSaving);
 			expect(formatShakeSummary(result)).toContain(`~${result.tokensFreed} tokens freed`);
@@ -443,11 +443,7 @@ describe("AgentSession shake", () => {
 			}
 		});
 
-		it("counts the signature payloads riding beside the reasoning, not just the reasoning text", async () => {
-			// Signatures are opaque base64 that context accounting charges for but
-			// that carry no reasoning. On thinking-heavy sessions they are the larger
-			// share of what a shake removes, so a saving summed from visible
-			// reasoning text alone would under-report it.
+		it("does not inflate reported savings with opaque signature bytes", async () => {
 			const signed: AssistantMessage = {
 				role: "assistant",
 				content: [
@@ -462,11 +458,43 @@ describe("AgentSession shake", () => {
 			sessionManager.appendMessage(signed);
 			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
 
-			const reasoningTextOnly = new Tokenizer().countTokens("short");
+			const tokenizer = new Tokenizer();
+			const before = tokenizer.countMessage(signed, { excludeEncryptedReasoning: true });
+			const rawBefore = tokenizer.countMessage(signed);
 			const result = await session.shake("thinking");
 
 			expect(result.thinkingBlocksDropped).toBe(1);
-			expect(result.tokensFreed).toBeGreaterThan(reasoningTextOnly * 100);
+			expect(result.tokensFreed).toBe(
+				before - tokenizer.countMessage(signed, { excludeEncryptedReasoning: true }),
+			);
+			expect(result.tokensFreed).toBeLessThan(rawBefore - tokenizer.countMessage(signed));
+		});
+
+		it("updates the provider-anchored context meter for earlier thinking", async () => {
+			const prior: AssistantMessage = {
+				role: "assistant",
+				content: [{ type: "thinking", thinking: "old reasoning ".repeat(1_000) }, { type: "text", text: "old answer" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage,
+				timestamp: Date.now() - 1,
+			};
+			sessionManager.appendMessage(prior);
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "latest answer" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now(),
+			});
+			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+			expect(session.getContextUsage()?.tokens).toBe(20_000);
+
+			const result = await session.shake("thinking");
+
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			expect(session.getContextUsage()?.tokens).toBe(20_000 - result.tokensFreed);
 		});
 	});
 
