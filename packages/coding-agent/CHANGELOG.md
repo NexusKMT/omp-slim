@@ -12,6 +12,10 @@
 - Added CLI `skill` and TUI `/skills` commands for registry interactions
 - Implemented project-scoped and global skill installation with integrity validation
 - Added StepFun to the `/login` provider list and `STEPFUN_API_KEY` to the `--help` environment list ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
+- Added `maxContextWindow` to custom `models` entries and `modelOverrides`, so `/extended-context on` can use a larger window on custom providers ([#12923](https://github.com/can1357/oh-my-pi/pull/12923) by [@LingLambda](https://github.com/LingLambda)).
+- Added the `before_subagent_spawn` extension event to reroute or block each subagent before it resolves its model ([#12907](https://github.com/can1357/oh-my-pi/pull/12907) by [@aloyzzz](https://github.com/aloyzzz)).
+- Added Pi-compatible `get_entries`, `get_tree`, and `get_available_thinking_levels` RPC commands ([#12900](https://github.com/can1357/oh-my-pi/pull/12900) by [@44madfire](https://github.com/44madfire)).
+- Model fallback warnings now explain why the fallback happened, and fallback events carry the cause for extensions and RPC clients ([#12904](https://github.com/can1357/oh-my-pi/pull/12904) by [@lockwo](https://github.com/lockwo)).
 
 ### Changed
 
