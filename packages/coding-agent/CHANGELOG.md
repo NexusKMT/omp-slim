@@ -4,8 +4,14 @@
 
 ### Added
 
+- Added usage reporting for failed native judgments, including error stop reason and message
+- Added openrouter/~typesafe/jev-latest as a native judge candidate in priority configuration
 - Added `OMP_MCP_STARTUP_TIMEOUT_MS` and `mcp.startupTimeoutMs` to configure the initial MCP discovery window, plus `OMP_MCP_REQUIRE_READY=1` to fail headless print runs before the first turn when a server is unavailable.
 - Added `auth.accountPolicies` for per-account OAuth priority and reserve controls, with matching policy state in `omp usage` ([#12243](https://github.com/can1357/oh-my-pi/pull/12243) by [@schickling-assistant](https://github.com/schickling-assistant)).
+
+### Changed
+
+- Changed judgment fallback to consider only native candidates, preventing prompted models from replacing failed natives
 
 ### Fixed
 
