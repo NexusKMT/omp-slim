@@ -773,9 +773,10 @@ describe("callSessionTool", () => {
 			{ op: "done", task: "Task 0" },
 			{ session, emitStatus: event => statuses.push(event) },
 		);
+		await callSessionTool("todo", { op: "view" }, { session, emitStatus: event => statuses.push(event) });
 
 		expect(phases[0]?.tasks[0]?.status).toBe("completed");
-		expect(statuses).toHaveLength(1);
+		expect(statuses.map(event => event.committed)).toEqual([true, false]);
 		expect(JSON.stringify(statuses).length).toBeLessThan(500);
 	});
 

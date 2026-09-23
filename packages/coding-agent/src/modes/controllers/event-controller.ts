@@ -76,7 +76,7 @@ function hasNestedTodo(details: unknown): boolean {
 	return (
 		isRecord(details) &&
 		Array.isArray(details.statusEvents) &&
-		details.statusEvents.some(event => isRecord(event) && event.op === "todo")
+		details.statusEvents.some(event => isRecord(event) && event.op === "todo" && event.committed === true)
 	);
 }
 

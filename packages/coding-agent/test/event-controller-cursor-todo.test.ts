@@ -76,7 +76,11 @@ function todoEnd(
 
 function evalEnd(
 	toolCallId: string,
-	statusEvents?: Array<{ op: string; phases?: { name: string; tasks: { content: string; status: string }[] }[] }>,
+	statusEvents?: Array<{
+		op: string;
+		committed?: boolean;
+		phases?: { name: string; tasks: { content: string; status: string }[] }[];
+	}>,
 	isError = false,
 ): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
 	return {
@@ -192,7 +196,7 @@ describe("EventController + Cursor todo bridge", () => {
 		const current = [{ name: "Current", tasks: [{ content: "Later", status: "in_progress" as const }] }];
 		f.ctx.viewSession.getTodoPhases = () => current;
 
-		await f.controller.handleEvent(evalEnd("eval-todo-1", [{ op: "todo", phases: recorded }]));
+		await f.controller.handleEvent(evalEnd("eval-todo-1", [{ op: "todo", committed: true, phases: recorded }]));
 
 		expect(f.ctx.setTodos).toHaveBeenCalledWith(current);
 	});
@@ -202,9 +206,15 @@ describe("EventController + Cursor todo bridge", () => {
 		const current = [{ name: "Current", tasks: [{ content: "Committed", status: "completed" as const }] }];
 		f.ctx.viewSession.getTodoPhases = () => current;
 
-		await f.controller.handleEvent(evalEnd("eval-todo-error", [{ op: "todo" }], true));
+		await f.controller.handleEvent(evalEnd("eval-todo-error", [{ op: "todo", committed: true }], true));
 
 		expect(f.ctx.setTodos).toHaveBeenCalledWith(current);
+	});
+	it("does not restart Todo auto-clear after a nested read-only view", async () => {
+		const f = createFixture();
+		f.ctx.viewSession.getTodoPhases = () => [];
+		await f.controller.handleEvent(evalEnd("eval-todo-view", [{ op: "todo", committed: false }]));
+		expect(f.ctx.setTodos).not.toHaveBeenCalled();
 	});
 
 	it("settles a held completion when execution start creates the card", async () => {
