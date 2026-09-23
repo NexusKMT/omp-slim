@@ -4,6 +4,8 @@
 
 ### Added
 
+- Enabled `org-scoped-identity` and `oauth-token-env` configuration parsing for authentication providers
+- Adopted namespaced `authStorage` API for CLI and session management
 - Added usage reporting for failed native judgments, including error stop reason and message
 - Added openrouter/~typesafe/jev-latest as a native judge candidate in priority configuration
 - Added `OMP_MCP_STARTUP_TIMEOUT_MS` and `mcp.startupTimeoutMs` to configure the initial MCP discovery window, plus `OMP_MCP_REQUIRE_READY=1` to fail headless print runs before the first turn when a server is unavailable.

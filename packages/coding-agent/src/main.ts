@@ -546,7 +546,7 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 			preloadedExtensions: trustedExtensions,
 		});
 		if (args.parsedArgs.apiKey && !args.baseOptions.model && nextSession.model) {
-			args.authStorage.setRuntimeApiKey(nextSession.model.provider, args.parsedArgs.apiKey);
+			args.authStorage.keys.setRuntime(nextSession.model.provider, args.parsedArgs.apiKey);
 		}
 		const runner = nextSession.extensionRunner;
 		const reparsedArgs = applyExtensionFlags(
@@ -2105,7 +2105,7 @@ export async function runRootCommand(
 				process.exit(1);
 			}
 			if (sessionOptions.model) {
-				authStorage.setRuntimeApiKey(sessionOptions.model.provider, parsedArgs.apiKey);
+				authStorage.keys.setRuntime(sessionOptions.model.provider, parsedArgs.apiKey);
 			}
 		}
 
@@ -2266,7 +2266,7 @@ export async function runRootCommand(
 				Math.trunc(Number(settingsInstance.get("task.agentIdleTtlMs") ?? 420_000) || 0),
 			);
 			if (parsedArgs.apiKey && !sessionOptions.model && session.model) {
-				authStorage.setRuntimeApiKey(session.model.provider, parsedArgs.apiKey);
+				authStorage.keys.setRuntime(session.model.provider, parsedArgs.apiKey);
 			}
 
 			// Runtime provider discovery (opencode-go, models.yml `discovery:`, proxies)

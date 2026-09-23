@@ -163,7 +163,7 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 		await withEnv(SUPPRESS_AUTH_BROKER_ENV, async () => {
 			const storage = await discoverAuthStorage({ agentDir });
 			try {
-				await storage.set("openai-codex", [
+				await storage.credentials.set("openai-codex", [
 					{
 						type: "oauth",
 						access: "preferred-access",
@@ -182,7 +182,7 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 					},
 				]);
 
-				const selected = await storage.getOAuthAccess("openai-codex", "fresh-session");
+				const selected = await storage.oauth.access("openai-codex", "fresh-session");
 
 				expect(selected?.email).toBe("preferred@example.com");
 			} finally {
@@ -305,7 +305,7 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 			async () => {
 				const storage = await discoverAuthStorage({ agentDir, cachePath });
 				try {
-					expect(storage.hasAuth("anthropic")).toBeTrue();
+					expect(storage.keys.source("anthropic") !== undefined).toBeTrue();
 				} finally {
 					storage.close();
 				}

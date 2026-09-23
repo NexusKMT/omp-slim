@@ -444,7 +444,7 @@ export async function discoverAuthStorage(options: DiscoverAuthStorageOptions = 
 			accountPolicies,
 			defaultReservePct,
 		});
-		await storage.reload();
+		await storage.credentials.reload();
 		return storage;
 	}
 
@@ -456,6 +456,6 @@ export async function discoverAuthStorage(options: DiscoverAuthStorageOptions = 
 		accountPolicies,
 		defaultReservePct,
 	});
-	await storage.reload();
+	await storage.credentials.reload();
 	return storage;
 }

@@ -970,7 +970,7 @@ export function formatUsageHistory(
 
 function collectStoredAccounts(authStorage: AuthStorage): UsageAccountIdentity[] {
 	const accounts: UsageAccountIdentity[] = [];
-	const all = authStorage.getAll();
+	const all = authStorage.credentials.all();
 	for (const provider in all) {
 		const entry = all[provider];
 		const credentials = Array.isArray(entry) ? entry : [entry];
@@ -1002,7 +1002,7 @@ function collectStoredAccounts(authStorage: AuthStorage): UsageAccountIdentity[]
  * keyless servers, inference providers without a usage API) would only ever
  * render as noise, so they are dropped.
  *
- * `hasUsageProvider` is injected (in practice {@link AuthStorage.usageProviderFor})
+ * `hasUsageProvider` is injected (in practice {@link AuthStorage.usage.providerFor})
  * so custom/broker resolvers stay authoritative — no provider list is duplicated
  * here. An explicit `--provider` request bypasses the cull, so
  * `omp usage --provider xai` can still confirm the stored credential has no
@@ -1126,7 +1126,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 	try {
 		if (cmd.action === "invalidate") {
 			const provider = cmd.provider?.toLowerCase();
-			await authStorage.invalidateUsageCache(provider);
+			await authStorage.usage.invalidate(provider);
 			if (provider) {
 				process.stdout.write(`Invalidated cached usage reports for provider "${provider}".\n`);
 			} else {
@@ -1146,7 +1146,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 				const client = new AuthBrokerClient({ url: brokerConfig.url, token: brokerConfig.token });
 				clients = (await client.fetchClientUsageSummary({ sinceMs })).clients;
 			} else {
-				clients = authStorage.getClientUsageSummary(sinceMs).clients;
+				clients = authStorage.usage.clientSummary(sinceMs).clients;
 			}
 			if (cmd.json) {
 				process.stdout.write(`${JSON.stringify({ generatedAt: nowMs, sinceMs, clients }, null, 2)}\n`);
@@ -1168,7 +1168,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const days = cmd.days !== undefined && Number.isFinite(cmd.days) && cmd.days > 0 ? cmd.days : 7;
 			const nowMs = Date.now();
 			const sinceMs = nowMs - days * 86_400_000;
-			const entries = authStorage.listUsageHistory({ sinceMs, provider: cmd.provider?.toLowerCase() });
+			const entries = authStorage.usage.history({ sinceMs, provider: cmd.provider?.toLowerCase() });
 			const redaction = cmd.redact ? buildRedactionMap(collectHistoryIdentityStrings(entries)) : undefined;
 			if (cmd.json) {
 				const masked = redaction
@@ -1197,11 +1197,11 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		}
 		const policyOptions: UsagePolicyDiagnosticsOptions = {
 			globalReservePct: settings.get("retry.usageReservePct"),
-			getAccountPolicy: (provider, identity) => authStorage.getAccountPolicy(provider, identity),
+			getAccountPolicy: (provider, identity) => authStorage.oauth.policy(provider, identity),
 		};
 		const modelRegistry = new ModelRegistry(authStorage);
 		const reports =
-			(await authStorage.fetchUsageReports({
+			(await authStorage.usage.reports({
 				baseUrlResolver: provider => modelRegistry.getProviderBaseUrl(provider),
 			})) ?? [];
 		// Reports are always fresh (broker-side fetch) but the account list can
@@ -1209,14 +1209,14 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		// just-logged-in (or just-rotated-identity) credential isn't rendered
 		// as a stale duplicate. Best-effort: offline broker keeps the cache.
 		try {
-			await authStorage.revalidateCredentials();
+			await authStorage.credentials.revalidate();
 		} catch {
 			// Stale identities beat no output.
 		}
 		const storedAccounts = collectStoredAccounts(authStorage);
 		let accounts = selectReportableAccounts(
 			storedAccounts,
-			provider => authStorage.usageProviderFor(provider) !== undefined,
+			provider => authStorage.usage.providerFor(provider) !== undefined,
 			cmd.provider,
 		);
 		// Tombstones ride alongside the live pool so an auto-disabled account
@@ -1224,7 +1224,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		// missing. Best-effort: a broker predating the endpoint yields [].
 		let disabled: DisabledCredentialSummary[] = [];
 		try {
-			disabled = await authStorage.listDisabledCredentials();
+			disabled = await authStorage.credentials.listDisabled();
 		} catch {
 			// Usage output must not fail because tombstone listing did.
 		}

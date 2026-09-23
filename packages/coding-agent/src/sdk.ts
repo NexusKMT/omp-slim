@@ -1414,7 +1414,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	// buffer — so we can't rely on it to catch startup events for the extension runner.
 	const startupCredentialDisabledEvents: CredentialDisabledEvent[] = [];
 	let credentialDisabledTarget: ExtensionRunner | undefined;
-	const unsubscribeCredentialDisabled: (() => void) | undefined = authStorage.onCredentialDisabled(event => {
+	const unsubscribeCredentialDisabled: (() => void) | undefined = authStorage.credentials.onDisabled(event => {
 		if (credentialDisabledTarget) {
 			// Discard return: any handler error is routed through runner.onError listeners.
 			void credentialDisabledTarget.emitCredentialDisabled(event);
@@ -1500,7 +1500,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	if (options.credentialSourceSessionId) {
-		modelRegistry.authStorage.inheritSessionCredentials(options.credentialSourceSessionId, providerSessionId);
+		modelRegistry.authStorage.sessions.inherit(options.credentialSourceSessionId, providerSessionId);
 	}
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
@@ -2594,7 +2594,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				) {
 					let usageHealth: ModelUsageHealth | undefined;
 					try {
-						usageHealth = await modelRegistry.authStorage.getModelUsageHealth(primary.model.provider, {
+						usageHealth = await modelRegistry.authStorage.health.model(primary.model.provider, {
 							modelId: primary.model.id,
 							baseUrl: primary.model.baseUrl,
 							reserveFraction: settings.get("retry.usageReservePct") / 100,

@@ -55,7 +55,7 @@ it("standalone auth discovery routes by PI_CONFIG_FILES policy over main config"
 	try {
 		const storage = await discoverAuthStorage(tempDir.path(), { cwd: tempDir.path() });
 		try {
-			await storage.set("test-provider", [
+			await storage.credentials.set("test-provider", [
 				{
 					type: "oauth",
 					access: "other-token",
@@ -71,7 +71,7 @@ it("standalone auth discovery routes by PI_CONFIG_FILES policy over main config"
 					email: "preferred@example.test",
 				},
 			]);
-			expect(await storage.getApiKey("test-provider", "standalone-policy-session")).toBe("preferred-token");
+			expect(await storage.keys.get("test-provider", "standalone-policy-session")).toBe("preferred-token");
 		} finally {
 			storage.close();
 		}

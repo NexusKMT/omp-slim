@@ -165,7 +165,7 @@ async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 		refreshOAuthCredential: (provider, _credentialId, credential, signal) =>
 			refreshBrokerOAuthCredential(provider, credential, signal),
 	});
-	await storage.reload();
+	await storage.credentials.reload();
 	const handle = startAuthBroker({
 		storage,
 		bind,
@@ -175,7 +175,7 @@ async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 	logger.info("auth-broker listening", { url: handle.url });
 	logger.info("auth-broker bearer token loaded", { path: getTokenFilePath(), mode: "0600" });
 
-	const credentialDisabledUnsub = storage.onCredentialDisabled((event: CredentialDisabledEvent) => {
+	const credentialDisabledUnsub = storage.credentials.onDisabled((event: CredentialDisabledEvent) => {
 		logger.warn("auth-broker credential disabled", { ...event });
 	});
 
@@ -245,17 +245,17 @@ async function runLocalLogin(provider: OAuthProvider): Promise<void> {
 	const ask = (msg: string, signal?: AbortSignal) => promptLine(rl, `${msg} `, signal);
 	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
 	const storage = new AuthStorage(store);
-	await storage.reload();
+	await storage.credentials.reload();
 	try {
 		// Only paste-code providers (fixed non-loopback redirect, e.g. GitLab Duo
 		// Agent's vscode:// URI) get the manual paste fallback. An explicit
 		// `onManualCodeInput` is honored for ANY provider (the storage escape hatch),
 		// so for loopback providers we do not pass it: an eager readline prompt adds
-		// noise to a flow that normally completes through HTTP. `AuthStorage.login`
+		// noise to a flow that normally completes through HTTP. `AuthStorage.oauth.login`
 		// independently refuses to synthesize the default prompt
 		// for non-paste-code providers, so this is defense-in-depth on the same gate.
 		const usesManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(provider);
-		await storage.login(provider, {
+		await storage.oauth.login(provider, {
 			onAuth({ url, launchUrl, instructions }) {
 				process.stdout.write("\nOpen this URL in your browser:\n");
 				// Full URL first so the CLI works from any machine, including SSH
@@ -430,7 +430,7 @@ async function runLogout(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 			}
 			providerArg = await pickStoredProviderInteractively(stored);
 		}
-		store.deleteAuthCredentialsForProvider(providerArg, "logged out by user");
+		await store.deleteAuthCredentials(providerArg, "logged out by user");
 		process.stdout.write(`Logged out of ${providerArg}\n`);
 	} finally {
 		store.close();
@@ -682,7 +682,7 @@ async function runImport(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 	const store = await SqliteAuthCredentialStore.open(getAgentDbPath());
 	try {
 		for (const entry of entries) {
-			store.upsertAuthCredentialForProvider(entry.provider, entry.credential);
+			await store.upsertAuthCredential(entry.provider, entry.credential);
 			if (!flags.json) process.stdout.write(`${chalk.green("imported")} ${describeImportEntry(entry)}\n`);
 		}
 	} finally {

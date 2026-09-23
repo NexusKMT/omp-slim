@@ -32,20 +32,20 @@ describe("auth-gateway account pool", () => {
 		setAgentDir(tempDir);
 		resetSettingsForTest();
 		brokerStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
-		brokerStore.saveOAuth("anthropic", {
+		await brokerStore.saveOAuth("anthropic", {
 			access: "allowed-access",
 			refresh: "allowed-refresh",
 			expires: Date.now() + 120_000,
 			email: "allowed@example.com",
 		});
-		brokerStore.saveOAuth("anthropic", {
+		await brokerStore.saveOAuth("anthropic", {
 			access: "excluded-access",
 			refresh: "excluded-refresh",
 			expires: Date.now() + 120_000,
 			email: "excluded@example.com",
 		});
 		brokerStorage = new AuthStorage(brokerStore);
-		await brokerStorage.reload();
+		await brokerStorage.credentials.reload();
 		handle = startAuthBroker({
 			storage: brokerStorage,
 			bind: "127.0.0.1:0",
