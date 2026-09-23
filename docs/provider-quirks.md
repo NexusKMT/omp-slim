@@ -1416,6 +1416,26 @@ SiliconFlow (China) is the domestic China deployment of SiliconFlow's AI model p
 - **Dynamic-Only Model Discovery**: Deliberately omitted from `MODELS_DEV_PROVIDER_DESCRIPTORS` and static catalog generation (`scripts/generate-models.ts`), fetching available chat models live from `https://api.siliconflow.cn/v1/models`.
 - **Runtime Reference Hydration**: Live discovered models are cross-referenced with models.dev catalog entries (`SILICONFLOW_MODELS_DEV_DESCRIPTORS`) with a 5-second timeout (`SILICONFLOW_MODELS_DEV_REFERENCE_TIMEOUT_MS`) in `loadSiliconFlowModelsDevReferences` (`packages/catalog/src/provider-models/openai-compat.ts`) to hydrate pricing and limit metadata.
 
+## StepFun (`stepfun`)
+StepFun is the OpenAI-compatible Open Platform endpoint at `https://api.stepfun.ai/v1` serving StepFun's own chat models (`step-5-preview`, `step-3.7-flash`, `step-3.5-flash`, `step-3.5-flash-2603`). It uses the OpenAI Chat Completions transport (`openai-completions`). StepFun's China deployment (`api.stepfun.com`) and Step Plan subscription endpoints (`/step_plan/v1`) are separate deployments whose API keys are not interchangeable with `.ai` keys.
+
+### Special casings
+- **`max_tokens` Only**: The provider rule sets `max-tokens-field "max_tokens"` in `packages/catalog/src/compat/rules/providers/stepfun.kdl`. StepFun documents `max_tokens` (default `INF`) and never the `max_completion_tokens` spelling the OpenAI baseline assumes, which the endpoint silently ignores — output budgets would go unlimited.
+- **Provider-Owned Effort Ladder**: The same rule file assigns `thinking-mode "effort"` and `thinking-efforts "low" "medium" "high"` for the `stepfun` class/`step` family. The census ladder for this class spans `minimal`…`xhigh` because relay hosts (OpenRouter, NanoGPT, NVIDIA, ZenMux) advertise those tiers; StepFun's own API rejects them, so the provider scope overrides the relay default.
+- **`reasoning_content` Reasoning Field**: Reasoning streams arrive as `reasoning_content` deltas (StepFun's `reasoning_format: "general"` default returns a `reasoning` field, and both are parsed), handled by the generic dispatch in `packages/ai/src/providers/openai-completions.ts`.
+- **Non-Chat Roster Filtering**: `/v1/models` interleaves StepAudio (ASR/TTS/realtime/gen) and image-generation SKUs with the chat models. `isStepfunChatModelId` in `packages/catalog/src/provider-models/openai-compat.ts` drops them using the `exclude-models provider="stepfun"` policy in `packages/catalog/src/compat/rules/runtime/behavior.kdl`.
+- **No Cross-Host Limit Backfill**: The provider entry sets `skip-cross-provider-reference-fills #true` so the generator never copies relay-host output ceilings (e.g. the 256K figures on NanoGPT/Hugging Face rows) onto first-party rows where StepFun publishes no cap.
+
+### Auth & usage
+- **Environment Variable**: Authenticates via `STEPFUN_API_KEY` (provider entry in `packages/catalog/src/compat/rules/providers/stepfun.kdl`). Keys are region-scoped: `.ai` keys work against `api.stepfun.ai`, `.com` keys against `api.stepfun.com`.
+- **API Key Login**: Declared in `packages/catalog/src/compat/rules/auth/stepfun.kdl` as a `login "api-key"` rule (`packages/ai/src/registry/engine/api-key.ts`) with console URL `https://platform.stepfun.ai/interface-key` and chat-completions validation model `step-5-preview`.
+- **No Usage Tracking**: No dedicated quota or usage resolution module is present under `packages/ai/src/usage/`; prompt caching is billed by StepFun as the cache-miss input rate, so rows carry `cacheWrite: 0`.
+
+### Catalog model handling
+- **Descriptor Configuration**: `stepfunModelManagerOptions` is registered in `packages/catalog/src/provider-models/descriptors.ts` with `defaultModel: "step-5-preview"`, `envVars: ["STEPFUN_API_KEY"]`, and discovery label `StepFun`.
+- **Seeded Bundle**: `providers/stepfun.kdl` carries `seed bundle="always"` rows with StepFun's published model-card limits and prices (`https://platform.stepfun.ai/docs/en/guides/pricing/details`, limits as catalogued on models.dev), so the provider is selectable before first discovery.
+- **Live Discovery**: `stepfunModelManagerOptions` in `packages/catalog/src/provider-models/openai-compat.ts` merges `/v1/models` results additively over the seed rows, hydrated by `mapWithBundledReference`, so models StepFun ships later become selectable without an omp release.
+
 ## Synthetic (`synthetic`)
 Synthetic is an AI platform offering dual API format support for its models, exposing both OpenAI-compatible (`https://api.synthetic.new/openai/v1/chat/completions`) and Anthropic-compatible (`https://api.synthetic.new/anthropic/v1/messages`) endpoints. Calls default to the `OpenAI Chat Completions` transport, but can switch dynamically to the `Anthropic Messages` transport when configured.
 

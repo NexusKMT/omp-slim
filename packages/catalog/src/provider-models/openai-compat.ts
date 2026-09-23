@@ -4956,6 +4956,47 @@ export function yoloAutoModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
+// 16.9 StepFun
+// ---------------------------------------------------------------------------
+
+export interface StepfunModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * Whether a StepFun `/v1/models` id is a chat model omp can route. StepFun's
+ * roster interleaves its audio and image SKUs with the chat models; the
+ * exclusion policy itself lives in `runtime/behavior.kdl` (`exclude-models
+ * provider="stepfun"`), not here.
+ */
+export function isStepfunChatModelId(id: string): boolean {
+	const normalized = id.trim().toLowerCase();
+	if (!normalized) return false;
+	return !isExcludedModel("stepfun", normalized);
+}
+
+/**
+ * StepFun model manager: plain OpenAI-compatible chat completions at
+ * `api.stepfun.ai/v1`. Live `/v1/models` discovery merges additively over the
+ * bundled seed rows (`providers/stepfun.kdl`), so models StepFun adds later
+ * become selectable without an omp release, while the reasoning-effort ladder
+ * and `max_tokens` spelling stay rule-owned by the provider's cascade block.
+ */
+export function stepfunModelManagerOptions(
+	config?: StepfunModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createOpenAICompatibleModelManagerOptions({
+		api: "openai-completions",
+		providerId: "stepfun",
+		defaultBaseUrl: "https://api.stepfun.ai/v1",
+		config,
+		requireApiKey: true,
+		filterModel: (_entry, model) => isStepfunChatModelId(model.id),
+		mapModel: mapWithBundledReference,
+	});
+}
 
 // ---------------------------------------------------------------------------
 // 17. Qwen Portal
