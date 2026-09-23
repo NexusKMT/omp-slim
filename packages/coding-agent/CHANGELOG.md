@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added Jev (TypeSafe Jev 1.13) to `toks` command supported encodings
 - Added `*** Insert Before` and `*** Insert After` to append new lines without replacing existing code
 - Added `toks` command to count tokens via offline tokenizers
 - Added automatic discovery of Apple Foundation Models on supported Apple silicon devices

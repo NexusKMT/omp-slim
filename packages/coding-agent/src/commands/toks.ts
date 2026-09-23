@@ -22,6 +22,7 @@ const ENCODINGS: Record<natives.Encoding, { name: string; models: string }> = {
 	[natives.Encoding.DeepSeekV3]: { name: "deepseek-v3", models: "DeepSeek V3–V4" },
 	[natives.Encoding.KimiK2]: { name: "kimi-k2", models: "Kimi K2–K3" },
 	[natives.Encoding.Glm5]: { name: "glm5", models: "GLM-5.x" },
+	[natives.Encoding.Jev]: { name: "jev", models: "TypeSafe Jev 1.13" },
 };
 
 type Source = { kind: "file"; path: string } | { kind: "text" };

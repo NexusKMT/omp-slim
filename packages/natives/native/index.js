@@ -166,6 +166,7 @@ export const Encoding = {
 	DeepSeekV3: "DeepSeekV3",
 	KimiK2: "KimiK2",
 	Glm5: "Glm5",
+	Jev: "Jev",
 };
 export const FileType = {
 	File: 1,
