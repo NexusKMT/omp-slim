@@ -1914,6 +1914,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			getTurnBudget: () => sessionManager.getTurnBudget(),
 			recordEvalSubagentUsage: output => sessionManager.recordEvalSubagentOutput(output),
 			getClientBridge: () => session?.clientBridge,
+			emitBeforeSubagentSpawn: (event, signal) =>
+				session?.extensionRunner?.emitBeforeSubagentSpawn(event, signal) ?? Promise.resolve(undefined),
 			queueDeferredDiagnostics: entry => session?.yieldQueue.enqueue(LSP_LATE_DIAGNOSTIC_MESSAGE_TYPE, entry),
 			queueLaunchCompletion: notification =>
 				session?.queueLaunchCompletion(notification) ??
