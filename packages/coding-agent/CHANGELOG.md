@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- Fixed retry fallback treating a chain entry that resolves to the failing request (same routed model and the same effective thinking level after clamping) as a model switch, which reset the retry budget on every failure and retried without limit ([#12976](https://github.com/can1357/oh-my-pi/pull/12976) by [@Gablinas](https://github.com/Gablinas)).
 - Fixed headless print mode (`-p`) silently dropping MCP servers slower than the startup window; print mode now waits for configured servers (bounded by `OMP_MCP_TIMEOUT_MS`) and warns on stderr when one is not ready ([#12188](https://github.com/can1357/oh-my-pi/issues/12188), reported by [@aaronjmars](https://github.com/aaronjmars)).
 
 ## [18.2.11] - 2026-09-23
