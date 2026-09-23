@@ -15,10 +15,16 @@ export interface XdevMountedRenderer {
 	mergeCallAndResult?: boolean;
 }
 
-/** Mounted tool presentation state supplied by the host's canonical tool map. */
+/** Tool presentation state supplied by the host's canonical tool map. */
 export interface XdevMountedState {
 	readonly mountedNames: ReadonlySet<string>;
 	readonly tools: ReadonlyMap<string, XdevMountedRenderer>;
+	/**
+	 * Whether a name is active at the top level. Active tools are dispatchable
+	 * through `write xd://<tool>` as well (host `resolveXdevTool`), so their
+	 * device cards resolve the same canonical renderer as mounted devices.
+	 */
+	readonly isActive?: (name: string) => boolean;
 }
 
 function isComponent(value: unknown): value is Component {

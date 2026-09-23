@@ -17,6 +17,7 @@ import type { XdevMountedRenderer } from "@oh-my-pi/pi-tui/tools/xdev";
 import {
 	listXdevTools,
 	resolveMountedXdevTool,
+	resolveXdevTool,
 	XDEV_DOCS_PER_DEVICE_CAP,
 	XDEV_DOCS_TOTAL_BUDGET,
 	XDEV_EXTERNAL_DESCRIPTION_CAP,
@@ -27,10 +28,14 @@ import {
 } from "@oh-my-pi/pi-coding-agent/tools/xdev";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 
-/** Mirrors `ToolExecutionComponent#buildRenderContext`: mounted tools expose their render hooks to the write renderer. */
+/**
+ * Mirrors `ToolExecutionComponent#buildRenderContext`: mounted devices and
+ * active top-level tools (both dispatchable through the write transport)
+ * expose their render hooks to the write renderer.
+ */
 function mountedRenderContext(xdev: XdevState): WriteRenderContext {
 	return {
-		resolveXdevMounted: name => resolveMountedXdevTool(xdev, name) as XdevMountedRenderer | undefined,
+		resolveXdevMounted: name => resolveXdevTool(xdev, name) as XdevMountedRenderer | undefined,
 	};
 }
 

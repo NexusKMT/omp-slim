@@ -1298,11 +1298,15 @@ export class ToolExecutionComponent extends Container {
 			context.renderDiff = renderDiff;
 		} else if (this.#toolName === "write") {
 			// Device-dispatch previews resolve renderers from the canonical tool map.
+			// Dispatch accepts mounted devices *and* active top-level tools
+			// (`resolveXdevTool`), so the lookup covers both: a `write xd://<tool>`
+			// card for a top-level tool must use that tool's own renderer instead of
+			// the generic args/output card.
 			const writeTool = this.#tool as { session?: { xdev?: XdevMountedState } } | undefined;
 			const xdev = writeTool?.session?.xdev;
 			if (xdev) {
 				context.resolveXdevMounted = (name: string) =>
-					xdev.mountedNames.has(name) ? xdev.tools.get(name) : undefined;
+					xdev.mountedNames.has(name) || xdev.isActive?.(name) === true ? xdev.tools.get(name) : undefined;
 			}
 		}
 
