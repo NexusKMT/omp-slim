@@ -5,6 +5,7 @@
 ### Added
 
 - Added Skills configuration section to settings
+- Enabled OSC 8 hyperlinks on rio ([#12922](https://github.com/can1357/oh-my-pi/pull/12922) by [@abcfy2](https://github.com/abcfy2))
 
 ## [18.2.10] - 2026-09-22
 
