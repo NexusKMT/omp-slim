@@ -3,15 +3,15 @@ import type { AgentTool } from "@oh-my-pi/pi-agent-core";
 import { Text } from "@oh-my-pi/pi-tui";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
-import type { XdevMountedRenderer } from "@oh-my-pi/pi-tui/tools/xdev";
+import type { XdevMountedRenderer, XdevMountedState } from "@oh-my-pi/pi-tui/tools/xdev";
 
 /**
- * A `write xd://<tool>` card must render with the dispatched tool's own
- * renderer. Dispatch accepts mounted devices *and* active top-level tools
- * (`resolveXdevTool`), while the write card's renderer lookup used to be
- * gated on `mountedNames` alone — so an essential (top-level) extension tool
- * called through the device transport fell back to the generic args/output
- * card even though the identical native call renders its custom frame.
+ * A `write xd://<tool>` card renders with the dispatched tool's own renderer,
+ * while streaming (call branch) and once the result lands, for mounted devices
+ * and active top-level tools alike. The TUI forwards the host's canonical
+ * resolver (`XdevMountedState.resolve`, wired to `resolveXdevTool`) and must
+ * not gate it on `mountedNames` itself: that second predicate is what left a
+ * dispatched top-level tool on the generic args/output card.
  */
 
 const ui = () => ({
@@ -20,34 +20,31 @@ const ui = () => ({
 	resetDisplay: vi.fn(),
 });
 
-/** Renderer-bearing device fixture. */
-const probeTool = {
-	name: "probe",
+const probeTool: XdevMountedRenderer = {
 	label: "Probe",
 	mergeCallAndResult: true,
 	renderCall: () => new Text("PROBE-CALL", 0, 0),
 	renderResult: () => new Text("PROBE-RESULT", 0, 0),
 };
 
-function writeToolWithXdev(xdev: {
-	mountedNames: ReadonlySet<string>;
-	tools: ReadonlyMap<string, XdevMountedRenderer>;
-	isActive?: (name: string) => boolean;
-}): AgentTool {
+function writeToolWithXdev(xdev: XdevMountedState): AgentTool {
 	return { name: "write", label: "Write", session: { xdev } } as unknown as AgentTool;
 }
 
-const xdevState = (mounted: string[], isActive: (name: string) => boolean) => ({
-	mountedNames: new Set(mounted),
-	tools: new Map<string, XdevMountedRenderer>([[probeTool.name, probeTool]]),
-	isActive,
-});
+/** `mountedNames` stays empty on purpose: the host resolver is the only authority. */
+function xdevState(resolve: XdevMountedState["resolve"]): XdevMountedState {
+	return {
+		mountedNames: new Set<string>(),
+		tools: new Map<string, XdevMountedRenderer>([["probe", probeTool]]),
+		resolve,
+	};
+}
 
 const dispatchResult = {
 	content: [{ type: "text" as const, text: "42" }],
 	details: {
 		xdev: {
-			tool: probeTool.name,
+			tool: "probe",
 			mode: "execute" as const,
 			args: { command: "Write-Output 42" },
 			inner: { output: "42" },
@@ -55,16 +52,16 @@ const dispatchResult = {
 	},
 };
 
-function renderDeviceWrite(xdev: Parameters<typeof writeToolWithXdev>[0]): string {
+function deviceWrite(resolve: XdevMountedState["resolve"]): ToolExecutionComponent {
 	const component = new ToolExecutionComponent(
 		"write",
-		{ path: `xd://${probeTool.name}`, content: JSON.stringify({ command: "Write-Output 42" }) },
+		{ path: "xd://probe", content: JSON.stringify({ command: "Write-Output 42" }) },
 		{ useBuiltInRenderer: true },
-		writeToolWithXdev(xdev),
+		writeToolWithXdev(xdevState(resolve)),
 		ui(),
 	);
-	component.updateResult(dispatchResult, false);
-	return component.render(80).join("\n");
+	component.setExecutionStarted();
+	return component;
 }
 
 describe("write xd:// device card renderer resolution", () => {
@@ -72,18 +69,20 @@ describe("write xd:// device card renderer resolution", () => {
 		await initTheme();
 	});
 
-	it("delegates to an active top-level tool's renderer", () => {
-		const rendered = renderDeviceWrite(xdevState([], name => name === probeTool.name));
-		expect(rendered).toContain("PROBE-RESULT");
+	it("renders the dispatched tool's card while streaming and after the result", () => {
+		const component = deviceWrite(() => probeTool);
+		expect(component.render(80).join("\n")).toContain("PROBE-CALL");
+
+		component.updateResult(dispatchResult, false);
+		expect(component.render(80).join("\n")).toContain("PROBE-RESULT");
 	});
 
-	it("delegates to a mounted device's renderer", () => {
-		const rendered = renderDeviceWrite(xdevState([probeTool.name], () => false));
-		expect(rendered).toContain("PROBE-RESULT");
-	});
+	it("falls back to the generic card when the host resolver returns nothing", () => {
+		const component = deviceWrite(() => undefined);
+		expect(component.render(80).join("\n")).not.toContain("PROBE-CALL");
 
-	it("falls back to the generic card for a name that can neither be mounted nor dispatched", () => {
-		const rendered = renderDeviceWrite(xdevState([], () => false));
+		component.updateResult(dispatchResult, false);
+		const rendered = component.render(80).join("\n");
 		expect(rendered).not.toContain("PROBE-RESULT");
 		expect(rendered).toContain("42");
 	});
