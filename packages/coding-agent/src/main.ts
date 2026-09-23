@@ -1748,15 +1748,9 @@ export async function runRootCommand(
 			? Promise.resolve(deps.settings)
 			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
 		settingsPromise.catch(() => {});
-		const authStoragePromise = logger.time("discoverAuthStorage", async () => {
-			const settingsInstance = await settingsPromise;
-			return (deps.discoverAuthStorage ?? discoverAuthStorage)(undefined, {
-				accountPolicies: settingsInstance.get("auth.accountPolicies"),
-				authStorageOptions: {
-					defaultReservePct: settingsInstance.get("retry.usageReservePct"),
-				},
-			});
-		});
+		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
+			(deps.discoverAuthStorage ?? discoverAuthStorage)(undefined, { settings: await settingsPromise }),
+		);
 		authStoragePromise.catch(() => {});
 		let authStorage: AuthStorage;
 		try {

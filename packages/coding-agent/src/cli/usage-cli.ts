@@ -1122,12 +1122,7 @@ export function formatClientUsage(clients: ClientUsageClientSummary[], sinceMs: 
 
 export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 	const settings = await Settings.loadReadOnly();
-	const authStorage = await discoverAuthStorage(undefined, {
-		accountPolicies: settings.get("auth.accountPolicies"),
-		authStorageOptions: {
-			defaultReservePct: settings.get("retry.usageReservePct"),
-		},
-	});
+	const authStorage = await discoverAuthStorage(undefined, { settings });
 	try {
 		if (cmd.action === "invalidate") {
 			const provider = cmd.provider?.toLowerCase();
