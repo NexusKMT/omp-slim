@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added recording of idle recaps to `session_recaps` table for durable storage
+- Added GC cleanup of session recap rows when deleting archived sessions
 - Implemented automatic title retry for ambiguous first messages
 - Added `/changelog last [N]` to show the latest release, or the last N releases. `/changelog` still shows the recent default and `/changelog full` still shows the complete history.
 - Added 'daybreak' badge to `omp usage` output for enabled accounts
