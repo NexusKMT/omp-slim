@@ -6608,4 +6608,53 @@ describe("AgentSession retry fallback", () => {
 		const finalAssistant = getLastAssistantMessage(session);
 		expect(finalAssistant.content).toEqual([{ type: "text", text: "Recovered on the same model." }]);
 	});
+
+	it("does not reset the retry budget for a chain entry that resolves to the failing model", async () => {
+		const primaryModel = getBundledModel("openrouter", "z-ai/glm-5.2");
+		if (!primaryModel) {
+			throw new Error("Expected bundled test model to exist");
+		}
+		const primarySelector = `${primaryModel.provider}/${primaryModel.id}`;
+
+		const mock = createMockModel();
+		const requestedModels: string[] = [];
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (model, context, options) => {
+				requestedModels.push(`${model.provider}/${model.id}`);
+				// A permanent route failure: retrying it can never succeed.
+				mock.push({ throw: "500 upstream is unwell" });
+				return mock.stream(model, context, options);
+			},
+		});
+
+		// The chain entry is a DIFFERENT selector string that resolves to the
+		// model already active. `findRetryFallbackCandidates` filters by string,
+		// so it survives the filter and the swap lands on the failing model.
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxRetries": 2,
+			"retry.fallbackChains": { [primarySelector]: ["openrouter/glm-5.2"] },
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		mockSchedulerWaitWithClock();
+
+		await session.prompt("Fail on a route that cannot recover");
+		await session.waitForIdle();
+
+		// A "switch" onto the model that just failed is not a switch: the retry
+		// budget must still bound the attempts. Before the guard this reset the
+		// budget on every failure and the turn retried without limit.
+		expect(requestedModels.length).toBeLessThanOrEqual(1 + 2);
+		expect(requestedModels.every(selector => selector === primarySelector)).toBe(true);
+		expect(getLastAssistantMessage(session).stopReason).toBe("error");
+	});
 });

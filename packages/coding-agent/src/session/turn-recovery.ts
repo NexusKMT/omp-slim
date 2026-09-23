@@ -1944,6 +1944,25 @@ export class TurnRecovery {
 				const resolved = resolveModelOverride([selector.raw], this.#host.modelRegistry, this.#host.settings);
 				const candidate = resolved.model ?? this.#host.modelRegistry.find(selector.provider, selector.id);
 				if (!candidate) continue;
+				// A candidate that RESOLVES to the model which just failed is not a
+				// switch, and must never be applied: `findRetryFallbackCandidates`
+				// excludes the current model by selector STRING, while the model
+				// actually applied is whatever `resolveModelOverride` resolves that
+				// string to. When those disagree (a chain selector that fuzzy-matches
+				// the active model, or two selectors naming one model), the swap
+				// "succeeds" onto the same model, the caller sets `switchedModel`, and
+				// the retry budget is reset to 1 on every failure — an unbounded retry
+				// loop against a model that cannot work. A candidate at a DIFFERENT
+				// thinking level is still a real change of request and stays eligible.
+				const active = this.#host.model();
+				if (
+					active &&
+					candidate.provider === active.provider &&
+					candidate.id === active.id &&
+					(selector.thinkingLevel ?? this.#host.configuredThinkingLevel()) === this.#host.configuredThinkingLevel()
+				) {
+					continue;
+				}
 				if (options?.excludeProvider === candidate.provider) continue;
 				// Anthropic signatures and redacted blocks are model-bound, while the
 				// latest assistant response must remain byte-identical. A same-provider
