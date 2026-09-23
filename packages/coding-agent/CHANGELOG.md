@@ -11,6 +11,7 @@
 - Introduced Skillshare registry support for searching, installing, and managing skill extensions
 - Added CLI `skill` and TUI `/skills` commands for registry interactions
 - Implemented project-scoped and global skill installation with integrity validation
+- Added StepFun to the `/login` provider list and `STEPFUN_API_KEY` to the `--help` environment list ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
 
 ### Changed
 
@@ -18,9 +19,6 @@
 - Optimized TTSR registry to prefilter judged rules before triggering model calls, minimizing judgment costs
 - Extensions load faster on warm starts: their dependencies are no longer re-parsed on every launch ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
 - The first highlighted code block, bash preview, or diff no longer stalls the screen while syntax highlighting initializes ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
-### Added
-
-- Added StepFun to the `/login` provider list and `STEPFUN_API_KEY` to the `--help` environment list ([#12918](https://github.com/can1357/oh-my-pi/pull/12918) by [@ArpitMishra17](https://github.com/ArpitMishra17)).
 
 ### Fixed
 
