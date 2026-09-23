@@ -22,6 +22,12 @@
 ### Fixed
 
 - The Todo tracker now reflects nested `eval` Todo updates, including when a cell fails after committing ([#12921](https://github.com/can1357/oh-my-pi/pull/12921) by [@tommymorgan](https://github.com/tommymorgan)).
+- Output schemas written as JSON Schema without a root `type` keep their `items` and `required` keywords, so structured-output tools no longer fail strict-mode validation ([#12893](https://github.com/can1357/oh-my-pi/issues/12893))
+- TTSR whole-buffer lookahead conditions now avoid repeated starting-position scans during streamed writes ([#12261](https://github.com/can1357/oh-my-pi/issues/12261), [#12887](https://github.com/can1357/oh-my-pi/pull/12887) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed plural browser queries failing when compiled binaries expose shallow stack traces ([#12902](https://github.com/can1357/oh-my-pi/pull/12902) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed browser `tab.fill` timing out after 8 seconds on pages whose animation frames stall ([#12892](https://github.com/can1357/oh-my-pi/issues/12892))
+- Fixed LSP diagnostics returning an empty result on the first edit while a freshly started server is still analyzing ([#12889](https://github.com/can1357/oh-my-pi/issues/12889))
+- `/shake thinking` now reports how many tokens it freed ([#12916](https://github.com/can1357/oh-my-pi/pull/12916) by [@Gablinas](https://github.com/Gablinas))
 
 ## [18.2.10] - 2026-09-22
 
@@ -39,11 +45,6 @@
 - Refined AI-assisted git staging verification to reduce false positives
 - Updated `omp bench` default profile to `chat` and improved CLI flag documentation
 - Coalesced judgment batch drain operations for better performance under high load
-
-### Fixed
-
-- Output schemas written as JSON Schema without a root `type` keep their `items` and `required` keywords, so structured-output tools no longer fail strict-mode validation ([#12893](https://github.com/can1357/oh-my-pi/issues/12893))
-- TTSR whole-buffer lookahead conditions now avoid repeated starting-position scans during streamed writes ([#12261](https://github.com/can1357/oh-my-pi/issues/12261), [#12887](https://github.com/can1357/oh-my-pi/pull/12887) by [@Dante-dan](https://github.com/Dante-dan)).
 
 ## [18.2.9] - 2026-09-22
 
@@ -72,7 +73,6 @@
 
 ### Fixed
 
-- Fixed plural browser queries failing when compiled binaries expose shallow stack traces ([#12902](https://github.com/can1357/oh-my-pi/pull/12902) by [@Dante-dan](https://github.com/Dante-dan)).
 - Fixed JavaScript `eval` assignments in cells containing top-level `await` so they persist into subsequent cells.
 - Fixed skill hints becoming out of sync with the active prompt after discarded rebuilds and in advisor sessions.
 - Restored `pi.pi.askToolRenderer` for extensions that replace the built-in ask tool, preserving native rendering.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed background job completions interrupting foreground bash and eval calls, which made them auto-background repeatedly ([#12869](https://github.com/can1357/oh-my-pi/issues/12869))
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Claude Opus 5.5 ignoring a mid-session switch to high effort when the session started without an explicit effort; the change is now sent as a cache-preserving per-message effort control ([#12909](https://github.com/can1357/oh-my-pi/pull/12909) by [@h4vc](https://github.com/h4vc)).
+- Fixed Alibaba Token Plan monthly quotas missing from usage reports and the status line ([#12873](https://github.com/can1357/oh-my-pi/issues/12873))
 
 ## [18.2.9] - 2026-09-22
 
