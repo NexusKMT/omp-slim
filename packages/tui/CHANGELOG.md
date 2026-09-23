@@ -6,6 +6,10 @@
 
 - Updated model hub and oauth selector components to use namespaced `authStorage` API
 
+### Fixed
+
+- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement.
+
 ## [18.2.11] - 2026-09-23
 
 ### Added
