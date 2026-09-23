@@ -2882,6 +2882,14 @@ export class Markdown implements Component {
 		};
 	}
 
+	#quoteStyle(text: string): string {
+		return this.#theme.quote(this.#theme.italic(text));
+	}
+
+	#getQuoteStylePrefix(): string {
+		return this.#getStylePrefix(text => this.#quoteStyle(text));
+	}
+
 	#renderToken(
 		token: Token,
 		width: number,
@@ -3002,11 +3010,9 @@ export class Markdown implements Component {
 			}
 
 			case "blockquote": {
-				const quoteStyle = (text: string) => this.#theme.quote(this.#theme.italic(text));
-				const quoteStylePrefix = this.#getStylePrefix(quoteStyle);
 				const quoteInlineStyleContext: InlineStyleContext = {
 					applyText: (text: string) => text,
-					stylePrefix: quoteStylePrefix,
+					stylePrefix: this.#getQuoteStylePrefix(),
 				};
 				const quoteContentWidth = Math.max(1, width - 2);
 				const quoteTokens = token.tokens || [];
@@ -3076,14 +3082,13 @@ export class Markdown implements Component {
 	 * `width` is the full content width; the border reserves two cells.
 	 */
 	#applyQuoteBorder(renderedLines: RenderedLine[], width: number): RenderedLine[] {
-		const quoteStyle = (text: string) => this.#theme.quote(this.#theme.italic(text));
-		const quoteStylePrefix = this.#getStylePrefix(quoteStyle);
+		const quoteStylePrefix = this.#getQuoteStylePrefix();
 		const applyQuoteStyle = (line: string): string => {
 			if (!quoteStylePrefix) {
-				return quoteStyle(line);
+				return this.#quoteStyle(line);
 			}
 			const lineWithReappliedStyle = line.replace(/\x1b\[0m/g, `\x1b[0m${quoteStylePrefix}`);
-			return quoteStyle(lineWithReappliedStyle);
+			return this.#quoteStyle(lineWithReappliedStyle);
 		};
 		const quoteContentWidth = Math.max(1, width - 2);
 		const lines: RenderedLine[] = [];
