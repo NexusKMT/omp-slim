@@ -41,6 +41,7 @@ import { resolveFileDisplayMode } from "../utils/file-display-mode";
 import { routeWriteThroughBridge, shouldRouteWriteThroughBridge } from "./acp-bridge";
 import { resolveToolTier, truncateForPrompt } from "./approval";
 import { assertEditableFile } from "./auto-generated-guard";
+
 import {
 	formatHashlineHeader,
 	isReadTruncationNotice,
@@ -77,6 +78,7 @@ import { decodeUtf8Text } from "./read-format";
 import { routeReadThroughBridge } from "./read-summary";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 
+
 import { dispatchReportIssueDevice } from "./report-tool-issue";
 import { REPORT_ISSUE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/report-tool-issue";
 import { dispatchResolutionDevice } from "./resolve";
@@ -94,6 +96,10 @@ import {
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { toolResult } from "./tool-result";
 import { dispatchXdevTool, resolveXdevTool, xdevListing } from "./xdev";
+function utf8ByteLength(text: string): number {
+	return Buffer.byteLength(text);
+}
+
 
 const LOOSE_HASHLINE_HEADER_RE = /^\s*\[[^#\r\n]+#[^ \t\r\n]*\]\s*$/;
 const EXECUTABLE_NOTICE = "[Notice: Made executable via chmod +x]";
@@ -762,7 +768,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			resolvedArchivePath.archiveSubPath
 		}`;
 		return {
-			content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${outputPath}` }],
+			content: [{ type: "text", text: `Successfully wrote ${utf8ByteLength(content)} bytes to ${outputPath}` }],
 			details: { resolvedPath: resolvedArchivePath.absolutePath },
 		};
 	}
@@ -1277,7 +1283,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 						},
 					});
 					if (xdResult) return xdResult;
-					let resultText = `Successfully wrote ${cleanContent.length} bytes to ${path}`;
+					let resultText = `Successfully wrote ${utf8ByteLength(cleanContent)} bytes to ${path}`;
 					if (stripped) {
 						resultText += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
 					}
@@ -1385,7 +1391,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 				// hands back a tag that matches what's actually on disk.
 				const madeExecutable = await maybeMarkExecutableForShebang(absolutePath, bridgeWrite.text);
 				const header = maybeWriteSnapshotHeader(this.session, absolutePath, bridgeWrite.text);
-				const writeLine = `Successfully wrote ${cleanContent.length} bytes to ${displayPath}`;
+				const writeLine = `Successfully wrote ${utf8ByteLength(cleanContent)} bytes to ${displayPath}`;
 				let resultText = header ? `${header}\n${writeLine}` : writeLine;
 				if (stripped) {
 					resultText += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
@@ -1415,7 +1421,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 			const madeExecutable = await maybeMarkExecutableForShebang(absolutePath, finalContent);
 
 			const header = maybeWriteSnapshotHeader(this.session, absolutePath, finalContent);
-			const writeLine = `Successfully wrote ${finalContent.length} bytes to ${displayPath}`;
+			const writeLine = `Successfully wrote ${utf8ByteLength(finalContent)} bytes to ${displayPath}`;
 			let resultText = header ? `${header}\n${writeLine}` : writeLine;
 			if (stripped) {
 				resultText += `\nNote: auto-stripped hashline display prefixes from content before writing.`;
