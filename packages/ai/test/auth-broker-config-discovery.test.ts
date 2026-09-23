@@ -90,6 +90,19 @@ describe("resolveAuthBrokerConfig config discovery", () => {
 		});
 	});
 
+	test("treats an empty or comment-only config.yml as no configuration", async () => {
+		for (const content of ["", "# nothing configured yet\n"]) {
+			await Bun.write(path.join(agentDir, "config.yml"), content);
+			await withEnv(SUPPRESS_AUTH_BROKER_ENV, async () => {
+				await expect(resolveAuthBrokerConfig({ agentDir })).resolves.toBeNull();
+				await expect(loadAuthAccountPolicyConfig({ agentDir })).resolves.toEqual({
+					accountPolicies: [],
+					defaultReservePct: DEFAULT_USAGE_RESERVE_PCT,
+				});
+			});
+		}
+	});
+
 	test("strictly validates effective policy overrides without parsing superseded main-config values", async () => {
 		await Bun.write(path.join(agentDir, "config.yml"), ["auth:", "  accountPolicies: null", ""].join("\n"));
 		const invalidPolicies = [

@@ -209,7 +209,9 @@ async function readConfigYaml(agentDir: string): Promise<ConfigSnapshot> {
 		} catch (error) {
 			throw new AIError.ConfigurationError(`${configPath} contains invalid YAML: ${String(error)}`);
 		}
-		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		// An empty or comment-only file parses to null: no settings, not a malformed config.
+		if (parsed === null || parsed === undefined) return {};
+		if (typeof parsed !== "object" || Array.isArray(parsed)) {
 			throw new AIError.ConfigurationError(`${configPath} must contain a YAML object`);
 		}
 		const record = parsed as Record<string, unknown>;
