@@ -35,6 +35,8 @@
 ### Fixed
 
 - Fixed AltGr characters, including `[`, `]`, `{`, and `}`, being dropped in Windows Terminal when using the kitty keyboard protocol on Hungarian and other international keyboard layouts ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
+- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
+- Pending Read and Write file paths open local files instead of browser URLs, including archive and database targets ([#12879](https://github.com/can1357/oh-my-pi/pull/12879)).
 
 ## [18.2.11] - 2026-09-23
 
