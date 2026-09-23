@@ -542,10 +542,13 @@ function parseJinaReaderContent(responseBody: string): string | null {
 
 /**
  * Markdown image whose destination is an inline `data:` URI. The label allows
- * backslash escapes (converters emit `\]` inside titles); base64 payloads never
+ * backslash escapes (converters emit `\]` inside titles). The scheme is matched
+ * case-insensitively, the destination may be bare or `<…>`-wrapped, and an
+ * optional `"…"`, `'…'`, or `(…)` title is consumed; base64 payloads never
  * contain `)` or whitespace.
  */
-const DATA_URI_IMAGE_RE = /!\[((?:\\.|[^\\\]])*)\]\(\s*data:[^)\s]*\s*\)/g;
+const DATA_URI_IMAGE_RE =
+	/!\[((?:\\.|[^\\\]])*)\]\(\s*(?:<data:[^>]*>|data:[^)\s]*)(?:\s+(?:"(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'|\((?:\\.|[^\\)])*\)))?\s*\)/gi;
 
 /**
  * Drop inline `data:` image payloads (inline `<svg>` icons, base64 `<img>`)
