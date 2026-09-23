@@ -4,7 +4,8 @@
 
 ### Fixed
 
-- Fixed GPT-6 Sol and Luna missing from OpenAI Codex model discovery and displaying zero estimated costs for their plain and worker routes ([#12885](https://github.com/can1357/oh-my-pi/pull/12885) by [@itsddvn](https://github.com/itsddvn)).
+- Fixed zero estimated costs for OpenAI Codex GPT-6 Sol and Luna plain and worker routes ([#12885](https://github.com/can1357/oh-my-pi/pull/12885) by [@itsddvn](https://github.com/itsddvn)).
+
 ## [18.2.10] - 2026-09-22
 
 ### Changed
