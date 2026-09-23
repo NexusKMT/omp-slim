@@ -56,6 +56,7 @@ function createFocusedContext() {
 		updatePendingMessagesDisplay: vi.fn(),
 		handleUsageCommand: vi.fn(async () => {}),
 		handleExportCommand: vi.fn(async () => {}),
+		showResetUsageSelector: vi.fn(async () => {}),
 		withLocalSubmission: async <T>(_text: string, fn: () => Promise<T>) => fn(),
 	};
 	return { ctx: ctx as unknown as InteractiveModeContext, raw: ctx, editor, prompt };
@@ -92,6 +93,16 @@ describe("focused subagent view slash commands", () => {
 		expect(raw.showStatus).toHaveBeenCalledWith(expect.stringContaining("press ←← to return first"));
 		expect(editor.getText()).toBe("/compact");
 		expect(prompt).not.toHaveBeenCalled();
+	});
+
+	it("keeps the mutating /usage reset form gated to the main session", async () => {
+		for (const text of ["/usage reset", "/usage reset anthropic/active"]) {
+			const { raw, editor } = await submit(text);
+			expect(raw.showResetUsageSelector).not.toHaveBeenCalled();
+			expect(raw.handleUsageCommand).not.toHaveBeenCalled();
+			expect(raw.showStatus).toHaveBeenCalledWith(expect.stringContaining("press ←← to return first"));
+			expect(editor.getText()).toBe(text);
+		}
 	});
 
 	it("exports the viewed (focused) session rather than the main session", async () => {
