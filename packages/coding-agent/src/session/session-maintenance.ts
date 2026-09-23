@@ -773,6 +773,7 @@ export class SessionMaintenance {
 		if (mode === "thinking") {
 			const branchEntries = this.#host.sessionManager.getBranch();
 			let removed = 0;
+			let tokensFreed = 0;
 			for (const entry of branchEntries) {
 				if (entry.type !== "message" || entry.message.role !== "assistant") continue;
 				const message = entry.message;
@@ -781,9 +782,17 @@ export class SessionMaintenance {
 				);
 				const dropped = message.content.length - kept.length;
 				if (dropped === 0) continue;
+				// Measure the whole turn before and after rather than tokenizing the
+				// dropped blocks alone: `countMessage` is what context accounting
+				// charges, and it charges the opaque `thinkingSignature` /
+				// `redactedThinking.data` payloads riding beside the reasoning text
+				// (#2275). On a thinking-heavy session those payloads are the larger
+				// share of the saving, so summing block text alone would under-report.
+				const before = this.#tokenizer.countMessage(message);
 				// Provider serializers omit empty assistant turns, so don't invent model-authored text.
 				message.content = kept;
 				invalidateMessageCache(message);
+				tokensFreed += Math.max(0, before - this.#tokenizer.countMessage(message));
 				removed += dropped;
 			}
 			if (removed === 0) {
@@ -794,7 +803,7 @@ export class SessionMaintenance {
 			this.#host.agent.replaceMessages(sessionContext.messages);
 			this.#host.resetAdvisorRuntimes("shake");
 			this.#host.closeCodexProviderSessionsForHistoryRewrite();
-			return { mode, toolResultsDropped: 0, blocksDropped: 0, thinkingBlocksDropped: removed, tokensFreed: 0 };
+			return { mode, toolResultsDropped: 0, blocksDropped: 0, thinkingBlocksDropped: removed, tokensFreed };
 		}
 
 		const assertCurrent = () => {
