@@ -5936,6 +5936,9 @@ export interface GithubCopilotModelManagerConfig {
 	fetch?: FetchImpl;
 }
 
+// Copilot ids whose cached route predates the Responses pin: a cache written by
+// an older build still says openai-completions, which Copilot answers with 400
+// unsupported_api_for_model (#7096, #8807, #12901).
 const COPILOT_CACHE_INVALIDATED_MODEL_IDS = [
 	"gpt-6-astra",
 	"gpt-6-astra-1m",
@@ -5943,6 +5946,8 @@ const COPILOT_CACHE_INVALIDATED_MODEL_IDS = [
 	"grok-4.5-1m",
 	"grok-4.6",
 	"grok-4.6-1m",
+	"grok-4.7",
+	"grok-4.7-1m",
 	"mai-code-1-flash-picker",
 ];
 
@@ -6211,7 +6216,13 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 													supportsReasoningEffort: false,
 												},
 											}
-										: {}),
+										: // The bundled row for an id whose route later moved to
+											// Responses/Messages still carries this chat-completions
+											// block, and `supportsReasoningEffort: false` suppresses
+											// the effort dial on a transport that supports it
+											// (grok-4.7, #12901). Compat is transport-scoped: let the
+											// rules resolve it for the route actually in use.
+											{ compat: undefined }),
 								}
 							: {
 									...defaults,

@@ -440,6 +440,7 @@ describe("github copilot model limits mapping", () => {
 		{ id: "mai-code-1-flash-picker", name: "MAI-Code-1-Flash" },
 		{ id: "grok-4.5", name: "Grok 4.5" },
 		{ id: "grok-4.6", name: "Grok 4.6" },
+		{ id: "grok-4.7", name: "Grok 4.7" },
 	]) {
 		it(`refreshes a cached ${migration.name} completion route after the endpoint migration`, async () => {
 			const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `pi-ai-copilot-${migration.id}-cache-`));
@@ -1077,6 +1078,67 @@ describe("github copilot vision endpoint policy", () => {
 			const model = models.find(candidate => candidate.id === "claude-sonnet-4.6");
 			expect(model?.baseUrl).toBe("https://api.business.githubcopilot.com");
 			expect(model?.input).toEqual(["text", "image"]);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("github copilot grok transport routing", () => {
+	it("routes every Grok 4.x row — including the synthesized 1M sibling — to Responses", async () => {
+		const { models } = await discoverCopilotModels({
+			data: [
+				tieredCopilotEntry({
+					id: "grok-4.7",
+					name: "Grok 4.7",
+					window: 1_000_000,
+					maxOutput: 128_000,
+					defaultContextMax: 500_000,
+					longContextMax: 872_000,
+				}),
+				tieredCopilotEntry({
+					id: "grok-code-fast-1",
+					name: "Grok Code Fast 1",
+					window: 256_000,
+					maxOutput: 64_000,
+				}),
+			],
+		});
+		// Copilot answers /chat/completions for these ids with
+		// 400 unsupported_api_for_model (#7096, #8807, #12901).
+		expect(models.map(model => [model.id, model.api])).toEqual([
+			["grok-4.7", "openai-responses"],
+			["grok-4.7-1m", "openai-responses"],
+			["grok-code-fast-1", "openai-completions"],
+		]);
+	});
+
+	it("keeps the effort dial when a bundled chat-completions row is re-routed to Responses", async () => {
+		// The bundled grok-4.7 row was baked while the id rode chat completions,
+		// so it carries Copilot's `supportsReasoningEffort: false` override. That
+		// override is scoped to the transport it was authored for; re-applying it
+		// over the discovered Responses row strips reasoning from every request.
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-copilot-grok-"));
+		try {
+			const fetchMock = vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							data: [
+								tieredCopilotEntry({ id: "grok-4.7", name: "Grok 4.7", window: 500_000, maxOutput: 128_000 }),
+							],
+						}),
+						{ status: 200, headers: { "Content-Type": "application/json" } },
+					),
+			);
+			const manager = createModelManager({
+				...githubCopilotModelManagerOptions({ apiKey: "copilot-test-key", fetch: fetchMock }),
+				cacheDbPath: path.join(tempDir, "models.db"),
+			});
+			const { models } = await manager.refresh("online");
+			const model = models.find(candidate => candidate.id === "grok-4.7");
+			expect(model?.api).toBe("openai-responses");
+			expect(model?.thinking?.efforts).toEqual([Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]);
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
