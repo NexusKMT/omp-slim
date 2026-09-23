@@ -16,6 +16,7 @@
 ### Fixed
 
 - Fixed startup release notes requiring an Escape keypress before they could be scrolled ([#12906](https://github.com/can1357/oh-my-pi/pull/12906) by [@michaelr](https://github.com/michaelr)).
+- Kept usage quota names distinguishable with aligned bars and bounded, sanitized labels in narrow and multi-column dashboards ([#12903](https://github.com/can1357/oh-my-pi/pull/12903) by [@lockwo](https://github.com/lockwo)).
 
 ## [18.2.9] - 2026-09-22
 
