@@ -136,10 +136,6 @@ const summarizeToolResult: StatusSummarizer = (name, args, result, text, hasErro
 				code: typeof details.exitCode === "number" ? details.exitCode : undefined,
 				output: text.slice(0, 500),
 			});
-		case "todo": {
-			const phases = committedTodoPhases(result);
-			return withError(phases ? { op: "todo", phases } : { op: "todo", chars: text.length });
-		}
 		default:
 			return withError({ op: name, chars: text.length });
 	}

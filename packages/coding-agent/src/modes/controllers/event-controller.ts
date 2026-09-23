@@ -35,7 +35,7 @@ import { type ApprovalMode, resolveApproval } from "../../tools/approval";
 import { previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
 import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import { writeDeviceDispatch } from "../../tools/resolve";
-import { isTodoPhase, nextActionableTask } from "../../tools/todo";
+import { nextActionableTask } from "../../tools/todo";
 import { SpeechEnhancer } from "../../tts/speech-enhancer";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
@@ -72,15 +72,12 @@ const IDLE_RECAP_MAX_SECONDS = 3600;
 
 const RAW_PARTIAL_JSON_RENDERERS: Record<string, true> = { bash: true, edit: true, apply_patch: true };
 
-function nestedTodoPhases(details: unknown): TodoPhase[] | undefined {
-	if (!isRecord(details) || !Array.isArray(details.statusEvents)) return undefined;
-	for (let index = details.statusEvents.length - 1; index >= 0; index--) {
-		const event = details.statusEvents[index];
-		if (isRecord(event) && event.op === "todo" && Array.isArray(event.phases) && event.phases.every(isTodoPhase)) {
-			return event.phases;
-		}
-	}
-	return undefined;
+function hasNestedTodo(details: unknown): boolean {
+	return (
+		isRecord(details) &&
+		Array.isArray(details.statusEvents) &&
+		details.statusEvents.some(event => isRecord(event) && event.op === "todo")
+	);
 }
 
 function exposesRawPartialJson(toolName: string, rawInput: boolean, tool: unknown): boolean {
@@ -1932,9 +1929,8 @@ export class EventController {
 			const details = event.result.details as { op?: string; phases?: TodoPhase[] } | undefined;
 			if (details?.op !== "view" && details?.phases) this.ctx.setTodos(details.phases);
 		}
-		if (event.toolName === "eval" && !event.isError) {
-			const phases = nestedTodoPhases(event.result.details);
-			if (phases) this.ctx.setTodos(phases);
+		if (event.toolName === "eval" && hasNestedTodo(event.result.details)) {
+			this.ctx.setTodos(this.ctx.viewSession.getTodoPhases());
 		}
 		if (event.toolName === "todo" && event.isError) {
 			const textContent = event.result.content.find(

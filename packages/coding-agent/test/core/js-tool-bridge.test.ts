@@ -747,8 +747,16 @@ describe("callSessionTool", () => {
 		expect(persisted).toHaveLength(1);
 	});
 
-	it("emits committed Todo phases for nested UI synchronization", async () => {
-		let phases: TodoPhase[] = [{ name: "Ship", tasks: [{ content: "Persist", status: "in_progress" }] }];
+	it("keeps persisted nested Todo status bounded for large checklists", async () => {
+		let phases: TodoPhase[] = [
+			{
+				name: "Ship",
+				tasks: Array.from({ length: 100 }, (_, index) => ({
+					content: `Task ${index}`,
+					status: index === 0 ? ("in_progress" as const) : ("pending" as const),
+				})),
+			},
+		];
 		const statuses: Array<Record<string, unknown>> = [];
 		const session: ToolSession = {
 			...createSession([]),
@@ -762,16 +770,13 @@ describe("callSessionTool", () => {
 
 		await callSessionTool(
 			"todo",
-			{ op: "done", task: "Persist" },
+			{ op: "done", task: "Task 0" },
 			{ session, emitStatus: event => statuses.push(event) },
 		);
 
-		expect(statuses).toEqual([
-			expect.objectContaining({
-				op: "todo",
-				phases: [{ name: "Ship", tasks: [{ content: "Persist", status: "completed" }] }],
-			}),
-		]);
+		expect(phases[0]?.tasks[0]?.status).toBe("completed");
+		expect(statuses).toHaveLength(1);
+		expect(JSON.stringify(statuses).length).toBeLessThan(500);
 	});
 
 	it("returns structured tool results when details or images are present", async () => {

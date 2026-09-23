@@ -77,12 +77,13 @@ function todoEnd(
 function evalEnd(
 	toolCallId: string,
 	statusEvents?: Array<{ op: string; phases?: { name: string; tasks: { content: string; status: string }[] }[] }>,
+	isError = false,
 ): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
 	return {
 		type: "tool_execution_end",
 		toolCallId,
 		toolName: "eval",
-		isError: false,
+		isError,
 		result: { content: [{ type: "text", text: "done" }], details: statusEvents ? { statusEvents } : undefined },
 	} as unknown as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
 }
@@ -185,13 +186,25 @@ describe("EventController + Cursor todo bridge", () => {
 		expectRetirableResult(block);
 	});
 
-	it("refreshes the Todo panel from a nested Eval Todo update", async () => {
+	it("shows current Todo phases rather than a snapshot captured during Eval", async () => {
 		const f = createFixture();
-		const phases = [{ name: "Review", tasks: [{ content: "Report findings", status: "completed" }] }];
+		const recorded = [{ name: "Old", tasks: [{ content: "Earlier", status: "completed" }] }];
+		const current = [{ name: "Current", tasks: [{ content: "Later", status: "in_progress" as const }] }];
+		f.ctx.viewSession.getTodoPhases = () => current;
 
-		await f.controller.handleEvent(evalEnd("eval-todo-1", [{ op: "todo", phases }]));
+		await f.controller.handleEvent(evalEnd("eval-todo-1", [{ op: "todo", phases: recorded }]));
 
-		expect(f.ctx.setTodos).toHaveBeenCalledWith(phases);
+		expect(f.ctx.setTodos).toHaveBeenCalledWith(current);
+	});
+
+	it("keeps the Todo panel current when Eval fails after a nested update", async () => {
+		const f = createFixture();
+		const current = [{ name: "Current", tasks: [{ content: "Committed", status: "completed" as const }] }];
+		f.ctx.viewSession.getTodoPhases = () => current;
+
+		await f.controller.handleEvent(evalEnd("eval-todo-error", [{ op: "todo" }], true));
+
+		expect(f.ctx.setTodos).toHaveBeenCalledWith(current);
 	});
 
 	it("settles a held completion when execution start creates the card", async () => {
