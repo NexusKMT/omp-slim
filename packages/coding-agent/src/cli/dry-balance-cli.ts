@@ -528,10 +528,10 @@ async function runBenchTargets(
 }
 
 async function createDefaultRuntime(): Promise<DryBalanceRuntime> {
-	const authStorage = await discoverAuthStorage();
+	const cwd = getProjectDir();
+	const settings = await Settings.init({ cwd });
+	const authStorage = await discoverAuthStorage(undefined, { settings });
 	try {
-		const cwd = getProjectDir();
-		const settings = await Settings.init({ cwd });
 		const modelRegistry = new ModelRegistry(authStorage);
 		await loadCliExtensionProviders(modelRegistry, settings, cwd);
 		return {

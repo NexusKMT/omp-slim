@@ -23,6 +23,7 @@ import type {
 	SimpleStreamOptions,
 } from "@oh-my-pi/pi-ai";
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
+import type { DiscoverAuthStorageOptions } from "@oh-my-pi/pi-ai/auth-broker/discover";
 import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import { prewarmOpenAICodexResponses } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { isOpenAICodexWebSocketPreferred } from "@oh-my-pi/pi-ai/providers/openai-codex-transport";
@@ -152,7 +153,11 @@ import {
 	type SecretObfuscator,
 } from "./secrets";
 import { AgentSession, type InitialRetryFallbackState, type PlanYolo, type Prewalk } from "./session/agent-session";
-import { discoverAuthStorage as discoverAuthStorageFromConfig } from "./session/auth-broker-config";
+import {
+	discoverAuthStorage as discoverAuthStorageFromConfig,
+	type EffectiveSettingsScope,
+	loadEffectiveAuthAccountPolicyConfig,
+} from "./session/auth-broker-config";
 import type { AuthStorage } from "./session/auth-storage";
 import { DateCwdReminderInjector } from "./session/date-cwd-reminder";
 import { createInterruptedTurnAbortMessage } from "./session/exit-diagnostics";
@@ -763,11 +768,28 @@ export {
  * back into the broker through the {@link AuthStorageOptions.refreshOAuthCredential}
  * override to re-mint access tokens when needed.
  *
+ * Account routing (`auth.accountPolicies`, `retry.usageReservePct`) comes from
+ * effective settings: `options.settings` when given, else the matching global
+ * instance, else a read-only load for `options.cwd`; explicit option values win.
+ *
  * Delegates to {@link ./session/auth-broker-config} so the TUI and the catalog
  * generator share the same credential-discovery logic.
  */
-export async function discoverAuthStorage(agentDir: string = getAgentDir()): Promise<AuthStorage> {
-	return discoverAuthStorageFromConfig(agentDir);
+export async function discoverAuthStorage(
+	agentDir: string = getAgentDir(),
+	options: Omit<DiscoverAuthStorageOptions, "agentDir" | "configValueResolver"> &
+		Omit<EffectiveSettingsScope, "agentDir"> = {},
+): Promise<AuthStorage> {
+	const { settings, cwd, ...discoveryOptions } = options;
+	const policy = await loadEffectiveAuthAccountPolicyConfig({ settings, cwd, agentDir });
+	return discoverAuthStorageFromConfig(agentDir, {
+		...discoveryOptions,
+		accountPolicies: discoveryOptions.accountPolicies ?? policy.accountPolicies,
+		authStorageOptions: {
+			...discoveryOptions.authStorageOptions,
+			defaultReservePct: discoveryOptions.authStorageOptions?.defaultReservePct ?? policy.defaultReservePct,
+		},
+	});
 }
 
 /**
@@ -1370,7 +1392,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	const modelRegistry =
 		options.modelRegistry ??
 		new ModelRegistry(
-			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir)),
+			options.authStorage ?? (await logger.time("discoverModels", discoverAuthStorage, agentDir, { settings, cwd })),
 			path.join(agentDir, "models.yml"),
 			{
 				settings,
