@@ -4157,6 +4157,35 @@ describe("AuthStorage claude oauth ranking", () => {
 		expect(await storage.getApiKey("anthropic", "claude-idle-gating")).toBe("api-acct-fresh");
 	});
 
+	test("re-ranks a stale resumed Anthropic pin without account policies", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+		const storage = authStorage;
+
+		await storage.set("anthropic", [
+			{ type: "oauth", ...createCredential("acct-pinned", "pinned@example.com") },
+			{ type: "oauth", ...createCredential("acct-fresh", "fresh@example.com") },
+		]);
+		const usage = (accountId: string, primary: number) =>
+			createClaudeUsageReport({
+				accountId,
+				primary: { usedFraction: primary, resetInMs: 4 * HOUR_MS },
+				secondary: { usedFraction: 0.5, resetInMs: 5 * 24 * HOUR_MS },
+			});
+		usageByAccount.set("acct-pinned", usage("acct-pinned", 0.9));
+		usageByAccount.set("acct-fresh", usage("acct-fresh", 0.2));
+
+		// Session resume restores the recorded account with its last-use time; a
+		// resume past the warm window must fall through to usage ranking.
+		const pinned = storage.listOAuthAccounts("anthropic").find(account => account.accountId === "acct-pinned");
+		if (!pinned) throw new Error("expected pinned account");
+		expect(
+			storage.pinSessionOAuthAccount("anthropic", "claude-stale-resume", pinned.credentialId, {
+				restoredAtMs: Date.now() - 2 * HOUR_MS,
+			}),
+		).toBe(true);
+		expect(await storage.getApiKey("anthropic", "claude-stale-resume")).toBe("api-acct-fresh");
+	});
+
 	test("keeps the pinned account after idle when siblings rank equal (tie-break)", async () => {
 		if (!authStorage) throw new Error("test setup failed");
 		const storage = authStorage;

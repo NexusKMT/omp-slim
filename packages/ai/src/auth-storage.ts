@@ -6579,19 +6579,20 @@ export class AuthStorage {
 	 * Pin one stored OAuth account as this session's preferred credential.
 	 *
 	 * The durable credential id keeps the pin stable across credential refreshes,
-	 * storage reordering, and process restarts. Account reserve never evicts this
-	 * explicit user pin; hard unavailability and auth retry may still route around it.
+	 * storage reordering, and process restarts. By default this is an explicit
+	 * user pin: ranking and account reserve never evict it; hard unavailability
+	 * and auth retry may still route around it.
 	 *
-	 * `options.lastUsedAtMs` backdates the sticky's last-use timestamp so a pin
-	 * restored from a persisted session keeps the provider's warm-window
-	 * semantics: a resume inside the prompt-cache TTL reuses the account, a
-	 * stale resume still re-ranks.
+	 * `options.restoredAtMs` instead restores an automatic affinity recorded by a
+	 * persisted session, backdated to its last use, so it keeps the provider's
+	 * warm-window semantics: a resume inside the prompt-cache TTL reuses the
+	 * account, a stale resume re-ranks.
 	 */
 	pinSessionOAuthAccount(
 		provider: string,
 		sessionId: string,
 		credentialId: number,
-		options?: { lastUsedAtMs?: number },
+		options?: { restoredAtMs?: number },
 	): boolean {
 		if (!sessionId || this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider)) {
 			return false;
@@ -6600,7 +6601,8 @@ export class AuthStorage {
 		const index = stored.findIndex(entry => entry.id === credentialId);
 		const target = stored[index];
 		if (target?.credential.type !== "oauth") return false;
-		this.#recordSessionCredential(provider, sessionId, "oauth", index, options?.lastUsedAtMs, true);
+		const restoredAtMs = options?.restoredAtMs;
+		this.#recordSessionCredential(provider, sessionId, "oauth", index, restoredAtMs, restoredAtMs === undefined);
 		return true;
 	}
 
