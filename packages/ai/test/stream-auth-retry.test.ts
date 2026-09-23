@@ -539,45 +539,6 @@ describe("streamSimple resolver auth retry", () => {
 		expect((errors[0] as Error).message).toMatch(/usage limit/i);
 	});
 
-	it("rotates a Go 402 account-funds error to the healthy key before emitting content", async () => {
-		const keys: unknown[] = [];
-		const lastChances: boolean[] = [];
-		registerCustomApi(
-			API,
-			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
-				pushKey(keys, options);
-				const stream = new AssistantMessageEventStream();
-				queueMicrotask(() => {
-					if (options?.apiKey === "healthy-key") {
-						ok(stream);
-						return;
-					}
-					stream.fail(
-						new ProviderHttpError("Upstream request failed: Insufficient account funds", 402, {
-							code: "server_error",
-						}),
-					);
-				});
-				return stream;
-			},
-			SOURCE_ID,
-		);
-
-		const stream = streamSimple(model(), context, {
-			apiKey: ctx => {
-				lastChances.push(ctx.lastChance);
-				return ctx.error === undefined ? "exhausted-key" : "healthy-key";
-			},
-		});
-		for await (const _event of stream) {
-			// drain
-		}
-
-		expect((await stream.result()).content).toEqual([{ type: "text", text: "ok" }]);
-		expect(keys).toEqual(["exhausted-key", "healthy-key"]);
-		expect(lastChances).toEqual([false, true]);
-	});
-
 	it("retries a usage-limit error event before content", async () => {
 		const keys: unknown[] = [];
 		registerCustomApi(
@@ -778,12 +739,13 @@ describe("streamSimple resolver auth retry", () => {
 		expect(keys).toEqual(["credential-A", "credential-B"]);
 	});
 
-	it("rotates before emitting content for Codex quota payloads", async () => {
+	it("rotates before emitting content for quota and billing-cap payloads", async () => {
 		const payloads: Array<{ message: string; status?: number }> = [
 			{ message: "429", status: 429 },
 			{ message: '{"error":{"code":"insufficient_quota","message":"quota exhausted"}}' },
 			{ message: '{"error":{"code":"usage_limit_exceeded","message":"usage limit exceeded"}}' },
 			{ message: '{"error":{"code":"usage_limit_reached","message":"usage limit reached"}}' },
+			{ message: "Upstream request failed: Insufficient account funds", status: 402 },
 		];
 		let activePayload = payloads[0]!;
 		let keys: unknown[] = [];

@@ -17,6 +17,9 @@
 - Refactored `AuthStorage` into namespaced sub-modules (`credentials`, `keys`, `oauth`, `limits`, `health`, `blocks`, `resets`, `usage`)
 - Migrated all internal crypto-hashing to native `Bun` performance primitives
 
+### Fixed
+- Fixed OpenCode Go retrying an account with insufficient funds instead of switching to another signed-in account ([#13038](https://github.com/can1357/oh-my-pi/pull/13038) by [@fros1y](https://github.com/fros1y)).
+
 ## [18.2.11] - 2026-09-23
 
 ### Fixed
