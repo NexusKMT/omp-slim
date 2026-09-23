@@ -1,32 +1,33 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as mermaidAscii from "@oh-my-pi/pi-utils/mermaid-ascii";
 import { clearMermaidCache, resolveMermaidAscii } from "../src/theme/mermaid-cache.ts";
 
-const renders: string[] = [];
-
-// mock.module is hoisted ahead of the static import above.
-mock.module("@oh-my-pi/pi-utils/mermaid-ascii", () => ({
-	renderMermaidAsciiSafe(source: string, options?: { direction?: "TD" | "LR" }): string | null {
-		const direction = options?.direction ?? "authored";
-		renders.push(`${source}:${direction}`);
-		if (source === "bad") return null;
-		if (source === "wide-authored") {
-			if (direction === "authored") return "AUTHORED-ALSO-WIDE\nsecond\nthird";
-			if (direction === "TD") return "td\ntd\ntd";
-			return "left-to-right";
-		}
-		if (source === "colored") {
-			if (direction === "authored") return "\u001b[31mabcd\u001b[0m";
-			if (direction === "TD") return "too-wide-for-four";
-			return "z";
-		}
-		return "x";
-	},
-}));
-
 describe("resolveMermaidAscii resize selection", () => {
+	const renders: string[] = [];
+
 	beforeEach(() => {
 		renders.length = 0;
 		clearMermaidCache();
+		vi.spyOn(mermaidAscii, "renderMermaidAsciiSafe").mockImplementation((source, options) => {
+			const direction = options?.direction ?? "authored";
+			renders.push(`${source}:${direction}`);
+			if (source === "bad") return null;
+			if (source === "wide-authored") {
+				if (direction === "authored") return "AUTHORED-ALSO-WIDE\nsecond\nthird";
+				if (direction === "TD") return "td\ntd\ntd";
+				return "left-to-right";
+			}
+			if (source === "colored") {
+				if (direction === "authored") return "\u001b[31mabcd\u001b[0m";
+				if (direction === "TD") return "too-wide-for-four";
+				return "z";
+			}
+			return "direction-ignored-and-wide";
+		});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
 	});
 
 	it("keeps the authored layout when no width is given", () => {
@@ -53,5 +54,21 @@ describe("resolveMermaidAscii resize selection", () => {
 	it("returns null without trying orientations when the source fails", () => {
 		expect(resolveMermaidAscii("bad", { maxWidth: 80 })).toBeNull();
 		expect(renders).toEqual(["bad:authored"]);
+	});
+
+	it("renders diagrams that ignore direction only as authored", () => {
+		const sources = [
+			"sequenceDiagram\nAlice->>Bob: hi",
+			"classDiagram\nclass A",
+			"erDiagram\nA ||--o{ B : rel",
+			"xychart-beta\nbar [1, 2]",
+			"xychart\nbar [1, 2]",
+		];
+		for (const source of sources) {
+			renders.length = 0;
+			clearMermaidCache();
+			expect(resolveMermaidAscii(source, { maxWidth: 4 })).toBe("direction-ignored-and-wide");
+			expect(renders).toEqual([`${source}:authored`]);
+		}
 	});
 });

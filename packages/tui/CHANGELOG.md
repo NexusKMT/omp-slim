@@ -5,6 +5,7 @@
 ### Changed
 
 - Mermaid flowcharts now re-pick layout on terminal resize: the shortest orientation that fits the width wins, and the narrowest is used only when none fit.
+- Sequence, class, ER, and XY charts are no longer re-rendered in forced orientations when fitting the terminal; only flowcharts and state diagrams reflow.
 - Updated model hub and oauth selector components to use namespaced `authStorage` API
 
 ## [18.2.11] - 2026-09-23

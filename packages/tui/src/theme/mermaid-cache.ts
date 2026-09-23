@@ -1,5 +1,5 @@
 import type { MermaidRenderOptions } from "@oh-my-pi/pi-natives";
-import { renderMermaidAsciiSafe } from "@oh-my-pi/pi-utils/mermaid-ascii";
+import * as mermaidAscii from "@oh-my-pi/pi-utils/mermaid-ascii";
 
 /**
  * Options controlling how fenced Mermaid source is resolved to terminal ASCII.
@@ -54,9 +54,27 @@ function renderVariant(
 	const cached = cache.get(key);
 	if (cached !== undefined) return cached;
 
-	const ascii = renderMermaidAsciiSafe(source, direction ? { ...baseOptions, direction } : baseOptions);
+	const ascii = mermaidAscii.renderMermaidAsciiSafe(source, direction ? { ...baseOptions, direction } : baseOptions);
 	cache.set(key, ascii);
 	return ascii;
+}
+
+/**
+ * Whether a forced TD/LR render can change layout. Sequence, class, ER, and
+ * xychart ignore direction; flowchart, graph, state, and unrecognized headers
+ * (treated as flowcharts) do not. Header match mirrors native `detect_diagram_kind`,
+ * including its JavaScript `\w` boundary (`[A-Za-z0-9_]`).
+ */
+function layoutDirectionCanChange(source: string): boolean {
+	const header = (source.split("\n", 1)[0] ?? "").trim().toLowerCase();
+	for (const prefix of ["xychart-beta", "xychart"] as const) {
+		if (!header.startsWith(prefix)) continue;
+		const next = header.charCodeAt(prefix.length);
+		const wordChar =
+			(next >= 48 && next <= 57) || (next >= 65 && next <= 90) || (next >= 97 && next <= 122) || next === 95;
+		if (!wordChar) return false;
+	}
+	return header !== "sequencediagram" && header !== "classdiagram" && header !== "erdiagram";
 }
 
 /**
@@ -77,11 +95,14 @@ export function resolveMermaidAscii(source: string, options?: MermaidResolveOpti
 	if (maxWidth === undefined) return base;
 
 	// Width selection is against cached renders, so a later resize re-decides
-	// without drawing again. Forced TD/LR are no-ops for non-flowcharts.
+	// without drawing again. Forced TD/LR are not rendered at all when direction
+	// cannot change the layout (sequence, class, ER, xychart).
 	const candidates = [measureLayout(base, true)];
-	for (const direction of ["TD", "LR"] as const) {
-		const variant = renderVariant(normalizedSource, baseOptions, baseKey, direction);
-		if (variant !== null) candidates.push(measureLayout(variant, false));
+	if (layoutDirectionCanChange(normalizedSource)) {
+		for (const direction of ["TD", "LR"] as const) {
+			const variant = renderVariant(normalizedSource, baseOptions, baseKey, direction);
+			if (variant !== null) candidates.push(measureLayout(variant, false));
+		}
 	}
 
 	const fitting = candidates.filter(candidate => candidate.width <= maxWidth);
