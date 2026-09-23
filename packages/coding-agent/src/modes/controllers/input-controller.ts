@@ -119,6 +119,9 @@ const SHELL_PROMPT_COMMAND_RE =
 const SHELL_PROMPT_OPERATOR_RE = /(?:^|\s)(?:&&|\|\||\||2>&1|[<>]{1,2})(?:\s|$)/;
 const OMP_STATUS_LINE_RE = /^\s*in:\s+\d+\s+out:\s+\d+(?:\s+cache\s+\S+)?\s+t:\s+\S+\s+tok\/s:\s+\S+/m;
 
+/** Slash commands that also run from a focused subagent view; all others need the main session. */
+const FOCUSED_VIEW_COMMANDS: Record<string, true> = { export: true, usage: true };
+
 function looksLikePastedShellPrompt(code: string): boolean {
 	const firstLine = code.split("\n", 1)[0]?.trimStart() ?? "";
 	return (
@@ -1305,8 +1308,22 @@ export class InputController {
 			}
 			return;
 		}
+		if (text?.startsWith("/")) {
+			const command = parseSlashCommand(text)?.name;
+			if (command && FOCUSED_VIEW_COMMANDS[command]) {
+				// Viewer-scoped commands: /export writes the focused transcript (with its
+				// own subagents), /usage reports account-wide limits.
+				this.#recordSlashCommandUsage(text);
+				if ((await executeBuiltinSlashCommand(text, { ctx: this.ctx })) !== false) {
+					this.ctx.editor.addToHistory(text);
+					return;
+				}
+			}
+		}
 		if (text && (text.startsWith("/") || text.startsWith("!") || parsePythonCommandInput(text))) {
-			this.ctx.showStatus("Commands run in the main session — press ←← to return first");
+			this.ctx.showStatus(
+				"Only /export and /usage run here; other commands run in the main session — press ←← to return first",
+			);
 			return; // editor text not cleared: Editor does not auto-clear on submit
 		}
 		this.ctx.editor.clearDraft(text);

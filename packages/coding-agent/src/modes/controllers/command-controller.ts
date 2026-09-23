@@ -155,7 +155,9 @@ export class CommandController {
 				return;
 			}
 
-			const filePath = await this.ctx.session.exportToHtml(outputPath, useUserThemes);
+			// The viewed session: the focused subagent's transcript (plus its own
+			// subagents) from a focused view, otherwise the main session.
+			const filePath = await this.ctx.viewSession.exportToHtml(outputPath, useUserThemes);
 			this.ctx.showStatus(`Session exported to: ${filePath}`);
 			this.openInBrowser(filePath);
 		} catch (error: unknown) {
