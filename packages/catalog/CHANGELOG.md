@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.11] - 2026-09-23
+
 ### Added
 
 - Added built-in StepFun provider support for the step-5-preview model, including live model discovery.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.11] - 2026-09-23
+
 ### Changed
 
 - Improved `warmHighlighter()` so it prepares TypeScript, TSX, JavaScript, Bash, Python, Rust, and Markdown highlighting in the background, reducing delays on the first highlight for these languages.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.2.11] - 2026-09-23
+
 ### Fixed
 
 - Fixed nested `eval` Todo updates not being reflected by the Todo tracker, including cases where a cell fails after committing an update.
