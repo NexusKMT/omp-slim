@@ -13,6 +13,10 @@
 - Added support for multiple concurrent TUI paint listeners to enable simultaneous session recording and streaming
 - Coalesced status event updates for progress-based operations to reduce TUI render overhead
 
+### Fixed
+
+- Fixed startup release notes requiring an Escape keypress before they could be scrolled ([#12906](https://github.com/can1357/oh-my-pi/pull/12906) by [@michaelr](https://github.com/michaelr)).
+
 ## [18.2.9] - 2026-09-22
 
 ### Added
