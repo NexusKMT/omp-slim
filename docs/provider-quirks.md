@@ -1434,7 +1434,7 @@ StepFun is the OpenAI-compatible Open Platform endpoint at `https://api.stepfun.
 ### Catalog model handling
 - **Descriptor Configuration**: `stepfunModelManagerOptions` is registered in `packages/catalog/src/provider-models/descriptors.ts` with `defaultModel: "step-5-preview"`, `envVars: ["STEPFUN_API_KEY"]`, and discovery label `StepFun`.
 - **Seeded Bundle**: `providers/stepfun.kdl` carries `seed bundle="always"` rows with StepFun's published model-card limits and prices (`https://platform.stepfun.ai/docs/en/guides/pricing/details`, limits as catalogued on models.dev), so the provider is selectable before first discovery.
-- **Live Discovery**: `stepfunModelManagerOptions` in `packages/catalog/src/provider-models/openai-compat.ts` merges `/v1/models` results additively over the seed rows, hydrated by `mapWithBundledReference`, so models StepFun ships later become selectable without an omp release.
+- **Live Discovery**: `stepfunModelManagerOptions` in `packages/catalog/src/provider-models/openai-compat.ts` treats a successful `/v1/models` snapshot as authoritative (`dynamicModelsAuthoritative`): it replaces the seed rows, hydrated by `mapWithBundledReference`, so retired models leave the picker and models StepFun ships later become selectable without an omp release.
 
 ## Synthetic (`synthetic`)
 Synthetic is an AI platform offering dual API format support for its models, exposing both OpenAI-compatible (`https://api.synthetic.new/openai/v1/chat/completions`) and Anthropic-compatible (`https://api.synthetic.new/anthropic/v1/messages`) endpoints. Calls default to the `OpenAI Chat Completions` transport, but can switch dynamically to the `Anthropic Messages` transport when configured.
