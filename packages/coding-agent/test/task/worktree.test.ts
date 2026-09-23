@@ -942,6 +942,10 @@ describe("applyNestedPatches", () => {
 		await runGit(fixtureParent, ["init", "-q", "-b", "main"]);
 		await runGit(fixtureParent, ["config", "user.email", "test@example.com"]);
 		await runGit(fixtureParent, ["config", "user.name", "Test User"]);
+		// beforeEach copies both repos with fs.cp; auto maintenance would race
+		// the copy the same way as in the commitToBranch fixture below.
+		await runGit(fixtureParent, ["config", "maintenance.auto", "false"]);
+		await runGit(fixtureParent, ["config", "gc.auto", "0"]);
 		await fs.writeFile(path.join(fixtureParent, ".gitignore"), "sub/\n");
 		await runGit(fixtureParent, ["add", "."]);
 		await runGit(fixtureParent, ["commit", "-q", "-m", "parent-init"]);
@@ -951,6 +955,8 @@ describe("applyNestedPatches", () => {
 		await runGit(fixtureNested, ["init", "-q", "-b", "main"]);
 		await runGit(fixtureNested, ["config", "user.email", "test@example.com"]);
 		await runGit(fixtureNested, ["config", "user.name", "Test User"]);
+		await runGit(fixtureNested, ["config", "maintenance.auto", "false"]);
+		await runGit(fixtureNested, ["config", "gc.auto", "0"]);
 		await fs.writeFile(path.join(fixtureNested, "file.txt"), "v1\n");
 		await runGit(fixtureNested, ["add", "."]);
 		await runGit(fixtureNested, ["commit", "-q", "-m", "nested-init"]);
