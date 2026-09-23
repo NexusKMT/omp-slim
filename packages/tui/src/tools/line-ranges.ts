@@ -49,10 +49,16 @@ export function parseLineRangeChunk(sel: string): LineRange | null {
  */
 export function parseLineRanges(sel: string): [LineRange, ...LineRange[]] | null {
 	const chunks = sel.split(",");
+	// A lone `:50` means "from line 50". Inside a comma list, a bare number is
+	// that one line; otherwise `:19,59` collapses to "from 19 through EOF".
+	const pinBareLines = chunks.length > 1;
 	const parsed: LineRange[] = [];
 	for (const chunk of chunks) {
 		const range = parseLineRangeChunk(chunk);
 		if (!range) return null;
+		if (pinBareLines && range.endLine === undefined && /^L?\d+$/i.test(chunk.trim())) {
+			range.endLine = range.startLine;
+		}
 		parsed.push(range);
 	}
 	if (parsed.length === 0) return null;
