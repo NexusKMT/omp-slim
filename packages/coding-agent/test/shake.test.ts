@@ -464,16 +464,17 @@ describe("AgentSession shake", () => {
 			const result = await session.shake("thinking");
 
 			expect(result.thinkingBlocksDropped).toBe(1);
-			expect(result.tokensFreed).toBe(
-				before - tokenizer.countMessage(signed, { excludeEncryptedReasoning: true }),
-			);
+			expect(result.tokensFreed).toBe(before - tokenizer.countMessage(signed, { excludeEncryptedReasoning: true }));
 			expect(result.tokensFreed).toBeLessThan(rawBefore - tokenizer.countMessage(signed));
 		});
 
 		it("updates the provider-anchored context meter for earlier thinking", async () => {
 			const prior: AssistantMessage = {
 				role: "assistant",
-				content: [{ type: "thinking", thinking: "old reasoning ".repeat(1_000) }, { type: "text", text: "old answer" }],
+				content: [
+					{ type: "thinking", thinking: "old reasoning ".repeat(1_000) },
+					{ type: "text", text: "old answer" },
+				],
 				...apiInfo,
 				stopReason: "stop",
 				usage,
