@@ -56,6 +56,7 @@ import type {
 	AssistantMessage,
 	CodexCompactionContext,
 	ImageContent,
+	Judge,
 	Message,
 	MessageAttribution,
 	Model,
@@ -101,6 +102,7 @@ import {
 	withTimeout,
 } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
+import { formatUsageResetWindow } from "@oh-my-pi/pi-tui/overlays/usage-display";
 import { loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
@@ -123,6 +125,7 @@ import { releaseCompletionHandles } from "../eval/completion-bridge";
 import { releaseJudgmentBatches } from "../eval/judgment-batch-bridge";
 import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PythonResult } from "../eval/py/executor";
+import { formatEvalStateContext } from "../eval/state";
 import { WorkPoolRegistry } from "../task/workpool";
 import type { BashPtyOptions, BashResult } from "../exec/bash-executor";
 import type { TtsrManager } from "../export/ttsr";
@@ -152,7 +155,8 @@ import { emitSessionShutdownEvent } from "../extensibility/extensions";
 import { ManagedTimers } from "../extensibility/extensions/managed-timers";
 import { createExtensionModelQuery } from "../extensibility/extensions/model-api";
 import type { CompactOptions, ContextUsage } from "../extensibility/extensions/types";
-import type { HookCommandContext } from "../extensibility/hooks/types";
+import type { CustomCommandContext } from "../extensibility/custom-commands/types";
+import { SkillDescriptionCatalog } from "../extensibility/skill-descriptions";
 import type { Skill, SkillWarning } from "../extensibility/skills";
 import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slash-commands";
 import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility/tool-event-input";
@@ -160,7 +164,8 @@ import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState } from "../goals/state";
 import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
-import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/hub";
+import { hasNativeJudge, journalJudgmentUsage, resolveJudge } from "../judgment";
+import type { IrcMessage } from "@oh-my-pi/pi-tui/tools/irc";
 import type { DaemonCompletionNotification } from "../launch/protocol";
 import { shutdownMnemopiEmbedClient } from "../mnemopi/embed-client";
 import { getMnemopiSessionState, type MnemopiSessionState, setMnemopiSessionState } from "../mnemopi/state";
@@ -207,7 +212,7 @@ import {
 } from "@oh-my-pi/pi-tui/thinking";
 import { isLowSignalTitleInput } from "../tiny/text";
 import { shutdownTinyTitleClient } from "../tiny/title-client";
-import type { ImageAttachmentEntry } from "../tools";
+import type { ImageAttachmentEntry, ToolSession } from "../tools";
 import { resolveApproval } from "../tools/approval";
 import { type AskToolDetails } from "@oh-my-pi/pi-tui/tools/ask";
 import { type AskToolInput, recoverAskQuestions } from "../tools/ask";
@@ -292,6 +297,7 @@ import {
 	semanticToolResult,
 } from "./checkpoint-entries";
 import type { ClientBridge } from "./client-bridge";
+import { type ClaudeResetAction, type ClaudeResetPlan, planClaudeResetRedemptions } from "./claude-auto-reset";
 import {
 	type CodexAutoRedeemCoordinator,
 	type CodexResetAction,
@@ -339,6 +345,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	type InterruptedThinkingDetails,
 	isEmptyErrorTurn,
+	isTitleContextReply,
 	isUserInterruptAbort,
 	isUserInvokedSkillPrompt,
 	logProviderTurnError,
@@ -691,6 +698,11 @@ export class AgentSession {
 	#titleSystemPrompt: string | undefined;
 	#titleGenerationStart: (() => (() => void) | void) | undefined;
 	#titleGenerationInFlightFor: string | undefined;
+	/** First-message auto-title that may be retried from conversation context.
+	 *  Once the title model declines the message (greeting-like or too ambiguous,
+	 *  e.g. a pasted image plus "help") AND the assistant has replied, the title is
+	 *  regenerated once from the recent user/assistant/thinking turns. */
+	#deferredTitle: { sessionId: string; declined: boolean; replied: boolean } | undefined;
 	#titleProviderSessionId: string | undefined;
 	#titleProviderParentSessionId: string | undefined;
 	/** Host hook invoked when a typed user prompt is dropped before dispatch;
@@ -702,6 +714,7 @@ export class AgentSession {
 	readonly #bash: BashRunner;
 
 	readonly #eval: EvalRunner;
+	readonly #evalToolSession: ToolSession | undefined;
 	/**
 	 * AsyncJobManager owned by this session (top-level only). Subagents leave
 	 * this undefined and **MUST NOT** dispose the global instance on teardown.
@@ -741,11 +754,14 @@ export class AgentSession {
 	#isDisposed = false;
 	#modelDiscoveryAbortController = new AbortController();
 	/** Process-wide by default (double-spend safety across sessions); injectable for tests. */
-	#codexResetCoordinator: CodexAutoRedeemCoordinator;
+	#resetCoordinator: CodexAutoRedeemCoordinator;
 	// Extension system
 	#extensionRunner: ExtensionRunner | undefined = undefined;
 	#getEvalPreludes: (() => readonly EvalPreludeDefinition[]) | undefined;
 	#reconcileBrowserMcpFilter: AgentSessionConfig["reconcileBrowserMcpFilter"];
+	#skillDescriptions: SkillDescriptionCatalog;
+	#promptSkillsSource: readonly Skill[] | undefined;
+	#promptSkills: readonly Skill[] = [];
 	/**
 	 * Backs `ctx.setInterval`/`setTimeout`/`clearTimer` for the runner-less
 	 * command-context fallback (SDK embeddings with no extension runner). Lazily
@@ -1307,6 +1323,7 @@ export class AgentSession {
 		this.#codeModeState = config.codeModeState ?? {};
 		this.sessionManager = config.sessionManager;
 		this.settings = config.settings;
+		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
 		this.#extensionRoots =
@@ -1319,7 +1336,7 @@ export class AgentSession {
 			}));
 		this.#preparedExtensions = config.preparedExtensions;
 		this.#extensionPaths = config.extensionPaths;
-		this.#codexResetCoordinator = config.codexResetCoordinator ?? defaultCodexAutoRedeemCoordinator;
+		this.#resetCoordinator = config.codexResetCoordinator ?? defaultCodexAutoRedeemCoordinator;
 		const bashHost: BashRunnerHost = {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
@@ -1345,16 +1362,17 @@ export class AgentSession {
 			kernelOwnerId: config.evalKernelOwnerId ?? `agent-session:${Snowflake.next()}`,
 			parentSessionId: config.parentEvalSessionId,
 		});
+		this.#evalToolSession = config.evalToolSession;
+		const initialEvalStateContext = this.#buildEvalStateContextMessage();
+		if (initialEvalStateContext) this.agent.appendMessage(initialEvalStateContext);
 		const ircHost: IrcBridgeHost = {
 			agent: this.agent,
 			sessionManager: this.sessionManager,
-			settings: this.settings,
 			isDisposed: () => this.#isDisposed,
 			isStreaming: () => this.isStreaming,
 			planModeEnabled: () => this.#planModeState?.enabled === true,
 			emitSessionEvent: event => this.#emitSessionEvent(event),
 			wakeForIrc: records => this.#wakeForIrc(records),
-			runEphemeralTurn: args => this.runEphemeralTurn(args),
 		};
 		this.#irc = new IrcBridge(ircHost);
 		const prewalkHost: PrewalkCoordinatorHost = {
@@ -1471,7 +1489,7 @@ export class AgentSession {
 			resolveActiveEditMode: () => this.#tools.resolveActiveEditMode(),
 			syncAfterModelChange: previousEditMode => this.#tools.syncAfterModelChange(previousEditMode),
 			resetCurrentResponsesProviderSession: reason => this.#resetCurrentResponsesProviderSession(reason),
-			maybeAutoRedeemCodexReset: activeBlockUnblockAtMs => this.#maybeAutoRedeemCodexReset(activeBlockUnblockAtMs),
+			maybeAutoRedeemReset: activeBlockUnblockAtMs => this.#maybeAutoRedeemReset(activeBlockUnblockAtMs),
 			runAutoCompaction: (reason, willRetry, deferred, allowDefer, options) =>
 				this.#maintenance.runAutoCompaction(reason, willRetry, deferred, allowDefer, options),
 			shakeForRequestBodyReadTimeout: generation => this.#maintenance.shakeForRequestBodyReadTimeout(generation),
@@ -1633,12 +1651,11 @@ export class AgentSession {
 		// Background-job completions / late diagnostics are pulled into the run at
 		// each step boundary as non-interrupting asides. Peer IRCs share the aside
 		// injection boundary, but also expose a non-consuming interrupt peek so
-		// `hub` waits can return early before the boundary drains them.
+		// `wait` can return early before the boundary drains them.
 		this.agent.hasIrcInterrupts = () => this.#irc.hasInterrupts();
 		// Completion notices (finished background jobs, exited supervised
 		// processes) queue here for the same boundary; peeking them lets a
-		// `hub wait` on something else return early instead of sitting on the
-		// notice for its whole window.
+		// `wait` return early rather than miss a queued completion.
 		this.agent.hasBackgroundCompletions = () =>
 			this.yieldQueue.has(LAUNCH_COMPLETION_MESSAGE_TYPE) || this.yieldQueue.has(ASYNC_RESULT_MESSAGE_TYPE);
 		this.agent.setAsideMessageProvider(() => {
@@ -1721,8 +1738,12 @@ export class AgentSession {
 			schedulePostPromptTask: (task, options) => this.#schedulePostPromptTask(task, options),
 			scheduleAgentContinue: options => this.#scheduleAgentContinue(options),
 			promptGeneration: () => this.#promptGeneration,
+			ruleJudge: () => this.ruleJudge(),
+			deliverRuleWarning: (content, ruleNames) => this.#deliverRuleWarning(content, ruleNames),
+			sessionGeneration: () => this.#sessionGeneration,
 		};
 		this.#ttsr = new TtsrCoordinator(ttsrHost, config.ttsrManager);
+		this.agent.setOnBeforeYield(() => this.#ttsr.settleJudgments());
 		this.#obfuscator = config.obfuscator;
 		const providerBoundaryHost: SessionProviderBoundaryHost = {
 			agent: this.agent,
@@ -2340,7 +2361,7 @@ export class AgentSession {
 	 * so a settle observed now is a scheduling pause rather than a terminal stop:
 	 * stop-time passes (todo reminder, session_stop hooks) defer to the settle
 	 * reached once the session is fully idle. Suppressed deliveries
-	 * (acknowledged, or watched by an in-flight `hub` wait) never wake the loop,
+	 * (acknowledged, or watched by an in-flight `wait`) never wake the loop,
 	 * so they don't count.
 	 */
 	#hasPendingAsyncWake(): boolean {
@@ -2415,7 +2436,7 @@ export class AgentSession {
 	 * Delivery sink for async jobs owned by this agent: format the result
 	 * (spilling oversized output to an artifact), enqueue it as an async-result
 	 * follow-up, and settle only after the yield queue injects or discards it.
-	 * This keeps the job body recoverable through `hub` while injection is pending.
+	 * This keeps the job body recoverable through `proc://` while injection is pending.
 	 */
 	async #deliverAsyncJobResult(manager: AsyncJobManager, jobId: string, text: string, job?: AsyncJob): Promise<void> {
 		if (this.#isDisposed) return;
@@ -2437,6 +2458,38 @@ export class AgentSession {
 			durationMs,
 			epoch,
 		});
+	}
+
+	/**
+	 * Judge for TTSR `question` rules per `ttsr.judge`, used by live judging and
+	 * `/omfg` validation. `auto` requires the judge role to resolve to a native
+	 * System One model, since every completed output may cost a request. Rebuilt
+	 * per call so model, credential, and session switches apply.
+	 */
+	ruleJudge(): Judge | undefined {
+		const mode = this.settings.get("ttsr.judge");
+		if (mode === "off" || (mode === "auto" && !hasNativeJudge(this.settings, this.#modelRegistry))) return undefined;
+		return resolveJudge({
+			settings: this.settings,
+			registry: this.#modelRegistry,
+			sessionModel: this.model,
+			sessionId: this.sessionId,
+			metadataResolver: provider => this.agent.metadataForProvider(provider),
+			onUsage: journalJudgmentUsage(this.sessionManager, "ttsr"),
+		});
+	}
+
+	/**
+	 * Non-interrupting delivery: mid-run the warning joins the next step; an idle
+	 * session starts a turn so the agent can act on it. Persisting the message
+	 * records the rules as injected (see #persistMessageEnd).
+	 */
+	async #deliverRuleWarning(content: string, ruleNames: string[]): Promise<void> {
+		if (this.#isDisposed) return;
+		await this.sendCustomMessage(
+			{ customType: "ttsr-injection", content, display: false, details: { rules: ruleNames }, attribution: "agent" },
+			{ deliverAs: "aside" },
+		);
 	}
 
 	async #formatAsyncResultForFollowUp(result: string, meta?: OutputMeta): Promise<string> {
@@ -3079,6 +3132,7 @@ export class AgentSession {
 		// toolUse) assistant message and skipping settle-only work.
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			this.#lastAssistantMessage = event.message;
+			if (this.#deferredTitle && isTitleContextReply(event.message)) this.#advanceDeferredTitle("replied");
 		}
 		// Expected internal transitions stamp a structural suppression flag on the
 		// persisted message BEFORE the obfuscator's display-side copy below, so the
@@ -3328,7 +3382,7 @@ export class AgentSession {
 				await this.#recovery.onAssistantSettledSuccessfully(assistantMsg);
 				// Broker deployments: report this request's burn so the broker can
 				// attribute token usage per install. No-op with a local auth store.
-				this.#modelRegistry.authStorage.recordObservedUsage({
+				this.#modelRegistry.authStorage.usage.observe({
 					provider: assistantMsg.provider,
 					model: assistantMsg.model,
 					at: assistantMsg.timestamp,
@@ -3494,7 +3548,7 @@ export class AgentSession {
 					!isConcurrencyCap &&
 					!AIError.isGitHubCopilotPolicyDenial(msg.provider, msg.errorStatus, msg.errorMessage)
 				) {
-					await this.#modelRegistry.authStorage.remove("github-copilot");
+					await this.#modelRegistry.authStorage.credentials.remove("github-copilot");
 				}
 			}
 
@@ -4411,6 +4465,7 @@ export class AgentSession {
 				from: event.from,
 				to: event.to,
 				role: event.role,
+				reason: event.reason,
 			});
 		} else if (event.type === "retry_fallback_succeeded") {
 			await this.#extensionRunner.emit({
@@ -5675,7 +5730,39 @@ export class AgentSession {
 	}
 
 	buildDisplaySessionContext(): SessionContext {
-		return this.#providerBoundary.buildDisplaySessionContext();
+		return this.#withEvalStateContext(this.#providerBoundary.buildDisplaySessionContext());
+	}
+
+	#withEvalStateContext(context: SessionContext): SessionContext {
+		const evalStateContext = this.#buildEvalStateContextMessage();
+		if (!evalStateContext) return context;
+		return { ...context, messages: [...context.messages, evalStateContext] };
+	}
+
+	#buildEvalStateContextMessage(): CustomMessage | undefined {
+		const session = this.#evalToolSession;
+		if (!session) return undefined;
+		const historyHasEval = this.sessionManager.getBranch().some(entry => {
+			if (entry.type !== "message") return false;
+			const message = entry.message;
+			if (message.role === "pythonExecution" || (message.role === "toolResult" && message.toolName === "eval")) {
+				return true;
+			}
+			return (
+				message.role === "assistant" &&
+				message.content.some(block => block.type === "toolCall" && block.name === "eval")
+			);
+		});
+		const content = formatEvalStateContext(session, { historyHasEval });
+		if (!content) return undefined;
+		return {
+			role: "custom",
+			customType: "eval-state-context",
+			content,
+			display: false,
+			attribution: "agent",
+			timestamp: Date.now(),
+		};
 	}
 
 	/**
@@ -6192,12 +6279,13 @@ export class AgentSession {
 
 	/**
 	 * Emit source paths for file-backed attachments (path-pasted/drag-and-dropped
-	 * images, video contact-sheet previews) as hidden user context. The visible
-	 * message deliberately contains only its `[Image #N]`/`[Video #N]` marker and
-	 * the attachment itself, while the agent gets the path required to act on the
-	 * original file (e.g. `read`, or video frame subselectors) without exposing
-	 * the user's filesystem layout in the TUI. Clipboard bitmaps have no backing
-	 * file and are skipped — no path is invented for them.
+	 * images, clipboard images committed to the session artifact directory, video
+	 * contact-sheet previews) as hidden user context. The visible message
+	 * deliberately contains only its `[Image #N]`/`[Video #N]` marker and the
+	 * attachment itself, while the agent gets the path required to act on the file
+	 * (e.g. `read`, uploads, or video frame subselectors) without exposing the
+	 * user's filesystem layout in the TUI. Attachments without a file on disk are
+	 * skipped — no path is invented for them.
 	 */
 	#createAttachmentSourceNotices(images: readonly ImageContent[] | undefined, timestamp: number): CustomMessage[] {
 		if (!images?.length) return [];
@@ -7129,11 +7217,11 @@ export class AgentSession {
 		const ctx = {
 			...baseCtx,
 			hasQueuedMessages: baseCtx.hasPendingMessages,
-		} as unknown as HookCommandContext;
+		} as unknown as CustomCommandContext;
 
 		try {
 			const args = parseCommandArgs(argsString);
-			const result = await loaded.command.execute(args, ctx);
+			const result = await loaded.command.execute(args, ctx, argsString);
 			// If result is a string, it's a prompt to send to LLM
 			// If void/undefined, command handled everything
 			return result ?? "";
@@ -7911,6 +7999,16 @@ export class AgentSession {
 		return this.#tools.skills;
 	}
 
+	/** Descriptions frozen when this session's system prompt was built. */
+	get renderedSkills(): readonly Skill[] {
+		const skills = this.skills;
+		if (skills !== this.#promptSkillsSource) {
+			this.#promptSkillsSource = skills;
+			this.#promptSkills = this.#skillDescriptions.snapshot(skills);
+		}
+		return this.#promptSkills;
+	}
+
 	/** Frozen skill-URI hint visibility snapshot (see {@link SessionTools.skillHintVisible}). */
 	getSkillHintVisible(): boolean {
 		return this.#tools.skillHintVisible;
@@ -8069,17 +8167,28 @@ export class AgentSession {
 		) {
 			return;
 		}
+		this.#deferredTitle = { sessionId, declined: false, replied: false };
+		this.#startAutoTitle(firstMessage, sessionId, onStart ?? this.#titleGenerationStart);
+	}
+
+	/**
+	 * Run one automatic title generation for `sessionId`, applying the result
+	 * unless the session was renamed or replaced meanwhile. A settled request
+	 * that left the session unnamed advances {@link #deferredTitle}.
+	 */
+	#startAutoTitle(input: string, sessionId: string, onStart: (() => (() => void) | void) | undefined): void {
 		this.#titleGenerationInFlightFor = sessionId;
 		let cleanupProgress: (() => void) | void;
 		try {
-			cleanupProgress = (onStart ?? this.#titleGenerationStart)?.();
+			cleanupProgress = onStart?.();
 		} catch (error) {
 			if (this.#titleGenerationInFlightFor === sessionId) {
 				this.#titleGenerationInFlightFor = undefined;
 			}
 			throw error;
 		}
-		this.generateTitle(firstMessage)
+		const signal = this.#titleGenerationAbortController.signal;
+		this.generateTitle(input)
 			.then(async title => {
 				// Re-check after generation so a later completion cannot replace
 				// the first title, and a request from a replaced session cannot
@@ -8101,7 +8210,33 @@ export class AgentSession {
 					this.#titleGenerationInFlightFor = undefined;
 				}
 				cleanupProgress?.();
+				// An interrupted request is cancelled inference, not a decline.
+				if (signal.aborted) this.#deferredTitle = undefined;
+				else this.#advanceDeferredTitle("declined");
 			});
+	}
+
+	/**
+	 * Record one half of the deferred-title condition; once the title model has
+	 * declined and the assistant has replied, retitle from conversation context.
+	 * The retry runs at most once per deferral, so a still-ambiguous exchange
+	 * waits for the next user message instead of retrying every assistant turn.
+	 */
+	#advanceDeferredTitle(step: "declined" | "replied"): void {
+		const deferred = this.#deferredTitle;
+		if (!deferred) return;
+		const sessionId = this.sessionManager.getSessionId();
+		if (deferred.sessionId !== sessionId || this.sessionName) {
+			this.#deferredTitle = undefined;
+			return;
+		}
+		deferred[step] = true;
+		if (!deferred.declined || !deferred.replied) return;
+		this.#deferredTitle = undefined;
+		if (this.#titleGenerationInFlightFor === sessionId || $env.PI_NO_TITLE) return;
+		const context = this.#buildReplanTitleContext();
+		if (!context || isLowSignalTitleInput(context)) return;
+		this.#startAutoTitle(context, sessionId, this.#titleGenerationStart);
 	}
 
 	#resolveTitleProviderSessionId(parentSessionId: string): string {
@@ -8637,7 +8772,9 @@ export class AgentSession {
 			// Enabled covers top-level, xd://-mounted, and Code Mode bridge-demoted
 			// tools: every path through which the model can still reach a reader.
 			const hasSkillReader = this.getEnabledToolNames().some(name => toolReadsSkillUris(this.getToolByName(name)));
-			const renderedSkills = hasSkillReader ? this.skills.filter(skill => skill.hide !== true) : [];
+			const renderedSkills = this.#skillDescriptions.render(
+				hasSkillReader ? this.skills.filter(skill => skill.hide !== true) : [],
+			);
 			// Hidden-only sessions have no catalog rows, but the notice template
 			// still carries the `skill://<name>` syntax the model needs: hidden
 			// skills stay reachable by URI even though they are never listed.
@@ -9263,16 +9400,16 @@ export class AgentSession {
 	}
 
 	/** Delivers an IRC message into this recipient session. */
-	deliverIrcMessage(msg: IrcMessage, opts?: { expectsReply?: boolean }): Promise<"injected" | "woken"> {
-		return this.#irc.deliver(msg, opts);
+	deliverIrcMessage(msg: IrcMessage): Promise<"injected" | "woken"> {
+		return this.#irc.deliver(msg);
 	}
 
-	/** Waits for every IRC reply this session still owes a peer (auto-replies, wake-turn relays). */
+	/** Waits for any in-flight IRC wake-turn relays. */
 	waitForIrcReplies(): Promise<void> {
 		return this.#irc.waitForReplies();
 	}
 
-	/** Registers an in-flight IRC reply obligation; peers awaiting an answer hold their stop verdict on it. */
+	/** Registers an in-flight IRC wake-turn relay. */
 	trackIrcReply(pending: Promise<void>): void {
 		this.#irc.trackReply(pending);
 	}
@@ -10467,7 +10604,7 @@ export class AgentSession {
 
 		// Update agent state — build display context to populate agent messages.
 		const stateContext = this.sessionManager.buildSessionContext();
-		const displayContext = deobfuscateSessionContext(stateContext, this.#obfuscator);
+		const displayContext = this.#withEvalStateContext(deobfuscateSessionContext(stateContext, this.#obfuscator));
 		this.agent.replaceMessages(displayContext.messages);
 		this.#rehydrateCheckpointRewindState();
 		this.#advisors.resetSessionState({ preserveCost: true });
@@ -10669,8 +10806,8 @@ export class AgentSession {
 
 	async fetchUsageReports(signal?: AbortSignal): Promise<UsageReport[] | null> {
 		const authStorage = this.#modelRegistry.authStorage;
-		if (!authStorage.fetchUsageReports) return null;
-		const reports = await authStorage.fetchUsageReports({
+		if (!authStorage.usage.reports) return null;
+		const reports = await authStorage.usage.reports({
 			baseUrlResolver: provider => {
 				if (provider === "google-antigravity") {
 					const mode = this.settings.get("providers.antigravityEndpoint");
@@ -10685,9 +10822,8 @@ export class AgentSession {
 			signal,
 		});
 		// Every fresh usage snapshot doubles as the salvage-sweep heartbeat: the
-		// status line calls this every 5 minutes while the TUI is open, so
-		// expiring saved Codex resets are caught even when nothing is blocked.
-		if (reports) this.#maybeScheduleCodexResetSweep(reports);
+		// status line calls this every 5 minutes while the TUI is open.
+		if (reports) this.#maybeScheduleResetSweep(reports);
 		return reports;
 	}
 
@@ -10701,7 +10837,7 @@ export class AgentSession {
 		}
 		const selectors = new Set<string>();
 		for (const [provider, models] of modelsByProvider) {
-			const modelIds = this.#modelRegistry.authStorage.getUsageReportingModelIds(
+			const modelIds = this.#modelRegistry.authStorage.usage.reportingModelIds(
 				provider,
 				models.map(model => model.id),
 				reports,
@@ -10716,10 +10852,10 @@ export class AgentSession {
 		const provider = this.model?.provider;
 		if (!provider) return undefined;
 		const authStorage = this.#modelRegistry.authStorage;
-		await authStorage.reload();
+		await authStorage.credentials.reload();
 		return {
 			provider,
-			accounts: authStorage.listOAuthAccounts(provider, this.sessionId),
+			accounts: authStorage.oauth.accounts(provider, this.sessionId),
 		};
 	}
 
@@ -10730,17 +10866,15 @@ export class AgentSession {
 	pinCurrentProviderOAuthAccount(credentialId: number): boolean {
 		const provider = this.model?.provider;
 		if (!provider || this.isStreaming) return false;
-		return this.#modelRegistry.authStorage.pinSessionOAuthAccount(provider, this.sessionId, credentialId);
+		return this.#modelRegistry.authStorage.sessions.pin(provider, this.sessionId, credentialId);
 	}
 
 	/**
-	 * Redeem one saved Codex rate-limit reset for a specific account, injecting
-	 * the provider base URL like {@link AgentSession.fetchUsageReports}. Powers
-	 * the `/usage reset` command and auto-redeem. Never throws for business
-	 * outcomes — inspect the returned `code`.
+	 * Redeem one provider-selected saved rate-limit reset for an exact stored
+	 * credential. Never throws for business outcomes — inspect `code`.
 	 */
 	async redeemResetCredit(target: ResetCreditTarget, signal?: AbortSignal): Promise<ResetCreditRedeemOutcome> {
-		return this.#modelRegistry.authStorage.redeemResetCredit({
+		return this.#modelRegistry.authStorage.resets.redeem({
 			target,
 			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
 			signal,
@@ -10748,75 +10882,98 @@ export class AgentSession {
 	}
 
 	/**
-	 * List saved Codex rate-limit resets per stored account, fetched live from
-	 * the dedicated credits endpoint (bypasses the usage cache). Powers the
-	 * `/usage reset` account selector.
+	 * List live saved-reset eligibility. An explicit provider lists only that
+	 * provider; the public default aggregates Codex and Claude independently.
 	 */
-	async listResetCredits(signal?: AbortSignal): Promise<ResetCreditAccountStatus[]> {
-		return this.#modelRegistry.authStorage.listResetCredits({
+	async listResetCredits(signal?: AbortSignal, provider?: string): Promise<ResetCreditAccountStatus[]> {
+		const options = {
 			sessionId: this.sessionId,
-			baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
+			baseUrlResolver: (candidate: string) => this.#modelRegistry.getProviderBaseUrl?.(candidate),
 			signal,
-		});
+		};
+		if (provider) {
+			return this.#modelRegistry.authStorage.resets.list({ ...options, provider });
+		}
+		const [codex, claude] = await Promise.all([
+			this.#modelRegistry.authStorage.resets.list({ ...options, provider: "openai-codex" }),
+			this.#modelRegistry.authStorage.resets.list({ ...options, provider: "anthropic" }),
+		]);
+		return [...codex, ...claude];
 	}
 	/**
-	 * Ask before the first auto-spend (`codexResets.autoRedeem === "unset"`).
-	 * The answer is persisted, so this fires at most once per install. Headless
-	 * hosts get a one-shot notice per episode instead of a prompt.
+	 * Ask before a provider's first automatic spend. Consent is persisted in
+	 * that provider's independent settings group; headless hosts only receive a
+	 * one-shot notice and never spend while the mode is unset.
 	 */
-	async #confirmCodexAutoRedeem(
-		actions: CodexResetAction[],
+	async #confirmAutoRedeem(
+		provider: "openai-codex" | "anthropic",
+		actions: (CodexResetAction | ClaudeResetAction)[],
 		coordinator: CodexAutoRedeemCoordinator,
 	): Promise<boolean> {
 		const first = actions[0];
 		if (!first) return false;
+		const providerLabel = provider === "anthropic" ? "Claude" : "Codex";
+		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
+		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
 		const runner = this.#extensionRunner;
 		if (!runner?.hasUI()) {
 			if (!coordinator.notifiedKeys.has(first.attemptKey)) {
 				coordinator.notifiedKeys.add(first.attemptKey);
 				this.emitNotice(
 					"warning",
-					"Saved Codex resets are eligible to spend, but auto-redeem is unset and no prompt UI is available. Run `/usage reset` or set codexResets.autoRedeem.",
-					"codex-auto-reset",
+					`Saved ${providerLabel} resets are eligible to spend, but auto-redeem is unset and no prompt UI is available. Run \`/usage reset\` or set ${settingsKey}.`,
+					source,
 				);
 			}
 			return false;
 		}
 
-		const lines = actions.map(action =>
-			action.reason === "blocked-account"
-				? `${action.label} is blocked by the Codex ${(action.blockedWindows ?? []).join(" + ") || "usage"} limit for about ${formatDuration(action.remainingMs ?? 0)}.`
-				: `${action.label}: a saved reset expires in ${formatDuration(action.expiresInMs ?? 0)} (${action.salvageWindow ?? "weekly"} window ${Math.round((action.salvageUsedFraction ?? action.weeklyUsedFraction ?? 0) * 100)}% used).`,
-		);
+		const lines = actions.map(action => {
+			if (!("program" in action)) {
+				const codex = action;
+				return codex.reason === "blocked-account"
+					? `${codex.label} is blocked by the Codex ${(codex.blockedWindows ?? []).join(" + ") || "usage"} limit for about ${formatDuration(codex.remainingMs ?? 0)}.`
+					: `${codex.label}: a saved reset expires in ${formatDuration(codex.expiresInMs ?? 0)} (${codex.salvageWindow ?? "weekly"} window ${Math.round((codex.salvageUsedFraction ?? codex.weeklyUsedFraction ?? 0) * 100)}% used).`;
+			}
+			const claude = action;
+			const grant = claude.program === "juniper_tide" ? "5h session-only reset" : (claude.title ?? "saved reset");
+			const early = claude.requiresLimit
+				? ""
+				: " This grant permits early use before the covered window is fully blocked.";
+			return claude.reason === "blocked-account"
+				? `${claude.label}: ${grant} covers ${(claude.blockedWindows ?? []).map(formatUsageResetWindow).join(" + ")} with about ${formatDuration(claude.remainingMs ?? 0)} left.${early}`
+				: `${claude.label}: ${grant} expires in ${formatDuration(claude.expiresInMs ?? 0)}; ${formatUsageResetWindow(claude.salvageWindow ?? "")} is ${Math.round((claude.salvageUsedFraction ?? 0) * 100)}% used.${early}`;
+		});
 		const question =
 			actions.length === 1
-				? `Spend a saved Codex rate-limit reset?\n${lines[0]}`
-				: `Spend ${actions.length} saved Codex rate-limit resets?\n${lines.join("\n")}`;
+				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
+				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
 		try {
 			const choice = await runner.getUIContext().select(question, [
 				{
 					label: "Yes",
-					description: "Redeem now and remember yes for future eligible Codex resets.",
+					description: `Redeem now and remember yes for future eligible ${providerLabel} resets.`,
 				},
 				{
 					label: "No",
-					description: "Do not auto-redeem saved Codex resets.",
+					description: `Do not auto-redeem saved ${providerLabel} resets.`,
 				},
 			]);
 			if (choice === "Yes") {
-				this.settings.set("codexResets.autoRedeem", "yes");
+				if (provider === "anthropic") this.settings.set("claudeResets.autoRedeem", "yes");
+				else this.settings.set("codexResets.autoRedeem", "yes");
 				return true;
 			}
 			if (choice === "No") {
-				this.settings.set("codexResets.autoRedeem", "no");
+				if (provider === "anthropic") this.settings.set("claudeResets.autoRedeem", "no");
+				else this.settings.set("codexResets.autoRedeem", "no");
 			}
 		} catch (error) {
-			logger.warn("codex-auto-reset prompt failed", { error: String(error) });
+			logger.warn(`${source} prompt failed`, { error: String(error) });
 		}
 		return false;
 	}
 
-	/** Run the pure planner over a usage snapshot with this session's settings. */
 	#planCodexResets(
 		trigger: CodexResetTrigger,
 		reports: UsageReport[] | null,
@@ -10850,50 +11007,77 @@ export class AgentSession {
 		return plan;
 	}
 
+	#planClaudeResets(
+		trigger: CodexResetTrigger,
+		reports: UsageReport[] | null,
+		statuses: readonly ResetCreditAccountStatus[],
+		coordinator: CodexAutoRedeemCoordinator,
+		activeBlockUnblockAtMs?: number,
+	): ClaudeResetPlan {
+		const cfg = this.settings.getGroup("claudeResets");
+		const model = this.model;
+		const plan = planClaudeResetRedemptions({
+			nowMs: Date.now(),
+			trigger,
+			provider: model?.provider ?? "",
+			modelId: model?.provider === "anthropic" ? model.id : "",
+			settings: {
+				enabled: shouldEvaluateCodexAutoRedeem(cfg.autoRedeem),
+				minBlockedMinutes: Math.max(0, cfg.minBlockedMinutes),
+				keepCredits: Math.max(0, Math.trunc(cfg.keepCredits)),
+				salvageHorizonMs: Math.max(0, cfg.salvageHorizonHours) * 3_600_000,
+			},
+			reports,
+			statuses,
+			attemptedKeys: coordinator.attemptedKeys,
+			deferredUntilByKey: coordinator.deferredUntilByKey,
+			lastAttemptAtByAccount: coordinator.lastAttemptAtByAccount,
+			activeBlockUnblockAtMs,
+		});
+		if (plan.skipped.length > 0) {
+			logger.debug("claude-auto-reset: plan", { trigger, actions: plan.actions.length, skipped: plan.skipped });
+		}
+		return plan;
+	}
+
 	/**
-	 * Spend planned resets in order, re-checking the process-wide attempt set
-	 * immediately before each consume so a concurrent pass can never
-	 * double-spend an episode. Returns how many credits were actually redeemed.
+	 * Shared consume executor for Codex and Claude plans. Attempt keys enter the
+	 * process-wide set before mutation, while nonterminal outcomes release and
+	 * defer the episode so a still-banked grant is not buried permanently.
 	 */
-	async #executeCodexResetActions(
-		actions: CodexResetAction[],
+	async #executeResetActions(
+		provider: "openai-codex" | "anthropic",
+		actions: (CodexResetAction | ClaudeResetAction)[],
 		coordinator: CodexAutoRedeemCoordinator,
 	): Promise<number> {
 		const authStorage = this.#modelRegistry.authStorage;
+		const providerLabel = provider === "anthropic" ? "Claude" : "Codex";
+		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
 		let redeemed = 0;
 		for (const action of actions) {
 			if (coordinator.attemptedKeys.has(action.attemptKey)) continue;
-			// Commit the attempt BEFORE acting so this episode can never re-enter.
 			coordinator.attemptedKeys.add(action.attemptKey);
 			coordinator.lastAttemptAtByAccount.set(action.accountKey, Date.now());
 			let outcome: ResetCreditRedeemOutcome;
 			try {
-				outcome = await authStorage.redeemResetCredit({
+				outcome = await authStorage.resets.redeem({
 					target: action.target,
-					baseUrlResolver: provider => this.#modelRegistry.getProviderBaseUrl?.(provider),
-					// Not tied to the retry abort controller: aborting a consume
-					// mid-flight leaves credit state unknown.
+					baseUrlResolver: candidate => this.#modelRegistry.getProviderBaseUrl?.(candidate),
+					// A caller abort must not leave a non-idempotent consume in an
+					// unknown state; Claude's Cedar UUID is retained by AuthStorage
+					// when an ambiguous request is considered again.
 					signal: AbortSignal.timeout(15_000),
 				});
 			} catch (error) {
-				// Thrown transport failure (network error, 15s timeout): same policy
-				// as a non-terminal code — release the episode and retry after the
-				// deferral. The next pass re-plans on a FRESH snapshot, so if an
-				// ambiguous timeout actually landed server-side the spent credit is
-				// gone from the plan before any retry could double-spend.
 				coordinator.attemptedKeys.delete(action.attemptKey);
 				coordinator.deferredUntilByKey.set(action.attemptKey, Date.now() + REDEEM_RETRY_DEFER_MS);
-				logger.warn("codex-auto-reset: redeem threw, deferred", {
+				logger.warn(`${source}: redeem threw, deferred`, {
 					account: action.accountKey,
 					error: String(error),
 				});
 				continue;
 			}
 			if (!isTerminalRedeemOutcome(outcome.code)) {
-				// `nothing_to_reset` (limits not constrained enough yet) or a
-				// transport failure: the credit is STILL BANKED. Release the episode
-				// and park it so a later pass retries once usage grows or the outage
-				// clears — burying a live credit here is how resets expire unused.
 				coordinator.attemptedKeys.delete(action.attemptKey);
 				coordinator.deferredUntilByKey.set(action.attemptKey, Date.now() + REDEEM_RETRY_DEFER_MS);
 			}
@@ -10905,46 +11089,46 @@ export class AgentSession {
 					const detail =
 						action.reason === "expiring-credit"
 							? `it was set to expire in ${formatDuration(action.expiresInMs ?? 0)}`
-							: "retrying now";
+							: outcome.cleared?.length
+								? `cleared ${outcome.cleared.map(formatUsageResetWindow).join(" + ")}; retrying now`
+								: "retrying now";
 					this.emitNotice(
 						"info",
-						`Auto-redeemed a saved Codex rate-limit reset for ${action.label}${left ?? ""}; ${detail}.`,
-						"codex-auto-reset",
+						`Auto-redeemed a saved ${providerLabel} rate-limit reset for ${action.label}${left ?? ""}; ${detail}.`,
+						source,
 					);
 					break;
 				}
 				case "already_redeemed":
 					this.emitNotice(
 						"warning",
-						`A saved Codex reset for ${action.label} was already redeemed elsewhere.`,
-						"codex-auto-reset",
+						`A saved ${providerLabel} reset for ${action.label} was already redeemed elsewhere.`,
+						source,
 					);
 					break;
 				case "no_credit":
-					logger.debug("codex-auto-reset: no_credit (snapshot/live mismatch)", { account: action.accountKey });
+					logger.debug(`${source}: no_credit (snapshot/live mismatch)`, { account: action.accountKey });
 					break;
 				case "nothing_to_reset":
-					// Routine for opportunistic salvage on a partially-used window —
-					// keep the transcript quiet; a blocked turn's user is watching.
 					if (action.reason === "blocked-account") {
 						this.emitNotice(
 							"warning",
-							`Codex reset for ${action.label} reported nothing to reset; will retry later.`,
-							"codex-auto-reset",
+							`${providerLabel} reset for ${action.label} reported nothing to reset; will retry later.`,
+							source,
 						);
 					} else {
-						logger.debug("codex-auto-reset: nothing_to_reset deferred", { account: action.accountKey });
+						logger.debug(`${source}: nothing_to_reset deferred`, { account: action.accountKey });
 					}
 					break;
 				default:
 					if (action.reason === "blocked-account") {
 						this.emitNotice(
 							"warning",
-							`Codex auto-redeem for ${action.label} failed (${outcome.code}); will retry later.`,
-							"codex-auto-reset",
+							`${providerLabel} auto-redeem for ${action.label} failed (${outcome.code}); will retry later.`,
+							source,
 						);
 					} else {
-						logger.warn("codex-auto-reset: consume failed, deferred", {
+						logger.warn(`${source}: consume failed, deferred`, {
 							account: action.accountKey,
 							code: outcome.code,
 						});
@@ -10952,74 +11136,50 @@ export class AgentSession {
 					break;
 			}
 		}
-		// Reflect the reset in the next snapshot (redeem already invalidated the cache).
 		if (redeemed > 0) void this.fetchUsageReports();
 		return redeemed;
 	}
 
-	/**
-	 * Auto-redeem hook for {@link AgentSession.#handleRetryableError}'s
-	 * usage-limit branch. Returns `true` only when a saved Codex reset was
-	 * actually spent (so the caller retries immediately). Usage is
-	 * force-refreshed first, but the live 429's parsed unblock timestamp
-	 * (`activeBlockUnblockAtMs`, captured at the error) stays authoritative for
-	 * the active account: the refreshed snapshot can still predate the block
-	 * (in-flight fetch adoption, last-good-on-failure under `/wham/usage` IP
-	 * throttling), and with no usable report at all the planner synthesizes the
-	 * active candidate and lets the redeem re-check credits live. The plan
-	 * covers ALL stored accounts — restoring an exhausted sibling clears its
-	 * credential blocks, so the retry's re-rank picks it up even when the
-	 * active account has no credits. The "unset" mode asks before spending;
-	 * "yes" skips the prompt; "no" avoids the eligibility IO entirely.
-	 * Per-account in-flight dedup lets concurrent sessions adopt one pass
-	 * instead of double-spending.
-	 */
-	async #maybeAutoRedeemCodexReset(activeBlockUnblockAtMs?: number): Promise<boolean> {
-		const coordinator = this.#codexResetCoordinator;
-		const cfg = this.settings.getGroup("codexResets");
-		const model = this.model;
-		// Cheap exits before any IO.
-		if (!shouldEvaluateCodexAutoRedeem(cfg.autoRedeem) || !model || model.provider !== "openai-codex") return false;
+	async #maybeAutoRedeemReset(activeBlockUnblockAtMs?: number): Promise<boolean> {
+		const provider = this.model?.provider;
+		if (provider !== "anthropic" && provider !== "openai-codex") return false;
+		const cfg =
+			provider === "anthropic" ? this.settings.getGroup("claudeResets") : this.settings.getGroup("codexResets");
+		if (!shouldEvaluateCodexAutoRedeem(cfg.autoRedeem)) return false;
+		const coordinator = this.#resetCoordinator;
 		const authStorage = this.#modelRegistry.authStorage;
-		// Capture identity BEFORE awaits: markUsageLimitReached leaves the
-		// usage-limit session credential sticky, so this names the blocked account.
-		const identity = authStorage.getOAuthAccountIdentity("openai-codex", this.sessionId);
-		const accountKey = (identity?.accountId ?? identity?.email)?.trim().toLowerCase();
-		if (!accountKey) return false;
+		const identity = authStorage.oauth.identity(provider, this.sessionId);
+		const identityValue = (identity?.accountId ?? identity?.email ?? identity?.orgId)?.trim().toLowerCase();
+		if (!identityValue) return false;
+		const accountKey = `${provider}|${identity?.orgId?.trim().toLowerCase() ?? "-"}|${identityValue}`;
 		const existing = coordinator.inFlightByAccount.get(accountKey);
 		if (existing) return existing;
 
 		const run = (async (): Promise<boolean> => {
-			// Live data: the cached report predates the block that got us here.
-			await authStorage.invalidateUsageCache("openai-codex");
+			await authStorage.usage.invalidate(provider);
 			const reports = await this.fetchUsageReports();
-			// Live per-account credit counts: `/wham/usage` counts can be stale or
-			// pre-feature, and a stale ZERO is never corrected by the detail merge
-			// (it only runs when the usage payload already reports a positive
-			// count) — so report counts must never veto a spend or fake a reserve.
-			let effectiveReports = reports;
-			try {
-				const statuses = await this.listResetCredits(AbortSignal.timeout(10_000));
-				effectiveReports = overlayLiveResetCredits(reports, statuses);
-			} catch (error) {
-				logger.debug("codex-auto-reset: live credit listing failed; keeping report counts", {
-					error: String(error),
-				});
-			}
-			const plan = this.#planCodexResets("blocked", effectiveReports, identity, coordinator, activeBlockUnblockAtMs);
+			const statuses = await this.listResetCredits(AbortSignal.timeout(10_000), provider);
+			const plan =
+				provider === "anthropic"
+					? this.#planClaudeResets("blocked", reports, statuses, coordinator, activeBlockUnblockAtMs)
+					: this.#planCodexResets(
+							"blocked",
+							overlayLiveResetCredits(reports, statuses, { synthesizeActive: true, nowMs: Date.now() }),
+							identity,
+							coordinator,
+							activeBlockUnblockAtMs,
+						);
 			if (plan.actions.length === 0) return false;
 			if (
 				shouldPromptCodexAutoRedeem(cfg.autoRedeem) &&
-				!(await this.#confirmCodexAutoRedeem(plan.actions, coordinator))
+				!(await this.#confirmAutoRedeem(provider, plan.actions, coordinator))
 			) {
 				return false;
 			}
-			return (await this.#executeCodexResetActions(plan.actions, coordinator)) > 0;
+			return (await this.#executeResetActions(provider, plan.actions, coordinator)) > 0;
 		})()
 			.catch(error => {
-				// Eligibility IO (cache invalidation / usage fetch) failed; the
-				// retry pipeline must keep running, so a blocked pass never rejects.
-				logger.warn("codex-auto-reset: blocked pass failed", { account: accountKey, error: String(error) });
+				logger.warn("auto-reset: blocked pass failed", { provider, account: accountKey, error: String(error) });
 				return false;
 			})
 			.finally(() => coordinator.inFlightByAccount.delete(accountKey));
@@ -11028,37 +11188,63 @@ export class AgentSession {
 	}
 
 	/**
-	 * Salvage-sweep entry, piggybacked on every successful usage fetch. Spends
-	 * saved Codex resets that would otherwise expire (the `expiring-credit`
-	 * rule in `./codex-auto-reset`) across ALL stored accounts, regardless of
-	 * the active model or blocked state. Fire-and-forget: never delays the
-	 * fetch, never runs concurrently with itself or a blocked pass, and the
-	 * attempt keys make re-sweeps of the same snapshot no-ops.
+	 * One process-wide salvage sweep handles both providers, but plans and asks
+	 * consent independently. Every candidate is refreshed through its live
+	 * listing before spend; a failed listing cannot fall back to stale usage.
 	 */
-	#maybeScheduleCodexResetSweep(reports: UsageReport[]): void {
-		const coordinator = this.#codexResetCoordinator;
-		const cfg = this.settings.getGroup("codexResets");
-		if (!shouldEvaluateCodexAutoRedeem(cfg.autoRedeem) || cfg.salvageHorizonHours <= 0) return;
-		// A blocked pass is planning over the same snapshot; let it own the spend.
+	#maybeScheduleResetSweep(reports: UsageReport[]): void {
+		const coordinator = this.#resetCoordinator;
+		const codexCfg = this.settings.getGroup("codexResets");
+		const claudeCfg = this.settings.getGroup("claudeResets");
+		const codexEnabled =
+			shouldEvaluateCodexAutoRedeem(codexCfg.autoRedeem) &&
+			codexCfg.salvageHorizonHours > 0 &&
+			reports.some(report => report.provider === "openai-codex");
+		const claudeEnabled =
+			shouldEvaluateCodexAutoRedeem(claudeCfg.autoRedeem) &&
+			claudeCfg.salvageHorizonHours > 0 &&
+			reports.some(report => report.provider === "anthropic");
+		if (!codexEnabled && !claudeEnabled) return;
 		if (coordinator.sweepInFlight || coordinator.inFlightByAccount.size > 0) return;
 		const now = Date.now();
 		if (now - coordinator.lastSweepAt < SWEEP_MIN_INTERVAL_MS) return;
-		if (!reports.some(r => r.provider === "openai-codex" && (r.resetCredits?.credits?.length ?? 0) > 0)) return;
 		coordinator.sweepInFlight = true;
 		coordinator.lastSweepAt = now;
 		coordinator.sweepPromise = (async () => {
-			const identity = this.#modelRegistry.authStorage.getOAuthAccountIdentity("openai-codex", this.sessionId);
-			const plan = this.#planCodexResets("sweep", reports, identity, coordinator);
-			if (plan.actions.length === 0) return;
-			if (
-				shouldPromptCodexAutoRedeem(cfg.autoRedeem) &&
-				!(await this.#confirmCodexAutoRedeem(plan.actions, coordinator))
-			) {
-				return;
+			if (codexEnabled) {
+				try {
+					const statuses = await this.listResetCredits(AbortSignal.timeout(10_000), "openai-codex");
+					const effectiveReports = overlayLiveResetCredits(reports, statuses);
+					const identity = this.#modelRegistry.authStorage.oauth.identity("openai-codex", this.sessionId);
+					const plan = this.#planCodexResets("sweep", effectiveReports, identity, coordinator);
+					if (
+						plan.actions.length > 0 &&
+						(!shouldPromptCodexAutoRedeem(codexCfg.autoRedeem) ||
+							(await this.#confirmAutoRedeem("openai-codex", plan.actions, coordinator)))
+					) {
+						await this.#executeResetActions("openai-codex", plan.actions, coordinator);
+					}
+				} catch (error) {
+					logger.warn("codex-auto-reset: salvage listing failed", { error: String(error) });
+				}
 			}
-			await this.#executeCodexResetActions(plan.actions, coordinator);
+			if (claudeEnabled) {
+				try {
+					const statuses = await this.listResetCredits(AbortSignal.timeout(10_000), "anthropic");
+					const plan = this.#planClaudeResets("sweep", reports, statuses, coordinator);
+					if (
+						plan.actions.length > 0 &&
+						(!shouldPromptCodexAutoRedeem(claudeCfg.autoRedeem) ||
+							(await this.#confirmAutoRedeem("anthropic", plan.actions, coordinator)))
+					) {
+						await this.#executeResetActions("anthropic", plan.actions, coordinator);
+					}
+				} catch (error) {
+					logger.warn("claude-auto-reset: salvage listing failed", { error: String(error) });
+				}
+			}
 		})()
-			.catch(error => logger.warn("codex-reset sweep failed", { error: String(error) }))
+			.catch(error => logger.warn("reset salvage sweep failed", { error: String(error) }))
 			.finally(() => {
 				coordinator.sweepInFlight = false;
 			});

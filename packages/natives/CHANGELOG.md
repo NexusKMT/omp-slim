@@ -2,10 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `appleFmAvailability`, `appleFmGenerate`, and `appleFmCancel` native bindings
+- Added `Encoding.Jev` to `countTokens` for offline TypeSafe Jev 1.13 `state` input-token counts (request frame excluded), reconstructed from live API measurements
+
+## [18.2.11] - 2026-09-23
+
+### Changed
+
+- Improved `warmHighlighter()` so it prepares TypeScript, TSX, JavaScript, Bash, Python, Rust, and Markdown highlighting in the background, reducing delays on the first highlight for these languages.
+
+## [18.2.9] - 2026-09-22
+
 ### Fixed
 
-- Fixed a stale workspace addon failing as `<symbol> is not a function` inside whichever tool used it first; the missing export now names the addon, the loaded and expected releases, and `bun run build:native` ([#12698](https://github.com/can1357/oh-my-pi/pull/12698) by [@iacore](https://github.com/iacore)).
-- Background bash jobs no longer hang forever when one output chunk forward wedges; the bridge disconnects after a bounded stall ([#12832](https://github.com/can1357/oh-my-pi/pull/12832) by [@roboomp](https://github.com/roboomp)).
+- Fixed stale workspace addons failing when first used; the error now identifies the addon and provides the command to rebuild native addons.
+- Fixed background bash jobs hanging indefinitely when output forwarding stalls.
 
 ## [18.2.7] - 2026-09-21
 

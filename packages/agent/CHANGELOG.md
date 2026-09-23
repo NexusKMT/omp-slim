@@ -2,11 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `docTopics` method to `AgentTool` interface for on-demand documentation
+
+## [18.2.11] - 2026-09-23
+
 ### Fixed
 
-- A provider stream that ends without a `done`/`error` event and produced zero events now appends the finalized trailing assistant message to the replay context and emits `message_start`/`message_end`, matching the done/error-event path ([#12605](https://github.com/can1357/oh-my-pi/pull/12605) by [@xiechimon](https://github.com/xiechimon)).
-- Fixed a rejecting host steering callback (`hasSteeringMessages`/`hasIrcInterrupts`) during a tool batch skipping every later chained tool with a phantom "Skipped due to pending steering message" result; the trailing steering probe in `runTool` is now guarded like the watch loop ([#12544](https://github.com/can1357/oh-my-pi/issues/12544)).
-- Host aside-commit and discard callbacks that throw no longer leave the stream pending or mask the original loop error ([#12815](https://github.com/can1357/oh-my-pi/pull/12815) by [@roboomp](https://github.com/roboomp)).
+- Fixed background job completions interrupting foreground Bash and eval calls, which could cause those calls to be repeatedly moved into the background.
+
+## [18.2.9] - 2026-09-22
+
+### Fixed
+
+- Fixed stream finalization when a provider ends without emitting a completion or error event, ensuring the final assistant message is preserved and corresponding message lifecycle events are emitted.
+- Fixed tool execution being incorrectly skipped when host steering callbacks reject during a tool batch.
+- Fixed stream hangs and preserved the original error when host aside-commit or discard callbacks fail.
 
 ## [18.2.5] - 2026-09-17
 

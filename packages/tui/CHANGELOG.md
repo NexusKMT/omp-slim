@@ -4,16 +4,61 @@
 
 ### Added
 
-- Detected the otty terminal (`TERM_PROGRAM=otty`) with the Kitty graphics protocol, Unicode placeholder placement, OSC 8 hyperlinks and OSC 99 notifications; Sixel is absent and unverified capabilities (DECCARA, text sizing) keep conservative defaults ([#12665](https://github.com/can1357/oh-my-pi/pull/12665) by [@xiechimon](https://github.com/xiechimon)).
-- Detected the rio terminal (`TERM_PROGRAM=rio`) with Kitty graphics protocol and true color; unverified capabilities (hyperlinks, notifications, DECCARA) keep conservative defaults until proven in that terminal ([#12205](https://github.com/can1357/oh-my-pi/issues/12205)) ([#12263](https://github.com/can1357/oh-my-pi/pull/12263) by [@danilouchoa](https://github.com/danilouchoa)).
-- Added `stripTerminalSequences` export for extensions that strip CSI/OSC/APC sequences ([#12795](https://github.com/can1357/oh-my-pi/pull/12795) by [@RockinPaul](https://github.com/RockinPaul)).
+- Added proc:// and agent:// URI support for process and agent interaction
+- Added support for xd:// documentation topic URLs
+- Added `wait` tool renderer to display background job state and peer-to-peer messages
+- Added supervised bash service rendering for status, readiness, and output
+- Added a fullscreen annotation overlay for diffs and text, with multi-line notes, editing, deletion, and undo ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
+- Added Daybreak-enabled account listing to usage dashboard overlay
+
+### Changed
+
+- Updated status line context usage to include tool examples in token estimation
+- Mermaid flowcharts and state diagrams now re-pick layout on terminal resize: the shortest orientation that fits the width wins, and the narrowest is used only when none fit.
+- Updated model hub and oauth selector components to use namespaced `authStorage` API
+- Plan Review annotations can now be edited or deleted, span multiple lines, and be undone ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
+
+### Removed
+
+- Removed `hub` tool renderer and associated messaging components
 
 ### Fixed
 
-- Composer shape previews now use the full overlay width instead of clipping at 96 columns ([#12713](https://github.com/can1357/oh-my-pi/pull/12713) by [@F0Rextasy](https://github.com/F0Rextasy)).
-- Fixed recalled one-line prompts placing the caret at the start when reached with Up but at the end when reached with Down; a history entry that fits on one visual row now always opens at the end, while multi-row entries keep their top/bottom anchors ([#12814](https://github.com/can1357/oh-my-pi/pull/12814) by [@H4vC](https://github.com/H4vC)).
-- Restored modified keys and terminal notifications over SSH in tmux by resolving the attached client's terminal type ([#12539](https://github.com/can1357/oh-my-pi/pull/12539) by [@CzBiX](https://github.com/CzBiX)).
-- Fixed typed Enter being swallowed into a literal newline when an event-loop stall batched keystrokes into one stdin read; the unbracketed raw-paste heuristic is now disabled on terminals that confirm bracketed-paste support ([#12540](https://github.com/can1357/oh-my-pi/issues/12540)).
+- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
+
+## [18.2.11] - 2026-09-23
+
+### Added
+
+- Added a Skills section to the settings.
+- Enabled OSC 8 hyperlinks in rio.
+
+### Fixed
+
+- Fixed scrolling startup release notes without requiring an initial Escape keypress.
+- Improved usage quota display so names remain distinguishable and readable in narrow and multi-column dashboards.
+
+## [18.2.10] - 2026-09-22
+
+### Changed
+
+- Added support for multiple concurrent TUI paint listeners to enable simultaneous session recording and streaming
+- Coalesced status event updates for progress-based operations to reduce TUI render overhead
+
+## [18.2.9] - 2026-09-22
+
+### Added
+
+- Added Claude and Codex saved-reset counts, availability, and expiry to usage views, with provider-specific confirmation and uniquely identified account options.
+- Added terminal detection and capability support for otty and rio, including Kitty graphics and true-color support where available, plus otty hyperlinks and notifications.
+- Added the public `stripTerminalSequences` export for extensions that need to remove terminal control sequences.
+
+### Fixed
+
+- Composer shape previews now use the full available overlay width instead of being clipped at 96 columns.
+- Fixed cursor placement when recalling prompts from history, keeping single-line entries at the end and preserving the appropriate position for multi-line entries.
+- Restored modified-key handling and terminal notifications over SSH sessions running inside tmux.
+- Fixed typed Enter occasionally being interpreted as a literal newline when terminal input events are batched.
 
 ## [18.2.8] - 2026-09-21
 
