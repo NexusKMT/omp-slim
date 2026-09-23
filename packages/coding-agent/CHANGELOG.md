@@ -36,6 +36,10 @@
 - Updated `omp bench` default profile to `chat` and improved CLI flag documentation
 - Coalesced judgment batch drain operations for better performance under high load
 
+### Fixed
+
+- Output schemas written as JSON Schema without a root `type` keep their `items` and `required` keywords, so structured-output tools no longer fail strict-mode validation ([#12893](https://github.com/can1357/oh-my-pi/issues/12893))
+
 ## [18.2.9] - 2026-09-22
 
 ### Added
