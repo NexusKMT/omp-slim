@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getEnvApiKey } from "@oh-my-pi/pi-ai/stream";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
+import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
 import type { FetchImpl, ResolvedOpenAICompat } from "@oh-my-pi/pi-catalog/types";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { isStepfunChatModelId, stepfunModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
 
 /** StepFun's documented three-tier ladder; the relay-host default spans minimal…xhigh. */
 const STEPFUN_LADDER = [Effort.Low, Effort.Medium, Effort.High];
@@ -128,6 +132,73 @@ describe("StepFun provider support", () => {
 		expect(discovered?.cost).toEqual({ input: 1, output: 2.7, cacheRead: 0.05, cacheWrite: 0 });
 		expect(discovered?.contextWindow).toBe(1_000_000);
 		expect(discovered?.maxTokens).toBe(1_000_000);
+	});
+
+	test("a discovered model with no bundled reference still gets StepFun's advertised reasoning dial", async () => {
+		// `mapWithBundledReference` starts an unbundled row from the generic
+		// defaults (`reasoning: false`, no thinking), and `mergeDynamicModels`
+		// adds it verbatim — so a model StepFun ships after this snapshot would
+		// otherwise never send `reasoning_effort`.
+		const fetchMock: FetchImpl = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						data: [
+							{ id: "step-6-preview", reasoning_effort_support_list: ["low", "medium", "high"] },
+							// Advertises no tiers: must stay non-reasoning rather than
+							// inherit a fabricated ladder.
+							{ id: "step-8-chat" },
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+		) as unknown as FetchImpl;
+
+		const models = await stepfunModelManagerOptions({
+			apiKey: "stepfun-key",
+			fetch: fetchMock,
+		}).fetchDynamicModels?.();
+
+		const future = models?.find(model => model.id === "step-6-preview");
+		expect(future?.reasoning).toBe(true);
+		expect(future?.thinking).toEqual({ mode: "effort", efforts: STEPFUN_LADDER });
+
+		const unreasoned = models?.find(model => model.id === "step-8-chat");
+		expect(unreasoned?.reasoning).toBe(false);
+		expect(unreasoned?.thinking).toBeUndefined();
+	});
+
+	test("a retired model is pruned through the manager options, not just the descriptor", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-stepfun-prune-"));
+		const dbPath = path.join(tempDir, "models.db");
+		// The live roster no longer lists step-3.5-flash; the bundled seed still does.
+		const liveRoster = getBundledModels("stepfun").filter(model => model.id !== "step-3.5-flash");
+		const options = {
+			...stepfunModelManagerOptions({
+				apiKey: "stepfun-key",
+				fetch: (async () =>
+					new Response(JSON.stringify({ data: liveRoster.map(model => ({ id: model.id, owned_by: "stepai" })) }), {
+						status: 200,
+						headers: { "Content-Type": "application/json" },
+					})) as unknown as FetchImpl,
+			}),
+			staticModels: getBundledModels("stepfun"),
+			cacheDbPath: dbPath,
+		};
+
+		try {
+			// The flag must be on the options `createModelManager()` consumes; the
+			// KDL descriptor alone leaves the additive branch active.
+			expect(options.dynamicModelsAuthoritative).toBe(true);
+
+			const result = await resolveProviderModels(options, "online");
+
+			expect(result.models.map(model => model.id)).not.toContain("step-3.5-flash");
+			expect(result.models.map(model => model.id)).toContain("step-5-preview");
+			expect(result.stale).toBe(false);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
 	});
 
 	test("roster exclusion classifies StepFun's non-chat SKUs without touching chat ids", () => {

@@ -4959,10 +4959,37 @@ export function yoloAutoModelManagerOptions(
 // 16.9 StepFun
 // ---------------------------------------------------------------------------
 
+/**
+ * StepFun discovery configuration: the API key plus optional base-URL and
+ * fetch overrides. Consumed by {@link stepfunModelManagerOptions}, and exported
+ * for extensions and tests that construct the manager directly.
+ */
 export interface StepfunModelManagerConfig {
 	apiKey?: string;
 	baseUrl?: string;
 	fetch?: FetchImpl;
+}
+
+/** StepFun's `/v1/models` row shape beyond the generic OpenAI-compatible fields. */
+interface StepfunModelRecord extends OpenAICompatibleModelRecord {
+	/** Reasoning tiers the endpoint advertises for the model, e.g. `["low","medium","high"]`. */
+	reasoning_effort_support_list?: unknown;
+}
+
+/**
+ * Translate StepFun's per-model `reasoning_effort_support_list` into a ladder.
+ * Every advertised value that names an OMP tier maps verbatim, in OMP's tier
+ * order; a row advertising nothing (or only tiers this client does not know)
+ * resolves to no thinking, so the wire path never sends a `reasoning_effort`
+ * the endpoint rejects. Same shape as `mapOpenRouterThinking` for OpenRouter's
+ * `reasoning.supported_efforts`.
+ */
+function mapStepfunThinking(entry: StepfunModelRecord): ThinkingConfig | undefined {
+	const advertised = Array.isArray(entry.reasoning_effort_support_list)
+		? entry.reasoning_effort_support_list.filter((value): value is string => typeof value === "string")
+		: [];
+	const efforts = THINKING_EFFORTS.filter(effort => advertised.includes(effort));
+	return efforts.length === 0 ? undefined : { mode: "effort", efforts };
 }
 
 /**
@@ -4979,10 +5006,10 @@ export function isStepfunChatModelId(id: string): boolean {
 
 /**
  * StepFun model manager: plain OpenAI-compatible chat completions at
- * `api.stepfun.ai/v1`. Live `/v1/models` discovery merges additively over the
- * bundled seed rows (`providers/stepfun.kdl`), so models StepFun adds later
- * become selectable without an omp release, while the reasoning-effort ladder
- * and `max_tokens` spelling stay rule-owned by the provider's cascade block.
+ * `api.stepfun.ai/v1`. A successful `/v1/models` snapshot is authoritative over
+ * the bundled seed rows (`providers/stepfun.kdl`), so a model StepFun retires
+ * leaves the picker instead of lingering as a dead seed row, while models added
+ * later become selectable without an omp release.
  */
 export function stepfunModelManagerOptions(
 	config?: StepfunModelManagerConfig,
@@ -4994,7 +5021,19 @@ export function stepfunModelManagerOptions(
 		config,
 		requireApiKey: true,
 		filterModel: (_entry, model) => isStepfunChatModelId(model.id),
-		mapModel: mapWithBundledReference,
+		mapModel: (entry, model, reference) => {
+			const mapped = mapWithBundledReference(entry, model, reference);
+			// A model StepFun ships later has no bundled reference, so it starts
+			// from the generic defaults (`reasoning: false`, no thinking) and
+			// `mergeDynamicModels` adds it verbatim — the endpoint's own tiers are
+			// then the only thing that can give it a reasoning dial.
+			if (reference) return mapped;
+			const thinking = mapStepfunThinking(entry);
+			return thinking === undefined ? mapped : { ...mapped, reasoning: true, thinking };
+		},
+		// Must live on the manager options, not only the KDL descriptor:
+		// `createModelManager()` prunes the bundled slice from this flag.
+		dynamicModelsAuthoritative: true,
 	});
 }
 
