@@ -537,7 +537,6 @@ Command discovery is intentionally an OMP dialect: Pi's `get_commands` (a
 `RpcSlashCommand[]` projection over extensions → prompt templates → skills) is
 not served because OMP's richer catalog (builtins/custom/MCP/file commands,
 broader `source` enum, no Pi `sourceInfo`) is not wire-compatible with it.
-See issue #6 for the compatibility evaluation.
 
 ### Pi-compatible history/tree commands with OMP-native entry payloads
 
