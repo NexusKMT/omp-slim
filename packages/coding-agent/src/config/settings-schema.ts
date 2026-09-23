@@ -4826,6 +4826,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"mcp.startupTimeoutMs": {
+		type: "number",
+		default: 250,
+		ui: {
+			tab: "tools",
+			group: "Discovery & MCP",
+			label: "MCP Startup Window",
+			description: "Wait this many milliseconds for initial MCP tool discovery; 0 waits until connections settle",
+		},
+	},
+
 	"mcp.renderMarkdownResults": {
 		type: "boolean",
 		default: true,

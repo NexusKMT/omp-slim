@@ -2065,6 +2065,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}));
 		const mcpDiscoverOptions = {
 			onStatus: onMCPStatus,
+			startupTimeoutMs: settings.get("mcp.startupTimeoutMs"),
 			enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
 			// Always filter Exa - we have native integration
 			filterExa: true,
