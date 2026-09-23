@@ -16,6 +16,10 @@
  * Layouts without an AltGr layer (US, UK, ...) resolve to an empty table once and
  * short-circuit every later event. The per-layout table is built once and cached;
  * it is rebuilt only when the foreground window reports a different layout handle.
+ *
+ * Known limitation: AltGr keys that produce a dead key on the active layout have no
+ * table entry (`ToUnicodeEx` reports them as pending composition, not text), so those
+ * chords keep reaching Alt bindings.
  */
 import { dlopen, FFIType, type Library, type Pointer, ptr } from "bun:ffi";
 import { parseKittySequence } from "./keys";
@@ -110,10 +114,8 @@ function buildAltGrTable(lib: User32, hkl: KeyboardLayoutHandle): AltGrTable {
 	const altGr = [VK_CONTROL, VK_LCONTROL, VK_MENU, VK_RMENU];
 	const altGrShift = [...altGr, VK_SHIFT, VK_LSHIFT];
 	for (let vk = 0x20; vk <= 0xfe; vk++) {
-		// Skip modifier and Windows/menu keys: they have no text layer.
-		if ((vk >= VK_SHIFT && vk <= VK_MENU) || (vk >= 0x5b && vk <= 0x5f) || (vk >= VK_LSHIFT && vk <= VK_RMENU)) {
-			continue;
-		}
+		// Skip Windows/menu keys and the sided modifiers: they have no text layer.
+		if ((vk >= 0x5b && vk <= 0x5f) || (vk >= VK_LSHIFT && vk <= VK_RMENU)) continue;
 		const scan = lib.symbols.MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC, hkl);
 		if (scan === 0) continue;
 		const base = translate(vk, scan, []);
@@ -154,21 +156,42 @@ export function readAltGrLayer(hkl: KeyboardLayoutHandle): ReadonlyMap<string, s
 export interface AltGrHost {
 	/** AltGr layer of the layout that produced the keystroke, keyed like {@link readAltGrLayer}. */
 	activeLayer(): ReadonlyMap<string, string>;
-	/** Whether Right Alt (AltGr) is physically held right now. */
+	/** Whether Right Alt (AltGr) is held, or was within the last {@link RIGHT_ALT_LATCH_MS}. */
 	isRightAltDown(): boolean;
 }
 
 const EMPTY_LAYER: ReadonlyMap<string, string> = new Map();
+
+/**
+ * How long an observed Right Alt press keeps counting as held. Key state is sampled
+ * at processing time, and one stdin read can carry several queued AltGr repeats that
+ * are dispatched synchronously after the key is released; the latch keeps that tail
+ * typing text. Far shorter than any release-then-Left-Alt chord a person can press.
+ */
+export const RIGHT_ALT_LATCH_MS = 30;
+
+/** Wrap a raw Right Alt probe so a press stays observed for {@link RIGHT_ALT_LATCH_MS}. */
+export function createRightAltLatch(isDownNow: () => boolean, now: () => number): () => boolean {
+	let lastSeenDown = Number.NEGATIVE_INFINITY;
+	return () => {
+		const at = now();
+		if (isDownNow()) {
+			lastSeenDown = at;
+			return true;
+		}
+		return at - lastSeenDown <= RIGHT_ALT_LATCH_MS;
+	};
+}
 
 const win32Host: AltGrHost = {
 	activeLayer() {
 		const lib = getUser32();
 		return lib ? activeLayoutTable(lib) : EMPTY_LAYER;
 	},
-	isRightAltDown() {
+	isRightAltDown: createRightAltLatch(() => {
 		const lib = getUser32();
 		return lib !== null && (lib.symbols.GetAsyncKeyState(VK_RMENU) & 0x8000) !== 0;
-	},
+	}, performance.now.bind(performance)),
 };
 
 /**
@@ -192,7 +215,9 @@ export function translateWindowsAltGrSequence(data: string, host: AltGrHost = wi
 		// Layouts without an AltGr layer (US, UK, ...) stop here: Alt chords stay shortcuts.
 		const layer = host.activeLayer();
 		if (layer.size === 0) return undefined;
-		const text = layer.get(tableKey(parsed.codepoint, (modifier & KITTY_MOD_SHIFT) !== 0));
+		// Table keys are lowercased base characters; normalize hosts that report uppercase.
+		const base = String.fromCodePoint(parsed.codepoint).toLowerCase().codePointAt(0)!;
+		const text = layer.get(tableKey(base, (modifier & KITTY_MOD_SHIFT) !== 0));
 		if (text === undefined) return undefined;
 		// Left Alt+key shares the exact bytes; only a held Right Alt means AltGr.
 		return host.isRightAltDown() ? text : undefined;

@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import {
 	type AltGrHost,
+	createRightAltLatch,
 	type KeyboardLayoutHandle,
+	RIGHT_ALT_LATCH_MS,
 	readAltGrLayer,
 	translateWindowsAltGrSequence,
 } from "@oh-my-pi/pi-tui/windows-altgr";
@@ -29,6 +31,8 @@ describe("translateWindowsAltGrSequence", () => {
 		expect(translateWindowsAltGrSequence("\x1b[110;3u", altGr)).toBe("}");
 		// Caps/Num Lock bits do not hide the chord.
 		expect(translateWindowsAltGrSequence("\x1b[102;131u", altGr)).toBe("[");
+		// Hosts that report the base key uppercase (Caps Lock) still hit the lowercased table.
+		expect(translateWindowsAltGrSequence("\x1b[70;3u", altGr)).toBe("[");
 	});
 
 	it("keeps Left Alt chords as shortcuts when Right Alt is not held", () => {
@@ -47,6 +51,32 @@ describe("translateWindowsAltGrSequence", () => {
 		expect(translateWindowsAltGrSequence("\x1b[102;3:3u", altGr)).toBeUndefined(); // release
 		expect(translateWindowsAltGrSequence("\x1b[102;4u", altGr)).toBeUndefined(); // Shift layer unmapped here
 		expect(translateWindowsAltGrSequence("\x1b[1;3A", altGr)).toBeUndefined(); // Alt+Up
+	});
+});
+
+describe("createRightAltLatch", () => {
+	it("keeps a just-released Right Alt observed through a synchronously dispatched batch", () => {
+		let down = true;
+		let now = 1000;
+		const isRightAltDown = createRightAltLatch(
+			() => down,
+			() => now,
+		);
+		expect(isRightAltDown()).toBe(true);
+		// Key released while queued repeats from the same stdin read are still being dispatched.
+		down = false;
+		now += 1;
+		expect(isRightAltDown()).toBe(true);
+		now += RIGHT_ALT_LATCH_MS;
+		expect(isRightAltDown()).toBe(false);
+	});
+
+	it("never reports a Right Alt press it has not observed", () => {
+		const isRightAltDown = createRightAltLatch(
+			() => false,
+			() => 0,
+		);
+		expect(isRightAltDown()).toBe(false);
 	});
 });
 
