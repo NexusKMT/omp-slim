@@ -4263,6 +4263,36 @@ describe("advisor", () => {
 			runtime.dispose();
 		}, 10_000);
 
+		it("releases a recovery-aware catch-up created while a session transition is paused", async () => {
+			// A paused runtime cannot drain until the transition resumes, which never
+			// happens on a shutdown path. A drain waiter created after the pause must
+			// release at once instead of parking for its (ten-minute) budget.
+			let abortPrompt: ((reason: unknown) => void) | undefined;
+			const agent: AdvisorAgent = {
+				prompt: () => {
+					const { promise, reject } = Promise.withResolvers<void>();
+					abortPrompt = reject;
+					return promise;
+				},
+				abort: reason => abortPrompt?.(new Error(String(reason))),
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "paused-turn", timestamp: 1 } as AgentMessage];
+			const host: AdvisorRuntimeHost = { snapshotMessages: () => messages };
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			runtime.onTurnEnd(messages);
+			await settleUntil(() => abortPrompt !== undefined);
+			await runtime.pauseForSessionTransition();
+			expect(runtime.backlog).toBeGreaterThan(0);
+
+			const started = performance.now();
+			expect(await runtime.waitForCatchup(60_000, 1, undefined, { waitThroughRecovery: true })).toBe(false);
+			expect(performance.now() - started).toBeLessThan(100);
+			runtime.dispose();
+		}, 10_000);
+
 		it("survives a poisoned message without throwing into the caller or losing the delta", async () => {
 			// CRITICAL contract: an advisor render failure (throwing getter,
 			// formatter bug) must neither propagate into the primary agent's

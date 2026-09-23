@@ -1,10 +1,14 @@
 /**
- * Contract: the headless advisor drain (`waitForAdvisorCatchup`, used by print
- * mode and other headless callers before disposing the session) waits through a
+ * Contract: the print-mode advisor drain (`waitForAdvisorCatchup` with
+ * `waitThroughRecovery`, run before disposing the session) waits through a
  * failing advisor's `retry.fallbackChains` recovery. A regression abandons the
  * review the moment the primary advisor model fails: the drain reports an
  * incomplete catch-up, disposal aborts the fallback switch mid-flight, and the
  * configured backup reviewer never runs.
+ *
+ * The default drain (subagent teardown, 5s shared with `dispose()`) must keep
+ * releasing at once on a failing advisor; a regression parks it through
+ * recovery and pushes session teardown past its cleanup deadline.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
@@ -44,7 +48,7 @@ describe("headless advisor drain with a fallback reviewer", () => {
 		await tempDir?.remove();
 	});
 
-	it("waits for the fallback advisor model to finish the review before reporting catch-up", async () => {
+	async function startSessionWithFailingAdvisor(backupDelayMs = 0) {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!primaryModel) throw new Error("Expected bundled anthropic/claude-sonnet-4-5");
 		if (!getBundledModel("anthropic", BACKUP_ADVISOR))
@@ -55,7 +59,9 @@ describe("headless advisor drain with a fallback reviewer", () => {
 		const unavailableAdvisor = createMockModel({
 			handler: () => ({ stopReason: "error", errorMessage: "503 Service Unavailable: upstream connect error" }),
 		});
-		const backupAdvisor = createMockModel({ handler: () => ({ content: [], stopReason: "stop" }) });
+		const backupAdvisor = createMockModel({
+			handler: () => ({ content: [], stopReason: "stop", delayMs: backupDelayMs }),
+		});
 		const advisorStreamFn = (
 			model: Model<Api>,
 			context: Context,
@@ -78,7 +84,7 @@ describe("headless advisor drain with a fallback reviewer", () => {
 		settings.setModelRole("advisor", `anthropic/${PRIMARY_ADVISOR}`);
 		authStorage = await AuthStorage.create(":memory:");
 		authStorage.keys.setRuntime("anthropic", "test-key");
-		session = new AgentSession({
+		const advised = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
 			settings,
@@ -86,13 +92,29 @@ describe("headless advisor drain with a fallback reviewer", () => {
 			advisorTools: [],
 			advisorStreamFn,
 		});
-		expect(session.setAdvisorEnabled(true)).toBe(true);
+		session = advised;
+		expect(advised.setAdvisorEnabled(true)).toBe(true);
 
-		session.prepareForHeadlessAdvisorDrain();
-		await session.prompt("answer in one line");
+		advised.prepareForHeadlessAdvisorDrain();
+		await advised.prompt("answer in one line");
+		return { advised, unavailableAdvisor, backupAdvisor };
+	}
 
-		expect(await session.waitForAdvisorCatchup(10_000)).toBe(true);
+	it("waits for the fallback advisor model to finish the review before reporting catch-up", async () => {
+		const { advised, unavailableAdvisor, backupAdvisor } = await startSessionWithFailingAdvisor();
+
+		expect(await advised.waitForAdvisorCatchup(10_000, { waitThroughRecovery: true })).toBe(true);
 		expect(unavailableAdvisor.calls.length).toBeGreaterThanOrEqual(1);
 		expect(backupAdvisor.calls).toHaveLength(1);
+	}, 20_000);
+
+	it("releases the default drain promptly while fallback recovery is still running", async () => {
+		// The backup reviewer hangs until disposal aborts it, so only the
+		// deadline could release a drain that waits through recovery.
+		const { advised } = await startSessionWithFailingAdvisor(60_000);
+
+		const started = performance.now();
+		expect(await advised.waitForAdvisorCatchup(10_000)).toBe(false);
+		expect(performance.now() - started).toBeLessThan(2_000);
 	}, 20_000);
 });

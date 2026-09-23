@@ -435,6 +435,9 @@ export class AdvisorRuntime {
 			this.#backlog < threshold ||
 			this.#quotaExhausted ||
 			this.#halted ||
+			// A paused runtime cannot drain until the transition resumes; release
+			// every waiter, as `pauseForSessionTransition` does for existing ones.
+			this.#sessionTransitionPaused ||
 			// An advisor mid-failure/retry must NEVER gate the primary agent:
 			// its backlog cannot drain until the retry cycle resolves, and the
 			// primary would otherwise park for the full catch-up budget.
