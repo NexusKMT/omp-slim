@@ -61,7 +61,7 @@ function createModelRegistryStub(key = "key") {
 	return {
 		getApiKey: vi.fn(async () => key),
 		resolver: vi.fn(() => async () => key),
-		authStorage: { ingestUsageHeaders: vi.fn(), getOAuthAccountId: vi.fn() },
+		authStorage: { usage: { ingestHeaders: vi.fn() }, oauth: { identity: vi.fn() } },
 		hasLazyRuntimeMetadata: vi.fn(() => false),
 	};
 }
