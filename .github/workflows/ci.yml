@@ -151,15 +151,20 @@ jobs:
          - uses: ./.github/actions/bun-install
          - name: Verify Rust license compliance (cargo-deny 0.20.2)
            run: |
-              # Prebuilt, checksum-verified release binary: `cargo install`
-              # compiled cargo-deny from source on every run (~135 s).
+              # Prebuilt release binary checked against digests pinned here:
+              # `cargo install` compiled cargo-deny from source on every run
+              # (~135 s), and a .sha256 fetched from the same mutable release
+              # would prove transport integrity only. Bump ver and both
+              # digests together.
               ver=0.20.2
-              case "$(uname -m)" in x86_64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;; esac
+              case "$(uname -m)" in
+                x86_64) arch=x86_64 sha=9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f ;;
+                aarch64|arm64) arch=aarch64 sha=995c82be0defc7a025cae49a2aa2644ce8245c9a3318fc4103907c6a285e8c7d ;;
+                *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
+              esac
               name="cargo-deny-$ver-$arch-unknown-linux-musl"
-              base="https://github.com/EmbarkStudios/cargo-deny/releases/download/$ver"
-              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz" "$base/$name.tar.gz"
-              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz.sha256" "$base/$name.tar.gz.sha256"
-              (cd "$RUNNER_TEMP" && echo "$(cut -d' ' -f1 "$name.tar.gz.sha256")  $name.tar.gz" | sha256sum -c -)
+              curl -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz" "https://github.com/EmbarkStudios/cargo-deny/releases/download/$ver/$name.tar.gz"
+              echo "$sha  $RUNNER_TEMP/$name.tar.gz" | sha256sum -c -
               tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
               mkdir -p "$HOME/.cargo/bin"
               install -m 0755 "$RUNNER_TEMP/$name/cargo-deny" "$HOME/.cargo/bin/cargo-deny"

@@ -930,7 +930,11 @@ export function selectShard<T>(commands: T[], spec: string | undefined): T[] {
 	if (!match || count < 1 || index < 1 || index > count) {
 		throw new Error(`Invalid OMP_TEST_SHARD=${JSON.stringify(trimmed)}; expected i/n with 1 <= i <= n`);
 	}
-	return commands.filter((_, i) => i % count === index - 1);
+	const selected = commands.filter((_, i) => i % count === index - 1);
+	if (selected.length === 0) {
+		throw new Error(`OMP_TEST_SHARD=${trimmed} selects no chunks (${commands.length} available)`);
+	}
+	return selected;
 }
 
 // Skipped when imported (e.g. by the runner's own unit tests), where

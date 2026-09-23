@@ -57,4 +57,9 @@ describe("OMP_TEST_SHARD", () => {
 			expect(() => selectShard([1, 2, 3], spec)).toThrow("Invalid OMP_TEST_SHARD");
 		}
 	});
+
+	test("rejects a shard that selects no chunks", () => {
+		expect(() => selectShard([1], "2/2")).toThrow("selects no chunks");
+		expect(() => selectShard([], "1/1")).toThrow("selects no chunks");
+	});
 });
