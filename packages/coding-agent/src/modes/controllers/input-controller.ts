@@ -58,6 +58,7 @@ import { getEditorCommand, openInEditor } from "../../utils/external-editor";
 import { loadImageInput } from "../../utils/image-loading";
 import { ensureSupportedImageInput, ImageInputTooLargeError } from "@oh-my-pi/pi-tui/chat/image-loading";
 import { type ImageAttachmentSource, tagImageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
+import { blobExtensionForImageMimeType } from "@oh-my-pi/pi-tui/prompt/image-format";
 import { VideoError, buildVideoContactSheetPng, probeVideo } from "../../utils/video";
 import { isVideoPath } from "@oh-my-pi/pi-tui/prompt/video";
 import { resizeImage } from "../../utils/image-resize";
@@ -1839,8 +1840,8 @@ export class InputController {
 		const image: ImageContent = source
 			? tagImageAttachmentSource(imageData, source.path, source.kind)
 			: { type: "image", data: imageData.data, mimeType: imageData.mimeType };
-		// File-backed attachments link to the original path (so the chip opens the
-		// user's file); clipboard payloads materialize a clickable blob copy.
+		// File-backed attachments link to their file (so the chip opens it); payloads
+		// without one (a failed clipboard persist) materialize a clickable blob copy.
 		const imageLink =
 			source?.path ??
 			(
@@ -1902,11 +1903,37 @@ export class InputController {
 	): Promise<boolean> {
 		const normalized = await this.#normalizePastedImage(image, unsupportedMessage);
 		if (!normalized) return false;
-		// A filesystem origin tags the attachment so the source path reaches the
-		// model via the hidden companion message (see AgentSession's attachment
-		// source notices); clipboard bitmaps stay untagged.
-		await this.#insertPendingImage(normalized, sourcePath ? { path: sourcePath, kind: "image" } : undefined);
+		// Every attachment gets a file on disk so tools can read, copy, or upload it:
+		// file-pasted images keep their original path; clipboard bitmaps are committed to
+		// the session. The path reaches the model via the hidden companion message (see
+		// AgentSession's attachment source notices).
+		const filePath = sourcePath ?? (await this.#persistPastedImage(image));
+		await this.#insertPendingImage(normalized, filePath ? { path: filePath, kind: "image" } : undefined);
 		return true;
+	}
+
+	/**
+	 * Commit clipboard image bytes to the session's artifact directory, as pasted (full
+	 * resolution, before model auto-resize). Named by content hash so re-pasting the same
+	 * screenshot reuses one file. Sessions without an artifact directory (in-memory) fall
+	 * back to the shared blob store. Returns undefined when the write fails; the image still
+	 * attaches, just without a path.
+	 */
+	async #persistPastedImage(image: ImageContent): Promise<string | undefined> {
+		const bytes = Buffer.from(image.data, "base64");
+		const extension = blobExtensionForImageMimeType(image.mimeType) ?? "png";
+		try {
+			const artifactsDir = this.ctx.sessionManager.getArtifactsDir();
+			if (!artifactsDir) return (await this.ctx.sessionManager.putBlob(bytes, { extension })).displayPath;
+			const filePath = path.join(artifactsDir, `pasted-image-${Bun.hash(bytes).toString(16)}.${extension}`);
+			await Bun.write(filePath, bytes);
+			return filePath;
+		} catch (error) {
+			logger.warn("failed to persist pasted image", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return undefined;
+		}
 	}
 
 	/**

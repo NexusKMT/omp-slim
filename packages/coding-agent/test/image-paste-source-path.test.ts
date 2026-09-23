@@ -3,12 +3,13 @@
  * paste, drag-and-drop, macOS file-url pasteboard) must deliver the original
  * absolute path to the model — mirroring how video contact sheets carry their
  * source path via a hidden companion message — so the agent can use the file
- * with read/other tools. Clipboard-bitmap pastes have no source file and must
- * not invent one.
+ * with read/other tools. Clipboard-bitmap pastes have no source file, so they
+ * are committed to the session artifact directory and that file's path is
+ * delivered the same way.
  *
  * Failure mode if this regresses: the model receives the image bytes but no
- * path, so it cannot open or act on the user's file; the user must retype the
- * directory and filename as separate text.
+ * path, so it cannot open, copy, or upload the user's image (e.g. attach a
+ * pasted screenshot to an issue tracker).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -154,24 +155,43 @@ describe("path-pasted image source path (#12244)", () => {
 		expect(editor.pendingImageLinks[0]).toBe(imagePath);
 	});
 
-	it("does not invent a source path for clipboard-bitmap pastes", async () => {
-		if (!session) throw new Error("Session was not initialized");
-		const { ctx, editor } = createPasteContext(SessionManager.inMemory(tmpDir));
+	async function pasteClipboardBitmap(sessionManager: SessionManager): Promise<StubEditor> {
+		const { ctx, editor } = createPasteContext(sessionManager);
 		const controller = new InputController(ctx, {
 			readImage: async () => ({ data: Buffer.from(TINY_PNG, "base64"), mimeType: "image/png" }),
 			readText: async () => "",
 		});
-
-		const handled = await controller.handleImagePaste();
-		expect(handled).toBe(true);
+		expect(await controller.handleImagePaste()).toBe(true);
 		expect(editor.pendingImages.length).toBe(1);
+		return editor;
+	}
+
+	it("commits clipboard-bitmap pastes to the session artifact directory and delivers that path", async () => {
+		if (!session) throw new Error("Session was not initialized");
+		const sessionManager = SessionManager.create(tmpDir, path.join(tmpDir, "sessions"));
+		const artifactsDir = sessionManager.getArtifactsDir();
+		if (!artifactsDir) throw new Error("Expected a file-backed session artifact directory");
+		const editor = await pasteClipboardBitmap(sessionManager);
+
+		const savedPath = editor.pendingImageLinks[0];
+		if (!savedPath) throw new Error("Expected the pasted image to link to its saved file");
+		expect(path.dirname(savedPath)).toBe(artifactsDir);
+		expect(path.extname(savedPath)).toBe(".png");
+		expect(Buffer.from(await Bun.file(savedPath).arrayBuffer()).toBase64()).toBe(TINY_PNG);
 
 		await session.prompt("What is in [Image #1]?", { images: [...editor.pendingImages] });
+		expect(modelVisibleText(session)).toContain(savedPath);
+	});
 
-		const hidden = session.messages.find(
-			message => message.role === "custom" && message.customType === "image-attachment",
-		);
-		expect(hidden).toBeUndefined();
-		expect(modelVisibleText(session)).not.toContain(tmpDir);
+	it("falls back to the blob store for clipboard pastes in sessions without an artifact directory", async () => {
+		if (!session) throw new Error("Session was not initialized");
+		const editor = await pasteClipboardBitmap(SessionManager.inMemory(tmpDir));
+
+		const savedPath = editor.pendingImageLinks[0];
+		if (!savedPath) throw new Error("Expected the pasted image to link to its saved file");
+		expect(Buffer.from(await Bun.file(savedPath).arrayBuffer()).toBase64()).toBe(TINY_PNG);
+
+		await session.prompt("What is in [Image #1]?", { images: [...editor.pendingImages] });
+		expect(modelVisibleText(session)).toContain(savedPath);
 	});
 });
