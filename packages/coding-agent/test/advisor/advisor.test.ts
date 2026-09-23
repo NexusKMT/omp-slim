@@ -4217,6 +4217,52 @@ describe("advisor", () => {
 			runtime.dispose();
 		}, 10_000);
 
+		it("holds a recovery-aware catch-up through the failure but releases it on a terminal quota pause", async () => {
+			// Headless shutdown drains wait through a failing turn so disposal cannot
+			// abort the host's fallback switch. A recovery that ends in a quota pause
+			// can never drain, so the waiter must be released then — not held to its
+			// (ten-minute, in print mode) deadline.
+			const agent: AdvisorAgent = {
+				prompt: async () => {
+					throw new Error("insufficient_quota: you have exceeded your rate limit");
+				},
+				abort: () => {},
+				reset: () => {},
+				state: { messages: [] },
+			};
+			const messages: AgentMessage[] = [{ role: "user", content: "quota-turn", timestamp: 1 } as AgentMessage];
+			const recoveryStarted = Promise.withResolvers<void>();
+			const recoveryResult = Promise.withResolvers<boolean>();
+			const host: AdvisorRuntimeHost = {
+				snapshotMessages: () => messages,
+				onTurnError: () => {
+					recoveryStarted.resolve();
+					return recoveryResult.promise;
+				},
+				notifyQuotaExhausted: () => {},
+			};
+			const runtime = new AdvisorRuntime(agent, host, 0);
+
+			runtime.onTurnEnd(messages);
+			let settled = false;
+			const catchup = runtime.waitForCatchup(60_000, 1, undefined, { waitThroughRecovery: true }).then(caughtUp => {
+				settled = true;
+				return caughtUp;
+			});
+			// A failure-released waiter settles before onTurnError runs, so its
+			// continuation is already queued ahead of this one.
+			await recoveryStarted.promise;
+			expect(settled).toBe(false);
+
+			// No fallback available: the runtime latches its quota pause.
+			const released = performance.now();
+			recoveryResult.resolve(false);
+			expect(await catchup).toBe(false);
+			expect(performance.now() - released).toBeLessThan(2_000);
+			expect(runtime.quotaExhausted).toBe(true);
+			runtime.dispose();
+		}, 10_000);
+
 		it("survives a poisoned message without throwing into the caller or losing the delta", async () => {
 			// CRITICAL contract: an advisor render failure (throwing getter,
 			// formatter bug) must neither propagate into the primary agent's

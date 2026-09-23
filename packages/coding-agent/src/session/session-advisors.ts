@@ -2120,12 +2120,18 @@ export class SessionAdvisors {
 
 	/**
 	 * Wait for active advisor reviews and their emitted card events before a
-	 * headless caller disposes the session. Returns `false` and logs work disposal
-	 * will abandon when the shared deadline expires or an advisor fails.
+	 * headless caller disposes the session. A failing advisor is waited through
+	 * its retry and fallback-chain recovery instead of being abandoned mid-switch.
+	 * Returns `false` and logs work disposal will abandon when the shared deadline
+	 * expires or an advisor stops for good (halt, quota pause).
 	 */
 	async waitForAdvisorCatchup(timeoutMs: number): Promise<boolean> {
 		const deadline = Date.now() + timeoutMs;
-		const results = await Promise.all(this.#advisors.map(advisor => advisor.runtime.waitForCatchup(timeoutMs, 1)));
+		const results = await Promise.all(
+			this.#advisors.map(advisor =>
+				advisor.runtime.waitForCatchup(timeoutMs, 1, undefined, { waitThroughRecovery: true }),
+			),
+		);
 		const cardEventsCaughtUp = await this.#waitForPendingAdvisorCardEvents(Math.max(0, deadline - Date.now()));
 		const abandoned = this.#advisors.filter(
 			(advisor, index) => results[index] === false && advisor.runtime.backlog > 0,
