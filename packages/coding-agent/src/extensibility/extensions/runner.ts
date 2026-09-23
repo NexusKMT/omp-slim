@@ -1219,9 +1219,18 @@ export class ExtensionRunner {
 							delegation?.signal,
 							registrationScope && !registrationScope.closed ? registrationScope.signal : undefined,
 						].filter((signal): signal is AbortSignal => signal !== undefined);
-						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () =>
-							runEphemeralTurn(signals.length ? { ...options, signal: AbortSignal.any(signals) } : options),
-						);
+						// Only hooks reached inside the side-turn pipeline are blocked. The caller's own
+						// delivery callback runs outside the guard so work it starts (lazy subscriptions,
+						// timers) does not inherit a permanent block on later consultations.
+						const onTextDelta = options.onTextDelta;
+						const request = {
+							...options,
+							onTextDelta: onTextDelta
+								? (delta: string) => this.#ephemeralTurnBlocker.exit(() => onTextDelta(delta))
+								: undefined,
+							signal: signals.length ? AbortSignal.any(signals) : undefined,
+						};
+						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () => runEphemeralTurn(request));
 					}
 				: undefined,
 			localProtocolOptions: this.localProtocolOptions,
@@ -1725,6 +1734,9 @@ export class ExtensionRunner {
 			if (!unchanged) markPerCallContextMessage(message);
 		}
 		for (const message of messages) clearContextHistoryIndex(message);
+		// An aborted handler is skipped and its input kept unchanged. Never hand that
+		// untransformed (possibly unredacted) context back to a caller as if every hook ran.
+		signal?.throwIfAborted();
 		return currentMessages;
 	}
 

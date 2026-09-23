@@ -5,6 +5,7 @@
 ### Added
 
 - `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
+- Extensions can run `/btw`-style side turns with `ctx.runEphemeralTurn()`, optionally omitting tool definitions and bounding output and outbound context, without adding to session history ([#11657](https://github.com/can1357/oh-my-pi/pull/11657) by [@gokceneraslan](https://github.com/gokceneraslan)).
 
 ### Changed
 
@@ -699,7 +700,6 @@
 - Fixed prompts awaiting setup crossing a fork, branch, or tree-navigation commit, multi-question extension dialogs moving later questions to a replacement Collab room, and stale rooms blocking `/collab` or `/join` after a failed session change ([#11908](https://github.com/can1357/oh-my-pi/pull/11908) by [@alphastorm](https://github.com/alphastorm)).
 - Fixed background task cards missing their final completion or failure after an early result or live-session focus replay.
 - Ranged reads on Windows no longer intermittently open the selector-suffixed path when filesystem probes return transient errors ([#11284](https://github.com/can1357/oh-my-pi/issues/11284)).
-- Extensions can run `/btw`-style side turns with `ctx.runEphemeralTurn()`, optionally omitting tool definitions and bounding output and outbound context, without adding to session history ([#11657](https://github.com/can1357/oh-my-pi/pull/11657) by [@gokceneraslan](https://github.com/gokceneraslan)).
 
 ## [18.1.19] - 2026-09-12
 

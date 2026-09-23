@@ -461,7 +461,7 @@ describe("ExtensionRunner", () => {
 	});
 
 	describe("error handling", () => {
-		it("cancels a pending context handler when its caller aborts", async () => {
+		it("rejects instead of returning untransformed context when its caller aborts a pending handler", async () => {
 			const extCode = `
 				export default function(pi) {
 					pi.on("context", async () => {
@@ -480,10 +480,10 @@ describe("ExtensionRunner", () => {
 				modelRegistry,
 			);
 			const controller = new AbortController();
-			const pending = runner.emitContext([], controller.signal);
+			const pending = runner.emitContext([{ role: "user", content: "unredacted", timestamp: 1 }], controller.signal);
 
-			controller.abort();
-			await expect(pending).resolves.toEqual([]);
+			controller.abort(new Error("caller aborted"));
+			await expect(pending).rejects.toThrow("caller aborted");
 		});
 
 		it("calls error listeners when handler throws", async () => {

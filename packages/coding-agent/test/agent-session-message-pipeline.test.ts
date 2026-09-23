@@ -583,6 +583,72 @@ describe("AgentSession message pipeline", () => {
 		},
 	);
 
+	it("rejects side turns started by a hook reached within a side turn, but not from onTextDelta", async () => {
+		const runtime = new ExtensionRuntime();
+		const manager = SessionManager.inMemory();
+		const hookErrors: string[] = [];
+		const extension = await loadExtensionFromFactory(
+			api => {
+				api.on("before_provider_request", async (_event, ctx) => {
+					try {
+						await ctx.runEphemeralTurn!({ promptText: "Nested?" });
+					} catch (error) {
+						hookErrors.push(String(error));
+					}
+				});
+			},
+			manager.getCwd(),
+			new EventBus(),
+			runtime,
+			"ephemeral-recursion-test",
+		);
+		const registry = createModelRegistryStub() as unknown as ModelRegistry;
+		const runner = new ExtensionRunner([extension], runtime, manager.getCwd(), manager, registry);
+		let inferences = 0;
+		const session = new AgentSession({
+			agent: new Agent({
+				initialState: { model: getBundledModel("openai", "gpt-4o-mini"), systemPrompt: [], tools: [] },
+			}),
+			sessionManager: manager,
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry: registry,
+			extensionRunner: runner,
+			onPayload: (payload, model, signal) => runner.emitBeforeProviderRequest(payload, model, signal),
+			sideStreamFn: async (model, _context, options) => {
+				// Reach the provider hook from inside the side-turn pipeline, as a real transport does.
+				await options?.onPayload?.({}, model);
+				inferences++;
+				const stream = new AssistantMessageEventStream();
+				const message = createAssistantMessage("Answer");
+				stream.push({ type: "text_delta", contentIndex: 0, delta: "Answer", partial: message });
+				stream.push({ type: "done", reason: "stop", message });
+				return stream;
+			},
+		});
+		sessions.push(session);
+		await initializeExtensions(session, { reportSendError: () => {}, reportRuntimeError: () => {} });
+		const ctx = runner.createContext();
+
+		expect((await ctx.runEphemeralTurn!({ promptText: "Question?" })).replyText).toBe("Answer");
+		expect(hookErrors).toHaveLength(1);
+		expect(hookErrors[0]).toContain("cannot be called recursively");
+		expect(inferences).toBe(1);
+
+		// The caller's own delivery callback is not part of the hook pipeline: a consultation it
+		// starts (e.g. from a lazily opened subscription) must not inherit the recursion guard.
+		let nested: Promise<unknown> | undefined;
+		await ctx.runEphemeralTurn!({
+			promptText: "Question?",
+			onTextDelta: () => {
+				nested ??= ctx.runEphemeralTurn!({ promptText: "Follow-up?" });
+			},
+		});
+		expect(nested).toBeDefined();
+		await expect(nested).resolves.toMatchObject({ replyText: "Answer" });
+		expect(inferences).toBe(3);
+		expect(hookErrors).toHaveLength(3);
+	});
+
 	it("applies transformContext before convertToLlm", async () => {
 		const inputMessages: AgentMessage[] = [{ role: "user", content: "hello", timestamp: Date.now() }];
 		const transformedMessages: AgentMessage[] = [
