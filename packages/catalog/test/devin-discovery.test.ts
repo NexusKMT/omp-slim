@@ -517,6 +517,43 @@ describe("devin native display filtering", () => {
 		expect(fusion.cost).toEqual({ input: 10, output: 50, cacheRead: 0.25, cacheWrite: 0 });
 	});
 
+	it("sends Fusion pairings through an available lead rather than the composite uid", async () => {
+		const configs = [
+			config({ uid: "gpt-6-sol-high" }),
+			config({ uid: "gpt-6-sol-high-priority" }),
+			config({ uid: "claude-opus-5-high" }),
+			config({ uid: "claude-opus-5-high-priority", disabled: true }),
+			config({ uid: "swe-2-high" }),
+			config({ uid: "fusion-gpt-6-sol-high-sidekick-swe-2-high", isModelRouter: true, harnessUids: ["fusion"] }),
+			config({
+				uid: "fusion-gpt-6-sol-high-fast-sidekick-swe-2-high",
+				isModelRouter: true,
+				harnessUids: ["fusion"],
+			}),
+			config({
+				uid: "fusion-claude-opus-5-high-fast-sidekick-swe-2-high",
+				isModelRouter: true,
+				harnessUids: ["fusion"],
+			}),
+			config({ uid: "fusion-sidekick-swe-2-high", isModelRouter: true, harnessUids: ["fusion"] }),
+			config({ uid: "fusion", isModelRouter: true, harnessUids: ["fusion"] }),
+		];
+		const payload = toBinary(
+			GetCliModelConfigsResponseSchema,
+			create(GetCliModelConfigsResponseSchema, { clientModelConfigs: configs }),
+		);
+		const fetched = await fetchDevinModels({
+			apiKey: "fixture-token",
+			fetch: async () => new Response(payload, { status: 200, headers: { "content-type": "application/proto" } }),
+		});
+		const wireId = (id: string) => fetched?.find(entry => entry.id === id)?.requestModelId;
+		expect(wireId("fusion-gpt-6-sol-high-sidekick-swe-2-high")).toBe("gpt-6-sol-high");
+		expect(wireId("fusion-gpt-6-sol-high-fast-sidekick-swe-2-high")).toBe("gpt-6-sol-high-priority");
+		expect(wireId("fusion-claude-opus-5-high-fast-sidekick-swe-2-high")).toBe("claude-opus-5-high");
+		expect(wireId("fusion-sidekick-swe-2-high")).toBeUndefined();
+		expect(wireId("fusion")).toBeUndefined();
+	});
+
 	it("stops composite pricing at the Sidekick marker even with a sparse headline card", () => {
 		const fusion = model("fusion-sparse");
 		expect(fusion.cost).toEqual({ input: 10, output: 50, cacheRead: 0, cacheWrite: 0 });
@@ -697,6 +734,9 @@ describe("devin catalog seed", () => {
 	});
 
 	it("pins the seed to a configured Cascade host", () => {
+		// Old discovery rows sent the composite uid to Cascade; a fresh cache
+		// namespace makes the lead route visible on the next discovery.
+		expect(devinModelManagerOptions().cacheProviderId).toBe("devin:models-v2");
 		expect(devinModelManagerOptions().staticModels).toBe(seedModels("devin"));
 		const scoped = devinModelManagerOptions({ baseUrl: "https://cascade.internal" });
 		expect(scoped.staticModels?.map(model => model.baseUrl)).toEqual([

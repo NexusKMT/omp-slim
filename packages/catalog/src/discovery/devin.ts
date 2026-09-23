@@ -453,6 +453,22 @@ function devinModelSpec(
 	return spec;
 }
 
+/**
+ * Lead chat uid of a Fusion pairing `fusion-<lead>[-fast]-sidekick-<sidekick>`.
+ * `-fast` pairings run the lead on its priority lane when the server lists one.
+ */
+function devinFusionLeadUid(uid: string, liveUids: ReadonlySet<string>): string | undefined {
+	if (!uid.startsWith("fusion-")) return undefined;
+	const cut = uid.indexOf("-sidekick-");
+	if (cut <= "fusion-".length) return undefined;
+	let lead = uid.slice("fusion-".length, cut);
+	if (lead.endsWith("-fast")) {
+		lead = lead.slice(0, -"-fast".length);
+		if (liveUids.has(`${lead}-priority`)) return `${lead}-priority`;
+	}
+	return liveUids.has(lead) ? lead : undefined;
+}
+
 function normalizeDevinModels(
 	configs: readonly ClientModelConfig[],
 	baseUrlOverride: string | undefined,
@@ -461,6 +477,7 @@ function normalizeDevinModels(
 	const specs: ModelSpec<"devin-agent">[] = [];
 	const seen = new Set<string>();
 	const lanes = new Map<string, DevinFamilyLane>();
+	const liveUids = new Set(configs.filter(config => !config.disabled).map(config => config.modelUid.trim()));
 
 	for (const config of configs) {
 		if (config.disabled) {
@@ -482,7 +499,14 @@ function normalizeDevinModels(
 		// `fusion-sidekick-*`) that are themselves valid chat uids. Only the
 		// former take the `AssignModel` path — sending a composite uid there 404s.
 		const isAssignModelRouter = isRouter && (config.modelInfo?.harnessUids.length ?? 0) === 0;
-		specs.push(devinModelSpec(config, uid, baseUrl, isAssignModelRouter));
+		const spec = devinModelSpec(config, uid, baseUrl, isAssignModelRouter);
+		// Fusion pairings are orchestrated by the native client: it runs the lead
+		// model as an ordinary chat uid and pairs a sidekick locally. The server
+		// has no provider for the composite uid itself (`permission_denied: no API
+		// providers are available`), so the chat request carries the lead uid.
+		const lead = devinFusionLeadUid(uid, liveUids);
+		if (lead) spec.requestModelId = lead;
+		specs.push(spec);
 		// A router is a server-side dispatcher, not an effort tier: it stays a
 		// standalone model even when upstream files it under a family.
 		if (!isRouter) {
