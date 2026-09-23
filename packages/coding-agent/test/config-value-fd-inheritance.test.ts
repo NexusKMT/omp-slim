@@ -199,21 +199,30 @@ test.skipIf(process.platform === "win32")(
 	async () => {
 		const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "omp-config-treekill-term-"));
 		roots.push(root);
-		const marker = path.join(root, "marker");
+		const pidFile = path.join(root, "descendant.pid");
+		const worker = path.join(root, "term-ignoring-worker.sh");
+		// The ignored TERM disposition survives `exec`, so the recorded pid is
+		// the `sleep` that must be hard-killed; it would outlive the test.
+		await fs.promises.writeFile(worker, `#!/bin/sh\ntrap '' TERM\necho $$ > "${pidFile}"\nexec sleep 30\n`, {
+			mode: 0o755,
+		});
 
-		// Parity with the executeShell contract (natives native.test.ts "should
-		// SIGKILL workloads that ignore SIGTERM on timeout"): the timeout must
-		// hard-kill the whole tree, and the resolver must not report the timeout
-		// until that kill has completed.
-		const result = await runShellCommand(`{ trap '' TERM; sleep 1.5; echo done > "${marker}"; } & sleep 10`, 150);
-		expect(result).toBeUndefined();
-		const deadline = Date.now() + 2000;
-		while (Date.now() < deadline && !(await Bun.file(marker).exists())) {
-			await Bun.sleep(50);
+		let descendant: Process | null = null;
+		try {
+			// Parity with the executeShell contract (natives native.test.ts "should
+			// SIGKILL workloads that ignore SIGTERM on timeout"): the timeout must
+			// hard-kill the whole tree. The pid-file wait runs inside the timed
+			// command, so it needs the same budget as the other escape cases (#10259).
+			const command = `"${worker}" & until [ -s "${pidFile}" ]; do sleep 0.01; done; sleep 10`;
+			const result = await runShellCommand(command, ESCAPE_TIMEOUT_MS);
+			expect(result).toBeUndefined();
+
+			const pid = Number.parseInt((await Bun.file(pidFile).text()).trim(), 10);
+			descendant = Process.fromPid(pid);
+			await expectDescendantDead(descendant, pid, "SIGTERM-ignoring");
+		} finally {
+			descendant?.killTree(9);
 		}
-		expect(await Bun.file(marker).exists(), "SIGTERM-ignoring descendant wrote the marker after the timeout").toBe(
-			false,
-		);
 	},
 );
 
