@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as mermaidAscii from "@oh-my-pi/pi-utils/mermaid-ascii";
-import { clearMermaidCache, resolveMermaidAscii } from "../src/theme/mermaid-cache.ts";
+import { clearMermaidCache, resolveMermaidAscii } from "../src/theme/mermaid-cache";
 
 describe("resolveMermaidAscii resize selection", () => {
 	const renders: string[] = [];
@@ -69,6 +69,23 @@ describe("resolveMermaidAscii resize selection", () => {
 			clearMermaidCache();
 			expect(resolveMermaidAscii(source, { maxWidth: 4 })).toBe("direction-ignored-and-wide");
 			expect(renders).toEqual([`${source}:authored`]);
+		}
+	});
+
+	it("skips the forced render that repeats a flowchart's authored direction", () => {
+		const cases: Array<[string, string[]]> = [
+			["flowchart TD\nA --> B", ["LR"]],
+			["graph tb\nA --> B", ["LR"]],
+			["flowchart LR\nA --> B", ["TD"]],
+			["graph RL\nA --> B", ["TD"]],
+			["flowchart BT\nA --> B", ["TD", "LR"]],
+			["stateDiagram-v2\n[*] --> A", ["TD", "LR"]],
+		];
+		for (const [source, forced] of cases) {
+			renders.length = 0;
+			clearMermaidCache();
+			resolveMermaidAscii(source, { maxWidth: 4 });
+			expect(renders).toEqual([`${source}:authored`, ...forced.map(direction => `${source}:${direction}`)]);
 		}
 	});
 });

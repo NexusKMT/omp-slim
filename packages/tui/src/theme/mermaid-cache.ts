@@ -59,22 +59,32 @@ function renderVariant(
 	return ascii;
 }
 
+const FORCED_DIRECTIONS = ["TD", "LR"] as const;
+type ForcedDirection = (typeof FORCED_DIRECTIONS)[number];
+
 /**
- * Whether a forced TD/LR render can change layout. Sequence, class, ER, and
- * xychart ignore direction; flowchart, graph, state, and unrecognized headers
- * (treated as flowcharts) do not. Header match mirrors native `detect_diagram_kind`,
- * including its JavaScript `\w` boundary (`[A-Za-z0-9_]`).
+ * Forced TD/LR renders that can differ from the authored one. Sequence, class,
+ * ER, and xychart ignore direction, so they get none; header match mirrors
+ * native `detect_diagram_kind`, including its JavaScript `\w` boundary
+ * (`[A-Za-z0-9_]`). A `graph`/`flowchart` header already authored in one of
+ * the forced layouts (`TD`/`TB` lay out as TD, `LR`/`RL` as LR) skips that
+ * variant: the native override replaces the header direction, so the render
+ * would be byte-identical to the authored one.
  */
-function layoutDirectionCanChange(source: string): boolean {
+function forcedDirections(source: string): readonly ForcedDirection[] {
 	const header = (source.split("\n", 1)[0] ?? "").trim().toLowerCase();
 	for (const prefix of ["xychart-beta", "xychart"] as const) {
 		if (!header.startsWith(prefix)) continue;
 		const next = header.charCodeAt(prefix.length);
 		const wordChar =
 			(next >= 48 && next <= 57) || (next >= 65 && next <= 90) || (next >= 97 && next <= 122) || next === 95;
-		if (!wordChar) return false;
+		if (!wordChar) return [];
 	}
-	return header !== "sequencediagram" && header !== "classdiagram" && header !== "erdiagram";
+	if (header === "sequencediagram" || header === "classdiagram" || header === "erdiagram") return [];
+	const authored = /^(?:graph|flowchart)\s+(td|tb|lr|rl)$/.exec(header)?.[1];
+	if (authored === "td" || authored === "tb") return ["LR"];
+	if (authored === "lr" || authored === "rl") return ["TD"];
+	return FORCED_DIRECTIONS;
 }
 
 /**
@@ -95,14 +105,12 @@ export function resolveMermaidAscii(source: string, options?: MermaidResolveOpti
 	if (maxWidth === undefined) return base;
 
 	// Width selection is against cached renders, so a later resize re-decides
-	// without drawing again. Forced TD/LR are not rendered at all when direction
-	// cannot change the layout (sequence, class, ER, xychart).
+	// without drawing again. Only forced layouts that can differ from the
+	// authored one are rendered (see `forcedDirections`).
 	const candidates = [measureLayout(base, true)];
-	if (layoutDirectionCanChange(normalizedSource)) {
-		for (const direction of ["TD", "LR"] as const) {
-			const variant = renderVariant(normalizedSource, baseOptions, baseKey, direction);
-			if (variant !== null) candidates.push(measureLayout(variant, false));
-		}
+	for (const direction of forcedDirections(normalizedSource)) {
+		const variant = renderVariant(normalizedSource, baseOptions, baseKey, direction);
+		if (variant !== null) candidates.push(measureLayout(variant, false));
 	}
 
 	const fitting = candidates.filter(candidate => candidate.width <= maxWidth);
