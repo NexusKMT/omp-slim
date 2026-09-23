@@ -867,6 +867,38 @@ export class InputController {
 		return compacted.text.trim();
 	}
 
+	#dropSubmittedPending(images: ImageContent[] | undefined, links: (string | undefined)[] | undefined): void {
+		if (!images?.length) return;
+		const pending = this.ctx.editor.pendingImages;
+		// Drop the snapshot only while it is still the live prefix: attachments
+		// added while the handler was pending stay in place.
+		if (!images.every((image, index) => pending[index] === image)) return;
+		pending.splice(0, images.length);
+		const linkCount = Math.min(links?.length ?? 0, this.ctx.editor.pendingImageLinks.length);
+		this.ctx.editor.pendingImageLinks.splice(0, linkCount);
+		this.ctx.editor.imageLinks =
+			this.ctx.editor.pendingImageLinks.length > 0 ? this.ctx.editor.pendingImageLinks : undefined;
+	}
+
+	async #runInputHandlers(
+		text: string,
+		images?: ImageContent[],
+		imageLinks?: (string | undefined)[],
+	): Promise<{ text: string; images?: ImageContent[]; imageLinks?: (string | undefined)[] } | undefined> {
+		const result = await this.ctx.session.extensionRunner?.emitInput(text, images, "interactive");
+		if (result?.handled) return undefined;
+		if (result?.text !== undefined) text = result.text.trim();
+		if (result?.images !== undefined) {
+			images = result.images;
+			imageLinks = await materializeImageReferenceLinks(
+				images,
+				this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager),
+			);
+		}
+		if (!text && !images?.length) return undefined;
+		return { text, images, imageLinks };
+	}
+
 	setupEditorSubmitHandler(): void {
 		this.ctx.editor.onSubmit = async (text: string) => {
 			const submittedText = text;
@@ -922,21 +954,16 @@ export class InputController {
 			const submittedImages = inputImages;
 
 			if (runner?.hasHandlers("input")) {
-				const result = await runner.emitInput(text, inputImages, "interactive");
-				if (result?.handled) {
-					this.ctx.editor.clearDraft();
+				const input = await this.#runInputHandlers(text, inputImages, inputImageLinks);
+				if (!input) {
+					// The handler consumed the submission. The editor text was reset
+					// before this callback ran, so anything in it now is a newer draft;
+					// only the submitted attachments are dropped, and only while they
+					// are still the live prefix.
+					this.#dropSubmittedPending(inputImages, inputImageLinks);
 					return;
 				}
-				if (result?.text !== undefined) {
-					text = result.text.trim();
-				}
-				if (result?.images !== undefined) {
-					inputImages = result.images;
-					inputImageLinks = await materializeImageReferenceLinks(
-						inputImages,
-						this.ctx.sessionManager.putBlob.bind(this.ctx.sessionManager),
-					);
-				}
+				({ text, images: inputImages, imageLinks: inputImageLinks } = input);
 				hasInputImages = (inputImages?.length ?? 0) > 0;
 			}
 			const submittedMode = parseSlashCommand(text)?.name;
@@ -1744,8 +1771,8 @@ export class InputController {
 	/** Send editor text as a follow-up message (queued behind current stream). */
 	async handleFollowUp(): Promise<void> {
 		let text = this.#compactDraftImages(this.ctx.editor.getExpandedText().trim());
-		const images = this.ctx.editor.pendingImages.length > 0 ? [...this.ctx.editor.pendingImages] : undefined;
-		const imageLinks =
+		let images = this.ctx.editor.pendingImages.length > 0 ? [...this.ctx.editor.pendingImages] : undefined;
+		let imageLinks =
 			images && this.ctx.editor.pendingImageLinks.length > 0 ? [...this.ctx.editor.pendingImageLinks] : undefined;
 		if (!text && !images) return;
 
@@ -1758,6 +1785,18 @@ export class InputController {
 		// Detach before the first await: another Ctrl+Enter cannot submit the
 		// same draft, and later typing belongs to the next submission.
 		this.ctx.editor.clearDraft();
+
+		if (this.ctx.session.extensionRunner?.hasHandlers("input")) {
+			try {
+				const input = await this.#runInputHandlers(text, images, imageLinks);
+				if (!input) return;
+				({ text, images, imageLinks } = input);
+			} catch (error) {
+				this.#restoreInputDraft(text, images, imageLinks);
+				this.ctx.showError(error instanceof Error ? error.message : String(error));
+				return;
+			}
+		}
 
 		// Compaction first: while compacting, free text gets queued via
 		// `queueCompactionMessage`, and `/skill:*` rides the same queue so a
