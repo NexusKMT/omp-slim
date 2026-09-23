@@ -241,6 +241,7 @@ export interface ModelPatch {
 	supportsTools?: boolean;
 	cost?: Partial<Model<Api>["cost"]>;
 	contextWindow?: number;
+	maxContextWindow?: number;
 	maxTokens?: number;
 	omitMaxOutputTokens?: boolean;
 	/** Whether Codex requests should prefer WebSocket transport. */
@@ -272,6 +273,7 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	if (patch.imageInputDecoder !== undefined) result.imageInputDecoder = patch.imageInputDecoder;
 	if (patch.supportsTools !== undefined) result.supportsTools = patch.supportsTools;
 	if (patch.contextWindow !== undefined) result.contextWindow = patch.contextWindow;
+	if (patch.maxContextWindow !== undefined) result.maxContextWindow = patch.maxContextWindow;
 	if (patch.maxTokens !== undefined) result.maxTokens = patch.maxTokens;
 	if (patch.omitMaxOutputTokens !== undefined) result.omitMaxOutputTokens = patch.omitMaxOutputTokens;
 	if (patch.preferWebsockets !== undefined) result.preferWebsockets = patch.preferWebsockets;

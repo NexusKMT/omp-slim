@@ -2340,6 +2340,62 @@ describe("ModelRegistry", () => {
 			expect(registry.find("openai-codex", "gpt-6-astra")?.thinking).toEqual(thinking);
 		});
 
+		test("custom provider models follow the extended-context toggle without retaining an earlier window", async () => {
+			writeRawModelsJson({
+				"proxy-window": {
+					baseUrl: "https://example.com/v1",
+					auth: "none",
+					api: "openai-responses",
+					models: [{ id: "gpt-6-astra", contextWindow: 272_000, maxContextWindow: 922_000, maxTokens: 128_000 }],
+				},
+			});
+			const testSettings = Settings.isolated();
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			expect(registry.find("proxy-window", "gpt-6-astra")?.contextWindow).toBe(272_000);
+
+			testSettings.set("extendedContext", true);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("proxy-window", "gpt-6-astra")?.contextWindow).toBe(922_000);
+
+			testSettings.set("extendedContext", false);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("proxy-window", "gpt-6-astra")?.contextWindow).toBe(272_000);
+
+			writeRawModelsJson({
+				"proxy-window": {
+					baseUrl: "https://example.com/v1",
+					auth: "none",
+					api: "openai-responses",
+					models: [{ id: "gpt-6-astra", contextWindow: 272_000, maxContextWindow: 922_000, maxTokens: 128_000 }],
+					modelOverrides: { "gpt-6-astra": { maxContextWindow: 512_000 } },
+				},
+			});
+			testSettings.set("extendedContext", true);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("proxy-window", "gpt-6-astra")?.contextWindow).toBe(512_000);
+		});
+
+		test("modelOverrides supply standard and extended windows to a non-Codex provider", async () => {
+			writeRawModelsJson({
+				openrouter: {
+					modelOverrides: {
+						"anthropic/claude-sonnet-4": { contextWindow: 128_000, maxContextWindow: 512_000 },
+					},
+				},
+			});
+			const testSettings = Settings.isolated();
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			expect(registry.find("openrouter", "anthropic/claude-sonnet-4")?.contextWindow).toBe(128_000);
+
+			testSettings.set("extendedContext", true);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("openrouter", "anthropic/claude-sonnet-4")?.contextWindow).toBe(512_000);
+
+			testSettings.set("extendedContext", false);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("openrouter", "anthropic/claude-sonnet-4")?.contextWindow).toBe(128_000);
+		});
+
 		test("toggles bundled Astra between its standard and documented extended windows", async () => {
 			const testSettings = Settings.isolated();
 			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });

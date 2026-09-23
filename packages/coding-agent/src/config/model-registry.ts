@@ -1108,12 +1108,18 @@ export class ModelRegistry {
 			const override = this.#providerOverrides.get(model.provider);
 			// Custom composition already resolved headers and metadata. Reapply only
 			// the provider transport and its gateway URL, without rebuilding the model.
-			return override?.transport
+			const withTransport = override?.transport
 				? this.#applyProviderTransportOverride(model, {
 						baseUrl: override.baseUrl,
 						transport: override.transport,
 					})
 				: model;
+			// A per-model override supplies the effective maximum; leave its
+			// standard window untouched until the override pass below.
+			const configuredMaximum = this.#modelOverrides.get(model.provider)?.get(model.id)?.maxContextWindow;
+			return configuredMaximum === undefined
+				? this.#applyConfiguredExtendedWindow(withTransport, customModel.maxContextWindow)
+				: withTransport;
 		});
 	}
 
@@ -2375,8 +2381,17 @@ export class ModelRegistry {
 			if (!providerOverrides) return model;
 			const override = resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel);
 			if (!override) return model;
-			return this.#applyModelOverrideWithClamp(model, override);
+			const overridden = this.#applyModelOverrideWithClamp(model, override);
+			return this.#applyConfiguredExtendedWindow(overridden, override.maxContextWindow);
 		});
+	}
+
+	#applyConfiguredExtendedWindow(model: Model<Api>, maximum: number | undefined): Model<Api> {
+		if (maximum === undefined || !isExtendedContextEnabledFromSettings(this.#settings)) return model;
+		const standard = model.contextWindow;
+		if (standard === null || maximum <= standard) return model;
+		const window = clampsContextOverride(model) ? clampCodexContextWindow(model, maximum) : maximum;
+		return window === standard ? model : applyModelOverride(model, { contextWindow: window });
 	}
 
 	/**

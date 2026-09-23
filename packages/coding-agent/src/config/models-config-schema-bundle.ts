@@ -191,6 +191,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		},
 		"premiumMultiplier?": "number",
 		"contextWindow?": "number",
+		"maxContextWindow?": "number",
 		"maxTokens?": "number",
 		"omitMaxOutputTokens?": "boolean",
 		"preferWebsockets?": "boolean",
@@ -224,6 +225,14 @@ export const getModelsConfigSchemaBundle = once(() => {
 		) {
 			return ctx.mustBe("compactionModel a non-empty string");
 		}
+		if (
+			value.maxContextWindow !== undefined &&
+			(!Number.isSafeInteger(value.maxContextWindow) ||
+				value.maxContextWindow <= 0 ||
+				(value.contextWindow !== undefined && value.maxContextWindow < value.contextWindow))
+		) {
+			return ctx.mustBe("maxContextWindow a positive integer no smaller than contextWindow");
+		}
 		return true;
 	});
 
@@ -243,6 +252,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		},
 		"premiumMultiplier?": "number",
 		"contextWindow?": "number",
+		"maxContextWindow?": "number",
 		"maxTokens?": "number",
 		"omitMaxOutputTokens?": "boolean",
 		"preferWebsockets?": "boolean",
@@ -268,6 +278,14 @@ export const getModelsConfigSchemaBundle = once(() => {
 			value.compactionModel.length === 0
 		) {
 			return ctx.mustBe("compactionModel a non-empty string");
+		}
+		if (
+			value.maxContextWindow !== undefined &&
+			(!Number.isSafeInteger(value.maxContextWindow) ||
+				value.maxContextWindow <= 0 ||
+				(value.contextWindow !== undefined && value.maxContextWindow < value.contextWindow))
+		) {
+			return ctx.mustBe("maxContextWindow a positive integer no smaller than contextWindow");
 		}
 		return true;
 	});
