@@ -152,8 +152,8 @@ return { during, after };`,
 	test("fills page and frame selectors on a tab that produces no animation frames", async () => {
 		const session = makeSession();
 		const prelude = createBrowserPrelude(session);
-		const starvedHtml = `<!doctype html><input id="q" value="stale">
-<iframe id="inner" srcdoc='<!doctype html><input id="deep" value="stale">'></iframe>`;
+		const starvedHtml = `<!doctype html><input id="q" value="stale"><div id="editable" contenteditable>stale</div>
+<iframe id="inner" srcdoc='<!doctype html><input id="deep" value="stale"><button id="go" onclick="this.dataset.clicked=1">Go</button>'></iframe>`;
 		const context = { session, toolCallId: "browser-starved" };
 		await prelude.invoke(
 			{ action: "open", name: STARVED_TAB_NAME, url: `data:text/html,${encodeURIComponent(starvedHtml)}` },
@@ -170,12 +170,24 @@ await cdp.send("Emulation.setVirtualTimePolicy", { policy: "pause" });
 await tab.fill("#q", "typed");
 const inner = await tab.frame("#inner");
 await inner.fill("#deep", "nested");
-return { page: await tab.value("#q"), frame: await inner.value("#deep") };`,
+await tab.fill("#editable", "replaced");
+await inner.click("#go");
+return {
+	page: await tab.value("#q"),
+	frame: await inner.value("#deep"),
+	editable: await tab.text("#editable"),
+	clicked: await inner.attr("#go", "data-clicked"),
+};`,
 					timeout: 25,
 				},
 				context,
 			);
-			expect(valueFrom<{ page: string; frame: string }>(result)).toEqual({ page: "typed", frame: "nested" });
+			expect(valueFrom<{ page: string; frame: string; editable: string; clicked: string }>(result)).toEqual({
+				page: "typed",
+				frame: "nested",
+				editable: "replaced",
+				clicked: "1",
+			});
 		} finally {
 			await prelude.invoke({ action: "close", name: STARVED_TAB_NAME, kill: true }, context).catch(() => undefined);
 		}

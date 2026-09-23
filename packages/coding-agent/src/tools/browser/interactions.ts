@@ -123,7 +123,7 @@ function requireFiniteNumber(value: number, label: string): void {
 	if (!Number.isFinite(value)) throw new ToolError(`${label} must be a finite number`);
 }
 
-/** Return the visible center point of an element or explain why it cannot receive a click. */
+/** Return a visible point relative to the element's box, or explain why it cannot receive a click. */
 export async function isClickActionable(handle: ElementHandle, signal?: AbortSignal): Promise<ActionabilityResult> {
 	return (await untilAborted(signal, () =>
 		handle.evaluate(el => {
@@ -169,7 +169,7 @@ export async function isClickActionable(handle: ElementHandle, signal?: AbortSig
 					.join("");
 				return { ok: false as const, reason: "covered", coveredBy: `<${tag}${id}${classes}>` };
 			}
-			return { ok: true as const, x, y };
+			return { ok: true as const, x: x - rect.left, y: y - rect.top };
 		}),
 	)) as ActionabilityResult;
 }
@@ -194,7 +194,8 @@ async function actionableClickPoint(handle: ElementHandle, label: string, signal
 			Math.abs(previous.width - current.width) < 0.5 &&
 			Math.abs(previous.height - current.height) < 0.5;
 		const result = await isClickActionable(handle, signal);
-		if (stable && result.ok) return { x: result.x, y: result.y };
+		// ElementHandle.boundingBox() is relative to the main frame; elementFromPoint() above is frame-local.
+		if (stable && result.ok && current) return { x: current.x + result.x, y: current.y + result.y };
 		if (stable && !result.ok && result.coveredBy) {
 			throw new ToolError(`${label} blocked: covered by ${result.coveredBy}`);
 		}
@@ -239,9 +240,15 @@ export async function fillViaHandle(
 ): Promise<void> {
 	await untilAborted(signal, () =>
 		handle.evaluate(el => {
-			const node = el as unknown as { value?: string; focus?: () => void };
+			const node = el as unknown as {
+				value?: string;
+				focus?: () => void;
+				isContentEditable?: boolean;
+				innerText?: string;
+			};
 			node.focus?.();
-			if ("value" in node) node.value = "";
+			if (node.isContentEditable) node.innerText = "";
+			else if ("value" in node) node.value = "";
 		}),
 	);
 	await untilAborted(signal, () => type(value));
