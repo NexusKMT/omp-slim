@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `appleFmAvailability`, `appleFmGenerate`, and `appleFmCancel` native bindings
+
 ## [18.2.11] - 2026-09-23
 
 ### Changed

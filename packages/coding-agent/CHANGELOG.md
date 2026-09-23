@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added automatic discovery of Apple Foundation Models on supported Apple silicon devices
 - Added recording of idle recaps to `session_recaps` table for durable storage
 - Added GC cleanup of session recap rows when deleting archived sessions
 - Implemented automatic title retry for ambiguous first messages
