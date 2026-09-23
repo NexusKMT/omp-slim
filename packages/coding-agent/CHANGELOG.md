@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Introduced Skillshare registry support for searching, installing, and managing skill extensions
+- Added CLI `skill` and TUI `/skills` commands for registry interactions
+- Implemented project-scoped and global skill installation with integrity validation
+
 ### Changed
 
 - Extensions load faster on warm starts: their dependencies are no longer re-parsed on every launch ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
