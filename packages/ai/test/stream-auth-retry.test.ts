@@ -539,6 +539,45 @@ describe("streamSimple resolver auth retry", () => {
 		expect((errors[0] as Error).message).toMatch(/usage limit/i);
 	});
 
+	it("rotates a Go 402 account-funds error to the healthy key before emitting content", async () => {
+		const keys: unknown[] = [];
+		const lastChances: boolean[] = [];
+		registerCustomApi(
+			API,
+			(_model: Model<Api>, _context: Context, options?: SimpleStreamOptions) => {
+				pushKey(keys, options);
+				const stream = new AssistantMessageEventStream();
+				queueMicrotask(() => {
+					if (options?.apiKey === "healthy-key") {
+						ok(stream);
+						return;
+					}
+					stream.fail(
+						new ProviderHttpError("Upstream request failed: Insufficient account funds", 402, {
+							code: "server_error",
+						}),
+					);
+				});
+				return stream;
+			},
+			SOURCE_ID,
+		);
+
+		const stream = streamSimple(model(), context, {
+			apiKey: ctx => {
+				lastChances.push(ctx.lastChance);
+				return ctx.error === undefined ? "exhausted-key" : "healthy-key";
+			},
+		});
+		for await (const _event of stream) {
+			// drain
+		}
+
+		expect((await stream.result()).content).toEqual([{ type: "text", text: "ok" }]);
+		expect(keys).toEqual(["exhausted-key", "healthy-key"]);
+		expect(lastChances).toEqual([false, true]);
+	});
+
 	it("retries a usage-limit error event before content", async () => {
 		const keys: unknown[] = [];
 		registerCustomApi(

@@ -435,6 +435,13 @@ describe("isUsageLimit", () => {
 		).toBe(false);
 		expect(isUsageLimit(new ProviderHttpError("Payment Required", 402))).toBe(true);
 		expect(isUsageLimit(new ProviderHttpError("A subscription is required for this endpoint", 402))).toBe(false);
+		expect(
+			isUsageLimit(
+				new ProviderHttpError("Upstream request failed: Insufficient account funds", 402, {
+					code: "server_error",
+				}),
+			),
+		).toBe(true);
 	});
 	it("detects 402 Payment Required and Payment is required as credential-rotatable usage limit", () => {
 		expect(isUsageLimit(Object.assign(new Error("Payment Required"), { status: 402 }))).toBe(true);
