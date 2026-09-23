@@ -52,8 +52,11 @@ interface ThinkingPayload {
 	};
 }
 
+/** Every Converse request carries `messages` and `inferenceConfig`; reject anything else. */
 function isThinkingPayload(payload: unknown): payload is ThinkingPayload {
-	return typeof payload === "object" && payload !== null;
+	if (typeof payload !== "object" || payload === null) return false;
+	const { messages, inferenceConfig } = payload as { messages?: unknown; inferenceConfig?: unknown };
+	return Array.isArray(messages) && typeof inferenceConfig === "object" && inferenceConfig !== null;
 }
 
 /** Capture the mapped Bedrock wire payload through the public streamSimple path. */
