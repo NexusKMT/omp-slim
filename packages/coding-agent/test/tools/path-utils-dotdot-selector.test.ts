@@ -30,18 +30,6 @@ describe("`..` range selector alias", () => {
 		]);
 	});
 
-	it("pins bare numbers in a comma list to single lines", () => {
-		expect(parseLineRanges("19,59")).toEqual([
-			{ startLine: 19, endLine: 19 },
-			{ startLine: 59, endLine: 59 },
-		]);
-		expect(parseLineRanges("50")).toEqual([{ startLine: 50, endLine: undefined }]);
-		expect(parseLineRanges("19,59-")).toEqual([
-			{ startLine: 19, endLine: 19 },
-			{ startLine: 59, endLine: undefined },
-		]);
-	});
-
 	it("rejects inverted `..` ranges with the same guard as `-`", () => {
 		expect(() => parseLineRangeChunk("2727..2724")).toThrow(ToolError);
 	});

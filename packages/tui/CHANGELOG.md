@@ -6,10 +6,6 @@
 
 - Updated model hub and oauth selector components to use namespaced `authStorage` API
 
-### Fixed
-
-- Fixed comma-separated read selectors such as `:19,59` collapsing to an open-ended read from the first number. A bare number in a list is that line; a lone `:50` still means from that line.
-
 ## [18.2.11] - 2026-09-23
 
 ### Added
