@@ -242,6 +242,8 @@ export interface ModelPatch {
 	cost?: Partial<Model<Api>["cost"]>;
 	promptCache?: Model<Api>["promptCache"];
 	contextWindow?: number;
+	/** Registry-only window preference; never patches the provider-advertised maximum. */
+	maxContextWindow?: number;
 	maxTokens?: number;
 	omitMaxOutputTokens?: boolean;
 	/** Whether Codex requests should prefer WebSocket transport. */

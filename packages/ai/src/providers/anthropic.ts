@@ -110,9 +110,10 @@ import {
 	CLAUDE_CODE_MAX_OUTPUT_TOKENS,
 	claudeCodeSdkVersion,
 	claudeCodeSystemInstruction,
-	claudeCodeVersion,
+	adoptRequiredClaudeCodeVersion,
 	claudeToolPrefix,
-	claudeCodeUserAgent,
+	getClaudeCodeUserAgent,
+	getClaudeCodeVersion,
 } from "./claude-code-fingerprint";
 import {
 	buildCopilotDynamicHeaders,
@@ -376,7 +377,7 @@ export function buildAnthropicHeaders(options: AnthropicHeaderOptions): Record<s
 	}
 
 	if (oauthToken) {
-		const userAgent = isClaudeCodeClientUserAgent(incomingUserAgent) ? incomingUserAgent : claudeCodeUserAgent;
+		const userAgent = isClaudeCodeClientUserAgent(incomingUserAgent) ? incomingUserAgent : getClaudeCodeUserAgent();
 		const headers = {
 			...modelHeaders,
 			Accept: acceptHeader,
@@ -465,8 +466,11 @@ type AnthropicControlState = {
 	stableSystemBlocks: AnthropicSystemBlock[] | undefined;
 	systemFingerprint: string | undefined;
 	controlTransitions: AnthropicControlTransition[];
-	baseEffort: AnthropicOutputEffort | undefined;
+	/** Whether the effort baseline was captured; `undefined` efforts are a valid baseline. */
+	effortBaselined: boolean;
+	/** Top-level `output_config.effort` of the baseline request; `undefined` = API default. */
 	baseEffortWire: AnthropicOutputEffort | undefined;
+	/** Effort in force at the conversation tail; `undefined` = API default. */
 	currentEffort: AnthropicOutputEffort | undefined;
 };
 
@@ -503,7 +507,7 @@ function createAnthropicControlState(): AnthropicControlState {
 		stableSystemBlocks: undefined,
 		systemFingerprint: undefined,
 		controlTransitions: [],
-		baseEffort: undefined,
+		effortBaselined: false,
 		baseEffortWire: undefined,
 		currentEffort: undefined,
 	};
@@ -665,14 +669,11 @@ function createClaudeBillingHeader(firstUserMessageText: string): string {
 	// Matches CC's computeFingerprint in utils/fingerprint.ts.
 	// Uses chars from the first user message (not the system prompt).
 	const k = [4, 7, 20].map(i => firstUserMessageText[i] ?? "0").join("");
-	const versionSuffix = nodeCrypto
-		.createHash("sha256")
-		.update(`59cf53e54c78${k}${claudeCodeVersion}`)
-		.digest("hex")
-		.slice(0, 3);
+	const version = getClaudeCodeVersion();
+	const versionSuffix = nodeCrypto.createHash("sha256").update(`59cf53e54c78${k}${version}`).digest("hex").slice(0, 3);
 	// cch=00000: placeholder replaced with the real attestation hash by wrapFetchForCch
 	// before the request hits the wire (see below).
-	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${claudeCodeVersion}.${versionSuffix}; cc_entrypoint=cli; ${CCH_PLACEHOLDER_STR};`;
+	return `${CLAUDE_BILLING_HEADER_PREFIX} cc_version=${version}.${versionSuffix}; cc_entrypoint=cli; ${CCH_PLACEHOLDER_STR};`;
 }
 
 // cch attestation: XXHash64(body_with_placeholder, seed) low-20-bits, 5 hex chars.
@@ -2059,6 +2060,8 @@ const streamAnthropicOnce = (
 
 			let client: AnthropicMessagesClientLike;
 			let isOAuthToken: boolean;
+			// Retained so a Claude Code version bump can rebuild the client's fingerprint headers.
+			let clientArgs: AnthropicClientOptionsArgs | undefined;
 
 			if (options?.client) {
 				client = options.client;
@@ -2164,7 +2167,7 @@ const streamAnthropicOnce = (
 					}
 				}
 
-				const created = createClient(model, {
+				clientArgs = {
 					model,
 					apiKey,
 					extraBetas,
@@ -2185,7 +2188,8 @@ const streamAnthropicOnce = (
 						extractClaudeMetadataSessionId(options?.metadata?.user_id) ??
 						options?.promptCacheKey,
 					disableStrictTools,
-				});
+				};
+				const created = createClient(model, clientArgs);
 				client = created.client;
 				isOAuthToken = created.isOAuthToken;
 			}
@@ -2231,6 +2235,7 @@ const streamAnthropicOnce = (
 			const firstEventTimeoutMs = options?.streamFirstEventTimeoutMs ?? getStreamFirstEventTimeoutMs(idleTimeoutMs);
 			const requestTimeoutMs =
 				firstEventTimeoutMs !== undefined && firstEventTimeoutMs > 0 ? firstEventTimeoutMs : undefined;
+
 
 			// Opt-in flag: the response parser only honors `fallback` content
 			// blocks and `usage.iterations` when the current request opted into
@@ -2970,6 +2975,30 @@ const streamAnthropicOnce = (
 					}
 					const streamFailureMessage =
 						streamFailure instanceof Error ? streamFailure.message : String(streamFailure);
+					if (
+						isOAuthToken &&
+						clientArgs &&
+						firstTokenTime === undefined &&
+						adoptRequiredClaudeCodeVersion(streamFailure)
+					) {
+						logger.warn("anthropic: Claude Code version rejected as too old, retrying with required version", {
+							model: model.id,
+							version: getClaudeCodeVersion(),
+						});
+						client = createClient(model, { ...clientArgs, disableStrictTools }).client;
+						params = await prepareParams();
+						providerRetryAttempt = 0;
+						output.content.length = 0;
+						output.model = model.id;
+						output.responseId = undefined;
+						output.upstreamModel = undefined;
+						output.errorMessage = undefined;
+						output.providerPayload = undefined;
+						output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
+						output.stopReason = "stop";
+						firstTokenTime = undefined;
+						continue;
+					}
 					if (
 						!prefixBindingRetryAttempted &&
 						options?.anthropicPrefixMismatchBehavior !== "error" &&
@@ -3871,7 +3900,7 @@ function resetAnthropicControlState(state: AnthropicControlState): void {
 	state.stableSystemBlocks = undefined;
 	state.systemFingerprint = undefined;
 	state.controlTransitions = [];
-	state.baseEffort = undefined;
+	state.effortBaselined = false;
 	state.baseEffortWire = undefined;
 	state.currentEffort = undefined;
 }
@@ -4074,6 +4103,13 @@ function planStableAnthropicTools(
  * later changes as per-message effort. Anthropic applies a system message's
  * `output_config.effort` from the next `user` turn on, so the control is
  * anchored before the latest user message to take effect on this response.
+ *
+ * An omitted effort means the API's per-model default (`medium` on Opus 5.5,
+ * `high` elsewhere), so it is tracked as its own state rather than assumed to
+ * be any concrete level: every later explicit level is sent as a control. A
+ * per-message control cannot express "back to the API default", so a request
+ * that drops its effort mid-session keeps the level already in force instead
+ * of rewriting the top-level value and invalidating the cache.
  */
 function planStableAnthropicEffort(
 	current: AnthropicOutputEffort | undefined,
@@ -4082,18 +4118,17 @@ function planStableAnthropicEffort(
 	enabled: boolean,
 ): AnthropicOutputEffort | undefined {
 	if (!state || !enabled) return current;
-	const effective = current ?? "high";
-	if (state.baseEffort === undefined) {
-		state.baseEffort = effective;
+	if (!state.effortBaselined) {
+		state.effortBaselined = true;
 		state.baseEffortWire = current;
-		state.currentEffort = effective;
+		state.currentEffort = current;
 		return current;
 	}
-	if (state.currentEffort !== effective) {
+	if (current !== undefined && state.currentEffort !== current) {
 		const lastUserIndex = messages.findLastIndex(message => message.role === "user");
 		const messageCount = lastUserIndex >= 0 ? lastUserIndex : messages.length;
-		recordAnthropicControlTransition(state, messages, messageCount, [], effective);
-		state.currentEffort = effective;
+		recordAnthropicControlTransition(state, messages, messageCount, [], current);
+		state.currentEffort = current;
 	}
 	return state.baseEffortWire;
 }
