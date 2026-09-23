@@ -62,10 +62,6 @@ on:
             description: "Skip npm publish"
             type: boolean
             default: false
-         release_dry_run:
-            description: "Release dry run: build, sign, and smoke every release binary without publishing (no GitHub Release, npm, leaves, or tap)"
-            type: boolean
-            default: false
 
 # Release runs publish a `v*` tag pushed atomically with main HEAD; sharing
 # the cheap branch-wide `CI-refs/heads/main` group meant a later main push
@@ -108,9 +104,6 @@ jobs:
          # Canary tags publish to npm's canary dist-tag (derived script-side), mark
          # the GitHub release prerelease, and skip the stable-only brew tap.
          channel: ${{ steps.detect.outputs.channel }}
-         # Dispatch-only release rehearsal: turns on the release build legs but
-         # every publishing job refuses to run while it is true.
-         dry-run: ${{ steps.detect.outputs.dry-run }}
       steps:
          # Only a main-branch run needs tags fetched, so `git tag --points-at
          # HEAD` can see the freshly-pushed `v*`. A tag-ref dispatch reads the
@@ -137,13 +130,8 @@ jobs:
                   fi
                   ;;
               esac
-              dry_run="${{ inputs.release_dry_run == true }}"
               if [ -n "$release_tag" ]; then
                 echo "HEAD carries release tag $release_tag; this run builds and publishes the release."
-                is_release=true
-              fi
-              if [ "$dry_run" = true ]; then
-                echo "::notice title=Release dry run::Building every release binary; all publishing jobs are disabled for this run."
                 is_release=true
               fi
               if [[ "$release_tag" == *-canary.* ]]; then
@@ -153,7 +141,6 @@ jobs:
                 echo "is-release=$is_release"
                 echo "release-tag=$release_tag"
                 echo "channel=$channel"
-                echo "dry-run=$dry_run"
               } >> "$GITHUB_OUTPUT"
 
    check:
@@ -787,7 +774,7 @@ jobs:
    # packages/natives/native), so no per-platform runners are needed.
    release_native_leaves:
       name: Publish native leaf packages
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.release_metadata.outputs.dry-run != 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_hosted.result == 'success' &&
@@ -855,7 +842,7 @@ jobs:
 
    release_github:
       name: Publish GitHub release
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.release_metadata.outputs.dry-run != 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_hosted.result == 'success' }}
@@ -911,7 +898,7 @@ jobs:
 
    release_github_verify:
       name: Verify published release (macOS)
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.release_metadata.outputs.dry-run != 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_github.result == 'success' }}
       needs: [release_metadata, release_github]
       runs-on: macos-14
@@ -945,7 +932,7 @@ jobs:
 
    release_npm:
       name: Publish to npm
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.release_metadata.outputs.dry-run != 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_binary.result == 'success' &&
          needs.release_binary_hosted.result == 'success' &&
          needs.release_github_verify.result == 'success' &&
@@ -1012,7 +999,7 @@ jobs:
    # release never blocks on tap access.
    release_brew:
       name: Update Homebrew tap
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && needs.release_metadata.outputs.dry-run != 'true' && !cancelled() &&
+      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_metadata.outputs.channel != 'canary' &&
          needs.release_github_verify.result == 'success' }}
       needs: [release_metadata, release_github_verify]
