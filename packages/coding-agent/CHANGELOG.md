@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `*** Insert Before` and `*** Insert After` to append new lines without replacing existing code
 - Added `toks` command to count tokens via offline tokenizers
 - Added automatic discovery of Apple Foundation Models on supported Apple silicon devices
 - Added recording of idle recaps to `session_recaps` table for durable storage
@@ -24,6 +25,7 @@
 
 ### Changed
 
+- Updated edit mode syntax to use `*** Edit File:`, `*** Find`, and `*** Replace` instead of `SM:` prefixed headers
 - Unified terminal OAuth flow logic across `omp login` and `omp auth-broker login`
 - Included identity account/organization info in terminal login success messages
 - Changed judgment fallback to consider only native candidates, preventing prompted models from replacing failed natives
