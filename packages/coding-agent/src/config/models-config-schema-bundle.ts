@@ -1,5 +1,20 @@
-import { type } from "@oh-my-pi/omptype";
+import { type NarrowContext, type } from "@oh-my-pi/omptype";
 import { once } from "@oh-my-pi/pi-utils";
+
+function validateMaxContextWindow(
+	value: { maxContextWindow?: number; contextWindow?: number },
+	ctx: NarrowContext,
+): boolean {
+	if (
+		value.maxContextWindow !== undefined &&
+		(!Number.isSafeInteger(value.maxContextWindow) ||
+			value.maxContextWindow <= 0 ||
+			(value.contextWindow !== undefined && value.maxContextWindow < value.contextWindow))
+	) {
+		return ctx.mustBe("maxContextWindow a positive integer no smaller than contextWindow");
+	}
+	return true;
+}
 
 export const getModelsConfigSchemaBundle = once(() => {
 	const OpenRouterRoutingSchema = type({
@@ -225,15 +240,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		) {
 			return ctx.mustBe("compactionModel a non-empty string");
 		}
-		if (
-			value.maxContextWindow !== undefined &&
-			(!Number.isSafeInteger(value.maxContextWindow) ||
-				value.maxContextWindow <= 0 ||
-				(value.contextWindow !== undefined && value.maxContextWindow < value.contextWindow))
-		) {
-			return ctx.mustBe("maxContextWindow a positive integer no smaller than contextWindow");
-		}
-		return true;
+		return validateMaxContextWindow(value, ctx);
 	});
 
 	const ModelOverrideSchema = type({
@@ -279,15 +286,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 		) {
 			return ctx.mustBe("compactionModel a non-empty string");
 		}
-		if (
-			value.maxContextWindow !== undefined &&
-			(!Number.isSafeInteger(value.maxContextWindow) ||
-				value.maxContextWindow <= 0 ||
-				(value.contextWindow !== undefined && value.maxContextWindow < value.contextWindow))
-		) {
-			return ctx.mustBe("maxContextWindow a positive integer no smaller than contextWindow");
-		}
-		return true;
+		return validateMaxContextWindow(value, ctx);
 	});
 
 	const ProviderDiscoverySchema = type({

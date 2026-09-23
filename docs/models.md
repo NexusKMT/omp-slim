@@ -93,6 +93,10 @@ the larger window; `off` restores the normal one. An override specifying only
 `contextWindow` remains fixed in both modes, as before. This changes OMP's
 local context budget, not the provider's server-side limit; verify the endpoint
 accepts requests of the configured size.
+Configured maxima do not replace provider-advertised capacity. Models governed
+by a catalog override ceiling (such as Codex Astra) still clamp to that ceiling.
+Per-model overrides, including retired variant aliases, are resolved before
+selecting the extended window.
 
 ### Compaction options
 

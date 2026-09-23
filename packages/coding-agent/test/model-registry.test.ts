@@ -7,6 +7,7 @@ import { Effort, type FetchImpl, type Model, type OpenAICompat, type ThinkingCon
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { fingerprintStaticModels } from "@oh-my-pi/pi-catalog/model-manager";
 import * as catalogModels from "@oh-my-pi/pi-catalog/models";
@@ -2447,6 +2448,53 @@ describe("ModelRegistry", () => {
 			expect(registry.find("openai-codex", "gpt-6-astra")?.contextWindow).toBe(922_000);
 		});
 
+		test.each([
+			["maximum-only override", "modelOverrides", undefined, 272_000],
+			["paired override", "modelOverrides", 400_000, 400_000],
+			["maximum-only custom model", "models", undefined, 272_000],
+			["paired custom model", "models", 400_000, 400_000],
+		] as const)(
+			"clamps Astra %s across repeated toggles and offline refresh",
+			async (_name, source, contextWindow, standardWindow) => {
+				const configuredWindow = {
+					...(contextWindow === undefined ? {} : { contextWindow }),
+					maxContextWindow: 2_000_000,
+				};
+				writeRawModelsJson({
+					"openai-codex":
+						source === "modelOverrides"
+							? { modelOverrides: { "gpt-6-astra": configuredWindow } }
+							: {
+									baseUrl: "https://chatgpt.com/backend-api",
+									api: "openai-codex-responses",
+									auth: "none",
+									models: [{ id: "gpt-6-astra", ...configuredWindow }],
+								},
+				});
+				const testSettings = Settings.isolated();
+				testSettings.set("extendedContext", true);
+				const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+				expect(registry.getError()).toBeUndefined();
+				const expectWindow = (contextWindow: number) => {
+					const model = registry.find("openai-codex", "gpt-6-astra");
+					expect(model?.contextWindow).toBe(contextWindow);
+					expect(model && resolveMaxContextWindow(model)).toBe(922_000);
+				};
+				expectWindow(922_000);
+
+				for (const extendedContext of [false, true, false, true]) {
+					testSettings.set("extendedContext", extendedContext);
+					await registry.reapplyModelPolicies();
+					const expectedWindow = extendedContext ? 922_000 : standardWindow;
+					expectWindow(expectedWindow);
+
+					await registry.refresh("offline");
+					expect(registry.getError()).toBeUndefined();
+					expectWindow(expectedWindow);
+				}
+			},
+		);
+
 		test("clamps a cached Astra row already carrying the applied override", async () => {
 			writeRawModelsJson({
 				"openai-codex": { modelOverrides: { "gpt-6-astra": { contextWindow: 2_000_000 } } },
@@ -3352,6 +3400,38 @@ describe("ModelRegistry", () => {
 			expect(collapsed?.contextWindow).toBe(222_222);
 			// The retired selector resolves to the same collapsed model.
 			expect(antigravityOverride.find("google-antigravity", "gemini-3-pro-high")?.id).toBe("gemini-3-pro");
+		});
+
+		test("retired variant maximum override wins over a larger custom maximum", async () => {
+			writeRawModelsJson({
+				"google-antigravity": {
+					baseUrl: "https://example.com/v1",
+					api: "google-gemini-cli",
+					auth: "none",
+					models: [{ id: "gemini-3-pro", contextWindow: 128_000, maxContextWindow: 800_000 }],
+					modelOverrides: { "gemini-3-pro-high": { maxContextWindow: 512_000 } },
+				},
+			});
+			const testSettings = Settings.isolated();
+			testSettings.set("extendedContext", true);
+			const registry = new ModelRegistry(authStorage, modelsJsonPath, { settings: testSettings });
+			expect(registry.getError()).toBeUndefined();
+			expect(registry.find("google-antigravity", "gemini-3-pro")?.contextWindow).toBe(512_000);
+			expect(registry.find("google-antigravity", "gemini-3-pro-high")).toMatchObject({
+				id: "gemini-3-pro",
+				contextWindow: 512_000,
+			});
+
+			testSettings.set("extendedContext", false);
+			await registry.reapplyModelPolicies();
+			expect(registry.find("google-antigravity", "gemini-3-pro")?.contextWindow).toBe(128_000);
+
+			testSettings.set("extendedContext", true);
+			await registry.reapplyModelPolicies();
+			await registry.refresh("offline");
+			expect(registry.getError()).toBeUndefined();
+			expect(registry.find("google-antigravity", "gemini-3-pro")?.contextWindow).toBe(512_000);
+			expect(registry.find("google-antigravity", "gemini-3-pro-high")?.contextWindow).toBe(512_000);
 		});
 
 		test("suppressed selectors keyed by retired variant ids bind to the collapsed id", () => {
