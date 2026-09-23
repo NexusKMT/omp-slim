@@ -21,6 +21,7 @@
 ### Fixed
 
 - Fixed headless print mode (`-p`) silently dropping MCP servers slower than the startup window; print mode now waits for configured servers (bounded by `OMP_MCP_TIMEOUT_MS`) and warns on stderr when one is not ready ([#12188](https://github.com/can1357/oh-my-pi/issues/12188), reported by [@aaronjmars](https://github.com/aaronjmars)).
+- Fixed headless print mode (`-p`) abandoning the advisor's review when its model fails: the final-review drain now waits for the configured `retry.fallbackChains` backup reviewer to finish instead of disposing the session mid-switch ([#12964](https://github.com/can1357/oh-my-pi/pull/12964) by [@aviv4339](https://github.com/aviv4339))
 
 ## [18.2.11] - 2026-09-23
 
