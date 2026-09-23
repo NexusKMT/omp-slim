@@ -23,6 +23,7 @@ import {
 import { reset as resetCapabilities } from "../../capability";
 import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
+import { formatLoginIdentity } from "../../cli/oauth-terminal";
 import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { getRoleInfo } from "../../config/model-roles";
@@ -2142,12 +2143,13 @@ export class SelectorController {
 			// Name the account (and Anthropic organization) that was stored so a
 			// login that lands on an unintended account/subscription is visible
 			// immediately instead of silently replacing an existing registration.
-			const whoBase = identity?.type === "oauth" ? (identity.email ?? identity.accountId) : undefined;
-			const whoOrg = identity?.type === "oauth" ? (identity.orgName ?? identity.orgId) : undefined;
-			const who = whoBase ? ` as ${whoBase}${whoOrg ? ` (${whoOrg})` : ""}` : whoOrg ? ` as ${whoOrg}` : "";
+			const who = formatLoginIdentity(identity);
 			block.addChild(
 				new Text(
-					theme.fg("success", `${theme.status.success} Successfully logged in to ${providerId}${who}`),
+					theme.fg(
+						"success",
+						`${theme.status.success} Successfully logged in to ${providerId}${who ? ` as ${who}` : ""}`,
+					),
 					1,
 					0,
 				),

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `omp login` command for terminal-based OAuth authentication, including automated model discovery refresh and browser-opening support
 - Enabled `org-scoped-identity` and `oauth-token-env` configuration parsing for authentication providers
 - Adopted namespaced `authStorage` API for CLI and session management
 - Added usage reporting for failed native judgments, including error stop reason and message
@@ -13,6 +14,8 @@
 
 ### Changed
 
+- Unified terminal OAuth flow logic across `omp login` and `omp auth-broker login`
+- Included identity account/organization info in terminal login success messages
 - Changed judgment fallback to consider only native candidates, preventing prompted models from replacing failed natives
 
 ### Fixed
