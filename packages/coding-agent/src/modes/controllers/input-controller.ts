@@ -12,7 +12,7 @@ import { isEnoent, logger, postmortem, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatModelRoleAlias, roleCandidatePool } from "../../config/model-roles";
 import { resolveModelRoleValue } from "../../config/model-resolver";
 import { isSettingsInitialized, settings } from "../../config/settings";
-import { resolveLocalRoot } from "../../internal-urls";
+import { resolveLocalRoot, resolveLocalUrlToPath } from "../../internal-urls";
 import { AskDialogComponent } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { extractImagePathFromText } from "@oh-my-pi/pi-tui/prompt/custom-editor";
@@ -1903,31 +1903,34 @@ export class InputController {
 	): Promise<boolean> {
 		const normalized = await this.#normalizePastedImage(image, unsupportedMessage);
 		if (!normalized) return false;
-		// Every attachment gets a file on disk so tools can read, copy, or upload it:
-		// file-pasted images keep their original path; clipboard bitmaps are committed to
-		// the session. The path reaches the model via the hidden companion message (see
-		// AgentSession's attachment source notices).
+		// Every attachment gets a file so tools can read, copy, or upload it: file-pasted
+		// images keep their original path; clipboard bitmaps are committed to the session
+		// and referenced by a relocation-safe `local://` URL. The reference reaches the
+		// model via the hidden companion message (see AgentSession's attachment source notices).
 		const filePath = sourcePath ?? (await this.#persistPastedImage(image));
 		await this.#insertPendingImage(normalized, filePath ? { path: filePath, kind: "image" } : undefined);
 		return true;
 	}
 
 	/**
-	 * Commit clipboard image bytes to the session's artifact directory, as pasted (full
-	 * resolution, before model auto-resize). Named by content hash so re-pasting the same
-	 * screenshot reuses one file. Sessions without an artifact directory (in-memory) fall
-	 * back to the shared blob store. Returns undefined when the write fails; the image still
-	 * attaches, just without a path.
+	 * Commit clipboard image bytes to the session's `local://` root (inside the session
+	 * artifact directory), as pasted: full resolution, before model auto-resize. Named by
+	 * content hash so re-pasting the same screenshot reuses one file. Returns the
+	 * `local://` URL rather than an absolute path: `/move` relocates the artifact
+	 * directory, and the URL resolves against the session's current root. Returns
+	 * undefined when the write fails; the image still attaches, just without a reference.
 	 */
 	async #persistPastedImage(image: ImageContent): Promise<string | undefined> {
 		const bytes = Buffer.from(image.data, "base64");
 		const extension = blobExtensionForImageMimeType(image.mimeType) ?? "png";
+		const url = `local://pasted-image-${Bun.hash(bytes).toString(16)}.${extension}`;
 		try {
-			const artifactsDir = this.ctx.sessionManager.getArtifactsDir();
-			if (!artifactsDir) return (await this.ctx.sessionManager.putBlob(bytes, { extension })).displayPath;
-			const filePath = path.join(artifactsDir, `pasted-image-${Bun.hash(bytes).toString(16)}.${extension}`);
+			const filePath = resolveLocalUrlToPath(url, {
+				getArtifactsDir: () => this.ctx.sessionManager.getArtifactsDir(),
+				getSessionId: () => this.ctx.sessionManager.getSessionId(),
+			});
 			await Bun.write(filePath, bytes);
-			return filePath;
+			return url;
 		} catch (error) {
 			logger.warn("failed to persist pasted image", {
 				error: error instanceof Error ? error.message : String(error),

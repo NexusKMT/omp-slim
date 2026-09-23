@@ -1,7 +1,7 @@
 /**
- * Filesystem source carried on image attachments backed by a file on disk:
+ * File source carried on image attachments backed by a file on disk:
  * path-pasted/drag-and-dropped images, clipboard images the coding agent commits
- * to the session artifact directory, and generated video contact-sheet previews.
+ * to the session's `local://` root, and generated video contact-sheet previews.
  * Symbol metadata stays out of serialized/model-bound image data while traveling
  * with the draft object, until AgentSession creates the hidden companion message
  * that tells the model the path (and link materialization prefers it over a blob copy).
@@ -12,8 +12,9 @@ import { isRecord } from "@oh-my-pi/pi-utils";
 /** How an image attachment's backing file entered the session. */
 export type ImageAttachmentSourceKind = "image" | "video";
 
-/** Original local file backing an image attachment. */
+/** Local file backing an image attachment. */
 export interface ImageAttachmentSource {
+	/** Absolute filesystem path, or a session-relative `local://` URL for images committed to the session. */
 	readonly path: string;
 	readonly kind: ImageAttachmentSourceKind;
 }
