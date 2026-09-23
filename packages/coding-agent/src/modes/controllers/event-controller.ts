@@ -2,7 +2,7 @@ import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Loader, TERMINAL } from "@oh-my-pi/pi-tui";
-import { formatDuration, logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
+import { formatDuration, isRecord, logger, prompt, sanitizeText } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { extractTextContent } from "../../commit/utils";
 import { settings } from "../../config/settings";
@@ -35,7 +35,7 @@ import { type ApprovalMode, resolveApproval } from "../../tools/approval";
 import { previewLine, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
 import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import { writeDeviceDispatch } from "../../tools/resolve";
-import { nextActionableTask } from "../../tools/todo";
+import { isTodoPhase, nextActionableTask } from "../../tools/todo";
 import { SpeechEnhancer } from "../../tts/speech-enhancer";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
@@ -71,6 +71,17 @@ const IDLE_RECAP_MIN_SECONDS = 1;
 const IDLE_RECAP_MAX_SECONDS = 3600;
 
 const RAW_PARTIAL_JSON_RENDERERS: Record<string, true> = { bash: true, edit: true, apply_patch: true };
+
+function nestedTodoPhases(details: unknown): TodoPhase[] | undefined {
+	if (!isRecord(details) || !Array.isArray(details.statusEvents)) return undefined;
+	for (let index = details.statusEvents.length - 1; index >= 0; index--) {
+		const event = details.statusEvents[index];
+		if (isRecord(event) && event.op === "todo" && Array.isArray(event.phases) && event.phases.every(isTodoPhase)) {
+			return event.phases;
+		}
+	}
+	return undefined;
+}
 
 function exposesRawPartialJson(toolName: string, rawInput: boolean, tool: unknown): boolean {
 	if (rawInput) return true;
@@ -1920,6 +1931,10 @@ export class EventController {
 		if (event.toolName === "todo" && !event.isError) {
 			const details = event.result.details as { op?: string; phases?: TodoPhase[] } | undefined;
 			if (details?.op !== "view" && details?.phases) this.ctx.setTodos(details.phases);
+		}
+		if (event.toolName === "eval" && !event.isError) {
+			const phases = nestedTodoPhases(event.result.details);
+			if (phases) this.ctx.setTodos(phases);
 		}
 		if (event.toolName === "todo" && event.isError) {
 			const textContent = event.result.content.find(

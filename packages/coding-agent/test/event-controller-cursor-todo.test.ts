@@ -74,14 +74,17 @@ function todoEnd(
 	} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
 }
 
-function evalEnd(toolCallId: string): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
+function evalEnd(
+	toolCallId: string,
+	statusEvents?: Array<{ op: string; phases?: { name: string; tasks: { content: string; status: string }[] }[] }>,
+): Extract<AgentSessionEvent, { type: "tool_execution_end" }> {
 	return {
 		type: "tool_execution_end",
 		toolCallId,
 		toolName: "eval",
 		isError: false,
-		result: { content: [{ type: "text", text: "done" }] },
-	} as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
+		result: { content: [{ type: "text", text: "done" }], details: statusEvents ? { statusEvents } : undefined },
+	} as unknown as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
 }
 
 function evalStart(toolCallId: string): Extract<AgentSessionEvent, { type: "tool_execution_start" }> {
@@ -180,6 +183,15 @@ describe("EventController + Cursor todo bridge", () => {
 		expect(block).toHaveProperty("isTranscriptBlockFinalized");
 		expect((block as AssistantMessageComponent).isTranscriptBlockFinalized()).toBe(true);
 		expectRetirableResult(block);
+	});
+
+	it("refreshes the Todo panel from a nested Eval Todo update", async () => {
+		const f = createFixture();
+		const phases = [{ name: "Review", tasks: [{ content: "Report findings", status: "completed" }] }];
+
+		await f.controller.handleEvent(evalEnd("eval-todo-1", [{ op: "todo", phases }]));
+
+		expect(f.ctx.setTodos).toHaveBeenCalledWith(phases);
 	});
 
 	it("settles a held completion when execution start creates the card", async () => {

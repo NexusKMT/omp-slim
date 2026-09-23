@@ -747,6 +747,33 @@ describe("callSessionTool", () => {
 		expect(persisted).toHaveLength(1);
 	});
 
+	it("emits committed Todo phases for nested UI synchronization", async () => {
+		let phases: TodoPhase[] = [{ name: "Ship", tasks: [{ content: "Persist", status: "in_progress" }] }];
+		const statuses: Array<Record<string, unknown>> = [];
+		const session: ToolSession = {
+			...createSession([]),
+			getTodoPhases: () => phases,
+			setTodoPhases: next => {
+				phases = next;
+			},
+			getToolByName: name => (name === "todo" ? (todoTool as unknown as AgentTool) : undefined),
+		};
+		const todoTool = new TodoTool(session);
+
+		await callSessionTool(
+			"todo",
+			{ op: "done", task: "Persist" },
+			{ session, emitStatus: event => statuses.push(event) },
+		);
+
+		expect(statuses).toEqual([
+			expect.objectContaining({
+				op: "todo",
+				phases: [{ name: "Ship", tasks: [{ content: "Persist", status: "completed" }] }],
+			}),
+		]);
+	});
+
 	it("returns structured tool results when details or images are present", async () => {
 		const session = createSession([
 			createTool("custom", async () => ({
