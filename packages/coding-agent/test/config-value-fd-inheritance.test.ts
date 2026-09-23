@@ -32,11 +32,11 @@ const resolverUrl = pathToFileURL(path.join(import.meta.dir, "../src/config/reso
 
 /**
  * Budget for the descendant-escape oracles below. The command must outlive it
- * (both use `sleep 10`, and the escaped worker `sleep 30`), so the timeout
- * always fires with the descendant alive — but it must also cover starting a
- * `sh` and a worker script on a loaded CI runner, because those oracles wait
- * for the worker *inside* the timed command. 150 ms did not, and the tests
- * flaked whenever the worker lost the race (#10259).
+ * (each keeps its shell alive with `sleep 10` and its worker with `sleep 30`),
+ * so the timeout always fires with the descendant alive — but it must also
+ * cover starting a `sh` and a worker script on a loaded CI runner, because
+ * those oracles wait for the worker *inside* the timed command. 150 ms did not,
+ * and the tests flaked whenever the worker lost the race (#10259).
  */
 const ESCAPE_TIMEOUT_MS = 3000;
 
