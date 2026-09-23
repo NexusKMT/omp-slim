@@ -2866,7 +2866,10 @@ async function executeToolCalls(
 	const emittedToolResults: ToolResultMessage[] = [];
 	const toolCallInfos = toolCalls.map(call => ({ id: call.id, name: call.name }));
 	const batchId = `${assistantMessage.timestamp ?? Date.now()}_${toolCalls[0]?.id ?? "batch"}`;
-	const shouldInterruptImmediately = interruptMode !== "wait";
+	// `interruptMode: "wait"` only spares side-effecting work: interruptible
+	// waits are always cut short, since a pure wait has nothing to finish and
+	// would otherwise sit out its full window with a message already queued.
+	const softInterrupts = interruptMode !== "wait";
 	const steeringAbortController = new AbortController();
 	const ircAbortController = new AbortController();
 	// Cooperative channel: aborted when queued steering (or an interrupting
@@ -2939,9 +2942,10 @@ async function executeToolCalls(
 		// Asides only fire once: an interrupt already recorded on interruptState
 		// must not re-abort, and (unlike steering) never re-consumes a queue.
 		// A completion-triggered record is the exception — it leaves the
-		// cooperative signal down, so keep polling until a peer IRC escalates.
-		if (!shouldInterruptImmediately || signal?.aborted) return;
-		if (interruptState.triggered && steeringSoftController.signal.aborted) return;
+		// cooperative signal down, so keep polling until a peer IRC escalates
+		// (only when soft interrupts are enabled; otherwise nothing is left).
+		if (signal?.aborted) return;
+		if (interruptState.triggered && (!softInterrupts || steeringSoftController.signal.aborted)) return;
 		// Peer IRC and background completions (finished jobs, exited supervised
 		// processes) hard-abort interruptible waits only; foreground tools keep
 		// running (no partial side effects).
@@ -2963,16 +2967,14 @@ async function executeToolCalls(
 		// also cascades: the freshly detached job's own completion re-triggers
 		// this check for the next command, so millisecond-long commands chain
 		// into separate background deliveries (#12869).
-		if (source !== "background") steeringSoftController.abort();
+		if (source !== "background" && softInterrupts) steeringSoftController.abort();
 	};
 
 	const checkSteering = async (): Promise<void> => {
 		// `signal` (external/user abort) is checked separately from the internal
 		// abort controllers: once the run is externally aborted it is unwinding
 		// and the interrupt would be redundant.
-		if (!shouldInterruptImmediately || signal?.aborted) {
-			return;
-		}
+		if (signal?.aborted) return;
 		// Mid-batch steering detection must be non-consuming. If a direct
 		// integration only provides getSteeringMessages(), the queue drains at the
 		// injection boundary below; polling it here would strand or drop messages.
@@ -2990,8 +2992,9 @@ async function executeToolCalls(
 			}
 		}
 		if (steeringQueued) {
-			// Queued steering hard-aborts only interruptible waits and raises the
-			// cooperative soft signal for everything else: the boundary dequeue
+			// Queued steering hard-aborts only interruptible waits and (unless
+			// interruptMode is "wait") raises the cooperative soft signal for
+			// everything else: the boundary dequeue
 			// below injects the message as soon as running tools finish (or
 			// background themselves), and not-yet-started interruptible waits
 			// are skipped. Idempotent — a second steer poll after the abort is
@@ -3000,7 +3003,7 @@ async function executeToolCalls(
 				interruptState.triggered = true;
 				interruptState.source = steeringSource ?? "unknown";
 				steeringAbortController.abort();
-				steeringSoftController.abort();
+				if (softInterrupts) steeringSoftController.abort();
 			}
 			return;
 		}
@@ -3312,10 +3315,12 @@ async function executeToolCalls(
 	// detection hard-aborts interruptible waits (running or not yet started),
 	// and steering/IRC additionally soft-signal cooperative tools
 	// (auto-background bash), so the boundary dequeue below injects the message
-	// promptly. Gated on immediate-interrupt mode; checkSteering is idempotent
-	// (no-op once triggered).
+	// promptly. In "wait" mode only a batch holding an interruptible wait needs
+	// the watch; checkSteering is idempotent (no-op once triggered).
 	const hasAsidePeek = hasIrcInterrupts !== undefined || hasBackgroundCompletions !== undefined;
-	const watchSteeringWhileRunning = shouldInterruptImmediately && (hasSteeringMessages !== undefined || hasAsidePeek);
+	const watchSteeringWhileRunning =
+		(softInterrupts || records.some(record => record.interruptible)) &&
+		(hasSteeringMessages !== undefined || hasAsidePeek);
 	const eventDrivenSteeringWatch =
 		watchSteeringWhileRunning && config.waitForSteeringMessages !== undefined && hasSteeringMessages !== undefined;
 	const steeringWatchAbortController = new AbortController();
@@ -3349,11 +3354,17 @@ async function executeToolCalls(
 						() => false,
 					);
 					if (!(await Promise.race([steeringChecked, watchAbortedFalse]))) return;
-					// Stop once the cooperative signal is up — steering and IRC
-					// have nothing left to escalate. A completion-only trigger
-					// leaves it down, so keep watching: a genuine steer arriving
-					// afterwards must still reach foreground tools.
-					if (steeringWatchSignal.aborted || steeringSoftController.signal.aborted) return;
+					// Stop once nothing is left to escalate: the cooperative signal
+					// is up, or (without soft interrupts) the waits are cut. A
+					// completion-only trigger leaves the soft signal down, so keep
+					// watching: a genuine steer arriving afterwards must still
+					// reach foreground tools.
+					if (
+						steeringWatchSignal.aborted ||
+						steeringSoftController.signal.aborted ||
+						(!softInterrupts && interruptState.triggered)
+					)
+						return;
 					if (!(await Promise.race([steeringQueued, watchAbortedFalse]))) return;
 				}
 			})()

@@ -6,6 +6,7 @@
 
 - `find` (and `omp find`) accepts an `omp://` docs scope: `omp://` searches every embedded harness doc and `omp://<file>.md` searches one, reporting hits as canonical `omp://` URLs that `read` opens directly, including with `:start-end` selectors ([#12758](https://github.com/can1357/oh-my-pi/pull/12758) by [@H4vC](https://github.com/H4vC)).
 - Extensions can run `/btw`-style side turns with `ctx.runEphemeralTurn()`, optionally omitting tool definitions and bounding output and outbound context, without adding to session history ([#11657](https://github.com/can1357/oh-my-pi/pull/11657) by [@gokceneraslan](https://github.com/gokceneraslan)).
+- Added conditional wait tool hint in eval prompts when the tool is available
 - Added `wait` tool for monitoring background jobs, services, and peer messages
 - Added `proc://` protocol for inspecting and managing background jobs and services
 - Added `agent://` path support to `write` tool for direct agent messaging
@@ -32,6 +33,7 @@
 
 ### Changed
 
+- Changed subagents to exclude the wait tool, preventing blocking on wait in nested agents
 - Changed default `bash.autoBackground.strategy` to `catalog`
 - Renamed `Launch` configuration group to `Services`
 - Improved terminal output for pipe-backed shells by normalizing line endings

@@ -2244,7 +2244,7 @@ async function driveSessionToYield(
 		// and are reaped at teardown.
 		//
 		// Before blocking on running jobs, tell the model ONCE what it is
-		// waiting on so it can use `wait` or cancel via `write proc://<id>` instead of sitting silent
+		// waiting on so it can stand by or cancel via `write proc://<id>` instead of sitting silent
 		// until the jobs (or the runtime limit) expire. Runs that never yield
 		// (ladder exhausted / terminal model error) skip the barrier — more
 		// injected turns just multiply the failure noise; the teardown reap
@@ -3372,19 +3372,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 
 	if (atMaxDepth && toolNames?.includes("task")) {
 		toolNames = toolNames.filter(name => name !== "task");
-	}
-	// Ordinary agents retain the host's collaboration wait capability.
-	// Restricted sessions must not widen their explicit host tool list.
-	if (
-		toolNames &&
-		!options.restrictToolNames &&
-		!toolNames.includes("wait") &&
-		(!isReadOnlyAgent(agent) || toolNames.includes("task")) &&
-		(subagentSettings.get("async.enabled") ||
-			(options.enableIrc !== false && isIrcEnabled(subagentSettings, childDepth)) ||
-			subagentSettings.get("launch.enabled"))
-	) {
-		toolNames = [...toolNames, "wait"];
 	}
 	if (toolNames?.includes("exec")) {
 		const backends = resolveEvalBackends({ settings } as ToolSession);
