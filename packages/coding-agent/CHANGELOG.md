@@ -19,6 +19,10 @@
 - Extensions load faster on warm starts: their dependencies are no longer re-parsed on every launch ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
 - The first highlighted code block, bash preview, or diff no longer stalls the screen while syntax highlighting initializes ([#12908](https://github.com/can1357/oh-my-pi/pull/12908) by [@H4vC](https://github.com/H4vC)).
 
+### Fixed
+
+- The Todo tracker now reflects nested `eval` Todo updates, including when a cell fails after committing ([#12921](https://github.com/can1357/oh-my-pi/pull/12921) by [@tommymorgan](https://github.com/tommymorgan)).
+
 ## [18.2.10] - 2026-09-22
 
 ### Added
