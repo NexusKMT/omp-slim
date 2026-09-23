@@ -706,7 +706,6 @@ describe("openai-codex Responses Lite and client metadata wire format", () => {
 
 		expect(result.stopReason).toBe("stop");
 		expect(captured!.headers.get("x-openai-internal-codex-responses-lite")).toBe("true");
-
 		const body = captured!.body;
 		expect(body.reasoning).toEqual({ context: "all_turns" });
 		expect(body.instructions).toBeUndefined();
