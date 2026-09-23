@@ -18,6 +18,29 @@ export const RECENT_CHANGELOG_ENTRY_LIMIT = 3;
 export const STARTUP_CHANGELOG_MAX_BYTES = 64 * 1024;
 /** Hint appended when automatic startup release notes are truncated. */
 export const STARTUP_CHANGELOG_FULL_HINT = "Use `/changelog full` to view the complete changelog.";
+/** Releases shown by `/changelog last` when no count is given. */
+export const DEFAULT_LAST_CHANGELOG_COUNT = 1;
+export const CHANGELOG_COMMAND_USAGE = "Usage: /changelog [full|last [N]]";
+
+/** Explicit `/changelog` view. Bare invocation stays the recent default. */
+export type ChangelogView = { kind: "full" } | { kind: "recent"; count: number };
+
+export function parseChangelogView(args: string): ChangelogView | { error: string } {
+	const trimmed = args.trim().toLowerCase();
+	if (!trimmed) return { kind: "recent", count: RECENT_CHANGELOG_ENTRY_LIMIT };
+	if (trimmed === "full") return { kind: "full" };
+	const match = trimmed.match(/^last(?:\s+(\d+))?$/);
+	if (!match) return { error: CHANGELOG_COMMAND_USAGE };
+	if (match[1] === undefined) return { kind: "recent", count: DEFAULT_LAST_CHANGELOG_COUNT };
+	const count = Number.parseInt(match[1], 10);
+	if (count < 1) return { error: "Usage: /changelog last [N] (N must be a positive integer)" };
+	return { kind: "recent", count };
+}
+
+export function selectChangelogEntries(entries: readonly ChangelogEntry[], view: ChangelogView): ChangelogEntry[] {
+	return view.kind === "full" ? [...entries] : entries.slice(0, view.count);
+}
+
 
 /** Markdown generated from selected changelog entries and whether it hit a size cap. */
 export interface RenderedChangelog {
