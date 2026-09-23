@@ -1,12 +1,9 @@
 import { prompt } from "@oh-my-pi/pi-utils";
 import annotationsTemplate from "./prompts/annotations.md" with { type: "text" };
 import reviewRequestTemplate from "../../../../prompts/review-request.md" with { type: "text" };
-import { getRecommendedReviewAgentCount, getReviewDiffPreview } from "@oh-my-pi/pi-tui/overlays/annotation-diff";
-import type {
-	CodeReviewAnnotation,
-	ResolvedReviewTarget,
-	ReviewDiffFile,
-} from "@oh-my-pi/pi-tui/overlays/annotation-types";
+import type { CodeReviewAnnotation, ReviewDiffFile } from "@oh-my-pi/pi-tui/overlays/annotation-types";
+import { getRecommendedReviewAgentCount, getReviewDiffPreview } from "./diff";
+import type { ResolvedReviewTarget } from "./target";
 
 const LARGE_DIFF_CHARACTER_LIMIT = 50_000;
 const LARGE_DIFF_FILE_LIMIT = 20;
@@ -43,18 +40,12 @@ function formatLineLabel(annotation: Extract<CodeReviewAnnotation, { scope: "lin
 	return "hunk";
 }
 
-function getFileExtension(file: ReviewDiffFile): string {
-	const name = file.path.slice(file.path.lastIndexOf("/") + 1);
-	const dot = name.lastIndexOf(".");
-	return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : "other";
-}
-
 function renderReviewPromptFile(file: ReviewDiffFile, previewLines: number): ReviewPromptFile {
 	return {
 		path: file.path,
 		linesAdded: file.linesAdded,
 		linesRemoved: file.linesRemoved,
-		ext: getFileExtension(file),
+		ext: file.path.match(/\.([^.]+)$/)?.[1] ?? "",
 		hunksPreview: previewLines > 0 ? getReviewDiffPreview(file.rawDiff, previewLines) : "",
 	};
 }

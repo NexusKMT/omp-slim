@@ -12,7 +12,8 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
-import { CopySelectorComponent, type CopySelection } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import { CopySelectorComponent } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import type { SessionPick } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/text-source";
 import {
 	AnnotateCommand,
 	runAnnotateCommand,
@@ -23,15 +24,14 @@ import type {
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/types";
 import type { ReviewPrRef } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/review";
 import {
-	createPrReviewTarget,
 	createResolvedReviewTarget,
+	type ResolvedReviewTarget,
 	type ReviewTargetUI,
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/review/target";
 import { buildTextReviewPrompt } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/annotate/text-review";
 import type { SessionMessageEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type {
 	CodeReviewAnnotation,
-	ResolvedReviewTarget,
 	TextReviewAnnotation,
 	TextReviewSource,
 } from "@oh-my-pi/pi-tui/overlays/annotation-types";
@@ -70,7 +70,7 @@ function createContext(options: ContextOptions = {}) {
 	const pasteToEditor = vi.fn((_text: string) => undefined);
 	const notify = vi.fn((_message: string, _type?: "info" | "warning" | "error") => undefined);
 	const setStatus = vi.fn((_key: string, _text: string | undefined) => undefined);
-	const pickedSelections: CopySelection[] = [];
+	const pickedSelections: SessionPick[] = [];
 	let customCalls = 0;
 	const custom: ExtensionUIContext["custom"] = async <T>(
 		factory: (
@@ -87,7 +87,7 @@ function createContext(options: ContextOptions = {}) {
 		const completion = Promise.withResolvers<T>();
 		const done = (result: T): void => {
 			if (typeof result === "object" && result !== null && "entry" in result && "content" in result) {
-				pickedSelections.push(result as unknown as CopySelection);
+				pickedSelections.push(result as unknown as SessionPick);
 			}
 			completion.resolve(result);
 		};
@@ -196,15 +196,16 @@ afterEach(() => {
 });
 
 describe("/annotate contracts", () => {
-	it("opens the local target selected from the source menu and pastes code notes without submitting", async () => {
+	it("resolves the selected local target in the live session cwd and pastes code notes without submitting", async () => {
 		const { ctx, select, pasteToEditor } = createContext({
 			selectResults: ["Code review", "2. Review uncommitted changes"],
+			cwd: "/live-worktree",
 		});
 		const target = localTarget();
 		const resolveLocalReviewTarget = vi.fn(
 			async (kind: "base-branch" | "uncommitted" | "commit", cwd: string, _ui: ReviewTargetUI) => {
 				expect(kind).toBe("uncommitted");
-				expect(cwd).toBe("/workspace");
+				expect(cwd).toBe("/live-worktree");
 				return target;
 			},
 		);
@@ -238,7 +239,7 @@ describe("/annotate contracts", () => {
 		const prUrl = "https://github.com/acme/project/pull/42";
 		const contextInstruction =
 			"MUST NOT read local workspace files for PR file context; use the fetched PR diff only";
-		const target = createPrReviewTarget("PR acme/project#42", SAMPLE_DIFF, "PR has no diff", {
+		const target = createResolvedReviewTarget("pr", "PR acme/project#42", SAMPLE_DIFF, "PR has no diff", {
 			diffInstruction: "MUST read the fetched PR diff",
 			contextInstruction,
 		});
@@ -253,13 +254,12 @@ describe("/annotate contracts", () => {
 			rawLine: "+const value = 2;",
 			note: exactNote,
 		};
-		const resolvePrReviewTarget = vi.fn(
-			async (_api: CustomCommandAPI, _ctx: CustomCommandContext, ref: ReviewPrRef) => {
-				expect(ref.repo).toBe("acme/project");
-				expect(ref.number).toBe(42);
-				return target;
-			},
-		);
+		const resolvePrReviewTarget = vi.fn(async (cwd: string, _ctx: CustomCommandContext, ref: ReviewPrRef) => {
+			expect(cwd).toBe("/workspace");
+			expect(ref.repo).toBe("acme/project");
+			expect(ref.number).toBe(42);
+			return target;
+		});
 		const showCodeReviewOverlay = vi.fn(async () => ({
 			action: "review" as const,
 			annotations: [annotation],
@@ -379,7 +379,7 @@ describe("/annotate contracts", () => {
 		expect(result).toBeUndefined();
 		expect(pickedSelections[0]?.entry).toBe(assistant);
 		expect(pickedSelections[0]?.block?.content).toBe(longCommand);
-		expect(pickedSelections[0]?.block?.command?.kind).toBe("bash");
+		expect(pickedSelections[0]?.block?.kind).toBe("command");
 		expect(generateTextReviewContextSummary).not.toHaveBeenCalled();
 		const prompt = pasteToEditor.mock.calls[0]?.[0] ?? "";
 		expect(countOccurrences(prompt, longCommand)).toBe(1);
@@ -493,15 +493,15 @@ describe("/annotate contracts", () => {
 		});
 	});
 
-	it("completes spaced file paths without quotes and keeps quoted text literal", async () => {
+	it("completes spaced file paths from the live cwd without quotes and keeps quoted text literal", async () => {
 		await withTempDir(async directory => {
 			const relativePath = "nested folder/source file.txt";
 			await mkdir(join(directory, "nested folder"), { recursive: true });
 			await writeFile(join(directory, relativePath), "completion source", "utf8");
-			const api = { ...API, cwd: directory } as unknown as CustomCommandAPI;
-			const command = new AnnotateCommand(api);
+			// The load-time API cwd is stale; completions must follow the live cwd argument.
+			const command = new AnnotateCommand(API);
 
-			const empty = await command.getArgumentCompletions?.("");
+			const empty = await command.getArgumentCompletions("", directory);
 			expect(empty?.map(item => item.label)).toEqual([
 				"last",
 				"session",
@@ -510,17 +510,17 @@ describe("/annotate contracts", () => {
 				'"prompt text"',
 			]);
 
-			const partial = await command.getArgumentCompletions?.("se");
+			const partial = await command.getArgumentCompletions("se", directory);
 			expect(partial?.map(item => item.label)).toEqual(["session"]);
 
-			const fileMatches = await command.getArgumentCompletions?.("./nested folder/source");
+			const fileMatches = await command.getArgumentCompletions("./nested folder/source", directory);
 			expect(fileMatches?.map(item => item.value)).toContain("./nested folder/source file.txt");
 			expect(fileMatches?.every(item => !item.value.startsWith('"'))).toBe(true);
 
-			const literalMatches = await command.getArgumentCompletions?.('"nested folder/source');
+			const literalMatches = await command.getArgumentCompletions('"nested folder/source', directory);
 			expect(literalMatches?.map(item => item.value)).toEqual(['"nested folder/source"']);
 			expect(literalMatches?.some(item => item.value.includes("source file.txt"))).toBe(false);
-			const whitespaceLiteralMatches = await command.getArgumentCompletions?.('  "nested folder/source');
+			const whitespaceLiteralMatches = await command.getArgumentCompletions('  "nested folder/source', directory);
 			expect(whitespaceLiteralMatches?.map(item => item.value)).toEqual(['  "nested folder/source"']);
 		});
 	});

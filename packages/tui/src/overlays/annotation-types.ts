@@ -1,5 +1,3 @@
-export type LocalReviewKind = "base-branch" | "uncommitted" | "commit";
-
 export type ReviewSourceRowKind = "context" | "added" | "removed";
 
 export interface ReviewSourceRow {
@@ -26,31 +24,6 @@ export interface ReviewDiffFile {
 	linesAdded: number;
 	linesRemoved: number;
 	isBinary: boolean;
-}
-
-export interface ExcludedReviewFile {
-	path: string;
-	reason: string;
-	linesAdded: number;
-	linesRemoved: number;
-}
-
-export interface ReviewDiffSnapshot {
-	files: ReviewDiffFile[];
-	excluded: ExcludedReviewFile[];
-	totalAdded: number;
-	totalRemoved: number;
-}
-
-export interface ResolvedReviewTarget {
-	kind: LocalReviewKind | "pr";
-	mode: string;
-	rawDiff: string;
-	snapshot: ReviewDiffSnapshot;
-	emptyMessage: string;
-	filteredMessage?: string;
-	diffInstruction?: string;
-	contextInstruction?: string;
 }
 
 export interface CodeReviewAnnotationBase {

@@ -909,6 +909,12 @@ describe("PlanReviewOverlay", () => {
 		expect(editorDraft).toBe("draft");
 		expect(render(overlay)).toContain("Annotate");
 		expect(render(overlay)).toContain("- add rollback command");
+		// A multi-line draft renders as separate editor rows, never as an embedded newline.
+		const draftLines = overlay.render(80);
+		expect(draftLines.some(line => line.includes("\n"))).toBe(false);
+		expect(draftLines.map(line => stripVTControlCharacters(line)).filter(line => line.includes("- "))).toHaveLength(
+			2,
+		);
 		expect(onFeedbackChange).not.toHaveBeenCalled();
 
 		overlay.handleInput(ENTER);

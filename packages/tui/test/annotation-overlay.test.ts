@@ -4,7 +4,6 @@ import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { getKeybindings, setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
 import { getThemeByName, setThemeInstance, type Theme } from "@oh-my-pi/pi-tui/theme";
 import { AnnotationOverlay, type AnnotationOverlayCallbacks } from "@oh-my-pi/pi-tui/overlays/annotation-overlay";
-import { parseReviewDiffSnapshot } from "@oh-my-pi/pi-tui/overlays/annotation-diff";
 import type {
 	CodeReviewOverlayResult,
 	ReviewDiffFile,
@@ -57,12 +56,27 @@ function makeTui(): TUI {
 	} as unknown as TUI;
 }
 
-const oneLineDiff = `diff --git a/src/value.ts b/src/value.ts
---- a/src/value.ts
-+++ b/src/value.ts
-@@ -1 +1 @@
--old
-+new`;
+function diffFile(path: string, hunkHeader: string, rows: ReviewDiffFile["rows"]): ReviewDiffFile {
+	return {
+		path,
+		oldPath: path,
+		newPath: path,
+		occurrence: 1,
+		rawDiff: [`diff --git a/${path} b/${path}`, hunkHeader, ...rows.map(row => row.raw)].join("\n"),
+		rows: [{ kind: "hunk", raw: hunkHeader, hunkHeader }, ...rows],
+		linesAdded: rows.filter(row => row.kind === "added").length,
+		linesRemoved: rows.filter(row => row.kind === "removed").length,
+		isBinary: false,
+	};
+}
+
+const ONE_LINE_HUNK = "@@ -1 +1 @@";
+const oneLineFiles = [
+	diffFile("src/value.ts", ONE_LINE_HUNK, [
+		{ kind: "removed", raw: "-old", content: "old", oldLine: 1, hunkHeader: ONE_LINE_HUNK },
+		{ kind: "added", raw: "+new", content: "new", newLine: 1, hunkHeader: ONE_LINE_HUNK },
+	]),
+];
 
 describe("AnnotationOverlay", () => {
 	beforeAll(async () => {
@@ -85,13 +99,14 @@ describe("AnnotationOverlay", () => {
 	});
 
 	it("anchors a line note to the frozen source row and deletes it on an empty edit", () => {
-		const files = parseReviewDiffSnapshot(`diff --git a/src/long.ts b/src/long.ts
---- a/src/long.ts
-+++ b/src/long.ts
-@@ -12,2 +12,2 @@
- context
--removed
-+added`).files;
+		const hunkHeader = "@@ -12,2 +12,2 @@";
+		const files = [
+			diffFile("src/long.ts", hunkHeader, [
+				{ kind: "context", raw: " context", content: "context", oldLine: 12, newLine: 12, hunkHeader },
+				{ kind: "removed", raw: "-removed", content: "removed", oldLine: 13, hunkHeader },
+				{ kind: "added", raw: "+added", content: "added", newLine: 13, hunkHeader },
+			]),
+		];
 		const overlay = makeDiffOverlay(files);
 
 		render(overlay);
@@ -120,7 +135,7 @@ describe("AnnotationOverlay", () => {
 	});
 
 	it("preserves a saved note when editing is cancelled", () => {
-		const overlay = makeDiffOverlay(parseReviewDiffSnapshot(oneLineDiff).files);
+		const overlay = makeDiffOverlay(oneLineFiles);
 		render(overlay);
 		overlay.handleInput(TAB);
 		overlay.handleInput("a");
@@ -131,6 +146,35 @@ describe("AnnotationOverlay", () => {
 		overlay.handleInput("discarded");
 		overlay.handleInput(CANCEL);
 		expect(overlay.getAnnotations().map(annotation => annotation.note)).toEqual(["saved"]);
+	});
+
+	it("undoes the latest change instead of dropping the newest note", () => {
+		const overlay = makeDiffOverlay(oneLineFiles);
+		render(overlay);
+		overlay.handleInput(TAB);
+		overlay.handleInput("a");
+		overlay.handleInput("first");
+		overlay.handleInput(ENTER);
+		overlay.handleInput(DOWN);
+		overlay.handleInput("a");
+		overlay.handleInput("second");
+		overlay.handleInput(ENTER);
+		overlay.handleInput("\x1b[A");
+		overlay.handleInput("e");
+		overlay.handleInput(CTRL_U);
+		overlay.handleInput("edited");
+		overlay.handleInput(ENTER);
+		expect(overlay.getAnnotations().map(annotation => annotation.note)).toEqual(["edited", "second"]);
+
+		overlay.handleInput("u");
+		expect(overlay.getAnnotations().map(annotation => annotation.note)).toEqual(["first", "second"]);
+
+		overlay.handleInput("e");
+		overlay.handleInput(CTRL_U);
+		overlay.handleInput(ENTER);
+		expect(overlay.getAnnotations().map(annotation => annotation.note)).toEqual(["second"]);
+		overlay.handleInput("u");
+		expect(overlay.getAnnotations().map(annotation => annotation.note)).toEqual(["first", "second"]);
 	});
 
 	it("preserves exact text quotes while annotating a selected line", () => {
@@ -156,7 +200,7 @@ describe("AnnotationOverlay", () => {
 	});
 
 	it("chooses duplicate line notes and deletes only the selected note", () => {
-		const overlay = makeDiffOverlay(parseReviewDiffSnapshot(oneLineDiff).files);
+		const overlay = makeDiffOverlay(oneLineFiles);
 		render(overlay);
 		overlay.handleInput(TAB);
 		overlay.handleInput("a");
@@ -179,7 +223,7 @@ describe("AnnotationOverlay", () => {
 		const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
 		Object.defineProperty(process.stdout, "rows", { configurable: true, value: 12 });
 		try {
-			const overlay = makeDiffOverlay(parseReviewDiffSnapshot(oneLineDiff).files);
+			const overlay = makeDiffOverlay(oneLineFiles);
 			render(overlay);
 			overlay.handleInput(TAB);
 			overlay.handleInput("a");
@@ -204,7 +248,7 @@ describe("AnnotationOverlay", () => {
 	});
 
 	it("supports multiline notes and treats a blank new draft as a no-op", () => {
-		const overlay = makeDiffOverlay(parseReviewDiffSnapshot(oneLineDiff).files);
+		const overlay = makeDiffOverlay(oneLineFiles);
 		render(overlay);
 		overlay.handleInput(TAB);
 		overlay.handleInput("a");
@@ -249,7 +293,7 @@ describe("AnnotationOverlay", () => {
 			makeTui(),
 			darkTheme!,
 			getKeybindings() as KeybindingsManager,
-			parseReviewDiffSnapshot(oneLineDiff).files,
+			oneLineFiles,
 			"PR #1",
 			{
 				onAnnotationExternalEditor: (draft, commit) => {
@@ -273,7 +317,7 @@ describe("AnnotationOverlay", () => {
 
 	it("returns undefined on cancel without a review result", () => {
 		const completed: Array<CodeReviewOverlayResult | undefined> = [];
-		const overlay = makeDiffOverlay(parseReviewDiffSnapshot(oneLineDiff).files, {
+		const overlay = makeDiffOverlay(oneLineFiles, {
 			onComplete: result => completed.push(result),
 		});
 		overlay.handleInput(CANCEL);

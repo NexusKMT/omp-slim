@@ -3,10 +3,10 @@ import { AnnotationOverlay } from "@oh-my-pi/pi-tui/overlays/annotation-overlay"
 import type { CustomCommandContext } from "../../../../extensibility/custom-commands/types";
 import type {
 	CodeReviewOverlayResult,
-	ResolvedReviewTarget,
 	TextReviewOverlayResult,
 	TextReviewSource,
 } from "@oh-my-pi/pi-tui/overlays/annotation-types";
+import type { ResolvedReviewTarget } from "../review/target";
 import { getEditorCommand, openInEditor } from "../../../../utils/external-editor";
 
 const ANNOTATION_OVERLAY_OPTIONS = {

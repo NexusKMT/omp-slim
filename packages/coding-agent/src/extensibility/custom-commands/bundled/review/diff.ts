@@ -1,5 +1,20 @@
-import type { ExcludedReviewFile, ReviewDiffFile, ReviewDiffRow, ReviewDiffSnapshot } from "./annotation-types";
+import type { ReviewDiffFile, ReviewDiffRow } from "@oh-my-pi/pi-tui/overlays/annotation-types";
 
+export interface ExcludedReviewFile {
+	path: string;
+	reason: string;
+	linesAdded: number;
+	linesRemoved: number;
+}
+
+export interface ReviewDiffSnapshot {
+	files: ReviewDiffFile[];
+	excluded: ExcludedReviewFile[];
+	totalAdded: number;
+	totalRemoved: number;
+}
+
+/** Paths the review diff provider withholds from reviewers and the annotation view. */
 const EXCLUDED_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
 	{ pattern: /\.lock$/, reason: "lock file" },
 	{ pattern: /-lock\.(json|yaml|yml)$/, reason: "lock file" },

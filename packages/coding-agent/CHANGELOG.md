@@ -11,15 +11,13 @@
 - Added openrouter/~typesafe/jev-latest as a native judge candidate in priority configuration
 - Added `OMP_MCP_STARTUP_TIMEOUT_MS` and `mcp.startupTimeoutMs` to configure the initial MCP discovery window, plus `OMP_MCP_REQUIRE_READY=1` to fail headless print runs before the first turn when a server is unavailable.
 - Added `auth.accountPolicies` for per-account OAuth priority and reserve controls, with matching policy state in `omp usage` ([#12243](https://github.com/can1357/oh-my-pi/pull/12243) by [@schickling-assistant](https://github.com/schickling-assistant)).
+- Added `/annotate` to attach notes to a code-review diff, the latest reply, a session message, a file, or quoted text, then paste them into the prompt or send them with a review ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
 
 ### Changed
 
 - Unified terminal OAuth flow logic across `omp login` and `omp auth-broker login`
 - Included identity account/organization info in terminal login success messages
 - Changed judgment fallback to consider only native candidates, preventing prompted models from replacing failed natives
-- Enhanced browser resilience with configurable HTTPS error ignoring, domain allow-listing, and automatic tab recycling for security-sensitive state changes
-- Added `Target.getTargets` to the browser relay's CDP surface so clients can enumerate eligible pages without attaching to or claiming them.
-- Added native `/annotate` for local/PR code-review diffs, latest/session text, and file or literal-prompt sources, reusing the built-in `/copy` selection with editable/deletable notes, paste-only text flows, bounded selected-model context for older long session text, and argument completion hints for modes, file paths, and quoted literal prompts ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
 
 ### Fixed
 

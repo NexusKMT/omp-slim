@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a fullscreen annotation overlay for diffs and text, with multi-line notes, editing, deletion, and undo ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
+
 ### Changed
 
 - Updated model hub and oauth selector components to use namespaced `authStorage` API
+- Plan Review annotations can now be edited or deleted, span multiple lines, and be undone ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
 
 ## [18.2.11] - 2026-09-23
 
@@ -64,13 +69,6 @@
 ### Fixed
 
 - Prevented magic keywords from triggering spelling autocorrect and underlining
-### Added
-
-- Added the native annotation overlay for diffs and text, with inline/external note editing, empty-note deletion, cancellation, and native `/copy` session selection without auto-submission ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy))
-
-### Changed
-
-- Plan Review now lets users edit existing annotations from the overlay, with empty-note deletion, Escape cancellation, and undo ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.2.5] - 2026-09-17
 

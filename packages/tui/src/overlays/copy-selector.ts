@@ -26,7 +26,7 @@ import {
 import type { SessionMessageEntryLike as SessionMessageEntry } from "../chat/transcript-entry";
 import { replaceTabs } from "../render/render-utils";
 import { highlightCode, type ThemeColor, theme } from "../theme/theme";
-import { commandFromToolCall, extractBlocks, extractLinks, type LastCommand, type MessageBlock } from "./copy-targets";
+import { commandFromToolCall, extractBlocks, extractLinks } from "./copy-targets";
 import { matchesAppToolsExpand, matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
 import { ChatTranscriptBuilder } from "../chat/chat-transcript-builder";
 import { TranscriptBrowser, type TranscriptBrowserFrame } from "../chat/transcript-browser";
@@ -37,16 +37,6 @@ import {
 	type OutlineTarget,
 	outlineRows,
 } from "../chat/transcript-outline";
-
-/** Metadata for the exact content selected from the transcript picker. */
-export interface CopySelection {
-	content: string;
-	label: string;
-	/** The persisted transcript entry that supplied this content. */
-	entry: TranscriptEntry;
-	/** The exact inner block selected, when the picker is descended into a turn. */
-	block?: CopyBlock;
-}
 
 export interface CopySelectorDeps {
 	ui: TUI;
@@ -59,15 +49,25 @@ export interface CopySelectorDeps {
 	proseOnlyThinking?: () => boolean;
 	linkTargets?: ReadonlyMap<string, string>;
 	requestRender: () => void;
-	/** Optional replacement for the Copy overlay title (for source pickers). */
+	/** Replaces the "Copy" header when the picker is reused for another purpose. */
 	title?: string;
-	/** Optional action label used in controls and hints instead of "copy". */
+	/** Verb shown for the pick action in hints and block controls (default "copy"). */
 	actionLabel?: string;
-	/** The outlined content was chosen — copy it. `label` feeds the status line. */
-	onPick: (content: string, label: string, selection: CopySelection) => void;
+	/**
+	 * The outlined content was chosen — copy it. `label` feeds the status line;
+	 * `source` names the transcript entry (and inner block, when descended) it came from.
+	 */
+	onPick: (content: string, label: string, source: CopyPickSource) => void;
 	/** `o` on a link block — open `href` with the system opener. Absent: `o` is ignored. */
 	onOpen?: (href: string, label: string) => void;
 	onCancel: () => void;
+}
+
+/** Where picked content came from in the transcript. */
+export interface CopyPickSource {
+	entry: TranscriptEntry;
+	/** The inner block, when the pick happened in the descended block view. */
+	block?: CopyBlock;
 }
 
 /** One copyable inner block of a transcript turn. */
@@ -76,27 +76,14 @@ export interface CopyBlock {
 	label: string;
 	/** Exact text placed on the clipboard. */
 	content: string;
+	/** Transcript entry that produced this block. */
+	entry: TranscriptEntry;
+	/** Markdown code/quote block, or a bash/eval tool-call command. */
+	kind?: "code" | "quote" | "command";
 	/** Highlight language for the block preview. */
 	language?: string;
 	/** Set for link blocks: the URL `o` opens. `content` is the same URL. */
 	href?: string;
-	/** Present only for code/quote blocks extracted from markdown. */
-	kind?: MessageBlock["kind"];
-	/** Native command metadata for assistant tool-call blocks. */
-	command?: LastCommand;
-}
-
-interface SourcedCopyBlock {
-	entry: TranscriptEntry;
-	block: CopyBlock;
-}
-function blockSelection(source: SourcedCopyBlock): CopySelection {
-	return {
-		content: source.block.content,
-		label: source.block.label,
-		entry: source.entry,
-		block: source.block,
-	};
 }
 
 /** Preview rows shown per block in the descended view; copy always takes the full text. */
@@ -127,9 +114,9 @@ export class CopySelectorComponent implements Component {
 	#visible: boolean[] | undefined;
 	#expanded = false;
 	/** Inner blocks of the selected turn while descended, else undefined. */
-	#blocks: SourcedCopyBlock[] | undefined;
+	#blocks: CopyBlock[] | undefined;
 	#blockSelected = 0;
-	#blockCache = new Map<string, SourcedCopyBlock[]>();
+	#blockCache = new Map<string, CopyBlock[]>();
 	/** Click targets of the last render, keyed by composed-column line index. */
 	#controls = new Map<number, ControlRegion[]>();
 
@@ -204,7 +191,7 @@ export class CopySelectorComponent implements Component {
 		this.#builder.dispose();
 	}
 
-	#blocksFor(target: OutlineTarget): SourcedCopyBlock[] {
+	#blocksFor(target: OutlineTarget): CopyBlock[] {
 		const cached = this.#blockCache.get(target.turnId);
 		if (cached) return cached;
 		const blocks = collectBlocks(target.entries);
@@ -220,6 +207,8 @@ export class CopySelectorComponent implements Component {
 		if (data.startsWith("\x1b[<")) {
 			routeSgrMouseInput(data, event => {
 				if (event.wheel !== null) {
+					// A wheel notch at either end moves nothing: repainting it
+					// anyway makes the frame twitch under a fast wheel.
 					if (this.#browser.scroll(event.wheel * 3)) this.deps.requestRender();
 					return true;
 				}
@@ -267,28 +256,26 @@ export class CopySelectorComponent implements Component {
 			return;
 		}
 		if (data === "o" || data === "O") {
-			const source = this.#blocks?.[this.#blockSelected];
-			const block = source?.block;
+			const block = this.#blocks?.[this.#blockSelected];
 			if (block?.href && this.deps.onOpen) this.deps.onOpen(block.href, block.label);
 			return;
 		}
 		if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
 			if (this.#blocks) {
-				const source = this.#blocks[this.#blockSelected];
-				if (source) {
-					const selection = blockSelection(source);
-					this.deps.onPick(selection.content, selection.label, selection);
-				}
+				const block = this.#blocks[this.#blockSelected];
+				if (block) this.deps.onPick(block.content, block.label, { entry: block.entry, block });
 				return;
 			}
 			const target = this.#targets[this.#selected];
 			if (!target) return;
-			const selection = targetCopy(target, this.#blocksFor(target));
-			this.deps.onPick(selection.content, selection.label, selection);
+			const item = targetCopy(target, this.#blocksFor(target));
+			this.deps.onPick(item.content, item.label, { entry: target.entries[0]! });
 			return;
 		}
 		// Page/home/end/shift+arrow scrolling without moving the selection.
-		if (this.#browser.handleScrollKey(data)) this.deps.requestRender();
+		if (this.#browser.handleScrollKey(data)) {
+			this.deps.requestRender();
+		}
 	}
 
 	#ascend(): void {
@@ -307,16 +294,14 @@ export class CopySelectorComponent implements Component {
 		if (!regions) return;
 		const hit = regions.find(region => point.col >= region.start && point.col < region.end);
 		if (!hit) return;
-		const source = this.#blocks[hit.blockIndex];
-		if (!source) return;
+		const block = this.#blocks[hit.blockIndex];
+		if (!block) return;
 		this.#blockSelected = hit.blockIndex;
 		if (hit.action === "open") {
-			const block = source.block;
 			if (block.href && this.deps.onOpen) this.deps.onOpen(block.href, block.label);
 			return;
 		}
-		const selection = blockSelection(source);
-		this.deps.onPick(selection.content, selection.label, selection);
+		this.deps.onPick(block.content, block.label, { entry: block.entry, block });
 	}
 
 	#moveVertical(delta: -1 | 1): void {
@@ -394,23 +379,23 @@ export class CopySelectorComponent implements Component {
 			}).column;
 		}
 
-		const selectedBlock = this.#blocks?.[this.#blockSelected]?.block;
-		const actionLabel = this.deps.actionLabel ?? "copy";
+		const selectedBlock = this.#blocks?.[this.#blockSelected];
 		const openHint = selectedBlock?.href && this.deps.onOpen ? "  o open" : "";
+		const action = this.deps.actionLabel ?? "copy";
 		const hint = this.#blocks
-			? `${this.#blockSelected + 1}/${this.#blocks.length}  ↑/↓ block  ←/esc back  enter ${actionLabel}${openHint}  click ${theme.cmd.copy}/${theme.cmd.share}`
-			: `${this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : ""}↑/↓ step  ${blocks.length > 0 ? "→ blocks  " : ""}enter ${actionLabel}  ${this.#truncated ? "a earlier turns  " : ""}ctrl+o expand  esc close`;
+			? `${this.#blockSelected + 1}/${this.#blocks.length}  ↑/↓ block  ←/esc back  enter ${action}${openHint}  click ${theme.cmd.copy}/${theme.cmd.share}`
+			: `${this.#targets.length > 0 ? `${this.#selected + 1}/${this.#targets.length}  ` : ""}↑/↓ step  ${blocks.length > 0 ? "→ blocks  " : ""}enter ${action}  ${this.#truncated ? "a earlier turns  " : ""}ctrl+o expand  esc close`;
 		const anchorId = target
 			? this.#blocks
 				? `copy:${target.turnId}:block:${this.#blockSelected}`
 				: `copy:${target.turnId}`
 			: undefined;
-		const heading = this.deps.title ? theme.bold(this.deps.title) : `${theme.cmd.copy} ${theme.bold("Copy")}`;
-		const description = this.deps.title
-			? theme.fg("dim", "pick a transcript source")
-			: theme.fg("dim", "pick what to put on the clipboard");
 		return {
-			header: [`${heading}${theme.sep.dot}${description}`],
+			header: [
+				this.deps.title
+					? theme.bold(this.deps.title)
+					: `${theme.cmd.copy} ${theme.bold("Copy")}${theme.sep.dot}${theme.fg("dim", "pick what to put on the clipboard")}`,
+			],
 			body: {
 				lines: composed.lines,
 				anchor:
@@ -428,13 +413,13 @@ export class CopySelectorComponent implements Component {
 	 * are recorded in `#controls` under the composed line index
 	 * (`lineOffset` + local index) so {@link #click} can resolve a mouse hit.
 	 */
-	#composeBlocks(blocks: SourcedCopyBlock[], columnWidth: number, lineOffset: number): ComposedColumn {
+	#composeBlocks(blocks: CopyBlock[], columnWidth: number, lineOffset: number): ComposedColumn {
 		const inner = Math.max(10, columnWidth - 4);
 		const lines: string[] = [];
 		let selStart = -1;
 		let selEnd = -1;
 		for (let index = 0; index < blocks.length; index++) {
-			const block = blocks[index]!.block;
+			const block = blocks[index]!;
 			const raw = block.content.split("\n");
 			const shown = raw.slice(0, BLOCK_PREVIEW_LINES);
 			const styled = block.language ? highlightCode(shown.join("\n"), block.language) : shown;
@@ -533,36 +518,35 @@ function toolResultText(message: Extract<SessionMessageEntry["message"], { role:
 		.trim();
 }
 
-function pushMarkdownBlocks(blocks: SourcedCopyBlock[], text: string, entry: TranscriptEntry): void {
+function pushMarkdownBlocks(blocks: CopyBlock[], text: string, entry: TranscriptEntry): void {
 	for (const block of extractBlocks(text)) {
-		const copyBlock: CopyBlock =
-			block.kind === "code"
-				? {
-						label: block.lang ? `${block.lang} code` : "code",
-						content: block.code,
-						language: block.lang || undefined,
-						kind: block.kind,
-					}
-				: { label: "quote", content: block.text, kind: block.kind };
-		blocks.push({ entry, block: copyBlock });
+		if (block.kind === "code") {
+			blocks.push({
+				label: block.lang ? `${block.lang} code` : "code",
+				content: block.code,
+				entry,
+				kind: "code",
+				language: block.lang || undefined,
+			});
+		} else {
+			blocks.push({ label: "quote", content: block.text, entry, kind: "quote" });
+		}
 	}
 	// Links follow the message's blocks. The preview shows the whole URL on one
 	// row, so a link the transcript wrapped is copied or opened intact.
 	for (const link of extractLinks(text)) {
 		blocks.push({
+			label: link.text !== link.href ? `link${theme.sep.dot}${link.text}` : "link",
+			content: link.href,
 			entry,
-			block: {
-				label: link.text !== link.href ? `link${theme.sep.dot}${link.text}` : "link",
-				content: link.href,
-				href: link.href,
-			},
+			href: link.href,
 		});
 	}
 }
 
 /** Inner blocks of one turn: markdown code/quotes, commands, and tool output. */
-function collectBlocks(entries: readonly TranscriptEntry[]): SourcedCopyBlock[] {
-	const blocks: SourcedCopyBlock[] = [];
+function collectBlocks(entries: readonly TranscriptEntry[]): CopyBlock[] {
+	const blocks: CopyBlock[] = [];
 	for (const entry of entries) {
 		const message = transcriptEntryMessage(entry);
 		if (!message) continue;
@@ -577,13 +561,11 @@ function collectBlocks(entries: readonly TranscriptEntry[]): SourcedCopyBlock[] 
 					const command = commandFromToolCall(content);
 					if (command) {
 						blocks.push({
+							label: command.kind === "bash" ? "bash command" : "eval code",
+							content: command.code,
 							entry,
-							block: {
-								label: command.kind === "bash" ? "bash command" : "eval code",
-								content: command.code,
-								language: command.language,
-								command,
-							},
+							kind: "command",
+							language: command.language,
 						});
 					}
 				}
@@ -591,37 +573,16 @@ function collectBlocks(entries: readonly TranscriptEntry[]): SourcedCopyBlock[] 
 			}
 			case "toolResult": {
 				const text = toolResultText(message);
-				if (text)
-					blocks.push({
-						entry,
-						block: {
-							label: `${message.toolName} result`,
-							content: text,
-						},
-					});
+				if (text) blocks.push({ label: `${message.toolName} result`, content: text, entry });
 				break;
 			}
 			case "bashExecution":
-				blocks.push({
-					entry,
-					block: {
-						label: "command",
-						content: message.command,
-						language: "bash",
-					},
-				});
-				if (message.output.trim()) blocks.push({ entry, block: { label: "output", content: message.output } });
+				blocks.push({ label: "command", content: message.command, entry, language: "bash" });
+				if (message.output.trim()) blocks.push({ label: "output", content: message.output, entry });
 				break;
 			case "pythonExecution":
-				blocks.push({
-					entry,
-					block: {
-						label: "eval code",
-						content: message.code,
-						language: "python",
-					},
-				});
-				if (message.output.trim()) blocks.push({ entry, block: { label: "output", content: message.output } });
+				blocks.push({ label: "eval code", content: message.code, entry, language: "python" });
+				if (message.output.trim()) blocks.push({ label: "output", content: message.output, entry });
 				break;
 			default:
 				break;
@@ -631,42 +592,40 @@ function collectBlocks(entries: readonly TranscriptEntry[]): SourcedCopyBlock[] 
 }
 
 /** Clipboard payload for a whole turn, falling back to its blocks when the turn has no prose. */
-function targetCopy(target: OutlineTarget, blocks: readonly SourcedCopyBlock[]): CopySelection {
+function targetCopy(target: OutlineTarget, blocks: readonly CopyBlock[]): { content: string; label: string } {
 	const entry = target.entries[0]!;
 	const message = transcriptEntryMessage(entry);
 	switch (message?.role) {
 		case "user":
-			return { content: rawUserText(message), label: "user message", entry };
+			return { content: rawUserText(message), label: "user message" };
 		case "assistant": {
 			const text = assistantVisibleText(message);
-			if (text) return { content: text, label: "assistant message", entry };
+			if (text) return { content: text, label: "assistant message" };
 			break;
 		}
 		case "toolResult": {
 			const text = toolResultText(message);
-			if (text) return { content: text, label: `${message.toolName} result`, entry };
+			if (text) return { content: text, label: `${message.toolName} result` };
 			break;
 		}
 		case "bashExecution":
 			return {
 				content: [message.command, message.output].filter(part => part.trim()).join("\n"),
 				label: "bash execution",
-				entry,
 			};
 		case "pythonExecution":
 			return {
 				content: [message.code, message.output].filter(part => part.trim()).join("\n"),
 				label: "eval execution",
-				entry,
 			};
 		case "compactionSummary":
 		case "branchSummary":
-			return { content: message.summary, label: "summary", entry };
+			return { content: message.summary, label: "summary" };
 		case "custom":
 		case "hookMessage": {
 			// A user-invoked skill/collab prompt copies as what the user typed, not the expanded body.
 			const draft = message.role === "custom" ? userTurnDraft(entry) : undefined;
-			if (draft?.trim()) return { content: draft, label: "user message", entry };
+			if (draft?.trim()) return { content: draft, label: "user message" };
 			const content =
 				typeof message.content === "string"
 					? message.content
@@ -674,16 +633,12 @@ function targetCopy(target: OutlineTarget, blocks: readonly SourcedCopyBlock[]):
 							.filter((block): block is { type: "text"; text: string } => block.type === "text")
 							.map(block => block.text)
 							.join("\n");
-			if (content.trim()) return { content, label: "message", entry };
+			if (content.trim()) return { content, label: "message" };
 			break;
 		}
 		default:
 			break;
 	}
 	// No direct prose (e.g. a pure tool turn): fall back to its blocks joined.
-	return {
-		content: blocks.map(source => source.block.content).join("\n\n"),
-		label: "turn content",
-		entry,
-	};
+	return { content: blocks.map(block => block.content).join("\n\n"), label: "turn content" };
 }

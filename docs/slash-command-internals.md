@@ -23,32 +23,6 @@ This document describes how slash commands are discovered, deduplicated, surface
 - [`src/modes/controllers/input-controller.ts`](../packages/coding-agent/src/modes/controllers/input-controller.ts)
 - [`src/modes/utils/ui-helpers.ts`](../packages/coding-agent/src/modes/utils/ui-helpers.ts)
 
-## Annotate
-
-`/annotate` opens a source menu when no source argument is supplied.
-
-Typing `/annotate ` offers completion rows for `last`, `session`, and `code-review`, plus `./` file-path and quoted-literal starters. File suggestions keep paths with spaces unquoted; text that starts with a quote remains literal and never receives filename suggestions.
-
-| Command | Source |
-|---|---|
-| `/annotate code-review [focus]` | Local base-branch, working-copy, or commit diff, or a GitHub PR |
-| `/annotate last` | Latest non-empty assistant reply |
-| `/annotate session` | A message or block selected in the built-in `/copy` picker |
-| `/annotate path-to-file` | Text read from a file |
-| `/annotate "user prompt"` | Literal prompt text |
-
-With an argument, `/annotate` treats the entire remainder as one source specification. A remainder wrapped in matching single or double quotes is always a literal prompt; only the matching outer pair is stripped, and the interior text is preserved exactly. Without matching outer quotes, unquoted `last`, `session`, and `code-review` select those modes (including code-review's optional focus/PR syntax); any other nonblank remainder is one file path, including spaces. File paths are resolved with `resolveReadPath` relative to the current working directory, with `~` expansion. Missing, unreadable, or non-regular paths notify the user and never fall back to a prompt.
-
-Code review lists up to three recent GitHub PR references found in the conversation, followed by the local base-branch, working-copy, and commit choices. Pass `/annotate code-review pr://owner/repo/N [focus]` to select a PR explicitly and skip the menu. The PR diff is fetched once: the annotation view and subsequent review use the same snapshot. PR context comes from GitHub, not similarly named files in the working directory. Annotations remain local; the command does not publish GitHub comments.
-
-`/annotate session` reuses the built-in `/copy` selector, returning the selected message or block exactly (including code, quotes, commands, and tool output).
-
-In the annotation view, `a` adds a line note, `A` adds a whole-file or whole-text note, and `e` reopens an existing note (with a chooser when several apply). Enter saves; Shift+Enter inserts a newline. Accepting an empty existing note deletes it; an empty new note does nothing. Escape cancels an edit without changing the saved note. The configured external-editor shortcut edits the draft; returning from the editor does not save or submit it.
-
-Code review offers **Continue with LLM review** and **Paste annotations into prompt**. The paste action and all text-source annotation flows only paste into the prompt editor; they never submit automatically. Cancelling does neither. Pasting requires at least one annotation.
-
-Annotation anchors (including exact line quotes) and notes are preserved exactly. File and literal-prompt sources are included verbatim regardless of length and bypass summarization; the latest assistant reply includes only annotated passages. Older session messages or quote sources longer than 1,000 JavaScript string characters ask the currently selected session model to rephrase grounding context to at most 999 characters, using that model's credentials. This separate provider call can incur normal provider charges; it does not fall back to another provider/model or download a local model. The generated context supplements exact selected passages; it never replaces them. An invalid summary (blank, oversized, timed-out, or failed) falls back to the full original source verbatim with a warning.
-
 ## 1) Discovery model
 
 Slash commands are a capability (`id: "slash-commands"`) keyed by command name (`key: cmd => cmd.name`).
@@ -419,3 +393,33 @@ branch only when the original session/leaf is unchanged and the main session is
 idle. Multi-turn side conversations remain in BTW history; promoting only their
 latest pair would discard earlier context. History browsing does not promote
 answers or relax these branch guards.
+
+## 12) Bundled command note: `/annotate`
+
+`/annotate` lets the operator attach notes to a diff or text before the agent acts. With no argument it opens a source menu.
+
+| Command | Source |
+|---|---|
+| `/annotate code-review [focus]` | Local base-branch, working-copy, or commit diff, or a GitHub PR |
+| `/annotate last` | Latest non-empty assistant reply on the active branch |
+| `/annotate session` | A message or block picked in the `/copy` selector |
+| `/annotate path/to/file` | Text read from a file |
+| `/annotate "text"` | Literal text |
+
+The whole remainder after `/annotate` is one source specification (`CustomCommand.execute` receives it verbatim as `rawArgs`):
+
+- A remainder wrapped in matching `"` or `'` is literal text; only the outer pair is stripped and the interior is kept byte-for-byte.
+- Unquoted `last`, `session`, and `code-review …` select those modes. To annotate a file whose path starts with one of these words, prefix it with `./` (for example `/annotate ./code-review notes.md`).
+- Anything else is one file path, spaces included, resolved with `resolveReadPath` against the live session cwd. Missing or non-regular paths notify and never fall back to literal text.
+
+Argument completion offers the modes, a `./` file-path starter, and a quote starter. `CustomCommand.getArgumentCompletions(prefix, cwd)` receives the live session cwd, so file suggestions follow `/move` and `/wt`.
+
+**Code review.** The menu lists up to three GitHub PRs referenced in the conversation, then the local diff kinds. `/annotate code-review pr://owner/repo/N [focus]` skips the menu. The diff is resolved once in the live session cwd and frozen (`ResolvedReviewTarget`); the overlay and the reviewer prompt read the same snapshot, filtered by the same exclusion rules as `/review` (`bundled/review/diff.ts`). The overlay offers **Continue with LLM review** (submits the `/review` prompt with the notes as operator focus) and **Paste annotations into prompt**. Both include the optional `[focus]` text. Nothing is posted to GitHub.
+
+**Text sources.** Feedback is always pasted into the composer, never submitted. File and literal sources are embedded verbatim. The latest reply is referenced as "your last reply" and only the annotated lines are quoted. An older session message longer than 1,000 characters is condensed by one call to the current session model (its credentials, no fallback model); if that call fails or returns an unusable result, the full source is embedded with a warning.
+
+**Overlay keys.** `a` adds a line note, `A` a whole-file/whole-text note, `e` edits the note(s) at the cursor (with a chooser when several apply), `u` undoes the last add/edit/delete. In the note editor, Enter saves, Shift+Enter inserts a newline, Escape discards the draft, and the configured external-editor key replaces the draft without saving it. Notes are trimmed on save; saving an empty edit deletes the note, and an empty new note is ignored. Line anchors (quoted source line, diff hunk header and raw row) are kept exactly.
+
+## 13) Built-in command note: `/plan-review`
+
+`/plan-review` reopens the Plan Review overlay for the latest plan (plan mode only). In the Contents sidebar `a` annotates the selected section; in the plan body `a` annotates the top visible line. `e` edits the annotation(s) at that section or line (with a chooser when several apply) and `u` undoes the latest section deletion or annotation change. The note editor behaves like `/annotate`'s: Enter saves, Shift+Enter inserts a newline, Escape discards the draft, the external-editor key replaces the draft without saving, and saving an empty edit deletes the annotation.

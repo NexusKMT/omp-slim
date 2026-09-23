@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { transcriptEntryMessage } from "@oh-my-pi/pi-tui/chat/transcript-entry";
-import { CopySelectorComponent, type CopySelection } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import { type CopyPickSource, CopySelectorComponent } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import { assistantText } from "@oh-my-pi/pi-tui/overlays/copy-targets";
 import type { CustomCommandContext } from "../../../../extensibility/custom-commands/types";
 import { isTranscriptEntry } from "../../../../session/session-context";
 import type { SessionEntry } from "../../../../session/session-entries";
@@ -46,13 +46,10 @@ export async function selectAnnotationSourceKind(
 	return ANNOTATION_SOURCE_CHOICES.find(choice => choice.label === selected)?.kind;
 }
 
-function assistantText(message: AgentMessage): string | undefined {
-	if (message.role !== "assistant") return undefined;
-	let text = "";
-	for (const content of message.content) {
-		if (content.type === "text") text += content.text;
-	}
-	return text.trim() ? text : undefined;
+/** Exact picked content plus the transcript entry/block it came from. */
+export interface SessionPick extends CopyPickSource {
+	content: string;
+	label: string;
 }
 
 function latestAssistantEntry(branch: readonly SessionEntry[]): { id: string; text: string } | undefined {
@@ -65,9 +62,8 @@ function latestAssistantEntry(branch: readonly SessionEntry[]): { id: string; te
 	return undefined;
 }
 
-function sourceKind(selection: CopySelection): TextReviewSource["kind"] {
-	if (selection.block?.command?.kind === "bash" || selection.block?.command?.kind === "eval") return "command";
-	if (selection.block?.kind === "code" || selection.block?.kind === "quote") return selection.block.kind;
+function sourceKind(selection: SessionPick): TextReviewSource["kind"] {
+	if (selection.block?.kind) return selection.block.kind;
 	switch (transcriptEntryMessage(selection.entry)?.role) {
 		case "toolResult":
 			return "code";
@@ -81,7 +77,7 @@ function sourceKind(selection: CopySelection): TextReviewSource["kind"] {
 
 function sourceFromSelection(
 	ctx: CustomCommandContext,
-	selection: CopySelection,
+	selection: SessionPick,
 	latestAssistantId: string | undefined,
 ): TextReviewSource {
 	const kind = sourceKind(selection);
@@ -127,14 +123,14 @@ export async function selectSessionTextReviewSource(
 		ctx.ui.notify("No messages to annotate yet.", "warning");
 		return undefined;
 	}
-	const selection = await ctx.ui.custom<CopySelection | undefined>((tui, _theme, _keybindings, done) => {
+	const selection = await ctx.ui.custom<SessionPick | undefined>((tui, _theme, _keybindings, done) => {
 		return new CopySelectorComponent(entries, {
 			ui: tui,
 			cwd: ctx.sessionManager.getCwd?.() ?? ctx.cwd,
 			title: "Select message to annotate",
 			actionLabel: "select",
 			requestRender: () => tui.requestRender(),
-			onPick: (_content, _label, picked) => done(picked),
+			onPick: (content, label, source) => done({ content, label, ...source }),
 			onCancel: () => done(undefined),
 		});
 	});

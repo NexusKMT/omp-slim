@@ -3,23 +3,25 @@ import type {
 	CustomCommandAPI,
 	CustomCommandContext,
 } from "../../../../extensibility/custom-commands/types";
-import type { AutocompleteItem, SlashCommand } from "@oh-my-pi/pi-tui";
+import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
-import type {
-	CodeReviewOverlayResult,
-	LocalReviewKind,
-	ResolvedReviewTarget,
-	TextReviewSource,
-} from "@oh-my-pi/pi-tui/overlays/annotation-types";
+import type { CodeReviewOverlayResult, TextReviewSource } from "@oh-my-pi/pi-tui/overlays/annotation-types";
 import {
 	extractReviewPrRefFromArgs,
+	liveCommandCwd,
 	resolvePrReviewTarget,
 	ReviewCommand,
 	selectReviewChoice,
 	type ReviewPrRef,
 } from "../review";
 import { buildReviewPrompt, formatCodeReviewAnnotations } from "../review/prompt";
-import { getReviewTargetIssue, resolveLocalReviewTarget, type ReviewTargetUI } from "../review/target";
+import {
+	getReviewTargetIssue,
+	type LocalReviewKind,
+	type ResolvedReviewTarget,
+	resolveLocalReviewTarget,
+	type ReviewTargetUI,
+} from "../review/target";
 import { acquireFileTextReviewSource, createPromptTextReviewSource } from "./direct-source";
 import { showCodeReviewOverlay, showTextReviewOverlay } from "./fullscreen";
 import { selectAnnotationSourceKind, selectSessionTextReviewSource, type AnnotationSourceKind } from "./text-source";
@@ -37,7 +39,7 @@ interface CodeReviewDependencies {
 		ui: ReviewTargetUI,
 	): Promise<ResolvedReviewTarget | undefined>;
 	resolvePrReviewTarget(
-		api: CustomCommandAPI,
+		cwd: string,
 		ctx: CustomCommandContext,
 		ref: ReviewPrRef,
 	): Promise<ResolvedReviewTarget | undefined>;
@@ -188,16 +190,13 @@ async function finishCodeReview(
 	}
 	const result = await showOverlay(ctx, target);
 	if (!result) return undefined;
-	if (result.action === "paste") {
-		const annotations = formatCodeReviewAnnotations(result.annotations, { forReviewer: false });
-		if (annotations) ctx.ui.pasteToEditor(annotations);
-		return undefined;
-	}
 	const annotations = formatCodeReviewAnnotations(result.annotations, {
-		forReviewer: true,
+		forReviewer: result.action === "review",
 		supplementalInstructions: focus,
 	});
-	return buildReviewPrompt(target, annotations);
+	if (result.action === "review") return buildReviewPrompt(target, annotations);
+	if (annotations) ctx.ui.pasteToEditor(annotations);
+	return undefined;
 }
 
 /** Run `/annotate code-review`, freezing one target before the overlay opens. */
@@ -211,22 +210,15 @@ export async function runCodeReviewCommand(
 		return new ReviewCommand(api).execute(splitReviewArgs(args), ctx);
 	}
 	const resolved = { ...defaultCodeReviewDependencies, ...dependencies };
+	const cwd = liveCommandCwd(api, ctx);
 	const parsed = extractReviewPrRefFromArgs(splitReviewArgs(args));
-	if (parsed.prRef) {
-		const target = await resolved.resolvePrReviewTarget(api, ctx, parsed.prRef);
-		return target
-			? finishCodeReview(ctx, target, parsed.extraInstructions || undefined, resolved.showCodeReviewOverlay)
-			: undefined;
-	}
 	const focus = parsed.extraInstructions || undefined;
-	const selectedChoice = await selectReviewChoice(ctx, { includeCustom: false });
-	if (!selectedChoice) return undefined;
-	if (selectedChoice.kind === "pr") {
-		const target = await resolved.resolvePrReviewTarget(api, ctx, selectedChoice.ref);
-		return target ? finishCodeReview(ctx, target, focus, resolved.showCodeReviewOverlay) : undefined;
-	}
-	if (selectedChoice.kind === "custom") return undefined;
-	const target = await resolved.resolveLocalReviewTarget(selectedChoice.kind, api.cwd, ctx.ui);
+	const choice = parsed.prRef ? { kind: "pr" as const, ref: parsed.prRef } : await selectReviewChoice(ctx);
+	if (!choice) return undefined;
+	const target =
+		choice.kind === "pr"
+			? await resolved.resolvePrReviewTarget(cwd, ctx, choice.ref)
+			: await resolved.resolveLocalReviewTarget(choice.kind, cwd, ctx.ui);
 	return target ? finishCodeReview(ctx, target, focus, resolved.showCodeReviewOverlay) : undefined;
 }
 
@@ -319,14 +311,18 @@ export async function runAnnotateCommand(
 export class AnnotateCommand implements CustomCommand {
 	name = "annotate";
 	description = "Annotate a diff or text from a file, prompt, latest reply, or session";
-	readonly #fileCompletionProvider: CombinedAutocompleteProvider;
+	#fileCompletionProvider: CombinedAutocompleteProvider | undefined;
+	#fileCompletionCwd: string | undefined;
 
-	constructor(private readonly api: CustomCommandAPI) {
-		this.#fileCompletionProvider = new CombinedAutocompleteProvider([], api.cwd);
+	constructor(private readonly api: CustomCommandAPI) {}
+
+	getArgumentCompletions(argumentPrefix: string, cwd: string): Promise<AutocompleteItem[] | null> {
+		if (!this.#fileCompletionProvider || this.#fileCompletionCwd !== cwd) {
+			this.#fileCompletionProvider = new CombinedAutocompleteProvider([], cwd);
+			this.#fileCompletionCwd = cwd;
+		}
+		return getAnnotateArgumentCompletions(argumentPrefix, this.#fileCompletionProvider);
 	}
-
-	getArgumentCompletions: SlashCommand["getArgumentCompletions"] = argumentPrefix =>
-		getAnnotateArgumentCompletions(argumentPrefix, this.#fileCompletionProvider);
 
 	execute(args: string[], ctx: CustomCommandContext, rawArgs?: string): Promise<string | undefined> {
 		return runAnnotateCommand(this.api, rawArgs ?? args.join(" "), ctx);

@@ -19,7 +19,7 @@
 import {
 	type Component,
 	Ellipsis,
-	Input,
+	Editor,
 	Markdown,
 	type MarkdownTheme,
 	matchesKey,
@@ -31,7 +31,7 @@ import {
 } from "../index";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { sanitizeStatusText } from "../chrome/shared";
-import { getMarkdownTheme, theme } from "../theme/theme";
+import { getEditorTheme, getMarkdownTheme, theme } from "../theme/theme";
 import {
 	matchesAppExternalEditor,
 	matchesSelectCancel,
@@ -57,6 +57,8 @@ import { renderSegmentTrack } from "../chrome/segment-track";
 const OVERLAY_TITLE = "Plan Review";
 /** Minimum plan-body rows kept visible even on short terminals. */
 const MIN_BODY_ROWS = 3;
+/** Visible rows for the in-overlay annotation editor before it scrolls. */
+const MAX_ANNOTATION_EDITOR_ROWS = 6;
 /** Sidebar gates: enough headings, a wide terminal, and a usable body column. */
 const SIDEBAR_MIN_HEADINGS = 2;
 const SIDEBAR_MIN_TOTAL_WIDTH = 64;
@@ -217,7 +219,7 @@ export class PlanReviewOverlay implements Component {
 	/** Label of the committed choice, shown while the async approval settles. */
 	#committedLabel: string | undefined;
 	#annotating = false;
-	#input: Input;
+	#editor: Editor;
 	#annotationTarget: BodyRowAnchor | { sectionIndex: number; row: null; context: null } | undefined;
 	#editingAnnotation: AnnotationSelection | undefined;
 	#annotationChooser: AnnotationChooser | undefined;
@@ -248,10 +250,11 @@ export class PlanReviewOverlay implements Component {
 		} else {
 			this.#sliderIndex = 0;
 		}
-		this.#input = new Input();
-		this.#input.setUseTerminalCursor(false);
-		this.#input.onSubmit = value => this.#submitAnnotation(value);
-		this.#input.onEscape = () => this.#exitAnnotate();
+		this.#editor = new Editor(getEditorTheme());
+		this.#editor.setBorderVisible(false);
+		this.#editor.setPromptGutter("> ");
+		this.#editor.setUseTerminalCursor(false);
+		this.#editor.onSubmit = value => this.#submitAnnotation(value);
 		this.#setSections(planContent);
 		this.#restoreAnnotationState(options.annotationState);
 		if (Array.isArray(options.annotationState?.annotations) && options.annotationState.annotations.length > 0) {
@@ -508,12 +511,16 @@ export class PlanReviewOverlay implements Component {
 		}
 		if (this.#annotating) {
 			if (this.callbacks.onAnnotationExternalEditor && matchesAppExternalEditor(keyData)) {
-				this.callbacks.onAnnotationExternalEditor(this.#input.getValue(), text => {
-					if (text !== null && this.#annotating) this.#input.setValue(text);
+				this.callbacks.onAnnotationExternalEditor(this.#editor.getExpandedText(), text => {
+					if (text !== null && this.#annotating) this.#editor.setText(text);
 				});
 				return;
 			}
-			this.#input.handleInput(keyData);
+			if (matchesSelectCancel(keyData)) {
+				this.#exitAnnotate();
+				return;
+			}
+			this.#editor.handleInput(keyData);
 			return;
 		}
 		if (matchesSelectCancel(keyData)) {
@@ -521,11 +528,11 @@ export class PlanReviewOverlay implements Component {
 			this.callbacks.onCancel();
 			return;
 		}
-		if (keyData === "u") {
+		if (this.#focus !== "actions" && keyData === "u") {
 			this.#undoLast();
 			return;
 		}
-		if (keyData === "e") {
+		if (this.#focus !== "actions" && keyData === "e") {
 			this.#editCurrentAnnotation();
 			return;
 		}
@@ -750,10 +757,6 @@ export class PlanReviewOverlay implements Component {
 			this.#startSectionAnnotate();
 			return;
 		}
-		if (data === "u") {
-			this.#undoLast();
-			return;
-		}
 	}
 
 	#moveTocCursor(delta: number): void {
@@ -854,7 +857,7 @@ export class PlanReviewOverlay implements Component {
 		this.#annotationTarget = target;
 		this.#editingAnnotation = undefined;
 		this.#annotating = true;
-		this.#input.setValue("");
+		this.#editor.setText("");
 	}
 
 	#startExistingAnnotation(selection: AnnotationSelection): void {
@@ -873,7 +876,7 @@ export class PlanReviewOverlay implements Component {
 						contextTruncated: annotation.target.contextTruncated,
 					};
 		this.#annotating = true;
-		this.#input.setValue(annotation.note);
+		this.#editor.setText(annotation.note);
 	}
 
 	#annotationMatchesBodyAnchor(annotation: OverlayAnnotation, anchor: BodyRowAnchor): boolean {
@@ -956,7 +959,7 @@ export class PlanReviewOverlay implements Component {
 		this.#annotating = false;
 		this.#annotationTarget = undefined;
 		this.#editingAnnotation = undefined;
-		this.#input.setValue("");
+		this.#editor.setText("");
 		if (editing) {
 			const section = this.#sections[editing.sectionIndex];
 			const annotation = section?.annotations[editing.annotationIndex];
@@ -990,7 +993,7 @@ export class PlanReviewOverlay implements Component {
 		this.#annotating = false;
 		this.#annotationTarget = undefined;
 		this.#editingAnnotation = undefined;
-		this.#input.setValue("");
+		this.#editor.setText("");
 	}
 
 	#recomputeFeedback(): void {
@@ -1312,10 +1315,12 @@ export class PlanReviewOverlay implements Component {
 				innerWidth,
 				Ellipsis.Unicode,
 			);
-			const hintParts = ["enter save", "esc cancel"];
+			const hintParts = ["enter save", "shift+enter newline", "esc cancel"];
 			if (this.#editingAnnotation) hintParts.push("empty deletes");
 			if (this.#externalEditorLabel) hintParts.push(`${this.#externalEditorLabel} editor`);
-			return [caption, this.#input.render(innerWidth)[0] ?? "", theme.fg("dim", hintParts.join(" · "))];
+			this.#editor.setMaxHeight(Math.max(1, Math.min(MAX_ANNOTATION_EDITOR_ROWS, (process.stdout.rows || 40) - 12)));
+			this.#editor.focused = true;
+			return [caption, ...this.#editor.render(innerWidth), theme.fg("dim", hintParts.join(" · "))];
 		}
 		return [theme.fg("dim", this.#buildHelp())];
 	}

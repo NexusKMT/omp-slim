@@ -9,7 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { CopySelectorComponent, type CopySelection } from "@oh-my-pi/pi-tui/overlays/copy-selector";
+import { CopySelectorComponent, type CopyPickSource } from "@oh-my-pi/pi-tui/overlays/copy-selector";
 import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { SessionMessageEntry } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import { setKeybindings, type TUI } from "@oh-my-pi/pi-tui";
@@ -128,15 +128,15 @@ function makeSelector(
 	onCancel = () => {},
 	opens?: Array<{ href: string; label: string }>,
 	entries: SessionMessageEntry[] = makeEntries(),
-	selections?: CopySelection[],
+	sources?: CopyPickSource[],
 ): CopySelectorComponent {
 	return new CopySelectorComponent(entries, {
 		ui: { requestRender: () => {}, requestComponentRender: () => {} } as unknown as TUI,
 		cwd: "/tmp",
 		requestRender: () => {},
-		onPick: (content, label, selection) => {
+		onPick: (content, label, source) => {
 			picks.push({ content, label });
-			selections?.push(selection);
+			sources?.push(source);
 		},
 		onOpen: opens ? (href, label) => opens.push({ href, label }) : undefined,
 		onCancel,
@@ -172,8 +172,8 @@ describe("CopySelectorComponent", () => {
 	it("keeps whole-turn picks exact and ties them to the native transcript entries", () => {
 		const entries = makeEntries();
 		const picks: Array<{ content: string; label: string }> = [];
-		const selections: CopySelection[] = [];
-		const selector = makeSelector(picks, () => {}, undefined, entries, selections);
+		const sources: CopyPickSource[] = [];
+		const selector = makeSelector(picks, () => {}, undefined, entries, sources);
 		selector.render(100);
 
 		selector.handleInput(ENTER);
@@ -185,13 +185,7 @@ describe("CopySelectorComponent", () => {
 			{ content: ASSISTANT_TEXT, label: "assistant message" },
 			{ content: "fix the logging", label: "user message" },
 		]);
-		expect(selections).toHaveLength(2);
-		expect(selections[0]).toMatchObject({ content: ASSISTANT_TEXT, label: "assistant message" });
-		expect(selections[0]?.entry).toBe(entries[1]);
-		expect(selections[0]?.block).toBeUndefined();
-		expect(selections[1]).toMatchObject({ content: "fix the logging", label: "user message" });
-		expect(selections[1]?.entry).toBe(entries[0]);
-		expect(selections[1]?.block).toBeUndefined();
+		expect(sources).toEqual([{ entry: entries[1] }, { entry: entries[0] }]);
 	});
 
 	it("keeps block content and metadata exact while retaining each block's source entry", () => {
@@ -201,8 +195,8 @@ describe("CopySelectorComponent", () => {
 		const assistantEntry = entries[1]!;
 		const toolResultEntry = entries[2]!;
 		const picks: Array<{ content: string; label: string }> = [];
-		const selections: CopySelection[] = [];
-		const selector = makeSelector(picks, () => {}, undefined, entries, selections);
+		const sources: CopyPickSource[] = [];
+		const selector = makeSelector(picks, () => {}, undefined, entries, sources);
 		selector.render(100);
 		selector.handleInput(RIGHT);
 
@@ -219,24 +213,19 @@ describe("CopySelectorComponent", () => {
 			{ content: "bun test", label: "bash command" },
 			{ content: "12 pass", label: "bash result" },
 		]);
-		expect(selections.map(selection => selection.entry)).toEqual([
+		expect(sources.map(source => source.entry)).toEqual([
 			assistantEntry,
 			assistantEntry,
 			assistantEntry,
 			assistantEntry,
 			toolResultEntry,
 		]);
-		expect(selections.map(selection => selection.block)).toEqual([
-			{ content: CODE, label: "ts code", language: "ts", kind: "code" },
-			{ content: quote, label: "quote", kind: "quote" },
-			{ content: LINK, label: `link${theme.sep.dot}the PR`, href: LINK },
-			{
-				content: "bun test",
-				label: "bash command",
-				language: "bash",
-				command: { kind: "bash", code: "bun test", language: "bash" },
-			},
-			{ content: "12 pass", label: "bash result" },
+		expect(sources.map(source => source.block)).toEqual([
+			{ content: CODE, label: "ts code", entry: assistantEntry, language: "ts", kind: "code" },
+			{ content: quote, label: "quote", entry: assistantEntry, kind: "quote" },
+			{ content: LINK, label: `link${theme.sep.dot}the PR`, entry: assistantEntry, href: LINK },
+			{ content: "bun test", label: "bash command", entry: assistantEntry, language: "bash", kind: "command" },
+			{ content: "12 pass", label: "bash result", entry: toolResultEntry },
 		]);
 	});
 

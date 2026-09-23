@@ -149,6 +149,8 @@ export class AnnotationOverlay implements Component {
 	#finished = false;
 	#annotations: CommittedAnnotation[] = [];
 	#textAnnotations: CommittedTextAnnotation[] = [];
+	/** Annotation lists before each create/edit/delete, restored by `u`. */
+	#undoStack: Array<{ annotations: CommittedAnnotation[]; textAnnotations: CommittedTextAnnotation[] }> = [];
 	#actions: readonly string[] = CODE_REVIEW_ACTIONS;
 	#textSource: TextReviewSource | undefined;
 	#textLines: readonly string[] = [];
@@ -555,12 +557,16 @@ export class AnnotationOverlay implements Component {
 		this.#editor.setText("");
 
 		if (!note) {
-			if (editingIndex !== undefined) this.#annotations.splice(editingIndex, 1);
+			if (editingIndex !== undefined) {
+				this.#pushUndo();
+				this.#annotations.splice(editingIndex, 1);
+			}
 			return;
 		}
 		if (editingIndex !== undefined) {
 			const existing = this.#annotations[editingIndex];
 			if (existing) {
+				this.#pushUndo();
 				this.#annotations[editingIndex] = {
 					...existing,
 					annotation: { ...existing.annotation, note },
@@ -569,6 +575,7 @@ export class AnnotationOverlay implements Component {
 			return;
 		}
 		if (!file || (scope === "line" && !source)) return;
+		this.#pushUndo();
 
 		const common = {
 			path: file.path,
@@ -604,12 +611,16 @@ export class AnnotationOverlay implements Component {
 		this.#editingAnnotationIndex = undefined;
 		this.#editor.setText("");
 		if (!note) {
-			if (editingIndex !== undefined) this.#textAnnotations.splice(editingIndex, 1);
+			if (editingIndex !== undefined) {
+				this.#pushUndo();
+				this.#textAnnotations.splice(editingIndex, 1);
+			}
 			return;
 		}
 		if (editingIndex !== undefined) {
 			const existing = this.#textAnnotations[editingIndex];
 			if (existing) {
+				this.#pushUndo();
 				this.#textAnnotations[editingIndex] = {
 					...existing,
 					annotation: { ...existing.annotation, note },
@@ -617,6 +628,7 @@ export class AnnotationOverlay implements Component {
 			}
 			return;
 		}
+		this.#pushUndo();
 		const annotation: TextReviewAnnotation =
 			scope === "text"
 				? { scope: "text", note }
@@ -714,13 +726,15 @@ export class AnnotationOverlay implements Component {
 		return `${sanitizeStatusText(this.#textSource?.label ?? "text")} · line ${entry.annotation.line}`;
 	}
 
+	#pushUndo(): void {
+		this.#undoStack.push({ annotations: [...this.#annotations], textAnnotations: [...this.#textAnnotations] });
+	}
+
 	#undoAnnotation(): void {
-		if (this.#textSource) {
-			this.#textAnnotations.pop();
-			if (this.#textAnnotations.length === 0 && this.#actionIndex === 1) this.#actionIndex = 0;
-			return;
-		}
-		this.#annotations.pop();
+		const snapshot = this.#undoStack.pop();
+		if (!snapshot) return;
+		this.#annotations = snapshot.annotations;
+		this.#textAnnotations = snapshot.textAnnotations;
 		if (this.#annotations.length === 0 && this.#actionIndex === 1) this.#actionIndex = 0;
 	}
 
@@ -1022,9 +1036,7 @@ export class AnnotationOverlay implements Component {
 				Ellipsis.Unicode,
 			);
 			const hints = ["enter save", "shift+enter newline", "esc cancel"];
-			hints.push("ctrl+g editor");
-			if (this.#externalEditorLabel && this.#externalEditorLabel.toLowerCase() !== "ctrl+g")
-				hints.push(`${this.#externalEditorLabel} editor`);
+			if (this.#externalEditorLabel) hints.push(`${this.#externalEditorLabel} editor`);
 			this.#editor.focused = true;
 			return [caption, ...this.#editor.render(width), this.#theme.fg("dim", hints.join(" · "))];
 		}
