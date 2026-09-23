@@ -290,9 +290,11 @@ export class Input implements Component, Focusable {
 		this.#replaceBeforeCursor(0, clean);
 	}
 
-	/** Replace the `count` code units before the cursor with `text`, leaving the cursor after it. */
+	/** Replace up to `count` code units before the cursor with `text`, leaving the cursor after it. The
+	 *  range stops at the start of the value: a volatile preview's length can outrun the cursor once
+	 *  the caret moves while dictation is still streaming. */
 	#replaceBeforeCursor(count: number, text: string): void {
-		const start = this.#cursor - count;
+		const start = Math.max(0, this.#cursor - count);
 		this.#value = this.#value.slice(0, start) + text + this.#value.slice(this.#cursor);
 		this.#cursor = start + text.length;
 	}

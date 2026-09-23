@@ -5,15 +5,12 @@
 ### Breaking Changes
 
 - `CustomEditor`'s `onSpaceHoldStart`, `onSpaceHoldEnd` and `sttHoldEnabled` are replaced by `spaceHold.handler` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- Removed `Editor.cursorOverrideWidth`; the width of a `cursorOverride` glyph is always measured ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 
 ### Added
 
 - Added Skills configuration section to settings
 - `Input` supports hold-Space push-to-talk, live dictation text, and `cursorOverride` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
-
-### Changed
-
-- `Editor` measures `cursorOverride` when `cursorOverrideWidth` isn't set, instead of assuming one column ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 
 ## [18.2.10] - 2026-09-22
 

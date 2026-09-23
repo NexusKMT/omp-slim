@@ -41,6 +41,16 @@ describe("Input component", () => {
 		expect(input.getValue()).toBe("ask ");
 	});
 
+	it("keeps the value intact when the caret leaves a live dictation preview", () => {
+		const input = setupAtEnd("ask ");
+		input.setVolatileText("hello");
+		input.handleInput("\x1b[H"); // Home
+		input.setVolatileText("hello world");
+		input.commitVolatileText("hello world");
+		// The new preview lands at the caret, as in Editor; nothing before it is duplicated.
+		expect(input.getValue()).toBe("hello worldask hello");
+	});
+
 	it("fits a wide cursor override at the end of a line that fills the width", () => {
 		const input = setupAtEnd("x".repeat(40));
 		input.prompt = "";

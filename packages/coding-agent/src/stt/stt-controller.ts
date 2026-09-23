@@ -53,8 +53,6 @@ export class STTController {
 	#resolvedModelKey: SttModelKey | null = null;
 	#toggling = false;
 	#stopAfterStart = false;
-	/** Callbacks of the current capture, from the {@link start} that began it. */
-	#options: SttCallbacks | null = null;
 	#disposed = false;
 	readonly #createCapture: CaptureFactory;
 	readonly #settings: Settings;
@@ -65,6 +63,8 @@ export class STTController {
 	#stream: SttStreamHandle | null = null;
 	#streamRecorder: CaptureHandle | null = null;
 	#streamEditor: SttTarget | null = null;
+	/** Callbacks of the running capture, from the {@link start} that began it. */
+	#streamCallbacks: SttCallbacks | null = null;
 	#streamCommitted = false;
 	#streamAbort: AbortController | null = null;
 	#streamUtterance = "";
@@ -109,7 +109,6 @@ export class STTController {
 	async start(editor: SttTarget, options: SttCallbacks): Promise<void> {
 		if (this.#state === "transcribing") options.showStatus("Transcription in progress...");
 		if (this.#toggling || this.#state !== "idle") return;
-		this.#options = options;
 		await this.#transition(options, () => this.#start(editor, options));
 	}
 
@@ -120,8 +119,8 @@ export class STTController {
 			if (this.#state === "idle" || this.#state === "recording") this.#stopAfterStart = true;
 			return;
 		}
-		const options = this.#options;
-		if (this.#state === "recording" && options) await this.#transition(options, () => this.#stop(options));
+		const callbacks = this.#streamCallbacks;
+		if (this.#state === "recording" && callbacks) await this.#transition(callbacks, () => this.#stop(callbacks));
 	}
 
 	/** Stop a capture that is starting or recording; otherwise start one into `editor`. */
@@ -246,6 +245,7 @@ export class STTController {
 
 	#startBuffered(editor: SttTarget, options: SttCallbacks, model: Model<Api>): void {
 		this.#streamEditor = editor;
+		this.#streamCallbacks = options;
 		this.#streamCommitted = false;
 		this.#streamUtterance = "";
 		this.#streamAbort = new AbortController();
@@ -351,6 +351,7 @@ export class STTController {
 		this.#cloudAudio = [];
 		this.#streamRecorder = null;
 		this.#streamEditor = null;
+		this.#streamCallbacks = null;
 		this.#streamCommitted = false;
 		this.#streamAbort = null;
 		this.#streamUtterance = "";
@@ -369,6 +370,7 @@ export class STTController {
 	async #startStreaming(editor: SttTarget, options: SttCallbacks, modelKey: SttModelKey): Promise<void> {
 		const language = this.#settings.get("stt.language");
 		this.#streamEditor = editor;
+		this.#streamCallbacks = options;
 		this.#streamCommitted = false;
 		this.#streamUtterance = "";
 		this.#streamAbort = new AbortController();
@@ -473,6 +475,7 @@ export class STTController {
 		this.#stream = null;
 		this.#streamRecorder = null;
 		this.#streamEditor = null;
+		this.#streamCallbacks = null;
 		this.#streamCommitted = false;
 		this.#streamAbort = null;
 		this.#streamUtterance = "";
