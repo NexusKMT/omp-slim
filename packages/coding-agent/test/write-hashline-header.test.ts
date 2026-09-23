@@ -108,9 +108,6 @@ describe("write tool hashline header", () => {
 		const content = "café\n";
 
 		const result = await tool.execute("call-1", { path: filePath, content });
-		expect(resultText(result)).toBe(
-			`Successfully wrote ${Buffer.byteLength(content)} bytes to ${path.relative(tmpDir, filePath)}`,
-		);
-		expect(Buffer.byteLength(content)).toBeGreaterThan(content.length);
+		expect(resultText(result)).toBe(`Successfully wrote 6 bytes to ${path.relative(tmpDir, filePath)}`);
 	});
 });
