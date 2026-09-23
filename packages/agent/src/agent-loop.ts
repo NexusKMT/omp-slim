@@ -164,6 +164,13 @@ export function createToolScopedAbortReason(
  */
 export const TERMINAL_TOOL_RESULT_ABORT_REASON = Symbol.for("pi-agent-core.terminal-tool-result");
 
+/**
+ * Abort reason carried by an interruptible tool's signal when queued steering,
+ * a peer IRC, or a background completion cut it short. Lets a wait tell the
+ * designed wake path apart from an external/user abort of the run.
+ */
+export const TOOL_INTERRUPT_ABORT_REASON = Symbol.for("pi-agent-core.tool-interrupt");
+
 const STEERING_INTERRUPT_POLL_MS = 250;
 
 class HarmonyLeakInterruption extends Error {
@@ -2957,7 +2964,7 @@ async function executeToolCalls(
 		if (!interruptState.triggered) {
 			interruptState.triggered = true;
 			interruptState.source = source;
-			ircAbortController.abort();
+			ircAbortController.abort(TOOL_INTERRUPT_ABORT_REASON);
 		}
 		// Only an urgent aside raises the cooperative signal that makes
 		// backgroundable foreground work (auto-background bash/eval) detach
@@ -3002,7 +3009,7 @@ async function executeToolCalls(
 			if (!steeringAbortController.signal.aborted) {
 				interruptState.triggered = true;
 				interruptState.source = steeringSource ?? "unknown";
-				steeringAbortController.abort();
+				steeringAbortController.abort(TOOL_INTERRUPT_ABORT_REASON);
 				if (softInterrupts) steeringSoftController.abort();
 			}
 			return;

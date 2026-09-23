@@ -220,9 +220,9 @@ process.stdin.on("data", chunk => process.stdout.write("got: " + chunk));
 `,
 		);
 		const secondScript = path.join(projectDir, "second.ts");
-		await Bun.write(secondScript, `process.stdout.write("second ready\\n");\nsetInterval(() => {}, 60_000);\n`);
+		await Bun.write(secondScript, `process.stdout.write("second ready\\n");\nprocess.stdin.resume();\n`);
 		const silentScript = path.join(projectDir, "silent.ts");
-		await Bun.write(silentScript, `setInterval(() => {}, 60_000);\n`);
+		await Bun.write(silentScript, `process.stdin.resume();\n`);
 		const start = (scriptPath: string, readyLog?: string) =>
 			client.request({
 				op: "start",
@@ -261,7 +261,13 @@ process.stdin.on("data", chunk => process.stdout.write("got: " + chunk));
 			if (first.op !== "start") throw new Error("unexpected start result");
 			expect(first.readyTimedOut).toBeFalse();
 			await client.request({ op: "send", name: "svc", data: "hello\n" });
-			const echoed = await client.request({ op: "wait", name: "svc", for: "exit", pattern: "got: hello", timeoutMs: 5_000 });
+			const echoed = await client.request({
+				op: "wait",
+				name: "svc",
+				for: "exit",
+				pattern: "got: hello",
+				timeoutMs: 5_000,
+			});
 			if (echoed.op !== "wait") throw new Error("unexpected wait result");
 			expect(echoed.timedOut).toBeFalse();
 
