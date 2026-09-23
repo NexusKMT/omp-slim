@@ -8,12 +8,10 @@ import { renderMermaidAsciiSafe } from "@oh-my-pi/pi-utils/mermaid-ascii";
  */
 export interface MermaidResolveOptions extends MermaidRenderOptions {
 	/**
-	 * Maximum display width (terminal columns) the diagram should occupy. A
-	 * layout that overflows this width is re-rendered in the perpendicular
-	 * orientation — a wide horizontal chain collapses to a tall vertical column
-	 * (which the terminal can scroll), and a wide vertical fan-out collapses to a
-	 * tall horizontal column. Omit to keep the source's own layout regardless of
-	 * width.
+	 * Maximum display width (terminal columns) the diagram should occupy.
+	 * Flowcharts are also rendered top-down and left-to-right. A resize picks
+	 * the shortest variant that fits; if none fit, the narrowest, which the
+	 * caller may still clip. Omit to keep the source's own layout.
 	 */
 	maxWidth?: number;
 }
@@ -23,14 +21,27 @@ export interface MermaidResolveOptions extends MermaidRenderOptions {
 // the cached renders, so a terminal resize re-decides without re-rendering.
 const cache = new Map<string, string | null>();
 
-/** Widest rendered row in display columns (ANSI- and CJK-aware). */
+/** Display columns, ignoring ANSI so themed diagrams are measured as drawn. */
+const DISPLAY_WIDTH = { countAnsiEscapeCodes: false } as const;
+
 function asciiDisplayWidth(ascii: string): number {
 	let max = 0;
 	for (const line of ascii.split("\n")) {
-		const width = Bun.stringWidth(line);
+		const width = Bun.stringWidth(line, DISPLAY_WIDTH);
 		if (width > max) max = width;
 	}
 	return max;
+}
+
+interface LayoutCandidate {
+	ascii: string;
+	width: number;
+	height: number;
+	authored: boolean;
+}
+
+function measureLayout(ascii: string, authored: boolean): LayoutCandidate {
+	return { ascii, width: asciiDisplayWidth(ascii), height: ascii.split("\n").length, authored };
 }
 
 function renderVariant(
@@ -65,24 +76,42 @@ export function resolveMermaidAscii(source: string, options?: MermaidResolveOpti
 	if (base === null) return null;
 	if (maxWidth === undefined) return base;
 
-	let best = base;
-	let bestWidth = asciiDisplayWidth(base);
-	if (bestWidth <= maxWidth) return base;
-
-	// The as-authored layout overflows. Render both forced orientations and keep
-	// the narrowest (clipping at the call site handles any residual overflow).
-	// Re-rendering the already-authored orientation is a cache hit, so this stays
-	// cheap, and one of the two will be the perpendicular fit.
+	// Width selection is against cached renders, so a later resize re-decides
+	// without drawing again. Forced TD/LR are no-ops for non-flowcharts.
+	const candidates = [measureLayout(base, true)];
 	for (const direction of ["TD", "LR"] as const) {
 		const variant = renderVariant(normalizedSource, baseOptions, baseKey, direction);
-		if (variant === null) continue;
-		const variantWidth = asciiDisplayWidth(variant);
-		if (variantWidth < bestWidth) {
-			best = variant;
-			bestWidth = variantWidth;
-		}
+		if (variant !== null) candidates.push(measureLayout(variant, false));
 	}
-	return best;
+
+	const fitting = candidates.filter(candidate => candidate.width <= maxWidth);
+	const pool = fitting.length > 0 ? fitting : candidates;
+	let best = pool[0]!;
+	for (let i = 1; i < pool.length; i++) {
+		const next = pool[i]!;
+		if (fitting.length > 0) {
+			if (next.height !== best.height) {
+				if (next.height < best.height) best = next;
+				continue;
+			}
+			if (next.authored !== best.authored) {
+				if (next.authored) best = next;
+				continue;
+			}
+			if (next.width < best.width) best = next;
+			continue;
+		}
+		if (next.width !== best.width) {
+			if (next.width < best.width) best = next;
+			continue;
+		}
+		if (next.height !== best.height) {
+			if (next.height < best.height) best = next;
+			continue;
+		}
+		if (next.authored) best = next;
+	}
+	return best.ascii;
 }
 
 /**
