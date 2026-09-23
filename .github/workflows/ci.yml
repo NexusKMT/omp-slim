@@ -601,12 +601,23 @@ jobs:
       steps:
          - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
          - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-         - name: Cache bun dependencies
-           uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+         - name: Restore bun store
+           id: bun-cache
+           uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+              restore-keys: |
+                 bun-${{ runner.os }}-
          - run: bun install --frozen-lockfile
+         # Main-only save: caches saved on a tag or branch are readable only by
+         # that ref yet count against the shared 10 GB quota (see bazel-cache).
+         - name: Save bun store
+           if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: ~/.bun/install/cache
+              key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          - name: Install prebuilt native addon(s)
            uses: ./.github/actions/native-artifacts
            with:
@@ -684,12 +695,23 @@ jobs:
       steps:
          - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
          - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-         - name: Cache bun dependencies
-           uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+         - name: Restore bun store
+           id: bun-cache
+           uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+              restore-keys: |
+                 bun-${{ runner.os }}-
          - run: bun install --frozen-lockfile
+         # Main-only save: caches saved on a tag or branch are readable only by
+         # that ref yet count against the shared 10 GB quota (see bazel-cache).
+         - name: Save bun store
+           if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: ~/.bun/install/cache
+              key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          # Darwin addons use the host Xcode toolchain. The warm workflow keeps
          # these scopes seeded near HEAD, so this is normally the version-bump
          # delta.
@@ -788,12 +810,23 @@ jobs:
          # requires a newer emulated Node version than Bun 1.3 provides.
          - name: Ensure npm supports trusted publishing
            run: npm install -g npm@11.17.0
-         - name: Cache bun dependencies
-           uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+         - name: Restore bun store
+           id: bun-cache
+           uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+              restore-keys: |
+                 bun-${{ runner.os }}-
          - run: bun install --frozen-lockfile
+         # Main-only save: caches saved on a tag or branch are readable only by
+         # that ref yet count against the shared 10 GB quota (see bazel-cache).
+         - name: Save bun store
+           if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: ~/.bun/install/cache
+              key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          # Linux + win32-x64 addons from the native_addons artifact (gnu targets
          # only — musl reuses the linux filenames and has no leaf package).
          - name: Install linux and win32-x64 native addons
@@ -941,12 +974,23 @@ jobs:
          # requires a newer emulated Node version than Bun 1.3 provides.
          - name: Ensure npm supports trusted publishing
            run: npm install -g npm@11.17.0
-         - name: Cache bun dependencies
-           uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+         - name: Restore bun store
+           id: bun-cache
+           uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+              restore-keys: |
+                 bun-${{ runner.os }}-
          - run: bun install --frozen-lockfile
+         # Main-only save: caches saved on a tag or branch are readable only by
+         # that ref yet count against the shared 10 GB quota (see bazel-cache).
+         - name: Save bun store
+           if: github.ref == 'refs/heads/main' && steps.bun-cache.outputs.cache-hit != 'true'
+           uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+           with:
+              path: ~/.bun/install/cache
+              key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
          # The prepack executes workspace code which loads the Linux x64
          # addon, so install the native_addons job's artifact before publishing.
          - name: Install prebuilt native addons
