@@ -343,6 +343,17 @@ describe("formatUsageBreakdown", () => {
 		expect(text).toContain("capacity: 5h → 1.34/2 accounts used (0.66× quota left)");
 	});
 
+	it("shows the live Codex plan instead of a stale login-token plan", () => {
+		const codex = makeReport("openai-codex", "user@example.test", [
+			makeLimit({ id: "7d", provider: "openai-codex", usedFraction: 0.81, durationMs: SEVEN_DAYS }),
+		]);
+		codex.metadata = { email: "user@example.test", orgId: "workspace-id", orgName: "free", planType: "prolite" };
+
+		const text = stripVTControlCharacters(formatUsageBreakdown([codex], [], Date.now()));
+		expect(text).toContain("user@example.test · workspace-id · plan: prolite");
+		expect(text).not.toContain(" · free");
+	});
+
 	it("renders marked Antigravity shared quotas once per account", () => {
 		const antigravity = makeReport("google-antigravity", "user@example.test", [
 			makeLimit({

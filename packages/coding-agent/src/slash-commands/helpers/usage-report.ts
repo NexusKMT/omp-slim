@@ -27,7 +27,9 @@ function formatUsageAmount(limit: UsageLimit): string {
 }
 
 function formatUsageReportAccount(report: UsageReport, limit: UsageLimit, index: number): string {
-	const metaOrgName = report.metadata?.orgName;
+	const rawPlan = report.provider === "openai-codex" ? report.metadata?.planType : undefined;
+	const livePlan = typeof rawPlan === "string" ? rawPlan.trim() : "";
+	const metaOrgName = livePlan ? undefined : report.metadata?.orgName;
 	const metaOrgId = report.metadata?.orgId;
 	const org =
 		typeof metaOrgName === "string" && metaOrgName
@@ -35,22 +37,23 @@ function formatUsageReportAccount(report: UsageReport, limit: UsageLimit, index:
 			: typeof metaOrgId === "string" && metaOrgId
 				? metaOrgId
 				: undefined;
-	// Two subscriptions (orgs) can share one email — suffix the org so the rows
-	// are tellable apart.
+	const withPlan = (identity: string): string => (livePlan ? `${identity} · plan: ${livePlan}` : identity);
+	// Two subscriptions (orgs) can share one email — suffix the stable org id
+	// even when their live plans are the same.
 	const email = report.metadata?.email;
-	if (typeof email === "string" && email) return org ? `${email} (${org})` : email;
+	if (typeof email === "string" && email) return withPlan(org ? `${email} (${org})` : email);
 	// Guard metadata values for truthiness before using, then fall back to scope.
 	// ?? won't help here: empty string is not null/undefined, so it would suppress
 	// a valid scoped fallback (e.g. metadata.accountId="" hides limit.scope.accountId).
 	const metaAccountId = report.metadata?.accountId;
 	const accountId = typeof metaAccountId === "string" && metaAccountId ? metaAccountId : limit.scope.accountId;
 	if (typeof accountId === "string" && accountId) {
-		return org && org !== accountId ? `${accountId} (${org})` : accountId;
+		return withPlan(org && org !== accountId ? `${accountId} (${org})` : accountId);
 	}
 	const metaProjectId = report.metadata?.projectId;
 	const projectId = typeof metaProjectId === "string" && metaProjectId ? metaProjectId : limit.scope.projectId;
-	if (typeof projectId === "string" && projectId) return projectId;
-	return `account ${index + 1}`;
+	if (typeof projectId === "string" && projectId) return withPlan(projectId);
+	return withPlan(`account ${index + 1}`);
 }
 
 function renderUsageReports(
@@ -93,14 +96,17 @@ function renderUsageReports(
 						: typeof report.metadata?.accountId === "string"
 							? report.metadata.accountId
 							: "account";
+				const rawPlan = report.provider === "openai-codex" ? report.metadata?.planType : undefined;
+				const livePlan = typeof rawPlan === "string" ? rawPlan.trim() : "";
 				const resetOrg =
-					typeof report.metadata?.orgName === "string" && report.metadata.orgName
+					!livePlan && typeof report.metadata?.orgName === "string" && report.metadata.orgName
 						? report.metadata.orgName
 						: typeof report.metadata?.orgId === "string"
 							? report.metadata.orgId
 							: undefined;
 				const rawResetLabel =
-					resetOrg && resetOrg !== resetIdentity ? `${resetIdentity} (${resetOrg})` : resetIdentity;
+					(resetOrg && resetOrg !== resetIdentity ? `${resetIdentity} (${resetOrg})` : resetIdentity) +
+					(livePlan ? ` · plan: ${livePlan}` : "");
 				const resetLabel = sanitizeText(rawResetLabel.replace(/[\r\n\t]+/g, " "));
 				const availability =
 					resets.redeemableCount === resets.bankedCount ? "available" : `${resets.redeemableCount} usable now`;

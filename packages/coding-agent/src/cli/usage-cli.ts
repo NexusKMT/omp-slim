@@ -397,14 +397,19 @@ function formatAccountHeader(
 	const icon = STATUS_COLOR[status]("●");
 	const label = reportAccountLabel(report, index);
 	let header = `${icon} ${chalk.bold(redaction?.get(label) ?? label)}`;
+	const planType = report.metadata?.planType;
+	// Codex stores the plan from the login JWT as orgName. Keep the stable
+	// workspace id for identity, but show the live usage plan instead of the
+	// potentially stale JWT plan.
+	const liveCodexPlan =
+		report.provider === "openai-codex" && typeof planType === "string" && planType.trim().length > 0;
 	const metaOrgName = report.metadata?.orgName;
 	const metaOrgId = report.metadata?.orgId;
-	const org = typeof metaOrgName === "string" && metaOrgName ? metaOrgName : metaOrgId;
+	const org = liveCodexPlan ? metaOrgId : typeof metaOrgName === "string" && metaOrgName ? metaOrgName : metaOrgId;
 	if (typeof org === "string" && org && org !== label) {
 		header += chalk.dim(` · ${redaction?.get(org) ?? org}`);
 	}
-	const planType = report.metadata?.planType;
-	if (typeof planType === "string" && planType) header += chalk.dim(` · plan: ${planType}`);
+	if (typeof planType === "string" && planType.trim()) header += chalk.dim(` · plan: ${planType.trim()}`);
 	const resets = summarizeUsageResetCredits(report.resetCredits, nowMs);
 	if (resets && resets.bankedCount > 0) {
 		header += chalk.cyan(` · ✦ ${resets.bankedCount} saved reset${resets.bankedCount === 1 ? "" : "s"}`);
