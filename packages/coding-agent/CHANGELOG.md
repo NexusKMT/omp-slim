@@ -4,6 +4,7 @@
 
 ### Added
 
+- Implemented automatic title retry for ambiguous first messages
 - Added `/changelog last [N]` to show the latest release, or the last N releases. `/changelog` still shows the recent default and `/changelog full` still shows the complete history.
 - Added 'daybreak' badge to `omp usage` output for enabled accounts
 - Added `omp login` command for terminal-based OAuth authentication, including automated model discovery refresh and browser-opening support
