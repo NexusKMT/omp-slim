@@ -8,6 +8,7 @@ import {
 	type CompactionSummaryMessage,
 	resolveTelemetry,
 	type StreamFn,
+	TERMINAL_TOOL_RESULT_ABORT_REASON,
 	ThinkingLevel,
 	type Tokenizer,
 } from "@oh-my-pi/pi-agent-core";
@@ -1142,6 +1143,27 @@ export class SessionAdvisors {
 						message,
 						buildAdvisorQuarantineSourceText(currentAdvisorInput, advisorAgent.state.messages),
 					);
+				},
+				// A turn whose only tool calls are `advise` has nothing left to do:
+				// without this the model is re-invoked over the whole prefix just to
+				// say "done" (measured at ~6% of advisor spend, zero notes). Stop the
+				// review through the same graceful terminal path the primary's
+				// `yield` tool uses — the tool batch persists and `onTurnEnd` still
+				// runs. A turn that advises and keeps investigating is untouched.
+				// Fire on the LAST advise block, not the first: the batch starts
+				// records in index order and a not-yet-started sibling would see the
+				// aborted signal and become a skipped placeholder — a lost note.
+				afterToolCall: ctx => {
+					if (ctx.toolCall.name !== adviseTool.name) return undefined;
+					if (ctx.isError) return undefined;
+					let lastAdviseId: string | undefined;
+					for (const block of ctx.assistantMessage.content) {
+						if (block.type !== "toolCall") continue;
+						if (block.name !== adviseTool.name) return undefined;
+						lastAdviseId = block.id;
+					}
+					if (ctx.toolCall.id === lastAdviseId) advisorAgent.abort(TERMINAL_TOOL_RESULT_ABORT_REASON);
+					return undefined;
 				},
 				telemetry: advisorTelemetry,
 				serviceTier: undefined,
