@@ -19,13 +19,15 @@
 - Fixed SQLite stores opened with `recoverCorruption` crashing on a corrupt file instead of being preserved and recreated when the corruption surfaced as a different initialization error such as `no such table` ([#13530](https://github.com/can1357/oh-my-pi/pull/13530) by [@Hunter-124](https://github.com/Hunter-124))
 - Fixed raw stderr output staying on the previous day's log file after the log sink rotates at local midnight ([#13003](https://github.com/can1357/oh-my-pi/issues/13003)).
 
+### Fixed
+
+- Fixed multi-second temp directory removal stalls on Windows by forcing a major GC before the first deletion retry ([#13044](https://github.com/can1357/oh-my-pi/pull/13044) by [@jchanghong023](https://github.com/jchanghong023)).
+
 ## [18.3.1] - 2026-09-25
 
 ### Fixed
 
 - Fixed log rotation near local-day boundaries so dated log files are consistently assigned to the correct local date.
-- Fixed rotating log files being assigned to the wrong date near local-day boundaries by ensuring dated log paths match the local day used to name the files.
-- Fixed multi-second temp directory removal stalls on Windows by forcing a major GC before the first deletion retry ([#13044](https://github.com/can1357/oh-my-pi/pull/13044) by [@jchanghong023](https://github.com/jchanghong023)).
 
 ## [18.2.7] - 2026-09-21
 
