@@ -1981,7 +1981,7 @@ describe("Settings", () => {
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect([settings.getModelRole("web"), ...settings.get("retry.fallbackChains").web.slice(0, 2)]).toEqual([
+			expect([settings.getModelRole("web"), ...cfgRetryFallbackChains.get(settings).web.slice(0, 2)]).toEqual([
 				"google-gemini-cli/gemini-3.8-flash-high",
 				"google-antigravity/gemini-3.8-flash-high",
 				"google/gemini-3.8-flash-high",
