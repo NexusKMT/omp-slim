@@ -310,6 +310,20 @@ describe("searchGemini tools serialization", () => {
 		});
 	});
 
+	it("clamps an unsupported thinking level onto the nearest routed wire id", async () => {
+		const fetchMock = mockGeminiFetch();
+		const selectedModel = getBundledModel("google-antigravity", "gemini-3.8-flash");
+		await searchGemini({
+			...makeParams("collapsed OAuth model", selectedModel),
+			thinkingLevel: ThinkingLevel.XHigh,
+			fetch: fetchMock,
+		});
+
+		expect(capturedRequest?.body).toMatchObject({
+			model: "gemini-3.8-flash-high",
+		});
+	});
+
 	it("sends default googleSearch tool when no passthrough payloads are provided", async () => {
 		const fetchMock = mockGeminiFetch();
 		await searchGemini({ ...makeParams("default tools"), fetch: fetchMock });

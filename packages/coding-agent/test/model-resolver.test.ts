@@ -2614,6 +2614,13 @@ describe("effort-tier variant aliases", () => {
 		expect(result.thinkingLevel).toBe(Effort.High);
 	});
 
+	test("the default wire id shared by several levels leaves the thinking level unset", () => {
+		const result = parseModelPattern("google-antigravity/gemini-3.5-flash-extra-low", variantModels);
+		expect(result.model?.id).toBe("gemini-3.5-flash");
+		expect(result.thinkingLevel).toBeUndefined();
+		expect(result.explicitThinkingLevel).toBe(false);
+	});
+
 	test("retired tier ids keep explicit :level suffixes", () => {
 		const result = parseModelPattern("google-antigravity/gemini-3.5-flash-low:high", variantModels);
 		expect(result.model?.id).toBe("gemini-3.5-flash");

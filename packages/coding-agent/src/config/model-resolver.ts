@@ -841,19 +841,23 @@ function matchModel(
 	return pickPreferredModel(topCandidates, context);
 }
 
+/**
+ * Recover the effort a retired wire-tier id (e.g. `gemini-3.8-flash-high`) implied before it was
+ * collapsed into a logical model. Only a route owned by exactly one level carries intent: the
+ * model's default wire id and ids shared by several levels imply nothing, so the caller's level
+ * still applies.
+ */
 function inferWireRouteThinkingLevel(pattern: string, model: Model<Api>): ConfiguredThinkingLevel | undefined {
-	const normalized = pattern.trim().toLowerCase();
-	const providerPrefix = `${model.provider.toLowerCase()}/`;
-	const modelId = normalized.startsWith(providerPrefix) ? normalized.slice(providerPrefix.length) : normalized;
-	if (modelId === model.id.toLowerCase()) return undefined;
-
 	const routing = model.thinking?.effortRouting;
 	if (!routing) return undefined;
-	if (routing.off?.toLowerCase() === modelId) return ThinkingLevel.Off;
-	for (const level of model.thinking?.efforts ?? []) {
-		if (routing[level]?.toLowerCase() === modelId) return parseConfiguredThinkingLevel(level);
-	}
-	return undefined;
+	const normalized = pattern.trim().toLowerCase();
+	const providerPrefix = `${model.provider.toLowerCase()}/`;
+	const wireId = normalized.startsWith(providerPrefix) ? normalized.slice(providerPrefix.length) : normalized;
+	if (wireId === model.id.toLowerCase() || wireId === model.requestModelId?.toLowerCase()) return undefined;
+
+	const levels = [ThinkingLevel.Off, ...(model.thinking?.efforts ?? [])];
+	const matches = levels.filter(level => routing[level]?.toLowerCase() === wireId);
+	return matches.length === 1 ? parseConfiguredThinkingLevel(matches[0]) : undefined;
 }
 
 export interface ParsedModelResult {
