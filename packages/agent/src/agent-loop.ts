@@ -38,6 +38,7 @@ import {
 	getStreamingPartialJson,
 	kCursorExecResolved,
 } from "@oh-my-pi/pi-ai/utils/block-symbols";
+import { schemaDefinesProperty } from "@oh-my-pi/pi-ai/utils/schema/json-schema-validator";
 import { stamp } from "@oh-my-pi/pi-ai/utils/schema/stamps";
 import {
 	createHarmonyAuditEvent,
@@ -1021,17 +1022,13 @@ function resolveIntentMode(intent: AgentTool["intent"]): "require" | "optional" 
 }
 
 /**
- * Longest `i` value accepted as an intent. Intents are short labels (the
- * coding-agent prompt asks for 2–6 words, ~50 chars); anything past this is a
- * tool payload the model put in the wrong field, not a label.
+ * Longest `i` value accepted as an intent. The injected field is described as
+ * a "concise intent" (INTENT_FIELD_DESCRIPTION); anything past this is a tool
+ * payload the model put in the wrong field, not a label.
  */
 const MAX_INTENT_LENGTH = 200;
 
-function extractIntent(args: Record<string, unknown>): {
-	intent?: string;
-	strippedArgs: Record<string, unknown>;
-	misplacedPayloadError?: string;
-} {
+function extractIntent(args: Record<string, unknown>): { intent?: string; strippedArgs: Record<string, unknown> } {
 	const { [INTENT_FIELD]: intent, ...strippedArgs } = args;
 	if (typeof intent !== "string") {
 		return { strippedArgs };
@@ -1040,14 +1037,6 @@ function extractIntent(args: Record<string, unknown>): {
 		.trim()
 		.replace(/\s*\.+$/, "")
 		.trim();
-	if (trimmed.length > MAX_INTENT_LENGTH) {
-		// Stripping `i` here would silently drop the payload and run the tool
-		// with whatever the model left in the real parameters.
-		return {
-			strippedArgs,
-			misplacedPayloadError: `\`${INTENT_FIELD}\` is a short intent label (at most ${MAX_INTENT_LENGTH} chars); the value you sent is ${trimmed.length} chars. The tool was not run. Put that content in the tool's own parameters and retry with a brief \`${INTENT_FIELD}\`.`,
-		};
-	}
 	return { intent: trimmed.length > 0 ? trimmed : undefined, strippedArgs };
 }
 
@@ -2773,11 +2762,19 @@ async function prepareToolCallDispatch(
 		prepared.set(toolCall.id, entry);
 		let argsForExecution = toolCall.arguments as Record<string, unknown>;
 		if (intentTracing) {
-			const { intent, strippedArgs, misplacedPayloadError } = extractIntent(toolCall.arguments);
+			const { intent, strippedArgs } = extractIntent(toolCall.arguments);
 			argsForExecution = strippedArgs;
-			if (misplacedPayloadError !== undefined) {
+			// A payload in `i` would be stripped and the tool run with the leftover
+			// args. Unknown tools fall through to the not-found error; a tool that
+			// owns `i` as a real parameter has nowhere else to put the value.
+			if (
+				intent !== undefined &&
+				intent.length > MAX_INTENT_LENGTH &&
+				tool &&
+				!schemaDefinesProperty(toolWireSchema(tool), INTENT_FIELD)
+			) {
 				entry.args = strippedArgs;
-				entry.validationErrorMessage = misplacedPayloadError;
+				entry.validationErrorMessage = `\`${INTENT_FIELD}\` is a short intent label (at most ${MAX_INTENT_LENGTH} chars); the value you sent is ${intent.length} chars. The tool was not run. Put that content in the tool's own parameters and retry with a brief \`${INTENT_FIELD}\`.`;
 				continue;
 			}
 			if (intent) {
