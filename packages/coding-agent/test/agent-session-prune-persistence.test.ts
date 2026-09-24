@@ -5,7 +5,7 @@ import { USELESS_NOTICE } from "@oh-my-pi/pi-agent-core/compaction/pruning";
 import type { Context } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { AdvisorRuntime } from "@oh-my-pi/pi-coding-agent/advisor/runtime";
+import { AdvisorOutputQuarantinedError, AdvisorRuntime } from "@oh-my-pi/pi-coding-agent/advisor/runtime";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -349,6 +349,61 @@ describe("AgentSession per-turn prune persistence", () => {
 			});
 
 			expect(resets).toBe(1);
+			runtime.dispose();
+		});
+
+		it("re-primes a quarantined review from the pruned transcript, not the pre-prune snapshot", async () => {
+			const user = (text: string): AgentMessage => ({ role: "user", content: text, timestamp: Date.now() });
+			const firstPrompt = Promise.withResolvers<void>();
+			const firstPromptStarted = Promise.withResolvers<void>();
+			const replay = Promise.withResolvers<string>();
+			let promptCalls = 0;
+			let current: AgentMessage[] = [
+				user("delivered one"),
+				assistant([{ type: "toolCall", id: "call-big", name: "grep", arguments: { pattern: "TODO" } }]),
+				toolResult("call-big", "grep", "match line\n".repeat(30).trimEnd()),
+			];
+			const runtime = new AdvisorRuntime(
+				{
+					prompt: input => {
+						promptCalls++;
+						if (promptCalls === 1) {
+							firstPromptStarted.resolve();
+							return firstPrompt.promise;
+						}
+						replay.resolve(JSON.stringify(input));
+						return Promise.resolve();
+					},
+					abort: () => {},
+					reset: () => {},
+					state: { messages: [] },
+				},
+				// The live session swaps in a new array on every rebuild; mirror that.
+				{ snapshotMessages: () => current },
+				0,
+			);
+			runtime.onTurnEnd(current);
+			await firstPromptStarted.promise;
+			// Queued while the first review is still running, so the quarantine re-primes.
+			current = [...current, user("delivered two")];
+			runtime.onTurnEnd(current);
+			// The prune rebuilds the transcript into a fresh array with the result elided.
+			current = current.map(message =>
+				message.role === "toolResult"
+					? ({
+							...message,
+							content: [{ type: "text", text: USELESS_NOTICE }],
+							prunedAt: Date.now(),
+						} as AgentMessage)
+					: message,
+			);
+			runtime.rebaseDeliveredPrefix("prune-tool-outputs");
+
+			firstPrompt.reject(new AdvisorOutputQuarantinedError("quarantined"));
+			const replayed = await replay.promise;
+
+			expect(replayed).toContain("⇒ ok · 1 line");
+			expect(replayed).not.toContain("30 lines");
 			runtime.dispose();
 		});
 	});

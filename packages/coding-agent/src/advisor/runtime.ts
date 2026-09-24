@@ -639,6 +639,9 @@ export class AdvisorRuntime {
 		}
 		this.#deliveredPrefix = rebased;
 		this.#lastCount = rebased.length;
+		// A quarantine re-prime replays `#latestMessages`; keep it on the rewritten
+		// transcript so the replay does not resurrect pre-prune tool output.
+		this.#latestMessages = all;
 		logger.debug("advisor delivered prefix rebased", { reason, lastCount: this.#lastCount });
 	}
 
