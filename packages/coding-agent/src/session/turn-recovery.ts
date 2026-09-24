@@ -385,6 +385,7 @@ export class TurnRecovery {
 			modelIdentity: formatModelStringWithRouting(model),
 			thinkingLevel: level,
 			isFallback: this.#fallbackRouted,
+			contextWindow: model.contextWindow,
 		};
 		this.#bootstrapCache = { model, level, routed: this.#fallbackRouted, value };
 		return value;
@@ -444,6 +445,7 @@ export class TurnRecovery {
 					modelIdentity: formatModelStringWithRouting(model),
 					thinkingLevel: level,
 					isFallback: this.#fallbackRouted,
+					contextWindow: model.contextWindow,
 				},
 				sessionId: this.#host.sessionManager.getSessionId(),
 			};
