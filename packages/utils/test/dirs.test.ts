@@ -81,4 +81,19 @@ describe("dated log path", () => {
 		expect(localDay(date)).toBe("2026-05-31");
 		expect(path.basename(getLogPath(date, 123))).toBe("omp.2026-05-31.123.log");
 	});
+
+	it("keeps the local-day key under a forced non-UTC timezone", () => {
+		// On a UTC runner `toISOString()` and the local day agree, so the
+		// in-process assertion above cannot catch a revert there. Run the probe
+		// in a UTC+8 child process, where the two days differ for this fixture.
+		const probe = path.join(import.meta.dir, "fixtures", "local-day-probe.ts");
+		const proc = Bun.spawnSync([process.execPath, probe], {
+			env: { ...process.env, TZ: "Asia/Shanghai" },
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		if (proc.exitCode === 2) return; // TZ not honored on this platform
+		if (proc.exitCode !== 0) console.error(proc.stderr.toString());
+		expect(proc.exitCode).toBe(0);
+	});
 });
