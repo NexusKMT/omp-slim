@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex usage now shows the current subscription plan after an account's plan changes ([#12928](https://github.com/can1357/oh-my-pi/pull/12928) by [@haesol-shin](https://github.com/haesol-shin)).
 ### Added
 
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))

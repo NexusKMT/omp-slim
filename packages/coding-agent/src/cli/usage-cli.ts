@@ -29,6 +29,7 @@ import { Settings } from "../config/settings";
 import { discoverAuthStorage } from "../sdk";
 import { resolveAuthBrokerConfig } from "../session/auth-broker-config";
 import { collapseSharedUsageReports, summarizeUsageResetCredits } from "@oh-my-pi/pi-tui/overlays/usage-display";
+import { formatCodexUsageReportLabel } from "../slash-commands/helpers/active-oauth-account";
 
 const BAR_WIDTH = 28;
 
@@ -399,6 +400,7 @@ function accountIdentityLabel(account: UsageAccountIdentity, redaction?: Map<str
 
 function formatAccountHeader(
 	report: UsageReport,
+	peers: readonly UsageReport[],
 	index: number,
 	nowMs: number,
 	redaction?: Map<string, string>,
@@ -407,14 +409,18 @@ function formatAccountHeader(
 	const icon = STATUS_COLOR[status]("●");
 	const label = reportAccountLabel(report, index);
 	let header = `${icon} ${chalk.bold(redaction?.get(label) ?? label)}`;
-	const metaOrgName = report.metadata?.orgName;
-	const metaOrgId = report.metadata?.orgId;
-	const org = typeof metaOrgName === "string" && metaOrgName ? metaOrgName : metaOrgId;
-	if (typeof org === "string" && org && org !== label) {
-		header += chalk.dim(` · ${redaction?.get(org) ?? org}`);
+	if (report.provider === "openai-codex") {
+		const identity = sanitizeText((redaction?.get(label) ?? label).replace(/[\r\n\t]+/g, " "));
+		const rendered = formatCodexUsageReportLabel(report, peers, label, redaction, true, "inline");
+		header = `${icon} ${chalk.bold(identity)}${chalk.dim(rendered.slice(identity.length))}`;
+	} else {
+		const metaOrgName = report.metadata?.orgName;
+		const metaOrgId = report.metadata?.orgId;
+		const org = typeof metaOrgName === "string" && metaOrgName ? metaOrgName : metaOrgId;
+		if (typeof org === "string" && org && org !== label) header += chalk.dim(` · ${redaction?.get(org) ?? org}`);
+		const plan = report.metadata?.planType;
+		if (typeof plan === "string" && plan.trim()) header += chalk.dim(` · plan: ${plan.trim()}`);
 	}
-	const planType = report.metadata?.planType;
-	if (typeof planType === "string" && planType) header += chalk.dim(` · plan: ${planType}`);
 	if (report.metadata?.daybreak === true) header += chalk.cyan(" · daybreak");
 	const resets = summarizeUsageResetCredits(report.resetCredits, nowMs);
 	if (resets && resets.bankedCount > 0) {
@@ -771,7 +777,7 @@ export function formatUsageBreakdown(
 		const labelWidth = providerLimitTemplates.reduce((max, template) => Math.max(max, template.title.length), 0);
 
 		providerReports.forEach((report, index) => {
-			lines.push(`  ${formatAccountHeader(report, index, nowMs, redaction)}`);
+			lines.push(`  ${formatAccountHeader(report, providerReports, index, nowMs, redaction)}`);
 			if (policyOptions && policyProviders.has(provider)) {
 				lines.push(
 					`      ${chalk.dim(formatPolicyLine(provider, metadataIdentity(report), report.limits, policyOptions))}`,

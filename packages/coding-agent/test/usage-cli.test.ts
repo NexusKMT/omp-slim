@@ -442,6 +442,43 @@ describe("formatUsageBreakdown", () => {
 		expect(text).toContain("policy: priority -5 · reserve 40% (override) · reserve unknown");
 	});
 
+	it("shows the live Codex plan without exposing an ID for one account", () => {
+		const codex = makeReport("openai-codex", "user@example.test", [
+			makeLimit({ id: "7d", provider: "openai-codex", usedFraction: 0.81, durationMs: SEVEN_DAYS }),
+		]);
+		codex.metadata = { email: "user@example.test", orgId: "workspace-id", orgName: "free", planType: "prolite" };
+
+		const text = stripVTControlCharacters(formatUsageBreakdown([codex], [], Date.now()));
+		expect(text).toContain("user@example.test · plan: prolite");
+		expect(text).not.toContain("workspace-id");
+		expect(text).not.toContain(" · free");
+	});
+
+	it("qualifies colliding Codex emails but never falls back to the stale plan", () => {
+		const reports = ["workspace-one", "workspace-two"].map((orgId, index) => ({
+			...makeReport("openai-codex", "shared@example.test", [
+				makeLimit({ id: "7d", provider: "openai-codex", usedFraction: 0.2, durationMs: SEVEN_DAYS }),
+			]),
+			metadata: {
+				email: "shared@example.test",
+				orgId,
+				orgName: "free",
+				...(index === 0 ? { planType: "prolite" } : {}),
+			},
+		}));
+		const text = stripVTControlCharacters(formatUsageBreakdown(reports, [], Date.now()));
+		expect(text).toContain("shared@example.test · workspace-one · plan: prolite");
+		expect(text).toContain("shared@example.test · workspace-two");
+		expect(text).not.toContain(" · free");
+	});
+
+	it("keeps other providers' live plan tier in the account header", () => {
+		const report = makeReport("devin", "user@example.test", []);
+		report.metadata = { email: "user@example.test", planType: "team" };
+		const text = stripVTControlCharacters(formatUsageBreakdown([report], [], Date.now()));
+		expect(text).toContain("user@example.test · plan: team");
+	});
+
 	it("renders marked Antigravity shared quotas once per account", () => {
 		const antigravity = makeReport("google-antigravity", "user@example.test", [
 			makeLimit({
