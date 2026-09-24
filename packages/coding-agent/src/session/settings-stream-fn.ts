@@ -10,9 +10,15 @@
  * OpenRouter never saw `providers.openrouterVariant`, breaking sticky routing
  * and OpenRouter response-cache hits across advisor calls.
  */
-import type { StreamFn } from "@oh-my-pi/pi-agent-core";
+import {
+	fitOutputTokensToContextWindow,
+	type StreamFn,
+	Tokenizer,
+	tokenizerEncodingForModel,
+} from "@oh-my-pi/pi-agent-core";
 import { type SimpleStreamOptions, streamSimple } from "@oh-my-pi/pi-ai";
 import { classifyModel } from "@oh-my-pi/pi-catalog/identity";
+import type { Encoding } from "@oh-my-pi/pi-natives";
 import { type Settings, validateProviderMaxInFlightRequests } from "../config/settings";
 
 function timeoutSecondsToMs(value: number): number | undefined {
@@ -26,8 +32,14 @@ function timeoutSecondsToMs(value: number): number | undefined {
  * `settings` per call and forwards to `base` (defaults to `streamSimple`).
  *
  * Caller-supplied `streamOptions` always win — the helper only fills holes.
+ * The one exception is the output cap, which is lowered when prompt plus cap
+ * would exceed the model's context window (see
+ * {@link fitOutputTokensToContextWindow}); every request this session drives,
+ * including side turns like `/btw`, goes through here.
  */
 export function createSettingsAwareStreamFn(settings: Settings, base: StreamFn = streamSimple): StreamFn {
+	// One tokenizer per encoding, so per-message counts are reused across requests.
+	const tokenizers = new Map<Encoding | null, Tokenizer>();
 	return (model, context, streamOptions) => {
 		const openrouterRoutingPreset = settings.get("providers.openrouterVariant");
 		const openrouterVariant =
@@ -66,8 +78,16 @@ export function createSettingsAwareStreamFn(settings: Settings, base: StreamFn =
 			(serverSideFallbackIdentity.family === "fable" || serverSideFallbackIdentity.family === "mythos");
 		const fallbacks =
 			streamOptions?.fallbacks ?? (serverSideFallbackEnabled ? [{ model: "claude-opus-5-5" }] : undefined);
+		const encoding = tokenizerEncodingForModel(model);
+		let tokenizer = tokenizers.get(encoding);
+		if (!tokenizer) {
+			tokenizer = new Tokenizer(model);
+			tokenizers.set(encoding, tokenizer);
+		}
+		const maxTokens = fitOutputTokensToContextWindow(model, context, streamOptions?.maxTokens, tokenizer);
 		const merged: SimpleStreamOptions = {
 			...streamOptions,
+			maxTokens,
 			openrouterVariant: streamOptions?.openrouterVariant ?? openrouterVariant,
 			antigravityEndpointMode: streamOptions?.antigravityEndpointMode ?? antigravityEndpointMode,
 			textVerbosity: streamOptions?.textVerbosity ?? textVerbosity,

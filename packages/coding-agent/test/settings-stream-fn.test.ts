@@ -191,6 +191,28 @@ describe("createSettingsAwareStreamFn", () => {
 		expect(options?.loopGuard?.checkAssistantContent).toBe(true);
 		expect(options?.hideThinkingSummary).toBe(false);
 	});
+
+	it("lowers the output cap so prompt plus output fits the model's context window", () => {
+		// The reported DeepSeek /btw 400: a 666k-token prompt plus the model's
+		// 384k default output cap exceeded the window. Test-env counts are bytes/4.
+		const deepseek = { api: "openai-completions", contextWindow: 1_000_000, maxTokens: 384_000 } as unknown as Model;
+		const promptTokens = 666_387;
+		const context = {
+			messages: [{ role: "user", content: "x".repeat(promptTokens * 4), timestamp: 0 }],
+		} as unknown as Context;
+		const { fn: base, calls } = captureBase();
+		const wrapped = createSettingsAwareStreamFn(Settings.isolated({}), base);
+
+		wrapped(deepseek, context, { apiKey: "k" });
+		wrapped(deepseek, stubContext, { apiKey: "k" });
+
+		const fitted = calls[0]?.options?.maxTokens;
+		expect(fitted).toBeGreaterThan(0);
+		expect(promptTokens + (fitted ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(1_000_000);
+		// A prompt that leaves room keeps the transport's own default.
+		expect(calls[1]?.options?.maxTokens).toBeUndefined();
+	});
+
 	describe("providers.anthropic.serverSideFallback (opt-in)", () => {
 		const stubFableModel = {
 			api: "anthropic-messages",
