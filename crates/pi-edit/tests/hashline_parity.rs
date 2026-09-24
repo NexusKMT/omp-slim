@@ -1070,6 +1070,27 @@ async fn edit_results_carry_unshifted_prior_provenance_only() {
 	assert_eq!(workspace.read("a.txt").as_deref(), Some(expected.as_str()));
 }
 
+#[tokio::test]
+async fn edit_of_first_line_with_prior_read_carries_no_provenance() {
+	let source: String = (1..=5).map(|n| format!("line{n}\n")).collect();
+	let all_lines = (1..=5).collect::<Vec<u32>>();
+
+	let mut workspace = Workspace::new(EditMode::Hashline);
+	workspace.config.enforce_seen_lines = true;
+	workspace.write("a.txt", &source);
+	let read_tag = workspace.snapshot("a.txt", &source, Some(&all_lines));
+	let writer = common::DiskWriter::default();
+
+	workspace
+		.apply_json(&json!({ "input": format!("[a.txt#{read_tag}]\nPUT 1.=1:\n+LINE1") }), &writer)
+		.await
+		.expect("first-line edit with a prior read applies");
+	assert_eq!(
+		workspace.read("a.txt").as_deref(),
+		Some(source.replacen("line1\n", "LINE1\n", 1).as_str())
+	);
+}
+
 fn preview_for(
 	workspace: &Workspace,
 	input: String,

@@ -9,7 +9,7 @@
   - `packages/coding-agent/src/ida/settings.ts` — `ida.enabled`, `ida.python`, `ida.installDir` settings
   - `packages/coding-agent/src/ida/install.ts` — local install detection (`cfgIdaAvailable`, `cfgIdaInstall`)
   - `packages/coding-agent/src/ida/runtime.ts` — Python interpreter discovery (must import `ida_domain` + `idapro`)
-  - `packages/coding-agent/src/ida/store.ts` — executable sniffing, IDB location (`~/.omp/agent/idbs/<sha16>-<name>/` or in place)
+  - `packages/coding-agent/src/ida/store.ts` — executable sniffing, universal Mach-O slice selection, IDB location (`~/.omp/agent/idbs/<sha16>-<name>[.<arch>]/` or in place)
   - `packages/coding-agent/src/ida/supervisor.ts` — per-DB Python worker process, NDJSON RPC, registry, save-on-exit
   - `packages/coding-agent/src/ida/worker.py` — idalib worker: views, edits, `exec` namespace and helpers
   - `packages/coding-agent/src/tools/read-binary.ts` — `read` views on executables and `.i64`/`.idb`
@@ -26,7 +26,7 @@
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `action` | `"list" \| "open" \| "save" \| "close" \| "exec" \| "rename" \| "comment" \| "set_type" \| "make_function"` | Yes | Dispatch key. |
-| `db` | `string` | No | Binary or `.i64`/`.idb` path (cwd-relative), or an open DB id. Optional when exactly one DB is open; required for `open`. |
+| `db` | `string` | No | Binary or `.i64`/`.idb` path (cwd-relative), or an open DB id. `<bin>:@<arch>` picks a universal Mach-O slice. Optional when exactly one DB is open; required for `open`. |
 | `target` | `string` | No | Symbol name or `0x` address. `_`-prefixed Mach-O names also resolve without the underscore. |
 | `name` | `string` | No | New name for `rename`. |
 | `text` | `string` | No | Comment text for `comment`. |
@@ -69,6 +69,7 @@ Persistent per DB and shared by all agents. Preloaded: `db` (ida_domain `Databas
 
 ## Side Effects
 - Executables are copied into the IDB store dir; the original binary is never modified. `.i64`/`.idb` open in place.
+- Universal (fat) Mach-O: only the selected slice is staged, so IDA analyzes a thin binary. Default slice is the first matching the host CPU (else the first); `:@<arch>` (lipo names, e.g. `x86_64`, `arm64e`; unnamed subtypes as `<family>.<subtype>`) picks another. Each slice gets its own store IDB.
 - Changes persist only on `save`, `close` (saves by default), or omp process exit (postmortem closes every DB with save).
 - DBs are not tied to session disposal; they outlive compaction and subagents.
 - Each DB holds a file lock; another omp process opening the same IDB fails.
@@ -76,6 +77,7 @@ Persistent per DB and shared by all agents. Preloaded: `db` (ida_domain `Databas
 ## Errors
 - `No IDA database open; pass db=<binary path>` / `Multiple IDA databases open (…); pass db`
 - `db not found: <ref>` / `<ref> is not open`
+- `no <arch> slice; available: …` / `<path> is not a universal binary; drop :@<arch>`
 - `<field> is required for <action>`
 - IDA unavailable (no interpreter imports `ida_domain` + `idapro`): install ida-domain or set `ida.python`.
 - Worker killed after an ignored interrupt: changes since the last save are lost.

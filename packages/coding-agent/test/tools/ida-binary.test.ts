@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgIdaAvailable, cfgIdaInstall } from "@oh-my-pi/pi-coding-agent/ida/install";
-import { isExecutableHeader } from "@oh-my-pi/pi-coding-agent/ida/store";
+import { isExecutableHeader, parseFatSlices, selectSlice, splitSliceRef } from "@oh-my-pi/pi-coding-agent/ida/store";
 import { type BinaryView, parseBinaryView } from "@oh-my-pi/pi-coding-agent/tools/read-binary";
 
 describe("isExecutableHeader", () => {
@@ -30,6 +30,65 @@ describe("isExecutableHeader", () => {
 			expect(isExecutableHeader(new Uint8Array(bytes))).toBe(expected);
 		});
 	}
+});
+
+/** Big-endian fat header; each entry is `[cputype, cpusubtype, offset, size]`. */
+function fatHeader(entries: Array<[number, number, number, number]>, { is64 = false } = {}): Uint8Array {
+	const entrySize = is64 ? 32 : 20;
+	const view = new DataView(new ArrayBuffer(8 + entries.length * entrySize));
+	view.setUint32(0, is64 ? 0xcafebabf : 0xcafebabe);
+	view.setUint32(4, entries.length);
+	entries.forEach(([cpuType, subtype, offset, size], i) => {
+		const at = 8 + i * entrySize;
+		view.setUint32(at, cpuType);
+		view.setUint32(at + 4, subtype);
+		if (is64) {
+			view.setBigUint64(at + 8, BigInt(offset));
+			view.setBigUint64(at + 16, BigInt(size));
+		} else {
+			view.setUint32(at + 8, offset);
+			view.setUint32(at + 12, size);
+		}
+	});
+	return new Uint8Array(view.buffer);
+}
+
+describe("universal Mach-O slices", () => {
+	// Mirrors macOS 27 /usr/bin/yes: x86_64, arm64e (pointer-auth capability bit set), and an arm64 subtype lipo cannot name.
+	const yes = fatHeader([
+		[0x01000007, 3, 0x4000, 0x100],
+		[0x0100000c, 0x80000002, 0x110000, 0x200],
+		[0x0100000c, 0x8000000c, 0x224000, 0x200],
+	]);
+
+	it("names slices like lipo, masking capability bits", () => {
+		expect(parseFatSlices(yes)?.map(s => s.arch)).toEqual(["x86_64", "arm64e", "arm64.12"]);
+	});
+
+	it("reads 64-bit fat_arch offsets", () => {
+		const slices = parseFatSlices(fatHeader([[0x0100000c, 0, 0x1_0000_0000, 0x10]], { is64: true }));
+		expect(slices).toEqual([{ arch: "arm64", cpuType: 0x0100000c, offset: 0x1_0000_0000, size: 0x10 }]);
+	});
+
+	it("rejects a slice table cut short", () => {
+		expect(parseFatSlices(yes.subarray(0, yes.length - 1))).toBeNull();
+	});
+
+	it("defaults to the host CPU slice rather than the first", () => {
+		const slices = parseFatSlices(yes) ?? [];
+		const expected = process.arch === "arm64" ? "arm64e" : "x86_64";
+		expect(selectSlice(slices).arch).toBe(expected);
+	});
+
+	it("lists available slices for an unknown arch", () => {
+		expect(() => selectSlice(parseFatSlices(yes) ?? [], "ppc")).toThrow("no ppc slice; available: x86_64, arm64e");
+	});
+
+	it("splits a trailing :@arch off a db reference", () => {
+		expect(splitSliceRef("bin/yes:@x86_64")).toEqual({ path: "bin/yes", arch: "x86_64" });
+		expect(splitSliceRef("bin/yes")).toEqual({ path: "bin/yes" });
+		expect(() => splitSliceRef("bin/yes:@")).toThrow("empty slice name");
+	});
 });
 
 describe("parseBinaryView", () => {

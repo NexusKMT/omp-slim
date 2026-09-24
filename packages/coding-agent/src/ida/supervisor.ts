@@ -16,7 +16,15 @@ import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow }
 import { stageRunnerScript } from "../eval/runner-cache";
 import type { ToolSession } from "../tools";
 import { type IdaRuntime, resolveIdaRuntime } from "./runtime";
-import { type IdbLocation, locateIdb, prepareStoreDir, sanitizeIdbName } from "./store";
+import {
+	type FatSelection,
+	type IdbLocation,
+	type LocateIdbOptions,
+	locateIdb,
+	prepareStoreDir,
+	SLICE_SEPARATOR,
+	sanitizeIdbName,
+} from "./store";
 import IDA_WORKER from "./worker.py" with { type: "text" };
 
 /** How long a worker gets to answer after SIGINT before it is killed. */
@@ -99,6 +107,8 @@ export class IdaDatabase {
 	readonly id: string;
 	/** Absolute path of the binary or `.i64`/`.idb` the database was opened for. */
 	readonly sourcePath: string;
+	/** For universal binaries: the analyzed slice and its siblings. */
+	readonly fat?: FatSelection;
 	/** Worker process id. */
 	readonly pid: number;
 	#idbPath: string;
@@ -118,6 +128,7 @@ export class IdaDatabase {
 	private constructor(loc: IdbLocation, proc: Subprocess<"pipe", "pipe", "pipe">, lock: FileLockHandle) {
 		this.id = loc.id;
 		this.sourcePath = loc.sourcePath;
+		this.fat = loc.fat;
 		this.pid = proc.pid;
 		this.#idbPath = loc.openPath;
 		this.#proc = proc;
@@ -163,6 +174,11 @@ export class IdaDatabase {
 			if (loc.kind === "store" && loc.isNew) await removeCreationLeftovers(loc);
 			throw error;
 		}
+	}
+
+	/** Reference `read` and `ida db=` resolve back to this database: the source path plus `:@<arch>` for a universal binary slice. */
+	get ref(): string {
+		return this.fat ? `${this.sourcePath}${SLICE_SEPARATOR}${this.fat.slice.arch}` : this.sourcePath;
 	}
 
 	/** Path of the IDB file as reported by IDA. */
@@ -397,16 +413,22 @@ async function openIdaDatabase(session: ToolSession, loc: IdbLocation, signal?: 
 	}
 }
 
+/** Options for {@link acquireIdaDatabase}. */
+export interface AcquireIdaDatabaseOptions extends LocateIdbOptions {
+	signal?: AbortSignal;
+}
+
 /**
- * Return the live database for a binary or `.i64`/`.idb`, opening (or creating) it on first use.
- * Concurrent callers for the same database share one open.
+ * Return the live database for a binary (or one slice of a universal binary) or `.i64`/`.idb`,
+ * opening (or creating) it on first use. Concurrent callers for the same database share one open.
  */
 export async function acquireIdaDatabase(
 	session: ToolSession,
 	sourcePath: string,
-	signal?: AbortSignal,
+	options: AcquireIdaDatabaseOptions = {},
 ): Promise<IdaDatabase> {
-	const loc = await locateIdb(sourcePath);
+	const { signal, arch } = options;
+	const loc = await locateIdb(sourcePath, { arch });
 	const open = databases.get(loc.id);
 	if (open) return open;
 	const inflight = pending.get(loc.id);

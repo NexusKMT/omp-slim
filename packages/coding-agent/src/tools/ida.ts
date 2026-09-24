@@ -20,6 +20,7 @@ import {
 	type IdaDatabase,
 	listIdaDatabases,
 	locateIdb,
+	splitSliceRef,
 } from "../ida";
 import idaDescription from "../prompts/tools/ida.md" with { type: "text" };
 import type { ToolSession } from ".";
@@ -136,7 +137,7 @@ export class IdaTool implements AgentTool<typeof idaSchema, IdaToolDetails> {
 				const { module, format, arch, bitness } = db.info;
 				return result
 					.text(
-						`Opened ${db.id} (${module}, ${format}, ${arch} ${bitness}-bit) → ${shortenPath(db.idbPath)}. read ${shortenPath(db.sourcePath)} for the overview.`,
+						`Opened ${db.id} (${module}, ${format}, ${arch} ${bitness}-bit) → ${shortenPath(db.idbPath)}. read ${shortenPath(db.ref)} for the overview.`,
 					)
 					.done();
 			}
@@ -233,11 +234,12 @@ export class IdaTool implements AgentTool<typeof idaSchema, IdaToolDetails> {
 		}
 		const byId = findOpenIdaDatabase(ref);
 		if (byId) return byId;
-		const abs = resolveToCwd(ref, this.session.cwd);
+		const { path: sourcePath, arch } = splitSliceRef(ref);
+		const abs = resolveToCwd(sourcePath, this.session.cwd);
 		const stat = await fs.stat(abs).catch(() => null);
 		if (!stat?.isFile()) throw new ToolError(`db not found: ${ref}`);
-		if (open) return acquireIdaDatabase(this.session, abs, signal);
-		const loc = await locateIdb(abs);
+		if (open) return acquireIdaDatabase(this.session, abs, { arch, signal });
+		const loc = await locateIdb(abs, { arch });
 		const db = findOpenIdaDatabase(loc.id);
 		if (!db) throw new ToolError(`${ref} is not open`);
 		return db;
