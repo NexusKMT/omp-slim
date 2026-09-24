@@ -4,7 +4,7 @@ use std::{
 	borrow::Cow,
 	collections::HashMap,
 	fmt,
-	path::{Path, PathBuf},
+	path::{Component, Path, PathBuf, Prefix},
 	sync::{Arc, LazyLock},
 	time::{Duration, Instant},
 };
@@ -264,17 +264,24 @@ fn cache_key(root: &Path, mut options: WalkOptions) -> CacheKey {
 }
 
 /// Normalize a filesystem path to a forward-slash string on Windows.
+///
+/// Verbatim (`\\?\`) and device (`\\.\`) paths are returned unchanged: Windows
+/// only honors those prefixes with backslash separators.
 pub fn normalize_path(path: &Path) -> Cow<'_, str> {
-	if cfg!(windows) {
-		let path = path.to_string_lossy();
-		if path.contains('\\') {
-			Cow::Owned(path.replace('\\', "/"))
-		} else {
-			path
-		}
+	let text = path.to_string_lossy();
+	if cfg!(windows) && text.contains('\\') && !has_literal_prefix(path) {
+		Cow::Owned(text.replace('\\', "/"))
 	} else {
-		path.to_string_lossy()
+		text
 	}
+}
+
+fn has_literal_prefix(path: &Path) -> bool {
+	matches!(
+		path.components().next(),
+		Some(Component::Prefix(prefix))
+			if prefix.kind().is_verbatim() || matches!(prefix.kind(), Prefix::DeviceNS(_))
+	)
 }
 
 /// Normalize a filesystem path to a forward-slash relative string.
