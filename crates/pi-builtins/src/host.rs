@@ -311,14 +311,38 @@ impl ShellPaths {
 	/// A descriptor path becomes `/dev/fd/<host fd>` for the shell's
 	/// descriptor, or a path that cannot be opened when the shell has none.
 	pub fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
-		let normalized_path = brush_core::sys::fs::normalize_shell_path(path.as_ref());
-		let path = normalized_path.as_ref();
-		let resolved = if path.is_absolute() { path.to_path_buf() } else { self.cwd.join(path) };
+		let resolved = self.absolute(path.as_ref());
 		#[cfg(unix)]
 		if let Some(descriptor) = openfiles::DescriptorPath::parse(&resolved) {
 			return self.descriptor_target(descriptor);
 		}
 		resolved
+	}
+
+	/// Like [`ShellPaths::resolve`], for calls that inspect `path` itself
+	/// without following it (`lstat`, `readlink`).
+	///
+	/// `/dev/stdin`, `/dev/stdout`, and `/dev/stderr` are symlinks, and
+	/// `/dev/tty` a device node, that read the same in every process; only
+	/// following them reaches a process's own descriptors, so they stay as
+	/// spelled. `/dev/fd/N` names the descriptor itself and still resolves.
+	pub fn resolve_link(&self, path: impl AsRef<Path>) -> PathBuf {
+		let resolved = self.absolute(path.as_ref());
+		#[cfg(unix)]
+		if let Some(descriptor) = openfiles::DescriptorPath::parse(&resolved)
+			&& descriptor != openfiles::DescriptorPath::Terminal
+			// `/dev/stdin` and friends sit directly under `/dev`.
+			&& resolved.components().count() != 3
+		{
+			return self.descriptor_target(descriptor);
+		}
+		resolved
+	}
+
+	fn absolute(&self, path: &Path) -> PathBuf {
+		let normalized_path = brush_core::sys::fs::normalize_shell_path(path);
+		let path = normalized_path.as_ref();
+		if path.is_absolute() { path.to_path_buf() } else { self.cwd.join(path) }
 	}
 
 	#[cfg(unix)]

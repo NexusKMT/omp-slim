@@ -566,18 +566,17 @@ fn parse_proc_match_args(
 				.map_err(|err| (3, format!("cannot read pidfile from standard input: {err}")))?;
 			contents
 		} else {
-			let path = paths.resolve(file);
-			let mut pidfile = fs::File::open(&path)
-				.map_err(|err| (3, format!("cannot read pidfile '{}': {err}", path.display())))?;
+			let mut pidfile = fs::File::open(paths.resolve(file))
+				.map_err(|err| (3, format!("cannot read pidfile '{file}': {err}")))?;
 			if options.require_lock
 				&& !pidfile_is_locked(&pidfile)
-					.map_err(|err| (3, format!("cannot inspect pidfile '{}': {err}", path.display())))?
+					.map_err(|err| (3, format!("cannot inspect pidfile '{file}': {err}")))?
 			{
-				return Err((3, format!("pidfile '{}' is not locked", path.display())));
+				return Err((3, format!("pidfile '{file}' is not locked")));
 			}
 			let mut contents = String::new();
 			io::Read::read_to_string(&mut pidfile, &mut contents)
-				.map_err(|err| (3, format!("cannot read pidfile '{}': {err}", path.display())))?;
+				.map_err(|err| (3, format!("cannot read pidfile '{file}': {err}")))?;
 			contents
 		};
 		let pid = contents

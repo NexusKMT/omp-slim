@@ -1472,11 +1472,8 @@ pub fn compile_subst_flags(
 					return compilation_error(lines, line, ERR_SANDBOX);
 				}
 				let location = ScriptLocation::at_position(lines, line);
-				let mut path = read_file_path(lines, line)?;
-				if let Some(paths) = paths {
-					path = paths.resolve(&path);
-				}
-				subst.write_file = Some(NamedWriter::new(path, location)?);
+				let path = read_file_path(lines, line)?;
+				subst.write_file = Some(NamedWriter::new(path, paths, location)?);
 				return Ok(()); // 'w' is the last flag allowed
 			},
 
@@ -1566,8 +1563,8 @@ fn compile_write_file_command(
 		return compilation_error(lines, line, ERR_SANDBOX);
 	}
 	let location = ScriptLocation::at_position(lines, line);
-	let path = context.paths.resolve(read_file_path(lines, line)?);
-	cmd.data = CommandData::NamedWriter(NamedWriter::new(path, location)?);
+	let path = read_file_path(lines, line)?;
+	cmd.data = CommandData::NamedWriter(NamedWriter::new(path, Some(&context.paths), location)?);
 	Ok(CommandHandling::Continue)
 }
 
@@ -7597,6 +7594,10 @@ use std::{
 	rc::Rc,
 };
 
+use brush_core::openfiles::{DescriptorPath, OpenFiles};
+use crate::host::{Host, ShellPaths};
+use crate::sed::fast_io::OutputBuffer;
+
 use uucore::display::Quotable;
 use crate::sed::error_handling::SedResult;
 
@@ -7607,38 +7608,79 @@ thread_local! {
 	 static FLUSH_LIST: RefCell<Vec<Rc<RefCell<NamedWriter>>>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Where a `w` file's lines go.
+#[derive(Debug)]
+enum Target {
+	File(BufWriter<File>),
+	/// `w /dev/stdout`: sed's own output stream, as GNU sed does, so the lines
+	/// interleave with `p` output in order instead of racing it through a
+	/// second open of the same file.
+	Stdout,
+	/// `w /dev/stderr`: sed's own error stream.
+	Stderr,
+}
+
 #[derive(Debug)]
 /// Writer that tracks its file name for better error messages
 pub struct NamedWriter {
+	/// The file name as the script spelled it.
 	pub path: PathBuf,
-	writer:   BufWriter<File>,
+	target:   Target,
 	location: ScriptLocation,
 }
 
 impl NamedWriter {
 	/// Create a new writer, truncate the file, and register it for flushing.
-	pub fn new(path: PathBuf, location: ScriptLocation) -> SedResult<Rc<RefCell<Self>>> {
+	///
+	/// `paths` resolves `path` the way the shell would open it; `None` opens
+	/// it as spelled.
+	pub fn new(
+		path: PathBuf,
+		paths: Option<&ShellPaths>,
+		location: ScriptLocation,
+	) -> SedResult<Rc<RefCell<Self>>> {
+		let target = match DescriptorPath::parse(&path) {
+			Some(DescriptorPath::Fd(OpenFiles::STDOUT_FD)) => Target::Stdout,
+			Some(DescriptorPath::Fd(OpenFiles::STDERR_FD)) => Target::Stderr,
+			_ => {
+				let resolved = paths.map_or_else(|| path.clone(), |paths| paths.resolve(&path));
+				let file = OpenOptions::new()
+					.create(true)
+					.write(true)
+					.truncate(true)
+					.open(&resolved)
+					.map_err(|e| {
+						runtime_error::<()>(&location, format!("creating file {}: {}", path.quote(), e))
+							.unwrap_err()
+					})?;
+				Target::File(BufWriter::new(file))
+			},
+		};
 
-		let file = OpenOptions::new()
-			.create(true)
-			.write(true)
-			.truncate(true)
-			.open(&path)
-			.map_err(|e| {
-				runtime_error::<()>(&location, format!("creating file {}: {}", path.quote(), e))
-					.unwrap_err()
-			})?;
-
-		let writer =
-			Rc::new(RefCell::new(NamedWriter { path, writer: BufWriter::new(file), location }));
+		let writer = Rc::new(RefCell::new(NamedWriter { path, target, location }));
 
 		FLUSH_LIST.with(|list| list.borrow_mut().push(Rc::clone(&writer)));
 		Ok(writer)
 	}
 
 	/// Write a line to the file with a newline, returning descriptive errors.
-	pub fn write_line(&mut self, line: &str) -> SedResult<()> {
-		writeln!(self.writer, "{line}").map_err(|e| {
+	///
+	/// `output` is sed's current output: stdout, or the temporary file under
+	/// `-i`, in which case `/dev/stdout` still means the real stdout.
+	pub fn write_line(
+		&mut self,
+		line: &str,
+		output: &mut OutputBuffer,
+		in_place: bool,
+		host: &mut Host,
+	) -> SedResult<()> {
+		let result = match &mut self.target {
+			Target::File(writer) => writeln!(writer, "{line}"),
+			Target::Stdout if in_place => writeln!(host.stdout, "{line}"),
+			Target::Stdout => output.write_str(format!("{line}\n")),
+			Target::Stderr => writeln!(host.stderr, "{line}"),
+		};
+		result.map_err(|e| {
 			runtime_error::<()>(&self.location, format!("writing to file {}: {e}", self.path.quote()))
 				.unwrap_err()
 		})
@@ -7646,7 +7688,10 @@ impl NamedWriter {
 
 	/// Flush the writer, returning a descriptive error.
 	pub fn flush(&mut self) -> SedResult<()> {
-		self.writer.flush().map_err(|e| {
+		let Target::File(writer) = &mut self.target else {
+			return Ok(());
+		};
+		writer.flush().map_err(|e| {
 			runtime_error::<()>(
 				&self.location,
 				format!("writing to file {}: {}", self.path.quote(), e),
@@ -8037,8 +8082,8 @@ fn substitute(
 		}
 
 		// Write to file if needed.
-		if let Some(ref writer) = sub.write_file {
-			writer.borrow_mut().write_line(pattern.as_str()?)?;
+		if let Some(writer) = &sub.write_file {
+			writer.borrow_mut().write_line(pattern.as_str()?, output, context.in_place, host)?;
 		}
 		context.substitution_made = true;
 	}
@@ -8367,7 +8412,7 @@ fn process_file(
 				'w' => {
 					// Append the pattern space to the specified file.
 					let writer = extract_variant!(command, NamedWriter);
-					writer.borrow_mut().write_line(pattern.as_str()?)?;
+					writer.borrow_mut().write_line(pattern.as_str()?, output, context.in_place, host)?;
 				},
 				'x' => {
 					// Exchange the contents of the pattern and hold spaces.

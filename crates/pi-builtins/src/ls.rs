@@ -4579,13 +4579,13 @@ impl<'a> PathData<'a> {
 			)
 		};
 
-		let fs_path = config.runtime.paths.resolve(&p_buf);
+		let followed_path = config.runtime.paths.resolve(&p_buf);
 		let must_dereference = match &config.dereference {
 			Dereference::All => true,
 			Dereference::Args => command_line,
 			Dereference::DirArgs => {
 				if command_line {
-					if let Ok(md) = fs_path.metadata() {
+					if let Ok(md) = followed_path.metadata() {
 						md.is_dir()
 					} else {
 						false
@@ -4595,6 +4595,12 @@ impl<'a> PathData<'a> {
 				}
 			},
 			Dereference::None => false,
+		};
+		// Without dereferencing, `/dev/stdin` is listed as the symlink it is.
+		let fs_path = if must_dereference {
+			followed_path
+		} else {
+			config.runtime.paths.resolve_link(&p_buf)
 		};
 
 		// Why prefer to check the DirEntry file_type()?  B/c the call is

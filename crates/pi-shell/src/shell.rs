@@ -4736,6 +4736,50 @@ mod tests {
 		assert_eq!(output, "2 /dev/fd/63\n/dev/fd/63\nfrom-sed\n");
 	}
 
+	/// `sed`'s `w /dev/stdout` writes through sed's own output, as GNU sed
+	/// does: a second open of a redirected stdout truncates it and races the
+	/// primary output at its own offset.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn sed_w_dev_stdout_shares_sed_output() {
+		let dir = unique_temp_dir("sed-w-stdout");
+		let command = format!(
+			"cd '{}'; printf 'a\\nb\\n' | sed 'w /dev/stdout' > f; cat f; printf 'c\\n' | sed -n \
+			 's/c/d/w /dev/stdout'",
+			dir.display()
+		);
+		let (result, output) = time::timeout(
+			Duration::from_secs(5),
+			run_command_capture(&command, None, None, CancelToken::default()),
+		)
+		.await
+		.expect("sed should not hang");
+		let _ = std::fs::remove_dir_all(&dir);
+
+		assert_eq!(result.exit_code, Some(0), "output: {output:?}");
+		assert_eq!(output, "a\na\nb\nb\nd\n");
+	}
+
+	/// A descriptor the shell lacks is reported under the name the user
+	/// typed, and `readlink` reads `/dev/stdin` as the symlink it is instead
+	/// of the descriptor behind it.
+	#[cfg(target_os = "linux")]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn descriptor_paths_keep_their_spelling() {
+		let command = "pgrep -F /dev/fd/9; sed 'w /dev/fd/9' <<< x; readlink /dev/stdin <<< x";
+		let (_, output) = time::timeout(
+			Duration::from_secs(5),
+			run_command_capture(command, None, None, CancelToken::default()),
+		)
+		.await
+		.expect("closed descriptor paths should fail fast");
+
+		assert!(!output.contains("/dev/fd/-1"), "leaked the placeholder path: {output:?}");
+		assert!(output.contains("cannot read pidfile '/dev/fd/9'"), "output: {output:?}");
+		assert!(output.contains("creating file '/dev/fd/9'"), "output: {output:?}");
+		assert!(output.ends_with("/proc/self/fd/0\n"), "output: {output:?}");
+	}
+
 	#[cfg(unix)]
 	fn printf_minimizer(
 		settings_path: &std::path::Path,

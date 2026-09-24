@@ -2423,6 +2423,8 @@ mod paths {
 		path::{Path, PathBuf},
 	};
 	
+	use brush_core::openfiles::{DescriptorPath, OpenFiles};
+
 	use crate::{host::Host, tail::{TailResult, text}};
 	
 	#[derive(Debug, Clone)]
@@ -2474,14 +2476,19 @@ mod paths {
 	
 		/// Resolves a file operand against the shell working directory.
 		///
-		/// `/dev/stdin` stays literal: like `-`, tail reads it through
-		/// `host.stdin`, which observes cancellation.
+		/// Every spelling of the shell's fd 0 (`/dev/stdin`, `/dev/fd/0`,
+		/// `/proc/self/fd/0`, ...) becomes the literal `/dev/stdin`: like `-`,
+		/// tail reads it through `host.stdin`, which observes cancellation.
 		pub fn resolve_path(&mut self, host: &Host) {
-			if let InputKind::File(path) = &mut self.kind
-				&& path != Path::new(text::DEV_STDIN)
-			{
-				*path = host.resolve(&*path);
-			}
+			let InputKind::File(path) = &mut self.kind else {
+				return;
+			};
+			let absolute = host.cwd().join(&*path);
+			*path = if DescriptorPath::parse(&absolute) == Some(DescriptorPath::Fd(OpenFiles::STDIN_FD)) {
+				PathBuf::from(text::DEV_STDIN)
+			} else {
+				host.resolve(&*path)
+			};
 		}
 	
 		pub fn kind(&self) -> &InputKind {
