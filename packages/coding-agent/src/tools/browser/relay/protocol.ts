@@ -49,7 +49,8 @@ export type ExtToRelayMessage =
 			 * Lets the relay serve several browsers at once: tabs are namespaced per
 			 * instance, and a service-worker restart with the same id reuses the
 			 * existing tab registry instead of replacing another browser's connection.
-			 * Absent on older extensions, which fall back to per-socket instances.
+			 * Absent on older extensions, which share one legacy instance with
+			 * latest-wins socket replacement.
 			 */
 			instanceId?: string;
 	  }

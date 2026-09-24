@@ -50,7 +50,7 @@ type RuntimeState = "default" | "enabled" | "disabled";
 
 interface SessionRef {
 	kind: "tab" | "page";
-	/** Registry key of the owning tab (`<instance seq>:<chrome tabId>`). */
+	/** Registry key of the owning tab (`<instance code>:<chrome tabId>`). */
 	tabKey: string;
 	tabId: number;
 	runtimeState: RuntimeState;
@@ -205,7 +205,7 @@ const CDP_ERROR_SERVER = -32000;
  * extension service-worker restart only has to re-handshake.
  */
 export class RelayBridge {
-	/** Tab registries keyed by `<instance seq>:<chrome tabId>`; one namespace per browser instance. */
+	/** Tab registries keyed by `<instance code>:<chrome tabId>`; one namespace per browser instance. */
 	#tabs = new Map<string, TabState>();
 	#conns = new Map<number, CdpConnection>();
 	#connSeq = 0;
