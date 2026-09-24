@@ -75,6 +75,7 @@
 - Fixed reader-mode `fetch` output passing inline SVG icons and base64 `data:` images to the model as unreadable payloads; they are now dropped and their alt text is kept ([#13006](https://github.com/can1357/oh-my-pi/pull/13006) by [@H4vC](https://github.com/H4vC)).
 - Fixed judged TTSR rules failing with `max_tokens_exceeded` on long non-Latin outputs: judged content was capped at 60,000 characters, which is ~60k Jev tokens of Chinese against Jev's ~33k-token branch limit. It is now cut to 32,000 Jev tokens counted locally, so long English outputs are also no longer truncated early.
 - Fixed a malformed user-level `mcp.json` disabling every MCP source for the session; its disable/enable lists are ignored with a warning and the other sources keep loading ([#13040](https://github.com/can1357/oh-my-pi/pull/13040) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed headless print mode (`-p`) abandoning the advisor's review when its model fails: the final-review drain now waits for the configured `retry.fallbackChains` backup reviewer to finish instead of disposing the session mid-switch ([#12964](https://github.com/can1357/oh-my-pi/pull/12964) by [@aviv4339](https://github.com/aviv4339))
 
 ## [18.2.11] - 2026-09-23
 
