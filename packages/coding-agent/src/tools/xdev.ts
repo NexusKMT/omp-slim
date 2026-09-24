@@ -316,11 +316,16 @@ export function xdevDocs(state: XdevState, name: string): string {
 	return renderDocs(resolveRequiredXdevTool(state, name));
 }
 
-/** Docs + schema for mounted devices under the configured prompt-doc policy. */
+/**
+ * Docs + schema for mounted devices under the configured prompt-doc policy.
+ * Devices in `listedElsewhere` get no catalog line: the caller lists them
+ * itself, with their {@link xdevCatalogSummaries} entry.
+ */
 export function xdevDocsAll(
 	state: XdevState,
 	mode: XdevDocsMode = "inline",
 	inlinePatterns: readonly string[] = [],
+	listedElsewhere?: ReadonlySet<string>,
 ): string {
 	const sections: string[] = [];
 	const overflow: Tool[] = [];
@@ -340,11 +345,12 @@ export function xdevDocsAll(
 		used += docs.length;
 		sections.push(docs);
 	}
-	if (overflow.length > 0) {
+	const catalog = overflow.filter(tool => !listedElsewhere?.has(tool.name));
+	if (catalog.length > 0) {
 		sections.push(
 			[
 				"## Additional devices (docs on demand)",
-				...overflow.map(tool => {
+				...catalog.map(tool => {
 					const maxBytes = state.builtInNames.has(tool.name) ? undefined : XDEV_EXTERNAL_DESCRIPTION_CAP;
 					return `- ${XD_URL_PREFIX}${tool.name} — ${promptCatalogSummary(tool, maxBytes)}`;
 				}),
@@ -354,6 +360,27 @@ export function xdevDocsAll(
 		);
 	}
 	return sections.join("\n\n");
+}
+
+/**
+ * Catalog summaries of the mounted devices that the prompt-doc policy lists as
+ * one-line catalog entries instead of inline docs, keyed by device name. A
+ * device the policy inlines is absent even when its docs overflow the prompt
+ * budget; it keeps its own catalog line.
+ */
+export function xdevCatalogSummaries(
+	state: XdevState,
+	mode: XdevDocsMode,
+	inlinePatterns: readonly string[] = [],
+): Map<string, string> {
+	const inlineGlobs = compileInlineGlobs(inlinePatterns);
+	const summaries = new Map<string, string>();
+	for (const tool of listXdevTools(state)) {
+		if (shouldInlineXdevTool(state, tool, mode, inlineGlobs)) continue;
+		const maxBytes = state.builtInNames.has(tool.name) ? undefined : XDEV_EXTERNAL_DESCRIPTION_CAP;
+		summaries.set(tool.name, promptCatalogSummary(tool, maxBytes));
+	}
+	return summaries;
 }
 
 /** Docs for selected mounted devices under the configured prompt-doc policy. */
