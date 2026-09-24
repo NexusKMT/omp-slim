@@ -1,3 +1,4 @@
+import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 import { TERMINAL, setTerminalHyperlinks } from "@oh-my-pi/pi-tui";
@@ -51,7 +52,7 @@ describe("pending write path rendering", () => {
 		expect(rendered).toContain(`vscode://file${path.resolve(relativePath)}`);
 	});
 
-	it("links archive members and database rows to their containing files", async () => {
+	it("links archive members, database rows, and home paths to their files", async () => {
 		applyHyperlinkSetting("always");
 		await themeModule.initTheme();
 		const uiTheme = (await themeModule.getThemeByName("dark")) ?? (await themeModule.getThemeByName("light"));
@@ -59,6 +60,7 @@ describe("pending write path rendering", () => {
 		for (const [input, containingFile] of [
 			["reports.zip:entries/data.json", "reports.zip"],
 			["records.sqlite:users:42", "records.sqlite"],
+			["~/notes/todo.md", path.join(os.homedir(), "notes/todo.md")],
 		]) {
 			const component = writeToolRenderer.renderCall(
 				{ path: input, content: "ready" },

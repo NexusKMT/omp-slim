@@ -1,5 +1,3 @@
-import * as path from "node:path";
-import { parseArchivePathCandidates } from "@oh-my-pi/pi-utils/ar";
 import type { HighlightStream } from "@oh-my-pi/pi-natives";
 import type { Component } from "../tui";
 import { Text } from "../components/text";
@@ -38,6 +36,7 @@ import {
 } from "./xdev";
 import { isResolutionDeviceName, renderResolutionDeviceCall } from "./resolve";
 import { REPORT_ISSUE_DEVICE_NAME, renderReportIssueDeviceCall } from "./report-tool-issue";
+import { pendingFileLinkPath } from "./read";
 
 /** Details returned by the write tool for transcript rendering. */
 export interface WriteToolDetails {
@@ -58,13 +57,6 @@ interface WriteRenderArgs {
 	path?: unknown;
 	file_path?: unknown;
 	content?: unknown;
-}
-
-function pendingWriteLinkPath(rawPath: string): string {
-	if (!rawPath.includes(":")) return path.resolve(rawPath);
-	const archive = parseArchivePathCandidates(rawPath).find(candidate => candidate.archivePath !== rawPath);
-	const sqlite = rawPath.match(/^(.+\.(?:sqlite3?|db3?))(?=[:?])/i);
-	return path.resolve(archive?.archivePath ?? sqlite?.[1] ?? rawPath);
 }
 
 const WRITE_PREVIEW_LINES = 6;
@@ -425,7 +417,7 @@ export const writeToolRenderer = {
 		// The result has not resolved its target yet. Link the containing file
 		// rather than an archive member or database row selector.
 		const pathDisplay =
-			filePath && args.content !== undefined ? fileHyperlink(pendingWriteLinkPath(rawPath), styledPath) : styledPath;
+			filePath && args.content !== undefined ? fileHyperlink(pendingFileLinkPath(rawPath), styledPath) : styledPath;
 		// No status icon on the head row: it's the head of the framed block, and
 		// native-scrollback commits are prefix-only — an animated glyph would pin
 		// the commit boundary at the top, and the pending hourglass just adds

@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, describe, expect, it } from "bun:test";
 import { TERMINAL, setTerminalHyperlinks } from "@oh-my-pi/pi-tui";
 import { applyHyperlinkSetting } from "@oh-my-pi/pi-tui/render/hyperlink";
@@ -29,6 +31,26 @@ describe("pending read path rendering", () => {
 		expect(target).toBeDefined();
 		expect(target).toMatch(/^file:/);
 		expect(decodeURIComponent(new URL(target!).pathname)).toEndWith(`/${relativePath}`);
+	});
+
+	it("links archive members, database rows, and home paths to their files", async () => {
+		applyHyperlinkSetting("always");
+		await themeModule.initTheme();
+		const uiTheme = (await themeModule.getThemeByName("dark")) ?? (await themeModule.getThemeByName("light"));
+		if (!uiTheme) throw new Error("expected an initialized theme");
+		for (const [input, containingFile] of [
+			["reports.zip:entries/data.json", path.resolve("reports.zip")],
+			["records.sqlite:users:42", path.resolve("records.sqlite")],
+			["~/notes/todo.md", path.join(os.homedir(), "notes/todo.md")],
+		]) {
+			const target = readToolRenderer
+				.renderCall({ path: input }, { expanded: false, isPartial: true }, uiTheme)
+				.render(120)
+				.join("\n")
+				.match(/\x1b\]8;[^;]*;([^\x1b]+)\x1b\\/)?.[1];
+			expect(target).toBeDefined();
+			expect(decodeURIComponent(new URL(target!).pathname)).toBe(containingFile);
+		}
 	});
 
 	it("leaves scheme-less web hosts plain without hiding explicit local paths", async () => {
