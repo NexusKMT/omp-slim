@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Shortened the default system prompt by removing repeated rules and empty sections (about 150 fewer tokens with default settings).
+
+### Fixed
+
+- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices.
+
 ## [18.3.0] - 2026-09-24
 
 ### Breaking Changes
