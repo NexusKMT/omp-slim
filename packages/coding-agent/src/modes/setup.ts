@@ -10,7 +10,7 @@ import {
 	type SetupSceneSelectionOptions,
 } from "@oh-my-pi/pi-tui/setup/wizard";
 import { formatModelString, resolveModelRoleValue, rolePriorityDefaults } from "../config/model-resolver";
-import { getRoleInfo } from "../config/model-roles";
+import { roleCandidatePool } from "../config/model-roles";
 import type { Settings } from "../config/settings";
 import { captureBrowserSession } from "../utils/browser-session";
 import { copyToClipboard } from "../utils/clipboard";
@@ -35,12 +35,8 @@ function isWebSearchGrounding(id: SearchProviderId): id is WebSearchGrounding {
 	return id in WEB_SEARCH_GROUNDINGS;
 }
 
-function webRoleModels(ctx: InteractiveModeContext) {
-	return ctx.session.modelRegistry.getAvailable("all").filter(getRoleInfo("web", ctx.settings).accepts);
-}
-
 function resolveWebSearchSelection(ctx: InteractiveModeContext, id: SearchProviderId) {
-	const models = webRoleModels(ctx);
+	const models = roleCandidatePool("web", ctx.settings, ctx.session.modelRegistry);
 	if (!isWebSearchGrounding(id)) {
 		const selector = `web/${id}`;
 		const model = resolveModelRoleValue(selector, models, { settings: ctx.settings }).model;
@@ -75,7 +71,9 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		get webSearchOrder() {
 			const configured = ctx.settings.getModelRole("web")?.trim();
 			if (!configured) return [];
-			const model = resolveModelRoleValue(configured, webRoleModels(ctx), { settings: ctx.settings }).model;
+			const model = resolveModelRoleValue(configured, roleCandidatePool("web", ctx.settings, ctx.session.modelRegistry), {
+				settings: ctx.settings,
+			}).model;
 			if (model?.provider === "web") {
 				const option = SEARCH_PROVIDER_OPTIONS.find(candidate => candidate.value === model.id);
 				if (option && option.value !== "auto" && option.value !== "none") return [option.value];

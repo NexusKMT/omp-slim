@@ -169,6 +169,11 @@
 - Improved responsiveness in long sessions by significantly reducing the time required to scan provider context for credential patterns.
 - Fixed native judges failing to honor configured request headers, enabling authenticated and header-routed judge providers to work as configured.
 - Fixed LSP requests hanging when aborted while waiting for an earlier write to complete.
+- Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
+- Added support for buffered cloud transcription using OpenAI-compatible models
+- Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
+- Prevented LSP client from hanging when a request is aborted while waiting for a previous write
+- Fixed setup wizard reporting Gemini web search "Not configured yet" when only Antigravity OAuth is signed in ([#13052](https://github.com/can1357/oh-my-pi/pull/13052) by [@holny](https://github.com/holny))
 
 ## [18.2.7] - 2026-09-21
 
