@@ -6,27 +6,48 @@ export type AgentCompactionThresholdOverride = {
 	thresholdTokens?: number;
 };
 
-/** Normalize one agent entry into both child threshold settings when usable. */
-export function resolveAgentCompactionThresholdOverride(value: unknown):
-	| {
-			thresholdPercent: number;
-			thresholdTokens: number;
-	  }
-	| undefined {
-	if (!isRecord(value)) return undefined;
+/** Validate and normalize the exact-agent compaction threshold map. */
+export function validateAgentCompactionThresholdOverrides(
+	value: unknown,
+): Record<string, Required<AgentCompactionThresholdOverride>> {
+	if (value === undefined || value === null) return {};
+	if (!isRecord(value)) {
+		const received = Array.isArray(value) ? "an array" : `a ${typeof value}`;
+		throw new Error(
+			`Invalid task.agentCompactionThresholdOverrides: expected a map of agent name to threshold settings, got ${received}.`,
+		);
+	}
 
-	const thresholdPercent =
-		typeof value.thresholdPercent === "number" && Number.isFinite(value.thresholdPercent)
-			? value.thresholdPercent
-			: undefined;
-	const thresholdTokens =
-		typeof value.thresholdTokens === "number" && Number.isFinite(value.thresholdTokens)
-			? value.thresholdTokens
-			: undefined;
-	if (thresholdPercent === undefined && thresholdTokens === undefined) return undefined;
+	const overrides: [string, Required<AgentCompactionThresholdOverride>][] = [];
+	for (const [agentName, rawEntry] of Object.entries(value)) {
+		if (!isRecord(rawEntry)) {
+			throw new Error(
+				`Invalid task.agentCompactionThresholdOverrides.${agentName}: expected an object with thresholdPercent and/or thresholdTokens.`,
+			);
+		}
 
-	return {
-		thresholdPercent: thresholdPercent ?? -1,
-		thresholdTokens: thresholdTokens ?? -1,
-	};
+		const normalized = { thresholdPercent: -1, thresholdTokens: -1 };
+		let hasThresholdField = false;
+		for (const [field, rawThreshold] of Object.entries(rawEntry)) {
+			if (field !== "thresholdPercent" && field !== "thresholdTokens") {
+				throw new Error(
+					`Invalid task.agentCompactionThresholdOverrides.${agentName}.${field}: unknown threshold field. Valid fields: thresholdPercent, thresholdTokens.`,
+				);
+			}
+			if (typeof rawThreshold !== "number" || !Number.isFinite(rawThreshold)) {
+				throw new Error(
+					`Invalid task.agentCompactionThresholdOverrides.${agentName}.${field}: expected a finite number, got ${String(rawThreshold)}.`,
+				);
+			}
+			hasThresholdField = true;
+			normalized[field] = rawThreshold;
+		}
+		if (!hasThresholdField) {
+			throw new Error(
+				`Invalid task.agentCompactionThresholdOverrides.${agentName}: expected thresholdPercent and/or thresholdTokens.`,
+			);
+		}
+		overrides.push([agentName, normalized]);
+	}
+	return Object.fromEntries(overrides);
 }

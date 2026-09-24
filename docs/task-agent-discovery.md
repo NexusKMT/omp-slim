@@ -218,17 +218,19 @@ For task dispatch, model precedence is:
 
 Role aliases in either of the first two sources are expanded through `modelRoles`. The shared eval bridge can also supply an invocation-local model override ahead of the settings override; the task wire schema does not expose that field.
 
-Compaction-threshold overrides are separate from model and service-tier selection. An exact,
-case-sensitive `task.agentCompactionThresholdOverrides[agentName]` entry is a per-agent object with
-optional numeric `thresholdPercent` and `thresholdTokens` fields. After settings layers merge,
-a usable object (at least one field is finite numeric) replaces both threshold fields for that
-child; omitted or nonfinite fields become `-1`. If neither field is positive, the reserve-based fallback applies.
-When both values are positive, `thresholdTokens` takes precedence. An absent entry, a malformed
-top-level value, a non-object entry, or an object with neither field finite numeric is silently
-ignored, leaving the child on the inherited global
-`compaction.thresholdPercent` / `compaction.thresholdTokens` pair. Only exact-name
-task/eval launches consult this map; it does not change the parent/main session, and Vibe workers
-do not consult it.
+Compaction-threshold overrides are separate from model and service-tier selection. An absent or
+`null` `task.agentCompactionThresholdOverrides` value is treated as an empty map. Otherwise, the
+setting must be a mapping from exact, case-sensitive agent names to objects containing only
+`thresholdPercent` and/or `thresholdTokens`. Agent-name keys are arbitrary; an entry applies only
+to a task/eval launch with the exact same name. Each entry must include at least one field, and
+every present value must be a finite number; negative values such as `-1` are allowed.
+A top-level value other than a mapping or `null` (including arrays), a non-object or array entry,
+an empty entry, an unknown field, or a non-number/non-finite value fails settings load. After
+settings layers merge, a valid entry replaces both threshold fields for that child; an omitted field
+becomes `-1`. A positive token limit takes precedence; otherwise a positive percentage applies; if neither
+is positive, the reserve-based fallback applies, matching the global compaction thresholds. Only
+exact-name task/eval launches consult this map; it does not change the parent/main session, and
+Vibe workers do not consult it.
 
 Service-tier precedence is independent of model selection: an exact, case-sensitive
 `task.agentServiceTierOverrides[agentName]` entry overrides `tier.subagent`; an absent entry preserves

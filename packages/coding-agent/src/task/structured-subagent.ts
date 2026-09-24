@@ -7,11 +7,11 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { $env, isRecord, prompt, Snowflake } from "@oh-my-pi/pi-utils";
+import { $env, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { resolveAgentModelSelection, resolveConfiguredModelPatterns } from "../config/model-resolver";
 import {
 	type AgentCompactionThresholdOverride,
-	resolveAgentCompactionThresholdOverride,
+	validateAgentCompactionThresholdOverrides,
 } from "../config/compaction-threshold";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
 import type { CustomTool } from "../extensibility/custom-tools/types";
@@ -313,14 +313,12 @@ export async function resolveEffectiveSubagentPolicy(
 	const serviceTierOverride = Object.hasOwn(agentServiceTierOverrides, agentName)
 		? agentServiceTierOverrides[agentName]
 		: undefined;
-	const configuredCompactionThresholdOverrides: unknown = request.session.settings.get(
-		"task.agentCompactionThresholdOverrides",
+	const compactionThresholdOverrides = validateAgentCompactionThresholdOverrides(
+		request.session.settings.get("task.agentCompactionThresholdOverrides"),
 	);
-	const compactionThresholdOverride =
-		isRecord(configuredCompactionThresholdOverrides) &&
-		Object.hasOwn(configuredCompactionThresholdOverrides, agentName)
-			? resolveAgentCompactionThresholdOverride(configuredCompactionThresholdOverrides[agentName])
-			: undefined;
+	const compactionThresholdOverride = Object.hasOwn(compactionThresholdOverrides, agentName)
+		? compactionThresholdOverrides[agentName]
+		: undefined;
 	const parentActiveModelPattern = request.session.getActiveModelString?.();
 	const modelResolution = {
 		requestModel: request.model,

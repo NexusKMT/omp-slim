@@ -305,18 +305,6 @@ describe("structured subagent primitive", () => {
 		);
 		expect(sparse.compactionThresholdOverride).toBeUndefined();
 
-		const malformedEntry = await resolveEffectiveSubagentPolicy(
-			request({
-				session: session({
-					agentCompactionThresholdOverrides: {
-						scout: { thresholdPercent: Number.NaN },
-					},
-				}),
-				agent: "scout",
-			}),
-		);
-		expect(malformedEntry.compactionThresholdOverride).toBeUndefined();
-
 		const dispatched: executorModule.ExecutorOptions[] = [];
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
 			dispatched.push(options);
@@ -327,36 +315,6 @@ describe("structured subagent primitive", () => {
 		);
 		expect(settled.policy.compactionThresholdOverride).toEqual(expectedOverride);
 		expect(dispatched[0]?.compactionThresholdOverride).toEqual(expectedOverride);
-		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
-	});
-
-	it("ignores malformed threshold settings during mutation, load, and dispatch", async () => {
-		mockDiscovery({ ...AGENT, name: "scout" });
-
-		const mutatedSession = session();
-		expect(() =>
-			mutatedSession.settings.set("task.agentCompactionThresholdOverrides", {
-				scout: { thresholdPercent: Number.NaN },
-			}),
-		).not.toThrow();
-		const mutatedPolicy = await resolveEffectiveSubagentPolicy(request({ session: mutatedSession, agent: "scout" }));
-		expect(mutatedPolicy.compactionThresholdOverride).toBeUndefined();
-
-		const malformedSettings = await Settings.loadIsolated({
-			inMemory: true,
-			overrides: { "task.agentCompactionThresholdOverrides": "scout: 80%" },
-		});
-		const malformedSession = session({ settings: malformedSettings });
-		const dispatched: executorModule.ExecutorOptions[] = [];
-		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
-			dispatched.push(options);
-			return result();
-		});
-		const settled = await runStructuredSubagent(
-			request({ session: malformedSession, agent: "scout", retainArtifacts: true }),
-		);
-		expect(settled.policy.compactionThresholdOverride).toBeUndefined();
-		expect(dispatched[0]?.compactionThresholdOverride).toBeUndefined();
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 
