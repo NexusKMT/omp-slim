@@ -3147,7 +3147,12 @@ export class Markdown implements Component {
 
 	/** Render the inner content of an HTML `<blockquote>` with quote styling. */
 	#renderHtmlBlockquote(inner: string, width: number): RenderedLine[] {
-		const cleaned = normalizeHtmlForTerminal(inner, createHtmlNormalizationState(), text => this.#theme.code(text));
+		const quoteStylePrefix = this.#getQuoteStylePrefix();
+		const cleaned = normalizeHtmlForTerminal(
+			inner,
+			createHtmlNormalizationState(),
+			text => this.#theme.code(text) + quoteStylePrefix,
+		);
 		const innerLines = splitTerminalLines(cleaned).map(line => renderedLine(line.trimEnd()));
 		while (innerLines.length > 0 && innerLines[innerLines.length - 1].text === "") innerLines.pop();
 		return this.#applyQuoteBorder(innerLines, width);

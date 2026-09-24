@@ -1335,6 +1335,10 @@ bar`,
 			const [multiLine] = multiMarkdown.render(80);
 			expect(multiLine).toContain(`${codeFg}first\x1b[39m${quoteFg}`);
 			expect(multiLine).toContain(`${codeFg}second\x1b[39m${quoteFg}`);
+
+			const htmlMarkdown = new Markdown("<blockquote>before <code>code</code> after</blockquote>", 0, 0, testTheme);
+			const [htmlLine] = htmlMarkdown.render(80);
+			expect(htmlLine).toContain(`${codeFg}code\x1b[39m${quoteFg}`);
 		});
 
 		it("should render list content inside blockquotes", () => {
