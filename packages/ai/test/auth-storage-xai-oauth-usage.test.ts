@@ -318,7 +318,9 @@ describe("xAI OAuth environment usage", () => {
 						disabledCause: null,
 					},
 				]),
-				{ usageProviderResolver: () => ({ id: "xai-oauth", supports: () => true, fetchUsage: async () => report }) },
+				{
+					usageProviderResolver: () => ({ id: "xai-oauth", supports: () => true, fetchUsage: async () => report }),
+				},
 			);
 			await storage.credentials.reload();
 			await storage.keys.get("xai-oauth", "session");
