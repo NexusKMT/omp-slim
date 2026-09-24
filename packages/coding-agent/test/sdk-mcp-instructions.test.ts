@@ -87,7 +87,7 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 	});
 
 	it("omits an opted-out server's instructions and the empty heading, and keeps its tools", async () => {
-		fs.writeFileSync(
+		await Bun.write(
 			path.join(tempDir, ".mcp.json"),
 			JSON.stringify({
 				mcpServers: {
@@ -123,7 +123,7 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 	}, 20_000);
 
 	it("keeps other servers' instructions when one server opts out", async () => {
-		fs.writeFileSync(
+		await Bun.write(
 			path.join(tempDir, ".mcp.json"),
 			JSON.stringify({
 				mcpServers: {

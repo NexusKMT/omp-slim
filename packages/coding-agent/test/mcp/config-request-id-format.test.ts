@@ -24,7 +24,7 @@ import * as path from "node:path";
 import { validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema/json-schema-validator";
 import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
 import { loadAllMCPConfigs } from "@oh-my-pi/pi-coding-agent/mcp/config";
-import { getConfigRootDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { getConfigRootDir, logger, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import mcpSchema from "../../src/config/mcp-schema.json" with { type: "json" };
 
 const originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
@@ -129,14 +129,16 @@ for (const [provider, file] of [
 	["standalone", ".mcp.json"],
 	["plugin", "plugin/.mcp.json"],
 ] as const) {
-	test(provider + " instructions accepts booleans and drops invalid values", async () => {
+	test(provider + " config keeps boolean instructions and warns about invalid options", async () => {
+		const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
 		await Bun.write(
 			path.join(tempCwd, file),
 			JSON.stringify({
 				mcpServers: {
 					disabled: { command: "/bin/echo", args: ["disabled"], instructions: false },
 					enabled: { command: "/bin/echo", args: ["enabled"], instructions: true },
-					invalid: { command: "/bin/echo", args: ["invalid"], instructions: "false" },
+					"quoted-bool": { command: "/bin/echo", args: ["quoted-bool"], instructions: "false" },
+					"integer-ids": { command: "/bin/echo", args: ["integer-ids"], requestIdFormat: "integer" },
 				},
 			}),
 		);
@@ -148,10 +150,18 @@ for (const [provider, file] of [
 				configuredLevel: "project",
 			},
 		});
-		expect(Object.keys(configs).sort()).toEqual(["disabled", "enabled", "invalid"]);
+		expect(Object.keys(configs).sort()).toEqual(["disabled", "enabled", "integer-ids", "quoted-bool"]);
 		expect(configs.disabled?.instructions).toBe(false);
 		expect(configs.enabled?.instructions).toBe(true);
-		expect(configs.invalid?.instructions).toBeUndefined();
+		expect(configs["quoted-bool"]?.instructions).toBeUndefined();
+		expect(configs["integer-ids"]?.requestIdFormat).toBeUndefined();
+		// A dropped value is reported once, naming the server and the option, so
+		// a typo cannot silently re-enable instructions or revert the id encoding.
+		const warnings = warn.mock.calls.map(args =>
+			args.map(arg => (typeof arg === "string" ? arg : JSON.stringify(arg))).join(" "),
+		);
+		expect(warnings.filter(text => text.includes("quoted-bool") && text.includes("instructions"))).toHaveLength(1);
+		expect(warnings.filter(text => text.includes("integer-ids") && text.includes("requestIdFormat"))).toHaveLength(1);
 	});
 }
 
