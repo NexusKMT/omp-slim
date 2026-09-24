@@ -65,6 +65,8 @@ export interface GuestSnapshot {
 	uiRequest: CollabUiRequest | null;
 	/** Capped at 50, newest last. */
 	notices: readonly Notice[];
+	/** Snapshot download progress between `welcome` and its final chunk, else null. */
+	loading: { received: number; total: number } | null;
 }
 
 const MAX_NOTICES = 50;
@@ -106,6 +108,9 @@ export class GuestClient {
 	#endedReason: string | null = null;
 	#header: SessionHeader | null = null;
 	#entries: SessionEntry[] = [];
+	/** Snapshot entries received since `welcome`; published on the final chunk. */
+	#pendingEntries: SessionEntry[] | null = null;
+	#loading: GuestSnapshot["loading"] = null;
 	#state: SessionState | null = null;
 	#agents: readonly AgentSnapshot[] = [];
 	#progress: ReadonlyMap<string, SubagentProgressPayload> = new Map();
@@ -228,6 +233,9 @@ export class GuestClient {
 		if (this.#phase === "ended") return;
 		if (willReconnect) {
 			this.#phase = "reconnecting";
+			// The next welcome restarts the snapshot; drop the partial one.
+			this.#pendingEntries = null;
+			this.#loading = null;
 			this.#commit();
 			return;
 		}
@@ -240,6 +248,8 @@ export class GuestClient {
 		this.#clearSnapshotProgressTimer();
 		this.#phase = "ended";
 		this.#endedReason = reason;
+		this.#pendingEntries = null;
+		this.#loading = null;
 		for (const [, pending] of this.#pendingTranscripts) {
 			clearTimeout(pending.timer);
 			pending.resolve(null);
@@ -290,11 +300,19 @@ export class GuestClient {
 	#applyFrame(frame: HostFrame): void {
 		switch (frame.t) {
 			case "welcome":
-				// Reset accumulator: a fresh welcome arriving mid-load (reconnect)
-				// supersedes any partially-streamed snapshot from the prior session.
+				// A fresh welcome (first join or reconnect) restarts the snapshot.
+				// Entries already on screen stay until the new snapshot replaces
+				// them on its final chunk, so a resync never blanks the transcript.
 				this.#header = frame.header;
-				this.#entries = [];
-				this.#publishedEntries = [];
+				if (frame.entryCount === 0) {
+					this.#entries = [];
+					this.#publishedEntries = [];
+					this.#pendingEntries = null;
+					this.#loading = null;
+				} else {
+					this.#pendingEntries = [];
+					this.#loading = { received: 0, total: frame.entryCount };
+				}
 				this.#state = frame.state;
 				this.#agents = [...frame.agents];
 				this.#stream = null;
@@ -316,20 +334,31 @@ export class GuestClient {
 				this.#endedReason = null;
 				break;
 			case "snapshot-chunk": {
-				// Stream transcript fragments into the live snapshot. The host
-				// always closes the train with `final: true`; that flip is what
-				// moves the guest from "waiting" to "live".
-				this.#entries.push(...frame.entries);
-				this.#publishedEntries = [...this.#entries];
-				if (frame.final) {
-					this.#clearSnapshotProgressTimer();
-					this.#phase = "live";
-				} else {
+				// Buffer fragments and publish the transcript once, on the host's
+				// `final` chunk (as the TUI guest does). Intermediate chunks only
+				// advance `loading`: publishing entries per chunk re-renders the
+				// transcript per chunk, and a 50 MB session is ~100 chunks.
+				const pending = this.#pendingEntries;
+				if (pending === null) return;
+				pending.push(...frame.entries);
+				if (!frame.final) {
+					this.#loading = { received: pending.length, total: this.#loading?.total ?? pending.length };
 					this.#armSnapshotProgressTimer();
+					break;
 				}
+				this.#entries = pending;
+				this.#publishedEntries = [...pending];
+				this.#pendingEntries = null;
+				this.#loading = null;
+				this.#clearSnapshotProgressTimer();
+				this.#phase = "live";
 				break;
 			}
 			case "entry":
+				if (this.#pendingEntries !== null) {
+					this.#pendingEntries.push(frame.entry);
+					return;
+				}
 				this.#entries.push(frame.entry);
 				this.#publishedEntries = [...this.#entries];
 				if (this.#streamDone && frame.entry.type === "message" && frame.entry.message.role === "assistant") {
@@ -532,6 +561,7 @@ export class GuestClient {
 			readOnly: this.#readOnly,
 			uiRequest: this.#uiRequest,
 			notices: this.#notices,
+			loading: this.#loading,
 		};
 	}
 

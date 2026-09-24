@@ -104,7 +104,7 @@ describe("GuestClient frame apply", () => {
 			vi.advanceTimersByTime(29_999);
 			expect(client.getSnapshot().phase).toBe("connecting");
 			client.applyFrameForTest(snapshotChunk([firstEntry], false));
-			expect(client.getSnapshot().entries).toEqual([firstEntry]);
+			expect(client.getSnapshot().entries).toEqual([]);
 			expect(client.getSnapshot().phase).toBe("connecting");
 
 			vi.advanceTimersByTime(29_999);
@@ -119,9 +119,26 @@ describe("GuestClient frame apply", () => {
 			completeClient.applyFrameForTest(snapshotChunk([firstEntry]));
 			vi.advanceTimersByTime(30_000);
 			expect(completeClient.getSnapshot().phase).toBe("live");
+			expect(completeClient.getSnapshot().entries).toEqual([firstEntry]);
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("keeps the transcript on screen through a resync and swaps it in on the final chunk", () => {
+		const e1 = messageEntry("e1", { role: "user", content: "hi", timestamp: 1 });
+		const e2 = messageEntry("e2", { role: "user", content: "again", timestamp: 2 });
+		const client = liveClient([e1]);
+
+		client.applyFrameForTest(welcomeFrame(2));
+		client.applyFrameForTest(snapshotChunk([e1], false));
+		expect(client.getSnapshot().entries).toEqual([e1]);
+		expect(client.getSnapshot().loading).toEqual({ received: 1, total: 2 });
+
+		client.applyFrameForTest(snapshotChunk([e2]));
+		expect(client.getSnapshot().entries).toEqual([e1, e2]);
+		expect(client.getSnapshot().loading).toBeNull();
+		expect(client.getSnapshot().phase).toBe("live");
 	});
 
 	it("message_update sets the stream ghost (synthesizing a missed start)", () => {
