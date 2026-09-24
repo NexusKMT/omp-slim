@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the web build bundling development React, which made every render about 3x slower; the build now pins `NODE_ENV=production` regardless of the environment it runs in.
+- Fixed large sessions freezing browser guests: the transcript mounts the newest 100 entries and loads earlier ones when you scroll to the top or tap "show N earlier", keeping your reading position. On a 7,388-entry session in Safari, streamed text now appears in ~3 ms instead of ~45 s.
+- Joining and reconnecting no longer blank or thrash the transcript: the snapshot is published once when it completes, the previous transcript stays visible during a reconnect, and the banner shows download progress (`joining session… 43%`) instead of "no activity yet".
+
 ## [18.3.0] - 2026-09-24
 
 ### Added
