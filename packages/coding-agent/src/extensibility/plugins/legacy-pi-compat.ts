@@ -2655,6 +2655,16 @@ function resolveLegacyPiSpecifier(args: { path: string; importer: string }): Leg
 		return undefined;
 	}
 
+	// A canonical specifier that remaps to itself has nothing to rewrite, and
+	// resolving it here would call `Bun.resolveSync` with a specifier this very
+	// hook matches — Bun re-enters the hook, re-prefixes the namespace on each
+	// pass, and the import dies as `NameTooLong reading "file:file:…"`.
+	// Only a registered bundled/root override may answer such a specifier; with
+	// none, decline and let Bun resolve it natively.
+	if (remappedSpecifier === args.path && !legacyPiPackageRootOverrides[remappedSpecifier]) {
+		return undefined;
+	}
+
 	// Primary: resolve the canonical @oh-my-pi/* specifier from the host binary
 	// location. Works in dev mode and in source-link installs.
 	try {
