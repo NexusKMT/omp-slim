@@ -21,9 +21,11 @@ import { afterEach, beforeEach, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { validateJsonSchemaValue } from "@oh-my-pi/pi-ai/utils/schema/json-schema-validator";
 import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
 import { loadAllMCPConfigs } from "@oh-my-pi/pi-coding-agent/mcp/config";
 import { getConfigRootDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import mcpSchema from "../../src/config/mcp-schema.json" with { type: "json" };
 
 const originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
 const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
@@ -121,3 +123,61 @@ test('an explicit "number" is the default, so dedup collapses it with an unset a
 	// same connection and only one survives.
 	expect(Object.keys(configs)).toHaveLength(1);
 });
+
+for (const [provider, file] of [
+	["native", ".omp/mcp.json"],
+	["standalone", ".mcp.json"],
+	["plugin", "plugin/.mcp.json"],
+] as const) {
+	test(provider + " instructions accepts booleans and drops invalid values", async () => {
+		await Bun.write(
+			path.join(tempCwd, file),
+			JSON.stringify({
+				mcpServers: {
+					disabled: { command: "/bin/echo", args: ["disabled"], instructions: false },
+					enabled: { command: "/bin/echo", args: ["enabled"], instructions: true },
+					invalid: { command: "/bin/echo", args: ["invalid"], instructions: "false" },
+				},
+			}),
+		);
+		const { configs } = await loadAllMCPConfigs(tempCwd, {
+			extensionRoots: {
+				explicit: provider === "plugin" ? [path.join(tempCwd, "plugin")] : [],
+				mode: "explicit-only",
+				configured: [],
+				configuredLevel: "project",
+			},
+		});
+		expect(Object.keys(configs).sort()).toEqual(["disabled", "enabled", "invalid"]);
+		expect(configs.disabled?.instructions).toBe(false);
+		expect(configs.enabled?.instructions).toBe(true);
+		expect(configs.invalid?.instructions).toBeUndefined();
+	});
+}
+
+test("instructions does not split one endpoint into two connections", async () => {
+	const configs = await loadFrom(".omp/mcp.json", {
+		quiet: { command: "/bin/echo", instructions: false },
+		loud: { command: "/bin/echo" },
+	});
+
+	// A prompt-inclusion setting is not a transport input. Two names for one
+	// endpoint still collapse, so an alias cannot reconnect the server with its
+	// instructions restored.
+	expect(Object.keys(configs)).toHaveLength(1);
+});
+
+for (const server of [
+	{ type: "stdio", command: "fixture" },
+	{ type: "http", url: "https://example.com/mcp" },
+	{ type: "sse", url: "https://example.com/sse" },
+]) {
+	test(server.type + " schema accepts instructions opt-out and rejects a non-boolean", () => {
+		expect(
+			validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, instructions: false } } }).success,
+		).toBe(true);
+		expect(
+			validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, instructions: "false" } } }).success,
+		).toBe(false);
+	});
+}
