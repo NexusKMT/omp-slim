@@ -6,6 +6,7 @@ import { scheduler } from "node:timers/promises";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import { readSseJson } from "@oh-my-pi/pi-utils";
 import { renderDemotedThinking } from "../dialect/demotion";
+import { ThinkingFenceStripper } from "../dialect/thinking-fence-strip";
 import * as AIError from "../error";
 import type {
 	Api,
@@ -51,6 +52,15 @@ export type {
 export { normalizeSchemaForGoogle };
 
 type GoogleApiType = "google-generative-ai" | "google-gemini-cli" | "google-vertex";
+
+function convertGoogleImagePart(image: ImageContent): Part {
+	if (image.providerFile?.provider === "google" && image.providerFile.uri) {
+		return { fileData: { fileUri: image.providerFile.uri, mimeType: image.mimeType } };
+	}
+	return image.url
+		? { fileData: { fileUri: image.url, mimeType: image.mimeType } }
+		: { inlineData: { mimeType: image.mimeType, data: image.data } };
+}
 
 /**
  * Thinking level for Gemini 3 models. Mirrors Google's `ThinkingLevel` enum values.
@@ -143,29 +153,6 @@ function resolveThoughtSignature(isSameProviderAndModel: boolean, signature: str
 	return isSameProviderAndModel && isValidThoughtSignature(signature) ? signature : undefined;
 }
 
-function supportsFunctionPartId<T extends GoogleApiType>(model: Model<T>): boolean {
-	if (model.api === "google-vertex") return false;
-	return model.id.startsWith("claude-") || (model.api === "google-generative-ai" && isGemini3Model(model.id));
-}
-
-function getGeminiMajorVersion(modelId: string): number | undefined {
-	const match = modelId.toLowerCase().match(/^gemini(?:-live)?-(\d+)/);
-	if (!match) return undefined;
-	return Number.parseInt(match[1], 10);
-}
-
-function supportsMultimodalFunctionResponse(modelId: string): boolean {
-	const geminiMajorVersion = getGeminiMajorVersion(modelId);
-	if (geminiMajorVersion !== undefined) {
-		return geminiMajorVersion >= 3;
-	}
-	return true;
-}
-
-function isGemini3Model(modelId: string): boolean {
-	return modelId.includes("gemini-3");
-}
-
 /**
  * Convert internal messages to Gemini Content[] format.
  */
@@ -210,12 +197,7 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						if (text.trim().length === 0) continue;
 						parts.push({ text });
 					} else if (supportsImages) {
-						parts.push({
-							inlineData: {
-								mimeType: item.mimeType,
-								data: item.data,
-							},
-						});
+						parts.push(convertGoogleImagePart(item));
 					} else {
 						omittedImages = true;
 					}
@@ -233,8 +215,8 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 			const parts: Part[] = [];
 			// Check if message is from same provider and model - only then keep thinking blocks
 			const isSameProviderAndModel = msg.provider === model.provider && msg.model === model.id;
-			const dropsUnsignedThinking =
-				model.provider === "google-antigravity" && model.id.toLowerCase().includes("claude");
+			const dropsUnsignedThinking = model.compat.dropUnsignedThinking;
+			let isFirstToolCall = true;
 
 			for (const block of msg.content) {
 				if (block.type === "text") {
@@ -263,20 +245,25 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 					}
 				} else if (block.type === "toolCall") {
 					emittedToolCallNames.set(block.id, block.name);
+					// Gemini 3 requires a thought signature on function calls it makes. The
+					// public API requires the bypass sentinel on every unsigned call. Cloud
+					// Code Assist requires it only when the first call itself is unsigned;
+					// signed-first parallel turns must leave unsigned secondary calls bare.
+					// Vertex rejects the sentinel and receives neither fallback. (#9638, #10602)
 					const thoughtSignature = resolveThoughtSignature(isSameProviderAndModel, block.thoughtSignature);
-					const effectiveSignature =
-						thoughtSignature || (isGemini3Model(model.id) ? SKIP_THOUGHT_SIGNATURE : undefined);
+					const requiresFallback =
+						model.compat.requiresSkipThoughtSignature ||
+						(isFirstToolCall && model.compat.requiresSkipThoughtSignatureOnFirstFunctionCall);
+					const effectiveSignature = thoughtSignature || (requiresFallback ? SKIP_THOUGHT_SIGNATURE : undefined);
+					isFirstToolCall = false;
 
 					const part: Part = {
 						functionCall: {
 							name: block.name,
 							args: block.arguments ?? {},
-							...(supportsFunctionPartId(model) ? { id: block.id } : {}),
+							...(model.compat.supportsFunctionPartId ? { id: block.id } : {}),
 						},
 					};
-					if (model.provider === "google-vertex" && part?.functionCall?.id) {
-						delete part.functionCall.id; // Vertex AI GenerateContent rejects 'id' in functionCall parts.
-					}
 					if (effectiveSignature) {
 						part.thoughtSignature = effectiveSignature;
 					}
@@ -303,7 +290,7 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 			// Gemini 3+ models support multimodal function responses with images nested inside
 			// functionResponse.parts. Claude and other non-Gemini models behind Cloud Code Assist /
 			// Antigravity also accept this shape. Gemini < 3 still needs a separate user image turn.
-			const modelSupportsMultimodalFunctionResponse = supportsMultimodalFunctionResponse(model.id);
+			const modelSupportsMultimodalFunctionResponse = model.compat.multimodalFunctionResponse;
 
 			// Use "output" key for success, "error" key for errors as per SDK documentation
 			const responseValue = omittedImages
@@ -314,14 +301,9 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 						? "(see attached image)"
 						: "";
 
-			const imageParts: Part[] = imageContent.map(imageBlock => ({
-				inlineData: {
-					mimeType: imageBlock.mimeType,
-					data: imageBlock.data,
-				},
-			}));
+			const imageParts = imageContent.map(convertGoogleImagePart);
 
-			const includeId = supportsFunctionPartId(model);
+			const includeId = model.compat.supportsFunctionPartId;
 			const emittedName = emittedToolCallNames.get(msg.toolCallId);
 			const functionResponsePart: Part = {
 				functionResponse: {
@@ -331,10 +313,6 @@ export function convertMessages<T extends GoogleApiType>(model: Model<T>, contex
 					...(includeId ? { id: msg.toolCallId } : {}),
 				},
 			};
-
-			if (model.provider === "google-vertex" && functionResponsePart.functionResponse?.id) {
-				delete functionResponsePart.functionResponse.id; // Vertex AI GenerateContent rejects 'id' in functionResponse parts.
-			}
 
 			// Cloud Code Assist API requires all function responses to be in a single user turn.
 			// Check if the last content is already a user turn with function responses and merge.
@@ -378,7 +356,7 @@ export function convertTools(
 	 * Claude models on Cloud Code Assist need the legacy `parameters` field;
 	 * the API translates it into Anthropic's `input_schema`.
 	 */
-	const useParameters = model.id.startsWith("claude-");
+	const useParameters = model.compat.ccaLegacyParametersSchema;
 
 	return [
 		{
@@ -617,17 +595,35 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 	const blocks = output.content;
 	const blockIndex = () => blocks.length - 1;
 	let currentBlock: TextContent | ThinkingContent | null = null;
+	// Heals a leaked reasoning-fence opener (```thinking / ``````thinking) that some
+	// Gemini thought summaries emit as a between-summary delimiter (#8719). One
+	// stripper per thinking block; created lazily on first thinking delta.
+	let thinkingStripper: ThinkingFenceStripper | null = null;
 	let firstTokenSeen = false;
 	let sawFinishReason = false;
 
 	const flushCurrent = () => {
 		if (!currentBlock) return;
+		if (currentBlock.type === "thinking" && thinkingStripper) {
+			const tail = thinkingStripper.flush();
+			if (tail) {
+				currentBlock.thinking += tail;
+				stream.push({ type: "thinking_delta", contentIndex: blockIndex(), delta: tail, partial: output });
+			}
+		}
+		thinkingStripper = null;
 		pushBlockEndEvent(currentBlock, blockIndex(), output, stream);
 	};
 
 	for await (const chunk of googleStream) {
 		if (chunk.error) {
-			const detail = chunk.error.message || chunk.error.status || "unknown error";
+			// Keep the RPC status alongside the message: an in-band quota failure
+			// is classified from this text, and `RESOURCE_EXHAUSTED` is the only
+			// account-exhaustion signal some of these chunks carry (#13090).
+			const detail =
+				chunk.error.message && chunk.error.status
+					? `${chunk.error.message} (${chunk.error.status})`
+					: chunk.error.message || chunk.error.status || "unknown error";
 			const message = `Google API stream error: ${detail}`;
 			throw typeof chunk.error.code === "number" && chunk.error.code >= 400
 				? new AIError.GoogleApiError(message, chunk.error.code)
@@ -658,17 +654,21 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 						currentBlock = startTextOrThinkingBlock(isThinking, output, stream);
 					}
 					if (currentBlock.type === "thinking") {
-						currentBlock.thinking += part.text;
+						thinkingStripper ??= new ThinkingFenceStripper();
+						const cleaned = thinkingStripper.push(part.text);
+						currentBlock.thinking += cleaned;
 						currentBlock.thinkingSignature = retainThoughtSignature(
 							currentBlock.thinkingSignature,
 							part.thoughtSignature,
 						);
-						stream.push({
-							type: "thinking_delta",
-							contentIndex: blockIndex(),
-							delta: part.text,
-							partial: output,
-						});
+						if (cleaned) {
+							stream.push({
+								type: "thinking_delta",
+								contentIndex: blockIndex(),
+								delta: cleaned,
+								partial: output,
+							});
+						}
 					} else {
 						currentBlock.text += part.text;
 						if (retainTextSignature) {
@@ -761,7 +761,7 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 					total: 0,
 				},
 			};
-			calculateCost(model, output.usage);
+			calculateCost(model, output.usage, output.timestamp);
 		}
 	}
 
@@ -787,18 +787,6 @@ export async function consumeGoogleStream<T extends GoogleApiType>(args: {
 }
 
 /**
- * Generation/sampling fields that map directly onto Gemini's `GenerateContentConfig`.
- * Excludes any provider-specific extensions (`topP`/`topK`/etc are all forwarded as-is).
- */
-interface GoogleGenerationConfig extends GenerateContentConfig {
-	topP?: number;
-	topK?: number;
-	minP?: number;
-	presencePenalty?: number;
-	repetitionPenalty?: number;
-}
-
-/**
  * Build the `GenerateContentParameters` payload for the public Gemini API and Vertex AI.
  * Both surfaces accept the same `GenerateContentConfig` shape — every numeric/string knob,
  * tool-config, thinking-config, and system-instruction conversion is identical.
@@ -815,14 +803,12 @@ export function buildGoogleGenerateContentParams<T extends "google-generative-ai
 	const systemPrompts = normalizeSystemPrompts(context.systemPrompt);
 	const contents = convertMessages(model, context);
 
-	const generationConfig: GoogleGenerationConfig = {};
+	const generationConfig: GenerateContentConfig = {};
 	if (options.temperature !== undefined) generationConfig.temperature = options.temperature;
 	if (options.maxTokens !== undefined) generationConfig.maxOutputTokens = options.maxTokens;
 	if (options.topP !== undefined) generationConfig.topP = options.topP;
 	if (options.topK !== undefined) generationConfig.topK = options.topK;
-	if (options.minP !== undefined) generationConfig.minP = options.minP;
 	if (options.presencePenalty !== undefined) generationConfig.presencePenalty = options.presencePenalty;
-	if (options.repetitionPenalty !== undefined) generationConfig.repetitionPenalty = options.repetitionPenalty;
 
 	const config: GenerateContentConfig = {
 		...(Object.keys(generationConfig).length > 0 && generationConfig),
@@ -989,7 +975,7 @@ export function streamGoogleGenAI<T extends "google-generative-ai" | "google-ver
 				if (!response.ok) {
 					const errorText = await response.text().catch(() => "");
 					throw new AIError.GoogleApiError(
-						`Google API error (${response.status}): ${extractGoogleErrorMessage(errorText)}`,
+						`Google API error (${response.status}): ${extractGoogleErrorMessage(errorText, response.status)}`,
 						response.status,
 						{ headers: response.headers },
 					);
@@ -1117,20 +1103,34 @@ function paramsToWireBody(params: GenerateContentParameters): Record<string, unk
 	if (config.responseJsonSchema !== undefined) gen.responseJsonSchema = config.responseJsonSchema;
 	if (config.responseModalities !== undefined) gen.responseModalities = config.responseModalities;
 	if (config.thinkingConfig !== undefined) gen.thinkingConfig = config.thinkingConfig;
-	const generationConfig = config as unknown as { minP?: number; repetitionPenalty?: number };
-	if (generationConfig.minP !== undefined) gen.minP = generationConfig.minP;
-	if (generationConfig.repetitionPenalty !== undefined) gen.repetitionPenalty = generationConfig.repetitionPenalty;
 	if (Object.keys(gen).length > 0) body.generationConfig = gen;
 	return body;
 }
 
-function extractGoogleErrorMessage(errorText: string): string {
+/**
+ * Human-readable message for a non-2xx Google response.
+ *
+ * On a usage-limit status the RPC `status`/`details` residue is kept after the
+ * message: `parseGoogleRpcRateLimitReason` reads `RESOURCE_EXHAUSTED` plus the
+ * `google.rpc.ErrorInfo` reason to tell an account billing cap (terminal) from
+ * a per-minute throttle (retryable), and reducing the body to `error.message`
+ * hid both, so every billing 429 replayed as a transient rate limit (#13090).
+ * The Cloud Code Assist path keeps the whole raw body for the same reason.
+ */
+function extractGoogleErrorMessage(errorText: string, status: number): string {
 	if (!errorText) return "Unknown error";
 	try {
-		const parsed = JSON.parse(errorText) as { error?: { message?: string } };
-		if (parsed.error?.message) return parsed.error.message;
+		const parsed = JSON.parse(errorText) as {
+			error?: { message?: string; status?: string; details?: unknown[] };
+		};
+		const error = parsed.error;
+		if (!error?.message) return errorText;
+		if (!AIError.isUsageLimitStatus(status)) return error.message;
+		const residue = { error: { status: error.status, details: error.details } };
+		return error.status === undefined && error.details === undefined
+			? error.message
+			: `${error.message} ${JSON.stringify(residue)}`;
 	} catch {
-		// fall through to raw text
+		return errorText;
 	}
-	return errorText;
 }

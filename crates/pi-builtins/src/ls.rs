@@ -10,7 +10,7 @@ use std::{
 	cmp::Reverse,
 	ffi::{OsStr, OsString},
 	fs::{self, DirEntry, FileType, Metadata, ReadDir},
-	io::{BufWriter, ErrorKind, Write},
+	io::{ErrorKind, Write},
 	ops::RangeInclusive,
 	path::{Path, PathBuf},
 	rc::Rc,
@@ -37,7 +37,9 @@ use uucore::{
 	version_cmp::version_cmp,
 };
 
-use crate::host::{Host, Utility, format_usage, matches_parser, os_bytes_lossy, util};
+use crate::host::{
+	Host, ShellPaths, StreamWriter, Utility, format_usage, matches_parser, os_bytes_lossy, util,
+};
 
 mod colors {
 //! Color handling for the `ls` builtin.
@@ -1996,7 +1998,7 @@ mod dired {
 
 use std::{
 	fmt,
-	io::{self, BufWriter, Write},
+	io::{self, Write},
 };
 
 /// `dired` Module Documentation
@@ -2068,7 +2070,7 @@ pub fn calculate_dired(
 	(start, end)
 }
 
-pub fn indent<W: Write>(out: &mut BufWriter<W>) -> io::Result<()> {
+pub fn indent<W: Write>(out: &mut W) -> io::Result<()> {
 	write!(out, "  ")?;
 	Ok(())
 }
@@ -2085,7 +2087,7 @@ pub fn calculate_subdired(dired: &mut DiredOutput, path_len: usize) {
 pub fn print_dired_output<W: Write>(
 	config: &Config,
 	dired: &DiredOutput,
-	out: &mut BufWriter<W>,
+	out: &mut W,
 ) -> io::Result<()> {
 	out.flush()?;
 	if !dired.dired_positions.is_empty() {
@@ -2102,7 +2104,7 @@ pub fn print_dired_output<W: Write>(
 
 /// Helper function to print positions with a given prefix.
 fn print_positions<W: Write>(
-	out: &mut BufWriter<W>,
+	out: &mut W,
 	prefix: &str,
 	positions: &[BytePosition],
 ) -> io::Result<()> {
@@ -2318,17 +2320,17 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt};
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
 /// Show the directory name in the case where several arguments are given to ls
-use std::{borrow::Cow, iter};
 use std::{
+	borrow::Cow,
 	cell::LazyCell,
 	ffi::{OsStr, OsString},
 	fmt::Write as FmtWrite,
 	fs::{self, DirEntry, FileType, Metadata},
-	io::{BufWriter, Write},
+	io::Write,
+	iter,
 	sync::LazyLock,
 	time::SystemTime,
 };
-use brush_core::openfiles::OpenFile;
 
 use ansi_width::ansi_width;
 use glob::MatchOptions;
@@ -2442,9 +2444,9 @@ enum SizeOrDeviceId {
 /// dir1:               <- This as well
 /// file11
 /// ```
-pub fn show_dir_name(
+pub fn show_dir_name<W: Write>(
 	path_data: &PathData,
-	out: &mut BufWriter<OpenFile>,
+	out: &mut W,
 	config: &Config,
 ) -> std::io::Result<()> {
 	let escaped_name = escape_dir_name_with_locale(path_data.path().as_os_str(), config);
@@ -2761,11 +2763,11 @@ pub fn display_items(
 	Ok(())
 }
 
-fn display_grid(
+fn display_grid<W: Write>(
 	names: impl Iterator<Item = OsString>,
 	width: u16,
 	direction: Direction,
-	out: &mut BufWriter<OpenFile>,
+	out: &mut W,
 	quoted: bool,
 	tab_size: usize,
 ) -> std::io::Result<()> {
@@ -3077,7 +3079,7 @@ fn display_item_name(
 						&target_path
 					};
 
-					match fs::canonicalize(config.runtime.resolve(absolute_target)) {
+					match fs::canonicalize(config.runtime.paths.resolve(absolute_target)) {
 						Ok(resolved_target) => {
 							let target_data = PathData::new(
 								resolved_target.as_path().into(),
@@ -3155,8 +3157,7 @@ fn display_item_name(
 	DisplayItemName { displayed: name, dired_name_len }
 }
 
-/// This writes to the [`BufWriter`] `state.out` a single string of the output
-/// of `ls -l`.
+/// This writes to `state.out` a single string of the output of `ls -l`.
 ///
 /// It writes the following keys, in order:
 /// * `inode` ([`display_inode`], config-optional)
@@ -3729,18 +3730,12 @@ impl LsError {
 }
 
 struct LsRuntime {
-	cwd:     PathBuf,
-	stderr:  RefCell<OpenFile>,
-	status:  Cell<i32>,
+	paths:  ShellPaths,
+	stderr: RefCell<OpenFile>,
+	status: Cell<i32>,
 }
 
 impl LsRuntime {
-	fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
-		let normalized_path = brush_core::sys::fs::normalize_shell_path(path.as_ref());
-		let path = normalized_path.as_ref();
-		if path.is_absolute() { path.to_path_buf() } else { self.cwd.join(path) }
-	}
-
 	fn error(&self, err: LsError) {
 		self.status.set(err.code());
 		let _ = writeln!(self.stderr.borrow_mut(), "ls: {err}");
@@ -3770,7 +3765,7 @@ impl Utility for Ls {
 
 	fn run(self, host: &mut Host) -> i32 {
 		let runtime = Rc::new(LsRuntime {
-			cwd: host.cwd().to_path_buf(),
+			paths: host.paths().clone(),
 			stderr: RefCell::new(host.stderr_clone()),
 			status: Cell::new(0),
 		});
@@ -4584,13 +4579,13 @@ impl<'a> PathData<'a> {
 			)
 		};
 
-		let fs_path = config.runtime.resolve(&p_buf);
+		let followed_path = config.runtime.paths.resolve(&p_buf);
 		let must_dereference = match &config.dereference {
 			Dereference::All => true,
 			Dereference::Args => command_line,
 			Dereference::DirArgs => {
 				if command_line {
-					if let Ok(md) = fs_path.metadata() {
+					if let Ok(md) = followed_path.metadata() {
 						md.is_dir()
 					} else {
 						false
@@ -4600,6 +4595,12 @@ impl<'a> PathData<'a> {
 				}
 			},
 			Dereference::None => false,
+		};
+		// Without dereferencing, `/dev/stdin` is listed as the symlink it is.
+		let fs_path = if must_dereference {
+			followed_path
+		} else {
+			config.runtime.paths.resolve_link(&p_buf)
 		};
 
 		// Why prefer to check the DirEntry file_type()?  B/c the call is
@@ -4738,7 +4739,7 @@ type DirData = (PathBuf, bool);
 // A struct to encapsulate state that is passed around from `list` functions.
 #[cfg_attr(not(unix), allow(dead_code))]
 struct ListState<'a> {
-	out:               BufWriter<OpenFile>,
+	out:               StreamWriter,
 	style_manager:     Option<StyleManager<'a>>,
 	// TODO: More benchmarking with different use cases is required here.
 	// From experiments, BTreeMap may be faster than HashMap, especially as the
@@ -4769,7 +4770,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 	let now = SystemTime::now();
 
 	let mut state = ListState {
-		out: BufWriter::new(stdout),
+		out: StreamWriter::new(stdout),
 		style_manager: config
 			.color
 			.as_ref()
@@ -4874,7 +4875,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 
 		// Only runs if it must list recursively.
 		while let Some(dir_data) = state.stack.pop() {
-			let resolved_dir = config.runtime.resolve(&dir_data.0);
+			let resolved_dir = config.runtime.paths.resolve(&dir_data.0);
 			let read_dir = match fs::read_dir(&resolved_dir) {
 				Err(err) => {
 					// flush stdout buffer before the error to preserve formatting and order
@@ -5124,10 +5125,10 @@ fn get_metadata_with_deref_opt(path: &Path, dereference: bool) -> std::io::Resul
 	}
 }
 
-fn write_total(
+fn write_total<W: Write>(
 	items: &[PathData],
 	config: &Config,
-	out: &mut BufWriter<OpenFile>,
+	out: &mut W,
 ) -> std::io::Result<usize> {
 	let mut total_size = 0;
 	for item in items {
@@ -5198,7 +5199,7 @@ fn get_security_context<'a>(
 	// 1.
 	if must_dereference
 		&& let Err(err) =
-			get_metadata_with_deref_opt(&config.runtime.resolve(path), must_dereference)
+			get_metadata_with_deref_opt(&config.runtime.paths.resolve(path), must_dereference)
 	{
 		// The Path couldn't be dereferenced, so return early and set exit code 1
 		// to indicate a minor error
@@ -5208,7 +5209,7 @@ fn get_security_context<'a>(
 				path.to_path_buf(),
 				err,
 				false,
-				config.runtime.resolve(path).is_dir(),
+				config.runtime.paths.resolve(path).is_dir(),
 			));
 		}
 		return Cow::Borrowed(SUBSTITUTE_STRING);

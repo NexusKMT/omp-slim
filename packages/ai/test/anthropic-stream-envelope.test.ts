@@ -13,7 +13,7 @@ import type {
 import type { AssistantMessageEvent, Context, Model, ModelSpec, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { structuredCloneJSON } from "@oh-my-pi/pi-utils";
-import { withEnv } from "./helpers";
+import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
 
 const model: Model<"anthropic-messages"> = buildModel({
 	id: "claude-sonnet-4-5",
@@ -111,6 +111,26 @@ function createRawSseRequest(frames: string[]): { asResponse(): Promise<Response
 				headers: {
 					"content-type": "text/event-stream",
 					"request-id": "req_raw_mock",
+				},
+			});
+		},
+	};
+}
+
+function createNeverClosingRawSseRequest(frames: string[]): { asResponse(): Promise<Response> } {
+	return {
+		async asResponse() {
+			const encoder = new TextEncoder();
+			const body = new ReadableStream<Uint8Array>({
+				start(controller) {
+					for (const frame of frames) controller.enqueue(encoder.encode(frame));
+				},
+			});
+			return new Response(body, {
+				status: 200,
+				headers: {
+					"content-type": "text/event-stream",
+					"request-id": "req_raw_never_closes",
 				},
 			});
 		},
@@ -350,6 +370,8 @@ function countEvents(events: AssistantMessageEvent[], type: AssistantMessageEven
 afterEach(() => {
 	vi.restoreAllMocks();
 });
+
+withOfficialAnthropicEndpoint();
 
 describe("anthropic stream envelope handling", () => {
 	it("ignores duplicate message_start envelopes without resetting streamed text", async () => {
@@ -1359,6 +1381,15 @@ describe("anthropic stream envelope handling", () => {
 				{ status: 400 },
 			),
 		],
+		[
+			"a strict tool schema a translating gateway forwarded to an OpenAI upstream",
+			Object.assign(
+				new Error(
+					"400 {\"error\":{\"message\":\"Invalid schema for function 'bash': In context=(), 'required' is required to be supplied and to be an array including every key in properties. Missing 'timeout'.\"}}",
+				),
+				{ status: 400 },
+			),
+		],
 	])("retries without strict tools when the endpoint rejects %s", async (_case, rejection) => {
 		const toolContext: Context = {
 			...context,
@@ -1544,6 +1575,27 @@ describe("anthropic stream envelope handling", () => {
 		expect(countEvents(events, "done")).toBe(1);
 		expect(result.stopReason).toBe("stop");
 		expect(JSON.parse(JSON.stringify(result.content))).toEqual([{ type: "text", text: "hello" }]);
+	});
+
+	it("finishes on message_stop when the raw SSE connection stays open", async () => {
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(
+			() => createNeverClosingRawSseRequest(createTextSuccessSseFrames("complete")) as never,
+		);
+
+		const stream = streamAnthropic(model, context, {
+			apiKey: "sk-ant-test",
+			signal: AbortSignal.timeout(500),
+		});
+		const events: AssistantMessageEvent[] = [];
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const result = await stream.result();
+
+		expect(countEvents(events, "error")).toBe(0);
+		expect(countEvents(events, "done")).toBe(1);
+		expect(result.stopReason).toBe("stop");
+		expect(JSON.parse(JSON.stringify(result.content))).toEqual([{ type: "text", text: "complete" }]);
 	});
 
 	it("degrades to best-effort content when a raw SSE stream closes before message_stop", async () => {

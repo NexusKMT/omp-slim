@@ -10,18 +10,27 @@ import type {
 	AgentToolUpdateCallback,
 } from "@oh-my-pi/pi-agent-core";
 import type { CredentialDisabledEvent, ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
+import {
+	clearContextHistoryIndex,
+	getContextHistoryIndex,
+	markPerCallContextMessage,
+	setContextHistoryIndex,
+} from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
-import type { Settings } from "../../config/settings";
+import { type Settings, withActiveSettings } from "../../config/settings";
 import type { LocalProtocolOptions } from "../../internal-urls/local-protocol";
 import type { MemoryRuntimeContext } from "../../memory-backend";
-import { type Theme, theme } from "../../modes/theme/theme";
+import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import type { SessionManager } from "../../session/session-manager";
+import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
 import type { BranchHandler, NavigateTreeHandler, NewSessionHandler } from "../session-handler-types";
+import { accumulateToolCallResult, buildAggregatedToolCallResult } from "../shared-events";
 import { ManagedTimers } from "./managed-timers";
 import { createExtensionModelQuery } from "./model-api";
+import type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 import type {
 	AfterProviderResponseEvent,
 	AssistantThinkingRenderer,
@@ -29,6 +38,8 @@ import type {
 	BeforeAgentStartEventResult,
 	BeforeProviderRequestEvent,
 	BeforeProviderRequestEventResult,
+	BeforeSubagentSpawnEvent,
+	BeforeSubagentSpawnEventResult,
 	CompactOptions,
 	ContextEvent,
 	ContextEventResult,
@@ -375,10 +386,12 @@ export type SwitchSessionHandler = (sessionPath: string) => Promise<{ cancelled:
 export type ShutdownHandler = () => void;
 
 /**
- * Emit `session_shutdown` and clear timers owned by an extension runner.
+ * Emit `session_shutdown`, dispose file-write-fallback registrations, and clear
+ * timers owned by an extension runner.
  *
- * Returns whether any shutdown handlers were present. Timer cleanup runs even
- * when a handler fails so extension background work cannot outlive its host.
+ * Returns whether any shutdown handlers were present. Fallback disposal and timer
+ * cleanup run even when a handler fails so extension background work — and a
+ * fallback bound to this session's context — cannot outlive its host.
  */
 export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner | undefined): Promise<boolean> {
 	if (!extensionRunner) return false;
@@ -389,6 +402,7 @@ export async function emitSessionShutdownEvent(extensionRunner: ExtensionRunner 
 		});
 		return true;
 	} finally {
+		extensionRunner.disposeFileFallbacks();
 		extensionRunner.clearManagedTimers();
 	}
 }
@@ -441,6 +455,8 @@ export class ExtensionRunner {
 	#getContextUsageFn: () => ContextUsage | undefined = () => undefined;
 	#compactFn: (instructionsOrOptions?: string | CompactOptions) => Promise<void> = async () => {};
 	#getSystemPromptFn: () => string[] = () => [];
+	#runEphemeralTurnFn?: ExtensionContextActions["runEphemeralTurn"];
+	#ephemeralTurnBlocker = new AsyncLocalStorage<string | undefined>();
 	#getAsyncJobSnapshotFn: () => AsyncJobSnapshot | null = () => null;
 	#newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	#branchHandler: BranchHandler = async () => ({ cancelled: false });
@@ -486,6 +502,23 @@ export class ExtensionRunner {
 	#managedTimers = new ManagedTimers((event, error, stack) =>
 		this.emitError({ extensionPath: "<timer>", event, error, stack }),
 	);
+	/**
+	 * Disposers for the trampolines installed via {@link addFileWriteFallback} and
+	 * {@link addFileDeleteFallback} — one per extension per seam it registered for.
+	 * Installed during {@link initialize} (after the UI/runtime context is live, so
+	 * the bound handler sees a working `ctx.ui`) and drained by
+	 * {@link disposeFileFallbacks} on session shutdown so a handler from a
+	 * torn-down session can never fire for a later one sharing the same process.
+	 *
+	 * Each trampoline re-reads its extension's handler list at call time rather than
+	 * closing over a snapshot, matching how `ext.handlers` is re-read on every emit,
+	 * so an extension that already had a handler for that seam at `initialize` picks
+	 * up later additions to it. A seam the extension registered NOTHING for gets no
+	 * trampoline at all, which keeps the registry empty for a host with no fallbacks;
+	 * the cost is that a first registration for that seam after `initialize` never
+	 * takes effect, which is why the API documents load-time registration.
+	 */
+	#fileFallbackDisposers: Array<() => void> = [];
 	/**
 	 * Dedup markers for `tool_call` emission, keyed `${toolCallId}:${toolName}`.
 	 * The agent loop emits `tool_call` at arg-prep time (before scheduling and
@@ -609,6 +642,27 @@ export class ExtensionRunner {
 		return this.sessionManager.getCwd();
 	}
 
+	/**
+	 * Stable id of the session this runner serves. Read through `sessionManager`
+	 * for the same reason as {@link cwd}: it is this session's own, never a
+	 * process-global, so a subagent runner reports itself and not its parent.
+	 *
+	 * Used to attribute a denied file write or delete to the session that issued
+	 * it, since the fallback registry those handlers live in is process-wide.
+	 */
+	get sessionId(): string {
+		return this.sessionManager.getSessionId();
+	}
+
+	/**
+	 * Session settings this runner was constructed with. Used when a direct
+	 * `tool.execute()` omits execute-time context so approval still sees the
+	 * user's configured mode (schema default `yolo`) instead of fail-closed.
+	 */
+	get sessionSettings(): Settings | undefined {
+		return this.settings;
+	}
+
 	initialize(
 		actions: ExtensionActions,
 		contextActions: ExtensionContextActions,
@@ -648,7 +702,10 @@ export class ExtensionRunner {
 		this.#abortFn = contextActions.abort;
 		this.#hasPendingMessagesFn = contextActions.hasPendingMessages;
 		this.#shutdownHandler = contextActions.shutdown;
+		this.#getContextUsageFn = contextActions.getContextUsage;
+		this.#compactFn = contextActions.compact;
 		this.#getSystemPromptFn = contextActions.getSystemPrompt;
+		this.#runEphemeralTurnFn = contextActions.runEphemeralTurn;
 
 		// Command context actions (optional, only for interactive mode)
 		if (commandContextActions) {
@@ -665,6 +722,75 @@ export class ExtensionRunner {
 		this.#uiContext = uiContext ?? noOpUIContext;
 		this.#mode = mode;
 		this.#initialized = true;
+
+		// Re-initialize (e.g. a mode switch rewiring UI/runtime actions) must not
+		// accumulate duplicate global registrations — drop the prior generation before
+		// installing this one's trampolines.
+		this.disposeFileFallbacks();
+		for (const ext of this.extensions) {
+			// Nothing registered by this extension means no trampoline, so a host with
+			// no fallback-registering extension leaves the seam genuinely empty and
+			// `hasFileWriteFallback()`/`hasFileDeleteFallback()` false — the invariant
+			// the whole feature rests on. Each seam is checked separately, so an
+			// extension that only brokers writes never appears in the delete registry.
+			if (ext.fileWriteFallbackHandlers.length === 0 && ext.fileDeleteFallbackHandlers.length === 0) continue;
+			// One trampoline per extension per seam, not per handler: the list is walked
+			// at mutation time so a handler this extension adds later still takes effect,
+			// and `createContext()` takes no extension argument, so within one invocation
+			// a single context is all any of this extension's handlers would have
+			// received anyway.
+			//
+			// The context is built PER INVOCATION rather than captured here, matching
+			// every other dispatch site. `createContext()` materializes `cwd` and
+			// `hasUI` as values, so a trampoline holding one context for the life of the
+			// session would keep handing handlers the workspace this runner initialized
+			// in — wrong the moment `SessionManager.moveTo()` relocates the session
+			// (`/move`), and a handler that scopes or prompts against `ctx.cwd` would
+			// then allow the old workspace and deny the new one. A denied mutation is a
+			// rare path, so the extra object costs nothing that matters.
+			//
+			// Isolation is per HANDLER, not per extension. The registry only sees one
+			// trampoline per extension, so a throw escaping this loop would advance the
+			// registry to the NEXT extension and skip every later handler this one
+			// registered — breaking both the documented "a throwing handler is skipped"
+			// contract and registration order for a backup-handler setup.
+			if (ext.fileWriteFallbackHandlers.length > 0) {
+				this.#fileFallbackDisposers.push(
+					addFileWriteFallback(async req => {
+						const ctx = this.createContext();
+						for (const handler of ext.fileWriteFallbackHandlers) {
+							try {
+								if (await handler(req, ctx)) return true;
+							} catch (error) {
+								logger.warn("Extension file write fallback handler threw; trying next handler", {
+									extension: ext.path,
+									error: error instanceof Error ? error.message : String(error),
+								});
+							}
+						}
+						return false;
+					}),
+				);
+			}
+			if (ext.fileDeleteFallbackHandlers.length > 0) {
+				this.#fileFallbackDisposers.push(
+					addFileDeleteFallback(async req => {
+						const ctx = this.createContext();
+						for (const handler of ext.fileDeleteFallbackHandlers) {
+							try {
+								if (await handler(req, ctx)) return true;
+							} catch (error) {
+								logger.warn("Extension file delete fallback handler threw; trying next handler", {
+									extension: ext.path,
+									error: error instanceof Error ? error.message : String(error),
+								});
+							}
+						}
+						return false;
+					}),
+				);
+			}
+		}
 
 		// Drain events buffered by emitCredentialDisabled() before initialize ran. The
 		// spread adds the `type` discriminator — `event` is the pi-ai shape (no `type`).
@@ -874,6 +1000,15 @@ export class ExtensionRunner {
 		if (firstFailure) throw firstFailure.reason;
 	}
 
+	/** Composer shapes registered during extension load, with later extensions winning id collisions. */
+	getComposerShapes(): ComposerShapeDefinition[] {
+		const shapes = new Map<string, ComposerShapeDefinition>();
+		for (const extension of this.extensions) {
+			for (const [id, shape] of extension.composerShapes) shapes.set(id, shape);
+		}
+		return [...shapes.values()];
+	}
+
 	/**
 	 * Aggregate the registered CLI flags across a set of extensions (last write
 	 * wins on name collision). Static so callers that need the flag set before a
@@ -1021,6 +1156,17 @@ export class ExtensionRunner {
 	}
 
 	/**
+	 * Run an extension-owned callback within this session's settings scope, so a
+	 * synchronous `SettingsManager.create(ctx.cwd)` inside it resolves THIS
+	 * session's manager rather than a same-cwd sibling's. Event handlers get this
+	 * scope via {@link #runHandlerWithTimeout}; slash commands and shortcuts are
+	 * invoked directly by their controllers and route through here instead.
+	 */
+	runScoped<T>(fn: () => T): T {
+		return withActiveSettings(this.settings, fn);
+	}
+
+	/**
 	 * Creates an extension context, optionally scoped to a provider request model.
 	 *
 	 * `delegation` wires the same-tool `ctx.invokeTool` for a re-registered built-in: when `toolName`
@@ -1042,6 +1188,7 @@ export class ExtensionRunner {
 		},
 	): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
+		const runEphemeralTurn = this.#runEphemeralTurnFn;
 		return {
 			ui: this.#uiContext,
 			mode: this.#mode,
@@ -1052,6 +1199,7 @@ export class ExtensionRunner {
 			cwd: this.cwd,
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
+			isProjectTrusted: () => true,
 			get model() {
 				return getModel();
 			},
@@ -1061,11 +1209,39 @@ export class ExtensionRunner {
 			hasPendingMessages: () => this.#hasPendingMessagesFn(),
 			shutdown: () => this.#shutdownHandler(),
 			getSystemPrompt: () => this.#getSystemPromptFn(),
+			runEphemeralTurn: runEphemeralTurn
+				? async options => {
+						if (this.#ephemeralTurnBlocker.getStore()) {
+							throw new Error("runEphemeralTurn cannot be called recursively from an ephemeral turn hook");
+						}
+						// Resolve at call time so a running handler's cancellation is inherited.
+						// A saved context must not retain a completed handler's stale signal.
+						const registrationScope = this.#toolRegistrationScope.getStore();
+						const signals = [
+							options.signal,
+							delegation?.signal,
+							registrationScope && !registrationScope.closed ? registrationScope.signal : undefined,
+						].filter((signal): signal is AbortSignal => signal !== undefined);
+						// Only hooks reached inside the side-turn pipeline are blocked. The caller's own
+						// delivery callback runs outside the guard so work it starts (lazy subscriptions,
+						// timers) does not inherit a permanent block on later consultations.
+						const onTextDelta = options.onTextDelta;
+						const request = {
+							...options,
+							onTextDelta: onTextDelta
+								? (delta: string) => this.#ephemeralTurnBlocker.exit(() => onTextDelta(delta))
+								: undefined,
+							signal: signals.length ? AbortSignal.any(signals) : undefined,
+						};
+						return await this.#ephemeralTurnBlocker.run("ephemeral turn", () => runEphemeralTurn(request));
+					}
+				: undefined,
 			localProtocolOptions: this.localProtocolOptions,
 			memory: this.#getMemoryFn?.(),
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#managedTimers.setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#managedTimers.clear(timer),
+			addAdditionalContext: delegation?.context?.addAdditionalContext,
 			invokeTool:
 				delegation !== undefined && this.hasNativeTool(delegation.toolName)
 					? (params, options) =>
@@ -1098,6 +1274,16 @@ export class ExtensionRunner {
 		this.#managedTimers.clearAll();
 	}
 
+	/**
+	 * Remove every file write and delete fallback this runner installed into the
+	 * process-wide registries. Called on session shutdown (and before reinstalling
+	 * on a re-{@link initialize}) so a handler bound to a torn-down session's
+	 * context can never fire for another session sharing this process.
+	 */
+	disposeFileFallbacks(): void {
+		for (const dispose of this.#fileFallbackDisposers.splice(0)) dispose();
+	}
+
 	createCommandContext(): ExtensionCommandContext {
 		return {
 			...this.createContext(),
@@ -1123,15 +1309,15 @@ export class ExtensionRunner {
 	#isSessionShutdownEvent(event: RunnerEmitEvent): event is Extract<RunnerEmitEvent, { type: "session_shutdown" }> {
 		return event.type === "session_shutdown";
 	}
-	async #runHandlerWithTimeout<TEvent extends { type: string }, TResult>(
-		handler: (event: TEvent, ctx: ExtensionContext) => Promise<TResult | undefined> | TResult | undefined,
+	async #runHandlerWithTimeout<TEvent extends { type: string }, R>(
+		handler: (event: TEvent, ctx: ExtensionContext) => Promise<R | undefined> | R | undefined,
 		event: TEvent,
 		ctx: ExtensionContext,
 		ext: Extension,
 		timeoutMs: number,
-		onFailure?: (kind: "timeout" | "error", message: string) => TResult,
+		onFailure?: (kind: "timeout" | "error", message: string) => R,
 		outerSignal?: AbortSignal,
-	): Promise<TResult | undefined> {
+	): Promise<R | undefined> {
 		// `session_stop` carries its own signal on the event; `tool_call` receives
 		// the outer dispatch signal (loop request or wrapper execute) so an abort
 		// while a handler awaits a human dialog cancels the dialog and settles the
@@ -1144,34 +1330,38 @@ export class ExtensionRunner {
 		const signal = signals.length === 0 ? undefined : signals.length === 1 ? signals[0] : AbortSignal.any(signals);
 		if (signal?.aborted) return undefined;
 		const registrationScope: ToolRegistrationScope = { pending: new Set(), closed: false };
-		let handlerResult: TResult | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
+		let handlerResult: R | typeof EXTENSION_HANDLER_TIMEOUT | typeof EXTENSION_HANDLER_ABORTED | undefined;
 		let handlerFailure: { error: unknown } | undefined;
 		try {
-			handlerResult = await raceHandlerWithTimeout(
-				async (handlerSignal, budget) => {
-					registrationScope.signal = handlerSignal;
-					let result: TResult | undefined;
-					try {
-						result = await this.#toolRegistrationScope.run(registrationScope, () =>
-							handler(
-								event,
-								createHandlerContext(ctx, handlerSignal, event.type === "tool_call" ? budget : undefined),
-							),
-						);
-					} catch (error) {
-						handlerFailure = { error };
-					} finally {
-						registrationScope.closed = true;
-					}
-					try {
-						await this.#flushToolRegistrations(registrationScope.pending);
-					} catch (error) {
-						handlerFailure ??= { error };
-					}
-					return result;
-				},
-				timeoutMs,
-				signal,
+			handlerResult = await withActiveSettings(this.settings, () =>
+				raceHandlerWithTimeout(
+					async (handlerSignal, budget) => {
+						registrationScope.signal = handlerSignal;
+						let result: R | undefined;
+						try {
+							const handlerContext = createHandlerContext(
+								ctx,
+								handlerSignal,
+								event.type === "tool_call" ? budget : undefined,
+							);
+							result = await this.#toolRegistrationScope.run(registrationScope, () =>
+								handler(event, handlerContext),
+							);
+						} catch (error) {
+							handlerFailure = { error };
+						} finally {
+							registrationScope.closed = true;
+						}
+						try {
+							await this.#flushToolRegistrations(registrationScope.pending);
+						} catch (error) {
+							handlerFailure ??= { error };
+						}
+						return result;
+					},
+					timeoutMs,
+					signal,
+				),
 			);
 		} catch (error) {
 			handlerFailure = { error };
@@ -1205,7 +1395,7 @@ export class ExtensionRunner {
 			});
 			return onFailure?.("error", message);
 		}
-		return handlerResult as TResult | undefined;
+		return handlerResult as R | undefined;
 	}
 
 	async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
@@ -1257,13 +1447,14 @@ export class ExtensionRunner {
 				}
 
 				if (event.type === "session_stop" && handlerResult) {
-					result = handlerResult as SessionStopEventResult;
-					const hasContinuationContext =
-						(typeof result.additionalContext === "string" && result.additionalContext.length > 0) ||
-						(typeof result.reason === "string" && result.reason.length > 0);
-					if ((result.continue === true || result.decision === "block") && hasContinuationContext) {
-						return result as RunnerEmitResult<TEvent>;
+					const stopResult = handlerResult as SessionStopEventResult;
+					if (stopResult.decision === "block") {
+						return stopResult as RunnerEmitResult<TEvent>;
 					}
+					const hasContinuationContext =
+						(typeof stopResult.additionalContext === "string" && stopResult.additionalContext.length > 0) ||
+						(typeof stopResult.reason === "string" && stopResult.reason.length > 0);
+					if (stopResult.continue === true && hasContinuationContext) result ??= stopResult;
 				}
 			}
 		}
@@ -1335,13 +1526,14 @@ export class ExtensionRunner {
 			this.settings?.get("extensionHandlers.toolCallTimeoutMs") ?? extensionHandlerTimeoutMs,
 		);
 		let result: ToolCallEventResult | undefined;
+		const aggregated = { input: undefined as ToolCallEventResult["input"], additionalContext: [] as string[] };
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("tool_call");
 			if (!handlers || handlers.length === 0) continue;
 
 			for (const handler of handlers) {
-				const handlerResult = await this.#runHandlerWithTimeout(
+				const handlerResult = (await this.#runHandlerWithTimeout(
 					handler,
 					event,
 					ctx,
@@ -1355,21 +1547,22 @@ export class ExtensionRunner {
 								: `Extension ${ext.path} failed: ${message}`,
 					}),
 					signal,
-				);
+				)) as ToolCallEventResult | undefined;
 
-				if (handlerResult) {
-					result = handlerResult;
-					if (result.block) {
-						return result;
-					}
+				if (!handlerResult) continue;
+				if (handlerResult.block) {
+					return handlerResult;
 				}
+				const { additionalContext: _context, input: _input, ...controlResult } = handlerResult;
+				accumulateToolCallResult(aggregated, handlerResult);
+				result = controlResult;
 			}
 		}
 
 		if (signal?.aborted) {
 			return { block: true, reason: `Tool execution was cancelled while an extension handler was pending` };
 		}
-		return result;
+		return buildAggregatedToolCallResult(result, aggregated);
 	}
 
 	async emitUserBash(event: UserBashEvent): Promise<UserBashEventResult | undefined> {
@@ -1477,7 +1670,7 @@ export class ExtensionRunner {
 		return transformed;
 	}
 
-	async emitContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
+	async emitContext(messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> {
 		const ctx = this.createContext();
 
 		// Check if any extensions actually have context handlers before cloning
@@ -1499,6 +1692,10 @@ export class ExtensionRunner {
 			// return new message arrays rather than mutating in place.
 			currentMessages = [...messages];
 		}
+		for (let index = 0; index < currentMessages.length; index++) {
+			const message = currentMessages[index];
+			if (message) setContextHistoryIndex(message, index);
+		}
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("context");
@@ -1512,19 +1709,49 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
 				);
 
 				if (handlerResult && (handlerResult as ContextEventResult).messages) {
-					currentMessages = (handlerResult as ContextEventResult).messages!;
+					const nextMessages = (handlerResult as ContextEventResult).messages!;
+					for (let index = 0; index < nextMessages.length; index++) {
+						const message = nextMessages[index];
+						if (!message || getContextHistoryIndex(message) !== undefined) continue;
+						const previousMessage = currentMessages[index];
+						if (!previousMessage) continue;
+						const historyIndex = getContextHistoryIndex(previousMessage);
+						if (historyIndex === undefined) continue;
+						setContextHistoryIndex(message, historyIndex);
+						if (!Bun.deepEquals(message, previousMessage)) clearContextHistoryIndex(message);
+					}
+					currentMessages = nextMessages;
 				}
 			}
 		}
 
+		for (const message of currentMessages) {
+			const historyIndex = getContextHistoryIndex(message);
+			const historyMessage = historyIndex === undefined ? undefined : messages[historyIndex];
+			if (historyMessage && historyIndex !== undefined) setContextHistoryIndex(historyMessage, historyIndex);
+			const unchanged = historyMessage !== undefined && Bun.deepEquals(message, historyMessage);
+			clearContextHistoryIndex(message);
+			if (historyMessage) clearContextHistoryIndex(historyMessage);
+			if (!unchanged) markPerCallContextMessage(message);
+		}
+		for (const message of messages) clearContextHistoryIndex(message);
+		// An aborted handler is skipped and its input kept unchanged. Never hand that
+		// untransformed (possibly unredacted) context back to a caller as if every hook ran.
+		signal?.throwIfAborted();
 		return currentMessages;
 	}
 
 	/** Runs request payload hooks with the model used for that provider request. */
-	async emitBeforeProviderRequest(payload: unknown, model?: Model): Promise<BeforeProviderRequestEventResult> {
+	async emitBeforeProviderRequest(
+		payload: unknown,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<BeforeProviderRequestEventResult> {
 		const ctx = this.createContext(model);
 		let currentPayload = payload;
 
@@ -1543,6 +1770,8 @@ export class ExtensionRunner {
 					ctx,
 					ext,
 					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
 				);
 				if (handlerResult !== undefined) {
 					currentPayload = handlerResult;
@@ -1553,8 +1782,13 @@ export class ExtensionRunner {
 		return currentPayload;
 	}
 
-	async emitAfterProviderResponse(response: ProviderResponseMetadata, _model?: Model): Promise<void> {
-		const ctx = this.createContext();
+	/** Runs response hooks with the model that produced that provider response. */
+	async emitAfterProviderResponse(
+		response: ProviderResponseMetadata,
+		model?: Model,
+		signal?: AbortSignal,
+	): Promise<void> {
+		const ctx = this.createContext(model);
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("after_provider_response");
@@ -1568,7 +1802,7 @@ export class ExtensionRunner {
 					requestId: response.requestId,
 					metadata: response.metadata,
 				};
-				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs);
+				await this.#runHandlerWithTimeout(handler, event, ctx, ext, extensionHandlerTimeoutMs, undefined, signal);
 			}
 		}
 	}
@@ -1578,6 +1812,7 @@ export class ExtensionRunner {
 		images: ImageContent[] | undefined,
 		systemPrompt: string[],
 	): Promise<BeforeAgentStartCombinedResult | undefined> {
+		if (!this.hasHandlers("before_agent_start")) return undefined;
 		const ctx = this.createContext();
 		const messages: NonNullable<BeforeAgentStartEventResult["message"]>[] = [];
 		let currentSystemPrompt = systemPrompt;
@@ -1624,5 +1859,41 @@ export class ExtensionRunner {
 		}
 
 		return undefined;
+	}
+
+	/**
+	 * Runs `before_subagent_spawn` handlers; a `block` short-circuits, the last defined `model` wins.
+	 * `signal` (the spawn's abort signal) cancels an awaiting handler instead of parking until the timeout.
+	 */
+	async emitBeforeSubagentSpawn(
+		event: BeforeSubagentSpawnEvent,
+		signal?: AbortSignal,
+	): Promise<BeforeSubagentSpawnEventResult | undefined> {
+		if (!this.hasHandlers("before_subagent_spawn")) return undefined;
+		const ctx = this.createContext();
+		let chosen: Pick<BeforeSubagentSpawnEventResult, "model" | "note"> | undefined;
+
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("before_subagent_spawn");
+			if (!handlers || handlers.length === 0) continue;
+
+			for (const handler of handlers) {
+				const handlerResult = await this.#runHandlerWithTimeout(
+					handler,
+					event,
+					ctx,
+					ext,
+					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
+				);
+				if (!handlerResult) continue;
+				const result = handlerResult as BeforeSubagentSpawnEventResult;
+				if (result.block) return result;
+				if (result.model !== undefined) chosen = { model: result.model, note: result.note };
+			}
+		}
+
+		return chosen;
 	}
 }

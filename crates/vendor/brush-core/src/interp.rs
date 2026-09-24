@@ -272,19 +272,31 @@ impl ExecutionParameters {
 		&self,
 		shell: &Shell<impl extensions::ShellExtensions>,
 	) -> impl Iterator<Item = (ShellFd, openfiles::OpenFile)> {
-		let our_fds = self.open_files.iter_fds();
-		let shell_fds = shell
-			.persistent_open_files()
-			.iter_fds()
-			.filter(|(fd, _)| !self.open_files.contains_fd(*fd));
-
 		#[allow(clippy::needless_collect)]
-		let all_fds: Vec<_> = our_fds
-			.chain(shell_fds)
+		let all_fds: Vec<_> = self
+			.open_fds(shell)
 			.map(|(fd, file)| (fd, file.clone()))
 			.collect();
 
 		all_fds.into_iter()
+	}
+
+	/// Like [`Self::iter_fds`], but borrows each open file instead of
+	/// duplicating it, so a caller that wants a few descriptors pays for only
+	/// those.
+	///
+	/// # Arguments
+	///
+	/// * `shell` - The shell context.
+	pub fn open_fds<'a>(
+		&'a self,
+		shell: &'a Shell<impl extensions::ShellExtensions>,
+	) -> impl Iterator<Item = (ShellFd, &'a openfiles::OpenFile)> {
+		let shell_fds = shell
+			.persistent_open_files()
+			.iter_fds()
+			.filter(|(fd, _)| !self.open_files.contains_fd(*fd));
+		self.open_files.iter_fds().chain(shell_fds)
 	}
 }
 
@@ -512,10 +524,21 @@ fn unwrap_transparent_background_wrapper(pipeline: &ast::Pipeline) -> Option<ast
 	};
 	let mut unwrapped = simple_cmd.clone();
 	let suffix = unwrapped.suffix.as_mut()?;
-	let operand_index = suffix
+	let mut operand_index = suffix
 		.0
 		.iter()
 		.position(|item| matches!(item, CommandPrefixOrSuffixItem::Word(_)))?;
+	// A leading `--` only terminates the wrapper's own options
+	// (`nohup -- cmd &`): drop it and take the next word as the operand.
+	if let CommandPrefixOrSuffixItem::Word(word) = &suffix.0[operand_index]
+		&& word.value == "--"
+	{
+		suffix.0.remove(operand_index);
+		operand_index = suffix
+			.0
+			.iter()
+			.position(|item| matches!(item, CommandPrefixOrSuffixItem::Word(_)))?;
+	}
 	let CommandPrefixOrSuffixItem::Word(operand_word) = suffix.0.remove(operand_index) else {
 		return None;
 	};
@@ -917,17 +940,41 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
 			Self::Simple(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
 			Self::Compound(compound, redirects) => {
 				params.disable_command_output_marking();
-				// Set up any additional redirects.
-				if let Some(redirects) = redirects {
-					for redirect in &redirects.0 {
-						setup_redirect(&mut pipeline_context.shell, &mut params, redirect).await?;
-					}
-				}
 
-				Ok(compound
-					.execute(&mut pipeline_context.shell, &params)
-					.await?
-					.into())
+				// Each stage of a multi-command pipeline runs in its own
+				// subshell (`pipeline_context.shell` is already an owned
+				// clone). Execute compound stages as concurrent tasks rather
+				// than inline: inline execution serializes the pipeline —
+				// downstream stages are not even spawned until this stage
+				// completes — and deadlocks outright once a stage fills the
+				// connecting pipe's buffer with no reader running.
+				let in_pipeline = pipeline_context.in_pipeline;
+				match pipeline_context.shell {
+					commands::ShellForCommand::OwnedShell { target, .. } if in_pipeline => {
+						let mut shell = *target;
+						let compound = compound.clone();
+						let redirects = redirects.clone();
+						let mut params = params;
+						Ok(ExecutionSpawnResult::StartedTask(tokio::spawn(async move {
+							if let Some(redirects) = &redirects {
+								for redirect in &redirects.0 {
+									setup_redirect(&mut shell, &mut params, redirect).await?;
+								}
+							}
+							compound.execute(&mut shell, &params).await
+						})))
+					},
+					mut shell => {
+						// Set up any additional redirects.
+						if let Some(redirects) = redirects {
+							for redirect in &redirects.0 {
+								setup_redirect(&mut shell, &mut params, redirect).await?;
+							}
+						}
+
+						Ok(compound.execute(&mut shell, &params).await?.into())
+					},
+				}
 			},
 			Self::Function(func) => {
 				params.disable_command_output_marking();
