@@ -52,6 +52,16 @@ describe("fitOutputTokensToContextWindow", () => {
 		expect(cap).toBeLessThanOrEqual(deepseek.contextWindow - 700_000);
 	});
 
+	test("keeps an OpenRouter default cap omitted, but still fits an explicit one", () => {
+		// The transport omits OpenRouter catalog defaults so upstreams self-cap;
+		// a fitted default would become an explicit, upstream-filtering cap.
+		const openrouter = { ...deepseek, compat: { isOpenRouterHost: true, alwaysSendMaxTokens: false } } as never;
+		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), undefined, tokenizer)).toBeUndefined();
+		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), 200_000, tokenizer)).toBe(120_000);
+		const alwaysSends = { ...deepseek, compat: { isOpenRouterHost: true, alwaysSendMaxTokens: true } } as never;
+		expect(fitOutputTokensToContextWindow(alwaysSends, promptOf(800_000), undefined, tokenizer)).toBe(120_000);
+	});
+
 	test("never requests less than the floor, leaving a full window to compaction", () => {
 		expect(fitOutputTokensToContextWindow(deepseek, promptOf(990_000), undefined, tokenizer)).toBe(
 			MIN_FITTED_OUTPUT_TOKENS,

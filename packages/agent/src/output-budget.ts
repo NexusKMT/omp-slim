@@ -27,7 +27,10 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
  * recovery at all.
  *
  * Returns `maxTokens` unchanged when the requested cap already fits, the
- * model declares no window, or nothing would be requested. Otherwise returns
+ * model declares no window, or nothing would be requested (including an
+ * OpenRouter-hosted model with no caller cap: the transport omits the catalog
+ * default there so each upstream self-caps, and a fitted value would turn into
+ * an explicit cap that filters upstreams). Otherwise returns
  * the remaining room (never below {@link MIN_FITTED_OUTPUT_TOKENS}); a
  * prompt that fills the whole window still overflows and is left to the
  * caller's compaction. Near a full window the floor means a turn can stop on
@@ -43,11 +46,12 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
  * and the request can still exceed the window as before.
  */
 export function fitOutputTokensToContextWindow(
-	model: Pick<Model, "contextWindow" | "maxTokens">,
+	model: Pick<Model, "contextWindow" | "maxTokens"> & { compat?: Model["compat"] },
 	context: Context,
 	maxTokens: number | undefined,
 	tokenizer: Tokenizer,
 ): number | undefined {
+	if (maxTokens === undefined && omitsDefaultOutputCap(model.compat)) return undefined;
 	const requested = maxTokens ?? model.maxTokens;
 	const contextWindow = model.contextWindow;
 	if (!requested || !contextWindow || contextWindow <= 0) return maxTokens;
@@ -57,6 +61,13 @@ export function fitOutputTokensToContextWindow(
 	const room = contextWindow - promptTokens;
 	if (room >= requested) return maxTokens;
 	return Math.max(MIN_FITTED_OUTPUT_TOKENS, room);
+}
+
+/** OpenRouter hosts drop the catalog default cap unless the endpoint always needs one. */
+function omitsDefaultOutputCap(compat: Model["compat"] | undefined): boolean {
+	return (
+		compat !== undefined && "isOpenRouterHost" in compat && compat.isOpenRouterHost && !compat.alwaysSendMaxTokens
+	);
 }
 
 /**
