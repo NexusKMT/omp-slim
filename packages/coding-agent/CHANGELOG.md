@@ -4,11 +4,11 @@
 
 ### Changed
 
-- Shortened the default system prompt by removing repeated rules and empty sections (about 150 fewer tokens with default settings).
+- Shortened the default system prompt by removing repeated rules and empty sections (about 150 fewer tokens with default settings) ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
 
 ### Fixed
 
-- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices.
+- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.0] - 2026-09-24
 
