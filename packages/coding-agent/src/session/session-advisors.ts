@@ -706,6 +706,11 @@ export class SessionAdvisors {
 		this.#resetAllAdvisorRuntimes(reason);
 	}
 
+	/** Re-aligns advisor delivered prefixes after an in-place rewrite their contexts already cover. */
+	rebaseDeliveredPrefixes(reason: string): void {
+		for (const advisor of this.#advisors) advisor.runtime.rebaseDeliveredPrefix(reason);
+	}
+
 	/** Whether live runtimes still match the resolved advisor configuration. */
 	runtimeMatchesCurrentConfig(): boolean {
 		return this.#advisorRuntimeMatchesCurrentConfig();
