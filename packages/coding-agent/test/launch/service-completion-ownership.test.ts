@@ -69,7 +69,6 @@ describe("session-owned supervised services", () => {
 				ready: { log: "service-ready", timeout: 5 },
 			});
 			expect(started.daemon.state).toBe("ready");
-			expect(started.daemon.owner).toBe("first-session");
 			await listServices(second);
 			const firstFinished = waitForOwnedServiceCompletion(first);
 			await sendService(first, "failing-service", "go\n");
@@ -79,6 +78,7 @@ describe("session-owned supervised services", () => {
 				["failing-service", "failed", 3],
 			]);
 			expect(secondCompletions).toEqual([]);
+			expect(started.daemon.owner).toBe("first-session");
 		} finally {
 			vi.restoreAllMocks();
 			await client.request({ op: "shutdown" }).catch(() => undefined);
@@ -88,7 +88,7 @@ describe("session-owned supervised services", () => {
 		}
 	}, 15_000);
 
-	it("does not retain an unacknowledgeable completion after a session changes", async () => {
+	it("replays a completion to its session when that session is resumed after a switch", async () => {
 		using tempDir = TempDir.createSync("@omp-service-transition-");
 		const projectDir = path.join(tempDir.path(), "project");
 		const runtimeDir = path.join(tempDir.path(), "runtime");
@@ -98,7 +98,7 @@ describe("session-owned supervised services", () => {
 		const broker = startBroker(projectDir, runtimeDir);
 		let sessionId = "old-session";
 		const callbacks: Array<() => void> = [];
-		const completions: DaemonCompletionNotification[] = [];
+		const deliveries: Array<[string, DaemonCompletionNotification]> = [];
 		const session: ToolSession = {
 			cwd: projectDir,
 			hasUI: false,
@@ -111,9 +111,13 @@ describe("session-owned supervised services", () => {
 				callbacks.push(callback);
 			},
 			queueLaunchCompletion: notification => {
-				completions.push(notification);
+				deliveries.push([sessionId, notification]);
 				return Promise.resolve();
 			},
+		};
+		const switchTo = (nextSessionId: string): void => {
+			sessionId = nextSessionId;
+			for (const callback of callbacks) callback();
 		};
 		try {
 			vi.spyOn(brokerClients, "daemonClientForProject").mockResolvedValue(client);
@@ -122,22 +126,26 @@ describe("session-owned supervised services", () => {
 				command: "echo service-ready; read answer; exit 3",
 				ready: { log: "service-ready", timeout: 5 },
 			});
-			sessionId = "new-session";
-			for (const callback of callbacks) callback();
+			switchTo("new-session");
 			await listServices(session);
 			await sendService(session, "old-service", "go\n");
 			const exited = await client.request({ op: "wait", name: "old-service", for: "exit", timeoutMs: 5_000 });
 			if (exited.op !== "wait") throw new Error("Expected daemon exit wait");
 			expect(exited.daemon.state).toBe("failed");
+			expect(deliveries).toEqual([]);
+
+			switchTo("old-session");
+			// The broker writes the replay before the list response, so the sink has already run.
+			await listServices(session);
+			expect(
+				deliveries.map(([receiver, { owner, daemon }]) => [receiver, owner, daemon.name, daemon.state]),
+			).toEqual([["old-session", "old-session", "old-service", "failed"]]);
 			await client.request({ op: "shutdown" });
 			await broker;
 			const metadata = (await Bun.file(path.join(runtimeDir, "daemons", "old-service", "meta.json")).json()) as {
-				completionEvents: boolean;
 				pendingCompletions: DaemonCompletionNotification[];
 			};
-			expect(metadata.completionEvents).toBe(false);
 			expect(metadata.pendingCompletions).toEqual([]);
-			expect(completions).toEqual([]);
 		} finally {
 			vi.restoreAllMocks();
 			await client.request({ op: "shutdown" }).catch(() => undefined);

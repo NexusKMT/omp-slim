@@ -94,7 +94,9 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
 		for (const listener of serviceState(session).listeners) listener();
 	});
 	session.registerSessionChangeCallback?.(() => {
-		unsubscribe();
+		// The previous session stays resumable (`/resume`, fork parent), so keep its
+		// completions queued in the broker for replay when that session id re-subscribes.
+		unsubscribe({ preservePending: true });
 		clients.delete(client);
 		serviceState(session).owned.clear();
 		for (const listener of serviceState(session).listeners) listener();
