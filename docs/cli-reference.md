@@ -201,6 +201,8 @@ print-mode disposal semantics when the advisor runtime is enabled.
 | `rpc-ui` | RPC transport with UI extension events enabled. |
 | `acp` | Agent Client Protocol server over stdio. Equivalent to the [`acp`](#subcommands) subcommand; see [approval mode → ACP sessions](./approval-mode.md#acp-sessions). |
 
+`--no-ui` (only with `--mode rpc`) runs extensions headless: no `extension_ui_request` dialogs are sent to the host, and `ctx.hasUI` is `false`. See [RPC startup](./rpc.md#startup).
+
 ## Subcommands
 
 Run `omp <command> --help` for each command's own flags and examples.

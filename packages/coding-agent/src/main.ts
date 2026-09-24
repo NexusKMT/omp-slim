@@ -66,6 +66,7 @@ import { discoverStartupLspServers } from "./lsp/servers";
 import type { MCPManager } from "./mcp";
 import type { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
+import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 import type * as SetupWizardModule from "./modes/setup";
@@ -159,12 +160,7 @@ import { cfgWorkspaceAdditionalDirectories } from "./session/context-settings";
 
 type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
 type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<number>;
-type RunRpcMode = (
-	session: AgentSession,
-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
-	subagentEventBus?: EventBus,
-	input?: ReadableStream<Uint8Array>,
-) => Promise<never>;
+type RunRpcMode = (session: AgentSession, options?: RpcModeOptions) => Promise<never>;
 
 /** Interactive-only graph boundary; login dialogs and overlays load on first real use. */
 async function loadInteractiveModeConstructor() {
@@ -1742,6 +1738,10 @@ export async function runRootCommand(
 			process.stderr.write(`${chalk.red("Error: @file arguments are not supported in RPC mode")}\n`);
 			process.exit(1);
 		}
+		if (parsedArgs.noUi && parsedArgs.mode !== "rpc") {
+			process.stderr.write(`${chalk.red("Error: --no-ui requires --mode rpc")}\n`);
+			process.exit(1);
+		}
 		const mode = parsedArgs.mode || "text";
 		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
 		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
@@ -2368,7 +2368,12 @@ export async function runRootCommand(
 				// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
 				const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
 				stopStartupWatchdog();
-				await runRpcMode(session, mode === "rpc-ui" ? setToolUIContext : undefined, subagentEventBus, rpcInput);
+				await runRpcMode(session, {
+					setToolUIContext: mode === "rpc-ui" ? setToolUIContext : undefined,
+					headless: parsedArgs.noUi === true,
+					subagentEventBus,
+					input: rpcInput,
+				});
 			} else if (isInteractive) {
 				const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 				const startupChangelog = await startupChangelogPromise;

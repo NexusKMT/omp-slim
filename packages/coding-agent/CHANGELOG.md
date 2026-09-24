@@ -16,6 +16,13 @@
 - Added dictation support to `/btw` follow-up input, including microphone controls on the follow-up line.
 - Added opt-in CUDA support to the Nix package for tiny-model inference with the ONNX Runtime CUDA execution provider.
 - Added support for multiple simultaneous browser instances, allowing tabs from browsers such as Chrome and Edge to remain connected and usable at the same time.
+- Added a `prompt_result` frame in RPC mode for every accepted prompt, sent when the agent yields and tied to the prompt's own id. It reports `completed`, `aborted` or `error`, and a late `agent_end` from an earlier run no longer completes a newer prompt.
+- Added structured provider errors to RPC `prompt_result` (message, provider, model, HTTP status, retryable), with local request-dump paths removed from the message.
+- Added a `session_settled` RPC frame, `prompt_result.sessionSettled`, `get_state.isSettled`/`hasPendingAsyncWork`, and an `agent_end.yielded` flag, so hosts can tell when the agent yielded apart from when the session is done and no background job will wake it again.
+- Added `--no-ui` for `--mode rpc`, which keeps extension dialogs and UI requests off the wire for hosts with no interactive surface.
+- Added the `open_session` RPC command, which resumes the newest session in a directory or starts a new one there, so a pre-spawned RPC process can be bound to a conversation after startup.
+- Added the `set_event_filter` RPC command to forward only chosen session event types, and a `messageId` on RPC message start/update/end frames.
+- Added `openSession`, `setEventFilter`, `onPromptResult`, `onSessionSettled` and `waitForSettled` to the TypeScript and Python RPC clients. `promptAndWait` now waits for the prompt's own `prompt_result`.
 
 ### Changed
 
@@ -28,6 +35,7 @@
 
 - Fixed `vault://` paths resolving to a different spelling for bash than for reads on Windows when `TEMP` or the profile directory uses an 8.3 short name like `ADMINI~1` ([#7911](https://github.com/can1357/oh-my-pi/issues/7911), [#7938](https://github.com/can1357/oh-my-pi/pull/7938) by [@CoderTCY](https://github.com/CoderTCY))
 - Fixed the bash tool on Windows keeping 8.3 short-name spellings like `ADMINI~1` in its working directory; `pwd` and `$PWD` now report the long path ([#7938](https://github.com/can1357/oh-my-pi/pull/7938) by [@CoderTCY](https://github.com/CoderTCY))
+- Fixed RPC `abort_and_prompt` scheduling failures being reported only as a late error response; the prompt now also completes with a `prompt_result`.
 - `omp update` and the startup update check now use your configured npm registry (`.npmrc`, `npm_config_registry`, or bunfig, including scoped registries and auth tokens) instead of always querying registry.npmjs.org ([#13115](https://github.com/can1357/oh-my-pi/pull/13115) by [@H4vC](https://github.com/H4vC))
 - Fixed auto-QA grievance pushes getting stuck forever behind one report the collector rejects: tool names are clamped to the collector's 128-byte limit, rejected reports are set aside with the server's error (shown in `omp grievances list` and `push`), and the rest of the queue keeps sending ([#13091](https://github.com/can1357/oh-my-pi/issues/13091), [#13119](https://github.com/can1357/oh-my-pi/pull/13119) by [@NaC-L](https://github.com/NaC-L))
 - Fixed advisor reviews making an extra model request after a turn whose only tool calls were `advise`. That request re-sent the whole review context just so the advisor could reply "done", with no new notes. The review now ends after the advise-only turn; a turn that also calls other tools continues as before ([#13132](https://github.com/can1357/oh-my-pi/pull/13132) by [@alnaggar-dev](https://github.com/alnaggar-dev)).

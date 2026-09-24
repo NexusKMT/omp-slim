@@ -3685,12 +3685,18 @@ export class AgentSession implements SettingsScope {
 			// TTSR retry work runs concurrently and clears the live flag before
 			// maintenance can emit agent_end, so preserve the state at settle entry.
 			const ttsrAbortPendingAtAgentEnd = this.#ttsr.abortPending;
-			const emitAgentEndNotification = async (options?: { willContinue?: boolean }) => {
+			const emitAgentEndNotification = async (options?: { willContinue?: boolean; awaitingAsyncWork?: boolean }) => {
 				this.#emitRunState("idle");
 				// Public agent_end is held out of the eager display pass and emitted
 				// here after maintenance routing, tagged isTerminal so subscribers can
-				// tell final settles from scheduled continuations.
-				await this.#emitSessionEvent({ ...event, isTerminal: !options?.willContinue });
+				// tell final settles from scheduled continuations, and `yielded` so
+				// they can tell the agent's own follow-up work (retries, reminders,
+				// compaction) from a finished turn that only background work resumes.
+				await this.#emitSessionEvent({
+					...event,
+					isTerminal: !options?.willContinue,
+					yielded: !options?.willContinue || options.awaitingAsyncWork === true,
+				});
 				void this.#emitAgentEndNotification([...activeMessages], options).catch(err => {
 					logger.error("Agent end extension notification failed", { err });
 				});
@@ -4049,7 +4055,7 @@ export class AgentSession implements SettingsScope {
 			// the session is fully idle (the todo reminder above defers the same
 			// way inside #checkTodoCompletion).
 			if (this.#hasPendingAsyncWake()) {
-				await emitAgentEndNotification({ willContinue: true });
+				await emitAgentEndNotification({ willContinue: true, awaitingAsyncWork: true });
 				return;
 			}
 			const sessionStopWillContinue = await this.#emitSessionStopEvent(activeMessages, msg);
