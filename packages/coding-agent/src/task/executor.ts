@@ -31,7 +31,7 @@ import {
 	resolveSubagentServiceTier,
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
-import type { AgentCompactionThresholdOverride } from "../config/compaction-threshold";
+import type { CompactionThresholdPair } from "../config/compaction-threshold";
 import { Settings } from "../config/settings";
 import { SETTINGS_SCHEMA, type SettingPath } from "../config/settings-schema";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
@@ -544,7 +544,7 @@ export interface ExecutorOptions {
 	 */
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	/** Exact-name `task.agentCompactionThresholdOverrides` pair selected by dispatch. */
-	compactionThresholdOverride?: Required<AgentCompactionThresholdOverride>;
+	compactionThresholdOverride?: CompactionThresholdPair;
 	/** Override local:// protocol options so subagent shares parent's local:// root */
 	localProtocolOptions?: LocalProtocolOptions;
 	/**
@@ -980,6 +980,26 @@ function inheritedSubagentServiceTiers(
 		: (inheritedServiceTier ?? {});
 }
 
+/**
+ * Compaction thresholds of the root (non-subagent) settings a subagent chain
+ * started from. Per-agent `task.agentCompactionThresholdOverrides` entries
+ * replace `compaction.threshold*` only for the agent they name; every other
+ * descendant resolves against these root values, not an ancestor's override.
+ */
+const rootCompactionThresholds = new WeakMap<Settings, CompactionThresholdPair>();
+
+/** Settings overrides applying an exact-name compaction threshold entry to one subagent. */
+export function compactionThresholdSettings(
+	threshold: CompactionThresholdPair | undefined,
+): Partial<Record<SettingPath, unknown>> | undefined {
+	return threshold === undefined
+		? undefined
+		: {
+				"compaction.thresholdPercent": threshold.thresholdPercent,
+				"compaction.thresholdTokens": threshold.thresholdTokens,
+			};
+}
+
 export function createSubagentSettings(
 	baseSettings: Settings,
 	overrides?: Partial<Record<SettingPath, unknown>>,
@@ -989,6 +1009,13 @@ export function createSubagentSettings(
 	for (const key of Object.keys(SETTINGS_SCHEMA) as SettingPath[]) {
 		snapshot[key] = baseSettings.get(key);
 	}
+	// A parent subagent's own per-agent threshold must not leak to its children.
+	const rootThresholds = rootCompactionThresholds.get(baseSettings) ?? {
+		thresholdPercent: baseSettings.get("compaction.thresholdPercent"),
+		thresholdTokens: baseSettings.get("compaction.thresholdTokens"),
+	};
+	snapshot["compaction.thresholdPercent"] = rootThresholds.thresholdPercent;
+	snapshot["compaction.thresholdTokens"] = rootThresholds.thresholdTokens;
 	// Resolve the subagent's per-family tiers from `tier.subagent` ("inherit" =
 	// match the parent's live tiers when a live session supplied them, else the
 	// subagent's own configured tier.* settings). The result is stamped back onto
@@ -998,7 +1025,7 @@ export function createSubagentSettings(
 	snapshot["tier.openai"] = subagentTiers.openai ?? "none";
 	snapshot["tier.anthropic"] = subagentTiers.anthropic ?? "none";
 	snapshot["tier.google"] = subagentTiers.google ?? "none";
-	return Settings.isolated(
+	const subagentSettings = Settings.isolated(
 		{
 			...snapshot,
 			// Async jobs and bash/eval auto-backgrounding are inherited from the parent:
@@ -1018,6 +1045,8 @@ export function createSubagentSettings(
 		},
 		{ storage: baseSettings.getStorage() },
 	);
+	rootCompactionThresholds.set(subagentSettings, rootThresholds);
+	return subagentSettings;
 }
 
 export type AbortReason = "signal" | "shutdown" | "terminate" | "timeout" | "budget";
@@ -3371,13 +3400,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	}
 
 	const settings = options.settings ?? Settings.isolated();
-	const compactionThresholdSettings =
-		options.compactionThresholdOverride === undefined
-			? undefined
-			: {
-					"compaction.thresholdPercent": options.compactionThresholdOverride.thresholdPercent,
-					"compaction.thresholdTokens": options.compactionThresholdOverride.thresholdTokens,
-				};
 	// Per-agent advisor: the agent definition's `advisor` frontmatter or the
 	// `task.agentAdvisor` settings override (agent name → "on"/"off"/model
 	// pattern) pairs the spawned session with an advisor. Subagents default to
@@ -3391,7 +3413,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
-			...compactionThresholdSettings,
+			...compactionThresholdSettings(options.compactionThresholdOverride),
 			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
@@ -4023,14 +4045,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				spawns: spawnsEnv,
 				readSummarize: agent.readSummarize,
 				advisor: advisorSelection ? (advisorSelection.model ?? "on") : undefined,
-				...(compactionThresholdSettings !== undefined
-					? {
-							compactionThreshold: {
-								thresholdPercent: compactionThresholdSettings["compaction.thresholdPercent"],
-								thresholdTokens: compactionThresholdSettings["compaction.thresholdTokens"],
-							},
-						}
-					: undefined),
+				compactionThreshold: options.compactionThresholdOverride,
 				outputSchema,
 				outputSchemaMode: options.outputSchemaMode,
 				restrictToolNames: restrictToolNames || undefined,

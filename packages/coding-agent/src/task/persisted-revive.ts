@@ -14,7 +14,12 @@ import type { AgentSession } from "../session/agent-session";
 import type { AuthStorage } from "../session/auth-storage";
 import { extractSessionInit, hasConversationalHistory, SessionManager } from "../session/session-manager";
 import type { EventBus } from "../utils/event-bus";
-import { attachIrcWakeTurnMonitor, createMCPProxyTools, createSubagentSettings } from "./executor";
+import {
+	attachIrcWakeTurnMonitor,
+	compactionThresholdSettings,
+	createMCPProxyTools,
+	createSubagentSettings,
+} from "./executor";
 import type { AgentDefinition } from "./types";
 
 /**
@@ -126,12 +131,7 @@ export function createPersistedSubagentReviverFactory(
 								: undefined),
 						}
 					: undefined),
-				...(init.compactionThreshold !== undefined
-					? {
-							"compaction.thresholdPercent": init.compactionThreshold.thresholdPercent,
-							"compaction.thresholdTokens": init.compactionThreshold.thresholdTokens,
-						}
-					: undefined),
+				...compactionThresholdSettings(init.compactionThreshold),
 			});
 			const persistedModelPattern =
 				init.modelRole && init.modelRole !== "default"

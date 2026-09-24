@@ -10,7 +10,7 @@ import path from "node:path";
 import { $env, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { resolveAgentModelSelection, resolveConfiguredModelPatterns } from "../config/model-resolver";
 import {
-	type AgentCompactionThresholdOverride,
+	type CompactionThresholdPair,
 	validateAgentCompactionThresholdOverrides,
 } from "../config/compaction-threshold";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
@@ -147,7 +147,7 @@ export interface EffectiveSubagentPolicy {
 	/** Exact-name `task.agentServiceTierOverrides` entry for this agent, applied after model resolution. */
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	/** Exact-name entry normalized to both child compaction threshold fields. */
-	compactionThresholdOverride?: Required<AgentCompactionThresholdOverride>;
+	compactionThresholdOverride?: CompactionThresholdPair;
 	parentActiveModelPattern?: string;
 	schema: StructuredSubagentSchemaResolution;
 	planMode: boolean;

@@ -530,28 +530,39 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("uses the child threshold for compaction decisions", async () => {
-		const session = yieldEmittingSession();
-		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-		const settings = Settings.isolated({
-			"compaction.thresholdPercent": 65,
-			"compaction.thresholdTokens": 40_000,
-		});
+	it("applies the override to the named child only, not to agents that child spawns", async () => {
+		const createSession = vi
+			.spyOn(sdkModule, "createAgentSession")
+			.mockResolvedValueOnce(createSessionResult(yieldEmittingSession()))
+			.mockResolvedValueOnce(createSessionResult(yieldEmittingSession()));
+		const rootSettings = Settings.isolated({ "compaction.thresholdTokens": 40_000 });
 
-		const result = await runSubprocess({
+		const child = await runSubprocess({
 			...baseOptions,
-			id: "compaction-percent-override",
-			settings,
+			id: "compaction-override-child",
+			settings: rootSettings,
 			compactionThresholdOverride: { thresholdPercent: 80, thresholdTokens: -1 },
 		});
-
-		expect(result.exitCode).toBe(0);
+		expect(child.exitCode).toBe(0);
 		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
 		if (!childSettings) throw new Error("Expected child settings");
-		const compactionSettings = childSettings.getGroup("compaction");
-		expect(resolveThresholdTokens(200_000, compactionSettings)).toBe(160_000);
-		expect(shouldCompact(50_000, 200_000, compactionSettings)).toBe(false);
-		expect(shouldCompact(160_001, 200_000, compactionSettings)).toBe(true);
+		const childCompaction = childSettings.getGroup("compaction");
+		expect(resolveThresholdTokens(200_000, childCompaction)).toBe(160_000);
+		expect(shouldCompact(50_000, 200_000, childCompaction)).toBe(false);
+		expect(shouldCompact(160_001, 200_000, childCompaction)).toBe(true);
+
+		// A grandchild without its own entry is spawned from the child's settings.
+		const grandchild = await runSubprocess({
+			...baseOptions,
+			id: "compaction-override-grandchild",
+			settings: childSettings,
+		});
+		expect(grandchild.exitCode).toBe(0);
+		const grandchildSettings = createSession.mock.calls[1]?.[0]?.settings;
+		if (!grandchildSettings) throw new Error("Expected grandchild settings");
+		const grandchildCompaction = grandchildSettings.getGroup("compaction");
+		expect(resolveThresholdTokens(200_000, grandchildCompaction)).toBe(40_000);
+		expect(shouldCompact(50_000, 200_000, grandchildCompaction)).toBe(true);
 	});
 });
 

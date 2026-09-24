@@ -218,19 +218,10 @@ For task dispatch, model precedence is:
 
 Role aliases in either of the first two sources are expanded through `modelRoles`. The shared eval bridge can also supply an invocation-local model override ahead of the settings override; the task wire schema does not expose that field.
 
-Compaction-threshold overrides are separate from model and service-tier selection. An absent or
-`null` `task.agentCompactionThresholdOverrides` value is treated as an empty map. Otherwise, the
-setting must be a mapping from exact, case-sensitive agent names to objects containing only
-`thresholdPercent` and/or `thresholdTokens`. Agent-name keys are arbitrary; an entry applies only
-to a task/eval launch with the exact same name. Each entry must include at least one field, and
-every present value must be a finite number; negative values such as `-1` are allowed.
-A top-level value other than a mapping or `null` (including arrays), a non-object or array entry,
-an empty entry, an unknown field, or a non-number/non-finite value fails settings load. After
-settings layers merge, a valid entry replaces both threshold fields for that child; an omitted field
-becomes `-1`. A positive token limit takes precedence; otherwise a positive percentage applies; if neither
-is positive, the reserve-based fallback applies, matching the global compaction thresholds. Only
-exact-name task/eval launches consult this map; it does not change the parent/main session, and
-Vibe workers do not consult it.
+Compaction triggers are separate from model and service-tier selection: an exact, case-sensitive
+`task.agentCompactionThresholdOverrides[agentName]` entry (`90000` or `"80%"`) replaces the
+`compaction.threshold*` settings for that agent only; agents without an entry, including agents it
+spawns, use the main session's thresholds. See [Settings](./settings.md#context-compaction-and-memory).
 
 Service-tier precedence is independent of model selection: an exact, case-sensitive
 `task.agentServiceTierOverrides[agentName]` entry overrides `tier.subagent`; an absent entry preserves

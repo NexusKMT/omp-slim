@@ -500,16 +500,7 @@ From `settings-schema.ts`:
 - `compaction.remoteStreamingV2Enabled` = `true`
 - `compaction.v2RetainedMessageBudget` = `64000`
 - `compaction.thresholdPercent` = `-1` and `compaction.thresholdTokens` = `-1`; a positive fixed token limit takes precedence over percentage, and otherwise the reserve-based threshold is used.
-- `task.agentCompactionThresholdOverrides` is a sparse exact-name map for task/eval children; an absent or `null` map means no overrides.
-  Agent-name keys are arbitrary and matched exactly, case-sensitively.
-  Each entry contains only `thresholdPercent` and/or `thresholdTokens`, with at least one required;
-  every present value must be a finite number (negative values such as `-1` are allowed).
-  A top-level value other than a mapping or `null` (including arrays), a non-object or array entry,
-  an empty entry, an unknown field, or a nonnumeric or non-finite value fails settings load.
-  A valid per-agent object replaces both threshold fields after settings merge; an omitted field
-  becomes `-1`. A positive token limit takes precedence; otherwise a positive percentage applies;
-  if neither is positive, the reserve-based fallback applies, matching the global thresholds.
-  The main session is unaffected; Vibe workers do not consult this map.
+- `task.agentCompactionThresholdOverrides` = `{}`; exact-name task/eval agent → token count (`90000`) or percentage (`"80%"`) replacing both thresholds for that agent only. See [Settings](./settings.md#context-compaction-and-memory).
 - `compaction.idleEnabled` = `false`
 - `compaction.idleThresholdTokens` = `200000`
 - `compaction.idleTimeoutSeconds` = `300`
