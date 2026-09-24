@@ -33,6 +33,7 @@
 
 ### Changed
 
+- Updated `write` tool usage to require explicit `proc://<id>/kill` for cancellation, enforcing content validation on all other write paths
 - Updated session compaction logic to support native Anthropic snapshot branches and rewinds
 - Changed browser screenshot pixel comparison to ignore minor rasterizer noise
 - Changed subagents to exclude the wait tool, preventing blocking on wait in nested agents
