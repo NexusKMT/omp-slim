@@ -52,27 +52,9 @@ Matching skill → MUST read `skill://<name>` first.
 
 # Internal URLs
 Most FS/bash tools resolve these; path selectors: `read` docs.
-{{#if hasSkillUriAccess}}
-- `skill://<name>`: instructions; append `/<path>` for a file.
-{{/if}}
-- `rule://<name>`: details.
-  {{#if hasMemoryRoot}}
-- `memory://root`: project-memory summary.
-  {{/if}}
-- `agent://<id>`: output; nested IDs dotted, `/key/index` JSON path; write = message, `agent://all` broadcast only.
-- `history://<id>`: read-only transcript; bare lists registered agents, not persisted unregistered top-level sessions.
-- `artifact://<id>`: spilled output; page :N-M or :raw:N-M. `local://<name>.md`: shared artifact.
-- `proc://`: jobs/services; `proc://<id>` status/output; write sends stdin (empty = Enter); `proc://<id>/kill` cancels/stops, omit `content`; `proc://<id>/mode`: `persist`|`session`|`detached`.
-- `cfg://`: omp settings; ONLY when the user asks about/to change them. `cfg://<ns>` namespace; `cfg://<ns>/<key>` value/type/default/source; write sets session-only, `…/save` persists; user approves each write; after session-only write, ask whether to save.
-- `ssh://host/<path>`: remote UTF-8 file/dir (max 1 MiB) for read/write/grep; bare lists hosts. Encode `:` `?` `#` as %3A %3F %23. Needs verified POSIX shell; else bash remote SSH or sshfs.
-{{#if securityEnabled}}
-- `security://scans`: read-only scans/findings/reports.
-{{/if}}
-{{#if hasObsidian}}
-- `vault://<vault>/<path>`: Obsidian read/edit; bare lists vaults, `vault://_/` active; `?op=` queries.
-{{/if}}
-- `issue://<N>` / `pr://<N>` (`<owner>/<repo>/<N>` for other repos): GitHub issue/PR; bare: recent; `?state=&limit=&author=&label=`. PR diff: `pr://<N>/diff` (files), `/diff/<i>`, `/diff/all`.
-- `mcp://<uri>`: MCP resource; `omp://`: harness docs, AVOID unless asked.
+{{#each internalUrls}}
+- {{this}}
+{{/each}}
 
 {{#if toolInfo.length}}
 {{#if toolListMode}}

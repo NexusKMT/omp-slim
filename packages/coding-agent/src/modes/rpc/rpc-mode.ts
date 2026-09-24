@@ -14,7 +14,6 @@ import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { $env, isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
-import { reset as resetCapabilities } from "../../capability";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
 	type ExtensionUIContext,
@@ -30,7 +29,6 @@ import {
 	type Skill,
 	type SkillPromptInput,
 } from "../../extensibility/skills";
-import { loadSlashCommands } from "../../extensibility/slash-commands";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AgentSession } from "../../session/agent-session";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
@@ -1151,14 +1149,7 @@ export async function runRpcMode(
 		const cwd = session.sessionManager.getCwd();
 		const projectPath = await resolveActiveProjectRegistryPath(cwd);
 		clearPluginRootsAndCaches(projectPath ? [projectPath] : undefined);
-		resetCapabilities();
-		await session.refreshSkills();
-		session.setSlashCommands(
-			await loadSlashCommands({
-				cwd,
-				extensionRoots: session.effectiveExtensionRoots,
-			}),
-		);
+		await session.refreshSkillsAndCommands();
 		await emitAvailableCommandsUpdate();
 	};
 	const emitAvailableCommandsUpdate = async () => {

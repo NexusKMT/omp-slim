@@ -20,18 +20,9 @@ import { prompt } from "@oh-my-pi/pi-utils";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import { type CfgWriteDetails, type CfgWriteOutcome } from "@oh-my-pi/pi-tui/tools/cfg-render";
 import { CFG_SAVE_SEGMENT, CFG_URL_PREFIX, parseCfgUrl } from "@oh-my-pi/pi-tui/tools/cfg-url";
-import {
-	getDefault,
-	getEnumValues,
-	getType,
-	getUi,
-	isCredential,
-	parseSettingValue,
-	type SettingPath,
-	type SettingProvenance,
-	type Settings,
-	SETTINGS_SCHEMA,
-} from "../config/settings";
+import { type AnySetting, all } from "../config/registry";
+import type { SettingProvenance, Settings } from "../config/settings";
+import cfgPromptDoc from "../prompts/internal-urls/cfg.md" with { type: "text" };
 import cfgWriteResultTemplate from "../prompts/tools/cfg-write-result.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 import type {
@@ -40,34 +31,36 @@ import type {
 	InternalWriteResult,
 	ProtocolHandler,
 	ResolveContext,
+	SchemeSpec,
 	UrlCompletion,
 	WriteContext,
 } from "./types";
 
-let sortedPaths: SettingPath[] | undefined;
+let sortedSettings: AnySetting[] | undefined;
 
 /**
- * Every setting path, ordered segment by segment so each namespace's members stay
+ * Every setting, ordered by id segment by segment so each namespace's members stay
  * contiguous. Computed on first use: the settings module is still initializing
  * when the router loads this handler.
  */
-function allPaths(): SettingPath[] {
-	sortedPaths ??= (Object.keys(SETTINGS_SCHEMA) as SettingPath[]).sort((a, b) => {
-		const left = a.split(".");
-		const right = b.split(".");
+function allSettings(): AnySetting[] {
+	sortedSettings ??= all().toSorted((a, b) => {
+		const left = a.id.split(".");
+		const right = b.id.split(".");
 		for (let i = 0; i < Math.min(left.length, right.length); i++) {
 			const order = left[i]!.localeCompare(right[i]!, "en", { sensitivity: "base" });
 			if (order !== 0) return order;
 		}
 		return left.length - right.length;
 	});
-	return sortedPaths;
+	return sortedSettings;
 }
 const REDACTED = "<redacted>";
 /** Tree listings keep only the description's first sentence, capped here; single-setting reads show it whole. */
 const TREE_COMMENT_MAX_CHARS = 120;
 
 const PROVENANCE_LABELS: Record<SettingProvenance, string> = {
+	env: "environment variable",
 	runtime: "session override",
 	overlay: "--config overlay",
 	project: "project config",
@@ -77,7 +70,7 @@ const PROVENANCE_LABELS: Record<SettingProvenance, string> = {
 
 /** A settings change awaiting the user's decision. Values are display-formatted, credentials redacted. */
 export interface CfgChangeRequest {
-	path: SettingPath;
+	path: string;
 	previous: string;
 	value: string;
 	/** Persist to config.yml instead of scoping the change to the session. */
@@ -86,7 +79,7 @@ export interface CfgChangeRequest {
 
 /** An approved change that took effect on one {@link Settings} instance. */
 export interface CfgAppliedChange {
-	path: SettingPath;
+	path: string;
 	/** Effective value on {@link settings} after the change. */
 	value: unknown;
 	settings: Settings;
@@ -121,9 +114,9 @@ export function setCfgApprovalHost(host: CfgApprovalHost | null): void {
 	approvalHost = host;
 }
 
-function formatValue(path: SettingPath, value: unknown): string {
+function formatValue(setting: AnySetting, value: unknown): string {
 	if (value === undefined || value === null) return "null";
-	if (isCredential(path) && value !== "") return REDACTED;
+	if (setting.isCredential && value !== "") return REDACTED;
 	if (typeof value === "boolean" || typeof value === "number") return String(value);
 	return JSON.stringify(value);
 }
@@ -134,27 +127,31 @@ function formatValue(path: SettingPath, value: unknown): string {
  *
  * @throws Error when the path names neither a setting nor a namespace.
  */
-function resolveSegments(segments: readonly string[]): { path: string; leaf?: SettingPath; members: SettingPath[] } {
-	if (segments.length === 0) return { path: "", members: allPaths() };
+function resolveSegments(segments: readonly string[]): { path: string; leaf?: AnySetting; members: AnySetting[] } {
+	if (segments.length === 0) return { path: "", members: allSettings() };
 	const lower = segments.join(".").toLowerCase();
-	const leaf = allPaths().find(candidate => candidate.toLowerCase() === lower);
-	const members = allPaths().filter(candidate => candidate.toLowerCase().startsWith(`${lower}.`));
-	const path = leaf ?? members[0]?.slice(0, lower.length);
+	const leaf = allSettings().find(candidate => candidate.id.toLowerCase() === lower);
+	const members = allSettings().filter(candidate => candidate.id.toLowerCase().startsWith(`${lower}.`));
+	const path = leaf?.id ?? members[0]?.id.slice(0, lower.length);
 	if (path === undefined) {
-		const similar = fuzzyFilter(allPaths(), segments.join("."), candidate => candidate).slice(0, 8);
+		const similar = fuzzyFilter(
+			allSettings().map(candidate => candidate.id),
+			segments.join("."),
+			candidate => candidate,
+		).slice(0, 8);
 		const hint = similar.length > 0 ? `\nSimilar: ${similar.join(", ")}` : "";
 		throw new Error(`Unknown setting: ${segments.join(".")}${hint}\nRead ${CFG_URL_PREFIX} for the full tree.`);
 	}
 	return { path, leaf, members };
 }
 
-function treeComment(path: SettingPath, value: unknown): string {
+function treeComment(setting: AnySetting, value: unknown): string {
 	const parts: string[] = [];
-	const choices = getEnumValues(path);
+	const choices = setting.enumValues;
 	if (choices) parts.push(choices.join("|"));
-	const fallback = getDefault(path);
-	if (!Bun.deepEquals(value, fallback)) parts.push(`default ${formatValue(path, fallback)}`);
-	const description = getUi(path)?.description;
+	const fallback = setting.default;
+	if (!Bun.deepEquals(value, fallback)) parts.push(`default ${formatValue(setting, fallback)}`);
+	const description = setting.ui?.description;
 	if (description) {
 		const sentence = description.match(/^.*?[.!?](?=\s|$)/s)?.[0] ?? description;
 		parts.push(
@@ -167,15 +164,15 @@ function treeComment(path: SettingPath, value: unknown): string {
 /** YAML-ish tree of `members`, rooted below `prefix`. Returns the rendered text and the count of non-default values. */
 function renderTree(
 	settings: Settings,
-	members: readonly SettingPath[],
+	members: readonly AnySetting[],
 	prefix: string,
 ): { text: string; modified: number } {
 	const lines: string[] = [];
 	let modified = 0;
 	const opened: string[] = [];
 	const strip = prefix ? prefix.length + 1 : 0;
-	for (const path of members) {
-		const segments = path.slice(strip).split(".");
+	for (const setting of members) {
+		const segments = setting.id.slice(strip).split(".");
 		let shared = 0;
 		while (shared < opened.length && shared < segments.length - 1 && opened[shared] === segments[shared]) shared++;
 		opened.length = shared;
@@ -183,25 +180,25 @@ function renderTree(
 			lines.push(`${"  ".repeat(depth)}${segments[depth]}:`);
 			opened.push(segments[depth]!);
 		}
-		const value = settings.get(path);
-		if (!Bun.deepEquals(value, getDefault(path))) modified++;
+		const value = setting.get(settings);
+		if (!Bun.deepEquals(value, setting.default)) modified++;
 		const indent = "  ".repeat(segments.length - 1);
-		lines.push(`${indent}${segments.at(-1)}: ${formatValue(path, value)}${treeComment(path, value)}`);
+		lines.push(`${indent}${segments.at(-1)}: ${formatValue(setting, value)}${treeComment(setting, value)}`);
 	}
 	return { text: lines.join("\n"), modified };
 }
 
-function renderLeaf(settings: Settings, path: SettingPath): string {
-	const value = settings.get(path);
+function renderLeaf(settings: Settings, setting: AnySetting): string {
+	const value = setting.get(settings);
 	const lines = [
-		`${path}: ${formatValue(path, value)}`,
-		`type: ${getType(path)}`,
-		`default: ${formatValue(path, getDefault(path))}`,
-		`source: ${PROVENANCE_LABELS[settings.getProvenance(path)]}`,
+		`${setting.id}: ${formatValue(setting, value)}`,
+		`type: ${setting.type}`,
+		`default: ${formatValue(setting, setting.default)}`,
+		`source: ${PROVENANCE_LABELS[setting.provenance(settings)]}`,
 	];
-	const choices = getEnumValues(path);
+	const choices = setting.enumValues;
 	if (choices) lines.push(`values: [${choices.join(", ")}]`);
-	const description = getUi(path)?.description;
+	const description = setting.ui?.description;
 	if (description) lines.push(`description: ${description}`);
 	return lines.join("\n");
 }
@@ -234,7 +231,16 @@ function writerSettings(context: WriteContext | undefined): Settings {
 
 export class CfgProtocolHandler implements ProtocolHandler {
 	readonly scheme = "cfg";
-	readonly immutable = true;
+	readonly spec: SchemeSpec = {
+		backing: "virtual",
+		selectors: "lines",
+		immutable: true,
+		write: { payload: "verbatim", scope: "workspace", tier: () => "write" },
+	};
+
+	promptDoc(): string {
+		return cfgPromptDoc.trim();
+	}
 
 	async resolve(url: InternalUrl, context?: ResolveContext): Promise<InternalResource> {
 		const { settings } = callerSession(context);
@@ -244,7 +250,7 @@ export class CfgProtocolHandler implements ProtocolHandler {
 		let modified = 0;
 		if (leaf) {
 			sections.push(renderLeaf(settings, leaf));
-			if (!Bun.deepEquals(settings.get(leaf), getDefault(leaf))) modified++;
+			if (!Bun.deepEquals(leaf.get(settings), leaf.default)) modified++;
 		}
 		if (members.length > 0) {
 			const tree = renderTree(settings, members, path);
@@ -270,15 +276,15 @@ export class CfgProtocolHandler implements ProtocolHandler {
 			throw new Error(`${path || CFG_URL_PREFIX} is a namespace; write a single setting, e.g. ${example}.`);
 		}
 		const save = target?.save ?? false;
-		const value = parseSettingValue(leaf, content);
-		const previous = settings.get(leaf);
+		const value = leaf.parse(content);
+		const previous = leaf.get(settings);
 		const request: CfgChangeRequest = {
-			path: leaf,
+			path: leaf.id,
 			previous: formatValue(leaf, previous),
 			value: formatValue(leaf, value),
 			save,
 		};
-		const settingUrl = `${CFG_URL_PREFIX}${leaf.replaceAll(".", "/")}`;
+		const settingUrl = `${CFG_URL_PREFIX}${leaf.id.replaceAll(".", "/")}`;
 		const finish = (outcome: CfgWriteOutcome, effective?: string): InternalWriteResult => {
 			const details: CfgWriteDetails = { ...request, outcome, ...(effective !== undefined ? { effective } : {}) };
 			const text = prompt
@@ -291,17 +297,17 @@ export class CfgProtocolHandler implements ProtocolHandler {
 					saved: outcome === "applied" && save,
 					applied: outcome === "applied" && !save,
 					effective,
-					provenance: PROVENANCE_LABELS[settings.getProvenance(leaf)],
+					provenance: PROVENANCE_LABELS[leaf.provenance(settings)],
 				})
 				.trim();
-			return { text, details: { cfg: details } };
+			return { content: [{ type: "text", text }], details: { cfg: details } };
 		};
 
 		if (!save && Bun.deepEquals(previous, value)) return finish("unchanged");
 		const host = approvalHost;
 		if (!host) {
 			throw new Error(
-				`Changing settings requires user approval, but no interactive UI is attached. Ask the user to change \`${leaf}\` themselves.`,
+				`Changing settings requires user approval, but no interactive UI is attached. Ask the user to change \`${leaf.id}\` themselves.`,
 			);
 		}
 		const decision = approvalQueue.then(() => host.approve(request));
@@ -309,30 +315,30 @@ export class CfgProtocolHandler implements ProtocolHandler {
 		if (!(await decision)) return finish("declined");
 
 		if (!save) {
-			settings.override(leaf, value);
-			host.applied({ path: leaf, value: settings.get(leaf), settings, save });
+			leaf.override(settings, value);
+			host.applied({ path: leaf.id, value: leaf.get(settings), settings, save });
 			return finish("applied");
 		}
 		const persistent = host.persistentSettings;
-		persistent.set(leaf, value);
+		leaf.set(persistent, value);
 		await persistent.flush();
 		// A session sharing the persistent instance drops its override so the saved value
 		// takes effect; a separate instance never reloads from disk, so mirror it.
 		if (settings === persistent) {
-			settings.clearOverride(leaf);
+			leaf.clearOverride(settings);
 		} else {
-			settings.override(leaf, value);
-			host.applied({ path: leaf, value: persistent.get(leaf), settings: persistent, save });
+			leaf.override(settings, value);
+			host.applied({ path: leaf.id, value: leaf.get(persistent), settings: persistent, save });
 		}
-		const effective = settings.get(leaf);
-		host.applied({ path: leaf, value: effective, settings, save });
+		const effective = leaf.get(settings);
+		host.applied({ path: leaf.id, value: effective, settings, save });
 		return finish("applied", Bun.deepEquals(effective, value) ? undefined : formatValue(leaf, effective));
 	}
 
 	async complete(): Promise<UrlCompletion[]> {
-		return allPaths().map(path => {
-			const description = getUi(path)?.description;
-			return { value: path.replaceAll(".", "/"), ...(description ? { description } : {}) };
+		return allSettings().map(setting => {
+			const description = setting.ui?.description;
+			return { value: setting.id.replaceAll(".", "/"), ...(description ? { description } : {}) };
 		});
 	}
 }

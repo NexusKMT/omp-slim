@@ -9,6 +9,8 @@ import {
 import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
+import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "@oh-my-pi/pi-coding-agent/advisor/settings";
+
 function sessionWith(settings: Settings, caller: Partial<ToolSession> = {}): ToolSession {
 	return { settings, hasUI: true, taskDepth: 0, ...caller } as unknown as ToolSession;
 }
@@ -45,7 +47,7 @@ describe("CfgProtocolHandler", () => {
 	it("refuses writes when no host can ask the user", async () => {
 		const settings = Settings.isolated();
 		await expect(write("cfg://advisor/enabled", "true", settings)).rejects.toThrow("requires user approval");
-		expect(settings.get("advisor.enabled")).toBe(false);
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
 	});
 
 	it("refuses subagent and headless writes without prompting the user", async () => {
@@ -64,7 +66,7 @@ describe("CfgProtocolHandler", () => {
 			"no interactive UI",
 		);
 		expect(asked).toEqual([]);
-		expect(settings.get("advisor.enabled")).toBe(false);
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
 	});
 
 	it("applies a session change only after approval and leaves disk untouched", async () => {
@@ -81,17 +83,17 @@ describe("CfgProtocolHandler", () => {
 
 		const declined = await write("cfg://advisor/enabled", "true", settings);
 		expect(declined.details?.cfg?.outcome).toBe("declined");
-		expect(settings.get("advisor.enabled")).toBe(false);
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
 		expect(applied).toEqual([]);
 
 		allow = true;
 		const result = await write("cfg://advisor/enabled", "true", settings);
 		expect(result.details?.cfg?.outcome).toBe("applied");
-		expect(result.text).toContain("cfg://advisor/enabled/save");
+		expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("cfg://advisor/enabled/save");
 		// The host must learn about the change to start components (e.g. the advisor) that read it once.
 		expect(applied).toEqual([{ path: "advisor.enabled", value: true, settings, save: false }]);
-		expect(settings.get("advisor.enabled")).toBe(true);
-		expect(persistent.isConfigured("advisor.enabled")).toBe(false);
+		expect(cfgAdvisorEnabled.get(settings)).toBe(true);
+		expect(cfgAdvisorEnabled.isConfigured(persistent)).toBe(false);
 		expect(asked).toEqual([
 			{ path: "advisor.enabled", previous: "false", value: "true", save: false },
 			{ path: "advisor.enabled", previous: "false", value: "true", save: false },
@@ -109,9 +111,9 @@ describe("CfgProtocolHandler", () => {
 		});
 
 		await write("cfg://advisor/syncBacklog/save", '"5"', settings);
-		expect(persistent.get("advisor.syncBacklog")).toBe("5");
-		expect(persistent.getProvenance("advisor.syncBacklog")).toBe("global");
-		expect(settings.get("advisor.syncBacklog")).toBe("5");
+		expect(cfgAdvisorSyncBacklog.get(persistent)).toBe("5");
+		expect(cfgAdvisorSyncBacklog.provenance(persistent)).toBe("global");
+		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("5");
 		expect(applied).toHaveLength(2);
 		expect(applied[0]).toBe(persistent);
 		expect(applied[1]).toBe(settings);

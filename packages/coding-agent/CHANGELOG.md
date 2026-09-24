@@ -5,6 +5,10 @@
 ### Added
 
 - Added case-sensitive per-agent compaction thresholds for task/eval subagents, with percentage or fixed-token limits that leave the main session threshold unchanged ([#13107](https://github.com/can1357/oh-my-pi/pull/13107) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Added centralized settings registry for type-safe configuration management and live reactivity
+- Added `InternalUrlRouter` for unified, spec-driven resource resolution and write-tier policy enforcement
+- Added `attachment://` and `conflict://` URL protocol handlers
+- Added live auth-broker and credential store swapping during runtime
 - Added `cfg://` protocol for reading and modifying agent settings with user approval
 - Added `--detailed` bench mode to run separate single-user, parallel, and prefill phases, allowing measurement of aggregate throughput and scaling efficiency under `--par` concurrent requests
 - Added automatic capping of synthetic prefill input size based on model context window limits
@@ -15,6 +19,7 @@
 
 ### Changed
 
+- Refactored all domain-specific settings to use the registry, enabling dynamic UI and session state updates without full restarts
 - Shortened the default system prompt by removing redundant rules and empty sections, reducing token usage by about 150 tokens with default settings.
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
 - Added Anthropic fallback credit token preservation across same-provider classifier refusal fallbacks, including continuation through signed thinking turns.

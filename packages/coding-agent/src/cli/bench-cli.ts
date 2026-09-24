@@ -42,6 +42,8 @@ import {
 import { createLiveBoard, type LiveBoardOutput } from "@oh-my-pi/pi-tui/chrome/live-board";
 import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
 
+import { cfgTierAnthropic, cfgTierGoogle, cfgTierOpenai } from "../session/settings";
+
 const DEFAULT_PAR = 4;
 const DEFAULT_CACHE_MAX_TOKENS = 64;
 const DEFAULT_CACHE_PREFIX_BYTES = 8_192;
@@ -1158,9 +1160,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
 		const serviceTierByFamily = command.flags.serviceTier
 			? serviceTierForAllFamilies(flagTier)
 			: buildServiceTierByFamily(
-					runtime.settings?.get("tier.openai") ?? "none",
-					runtime.settings?.get("tier.anthropic") ?? "none",
-					runtime.settings?.get("tier.google") ?? "none",
+					(runtime.settings ? cfgTierOpenai.get(runtime.settings) : undefined) ?? "none",
+					(runtime.settings ? cfgTierAnthropic.get(runtime.settings) : undefined) ?? "none",
+					(runtime.settings ? cfgTierGoogle.get(runtime.settings) : undefined) ?? "none",
 				);
 		if (!json && flagTier) print(chalk.dim(`service tier: ${flagTier}`));
 		const total = cacheMode ? cachePairs! : runs;

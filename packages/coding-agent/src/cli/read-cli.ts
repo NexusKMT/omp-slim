@@ -11,7 +11,6 @@ import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { initializeWithSettings } from "../discovery";
 import { loadSkills } from "../extensibility/skills";
-import { extractUriScheme } from "../internal-urls/parse";
 import { InternalUrlRouter } from "../internal-urls/router";
 import { closeDaemonClients } from "../launch/client";
 import { discoverAndLoadMCPTools } from "../mcp/loader";
@@ -23,19 +22,11 @@ import { wrapToolWithMetaNotice } from "../tools/output-meta";
 import { ReadTool, splitImageQuestionTarget } from "../tools/read";
 import { renderError } from "../tools/tool-errors";
 
+import { cfgDisabledExtensions, cfgExtensions, cfgSkills } from "../extensibility/settings";
+import { cfgMcpEnableProjectConfig } from "../mcp/settings";
+
 export interface ReadCommandArgs {
 	path: string;
-}
-
-function shouldDiscoverMcp(path: string): boolean {
-	// MCP resource URIs may be hierarchical (`test://notes`) or opaque
-	// (`urn:example:document`); `extractUriScheme` recognizes both while
-	// rejecting Windows drive paths and selector-shaped filesystem inputs.
-	const scheme = extractUriScheme(path);
-	if (!scheme) return false;
-	if (scheme === "mcp") return true;
-	if (["conflict", "file", "http", "https"].includes(scheme)) return false;
-	return InternalUrlRouter.instance().getHandler(scheme) === undefined;
 }
 
 export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
@@ -60,26 +51,28 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 	let failed = false;
 
 	try {
-		if (extractUriScheme(cmd.path) === "skill") {
+		// Internal URLs and MCP resource URIs (hierarchical `test://notes` or
+		// opaque `urn:example:document`) resolve against session state this
+		// lightweight session lacks: loaded skills and MCP servers. Filesystem
+		// paths and web URLs need neither.
+		if (InternalUrlRouter.instance().canResolve(cmd.path)) {
 			initializeWithSettings(settings);
 			const discovered = await loadSkills({
-				...settings.getGroup("skills"),
+				...cfgSkills.get(settings),
 				cwd,
-				disabledExtensions: settings.get("disabledExtensions") ?? [],
+				disabledExtensions: cfgDisabledExtensions.get(settings) ?? [],
 				extensionRoots: {
 					explicit: [],
 					mode: "merge",
-					configured: settings.get("extensions") ?? [],
+					configured: cfgExtensions.get(settings) ?? [],
 					configuredLevel: settings.extensionsSourceLevel(),
 				},
 			});
 			session.skills = discovered.skills;
-		}
 
-		if (shouldDiscoverMcp(cmd.path)) {
 			authStorage = await discoverAuthStorage(undefined, { settings });
 			const result = await discoverAndLoadMCPTools(cwd, {
-				enableProjectConfig: settings.get("mcp.enableProjectConfig") ?? true,
+				enableProjectConfig: cfgMcpEnableProjectConfig.get(settings) ?? true,
 				filterExa: true,
 				// `omp read` has no Eval prelude, so browser MCP remains available.
 				filterBrowser: false,

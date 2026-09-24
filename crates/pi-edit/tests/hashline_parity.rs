@@ -20,6 +20,7 @@ use pi_edit::{
 			types::FileOp,
 		},
 	},
+	path_policy::canonical_key,
 	store::{Clipboard, EditStore, file_hash},
 	stream_json::snapshot_from_text,
 	text::{LineEnding, detect_line_ending},
@@ -788,6 +789,42 @@ async fn coding_agent_hashline_executor_cases_run_through_session() {
 			"L10\n",
 		))
 	);
+
+	// The session sandbox is a plan-writable root outside the working tree.
+	let sandbox = tempfile::tempdir().expect("sandbox");
+	let sandbox_root = sandbox.path().canonicalize().expect("canonical sandbox");
+	let mut plan = Workspace::new(EditMode::Hashline);
+	plan.config.policy.plan_active = true;
+	plan.config.policy.plan_writable_roots = vec![sandbox_root.clone()];
+	let artifact = sandbox_root.join("cfg-module-hygiene-plan.md");
+	let source = "# Plan\n\n## Context\n- old\n";
+	std::fs::write(&artifact, source).expect("write sandbox artifact");
+	let tag = plan.store.record(&canonical_key(&artifact), source, None);
+	let args =
+		json!({ "input": format!("[cfg-module-hygiene-plan.md#{tag}]\nPUT 4.=4:\n+- new\n") });
+	let outcome = plan
+		.apply_json(&args, &common::DiskWriter::default())
+		.await
+		.expect("recovers a bare plan-file name onto the plan-writable sandbox in plan mode");
+	assert_eq!(
+		std::fs::read_to_string(&artifact).expect("artifact"),
+		"# Plan\n\n## Context\n- new\n"
+	);
+	assert!(plan.read("cfg-module-hygiene-plan.md").is_none());
+	assert!(outcome.text.contains("does not exist"), "{}", outcome.text);
+
+	let mut working_tree = Workspace::new(EditMode::Hashline);
+	working_tree.config.policy.plan_active = true;
+	working_tree.config.policy.plan_writable_roots = vec![sandbox_root];
+	working_tree.write("real.ts", "a\nb\nc\n");
+	let tag = working_tree.snapshot("real.ts", "a\nb\nc\n", None);
+	let args = json!({ "input": format!("[real.ts#{tag}]\nPUT 2.=2:\n+B\n") });
+	let error = working_tree
+		.apply_json(&args, &common::DiskWriter::default())
+		.await
+		.expect_err("plan mode still rejects an existing working-tree edit");
+	assert!(error.to_string().contains("working tree is read-only"), "{error}");
+	assert_eq!(working_tree.read("real.ts").as_deref(), Some("a\nb\nc\n"));
 }
 
 #[tokio::test]
