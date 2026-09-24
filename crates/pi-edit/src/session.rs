@@ -15,7 +15,7 @@ use crate::{
 	files::{FileCache, FileSource},
 	notebook,
 	path_policy::{PathPolicy, canonical_key},
-	store::{EditStore, file_hash},
+	store::{EditStore, file_hash, seen_lines_from_body},
 	stream_json::ArgStream,
 	text::{normalize_to_lf, strip_bom, utf16_len},
 };
@@ -292,14 +292,24 @@ impl Session {
 				.move_to
 				.as_ref()
 				.map_or(file.display.as_str(), |m| m.display.as_str());
-			let header = match file.header {
-				HeaderKind::HashlineTag => {
-					let tag = tag.unwrap_or_else(|| file_hash(&file.after));
-					format!("[{header_path}#{tag}]")
-				},
-				HeaderKind::Path => format!("[{header_path}]"),
+			let response_tag = match file.header {
+				HeaderKind::HashlineTag => Some(tag.unwrap_or_else(|| file_hash(&file.after))),
+				HeaderKind::Path => None,
 			};
+			let header = response_tag
+				.as_ref()
+				.map_or_else(|| format!("[{header_path}]"), |tag| format!("[{header_path}#{tag}]"));
 			let text = format_file_text(&file, &header);
+			if file.record_snapshot
+				&& let Some(tag) = &response_tag
+			{
+				let seen_lines = seen_lines_from_body(&text);
+				if !seen_lines.is_empty() {
+					let dest_canonical = file.move_to.as_ref().map(|m| canonical_key(&m.absolute));
+					let key = dest_canonical.as_deref().unwrap_or(&canonical);
+					self.store.record_seen_lines(key, tag, &seen_lines);
+				}
+			}
 			let parse_regressed = file.op != FileOp::Delete
 				&& file.op != FileOp::Noop
 				&& file.existed

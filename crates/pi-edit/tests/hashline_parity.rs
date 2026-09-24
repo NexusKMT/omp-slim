@@ -928,6 +928,59 @@ async fn seen_line_guard_rejects_hidden_anchors_and_accepts_seen_anchors() {
 	assert_eq!(seen.read("a.txt").as_deref(), Some("one\nTWO\nthree\n"));
 }
 
+#[tokio::test]
+async fn edit_results_register_displayed_lines_as_snapshot_provenance() {
+	const SOURCE: &str =
+		"line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\n";
+	const EDITED: &str =
+		"line1\nLINE2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\n";
+
+	let mut workspace = Workspace::new(EditMode::Hashline);
+	workspace.config.enforce_seen_lines = true;
+	workspace.write("a.txt", SOURCE);
+	let original_tag = workspace.snapshot("a.txt", SOURCE, Some(&[1, 2]));
+	let writer = common::DiskWriter::default();
+
+	let first = workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{original_tag}]\nPUT 2.=2:\n+LINE2") }),
+			&writer,
+		)
+		.await
+		.expect("applies the first edit");
+	assert!(first.text.contains("3:line3"), "edit result displays line 3: {}", first.text);
+
+	let edited_tag = file_hash(EDITED);
+	let hidden_error = workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{edited_tag}]\nPUT 12.=12:\n+LINE12") }),
+			&writer,
+		)
+		.await
+		.expect_err("rejects a line the edit result did not display");
+	assert!(hidden_error.to_string().contains("lines 12"), "{hidden_error}");
+
+	let reverted = workspace
+		.apply_json(&json!({ "input": format!("[a.txt#{edited_tag}]\nPUT 2.=2:\n+line2") }), &writer)
+		.await
+		.expect("reverts through the edited snapshot");
+	assert!(reverted.text.contains("3:line3"), "revert result displays line 3: {}", reverted.text);
+
+	workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{original_tag}]\nPUT 3.=3:\n+LINE3") }),
+			&writer,
+		)
+		.await
+		.expect("applies an edit anchored to a line the revert result displayed");
+	assert_eq!(
+		workspace.read("a.txt").as_deref(),
+		Some(
+			"line1\nline2\nLINE3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11\nline12\n"
+		)
+	);
+}
+
 fn preview_for(
 	workspace: &Workspace,
 	input: String,
