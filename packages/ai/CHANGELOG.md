@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added deprecated `getApiKey` and `reload` methods for backward compatibility
 - Added `messageIndex` field to Anthropic request controls for accurate replay of tool changes
 - Added `inactiveTools` and `AnthropicRequestControls` tracking to maintain stability across interrupted requests
 - Added schema-based validation for Anthropic User Profile API responses
