@@ -19,10 +19,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { isEnoent, isRecord } from "@oh-my-pi/pi-utils";
 
+/** Public npm registry; used when no user configuration names another one. */
 export const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/";
 
+/** Registry resolved for one package: where to fetch its metadata and how to authenticate. */
 export interface NpmRegistry {
-	/** Registry base URL with a trailing slash, as configured (passed to `--registry`). */
+	/**
+	 * Registry base URL with a trailing slash, passed to `--registry`. Userinfo
+	 * is always stripped so credentials never reach error text or child argv;
+	 * they travel in {@link authorization} instead.
+	 */
 	url: string;
 	/** Human-readable origin of {@link url}, for diagnostics. */
 	source: string;
@@ -48,6 +54,7 @@ export function fixedNpmRegistry(url: string = DEFAULT_NPM_REGISTRY, source = "d
 	return () => registry;
 }
 
+/** Test seams for {@link loadNpmRegistryResolver}; production reads the process env and home directory. */
 export interface LoadNpmRegistryOptions {
 	env?: Env;
 	homeDir?: string;
@@ -95,15 +102,11 @@ export async function loadNpmRegistryResolver(options: LoadNpmRegistryOptions = 
 /**
  * Metadata URL for `pkg` at `tag` (a dist-tag or version) on `registry`.
  * Scoped names use npm's escaped `@scope%2fname` form, which every registry
- * implementation accepts. Credentials embedded in the configured URL are
- * stripped; they travel in {@link NpmRegistry.authorization} instead.
+ * implementation accepts.
  */
 export function npmRegistryPackageUrl(registry: NpmRegistry, pkg: string, tag?: string): string {
-	const url = new URL(registry.url);
-	url.username = "";
-	url.password = "";
 	const escaped = pkg.replace("/", "%2f");
-	return `${url.href}${escaped}${tag === undefined ? "" : `/${tag}`}`;
+	return `${registry.url}${escaped}${tag === undefined ? "" : `/${tag}`}`;
 }
 
 function toRegistry(entry: RegistryEntry, npmrc?: Map<string, string>): NpmRegistry {
@@ -114,13 +117,17 @@ function toRegistry(entry: RegistryEntry, npmrc?: Map<string, string>): NpmRegis
 		throw new Error(`Invalid npm registry URL "${entry.url}" (from ${entry.source})`);
 	}
 	if (url.protocol !== "https:" && url.protocol !== "http:") {
-		throw new Error(`Unsupported npm registry URL "${entry.url}" (from ${entry.source}); expected http(s)`);
+		throw new Error(`Unsupported npm registry protocol "${url.protocol}" (from ${entry.source}); expected http(s)`);
 	}
 	if (!url.pathname.endsWith("/")) url.pathname += "/";
 	let authorization = entry.authorization;
 	if (!authorization && url.username) {
 		authorization = `Basic ${btoa(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`)}`;
 	}
+	// Embedded credentials are consumed above; the package manager install
+	// authenticates through its own config (npmrc `//host/:_authToken`, bunfig).
+	url.username = "";
+	url.password = "";
 	if (!authorization && npmrc) authorization = npmrcAuthorization(npmrc, url);
 	return { url: url.href, source: entry.source, authorization };
 }

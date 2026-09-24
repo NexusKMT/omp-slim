@@ -81,10 +81,18 @@ describe("loadNpmRegistryResolver", () => {
 		});
 	});
 
-	it("turns credentials embedded in the registry URL into basic auth", async () => {
+	it("moves credentials embedded in the registry URL into basic auth, never into the URL or install argv", async () => {
 		const homeDir = await home({ ".npmrc": "registry=https://me:p%40ss@creds.example/\n" });
 		const resolve = await loadNpmRegistryResolver({ env: {}, homeDir });
-		expect(resolve(PKG).authorization).toBe(`Basic ${btoa("me:p@ss")}`);
+		const registry = resolve(PKG);
+		expect(registry.authorization).toBe(`Basic ${btoa("me:p@ss")}`);
+		expect(registry.url).toBe("https://creds.example/");
+		const argv = [
+			...buildBunInstallArgs("19.0.0", "linux-x64", undefined, { registry: registry.url }),
+			...buildNpmInstallArgs("19.0.0", "linux-x64", undefined, { registry: registry.url }),
+		].join(" ");
+		expect(argv).not.toContain("p%40ss");
+		expect(argv).not.toContain("me:");
 	});
 
 	it("rejects a malformed configured registry instead of silently using the public one", async () => {
