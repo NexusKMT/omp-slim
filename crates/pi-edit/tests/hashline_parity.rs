@@ -981,6 +981,55 @@ async fn edit_results_register_displayed_lines_as_snapshot_provenance() {
 	);
 }
 
+#[tokio::test]
+async fn edit_results_carry_unshifted_prior_provenance_only() {
+	let source: String = (1..=40).map(|n| format!("line{n}\n")).collect();
+	let all_lines = (1..=40).collect::<Vec<u32>>();
+
+	let mut workspace = Workspace::new(EditMode::Hashline);
+	workspace.config.enforce_seen_lines = true;
+	workspace.write("a.txt", &source);
+	let read_tag = workspace.snapshot("a.txt", &source, Some(&all_lines));
+	let writer = common::DiskWriter::default();
+
+	let inserted = workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{read_tag}]\nPUT >30:\n+new-a\n+new-b") }),
+			&writer,
+		)
+		.await
+		.expect("inserts after line 30");
+	assert!(
+		!inserted.text.contains("\n2:line2"),
+		"insert result must not display line 2: {}",
+		inserted.text
+	);
+	let inserted_source = workspace.read("a.txt").expect("inserted file");
+	let inserted_tag = file_hash(&inserted_source);
+
+	let stale = workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{inserted_tag}]\nPUT 40.=40:\n+LINE40") }),
+			&writer,
+		)
+		.await
+		.expect_err("old line numbers below the insertion shifted and must not carry");
+	assert!(stale.to_string().contains("lines 40"), "{stale}");
+
+	workspace
+		.apply_json(
+			&json!({ "input": format!("[a.txt#{inserted_tag}]\nPUT 2.=2:\n+LINE2") }),
+			&writer,
+		)
+		.await
+		.expect("line 2 kept its number and content, so the full read still covers it");
+	let expected =
+		source
+			.replacen("line2\n", "LINE2\n", 1)
+			.replacen("line30\n", "line30\nnew-a\nnew-b\n", 1);
+	assert_eq!(workspace.read("a.txt").as_deref(), Some(expected.as_str()));
+}
+
 fn preview_for(
 	workspace: &Workspace,
 	input: String,
