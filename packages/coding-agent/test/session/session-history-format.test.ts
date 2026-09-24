@@ -421,5 +421,10 @@ describe("formatSessionHistoryMarkdown", () => {
 		const small = renderDiff(smallDiff);
 		expect(small).toContain(`\`\`\`diff\n${smallDiff}\n\`\`\``);
 		expect(small).not.toContain("elided");
+
+		const midRows = Array.from({ length: 200 }, (_, index) => `+row-${String(index + 1).padStart(4, "0")}`);
+		const mid = renderDiff(["--- a/big.ts", "+++ b/big.ts", "@@ -1,200 +1,200 @@", ...midRows].join("\n"));
+		expect(mid).toContain("+row-0100");
+		expect(mid).not.toContain("elided");
 	});
 });
