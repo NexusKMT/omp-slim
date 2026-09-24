@@ -983,7 +983,10 @@ async fn edit_results_register_displayed_lines_as_snapshot_provenance() {
 
 #[tokio::test]
 async fn edit_results_carry_unshifted_prior_provenance_only() {
-	let source: String = (1..=40).map(|n| format!("line{n}\n")).collect();
+	let source = (1..=40)
+		.map(|n| format!("line{n}\n"))
+		.collect::<Vec<_>>()
+		.concat();
 	let all_lines = (1..=40).collect::<Vec<u32>>();
 
 	let mut workspace = Workspace::new(EditMode::Hashline);
