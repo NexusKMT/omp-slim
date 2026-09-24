@@ -23,6 +23,7 @@
 - Fixed `omp usage` capacity rows folding a model-scoped quota cap (for example Anthropic's Fable weekly cap) into the shared window it caps, so a spent scoped cap read as the whole window spent; scoped caps now get their own meter ([#12872](https://github.com/can1357/oh-my-pi/pull/12872) by [@rlfleming93](https://github.com/rlfleming93)).
 - Fixed `write xd://<tool>` ignoring a device's `lenientArgValidation`: on a schema mismatch the raw arguments now reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed `providers.anthropic.serverSideFallback` failing every Fable/Mythos request with a 400 because it named `claude-opus-5-5`, which Anthropic does not accept as a fallback target; the fallback target is now `claude-opus-5` ([#13059](https://github.com/can1357/oh-my-pi/issues/13059)).
+- Fixed requests to large-output models (DeepSeek V4) failing with a context-length 400 once the prompt passed the window minus the output cap; the output cap now shrinks to fit, so `/btw` and main turns keep working up to compaction ([#13135](https://github.com/can1357/oh-my-pi/issues/13135))
 
 ## [18.3.0] - 2026-09-24
 
