@@ -1,4 +1,4 @@
-import type { Context, Model } from "@oh-my-pi/pi-ai";
+import type { Context, Model, Tool } from "@oh-my-pi/pi-ai";
 import { stringifyJson } from "@oh-my-pi/pi-utils";
 import type { Tokenizer } from "./tokenizer";
 
@@ -8,7 +8,9 @@ export const MIN_FITTED_OUTPUT_TOKENS = 1024;
 /**
  * Local counts are padded by 1/this before sizing the output cap: the
  * provider's tokenizer can disagree with ours by a few percent, and
- * undercounting reproduces the overflow this guards against.
+ * undercounting reproduces the overflow this guards against. This is a
+ * tokenizer-error margin on the prompt, not a context reserve; compaction's
+ * own reserve (`resolveBudgetReserveTokens`) still decides when to compact.
  */
 const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
 
@@ -28,7 +30,17 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
  * model declares no window, or nothing would be requested. Otherwise returns
  * the remaining room (never below {@link MIN_FITTED_OUTPUT_TOKENS}); a
  * prompt that fills the whole window still overflows and is left to the
- * caller's compaction.
+ * caller's compaction. Near a full window the floor means a turn can stop on
+ * `length` instead of failing with a 400.
+ *
+ * Lives here, not next to the default in pi-ai's `mapOptionsForApi`, because
+ * pi-ai has no tokenizer; callers apply it in their `streamFn` (coding-agent
+ * does so in its shared settings-aware wrapper).
+ *
+ * Not fixed: Anthropic budget-thinking transports raise `max_tokens` back to
+ * at least the thinking budget plus a fallback buffer downstream
+ * (`ensureMaxTokensForThinking`), so a fitted cap below that is overridden
+ * and the request can still exceed the window as before.
  */
 export function fitOutputTokensToContextWindow(
 	model: Pick<Model, "contextWindow" | "maxTokens">,
@@ -47,11 +59,36 @@ export function fitOutputTokensToContextWindow(
 	return Math.max(MIN_FITTED_OUTPUT_TOKENS, room);
 }
 
+/**
+ * Framing tokens (system prompt, tool definitions) memoized per array: these
+ * are stable identities for the life of a turn, so side turns and repeat
+ * requests do not re-stringify and re-tokenize them. Length is part of the key
+ * to catch in-place growth.
+ */
+const framingCounts = new WeakMap<readonly unknown[], { tokenizer: Tokenizer; length: number; tokens: number }>();
+
+function countFraming(items: readonly unknown[] | undefined, tokenizer: Tokenizer, fragments: () => string[]): number {
+	if (!items || items.length === 0) return 0;
+	const cached = framingCounts.get(items);
+	if (cached && cached.tokenizer === tokenizer && cached.length === items.length) return cached.tokens;
+	const tokens = tokenizer.countTokens(fragments());
+	framingCounts.set(items, { tokenizer, length: items.length, tokens });
+	return tokens;
+}
+
+function toolFragments(tools: readonly Tool[]): string[] {
+	const fragments: string[] = [];
+	for (const tool of tools) fragments.push(tool.name, tool.description, stringifyJson(tool.parameters) ?? "");
+	return fragments;
+}
+
 function countContextTokens(context: Context, tokenizer: Tokenizer): number {
-	const fragments: string[] = context.systemPrompt ? [...context.systemPrompt] : [];
-	for (const tool of context.tools ?? []) {
-		fragments.push(tool.name, tool.description, stringifyJson(tool.parameters) ?? "");
-	}
-	const framing = fragments.length === 0 ? 0 : tokenizer.countTokens(fragments);
-	return framing + tokenizer.countMessages(context.messages);
+	const { systemPrompt, tools, inactiveTools } = context;
+	return (
+		countFraming(systemPrompt, tokenizer, () => [...(systemPrompt ?? [])]) +
+		countFraming(tools, tokenizer, () => toolFragments(tools ?? [])) +
+		// Anthropic replays retired tool definitions, so they are prompt too.
+		countFraming(inactiveTools, tokenizer, () => toolFragments(inactiveTools ?? [])) +
+		tokenizer.countMessages(context.messages)
+	);
 }

@@ -39,15 +39,17 @@ describe("fitOutputTokensToContextWindow", () => {
 		expect(fitOutputTokensToContextWindow(deepseek, promptOf(800_000), 200_000, tokenizer)).toBe(120_000);
 	});
 
-	test("counts system prompt and tool definitions, not just messages", () => {
+	test("counts system prompt, active and retired tool definitions, not just messages", () => {
+		const tool = (description: string) => ({ name: "t", description, parameters: {} as never });
 		const context: Context = {
 			systemPrompt: ["s".repeat(200_000 * 4)],
-			tools: [{ name: "t", description: "d".repeat(100_000 * 4), parameters: {} as never }],
+			tools: [tool("d".repeat(100_000 * 4))],
+			// Anthropic replays retired definitions on the wire.
+			inactiveTools: [tool("r".repeat(100_000 * 4))],
 			messages: promptOf(300_000).messages,
 		};
 		const cap = fitOutputTokensToContextWindow(deepseek, context, undefined, tokenizer) ?? 0;
-		expect(cap).toBeLessThan(deepseek.maxTokens);
-		expect(cap).toBeLessThanOrEqual(deepseek.contextWindow - 600_000);
+		expect(cap).toBeLessThanOrEqual(deepseek.contextWindow - 700_000);
 	});
 
 	test("never requests less than the floor, leaving a full window to compaction", () => {
