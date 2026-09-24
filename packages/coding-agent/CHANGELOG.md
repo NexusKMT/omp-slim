@@ -9,6 +9,7 @@
 ### Fixed
 
 - `omp update` and the startup update check now use your configured npm registry (`.npmrc`, `npm_config_registry`, or bunfig, including scoped registries and auth tokens) instead of always querying registry.npmjs.org ([#13115](https://github.com/can1357/oh-my-pi/pull/13115) by [@H4vC](https://github.com/H4vC))
+- Fixed auto-QA grievance pushes getting stuck forever when one report had a tool name longer than the collector's 128-byte limit; tool names are now clamped when sending ([#13119](https://github.com/can1357/oh-my-pi/pull/13119) by [@NaC-L](https://github.com/NaC-L))
 
 ## [18.3.0] - 2026-09-24
 
