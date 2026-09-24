@@ -221,6 +221,8 @@ export interface XdevState {
 	readonly builtInNames: Set<string>;
 	/** Whether a name is active at the top level. */
 	readonly isActive: (name: string) => boolean;
+	/** Canonical renderer for a dispatched device name; mirrors {@link resolveXdevTool}. */
+	readonly resolve?: (name: string) => Tool | undefined;
 	/** Optional execution-only decorator, such as the ACP permission gate. */
 	decorateExecution?(tool: Tool): Tool;
 }
