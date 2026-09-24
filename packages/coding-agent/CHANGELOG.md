@@ -2,13 +2,11 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time: tab registries are namespaced per extension instance, hello garbage-collection is scoped to the reconnecting instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<seq>.<tabId>`). The bundled extension sends a stable per-install instance id; hellos without one keep the previous single-browser replacement behavior.
-
 ### Added
 
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
+- Holding Space to dictate now works in the `/btw` follow-up input, with the mic shown on that line ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- Added an opt-in `cudaSupport` override to the Nix package so tiny-model inference can load the onnxruntime CUDA execution provider on NixOS ([#12946](https://github.com/can1357/oh-my-pi/pull/12946) by [@lz37](https://github.com/lz37)).
 
 ### Fixed
 
@@ -27,14 +25,15 @@
 - Fixed `omp usage` capacity rows folding a model-scoped quota cap (for example Anthropic's Fable weekly cap) into the shared window it caps, so a spent scoped cap read as the whole window spent; scoped caps now get their own meter ([#12872](https://github.com/can1357/oh-my-pi/pull/12872) by [@rlfleming93](https://github.com/rlfleming93)).
 - Fixed `write xd://<tool>` ignoring a device's `lenientArgValidation`: on a schema mismatch the raw arguments now reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed `providers.anthropic.serverSideFallback` failing every Fable/Mythos request with a 400 because it named `claude-opus-5-5`, which Anthropic does not accept as a fallback target; the fallback target is now `claude-opus-5` ([#13059](https://github.com/can1357/oh-my-pi/issues/13059)).
-- Fixed requests to large-output models (DeepSeek V4) failing with a context-length 400 once the prompt passed the window minus the output cap; the output cap now shrinks to fit, so `/btw` and main turns keep working up to compaction ([#13135](https://github.com/can1357/oh-my-pi/issues/13135))
+- Fixed requests to large-output models (DeepSeek V4) failing with a context-length 400 once the prompt passed the window minus the output cap; the output cap now shrinks to fit, so `/btw` and main turns keep working up to compaction ([#13135](https://github.com/can1357/oh-my-pi/issues/13135), [#13137](https://github.com/can1357/oh-my-pi/pull/13137) by [@radkawar](https://github.com/radkawar))
+- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
+- Fixed Hindsight and Mnemopi memory instructions naming `recall`/`retain`/`reflect` by bare name when they are mounted only as `xd://` devices ([#13117](https://github.com/can1357/oh-my-pi/pull/13117) by [@andrebrait](https://github.com/andrebrait)).
+- Fixed holding Space again while the last clip is still transcribing leaving the mic recording after you let go ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time instead of the two knocking each other offline about once a second: tabs are tracked per extension instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<code>.<tabId>`); extensions that send no instance id keep the previous single-browser behavior ([#13005](https://github.com/can1357/oh-my-pi/pull/13005) by [@pavel-kalmykov](https://github.com/pavel-kalmykov)).
+
 ### Changed
 
 - Shortened the default system prompt by removing repeated rules and empty sections (about 150 fewer tokens with default settings) ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
-
-### Fixed
-
-- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.0] - 2026-09-24
 
@@ -93,11 +92,6 @@
 - Fixed browser `tab.fill` timing out on pages whose animation frames stall.
 - Fixed the first LSP diagnostics request returning no results while a newly started language server is still analyzing.
 - `/shake thinking` now reports the number of tokens freed.
-
-### Fixed
-
-- Holding Space to dictate now works in the `/btw` follow-up input, with the mic shown on that line ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
-- Holding Space again while the last clip is still transcribing no longer leaves the mic recording after you let go ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 
 ## [18.2.10] - 2026-09-22
 

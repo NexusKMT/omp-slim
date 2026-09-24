@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time: tab registries are namespaced per extension instance, hello garbage-collection is scoped to the reconnecting instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<seq>.<tabId>`). The bundled extension sends a stable per-install instance id.
+- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time instead of the two knocking each other offline about once a second: tabs are tracked per extension instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<code>.<tabId>`); extensions that send no instance id keep the previous single-browser behavior ([#13005](https://github.com/can1357/oh-my-pi/pull/13005) by [@pavel-kalmykov](https://github.com/pavel-kalmykov)).
 
 ## [18.0.7] - 2026-08-26
 

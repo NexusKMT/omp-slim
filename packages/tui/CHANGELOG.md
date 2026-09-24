@@ -6,6 +6,16 @@
 
 - Fixed blockquote dimmed styling resetting to full terminal contrast after inline code spans ([#13016](https://github.com/can1357/oh-my-pi/pull/13016) by [@harshaygadekar](https://github.com/harshaygadekar)).
 - Fixed `write xd://<tool>` calls to active top-level tools (extension or MCP tools) rendering the generic card instead of the tool's own call/result renderer ([#12951](https://github.com/can1357/oh-my-pi/pull/12951) by [@kouhe3](https://github.com/kouhe3)).
+- Fixed clicking a file path on a pending Read or Write card opening a guessed browser URL; pending paths now link to the local file, including `~`, archive and database targets ([#12879](https://github.com/can1357/oh-my-pi/pull/12879) by [@wn-mitch](https://github.com/wn-mitch)).
+
+### Breaking Changes
+
+- Replaced `CustomEditor`'s `onSpaceHoldStart`, `onSpaceHoldEnd` and `sttHoldEnabled` with `spaceHold.handler` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- Removed `Editor.cursorOverrideWidth`; the width of a `cursorOverride` glyph is always measured ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+
+### Added
+
+- `Input` supports hold-Space push-to-talk, live dictation text, and `cursorOverride` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 
 ## [18.3.0] - 2026-09-24
 
@@ -18,15 +28,6 @@
 - Added a fullscreen annotation overlay for diffs and text, including multi-line notes, editing, deletion, and undo ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Added Daybreak-enabled account listings to the usage dashboard.
 
-### Breaking Changes
-
-- `CustomEditor`'s `onSpaceHoldStart`, `onSpaceHoldEnd` and `sttHoldEnabled` are replaced by `spaceHold.handler` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
-- Removed `Editor.cursorOverrideWidth`; the width of a `cursorOverride` glyph is always measured ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
-
-### Added
-
-- Added Skills configuration section to settings
-- `Input` supports hold-Space push-to-talk, live dictation text, and `cursorOverride` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 ### Changed
 
 - Mermaid flowcharts and state diagrams now automatically choose a layout that best fits the available terminal width and reflow when the terminal is resized.
@@ -35,8 +36,6 @@
 ### Fixed
 
 - Fixed AltGr characters, including `[`, `]`, `{`, and `}`, being dropped in Windows Terminal when using the kitty keyboard protocol on Hungarian and other international keyboard layouts ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Pending Read and Write file paths open local files instead of browser URLs, including archive and database targets ([#12879](https://github.com/can1357/oh-my-pi/pull/12879)).
 
 ## [18.2.11] - 2026-09-23
 
