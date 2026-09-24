@@ -24,6 +24,13 @@
 - Fixed `write xd://<tool>` ignoring a device's `lenientArgValidation`: on a schema mismatch the raw arguments now reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed `providers.anthropic.serverSideFallback` failing every Fable/Mythos request with a 400 because it named `claude-opus-5-5`, which Anthropic does not accept as a fallback target; the fallback target is now `claude-opus-5` ([#13059](https://github.com/can1357/oh-my-pi/issues/13059)).
 - Fixed requests to large-output models (DeepSeek V4) failing with a context-length 400 once the prompt passed the window minus the output cap; the output cap now shrinks to fit, so `/btw` and main turns keep working up to compaction ([#13135](https://github.com/can1357/oh-my-pi/issues/13135))
+### Changed
+
+- Shortened the default system prompt by removing repeated rules and empty sections (about 150 fewer tokens with default settings) ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
+
+### Fixed
+
+- Fixed the system prompt directing the agent to tools such as `lsp` by bare name when they are reachable only as `xd://` devices ([#13113](https://github.com/can1357/oh-my-pi/pull/13113) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.0] - 2026-09-24
 
