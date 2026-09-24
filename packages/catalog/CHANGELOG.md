@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.0] - 2026-09-24
+
 ### Added
 
 - Added compaction support for the `claude-mythos-preview` model.

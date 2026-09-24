@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.0] - 2026-09-24
+
 ### Added
 
 - Added native bindings for Apple Foundation Models availability checks, text generation, and cancellation.

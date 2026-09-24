@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.0] - 2026-09-24
+
 ### Added
 
 - Added support for documenting agent tools on demand through the new `AgentTool.docTopics` method.

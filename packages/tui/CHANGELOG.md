@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.0] - 2026-09-24
+
 ### Added
 
 - Added proc:// and agent:// URI support for interacting with processes and agents.
