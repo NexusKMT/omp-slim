@@ -45,8 +45,9 @@ export interface HistoryFormatOptions {
 	 * Append the unified diff (from a tool result's `details.diff`) below
 	 * edit/apply_patch tool lines, instead of just the path. The advisor sets
 	 * this so it sees what changed without re-reading the file. Bounded by the
-	 * same per-tool budget as expanded tool IO: a huge diff is middle-truncated
-	 * rather than admitted whole.
+	 * same byte budget as expanded tool IO but its own, higher line cap
+	 * ({@link EXPANDED_DIFF_MAX_LINES}): a huge diff is middle-truncated rather
+	 * than admitted whole.
 	 */
 	expandEditDiffs?: boolean;
 	/**
