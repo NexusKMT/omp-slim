@@ -49,6 +49,8 @@ type RuntimeState = "default" | "enabled" | "disabled";
 
 interface SessionRef {
 	kind: "tab" | "page";
+	/** Registry key of the owning tab (`<instance seq>:<chrome tabId>`). */
+	tabKey: string;
 	tabId: number;
 	runtimeState: RuntimeState;
 	/** Context ids already announced to this pseudo-session. */
@@ -114,16 +116,15 @@ function pageTargetIdFromKey(key: string): string {
 	return `PAGE${key.replace(":", ".")}`;
 }
 
-function parseTargetId(targetId: string): { key: string; tabId: number; kind: "tab" | "page" } | null {
+function parseTargetId(targetId: string): { key: string; kind: "tab" | "page" } | null {
 	const match = /^(TAB|PAGE)(\d+)\.(\d+)$/.exec(targetId);
 	if (!match) return null;
 	const kind: "tab" | "page" = match[1] === "TAB" ? "tab" : "page";
-	return { key: `${match[2]}:${match[3]}`, tabId: Number(match[3]), kind };
+	return { key: `${match[2]}:${match[3]}`, kind };
 }
 
 class TabState {
-	readonly instanceId: string;
-	readonly extSeq: number;
+	/** Assigned in the constructor body from the owning instance. */
 	readonly tabKey: string;
 	url: string;
 	title: string;
@@ -248,7 +249,7 @@ export class RelayBridge {
 	#lastHello(): ExtInstance | undefined {
 		if (this.#lastHelloInstance) {
 			const inst = this.#instances.get(this.#lastHelloInstance);
-			if (inst) return inst;
+			if (inst?.socket) return inst;
 		}
 		for (const inst of this.#instances.values()) {
 			if (inst.socket) return inst;
@@ -384,8 +385,12 @@ export class RelayBridge {
 			this.#instances.set(instanceId, inst);
 		} else if (inst.socket && inst.socket !== socket) {
 			// Same browser reconnected (service-worker restart): retire the old
-			// socket; its tab registry is reused, not reset.
-			this.#log("replacing extension socket", { instanceId });
+			// socket. Debugger-derived state dies with the old attachment, so
+			// reset runtime state exactly like the old single-slot replace did;
+			// the hello's attachedTabIds reconciliation runs right after.
+			for (const tab of this.#tabs.values()) {
+				if (tab.instanceId === instanceId) this.#resetRuntime(tab);
+			}
 			this.#rejectPendingExtensionRpcs(instanceId, new ExtensionReplacedError());
 			this.#socketInstance.delete(inst.socket);
 			inst.socket.close();
@@ -442,7 +447,7 @@ export class RelayBridge {
 		const conn = this.#conns.get(connId);
 		if (!conn) return;
 		this.#conns.delete(connId);
-		const touched = new Set<number>();
+		const touched = new Set<string>();
 		for (const ref of conn.sessions.values()) touched.add(ref.tabKey);
 		conn.sessions.clear();
 		// Tabs this client claimed leave the omp group unless another claimant
@@ -809,8 +814,8 @@ export class RelayBridge {
 					this.#replyError(conn, msg, `No target with id ${String(msg.params?.targetId)}`);
 					return;
 				}
-				const removedTab = parsed ? this.#tabs.get(parsed.key) : undefined;
-				if (!parsed || !removedTab) {
+				const removedTab = this.#tabs.get(parsed.key);
+				if (!removedTab) {
 					this.#replyError(conn, msg, `No target with id ${String(msg.params?.targetId)}`);
 					return;
 				}
@@ -1252,6 +1257,9 @@ export class RelayBridge {
 
 	#eligible(tab: TabState): boolean {
 		if (tab.banned) return false;
+		// A browser whose extension socket is gone cannot be driven; hide its
+		// tabs from discovery until the instance reconnects.
+		if (!this.#instances.get(tab.instanceId)?.socket) return false;
 		if (!tab.url) return true;
 		return !INELIGIBLE_URL.test(tab.url);
 	}
