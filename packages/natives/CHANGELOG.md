@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed embedded-shell builtins and redirects opening the host process's own descriptors for `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/N`, `/proc/self/fd/N`, and `/dev/tty`. `cat /dev/stdin <<'EOF'` read the TUI's terminal instead of the heredoc, stole every later keystroke, and outlived the tool timeout; `tee /dev/stderr` and `> /dev/stderr` wrote into the TUI instead of the capture. These paths now resolve against the command's descriptors. A descriptor the command lacks fails with `ENOENT`, and `/dev/tty` is unavailable unless stdin is a terminal, matching the external commands the shell starts in their own session.
+
 ## [18.3.0] - 2026-09-24
 
 ### Added
