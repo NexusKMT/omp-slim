@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time: tab registries are namespaced per extension instance, hello garbage-collection is scoped to the reconnecting instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<seq>.<tabId>`). The bundled extension sends a stable per-install instance id; hellos without one keep the previous single-browser replacement behavior.
+
 ### Added
 
 - Added `/changelog last [N]` to show the latest release, or the last N releases. `/changelog` still shows the recent default and `/changelog full` still shows the complete history.
