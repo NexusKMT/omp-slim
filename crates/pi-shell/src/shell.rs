@@ -2691,9 +2691,15 @@ mod tests {
 		let (result, output) = execute_captured(format!("ps -M -p {pid}")).await;
 		assert_eq!(result.exit_code, Some(0), "{output:?}");
 		let mut lines = output.lines();
-		let header: Vec<&str> = lines.next().unwrap_or_default().split_whitespace().collect();
+		let header: Vec<&str> = lines
+			.next()
+			.unwrap_or_default()
+			.split_whitespace()
+			.collect();
 		assert_eq!(header, ["USER", "PID", "TT", "%CPU", "STAT", "PRI", "STIME", "UTIME", "COMMAND"]);
-		let threads: Vec<Vec<&str>> = lines.map(|line| line.split_whitespace().collect()).collect();
+		let threads: Vec<Vec<&str>> = lines
+			.map(|line| line.split_whitespace().collect())
+			.collect();
 		// The multi-threaded tokio runtime guarantees several threads.
 		assert!(threads.len() > 1, "{output:?}");
 		// USER, TT and COMMAND print only on the first thread line.
