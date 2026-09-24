@@ -1472,6 +1472,8 @@ export async function buildSessionOptions(
 			let candidate = resolveCandidate(pattern);
 			lastResolution = candidate;
 
+			// A disabled provider is unreachable; try the next fallback pattern.
+			if (candidate.model && disabledProviders.has(candidate.model.provider)) continue;
 			if (candidate.model && modelRegistry.hasConfiguredAuth(candidate.model)) {
 				authenticatedResolution = candidate;
 				break;
@@ -1491,6 +1493,7 @@ export async function buildSessionOptions(
 
 			candidate = resolveCandidate(pattern);
 			lastResolution = candidate;
+			if (candidate.model && disabledProviders.has(candidate.model.provider)) continue;
 			if (candidate.model && modelRegistry.hasConfiguredAuth(candidate.model)) {
 				authenticatedResolution = candidate;
 				break;
