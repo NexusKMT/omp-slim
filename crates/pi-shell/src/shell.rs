@@ -1957,8 +1957,12 @@ mod tests {
 	async fn shell_initializes_after_process_cwd_is_deleted() {
 		const MARKER: &str = "PI_SHELL_TEST_DELETED_CWD";
 		if std::env::var_os(MARKER).is_none() {
-			run_isolated_kill_test("shell::tests::shell_initializes_after_process_cwd_is_deleted", MARKER, false)
-				.await;
+			run_isolated_kill_test(
+				"shell::tests::shell_initializes_after_process_cwd_is_deleted",
+				MARKER,
+				false,
+			)
+			.await;
 			return;
 		}
 
@@ -1967,8 +1971,12 @@ mod tests {
 		std::fs::remove_dir(dir.path()).expect("delete process cwd");
 
 		let config = ShellConfig { session_env: None, snapshot_path: None, minimizer: None };
-		let session = create_session(&config).await.expect("initialize shell after deleted cwd");
-		let fallback = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_else(|| "/".into());
+		let session = create_session(&config)
+			.await
+			.expect("initialize shell after deleted cwd");
+		let fallback = std::env::var_os("HOME")
+			.map(std::path::PathBuf::from)
+			.unwrap_or_else(|| "/".into());
 		assert_eq!(session.shell.working_dir(), fallback);
 	}
 
