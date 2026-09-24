@@ -921,6 +921,9 @@
 - Fixed supervised service exits being missed or repeatedly replayed instead of being delivered to the session that started the service.
 - Fixed memory backend failures to identify the affected item and underlying storage error.
 - Fixed `write xd://<tool>` validation behavior so devices can return precise schema-mismatch responses.
+### Changed
+
+- Agent Hub keeps existing agents in place while open; new agents appear first in the flat roster or within their tree sibling group.
 
 ## [18.3.0] - 2026-09-24
 
@@ -956,7 +959,6 @@
 - Terminal OAuth behavior is now consistent between `omp login` and `omp auth-broker login`.
 - Judgment fallback now uses only native candidates, preventing prompted models from replacing failed native judges.
 - Browser screenshot comparisons now tolerate minor rasterizer differences.
-- Agent Hub keeps existing agents in their opening order as activity changes and places newly spawned agents at the top.
 
 ### Fixed
 
