@@ -16,6 +16,7 @@ import type {
 	TextContent,
 	ThinkingContent,
 	ToolChoice,
+	AnthropicFallbackCreditHandle,
 } from "@oh-my-pi/pi-ai";
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
@@ -280,6 +281,10 @@ export class TurnRecovery {
 	#retryPromise: Promise<void> | undefined;
 	#retryResolve: (() => void) | undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined;
+	#activeFallbackCreditRedemption?: {
+		targetSelector: string;
+		handle: AnthropicFallbackCreditHandle;
+	};
 	#usageReserveApprovedSelector: string | undefined;
 	#pendingRetryErrors: PendingRetryError[] = [];
 	#usageLimitOutcomes = new WeakMap<AssistantMessage, Promise<UsageLimitOutcome>>();
@@ -420,11 +425,26 @@ export class TurnRecovery {
 		this.#unexpectedStopRetryCount = 0;
 		this.#malformedFunctionCallRetryCount = 0;
 		this.#acceptTerminalEmptyStopForPrompt = false;
+		this.#activeFallbackCreditRedemption = undefined;
 	}
 
 	/** Sets whether one terminal empty stop is accepted for the current prompt. */
 	setAcceptTerminalEmptyStop(accept: boolean): void {
 		this.#acceptTerminalEmptyStopForPrompt = accept;
+	}
+
+	/** Consumes any queued Anthropic fallback credit handle for the retry turn. */
+	consumeActiveFallbackCreditRedemption(targetModel?: Model): AnthropicFallbackCreditHandle | undefined {
+		const active = this.#activeFallbackCreditRedemption;
+		if (!active) return undefined;
+		if (targetModel && `${targetModel.provider}/${targetModel.id}` !== active.targetSelector) {
+			return undefined;
+		}
+		this.#activeFallbackCreditRedemption = undefined;
+		if (Date.now() >= active.handle.expiresAt) {
+			return undefined;
+		}
+		return active.handle;
 	}
 
 	/**
@@ -1982,7 +2002,15 @@ export class TurnRecovery {
 				// model switch can satisfy neither constraint, so keep retrying the
 				// source model or consider a later cross-provider candidate whose
 				// message transform can safely demote the foreign thinking.
+				// Exception: when redeeming Anthropic fallback credit on refusal, the server
+				// validates thinking blocks across the boundary itself using the credit token.
+				const canRedeemFallbackCredit =
+					failedMessage.fallbackCreditHandle !== undefined &&
+					candidate.api === "anthropic-messages" &&
+					candidate.provider === failedMessage.provider &&
+					Date.now() < failedMessage.fallbackCreditHandle.expiresAt;
 				if (
+					!canRedeemFallbackCredit &&
 					candidate.api === "anthropic-messages" &&
 					latestAssistant?.api === "anthropic-messages" &&
 					latestAssistant.provider === candidate.provider &&
@@ -2006,10 +2034,17 @@ export class TurnRecovery {
 				}
 				const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 				if (!apiKey) continue;
-				return this.applyRetryFallbackCandidate(role, selector, currentSelector, {
+				const applied = await this.applyRetryFallbackCandidate(role, selector, currentSelector, {
 					...options,
 					reason: `Request failed: ${failedMessage.errorMessage ?? "provider returned an error without details"}`,
 				});
+				if (applied && options?.pinFallback === true && canRedeemFallbackCredit) {
+					this.#activeFallbackCreditRedemption = {
+						targetSelector: `${candidate.provider}/${candidate.id}`,
+						handle: failedMessage.fallbackCreditHandle!,
+					};
+				}
+				return applied;
 			}
 		}
 

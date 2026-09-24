@@ -1936,4 +1936,347 @@ describe("anthropic stream envelope handling", () => {
 		expect(cacheControls[1]).toEqual({ type: "ephemeral" });
 		expect(cacheControls[2]).toEqual({ type: "ephemeral", ttl: "1h" });
 	});
+
+	it("captures fallback_credit_token into fallbackCreditHandle on refusal", async () => {
+		const refusalEvents: MockAnthropicEvent[] = [
+			{
+				type: "message_start",
+				message: {
+					id: "msg_refusal_with_credit",
+					usage: { input_tokens: 10, output_tokens: 0 },
+				},
+			},
+			{
+				type: "content_block_start",
+				index: 0,
+				content_block: { type: "text", text: "Partial thoughts before refusal" },
+			},
+			{
+				type: "content_block_delta",
+				index: 0,
+				delta: { type: "text_delta", text: "..." },
+			},
+			{
+				type: "content_block_stop",
+				index: 0,
+			},
+			{
+				type: "message_delta",
+				delta: {
+					stop_reason: "refusal",
+					stop_sequence: null,
+					stop_details: {
+						type: "refusal",
+						category: "cyber",
+						explanation: "Declined",
+						fallback_credit_token: "fct_test_123",
+						fallback_has_prefill_claim: true,
+					},
+				},
+				usage: { input_tokens: 10, output_tokens: 2 },
+			},
+			{ type: "message_stop" },
+		];
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(
+			() => createMockRequest(refusalEvents) as never,
+		);
+
+		const stream = streamAnthropic(model, context, { apiKey: "sk-ant-test" });
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("error");
+		expect(result.stopDetails?.fallback_credit_token).toBe("fct_test_123");
+		expect(result.stopDetails?.fallback_has_prefill_claim).toBe(true);
+		expect(result.fallbackCreditHandle).toBeDefined();
+		expect(result.fallbackCreditHandle?.token).toBe("fct_test_123");
+		expect(result.fallbackCreditHandle?.prefillClaim).toBe(true);
+		expect(result.fallbackCreditHandle?.params).toBeDefined();
+		expect(result.fallbackCreditHandle?.expiresAt).toBeGreaterThan(Date.now());
+	});
+
+	it("redeems fallback credit token with frozen request body and continuation prefill", async () => {
+		let capturedParams: any;
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((params: any) => {
+			capturedParams = params;
+			const successEvents: MockAnthropicEvent[] = [
+				{
+					type: "message_start",
+					message: {
+						id: "msg_fallback_success",
+						usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 10 },
+					},
+				},
+				{
+					type: "content_block_start",
+					index: 0,
+					content_block: { type: "text", text: "Resumed seamlessly" },
+				},
+				{
+					type: "content_block_stop",
+					index: 0,
+				},
+				{
+					type: "message_delta",
+					delta: { stop_reason: "end_turn", stop_sequence: null },
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+				{ type: "message_stop" },
+			];
+			return createMockRequest(successEvents) as never;
+		}) as never);
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_test_456",
+				prefillClaim: true,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello world" }],
+					max_tokens: 1024,
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+				refusedContent: [{ type: "text", text: "Partial before refusal  " }],
+			},
+		});
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(capturedParams.model).toBe("claude-opus-4-8");
+		expect(capturedParams.fallback_credit_token).toBe("fct_test_456");
+		expect(capturedParams.messages).toHaveLength(2);
+		expect(capturedParams.messages[1]).toEqual({
+			role: "assistant",
+			content: [{ type: "text", text: "Partial before refusal" }],
+		});
+	});
+
+	it("steps down from continuation shape to unchanged body on 400 error", async () => {
+		const attemptedBodies: Array<Record<string, unknown>> = [];
+		let attempts = 0;
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
+			attempts++;
+			const params = rawParams as Record<string, unknown>;
+			attemptedBodies.push(structuredClone(params));
+			if (attempts === 1) {
+				const badRequest = new Error("400 continuation prefill not accepted for model");
+				Object.assign(badRequest, { status: 400 });
+				return {
+					withResponse: async () => {
+						throw badRequest;
+					},
+				} as never;
+			}
+			const successEvents: MockAnthropicEvent[] = [
+				{
+					type: "message_start",
+					message: {
+						id: "msg_fallback_success_stepdown",
+						usage: { input_tokens: 10, output_tokens: 5 },
+					},
+				},
+				{
+					type: "content_block_start",
+					index: 0,
+					content_block: { type: "text", text: "Recovered via unchanged body" },
+				},
+				{
+					type: "content_block_stop",
+					index: 0,
+				},
+				{
+					type: "message_delta",
+					delta: { stop_reason: "end_turn", stop_sequence: null },
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+				{ type: "message_stop" },
+			];
+			return createMockRequest(successEvents) as never;
+		}) as never);
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_test_789",
+				prefillClaim: true,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello world" }],
+					fallbacks: [{ model: "claude-opus-4-8" }],
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01", "server-side-fallback-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+				refusedContent: [{ type: "text", text: "Refused mid-way" }],
+			},
+		});
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(attempts).toBe(2);
+		// First attempt had continuation assistant message
+		expect(attemptedBodies[0].messages).toHaveLength(2);
+		expect(attemptedBodies[0].fallback_credit_token).toBe("fct_test_789");
+		expect(attemptedBodies[0].fallbacks).toBeUndefined();
+		// Second attempt stepped down to unchanged body (1 message) with the token
+		expect(attemptedBodies[1].messages).toHaveLength(1);
+		expect(attemptedBodies[1].fallback_credit_token).toBe("fct_test_789");
+		expect(attemptedBodies[1].fallbacks).toBeUndefined();
+	});
+
+	it("drops credit token and retries standard request when 400 names fallback_credit_token", async () => {
+		const attemptedBodies: Array<Record<string, unknown>> = [];
+		let attempts = 0;
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
+			attempts++;
+			const params = rawParams as Record<string, unknown>;
+			attemptedBodies.push(structuredClone(params));
+			if (attempts === 1) {
+				const badRequest = new Error("400 invalid fallback_credit_token expired");
+				Object.assign(badRequest, { status: 400 });
+				return {
+					withResponse: async () => {
+						throw badRequest;
+					},
+				} as never;
+			}
+			const successEvents: MockAnthropicEvent[] = [
+				{
+					type: "message_start",
+					message: {
+						id: "msg_fallback_success_token_dropped",
+						usage: { input_tokens: 10, output_tokens: 5 },
+					},
+				},
+				{
+					type: "content_block_start",
+					index: 0,
+					content_block: { type: "text", text: "Standard request succeeded" },
+				},
+				{
+					type: "content_block_stop",
+					index: 0,
+				},
+				{
+					type: "message_delta",
+					delta: { stop_reason: "end_turn", stop_sequence: null },
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+				{ type: "message_stop" },
+			];
+			return createMockRequest(successEvents) as never;
+		}) as never);
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_expired",
+				prefillClaim: false,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello world" }],
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+			},
+		});
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(attempts).toBe(2);
+		// First attempt sent the token
+		expect(attemptedBodies[0].fallback_credit_token).toBe("fct_expired");
+		// Second attempt dropped the token entirely
+		expect(attemptedBodies[1].fallback_credit_token).toBeUndefined();
+	});
+
+	it("preserves anthropicServerTool wire block in echoed refusal content", async () => {
+		let capturedParams: Record<string, unknown> | undefined;
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
+			capturedParams = rawParams as Record<string, unknown>;
+			const successEvents: MockAnthropicEvent[] = [
+				{
+					type: "message_start",
+					message: {
+						id: "msg_fallback_server_tool",
+						usage: { input_tokens: 10, output_tokens: 5 },
+					},
+				},
+				{
+					type: "content_block_start",
+					index: 0,
+					content_block: { type: "text", text: "Done" },
+				},
+				{
+					type: "content_block_stop",
+					index: 0,
+				},
+				{
+					type: "message_delta",
+					delta: { stop_reason: "end_turn", stop_sequence: null },
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+				{ type: "message_stop" },
+			];
+			return createMockRequest(successEvents) as never;
+		}) as never);
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_test_server_tool",
+				prefillClaim: true,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Search web" }],
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+				refusedContent: [
+					{
+						type: "anthropicServerTool",
+						block: {
+							type: "server_tool_use",
+							id: "stu_123",
+							name: "web_search",
+							input: { query: "weather" },
+						},
+					},
+					{
+						type: "text",
+						text: "Based on search: ",
+					},
+				],
+			},
+		});
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(capturedParams).toBeDefined();
+		const messages = capturedParams?.messages as Array<Record<string, unknown>>;
+		expect(messages).toHaveLength(2);
+		const assistantMsg = messages[1];
+		expect(assistantMsg.role).toBe("assistant");
+		const content = assistantMsg.content as Array<Record<string, unknown>>;
+		expect(content).toHaveLength(2);
+		// Server tool is unwrapped to wire block
+		expect(content[0]).toEqual({
+			type: "server_tool_use",
+			id: "stu_123",
+			name: "web_search",
+			input: { query: "weather" },
+		});
+		expect(content[1]).toEqual({
+			type: "text",
+			text: "Based on search:",
+		});
+	});
 });

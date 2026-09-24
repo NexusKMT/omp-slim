@@ -3780,6 +3780,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					settings.get("externalThinking") &&
 					agent.state.tools.some(tool => tool.name === "think") &&
 					supportsExternalThinking(streamModel);
+				const fallbackCreditRedemption = session?.consumeActiveFallbackCreditRedemption(streamModel);
 				return settingsAwareStreamFn(streamModel, context, {
 					...streamOptions,
 					anthropicCacheRefresh: true,
@@ -3787,6 +3788,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					...(codeModeState.namespacesInfo === undefined
 						? {}
 						: { toolNamespacesInfo: codeModeState.namespacesInfo }),
+					...(fallbackCreditRedemption !== undefined ? { fallbackCreditRedemption } : {}),
 				});
 			},
 			cursorExecHandlers,

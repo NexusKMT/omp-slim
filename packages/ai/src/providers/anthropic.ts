@@ -1487,6 +1487,57 @@ function unwrapAnthropicThinkingEnvelope(text: string): string | undefined {
 	return stripped ? current : undefined;
 }
 
+function formatEchoedRefusalContent(content: readonly unknown[]): unknown[] {
+	const filtered = content.filter(block => {
+		if (!isRecord(block)) return false;
+		if (block.type === "toolCall" || block.type === "tool_use") return false;
+		return true;
+	});
+	const wireBlocks = filtered.map(block => {
+		if (isRecord(block)) {
+			if (block.type === "text" && typeof block.text === "string") {
+				return { type: "text", text: block.text };
+			}
+			if (block.type === "thinking" && typeof block.thinking === "string") {
+				return {
+					type: "thinking",
+					thinking: block.thinking,
+					...(typeof block.thinkingSignature === "string" ? { signature: block.thinkingSignature } : {}),
+				};
+			}
+			if (block.type === "redactedThinking" && typeof block.data === "string") {
+				return { type: "redacted_thinking", data: block.data };
+			}
+			if (block.type === "fallback") {
+				return { type: "fallback", from: block.from, to: block.to };
+			}
+			if (block.type === "anthropicServerTool" && isRecord(block.block)) {
+				return structuredClone(block.block);
+			}
+		}
+		return structuredClone(block);
+	});
+	if (wireBlocks.length > 0) {
+		const last = wireBlocks[wireBlocks.length - 1];
+		if (isRecord(last) && last.type === "text" && typeof last.text === "string") {
+			last.text = last.text.trimEnd();
+		}
+	}
+	return wireBlocks;
+}
+
+function isAnthropicBadRequest(error: unknown): boolean {
+	if (!error) return false;
+	if (typeof error === "object") {
+		const rec = error as Record<string, unknown>;
+		if (rec.status === 400 || rec.statusCode === 400) return true;
+		if (typeof rec.message === "string" && (/\b400\b/.test(rec.message) || rec.message.includes("BadRequestError"))) {
+			return true;
+		}
+	}
+	return false;
+}
+
 function createEmptyUsage(premiumRequests?: number): Usage {
 	return {
 		input: 0,
@@ -2024,6 +2075,7 @@ const streamAnthropicOnce = (
 			let isOAuthToken: boolean;
 			// Retained so a Claude Code version bump can rebuild the client's fingerprint headers.
 			let clientArgs: AnthropicClientOptionsArgs | undefined;
+			let requestExtraBetas: readonly string[] = [];
 
 			if (options?.client) {
 				client = options.client;
@@ -2112,6 +2164,21 @@ const streamAnthropicOnce = (
 				) {
 					extraBetas.push(extendedCacheTtlBeta);
 				}
+				if (!isOAuth && isOfficialAnthropicApiUrl(baseUrl) && !extraBetas.includes(fallbackCreditBeta)) {
+					extraBetas.push(fallbackCreditBeta);
+				}
+				if (options?.fallbackCreditRedemption) {
+					const frozenBetas = options.fallbackCreditRedemption.betas.filter(
+						b => !b.startsWith("server-side-fallback-"),
+					);
+					extraBetas.length = 0;
+					for (const beta of frozenBetas) {
+						extraBetas.push(beta);
+					}
+					if (!extraBetas.includes(fallbackCreditBeta) && !extraBetas.includes("fallback-credit-2026-06-01")) {
+						extraBetas.push(fallbackCreditBeta);
+					}
+				}
 				// Server-side fallback beta chain: opt-in via `options.fallbacks`.
 				// Nested overrides (`speed`, `output_config.effort`,
 				// `output_config.task_budget`) reuse the same top-level betas
@@ -2159,6 +2226,7 @@ const streamAnthropicOnce = (
 				const created = createClient(model, clientArgs);
 				client = created.client;
 				isOAuthToken = created.isOAuthToken;
+				requestExtraBetas = extraBetas;
 			}
 			const preparedContext = await prepareAnthropicManyImageContext(context, model.input.includes("image"));
 			const prepareParams = async (): Promise<MessageCreateParamsStreaming> => {
@@ -2377,6 +2445,37 @@ const streamAnthropicOnce = (
 			const idleTimeoutAbortError = new AIError.StreamTimeoutError(
 				"Anthropic stream stalled while waiting for the next event",
 			);
+			let usingFallbackCredit = false;
+			let fallbackCreditShape: "continuation" | "unchanged" | undefined = undefined;
+			let fallbackCreditTransientRetries = 0;
+			if (options?.fallbackCreditRedemption) {
+				const redemption = options.fallbackCreditRedemption;
+				if (Date.now() <= redemption.expiresAt && redemption.params) {
+					usingFallbackCredit = true;
+					const frozenParams = structuredClone(redemption.params as MessageCreateParamsStreaming);
+					const targetModelId = options?.requestModelId ?? model.requestModelId ?? model.id;
+					frozenParams.model = targetModelId;
+					frozenParams.fallback_credit_token = redemption.token;
+					delete frozenParams.fallbacks;
+					if (
+						redemption.prefillClaim !== false &&
+						redemption.refusedContent &&
+						redemption.refusedContent.length > 0
+					) {
+						fallbackCreditShape = "continuation";
+						const echoed = formatEchoedRefusalContent(redemption.refusedContent);
+						if (echoed.length > 0) {
+							frozenParams.messages = [
+								...frozenParams.messages,
+								{ role: "assistant", content: echoed } as unknown as (typeof frozenParams.messages)[number],
+							];
+						}
+					} else {
+						fallbackCreditShape = "unchanged";
+					}
+					params = frozenParams;
+				}
+			}
 			while (true) {
 				activeAbortTracker = createAbortSourceTracker(options?.signal);
 				const { requestSignal } = activeAbortTracker;
@@ -2890,6 +2989,16 @@ const streamAnthropicOnce = (
 									const category = stopDetails.category;
 									const label = category ? `Refusal (${category})` : "Refusal";
 									output.errorMessage = explanation ? `${label}: ${explanation}` : label;
+								}
+								if (stopDetails?.fallback_credit_token) {
+									output.fallbackCreditHandle = {
+										token: stopDetails.fallback_credit_token,
+										prefillClaim: stopDetails.fallback_has_prefill_claim,
+										params: structuredClone(params),
+										betas: Array.from(requestExtraBetas),
+										expiresAt: Date.now() + 5 * 60 * 1000,
+										refusedContent: output.content ? structuredClone(output.content) : undefined,
+									};
 								} else if (!output.errorMessage) {
 									// Anthropic flagged an error-class stop (refusal / sensitive) without
 									// populating stop_details. Surface the raw reason instead of falling
@@ -3016,6 +3125,71 @@ const streamAnthropicOnce = (
 						output.stopReason = "stop";
 						firstTokenTime = undefined;
 						continue;
+					}
+					if (usingFallbackCredit && firstTokenTime === undefined && isAnthropicBadRequest(streamFailure)) {
+						const errMessage = streamFailure instanceof Error ? streamFailure.message : String(streamFailure);
+						const redemption = options!.fallbackCreditRedemption!;
+						if (
+							errMessage.includes("redemption temporarily unavailable") &&
+							Date.now() < redemption.expiresAt &&
+							fallbackCreditTransientRetries < 2
+						) {
+							fallbackCreditTransientRetries++;
+							logger.warn("anthropic: fallback credit redemption temporarily unavailable, retrying same shape", {
+								model: model.id,
+								attempt: fallbackCreditTransientRetries,
+							});
+							const { promise: delayPromise, resolve: resolveDelay } = Promise.withResolvers<void>();
+							setTimeout(resolveDelay, 500);
+							await delayPromise;
+							output.content.length = 0;
+							output.model = model.id;
+							output.errorMessage = undefined;
+							output.stopReason = "stop";
+							output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
+							continue;
+						}
+						if (fallbackCreditShape === "continuation") {
+							logger.warn(
+								"anthropic: fallback credit continuation shape rejected, retrying with unchanged body",
+								{
+									model: model.id,
+									error: errMessage,
+								},
+							);
+							fallbackCreditShape = "unchanged";
+							const frozenParams = structuredClone(redemption.params as MessageCreateParamsStreaming);
+							const targetModelId = options?.requestModelId ?? model.requestModelId ?? model.id;
+							frozenParams.model = targetModelId;
+							frozenParams.fallback_credit_token = redemption.token;
+							delete frozenParams.fallbacks;
+							params = frozenParams;
+							output.content.length = 0;
+							output.model = model.id;
+							output.errorMessage = undefined;
+							output.stopReason = "stop";
+							output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
+							continue;
+						}
+						if (errMessage.includes("fallback_credit_token") || errMessage.includes("credit token")) {
+							logger.warn(
+								"anthropic: fallback credit token rejected, falling back to standard request without token",
+								{
+									model: model.id,
+									error: errMessage,
+								},
+							);
+							usingFallbackCredit = false;
+							fallbackCreditShape = undefined;
+							dropAllThinking = true;
+							params = await prepareParams();
+							output.content.length = 0;
+							output.model = model.id;
+							output.errorMessage = undefined;
+							output.stopReason = "stop";
+							output.usage = createEmptyUsage(copilotDynamicHeaders?.premiumRequests);
+							continue;
+						}
 					}
 					const streamFailureMessage =
 						streamFailure instanceof Error ? streamFailure.message : String(streamFailure);

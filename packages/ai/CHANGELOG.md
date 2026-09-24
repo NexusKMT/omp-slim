@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added support for Anthropic fallback credit token capture and redemption, including the 3-step rejection ladder for prompt-cache repricing on classifier refusals.
+
 ### Fixed
 
 - Fixed multi-account provider selection for OpenCode Go and SuperGrok (xai-oauth), so accounts with insufficient funds or exhausted included quota are skipped in favor of eligible accounts with available billing headroom.
