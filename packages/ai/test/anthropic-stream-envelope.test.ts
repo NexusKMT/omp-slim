@@ -2009,7 +2009,12 @@ describe("anthropic stream envelope handling", () => {
 				{
 					type: "content_block_start",
 					index: 0,
-					content_block: { type: "text", text: "Resumed seamlessly" },
+					content_block: { type: "text", text: "" },
+				},
+				{
+					type: "content_block_delta",
+					index: 0,
+					delta: { type: "text_delta", text: "Resumed seamlessly" },
 				},
 				{
 					type: "content_block_stop",
@@ -2052,6 +2057,10 @@ describe("anthropic stream envelope handling", () => {
 			role: "assistant",
 			content: [{ type: "text", text: "Partial before refusal" }],
 		});
+		expect(JSON.parse(JSON.stringify(result.content))).toEqual([
+			{ type: "text", text: "Partial before refusal" },
+			{ type: "text", text: "Resumed seamlessly" },
+		]);
 	});
 
 	it("steps down from continuation shape to unchanged body on 400 error", async () => {
@@ -2278,5 +2287,94 @@ describe("anthropic stream envelope handling", () => {
 			type: "text",
 			text: "Based on search:",
 		});
+	});
+
+	it("surfaces error when transient redemption retries run out without stepping down", async () => {
+		let attempts = 0;
+		const attemptedBodies: Array<Record<string, unknown>> = [];
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
+			attempts++;
+			attemptedBodies.push(structuredClone(rawParams as Record<string, unknown>));
+			const transientErr = new Error("400 redemption temporarily unavailable");
+			Object.assign(transientErr, { status: 400 });
+			return {
+				withResponse: async () => {
+					throw transientErr;
+				},
+			} as never;
+		}) as never);
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_transient_exhaust",
+				prefillClaim: true,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello" }],
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+				refusedContent: [{ type: "text", text: "Partial" }],
+			},
+		});
+
+		const result = await stream.result();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("redemption temporarily unavailable");
+		// Did not step down to unchanged body (all attempts remained continuation shape with 2 messages)
+		expect(attempts).toBe(3); // 1 initial + 2 transient retries
+		for (const body of attemptedBodies) {
+			expect(body.messages).toHaveLength(2);
+		}
+	});
+
+	it("surfaces error instead of retrying tokenless when refused turn executed server tools", async () => {
+		let attempts = 0;
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(() => {
+			attempts++;
+			const tokenErr = new Error("400 invalid fallback_credit_token rejected");
+			Object.assign(tokenErr, { status: 400 });
+			return {
+				withResponse: async () => {
+					throw tokenErr;
+				},
+			} as never;
+		});
+
+		const fallbackModel = { ...model, id: "claude-opus-4-8" };
+		const stream = streamAnthropic(fallbackModel, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_token_server_tool",
+				prefillClaim: false,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello" }],
+					stream: true,
+				},
+				betas: ["fallback-credit-2026-06-01"],
+				expiresAt: Date.now() + 60000,
+				refusedContent: [
+					{
+						type: "anthropicServerTool",
+						block: {
+							type: "server_tool_use",
+							id: "stu_executed",
+							name: "web_search",
+							input: { query: "weather" },
+						},
+					},
+				],
+			},
+		});
+
+		// Must throw directly, not silently drop token and re-run
+		const result = await stream.result();
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain("fallback_credit_token");
+		expect(attempts).toBe(1);
 	});
 });

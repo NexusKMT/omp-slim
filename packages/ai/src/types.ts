@@ -1470,7 +1470,8 @@ export interface AnthropicFallbackCreditHandle {
 	token: string;
 	prefillClaim?: boolean | null;
 	params: unknown;
-	betas: readonly string[];
+	betas?: readonly string[];
+	betaHeader?: string;
 	expiresAt: number;
 	refusedContent?: readonly unknown[];
 }

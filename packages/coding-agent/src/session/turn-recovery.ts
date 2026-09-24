@@ -272,6 +272,18 @@ type UsageLimitOutcome = {
 	reportResetAtMs: number | undefined;
 };
 
+const ANTHROPIC_PERMITTED_FALLBACK_TARGETS: Record<string, Record<string, true>> = {
+	"claude-fable-5": { "claude-opus-4-8": true, "claude-opus-5": true, "claude-opus-5-5": true },
+	"claude-fable-5-1": { "claude-opus-4-8": true, "claude-opus-5": true, "claude-opus-5-5": true },
+};
+
+function isPermittedAnthropicFallbackTarget(sourceModelId: string, targetModelId: string): boolean {
+	const targets = ANTHROPIC_PERMITTED_FALLBACK_TARGETS[sourceModelId];
+	if (targets) {
+		return targets[targetModelId] === true;
+	}
+	return targetModelId.includes("opus");
+}
 /** Owns terminal-stop recovery, automatic retries, and fallback routing. */
 export class TurnRecovery {
 	readonly #host: TurnRecoveryHost;
@@ -2008,6 +2020,7 @@ export class TurnRecovery {
 					failedMessage.fallbackCreditHandle !== undefined &&
 					candidate.api === "anthropic-messages" &&
 					candidate.provider === failedMessage.provider &&
+					isPermittedAnthropicFallbackTarget(failedMessage.model, candidate.id) &&
 					Date.now() < failedMessage.fallbackCreditHandle.expiresAt;
 				if (
 					!canRedeemFallbackCredit &&
@@ -2034,11 +2047,13 @@ export class TurnRecovery {
 				}
 				const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
 				if (!apiKey) continue;
+				const previousEditMode = this.#host.resolveActiveEditMode();
 				const applied = await this.applyRetryFallbackCandidate(role, selector, currentSelector, {
 					...options,
 					reason: `Request failed: ${failedMessage.errorMessage ?? "provider returned an error without details"}`,
 				});
-				if (applied && options?.pinFallback === true && canRedeemFallbackCredit) {
+				const editModeChanged = this.#host.resolveActiveEditMode() !== previousEditMode;
+				if (applied && options?.pinFallback === true && canRedeemFallbackCredit && !editModeChanged) {
 					this.#activeFallbackCreditRedemption = {
 						targetSelector: `${candidate.provider}/${candidate.id}`,
 						handle: failedMessage.fallbackCreditHandle!,
