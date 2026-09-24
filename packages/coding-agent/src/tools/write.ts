@@ -345,6 +345,8 @@ function stripWriteContent(session: ToolSession, content: string): { text: strin
 const AGENT_URL_RE = /^agent:\/\//i;
 /** `write proc://<id>[/kill|/mode]`: service stdin, cancellation, or service mode (exec tier). */
 const PROC_URL_RE = /^proc:\/\//i;
+/** `write cfg://<setting>[/save]`: settings change; the handler itself asks the user before applying. */
+const CFG_URL_RE = /^cfg:\/\//i;
 
 function endsWithReadTruncationNotice(content: string): boolean {
 	const lines = splitAddressableFileLines(normalizeToLF(content));
@@ -628,6 +630,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		// processes (stdin, stop, mode).
 		if (AGENT_URL_RE.test(path)) return "read";
 		if (PROC_URL_RE.test(path)) return "exec";
+		if (CFG_URL_RE.test(path)) return "write";
 		// Remote SSH writes open an outbound connection and run a remote shell —
 		// gate them like the exec-tier `ssh` tool, ahead of the handler-write
 		// logic. Substring match also covers selector-suffixed targets.
@@ -1225,9 +1228,9 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
 		}
 		return untilAborted(signal, async () => {
 			// Strip hashline display prefixes ([PATH#HASH] + LINE:) if the model copied them from read output.
-			// Messages and process stdin are verbatim payloads, never file text.
+			// Messages, process stdin, and setting values are verbatim payloads, never file text.
 			const { text: cleanContent, stripped } =
-				AGENT_URL_RE.test(path) || PROC_URL_RE.test(path)
+				AGENT_URL_RE.test(path) || PROC_URL_RE.test(path) || CFG_URL_RE.test(path)
 					? { text: content, stripped: false }
 					: stripWriteContent(this.session, content);
 			const internalRouter = InternalUrlRouter.instance();

@@ -160,6 +160,7 @@ import {
 	truncateToWidth,
 } from "@oh-my-pi/pi-tui/render/render-utils";
 import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
+import { type CfgChangeRequest, setCfgApprovalHost } from "../internal-urls/cfg-protocol";
 import {
 	createTodoHudStateData,
 	getTodoHudVisibility,
@@ -1614,6 +1615,19 @@ export class InteractiveMode implements InteractiveModeContext {
 		// guarantees the decision persists even when the prompt is triggered
 		// from a subagent whose own `Settings` is an in-memory snapshot.
 		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
+		// Same wiring for cfg:// writes: every settings change the agent makes is
+		// confirmed here, and `/save` persists to disk. Subagents and headless
+		// sessions are refused by the handler before reaching this host. Changes
+		// to this session's settings run the settings panel's live side effects
+		// (advisor runtime, thinking level, …).
+		setCfgApprovalHost({
+			approve: request => this.#promptCfgChange(request),
+			applied: change => {
+				if (change.settings !== this.session.settings) return;
+				this.#selectorController.handleSettingChange(change.path, change.value, { persist: change.save });
+			},
+			persistentSettings: Settings.instance,
+		});
 
 		await logger.time(
 			"InteractiveMode.init:slashCommands",
@@ -5704,6 +5718,18 @@ export class InteractiveMode implements InteractiveModeContext {
 		return choice === "Yes";
 	}
 
+	/** Ask the user to approve one `cfg://` settings change; dismissing the dialog denies it. */
+	async #promptCfgChange(request: CfgChangeRequest): Promise<boolean> {
+		const headline = request.save
+			? `💾 Your agent wants to save \`${request.path}\` to your config.`
+			: `⚙️ Your agent wants to change \`${request.path}\` for this session.`;
+		const choice = await this.showHookSelector(`${headline}\n${request.previous} → ${request.value}`, [
+			"Allow",
+			"Deny",
+		]);
+		return choice === "Allow";
+	}
+
 	stop(): void {
 		this.#appearanceRefreshRequest = undefined;
 		this.#streamPublisher?.dispose();
@@ -5756,6 +5782,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// Clear the process-global consent handler so it doesn't outlive this
 		// InteractiveMode instance (e.g. test harnesses, headless re-init).
 		setAutoQaConsentHandler(null, null);
+		setCfgApprovalHost(null);
 		this.#hideSessionInfo();
 		if (this.#ownsStartedUi) {
 			this.ui.stop();

@@ -13,11 +13,11 @@ import {
 	getType,
 	getUi,
 	isCredential,
+	parseSettingValue,
 	type SettingPath,
 	Settings,
 	type SettingValue,
 	settings,
-	validateProviderMaxInFlightRequests,
 } from "../config/settings";
 import { SETTINGS_SCHEMA } from "../config/settings-schema";
 import { theme } from "@oh-my-pi/pi-tui/theme";
@@ -172,71 +172,6 @@ function getTypeDisplay(def: CliSettingDef): string {
 }
 
 // =============================================================================
-// Schema-Driven Value Parsing
-// =============================================================================
-
-function parseAndSetValue(path: SettingPath, rawValue: string): void {
-	const schemaType = getType(path);
-	let parsedValue: unknown;
-
-	const trimmed = rawValue.trim();
-	switch (schemaType) {
-		case "boolean": {
-			const lower = trimmed.toLowerCase();
-			if (["true", "1", "yes", "on"].includes(lower)) parsedValue = true;
-			else if (["false", "0", "no", "off"].includes(lower)) parsedValue = false;
-			else throw new Error(`Invalid boolean value: ${rawValue}. Use true/false, yes/no, on/off, or 1/0`);
-			break;
-		}
-		case "number":
-			parsedValue = Number(trimmed);
-			if (!Number.isFinite(parsedValue)) throw new Error(`Invalid number: ${rawValue}`);
-			break;
-		case "enum": {
-			const valid = getEnumValues(path);
-			if (valid && !valid.includes(trimmed)) {
-				throw new Error(`Invalid value: ${rawValue}. Valid values: ${valid.join(", ")}`);
-			}
-			parsedValue = trimmed;
-			break;
-		}
-		case "array": {
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(trimmed);
-			} catch {
-				throw new Error(`Invalid array JSON: ${rawValue}`);
-			}
-			if (!Array.isArray(parsed)) {
-				throw new Error(`Invalid array JSON: ${rawValue}`);
-			}
-			parsedValue = parsed;
-			break;
-		}
-		case "record": {
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(trimmed);
-			} catch {
-				throw new Error(`Invalid record JSON: ${rawValue}`);
-			}
-			if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-				throw new Error(`Invalid record JSON: ${rawValue}`);
-			}
-			if (path === "providers.maxInFlightRequests") {
-				parsed = validateProviderMaxInFlightRequests(parsed);
-			}
-			parsedValue = parsed;
-			break;
-		}
-		default:
-			parsedValue = trimmed;
-	}
-
-	settings.set(path, parsedValue as SettingValue<typeof path>);
-}
-
-// =============================================================================
 // Command Handlers
 // =============================================================================
 
@@ -374,7 +309,7 @@ async function handleSet(key: string | undefined, value: string | undefined, fla
 	}
 
 	try {
-		parseAndSetValue(def.path, value);
+		settings.set(def.path, parseSettingValue(def.path, value));
 		await settings.flush();
 	} catch (err) {
 		console.error(chalk.red(String(err)));

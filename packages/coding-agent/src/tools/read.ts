@@ -2804,6 +2804,7 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 			resolvedPath: resource.sourcePath,
 			contentType: resource.contentType,
 			...(resource.details?.proc ? { proc: resource.details.proc } : {}),
+			...(resource.details?.cfg ? { cfg: resource.details.cfg } : {}),
 		};
 
 		// If extraction was used, return directly (no pagination)

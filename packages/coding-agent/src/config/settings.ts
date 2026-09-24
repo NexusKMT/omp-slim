@@ -63,6 +63,8 @@ import {
 	type GroupPrefix,
 	type GroupTypeMap,
 	getDefault,
+	getEnumValues,
+	getType,
 	SETTINGS_SCHEMA,
 	type SettingPath,
 	type SettingValue,
@@ -99,6 +101,9 @@ function assertKnownStatusLineSegments(path: SettingPath, value: unknown): void 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** Settings layer that supplies an effective value; see {@link Settings.getProvenance}. */
+export type SettingProvenance = "runtime" | "overlay" | "project" | "global" | "default";
 
 /** Raw settings object as stored in YAML */
 export interface RawSettings {
@@ -319,6 +324,72 @@ export function validateProviderMaxInFlightRequests(value: unknown): Record<stri
 		throw new Error(`Provider request limits must be positive numbers: ${invalidProviders.join(", ")}`);
 	}
 	return normalized;
+}
+
+function parseJsonSettingValue(rawValue: string, kind: "array" | "record"): unknown {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(rawValue);
+	} catch {
+		throw new Error(`Invalid ${kind} JSON: ${rawValue}`);
+	}
+	const valid = kind === "array" ? Array.isArray(parsed) : isRecord(parsed);
+	if (!valid) throw new Error(`Invalid ${kind} JSON: ${rawValue}`);
+	return parsed;
+}
+
+/**
+ * Parse user- or agent-supplied text into the typed value of `path`, driven by
+ * the schema. Shared by `omp config set` and `write cfg://…`.
+ *
+ * Booleans accept true/false, yes/no, on/off, 1/0; arrays and records take
+ * JSON; strings and enums accept bare text or a JSON-quoted string.
+ *
+ * @throws Error when the text does not fit the setting's type or enum values.
+ */
+export function parseSettingValue<P extends SettingPath>(path: P, rawValue: string): SettingValue<P> {
+	const trimmed = rawValue.trim();
+	let parsed: unknown;
+	switch (getType(path)) {
+		case "boolean": {
+			const lower = trimmed.toLowerCase();
+			if (["true", "1", "yes", "on"].includes(lower)) parsed = true;
+			else if (["false", "0", "no", "off"].includes(lower)) parsed = false;
+			else throw new Error(`Invalid boolean value: ${rawValue}. Use true/false, yes/no, on/off, or 1/0`);
+			break;
+		}
+		case "number":
+			parsed = trimmed === "" ? Number.NaN : Number(trimmed);
+			if (!Number.isFinite(parsed)) throw new Error(`Invalid number: ${rawValue}`);
+			break;
+		case "array":
+			parsed = parseJsonSettingValue(trimmed, "array");
+			break;
+		case "record":
+			parsed = parseJsonSettingValue(trimmed, "record");
+			if (path === "providers.maxInFlightRequests") parsed = validateProviderMaxInFlightRequests(parsed);
+			break;
+		case "string":
+		case "enum": {
+			let text = trimmed;
+			if (text.startsWith('"')) {
+				try {
+					const unquoted: unknown = JSON.parse(text);
+					if (typeof unquoted === "string") text = unquoted;
+				} catch {
+					// Not a JSON string literal; keep the bare text.
+				}
+			}
+			const valid = getEnumValues(path);
+			if (valid && !valid.includes(text)) {
+				throw new Error(`Invalid value: ${rawValue}. Valid values: ${valid.join(", ")}`);
+			}
+			parsed = text;
+			break;
+		}
+	}
+	// The switch above validated `parsed` against the schema type of `path`.
+	return parsed as SettingValue<P>;
 }
 
 const PATH_SCOPED_ARRAY_SETTINGS = new Set<SettingPath>(["enabledModels", "disabledProviders", "enabledProviders"]);
@@ -722,6 +793,19 @@ export class Settings {
 	 */
 	isConfigured(path: SettingPath): boolean {
 		return getByPath(this.#merged, SETTING_PATH_SEGMENTS[path]) !== undefined;
+	}
+
+	/**
+	 * Layer supplying the effective value of `path`, in merge precedence order:
+	 * runtime override → config overlay → project → global → schema default.
+	 */
+	getProvenance(path: SettingPath): SettingProvenance {
+		const segments = SETTING_PATH_SEGMENTS[path];
+		if (getByPath(this.#overrides, segments) !== undefined) return "runtime";
+		if (getByPath(this.#configOverlay, segments) !== undefined) return "overlay";
+		if (getByPath(this.#projectSettingsForMerge(), segments) !== undefined) return "project";
+		if (getByPath(this.#global, segments) !== undefined) return "global";
+		return "default";
 	}
 
 	/**
@@ -1385,7 +1469,7 @@ export class Settings {
 	 * project null is a cleared value (falls back to global), not a
 	 * tombstone.
 	 */
-	getModelRoleProvenance(role: ModelRole | string): "runtime" | "overlay" | "project" | "global" | "default" {
+	getModelRoleProvenance(role: ModelRole | string): SettingProvenance {
 		if (this.#modelRoleLayerOwns(this.#overrides, role)) return "runtime";
 		if (this.#modelRoleLayerOwns(this.#configOverlay, role)) return "overlay";
 		if (this.#modelRoleLayerOwns(this.#projectSettingsForMerge(), role)) return "project";

@@ -19,6 +19,7 @@ import { formatBytes, sanitizeDisplayLines, shortenPath, wrapBrackets } from "..
 import type { OutputMeta } from "./output-meta";
 import type { TruncationResult } from "./streaming-output";
 import { renderProcRead, type ProcReadDetails } from "./proc-render";
+import { renderCfgRead, type CfgReadDetails } from "./cfg-render";
 
 /** Read result metadata retains truncation statistics, not a second copy of the body. */
 export type ReadTruncationStats = Omit<TruncationResult, "content">;
@@ -27,6 +28,7 @@ export type ReadTruncationStats = Omit<TruncationResult, "content">;
 export interface ReadToolDetails {
 	kind?: "file" | "url";
 	proc?: ProcReadDetails;
+	cfg?: CfgReadDetails;
 	/** Filesystem hyperlink target resolved by the executing tool. */
 	displayTarget?: string;
 	truncation?: ReadTruncationStats;
@@ -89,6 +91,7 @@ const INTERNAL_URL_SELECTOR_PART_RE = new RegExp(
 const INTERNAL_SCHEMES_WITH_SELECTORS: Record<string, true> = {
 	agent: true,
 	artifact: true,
+	cfg: true,
 	issue: true,
 	history: true,
 	local: true,
@@ -297,6 +300,8 @@ export const readToolRenderer = {
 			typeof input?.file_path === "string" ? input.file_path : typeof input?.path === "string" ? input.path : "";
 		if (/^proc:\/\//i.test(rawPath))
 			return { label: "Process", detail: rawPath.slice("proc://".length) || "jobs & services" };
+		if (/^cfg:\/\//i.test(rawPath))
+			return { label: "Config", detail: rawPath.slice("cfg://".length) || "all settings" };
 		return { label: "Read", detail: shortenPath(rawPath) };
 	},
 	renderCall(args: ReadRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
@@ -304,6 +309,8 @@ export const readToolRenderer = {
 			typeof args.file_path === "string" ? args.file_path : typeof args.path === "string" ? args.path : "";
 		if (/^proc:\/\//i.test(rawPath))
 			return renderProcRead(rawPath.slice("proc://".length), undefined, undefined, _options, uiTheme);
+		if (/^cfg:\/\//i.test(rawPath))
+			return renderCfgRead(splitInternalUrlSel(rawPath).path, undefined, undefined, _options, uiTheme);
 		if (isReadableUrlPath(rawPath)) {
 			return renderReadUrlCall({ path: rawPath, raw: args.raw }, _options, uiTheme);
 		}
@@ -336,6 +343,14 @@ export const readToolRenderer = {
 				baseRawPathForKind.slice("proc://".length),
 				result,
 				result.details?.proc,
+				options,
+				uiTheme,
+			);
+		if (/^cfg:\/\//i.test(baseRawPathForKind))
+			return renderCfgRead(
+				splitInternalUrlSel(baseRawPathForKind).path,
+				result,
+				result.details?.cfg,
 				options,
 				uiTheme,
 			);

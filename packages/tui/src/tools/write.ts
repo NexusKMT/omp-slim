@@ -23,6 +23,7 @@ import {
 } from "../render/render-utils";
 import type { CoordinationDetails } from "./wait";
 import { renderAgentWrite, renderProcWrite, type ProcWriteAction, type ProcWriteDetails } from "./proc-render";
+import { renderCfgWrite, type CfgWriteDetails } from "./cfg-render";
 import type { FileDiagnosticsResult } from "./lsp";
 import type { OutputMeta } from "./output-meta";
 import type { RenderResultOptions, ToolActivityContext, ToolActivitySummary, ToolRenderer } from "./renderer";
@@ -51,6 +52,7 @@ export interface WriteToolDetails {
 	xdev?: XdevRenderDispatch;
 	message?: CoordinationDetails;
 	proc?: ProcWriteDetails;
+	cfg?: CfgWriteDetails;
 }
 
 interface WriteRenderArgs {
@@ -348,6 +350,7 @@ export const writeToolRenderer = {
 			const { id, action } = procWriteTarget(rawPath);
 			return { label: "Process", detail: `${action} ${shortenPath(id)}` };
 		}
+		if (/^cfg:\/\//i.test(rawPath)) return { label: "Config", detail: rawPath.slice("cfg://".length) };
 		const xdev = parseXdUrl(rawPath);
 		if (xdev?.name) {
 			const resolveMounted = (context.renderContext as WriteRenderContext | undefined)?.resolveXdevMounted;
@@ -376,7 +379,8 @@ export const writeToolRenderer = {
 			!pathSettled &&
 			("agent://".startsWith(rawPath.toLowerCase()) ||
 				"proc://".startsWith(rawPath.toLowerCase()) ||
-				/^(?:agent|proc):\/\//i.test(rawPath))
+				"cfg://".startsWith(rawPath.toLowerCase()) ||
+				/^(?:agent|proc|cfg):\/\//i.test(rawPath))
 		)
 			return undefined;
 		if (/^agent:\/\//i.test(rawPath)) {
@@ -394,6 +398,16 @@ export const writeToolRenderer = {
 			return renderProcWrite(
 				id,
 				action,
+				typeof args.content === "string" ? args.content : undefined,
+				undefined,
+				undefined,
+				options,
+				uiTheme,
+			);
+		}
+		if (/^cfg:\/\//i.test(rawPath)) {
+			return renderCfgWrite(
+				rawPath,
 				typeof args.content === "string" ? args.content : undefined,
 				undefined,
 				undefined,
@@ -489,6 +503,16 @@ export const writeToolRenderer = {
 				typeof args?.content === "string" ? args.content : undefined,
 				result,
 				result.details?.proc,
+				options,
+				uiTheme,
+			);
+		}
+		if (typeof messagePath === "string" && /^cfg:\/\//i.test(messagePath)) {
+			return renderCfgWrite(
+				messagePath,
+				typeof args?.content === "string" ? args.content : undefined,
+				result,
+				result.details?.cfg,
 				options,
 				uiTheme,
 			);

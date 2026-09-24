@@ -587,11 +587,12 @@ export class SelectorController {
 	}
 
 	/**
-	 * Handle setting changes from the settings selector.
+	 * Apply the live side effects of a setting change (settings selector, `cfg://` writes).
 	 * Most settings are saved directly via SettingsManager in the definitions.
-	 * This handles side effects and session-specific settings.
+	 * This handles side effects and session-specific settings. `persist: false`
+	 * keeps session setters from writing the value to the global config.
 	 */
-	handleSettingChange(id: string, value: unknown): void {
+	handleSettingChange(id: string, value: unknown, { persist = true }: { persist?: boolean } = {}): void {
 		// Discovery provider toggles
 		if (id.startsWith("discovery.")) {
 			const providerId = id.replace("discovery.", "");
@@ -607,7 +608,7 @@ export class SelectorController {
 		switch (id) {
 			// Session-managed settings (not in SettingsManager)
 			case "autoCompact":
-				this.ctx.session.setAutoCompactionEnabled(value as boolean, true);
+				this.ctx.session.setAutoCompactionEnabled(value as boolean, persist);
 				this.ctx.statusLine.setAutoCompactEnabled(value as boolean);
 				break;
 			case "composer.shape":
@@ -625,17 +626,17 @@ export class SelectorController {
 				}
 				break;
 			case "steeringMode":
-				this.ctx.session.setSteeringMode(value as "all" | "one-at-a-time", true);
+				this.ctx.session.setSteeringMode(value as "all" | "one-at-a-time", persist);
 				break;
 			case "followUpMode":
-				this.ctx.session.setFollowUpMode(value as "all" | "one-at-a-time", true);
+				this.ctx.session.setFollowUpMode(value as "all" | "one-at-a-time", persist);
 				break;
 			case "interruptMode":
-				this.ctx.session.setInterruptMode(value as "immediate" | "wait", true);
+				this.ctx.session.setInterruptMode(value as "immediate" | "wait", persist);
 				break;
 			case "thinkingLevel":
 			case "defaultThinkingLevel":
-				this.ctx.session.setThinkingLevel(value as ConfiguredThinkingLevel, true);
+				this.ctx.session.setThinkingLevel(value as ConfiguredThinkingLevel, persist);
 				this.ctx.statusLine.invalidate();
 				this.ctx.updateEditorBorderColor();
 				break;

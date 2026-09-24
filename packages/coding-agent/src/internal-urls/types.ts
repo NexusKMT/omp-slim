@@ -1,7 +1,7 @@
 /**
  * Types for the internal URL routing system.
  *
- * Internal URLs (`agent://`, `artifact://`, `history://`, `issue://`, `local://`, `mcp://`, `memory://`, `omp://`, `pr://`, `proc://`, `rule://`, `security://`, `skill://`, `ssh://`, `vault://`, and `xd://`) are resolved by tools like read,
+ * Internal URLs (`agent://`, `artifact://`, `cfg://`, `history://`, `issue://`, `local://`, `mcp://`, `memory://`, `omp://`, `pr://`, `proc://`, `rule://`, `security://`, `skill://`, `ssh://`, `vault://`, and `xd://`) are resolved by tools like read,
  * providing access to agent outputs and server resources without exposing filesystem paths.
  */
 
@@ -13,10 +13,12 @@ import type { SessionEntry } from "../session/session-entries";
 import type { ToolSession } from "../tools";
 import type { CoordinationDetails } from "@oh-my-pi/pi-tui/tools/wait";
 import type { ProcReadDetails, ProcWriteDetails } from "@oh-my-pi/pi-tui/tools/proc-render";
+import type { CfgReadDetails, CfgWriteDetails } from "@oh-my-pi/pi-tui/tools/cfg-render";
 
 export interface InternalWriteDetails {
 	message?: CoordinationDetails;
 	proc?: ProcWriteDetails;
+	cfg?: CfgWriteDetails;
 }
 
 export interface InternalWriteResult {
@@ -43,8 +45,8 @@ export interface InternalResource {
 	sourcePath?: string;
 	/** Additional notes about resolution */
 	notes?: string[];
-	/** Structured process snapshot used only for transcript rendering. */
-	details?: { proc: ProcReadDetails };
+	/** Structured snapshots used only for transcript rendering. */
+	details?: { proc?: ProcReadDetails; cfg?: CfgReadDetails };
 	/**
 	 * True when the resolved content cannot be edited by the agent (e.g. sealed
 	 * artifacts, harness docs, machine-generated memory summaries). Hashline

@@ -91,7 +91,7 @@ describe("proc:// background jobs", () => {
 			const list = await protocol.resolve(parseInternalUrl("proc://"), { session });
 			expect(list.content).toContain(`${id} [bash] running`);
 			expect(list.content).not.toContain("other-job");
-			expect(list.details?.proc.jobs).toMatchObject([{ id, status: "running" }]);
+			expect(list.details?.proc?.jobs).toMatchObject([{ id, status: "running" }]);
 			await expect(protocol.resolve(parseInternalUrl("proc://other-job"), { session })).rejects.toThrow("not found");
 			await expect(protocol.write(parseInternalUrl("proc://other-job/kill"), "", { session })).rejects.toThrow(
 				"not found",
@@ -99,7 +99,7 @@ describe("proc:// background jobs", () => {
 			const running = await protocol.resolve(parseInternalUrl(`proc://${id}`), { session });
 			expect(running.content).toContain("compiling assets");
 			expect(running.content).toContain("building 50%");
-			expect(running.details?.proc.job).toMatchObject({ id, status: "running" });
+			expect(running.details?.proc?.job).toMatchObject({ id, status: "running" });
 			await expect(protocol.write(parseInternalUrl(`proc://${id}`), "input", { session })).rejects.toThrow(
 				"stdin is only available for services",
 			);
@@ -217,7 +217,7 @@ describe("proc:// background jobs", () => {
 			const list = await new ProcProtocolHandler().resolve(parseInternalUrl("proc://"), { session });
 			expect(list.content).toContain(`${doneId} [bash] completed in 2.0s — sleep 2; echo fast-done`);
 			expect(list.content).toContain(`${runningId} [bash] running up 39.0s — sleep 60`);
-			expect(list.details?.proc.jobs).toMatchObject([
+			expect(list.details?.proc?.jobs).toMatchObject([
 				{ id: doneId, durationMs: 2_000 },
 				{ id: runningId, durationMs: 39_000 },
 			]);
@@ -253,7 +253,7 @@ describe("bash services via proc://", () => {
 			expect(started.content[0]?.type === "text" ? started.content[0].text : "").toContain("READY");
 			const list = await proc.resolve(parseInternalUrl("proc://"), { session });
 			expect(list.content).toContain("echo-service [service]");
-			expect(list.details?.proc.daemons).toMatchObject([{ name: "echo-service", state: "ready" }]);
+			expect(list.details?.proc?.daemons).toMatchObject([{ name: "echo-service", state: "ready" }]);
 			const pending = Promise.withResolvers<string>();
 			const collisionId = manager.register(
 				"bash",
