@@ -5,6 +5,7 @@ import { setProcessName, TempDir } from "@oh-my-pi/pi-utils";
 import { AsyncJobManager } from "../../src/async/job-manager";
 import { ProcProtocolHandler } from "../../src/internal-urls/proc-protocol";
 import { parseInternalUrl } from "../../src/internal-urls/parse";
+import { AgentRegistry } from "../../src/registry/agent-registry";
 import { startDaemonBrokerFromEnvironment } from "../../src/launch/broker";
 import { createDaemonBrokerClient } from "../../src/launch/client";
 import * as daemonClient from "../../src/launch/client";
@@ -156,6 +157,26 @@ describe("proc:// background jobs", () => {
 			expect(manager.getJob(id)?.status).toBe("cancelled");
 		} finally {
 			await manager.dispose();
+		}
+	});
+
+	it.each([false, true])("kills only owned jobless agents (job manager: %s)", async withManager => {
+		const manager = withManager ? new AsyncJobManager({}) : undefined;
+		const registry = new AgentRegistry();
+		registry.register({ id: "Worker", displayName: "Worker", kind: "sub", parentId: "Main", session: null });
+		registry.register({ id: "Foreign", displayName: "Foreign", kind: "sub", parentId: "Other", session: null });
+		const session = toolSession(process.cwd(), manager, false);
+		session.agentRegistry = registry;
+		const write = new WriteTool(session);
+		try {
+			const denied = await write.execute("foreign", { path: "proc://Foreign/kill" });
+			expect(denied.details?.proc).toMatchObject({ cancelled: [{ id: "Foreign", status: "not_found" }] });
+			expect(registry.get("Foreign")?.status).toBe("running");
+			const killed = await write.execute("worker", { path: "proc://Worker/kill" });
+			expect(killed.details?.proc).toMatchObject({ cancelled: [{ id: "Worker", status: "cancelled" }] });
+			expect(registry.get("Worker")).toBeUndefined();
+		} finally {
+			await manager?.dispose();
 		}
 	});
 

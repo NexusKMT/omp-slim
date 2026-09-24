@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added `inactiveTools` and `AnthropicRequestControls` tracking to maintain stability across interrupted requests
+- Added schema-based validation for Anthropic User Profile API responses
 - Added support for Anthropic User Profiles API
 - Added credential-aware auth resolution for multi-account tracking
 - Implemented cross-credential thinking block redaction

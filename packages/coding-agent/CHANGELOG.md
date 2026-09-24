@@ -55,6 +55,8 @@
 
 ### Fixed
 
+- Fixed auth rotation to support credential-aware API key resolution
+- Restricted agent `proc://` kill requests to ensure target process ownership
 - Fixed comma-separated line selectors such as `:19,59` in `read`, `grep` paths, and `fetch` reading from the first number through EOF. A bare number in a list is now that single line; a lone `:50` still reads from line 50.
 - Fixed `write` success text reporting JavaScript string length as bytes. The count is now the UTF-8 byte length.
 - Fixed `read proc://`, `/jobs`, and job details showing a finished job's age as its duration. Completed, failed, and cancelled jobs now show how long they ran, e.g. `bg_1 [bash] completed in 2.0s`.
