@@ -3960,8 +3960,12 @@ type AnthropicControlSpec = { toolChanges: AnthropicToolChange[]; effort?: Anthr
 
 type AnthropicControlCarrier = object & { [ANTHROPIC_CONTROL]?: AnthropicControlSpec };
 
-/** An assistant message in `context.messages` whose request declared controls. */
-type AnthropicControlRecord = { index: number; controls: AnthropicRequestControls };
+/**
+ * An assistant message in `context.messages` whose request declared controls.
+ * `live` when it still sits at the index it was written at: the history before
+ * it is the one its request sent.
+ */
+type AnthropicControlRecord = { index: number; live: boolean; controls: AnthropicRequestControls };
 
 /** A control to splice in before `context.messages[index]`. */
 type AnthropicControlInsert = { index: number; spec: AnthropicControlSpec };
@@ -3979,7 +3983,11 @@ function collectAnthropicControlRecords(messages: readonly Message[]): Anthropic
 	for (let index = 0; index < messages.length; index++) {
 		const message = messages[index];
 		if (message?.role === "assistant" && message.requestControls) {
-			records.push({ index, controls: message.requestControls });
+			records.push({
+				index,
+				live: message.requestControls.messageIndex === index,
+				controls: message.requestControls,
+			});
 		}
 	}
 	return records;
@@ -4026,7 +4034,9 @@ function diffAnthropicActiveTools(
  * `inactiveTools`, plus newly active tools appended with `defer_loading`.
  * Every recorded active-set change is replayed as a control before the
  * response of the request that made it; the change this request makes goes
- * at the tail.
+ * at the tail. Records at a different index than they were written at are
+ * rewritten history: they keep the declaration but emit no controls, so the
+ * net change from the declared baseline lands at the first live position.
  */
 function planAnthropicToolControls(
 	context: Context,
@@ -4041,9 +4051,11 @@ function planAnthropicToolControls(
 	}
 	const activeNames = context.tools.map(tool => tool.name);
 
-	const toolRecords: { index: number; tools: AnthropicToolControls }[] = [];
+	const toolRecords: { index: number; live: boolean; tools: AnthropicToolControls }[] = [];
 	for (const record of records) {
-		if (record.controls.tools) toolRecords.push({ index: record.index, tools: record.controls.tools });
+		if (record.controls.tools) {
+			toolRecords.push({ index: record.index, live: record.live, tools: record.controls.tools });
+		}
 	}
 	const inserts: AnthropicControlInsert[] = [];
 	let declared = activeNames;
@@ -4062,8 +4074,12 @@ function planAnthropicToolControls(
 			declaredSet.add(name);
 			deferred.add(name);
 		}
-		let previous = toolRecords[0]?.tools.active ?? [];
-		for (const record of toolRecords.slice(1)) {
+		// The chain starts from what the top-level declaration makes active, so a
+		// rewritten history converges on the current roster instead of trusting a
+		// record whose earlier controls were summarized away.
+		let previous = declared.filter(name => !deferred.has(name));
+		for (const record of toolRecords) {
+			if (!record.live) continue;
 			const toolChanges = diffAnthropicActiveTools(previous, record.tools.active, declaredSet);
 			if (toolChanges.length > 0) inserts.push({ index: record.index, spec: { toolChanges } });
 			previous = record.tools.active;
@@ -4093,6 +4109,9 @@ function planAnthropicToolControls(
  * replay every recorded change as a per-message effort control. An omitted
  * effort means the API's per-model default, which a per-message control cannot
  * restore, so a request without an explicit effort keeps the level in force.
+ * Records at a different index than they were written at are rewritten history:
+ * they keep the top-level effort but emit no controls, so the net change lands
+ * at the first live position.
  */
 function planAnthropicEffortControls(
 	current: AnthropicOutputEffort | undefined,
@@ -4105,9 +4124,11 @@ function planAnthropicEffortControls(
 	record: AnthropicEffortControls | undefined;
 } {
 	if (!enabled) return { topLevel: current, inserts: [], record: undefined };
-	const effortRecords: { index: number; effort: AnthropicEffortControls }[] = [];
+	const effortRecords: { index: number; live: boolean; effort: AnthropicEffortControls }[] = [];
 	for (const record of records) {
-		if (record.controls.effort) effortRecords.push({ index: record.index, effort: record.controls.effort });
+		if (record.controls.effort) {
+			effortRecords.push({ index: record.index, live: record.live, effort: record.controls.effort });
+		}
 	}
 	const latest = effortRecords.at(-1);
 	if (!latest) {
@@ -4117,6 +4138,7 @@ function planAnthropicEffortControls(
 	const inserts: AnthropicControlInsert[] = [];
 	let tail = topLevel;
 	for (const record of effortRecords) {
+		if (!record.live) continue;
 		const recorded = record.effort.tail;
 		if (recorded !== null && recorded !== tail) {
 			inserts.push({
@@ -4397,6 +4419,7 @@ function buildParams(
 	const requestControls: AnthropicRequestControls | undefined =
 		toolPlan.record || effortPlan.record
 			? {
+					messageIndex: context.messages.length,
 					...(toolPlan.record && { tools: toolPlan.record }),
 					...(effortPlan.record && { effort: effortPlan.record }),
 				}

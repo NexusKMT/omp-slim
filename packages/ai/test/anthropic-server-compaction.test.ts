@@ -421,27 +421,28 @@ describe("Anthropic compaction replay", () => {
 		}
 	});
 
-	it("keeps the declared tools through compaction and restates net changes after kept thinking", async () => {
-		const preserved = buildModel({ ...spec, id: "claude-fable-5-1" });
-		const readTool: NonNullable<Context["tools"]>[number] = {
-			name: "read",
-			description: "Read a file",
-			parameters: { type: "object", properties: {} },
-		};
-		const removedTool: NonNullable<Context["tools"]>[number] = {
-			name: "grep",
-			description: "Search files",
-			parameters: { type: "object", properties: {} },
-		};
-		const addedTool: NonNullable<Context["tools"]>[number] = {
-			name: "write",
-			description: "Write a file",
-			parameters: { type: "object", properties: {} },
-		};
-		const tools = [readTool, addedTool];
-		const options = { sessionId: "conversation" };
-		const first = await captureRequest(preserved, options, context.messages, [readTool, removedTool]);
-		const kept: AssistantMessage = {
+	const preserved = buildModel({ ...spec, id: "claude-fable-5-1" });
+	const readTool: NonNullable<Context["tools"]>[number] = {
+		name: "read",
+		description: "Read a file",
+		parameters: { type: "object", properties: {} },
+	};
+	const removedTool: NonNullable<Context["tools"]>[number] = {
+		name: "grep",
+		description: "Search files",
+		parameters: { type: "object", properties: {} },
+	};
+	const addedTool: NonNullable<Context["tools"]>[number] = {
+		name: "write",
+		description: "Write a file",
+		parameters: { type: "object", properties: {} },
+	};
+	const tools = [readTool, addedTool];
+	const options = { sessionId: "conversation" };
+
+	/** The retained assistant turn with signed thinking, answering the request `from` captured. */
+	function keptFrom(from: { message: AssistantMessage }): AssistantMessage {
+		return {
 			role: "assistant",
 			content: [
 				{ type: "thinking", thinking: "Keep this reasoning.", thinkingSignature: "sig_kept" },
@@ -460,8 +461,21 @@ describe("Anthropic compaction replay", () => {
 				totalTokens: 0,
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 			},
-			requestControls: first.message.requestControls,
+			requestControls: from.message.requestControls,
 		};
+	}
+
+	/** Wire messages carrying `tool_addition`/`tool_removal` blocks, with their indices. */
+	function toolControls(wire: unknown): { index: number; json: string }[] {
+		if (!Array.isArray(wire)) throw new Error("Expected wire messages");
+		return wire
+			.map((message, index) => ({ index, json: JSON.stringify(message) }))
+			.filter(({ json }) => json.includes('"tool_addition"') || json.includes('"tool_removal"'));
+	}
+
+	it("keeps the declared tools through compaction and restates net changes after kept thinking", async () => {
+		const first = await captureRequest(preserved, options, context.messages, [readTool, removedTool]);
+		const kept = keptFrom(first);
 		const later: Context["messages"] = [...context.messages, kept, { role: "user", content: "more", timestamp: 3 }];
 		const changed = await captureRequest(preserved, options, later, tools, [removedTool]);
 		expect(JSON.stringify(changed.payload.messages)).toContain("tool_addition");
@@ -483,5 +497,42 @@ describe("Anthropic compaction replay", () => {
 		expect(changeIndex).toBeGreaterThan(nextIndex);
 		expect(JSON.stringify(wire[changeIndex])).toContain("tool_removal");
 		expect(JSON.stringify(wire)).toContain("sig_kept");
+	});
+
+	it("re-issues roster changes the summary absorbed after the retained tail", async () => {
+		const first = await captureRequest(preserved, options, context.messages, [readTool, removedTool]);
+		const later: Context["messages"] = [
+			...context.messages,
+			keptFrom(first),
+			{ role: "user", content: "more", timestamp: 3 },
+		];
+		const changed = await captureRequest(preserved, options, later, tools, [removedTool]);
+		expect(changed.message.requestControls).toMatchObject({
+			messageIndex: 3,
+			tools: { declared: ["read", "grep", "write"], deferred: ["write"], active: ["read", "write"] },
+		});
+		// The kept turn answered `changed`, whose tool control is now inside the summary.
+		const swapped = await captureRequest(
+			preserved,
+			options,
+			[summaryMessage({ signature: SIGNATURE }), keptFrom(changed), { role: "user", content: "next", timestamp: 4 }],
+			tools,
+			[removedTool],
+		);
+
+		expect(swapped.payload.tools).toEqual(changed.payload.tools);
+		const wire = swapped.payload.messages;
+		if (!Array.isArray(wire)) throw new Error("Expected wire messages");
+		const controls = toolControls(wire);
+		expect(controls).toHaveLength(1);
+		const [control] = controls;
+		expect(JSON.parse(control?.json ?? "{}").content).toEqual([
+			{ type: "tool_removal", tool: { type: "tool_reference", name: "grep" } },
+			{ type: "tool_addition", tool: { type: "tool_reference", name: "write" } },
+		]);
+		const nextIndex = wire.findIndex(message => JSON.stringify(message).includes('"next"'));
+		expect(control?.index).toBeGreaterThan(nextIndex);
+		const keptIndex = wire.findIndex(message => JSON.stringify(message).includes("sig_kept"));
+		expect(wire.slice(0, keptIndex).some(message => message.role === "system")).toBe(false);
 	});
 });

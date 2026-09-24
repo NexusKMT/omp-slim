@@ -70,6 +70,7 @@ describe("convertToLlm empty user-interrupted assistant", () => {
 		timestamp: 1,
 	};
 	const requestControls: AssistantMessage["requestControls"] = {
+		messageIndex: 0,
 		tools: { declared: ["read", "grep"], deferred: [], active: ["read"] },
 	};
 

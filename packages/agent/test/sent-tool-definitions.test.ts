@@ -44,8 +44,11 @@ describe("Agent — inactive tool definitions", () => {
 		try {
 			const contexts: Context[] = [];
 			const responses = [
-				reply({ tools: { declared: ["read", "grep"], deferred: [], active: ["read", "grep"] } }),
-				reply({ tools: { declared: ["read", "grep"], deferred: [], active: ["read"] } }),
+				reply({
+					messageIndex: 1,
+					tools: { declared: ["read", "grep"], deferred: [], active: ["read", "grep"] },
+				}),
+				reply({ messageIndex: 3, tools: { declared: ["read", "grep"], deferred: [], active: ["read"] } }),
 			];
 			const agent = new Agent({
 				initialState: {

@@ -924,6 +924,12 @@ export interface AnthropicMessagePayload {
  * Written by the Anthropic provider; read by it and by the Agent's inactive-tool lookup.
  */
 export interface AnthropicRequestControls {
+	/**
+	 * `context.messages.length` of the request that produced this response, i.e. the
+	 * response's own index. A record found at another index belongs to a history that was
+	 * rewritten before it (compaction, dropped messages) and is not replayed as controls.
+	 */
+	messageIndex: number;
 	/** Present when the request kept a stable tool declaration (`supportsMidConversationToolChanges`). Source tool names, not wire names. */
 	tools?: {
 		/** Top-level `tools` in wire order. */
