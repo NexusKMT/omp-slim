@@ -9,6 +9,7 @@ import * as os from "node:os";
 import path from "node:path";
 import { $env, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import { resolveAgentModelSelection, resolveConfiguredModelPatterns } from "../config/model-resolver";
+import { validateAgentCompactionThresholdOverrides } from "../config/compaction-threshold";
 import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { LocalProtocolOptions } from "../internal-urls";
@@ -142,6 +143,8 @@ export interface EffectiveSubagentPolicy {
 	modelRoute?: string;
 	/** Exact-name `task.agentServiceTierOverrides` entry for this agent, applied after model resolution. */
 	serviceTierOverride?: ServiceTierInheritSettingValue;
+	/** Exact-name `task.agentCompactionThresholdOverrides` entry for this child. */
+	compactionThresholdOverride?: string;
 	parentActiveModelPattern?: string;
 	schema: StructuredSubagentSchemaResolution;
 	planMode: boolean;
@@ -307,6 +310,12 @@ export async function resolveEffectiveSubagentPolicy(
 	const serviceTierOverride = Object.hasOwn(agentServiceTierOverrides, agentName)
 		? agentServiceTierOverrides[agentName]
 		: undefined;
+	const agentCompactionThresholdOverrides = validateAgentCompactionThresholdOverrides(
+		request.session.settings.get("task.agentCompactionThresholdOverrides"),
+	);
+	const compactionThresholdOverride = Object.hasOwn(agentCompactionThresholdOverrides, agentName)
+		? agentCompactionThresholdOverrides[agentName]
+		: undefined;
 	const parentActiveModelPattern = request.session.getActiveModelString?.();
 	const modelResolution = {
 		requestModel: request.model,
@@ -336,6 +345,7 @@ export async function resolveEffectiveSubagentPolicy(
 		modelOverride,
 		modelRole,
 		serviceTierOverride,
+		compactionThresholdOverride,
 		parentActiveModelPattern,
 		schema,
 		planMode,
@@ -473,6 +483,7 @@ function buildExecutorOptions(
 		modelRole: policy.modelRole,
 		modelRoute: policy.modelRoute,
 		serviceTierOverride: policy.serviceTierOverride,
+		compactionThresholdOverride: policy.compactionThresholdOverride,
 		parentActiveModelPattern: policy.parentActiveModelPattern,
 		thinkingLevel: policy.effectiveAgent.thinkingLevel,
 		effort: request.effort,

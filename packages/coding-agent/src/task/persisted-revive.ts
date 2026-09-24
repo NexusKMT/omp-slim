@@ -126,6 +126,12 @@ export function createPersistedSubagentReviverFactory(
 								: undefined),
 						}
 					: undefined),
+				...(init.compactionThreshold !== undefined
+					? {
+							"compaction.thresholdPercent": init.compactionThreshold.thresholdPercent,
+							"compaction.thresholdTokens": init.compactionThreshold.thresholdTokens,
+						}
+					: undefined),
 			});
 			const persistedModelPattern =
 				init.modelRole && init.modelRole !== "default"

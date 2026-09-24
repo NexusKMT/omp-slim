@@ -706,6 +706,7 @@ memory:
 | `compaction.methodOrder`      | array   | `remote, snapcompact, handoff, shake, soft` | Ordered fallbacks. `remote` uses provider-native server compaction (OpenAI Responses compact, Anthropic compaction beta); unavailable or failed methods advance. |
 | `compaction.thresholdPercent` | number  | `-1`                                     | Percent-of-context trigger; `-1` = reserve-based default.                                                                                                                                                                                 |
 | `compaction.thresholdTokens`  | number  | `-1`                                     | Fixed token trigger when `> 0`.                                                                                                                                                                                                           |
+| `task.agentCompactionThresholdOverrides` | record | `{}` | Sparse exact agent-name overrides for task/eval child compaction thresholds; values are percent strings or positive integer token strings. |
 | `compaction.reserveTokens`    | number  | _(unset)_                                | Absolute reserve floor. When unset, the effective reserve is the larger of `16384` and 15% of the context window; if that default would leave no practical small-window budget, it falls back to the 15% reserve.                         |
 | `compaction.keepRecentTokens` | number  | `20000`                                  | Recent tokens always preserved.                                                                                                                                                                                                           |
 | `compaction.autoContinue`     | boolean | `true`                                   | Continue automatically after compaction.                                                                                                                                                                                                  |
@@ -715,6 +716,21 @@ memory:
 | `autolearn.minToolCalls`      | number  | `5`           | Only nudge after a turn that used at least this many tools.                                                                                                                                                                               |
 
 `compaction` has additional tuning keys (idle compaction, supersede/drop heuristics) visible in `omp config list`. See [Compaction](./compaction.md) for the full strategy reference.
+
+Set worker limits independently of the main session's global limit. This example keeps the main session at a 40,000-token limit while assigning different limits to the `scout` and `task` agents:
+
+```yaml
+compaction:
+  thresholdPercent: -1
+  thresholdTokens: 40000
+
+task:
+  agentCompactionThresholdOverrides:
+    scout: "80%"
+    task: "90000"
+```
+
+Values are strings: `"80%"` selects an integer percent threshold from 1 through 99, while `"90000"` selects a positive fixed-token limit. An entry replaces both threshold fields for that child: percent mode clears the fixed-token limit, and token mode clears the percentage. Unlisted task/eval agents keep the inherited global threshold; the parent/main session is unchanged. Agent names are exact and case-sensitive (`scout` does not match `Scout`). Vibe workers do not consult this map.
 
 ### Appearance and terminal
 

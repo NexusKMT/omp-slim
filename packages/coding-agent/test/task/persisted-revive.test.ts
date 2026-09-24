@@ -128,7 +128,13 @@ async function createPersistedSession(
 	restrictToolNames?: boolean,
 	modelRole?: string,
 	advisor?: string,
-	contract?: { tools?: string[]; readOnly?: boolean; agent?: string; isolated?: boolean },
+	contract?: {
+		tools?: string[];
+		readOnly?: boolean;
+		agent?: string;
+		isolated?: boolean;
+		compactionThreshold?: { thresholdPercent: number; thresholdTokens: number };
+	},
 ): Promise<string> {
 	const manager = SessionManager.create(cwd, path.join(cwd, "sessions"));
 	const sessionFile = manager.getSessionFile();
@@ -144,6 +150,9 @@ async function createPersistedSession(
 		readOnly: contract?.readOnly,
 		agent: contract?.agent,
 		isolated: contract?.isolated,
+		...(contract?.compactionThreshold !== undefined
+			? { compactionThreshold: contract.compactionThreshold }
+			: undefined),
 	});
 	manager.appendMessage({
 		role: "assistant",
@@ -637,6 +646,30 @@ describe("persisted subagent revival", () => {
 
 		expect(capturedOptions?.modelPattern).toEqual(["@review-fast", "anthropic/claude-sonnet-4-5"]);
 		expect(capturedOptions?.modelPatternAuthFallback).toBe("anthropic/claude-sonnet-4-5");
+	});
+
+	it("restores an explicit compaction threshold after parent settings change", async () => {
+		const cwd = makeTempDir("@pi-compaction-threshold-revive-");
+		const sessionFile = await createPersistedSession(cwd, undefined, undefined, undefined, {
+			compactionThreshold: { thresholdPercent: 72, thresholdTokens: -1 },
+		});
+		const parentSettings = Settings.isolated({
+			"compaction.thresholdPercent": 45,
+			"compaction.thresholdTokens": 120_000,
+		});
+		let capturedOptions: CreateAgentSessionOptions | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementation(async options => {
+			capturedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd, undefined, { settings: parentSettings })(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		expect(capturedOptions?.settings?.get("compaction.thresholdPercent")).toBe(72);
+		expect(capturedOptions?.settings?.get("compaction.thresholdTokens")).toBe(-1);
 	});
 
 	it("pins the persisted concrete model when the default role is revived", async () => {

@@ -44,6 +44,7 @@ function session(
 		isolationApply?: boolean;
 		modelRoles?: Record<string, string>;
 		agentServiceTierOverrides?: Record<string, string>;
+		agentCompactionThresholdOverrides?: Record<string, string>;
 	} = {},
 ): ToolSession {
 	return {
@@ -61,6 +62,9 @@ function session(
 				...(options.isolationApply !== undefined ? { "task.isolation.apply": options.isolationApply } : {}),
 				...(options.agentServiceTierOverrides
 					? { "task.agentServiceTierOverrides": options.agentServiceTierOverrides }
+					: {}),
+				...(options.agentCompactionThresholdOverrides
+					? { "task.agentCompactionThresholdOverrides": options.agentCompactionThresholdOverrides }
 					: {}),
 			}),
 		getSessionFile: () => null,
@@ -265,6 +269,38 @@ describe("structured subagent primitive", () => {
 			request({ session: session({ agentServiceTierOverrides: { Scout: "priority" } }), agent: "scout" }),
 		);
 		expect(differentCase.serviceTierOverride).toBeUndefined();
+	});
+
+	it("resolves exact-case sparse compaction overrides and forwards the selected value", async () => {
+		mockDiscovery({ ...AGENT, name: "scout" });
+		const exactSession = session({ agentCompactionThresholdOverrides: { scout: "80%", task: "90000" } });
+		const exactPolicy = await resolveEffectiveSubagentPolicy(request({ session: exactSession, agent: "scout" }));
+		expect(exactPolicy.compactionThresholdOverride).toBe("80%");
+
+		const differentCase = await resolveEffectiveSubagentPolicy(
+			request({
+				session: session({ agentCompactionThresholdOverrides: { Scout: "80%", task: "90000" } }),
+				agent: "scout",
+			}),
+		);
+		expect(differentCase.compactionThresholdOverride).toBeUndefined();
+
+		const sparse = await resolveEffectiveSubagentPolicy(
+			request({ session: session({ agentCompactionThresholdOverrides: { task: "90000" } }), agent: "scout" }),
+		);
+		expect(sparse.compactionThresholdOverride).toBeUndefined();
+
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+		const settled = await runStructuredSubagent(
+			request({ session: exactSession, agent: "scout", retainArtifacts: true }),
+		);
+		expect(settled.policy.compactionThresholdOverride).toBe("80%");
+		expect(dispatched[0]?.compactionThresholdOverride).toBe("80%");
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 
 	it("reloads persisted per-agent service-tier overrides before each launch", async () => {

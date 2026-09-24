@@ -218,6 +218,16 @@ For task dispatch, model precedence is:
 
 Role aliases in either of the first two sources are expanded through `modelRoles`. The shared eval bridge can also supply an invocation-local model override ahead of the settings override; the task wire schema does not expose that field.
 
+Compaction-threshold overrides are separate from model and service-tier selection. An exact,
+case-sensitive `task.agentCompactionThresholdOverrides[agentName]` entry sets only that
+task/eval child session's threshold pair; it does not change the parent/main session. An absent
+entry leaves the child on the inherited global `compaction.thresholdPercent` and
+`compaction.thresholdTokens` values. Values are strings: `"80%"` sets an integer percentage
+threshold from 1 through 99 and disables fixed-token mode; `"90000"` sets a positive fixed-token
+threshold and disables percentage mode. Only task/eval launches look up this map; Vibe workers
+do not consult it.
+
+
 Service-tier precedence is independent of model selection: an exact, case-sensitive
 `task.agentServiceTierOverrides[agentName]` entry overrides `tier.subagent`; an absent entry preserves
 the global behavior. `inherit` snapshots the parent session's live per-family tiers (including

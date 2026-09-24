@@ -56,6 +56,7 @@ import { type EditMode } from "@oh-my-pi/pi-tui/tools/edit";
 import { normalizeEditMode } from "../utils/edit-mode";
 import { stringifyYamlConfig } from "@oh-my-pi/pi-utils/yaml-config";
 import { validateAgentServiceTierOverrides } from "./service-tier";
+import { validateAgentCompactionThresholdOverrides } from "./compaction-threshold";
 import { STATUS_LINE_SEGMENT_IDS } from "@oh-my-pi/pi-tui/status-line/schema";
 import {
 	type BashInterceptorRule,
@@ -3485,6 +3486,9 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 	},
 	"task.agentServiceTierOverrides": value => {
 		validateAgentServiceTierOverrides(value);
+	},
+	"task.agentCompactionThresholdOverrides": value => {
+		validateAgentCompactionThresholdOverrides(value);
 	},
 	"secrets.enabled": value => {
 		configureCredentialRedaction(value === true);
