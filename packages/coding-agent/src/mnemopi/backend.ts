@@ -305,27 +305,28 @@ export const mnemopiBackend: MemoryBackend = {
 		}
 		const content = input.content.trim();
 		if (!content) return { backend: "mnemopi", stored: 0, message: "Memory content is empty." };
-		const id = primary.rememberScoped(content, {
-			source: input.source || "coding-agent-memory-command",
-			importance: normalizeImportance(input.importance),
-			metadata: {
-				session_id: primary.sessionId,
-				cwd,
-				context: input.context ?? null,
-				operation: "memory.save",
-			},
-			scope: "bank",
-			extract: true,
-			extractEntities: true,
-			veracity: "user",
-			memoryType: "fact",
-		});
-		return {
-			backend: "mnemopi",
-			stored: id ? 1 : 0,
-			ids: id ? [id] : [],
-			message: id ? undefined : "Mnemopi did not return a stored memory id.",
-		};
+		let id: string;
+		try {
+			id = primary.rememberScoped(content, {
+				source: input.source || "coding-agent-memory-command",
+				importance: normalizeImportance(input.importance),
+				metadata: {
+					session_id: primary.sessionId,
+					cwd,
+					context: input.context ?? null,
+					operation: "memory.save",
+				},
+				scope: "bank",
+				extract: true,
+				extractEntities: true,
+				veracity: "user",
+				memoryType: "fact",
+			});
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			return { backend: "mnemopi", stored: 0, ids: [], message: `Mnemopi did not store the memory: ${reason}` };
+		}
+		return { backend: "mnemopi", stored: 1, ids: [id] };
 	},
 
 	async preCompactionContext(messages, _settings, session): Promise<string | undefined> {
