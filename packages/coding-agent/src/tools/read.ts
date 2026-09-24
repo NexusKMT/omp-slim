@@ -28,6 +28,13 @@ import {
 	prompt,
 	readImageMetadata,
 } from "@oh-my-pi/pi-utils";
+import {
+	cfgIdaAvailable,
+	EXECUTABLE_SNIFF_BYTES,
+	isExecutableFile,
+	isExecutableHeader,
+	isIdaDatabasePath,
+} from "../ida";
 import { normalizeToLF } from "../edit/normalize";
 import { getEditStore } from "../edit/store";
 import {
@@ -139,6 +146,7 @@ import {
 	selToOffsetLimit,
 } from "./read-selector";
 import { splitAddressableFileLines } from "@oh-my-pi/pi-tui/tools/hashline-format";
+import { readBinary, resolveBinaryViewPath } from "./read-binary";
 import { readSqlite, resolveSqliteReadPath } from "./read-sqlite";
 import {
 	getReadTextFileBridge,
@@ -834,7 +842,10 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 	readonly loadMode = "essential";
 	/** Rendered per access so the hashline guidance follows a live `edit.mode` change. */
 	get description(): string {
-		return prompt.render(readDescription, { IS_HL_MODE: resolveFileDisplayMode(this.session).hashLines });
+		return prompt.render(readDescription, {
+			IS_HL_MODE: resolveFileDisplayMode(this.session).hashLines,
+			BINARY_VIEWS: cfgIdaAvailable.get(this.session.settings),
+		});
 	}
 	readonly parameters = readSchema;
 	readonly strict = true;
@@ -1661,6 +1672,16 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				return readSqlite(sqlitePath, signal);
 			}
 
+			// `bin:main`, `bin:imports`, `bin:main:10-40`: an executable/IDB prefix
+			// routes to an IDA view; `:raw` keeps the byte-verbatim escape hatch.
+			if (question === undefined) {
+				const binaryParsed = parseSel(literalSplit.sel);
+				if (!isRawSelector(binaryParsed)) {
+					const binaryView = await resolveBinaryViewPath(this.session, literalSplit.path);
+					if (binaryView) return readBinary(this.session, binaryView, binaryParsed, signal);
+				}
+			}
+
 			const pdfCandidate = literalSplit.sel === undefined ? splitPdfImageReadPath(readPath) : null;
 			pdfImageRead =
 				pdfCandidate && (await probeLiteralPathExists(readPath, this.session.cwd)) === "missing"
@@ -1933,6 +1954,20 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 				(wholeFileBytes
 					? isProbablyBinaryHeader(wholeFileBytes.subarray(0, BINARY_SNIFF_BYTES))
 					: await isProbablyBinary(absolutePath));
+			// Executables and IDBs open in IDA instead of being refused. Speculative
+			// reads (lexicalAbsolutePath set) never launch IDA; they fall back to an
+			// ordinary execution that does.
+			if (
+				looksBinary &&
+				lexicalAbsolutePath === undefined &&
+				cfgIdaAvailable.get(this.session.settings) &&
+				(isIdaDatabasePath(absolutePath) ||
+					(wholeFileBytes
+						? isExecutableHeader(wholeFileBytes.subarray(0, EXECUTABLE_SNIFF_BYTES))
+						: await isExecutableFile(absolutePath)))
+			) {
+				return readBinary(this.session, { absolutePath, view: "" }, parsed, signal);
+			}
 			if (looksBinary) {
 				return toolResult<ReadToolDetails>({ resolvedPath: renderAbsolutePath, suffixResolution })
 					.text(

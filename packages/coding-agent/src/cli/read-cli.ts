@@ -10,6 +10,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { initializeWithSettings } from "../discovery";
+import { closeAllIdaDatabases } from "../ida";
 import { loadSkills } from "../extensibility/skills";
 import { InternalUrlRouter } from "../internal-urls/router";
 import { closeDaemonClients } from "../launch/client";
@@ -122,6 +123,8 @@ export async function runReadCommand(cmd: ReadCommandArgs): Promise<void> {
 		}
 		authStorage?.close();
 		await closeDaemonClients();
+		// Worker processes spawned for executable views keep the event loop alive.
+		await closeAllIdaDatabases();
 	}
 
 	if (failed) process.exit(1);

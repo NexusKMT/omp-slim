@@ -23,6 +23,9 @@
 - Added the `open_session` RPC command, which resumes the newest session in a directory or starts a new one there, so a pre-spawned RPC process can be bound to a conversation after startup.
 - Added the `set_event_filter` RPC command to forward only chosen session event types, and a `messageId` on RPC message start/update/end frames.
 - Added `openSession`, `setEventFilter`, `onPromptResult`, `onSessionSettled` and `waitForSettled` to the TypeScript and Python RPC clients. `promptAndWait` now waits for the prompt's own `prompt_result`.
+- Added IDA Pro support to `read`: executables (ELF/PE/Mach-O) and `.i64`/`.idb` databases open through idalib, with overview, pseudocode, asm, imports, exports, strings and xrefs views.
+- Added the discoverable `ida` tool to open, save, close and list databases, rename, comment, set types, make functions, and run persistent per-database Python via `exec` with helpers like `pseudocode()`, `xrefs_to()` and `callers()`. Databases are shared across agents in the same process.
+- Added the `ida.enabled`, `ida.python` and `ida.installDir` settings; IDA features appear only when a local IDA install with idalib is found.
 
 ### Changed
 
