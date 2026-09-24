@@ -457,19 +457,9 @@ describe("VaultProtocolHandler", () => {
 			const handler = new VaultProtocolHandler({ resolveObsidianBinary: () => null });
 			const resource = await handler.resolve(resourceUrl("vault://Work/Folder/note.md"));
 
-			// The vault directory may or may not be under an 8.3-spelled
-			// ancestor (os.tmpdir() is short-name on some Windows setups).
-			// Whatever the spelling of `root`, both paths must return the
-			// same spelling for the same physical file.
-			const asyncSource = resource.sourcePath;
-			if (asyncSource === undefined) {
-				throw new Error("Resolved vault resource is missing its source path");
-			}
-			const syncPath = resolveVaultUrlToPath("vault://Work/Folder/note.md");
-
-			// The sync bash path and the async read path must yield the same
-			// spelling for the same physical file (no short/long split).
-			expect(syncPath).toEqual(await fs.realpath(asyncSource));
+			// os.tmpdir() is short-name on some Windows setups; whatever the
+			// spelling of `root`, both paths must agree on the same file.
+			expect(resource.sourcePath).toBe(resolveVaultUrlToPath("vault://Work/Folder/note.md"));
 		});
 	});
 });

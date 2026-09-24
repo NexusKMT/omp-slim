@@ -135,21 +135,17 @@ describe("in-process VCS bindings", () => {
 		}
 	});
 
-	// PR CI loads the published addon, which predates the task-backed pre-abort fix.
-	test.skipIf(process.env.GITHUB_EVENT_NAME === "pull_request")(
-		"cancels a task-backed repository operation without replacing an aborted signal handler",
-		async () => {
-			const root = await repository();
-			const repo = vcsGitDiscover(root)!;
-			const controller = new AbortController();
-			const onAbort = () => {};
-			controller.signal.onabort = onAbort;
-			controller.abort();
+	test("cancels a task-backed repository operation without replacing an aborted signal handler", async () => {
+		const root = await repository();
+		const repo = vcsGitDiscover(root)!;
+		const controller = new AbortController();
+		const onAbort = () => {};
+		controller.signal.onabort = onAbort;
+		controller.abort();
 
-			await expect(repo.head(controller.signal)).rejects.toMatchObject({ name: "VcsError", code: "Canceled" });
-			expect(controller.signal.onabort).toBe(onAbort);
-		},
-	);
+		await expect(repo.head(controller.signal)).rejects.toMatchObject({ name: "VcsError", code: "Canceled" });
+		expect(controller.signal.onabort).toBe(onAbort);
+	});
 });
 
 describe("VcsRepo", () => {

@@ -12,7 +12,7 @@ use std::{ffi::OsStr, path::Component};
 #[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 #[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{GetLongPathNameW, GetShortPathNameW};
+use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
 
 /// Normalizes shell-facing path aliases before `std::fs` sees them.
 #[allow(clippy::missing_const_for_fn, reason = "Windows implementation allocates")]
@@ -278,16 +278,20 @@ pub trait PathExt {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	#[cfg(windows)]
+	use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
 
-	/// `GetShortPathNameW` is the deterministic inverse of
-	/// `GetLongPathNameW`: compute the short form of the temp dir, feed it in,
-	/// and assert the long form comes back. This actually exercises 8.3
-	/// expansion (and fails if the expansion is reverted) on any host, even
-	/// one whose own paths are already long-form.
+	/// A short-spelled path expands back to the long spelling of the same
+	/// directory. Uses a fresh long-named directory so the input really has a
+	/// distinct 8.3 alias; skips on volumes that do not generate short names.
 	#[cfg(windows)]
 	#[test]
 	fn expand_to_long_path_resolves_short_names() {
-		let long = std::env::temp_dir();
+		const LONG_NAME: &str = "brush-core-long-name-probe";
+		let root = tempfile::tempdir().expect("tempdir");
+		let long = root.path().join(LONG_NAME);
+		std::fs::create_dir(&long).expect("create long-named dir");
+
 		let wide: Vec<u16> = long.as_os_str().encode_wide().chain(Some(0)).collect();
 		let needed = unsafe { GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
 		assert!(needed > 0, "GetShortPathNameW failed for {}", long.display());
@@ -296,29 +300,15 @@ mod tests {
 		assert!(written > 0, "GetShortPathNameW fill failed for {}", long.display());
 		buf.truncate(written as usize);
 		let short = PathBuf::from(std::ffi::OsString::from_wide(&buf));
+		if short.file_name() == long.file_name() {
+			return;
+		}
 
-		// Both spellings must collapse to the identical long-form string;
-		// `canonicalize` is deliberately avoided here because it adds a
-		// `\\?\` extended prefix and resolves symlinks — neither is part of
-		// the identity this function stores.
 		let expanded = expand_to_long_path(&short);
-		assert_eq!(expand_to_long_path(&long), expanded);
-
-		let short_name_segment = |seg: std::path::Component<'_>| {
-			let s = seg.as_os_str().to_string_lossy();
-			if let Some(tilde) = s.find('~') {
-				let after = &s[tilde + 1..];
-				!after.is_empty() && after.chars().all(|c| c.is_ascii_digit())
-			} else {
-				false
-			}
-		};
-		assert!(
-			!expanded.components().any(short_name_segment),
-			"expand_to_long_path left an 8.3 short segment: {} -> {}",
-			short.display(),
-			expanded.display()
-		);
+		assert_eq!(expanded.file_name(), Some(OsStr::new(LONG_NAME)), "from {}", short.display());
+		// Same result as expanding the long spelling: one identity, no `\\?\`
+		// prefix, no symlink resolution.
+		assert_eq!(expanded, expand_to_long_path(&long));
 	}
 
 	#[test]
