@@ -510,12 +510,12 @@ export interface ProviderWindowStat {
  * allowance is a separate pool from the umbrella window it caps - `claude.ts` marks the Fable
  * weekly cap `tier` without `shared` precisely so it cannot gate Opus or Sonnet requests - and
  * reporting it separately keeps a spent scoped cap visible next to the umbrella remainder.
- * `sharedGroup` is the opposite signal: one upstream pool reported under several routing labels,
- * which the collapse pass already merges, so it never becomes a meter. Codex meters that carry no
- * tier fall back to the limit-id slug.
+ * Only Anthropic and Codex use `tier` for such a pool; other providers (Copilot, Devin, Muse Code)
+ * put the subscription plan there, which must not split one window per plan. Codex meters that
+ * carry no tier fall back to the limit-id slug.
  */
 function meterForLimit(report: UsageReport, limit: UsageLimit): string | undefined {
-	if (limit.scope.sharedGroup !== undefined) return undefined;
+	if (report.provider !== "anthropic" && report.provider !== "openai-codex") return undefined;
 	const tier = limit.scope.tier?.trim().toLowerCase();
 	if (tier) return tier;
 	if (report.provider !== "openai-codex") return undefined;

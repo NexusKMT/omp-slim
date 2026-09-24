@@ -172,6 +172,38 @@ describe("computeProviderWindowStats", () => {
 		expect(stats[0].remainingAccounts).toBeCloseTo(0.3);
 	});
 
+	it("does not split one window by subscription plan", () => {
+		// Copilot, Devin, and Muse Code carry the plan name in `scope.tier`; accounts on different
+		// plans still burn the same window, so they stay one capacity bucket.
+		const monthly = 30 * 24 * HOUR;
+		const reports = [
+			makeReport("github-copilot", "individual@example.test", [
+				makeLimit({
+					id: "copilot:premium",
+					provider: "github-copilot",
+					tier: "individual",
+					usedFraction: 0.3,
+					durationMs: monthly,
+					windowId: "monthly",
+				}),
+			]),
+			makeReport("github-copilot", "business@example.test", [
+				makeLimit({
+					id: "copilot:premium",
+					provider: "github-copilot",
+					tier: "business",
+					usedFraction: 0.5,
+					durationMs: monthly,
+					windowId: "monthly",
+				}),
+			]),
+		];
+		const stats = computeProviderWindowStats(reports);
+		expect(stats.map(stat => [stat.window, stat.meter, stat.accounts])).toEqual([["30d", undefined, 2]]);
+		expect(stats[0].usedAccounts).toBeCloseTo(0.8);
+		expect(stats[0].remainingAccounts).toBeCloseTo(1.2);
+	});
+
 	it("reports Spark-only capacity instead of dropping the meter", () => {
 		const report = makeReport("openai-codex", "spark@example.test", [
 			makeLimit({
