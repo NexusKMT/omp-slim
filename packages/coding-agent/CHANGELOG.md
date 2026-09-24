@@ -8,6 +8,7 @@
 - Added dictation support to `/btw` follow-up input, including microphone controls on the follow-up line.
 - Added opt-in CUDA support to the Nix package for tiny-model inference with the ONNX Runtime CUDA execution provider.
 - Added support for multiple simultaneous browser instances, allowing tabs from browsers such as Chrome and Edge to remain connected and usable at the same time.
+- Added a per-server `instructions: false` MCP option that leaves that server's instructions out of the system prompt while keeping its tools, for servers whose guidance conflicts with your tool policy ([#13196](https://github.com/can1357/oh-my-pi/pull/13196) by [@alphastorm](https://github.com/alphastorm)).
 
 ### Changed
 
