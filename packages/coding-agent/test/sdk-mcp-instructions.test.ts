@@ -15,6 +15,7 @@ import {
 	BOUNDED_GUIDANCE_MODE,
 	BOUNDED_GUIDANCE_TOOL_COUNT,
 	CONTEXT_MODE_NO_INSTRUCTIONS_MODE,
+	OVERSIZED_SCHEMA_MODE,
 	SERVER_INSTRUCTIONS,
 	TOOL_RESULT,
 } from "./fixtures/instructions-mcp";
@@ -33,6 +34,16 @@ const CONTEXT_MODE_ROUTE = '- "ctx_execute" → `xd://mcp__context_mode_ctx_exec
 const CONTEXT_MODE_MCP_TOOL_NAME = "mcp__context_mode_ctx_execute";
 /** Sentinel proving the user's append prompt stays a block of its own. */
 const USER_APPEND_MARKER = "USER_APPEND_SENTINEL_7d13f2: prefer Bun APIs over Node APIs.";
+/** The route section's instruction to read an `xd://` path before first use. */
+const READ_FIRST_CLAUSE = "for docs + JSON schema before first use";
+
+/** The rendered `## MCP Tool Routes` section, up to the next heading. */
+function routeSection(prompt: string): string {
+	const start = prompt.indexOf(MCP_ROUTE_SECTION);
+	if (start === -1) return "";
+	const end = prompt.indexOf("\n#", start + MCP_ROUTE_SECTION.length);
+	return prompt.slice(start, end === -1 ? undefined : end);
+}
 
 describe("createAgentSession MCP server instructions (deferred UI)", () => {
 	let tempDir: string;
@@ -311,10 +322,53 @@ describe("createAgentSession MCP server instructions (deferred UI)", () => {
 		try {
 			// Without `hasUI` and with a zero startup window, discovery settles
 			// before the first prompt is built. The inlined docs hold the
-			// description, so the route line keeps only the name mapping.
+			// description and schema, so the route line keeps only the name
+			// mapping and the section asks for no discovery read.
 			const prompt = session.systemPrompt.join("\n");
 			expect(prompt).toContain("## mcp__instr_do_thing");
 			expect(prompt.split("\n")).toContain('- "do\\u0060thing" → `xd://mcp__instr_do_thing`');
+			expect(routeSection(prompt)).not.toContain(READ_FIRST_CLAUSE);
+		} finally {
+			await session.dispose();
+		}
+	}, 20_000);
+
+	it("lists an inline-policy MCP tool whose docs overflow the cap once, on its route line", async () => {
+		await Bun.write(
+			path.join(tempDir, ".mcp.json"),
+			JSON.stringify({
+				mcpServers: {
+					instr: { type: "stdio", command: process.execPath, args: [FIXTURE_PATH, OVERSIZED_SCHEMA_MODE] },
+				},
+			}),
+		);
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir: tempDir,
+			modelRegistry,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "tools.xdevDocs": "inline", "mcp.startupTimeoutMs": 0 }),
+			model: getBundledModel("openai", "gpt-4o-mini"),
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableLsp: false,
+			skipPythonPreflight: true,
+			enableMCP: true,
+		});
+		try {
+			// The schema exceeds the per-device docs cap, so the docs fall back to
+			// a one-line entry even under the inline policy. That entry is the
+			// route line, and the section asks for a read before first use.
+			const prompt = session.systemPrompt.join("\n");
+			expect(prompt).not.toContain("## mcp__instr_do_thing");
+			expect(prompt.split("\n")).toContain(
+				'- "do\\u0060thing" → `xd://mcp__instr_do_thing` — Fixture tool returning a deterministic sentinel.',
+			);
+			expect(prompt.split("xd://mcp__instr_do_thing")).toHaveLength(2);
+			expect(routeSection(prompt)).toContain(READ_FIRST_CLAUSE);
 		} finally {
 			await session.dispose();
 		}

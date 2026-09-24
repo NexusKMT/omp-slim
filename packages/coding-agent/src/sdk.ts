@@ -231,8 +231,10 @@ import {
 	isMountableUnderXdev,
 	type LspStartupServerInfo,
 	listXdevTools,
+	planXdevPromptDocs,
 	ReadTool,
 	releaseComputerSessionsForOwner,
+	renderXdevPromptDocs,
 	resolveMountedXdevExecutable,
 	supportsExternalThinking,
 	type Tool,
@@ -240,8 +242,6 @@ import {
 	WebSearchTool,
 	WriteTool,
 	warmupLspServers,
-	xdevCatalogSummaries,
-	xdevDocsAll,
 	xdevEntries,
 } from "./tools";
 import { createBrowserPrelude } from "./tools/browser";
@@ -3327,19 +3327,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			const appendParts: string[] = [];
 			if (memoryInstructions) appendParts.push(memoryInstructions);
 			if (autoLearnInstructions) appendParts.push(autoLearnInstructions);
-			// List each mounted MCP tool once. A routed tool that the catalog would
-			// list as a one-line entry carries that summary on its route line and
-			// gets no catalog line; a tool the route bound omits keeps its catalog line.
-			const xdevDocsMode = settings.get("tools.xdevDocs");
-			const xdevInlineDevices = settings.get("tools.xdevInlineDevices");
-			const xdevCatalog = toolSession.xdev
-				? xdevCatalogSummaries(toolSession.xdev, xdevDocsMode, xdevInlineDevices)
+			// List each mounted MCP tool once. A routed tool that the xd:// catalog
+			// would list carries its catalog summary on the route line and gets no
+			// catalog line; a tool the route bound omits keeps its catalog line.
+			const xdevPromptDocs = toolSession.xdev
+				? planXdevPromptDocs(
+						toolSession.xdev,
+						settings.get("tools.xdevDocs"),
+						settings.get("tools.xdevInlineDevices"),
+					)
 				: undefined;
 			const projection = projectMountedMCPXdevGuidance(
 				collectMountedMCPToolRoutes(toolSession.xdev ? listXdevTools(toolSession.xdev) : []),
 			);
 			const routedCatalogNames = new Set(
-				projection.mappings.filter(mapping => xdevCatalog?.has(mapping.name)).map(mapping => mapping.name),
+				projection.mappings
+					.filter(mapping => xdevPromptDocs?.catalog.has(mapping.name))
+					.map(mapping => mapping.name),
 			);
 			if (projection.mappings.length > 0 || projection.hasOmittedMappings) {
 				appendParts.push(
@@ -3348,8 +3352,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							tools: projection.mappings.map(mapping => ({
 								mcpToolName: mapping.label,
 								path: mapping.path,
-								summary: xdevCatalog?.get(mapping.name),
+								summary: xdevPromptDocs?.catalog.get(mapping.name),
 							})),
+							hasCatalogOnlyTools: routedCatalogNames.size > 0,
 							hasOmittedTools: projection.hasOmittedMappings,
 						})
 						.trim(),
@@ -3385,9 +3390,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				cwd: promptCwd,
 				additionalWorkspaceRoots: sessionManager.getAdditionalDirectories(),
 				xdevTools: toolSession.xdev ? xdevEntries(toolSession.xdev) : [],
-				xdevDocs: toolSession.xdev
-					? xdevDocsAll(toolSession.xdev, xdevDocsMode, xdevInlineDevices, routedCatalogNames)
-					: "",
+				xdevDocs: xdevPromptDocs ? renderXdevPromptDocs(xdevPromptDocs, routedCatalogNames) : "",
 				resolvedCustomPrompt: options.customSystemPrompt,
 				systemPromptTemplate: options.systemPromptTemplate,
 				skills: settings.get("skillful") ? (session?.skills ?? skills) : [],
