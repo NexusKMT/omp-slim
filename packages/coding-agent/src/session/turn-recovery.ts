@@ -21,6 +21,7 @@ import type {
 import { calculateRateLimitBackoffMs, parseRateLimitReason } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { extractProviderRetryHint } from "@oh-my-pi/pi-ai/utils/retry-after";
+import { fallbackCreditTargets } from "@oh-my-pi/pi-catalog/compat/fallback-credit";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import { isFireworksFastModelId, toFireworksBaseModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -272,18 +273,6 @@ type UsageLimitOutcome = {
 	reportResetAtMs: number | undefined;
 };
 
-const ANTHROPIC_PERMITTED_FALLBACK_TARGETS: Record<string, Record<string, true>> = {
-	"claude-fable-5": { "claude-opus-4-8": true, "claude-opus-5": true, "claude-opus-5-5": true },
-	"claude-fable-5-1": { "claude-opus-4-8": true, "claude-opus-5": true, "claude-opus-5-5": true },
-};
-
-function isPermittedAnthropicFallbackTarget(sourceModelId: string, targetModelId: string): boolean {
-	const targets = ANTHROPIC_PERMITTED_FALLBACK_TARGETS[sourceModelId];
-	if (targets) {
-		return targets[targetModelId] === true;
-	}
-	return targetModelId.includes("opus");
-}
 /** Owns terminal-stop recovery, automatic retries, and fallback routing. */
 export class TurnRecovery {
 	readonly #host: TurnRecoveryHost;
@@ -1993,6 +1982,11 @@ export class TurnRecovery {
 			: this.#host.agent.state.messages.findLast(
 					(message): message is AssistantMessage => message.role === "assistant" && message !== failedMessage,
 				);
+		// Permitted redemption targets are catalog policy on the refused model.
+		const failedModel = failedMessage.fallbackCreditHandle
+			? this.#host.modelRegistry.find(failedMessage.provider, failedMessage.model)
+			: undefined;
+		const creditTargets = failedModel ? fallbackCreditTargets(failedModel) : [];
 		for (const role of this.retryFallbackChainKeys(currentSelector)) {
 			for (const selector of this.findRetryFallbackCandidates(role, currentSelector, undefined, options)) {
 				if (this.isRetryFallbackSelectorSuppressed(selector)) continue;
@@ -2020,7 +2014,7 @@ export class TurnRecovery {
 					failedMessage.fallbackCreditHandle !== undefined &&
 					candidate.api === "anthropic-messages" &&
 					candidate.provider === failedMessage.provider &&
-					isPermittedAnthropicFallbackTarget(failedMessage.model, candidate.id) &&
+					creditTargets.includes(candidate.id) &&
 					Date.now() < failedMessage.fallbackCreditHandle.expiresAt;
 				if (
 					!canRedeemFallbackCredit &&

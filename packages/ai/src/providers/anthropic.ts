@@ -1487,43 +1487,40 @@ function unwrapAnthropicThinkingEnvelope(text: string): string | undefined {
 	return stripped ? current : undefined;
 }
 
-function formatEchoedRefusalContent(content: readonly unknown[]): unknown[] {
-	const filtered = content.filter(block => {
-		if (!isRecord(block)) return false;
-		if (block.type === "toolCall" || block.type === "tool_use") return false;
-		return true;
-	});
-	const wireBlocks = filtered.map(block => {
-		if (isRecord(block)) {
-			if (block.type === "text" && typeof block.text === "string") {
+/**
+ * The refused response's content as the continuation prefix: client tool
+ * calls (no matching tool_result) are omitted and a trailing text block is
+ * right-trimmed, per the fallback-credit continuation contract.
+ */
+function refusalContinuationPrefix(content: AssistantMessage["content"]): AssistantMessage["content"] {
+	const prefix = structuredClone(content.filter(block => block.type !== "toolCall"));
+	const last = prefix.at(-1);
+	if (last?.type === "text") last.text = last.text.trimEnd();
+	return prefix;
+}
+
+/** Wire form of {@link refusalContinuationPrefix} for the appended assistant message. */
+function formatEchoedRefusalContent(content: AssistantMessage["content"]): unknown[] {
+	return refusalContinuationPrefix(content).map(block => {
+		switch (block.type) {
+			case "text":
 				return { type: "text", text: block.text };
-			}
-			if (block.type === "thinking" && typeof block.thinking === "string") {
+			case "thinking":
 				return {
 					type: "thinking",
 					thinking: block.thinking,
-					...(typeof block.thinkingSignature === "string" ? { signature: block.thinkingSignature } : {}),
+					...(block.thinkingSignature ? { signature: block.thinkingSignature } : {}),
 				};
-			}
-			if (block.type === "redactedThinking" && typeof block.data === "string") {
+			case "redactedThinking":
 				return { type: "redacted_thinking", data: block.data };
-			}
-			if (block.type === "fallback") {
+			case "fallback":
 				return { type: "fallback", from: block.from, to: block.to };
-			}
-			if (block.type === "anthropicServerTool" && isRecord(block.block)) {
-				return structuredClone(block.block);
-			}
+			case "anthropicServerTool":
+				return block.block;
+			default:
+				return block;
 		}
-		return structuredClone(block);
 	});
-	if (wireBlocks.length > 0) {
-		const last = wireBlocks[wireBlocks.length - 1];
-		if (isRecord(last) && last.type === "text" && typeof last.text === "string") {
-			last.text = last.text.trimEnd();
-		}
-	}
-	return wireBlocks;
 }
 
 function isAnthropicBadRequest(error: unknown): boolean {
@@ -2504,6 +2501,25 @@ const streamAnthropicOnce = (
 				output.stopReason = "stop";
 				firstTokenTime = undefined;
 			};
+			// A rebuilt body no longer matches the refused request, so it cannot carry
+			// the credit token. When the refused turn already ran server tools, a
+			// tokenless retry would re-run and re-bill them: surface the failure instead.
+			const forfeitFallbackCredit = (streamFailure: unknown): void => {
+				if (
+					options?.fallbackCreditRedemption?.refusedContent?.some(block => block.type === "anthropicServerTool")
+				) {
+					logger.warn("anthropic: fallback credit cannot be forfeited after server tools ran; surfacing error", {
+						model: model.id,
+					});
+					throw streamFailure;
+				}
+				usingFallbackCredit = false;
+				fallbackCreditShape = undefined;
+			};
+			const rebuildParams = async (streamFailure: unknown): Promise<MessageCreateParamsStreaming> => {
+				if (usingFallbackCredit) forfeitFallbackCredit(streamFailure);
+				return prepareParams();
+			};
 			while (true) {
 				activeAbortTracker = createAbortSourceTracker(options?.signal);
 				const { requestSignal } = activeAbortTracker;
@@ -3160,11 +3176,7 @@ const streamAnthropicOnce = (
 							providerSessionState.strictToolsDisabled = true;
 						}
 						disableStrictTools = true;
-						if (usingFallbackCredit) {
-							dropAnthropicStrictTools(params);
-						} else {
-							params = await prepareParams();
-						}
+						params = await rebuildParams(streamFailure);
 						resetStreamOutputState();
 						continue;
 					}
@@ -3210,21 +3222,7 @@ const streamAnthropicOnce = (
 							continue;
 						}
 						if (errMessage.includes("fallback_credit_token")) {
-							const hasExecutedServerTools = redemption.refusedContent?.some(
-								block =>
-									isRecord(block) &&
-									(block.type === "anthropicServerTool" || block.type === "server_tool_use"),
-							);
-							if (hasExecutedServerTools) {
-								logger.warn(
-									"anthropic: fallback credit token rejected and refused turn ran server tools; surfacing error",
-									{
-										model: model.id,
-										error: errMessage,
-									},
-								);
-								throw streamFailure;
-							}
+							forfeitFallbackCredit(streamFailure);
 							logger.warn(
 								"anthropic: fallback credit token rejected, falling back to standard request without token",
 								{
@@ -3232,8 +3230,6 @@ const streamAnthropicOnce = (
 									error: errMessage,
 								},
 							);
-							usingFallbackCredit = false;
-							fallbackCreditShape = undefined;
 							dropAllThinking = true;
 							params = await prepareParams();
 							resetStreamOutputState();
@@ -3253,7 +3249,8 @@ const streamAnthropicOnce = (
 							version: getClaudeCodeVersion(),
 						});
 						client = createClient(model, { ...clientArgs, disableStrictTools }).client;
-						params = await prepareParams();
+						// The version only changes client headers; a redemption keeps its frozen body.
+						if (!usingFallbackCredit) params = await prepareParams();
 						providerRetryAttempt = 0;
 						output.content.length = 0;
 						output.model = model.id;
@@ -3281,7 +3278,7 @@ const streamAnthropicOnce = (
 						prefixBindingRetryAttempted = true;
 						prefixMismatchBehavior = undefined;
 						dropAllThinking = !rememberPrefixBindingFailure(params, streamFailureMessage, providerSessionState);
-						params = await prepareParams();
+						params = await rebuildParams(streamFailure);
 						providerRetryAttempt = 0;
 						output.content.length = 0;
 						output.model = model.id;
@@ -3315,7 +3312,7 @@ const streamAnthropicOnce = (
 							providerSessionState.replayUnsignedThinkingDisabled = true;
 						}
 						forceDemoteUnsignedThinking = true;
-						params = await prepareParams();
+						params = await rebuildParams(streamFailure);
 						providerRetryAttempt = 0;
 						output.content.length = 0;
 						output.model = model.id;
@@ -3357,7 +3354,7 @@ const streamAnthropicOnce = (
 						}
 						droppedAllThinkingForSignature = true;
 						dropAllThinking = true;
-						params = await prepareParams();
+						params = await rebuildParams(streamFailure);
 						providerRetryAttempt = 0;
 						output.content.length = 0;
 						output.model = model.id;
@@ -3385,7 +3382,7 @@ const streamAnthropicOnce = (
 							providerSessionState.fastModeDisabled = true;
 						}
 						dropFastMode = true;
-						params = await prepareParams();
+						params = await rebuildParams(streamFailure);
 						providerRetryAttempt = 0;
 						output.content.length = 0;
 						output.model = model.id;
@@ -3451,10 +3448,9 @@ const streamAnthropicOnce = (
 				fallbackCreditShape === "continuation" &&
 				options?.fallbackCreditRedemption?.refusedContent
 			) {
-				const prefixBlocks = formatEchoedRefusalContent(options.fallbackCreditRedemption.refusedContent);
-				if (prefixBlocks.length > 0) {
-					output.content = [...(prefixBlocks as unknown as typeof output.content), ...output.content];
-				}
+				// The response continues the echoed prefix; keep it in the stored turn in
+				// AssistantMessage form so later replays keep signatures and server tools.
+				output.content.unshift(...refusalContinuationPrefix(options.fallbackCreditRedemption.refusedContent));
 			}
 			output.duration = performance.now() - startTime;
 			if (firstTokenTime) output.ttft = firstTokenTime - startTime;

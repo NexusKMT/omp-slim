@@ -3516,8 +3516,9 @@ describe("AgentSession retry fallback", () => {
 	});
 
 	it("transfers Anthropic fallback credit redemption across same-provider refusal fallback even with signed thinking", async () => {
-		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
-		const fallbackModel = getBundledModel("anthropic", "claude-opus-4-1");
+		// Fable → Opus 4.8 is a catalog-permitted fallback-credit target pair.
+		const primaryModel = getBundledModel("anthropic", "claude-fable-5");
+		const fallbackModel = getBundledModel("anthropic", "claude-opus-4-8");
 		if (!primaryModel || !fallbackModel) {
 			throw new Error("Expected bundled test models to exist");
 		}

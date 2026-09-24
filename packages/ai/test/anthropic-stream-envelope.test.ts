@@ -2205,7 +2205,7 @@ describe("anthropic stream envelope handling", () => {
 		expect(attemptedBodies[1].fallback_credit_token).toBeUndefined();
 	});
 
-	it("preserves anthropicServerTool wire block in echoed refusal content", async () => {
+	it("echoes refused thinking and server tools and keeps them replayable in the stored turn", async () => {
 		let capturedParams: Record<string, unknown> | undefined;
 		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
 			capturedParams = rawParams as Record<string, unknown>;
@@ -2250,6 +2250,7 @@ describe("anthropic stream envelope handling", () => {
 				betas: ["fallback-credit-2026-06-01"],
 				expiresAt: Date.now() + 60000,
 				refusedContent: [
+					{ type: "thinking", thinking: "Search first.", thinkingSignature: "sig-refused" },
 					{
 						type: "anthropicServerTool",
 						block: {
@@ -2275,18 +2276,23 @@ describe("anthropic stream envelope handling", () => {
 		const assistantMsg = messages[1];
 		expect(assistantMsg.role).toBe("assistant");
 		const content = assistantMsg.content as Array<Record<string, unknown>>;
-		expect(content).toHaveLength(2);
-		// Server tool is unwrapped to wire block
-		expect(content[0]).toEqual({
-			type: "server_tool_use",
-			id: "stu_123",
-			name: "web_search",
-			input: { query: "weather" },
-		});
-		expect(content[1]).toEqual({
-			type: "text",
-			text: "Based on search:",
-		});
+		expect(content).toEqual([
+			{ type: "thinking", thinking: "Search first.", signature: "sig-refused" },
+			// Server tool is unwrapped to wire block
+			{ type: "server_tool_use", id: "stu_123", name: "web_search", input: { query: "weather" } },
+			{ type: "text", text: "Based on search:" },
+		]);
+
+		// The stored turn carries the echoed prefix in AssistantMessage form, so a
+		// later replay still sends the signed thinking and the server tool call.
+		const replay = convertAnthropicMessages([context.messages[0], structuredCloneJSON(result)], fallbackModel, false);
+		const replayed = replay.find(message => message.role === "assistant");
+		expect(replayed?.content).toEqual([
+			{ type: "thinking", thinking: "Search first.", signature: "sig-refused" },
+			{ type: "server_tool_use", id: "stu_123", name: "web_search", input: { query: "weather" } },
+			// The mock continuation streams no text delta, so only the prefix text replays.
+			expect.objectContaining({ type: "text", text: "Based on search:" }),
+		]);
 	});
 
 	it("surfaces error when transient redemption retries run out without stepping down", async () => {
@@ -2376,5 +2382,58 @@ describe("anthropic stream envelope handling", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("fallback_credit_token");
 		expect(attempts).toBe(1);
+	});
+
+	it("forfeits the credit token when an in-loop retry rebuilds the request body", async () => {
+		const attemptedBodies: Array<Record<string, unknown>> = [];
+		vi.spyOn(AnthropicMessages.prototype, "create").mockImplementation(((rawParams: unknown) => {
+			attemptedBodies.push(structuredClone(rawParams as Record<string, unknown>));
+			if (attemptedBodies.length === 1) {
+				const grammarError = new Error(
+					'400 {"type":"error","error":{"type":"invalid_request_error","message":"The compiled grammar is too large"}}',
+				);
+				Object.assign(grammarError, { status: 400 });
+				return {
+					withResponse: async () => {
+						throw grammarError;
+					},
+				} as never;
+			}
+			return createMockRequest([
+				{ type: "message_start", message: { id: "msg_rebuilt", usage: { input_tokens: 10, output_tokens: 5 } } },
+				{ type: "content_block_start", index: 0, content_block: { type: "text", text: "Rebuilt" } },
+				{ type: "content_block_stop", index: 0 },
+				{
+					type: "message_delta",
+					delta: { stop_reason: "end_turn", stop_sequence: null },
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+				{ type: "message_stop" },
+			]) as never;
+		}) as never);
+
+		const stream = streamAnthropic({ ...model, id: "claude-opus-4-8" }, context, {
+			apiKey: "sk-ant-test",
+			fallbackCreditRedemption: {
+				token: "fct_strict",
+				prefillClaim: false,
+				params: {
+					model: "claude-fable-5",
+					messages: [{ role: "user", content: "Hello" }],
+					tools: [{ name: "read", input_schema: { type: "object", properties: {} }, strict: true }],
+					stream: true,
+				},
+				betaHeader: "fallback-credit-2026-06-01",
+				expiresAt: Date.now() + 60000,
+			},
+		});
+		const result = await stream.result();
+
+		expect(result.stopReason).toBe("stop");
+		expect(attemptedBodies).toHaveLength(2);
+		expect(attemptedBodies[0].fallback_credit_token).toBe("fct_strict");
+		// Stripping strict tools changes `tools`, which must match the refused
+		// request exactly, so the retry is a standard request without the token.
+		expect(attemptedBodies[1].fallback_credit_token).toBeUndefined();
 	});
 });

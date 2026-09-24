@@ -1473,5 +1473,6 @@ export interface AnthropicFallbackCreditHandle {
 	betas?: readonly string[];
 	betaHeader?: string;
 	expiresAt: number;
-	refusedContent?: readonly unknown[];
+	/** The refused response's content, in `AssistantMessage` block form. */
+	refusedContent?: AssistantMessage["content"];
 }
