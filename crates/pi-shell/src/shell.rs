@@ -3457,6 +3457,7 @@ mod tests {
 			"date",
 			"diff",
 			"dirname",
+			#[cfg(unix)]
 			"errno",
 			"fd",
 			"find",

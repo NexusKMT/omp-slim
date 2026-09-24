@@ -352,7 +352,10 @@ pub mod matchers {
 		impl WalkEntry {
 			/// Create a new WalkEntry for a specific file.
 			pub fn new(path: impl Into<PathBuf>, depth: usize, follow: Follow) -> Self {
-				Self { path: path.into(), depth, follow, meta: OnceCell::new(), display: None }
+				let path = path.into();
+				let display = cfg!(windows)
+					.then(|| PathBuf::from(pi_walker::normalize_path(&path).as_ref()));
+				Self { path, depth, follow, meta: OnceCell::new(), display }
 			}
 
 			/// Get the path to this entry.
@@ -379,7 +382,7 @@ pub mod matchers {
 					Ok(rel) => operand.join(rel),
 					Err(_) => return,
 				};
-				self.display = Some(display);
+				self.display = Some(PathBuf::from(pi_walker::normalize_path(&display).as_ref()));
 			}
 
 			/// Get the name of this entry.
