@@ -71,9 +71,13 @@ export function createSetupHost(ctx: InteractiveModeContext): SetupHost {
 		get webSearchOrder() {
 			const configured = ctx.settings.getModelRole("web")?.trim();
 			if (!configured) return [];
-			const model = resolveModelRoleValue(configured, roleCandidatePool("web", ctx.settings, ctx.session.modelRegistry), {
-				settings: ctx.settings,
-			}).model;
+			const model = resolveModelRoleValue(
+				configured,
+				roleCandidatePool("web", ctx.settings, ctx.session.modelRegistry),
+				{
+					settings: ctx.settings,
+				},
+			).model;
 			if (model?.provider === "web") {
 				const option = SEARCH_PROVIDER_OPTIONS.find(candidate => candidate.value === model.id);
 				if (option && option.value !== "auto" && option.value !== "none") return [option.value];
