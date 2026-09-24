@@ -36,7 +36,7 @@ function isWebSearchGrounding(id: SearchProviderId): id is WebSearchGrounding {
 }
 
 function webRoleModels(ctx: InteractiveModeContext) {
-	return ctx.session.modelRegistry.getAll("all").filter(getRoleInfo("web", ctx.settings).accepts);
+	return ctx.session.modelRegistry.getAvailable("all").filter(getRoleInfo("web", ctx.settings).accepts);
 }
 
 function resolveWebSearchSelection(ctx: InteractiveModeContext, id: SearchProviderId) {
