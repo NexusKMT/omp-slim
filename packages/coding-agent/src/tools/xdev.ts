@@ -123,9 +123,12 @@ function renderDocs(inst: Tool, heading = "#", descriptionCap?: number): string 
  * schema declares one. Throws ToolError; schema-mismatch errors carry `docs()`
  * for repair. A device with `lenientArgValidation` receives the raw args on a
  * schema mismatch instead — the same contract the agent loop and the eval
- * tool bridge honor — so a tool that owns its own refusal (the Dispatch tools
- * re-validate with a strict schema and name the precise problem) is never
- * pre-empted by the host's generic wording plus the full docs.
+ * tool bridge honor (`AgentTool.lenientArgValidation`) — so a tool that owns
+ * its own refusal/repair (e.g. `todo` inferring an omitted `op`) is never
+ * pre-empted by the host's generic wording plus the full docs. Lenience covers
+ * schema mismatch only: malformed JSON and non-object content still throw. The
+ * `__parseError`/`__rawJson` strip mirrors the agent loop so a payload cannot
+ * forge the loop's parse-failure sentinels.
  */
 function parseDeviceArgs(
 	device: Tool,

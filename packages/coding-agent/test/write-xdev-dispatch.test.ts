@@ -923,24 +923,23 @@ describe("device-only write transport for explicit lists omitting write", () => 
 });
 
 describe("device writes honor lenientArgValidation", () => {
-	// The Dispatch/Envoy extension tools set lenientArgValidation so their own
-	// strict re-validation can name the precise problem (unknown field, missing
-	// field, over-cap value). Before this contract, every xd:// write ran the
-	// host's validateToolArguments unconditionally and a mismatch returned the
-	// generic "Invalid args for xd://…" text plus the full tool doc — the
-	// wrapped tool's refusal never ran (LEGION-214).
+	// #12871: a device that sets lenientArgValidation and re-validates in
+	// `execute` must see the raw args on a schema mismatch. Previously every
+	// xd:// write ran the host's validateToolArguments unconditionally and a
+	// mismatch returned the generic "Invalid args for xd://…" text plus the
+	// full tool doc — the wrapped tool's own refusal never ran.
 	function fixtureDevice(lenient: boolean, seen: Record<string, unknown>[]): Tool {
 		return {
 			name: lenient ? "lenient_dev" : "strict_dev",
 			label: "fixture",
 			description: "fixture",
 			parameters: type({ op: "string" }),
-			...(lenient ? { lenientArgValidation: true } : {}),
+			lenientArgValidation: lenient,
 			async execute(_id: string, args: Record<string, unknown>) {
 				seen.push(args);
 				return { content: [{ type: "text" as const, text: "tool-owned refusal" }] };
 			},
-		} as Tool;
+		};
 	}
 
 	it("hands raw args to a lenient device on schema mismatch, and still refuses for a strict one", async () => {
