@@ -1020,7 +1020,18 @@ function resolveIntentMode(intent: AgentTool["intent"]): "require" | "optional" 
 	return "require";
 }
 
-function extractIntent(args: Record<string, unknown>): { intent?: string; strippedArgs: Record<string, unknown> } {
+/**
+ * Longest `i` value accepted as an intent. Intents are short labels (the
+ * coding-agent prompt asks for 2–6 words, ~50 chars); anything past this is a
+ * tool payload the model put in the wrong field, not a label.
+ */
+const MAX_INTENT_LENGTH = 200;
+
+function extractIntent(args: Record<string, unknown>): {
+	intent?: string;
+	strippedArgs: Record<string, unknown>;
+	misplacedPayloadError?: string;
+} {
 	const { [INTENT_FIELD]: intent, ...strippedArgs } = args;
 	if (typeof intent !== "string") {
 		return { strippedArgs };
@@ -1029,6 +1040,14 @@ function extractIntent(args: Record<string, unknown>): { intent?: string; stripp
 		.trim()
 		.replace(/\s*\.+$/, "")
 		.trim();
+	if (trimmed.length > MAX_INTENT_LENGTH) {
+		// Stripping `i` here would silently drop the payload and run the tool
+		// with whatever the model left in the real parameters.
+		return {
+			strippedArgs,
+			misplacedPayloadError: `\`${INTENT_FIELD}\` is a short intent label (at most ${MAX_INTENT_LENGTH} chars); the value you sent is ${trimmed.length} chars. The tool was not run. Put that content in the tool's own parameters and retry with a brief \`${INTENT_FIELD}\`.`,
+		};
+	}
 	return { intent: trimmed.length > 0 ? trimmed : undefined, strippedArgs };
 }
 
@@ -2754,8 +2773,13 @@ async function prepareToolCallDispatch(
 		prepared.set(toolCall.id, entry);
 		let argsForExecution = toolCall.arguments as Record<string, unknown>;
 		if (intentTracing) {
-			const { intent, strippedArgs } = extractIntent(toolCall.arguments);
+			const { intent, strippedArgs, misplacedPayloadError } = extractIntent(toolCall.arguments);
 			argsForExecution = strippedArgs;
+			if (misplacedPayloadError !== undefined) {
+				entry.args = strippedArgs;
+				entry.validationErrorMessage = misplacedPayloadError;
+				continue;
+			}
 			if (intent) {
 				toolCall.intent = intent;
 			} else if (typeof tool?.intent === "function") {

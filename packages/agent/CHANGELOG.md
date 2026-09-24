@@ -6,6 +6,10 @@
 
 - Added passive tool-call context: `beforeToolCall` can return `additionalContext`, and tools can report context through `ToolCallContext.addAdditionalContext`; it is sent as a developer message after the batch's tool results ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
 
+### Fixed
+
+- Fixed tool calls that put their payload in the intent field `i` (for example a file body in `write`) silently running with the leftover arguments; they now fail with an error telling the model to retry ([#13140](https://github.com/can1357/oh-my-pi/issues/13140))
+
 ## [18.3.0] - 2026-09-24
 
 ### Added

@@ -1532,6 +1532,56 @@ describe("agentLoop with AgentMessage", () => {
 		}
 	});
 
+	it("rejects a tool call whose intent field carries the payload instead of a label", async () => {
+		const writeSchema = type({ path: "string", content: "string" });
+		const written: Record<string, unknown>[] = [];
+		const tool: AgentTool<typeof writeSchema> = {
+			name: "write",
+			label: "Write",
+			description: "Write a file",
+			parameters: writeSchema,
+			async execute(_toolCallId, params) {
+				written.push(params as Record<string, unknown>);
+				return { content: [{ type: "text", text: `wrote ${params.content.length} bytes` }] };
+			},
+		};
+		const body = `# Guide\n\n${"Explains how the query pipeline is reconstructed.\n".repeat(20)}`;
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{
+							type: "toolCall",
+							id: "swapped",
+							name: "write",
+							arguments: { path: "guide.md", [INTENT_FIELD]: body, content: "Writing reconstruction guide" },
+						},
+						{
+							type: "toolCall",
+							id: "normal",
+							name: "write",
+							arguments: { path: "notes.md", [INTENT_FIELD]: "Writing notes", content: "hello" },
+						},
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter, intentTracing: true };
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+
+		const messages = await agentLoop([createUserMessage("run")], context, config, undefined, mock.stream).result();
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		const swapped = results.find(r => r.toolCallId === "swapped");
+		const normal = results.find(r => r.toolCallId === "normal");
+
+		// The swapped call must not run with the one-line `content`: the model is
+		// told to retry instead of believing the body was written.
+		expect(written).toEqual([{ path: "notes.md", content: "hello" }]);
+		expect(swapped?.isError).toBe(true);
+		expect(normal?.isError).toBe(false);
+	});
+
 	it("runs shared tools in parallel and emits completion-ordered results", async () => {
 		const toolSchema = type({ value: "string" });
 		const startTimes: Record<string, number> = {};
