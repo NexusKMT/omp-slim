@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The browser relay now supports several browser instances (for example Chrome and Edge) connected at the same time: tab registries are namespaced per extension instance, hello garbage-collection is scoped to the reconnecting instance, RPCs route to the browser that owns the tab, and target ids encode the instance (`PAGE<seq>.<tabId>`). The bundled extension sends a stable per-install instance id; hellos without one keep the previous single-browser replacement behavior.
+
 ### Added
 
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))

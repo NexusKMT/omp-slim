@@ -44,6 +44,14 @@ export type ExtToRelayMessage =
 			tabs: TabSnapshot[];
 			/** Tabs that already have a `chrome.debugger` attachment (relay reconciles after a service-worker restart). */
 			attachedTabIds: number[];
+			/**
+			 * Stable per-install browser identity (persisted in `chrome.storage.local`).
+			 * Lets the relay serve several browsers at once: tabs are namespaced per
+			 * instance, and a service-worker restart with the same id reuses the
+			 * existing tab registry instead of replacing another browser's connection.
+			 * Absent on older extensions, which fall back to per-socket instances.
+			 */
+			instanceId?: string;
 	  }
 	| { t: "cdpEvent"; tabId: number; sessionId?: string; method: string; params?: Record<string, unknown> }
 	| { t: "detached"; tabId: number; reason: string; relayInitiated?: boolean }
