@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction";
+import { resolveThresholdTokens, shouldCompact } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model, ServiceTierByFamily } from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -530,13 +530,12 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("applies a percent override to child settings and persists its effective pair", async () => {
+	it("uses the child threshold for compaction decisions", async () => {
 		const session = yieldEmittingSession();
 		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-		const appendSessionInit = vi.spyOn(session.sessionManager, "appendSessionInit");
 		const settings = Settings.isolated({
-			"compaction.thresholdPercent": 75,
-			"compaction.thresholdTokens": 140_000,
+			"compaction.thresholdPercent": 65,
+			"compaction.thresholdTokens": 40_000,
 		});
 
 		const result = await runSubprocess({
@@ -548,87 +547,11 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 
 		expect(result.exitCode).toBe(0);
 		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
-		expect(childSettings?.get("compaction.thresholdPercent")).toBe(80);
-		expect(childSettings?.get("compaction.thresholdTokens")).toBe(-1);
-		expect(appendSessionInit).toHaveBeenCalledWith(
-			expect.objectContaining({
-				compactionThreshold: { thresholdPercent: 80, thresholdTokens: -1 },
-			}),
-		);
-	});
-
-	it("applies a token override to child settings and persists its effective pair", async () => {
-		const session = yieldEmittingSession();
-		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-		const appendSessionInit = vi.spyOn(session.sessionManager, "appendSessionInit");
-		const settings = Settings.isolated({
-			"compaction.thresholdPercent": 75,
-			"compaction.thresholdTokens": 140_000,
-		});
-
-		const result = await runSubprocess({
-			...baseOptions,
-			id: "compaction-token-override",
-			settings,
-			compactionThresholdOverride: { thresholdPercent: -1, thresholdTokens: 90_000 },
-		});
-
-		expect(result.exitCode).toBe(0);
-		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
-		expect(childSettings?.get("compaction.thresholdPercent")).toBe(-1);
-		expect(childSettings?.get("compaction.thresholdTokens")).toBe(90_000);
-		expect(appendSessionInit).toHaveBeenCalledWith(
-			expect.objectContaining({
-				compactionThreshold: { thresholdPercent: -1, thresholdTokens: 90_000 },
-			}),
-		);
-	});
-
-	it("passes both numeric thresholds through and uses the token limit when both are positive", async () => {
-		const session = yieldEmittingSession();
-		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-		const appendSessionInit = vi.spyOn(session.sessionManager, "appendSessionInit");
-		const settings = Settings.isolated({
-			"compaction.thresholdPercent": 75,
-			"compaction.thresholdTokens": 140_000,
-		});
-
-		const result = await runSubprocess({
-			...baseOptions,
-			id: "compaction-both-overrides",
-			settings,
-			compactionThresholdOverride: { thresholdPercent: 80, thresholdTokens: 90_000 },
-		});
-
-		expect(result.exitCode).toBe(0);
-		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
 		if (!childSettings) throw new Error("Expected child settings");
-		expect(childSettings.get("compaction.thresholdPercent")).toBe(80);
-		expect(childSettings.get("compaction.thresholdTokens")).toBe(90_000);
-		expect(resolveThresholdTokens(200_000, childSettings.getGroup("compaction"))).toBe(90_000);
-		expect(appendSessionInit).toHaveBeenCalledWith(
-			expect.objectContaining({
-				compactionThreshold: { thresholdPercent: 80, thresholdTokens: 90_000 },
-			}),
-		);
-	});
-
-	it("preserves inherited thresholds and omits the transcript field without an explicit override", async () => {
-		const session = yieldEmittingSession();
-		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
-		const appendSessionInit = vi.spyOn(session.sessionManager, "appendSessionInit");
-		const settings = Settings.isolated({
-			"compaction.thresholdPercent": 65,
-			"compaction.thresholdTokens": 125_000,
-		});
-
-		const result = await runSubprocess({ ...baseOptions, id: "compaction-inherited", settings });
-
-		expect(result.exitCode).toBe(0);
-		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
-		expect(childSettings?.get("compaction.thresholdPercent")).toBe(65);
-		expect(childSettings?.get("compaction.thresholdTokens")).toBe(125_000);
-		expect(appendSessionInit.mock.calls[0]?.[0]).not.toHaveProperty("compactionThreshold");
+		const compactionSettings = childSettings.getGroup("compaction");
+		expect(resolveThresholdTokens(200_000, compactionSettings)).toBe(160_000);
+		expect(shouldCompact(50_000, 200_000, compactionSettings)).toBe(false);
+		expect(shouldCompact(160_001, 200_000, compactionSettings)).toBe(true);
 	});
 });
 

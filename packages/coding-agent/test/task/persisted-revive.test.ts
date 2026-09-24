@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
+import { resolveThresholdTokens, shouldCompact } from "@oh-my-pi/pi-agent-core/compaction";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { EffectiveExtensionRoots } from "@oh-my-pi/pi-coding-agent/capability/types";
@@ -648,7 +649,7 @@ describe("persisted subagent revival", () => {
 		expect(capturedOptions?.modelPatternAuthFallback).toBe("anthropic/claude-sonnet-4-5");
 	});
 
-	it("restores an explicit compaction threshold after parent settings change", async () => {
+	it("restores compaction threshold behavior after parent settings change", async () => {
 		const cwd = makeTempDir("@pi-compaction-threshold-revive-");
 		const sessionFile = await createPersistedSession(cwd, undefined, undefined, undefined, {
 			compactionThreshold: { thresholdPercent: 72, thresholdTokens: -1 },
@@ -668,8 +669,14 @@ describe("persisted subagent revival", () => {
 		if (!reviver) throw new Error("Expected a persisted reviver");
 		await reviver(ref);
 
-		expect(capturedOptions?.settings?.get("compaction.thresholdPercent")).toBe(72);
-		expect(capturedOptions?.settings?.get("compaction.thresholdTokens")).toBe(-1);
+		const revivedSettings = capturedOptions?.settings;
+		if (!revivedSettings) throw new Error("Expected revived child settings");
+		const parentCompaction = parentSettings.getGroup("compaction");
+		const revivedCompaction = revivedSettings.getGroup("compaction");
+		expect(shouldCompact(130_000, 200_000, parentCompaction)).toBe(true);
+		expect(resolveThresholdTokens(200_000, revivedCompaction)).toBe(144_000);
+		expect(shouldCompact(130_000, 200_000, revivedCompaction)).toBe(false);
+		expect(shouldCompact(144_001, 200_000, revivedCompaction)).toBe(true);
 	});
 
 	it("pins the persisted concrete model when the default role is revived", async () => {
