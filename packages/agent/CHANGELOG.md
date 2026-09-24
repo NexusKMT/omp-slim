@@ -9,6 +9,7 @@
 
 ### Changed
 
+- Migrated Anthropic compaction to `compact-2026-09-04` with signature-based verification
 - Changed interrupt handling to respect wait mode and enable interrupts
 
 ## [18.2.11] - 2026-09-23

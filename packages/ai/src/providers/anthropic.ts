@@ -92,6 +92,7 @@ import {
 	type Tool as AnthropicWireTool,
 	type Usage as AnthropicWireUsage,
 	COMPACTION_BETA,
+	LEGACY_COMPACTION_BETA,
 	type CompactionBlockParam,
 	type CompactionEdit,
 	type ContentBlockParam,
@@ -510,6 +511,10 @@ type AnthropicProviderSessionState = ProviderSessionState & {
 	controlStates: Map<string, AnthropicControlState>;
 	/** LRU of baselines seen by exactly one request; promoted into `controlStates` on reuse. */
 	pendingControlStates: Map<string, AnthropicControlState>;
+	/** Last live-turn baseline for each conversation, independent of a rewritten root. */
+	lastControlStatesBySession: Map<string, AnthropicControlState>;
+	/** Pre-compaction controls bound to the signed block that replaces their root. */
+	compactionControlBaselines: Map<string, { state: AnthropicControlState; signature?: string }>;
 };
 
 function createAnthropicControlState(): AnthropicControlState {
@@ -534,6 +539,8 @@ function createAnthropicProviderSessionState(): AnthropicProviderSessionState {
 		prefixDroppedThinkingBlocks: new Set(),
 		controlStates: new Map(),
 		pendingControlStates: new Map(),
+		lastControlStatesBySession: new Map(),
+		compactionControlBaselines: new Map(),
 		close: () => {
 			state.strictToolsDisabled = false;
 			state.fastModeDisabled = false;
@@ -542,6 +549,8 @@ function createAnthropicProviderSessionState(): AnthropicProviderSessionState {
 			state.prefixDroppedThinkingBlocks.clear();
 			state.controlStates.clear();
 			state.pendingControlStates.clear();
+			state.lastControlStatesBySession.clear();
+			state.compactionControlBaselines.clear();
 		},
 	};
 	return state;
@@ -1631,8 +1640,6 @@ function parseAnthropicFallbackWireBlock(value: unknown): AnthropicFallbackConte
 	return { type: "fallback", from: { model: from }, to: { model: to } };
 }
 
-const ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS = 50_000;
-
 /**
  * Whether a persisted compaction summary replays as a native `compaction`
  * block: only the provider that produced it may replay it, and only on a
@@ -1648,8 +1655,13 @@ function isReplayableAnthropicCompaction(
 
 /** The wire block for a replayed compaction payload, opaque state included. */
 function compactionBlockParam(payload: AnthropicCompactionPayload): CompactionBlockParam {
-	const { content, encryptedContent } = payload;
-	return { type: "compaction", content, ...(encryptedContent ? { encrypted_content: encryptedContent } : {}) };
+	const { content, signature, encryptedContent } = payload;
+	return {
+		type: "compaction",
+		content,
+		...(signature !== undefined ? { signature } : {}),
+		...(encryptedContent !== undefined ? { encrypted_content: encryptedContent } : {}),
+	};
 }
 
 /**
@@ -1657,72 +1669,54 @@ function compactionBlockParam(payload: AnthropicCompactionPayload): CompactionBl
  * harness's user-role summary message, or the assistant message that
  * produced the block when a caller appends the response itself.
  */
-function contextReplaysAnthropicCompaction(messages: readonly Message[], model: Model<"anthropic-messages">): boolean {
-	return messages.some(
-		message =>
+function contextReplaysAnthropicCompaction(
+	messages: readonly Message[],
+	model: Model<"anthropic-messages">,
+	format: "signed" | "legacy",
+): boolean {
+	return messages.some(message => {
+		const payload = message.providerPayload;
+		return (
 			(message.role === "user" || message.role === "developer" || message.role === "assistant") &&
-			isReplayableAnthropicCompaction(message.providerPayload, model),
-	);
+			isReplayableAnthropicCompaction(payload, model) &&
+			(format === "signed" ? payload.signature !== undefined : payload.encryptedContent !== undefined)
+		);
+	});
 }
 
 /**
- * The `compact_20260112` edit for a request that opted into server-side
- * compaction. The trigger is clamped to the API's 50k floor: a lower value is
- * rejected outright rather than compacting sooner.
- */
-function buildAnthropicCompactionEdit(options: AnthropicOptions | undefined): CompactionEdit | undefined {
-	const request = options?.anthropicCompaction;
-	if (!request) return undefined;
-	const edit: CompactionEdit = { type: "compact_20260112" };
-	if (request.triggerInputTokens !== undefined && Number.isFinite(request.triggerInputTokens)) {
-		edit.trigger = {
-			type: "input_tokens",
-			value: Math.max(ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS, Math.floor(request.triggerInputTokens)),
-		};
-	}
-	if (request.pauseAfterCompaction !== undefined) edit.pause_after_compaction = request.pauseAfterCompaction;
-	if (request.instructions) edit.instructions = request.instructions;
-	return edit;
-}
-
-/**
- * The edit a request needs merely to replay a persisted `compaction` block:
- * the API rejects the block unless a `compact_20260112` strategy is present.
- * The trigger sits at the model's context window, which no in-window prompt
- * reaches, so the live turn never compacts on its own — the harness owns
- * when compaction happens and persists it as a compaction entry.
+ * Persisted encrypted threshold blocks still require a legacy strategy.
+ * This edit is replay-only and cannot trigger a new threshold compaction.
  */
 function buildAnthropicCompactionReplayEdit(model: Model<"anthropic-messages">): CompactionEdit {
 	return {
 		type: "compact_20260112",
-		trigger: {
-			type: "input_tokens",
-			value: Math.max(ANTHROPIC_COMPACTION_MIN_TRIGGER_TOKENS, model.contextWindow ?? 0),
-		},
+		trigger: { type: "input_tokens", value: Math.max(50_000, model.contextWindow ?? 0) },
 	};
 }
 
-/**
- * Whether the request carries a `compact_20260112` edit — a live compaction
- * request or a replayed block — and so must carry the compaction beta.
- */
-function carriesCompactionEdit(params: MessageCreateParams): boolean {
-	const edits = params.context_management?.edits;
-	return edits !== undefined && edits.some(edit => edit.type === "compact_20260112");
+/** Legacy threshold block replay requires its original beta and replay edit. */
+function carriesLegacyCompactionEdit(params: MessageCreateParams): boolean {
+	return params.context_management?.edits.some(edit => edit.type === "compact_20260112") ?? false;
+}
+
+/** Signed replay blocks and on-demand requests require the current compaction beta. */
+function carriesSignedCompaction(params: MessageCreateParams): boolean {
+	return (
+		params.compaction !== undefined ||
+		params.messages.some(
+			message =>
+				Array.isArray(message.content) &&
+				message.content.some(block => block.type === "compaction" && block.signature !== undefined),
+		)
+	);
 }
 
 /**
- * Replace the top-level token counts with the sum over every sampling
- * iteration once a request ran a server-side compaction. The API's top-level
- * counts exclude the compaction iteration while `message_start` still reports
- * its cache write, so the iteration list is the only consistent total for a
- * compacting request (and the documented one for billing). Requests without a
- * compaction iteration are left untouched.
- *
- * When generation continues after the compaction, both prompts are billed but
- * only the post-compaction sampling stays resident: `contextTokens` carries
- * that sampling's prompt so gauges do not treat both as live context and
- * trigger another compaction right after the first.
+ * Replace the top-level zero token counts with the sum over every sampling
+ * iteration on an on-demand compaction response. The iteration list is the
+ * documented billing total. Requests without a compaction iteration retain
+ * their top-level usage.
  */
 function applyCompactionIterationUsage(usage: Usage, source: AnthropicWireUsage): boolean {
 	const iterations = source.iterations;
@@ -1742,15 +1736,6 @@ function applyCompactionIterationUsage(usage: Usage, source: AnthropicWireUsage)
 	usage.output = output;
 	usage.cacheRead = cacheRead;
 	usage.cacheWrite = cacheWrite;
-	for (let index = iterations.length - 1; index >= 0; index -= 1) {
-		const resumed = iterations[index];
-		if (resumed?.type !== "message" && resumed?.type !== "fallback_message") continue;
-		usage.contextTokens =
-			(resumed.input_tokens ?? 0) +
-			(resumed.cache_read_input_tokens ?? 0) +
-			(resumed.cache_creation_input_tokens ?? 0);
-		break;
-	}
 	return true;
 }
 
@@ -1874,10 +1859,15 @@ const THINKING_PREFIX_BINDING_PATTERN =
 
 /** Detects the preserved-thinking error caused by rewriting a signed block's conversation prefix. */
 export function isThinkingPrefixBindingError(message: string): boolean {
-	return INVALID_THINKING_SIGNATURE_PATTERN.test(message) && THINKING_PREFIX_BINDING_PATTERN.test(message);
+	return (
+		!/\bcompaction_[a-z_]+\b/i.test(message) &&
+		INVALID_THINKING_SIGNATURE_PATTERN.test(message) &&
+		THINKING_PREFIX_BINDING_PATTERN.test(message)
+	);
 }
 
 export function isInvalidThinkingSignatureError(message: string): boolean {
+	if (/\bcompaction_[a-z_]+\b/i.test(message)) return false;
 	return INVALID_THINKING_SIGNATURE_PATTERN.test(message) || MISSING_THINKING_SIGNATURE_PATTERN.test(message);
 }
 
@@ -2154,24 +2144,29 @@ const streamAnthropicOnce = (
 					model.reasoning &&
 					options?.thinkingEnabled &&
 					model.compat.supportsContextManagement !== false &&
+					!(compactionSupported && options?.anthropicCompaction) &&
+					!isVertexRawPredictUrl(baseUrl) &&
 					!extraBetas.includes(contextManagementBeta)
 				) {
 					extraBetas.push(contextManagementBeta);
 				}
-				// Server-side compaction: the `compact_20260112` edit and any replayed
-				// `compaction` block both require the compaction beta. Gated on the
-				// endpoint the request actually reaches, matching the edit and the
-				// replay gate in buildParams / convertAnthropicMessages.
-				if (
-					compactionSupported &&
-					(options?.anthropicCompaction !== undefined ||
-						contextReplaysAnthropicCompaction(context.messages, model)) &&
-					!isVertexRawPredictUrl(baseUrl) &&
-					!extraBetas.includes(COMPACTION_BETA)
-				) {
-					// Vertex rawPredict 400s on `anthropic-beta` headers; its beta
-					// rides the body instead (see buildParams).
-					extraBetas.push(COMPACTION_BETA);
+				// Vertex rawPredict takes betas in the body; other routes use the
+				// header. Legacy encrypted replay keeps its original beta.
+				if (compactionSupported && !isVertexRawPredictUrl(baseUrl)) {
+					if (
+						(options?.anthropicCompaction !== undefined ||
+							contextReplaysAnthropicCompaction(context.messages, model, "signed")) &&
+						!extraBetas.includes(COMPACTION_BETA)
+					) {
+						extraBetas.push(COMPACTION_BETA);
+					}
+					if (
+						options?.anthropicCompaction === undefined &&
+						contextReplaysAnthropicCompaction(context.messages, model, "legacy") &&
+						!extraBetas.includes(LEGACY_COMPACTION_BETA)
+					) {
+						extraBetas.push(LEGACY_COMPACTION_BETA);
+					}
 				}
 				// `ttl: "1h"` requires the extended-cache-ttl beta on API-key
 				// requests. OAuth requests never add it here: Anthropic honors
@@ -2259,6 +2254,7 @@ const streamAnthropicOnce = (
 				if (replacementPayload !== undefined) {
 					nextParams = replacementPayload as typeof nextParams;
 				}
+				if (nextParams.compaction) stripCompactionIncompatibleParams(nextParams);
 				nextParams = toWellFormedDeep(nextParams) as typeof nextParams;
 				rawRequestDump = {
 					provider: model.provider,
@@ -2301,12 +2297,18 @@ const streamAnthropicOnce = (
 				// Route by the client's own endpoint when it exposes one.
 				const refreshBetaRouteUrl =
 					options?.client !== undefined ? (injectedClientBaseUrl(options.client) ?? baseUrl) : baseUrl;
-				const refreshHeaders =
-					options?.client !== undefined &&
-					!isVertexRawPredictUrl(refreshBetaRouteUrl) &&
-					carriesCompactionEdit(refreshParams)
-						? mergeAnthropicBetaHeader(mergedCallerHeaders, COMPACTION_BETA)
-						: undefined;
+				let refreshHeaders: Record<string, string> | undefined;
+				if (options?.client !== undefined && !isVertexRawPredictUrl(refreshBetaRouteUrl)) {
+					if (carriesSignedCompaction(refreshParams)) {
+						refreshHeaders = mergeAnthropicBetaHeader(refreshHeaders ?? mergedCallerHeaders, COMPACTION_BETA);
+					}
+					if (carriesLegacyCompactionEdit(refreshParams)) {
+						refreshHeaders = mergeAnthropicBetaHeader(
+							refreshHeaders ?? mergedCallerHeaders,
+							LEGACY_COMPACTION_BETA,
+						);
+					}
+				}
 				const requestOptions = {
 					...createSdkStreamRequestOptions(requestSignal, requestTimeoutMs),
 					maxRetries: 0,
@@ -2469,16 +2471,26 @@ const streamAnthropicOnce = (
 							effortBeta,
 						);
 					}
-					if (carriesCompactionEdit(params)) {
+					if (carriesSignedCompaction(params)) {
 						injectedClientBetaHeaders = mergeAnthropicBetaHeader(
 							injectedClientBetaHeaders ?? mergedCallerHeaders,
 							COMPACTION_BETA,
 						);
 					}
+					if (carriesLegacyCompactionEdit(params)) {
+						injectedClientBetaHeaders = mergeAnthropicBetaHeader(
+							injectedClientBetaHeaders ?? mergedCallerHeaders,
+							LEGACY_COMPACTION_BETA,
+						);
+					}
 				}
 				const perRequestHeaders =
-					umansGatewayWebSearchHeader || injectedClientBetaHeaders
-						? { ...umansGatewayWebSearchHeader, ...injectedClientBetaHeaders }
+					umansGatewayWebSearchHeader || injectedClientBetaHeaders || options?.userProfileId
+						? {
+								...umansGatewayWebSearchHeader,
+								...injectedClientBetaHeaders,
+								...(options?.userProfileId ? { "anthropic-user-profile-id": options.userProfileId } : {}),
+							}
 						: undefined;
 				const requestOptions = {
 					...createSdkStreamRequestOptions(requestSignal, requestTimeoutMs),
@@ -2543,13 +2555,9 @@ const streamAnthropicOnce = (
 								| "ignored";
 						}
 					>();
-					// Server-side compaction summary (compact-2026-01-12). Never an
-					// assistant content block: it becomes the message's providerPayload
-					// once its block closes. `null` is the API's "model called a tool
-					// instead of summarizing" outcome and yields no payload. The opaque
-					// `encrypted_content` travels with it, verbatim, for the replay.
-					let compactionContent: string | null | undefined;
-					let compactionEncryptedContent: string | undefined;
+					// A compaction block is complete at content_block_start, not streamed
+					// through deltas. Hold it until the stop reason confirms compaction.
+					let compactionPayload: AnthropicCompactionPayload | undefined;
 
 					// Pings keep the idle deadline alive once content is flowing (Anthropic
 					// bridges legitimate generation gaps with keepalives), but only within a
@@ -2788,9 +2796,16 @@ const streamAnthropicOnce = (
 									partial: output,
 								});
 							} else if (event.content_block.type === "compaction") {
-								const started = event.content_block.content;
-								compactionContent = typeof started === "string" && started.length > 0 ? started : undefined;
-								compactionEncryptedContent = event.content_block.encrypted_content ?? undefined;
+								const { content, signature, encrypted_content } = event.content_block;
+								if (content) {
+									compactionPayload = {
+										type: "anthropicCompaction",
+										provider: model.provider,
+										content,
+										...(signature !== undefined ? { signature } : {}),
+										...(encrypted_content ? { encryptedContent: encrypted_content } : {}),
+									};
+								}
 								openBlocks.set(event.index, { contentIndex: -1, kind: "compaction" });
 							} else {
 								openBlocks.set(event.index, { contentIndex: -1, kind: "ignored" });
@@ -2877,15 +2892,6 @@ const streamAnthropicOnce = (
 								streamedReplayUnsafeContent = true;
 								block.thinkingSignature = block.thinkingSignature || "";
 								block.thinkingSignature += event.delta.signature;
-							} else if (event.delta.type === "compaction_delta") {
-								if (openBlock.kind !== "compaction") {
-									reportAnthropicEnvelopeAnomaly(`received compaction_delta for ${openBlock.kind} block`);
-									continue;
-								}
-								// One delta carries the whole summary; `null` means the model
-								// called a tool during summarization instead of writing one.
-								compactionContent = event.delta.content ?? null;
-								if (event.delta.encrypted_content) compactionEncryptedContent = event.delta.encrypted_content;
 							}
 						} else if (event.type === "content_block_stop") {
 							if (sawTerminalEnvelope) {
@@ -2904,21 +2910,6 @@ const streamAnthropicOnce = (
 							if (openBlock.kind === "compaction") {
 								openBlocks.delete(event.index);
 								closedBlockIndexes.add(event.index);
-								if (typeof compactionContent === "string" && compactionContent.length > 0) {
-									output.providerPayload = {
-										type: "anthropicCompaction",
-										provider: model.provider,
-										content: compactionContent,
-										...(compactionEncryptedContent ? { encryptedContent: compactionEncryptedContent } : {}),
-									};
-								} else {
-									logger.warn("anthropic: server-side compaction produced no summary", {
-										model: model.id,
-										reason: compactionContent === null ? "tool_call_during_summarization" : "empty",
-									});
-								}
-								compactionContent = undefined;
-								compactionEncryptedContent = undefined;
 								continue;
 							}
 							const block = blocks[openBlock.contentIndex];
@@ -2950,10 +2941,16 @@ const streamAnthropicOnce = (
 							if (rawStopReason) {
 								output.stopReason = mapStopReason(rawStopReason);
 								sawTerminalEnvelope = true;
-								// `pause_after_compaction` ends the response right after the
-								// summary block: a legitimate empty stop, distinguished here so
-								// the empty-completion retry leaves it alone.
-								if (rawStopReason === "compaction") output.stopDetails = { type: "compaction" };
+								// On-demand compaction ends with no ordinary assistant content.
+								// A non-compaction stop (e.g. max_tokens) is not a usable summary.
+								if (rawStopReason === "compaction") {
+									output.stopDetails = { type: "compaction" };
+									output.providerPayload = compactionPayload;
+									if (compactionPayload?.signature && params.compaction && options?.sessionId) {
+										const snapshot = providerSessionState?.compactionControlBaselines.get(options.sessionId);
+										if (snapshot) snapshot.signature = compactionPayload.signature;
+									}
+								}
 							}
 							if (output.stopReason === "error") {
 								const stopDetails = delta?.stop_details;
@@ -3609,6 +3606,23 @@ function createClient(
 	return { client, isOAuthToken: oauthToken };
 }
 
+/** The compaction request is a standalone summary call, not a generation turn. */
+function stripCompactionIncompatibleParams(params: MessageCreateParamsStreaming): void {
+	delete params.context_management;
+	delete params.stop_sequences;
+	if (params.tool_choice?.type === "any" || params.tool_choice?.type === "tool") {
+		params.tool_choice = { type: "auto" };
+	}
+	if (params.output_config) {
+		delete params.output_config.format;
+		if (params.output_config.task_budget?.remaining !== undefined) {
+			params.output_config.task_budget = { ...params.output_config.task_budget };
+			delete params.output_config.task_budget.remaining;
+		}
+		if (Object.keys(params.output_config).length === 0) delete params.output_config;
+	}
+}
+
 function disableThinkingIfToolChoiceForced(
 	params: MessageCreateParamsStreaming,
 	model: Model<"anthropic-messages">,
@@ -3618,8 +3632,8 @@ function disableThinkingIfToolChoiceForced(
 	if (toolChoice.type !== "any" && toolChoice.type !== "tool") return;
 
 	delete params.thinking;
-	// Only the thinking edit is tied to thinking; a compaction strategy must
-	// stay because any replayed `compaction` block is rejected without it.
+	// Preserve the replay-only legacy edit when disabling thinking. Signed
+	// compaction blocks need no edit and keep their normal context management.
 	const compactionEdits = params.context_management?.edits.filter(edit => edit.type === "compact_20260112") ?? [];
 	if (compactionEdits.length > 0) {
 		params.context_management = { edits: compactionEdits };
@@ -4040,8 +4054,10 @@ function anthropicControlMessageProjection(message: MessageParam): MessageParam 
  * a fresh session id per call, so their one-shot keys only churn the pending
  * tier and can never evict a live conversation's baseline — which would force
  * it to re-declare tools, system, and effort, a full prompt-cache miss. Each
- * tier still ages out plain-LRU, so conversations abandoned by compaction or a
- * system-prompt change make room for the next one.
+ * tier still ages out plain-LRU. A signed compaction block becomes the new root;
+ * the declared tool baseline is carried over separately so kept thinking
+ * continues to see byte-identical top-level tools. Developer instructions
+ * removed with the summarized range still need restating by the caller.
  */
 function getAnthropicControlState(
 	state: AnthropicProviderSessionState | undefined,
@@ -4076,11 +4092,7 @@ function getAnthropicControlState(
 }
 
 /** Mark `key` most recently used in `states`, evicting the least recently used entry past the cap. */
-function touchAnthropicControlState(
-	states: Map<string, AnthropicControlState>,
-	key: string,
-	value: AnthropicControlState,
-): void {
+function touchAnthropicControlState<V>(states: Map<string, V>, key: string, value: V): void {
 	states.delete(key);
 	states.set(key, value);
 	if (states.size <= MAX_ANTHROPIC_CONTROL_STATES) return;
@@ -4093,6 +4105,49 @@ function anthropicControlAnchor(messages: readonly MessageParam[], messageCount:
 	if (messageCount === 0) return "";
 	const message = messages[messageCount - 1];
 	return message ? String(Bun.hash(JSON.stringify(anthropicControlMessageProjection(message)))) : "";
+}
+
+/** Clone a baseline without mutating live controls during a prefix-only summary call. */
+function cloneAnthropicControlState(
+	state: AnthropicControlState,
+	messages?: readonly MessageParam[],
+): AnthropicControlState {
+	return {
+		declaredTools: state.declaredTools?.map(tool => ({ ...tool })),
+		activeToolNames: new Set(state.activeToolNames),
+		stableSystemBlocks: state.stableSystemBlocks?.map(block => ({ ...block })),
+		systemFingerprint: state.systemFingerprint,
+		controlTransitions: state.controlTransitions
+			.filter(
+				transition =>
+					messages === undefined ||
+					(transition.messageCount <= messages.length &&
+						transition.anchor === anthropicControlAnchor(messages, transition.messageCount)),
+			)
+			.map(transition => ({ ...transition, content: transition.content.map(block => ({ ...block })) })),
+		effortBaselined: state.effortBaselined,
+		baseEffortWire: state.baseEffortWire,
+		currentEffort: state.currentEffort,
+	};
+}
+
+/**
+ * Retain the original top-level controls after replacing the root. Materialized
+ * transitions in the summarized range disappeared with their anchor messages:
+ * replay their net tool/effort changes after the new user turn, not before the
+ * retained tail (which would break its preserved thinking).
+ */
+function restoreAnthropicCompactionControls(target: AnthropicControlState, source: AnthropicControlState): void {
+	target.declaredTools = source.declaredTools?.map(tool => ({ ...tool }));
+	target.activeToolNames = new Set(
+		source.declaredTools?.filter(tool => !tool.defer_loading).map(tool => tool.name) ?? [],
+	);
+	target.stableSystemBlocks = source.stableSystemBlocks?.map(block => ({ ...block }));
+	target.systemFingerprint = source.systemFingerprint;
+	target.controlTransitions = [];
+	target.effortBaselined = source.effortBaselined;
+	target.baseEffortWire = source.baseEffortWire;
+	target.currentEffort = source.baseEffortWire;
 }
 
 /**
@@ -4487,21 +4542,22 @@ function buildParams(
 	const shouldKeepThinkingContext =
 		!options?.client &&
 		model.compat.supportsContextManagement !== false &&
+		!isVertexRawPredictUrl(effectiveBaseUrl) &&
 		(thinking?.type === "adaptive" || thinking?.type === "enabled");
-	// Server-side compaction rides the same field; injected clients get the
-	// compaction beta per request, so it is not skipped for them. Replaying a
-	// persisted block also needs a strategy present (the API rejects the block
-	// without one), so a request that merely continues a natively compacted
-	// conversation carries a never-firing edit.
-	const compactionEdit = compactionSupported
-		? (buildAnthropicCompactionEdit(options) ??
-			(contextReplaysAnthropicCompaction(context.messages, model)
-				? buildAnthropicCompactionReplayEdit(model)
-				: undefined))
-		: undefined;
+	// A new on-demand compaction request cannot carry context_management.
+	// Later turns carrying its signed block may keep clear_thinking as usual.
+	// Persisted encrypted threshold blocks alone need a legacy replay edit.
+	const compactionRequest = compactionSupported ? options?.anthropicCompaction : undefined;
+	const signedReplay = compactionSupported && contextReplaysAnthropicCompaction(context.messages, model, "signed");
+	const legacyReplay =
+		compactionSupported && !signedReplay && contextReplaysAnthropicCompaction(context.messages, model, "legacy");
 	const contextManagementEdits: NonNullable<MessageCreateParams["context_management"]>["edits"] = [];
-	if (shouldKeepThinkingContext) contextManagementEdits.push({ type: "clear_thinking_20251015", keep: "all" });
-	if (compactionEdit) contextManagementEdits.push(compactionEdit);
+	if (!compactionRequest && shouldKeepThinkingContext) {
+		contextManagementEdits.push({ type: "clear_thinking_20251015", keep: "all" });
+	}
+	if (legacyReplay && !compactionRequest) {
+		contextManagementEdits.push(buildAnthropicCompactionReplayEdit(model));
+	}
 	const contextManagement = contextManagementEdits.length > 0 ? { edits: contextManagementEdits } : undefined;
 
 	// Pre-compute output_config. Skip `effort` on Vertex rawPredict: it requires
@@ -4511,10 +4567,33 @@ function buildParams(
 	let wireMessages = convertAnthropicMessages(context.messages, effectiveModel, isOAuthToken, {
 		serverSideFallbackEnabled: !!fallbacks?.length,
 		replayCompaction: compactionSupported,
+		replayLegacyCompaction: !compactionRequest && !signedReplay,
 		dropAllThinking,
 		droppedThinkingBlocks,
+		credentialId: options?.credentialId,
 	});
-	const controlState = getAnthropicControlState(providerSessionState, options?.sessionId, systemBlocks, wireMessages);
+	let controlState = getAnthropicControlState(providerSessionState, options?.sessionId, systemBlocks, wireMessages);
+	const sessionId = options?.sessionId;
+	if (compactionRequest && controlState && providerSessionState && sessionId) {
+		// The compacting request contains only the summarized prefix. Work on a
+		// clone of the last live baseline so transitions anchored in the kept
+		// tail cannot reset it, or leak changes into the live conversation.
+		const liveState = providerSessionState.lastControlStatesBySession.get(sessionId) ?? controlState;
+		touchAnthropicControlState(providerSessionState.compactionControlBaselines, sessionId, {
+			state: cloneAnthropicControlState(liveState),
+		});
+		controlState = cloneAnthropicControlState(liveState, wireMessages);
+	} else if (!compactionRequest && controlState && providerSessionState && sessionId && signedReplay) {
+		const signature = context.messages[0]?.providerPayload;
+		const saved = providerSessionState.compactionControlBaselines.get(sessionId);
+		if (signature?.type === "anthropicCompaction" && saved?.signature === signature.signature) {
+			// The block replaced the old root. Keep the exact tool definitions
+			// (including deferred additions) and re-issue the net active changes
+			// only after the first new user turn.
+			restoreAnthropicCompactionControls(controlState, saved.state);
+			providerSessionState.compactionControlBaselines.delete(sessionId);
+		}
+	}
 	if (controlState) syncAnthropicControlState(controlState, wireMessages);
 	systemBlocks = planStableAnthropicSystem(systemBlocks, controlState, model.compat.supportsMidConversationSystem);
 	tools = planStableAnthropicTools(tools, wireMessages, controlState, model.compat.supportsMidConversationToolChanges);
@@ -4528,10 +4607,21 @@ function buildParams(
 		model.compat.supportsPerMessageEffort,
 	);
 	wireMessages = materializeAnthropicControlTransitions(wireMessages, controlState);
+	if (!compactionRequest && controlState && providerSessionState && sessionId) {
+		touchAnthropicControlState(providerSessionState.lastControlStatesBySession, sessionId, controlState);
+	}
 
 	const outputConfigEntries: AnthropicOutputConfig = {};
 	if (topLevelEffort && model.compat.supportsOutputEffort) outputConfigEntries.effort = topLevelEffort;
-	if (options?.taskBudget) outputConfigEntries.task_budget = options.taskBudget;
+	if (options?.taskBudget) {
+		if (compactionRequest || signedReplay) {
+			const taskBudget = { ...options.taskBudget };
+			delete taskBudget.remaining;
+			outputConfigEntries.task_budget = taskBudget;
+		} else {
+			outputConfigEntries.task_budget = options.taskBudget;
+		}
+	}
 	const outputConfig = Object.keys(outputConfigEntries).length ? outputConfigEntries : undefined;
 
 	// Claude Code requests at most 64k output tokens; clamp only OAuth requests,
@@ -4551,19 +4641,18 @@ function buildParams(
 	const vertexControlBetas = isVertexRawPredictUrl(vertexRequestUrl)
 		? resolveAnthropicControlBetas(model, prefixMismatchBehavior)
 		: [];
-	// Vertex rawPredict rejects `anthropic-beta` headers, so a request carrying
-	// the compaction edit (live compaction or replayed block — both require
-	// the beta) advertises it in the body instead, beside the other controls.
-	if (
-		isVertexRawPredictUrl(vertexRequestUrl) &&
-		compactionEdit !== undefined &&
-		!vertexControlBetas.includes(COMPACTION_BETA)
-	) {
-		vertexControlBetas.push(COMPACTION_BETA);
+	// Vertex rawPredict routes on-demand and legacy replay betas in the body.
+	if (isVertexRawPredictUrl(vertexRequestUrl)) {
+		if ((compactionRequest || signedReplay) && compactionSupported && !vertexControlBetas.includes(COMPACTION_BETA)) {
+			vertexControlBetas.push(COMPACTION_BETA);
+		}
+		if (legacyReplay && !compactionRequest && !vertexControlBetas.includes(LEGACY_COMPACTION_BETA)) {
+			vertexControlBetas.push(LEGACY_COMPACTION_BETA);
+		}
 	}
 
 	// Build params in the canonical field order: model → messages → system → tools →
-	// metadata → max_tokens → thinking → context_management → output_config → stream.
+	// metadata → max_tokens → thinking → context_management/compaction → output_config → stream.
 	const params: MessageCreateParamsStreaming = {
 		model: options?.requestModelId ?? model.requestModelId ?? model.id,
 		messages: wireMessages,
@@ -4573,6 +4662,12 @@ function buildParams(
 		max_tokens: Math.min(maxOutputTokens, options?.maxTokens ?? modelMaxTokens),
 		...(thinking && { thinking }),
 		...(contextManagement && { context_management: contextManagement }),
+		...(compactionRequest && {
+			compaction: {
+				type: "summarize",
+				...(compactionRequest.instructions ? { instructions: compactionRequest.instructions } : {}),
+			},
+		}),
 		...(outputConfig && { output_config: outputConfig }),
 		...(fallbacks?.length ? { fallbacks } : {}),
 		...(vertexControlBetas.length > 0 ? { anthropic_beta: vertexControlBetas } : {}),
@@ -4592,7 +4687,7 @@ function buildParams(
 	if (allowSamplingParams && options?.topK !== undefined) {
 		params.top_k = options.topK;
 	}
-	if (options?.stopSequences?.length) {
+	if (!compactionRequest && options?.stopSequences?.length) {
 		const seqs = options.stopSequences;
 		if (seqs.length > ANTHROPIC_STOP_SEQUENCES_MAX && !warnedStopSequencesTrim) {
 			warnedStopSequencesTrim = true;
@@ -4628,7 +4723,10 @@ function buildParams(
 		// request succeeds; the tool stays available and the caller's prompt steers
 		// the model toward it.
 		const choiceType = params.tool_choice?.type;
-		if ((choiceType === "any" || choiceType === "tool") && !model.compat.supportsForcedToolChoice) {
+		if (
+			(choiceType === "any" || choiceType === "tool") &&
+			(compactionRequest || !model.compat.supportsForcedToolChoice)
+		) {
 			params.tool_choice = { type: "auto" };
 		}
 	}
@@ -4756,8 +4854,10 @@ export function convertAnthropicMessages(
 	opts?: {
 		serverSideFallbackEnabled?: boolean;
 		replayCompaction?: boolean;
+		replayLegacyCompaction?: boolean;
 		dropAllThinking?: boolean;
 		droppedThinkingBlocks?: ReadonlySet<string>;
+		credentialId?: number;
 	},
 ): AnthropicMessageParam[] {
 	// Indices of params emitted from `developer` messages. After the main pass,
@@ -4782,7 +4882,15 @@ export function convertAnthropicMessages(
 		}
 	};
 
-	const transformedMessages = transformMessages(messages, model, normalizeToolCallId);
+	const transformedMessages = transformMessages(
+		messages,
+		model,
+		normalizeToolCallId,
+		undefined,
+		undefined,
+		undefined,
+		opts?.credentialId,
+	);
 
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
@@ -4790,7 +4898,9 @@ export function convertAnthropicMessages(
 		if (
 			opts?.replayCompaction &&
 			(msg.role === "user" || msg.role === "developer") &&
-			isReplayableAnthropicCompaction(msg.providerPayload, model)
+			isReplayableAnthropicCompaction(msg.providerPayload, model) &&
+			(msg.providerPayload.signature !== undefined ||
+				(opts.replayLegacyCompaction !== false && msg.providerPayload.encryptedContent !== undefined))
 		) {
 			const compactionParam: AnthropicMessageParam = {
 				role: "assistant",
@@ -4880,7 +4990,12 @@ export function convertAnthropicMessages(
 			// A caller that appends the compacting response itself holds the block
 			// on the assistant message; it opened that response, so it opens the
 			// replayed turn.
-			if (opts?.replayCompaction && isReplayableAnthropicCompaction(msg.providerPayload, model)) {
+			if (
+				opts?.replayCompaction &&
+				isReplayableAnthropicCompaction(msg.providerPayload, model) &&
+				(msg.providerPayload.signature !== undefined ||
+					(opts.replayLegacyCompaction !== false && msg.providerPayload.encryptedContent !== undefined))
+			) {
 				blocks.push(compactionBlockParam(msg.providerPayload));
 			}
 

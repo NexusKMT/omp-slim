@@ -33,6 +33,7 @@
 
 ### Changed
 
+- Updated session compaction logic to support native Anthropic snapshot branches and rewinds
 - Changed browser screenshot pixel comparison to ignore minor rasterizer noise
 - Changed subagents to exclude the wait tool, preventing blocking on wait in nested agents
 - Changed default `bash.autoBackground.strategy` to `catalog`
