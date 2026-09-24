@@ -117,22 +117,16 @@ describe("in-process VCS bindings", () => {
 		expect(await git(root, "diff", "--cached")).toBe("");
 	});
 
-	test("aborts clone promptly", async () => {
-		const root = await mkdtemp(join(tmpdir(), "pi-natives-vcs-clone-"));
-		roots.push(root);
-		const target = join(root, "clone");
+	test("cancels a task-backed repository operation without replacing an aborted signal handler", async () => {
+		const root = await repository();
+		const repo = vcsGitDiscover(root)!;
 		const controller = new AbortController();
+		const onAbort = () => {};
+		controller.signal.onabort = onAbort;
 		controller.abort();
-		const started = performance.now();
-		try {
-			await vcsGitClone("https://10.255.255.1/never.git", target, { timeoutMs: 60_000 }, controller.signal);
-			throw new Error("expected clone to reject");
-		} catch (error) {
-			expect(error).toMatchObject({ name: "VcsError" });
-			const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-			expect(["Canceled", "Cli", "CliTimeout"]).toContain(String(code));
-			expect(performance.now() - started).toBeLessThan(2_000);
-		}
+
+		await expect(repo.head(controller.signal)).rejects.toMatchObject({ name: "VcsError", code: "Canceled" });
+		expect(controller.signal.onabort).toBe(onAbort);
 	});
 });
 
