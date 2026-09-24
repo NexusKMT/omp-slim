@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed blockquote dimmed styling resetting to full terminal contrast after inline code spans ([#13016](https://github.com/can1357/oh-my-pi/pull/13016) by [@harshaygadekar](https://github.com/harshaygadekar)).
+- Fixed `write xd://<tool>` calls to active top-level tools (extension or MCP tools) rendering the generic card instead of the tool's own call/result renderer ([#12951](https://github.com/can1357/oh-my-pi/pull/12951) by [@kouhe3](https://github.com/kouhe3)).
+
 ## [18.3.0] - 2026-09-24
 
 ### Added
@@ -21,8 +26,6 @@
 ### Fixed
 
 - Fixed AltGr characters, including `[`, `]`, `{`, and `}`, being dropped in Windows Terminal when using the kitty keyboard protocol on Hungarian and other international keyboard layouts ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Fixed blockquote dimmed styling resetting to full terminal contrast after inline code spans ([#13016](https://github.com/can1357/oh-my-pi/pull/13016) by [@harshaygadekar](https://github.com/harshaygadekar)).
 
 ## [18.2.11] - 2026-09-23
 

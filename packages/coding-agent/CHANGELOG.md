@@ -2,19 +2,27 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Codex usage now shows the current subscription plan after an account's plan changes ([#12928](https://github.com/can1357/oh-my-pi/pull/12928) by [@haesol-shin](https://github.com/haesol-shin)).
 ### Added
 
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
-- Fixed embedded shell startup after its inherited working directory is deleted ([#13133](https://github.com/can1357/oh-my-pi/pull/13133) by [@schickling-assistant](https://github.com/schickling-assistant)).
 - `omp update` and the startup update check now use your configured npm registry (`.npmrc`, `npm_config_registry`, or bunfig, including scoped registries and auth tokens) instead of always querying registry.npmjs.org ([#13115](https://github.com/can1357/oh-my-pi/pull/13115) by [@H4vC](https://github.com/H4vC))
 - Fixed auto-QA grievance pushes getting stuck forever behind one report the collector rejects: tool names are clamped to the collector's 128-byte limit, rejected reports are set aside with the server's error (shown in `omp grievances list` and `push`), and the rest of the queue keeps sending ([#13091](https://github.com/can1357/oh-my-pi/issues/13091), [#13119](https://github.com/can1357/oh-my-pi/pull/13119) by [@NaC-L](https://github.com/NaC-L))
 - Fixed `read` on Windows intermittently failing with `ENOENT` for an existing file when a line selector such as `:1-40` was appended ([#13109](https://github.com/can1357/oh-my-pi/pull/13109) by [@NaC-L](https://github.com/NaC-L)).
+- Fixed the `retain` tool reporting `N memories stored.` when Mnemopi failed to store an item. It now fails with the storage error, names the item, and lists the items the batch already stored with their ids; `learn` and memory-backend saves now include the storage error too ([#13020](https://github.com/can1357/oh-my-pi/pull/13020) by [@alphastorm](https://github.com/alphastorm)).
+- Fixed a malformed user-level `mcp.json` disabling every MCP source for the session; its disable/enable lists are ignored with a warning and the other sources keep loading ([#13040](https://github.com/can1357/oh-my-pi/pull/13040) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed retry fallback treating a chain entry that resolves to the failing request (same routed model and the same effective thinking level after clamping) as a model switch, which reset the retry budget on every failure and retried without limit ([#12976](https://github.com/can1357/oh-my-pi/pull/12976) by [@Gablinas](https://github.com/Gablinas)).
+- Fixed setup wizard reporting Gemini web search "Not configured yet" when only Antigravity OAuth is signed in ([#13052](https://github.com/can1357/oh-my-pi/pull/13052) by [@holny](https://github.com/holny)).
+- Fixed headless print mode (`-p`) abandoning the advisor's review when its model fails: the final-review drain now waits for the configured `retry.fallbackChains` backup reviewer to finish instead of disposing the session mid-switch ([#12964](https://github.com/can1357/oh-my-pi/pull/12964) by [@aviv4339](https://github.com/aviv4339)).
+- Fixed embedded shell startup after its inherited working directory is deleted ([#13133](https://github.com/can1357/oh-my-pi/pull/13133) by [@schickling-assistant](https://github.com/schickling-assistant)).
+- Fixed Codex usage views showing the plan from login time after the account's plan changed; `omp usage`, ACP and TUI `/usage` now show the current plan ([#12928](https://github.com/can1357/oh-my-pi/pull/12928) by [@haesol-shin](https://github.com/haesol-shin)).
+- Fixed the shared LSP mux daemon dying from an unhandled rejection when session teardown writes to an already-exited language server ([#13041](https://github.com/can1357/oh-my-pi/pull/13041) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed an explicit `--model`/`--provider` pin (including `--prewalk-into` and `--plan-yolo-into`) to a provider listed in `disabledProviders` still sending requests to it; such pins are now refused and fallback lists skip to the next enabled provider ([#13079](https://github.com/can1357/oh-my-pi/issues/13079)).
+- Fixed `omp usage` capacity rows folding a model-scoped quota cap (for example Anthropic's Fable weekly cap) into the shared window it caps, so a spent scoped cap read as the whole window spent; scoped caps now get their own meter ([#12872](https://github.com/can1357/oh-my-pi/pull/12872) by [@rlfleming93](https://github.com/rlfleming93)).
+- Fixed `write xd://<tool>` ignoring a device's `lenientArgValidation`: on a schema mismatch the raw arguments now reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed `providers.anthropic.serverSideFallback` failing every Fable/Mythos request with a 400 because it named `claude-opus-5-5`, which Anthropic does not accept as a fallback target; the fallback target is now `claude-opus-5` ([#13059](https://github.com/can1357/oh-my-pi/issues/13059)).
 
 ## [18.3.0] - 2026-09-24
 
@@ -61,29 +69,6 @@
 - Fixed headless print mode dropping or silently ignoring MCP servers that start slowly; it now waits within the configured timeout and warns when a server is not ready.
 - Fixed reader-mode `fetch` sending inline SVG icons and base64 images as unreadable model input; alt text is retained instead.
 - Fixed long non-Latin judged TTSR output exceeding token limits by applying token-aware truncation.
-- Fixed comma-separated line selectors such as `:19,59` in `read`, `grep` paths, and `fetch` reading from the first number through EOF. A bare number in a list is now that single line; a lone `:50` still reads from line 50.
-- Fixed `write` success text reporting JavaScript string length as bytes. The count is now the UTF-8 byte length.
-- Fixed `read proc://`, `/jobs`, and job details showing a finished job's age as its duration. Completed, failed, and cancelled jobs now show how long they ran, e.g. `bg_1 [bash] completed in 2.0s`.
-- Fixed bash and eval calls that finished in the foreground with auto-background enabled appearing in `read proc://` as `bg_` jobs with a made-up duration. Only calls that actually move to the background become jobs.
-- Fixed background job ids being reused after earlier jobs were cleaned up, which made `proc://bg_1` point to different jobs over a session. Each new background job now gets a new `bg_` number.
-- Fixed a named service started again under an existing name showing the previous process's output in its log, in `read proc://<name>`, and in the bash tool's start result. A new start now begins with an empty log; restarts under the service's restart policy and explicit restarts still keep the earlier output.
-- Fixed `wait` returning `No running background jobs to wait for.` while a subagent's finished result was still on its way to the parent. `wait` now returns that result, keeps waiting when a peer's result is registered after the wait started, and a result that finished while `wait` returned a peer message instead is still delivered.
-- Fixed results from subagents woken again by `write agent://<id>` or `agent://all` never reaching the parent, and later results overwriting earlier ones in `agent://<id>` unseen. Each result from a woken subagent now arrives like the first one (`Background job <id> has completed` plus the result), and `wait` can wait for it.
-- Fixed a `wait` cut short by an incoming message showing as an error (`Operation aborted`). It now returns `Wait interrupted by message.`; stopping the run yourself still reports an abort.
-- Fixed retry fallback treating a chain entry that resolves to the failing request (same routed model and the same effective thinking level after clamping) as a model switch, which reset the retry budget on every failure and retried without limit ([#12976](https://github.com/can1357/oh-my-pi/pull/12976) by [@Gablinas](https://github.com/Gablinas)).
-- Fixed headless print mode (`-p`) silently dropping MCP servers slower than the startup window; print mode now waits for configured servers (bounded by `OMP_MCP_TIMEOUT_MS`) and warns on stderr when one is not ready ([#12188](https://github.com/can1357/oh-my-pi/issues/12188), reported by [@aaronjmars](https://github.com/aaronjmars)).
-- Fixed reader-mode `fetch` output passing inline SVG icons and base64 `data:` images to the model as unreadable payloads; they are now dropped and their alt text is kept ([#13006](https://github.com/can1357/oh-my-pi/pull/13006) by [@H4vC](https://github.com/H4vC)).
-- Fixed judged TTSR rules failing with `max_tokens_exceeded` on long non-Latin outputs: judged content was capped at 60,000 characters, which is ~60k Jev tokens of Chinese against Jev's ~33k-token branch limit. It is now cut to 32,000 Jev tokens counted locally, so long English outputs are also no longer truncated early.
-- Fixed the `retain` tool reporting `N memories stored.` when Mnemopi failed to store an item. It now fails with the storage error, names the item, and lists the items the batch already stored with their ids; `learn` and memory-backend saves now include the storage error too ([#13020](https://github.com/can1357/oh-my-pi/pull/13020) by [@alphastorm](https://github.com/alphastorm)).
-- Fixed headless print mode (`-p`) silently dropping MCP servers slower than the startup window; print mode now waits for configured servers (bounded by `OMP_MCP_TIMEOUT_MS`) and warns on stderr when one is not ready ([#12188](https://github.com/can1357/oh-my-pi/issues/12188), reported by [@aaronjmars](https://github.com/aaronjmars)).
-- Fixed reader-mode `fetch` output passing inline SVG icons and base64 `data:` images to the model as unreadable payloads; they are now dropped and their alt text is kept ([#13006](https://github.com/can1357/oh-my-pi/pull/13006) by [@H4vC](https://github.com/H4vC)).
-- Fixed judged TTSR rules failing with `max_tokens_exceeded` on long non-Latin outputs: judged content was capped at 60,000 characters, which is ~60k Jev tokens of Chinese against Jev's ~33k-token branch limit. It is now cut to 32,000 Jev tokens counted locally, so long English outputs are also no longer truncated early.
-- Fixed a malformed user-level `mcp.json` disabling every MCP source for the session; its disable/enable lists are ignored with a warning and the other sources keep loading ([#13040](https://github.com/can1357/oh-my-pi/pull/13040) by [@jchanghong023](https://github.com/jchanghong023)).
-- Fixed headless print mode (`-p`) abandoning the advisor's review when its model fails: the final-review drain now waits for the configured `retry.fallbackChains` backup reviewer to finish instead of disposing the session mid-switch ([#12964](https://github.com/can1357/oh-my-pi/pull/12964) by [@aviv4339](https://github.com/aviv4339))
-- Fixed headless print mode (`-p`) silently dropping MCP servers slower than the startup window; print mode now waits for configured servers (bounded by `OMP_MCP_TIMEOUT_MS`) and warns on stderr when one is not ready ([#12188](https://github.com/can1357/oh-my-pi/issues/12188), reported by [@aaronjmars](https://github.com/aaronjmars)).
-- Fixed reader-mode `fetch` output passing inline SVG icons and base64 `data:` images to the model as unreadable payloads; they are now dropped and their alt text is kept ([#13006](https://github.com/can1357/oh-my-pi/pull/13006) by [@H4vC](https://github.com/H4vC)).
-- Fixed judged TTSR rules failing with `max_tokens_exceeded` on long non-Latin outputs: judged content was capped at 60,000 characters, which is ~60k Jev tokens of Chinese against Jev's ~33k-token branch limit. It is now cut to 32,000 Jev tokens counted locally, so long English outputs are also no longer truncated early.
-- Fixed the shared LSP mux daemon dying from an unhandled rejection when session teardown writes to an already-exited language server ([#13041](https://github.com/can1357/oh-my-pi/pull/13041) by [@jchanghong023](https://github.com/jchanghong023)).
 
 ## [18.2.11] - 2026-09-23
 
@@ -113,8 +98,6 @@
 - Refined AI-assisted git staging verification to reduce false positives
 - Updated `omp bench` default profile to `chat` and improved CLI flag documentation
 - Coalesced judgment batch drain operations for better performance under high load
-- `omp usage` capacity rows now report a model-scoped quota cap (for example Anthropic's Fable weekly cap) as its own meter instead of folding it into the shared window it caps, so a spent scoped cap no longer reads as a partly-spent shared pool; routing copies of one shared upstream pool stay merged.
-- `write xd://<tool>` now honors a device's `lenientArgValidation`: on a schema mismatch the raw arguments reach the tool's own `execute()` (matching the agent loop and eval tool bridge), so tools that own their refusal answer with their precise message instead of the generic `Invalid args for xd://…` plus the full tool doc ([#12871](https://github.com/can1357/oh-my-pi/pull/12871) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.2.9] - 2026-09-22
 
@@ -208,11 +191,6 @@
 - Improved responsiveness in long sessions by significantly reducing the time required to scan provider context for credential patterns.
 - Fixed native judges failing to honor configured request headers, enabling authenticated and header-routed judge providers to work as configured.
 - Fixed LSP requests hanging when aborted while waiting for an earlier write to complete.
-- Fixed native judges ignoring configured `headers`: the judge chain now resolves model headers and passes them to the System One transport, so gateway-authenticated and header-routed judge providers work without extra configuration.
-- Added support for buffered cloud transcription using OpenAI-compatible models
-- Added visual change detection capabilities for video processing using FFMPEG and SVG overlaying
-- Prevented LSP client from hanging when a request is aborted while waiting for a previous write
-- Fixed setup wizard reporting Gemini web search "Not configured yet" when only Antigravity OAuth is signed in ([#13052](https://github.com/can1357/oh-my-pi/pull/13052) by [@holny](https://github.com/holny))
 
 ## [18.2.7] - 2026-09-21
 

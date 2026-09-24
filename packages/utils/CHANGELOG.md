@@ -2,10 +2,6 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Migrated internal cryptographic utilities to `Bun` performance-optimized hashers
-
 ### Fixed
 
 - Fixed dated log paths using the UTC day instead of the local day the rotating sink names its files with ([#13042](https://github.com/can1357/oh-my-pi/pull/13042) by [@jchanghong023](https://github.com/jchanghong023)).
