@@ -94,7 +94,7 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
 		for (const listener of serviceState(session).listeners) listener();
 	});
 	session.registerSessionChangeCallback?.(() => {
-		unsubscribe({ preservePending: true });
+		unsubscribe();
 		clients.delete(client);
 		serviceState(session).owned.clear();
 		for (const listener of serviceState(session).listeners) listener();
