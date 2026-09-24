@@ -354,16 +354,18 @@ export class GuestClient {
 				break;
 			}
 			case "entry":
-				if (this.#pendingSnapshot !== null) {
-					this.#pendingSnapshot.live.push(frame.entry);
-					return;
-				}
-				this.#entries.push(frame.entry);
-				this.#publishedEntries = [...this.#entries];
+				// The committed row supersedes the finished stream ghost, even when
+				// the row is buffered behind an in-flight snapshot.
 				if (this.#streamDone && frame.entry.type === "message" && frame.entry.message.role === "assistant") {
 					this.#stream = null;
 					this.#streamDone = false;
 				}
+				if (this.#pendingSnapshot !== null) {
+					this.#pendingSnapshot.live.push(frame.entry);
+					break;
+				}
+				this.#entries.push(frame.entry);
+				this.#publishedEntries = [...this.#entries];
 				break;
 			case "event":
 				this.#applyEvent(frame.event);

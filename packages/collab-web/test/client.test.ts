@@ -157,6 +157,24 @@ describe("GuestClient frame apply", () => {
 		expect(client.getSnapshot().entries).toEqual([e1, e2, live]);
 	});
 
+	it("drops the finished stream ghost when its entry lands mid-snapshot", () => {
+		const e1 = messageEntry("e1", { role: "user", content: "one", timestamp: 1 });
+		const e2 = messageEntry("e2", { role: "user", content: "two", timestamp: 2 });
+		const message = assistantMessage("hello");
+		const client = new GuestClient(LINK, "tester");
+
+		client.applyFrameForTest(welcomeFrame(2));
+		client.applyFrameForTest(snapshotChunk([e1], false));
+		client.applyFrameForTest({ t: "event", event: { type: "message_end", message } });
+		client.applyFrameForTest({ t: "entry", entry: messageEntry("a1", message) });
+		client.applyFrameForTest(snapshotChunk([e2]));
+
+		const snap = client.getSnapshot();
+		expect(snap.entries).toEqual([e1, e2, messageEntry("a1", message)]);
+		expect(snap.stream).toBeNull();
+		expect(snap.streamDone).toBe(false);
+	});
+
 	it("completes the snapshot once every promised entry arrived, even without a final chunk", () => {
 		const e1 = messageEntry("e1", { role: "user", content: "one", timestamp: 1 });
 		const e2 = messageEntry("e2", { role: "user", content: "two", timestamp: 2 });
