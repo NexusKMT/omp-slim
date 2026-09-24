@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import type { AgentCompactionThresholdOverride } from "@oh-my-pi/pi-coding-agent/config/compaction-threshold";
 import type { BeforeSubagentSpawnEvent } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import {
 	artifactsDirsFromRegistry,
@@ -44,7 +45,7 @@ function session(
 		isolationApply?: boolean;
 		modelRoles?: Record<string, string>;
 		agentServiceTierOverrides?: Record<string, string>;
-		agentCompactionThresholdOverrides?: Record<string, string>;
+		agentCompactionThresholdOverrides?: Record<string, AgentCompactionThresholdOverride>;
 	} = {},
 ): ToolSession {
 	return {
@@ -271,24 +272,50 @@ describe("structured subagent primitive", () => {
 		expect(differentCase.serviceTierOverride).toBeUndefined();
 	});
 
-	it("resolves exact-case sparse compaction overrides and forwards the selected value", async () => {
+	it("resolves exact-case sparse numeric compaction overrides and forwards the normalized pair", async () => {
 		mockDiscovery({ ...AGENT, name: "scout" });
-		const exactSession = session({ agentCompactionThresholdOverrides: { scout: "80%", task: "90000" } });
+		const expectedOverride = { thresholdPercent: 80, thresholdTokens: 90000 };
+		const exactSession = session({
+			agentCompactionThresholdOverrides: {
+				scout: expectedOverride,
+				task: { thresholdTokens: 90000 },
+			},
+		});
 		const exactPolicy = await resolveEffectiveSubagentPolicy(request({ session: exactSession, agent: "scout" }));
-		expect(exactPolicy.compactionThresholdOverride).toBe("80%");
+		expect(exactPolicy.compactionThresholdOverride).toEqual(expectedOverride);
 
 		const differentCase = await resolveEffectiveSubagentPolicy(
 			request({
-				session: session({ agentCompactionThresholdOverrides: { Scout: "80%", task: "90000" } }),
+				session: session({
+					agentCompactionThresholdOverrides: {
+						Scout: expectedOverride,
+						task: { thresholdTokens: 90000 },
+					},
+				}),
 				agent: "scout",
 			}),
 		);
 		expect(differentCase.compactionThresholdOverride).toBeUndefined();
 
 		const sparse = await resolveEffectiveSubagentPolicy(
-			request({ session: session({ agentCompactionThresholdOverrides: { task: "90000" } }), agent: "scout" }),
+			request({
+				session: session({ agentCompactionThresholdOverrides: { task: { thresholdTokens: 90000 } } }),
+				agent: "scout",
+			}),
 		);
 		expect(sparse.compactionThresholdOverride).toBeUndefined();
+
+		const malformedEntry = await resolveEffectiveSubagentPolicy(
+			request({
+				session: session({
+					agentCompactionThresholdOverrides: {
+						scout: { thresholdPercent: Number.NaN },
+					},
+				}),
+				agent: "scout",
+			}),
+		);
+		expect(malformedEntry.compactionThresholdOverride).toBeUndefined();
 
 		const dispatched: executorModule.ExecutorOptions[] = [];
 		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
@@ -298,8 +325,38 @@ describe("structured subagent primitive", () => {
 		const settled = await runStructuredSubagent(
 			request({ session: exactSession, agent: "scout", retainArtifacts: true }),
 		);
-		expect(settled.policy.compactionThresholdOverride).toBe("80%");
-		expect(dispatched[0]?.compactionThresholdOverride).toBe("80%");
+		expect(settled.policy.compactionThresholdOverride).toEqual(expectedOverride);
+		expect(dispatched[0]?.compactionThresholdOverride).toEqual(expectedOverride);
+		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
+	});
+
+	it("ignores malformed threshold settings during mutation, load, and dispatch", async () => {
+		mockDiscovery({ ...AGENT, name: "scout" });
+
+		const mutatedSession = session();
+		expect(() =>
+			mutatedSession.settings.set("task.agentCompactionThresholdOverrides", {
+				scout: { thresholdPercent: Number.NaN },
+			}),
+		).not.toThrow();
+		const mutatedPolicy = await resolveEffectiveSubagentPolicy(request({ session: mutatedSession, agent: "scout" }));
+		expect(mutatedPolicy.compactionThresholdOverride).toBeUndefined();
+
+		const malformedSettings = await Settings.loadIsolated({
+			inMemory: true,
+			overrides: { "task.agentCompactionThresholdOverrides": "scout: 80%" },
+		});
+		const malformedSession = session({ settings: malformedSettings });
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+		const settled = await runStructuredSubagent(
+			request({ session: malformedSession, agent: "scout", retainArtifacts: true }),
+		);
+		expect(settled.policy.compactionThresholdOverride).toBeUndefined();
+		expect(dispatched[0]?.compactionThresholdOverride).toBeUndefined();
 		await fs.rm(settled.artifactsDir, { recursive: true, force: true });
 	});
 

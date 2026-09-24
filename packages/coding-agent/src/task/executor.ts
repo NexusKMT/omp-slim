@@ -31,7 +31,7 @@ import {
 	resolveSubagentServiceTier,
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
-import { resolveAgentCompactionThresholdOverride } from "../config/compaction-threshold";
+import type { AgentCompactionThresholdOverride } from "../config/compaction-threshold";
 import { Settings } from "../config/settings";
 import { SETTINGS_SCHEMA, type SettingPath } from "../config/settings-schema";
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
@@ -543,8 +543,8 @@ export interface ExecutorOptions {
 	 * `tier.subagent` (Vibe workers) omit it.
 	 */
 	serviceTierOverride?: ServiceTierInheritSettingValue;
-	/** Exact-name `task.agentCompactionThresholdOverrides` entry selected by dispatch. */
-	compactionThresholdOverride?: string;
+	/** Exact-name `task.agentCompactionThresholdOverrides` pair selected by dispatch. */
+	compactionThresholdOverride?: Required<AgentCompactionThresholdOverride>;
 	/** Override local:// protocol options so subagent shares parent's local:// root */
 	localProtocolOptions?: LocalProtocolOptions;
 	/**
@@ -3325,7 +3325,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const compactionThresholdSettings =
 		options.compactionThresholdOverride === undefined
 			? undefined
-			: resolveAgentCompactionThresholdOverride(options.compactionThresholdOverride);
+			: {
+					"compaction.thresholdPercent": options.compactionThresholdOverride.thresholdPercent,
+					"compaction.thresholdTokens": options.compactionThresholdOverride.thresholdTokens,
+				};
 	// Per-agent advisor: the agent definition's `advisor` frontmatter or the
 	// `task.agentAdvisor` settings override (agent name → "on"/"off"/model
 	// pattern) pairs the spawned session with an advisor. Subagents default to

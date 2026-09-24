@@ -706,7 +706,7 @@ memory:
 | `compaction.methodOrder`      | array   | `remote, snapcompact, handoff, shake, soft` | Ordered fallbacks. `remote` uses provider-native server compaction (OpenAI Responses compact, Anthropic compaction beta); unavailable or failed methods advance. |
 | `compaction.thresholdPercent` | number  | `-1`                                     | Percent-of-context trigger; `-1` = reserve-based default.                                                                                                                                                                                 |
 | `compaction.thresholdTokens`  | number  | `-1`                                     | Fixed token trigger when `> 0`.                                                                                                                                                                                                           |
-| `task.agentCompactionThresholdOverrides` | record | `{}` | Sparse exact agent-name overrides for task/eval child compaction thresholds; values are percent strings or positive integer token strings. |
+| `task.agentCompactionThresholdOverrides` | record | `{}` | Sparse exact-name task/eval child overrides; each value is an object with optional numeric `thresholdPercent` and `thresholdTokens` fields. |
 | `compaction.reserveTokens`    | number  | _(unset)_                                | Absolute reserve floor. When unset, the effective reserve is the larger of `16384` and 15% of the context window; if that default would leave no practical small-window budget, it falls back to the 15% reserve.                         |
 | `compaction.keepRecentTokens` | number  | `20000`                                  | Recent tokens always preserved.                                                                                                                                                                                                           |
 | `compaction.autoContinue`     | boolean | `true`                                   | Continue automatically after compaction.                                                                                                                                                                                                  |
@@ -726,11 +726,23 @@ compaction:
 
 task:
   agentCompactionThresholdOverrides:
-    scout: "80%"
-    task: "90000"
+    scout:
+      thresholdPercent: 80
+    task:
+      thresholdTokens: 90000
 ```
 
-Values are strings: `"80%"` selects an integer percent threshold from 1 through 99, while `"90000"` selects a positive fixed-token limit. An entry replaces both threshold fields for that child: percent mode clears the fixed-token limit, and token mode clears the percentage. Unlisted task/eval agents keep the inherited global threshold; the parent/main session is unchanged. Agent names are exact and case-sensitive (`scout` does not match `Scout`). Vibe workers do not consult this map.
+Each exact agent-name entry is an object with optional numeric `thresholdPercent` and
+`thresholdTokens` fields. After settings layers merge, a usable object (at least one field is
+finite numeric) replaces both threshold fields for that task/eval child: omitted or nonfinite
+fields become `-1`; if neither field is positive, the reserve-based fallback applies. When
+both values are positive, `thresholdTokens` takes precedence. Because nested objects merge
+across config layers, set `thresholdTokens: -1` in a higher-priority layer to clear a
+lower-priority token limit when selecting a percentage. An absent entry, malformed top-level
+value, non-object entry, or object with neither field finite numeric is silently ignored, so
+the child keeps the global pair. Names are exact and case-sensitive (`scout` does not match
+`Scout`). This setting applies only to task/eval launches and does not change the
+parent/main session; Vibe workers do not consult this map.
 
 ### Appearance and terminal
 

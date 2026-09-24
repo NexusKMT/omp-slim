@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model, ServiceTierByFamily } from "@oh-my-pi/pi-ai";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -542,7 +543,7 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 			...baseOptions,
 			id: "compaction-percent-override",
 			settings,
-			compactionThresholdOverride: "80%",
+			compactionThresholdOverride: { thresholdPercent: 80, thresholdTokens: -1 },
 		});
 
 		expect(result.exitCode).toBe(0);
@@ -569,7 +570,7 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 			...baseOptions,
 			id: "compaction-token-override",
 			settings,
-			compactionThresholdOverride: "90000",
+			compactionThresholdOverride: { thresholdPercent: -1, thresholdTokens: 90_000 },
 		});
 
 		expect(result.exitCode).toBe(0);
@@ -579,6 +580,35 @@ describe("runSubprocess per-agent compaction threshold overrides", () => {
 		expect(appendSessionInit).toHaveBeenCalledWith(
 			expect.objectContaining({
 				compactionThreshold: { thresholdPercent: -1, thresholdTokens: 90_000 },
+			}),
+		);
+	});
+
+	it("passes both numeric thresholds through and uses the token limit when both are positive", async () => {
+		const session = yieldEmittingSession();
+		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(session));
+		const appendSessionInit = vi.spyOn(session.sessionManager, "appendSessionInit");
+		const settings = Settings.isolated({
+			"compaction.thresholdPercent": 75,
+			"compaction.thresholdTokens": 140_000,
+		});
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "compaction-both-overrides",
+			settings,
+			compactionThresholdOverride: { thresholdPercent: 80, thresholdTokens: 90_000 },
+		});
+
+		expect(result.exitCode).toBe(0);
+		const childSettings = createSession.mock.calls[0]?.[0]?.settings;
+		if (!childSettings) throw new Error("Expected child settings");
+		expect(childSettings.get("compaction.thresholdPercent")).toBe(80);
+		expect(childSettings.get("compaction.thresholdTokens")).toBe(90_000);
+		expect(resolveThresholdTokens(200_000, childSettings.getGroup("compaction"))).toBe(90_000);
+		expect(appendSessionInit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				compactionThreshold: { thresholdPercent: 80, thresholdTokens: 90_000 },
 			}),
 		);
 	});

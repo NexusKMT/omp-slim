@@ -45,6 +45,7 @@ import {
 	SERVICE_TIER_OPENAI_VALUES,
 	type ServiceTierInheritSettingValue,
 } from "./service-tier";
+import type { AgentCompactionThresholdOverride } from "./compaction-threshold";
 
 /** Unified settings schema - single source of truth for all settings.
  *
@@ -227,7 +228,7 @@ const EMPTY_STRING_ARRAY: string[] = [];
 const EMPTY_STRING_RECORD: Record<string, string> = {};
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
 const EMPTY_AGENT_SERVICE_TIER_OVERRIDES: Record<string, ServiceTierInheritSettingValue> = {};
-const EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES: Record<string, string> = {};
+const EMPTY_AGENT_COMPACTION_THRESHOLD_OVERRIDES: Record<string, AgentCompactionThresholdOverride> = {};
 const DEFAULT_CYCLE_ORDER: string[] = ["smol", "default", "slow"];
 const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["wait"];
 const EMPTY_MODEL_TAGS_RECORD: ModelTagsSettings = {};
