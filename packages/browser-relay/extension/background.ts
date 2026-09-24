@@ -31,10 +31,10 @@ let instanceId: string | null = null;
 async function ensureInstanceId(): Promise<string> {
 	if (instanceId) return instanceId;
 	const key = "relayInstanceId";
-	const stored = await chrome.storage.local.get(key);
+	const stored = await chrome.storage.local.get({ [key]: "" });
 	const existing = stored[key];
 	instanceId = typeof existing === "string" && existing.length > 0 ? existing : crypto.randomUUID();
-	await chrome.storage.local.set({ [key]: instanceId });
+	await chrome.storage.local.set({ [key]: instanceId } as Record<string, string>);
 	return instanceId;
 }
 
