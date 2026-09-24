@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Claude Opus 5.5 failing every turn that forces a tool (eager todo/task preludes, forced final yield, sharpshooter passes) with `400 tool_choice: type "tool" and "any" are not supported for this model`; forced selectors now downgrade to `auto` as they already did for Fable/Mythos ([#12939](https://github.com/can1357/oh-my-pi/issues/12939)).
+- Fixed Claude Opus 5.5 requests that force tool use, preventing turn failures and allowing forced tool selections to fall back to automatic tool selection when required.
 
 ## [18.3.0] - 2026-09-24
 
