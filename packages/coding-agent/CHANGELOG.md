@@ -6,6 +6,10 @@
 
 - Added `additionalContext` to extension and hook `tool_call` results, plus `ctx.addAdditionalContext()` for registered tools, to pass trusted instructions to the model after a tool call without changing its result ([#11998](https://github.com/can1357/oh-my-pi/pull/11998) by [@H4vC](https://github.com/H4vC))
 
+### Fixed
+
+- Fixed `read` on Windows intermittently failing with `ENOENT` for an existing file when a line selector such as `:1-40` was appended ([#13109](https://github.com/can1357/oh-my-pi/pull/13109) by [@NaC-L](https://github.com/NaC-L)).
+
 ## [18.3.0] - 2026-09-24
 
 ### Breaking Changes
