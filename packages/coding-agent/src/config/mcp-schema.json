@@ -149,7 +149,12 @@
           "additionalProperties": false,
           "required": ["command"],
           "properties": {
+            "enabled": {},
+            "timeout": {},
+            "requestIdFormat": {},
             "instructions": {},
+            "auth": {},
+            "oauth": {},
             "type": {
               "type": "string",
               "enum": ["stdio"],
@@ -192,7 +197,12 @@
           "additionalProperties": false,
           "required": ["type", "url"],
           "properties": {
+            "enabled": {},
+            "timeout": {},
+            "requestIdFormat": {},
             "instructions": {},
+            "auth": {},
+            "oauth": {},
             "type": {
               "type": "string",
               "enum": ["http"],
@@ -224,7 +234,12 @@
           "additionalProperties": false,
           "required": ["type", "url"],
           "properties": {
+            "enabled": {},
+            "timeout": {},
+            "requestIdFormat": {},
             "instructions": {},
+            "auth": {},
+            "oauth": {},
             "type": {
               "type": "string",
               "enum": ["sse"],

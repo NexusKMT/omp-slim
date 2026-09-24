@@ -190,4 +190,27 @@ for (const server of [
 			validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, instructions: "false" } } }).success,
 		).toBe(false);
 	});
+
+	test(server.type + " schema accepts every shared server field and still rejects unknown keys", () => {
+		// Each transport closes its properties with `additionalProperties: false`,
+		// which does not see `serverBase` through `allOf`; shared fields must stay
+		// allowlisted there or valid configs fail validation.
+		const shared = {
+			enabled: false,
+			timeout: 120_000,
+			requestIdFormat: "string",
+			instructions: false,
+			auth: { type: "oauth" },
+			oauth: { clientId: "client" },
+		};
+		expect(validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, ...shared } } }).success).toBe(
+			true,
+		);
+		expect(validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, timeout: -1 } } }).success).toBe(
+			false,
+		);
+		expect(validateJsonSchemaValue(mcpSchema, { mcpServers: { fixture: { ...server, bogus: true } } }).success).toBe(
+			false,
+		);
+	});
 }
