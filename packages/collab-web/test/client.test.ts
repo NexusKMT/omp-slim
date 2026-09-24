@@ -141,6 +141,34 @@ describe("GuestClient frame apply", () => {
 		expect(client.getSnapshot().phase).toBe("live");
 	});
 
+	it("publishes live entries that arrive mid-snapshot after the snapshot, not inside it", () => {
+		const e1 = messageEntry("e1", { role: "user", content: "one", timestamp: 1 });
+		const e2 = messageEntry("e2", { role: "user", content: "two", timestamp: 2 });
+		const live = messageEntry("live", { role: "user", content: "live", timestamp: 3 });
+		const client = new GuestClient(LINK, "tester");
+
+		client.applyFrameForTest(welcomeFrame(2));
+		client.applyFrameForTest(snapshotChunk([e1], false));
+		client.applyFrameForTest({ t: "entry", entry: live });
+		expect(client.getSnapshot().entries).toEqual([]);
+		expect(client.getSnapshot().loading).toEqual({ received: 1, total: 2 });
+
+		client.applyFrameForTest(snapshotChunk([e2]));
+		expect(client.getSnapshot().entries).toEqual([e1, e2, live]);
+	});
+
+	it("completes the snapshot once every promised entry arrived, even without a final chunk", () => {
+		const e1 = messageEntry("e1", { role: "user", content: "one", timestamp: 1 });
+		const e2 = messageEntry("e2", { role: "user", content: "two", timestamp: 2 });
+		const client = new GuestClient(LINK, "tester");
+
+		client.applyFrameForTest(welcomeFrame(2));
+		client.applyFrameForTest(snapshotChunk([e1, e2], false));
+		expect(client.getSnapshot().phase).toBe("live");
+		expect(client.getSnapshot().entries).toEqual([e1, e2]);
+		expect(client.getSnapshot().loading).toBeNull();
+	});
+
 	it("message_update sets the stream ghost (synthesizing a missed start)", () => {
 		const client = liveClient();
 		const partial = assistantMessage("hel");

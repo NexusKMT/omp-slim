@@ -294,8 +294,12 @@ export function Transcript(props: TranscriptProps): ReactNode {
 
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const lockRef = useRef(true);
-	/** Scroll geometry captured before mounting earlier rows; restored after commit. */
-	const prependRef = useRef<{ height: number; top: number } | null>(null);
+	/**
+	 * First visible row and its offset from the viewport top, captured before
+	 * mounting earlier rows. Restoring against the row, not the total height
+	 * delta, stays exact when the same commit also appends live entries.
+	 */
+	const prependRef = useRef<{ anchor: Element; offset: number } | null>(null);
 
 	// Follow the tail while bottom-locked; releasing/re-arming happens in onScroll.
 	useEffect(() => {
@@ -318,13 +322,21 @@ export function Transcript(props: TranscriptProps): ReactNode {
 		const before = prependRef.current;
 		if (el === null || before === null) return;
 		prependRef.current = null;
-		el.scrollTop = before.top + (el.scrollHeight - before.height);
+		if (!before.anchor.isConnected) return;
+		el.scrollTop += before.anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - before.offset;
 	}, [start]);
 
 	const showEarlier = (): void => {
 		const el = rootRef.current;
 		if (el === null || start === 0 || prependRef.current !== null) return;
-		prependRef.current = { height: el.scrollHeight, top: el.scrollTop };
+		const top = el.getBoundingClientRect().top;
+		for (const row of el.children) {
+			if (row.classList.contains("tr-earlier")) continue;
+			const rect = row.getBoundingClientRect();
+			if (rect.bottom <= top) continue;
+			prependRef.current = { anchor: row, offset: rect.top - top };
+			break;
+		}
 		setPinnedStart(Math.max(0, start - WINDOW));
 	};
 

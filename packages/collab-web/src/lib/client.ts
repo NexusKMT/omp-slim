@@ -108,9 +108,11 @@ export class GuestClient {
 	#endedReason: string | null = null;
 	#header: SessionHeader | null = null;
 	#entries: SessionEntry[] = [];
-	/** Snapshot entries received since `welcome`; published on the final chunk. */
-	#pendingEntries: SessionEntry[] | null = null;
-	#loading: GuestSnapshot["loading"] = null;
+	/**
+	 * Snapshot in flight since `welcome`: chunk entries, plus live `entry`
+	 * frames that arrived meanwhile (published after the snapshot, at the tail).
+	 */
+	#pendingSnapshot: { entries: SessionEntry[]; live: SessionEntry[]; total: number } | null = null;
 	#state: SessionState | null = null;
 	#agents: readonly AgentSnapshot[] = [];
 	#progress: ReadonlyMap<string, SubagentProgressPayload> = new Map();
@@ -234,8 +236,7 @@ export class GuestClient {
 		if (willReconnect) {
 			this.#phase = "reconnecting";
 			// The next welcome restarts the snapshot; drop the partial one.
-			this.#pendingEntries = null;
-			this.#loading = null;
+			this.#pendingSnapshot = null;
 			this.#commit();
 			return;
 		}
@@ -248,8 +249,7 @@ export class GuestClient {
 		this.#clearSnapshotProgressTimer();
 		this.#phase = "ended";
 		this.#endedReason = reason;
-		this.#pendingEntries = null;
-		this.#loading = null;
+		this.#pendingSnapshot = null;
 		for (const [, pending] of this.#pendingTranscripts) {
 			clearTimeout(pending.timer);
 			pending.resolve(null);
@@ -302,16 +302,14 @@ export class GuestClient {
 			case "welcome":
 				// A fresh welcome (first join or reconnect) restarts the snapshot.
 				// Entries already on screen stay until the new snapshot replaces
-				// them on its final chunk, so a resync never blanks the transcript.
+				// them once complete, so a resync never blanks the transcript.
 				this.#header = frame.header;
 				if (frame.entryCount === 0) {
 					this.#entries = [];
 					this.#publishedEntries = [];
-					this.#pendingEntries = null;
-					this.#loading = null;
+					this.#pendingSnapshot = null;
 				} else {
-					this.#pendingEntries = [];
-					this.#loading = { received: 0, total: frame.entryCount };
+					this.#pendingSnapshot = { entries: [], live: [], total: frame.entryCount };
 				}
 				this.#state = frame.state;
 				this.#agents = [...frame.agents];
@@ -334,29 +332,30 @@ export class GuestClient {
 				this.#endedReason = null;
 				break;
 			case "snapshot-chunk": {
-				// Buffer fragments and publish the transcript once, on the host's
-				// `final` chunk (as the TUI guest does). Intermediate chunks only
-				// advance `loading`: publishing entries per chunk re-renders the
-				// transcript per chunk, and a 50 MB session is ~100 chunks.
-				const pending = this.#pendingEntries;
+				// Buffer fragments and publish the transcript once, when the
+				// snapshot completes (as the TUI guest does). Intermediate chunks
+				// only advance `loading`: publishing entries per chunk re-renders
+				// the transcript per chunk, and a 50 MB session is ~100 chunks.
+				const pending = this.#pendingSnapshot;
 				if (pending === null) return;
-				pending.push(...frame.entries);
-				if (!frame.final) {
-					this.#loading = { received: pending.length, total: this.#loading?.total ?? pending.length };
+				pending.entries.push(...frame.entries);
+				// Complete on `final` or once every promised entry arrived, so a
+				// lost final chunk doesn't strand a fully received transcript.
+				if (!frame.final && pending.entries.length < pending.total) {
 					this.#armSnapshotProgressTimer();
 					break;
 				}
-				this.#entries = pending;
-				this.#publishedEntries = [...pending];
-				this.#pendingEntries = null;
-				this.#loading = null;
+				this.#entries = pending.entries;
+				this.#entries.push(...pending.live);
+				this.#publishedEntries = [...this.#entries];
+				this.#pendingSnapshot = null;
 				this.#clearSnapshotProgressTimer();
 				this.#phase = "live";
 				break;
 			}
 			case "entry":
-				if (this.#pendingEntries !== null) {
-					this.#pendingEntries.push(frame.entry);
+				if (this.#pendingSnapshot !== null) {
+					this.#pendingSnapshot.live.push(frame.entry);
 					return;
 				}
 				this.#entries.push(frame.entry);
@@ -561,7 +560,10 @@ export class GuestClient {
 			readOnly: this.#readOnly,
 			uiRequest: this.#uiRequest,
 			notices: this.#notices,
-			loading: this.#loading,
+			loading: this.#pendingSnapshot && {
+				received: this.#pendingSnapshot.entries.length,
+				total: this.#pendingSnapshot.total,
+			},
 		};
 	}
 
