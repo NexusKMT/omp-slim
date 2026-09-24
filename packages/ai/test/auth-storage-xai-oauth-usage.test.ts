@@ -255,7 +255,7 @@ describe("xAI OAuth environment usage", () => {
 					status: "exhausted",
 				},
 				{
-					id: "xai-oauth:on-demand:1mo",
+					id: "xai-oauth:on-demand",
 					label: "On-Demand Cap",
 					scope: { provider: "xai-oauth" },
 					amount: { usedFraction: 1.0, unit: "usd" },
@@ -282,5 +282,55 @@ describe("xAI OAuth environment usage", () => {
 		};
 		const windows = strategy!.findWindowLimits(monthlyReport);
 		expect(windows.secondary?.id).toBe("xai-oauth:included:1mo");
+	});
+
+	it("extends a 429 block to the billing-period end only once on-demand headroom is gone", async () => {
+		const now = Date.now();
+		const periodEnd = now + 20 * 24 * 60 * 60 * 1000;
+		const reportWithOnDemand = (onDemandUsed: number): UsageReport => ({
+			provider: "xai-oauth",
+			fetchedAt: now,
+			limits: [
+				{
+					id: "xai-oauth:included:1mo",
+					label: "SuperGrok Monthly Included",
+					scope: { provider: "xai-oauth", windowId: "1mo", shared: true },
+					window: { id: "1mo", label: "Monthly", durationMs: 30 * 24 * 60 * 60 * 1000, resetsAt: periodEnd },
+					amount: { used: 100, limit: 100, usedFraction: 1, remainingFraction: 0, unit: "unknown" },
+					status: "exhausted",
+				},
+				{
+					id: "xai-oauth:on-demand",
+					label: "On-demand",
+					scope: { provider: "xai-oauth", shared: true },
+					amount: { used: onDemandUsed, limit: 50, usedFraction: onDemandUsed / 50, unit: "unknown" },
+					status: onDemandUsed >= 50 ? "exhausted" : "ok",
+				},
+			],
+		});
+		const markReachedFor = async (report: UsageReport) => {
+			const storage = new AuthStorage(
+				makeStore([
+					{
+						id: 1,
+						provider: "xai-oauth",
+						credential: { type: "oauth", access: "token", refresh: "r", expires: now + 3600000 },
+						disabledCause: null,
+					},
+				]),
+				{ usageProviderResolver: () => ({ id: "xai-oauth", supports: () => true, fetchUsage: async () => report }) },
+			);
+			await storage.credentials.reload();
+			await storage.keys.get("xai-oauth", "session");
+			return storage.limits.markReached("xai-oauth", "session", { retryAfterMs: 60_000 });
+		};
+
+		const servingOnDemand = await markReachedFor(reportWithOnDemand(10));
+		expect(servingOnDemand.reportResetAtMs).toBeUndefined();
+		expect(servingOnDemand.blockedUntilMs).toBeLessThan(now + 2 * 60_000);
+
+		const onDemandSpent = await markReachedFor(reportWithOnDemand(50));
+		expect(onDemandSpent.reportResetAtMs).toBe(periodEnd);
+		expect(onDemandSpent.blockedUntilMs).toBe(periodEnd);
 	});
 });
