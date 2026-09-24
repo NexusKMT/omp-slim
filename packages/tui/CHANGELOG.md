@@ -18,6 +18,15 @@
 - Added a fullscreen annotation overlay for diffs and text, including multi-line notes, editing, deletion, and undo ([#12601](https://github.com/can1357/oh-my-pi/pull/12601) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Added Daybreak-enabled account listings to the usage dashboard.
 
+### Breaking Changes
+
+- `CustomEditor`'s `onSpaceHoldStart`, `onSpaceHoldEnd` and `sttHoldEnabled` are replaced by `spaceHold.handler` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- Removed `Editor.cursorOverrideWidth`; the width of a `cursorOverride` glyph is always measured ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+
+### Added
+
+- Added Skills configuration section to settings
+- `Input` supports hold-Space push-to-talk, live dictation text, and `cursorOverride` ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
 ### Changed
 
 - Mermaid flowcharts and state diagrams now automatically choose a layout that best fits the available terminal width and reflow when the terminal is resized.

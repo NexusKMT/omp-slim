@@ -94,6 +94,11 @@
 - Fixed the first LSP diagnostics request returning no results while a newly started language server is still analyzing.
 - `/shake thinking` now reports the number of tokens freed.
 
+### Fixed
+
+- Holding Space to dictate now works in the `/btw` follow-up input, with the mic shown on that line ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+- Holding Space again while the last clip is still transcribing no longer leaves the mic recording after you let go ([#12963](https://github.com/can1357/oh-my-pi/pull/12963) by [@HACKE-RC](https://github.com/HACKE-RC)).
+
 ## [18.2.10] - 2026-09-22
 
 ### Added
