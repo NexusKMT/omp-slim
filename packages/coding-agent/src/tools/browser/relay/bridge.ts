@@ -21,6 +21,7 @@
  * - real child session ids (OOPIFs, workers) — created by Chrome under the
  *   shared root session and passed through verbatim
  */
+import { createHash } from "node:crypto";
 import type { ExtToRelayMessage, RelayRpcRequest, RelayToExtMessage, TabSnapshot } from "./protocol";
 
 /** Transport-agnostic websocket surface the bridge writes to. */
@@ -98,14 +99,19 @@ class ExtensionReplacedError extends Error {}
 /** A connected extension browser instance; one per browser/profile. */
 interface ExtInstance {
 	instanceId: string;
-	/** Stable short id used in target ids (`TAB<seq>.<tabId>`). */
-	seq: number;
+	/** Stable short code derived from the instance id; names target ids (`TAB<code>.<tabId>`). */
+	code: string;
 	socket: RelaySocket | null;
 	info: { userAgent: string; browserVersion: string } | null;
 }
 
-function tabKeyOf(extSeq: number, tabId: number): string {
-	return `${extSeq}:${tabId}`;
+/** Deterministic per-instance code for target ids: stable across relay restarts. */
+function instanceCode(instanceId: string): string {
+	return createHash("sha256").update(instanceId).digest("base64url").slice(0, 8);
+}
+
+function tabKeyOf(extCode: string, tabId: number): string {
+	return `${extCode}:${tabId}`;
 }
 
 function tabTargetIdFromKey(key: string): string {
@@ -117,7 +123,7 @@ function pageTargetIdFromKey(key: string): string {
 }
 
 function parseTargetId(targetId: string): { key: string; kind: "tab" | "page" } | null {
-	const match = /^(TAB|PAGE)(\d+)\.(\d+)$/.exec(targetId);
+	const match = /^(TAB|PAGE)([^.]+)\.(\d+)$/.exec(targetId);
 	if (!match) return null;
 	const kind: "tab" | "page" = match[1] === "TAB" ? "tab" : "page";
 	return { key: `${match[2]}:${match[3]}`, kind };
@@ -163,11 +169,11 @@ class TabState {
 
 	constructor(
 		readonly instanceId: string,
-		readonly extSeq: number,
+		readonly extCode: string,
 		readonly tabId: number,
 		snap: TabSnapshot,
 	) {
-		this.tabKey = tabKeyOf(extSeq, tabId);
+		this.tabKey = tabKeyOf(extCode, tabId);
 		this.url = snap.url;
 		this.title = snap.title;
 		this.active = snap.active;
@@ -208,7 +214,6 @@ export class RelayBridge {
 	/** Connected extension browser instances, keyed by stable instance id. */
 	#instances = new Map<string, ExtInstance>();
 	#socketInstance = new Map<RelaySocket, string>();
-	#instanceSeq = 0;
 	/** Instance whose hello ran last: answers browser-wide requests and owns created tabs. */
 	#lastHelloInstance: string | null = null;
 	#extensionSeen = false;
@@ -355,10 +360,10 @@ export class RelayBridge {
 				return;
 			}
 			case "cdpEvent":
-				this.#onCdpEvent(tabKeyOf(inst.seq, msg.tabId), msg.sessionId, msg.method, msg.params);
+				this.#onCdpEvent(tabKeyOf(inst.code, msg.tabId), msg.sessionId, msg.method, msg.params);
 				return;
 			case "detached":
-				this.#onTabDetached(tabKeyOf(inst.seq, msg.tabId), msg.reason, msg.relayInitiated === true);
+				this.#onTabDetached(tabKeyOf(inst.code, msg.tabId), msg.reason, msg.relayInitiated === true);
 				return;
 			case "tabCreated":
 				this.#onTabUpsert(msg.tab, instanceId);
@@ -367,7 +372,7 @@ export class RelayBridge {
 				this.#onTabUpsert(msg.tab, instanceId);
 				return;
 			case "tabRemoved":
-				this.#onTabRemoved(tabKeyOf(inst.seq, msg.tabId));
+				this.#onTabRemoved(tabKeyOf(inst.code, msg.tabId));
 				return;
 			case "ping":
 				socket.send(JSON.stringify({ t: "pong" } satisfies RelayToExtMessage));
@@ -381,7 +386,7 @@ export class RelayBridge {
 		const instanceId = typeof msg.instanceId === "string" && msg.instanceId.length > 0 ? msg.instanceId : "anon";
 		let inst = this.#instances.get(instanceId);
 		if (!inst) {
-			inst = { instanceId, seq: ++this.#instanceSeq, socket: null, info: null };
+			inst = { instanceId, code: instanceCode(instanceId), socket: null, info: null };
 			this.#instances.set(instanceId, inst);
 		} else if (inst.socket && inst.socket !== socket) {
 			// Same browser reconnected (service-worker restart): retire the old
@@ -803,7 +808,7 @@ export class RelayBridge {
 				const result = (await this.#rpc({ op: "createTab", url }, inst)) as { tab: TabSnapshot };
 				this.#onTabUpsert(result.tab, inst.instanceId);
 				// Creating a tab is an explicit act of driving it.
-				const createdKey = tabKeyOf(inst.seq, result.tab.tabId);
+				const createdKey = tabKeyOf(inst.code, result.tab.tabId);
 				this.#claimTab(conn, createdKey);
 				this.#reply(conn, msg, { targetId: pageTargetIdFromKey(createdKey) });
 				return;
@@ -980,10 +985,10 @@ export class RelayBridge {
 	#onTabUpsert(snap: TabSnapshot, instanceId: string, opts: { silent?: boolean } = {}): void {
 		const inst = this.#instances.get(instanceId);
 		if (!inst) return;
-		const key = tabKeyOf(inst.seq, snap.tabId);
+		const key = tabKeyOf(inst.code, snap.tabId);
 		let tab = this.#tabs.get(key);
 		if (!tab) {
-			tab = new TabState(instanceId, inst.seq, snap.tabId, snap);
+			tab = new TabState(instanceId, inst.code, snap.tabId, snap);
 			this.#tabs.set(key, tab);
 		} else {
 			if (tab.url !== snap.url) tab.banned = false;
