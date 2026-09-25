@@ -50,6 +50,8 @@
 
 ### Changed
 
+- Changed builtin command failure handling to return exit code 123 with diagnostic
+- Changed length‑stop recovery to reset retries only on delivered turns and updated final error message
 - Enhanced `length` stop recovery to distinguish between output cap exhaustion and context window saturation, allowing truncated-but-actionable turns to be retained
 - Replaced temporary file materialization with direct `InternalUrlFilesystem` resolution for virtual URL tools
 - Migrated `find`, `ifne`, and `xargs` to perform command execution through the `InternalUrlFilesystem` and subshell host
