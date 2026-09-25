@@ -259,21 +259,23 @@ export class TtsrCoordinator {
 		this.#releaseDeferredReservation(deliveryId, ruleNames);
 	}
 
-	/** Folds per-tool reminders into the matched tool's result. */
+	/** Delivers per-tool reminders through the trusted passive-context channel. */
 	afterToolCall(ctx: AfterToolCallContext): AfterToolCallResult | undefined {
-		return this.#buildToolReminder(ctx.toolCall.id, ctx.result);
+		const reminder = this.#buildToolReminder(ctx.toolCall.id);
+		return reminder ? { additionalContext: reminder } : undefined;
 	}
 
+	/** Eval-bridged calls bypass the agent loop, so their reminder is folded into the result. */
 	afterBridgedToolCall(toolCallId: string, result: AgentToolResult): AgentToolResult | undefined {
-		const reminder = this.#buildToolReminder(toolCallId, result);
-		return reminder ? { ...result, ...reminder } : undefined;
+		const reminder = this.#buildToolReminder(toolCallId);
+		return reminder ? { ...result, content: [{ type: "text", text: reminder }, ...result.content] } : undefined;
 	}
 
 	cancelBridgedToolCall(toolCallId: string): void {
 		this.#perToolInjections.delete(toolCallId);
 	}
 
-	#buildToolReminder(toolCallId: string, result: AgentToolResult): AfterToolCallResult | undefined {
+	#buildToolReminder(toolCallId: string): string | undefined {
 		const rules = this.#perToolInjections.get(toolCallId);
 		if (!rules || rules.length === 0) return undefined;
 		this.#perToolInjections.delete(toolCallId);
@@ -288,7 +290,7 @@ export class TtsrCoordinator {
 			.join("\n\n");
 		const ruleNames = rules.map(rule => rule.name.trim()).filter(name => name.length > 0);
 		if (ruleNames.length > 0) this.#markInjected(ruleNames);
-		return { content: [{ type: "text", text: reminder }, ...result.content] };
+		return reminder;
 	}
 
 	/** Resolves and clears the current resume gate. */

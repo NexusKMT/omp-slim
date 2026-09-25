@@ -61,6 +61,9 @@
 ### Added
 
 - Added live steering support, allowing models to receive and act on user steering messages during an active stream.
+### Added
+
+- Added `additionalContext` to `afterToolCall` results, allowing trusted post-tool guidance to reach the next provider request outside tool output, including after failed results.
 
 ## [18.3.2] - 2026-09-25
 
