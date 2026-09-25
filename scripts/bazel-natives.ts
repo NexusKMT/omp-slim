@@ -7,7 +7,8 @@
  * Targets are the //:natives-* names from BUILD.bazel (e.g. linux-x64-baseline,
  * darwin-arm64) plus three pseudo-targets:
  *   - host        the single addon matching this machine (x64 hosts pick
- *                 modern vs baseline via AVX2 detection)
+ *                 modern vs baseline via AVX2 detection; a musl Bun gets the
+ *                 musl addon)
  *   - linux-all   every addon buildable from a linux-x64 host (incl. win32)
  *   - darwin-all  both darwin addons (mac hosts only)
  *
@@ -37,13 +38,11 @@
  * CI jobs that ship files always request an explicit disjoint target set.
  *
  * After install, the addon for the host's own target is dlopen-probed in a
- * child process and an unloadable image fails the build. The bazel `host`
- * target is always gnu, so on a musl host (Alpine) with the bazel backend the
- * probe rejects it; use the default local Cargo build there instead.
+ * child process and an unloadable image (or a load that hangs) fails the build.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { detectHostAvx2Support, resolveLocalHostAddon } from "./host-detect";
+import { detectHostAvx2Support, detectHostMusl, resolveLocalHostAddon } from "./host-detect";
 
 const repoRoot = path.join(import.meta.dir, "..");
 
@@ -76,17 +75,26 @@ export interface HostInfo {
 	platform: string;
 	arch: string;
 	avx2: boolean;
+	/** The running Bun links musl, so only musl addons load in it. */
+	musl: boolean;
 }
 
-/** The single addon target matching the host CPU (modern iff x64 + AVX2). */
+/**
+ * The single addon target this host can load: modern iff x64 + AVX2, musl iff
+ * the running Bun is musl. There is no modern musl addon; the runtime loader
+ * falls back from modern to baseline.
+ */
 export function hostTargetName(host: HostInfo): string {
 	if (host.platform === "darwin") {
 		if (host.arch === "arm64") return "darwin-arm64";
 		if (host.arch === "x64") return "darwin-x64-baseline";
 	}
 	if (host.platform === "linux") {
-		if (host.arch === "arm64") return "linux-arm64";
-		if (host.arch === "x64") return host.avx2 ? "linux-x64-modern" : "linux-x64-baseline";
+		if (host.arch === "arm64") return host.musl ? "linux-musl-arm64" : "linux-arm64";
+		if (host.arch === "x64") {
+			if (host.musl) return "linux-musl-x64-baseline";
+			return host.avx2 ? "linux-x64-modern" : "linux-x64-baseline";
+		}
 	}
 	if (host.platform === "win32" && host.arch === "x64") return "win32-x64-baseline";
 	throw new Error(`No pi_natives addon target for host ${host.platform}-${host.arch}`);
@@ -135,9 +143,9 @@ export function conventionOutputPaths(names: string[], host: HostInfo): string[]
  * The filename alone cannot decide this: musl targets deliberately reuse the
  * gnu canonical names, so `pi_natives.linux-arm64.node` may be a musl image
  * that a glibc builder must not dlopen — the release matrix installs exactly
- * that artifact on a glibc runner. Only the host's own target is probed, and
- * one invocation can never hold both spellings of a basename because the
- * install loop refuses duplicates.
+ * that artifact on a glibc runner. Only the host's own target, which matches
+ * the running Bun's libc, is probed, and one invocation can never hold both
+ * spellings of a basename because the install loop refuses duplicates.
  */
 export function hostProbeFilename(names: string[], host: HostInfo): string | null {
 	let hostTarget: string;
@@ -256,6 +264,9 @@ export const ADDON_LOAD_FAILURE_EXPLANATION =
 	"The addon was produced and installed successfully, so this is a defect in the build that made it, " +
 	"not in the loader that rejected it.";
 
+/** Upper bound on one load probe; loading runs the addon's init code, which must not hang the build. */
+export const ADDON_LOAD_PROBE_TIMEOUT_MS = 60_000;
+
 /**
  * Confirm a freshly installed host addon can actually be loaded.
  *
@@ -266,17 +277,34 @@ export const ADDON_LOAD_FAILURE_EXPLANATION =
  * pointing back at the build that produced it. Loading happens in a child so a
  * successful probe does not keep the file mapped in this process.
  */
-export async function verifyHostAddonLoads(destPath: string): Promise<void> {
+export async function verifyHostAddonLoads(
+	destPath: string,
+	timeoutMs: number = ADDON_LOAD_PROBE_TIMEOUT_MS,
+): Promise<void> {
 	const probe =
 		`try { process.dlopen({ exports: {} }, ${JSON.stringify(destPath)}); } ` +
 		"catch (error) { console.error(error && error.message ? error.message : String(error)); process.exit(1); }";
 	const proc = Bun.spawn([process.execPath, "-e", probe], { stdout: "ignore", stderr: "pipe" });
-	const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		proc.kill("SIGKILL");
+	}, timeoutMs);
+	let exitCode: number;
+	let stderr: string;
+	try {
+		[exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+	} finally {
+		clearTimeout(timer);
+	}
+	const header = `built addon ${path.basename(destPath)} cannot be loaded on this host (${process.platform}-${process.arch})`;
+	if (timedOut) {
+		throw new Error(
+			`${header}: loading did not finish within ${timeoutMs / 1000}s.\n${ADDON_LOAD_FAILURE_EXPLANATION}`,
+		);
+	}
 	if (exitCode === 0) return;
-	throw new Error(
-		`built addon ${path.basename(destPath)} cannot be loaded on this host (${process.platform}-${process.arch}):\n` +
-			`${stderr.trim()}\n${ADDON_LOAD_FAILURE_EXPLANATION}`,
-	);
+	throw new Error(`${header}:\n${stderr.trim()}\n${ADDON_LOAD_FAILURE_EXPLANATION}`);
 }
 
 /** Build and install the host addon through the local Cargo/N-API path. */
@@ -303,7 +331,12 @@ async function buildLocalHostAddon(host: HostInfo, destDir: string): Promise<voi
 
 async function main(): Promise<void> {
 	const options = parseCliArgs(process.argv.slice(2));
-	const host: HostInfo = { platform: process.platform, arch: process.arch, avx2: detectHostAvx2Support() };
+	const host: HostInfo = {
+		platform: process.platform,
+		arch: process.arch,
+		avx2: detectHostAvx2Support(),
+		musl: detectHostMusl(),
+	};
 	const destDir = options.dest ? path.resolve(options.dest) : path.join(repoRoot, "packages/natives/native");
 
 	const backend = Bun.env.OMP_NATIVE_BUILD_BACKEND?.trim();

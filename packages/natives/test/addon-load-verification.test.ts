@@ -22,6 +22,7 @@ import {
 	ADDON_LOAD_FAILURE_EXPLANATION,
 	type HostInfo,
 	hostProbeFilename,
+	resolveTargetMembers,
 	verifyHostAddonLoads,
 } from "../../../scripts/bazel-natives";
 import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
@@ -71,11 +72,33 @@ describe("verifyHostAddonLoads", () => {
 	test.skipIf(!existsSync(hostAddon))("accepts the addon this checkout actually loads", async () => {
 		expect(await failureOf(verifyHostAddonLoads(hostAddon))).toBeUndefined();
 	});
+
+	// A FIFO with no writer blocks the loader's open() forever: a stand-in for
+	// an addon whose init hangs. Windows has no FIFOs.
+	test.skipIf(process.platform === "win32")(
+		"fails a load that never finishes instead of hanging the build",
+		async () => {
+			const directory = await mkdtemp(path.join(tmpdir(), "omp-addon-load-"));
+			const addon = path.join(directory, "pi_natives.hang.node");
+			expect(Bun.spawnSync(["mkfifo", addon]).exitCode).toBe(0);
+
+			try {
+				const failure = await failureOf(verifyHostAddonLoads(addon, 500));
+
+				expect(failure).toBeInstanceOf(Error);
+				expect(failure instanceof Error ? failure.message : "").toContain("did not finish within 0.5s");
+			} finally {
+				await rm(directory, { recursive: true, force: true });
+			}
+		},
+	);
 });
 
 describe("hostProbeFilename", () => {
-	const glibcArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false };
-	const glibcX64Baseline: HostInfo = { platform: "linux", arch: "x64", avx2: false };
+	const glibcArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false, musl: false };
+	const glibcX64Baseline: HostInfo = { platform: "linux", arch: "x64", avx2: false, musl: false };
+	const muslArm64: HostInfo = { platform: "linux", arch: "arm64", avx2: false, musl: true };
+	const muslX64Avx2: HostInfo = { platform: "linux", arch: "x64", avx2: true, musl: true };
 
 	test("never probes a musl addon on a glibc host, though both spell the filename the same", () => {
 		// The release matrix installs //:natives-linux-musl-arm64 on a glibc
@@ -85,6 +108,15 @@ describe("hostProbeFilename", () => {
 		// file") and would turn a valid artifact into a failed release build.
 		expect(hostProbeFilename(["linux-musl-arm64"], glibcArm64)).toBeNull();
 		expect(hostProbeFilename(["linux-musl-x64-baseline"], glibcX64Baseline)).toBeNull();
+	});
+
+	test("a musl host builds and probes the musl addon, never the gnu one of the same name", () => {
+		// A musl Bun cannot load a gnu addon ("linked against glibc"), so `host`
+		// must build the musl target; there is no modern musl addon.
+		expect(resolveTargetMembers(["host"], muslX64Avx2)).toEqual(["linux-musl-x64-baseline"]);
+		expect(resolveTargetMembers(["host"], muslArm64)).toEqual(["linux-musl-arm64"]);
+		expect(hostProbeFilename(["linux-musl-arm64"], muslArm64)).toBe("pi_natives.linux-arm64.node");
+		expect(hostProbeFilename(["linux-arm64"], muslArm64)).toBeNull();
 	});
 
 	test("probes the host's own target, however it was requested", () => {
