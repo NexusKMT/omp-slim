@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.1] - 2026-09-25
+
 ### Added
 
 - Added native filesystem support for `local://` and `omp://` URLs across file-search, content-search, AST, shell, and related tools, including support for virtual working directories.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.1] - 2026-09-25
+
 ### Added
 
 - Added live steering support for GPT-6 models, allowing queued user messages to be delivered during an active streaming response.

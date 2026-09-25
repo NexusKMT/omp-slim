@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.1] - 2026-09-25
+
 ### Breaking Changes
 
 - Replaced the `CustomEditor` space-hold callbacks and `sttHoldEnabled` option with the `spaceHold.handler` API.

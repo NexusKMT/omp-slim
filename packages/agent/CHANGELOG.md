@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.1] - 2026-09-25
+
 ### Added
 
 - Added live steering support for Codex WebSocket transports, allowing users to provide input while a response is in progress.
