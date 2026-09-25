@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added `ida.maxOpen` setting to cap concurrent database workers, automatically evicting the least recently used idle database
+- Added `ida.idleCloseSec` setting to save and close databases idle beyond the configured duration
+- Added dirty-state tracking for automated autosave after database activity quiescence
 - Added `Always for this session` option to cfg:// approval prompts for session-wide changes
 - Added timeout handling for cfg:// approval prompts, aborting writes after 10 s with a clear error message
 - Added `providers.openaiLiveSteering` setting to toggle mid-response input delivery
@@ -41,6 +44,8 @@
 
 ### Changed
 
+- Refactored database supervisor to use LRU eviction, idle autosave, and request-aware queueing
+- Hardened cross-request queueing with timeout-bounded waiting for busy database workers
 - Tightened async job visibility and cancellation to block cross-agent use
 - Restricted cancelAgentRegistration to only cancel agents spawned by the caller
 - Implemented sequential atomic configuration saves to prevent write overlaps

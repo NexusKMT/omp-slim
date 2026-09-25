@@ -255,8 +255,6 @@ export async function locateIdb(sourcePath: string, options: LocateIdbOptions = 
 	const fat = slices ? { slice: selectSlice(slices, options.arch), slices } : undefined;
 	const id = `${sha.slice(0, 16)}-${name}${fat ? `.${sanitizeIdbName(fat.slice.arch)}` : ""}`;
 	const dir = path.join(getAgentDir(), "idbs", id);
-	// The lock file lives inside `dir`, and the lock is taken before `prepareStoreDir`.
-	await fs.promises.mkdir(dir, { recursive: true });
 	return {
 		id,
 		dir,

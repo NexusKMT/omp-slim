@@ -6,11 +6,11 @@
 - Entry: `packages/coding-agent/src/tools/ida.ts`
 - Model-facing prompt: `packages/coding-agent/src/prompts/tools/ida.md`
 - Key collaborators:
-  - `packages/coding-agent/src/ida/settings.ts` — `ida.enabled`, `ida.python`, `ida.installDir` settings
+  - `packages/coding-agent/src/ida/settings.ts` — `ida.enabled`, `ida.python`, `ida.installDir`, `ida.maxOpen`, `ida.idleCloseSec` settings
   - `packages/coding-agent/src/ida/install.ts` — local install detection (`cfgIdaAvailable`, `cfgIdaInstall`)
   - `packages/coding-agent/src/ida/runtime.ts` — Python interpreter discovery (must import `ida_domain` + `idapro`)
   - `packages/coding-agent/src/ida/store.ts` — executable sniffing, universal Mach-O slice selection, IDB location (`~/.omp/agent/idbs/<sha16>-<name>[.<arch>]/` or in place)
-  - `packages/coding-agent/src/ida/supervisor.ts` — per-DB Python worker process, NDJSON RPC, registry, save-on-exit
+  - `packages/coding-agent/src/ida/supervisor.ts` — per-DB Python worker process, NDJSON RPC, registry, open cap/LRU eviction, idle autosave/close, save-on-exit
   - `packages/coding-agent/src/ida/worker.py` — idalib worker: views, edits, `exec` namespace and helpers
   - `packages/coding-agent/src/tools/read-binary.ts` — `read` views on executables and `.i64`/`.idb`
   - `packages/coding-agent/src/tools/tool-timeouts.ts` — `ida` exec timeout clamp
@@ -55,8 +55,9 @@
 
 ## Flow
 1. `#resolveDb`: omitted `db` → the single open DB; an open id → that DB; otherwise the path must be a file. Mutating actions and `exec` call `acquireIdaDatabase` (opens or creates); `save`/`close` look up `locateIdb(path).id` among open DBs.
-2. Each DB runs in its own long-lived Python worker (idalib allows one DB per process). Requests are serialized per DB.
-3. Timeouts/aborts send SIGINT; the worker gets 5 s to respond, then it is SIGKILLed.
+2. Each DB runs in its own long-lived Python worker (idalib allows one DB per process). Concurrent callers share one open; aborting a caller only stops its wait, the open always completes (idalib ignores SIGINT while opening). Opening beyond `ida.maxOpen` (default 4) first saves and closes the least recently used idle DB; when every open DB is busy the open fails with `IDA database limit reached`.
+3. Requests are serialized per DB. The request timeout covers the queue wait: a request still queued at its deadline fails with `IDA <id> busy: <method> running for <n>s` without interrupting the running request.
+4. Timeouts/aborts of a running request send SIGINT; the worker gets 5 s to respond, then it is SIGKILLed.
 
 ## `exec` namespace
 Persistent per DB and shared by all agents. Preloaded: `db` (ida_domain `Database`), `ida_domain`, `ida_bytes`, `ida_funcs`, `ida_name`, `ida_typeinf`, `ida_hexrays`, `ida_segment`, `ida_xref`, `ida_ua`, `ida_nalt`, `ida_auto`, `ida_lines`, `ida_loader`, `idautils`, and helpers (targets accept name, `0x` string, or int ea):
@@ -70,7 +71,8 @@ Persistent per DB and shared by all agents. Preloaded: `db` (ida_domain `Databas
 ## Side Effects
 - Executables are copied into the IDB store dir; the original binary is never modified. `.i64`/`.idb` open in place.
 - Universal (fat) Mach-O: only the selected slice is staged, so IDA analyzes a thin binary. Default slice is the first matching the host CPU (else the first); `:@<arch>` (lipo names, e.g. `x86_64`, `arm64e`; unnamed subtypes as `<family>.<subtype>`) picks another. Each slice gets its own store IDB.
-- Changes persist only on `save`, `close` (saves by default), or omp process exit (postmortem closes every DB with save).
+- Changes persist on `save`, `close` (saves by default), idle autosave, idle close, LRU eviction, or omp process exit (postmortem closes every DB with save). The worker tracks mutations via IDB/Hex-Rays hooks and reports `dirty` on each response; a dirty DB autosaves 10 s after its queue drains. A new DB is saved by its first autosave.
+- DBs idle for `ida.idleCloseSec` (default 900, `0` = never) are saved and closed; reopening resets the `exec` namespace.
 - DBs are not tied to session disposal; they outlive compaction and subagents.
 - Each DB holds a file lock; another omp process opening the same IDB fails.
 
@@ -80,4 +82,6 @@ Persistent per DB and shared by all agents. Preloaded: `db` (ida_domain `Databas
 - `no <arch> slice; available: …` / `<path> is not a universal binary; drop :@<arch>`
 - `<field> is required for <action>`
 - IDA unavailable (no interpreter imports `ida_domain` + `idapro`): install ida-domain or set `ida.python`.
+- `IDA database limit reached (<n> open, all busy: …)` — close one or raise `ida.maxOpen`.
+- `IDA <id> busy: …` — the queue ahead did not drain within the request timeout.
 - Worker killed after an ignored interrupt: changes since the last save are lost.

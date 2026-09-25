@@ -16,6 +16,7 @@ import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow }
 import { stageRunnerScript } from "../eval/runner-cache";
 import type { ToolSession } from "../tools";
 import { type IdaRuntime, resolveIdaRuntime } from "./runtime";
+import { cfgIdaIdleCloseSec, cfgIdaMaxOpen } from "./settings";
 import {
 	type FatSelection,
 	type IdbLocation,
@@ -31,6 +32,8 @@ import IDA_WORKER from "./worker.py" with { type: "text" };
 const INTERRUPT_GRACE_MS = 5_000;
 /** Budget for the worker's `close` (including the final save). */
 const CLOSE_TIMEOUT_MS = 120_000;
+/** How long a dirty database must sit idle before it is saved automatically. */
+const AUTOSAVE_IDLE_MS = 10_000;
 /** How long to wait for the worker to exit after answering `close`. */
 const EXIT_GRACE_MS = 10_000;
 /** How long the exit handler waits for stdout/stderr to drain before failing pending requests. */
@@ -68,7 +71,15 @@ interface IdaOpenResult extends IdaDatabaseInfo {
 	idb: string;
 }
 
-type WorkerResponse = { id: number; ok: true; result: unknown } | { id: number; ok: false; message: string };
+/** The request a worker is currently executing. */
+export interface IdaRunningRequest {
+	method: IdaMethod;
+	startedAt: number;
+}
+
+type WorkerResponse =
+	| { id: number; ok: true; result: unknown; dirty?: boolean }
+	| { id: number; ok: false; message: string };
 
 type RequestOutcome = { kind: "response"; value: unknown } | { kind: "interrupted" };
 
@@ -92,7 +103,11 @@ function parseWorkerResponse(frame: unknown): WorkerResponse | null {
 	if (typeof frame !== "object" || frame === null) return null;
 	if (!("id" in frame) || typeof frame.id !== "number") return null;
 	if (!("ok" in frame) || typeof frame.ok !== "boolean") return null;
-	if (frame.ok) return { id: frame.id, ok: true, result: "result" in frame ? frame.result : undefined };
+	if (frame.ok) {
+		const result = "result" in frame ? frame.result : undefined;
+		const dirty = "dirty" in frame && typeof frame.dirty === "boolean" ? frame.dirty : undefined;
+		return { id: frame.id, ok: true, result, dirty };
+	}
 	const error = "error" in frame ? frame.error : undefined;
 	const message =
 		typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
@@ -124,8 +139,23 @@ export class IdaDatabase {
 	/** Set once `open` succeeded; from then on the worker's exit releases the lock. */
 	#opened = false;
 	#closing: Promise<void> | null = null;
+	/** Whether the worker reported unsaved changes in its last successful response. */
+	#dirty = false;
+	/** Requests queued or in flight. */
+	#active = 0;
+	#current: IdaRunningRequest | null = null;
+	#lastUsed = Date.now();
+	/** Idle time after which the database is saved and closed; 0 disables. */
+	readonly #idleCloseMs: number;
+	#autosaveTimer: Timer | undefined;
+	#idleTimer: Timer | undefined;
 
-	private constructor(loc: IdbLocation, proc: Subprocess<"pipe", "pipe", "pipe">, lock: FileLockHandle) {
+	private constructor(
+		loc: IdbLocation,
+		proc: Subprocess<"pipe", "pipe", "pipe">,
+		lock: FileLockHandle,
+		idleCloseMs: number,
+	) {
 		this.id = loc.id;
 		this.sourcePath = loc.sourcePath;
 		this.fat = loc.fat;
@@ -133,6 +163,7 @@ export class IdaDatabase {
 		this.#idbPath = loc.openPath;
 		this.#proc = proc;
 		this.#lock = lock;
+		this.#idleCloseMs = idleCloseMs;
 		this.#streamsDrained = Promise.all([this.#readStdout(proc.stdout), this.#drainStderr(proc.stderr)]);
 		void proc.exited.then(code => this.#onExit(code));
 	}
@@ -140,13 +171,14 @@ export class IdaDatabase {
 	/**
 	 * Spawn a worker for `loc` and open its database. The caller holds `lock` and has run
 	 * `prepareStoreDir`; on failure the worker is killed, a half-created store IDB is removed,
-	 * and the lock stays with the caller.
+	 * and the lock stays with the caller. The open cannot be cancelled: idalib ignores SIGINT
+	 * while opening, so an interrupt would kill the worker mid-creation.
 	 */
 	static async start(
 		loc: IdbLocation,
 		runtime: IdaRuntime,
 		lock: FileLockHandle,
-		signal?: AbortSignal,
+		idleCloseMs: number,
 	): Promise<IdaDatabase> {
 		const script = await stageRunnerScript("omp-ida-worker", "py", IDA_WORKER);
 		const proc = Bun.spawn([runtime.pythonPath, "-u", script], {
@@ -161,13 +193,14 @@ export class IdaDatabase {
 				hostHasInheritableConsole: hostHasInheritableConsole(),
 			}),
 		});
-		const db = new IdaDatabase(loc, proc, lock);
+		const db = new IdaDatabase(loc, proc, lock, idleCloseMs);
 		try {
-			const opened = await db.request<IdaOpenResult>("open", { path: loc.openPath, new: loc.isNew }, { signal });
+			const opened = await db.request<IdaOpenResult>("open", { path: loc.openPath, new: loc.isNew });
 			if (db.#exitCode !== null) throw db.#exitError();
 			db.#idbPath = opened.idb;
 			db.#info = { module: opened.module, format: opened.format, arch: opened.arch, bitness: opened.bitness };
 			db.#opened = true;
+			db.#scheduleIdleWork();
 			return db;
 		} catch (error) {
 			await db.#kill();
@@ -191,24 +224,103 @@ export class IdaDatabase {
 		return this.#info;
 	}
 
+	/** When the last request was issued (epoch ms); LRU eviction closes the oldest idle database first. */
+	get lastUsed(): number {
+		return this.#lastUsed;
+	}
+
+	/** Whether requests are queued or in flight; busy databases are never evicted. */
+	get busy(): boolean {
+		return this.#active > 0;
+	}
+
+	/** The request the worker is executing now, if any. */
+	get current(): IdaRunningRequest | null {
+		return this.#current;
+	}
+
 	/**
-	 * Send one request to the worker, serialized behind earlier requests. A timeout or abort sends
-	 * SIGINT and waits {@link INTERRUPT_GRACE_MS} for the answer; a worker that does not answer is
-	 * killed and a {@link ToolError} is thrown. Worker-side failures surface as {@link ToolError}.
+	 * Send one request to the worker, serialized behind earlier requests. `timeoutMs` covers the
+	 * queue wait too: a request still queued at its deadline fails with a {@link ToolError} naming
+	 * the running request, without interrupting it (it belongs to another caller). A timeout or
+	 * abort while executing sends SIGINT and waits {@link INTERRUPT_GRACE_MS} for the answer; a
+	 * worker that does not answer is killed. Worker-side failures surface as {@link ToolError}.
 	 */
 	async request<T>(method: IdaMethod, params: object, options: IdaRequestOptions = {}): Promise<T> {
 		if (this.#exitCode !== null) throw this.#exitError();
+		const { signal, timeoutMs } = options;
+		const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+		this.#active++;
+		this.#lastUsed = Date.now();
+		this.#clearIdleTimers();
 		const previous = this.#queue;
 		const turn = Promise.withResolvers<void>();
 		this.#queue = previous.then(() => turn.promise);
 		try {
-			await untilAborted(options.signal, previous);
-			const value = await this.#send(method, params, options);
+			await this.#waitTurn(previous, signal, timeoutMs);
+			const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
+			const value = await this.#send(method, params, { signal, timeoutMs: remaining });
 			// The worker answers with the JSON shape documented for `method`.
 			return value as T;
 		} finally {
 			turn.resolve();
+			this.#active--;
+			if (this.#active === 0) this.#scheduleIdleWork();
 		}
+	}
+
+	/** Wait for `previous` (the queue ahead), bounded by the signal and `timeoutMs`. */
+	async #waitTurn(
+		previous: Promise<void>,
+		signal: AbortSignal | undefined,
+		timeoutMs: number | undefined,
+	): Promise<void> {
+		const queued = untilAborted(signal, previous);
+		if (timeoutMs === undefined) return queued;
+		const wait = delay(timeoutMs);
+		try {
+			const ready = await Promise.race([queued.then(() => true), wait.promise.then(() => false)]);
+			if (ready) return;
+		} finally {
+			wait.cancel();
+		}
+		const running = this.#current;
+		throw new ToolError(
+			running
+				? `IDA ${this.id} busy: ${running.method} running for ${Math.round((Date.now() - running.startedAt) / 1000)}s; retry later or raise timeout`
+				: `IDA ${this.id} busy: queued requests did not finish within ${Math.round(timeoutMs / 1000)}s`,
+		);
+	}
+
+	/** Arm the idle autosave (when dirty) and idle close (when enabled); any request disarms both. */
+	#scheduleIdleWork(): void {
+		this.#clearIdleTimers();
+		if (!this.#opened || this.#closing || this.#exitCode !== null) return;
+		if (this.#dirty) {
+			this.#autosaveTimer = setTimeout(() => {
+				if (this.#active > 0 || this.#closing) return;
+				this.request("save", {}, { timeoutMs: CLOSE_TIMEOUT_MS }).catch(error => {
+					logger.warn("IDA autosave failed", { id: this.id, error: errorMessage(error) });
+				});
+			}, AUTOSAVE_IDLE_MS);
+			this.#autosaveTimer.unref();
+		}
+		if (this.#idleCloseMs > 0) {
+			this.#idleTimer = setTimeout(() => {
+				if (this.#active > 0 || this.#closing) return;
+				this.close({ save: true }).catch(error => {
+					logger.warn("IDA idle close failed", { id: this.id, error: errorMessage(error) });
+				});
+			}, this.#idleCloseMs);
+			this.#idleTimer.unref();
+		}
+	}
+
+	#clearIdleTimers(): void {
+		clearTimeout(this.#autosaveTimer);
+		clearTimeout(this.#idleTimer);
+		this.#autosaveTimer = undefined;
+		this.#idleTimer = undefined;
 	}
 
 	/** Close the worker (saving first when `save`), wait for it to exit, then release the lock and unregister. */
@@ -237,6 +349,7 @@ export class IdaDatabase {
 		const id = this.#nextId++;
 		const response = Promise.withResolvers<unknown>();
 		this.#pending.set(id, response);
+		this.#current = { method, startedAt: Date.now() };
 		try {
 			try {
 				this.#proc.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
@@ -286,6 +399,7 @@ export class IdaDatabase {
 			);
 		} finally {
 			this.#pending.delete(id);
+			this.#current = null;
 		}
 	}
 
@@ -312,8 +426,12 @@ export class IdaDatabase {
 					continue;
 				}
 				this.#pending.delete(response.id);
-				if (response.ok) entry.resolve(response.result);
-				else entry.reject(new ToolError(response.message));
+				if (response.ok) {
+					if (response.dirty !== undefined) this.#dirty = response.dirty;
+					entry.resolve(response.result);
+				} else {
+					entry.reject(new ToolError(response.message));
+				}
 			}
 		} catch (error) {
 			logger.warn("IDA worker stdout reader failed", { id: this.id, error: errorMessage(error) });
@@ -340,6 +458,7 @@ export class IdaDatabase {
 
 	async #onExit(code: number): Promise<void> {
 		this.#exitCode = code;
+		this.#clearIdleTimers();
 		if (this.#opened) this.#release();
 		// A response written right before exit (e.g. `close`) must settle before pending requests fail.
 		const drain = delay(STREAM_DRAIN_MS);
@@ -396,7 +515,27 @@ function registerIdaCleanup(): void {
 	postmortem.register("ida-cleanup", closeAllIdaDatabases);
 }
 
-async function openIdaDatabase(session: ToolSession, loc: IdbLocation, signal?: AbortSignal): Promise<IdaDatabase> {
+/**
+ * Open `loc` in a new worker. Makes room first by saving and closing the least recently used
+ * idle database while `ida.maxOpen` would be exceeded; throws when every open database is busy.
+ */
+async function openIdaDatabase(session: ToolSession, loc: IdbLocation): Promise<IdaDatabase> {
+	const maxOpen = Math.max(1, cfgIdaMaxOpen.get(session.settings));
+	// Slots held by open databases and by other in-flight opens (`pending` may already hold this one).
+	while (databases.size + pending.size - (pending.has(loc.id) ? 1 : 0) >= maxOpen) {
+		const victim = listIdaDatabases()
+			.filter(db => !db.busy)
+			.sort((a, b) => a.lastUsed - b.lastUsed)[0];
+		if (!victim) {
+			const ids = listIdaDatabases().map(db => db.id);
+			throw new ToolError(
+				`IDA database limit reached (${maxOpen} open, all busy: ${ids.join(", ")}); close one with ida close or raise ida.maxOpen`,
+			);
+		}
+		await victim.close({ save: true });
+	}
+	// The lock file lives in the store dir; `locateIdb` leaves it uncreated for pure lookups.
+	if (loc.kind === "store") await fs.promises.mkdir(loc.dir, { recursive: true });
 	const lock = await acquireFileLock(loc.lockTarget, { retries: 1 }).catch(() => {
 		throw new ToolError(`IDB ${loc.id} is in use by another omp process`);
 	});
@@ -404,7 +543,7 @@ async function openIdaDatabase(session: ToolSession, loc: IdbLocation, signal?: 
 		await prepareStoreDir(loc);
 		const runtime = await resolveIdaRuntime(session);
 		registerIdaCleanup();
-		const db = await IdaDatabase.start(loc, runtime, lock, signal);
+		const db = await IdaDatabase.start(loc, runtime, lock, cfgIdaIdleCloseSec.get(session.settings) * 1000);
 		databases.set(loc.id, db);
 		return db;
 	} catch (error) {
@@ -420,7 +559,8 @@ export interface AcquireIdaDatabaseOptions extends LocateIdbOptions {
 
 /**
  * Return the live database for a binary (or one slice of a universal binary) or `.i64`/`.idb`,
- * opening (or creating) it on first use. Concurrent callers for the same database share one open.
+ * opening (or creating) it on first use. Concurrent callers for the same database share one open;
+ * aborting `signal` stops only this caller's wait, the open itself always runs to completion.
  */
 export async function acquireIdaDatabase(
 	session: ToolSession,
@@ -431,11 +571,14 @@ export async function acquireIdaDatabase(
 	const loc = await locateIdb(sourcePath, { arch });
 	const open = databases.get(loc.id);
 	if (open) return open;
-	const inflight = pending.get(loc.id);
-	if (inflight) return untilAborted(signal, inflight);
-	const opening = openIdaDatabase(session, loc, signal).finally(() => pending.delete(loc.id));
-	pending.set(loc.id, opening);
-	return opening;
+	let opening = pending.get(loc.id);
+	if (!opening) {
+		opening = openIdaDatabase(session, loc).finally(() => pending.delete(loc.id));
+		// Every caller may have stopped waiting; remaining ones still receive the failure.
+		opening.catch(error => logger.debug("IDA database open failed", { id: loc.id, error: errorMessage(error) }));
+		pending.set(loc.id, opening);
+	}
+	return untilAborted(signal, opening);
 }
 
 /** The open database registered under `id`, if any. */
