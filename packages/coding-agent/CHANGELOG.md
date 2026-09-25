@@ -41,6 +41,8 @@
 
 ### Changed
 
+- Tightened async job visibility and cancellation to block cross-agent use
+- Restricted cancelAgentRegistration to only cancel agents spawned by the caller
 - Implemented sequential atomic configuration saves to prevent write overlaps
 - Refactored domain-specific settings to a type-safe registry supporting dynamic reactivity and layered environment variable overrides
 - Updated URL resolution to use a canonical router, replacing ad-hoc `normalizeLocalScheme` logic
