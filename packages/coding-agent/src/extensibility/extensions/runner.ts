@@ -48,6 +48,7 @@ import type {
 	ExtensionActions,
 	ExtensionCommandContext,
 	ExtensionCommandContextActions,
+	ExtensionAgentIdentity,
 	ExtensionContext,
 	ExtensionContextActions,
 	ExtensionError,
@@ -444,6 +445,14 @@ interface ToolRegistrationScope {
 	closed: boolean;
 }
 
+/** Identity reported by a session that is not a subagent and received no explicit identity. */
+export const TOP_LEVEL_AGENT: ExtensionAgentIdentity = Object.freeze({
+	kind: "main",
+	id: "Main",
+	name: "main",
+	depth: 0,
+});
+
 export class ExtensionRunner {
 	#uiContext: ExtensionUIContext;
 	#mode: ExtensionMode = "print";
@@ -623,6 +632,8 @@ export class ExtensionRunner {
 		private readonly settings?: Settings,
 		private readonly localProtocolOptions?: LocalProtocolOptions,
 		getAsyncJobSnapshot?: () => AsyncJobSnapshot | null,
+		/** Identity of the agent this runner's session runs; defaults to the top-level agent. */
+		private readonly agent: ExtensionAgentIdentity = TOP_LEVEL_AGENT,
 	) {
 		this.#uiContext = noOpUIContext;
 		this.#getMemoryFn = getMemory;
@@ -1249,6 +1260,7 @@ export class ExtensionRunner {
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			isProjectTrusted: () => true,
+			agent: this.agent,
 			get model() {
 				return getModel();
 			},
