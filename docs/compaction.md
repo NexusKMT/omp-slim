@@ -140,8 +140,7 @@ The automatic paths are intentionally different:
 
 ### Experimental notes-backed context windows
 
-Enable **Notes-backed context windows (experimental)** in `/settings`, then restart
-the session to refresh its tool roster. The equivalent configuration is:
+Enable **Notes-backed context windows (experimental)** in `/settings`; the running session gains the tools immediately. The equivalent configuration is:
 
 ```yaml
 compaction:
