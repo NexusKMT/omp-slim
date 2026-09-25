@@ -79,8 +79,23 @@ export function hasCjk(text: string): boolean {
 
 export const containsSpacelessCjk = hasCjk;
 
-/** Allow a meaningful leading query fragment, never an interior or reverse substring. */
+/** Endings a query word may add to a stored word and still name it: `facts` finds `fact`. */
+const RECALL_INFLECTIONS: readonly string[] = ["s", "es", "ed", "ing"];
+
+/**
+ * Weak match between two forms of one word: the query token is a leading fragment of the stored
+ * token (`backup` finds `backups`), or the stored token plus an inflectional ending (`facts` finds
+ * `fact`). The shorter side needs at least four characters, and an interior fragment or another
+ * ending never matches, so `1password` and `password` do not find `pass`.
+ */
 export function matchesRecallPrefix(queryToken: string, contentToken: string): boolean {
+	if (queryToken.length > contentToken.length) {
+		return (
+			contentToken.length >= 4 &&
+			queryToken.startsWith(contentToken) &&
+			RECALL_INFLECTIONS.includes(queryToken.slice(contentToken.length))
+		);
+	}
 	return queryToken.length >= 4 && contentToken.length > queryToken.length && contentToken.startsWith(queryToken);
 }
 

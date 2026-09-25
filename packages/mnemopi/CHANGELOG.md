@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed recall matching query words inside unrelated words (`1Password` matched memories about `pass` or `word`), which crowded exact matches out of the results; forward prefixes such as `backup` → `backups` still match ([#13322](https://github.com/can1357/oh-my-pi/pull/13322) by [@alphastorm](https://github.com/alphastorm)).
+- Fixed recall matching query words inside unrelated words (`1Password` matched memories about `pass` or `word`), which crowded exact matches out of the results ([#13322](https://github.com/can1357/oh-my-pi/pull/13322) by [@alphastorm](https://github.com/alphastorm)).
 
 ## [18.2.5] - 2026-09-17
 

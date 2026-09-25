@@ -29,7 +29,7 @@ console.log(id, results[0]?.content);
 memory.close();
 ```
 
-Lexical recall matches whole tokens, declared synonyms, underscore-separated identifier parts, and forward prefixes of at least four characters: `backup` matches `backups`, but `1Password` does not match `pass` or `word`.
+Lexical recall matches whole tokens, declared synonyms, underscore-separated identifier parts, forward prefixes of at least four characters, and a stored word plus an inflectional ending (`s`, `es`, `ed`, `ing`): `backup` matches `backups` and `facts` matches `fact`, but `1Password` does not match `pass` or `word`.
 
 ## Configuration
 

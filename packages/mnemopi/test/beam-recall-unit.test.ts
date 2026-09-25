@@ -153,6 +153,15 @@ describe("beam recall free functions", () => {
 		]);
 	});
 
+	it("matches plural and inflected query words against their stored stems, not compounds", async () => {
+		const beam = makeBeam();
+		insertWorking(beam, "stem", "One fact about the nightly backup.");
+		insertWorking(beam, "fragment", "The qualification gates pass.");
+		expect((await recall(beam, "facts", 5, { queryEmbedding: null })).map(result => result.id)).toEqual(["stem"]);
+		expect((await recall(beam, "backups", 5, { queryEmbedding: null })).map(result => result.id)).toEqual(["stem"]);
+		expect(await recall(beam, "passwords", 5, { queryEmbedding: null })).toEqual([]);
+	});
+
 	it("preserves synonym and semantic-only recall without substring lexical evidence", async () => {
 		const beam = makeBeam();
 		insertWorking(beam, "synonym", "The datastore retains customer records.");

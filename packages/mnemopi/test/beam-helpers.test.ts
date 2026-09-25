@@ -58,6 +58,12 @@ describe("beam lexical and FTS helpers", () => {
 		expect(lexicalRelevance(["backup"], "We will be back tomorrow.", "backup")).toBe(0);
 	});
 
+	it("scores inflected query words against their stored stems", () => {
+		expect(lexicalRelevance(["facts"], "One fact about backups.", "facts")).toBeGreaterThan(0);
+		expect(strictFactMatches("deploying", "The team will deploy on Friday.")).toBe(true);
+		expect(lexicalRelevance(["passwords"], "The gates pass.", "passwords")).toBe(0);
+	});
+
 	it("builds stopword-filtered FTS terms with query-side synonyms", () => {
 		expect(recallTokens("What is my branding preference for the professional URL? 123")).toEqual([
 			"branding",
