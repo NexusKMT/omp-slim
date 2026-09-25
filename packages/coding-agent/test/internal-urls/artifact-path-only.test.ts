@@ -12,7 +12,7 @@ import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls/route
 import { resolveToolSearchScope } from "@oh-my-pi/pi-coding-agent/tools/path-utils";
 
 /**
- * Path consumers (search/grep, bash URL expansion) only need the artifact's
+ * Path consumers (search/grep, the bash shell filesystem) only need the artifact's
  * filesystem path. Blocking them for large artifacts would break `search`
  * against MCP results and `bash` commands that reference the file — the very
  * workflows the read-tool guidance points users toward.

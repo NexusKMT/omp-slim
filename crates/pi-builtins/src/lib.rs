@@ -107,6 +107,10 @@ mod wait;
 
 mod builder;
 mod factory;
+#[cfg(any(feature = "util.ln", feature = "util.mv"))]
+mod file_backup;
+#[cfg(any(feature = "util.ls", feature = "util.stat", feature = "util.find"))]
+mod fsmeta;
 mod host;
 mod unimp;
 

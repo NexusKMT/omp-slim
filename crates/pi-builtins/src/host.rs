@@ -39,12 +39,13 @@ use std::{
 	path::{Path, PathBuf},
 	time::Duration,
 	sync::{
-		Arc,
+		Arc, OnceLock,
 		atomic::{AtomicBool, Ordering},
 	},
 };
 
 use parking_lot::Mutex;
+use pi_vfs::{BlockingFs, Metadata, absolute_path};
 
 use brush_core::{
 	Error, ExecutionContext, ExecutionResult, ShellExtensions,
@@ -102,8 +103,10 @@ pub(crate) struct Host {
 	/// same serialized writer [`Host::stdout_writer`] returns, so interleaving
 	/// follows write order exactly.
 	pub stderr: StreamWriter,
-	/// Identity of the regular file backing stdout, when one exists.
-	stdout_handle:         Option<same_file::Handle>,
+	/// Unwrapped stdout retained for provider-aware self-read detection.
+	stdout_handle:         Option<OpenFile>,
+	/// Populated on the utility worker, where virtual handle queries may block.
+	stdout_metadata:       OnceLock<Option<Metadata>>,
 
 	name:                  String,
 	paths:                 ShellPaths,
@@ -119,13 +122,36 @@ pub(crate) struct Host {
 	sigpipe:               Arc<Sigpipe>,
 }
 
-fn output_handle(file: &OpenFile) -> Option<same_file::Handle> {
+fn output_handle(file: &OpenFile) -> Option<OpenFile> {
 	match file {
-		OpenFile::File(file) => file
-			.try_clone()
-			.ok()
-			.and_then(|file| same_file::Handle::from_file(file).ok()),
-		OpenFile::Stdout(_) => same_file::Handle::stdout().ok(),
+		OpenFile::File(_) | OpenFile::Vfs(_) | OpenFile::Stdout(_) => file.try_clone().ok(),
+		_ => None,
+	}
+}
+
+fn output_metadata(file: &OpenFile) -> Option<Metadata> {
+	match file {
+		OpenFile::File(file) => file.metadata().ok().map(Metadata::from),
+		OpenFile::Vfs(file) => file.metadata().ok(),
+		OpenFile::Stdout(stdout) => {
+			#[cfg(unix)]
+			{
+				use std::os::fd::AsFd;
+				let handle = stdout.as_fd().try_clone_to_owned().ok()?;
+				std::fs::File::from(handle).metadata().ok().map(Metadata::from)
+			}
+			#[cfg(windows)]
+			{
+				use std::os::windows::io::AsHandle;
+				let handle = stdout.as_handle().try_clone_to_owned().ok()?;
+				std::fs::File::from(handle).metadata().ok().map(Metadata::from)
+			}
+			#[cfg(not(any(unix, windows)))]
+			{
+				let _ = stdout;
+				None
+			}
+		},
 		_ => None,
 	}
 }
@@ -263,6 +289,7 @@ const UNAVAILABLE_DESCRIPTOR: &str = "/dev/fd/-1";
 #[derive(Clone, Default)]
 pub(crate) struct ShellPaths {
 	cwd:         PathBuf,
+	filesystem:  BlockingFs,
 	#[cfg(unix)]
 	descriptors: Arc<[(brush_core::ShellFd, OpenFile)]>,
 }
@@ -282,13 +309,24 @@ impl ShellPaths {
 	/// command in `context`: usually just 0/1/2, plus any from `exec N>` or
 	/// process substitution.
 	pub fn new<SE: ShellExtensions>(context: &ExecutionContext<'_, SE>) -> Self {
+		let filesystem = context.shell.filesystem().blocking();
+		#[cfg(unix)]
+		let descriptors: Arc<[(brush_core::ShellFd, OpenFile)]> = context
+			.open_fds()
+			.map(|(fd, file)| (fd, file.clone()))
+			.collect();
+		#[cfg(unix)]
+		let filesystem = descriptors.iter().fold(filesystem, |filesystem, (fd, file)| {
+			match file.as_vfs().and_then(|file| file.try_clone().ok()) {
+				Some(file) => filesystem.mount_file(virtual_descriptor_path(*fd), file),
+				None => filesystem,
+			}
+		});
 		Self {
-			cwd:         context.shell.working_dir().to_path_buf(),
+			cwd: context.shell.working_dir().to_path_buf(),
+			filesystem,
 			#[cfg(unix)]
-			descriptors: context
-				.open_fds()
-				.map(|(fd, file)| (fd, file.clone()))
-				.collect(),
+			descriptors,
 		}
 	}
 
@@ -302,6 +340,11 @@ impl ShellPaths {
 	/// The shell working directory that relative paths resolve against.
 	pub fn cwd(&self) -> &Path {
 		&self.cwd
+	}
+
+	/// Filesystem captured from the shell, shared by utility worker threads.
+	pub fn fs(&self) -> &BlockingFs {
+		&self.filesystem
 	}
 
 	/// Resolves `path` to what the shell would open.
@@ -340,9 +383,11 @@ impl ShellPaths {
 	}
 
 	fn absolute(&self, path: &Path) -> PathBuf {
+		if pi_vfs::is_virtual_path(path) {
+			return path.to_path_buf();
+		}
 		let normalized_path = brush_core::sys::fs::normalize_shell_path(path);
-		let path = normalized_path.as_ref();
-		if path.is_absolute() { path.to_path_buf() } else { self.cwd.join(path) }
+		absolute_path(&self.cwd, normalized_path.as_ref())
 	}
 
 	#[cfg(unix)]
@@ -363,6 +408,9 @@ impl ShellPaths {
 				};
 			},
 		};
+		if self.file(fd).and_then(OpenFile::as_vfs).is_some() {
+			return virtual_descriptor_path(fd);
+		}
 		match self.file(fd).and_then(|file| file.try_borrow_as_fd().ok()) {
 			Some(host_fd) => PathBuf::from(format!("/dev/fd/{}", host_fd.as_raw_fd())),
 			None => PathBuf::from(UNAVAILABLE_DESCRIPTOR),
@@ -378,6 +426,12 @@ impl ShellPaths {
 	}
 }
 
+/// Virtual descriptors cannot share native `/dev/fd` numbers in the overlay.
+#[cfg(unix)]
+fn virtual_descriptor_path(fd: brush_core::ShellFd) -> PathBuf {
+	PathBuf::from(format!("omp-descriptor://{fd}"))
+}
+
 impl Host {
 	/// The name the utility was invoked as. Differs from [`Utility::NAME`] when
 	/// one implementation backs several builtins (`grep` and `rg`).
@@ -388,6 +442,11 @@ impl Host {
 	/// The shell working directory that relative paths resolve against.
 	pub fn cwd(&self) -> &Path {
 		self.paths.cwd()
+	}
+
+	/// Native working directory for utility subprocesses; rejects virtual filesystem views.
+	pub fn native_cwd(&self) -> io::Result<&Path> {
+		native_working_dir(self.fs(), self.cwd())
 	}
 
 	/// Resolves `path` to what the shell would open; see [`ShellPaths::resolve`].
@@ -405,11 +464,19 @@ impl Host {
 		&self.paths
 	}
 
+	/// Filesystem for every utility path access, usable on its blocking worker.
+	pub fn fs(&self) -> &BlockingFs {
+		self.paths.fs()
+	}
+
 	/// Whether `path` identifies the regular file currently backing stdout.
 	pub fn path_is_stdout(&self, path: &Path) -> bool {
-		self.stdout_handle.as_ref().is_some_and(|stdout| {
-			same_file::Handle::from_path(path).is_ok_and(|candidate| stdout == &candidate)
-		})
+		self.stdout_metadata
+			.get_or_init(|| self.stdout_handle.as_ref().and_then(output_metadata))
+			.as_ref()
+			.is_some_and(|stdout| {
+				stdout.is_file() && self.fs().metadata(path).is_ok_and(|candidate| stdout.same_file(&candidate))
+			})
 	}
 
 	/// Looks up an exported shell variable.
@@ -440,7 +507,7 @@ impl Host {
 		Arc::clone(&self.cancel)
 	}
 
-	/// Whether stdin is a shell pipe or custom stream, and so should be treated
+	/// Whether stdin is a shell pipe, virtual file, or custom stream, and so should be treated
 	/// as implicit input rather than a terminal. `rg PATTERN` uses this to
 	/// decide between searching stdin and searching `.`.
 	pub const fn stdin_is_search_input(&self) -> bool {
@@ -515,6 +582,7 @@ impl Host {
 	pub fn child_env(&self) -> ChildEnv {
 		ChildEnv {
 			cwd:    self.paths.cwd().to_path_buf(),
+			filesystem: self.fs().clone(),
 			env:    Arc::new(
 				self
 					.env
@@ -541,6 +609,7 @@ impl Host {
 		&mut self,
 		command: &mut std::process::Command,
 	) -> io::Result<std::process::ExitStatus> {
+		native_working_dir(self.fs(), command.get_current_dir().unwrap_or(self.cwd()))?;
 		command
 			.stdin(std::process::Stdio::null())
 			.stdout(std::process::Stdio::piped())
@@ -739,8 +808,17 @@ fn same_destination(_a: &OpenFile, _b: &OpenFile) -> bool {
 #[derive(Clone)]
 pub(crate) struct ChildEnv {
 	cwd:    PathBuf,
+	filesystem: BlockingFs,
 	env:    Arc<Vec<(String, String)>>,
 	stderr: OpenFile,
+}
+
+fn native_working_dir<'a>(filesystem: &BlockingFs, cwd: &'a Path) -> io::Result<&'a Path> {
+	if filesystem.is_native_local(cwd) {
+		Ok(cwd)
+	} else {
+		Err(pi_vfs::unsupported("external process in a virtual working directory"))
+	}
 }
 
 impl ChildEnv {
@@ -749,14 +827,15 @@ impl ChildEnv {
 	///
 	/// Stdin and stdout are left untouched for the caller to wire; they default
 	/// to inherited, so a caller that leaves them alone MUST redirect them.
-	pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+	pub fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> io::Result<std::process::Command> {
+		let cwd = native_working_dir(&self.filesystem, &self.cwd)?;
 		let mut command = std::process::Command::new(program);
 		command
-			.current_dir(&self.cwd)
+			.current_dir(cwd)
 			.env_clear()
 			.envs(self.env.iter().map(|(k, v)| (k, v)))
 			.stderr(std::process::Stdio::piped());
-		command
+		Ok(command)
 	}
 
 	/// Drains a child's piped stderr into the command's standard error on a
@@ -1060,7 +1139,13 @@ async fn run_utility<U: Utility, SE: ShellExtensions>(
 	drop(context);
 
 	let mut handle = tokio::task::spawn_blocking(move || {
-		run_caught::<U>(parsed, &mut host)
+		let code = run_caught::<U>(parsed, &mut host);
+		if let Err(error) = host.fs().drain_closes() {
+			host.error(error, 1);
+			if code == 0 { 1 } else { code }
+		} else {
+			code
+		}
 	});
 
 	// Respect shell abort/`timeout`. On cancel we set the host's cancel flag,
@@ -1147,7 +1232,7 @@ fn build_host<SE: ShellExtensions>(
 	let stdin_fd: Option<i32> = None;
 	let stdin_is_search_input = stdin
 		.as_ref()
-		.is_some_and(|file| matches!(file, OpenFile::PipeReader(_) | OpenFile::Stream(_)));
+		.is_some_and(|file| matches!(file, OpenFile::PipeReader(_) | OpenFile::Stream(_) | OpenFile::Vfs(_)));
 
 	let mut env = HashMap::new();
 	for (key, var) in context.shell.env().iter_exported() {
@@ -1193,6 +1278,7 @@ fn build_host<SE: ShellExtensions>(
 		stdout,
 		stderr,
 		stdout_handle,
+		stdout_metadata: OnceLock::new(),
 		name: invoked,
 		paths: ShellPaths::new(context),
 		env,
@@ -1342,6 +1428,7 @@ mod testing {
 					&sigpipe,
 				)),
 				stdout_handle:         None,
+				stdout_metadata:       Default::default(),
 				name:                  name.to_string(),
 				paths:                 ShellPaths::with_cwd(cwd),
 				env:                   HashMap::new(),
@@ -1360,6 +1447,7 @@ mod testing {
 		/// pipe whose read end is already dropped.
 		pub(crate) fn set_test_stdout(&mut self, file: OpenFile) {
 			self.stdout_handle = output_handle(&file);
+			self.stdout_metadata.take();
 			self.stdout = SigpipeGuard::wrap(file, GuardedStream::Stdout, &self.sigpipe);
 		}
 

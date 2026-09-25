@@ -118,9 +118,16 @@ fn app() -> ClapCommand {
 
 /// Spawns the child and pumps stdin into it while draining its stdout/stderr.
 fn spawn_and_pump(host: &mut Host, command: &[OsString], first: Option<u8>) -> i32 {
+	let cwd = match host.native_cwd() {
+		Ok(cwd) => cwd,
+		Err(error) => {
+			host.error(error, 127);
+			return 127;
+		},
+	};
 	let mut child = match Command::new(&command[0])
 		.args(&command[1..])
-		.current_dir(host.cwd())
+		.current_dir(cwd)
 		.env_clear()
 		.envs(host.env())
 		.stdin(Stdio::piped())

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added `InternalUrlFilesystem` for native shell-level resolution of virtual `scheme://` paths
+- Added support for shell execution in virtual working directories
 - Added `ida.maxOpen` setting to cap concurrent database workers, automatically evicting the least recently used idle database
 - Added `ida.idleCloseSec` setting to save and close databases idle beyond the configured duration
 - Added dirty-state tracking for automated autosave after database activity quiescence
@@ -44,6 +46,7 @@
 
 ### Changed
 
+- Replaced bash tool command-string URL expansion with native shell filesystem integration
 - Refactored database supervisor to use LRU eviction, idle autosave, and request-aware queueing
 - Hardened cross-request queueing with timeout-bounded waiting for busy database workers
 - Tightened async job visibility and cancellation to block cross-agent use
