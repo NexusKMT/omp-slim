@@ -2,6 +2,7 @@ export * from "@oh-my-pi/pi-catalog/effort";
 export * from "@oh-my-pi/pi-catalog/types";
 
 import type { Type } from "@oh-my-pi/omptype";
+import type { AnthropicSlowModeHooks } from "./providers/anthropic-slow-mode";
 import type {
 	DeleteArgs,
 	DeleteResult,
@@ -637,6 +638,12 @@ export interface StreamOptions {
 	 * the new model and `fallback_credit_token` to redeem prompt cache credit.
 	 */
 	fallbackCreditRedemption?: AnthropicFallbackCreditHandle;
+	/**
+	 * Anthropic subscription slow-mode state machine (Claude Code `/low-priority`).
+	 * Consulted only for first-party OAuth `anthropic` requests: stamps
+	 * `anthropic-usage-limit: slow` while active and decides capacity waits.
+	 */
+	anthropicSlowMode?: AnthropicSlowModeHooks;
 }
 
 /**
