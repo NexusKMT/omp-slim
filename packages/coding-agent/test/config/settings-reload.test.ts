@@ -2,15 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { createSettingsHost } from "@oh-my-pi/pi-coding-agent/config/settings-ui";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
+import { cfgEditModelVariants } from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgCompactionEnabled } from "@oh-my-pi/pi-coding-agent/session/context-settings";
-import { cfgProvidersMaxInFlightRequests } from "@oh-my-pi/pi-coding-agent/session/settings";
-import { cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
+import { cfgProvidersMaxInFlightRequests, cfgTemperature } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 describe("Settings layer refresh", () => {
 	let state: SettingsTestState | undefined;
@@ -55,6 +54,38 @@ describe("Settings layer refresh", () => {
 		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 2 });
 	});
 
+	it("never adopts an invalid on-disk value through the save that merges external edits", async () => {
+		await writeConfig({ providers: { maxInFlightRequests: { openai: 2 } } });
+		const settings = await Settings.init({ cwd: startProject, agentDir });
+		await writeConfig({ providers: { maxInFlightRequests: { openai: 0 } } });
+		await expect(settings.reloadFromDisk()).rejects.toThrow("Provider request limits must be positive numbers");
+
+		cfgTemperature.set(settings, 0.5);
+		await settings.flush();
+		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 2 });
+		expect(cfgTemperature.get(settings)).toBe(0.5);
+		// The file keeps the external edit for the user to fix, merged with the save.
+		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
+			providers: { maxInFlightRequests: { openai: 0 } },
+			temperature: 0.5,
+		});
+	});
+
+	it("notifies listeners when a reload only reorders a precedence-sensitive record", async () => {
+		await writeConfig({ edit: { modelVariants: { claude: "patch", sonnet: "replace" } } });
+		const settings = await Settings.init({ cwd: startProject, agentDir });
+		const seen: string[][] = [];
+		cfgEditModelVariants.listen(settings, value => {
+			seen.push(Object.keys(value));
+		});
+
+		await writeConfig({ edit: { modelVariants: { sonnet: "replace", claude: "patch" } } });
+		await settings.reloadFromDisk();
+		expect(Object.keys(cfgEditModelVariants.get(settings))).toEqual(["sonnet", "claude"]);
+		await Promise.resolve();
+		expect(seen).toEqual([["sonnet", "claude"]]);
+	});
+
 	it("refuses to re-scope into a project whose settings fail validation", async () => {
 		writeProjectSettings(bareProject, { providers: { maxInFlightRequests: { openai: -1 } } });
 		const settings = await Settings.init({ cwd: scopedProject, agentDir });
@@ -82,23 +113,6 @@ describe("Settings layer refresh", () => {
 			expect(settings.getCwd()).toBe(path.normalize(bareProject));
 			expect(cfgCompactionEnabled.get(settings)).toBe(true);
 		}
-	});
-
-	it("clears a panel field by removing the key from config.yml, letting the env fallback apply", async () => {
-		Bun.env.SEARXNG_ENDPOINT = "https://env.example";
-		Bun.env.HINDSIGHT_API_TOKEN = "env-secret";
-		await writeConfig({ searxng: { endpoint: "https://cfg.example" }, temperature: 0.4 });
-		const settings = await Settings.init({ cwd: startProject, agentDir });
-		const host = createSettingsHost();
-
-		// The panel edits the configured layers: env values are never shown or pre-filled.
-		expect(host.get("hindsight.apiToken")).toBeUndefined();
-		expect(host.get("searxng.endpoint")).toBe("https://cfg.example");
-
-		host.unset("searxng.endpoint");
-		expect(cfgSearxngEndpoint.get(settings)).toBe("https://env.example");
-		await settings.flush();
-		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({ temperature: 0.4 });
 	});
 
 	it("drops a pinned default once a reloaded or cloned scope configures the setting", async () => {

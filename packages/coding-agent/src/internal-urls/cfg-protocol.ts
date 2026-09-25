@@ -17,7 +17,7 @@
  *
  * Credential values are always redacted.
  */
-import { prompt } from "@oh-my-pi/pi-utils";
+import { isRecord, prompt } from "@oh-my-pi/pi-utils";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import { type CfgWriteDetails, type CfgWriteOutcome } from "@oh-my-pi/pi-tui/tools/cfg-render";
 import { CFG_SAVE_SEGMENT, CFG_URL_PREFIX, parseCfgUrl } from "@oh-my-pi/pi-tui/tools/cfg-url";
@@ -205,6 +205,34 @@ function renderLeaf(settings: Settings, setting: AnySetting): string {
 	return lines.join("\n");
 }
 
+/**
+ * Layer that keeps a written `value` from taking effect on `settings`, or undefined when it applies.
+ * Decided by which layer owns the setting; `effective` only clears a false alarm where that layer
+ * already agrees (settings layers deep-merge, so a record write shows up as a subset of the effective record).
+ */
+function shadowingLayer(
+	setting: AnySetting,
+	settings: Settings,
+	value: unknown,
+	above: readonly SettingProvenance[],
+): SettingProvenance | undefined {
+	const owner = setting.provenance(settings);
+	if (!above.includes(owner)) return undefined;
+	const effective = setting.get(settings);
+	if (!isRecord(value) || !isRecord(effective)) {
+		return Bun.deepEquals(effective, value) ? undefined : owner;
+	}
+	for (const key in value) {
+		if (!Bun.deepEquals(effective[key], value[key])) return owner;
+	}
+	return undefined;
+}
+
+/** Only an environment variable outranks a session override. */
+const ABOVE_SESSION: readonly SettingProvenance[] = ["env"];
+/** Every layer that outranks the global config.yml a `/save` writes. */
+const ABOVE_GLOBAL: readonly SettingProvenance[] = ["env", "runtime", "overlay", "project"];
+
 function callerSession(context: ResolveContext | WriteContext | undefined): ToolSession {
 	const session = context?.session;
 	if (!session?.settings) throw new Error(`${CFG_URL_PREFIX} requires a calling session.`);
@@ -288,7 +316,11 @@ export class CfgProtocolHandler implements ProtocolHandler {
 			save,
 		};
 		const settingUrl = `${CFG_URL_PREFIX}${leaf.id.replaceAll(".", "/")}`;
-		const finish = (outcome: CfgWriteOutcome, effective?: string): InternalWriteResult => {
+		const finish = (
+			outcome: CfgWriteOutcome,
+			shadow?: { layer: SettingProvenance; scope: Settings },
+		): InternalWriteResult => {
+			const effective = shadow ? formatValue(leaf, leaf.get(shadow.scope)) : undefined;
 			const details: CfgWriteDetails = { ...request, outcome, ...(effective !== undefined ? { effective } : {}) };
 			const text = prompt
 				.render(cfgWriteResultTemplate, {
@@ -300,7 +332,7 @@ export class CfgProtocolHandler implements ProtocolHandler {
 					saved: outcome === "applied" && save,
 					applied: outcome === "applied" && !save,
 					effective,
-					provenance: PROVENANCE_LABELS[leaf.provenance(settings)],
+					provenance: shadow ? PROVENANCE_LABELS[shadow.layer] : undefined,
 				})
 				.trim();
 			return { content: [{ type: "text", text }], details: { cfg: details } };
@@ -319,10 +351,10 @@ export class CfgProtocolHandler implements ProtocolHandler {
 
 		if (!save) {
 			leaf.override(settings, value);
+			host.applied({ path: leaf.id, value: leaf.get(settings), settings, save });
 			// A non-fallback env var outranks runtime overrides; report it instead of claiming the change.
-			const effective = leaf.get(settings);
-			host.applied({ path: leaf.id, value: effective, settings, save });
-			return finish("applied", Bun.deepEquals(effective, value) ? undefined : formatValue(leaf, effective));
+			const layer = shadowingLayer(leaf, settings, value, ABOVE_SESSION);
+			return finish("applied", layer ? { layer, scope: settings } : undefined);
 		}
 		const persistent = host.persistentSettings;
 		leaf.set(persistent, value);
@@ -335,9 +367,10 @@ export class CfgProtocolHandler implements ProtocolHandler {
 			leaf.override(settings, value);
 			host.applied({ path: leaf.id, value: leaf.get(persistent), settings: persistent, save });
 		}
-		const effective = leaf.get(settings);
-		host.applied({ path: leaf.id, value: effective, settings, save });
-		return finish("applied", Bun.deepEquals(effective, value) ? undefined : formatValue(leaf, effective));
+		host.applied({ path: leaf.id, value: leaf.get(settings), settings, save });
+		// Judged on the persistent instance: a separate session carries the mirrored override above.
+		const layer = shadowingLayer(leaf, persistent, value, ABOVE_GLOBAL);
+		return finish("applied", layer ? { layer, scope: persistent } : undefined);
 	}
 
 	async complete(): Promise<UrlCompletion[]> {

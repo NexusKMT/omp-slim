@@ -1378,7 +1378,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.settings = session.settings;
 		const preferences = {
 			quiet: cfgStartupQuiet.get(settings),
-			composerShape: cfgComposerShape.get(settings) ?? "band",
+			composerShape: cfgComposerShape.get(settings),
 			...this.#liveComposerPreferences(),
 		};
 		const wasStarted = composer?.started ?? false;
@@ -3100,7 +3100,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 	}
 	syncComposerShape(): void {
-		const shape = cfgComposerShape.get(settings) ?? "band";
+		const shape = cfgComposerShape.get(settings);
 		const style = getComposerStyle(shape);
 		this.composer.setPreferences({ composerShape: shape });
 		this.statusLine.setAutocompleteActiveProbe(() => this.editor.isAutocompleteActive());
@@ -3131,7 +3131,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	 */
 	#persistComposerStatus(): void {
 		if (!this.sessionManager.getSessionFile()) return;
-		const shape = cfgComposerShape.get(settings) ?? "band";
+		const shape = cfgComposerShape.get(settings);
 		const style = getComposerStyle(shape);
 		const terminalWidth = this.ui.terminal.columns;
 		const availableWidth = this.editor.getTopBorderAvailableWidth(terminalWidth);

@@ -11,6 +11,8 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 
 import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 import { cfgEditFuzzyMatch } from "@oh-my-pi/pi-coding-agent/edit/settings";
+import { cfgModelRoles } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import type { InternalWriteResult } from "@oh-my-pi/pi-coding-agent/internal-urls/types";
 
 function sessionWith(settings: Settings, caller: Partial<ToolSession> = {}): ToolSession {
 	return { settings, hasUI: true, settingsApproval: true, taskDepth: 0, ...caller } as unknown as ToolSession;
@@ -21,6 +23,7 @@ const read = (url: string, settings: Settings) =>
 	handler.resolve(parseInternalUrl(url), { session: sessionWith(settings) });
 const write = (url: string, content: string, settings: Settings, caller?: Partial<ToolSession>) =>
 	handler.write(parseInternalUrl(url), content, { session: sessionWith(settings, caller) });
+const textOf = (result: InternalWriteResult) => (result.content[0]?.type === "text" ? result.content[0].text : "");
 
 describe("CfgProtocolHandler", () => {
 	afterEach(() => setCfgApprovalHost(null));
@@ -110,13 +113,43 @@ describe("CfgProtocolHandler", () => {
 			const result = await write("cfg://edit/fuzzyMatch", "false", settings);
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			expect(result.details?.cfg).toMatchObject({ outcome: "applied", effective: "true" });
-			expect(text).toContain("Effective value is still true");
+			expect(text).toContain("Effective value is still true: the environment variable takes precedence");
 			expect(text).not.toContain("/save");
 			expect(cfgEditFuzzyMatch.get(settings)).toBe(true);
 		} finally {
 			if (previous === undefined) delete Bun.env.PI_EDIT_FUZZY;
 			else Bun.env.PI_EDIT_FUZZY = previous;
 		}
+	});
+
+	it("reports a partial record write as applied, since layers deep-merge", async () => {
+		const settings = Settings.isolated();
+		cfgModelRoles.set(settings, { default: "anthropic/a" });
+		setCfgApprovalHost({ approve: async () => true, applied: () => {}, persistentSettings: settings });
+
+		const session = await write("cfg://modelRoles", '{"smol":"anthropic/b"}', settings);
+		expect(session.details?.cfg?.outcome).toBe("applied");
+		expect(session.details?.cfg?.effective).toBeUndefined();
+		expect(textOf(session)).toContain("cfg://modelRoles/save");
+
+		const saved = await write("cfg://modelRoles/save", '{"smol":"anthropic/c"}', settings);
+		expect(saved.details?.cfg?.effective).toBeUndefined();
+		expect(textOf(saved)).not.toContain("Effective value is still");
+		expect(cfgModelRoles.get(settings)).toMatchObject({ smol: "anthropic/c" });
+	});
+
+	it("reports a saved value a project layer still overrides", async () => {
+		const settings = Settings.isolated();
+		settings.setProjectModelRole("default", "anthropic/project");
+		setCfgApprovalHost({ approve: async () => true, applied: () => {}, persistentSettings: settings });
+
+		const shadowed = await write("cfg://modelRoles/save", '{"default":"anthropic/global"}', settings);
+		expect(shadowed.details?.cfg?.effective).toContain("anthropic/project");
+		expect(textOf(shadowed)).toContain("project config takes precedence");
+
+		// A key the project layer does not set applies despite the layer owning the record.
+		const applied = await write("cfg://modelRoles/save", '{"smol":"anthropic/global"}', settings);
+		expect(applied.details?.cfg?.effective).toBeUndefined();
 	});
 
 	it("persists /save writes to the host settings and mirrors them into a separate session instance", async () => {
