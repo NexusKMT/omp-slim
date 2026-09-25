@@ -939,6 +939,13 @@ describe("tool path arrays", () => {
 		expect(list).toContain("roles");
 		expect(list).not.toContain("kms");
 
+		// An explicit `**` under a directory prefix still recurses.
+		const deepGlob = getText(
+			await tool.execute("grep-dir-deep-glob", { pattern: "depth-needle", path: "internal/awsapi/**/*.go" }),
+		);
+		expect(deepGlob).toContain("awsapi-root");
+		expect(deepGlob).toContain("awsapi-nested");
+
 		// A bare glob with no directory prefix still matches at any depth.
 		const bareGlob = getText(await tool.execute("grep-bare-glob", { pattern: "depth-needle", path: "*.go" }));
 		expect(bareGlob).toContain("awsapi-nested");
