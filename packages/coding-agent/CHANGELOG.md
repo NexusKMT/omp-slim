@@ -34,12 +34,7 @@
 - Added RPC session management through `open_session`, plus corresponding TypeScript and Python client APIs including `openSession`, `setEventFilter`, `onPromptResult`, `onSessionSettled`, and `waitForSettled`.
 - Added `attachment://` and `conflict://` resource URL handlers.
 - Added a per-server MCP `instructions: false` option to keep a server's guidance out of the system prompt while retaining its tools.
-- Added stale tool-result eviction for advisors: before each review, an advisor replaces its own old `read`/`grep`/`glob` output from finished reviews with a short placeholder, so it stops re-sending that output on every request. The deltas it reviews and the notes it wrote are never touched.
-- Added stale tool-result eviction for advisors: before each review, an advisor replaces its own old `read`/`grep`/`glob` output from finished reviews with a short placeholder, so it stops re-sending that output on every request. The deltas it reviews and the notes it wrote are never touched. ([#13238](https://github.com/can1357/oh-my-pi/pull/13238) by [@alnaggar-dev](https://github.com/alnaggar-dev))
-- Added trusted additional context support for extension and hook tool results, including `ctx.addAdditionalContext()` for registered tools, allowing instructions to be passed to the model without altering the tool result.
-- Added dictation support to `/btw` follow-up input, including microphone controls on the follow-up line.
-- Added opt-in CUDA support to the Nix package for tiny-model inference with the ONNX Runtime CUDA execution provider.
-- Added support for multiple simultaneous browser instances, allowing tabs from browsers such as Chrome and Edge to remain connected and usable at the same time.
+- Added stale tool-result eviction for advisors: before each review, an advisor replaces its own old `read`/`grep`/`glob` output from finished reviews with a short placeholder, so it stops re-sending that output on every request. The deltas it reviews and the notes it wrote are never touched ([#13238](https://github.com/can1357/oh-my-pi/pull/13238) by [@alnaggar-dev](https://github.com/alnaggar-dev))
 
 ### Changed
 

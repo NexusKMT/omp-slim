@@ -1,6 +1,13 @@
 import type { AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import { invalidateMessageCache, isWorthPruning } from "@oh-my-pi/pi-agent-core/compaction";
+import { invalidateMessageCache } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
+
+/**
+ * Below this a blanked result recovers nothing — the stub itself costs ~10
+ * tokens, so evicting a tiny result only churns the prompt cache. Mirrors
+ * compaction's `MIN_PRUNE_TOKENS` (not exported from there).
+ */
+const MIN_EVICT_TOKENS = 50;
 
 function createEvictionNotice(tokens: number): string {
 	return `[Stale result elided - ${tokens} tokens]`;
@@ -48,7 +55,7 @@ export function evictStaleToolResults(messages: AgentMessage[], tokenizer: Token
 		const message = messages[i];
 		const tokens = tokenizer.countMessage(message);
 		const result = message.role === "toolResult" ? (message as ToolResultMessage) : undefined;
-		if (!result || result.prunedAt !== undefined || !isWorthPruning(tokens)) {
+		if (!result || result.prunedAt !== undefined || tokens < MIN_EVICT_TOKENS) {
 			nonCandidateAcc += tokens;
 			continue;
 		}
@@ -74,7 +81,7 @@ export function evictStaleToolResults(messages: AgentMessage[], tokenizer: Token
 		const result = message as ToolResultMessage;
 		if (result.prunedAt !== undefined) continue;
 		const tokens = tokenizer.countMessage(message);
-		if (!isWorthPruning(tokens)) continue;
+		if (tokens < MIN_EVICT_TOKENS) continue;
 		result.content = [{ type: "text", text: createEvictionNotice(tokens) }];
 		result.prunedAt = prunedAt;
 		invalidateMessageCache(message);
