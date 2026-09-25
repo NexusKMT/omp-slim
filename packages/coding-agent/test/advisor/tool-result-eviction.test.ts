@@ -117,7 +117,7 @@ describe("evictStaleToolResults", () => {
 
 		const result = evictStaleToolResults(messages, tokenizer);
 
-		expect(result).toEqual({ evicted: 0, tokensSaved: 0, coveredTokensSaved: 0 });
+		expect(result).toEqual({ evicted: 0, tokensSaved: 0 });
 		expect(view(messages[1]).prunedAt).toBeUndefined();
 	});
 
@@ -130,32 +130,8 @@ describe("evictStaleToolResults", () => {
 
 		const second = evictStaleToolResults(messages, tokenizer);
 
-		expect(second).toEqual({ evicted: 0, tokensSaved: 0, coveredTokensSaved: 0 });
+		expect(second).toEqual({ evicted: 0, tokensSaved: 0 });
 		expect(view(messages[2]).content).toBe(stubbed);
 		expect(view(messages[2]).prunedAt).toBe(prunedAt);
-	});
-
-	it("reports only savings the provider anchor still counts", () => {
-		const build = () => [
-			userDelta("review 1 delta"),
-			assistantText("investigating"),
-			toolResult("before", text(2_000)),
-			assistantText("anchor"),
-			userDelta("review 2 delta"),
-			toolResult("after", text(2_000)),
-		];
-
-		// No anchor: everything is counted locally, so nothing needs correcting.
-		const none = evictStaleToolResults(build(), tokenizer, -1);
-		expect(none.evicted).toBe(2);
-		expect(none.coveredTokensSaved).toBe(0);
-
-		// Anchor at index 3 covers the earlier result, not the later one.
-		const anchored = build();
-		const beforeTokens = tokenizer.countMessage(anchored[2]);
-		const some = evictStaleToolResults(anchored, tokenizer, 3);
-		expect(some.evicted).toBe(2);
-		expect(some.coveredTokensSaved).toBe(beforeTokens - tokenizer.countTokens(stub(beforeTokens)));
-		expect(some.coveredTokensSaved).toBeLessThan(some.tokensSaved);
 	});
 });

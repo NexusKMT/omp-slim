@@ -9,11 +9,6 @@ function createEvictionNotice(tokens: number): string {
 export interface ToolResultEvictionResult {
 	evicted: number;
 	tokensSaved: number;
-	/**
-	 * Part of `tokensSaved` from results before `coveredBefore`: the bytes a
-	 * provider usage report at that index still counts after the eviction.
-	 */
-	coveredTokensSaved: number;
 }
 
 /**
@@ -35,16 +30,8 @@ export interface ToolResultEvictionResult {
  *
  * Mutates `messages` in place, following compaction's in-place rewrite
  * contract (blank content, `prunedAt`, cache invalidation).
- *
- * `coveredBefore` is the index of the newest provider usage anchor (or -1 when
- * there is none); savings before it are reported separately so callers can
- * correct that stale usage without double-counting locally counted results.
  */
-export function evictStaleToolResults(
-	messages: AgentMessage[],
-	tokenizer: Tokenizer,
-	coveredBefore = -1,
-): ToolResultEvictionResult {
+export function evictStaleToolResults(messages: AgentMessage[], tokenizer: Tokenizer): ToolResultEvictionResult {
 	// One backward pass over the tail, tracking the running objective:
 	//   saved(i)   = Σ (tokens − stub) over candidates at index >= i
 	//   rewrite(i) = Σ tokens over non-candidates after i + Σ stub over
@@ -77,11 +64,10 @@ export function evictStaleToolResults(
 		}
 	}
 
-	if (bestIndex < 0) return { evicted: 0, tokensSaved: 0, coveredTokensSaved: 0 };
+	if (bestIndex < 0) return { evicted: 0, tokensSaved: 0 };
 
 	const prunedAt = Date.now();
 	let evicted = 0;
-	let coveredTokensSaved = 0;
 	for (let i = bestIndex; i < messages.length; i++) {
 		const message = messages[i];
 		if (message.role !== "toolResult") continue;
@@ -89,13 +75,11 @@ export function evictStaleToolResults(
 		if (result.prunedAt !== undefined) continue;
 		const tokens = tokenizer.countMessage(message);
 		if (!isWorthPruning(tokens)) continue;
-		const notice = createEvictionNotice(tokens);
-		if (i < coveredBefore) coveredTokensSaved += tokens - tokenizer.countTokens(notice);
-		result.content = [{ type: "text", text: notice }];
+		result.content = [{ type: "text", text: createEvictionNotice(tokens) }];
 		result.prunedAt = prunedAt;
 		invalidateMessageCache(message);
 		evicted++;
 	}
 
-	return { evicted, tokensSaved: bestSaved, coveredTokensSaved };
+	return { evicted, tokensSaved: bestSaved };
 }
