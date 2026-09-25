@@ -324,7 +324,7 @@ describe("AgentSession owner-routed async delivery", () => {
 		const expected = `${Array.from({ length: 20_000 }, (_, index) => index + 1).join("\n")}\n`;
 		try {
 			const started = await new BashTool(toolSession).execute("raw-followup", {
-				command: "seq 1 20000",
+				command: "seq 1 20000; exit 3",
 				async: true,
 			});
 			const jobId = started.details?.async?.jobId;
@@ -344,11 +344,12 @@ describe("AgentSession owner-routed async delivery", () => {
 				)
 				.join("\n");
 			expect(followUp).toContain(`Full output: artifact://${rawArtifactId}`);
+			// The raw capture holds only the stream; the exit notice the tool appended
+			// after it must survive in the preview's tail.
+			expect(followUp).toContain("Command exited with code 3");
 			const linkedPath = await store.getArtifactPath(rawArtifactId);
 			if (!linkedPath) throw new Error("Expected linked artifact on disk");
-			const linked = await Bun.file(linkedPath).text();
-			expect(linked).not.toContain("elided");
-			expect(linked).toBe(expected);
+			expect(await Bun.file(linkedPath).text()).toBe(expected);
 		} finally {
 			await session.dispose();
 			await store.close();
