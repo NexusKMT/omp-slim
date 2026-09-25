@@ -282,6 +282,16 @@ export class MnemopiSessionState {
 	}
 
 	/**
+	 * Bank for `scope: "global"` writes: the retain bank under `global` scoping, the shared bank
+	 * under `per-project-tagged`. Throws under `per-project`, which has no bank every project recalls.
+	 */
+	getGlobalRetainTarget(): MnemopiScopedMemory {
+		const target = this.config.scoping === "global" ? this.scoped.retain : this.scoped.global;
+		if (!target) throw new Error("Mnemopi global scope requires global or per-project-tagged scoping.");
+		return target;
+	}
+
+	/**
 	 * Read counterpart to {@link editScopedMemory}: fetch a memory row by id
 	 * from any bank this session recalls from (retain, recall, global). First
 	 * hit wins in the same order {@link editScopedMemory} would touch, so the
@@ -465,6 +475,13 @@ export class MnemopiSessionState {
 			});
 			return undefined;
 		}
+	}
+
+	/** Explicit global write: redacts and throws the storage error, like `rememberScoped`. */
+	rememberGlobal(memory: MnemopiRememberInput, options: MnemopiRememberOptions = {}): string {
+		const target = this.getGlobalRetainTarget();
+		const [scrubbed, scrubbedOptions] = redactRememberWrite(memory, options);
+		return target.memory.remember(scrubbed, scrubbedOptions);
 	}
 
 	/** Explicit write: throws the storage error, so the caller can report why nothing was stored. */
@@ -808,7 +825,7 @@ export class MnemopiSessionState {
 }
 
 // `per-project-tagged` is implemented by opening both the project bank and the
-// shared bank, then merging recall results while keeping writes project-local.
+// shared bank, then merging recall results while keeping writes project-local by default.
 function createScopedResources(config: MnemopiBackendConfig): MnemopiScopedResources {
 	// Env vars (MNEMOPI_POLYPHONIC_RECALL / MNEMOPI_ENHANCED_RECALL) still override
 	// these config-driven defaults inside the core gates. Proactive linking is

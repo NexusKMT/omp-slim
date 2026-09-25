@@ -13,6 +13,9 @@ import { cfgMemoryBackend } from "../memory-backend/settings";
 const learnSchema = type({
 	memory: type("string").describe("the durable, self-contained lesson to remember (what, when, why)"),
 	"context?": type("string").describe("optional source context for the lesson"),
+	"scope?": type("'project' | 'global'").describe(
+		"storage scope; defaults to project, global is for durable cross-project knowledge",
+	),
 	"skill?": type({
 		action: "'create' | 'update'",
 		name: type("string").describe("kebab-case skill name"),
@@ -56,17 +59,22 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 	async execute(_id: string, params: LearnParams): Promise<AgentToolResult> {
 		// 1) Persist or queue the lesson to long-term memory (mirrors MemoryRetainTool).
 		const backend = cfgMemoryBackend.get(this.session.settings);
+		if (params.scope === "global" && backend !== "mnemopi") {
+			throw new Error("Global memory scope is only available with the Mnemopi backend.");
+		}
 		let memoryMessage = "Lesson stored";
 		if (backend === "mnemopi") {
 			const state = this.session.getMnemopiSessionState?.();
 			if (!state) {
 				throw new Error("Mnemopi backend is not initialised for this session.");
 			}
+			// Resolve the global bank before writing, so an unsupported scoping mode is not reported as a storage failure.
+			if (params.scope === "global") state.getGlobalRetainTarget();
 			// A failed write throws (closed DB / disk error). Fail loudly with the
 			// cause rather than reporting (and minting a skill for) a lesson that was
 			// never stored.
 			try {
-				state.rememberScoped(params.memory, {
+				const options = {
 					source: "coding-agent-learn",
 					importance: 0.8,
 					metadata: {
@@ -75,12 +83,17 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 						context: params.context ?? null,
 						tool: "learn",
 					},
-					scope: "bank",
+					scope: "bank" as const,
 					extract: true,
 					extractEntities: true,
 					veracity: "tool",
-					memoryType: "fact",
-				});
+					memoryType: "fact" as const,
+				};
+				if (params.scope === "global") {
+					state.rememberGlobal(params.memory, options);
+				} else {
+					state.rememberScoped(params.memory, options);
+				}
 			} catch (error) {
 				const reason = error instanceof Error ? error.message : String(error);
 				throw new Error(`Mnemopi did not store the lesson: ${reason}`, { cause: error });

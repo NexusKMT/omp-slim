@@ -11,6 +11,9 @@ const memoryRetainSchema = type({
 	items: type({
 		content: type("string").describe("information to remember"),
 		"context?": type("string").describe("source context"),
+		"scope?": type("'project' | 'global'").describe(
+			"storage scope; defaults to project, global is for durable cross-project knowledge",
+		),
 	})
 		.array()
 		.atLeastLength(1)
@@ -44,6 +47,8 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 			if (!state) {
 				throw new Error("Mnemopi backend is not initialised for this session.");
 			}
+			// Resolve the global bank first, so an unsupported scoping mode rejects the batch before any item is stored.
+			if (params.items.some(item => item.scope === "global")) state.getGlobalRetainTarget();
 
 			// A failed write stored nothing. Stop there and say why, and what the batch
 			// kept, so the caller retries only what failed instead of trusting a
@@ -52,7 +57,7 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 			for (const [index, item] of params.items.entries()) {
 				let id: string;
 				try {
-					id = state.rememberScoped(item.content, {
+					const options = {
 						source: "coding-agent-retain",
 						importance: 0.75,
 						metadata: {
@@ -61,12 +66,16 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 							context: item.context ?? null,
 							tool: "retain",
 						},
-						scope: "bank",
+						scope: "bank" as const,
 						extract: true,
 						extractEntities: true,
 						veracity: "tool",
-						memoryType: "fact",
-					});
+						memoryType: "fact" as const,
+					};
+					id =
+						item.scope === "global"
+							? state.rememberGlobal(item.content, options)
+							: state.rememberScoped(item.content, options);
 				} catch (error) {
 					const reason = error instanceof Error ? error.message : String(error);
 					const kept =
@@ -93,6 +102,9 @@ export class MemoryRetainTool implements AgentTool<typeof memoryRetainSchema, Me
 		const state = this.session.getHindsightSessionState?.();
 		if (!state) {
 			throw new Error("Hindsight backend is not initialised for this session.");
+		}
+		if (params.items.some(item => item.scope === "global")) {
+			throw new Error("Global memory scope is only available with the Mnemopi backend.");
 		}
 
 		// Push every item onto the session-owned queue and return immediately.
