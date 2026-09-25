@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed sleep summaries corrupting words that merely contain a shortened term, such as `incomplete` → `inDONE`, `completed` → `DONEd` and `Networking` → `NetOK` ([#13320](https://github.com/can1357/oh-my-pi/pull/13320) by [@alphastorm](https://github.com/alphastorm)).
+
 ## [18.2.5] - 2026-09-17
 
 ### Fixed
