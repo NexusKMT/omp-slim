@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { acquireFileLock, getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
 import { beginSettingsTest, restoreSettingsTestState, type SettingsTestState } from "../helpers/settings-test-state";
 
@@ -69,6 +69,59 @@ describe("Settings layer refresh", () => {
 			providers: { maxInFlightRequests: { openai: 0 } },
 			temperature: 0.5,
 		});
+	});
+
+	it("keeps global writes made while a save waits on the lock live and persists them next", async () => {
+		await writeConfig({ compaction: { enabled: false } });
+		const settings = await Settings.init({ cwd: startProject, agentDir });
+		const seen: [string, unknown][] = [];
+		settings.onEffectiveChange([cfgTemperature, cfgCompactionEnabled, cfgProvidersMaxInFlightRequests], setting => {
+			seen.push([setting.id, setting.get(settings)]);
+		});
+
+		// Another writer holds config.yml's lock: the save snapshots its pending write, then waits.
+		const lock = await acquireFileLock(configPath());
+		cfgTemperature.set(settings, 0.5);
+		const saving = settings.flush();
+		cfgCompactionEnabled.unset(settings);
+		cfgProvidersMaxInFlightRequests.set(settings, { openai: 3 });
+		lock.release();
+		await saving;
+
+		expect(cfgCompactionEnabled.get(settings)).toBe(true);
+		expect(cfgProvidersMaxInFlightRequests.get(settings)).toEqual({ openai: 3 });
+		await settings.flush();
+		expect(seen).toEqual([
+			["temperature", 0.5],
+			["compaction.enabled", true],
+			["providers.maxInFlightRequests", { openai: 3 }],
+		]);
+		expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({
+			temperature: 0.5,
+			providers: { maxInFlightRequests: { openai: 3 } },
+		});
+	});
+
+	it("persists a setting written again while its save waits on the lock without a stale-edit warning", async () => {
+		await writeConfig({ temperature: 0.1 });
+		const settings = await Settings.init({ cwd: startProject, agentDir });
+		const warn = spyOn(logger, "warn");
+		try {
+			const lock = await acquireFileLock(configPath());
+			cfgTemperature.set(settings, 0.5);
+			const saving = settings.flush();
+			cfgTemperature.set(settings, 0.7);
+			lock.release();
+			await saving;
+			expect(cfgTemperature.get(settings)).toBe(0.7);
+
+			await settings.flush();
+			expect(warn).not.toHaveBeenCalled();
+			expect(cfgTemperature.get(settings)).toBe(0.7);
+			expect(YAML.parse(await Bun.file(configPath()).text())).toEqual({ temperature: 0.7 });
+		} finally {
+			warn.mockRestore();
+		}
 	});
 
 	it("notifies listeners when a reload only reorders a precedence-sensitive record", async () => {

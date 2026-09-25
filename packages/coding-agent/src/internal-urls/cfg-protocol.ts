@@ -24,6 +24,7 @@ import { CFG_SAVE_SEGMENT, CFG_URL_PREFIX, parseCfgUrl } from "@oh-my-pi/pi-tui/
 import { type AnySetting, all } from "../config/registry";
 import type { SettingProvenance, Settings } from "../config/settings";
 import cfgPromptDoc from "../prompts/internal-urls/cfg.md" with { type: "text" };
+import cfgEnvShadowedTemplate from "../prompts/tools/cfg-env-shadowed.md" with { type: "text" };
 import cfgWriteResultTemplate from "../prompts/tools/cfg-write-result.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 import type {
@@ -77,6 +78,8 @@ export interface CfgChangeRequest {
 	value: string;
 	/** Persist to config.yml instead of scoping the change to the session. */
 	save: boolean;
+	/** Higher layer that will keep a `/save` from taking effect here (e.g. `project config`); absent when it applies. */
+	shadowedBy?: string;
 }
 
 /** An approved change that took effect on one {@link Settings} instance. */
@@ -228,6 +231,33 @@ function shadowingLayer(
 	return undefined;
 }
 
+/**
+ * {@link shadowingLayer} judged before a `/save` lands on `persistent`. Layers deep-merge records, so a
+ * written key is shadowed only when its current value comes from a higher layer rather than the global
+ * config the save replaces; an env var replaces the value whole and is judged as is.
+ */
+function saveShadowingLayer(
+	setting: AnySetting,
+	persistent: Settings,
+	value: unknown,
+	above: readonly SettingProvenance[],
+): SettingProvenance | undefined {
+	const owner = setting.provenance(persistent);
+	const effective = setting.get(persistent);
+	if (owner === "env" || !above.includes(owner) || !isRecord(value) || !isRecord(effective)) {
+		return shadowingLayer(setting, persistent, value, above);
+	}
+	let global: unknown = persistent.getGlobalSettings();
+	for (const segment of setting.segments) global = isRecord(global) ? global[segment] : undefined;
+	for (const key in value) {
+		const current = effective[key];
+		if (current === undefined || Bun.deepEquals(current, value[key])) continue;
+		if (isRecord(global) && Bun.deepEquals(global[key], current)) continue;
+		return owner;
+	}
+	return undefined;
+}
+
 /** Only an environment variable outranks a session override. */
 const ABOVE_SESSION: readonly SettingProvenance[] = ["env"];
 /** Every layer that outranks the global config.yml a `/save` writes. */
@@ -339,11 +369,37 @@ export class CfgProtocolHandler implements ProtocolHandler {
 		};
 
 		if (!save && Bun.deepEquals(previous, value)) return finish("unchanged");
+		// Refuse before prompting: approving a session change a non-fallback env var overrides is a no-op.
+		// A fallback env var yields to the override the write adds, so it does not shadow.
+		if (!save && !leaf.envFallback && shadowingLayer(leaf, settings, value, ABOVE_SESSION)) {
+			throw new Error(
+				prompt
+					.render(cfgEnvShadowedTemplate, {
+						path: leaf.id,
+						effective: formatValue(leaf, previous),
+						env: leaf.envName,
+					})
+					.trim(),
+			);
+		}
 		const host = approvalHost;
 		if (!host) {
 			throw new Error(
 				`Changing settings requires user approval, but no interactive UI is attached. Ask the user to change \`${leaf.id}\` themselves.`,
 			);
+		}
+		if (save) {
+			// Saving may still be meant for other projects, so ask anyway, but name the layer that wins here.
+			// A session sharing the persistent instance drops its own override on save, so it does not shadow.
+			const persistent = host.persistentSettings;
+			const above = ABOVE_GLOBAL.filter(
+				layer => !(layer === "env" && leaf.envFallback) && !(layer === "runtime" && settings === persistent),
+			);
+			const layer = saveShadowingLayer(leaf, persistent, value, above);
+			if (layer) {
+				request.shadowedBy =
+					layer === "env" && leaf.envName ? `environment variable ${leaf.envName}` : PROVENANCE_LABELS[layer];
+			}
 		}
 		const decision = approvalQueue.then(() => host.approve(request));
 		approvalQueue = decision.catch(() => undefined);

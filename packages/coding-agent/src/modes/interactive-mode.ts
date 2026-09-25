@@ -5999,7 +5999,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		const headline = request.save
 			? `💾 Your agent wants to save \`${request.path}\` to your config.`
 			: `⚙️ Your agent wants to change \`${request.path}\` for this session.`;
-		const choice = await this.showHookSelector(`${headline}\n${request.previous} → ${request.value}`, [
+		const warning = request.shadowedBy
+			? `\n⚠️ Overridden by your ${request.shadowedBy}: the saved value won't take effect here.`
+			: "";
+		const choice = await this.showHookSelector(`${headline}\n${request.previous} → ${request.value}${warning}`, [
 			"Allow",
 			"Deny",
 		]);

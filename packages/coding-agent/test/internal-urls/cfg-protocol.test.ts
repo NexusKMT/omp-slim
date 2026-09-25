@@ -12,6 +12,7 @@ import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 import { cfgEditFuzzyMatch } from "@oh-my-pi/pi-coding-agent/edit/settings";
 import { cfgModelRoles } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import { cfgSearxngEndpoint } from "@oh-my-pi/pi-coding-agent/web/settings";
 import type { InternalWriteResult } from "@oh-my-pi/pi-coding-agent/internal-urls/types";
 
 function sessionWith(settings: Settings, caller: Partial<ToolSession> = {}): ToolSession {
@@ -104,21 +105,49 @@ describe("CfgProtocolHandler", () => {
 		]);
 	});
 
-	it("reports a session change an environment variable still overrides", async () => {
+	it("refuses a session change an environment variable overrides without asking the user", async () => {
 		const settings = Settings.isolated();
-		setCfgApprovalHost({ approve: async () => true, applied: () => {}, persistentSettings: Settings.isolated() });
+		const asked: CfgChangeRequest[] = [];
+		setCfgApprovalHost({
+			approve: async request => (asked.push(request), true),
+			applied: () => {},
+			persistentSettings: Settings.isolated(),
+		});
 		const previous = Bun.env.PI_EDIT_FUZZY;
 		Bun.env.PI_EDIT_FUZZY = "1";
 		try {
-			const result = await write("cfg://edit/fuzzyMatch", "false", settings);
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			expect(result.details?.cfg).toMatchObject({ outcome: "applied", effective: "true" });
-			expect(text).toContain("Effective value is still true: the environment variable takes precedence");
-			expect(text).not.toContain("/save");
+			await expect(write("cfg://edit/fuzzyMatch", "false", settings)).rejects.toThrow("PI_EDIT_FUZZY");
+			expect(asked).toEqual([]);
+			expect(cfgEditFuzzyMatch.provenance(settings)).toBe("env");
 			expect(cfgEditFuzzyMatch.get(settings)).toBe(true);
 		} finally {
 			if (previous === undefined) delete Bun.env.PI_EDIT_FUZZY;
 			else Bun.env.PI_EDIT_FUZZY = previous;
+		}
+	});
+
+	it("asks normally for writes a fallback environment variable only defaults", async () => {
+		const settings = Settings.isolated();
+		const asked: CfgChangeRequest[] = [];
+		setCfgApprovalHost({
+			approve: async request => (asked.push(request), true),
+			applied: () => {},
+			persistentSettings: settings,
+		});
+		const previous = Bun.env.SEARXNG_ENDPOINT;
+		Bun.env.SEARXNG_ENDPOINT = "http://env.example";
+		try {
+			const session = await write("cfg://searxng/endpoint", '"http://session.example"', settings);
+			expect(session.details?.cfg).toMatchObject({ outcome: "applied" });
+			expect(cfgSearxngEndpoint.get(settings)).toBe("http://session.example");
+
+			await write("cfg://searxng/endpoint/save", '"http://saved.example"', settings);
+			expect(cfgSearxngEndpoint.get(settings)).toBe("http://saved.example");
+			expect(asked).toHaveLength(2);
+			expect(asked.map(request => request.shadowedBy)).toEqual([undefined, undefined]);
+		} finally {
+			if (previous === undefined) delete Bun.env.SEARXNG_ENDPOINT;
+			else Bun.env.SEARXNG_ENDPOINT = previous;
 		}
 	});
 
@@ -141,15 +170,27 @@ describe("CfgProtocolHandler", () => {
 	it("reports a saved value a project layer still overrides", async () => {
 		const settings = Settings.isolated();
 		settings.setProjectModelRole("default", "anthropic/project");
-		setCfgApprovalHost({ approve: async () => true, applied: () => {}, persistentSettings: settings });
+		const asked: CfgChangeRequest[] = [];
+		setCfgApprovalHost({
+			approve: async request => (asked.push(request), true),
+			applied: () => {},
+			persistentSettings: settings,
+		});
 
 		const shadowed = await write("cfg://modelRoles/save", '{"default":"anthropic/global"}', settings);
+		expect(asked[0]?.shadowedBy).toContain("project config");
 		expect(shadowed.details?.cfg?.effective).toContain("anthropic/project");
 		expect(textOf(shadowed)).toContain("project config takes precedence");
 
 		// A key the project layer does not set applies despite the layer owning the record.
 		const applied = await write("cfg://modelRoles/save", '{"smol":"anthropic/global"}', settings);
+		expect(asked[1]?.shadowedBy).toBeUndefined();
 		expect(applied.details?.cfg?.effective).toBeUndefined();
+
+		// Replacing a key the global config supplies is not shadowed, though the project layer owns the record.
+		await write("cfg://modelRoles/save", '{"smol":"anthropic/next"}', settings);
+		expect(asked[2]?.shadowedBy).toBeUndefined();
+		expect(cfgModelRoles.get(settings)).toMatchObject({ default: "anthropic/project", smol: "anthropic/next" });
 	});
 
 	it("persists /save writes to the host settings and mirrors them into a separate session instance", async () => {

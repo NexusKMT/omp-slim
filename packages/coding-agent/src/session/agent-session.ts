@@ -5865,6 +5865,11 @@ export class AgentSession implements SettingsScope {
 		return this.#memory.applyMemoryBackend(options);
 	}
 
+	/** Resolves once every memory-setting edit so far, and the backend transitions it started, has settled. */
+	settleMemoryBackend(): Promise<void> {
+		return this.#memory.settle();
+	}
+
 	/** Rebuilds the stable base prompt, optionally discarding a stale asynchronous rebuild. */
 	refreshBaseSystemPrompt(commitIf?: () => boolean): Promise<void> {
 		return this.#tools.refreshBaseSystemPrompt(commitIf);

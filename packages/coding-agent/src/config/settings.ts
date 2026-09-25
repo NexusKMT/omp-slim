@@ -1104,7 +1104,7 @@ export class Settings {
 			await this.#projectSavePromise;
 		}
 		if (this.#modified.size > 0 || this.#modifiedGlobalModelRoles.size > 0) {
-			await this.#saveNow();
+			await this.#chainSave();
 		}
 		if (this.#modifiedProjectModelRoles.size > 0) {
 			await this.#saveProjectNow();
@@ -3318,19 +3318,25 @@ export class Settings {
 		clearTimeout(this.#saveTimer);
 		this.#saveTimer = setTimeout(() => {
 			this.#saveTimer = undefined;
-			const previousSave = this.#savePromise;
-			const savePromise = previousSave ? previousSave.then(() => this.#saveNow()) : this.#saveNow();
-			this.#savePromise = savePromise;
-			savePromise
-				.catch(err => {
-					logger.warn("Settings: background save failed", { error: String(err) });
-				})
-				.finally(() => {
-					if (this.#savePromise === savePromise) {
-						this.#savePromise = undefined;
-					}
-				});
+			this.#chainSave().catch(err => {
+				logger.warn("Settings: background save failed", { error: String(err) });
+			});
 		}, 100);
+	}
+
+	/**
+	 * Runs {@link #saveNow} after the in-flight save, so saves never overlap: every global write
+	 * made after a save's snapshot is still pending when that save adopts the file.
+	 */
+	#chainSave(): Promise<void> {
+		const previousSave = this.#savePromise;
+		const savePromise = previousSave ? previousSave.then(() => this.#saveNow()) : this.#saveNow();
+		this.#savePromise = savePromise;
+		const settle = () => {
+			if (this.#savePromise === savePromise) this.#savePromise = undefined;
+		};
+		savePromise.then(settle, settle);
+		return savePromise;
 	}
 
 	async #saveNow(): Promise<void> {
@@ -3343,7 +3349,6 @@ export class Settings {
 		const modifiedPathMutations = new Map(this.#modifiedPathMutations);
 		const modifiedModelRoleMutations = new Map(this.#modifiedGlobalModelRoleMutations);
 		const globalRolesAtStart = this.#modelRolesFromLayer(this.#global);
-		const previous = this.#snapshot();
 		this.#modified.clear();
 		this.#modifiedGlobalModelRoles.clear();
 		this.#modifiedPathMutations.clear();
@@ -3358,6 +3363,7 @@ export class Settings {
 				const current =
 					loaded.settings ?? (this.#quarantinedYamlTargets.has(configPath) ? structuredClone(this.#global) : {});
 				let shouldWrite = false;
+				const appliedPaths: string[] = [];
 
 				// Apply pending changes unless a newer file generation also
 				// changed that setting. Disjoint external edits still merge.
@@ -3379,6 +3385,7 @@ export class Settings {
 					const value = getByPath(this.#global, segments);
 					if (value === undefined) deleteByPath(current, segments);
 					else setByPath(current, segments, value);
+					appliedPaths.push(modPath);
 					shouldWrite = true;
 				}
 
@@ -3433,14 +3440,21 @@ export class Settings {
 					shouldWrite = true;
 				}
 
-				// Adopt the external changes we preserved only when they validate: otherwise the live
-				// layer stays last-good (it already holds this save's own writes), like a
-				// keep-last-good reload, while the file keeps the external edit for the user to fix.
-				if (this.#acceptsLayers({ ...this.#ownLayers(), global: current }, configPath)) this.#global = current;
 				if (shouldWrite) {
 					await this.#writeYamlAtomically(writePath, current);
 				}
 				this.#quarantinedYamlTargets.delete(configPath);
+				// A path written again after this save's snapshot was merged at its newer live value.
+				// Drop it from pending unless it changed again while the write was in flight, so the
+				// next save doesn't take this save's write for a stale external edit.
+				for (const modPath of appliedPaths) {
+					if (!this.#modified.has(modPath)) continue;
+					const segments = modPath.split(".");
+					if (!settingValuesEqual(getByPath(this.#global, segments), getByPath(current, segments))) continue;
+					this.#modified.delete(modPath);
+					this.#modifiedPathMutations.delete(modPath);
+				}
+				this.#adoptSavedGlobal(current, configPath);
 				// These pending roles were included in this write. Remove each
 				// only if no newer local change arrived while the write was in flight.
 				const globalRolesAfterWrite = this.#modelRolesFromLayer(this.#global);
@@ -3485,13 +3499,42 @@ export class Settings {
 					);
 				}
 			}
-			this.#rebuildMerged();
 			throw error;
 		}
+	}
 
+	/**
+	 * Adopts `saved` (config.yml as a save just wrote it) as the live global layer, first
+	 * re-applying every global write still pending — made after that save's snapshot, since saves
+	 * never overlap ({@link #chainSave}) — so a live value never regresses to its on-disk one. An
+	 * invalid result keeps the live layer, which is last good and already holds the save's writes,
+	 * like a keep-last-good reload; the file keeps the external edit for the user to fix.
+	 * Notifies every setting whose effective value changed.
+	 */
+	#adoptSavedGlobal(saved: RawSettings, source: string): void {
+		if (this.#modifiedGlobalModelRoles.size > 0) {
+			const liveRoles = getByPath(this.#global, ["modelRoles"]);
+			const savedRoles = getByPath(saved, ["modelRoles"]);
+			const roles: Record<string, unknown> = isRecord(savedRoles) ? savedRoles : {};
+			for (const role of this.#modifiedGlobalModelRoles) {
+				if (isRecord(liveRoles) && Object.hasOwn(liveRoles, role)) roles[role] = liveRoles[role];
+				else delete roles[role];
+			}
+			setByPath(saved, ["modelRoles"], roles);
+		}
+		for (const id of this.#modified) {
+			const segments = id.split(".");
+			const value = getByPath(this.#global, segments);
+			if (value === undefined) deleteByPath(saved, segments);
+			else setByPath(saved, segments, value);
+		}
+		if (!this.#acceptsLayers({ ...this.#ownLayers(), global: saved }, source)) return;
+		const previous = this.#snapshot();
+		this.#global = saved;
 		this.#rebuildMerged();
 		this.#fireChangesSince(previous);
 	}
+
 	#queueProjectSave(): void {
 		if (!this.#persist) return;
 

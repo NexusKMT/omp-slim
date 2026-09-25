@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added explicit memory backend settlement for reliable cross-project CWD transitions
+- Added automatic prevention of user session overrides shadowed by environment variables
+- Added configuration approval UI signals for saved settings shadowed by higher-precedence layers
 - Added support for paged reading of large files with metadata signaling for UI recovery
 - Added `unset` capability to the configuration registry for removing overrides and reverting to defaults
 - Added support for universal (fat) Mach-O binaries in IDA tool, allowing selection of specific architecture slices via the `:@<arch>` syntax
@@ -34,6 +37,7 @@
 
 ### Changed
 
+- Implemented sequential atomic configuration saves to prevent write overlaps
 - Refactored domain-specific settings to a type-safe registry supporting dynamic reactivity and layered environment variable overrides
 - Updated URL resolution to use a canonical router, replacing ad-hoc `normalizeLocalScheme` logic
 - Hardened filesystem access across `local://`, `memory://`, and `vault://` protocols with robust symlink and containment validation
