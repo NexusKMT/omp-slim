@@ -111,7 +111,12 @@ import type { SessionManager } from "./session-manager";
 import { buildSessionMetadata } from "./session-metadata";
 import type { YieldQueue } from "./yield-queue";
 
-import { cfgAdvisorImmuneTurns, cfgAdvisorMaxNotesPerUpdate, cfgAdvisorSyncBacklog } from "../advisor/settings";
+import {
+	cfgAdvisorEvictStaleResults,
+	cfgAdvisorImmuneTurns,
+	cfgAdvisorMaxNotesPerUpdate,
+	cfgAdvisorSyncBacklog,
+} from "../advisor/settings";
 import { cfgCompaction, cfgContextPromotionEnabled } from "./context-settings";
 import { cfgRetry, cfgTierAdvisor } from "./settings";
 
@@ -284,31 +289,15 @@ interface ActiveAdvisor {
 }
 /** First index whose provider usage may anchor the advisor's context estimate. */
 function advisorAnchorSearchStart(messages: readonly AgentMessage[]): number {
-	let start = 0;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message.role !== "compactionSummary") continue;
 		// Advisor summaries created before this runtime-only boundary existed have
 		// no trustworthy way to distinguish retained from newly appended messages.
 		// Conservatively ignore every current assistant until the next compaction.
-		start = (message as AdvisorCompactionSummaryMessage).advisorUsageAnchorStartIndex ?? messages.length;
-		break;
+		return (message as AdvisorCompactionSummaryMessage).advisorUsageAnchorStartIndex ?? messages.length;
 	}
-	// A pruned or evicted tool result was rewritten in place, so every usage
-	// report made at or before the newest rewrite still counts the removed bytes
-	// (the `prunedAt` rule of `findRequestUsageAnchor`). Start after the newest
-	// such report; until a fresh turn lands, the estimate is counted locally.
-	let rewriteAt = Number.NEGATIVE_INFINITY;
-	for (const message of messages) {
-		if (message.role === "toolResult" && message.prunedAt !== undefined)
-			rewriteAt = Math.max(rewriteAt, message.prunedAt);
-	}
-	if (rewriteAt === Number.NEGATIVE_INFINITY) return start;
-	for (let i = messages.length - 1; i >= start; i--) {
-		const message = messages[i];
-		if (message.role === "assistant" && message.timestamp <= rewriteAt) return i + 1;
-	}
-	return start;
+	return 0;
 }
 interface AdvisorCompactionSummaryMessage extends CompactionSummaryMessage {
 	firstKeptEntryId?: string;
@@ -1951,23 +1940,26 @@ export class SessionAdvisors {
 	): Promise<boolean> {
 		await this.#maybeRestoreAdvisorRetryFallbackPrimary(advisor, signal);
 		const agent = advisor.agent;
-		// Prior reviews' tool output is re-sent on every later request; the deltas
-		// the advisor reviews and the notes it wrote (carried in `advise` tool-call
-		// arguments) are never touched. Runs before the compaction gate, and
-		// regardless of whether compaction is enabled, because it is the advisor's
-		// own context hygiene, not a compaction method.
+		// Prior reviews' `read`/`grep`/`glob` output is re-sent on every later
+		// request; the deltas the advisor reviews and the notes it wrote (carried
+		// in `advise` tool-call arguments) are never touched, and the latest review
+		// is kept intact. Runs before the compaction gate because it is the
+		// advisor's own context hygiene, not a compaction method; it has its own
+		// `advisor.evictStaleResults` switch.
 		//
 		// On a prefix-bound thinking model the `prunedAt` marker also drops the
-		// signed thinking of every assistant after the cut. That region is the one
-		// the eviction rewrites anyway; what is lost is the advisor's reasoning
-		// from finished reviews, which its notes and the deltas already cover.
-		const eviction = evictStaleToolResults(agent.state.messages, agent.tokenizer);
-		if (eviction.evicted > 0) {
-			logger.debug("advisor evicted stale tool results", {
-				advisor: advisor.name,
-				evicted: eviction.evicted,
-				tokensSaved: eviction.tokensSaved,
-			});
+		// signed thinking of every assistant after the cut, the latest review
+		// included. What is lost is reasoning its notes and the deltas already
+		// cover.
+		if (cfgAdvisorEvictStaleResults.get(this.#host.settings)) {
+			const eviction = evictStaleToolResults(agent.state.messages, agent.tokenizer);
+			if (eviction.evicted > 0) {
+				logger.debug("advisor evicted stale tool results", {
+					advisor: advisor.name,
+					evicted: eviction.evicted,
+					tokensSaved: eviction.tokensSaved,
+				});
+			}
 		}
 		const incomingTokens = agent.tokenizer.countMessage(incoming);
 
@@ -2656,6 +2648,9 @@ export class SessionAdvisors {
 		const messages = advisor.agent.state.messages;
 		return estimateTranscriptTokens(messages, advisor.agent.tokenizer, {
 			anchorFromIndex: advisorAnchorSearchStart(messages),
+			// Evicted tool results were rewritten in place; usage reported before
+			// the newest eviction still counts the removed bytes.
+			skipPrunedAnchors: true,
 			excludeEncryptedReasoning: true,
 		});
 	}
