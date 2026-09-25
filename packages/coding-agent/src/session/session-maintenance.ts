@@ -2075,6 +2075,11 @@ export class SessionMaintenance {
 				error: error instanceof Error ? error.message : String(error),
 			});
 			if (this.#speculation === run) this.#speculation = undefined;
+			// Keyed by the live model even when a compaction-model candidate made the
+			// failing request: every consumer checks the live model, and a false hit
+			// only moves this cycle to the next configured method. Errors with no
+			// HTTP status classify by message text, so an unrecognised transient
+			// failure costs the same single early fallback.
 			if (
 				method === "remote" &&
 				model &&
