@@ -82,4 +82,36 @@ describe("Anthropic thinking leaves a capped request its output budget", () => {
 		const payload = await wirePayload(anthropicModel("claude-opus-5-5", 128_000), { reasoning: Effort.Max });
 		expect(payload.max_tokens).toBe(128_000);
 	});
+
+	it("adds the thinking budget to a capped adaptive request on Bedrock", async () => {
+		// Bedrock-hosted adaptive Claude shares maxTokens with thinking the same way.
+		const model = buildModel({
+			id: "anthropic.claude-opus-4-7",
+			name: "Claude Opus 4.7",
+			api: "bedrock-converse-stream",
+			provider: "amazon-bedrock",
+			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+			thinking: { mode: "anthropic-adaptive", efforts: [Effort.Low, Effort.Medium, Effort.High] },
+		} satisfies ModelSpec<"bedrock-converse-stream">);
+		const controller = new AbortController();
+		const { promise, resolve } = Promise.withResolvers<{ inferenceConfig?: { maxTokens?: number } }>();
+		void streamSimple(model, context, {
+			apiKey: "test-key",
+			signal: controller.signal,
+			maxTokens: 13_107,
+			reasoning: Effort.High,
+			onPayload: payload => {
+				resolve(payload as { inferenceConfig?: { maxTokens?: number } });
+				controller.abort();
+				return undefined;
+			},
+		});
+		// 16,384 is Bedrock's high-effort Claude thinking budget.
+		expect((await promise).inferenceConfig?.maxTokens).toBe(13_107 + 16_384);
+	});
 });
