@@ -1406,6 +1406,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 	const page = await pickElectronTarget(browser.browser, {
 		matcher: opts.target,
 		preferVisible: !activateForScreenshot,
+		relayJson: browser.kind.kind === "relay" ? browser.kind.cdpUrl : undefined,
 	});
 	const targetId = await targetIdForPage(page);
 	return {
