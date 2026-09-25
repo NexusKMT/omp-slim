@@ -305,7 +305,7 @@
 - Fixed one-shot commands that stopped before completing, such as `omp config set` on a fresh Windows profile, incorrectly exiting successfully without output; they now report failure with diagnostic guidance.
 ### Fixed
 
-- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output.
+- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.2] - 2026-09-25
 
