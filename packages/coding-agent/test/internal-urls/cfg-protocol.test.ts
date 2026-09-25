@@ -59,7 +59,7 @@ describe("CfgProtocolHandler", () => {
 		const settings = Settings.isolated();
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), true),
+			approve: async request => (asked.push(request), "once"),
 			applied: () => {},
 			persistentSettings: settings,
 		});
@@ -81,7 +81,7 @@ describe("CfgProtocolHandler", () => {
 		const applied: CfgAppliedChange[] = [];
 		let allow = false;
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), allow),
+			approve: async request => (asked.push(request), allow ? "once" : "deny"),
 			applied: change => applied.push(change),
 			persistentSettings: persistent,
 		});
@@ -105,11 +105,53 @@ describe("CfgProtocolHandler", () => {
 		]);
 	});
 
+	it("stops asking for the rest of the session once the user allows it always", async () => {
+		const settings = Settings.isolated();
+		const asked: CfgChangeRequest[] = [];
+		setCfgApprovalHost({
+			approve: async request => (asked.push(request), "session"),
+			applied: () => {},
+			persistentSettings: settings,
+		});
+		const inSession = (sessionId: string) => ({ getSessionId: () => sessionId });
+
+		await write("cfg://advisor/enabled", "true", settings, inSession("a"));
+		await write("cfg://advisor/syncBacklog", '"3"', settings, inSession("a"));
+		expect(cfgAdvisorSyncBacklog.get(settings)).toBe("3");
+		expect(asked.map(request => request.path)).toEqual(["advisor.enabled"]);
+
+		// A session-change grant does not cover persisting to config.yml ...
+		await write("cfg://advisor/syncBacklog/save", '"5"', settings, inSession("a"));
+		// ... but the grant given on the save prompt covers later saves.
+		await write("cfg://advisor/enabled/save", "false", settings, inSession("a"));
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		// Nor does any grant carry over to another session.
+		await write("cfg://advisor/syncBacklog", '"1"', settings, inSession("b"));
+		expect(asked.map(request => [request.path, request.save])).toEqual([
+			["advisor.enabled", false],
+			["advisor.syncBacklog", true],
+			["advisor.syncBacklog", false],
+		]);
+	});
+
+	it("fails an unanswered write without changing anything and asks again next time", async () => {
+		const settings = Settings.isolated();
+		let answer: "timeout" | "once" = "timeout";
+		setCfgApprovalHost({ approve: async () => answer, applied: () => {}, persistentSettings: settings });
+
+		await expect(write("cfg://advisor/enabled", "true", settings)).rejects.toThrow();
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+
+		answer = "once";
+		const retried = await write("cfg://advisor/enabled", "true", settings);
+		expect(retried.details?.cfg?.outcome).toBe("applied");
+	});
+
 	it("refuses a session change an environment variable overrides without asking the user", async () => {
 		const settings = Settings.isolated();
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), true),
+			approve: async request => (asked.push(request), "once"),
 			applied: () => {},
 			persistentSettings: Settings.isolated(),
 		});
@@ -130,7 +172,7 @@ describe("CfgProtocolHandler", () => {
 		const settings = Settings.isolated();
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), true),
+			approve: async request => (asked.push(request), "once"),
 			applied: () => {},
 			persistentSettings: settings,
 		});
@@ -154,7 +196,7 @@ describe("CfgProtocolHandler", () => {
 	it("reports a partial record write as applied, since layers deep-merge", async () => {
 		const settings = Settings.isolated();
 		cfgModelRoles.set(settings, { default: "anthropic/a" });
-		setCfgApprovalHost({ approve: async () => true, applied: () => {}, persistentSettings: settings });
+		setCfgApprovalHost({ approve: async () => "once", applied: () => {}, persistentSettings: settings });
 
 		const session = await write("cfg://modelRoles", '{"smol":"anthropic/b"}', settings);
 		expect(session.details?.cfg?.outcome).toBe("applied");
@@ -172,7 +214,7 @@ describe("CfgProtocolHandler", () => {
 		settings.setProjectModelRole("default", "anthropic/project");
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), true),
+			approve: async request => (asked.push(request), "once"),
 			applied: () => {},
 			persistentSettings: settings,
 		});
@@ -198,7 +240,7 @@ describe("CfgProtocolHandler", () => {
 		const persistent = Settings.isolated();
 		const applied: Settings[] = [];
 		setCfgApprovalHost({
-			approve: async () => true,
+			approve: async () => "once",
 			applied: change => applied.push(change.settings),
 			persistentSettings: persistent,
 		});
@@ -216,7 +258,7 @@ describe("CfgProtocolHandler", () => {
 		const settings = Settings.isolated();
 		const asked: CfgChangeRequest[] = [];
 		setCfgApprovalHost({
-			approve: async request => (asked.push(request), true),
+			approve: async request => (asked.push(request), "once"),
 			applied: () => {},
 			persistentSettings: settings,
 		});

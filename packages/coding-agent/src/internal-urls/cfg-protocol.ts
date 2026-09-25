@@ -25,6 +25,7 @@ import { type AnySetting, all } from "../config/registry";
 import type { SettingProvenance, Settings } from "../config/settings";
 import cfgPromptDoc from "../prompts/internal-urls/cfg.md" with { type: "text" };
 import cfgEnvShadowedTemplate from "../prompts/tools/cfg-env-shadowed.md" with { type: "text" };
+import cfgApprovalTimeoutTemplate from "../prompts/tools/cfg-approval-timeout.md" with { type: "text" };
 import cfgWriteResultTemplate from "../prompts/tools/cfg-write-result.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 import type {
@@ -92,10 +93,18 @@ export interface CfgAppliedChange {
 	save: boolean;
 }
 
+/**
+ * The user's answer to a {@link CfgChangeRequest}: `once` applies this change, `session`
+ * also approves later writes of the same kind for the rest of the session (a session grant
+ * from a `/save` prompt covers saves and session changes), `deny` declines, and `timeout`
+ * means nobody answered, so the write fails and the agent carries on without it.
+ */
+export type CfgApproval = "once" | "session" | "deny" | "timeout";
+
 /** Host UI that approves `cfg://` writes, plus the disk-backed settings `/save` persists to. */
 export interface CfgApprovalHost {
-	/** Resolves `true` only when the user explicitly approves the change. */
-	approve(request: CfgChangeRequest): Promise<boolean>;
+	/** Asks the user; dismissing the prompt must resolve `deny`. */
+	approve(request: CfgChangeRequest): Promise<CfgApproval>;
 	/**
 	 * Called once per settings instance whose value changed, so the host can apply
 	 * side effects reserved for the user's in-process choices (a `defaultThinkingLevel`
@@ -108,6 +117,8 @@ export interface CfgApprovalHost {
 let approvalHost: CfgApprovalHost | null = null;
 /** Tail of the approval chain; concurrent writes prompt one at a time. */
 let approvalQueue: Promise<unknown> = Promise.resolve();
+/** "Always for this session" answer: which session it covers and whether it extends to `/save`. */
+let sessionGrant: { sessionId: string; save: boolean } | undefined;
 
 /**
  * Register the process-global approval host for `cfg://` writes. `/save`
@@ -117,6 +128,22 @@ let approvalQueue: Promise<unknown> = Promise.resolve();
  */
 export function setCfgApprovalHost(host: CfgApprovalHost | null): void {
 	approvalHost = host;
+	sessionGrant = undefined;
+}
+
+/** Answers from the session grant when it covers this write; otherwise asks the host and records a new grant. */
+async function decide(
+	host: CfgApprovalHost,
+	request: CfgChangeRequest,
+	sessionId: string | undefined,
+): Promise<CfgApproval> {
+	const grant = sessionId !== undefined && sessionGrant?.sessionId === sessionId ? sessionGrant : undefined;
+	if (grant && (grant.save || !request.save)) return "once";
+	const answer = await host.approve(request);
+	if (answer === "session" && sessionId !== undefined) {
+		sessionGrant = { sessionId, save: request.save || (grant?.save ?? false) };
+	}
+	return answer;
 }
 
 function formatValue(setting: AnySetting, value: unknown): string {
@@ -401,9 +428,16 @@ export class CfgProtocolHandler implements ProtocolHandler {
 					layer === "env" && leaf.envName ? `environment variable ${leaf.envName}` : PROVENANCE_LABELS[layer];
 			}
 		}
-		const decision = approvalQueue.then(() => host.approve(request));
+		const sessionId = callerSession(context).getSessionId?.() ?? undefined;
+		const decision = approvalQueue.then(() => decide(host, request, sessionId));
 		approvalQueue = decision.catch(() => undefined);
-		if (!(await decision)) return finish("declined");
+		const answer = await decision;
+		if (answer === "timeout") {
+			throw new Error(
+				prompt.render(cfgApprovalTimeoutTemplate, { path: leaf.id, previous: request.previous }).trim(),
+			);
+		}
+		if (answer === "deny") return finish("declined");
 
 		if (!save) {
 			leaf.override(settings, value);

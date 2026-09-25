@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added `Always for this session` option to cfg:// approval prompts for session-wide changes
+- Added timeout handling for cfg:// approval prompts, aborting writes after 10 s with a clear error message
 - Added `providers.openaiLiveSteering` setting to toggle mid-response input delivery
 - Added explicit memory backend settlement for reliable cross-project CWD transitions
 - Added automatic prevention of user session overrides shadowed by environment variables
