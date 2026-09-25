@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed capped Anthropic requests at high thinking effort, including on-demand compaction, ending at `max_tokens` with no answer; thinking now gets its effort budget on top of the requested output ([#13300](https://github.com/can1357/oh-my-pi/pull/13300) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.3.1] - 2026-09-25
 
 ### Added
