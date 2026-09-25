@@ -851,6 +851,19 @@ export const cfgProvidersAnthropicServerSideFallback = register({
 	},
 });
 
+/**
+ * Anthropic subscription slow mode (`off` | `auto`). Deliberately has no
+ * `/settings` UI: `/slow on|off` on an Anthropic model is the only switch.
+ * `auto` switches to lower-priority service automatically when a Claude
+ * subscription hits its 5-hour limit and Anthropic offers it.
+ */
+export const cfgProvidersAnthropicSlowMode = register({
+	id: "providers.anthropic.slowMode",
+	type: "enum",
+	values: ["off", "auto"] as const,
+	default: "off" as const,
+});
+
 // Provider selection
 export const cfgProvidersOllamaCloudMaxConcurrency = register({
 	id: "providers.ollama-cloud.maxConcurrency",
