@@ -570,6 +570,12 @@ const fn exit_code(result: &ExecutionResult) -> i32 {
 const fn normalize_env_key(key: &str) -> &str {
 	if key.eq_ignore_ascii_case("PATH") {
 		"PATH"
+	} else if key.eq_ignore_ascii_case("TEMP") {
+		"TEMP"
+	} else if key.eq_ignore_ascii_case("TMP") {
+		"TMP"
+	} else if key.eq_ignore_ascii_case("TMPDIR") {
+		"TMPDIR"
 	} else {
 		key
 	}
@@ -660,6 +666,22 @@ fn copy_env_into_shell(
 			});
 			continue;
 		}
+		// A host TEMP may contain an 8.3 profile alias even after the shell's
+		// working directory was expanded. Keep its exported spelling aligned
+		// with PWD when a command enters $TEMP; leave explicit overrides alone.
+		#[cfg(windows)]
+		let expanded_temp = if matches!(normalized_key, "TEMP" | "TMP" | "TMPDIR")
+			&& std::path::Path::new(value).is_absolute()
+		{
+			Some(brush_core::sys::fs::expand_to_long_path(std::path::Path::new(value)))
+		} else {
+			None
+		};
+		#[cfg(windows)]
+		let value = expanded_temp
+			.as_ref()
+			.and_then(|path| path.to_str())
+			.unwrap_or(value);
 		let mut var = ShellVariable::new(ShellValue::String(value.to_string()));
 		var.export();
 		shell
@@ -2146,6 +2168,57 @@ mod tests {
 			"cd {}",
 			short.display()
 		);
+	}
+
+	/// Host TEMP/TMP paths must not export the short profile spelling after
+	/// entering the directory, even when the inherited key has mixed case.
+	#[cfg(windows)]
+	#[tokio::test]
+	async fn inherited_short_temp_matches_pwd_after_cd() {
+		// Existing profile aliases can survive after new 8.3 creation is
+		// disabled. Prefer the actual inherited short TEMP; otherwise use a
+		// fresh alias when the test volume still creates them.
+		let host_temp = std::env::temp_dir();
+		let expanded_host_temp = brush_core::sys::fs::expand_to_long_path(&host_temp);
+		let (short, expected, _fixture) = if host_temp != expanded_host_temp {
+			(host_temp, expanded_host_temp, None)
+		} else if let Some((root, long, short)) = short_alias_fixture() {
+			(short, brush_core::sys::fs::expand_to_long_path(&long), Some(root))
+		} else {
+			return;
+		};
+		let expected_str = expected.to_string_lossy().into_owned();
+		let mut shell = BrushShell::builder()
+			.do_not_inherit_env(true)
+			.profile(ProfileLoadBehavior::Skip)
+			.rc(RcLoadBehavior::Skip)
+			.builtins(default_builtins(BuiltinSet::BashMode))
+			.working_dir(short.parent().expect("parent").to_path_buf())
+			.build()
+			.await
+			.expect("build shell");
+
+		copy_env_into_shell(
+			&mut shell,
+			["Temp", "Tmp", "TmpDir"]
+				.into_iter()
+				.map(|key| (std::ffi::OsString::from(key), short.as_os_str().to_os_string())),
+		)
+		.expect("inherit temp vars");
+
+		let mut params = shell.default_exec_params();
+		params.set_fd(OpenFiles::STDIN_FD, null_file().expect("null stdin"));
+		params.set_fd(OpenFiles::STDOUT_FD, null_file().expect("null stdout"));
+		params.set_fd(OpenFiles::STDERR_FD, null_file().expect("null stderr"));
+		let result = shell
+			.run_string("cd \"$TEMP\"", &SourceInfo::from("pi-shell:test"), &params)
+			.await
+			.expect("cd inherited TEMP");
+		assert_eq!(exit_code(&result), 0);
+		assert_eq!(shell.working_dir(), expected);
+		for key in ["TEMP", "TMP", "TMPDIR", "PWD"] {
+			assert_eq!(shell.env_str(key).as_deref(), Some(expected_str.as_str()), "{key}");
+		}
 	}
 
 	/// A host cwd spelled with 8.3 short names matches the stored long form of
