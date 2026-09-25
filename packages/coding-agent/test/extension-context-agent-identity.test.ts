@@ -82,4 +82,16 @@ describe("ExtensionContext.agent", () => {
 			}),
 		).toEqual({ kind: "sub", id: "0-Explore", name: "explore", depth: 2, parentId: "Main" });
 	});
+
+	test("a spawned session outside the task tool is a subagent at depth 0", async () => {
+		// `/tan` clones pass a parent prefix but no task depth or agent definition.
+		expect(
+			await agentSeenByExtensions({
+				parentTaskPrefix: "Main-tan-1",
+				agentId: "Main-tan-1",
+				agentDisplayName: "tan",
+				parentAgentId: "Main",
+			}),
+		).toEqual({ kind: "sub", id: "Main-tan-1", name: "sub", depth: 0, parentId: "Main" });
+	});
 });

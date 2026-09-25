@@ -7381,7 +7381,8 @@ export class AgentSession implements SettingsScope {
 			sessionManager: this.sessionManager,
 			modelRegistry: this.#modelRegistry,
 			isProjectTrusted: () => true,
-			// Only top-level sessions run without an extension runner (the SDK always builds one).
+			// Used only when the session has no extension runner. `createAgentSession` always builds
+			// one (carrying the real identity), so only hand-constructed sessions land here.
 			agent: TOP_LEVEL_AGENT,
 
 			model: this.model ?? undefined,

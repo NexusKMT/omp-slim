@@ -428,16 +428,22 @@ export type ExtensionMode = "tui" | "rpc" | "json" | "print";
 
 /**
  * The agent a session runs. Extension factories are rebound to every subagent session
- * (task tool or eval `agent()`), so this tells a handler which agent it is serving.
+ * (task tool, eval `agent()`, `/tan` clones), so this tells a handler which agent it is serving.
  */
 export interface ExtensionAgentIdentity {
-	/** `"main"` for a top-level session, `"sub"` for a subagent. */
+	/**
+	 * `"main"` for a top-level session, `"sub"` for any spawned session. Check this, not `depth`,
+	 * to tell subagents apart: `/tan` clones are subagents at depth 0.
+	 */
 	kind: "main" | "sub";
 	/** Agent registry id, e.g. `"Main"` or `"0-Explore"`. */
 	id: string;
-	/** Lowercased agent definition name, e.g. `"main"`, `"task"`, `"explore"`. */
+	/**
+	 * Lowercased agent definition name, e.g. `"main"`, `"task"`, `"explore"`. Subagents spawned
+	 * without a definition (such as `/tan` clones) report `"sub"`.
+	 */
 	name: string;
-	/** Task nesting depth: 0 for a top-level session. */
+	/** Task-tool nesting depth: 0 for a top-level session and for subagents not spawned by `task`. */
 	depth: number;
 	/** Registry id of the spawning agent; absent for a top-level session. */
 	parentId?: string;
