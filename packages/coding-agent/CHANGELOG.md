@@ -4,7 +4,7 @@
 
 ### Changed
 
-- `/fork` now prints how to resume the session it leaves behind (`omp --resume <id>` or `/resume <id>`) instead of the new transcript's filename ([#TBD](https://github.com/can1357/oh-my-pi/pull/TBD) by [@LlemonDuck](https://github.com/LlemonDuck))
+- `/fork` now prints how to resume the session it leaves behind (`omp --resume <id>` or `/resume <id>`) instead of the new transcript's filename ([#13338](https://github.com/can1357/oh-my-pi/pull/13338) by [@LlemonDuck](https://github.com/LlemonDuck))
 
 ### Fixed
 
