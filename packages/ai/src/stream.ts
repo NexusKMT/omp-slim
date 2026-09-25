@@ -2138,11 +2138,21 @@ function mapOptionsForApi<TApi extends Api>(
 					? mapEffortToAnthropicAdaptiveEffort(model, reasoning)
 					: undefined;
 
+			// A caller's maxTokens is the output it asked for, but thinking spends the
+			// same max_tokens: adaptive thinking can use all of it and leave no answer.
+			// Give thinking its budget on top, as the budget-only path below does. An
+			// uncapped request keeps the provider default.
+			const maxTokensWithThinking =
+				base.maxTokens === undefined
+					? undefined
+					: maxTokensWithThinkingBudget(base.maxTokens, model.maxTokens, thinkingBudget);
+
 			// For Opus 4.6+ and Sonnet 4.6+: use adaptive thinking with effort level
 			// For older models: use budget-based thinking
 			if (thinkingMode === "anthropic-adaptive") {
 				return castApi<"anthropic-messages">({
 					...base,
+					maxTokens: maxTokensWithThinking,
 					requestModelId: resolveWireModelId(model, reasoning),
 					thinkingEnabled: true,
 					effort,
@@ -2155,6 +2165,7 @@ function mapOptionsForApi<TApi extends Api>(
 			if (ANTHROPIC_USE_INTERLEAVED_THINKING) {
 				return castApi<"anthropic-messages">({
 					...base,
+					maxTokens: maxTokensWithThinking,
 					requestModelId: resolveWireModelId(model, reasoning),
 					thinkingEnabled: true,
 					thinkingBudgetTokens: thinkingBudget,
