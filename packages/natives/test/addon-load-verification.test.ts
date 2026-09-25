@@ -14,6 +14,7 @@
  * attributable build failure.
  */
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -23,6 +24,16 @@ import {
 	hostProbeFilename,
 	verifyHostAddonLoads,
 } from "../../../scripts/bazel-natives";
+import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
+
+// x64 addon filenames carry an ISA suffix (-modern/-baseline), so the name must
+// come from the same resolver the build uses, not `${platform}-${arch}`.
+const hostAddon = path.join(
+	import.meta.dir,
+	"..",
+	"native",
+	resolveLocalHostAddon({ platform: process.platform, arch: process.arch, avx2: detectHostAvx2Support() }).filename,
+);
 
 async function failureOf(operation: Promise<void>): Promise<unknown> {
 	return operation.then(
@@ -57,11 +68,8 @@ describe("verifyHostAddonLoads", () => {
 		}
 	});
 
-	test("accepts the addon this checkout actually loads", async () => {
-		const addon = path.join(import.meta.dir, "..", "native", `pi_natives.${process.platform}-${process.arch}.node`);
-		if (!(await Bun.file(addon).exists())) return; // no built addon in this checkout
-
-		expect(await failureOf(verifyHostAddonLoads(addon))).toBeUndefined();
+	test.skipIf(!existsSync(hostAddon))("accepts the addon this checkout actually loads", async () => {
+		expect(await failureOf(verifyHostAddonLoads(hostAddon))).toBeUndefined();
 	});
 });
 

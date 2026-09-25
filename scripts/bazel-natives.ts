@@ -35,6 +35,11 @@
  * Note: musl addons intentionally reuse the plain linux-<arch> filenames, so a
  * `linux-all` copy overwrites the gnu addon with the musl one (and vice versa);
  * CI jobs that ship files always request an explicit disjoint target set.
+ *
+ * After install, the addon for the host's own target is dlopen-probed in a
+ * child process and an unloadable image fails the build. The bazel `host`
+ * target is always gnu, so on a musl host (Alpine) with the bazel backend the
+ * probe rejects it; use the default local Cargo build there instead.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
