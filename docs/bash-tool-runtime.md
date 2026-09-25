@@ -29,7 +29,7 @@ Set `bash.enabled: false` in settings to remove the model-facing `bash` tool fro
 - rejects `async: true` when `async.enabled` is false,
 - defaults `timeout` to 300 seconds; `0` explicitly disables the command deadline.
 
-There are no structured `head` or `tail` parameters. Command text is never rewritten for internal URLs. The embedded shell and its in-process coreutils resolve `scheme://` paths through an injected async filesystem (`InternalUrlFilesystem`) at the moment of each operation, so URLs built from variables, redirections, globs, `cd`, and a URL `cwd` all work. File-backed schemes operate on their backing files; rendered resources are read-only; external programs never see virtual paths and cannot start in a virtual working directory. The configured direnv/devenv preflight can then merge project environment changes, with explicit `env` values taking precedence.
+There are no structured `head` or `tail` parameters. Command text is never rewritten for internal URLs. The embedded shell and its in-process coreutils resolve `scheme://` paths through an injected async filesystem (`InternalUrlFilesystem`) at the moment of each operation, so URLs built from variables, redirections, globs, `cd`, and a URL `cwd` all work. File-backed schemes operate on their backing files; rendered resources are read-only; external programs never see virtual paths and cannot start in a virtual working directory. `xargs`, `find -exec`/`-execdir`, and `ifne` run their commands through the shell's own dispatch in a subshell, so `… | xargs cat` reaches the in-process `cat` and its URL arguments. The configured direnv/devenv preflight can then merge project environment changes, with explicit `env` values taking precedence.
 
 ### Approval policy
 

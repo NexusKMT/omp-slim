@@ -72,10 +72,12 @@ export function findTranscriptUsageAnchor(
  * describes the prefix it sits on, or `undefined` when none does.
  *
  * Request contexts carry no compaction index, so staleness is read from the
- * rewrite markers themselves: a compaction/branch summary (`historyRewriteAt`)
- * or pruned tool result (`prunedAt`) replaced text that every report made at or
- * before that time already counted. Same invariant `transformMessages` uses to
- * invalidate prefix-bound thinking.
+ * rewrite markers themselves: a compaction/branch summary or pruned tool result
+ * (`prunedAt`) replaced text that every report made at or before the rewrite
+ * already counted. A summary's rewrite time is its `timestamp` (commit time);
+ * its `historyRewriteAt` may be predated before a natively replayed retained
+ * tail so that tail's bound thinking survives, but the tail's usage still
+ * counted the summarized prefix.
  */
 export function findRequestUsageAnchor(messages: readonly Message[]): TranscriptUsageAnchor | undefined {
 	let rewriteAt = Number.NEGATIVE_INFINITY;
@@ -84,7 +86,7 @@ export function findRequestUsageAnchor(messages: readonly Message[]): Transcript
 	for (let index = 0; index < messages.length; index++) {
 		const message = messages[index];
 		if (message.role === "user" && message.historyRewriteAt !== undefined) {
-			rewriteAt = Math.max(rewriteAt, message.historyRewriteAt);
+			rewriteAt = Math.max(rewriteAt, message.historyRewriteAt, message.timestamp);
 		} else if (message.role === "toolResult" && message.prunedAt !== undefined) {
 			rewriteAt = Math.max(rewriteAt, message.prunedAt);
 		} else if (isTranscriptUsageAnchor(message) && message.timestamp > rewriteAt) {

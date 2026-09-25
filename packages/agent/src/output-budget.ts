@@ -1,4 +1,5 @@
 import type { Context, Model, Tool } from "@oh-my-pi/pi-ai";
+import { stopsOutputAtContextWindow } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { stringifyJson } from "@oh-my-pi/pi-utils";
 import { findRequestUsageAnchor } from "./compaction/transcript-tokens";
 import type { Tokenizer } from "./tokenizer";
@@ -34,7 +35,9 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
  * only when no turn can anchor (fresh or freshly rewritten context).
  *
  * Returns `maxTokens` unchanged when the requested cap already fits, the
- * model declares no window, or nothing would be requested (including an
+ * model declares no window, the host ends generation at the window itself
+ * instead of rejecting the request (`stops-output-at-context-window`, e.g.
+ * Claude 4.5+ on the Claude API), or nothing would be requested (including an
  * OpenRouter-hosted model with no caller cap: the transport omits the catalog
  * default there so each upstream self-caps, and a fitted value would turn into
  * an explicit cap that filters upstreams). Otherwise returns
@@ -53,7 +56,7 @@ const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
  * and the request can still exceed the window as before.
  */
 export function fitOutputTokensToContextWindow(
-	model: Pick<Model, "contextWindow" | "maxTokens"> & { compat?: Model["compat"] },
+	model: Model,
 	context: Context,
 	maxTokens: number | undefined,
 	tokenizer: Tokenizer,
@@ -62,6 +65,7 @@ export function fitOutputTokensToContextWindow(
 	const requested = maxTokens ?? model.maxTokens;
 	const contextWindow = model.contextWindow;
 	if (!requested || !contextWindow || contextWindow <= 0) return maxTokens;
+	if (stopsOutputAtContextWindow(model)) return maxTokens;
 
 	const room = contextWindow - countPromptTokens(context, tokenizer);
 	if (room >= requested) return maxTokens;

@@ -50,6 +50,7 @@
 
 ### Changed
 
+- Enhanced `length` stop recovery to distinguish between output cap exhaustion and context window saturation, allowing truncated-but-actionable turns to be retained
 - Replaced temporary file materialization with direct `InternalUrlFilesystem` resolution for virtual URL tools
 - Migrated `find`, `ifne`, and `xargs` to perform command execution through the `InternalUrlFilesystem` and subshell host
 - Migrated database workers into independent, project-shared daemon processes
