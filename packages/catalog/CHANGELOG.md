@@ -4,13 +4,12 @@
 
 ### Added
 
-- Added `stops-output-at-context-window` compatibility flag, enabled for Claude 4.5 and newer models
-- Added `supports-steering` compatibility flag, enabled by default for GPT-6 and newer models
+- Added compatibility flags for models that stop output at the context-window limit and models that support steering, including defaults for Claude 4.5+ and GPT-6+ models.
 
 ### Fixed
 
-- Fixed Claude Opus 5.5 requests that force tool use, preventing turn failures and allowing forced tool selections to fall back to automatic tool selection when required.
-- Yolo-Auto Qwen3.8 models now offer the `xhigh` reasoning level the provider advertises ([#13160](https://github.com/can1357/oh-my-pi/pull/13160) by [@H4vC](https://github.com/H4vC)).
+- Fixed forced-tool requests for Claude Opus 5.5 so tool selection falls back gracefully when necessary.
+- Added the provider-advertised `xhigh` reasoning level for Yolo-Auto Qwen3.8 models.
 
 ## [18.3.0] - 2026-09-24
 

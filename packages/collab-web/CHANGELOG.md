@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- Improved the web client’s performance by ensuring production builds use the optimized React runtime.
-- Improved large-session browsing and reconnect behavior: recent transcript entries load quickly, earlier entries can be loaded on demand without losing your place, and the existing transcript remains visible while reconnecting with download progress shown.
+- Improved large-session browsing and reconnect behavior: recent transcript entries load quickly, earlier entries can be loaded on demand without losing your place, and the existing transcript remains visible with download progress during reconnects.
 
 ## [18.3.0] - 2026-09-24
 
