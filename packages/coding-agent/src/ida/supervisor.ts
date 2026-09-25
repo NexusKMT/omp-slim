@@ -1,31 +1,21 @@
 /**
- * Process-wide registry of open IDA databases.
+ * Supervisor for one IDA Python worker (`worker.py`), run inside the broker-supervised IDA
+ * host daemon (`host.ts`).
  *
- * Each database runs in its own long-lived Python worker (`worker.py`) because idalib
- * supports one kernel and one open database per process. Every agent, subagent, and
- * post-compaction turn in this omp process shares the same live worker; requests to a
- * worker are serialized. Databases are saved on close and on process exit.
+ * idalib supports one kernel and one open database per process, so each database gets its own
+ * worker. The worker speaks NDJSON over stdin/stdout; requests are serialized, dirty databases
+ * autosave when idle, and idle databases save and close themselves.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { acquireFileLock, type FileLockHandle, logger, postmortem, readLines, untilAborted } from "@oh-my-pi/pi-utils";
+import { type FileLockHandle, logger, readLines, untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { Subprocess } from "bun";
-import { killProcessGroup } from "../eval/kernel-base";
-import { hostHasInheritableConsole, shouldDetachKernel, shouldHideKernelWindow } from "../eval/py/spawn-options";
+import { hostHasInheritableConsole, shouldHideKernelWindow } from "../eval/py/spawn-options";
 import { stageRunnerScript } from "../eval/runner-cache";
-import type { ToolSession } from "../tools";
-import { type IdaRuntime, resolveIdaRuntime } from "./runtime";
-import { cfgIdaIdleCloseSec, cfgIdaMaxOpen } from "./settings";
-import {
-	type FatSelection,
-	type IdbLocation,
-	type LocateIdbOptions,
-	locateIdb,
-	prepareStoreDir,
-	SLICE_SEPARATOR,
-	sanitizeIdbName,
-} from "./store";
+import type { IdaRuntime } from "./runtime";
+import { type FatSelection, type IdbLocation, idbRef, sanitizeIdbName } from "./store";
+import { errorMessage } from "./protocol";
 import IDA_WORKER from "./worker.py" with { type: "text" };
 
 /** How long a worker gets to answer after SIGINT before it is killed. */
@@ -61,7 +51,7 @@ export interface IdaDatabaseInfo {
 	bitness: number;
 }
 
-/** Per-request cancellation and deadline; either one interrupts the worker (SIGINT, then SIGKILL). */
+/** Per-request cancellation and deadline; either one interrupts a running request (SIGINT, then SIGKILL). */
 export interface IdaRequestOptions {
 	signal?: AbortSignal;
 	timeoutMs?: number;
@@ -82,14 +72,6 @@ type WorkerResponse =
 	| { id: number; ok: false; message: string };
 
 type RequestOutcome = { kind: "response"; value: unknown } | { kind: "interrupted" };
-
-const databases = new Map<string, IdaDatabase>();
-const pending = new Map<string, Promise<IdaDatabase>>();
-let cleanupRegistered = false;
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
 
 /** A timer that does not keep the event loop alive; `cancel` clears it. */
 function delay(ms: number): { promise: Promise<void>; cancel(): void } {
@@ -116,8 +98,8 @@ function parseWorkerResponse(frame: unknown): WorkerResponse | null {
 	return { id: frame.id, ok: false, message };
 }
 
-/** A live IDA database backed by a dedicated worker process; shared by every agent in this omp process. */
-export class IdaDatabase {
+/** One open IDA database backed by a dedicated Python worker process. */
+export class IdaWorker {
 	/** Registry key from `locateIdb`. */
 	readonly id: string;
 	/** Absolute path of the binary or `.i64`/`.idb` the database was opened for. */
@@ -141,6 +123,8 @@ export class IdaDatabase {
 	#closing: Promise<void> | null = null;
 	/** Whether the worker reported unsaved changes in its last successful response. */
 	#dirty = false;
+	/** `exec` ran since the last save; its mutations may bypass the dirty hooks. */
+	#execSinceSave = false;
 	/** Requests queued or in flight. */
 	#active = 0;
 	#current: IdaRunningRequest | null = null;
@@ -179,7 +163,7 @@ export class IdaDatabase {
 		runtime: IdaRuntime,
 		lock: FileLockHandle,
 		idleCloseMs: number,
-	): Promise<IdaDatabase> {
+	): Promise<IdaWorker> {
 		const script = await stageRunnerScript("omp-ida-worker", "py", IDA_WORKER);
 		const proc = Bun.spawn([runtime.pythonPath, "-u", script], {
 			cwd: loc.dir,
@@ -187,13 +171,15 @@ export class IdaDatabase {
 			stdin: "pipe",
 			stdout: "pipe",
 			stderr: "pipe",
-			detached: shouldDetachKernel(process.platform),
+			// Stay in the host's process group: the broker's stop/kill signals the whole group.
+			// worker.py ignores SIGTERM so the host can save and close it first.
+			detached: false,
 			windowsHide: shouldHideKernelWindow({
 				platform: process.platform,
 				hostHasInheritableConsole: hostHasInheritableConsole(),
 			}),
 		});
-		const db = new IdaDatabase(loc, proc, lock, idleCloseMs);
+		const db = new IdaWorker(loc, proc, lock, idleCloseMs);
 		try {
 			const opened = await db.request<IdaOpenResult>("open", { path: loc.openPath, new: loc.isNew });
 			if (db.#exitCode !== null) throw db.#exitError();
@@ -209,9 +195,9 @@ export class IdaDatabase {
 		}
 	}
 
-	/** Reference `read` and `ida db=` resolve back to this database: the source path plus `:@<arch>` for a universal binary slice. */
+	/** Reference `read` and `ida db=` resolve back to this database (see {@link idbRef}). */
 	get ref(): string {
-		return this.fat ? `${this.sourcePath}${SLICE_SEPARATOR}${this.fat.slice.arch}` : this.sourcePath;
+		return idbRef(this);
 	}
 
 	/** Path of the IDB file as reported by IDA. */
@@ -222,6 +208,16 @@ export class IdaDatabase {
 	/** Loader facts reported when the database opened. */
 	get info(): IdaDatabaseInfo {
 		return this.#info;
+	}
+
+	/** Whether a close must save to keep every change: hook-tracked edits, or any `exec` since the last save. */
+	get needsSave(): boolean {
+		return this.#dirty || this.#execSinceSave;
+	}
+
+	/** Resolves with the worker's exit code once the process is gone. */
+	get exited(): Promise<number> {
+		return this.#proc.exited;
 	}
 
 	/** When the last request was issued (epoch ms); LRU eviction closes the oldest idle database first. */
@@ -260,6 +256,8 @@ export class IdaDatabase {
 			await this.#waitTurn(previous, signal, timeoutMs);
 			const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
 			const value = await this.#send(method, params, { signal, timeoutMs: remaining });
+			if (method === "exec") this.#execSinceSave = true;
+			else if (method === "save") this.#execSinceSave = false;
 			// The worker answers with the JSON shape documented for `method`.
 			return value as T;
 		} finally {
@@ -452,6 +450,8 @@ export class IdaDatabase {
 
 	#appendStderr(text: string): void {
 		if (!text) return;
+		// The host's output is the daemon log (`omp ps logs`).
+		process.stderr.write(text);
 		const tail = this.#stderrTail + text;
 		this.#stderrTail = tail.length > STDERR_TAIL_CHARS ? tail.slice(-STDERR_TAIL_CHARS) : tail;
 	}
@@ -475,7 +475,7 @@ export class IdaDatabase {
 		return new ToolError(`IDA worker for ${this.id} exited (code ${this.#exitCode})${lines ? `: ${lines}` : ""}`);
 	}
 
-	/** SIGKILL the worker (and its process group) and wait for it to exit. */
+	/** SIGKILL the worker and wait for it to exit. */
 	async #kill(): Promise<void> {
 		if (this.#exitCode === null) {
 			try {
@@ -483,13 +483,11 @@ export class IdaDatabase {
 			} catch {
 				// Already gone.
 			}
-			killProcessGroup(this.#proc.pid, "SIGKILL");
 		}
 		await this.#proc.exited;
 	}
 
 	#release(): void {
-		if (databases.get(this.id) === this) databases.delete(this.id);
 		this.#lock.release();
 	}
 }
@@ -507,106 +505,4 @@ async function removeCreationLeftovers(loc: IdbLocation): Promise<void> {
 	} catch (error) {
 		logger.warn("IDA cleanup after failed database creation failed", { id: loc.id, error: errorMessage(error) });
 	}
-}
-
-function registerIdaCleanup(): void {
-	if (cleanupRegistered) return;
-	cleanupRegistered = true;
-	postmortem.register("ida-cleanup", closeAllIdaDatabases);
-}
-
-/**
- * Open `loc` in a new worker. Makes room first by saving and closing the least recently used
- * idle database while `ida.maxOpen` would be exceeded; throws when every open database is busy.
- */
-async function openIdaDatabase(session: ToolSession, loc: IdbLocation): Promise<IdaDatabase> {
-	const maxOpen = Math.max(1, cfgIdaMaxOpen.get(session.settings));
-	// Slots held by open databases and by other in-flight opens (`pending` may already hold this one).
-	while (databases.size + pending.size - (pending.has(loc.id) ? 1 : 0) >= maxOpen) {
-		const victim = listIdaDatabases()
-			.filter(db => !db.busy)
-			.sort((a, b) => a.lastUsed - b.lastUsed)[0];
-		if (!victim) {
-			const ids = listIdaDatabases().map(db => db.id);
-			throw new ToolError(
-				`IDA database limit reached (${maxOpen} open, all busy: ${ids.join(", ")}); close one with ida close or raise ida.maxOpen`,
-			);
-		}
-		await victim.close({ save: true });
-	}
-	// The lock file lives in the store dir; `locateIdb` leaves it uncreated for pure lookups.
-	if (loc.kind === "store") await fs.promises.mkdir(loc.dir, { recursive: true });
-	const lock = await acquireFileLock(loc.lockTarget, { retries: 1 }).catch(() => {
-		throw new ToolError(`IDB ${loc.id} is in use by another omp process`);
-	});
-	try {
-		await prepareStoreDir(loc);
-		const runtime = await resolveIdaRuntime(session);
-		registerIdaCleanup();
-		const db = await IdaDatabase.start(loc, runtime, lock, cfgIdaIdleCloseSec.get(session.settings) * 1000);
-		databases.set(loc.id, db);
-		return db;
-	} catch (error) {
-		lock.release();
-		throw error;
-	}
-}
-
-/** Options for {@link acquireIdaDatabase}. */
-export interface AcquireIdaDatabaseOptions extends LocateIdbOptions {
-	signal?: AbortSignal;
-}
-
-/**
- * Return the live database for a binary (or one slice of a universal binary) or `.i64`/`.idb`,
- * opening (or creating) it on first use. Concurrent callers for the same database share one open;
- * aborting `signal` stops only this caller's wait, the open itself always runs to completion.
- */
-export async function acquireIdaDatabase(
-	session: ToolSession,
-	sourcePath: string,
-	options: AcquireIdaDatabaseOptions = {},
-): Promise<IdaDatabase> {
-	const { signal, arch } = options;
-	const loc = await locateIdb(sourcePath, { arch });
-	const open = databases.get(loc.id);
-	if (open) return open;
-	let opening = pending.get(loc.id);
-	if (!opening) {
-		opening = openIdaDatabase(session, loc).finally(() => pending.delete(loc.id));
-		// Every caller may have stopped waiting; remaining ones still receive the failure.
-		opening.catch(error => logger.debug("IDA database open failed", { id: loc.id, error: errorMessage(error) }));
-		pending.set(loc.id, opening);
-	}
-	return untilAborted(signal, opening);
-}
-
-/** The open database registered under `id`, if any. */
-export function findOpenIdaDatabase(id: string): IdaDatabase | undefined {
-	return databases.get(id);
-}
-
-/** Every open database in this process. */
-export function listIdaDatabases(): IdaDatabase[] {
-	return Array.from(databases.values());
-}
-
-/** Close the open database `id` (saving first when `save`); throws when it is not open. */
-export async function closeIdaDatabase(id: string, options: { save: boolean }): Promise<void> {
-	const db = databases.get(id);
-	if (!db) throw new ToolError(`IDA database ${id} is not open`);
-	await db.close(options);
-}
-
-/** Save and close every open database; failures are logged, not thrown. */
-export async function closeAllIdaDatabases(): Promise<void> {
-	await Promise.all(
-		Array.from(databases.values(), async db => {
-			try {
-				await db.close({ save: true });
-			} catch (error) {
-				logger.warn("IDA close on exit failed", { id: db.id, error: errorMessage(error) });
-			}
-		}),
-	);
 }

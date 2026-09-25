@@ -32,6 +32,10 @@ def _arm_sigint():
     # supervisor's timeout/abort SIGINT raises KeyboardInterrupt instead of killing the worker.
     if signal.getsignal(signal.SIGINT) is not signal.default_int_handler:
         signal.signal(signal.SIGINT, signal.default_int_handler)
+    # The broker stops the host's whole process group; the host saves and closes this worker,
+    # so a group SIGTERM must not kill it mid-save.
+    if signal.getsignal(signal.SIGTERM) is not signal.SIG_IGN:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
 _arm_sigint()

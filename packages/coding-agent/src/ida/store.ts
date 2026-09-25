@@ -193,6 +193,11 @@ export interface IdbLocation {
 	fat?: FatSelection;
 }
 
+/** Reference `read` and `ida db=` resolve back to a database: the source path plus `:@<arch>` for a universal binary slice. */
+export function idbRef(loc: Pick<IdbLocation, "sourcePath" | "fat">): string {
+	return loc.fat ? `${loc.sourcePath}${SLICE_SEPARATOR}${loc.fat.slice.arch}` : loc.sourcePath;
+}
+
 /** Options for {@link locateIdb}. */
 export interface LocateIdbOptions {
 	/** Slice of a universal binary to analyze; defaults to the host architecture. Rejected for thin binaries and IDBs. */

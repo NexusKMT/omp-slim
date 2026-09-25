@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added shared access to IDA databases across all omp processes in a project
+- Added project-scoped IDA host daemon management via broker
 - Added `InternalUrlFilesystem` for native shell-level resolution of virtual `scheme://` paths
 - Added support for shell execution in virtual working directories
 - Added `ida.maxOpen` setting to cap concurrent database workers, automatically evicting the least recently used idle database
@@ -46,6 +48,10 @@
 
 ### Changed
 
+- Migrated database workers into independent, project-shared daemon processes
+- Integrated IDA daemon lifecycle with the project broker for improved resource management
+- Enhanced `list` output to show database initialization and busy status
+- Enabled automatic host cleanup via `omp ps` and broker idle-out
 - Replaced bash tool command-string URL expansion with native shell filesystem integration
 - Refactored database supervisor to use LRU eviction, idle autosave, and request-aware queueing
 - Hardened cross-request queueing with timeout-bounded waiting for busy database workers
@@ -64,6 +70,7 @@
 
 ### Fixed
 
+- Restricted concurrent access by enforcing file locking across all project processes
 - Fixed `vault://` paths resolving to a different spelling for bash than for reads on Windows when `TEMP` or the profile directory uses an 8.3 short name like `ADMINI~1` ([#7911](https://github.com/can1357/oh-my-pi/issues/7911), [#7938](https://github.com/can1357/oh-my-pi/pull/7938) by [@CoderTCY](https://github.com/CoderTCY))
 - Fixed the bash tool on Windows keeping 8.3 short-name spellings like `ADMINI~1` in its working directory; `pwd` and `$PWD` now report the long path ([#7938](https://github.com/can1357/oh-my-pi/pull/7938) by [@CoderTCY](https://github.com/CoderTCY))
 - Fixed RPC `abort_and_prompt` scheduling failures being reported only as a late error response; the prompt now also completes with a `prompt_result`.
