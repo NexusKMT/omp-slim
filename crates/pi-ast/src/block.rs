@@ -141,7 +141,9 @@ pub fn block_range_at(options: BlockRangeOptions) -> Result<Option<BlockRange>> 
 /// `modifiers` (one annotation per line) look identical but must be climbed
 /// through to reach the declaration. Braced `block`s never match because they
 /// begin at `{`; requiring the next sibling to start a later row at `node`'s
-/// column also rules out a leading label (`'a: {` in Rust).
+/// column also rules out a leading label (`'a: {` in Rust). Extras (comments)
+/// trailing `node` on its last row are skipped so `if … {} // note` still
+/// stops the climb.
 fn is_statement_sequence(parent: Node<'_>, node: Node<'_>) -> bool {
 	if !matches!(
 		parent.kind(),
@@ -159,9 +161,14 @@ fn is_statement_sequence(parent: Node<'_>, node: Node<'_>) -> bool {
 	{
 		return false;
 	}
-	node.next_named_sibling().is_some_and(|next| {
+	let end_row = node.end_position().row;
+	let mut next = node.next_named_sibling();
+	while let Some(sibling) = next.filter(|s| s.is_extra() && s.start_position().row == end_row) {
+		next = sibling.next_named_sibling();
+	}
+	next.is_some_and(|next| {
 		let next_start = next.start_position();
-		next_start.row > node.end_position().row && next_start.column == node.start_position().column
+		next_start.row > end_row && next_start.column == node.start_position().column
 	})
 }
 
@@ -558,6 +565,17 @@ mod tests {
 	fn python_leading_statement_excludes_following_siblings() {
 		let code = "def f(x):\n    if x:\n        return 1\n    y = 2\n    return y\n";
 		assert_eq!(resolve(code, "f.py", 2), Some(BlockRange { start_line: 2, end_line: 3 }));
+	}
+
+	#[test]
+	fn leading_statement_with_trailing_comment_excludes_following_siblings() {
+		// A comment on the statement's last row is a named sibling; it must not
+		// hide the next statement and let the climb swallow the whole body.
+		let go = "package p\n\nfunc f() error {\n\tif err := step(); err != nil {\n\t\treturn \
+		          err\n\t} // note\n\tother()\n\treturn nil\n}\n";
+		assert_eq!(resolve(go, "x.go", 4), Some(BlockRange { start_line: 4, end_line: 6 }));
+		let py = "def f(x):\n    y = 2  # note\n    z = 3\n    return y\n";
+		assert_eq!(resolve(py, "f.py", 2), Some(BlockRange { start_line: 2, end_line: 2 }));
 	}
 
 	#[test]
