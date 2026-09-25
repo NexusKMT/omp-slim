@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added live steering support for GPT-6 models, allowing queued user messages to be delivered into an active streaming response
 - Added support for Anthropic fallback credit token capture and redemption, including the 3-step rejection ladder for prompt-cache repricing on classifier refusals.
 - Added Vercel AI Gateway app attribution: requests now send `http-referer: https://omp.sh/` and `x-title: omp` unless you set those headers yourself.
 

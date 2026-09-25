@@ -9,6 +9,7 @@
 
 ### Added
 
+- Added visual marker for live-steered user messages in the chat transcript
 - Added UI support for marking paginated content in read-tool results
 - Added transcript rendering for `cfg://` configuration read and write tool calls
 - Added push-to-talk dictation to `Input`, including live transcription text and `cursorOverride` support.

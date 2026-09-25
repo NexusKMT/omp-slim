@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `providers.openaiLiveSteering` setting to toggle mid-response input delivery
 - Added explicit memory backend settlement for reliable cross-project CWD transitions
 - Added automatic prevention of user session overrides shadowed by environment variables
 - Added configuration approval UI signals for saved settings shadowed by higher-precedence layers

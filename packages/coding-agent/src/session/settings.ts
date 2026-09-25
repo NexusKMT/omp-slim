@@ -1055,6 +1055,19 @@ export const cfgProvidersOpenaiWebsockets = register({
 	},
 });
 
+export const cfgProvidersOpenaiLiveSteering = register({
+	id: "providers.openaiLiveSteering",
+	type: "boolean",
+	default: true,
+	ui: {
+		tab: "providers",
+		group: "Protocol",
+		label: "OpenAI Live Steering",
+		description:
+			"Deliver messages typed while a GPT-6 response streams into that response over the Codex WebSocket, instead of waiting for the next tool boundary",
+	},
+});
+
 export const cfgProvidersCacheRetention = register({
 	id: "providers.cacheRetention",
 	type: "enum",
