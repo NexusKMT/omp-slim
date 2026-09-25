@@ -165,6 +165,8 @@ Non-interrupting matches split by `matchContext.source`:
   </system-reminder>
   ```
 
+- **Eval-bridged AgentTool calls.** Finalized inner calls are checked at the `ExtensionToolWrapper` boundary; prelude host calls (`browser.*`, `computer.*`, `tab.run`) are not AgentTool dispatches and stay outside this path.
+
 - **`source === "text"` / `"thinking"` (prose-source match).** The rule is queued in the pending injections. After a successful non-error, non-aborted assistant message, `TtsrCoordinator` queues the hidden `ttsr-injection` custom message with `agent.followUp()` and schedules continuation after 1ms. These deferred non-interrupting prose matches do not emit `ttsr_triggered`; that event is emitted for actual interrupt paths and for non-interrupting per-tool reminders.
 
 Within a matching batch, each rule is attached to exactly one sibling tool call: if multiple sibling calls would satisfy the same rule, the first claimed bucket wins. Multiple distinct rules can still fold onto one tool call.
