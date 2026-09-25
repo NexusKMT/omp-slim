@@ -974,8 +974,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 					`Working directory ${virtualCwd} exists only in the embedded shell; ${name !== undefined ? "services" : "pty commands"} run external processes and need a host directory.`,
 				);
 			}
-			const cwdType = await this.#urlFilesystem(signal, approvalTier)
-				.fileType(virtualCwd)
+			const cwdStat = await this.#urlFilesystem(signal, approvalTier)
+				.stat(virtualCwd)
 				.catch((err: unknown) => {
 					if (err instanceof UrlFsError && err.code === "ENOENT") {
 						throw new ToolError(`Working directory does not exist: ${virtualCwd}`);
@@ -984,7 +984,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 						`Working directory ${virtualCwd} is unavailable: ${err instanceof Error ? err.message : String(err)}`,
 					);
 				});
-			if (cwdType !== "directory") {
+			if (cwdStat.type !== "directory") {
 				throw new ToolError(`Working directory is not a directory: ${virtualCwd}`);
 			}
 		} else {

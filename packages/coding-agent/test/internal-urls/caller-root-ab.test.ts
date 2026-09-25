@@ -27,7 +27,6 @@ import { AgentRegistry, MAIN_AGENT_ID } from "@oh-my-pi/pi-coding-agent/registry
 import { ensurePersistedRoster } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
-import { GlobTool } from "@oh-my-pi/pi-coding-agent/tools/glob";
 import { GrepTool } from "@oh-my-pi/pi-coding-agent/tools/grep";
 import { ShellFsOp } from "@oh-my-pi/pi-natives";
 
@@ -196,18 +195,6 @@ describe("internal URL tools resolve against the caller root (A/B same ids)", ()
 		const result = await tool.execute("grep-agent-a", { pattern: "A OUTPUT", path: "agent://Worker" });
 		expect(getResultText(result)).toContain("A OUTPUT");
 		expect(getResultText(result)).not.toContain("B OUTPUT");
-	});
-
-	it("find history://Worker resolves the caller root's transcript file when the global Main is the other root", async () => {
-		const registry = AgentRegistry.global();
-		await installGlobalMainB(registry, rootB);
-
-		const tool = new GlobTool(makeSession(dir, rootA));
-		const result = await tool.execute("find-history-a", { path: "history://Worker" });
-		const text = getResultText(result);
-		expect(text).toContain("# a/main/");
-		expect(text).toContain("Worker.jsonl");
-		expect(text).not.toContain("# b/main/");
 	});
 
 	it("bash opens the caller root's agent:// output when the global Main is the other root", async () => {

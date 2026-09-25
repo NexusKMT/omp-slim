@@ -466,14 +466,12 @@ pub mod matchers {
 			cell::RefCell,
 			error::Error,
 			ffi::OsString,
-			io::{self, Write},
+			io::Write,
 			path::{Path, PathBuf},
-			process::Command,
 		};
 
-		use pi_vfs::BlockingFs;
-
 		use super::{Matcher, MatcherIO, WalkEntry};
+		use crate::host::ShellCommand;
 
 		/// `{}` replacement for `-execdir`: the entry name relative to its parent.
 		fn execdir_arg(path: &Path) -> PathBuf {
@@ -483,27 +481,17 @@ pub mod matchers {
 			}
 		}
 
-		/// Working directory for running `-execdir` on `path`; `Ok(None)` keeps the
-		/// current directory. External commands cannot enter provider directories,
-		/// so those report `Unsupported` instead of running anywhere else.
-		fn execdir_dir(fs: &BlockingFs, path: &Path) -> io::Result<Option<PathBuf>> {
-			let dir = match pi_vfs::parent_path(path) {
+		/// Working directory for running `-execdir` on `path`; `None` keeps the
+		/// current directory. Provider directories are fine: builtins run there,
+		/// and the shell refuses external programs with its own diagnostic.
+		fn execdir_dir(path: &Path) -> Option<&Path> {
+			match pi_vfs::parent_path(path) {
 				// Root paths like "/" have no parent.  Run them from the root to match GNU
 				// find.
-				None => path,
+				None => Some(path),
 				// Paths like "foo" have a parent of "".  Avoid chdir("").
-				Some(parent) if parent.as_os_str().is_empty() => return Ok(None),
-				Some(parent) => parent,
-			};
-			native_exec_dir(fs, dir).map(Some)
-		}
-
-		/// `dir` as a host working directory for an external command.
-		fn native_exec_dir(fs: &BlockingFs, dir: &Path) -> io::Result<PathBuf> {
-			if fs.is_native_local(dir) {
-				Ok(dir.to_path_buf())
-			} else {
-				Err(pi_vfs::unsupported("-execdir in a virtual directory"))
+				Some(parent) if parent.as_os_str().is_empty() => None,
+				Some(parent) => Some(parent),
 			}
 		}
 
@@ -543,40 +531,29 @@ pub mod matchers {
 
 		impl Matcher for SingleExecMatcher {
 			fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
-				let mut command = Command::new(&self.executable);
 				let path_to_file = if self.exec_in_parent_dir {
 					execdir_arg(file_info.path())
 				} else {
 					file_info.display_path().to_path_buf()
 				};
 
+				let mut argv = Vec::with_capacity(self.args.len() + 1);
+				argv.push(OsString::from(&self.executable));
 				for arg in &self.args {
-					match *arg {
-						Arg::LiteralArg(ref a) => command.arg(a.as_os_str()),
-						Arg::FileArg(ref parts) => command.arg(parts.join(path_to_file.as_os_str())),
-					};
+					argv.push(match arg {
+						Arg::LiteralArg(a) => a.clone(),
+						Arg::FileArg(parts) => parts.join(path_to_file.as_os_str()),
+					});
 				}
-				if self.exec_in_parent_dir {
-					match execdir_dir(file_info.fs(), file_info.path()) {
-						Ok(Some(dir)) => {
-							command.current_dir(dir);
-						},
-						Ok(None) => {},
-						Err(e) => {
-							writeln!(&mut matcher_io.host().stderr, "Failed to run {}: {}", self.executable, e)
-								.unwrap();
-							return false;
-						},
-					}
-				} else {
-					// GNU runs `-exec` in find's working directory; resolve the
-					// operand-relative `{}` against the shell cwd, not the host cwd.
-					command.current_dir(matcher_io.host().cwd());
+				// GNU runs `-exec` in find's working directory, which is the
+				// shell's; `-execdir` moves to the entry's parent.
+				let mut command = ShellCommand::new(argv);
+				if self.exec_in_parent_dir
+					&& let Some(dir) = execdir_dir(file_info.path())
+				{
+					command = command.current_dir(dir);
 				}
-				command.env_clear().envs(matcher_io.host().env());
-				// The host process's stdio belongs to the embedding TUI; route the
-				// child's output through the scope streams instead of inheriting.
-				match matcher_io.host().run_captured(&mut command) {
+				match matcher_io.host().run_command(command) {
 					Ok(status) => status.success(),
 					Err(e) => {
 						writeln!(&mut matcher_io.host().stderr, "Failed to run {}: {}", self.executable, e).unwrap();
@@ -614,29 +591,26 @@ pub mod matchers {
 				})
 			}
 
-			fn new_command(&self, matcher_io: &mut MatcherIO) -> argmax::Command {
+			/// Starts a batch; `argmax` only sizes it against the system's
+			/// argument limit; [`Self::run_command`] runs it through the shell.
+			fn new_command(&self) -> argmax::Command {
 				let mut command = argmax::Command::new(&self.executable);
 				command.try_args(&self.args).unwrap();
-				if !self.exec_in_parent_dir {
-					// `-exec ... +` (non-execdir) dispatches in find's working dir;
-					// resolve the operand-relative paths against the shell cwd.
-					command.current_dir(matcher_io.host().cwd());
-				}
 				command
 			}
 
-			fn run_command(&self, command: &mut argmax::Command, matcher_io: &mut MatcherIO) {
-				// `argmax::Command` only Derefs immutably into `std::process::Command`,
-				// so rebuild a std command from its accumulated state to attach the
-				// scope environment and context-captured stdio — the host process's
-				// stdio belongs to the embedding TUI and must never be inherited.
-				let mut std_command = Command::new(command.get_program());
-				std_command.args(command.get_args());
+			fn run_command(&self, command: &argmax::Command, matcher_io: &mut MatcherIO) {
+				let argv = std::iter::once(command.get_program())
+					.chain(command.get_args())
+					.map(OsString::from)
+					.collect();
+				// `-exec ... +` runs in find's (the shell's) working directory;
+				// `-execdir` batches carry their directory.
+				let mut shell_command = ShellCommand::new(argv);
 				if let Some(dir) = command.get_current_dir() {
-					std_command.current_dir(dir);
+					shell_command = shell_command.current_dir(dir);
 				}
-				std_command.env_clear().envs(matcher_io.host().env());
-				match matcher_io.host().run_captured(&mut std_command) {
+				match matcher_io.host().run_command(shell_command) {
 					Ok(status) => {
 						if !status.success() {
 							matcher_io.set_exit_code(1);
@@ -658,31 +632,19 @@ pub mod matchers {
 					file_info.display_path().to_path_buf()
 				};
 				let mut command = self.command.borrow_mut();
-				let command = command.get_or_insert_with(|| self.new_command(matcher_io));
+				let command = command.get_or_insert_with(|| self.new_command());
 
 				// Build command, or dispatch it before when it is long enough.
 				if command.try_arg(&path_to_file).is_err() {
-					let dir = if self.exec_in_parent_dir {
-						execdir_dir(file_info.fs(), file_info.path())
-					} else {
-						Ok(None)
-					};
-					match dir {
-						Ok(dir) => {
-							if let Some(dir) = dir {
-								command.current_dir(dir);
-							}
-							self.run_command(command, matcher_io);
-						},
-						Err(e) => {
-							writeln!(&mut matcher_io.host().stderr, "Failed to run {}: {}", self.executable, e)
-								.unwrap();
-							matcher_io.set_exit_code(1);
-						},
+					if self.exec_in_parent_dir
+						&& let Some(dir) = execdir_dir(file_info.path())
+					{
+						command.current_dir(dir);
 					}
+					self.run_command(command, matcher_io);
 
 					// Reset command status.
-					*command = self.new_command(matcher_io);
+					*command = self.new_command();
 					if let Err(e) = command.try_arg(&path_to_file) {
 						writeln!(
 							&mut matcher_io.host().stderr,
@@ -702,17 +664,8 @@ pub mod matchers {
 				if self.exec_in_parent_dir {
 					let mut command = self.command.borrow_mut();
 					if let Some(mut command) = command.take() {
-						match native_exec_dir(matcher_io.host().fs(), dir) {
-							Ok(dir) => {
-								command.current_dir(Path::new(".").join(dir));
-								self.run_command(&mut command, matcher_io);
-							},
-							Err(e) => {
-								writeln!(&mut matcher_io.host().stderr, "Failed to run {}: {}", self.executable, e)
-									.unwrap();
-								matcher_io.set_exit_code(1);
-							},
-						}
+						command.current_dir(dir);
+						self.run_command(&command, matcher_io);
 					}
 				}
 			}
@@ -721,8 +674,8 @@ pub mod matchers {
 				// Dispatch command for -exec.
 				if !self.exec_in_parent_dir {
 					let mut command = self.command.borrow_mut();
-					if let Some(mut command) = command.take() {
-						self.run_command(&mut command, matcher_io);
+					if let Some(command) = command.take() {
+						self.run_command(&command, matcher_io);
 					}
 				}
 			}
@@ -5041,6 +4994,7 @@ fn app() -> Command {
 
 impl Utility for Find {
 	const NAME: &'static str = "find";
+	const RUNS_COMMANDS: bool = true;
 
 	fn run(self, host: &mut Host) -> i32 {
 		let owned: Vec<String> = self
@@ -5151,23 +5105,32 @@ mod tests {
 	}
 
 	#[cfg(unix)]
-	#[test]
-	fn exec_uses_shell_cwd_and_captures_child_stdout() {
+	#[tokio::test]
+	async fn exec_uses_shell_cwd_and_captures_child_stdout() {
 		let (_dir, root) = fixture();
-		let (code, capture) = run(
+		let (code, out, err) =
+			crate::host::run_script("find . -maxdepth 0 -exec /bin/pwd ';'", "", &root).await;
+		assert_eq!(code, 0, "stderr: {err}");
+		assert_eq!(err, "");
+		assert_eq!(out, format!("{}\n", root.display()));
+	}
+
+	/// Contract: `-execdir` runs each command from the entry's directory and
+	/// `-exec ... +` batches from the shell's, whether the command is a builtin
+	/// or a program.
+	#[tokio::test]
+	async fn exec_variants_run_builtins_in_their_directories() {
+		let (_dir, root) = fixture();
+		fs::create_dir(root.join("sub")).unwrap();
+		fs::write(root.join("sub/d.txt"), b"x").unwrap();
+		let (code, out, err) = crate::host::run_script(
+			"find . -name d.txt -execdir pwd ';' && find sub -name d.txt -exec wc -c {} +",
+			"",
 			&root,
-			&[
-				".".into(),
-				"-maxdepth".into(),
-				"0".into(),
-				"-exec".into(),
-				"pwd".into(),
-				";".into(),
-			],
-		);
-		assert_eq!(code, 0, "stderr: {}", capture.err());
-		assert_eq!(capture.err(), "");
-		assert_eq!(capture.out(), format!("{}\n", root.display()));
+		)
+		.await;
+		assert_eq!(code, 0, "stderr: {err}");
+		assert_eq!(out, format!("{}\n1 sub/d.txt\n", root.join("sub").display()));
 	}
 
 	#[test]

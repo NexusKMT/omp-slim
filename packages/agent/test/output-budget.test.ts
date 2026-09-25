@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Context } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Context, Message } from "@oh-my-pi/pi-ai";
 import { fitOutputTokensToContextWindow, MIN_FITTED_OUTPUT_TOKENS } from "../src/output-budget";
 import { Tokenizer } from "../src/tokenizer";
 
@@ -8,6 +8,31 @@ import { Tokenizer } from "../src/tokenizer";
 // token counts are bytes/4, so `tokens * 4` ASCII bytes is exactly `tokens`.
 function promptOf(tokens: number): Context {
 	return { messages: [{ role: "user", content: "x".repeat(tokens * 4), timestamp: 0 }] };
+}
+
+function userOf(tokens: number, timestamp: number): Message {
+	return { role: "user", content: "x".repeat(tokens * 4), timestamp };
+}
+
+/** Settled assistant turn whose provider-reported prompt was `promptTokens`. */
+function reported(promptTokens: number, timestamp: number): AssistantMessage {
+	return {
+		role: "assistant",
+		content: [{ type: "text", text: "ok" }],
+		api: "mock",
+		provider: "mock",
+		model: "mock-model",
+		usage: {
+			input: promptTokens,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: promptTokens,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "stop",
+		timestamp,
+	};
 }
 
 const deepseek = { contextWindow: 1_000_000, maxTokens: 384_000 };
@@ -60,6 +85,25 @@ describe("fitOutputTokensToContextWindow", () => {
 		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), 200_000, tokenizer)).toBe(120_000);
 		const alwaysSends = { ...deepseek, compat: { isOpenRouterHost: true, alwaysSendMaxTokens: true } } as never;
 		expect(fitOutputTokensToContextWindow(alwaysSends, promptOf(800_000), undefined, tokenizer)).toBe(120_000);
+	});
+
+	test("sizes the prompt from the provider's last report plus only the unreported tail", () => {
+		// Local counting of the reported prefix would read 900k and floor the cap
+		// (the Opus 1024-token `length` loop); the provider measured it at 500k.
+		const context: Context = { messages: [userOf(900_000, 1), reported(500_000, 2), userOf(200_000, 3)] };
+		expect(fitOutputTokensToContextWindow(deepseek, context, undefined, tokenizer)).toBe(
+			1_000_000 - (500_000 + 220_000),
+		);
+	});
+
+	test("ignores reports made before a history rewrite", () => {
+		// Compaction replaced the 950k prefix the kept turn measured with a small summary.
+		const summary: Message = { role: "user", content: "summary", historyRewriteAt: 10, timestamp: 10 };
+		const stale: Context = { messages: [summary, reported(950_000, 5), userOf(1_000, 11)] };
+		expect(fitOutputTokensToContextWindow(deepseek, stale, undefined, tokenizer)).toBeUndefined();
+
+		const fresh: Context = { messages: [...stale.messages, reported(700_000, 12), userOf(1_000, 13)] };
+		expect(fitOutputTokensToContextWindow(deepseek, fresh, undefined, tokenizer)).toBe(1_000_000 - (700_000 + 1_100));
 	});
 
 	test("never requests less than the floor, leaving a full window to compaction", () => {

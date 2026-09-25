@@ -2,8 +2,6 @@
 //!
 //! Ported from uutils coreutils 0.8.0.
 
-#[cfg(unix)]
-use std::os::fd::AsRawFd;
 use std::{
 	ffi::OsString,
 	fmt,
@@ -11,10 +9,9 @@ use std::{
 	path::{Path, PathBuf},
 };
 
-use brush_core::{ShellExtensions, builtins::Registration, openfiles::OpenFile};
+use brush_core::{ShellExtensions, builtins::Registration};
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, error::ErrorKind};
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
-use parking_lot::Mutex;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use pi_vfs::{
 	BlockingFs, CanonicalizeOptions, File, MissingHandling, OpenOptions, ResolveMode, SymlinkKind,
 	child_path, file_name, is_virtual_path, parent_path,
@@ -31,8 +28,9 @@ use uucore::{
 };
 
 use crate::{
-	file_backup::{backup_display, backup_path},
+	file_backup::{backup_display, backup_path, determine_backup_mode, determine_backup_suffix},
 	host::{Host, Utility, format_usage, matches_parser, util},
+	progress::stderr_draw_target,
 };
 #[cfg(unix)]
 use self::hardlink::{
@@ -81,88 +79,11 @@ pub(crate) struct Mv {
 
 matches_parser!(Mv, app);
 
-/// A terminal-like indicatif sink backed by the command's stderr.
-struct ProgressTerminal {
-	writer: Mutex<OpenFile>,
-}
-
-impl fmt::Debug for ProgressTerminal {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.debug_struct("ProgressTerminal").finish_non_exhaustive()
-	}
-}
-
-impl ProgressTerminal {
-	fn write_control(&self, value: impl fmt::Display) -> io::Result<()> {
-		write!(self.writer.lock(), "{value}")
-	}
-
-	fn move_cursor(&self, n: usize, direction: char) -> io::Result<()> {
-		if n == 0 {
-			Ok(())
-		} else {
-			self.write_control(format_args!("\x1b[{n}{direction}"))
-		}
-	}
-}
-
-impl TermLike for ProgressTerminal {
-	fn width(&self) -> u16 {
-		#[cfg(unix)]
-		{
-			let writer = self.writer.lock();
-			if let Ok(fd) = writer.try_borrow_as_fd() {
-				let mut size = libc::winsize { ws_row: 0, ws_col: 0, ws_xpixel: 0, ws_ypixel: 0 };
-				// SAFETY: `size` is writable for the duration of the ioctl, and
-				// `fd` is borrowed from the live `OpenFile` guarded above.
-				if unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCGWINSZ, &mut size) } == 0
-					&& size.ws_col > 0
-				{
-					return size.ws_col;
-				}
-			}
-		}
-		80
-	}
-
-	fn move_cursor_up(&self, n: usize) -> io::Result<()> {
-		self.move_cursor(n, 'A')
-	}
-
-	fn move_cursor_down(&self, n: usize) -> io::Result<()> {
-		self.move_cursor(n, 'B')
-	}
-
-	fn move_cursor_right(&self, n: usize) -> io::Result<()> {
-		self.move_cursor(n, 'C')
-	}
-
-	fn move_cursor_left(&self, n: usize) -> io::Result<()> {
-		self.move_cursor(n, 'D')
-	}
-
-	fn write_line(&self, s: &str) -> io::Result<()> {
-		writeln!(self.writer.lock(), "{s}")
-	}
-
-	fn write_str(&self, s: &str) -> io::Result<()> {
-		self.writer.lock().write_all(s.as_bytes())
-	}
-
-	fn clear_line(&self) -> io::Result<()> {
-		self.write_control("\r\x1b[2K")
-	}
-
-	fn flush(&self) -> io::Result<()> {
-		self.writer.lock().flush()
-	}
-}
-
 fn progress_manager(host: &Host, enabled: bool) -> Option<MultiProgress> {
-	(enabled && host.stderr.is_terminal()).then(|| {
-		let terminal = ProgressTerminal { writer: Mutex::new(host.stderr_clone()) };
-		MultiProgress::with_draw_target(ProgressDrawTarget::term_like(Box::new(terminal)))
-	})
+	if !enabled {
+		return None;
+	}
+	stderr_draw_target(host).map(MultiProgress::with_draw_target)
 }
 
 /// Options contains all the possible behaviors and flags for mv.
@@ -288,65 +209,6 @@ fn show(host: &mut Host, err: impl fmt::Display) {
 	host.error(err, 1);
 }
 
-fn match_backup_method(method: &str, origin: &str) -> MvResult<BackupMode> {
-	let matches = backup_control::BACKUP_CONTROL_VALUES
-		.iter()
-		.filter(|value| value.starts_with(method))
-		.collect::<Vec<_>>();
-	if matches.len() == 1 {
-		match *matches[0] {
-			"simple" | "never" => Ok(BackupMode::Simple),
-			"numbered" | "t" => Ok(BackupMode::Numbered),
-			"existing" | "nil" => Ok(BackupMode::Existing),
-			"none" | "off" => Ok(BackupMode::None),
-			_ => unreachable!("matched value comes from BACKUP_CONTROL_VALUES"),
-		}
-	} else {
-		let kind = if matches.is_empty() { "invalid" } else { "ambiguous" };
-		Err(MvFailure::Message(format!(
-			"{kind} argument {} for '{origin}'\nValid arguments are:\n  - 'none', 'off'\n  - \
-			 'simple', 'never'\n  - 'existing', 'nil'\n  - 'numbered', 't'",
-			method.quote()
-		)))
-	}
-}
-
-fn determine_backup_mode(matches: &ArgMatches, host: &Host) -> MvResult<BackupMode> {
-	let cli_method = matches
-		.get_one::<String>(backup_control::arguments::OPT_BACKUP)
-		.map(String::as_str);
-	if matches.contains_id(backup_control::arguments::OPT_BACKUP) {
-		if let Some(method) = cli_method {
-			match_backup_method(method, "backup type")
-		} else if let Some(method) = host.var("VERSION_CONTROL") {
-			match_backup_method(method, "$VERSION_CONTROL")
-		} else {
-			Ok(BackupMode::Existing)
-		}
-	} else if matches.get_flag(backup_control::arguments::OPT_BACKUP_NO_ARG)
-		|| matches.contains_id(backup_control::arguments::OPT_SUFFIX)
-	{
-		host.var("VERSION_CONTROL").map_or(Ok(BackupMode::Existing), |method| {
-			match_backup_method(method, "$VERSION_CONTROL")
-		})
-	} else {
-		Ok(BackupMode::None)
-	}
-}
-
-fn determine_backup_suffix(matches: &ArgMatches, host: &Host) -> String {
-	let suffix = matches
-		.get_one::<String>(backup_control::arguments::OPT_SUFFIX)
-		.map(String::as_str)
-		.or_else(|| host.var("SIMPLE_BACKUP_SUFFIX"))
-		.unwrap_or(backup_control::DEFAULT_BACKUP_SUFFIX);
-	if suffix.contains('/') {
-		backup_control::DEFAULT_BACKUP_SUFFIX.to_string()
-	} else {
-		suffix.to_string()
-	}
-}
-
 fn run_matches(matches: &ArgMatches, host: &mut Host) -> MvResult<()> {
 	let files: Vec<OsString> = matches
 		.get_many::<OsString>(ARG_FILES)
@@ -355,7 +217,7 @@ fn run_matches(matches: &ArgMatches, host: &mut Host) -> MvResult<()> {
 		.collect();
 
 	let overwrite_mode = determine_overwrite_mode(matches);
-	let backup_mode = determine_backup_mode(matches, host)?;
+	let backup_mode = determine_backup_mode(matches, host).map_err(MvFailure::Message)?;
 	let update_mode = update_control::determine_update_mode(matches);
 
 	if backup_mode != BackupMode::None

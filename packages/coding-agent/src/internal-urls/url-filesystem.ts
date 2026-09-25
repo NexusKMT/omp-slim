@@ -125,6 +125,20 @@ function encodeSegment(name: string): string {
 	return name.replace(SEGMENT_ENCODE_RE, char => `%${char.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 }
 
+/**
+ * `base` URL followed by a `/`-separated path of raw entry names (a native
+ * walk's root-relative result), each name percent-encoded as `pi_vfs::child_path` does.
+ */
+export function joinUrlPath(base: string, relative: string): string {
+	return appendSegments(
+		base,
+		relative
+			.split("/")
+			.filter(name => name.length > 0)
+			.map(encodeSegment),
+	);
+}
+
 function schemeOf(url: string): string {
 	return URL_PATH_RE.exec(url)?.[1].toLowerCase() ?? url;
 }
@@ -204,6 +218,15 @@ function requireField<T>(value: T | undefined | null, field: string, op: ShellFs
 	return value;
 }
 
+/** What {@link InternalUrlFilesystem.stat} reports about an entry. */
+export interface UrlFileStat {
+	type: "directory" | "file" | "other";
+	/** Bytes of a file; 0 for directories. */
+	size: number;
+	/** Host modification time; 0 for rendered resources, which have none. */
+	mtimeMs: number;
+}
+
 export interface InternalUrlFilesystemOptions {
 	/** Calling session's resolve context; its signal cancels in-flight operations. */
 	context: ResolveContext;
@@ -264,13 +287,34 @@ export class InternalUrlFilesystem {
 		}
 	}
 
-	/** Type of the entry `url` names, following symlinks; throws {@link UrlFsError}. */
-	async fileType(url: string): Promise<"directory" | "file" | "other"> {
+	/** The entry `input` (a URL or host path) names, following symlinks; throws {@link UrlFsError}. */
+	async stat(input: string): Promise<UrlFileStat> {
 		try {
-			const node = await this.#node(url, true, false);
-			if (node.kind === "virtual") return node.directory ? "directory" : "file";
+			const node = await this.#node(input, true, false);
+			if (node.kind === "virtual") {
+				return node.directory
+					? { type: "directory", size: 0, mtimeMs: 0 }
+					: { type: "file", size: node.bytes.length, mtimeMs: 0 };
+			}
 			const stats = await fs.stat(node.path);
-			return stats.isDirectory() ? "directory" : stats.isFile() ? "file" : "other";
+			return {
+				type: stats.isDirectory() ? "directory" : stats.isFile() ? "file" : "other",
+				size: stats.size,
+				mtimeMs: stats.mtimeMs,
+			};
+		} catch (error) {
+			const { code, message } = this.#errno(error);
+			throw new UrlFsError(code, message);
+		}
+	}
+
+	/** First `maxBytes` bytes of the file `input` (a URL or host path) names, following symlinks; throws {@link UrlFsError}. */
+	async readPrefix(input: string, maxBytes: number): Promise<Uint8Array> {
+		try {
+			const node = await this.#node(input, true, false);
+			if (node.kind !== "virtual") return await Bun.file(node.path).slice(0, maxBytes).bytes();
+			if (node.directory) throw new UrlFsError("EISDIR", `Is a directory: ${node.url}`);
+			return node.bytes.subarray(0, maxBytes);
 		} catch (error) {
 			const { code, message } = this.#errno(error);
 			throw new UrlFsError(code, message);

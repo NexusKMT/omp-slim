@@ -229,6 +229,33 @@ cat ./*.txt"#,
 	assert!(!directory.path().join("sorted").exists());
 }
 
+/// `xargs`, `ifne`, and `find -exec`/`-execdir` must dispatch their command
+/// through the shell: only in-process builtins can open provider URLs, and an
+/// external program cannot even start in a provider working directory.
+#[tokio::test]
+async fn command_running_utilities_dispatch_builtins_that_open_urls() {
+	let directory = tempfile::tempdir().expect("isolated provider filesystem");
+	fs::create_dir(directory.path().join("docs")).expect("provider directory");
+	fs::write(directory.path().join("docs/a.txt"), b"alpha\n").expect("first document");
+	fs::write(directory.path().join("docs/b.txt"), b"beta\n").expect("second document");
+	let output = tempfile::tempfile().expect("captured stdout");
+	let error = tempfile::tempfile().expect("captured stderr");
+	let mut shell = virtual_shell(directory.path()).await;
+	let parameters = capture_parameters(&shell, &output, &error);
+	let result = shell
+		.run_string(
+			"printf 'virtual://docs/a.txt\\n' | xargs cat && echo go | ifne cat virtual://docs/b.txt \
+			 && find virtual://docs -name b.txt -exec cat {} ';' && find virtual://docs -name a.txt \
+			 -execdir cat {} ';'",
+			&SourceInfo::from("vfs-command-runners"),
+			&parameters,
+		)
+		.await
+		.expect("command-running utilities");
+	assert_eq!(u8::from(result.exit_code), 0, "{}", captured_text(&error));
+	assert_eq!(captured_text(&output), "alpha\nbeta\nbeta\nalpha\n");
+}
+
 async fn wait_for_output(path: &Path, suffix: &str) -> io::Result<()> {
 	tokio::time::timeout(Duration::from_secs(5), async {
 		loop {

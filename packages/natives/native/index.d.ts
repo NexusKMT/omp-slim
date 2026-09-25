@@ -706,7 +706,10 @@ export interface AstFindOptions {
   patterns?: Array<string>
   /** Language override; otherwise inferred from file extension per candidate. */
   lang?: string
-  /** Single file or directory to scan (combined with `glob` when set). */
+  /**
+   * Single file or directory to scan (combined with `glob` when set): a
+   * host path or an absolute `scheme://` URL.
+   */
   path?: string
   /** Optional glob filter relative to the search root. */
   glob?: string
@@ -729,6 +732,11 @@ export interface AstFindOptions {
   signal?: unknown
   /** Wall-clock timeout for the worker task in milliseconds. */
   timeoutMs?: number
+  /**
+   * Filesystem candidates are resolved, walked, and read through (native
+   * when absent).
+   */
+  filesystem?: ShellFilesystem
 }
 
 /** Aggregated search statistics and any parse or compile diagnostics. */
@@ -869,7 +877,10 @@ export interface AstReplaceOptions {
    * mixed-language paths rewrite each file in its own language.
    */
   lang?: string
-  /** Single file or directory to rewrite. */
+  /**
+   * Single file or directory to rewrite: a host path or an absolute
+   * `scheme://` URL.
+   */
   path?: string
   /** Optional glob filter within the search root. */
   glob?: string
@@ -889,6 +900,11 @@ export interface AstReplaceOptions {
   signal?: unknown
   /** Wall-clock timeout for the worker task in milliseconds. */
   timeoutMs?: number
+  /**
+   * Filesystem candidates are resolved, walked, read, and written through
+   * (native when absent).
+   */
+  filesystem?: ShellFilesystem
 }
 
 /** Summary of an ast-grep rewrite pass, including whether disk writes occurred. */
@@ -1629,7 +1645,7 @@ export interface GlobMatch {
 export interface GlobOptions {
   /** Glob pattern to match (e.g., "*.ts"). */
   pattern: string
-  /** Directory to search. */
+  /** Directory to search: a host path or an absolute `scheme://` URL. */
   path: string
   /**
    * Filter by file type: "file", "dir", or "symlink". Symlinks are
@@ -1657,6 +1673,11 @@ export interface GlobOptions {
   signal?: unknown
   /** Timeout in milliseconds for the operation. */
   timeoutMs?: number
+  /**
+   * Filesystem the search root is resolved and walked through (native when
+   * absent).
+   */
+  filesystem?: ShellFilesystem
 }
 
 /** Result payload returned by a glob operation. */
@@ -1701,7 +1722,7 @@ export interface GrepMatch {
 export interface GrepOptions {
   /** Regex pattern to search for. */
   pattern: string
-  /** Directory or file to search. */
+  /** Directory or file to search: a host path or an absolute `scheme://` URL. */
   path: string
   /** Glob filter for filenames (e.g., "*.ts"). */
   glob?: string
@@ -1739,6 +1760,11 @@ export interface GrepOptions {
   signal?: unknown
   /** Timeout in milliseconds for the operation. */
   timeoutMs?: number
+  /**
+   * Filesystem every path is stat'ed, walked, and read through (native when
+   * absent).
+   */
+  filesystem?: ShellFilesystem
 }
 
 /** Output mode for [`search`] and [`grep`] (string values match JS callers). */
@@ -2743,7 +2769,10 @@ export declare enum ShellFsOp {
   Close = 'close',
   /** Metadata of the file behind `handle`. Answer: `metadata`. */
   FileMetadata = 'fileMetadata',
-  /** Query whether `handle` has a conflicting advisory write lock. Answer: `locked`. */
+  /**
+   * Query whether `handle` has a conflicting advisory write lock. Answer:
+   * `locked`.
+   */
   IsLocked = 'isLocked',
   /** Truncate or extend `handle` to `size` bytes. */
   SetLen = 'setLen',

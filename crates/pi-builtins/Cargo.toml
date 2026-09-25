@@ -306,6 +306,7 @@ base = [
 "util.cksum" = []
 "util.cmp" = []
 "util.comm" = []
+"util.cp" = []
 "util.cut" = []
 "util.date" = []
 "util.diff" = []
@@ -381,6 +382,7 @@ utils = [
   "util.cksum",
   "util.cmp",
   "util.comm",
+  "util.cp",
   "util.cut",
   "util.date",
   "util.diff",

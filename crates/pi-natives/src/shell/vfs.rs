@@ -42,8 +42,8 @@ use napi::{
 };
 use napi_derive::napi;
 use pi_vfs::{
-	CanonicalizeOptions, DirEntry, DirOptions, File, FileHandle, FileKind, FileSystem, FileTime,
-	FileType, Fs, Metadata, MissingHandling, NodeKind, OpenOptions, Permissions, ReadDir,
+	BlockingFs, CanonicalizeOptions, DirEntry, DirOptions, File, FileHandle, FileKind, FileSystem,
+	FileTime, FileType, Fs, Metadata, MissingHandling, NodeKind, OpenOptions, Permissions, ReadDir,
 	ResolveMode, StatFs, SymlinkKind,
 };
 
@@ -429,6 +429,13 @@ impl ShellFilesystem {
 			native:             Fs::native(),
 			cleanup:            false,
 		}))
+	}
+
+	/// Blocking facade for synchronous search workers: `filesystem`'s
+	/// provider, or the native host filesystem when absent. Call on the
+	/// JavaScript thread while unpacking the options, as the shell does.
+	pub fn blocking(filesystem: Option<Self>) -> BlockingFs {
+		filesystem.map_or_else(BlockingFs::native, |filesystem| filesystem.into_fs().blocking())
 	}
 }
 

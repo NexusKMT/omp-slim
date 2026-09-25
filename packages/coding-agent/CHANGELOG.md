@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added `cp` builtin for native filesystem copy operations
+- Added native support for `local://` and `omp://` URLs in `find`, `glob`, `grep`, and AST tools
 - Added shared access to IDA databases across all omp processes in a project
 - Added project-scoped IDA host daemon management via broker
 - Added `InternalUrlFilesystem` for native shell-level resolution of virtual `scheme://` paths
@@ -48,6 +50,8 @@
 
 ### Changed
 
+- Replaced temporary file materialization with direct `InternalUrlFilesystem` resolution for virtual URL tools
+- Migrated `find`, `ifne`, and `xargs` to perform command execution through the `InternalUrlFilesystem` and subshell host
 - Migrated database workers into independent, project-shared daemon processes
 - Integrated IDA daemon lifecycle with the project broker for improved resource management
 - Enhanced `list` output to show database initialization and busy status

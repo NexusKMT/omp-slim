@@ -8,6 +8,10 @@
 - Added passive tool-call context support, allowing hooks and tools to provide additional context that is included with tool results for subsequent model processing.
 - Added automatic output-token limit adjustment so requests fit within the model’s context window.
 
+### Changed
+
+- Optimized prompt token counting by using provider-reported usage for anchored prefixes, restricting local estimation to message deltas
+
 ## [18.3.0] - 2026-09-24
 
 ### Added
