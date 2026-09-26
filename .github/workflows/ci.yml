@@ -427,9 +427,13 @@ jobs:
          # whose LRU eviction has already cost the darwin release archives.
          # Probe first so an existing entry is not re-uploaded, then keep
          # only the newest two entries so the footprint stays ~100 MB.
+         # The three steps below run only on main (never exercised by PR or
+         # branch runs) and are pure optimization for later PRs: a failure
+         # must never fail native_addons and with it every test job.
          - name: Probe native addon cache entry
            id: natives-cache-probe
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+           continue-on-error: true
            uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ci-natives
@@ -437,12 +441,14 @@ jobs:
               lookup-only: true
          - name: Save native addon cache entry
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.natives-cache-probe.outputs.cache-hit != 'true'
+           continue-on-error: true
            uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
            with:
               path: ci-natives
               key: ${{ steps.natives-key.outputs.key }}
          - name: Prune superseded native addon cache entries
            if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.natives-cache-probe.outputs.cache-hit != 'true'
+           continue-on-error: true
            shell: bash
            env:
               GH_TOKEN: ${{ github.token }}
