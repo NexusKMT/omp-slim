@@ -606,6 +606,47 @@ describe("retain.execute (Mnemopi backend)", () => {
 	});
 });
 
+describe("global memory scope exposure", () => {
+	const offersScope = (tool: MemoryRetainTool | LearnTool) => ({
+		schema: JSON.stringify(tool.parameters.toJsonSchema()).includes('"scope"'),
+		prompt: tool.description.includes("scope: global"),
+	});
+
+	it.each([
+		["mnemopi", "per-project", false],
+		["mnemopi", "per-project-tagged", true],
+		["mnemopi", "global", true],
+		["local", "per-project-tagged", false],
+	] as const)("%s backend with %s scoping offers scope: %p", (backend, scoping, offered) => {
+		const settings = Settings.isolated({
+			"memory.backend": backend,
+			"mnemopi.scoping": scoping,
+			"autolearn.enabled": true,
+		});
+		const session = makeSession(settings);
+		expect(offersScope(LearnTool.createIf(session)!)).toEqual({ schema: offered, prompt: offered });
+		if (backend === "mnemopi") {
+			expect(offersScope(MemoryRetainTool.createIf(session)!)).toEqual({ schema: offered, prompt: offered });
+		}
+	});
+
+	it("requires write approval only for global writes", () => {
+		const session = makeSession(
+			Settings.isolated({
+				"memory.backend": "mnemopi",
+				"mnemopi.scoping": "per-project-tagged",
+				"autolearn.enabled": true,
+			}),
+		);
+		const retain = MemoryRetainTool.createIf(session)!;
+		const learn = LearnTool.createIf(session)!;
+		expect(retain.approval({ items: [{ content: "x" }, { content: "y", scope: "global" }] })).toBe("write");
+		expect(retain.approval({ items: [{ content: "x", scope: "project" }] })).toBe("read");
+		expect(learn.approval({ memory: "x", scope: "global" })).toBe("write");
+		expect(learn.approval({ memory: "x" })).toBe("read");
+	});
+});
+
 describe("learn.execute (Mnemopi backend)", () => {
 	let originalAgentDir: string;
 

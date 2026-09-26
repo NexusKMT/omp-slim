@@ -477,17 +477,17 @@ export class MnemopiSessionState {
 		}
 	}
 
-	/** Explicit global write: redacts and throws the storage error, like `rememberScoped`. */
-	rememberGlobal(memory: MnemopiRememberInput, options: MnemopiRememberOptions = {}): string {
-		const target = this.getGlobalRetainTarget();
+	/**
+	 * Explicit write: throws the storage error, so the caller can report why nothing was stored.
+	 * `target` defaults to the retain bank; pass {@link getGlobalRetainTarget} for a global write.
+	 */
+	rememberScoped(
+		memory: MnemopiRememberInput,
+		options: MnemopiRememberOptions = {},
+		target: MnemopiScopedMemory = this.scoped.retain,
+	): string {
 		const [scrubbed, scrubbedOptions] = redactRememberWrite(memory, options);
 		return target.memory.remember(scrubbed, scrubbedOptions);
-	}
-
-	/** Explicit write: throws the storage error, so the caller can report why nothing was stored. */
-	rememberScoped(memory: MnemopiRememberInput, options: MnemopiRememberOptions = {}): string {
-		const [scrubbed, scrubbedOptions] = redactRememberWrite(memory, options);
-		return this.scoped.retain.memory.remember(scrubbed, scrubbedOptions);
 	}
 
 	async recallForContext(query: string, signal?: AbortSignal): Promise<string | undefined> {

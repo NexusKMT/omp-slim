@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added an optional `scope` to the `retain` and `learn` tools: `scope: "global"` stores a memory or lesson in the Mnemopi bank every project recalls instead of the current project's bank ([#13324](https://github.com/can1357/oh-my-pi/pull/13324) by [@alphastorm](https://github.com/alphastorm)).
+- Added an optional `scope` to the `retain` and `learn` tools, offered when `mnemopi.scoping` is `global` or `per-project-tagged`: `scope: "global"` stores a memory or lesson in the Mnemopi bank every project recalls instead of the current project's bank ([#13324](https://github.com/can1357/oh-my-pi/pull/13324) by [@alphastorm](https://github.com/alphastorm)).
 
 ### Fixed
 

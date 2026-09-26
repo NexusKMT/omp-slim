@@ -102,10 +102,11 @@ describe("memory secret redaction", () => {
 			session: {} as never,
 		});
 		try {
-			const id = state.rememberGlobal(`global token is ${NPM_TOKEN}`, {
-				source: `agent-${NPM_TOKEN}`,
-				metadata: { context: `auth uses ${NPM_TOKEN}` },
-			});
+			const id = state.rememberScoped(
+				`global token is ${NPM_TOKEN}`,
+				{ source: `agent-${NPM_TOKEN}`, metadata: { context: `auth uses ${NPM_TOKEN}` } },
+				state.getGlobalRetainTarget(),
+			);
 			expect(state.globalMemory!.get(id!)).toMatchObject({
 				content: "global token is [REDACTED]",
 				source: "agent-[REDACTED]",
