@@ -397,7 +397,7 @@ export class CollabHost {
 		};
 		socket.onClose = (reason, willReconnect) => {
 			this.#relayConnected = false;
-			if (this.#stopped) return;
+			if (this.#stopping || this.#stopped) return;
 			if (!opened) {
 				firstOpen.reject(new Error(reason));
 				return;

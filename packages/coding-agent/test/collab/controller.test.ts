@@ -1014,6 +1014,34 @@ describe("CollabController", () => {
 		expect(await registry.listCollabHosts({ dir: tmp })).toMatchObject([{ generation: 2 }]);
 	});
 
+	it("does not auto-restart when the relay closes during an explicit stop's goodbye drain", async () => {
+		const { ctx } = makeControllerContext({ autoStart: "control" });
+		controller = new CollabController(ctx);
+		controller.autoStart();
+		await settled(publishSpy, 1);
+		const first = ctx.collabHost;
+		if (!first) throw new Error("first room missing");
+		const hostSocket = capturedSockets.find(s => s.role === "host");
+		if (!hostSocket) throw new Error("host transport socket was never created");
+
+		const drain = Promise.withResolvers<void>();
+		const flush = spyOn(CollabSocket.prototype, "flush").mockImplementation(() => drain.promise);
+		const stopping = controller.stop("host stopped");
+		try {
+			expect(first.ending).toBe(true);
+			expect(first.stopped).toBe(false);
+			hostSocket.onclose?.({ code: 4001, reason: "room closed" });
+		} finally {
+			drain.resolve();
+			flush.mockRestore();
+		}
+		await stopping;
+		await controller.idle();
+		expect(ctx.collabHost).toBeUndefined();
+		expect(await registry.listCollabHosts({ dir: tmp })).toEqual([]);
+		expect(publishSpy).toHaveBeenCalledTimes(1);
+	});
+
 	for (const outcome of ["commit", "rollback"] as const) {
 		it(`publishes only settled session state after transition ${outcome}`, async () => {
 			const { ctx, state } = makeControllerContext({ autoStart: "control" });
