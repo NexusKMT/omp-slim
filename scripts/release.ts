@@ -52,6 +52,7 @@ export interface CIRun {
 	status: string;
 	conclusion: string | null;
 	event?: string;
+	headBranch?: string;
 }
 
 export interface CommitRuns {
@@ -66,14 +67,25 @@ export type CIGateDecision =
 	| { kind: "none" };
 
 /**
+ * Only a run of `main` itself counts: a push, or a dispatch on the main ref.
+ * `pull_request` runs skip Rust validation and native builds, and a branch
+ * run tests a different ref, so neither may vouch for the commit.
+ */
+export function isMainCIRun(run: CIRun): boolean {
+	return run.headBranch === "main" && (run.event === "push" || run.event === "workflow_dispatch");
+}
+
+/**
  * Decide the CI gate from HEAD's first-parent chain (index 0 = HEAD). The
- * first commit that has any CI run is authoritative; its latest run (highest
- * databaseId) must have completed with `success`. Commits without runs (e.g.
- * path-filtered pushes) fall through to their first-parent ancestor.
+ * first commit that has a main CI run ({@link isMainCIRun}) is authoritative;
+ * its latest such run (highest databaseId) must have completed with
+ * `success`. Commits without one (e.g. path-filtered pushes) fall through to
+ * their first-parent ancestor.
  */
 export function decideCIGate(chain: readonly CommitRuns[]): CIGateDecision {
 	for (let i = 0; i < chain.length; i++) {
-		const { sha, runs } = chain[i];
+		const { sha } = chain[i];
+		const runs = chain[i].runs.filter(isMainCIRun);
 		if (runs.length === 0) continue;
 		const latest = runs.reduce((a, b) => (b.databaseId > a.databaseId ? b : a));
 		const ancestor = i > 0;
@@ -87,7 +99,8 @@ export function decideCIGate(chain: readonly CommitRuns[]): CIGateDecision {
 const CI_ANCESTOR_LIMIT = 30;
 
 async function listCIRuns(sha: string): Promise<CIRun[]> {
-	const out = await $`gh run list --commit ${sha} --workflow CI --json databaseId,status,conclusion,event`.text();
+	const out =
+		await $`gh run list --commit ${sha} --workflow CI --json databaseId,status,conclusion,event,headBranch`.text();
 	return JSON.parse(out) as CIRun[];
 }
 

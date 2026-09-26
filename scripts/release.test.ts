@@ -61,7 +61,19 @@ describe("release version bumps", () => {
 });
 
 describe("decideCIGate", () => {
-	const run = (databaseId: number, status: string, conclusion: string | null) => ({ databaseId, status, conclusion });
+	const run = (
+		databaseId: number,
+		status: string,
+		conclusion: string | null,
+		event = "push",
+		headBranch = "main",
+	) => ({
+		databaseId,
+		status,
+		conclusion,
+		event,
+		headBranch,
+	});
 
 	test("green HEAD passes", () => {
 		expect(decideCIGate([{ sha: "h", runs: [run(1, "completed", "success")] }])).toEqual({
@@ -128,6 +140,25 @@ describe("decideCIGate", () => {
 			sha: "p",
 			ancestor: true,
 		});
+	});
+
+	test("a pull_request or branch run never vouches for a main commit", () => {
+		// The SHA was PR-tested (green, but PR CI skips Rust validation and native
+		// builds), then pushed to main via a path-filtered change with no run.
+		const chain = [
+			{
+				sha: "h",
+				runs: [
+					run(9, "completed", "success", "pull_request", "feature"),
+					run(8, "completed", "success", "workflow_dispatch", "feature"),
+				],
+			},
+			{ sha: "p", runs: [run(4, "completed", "failure")] },
+		];
+		expect(decideCIGate(chain)).toMatchObject({ kind: "fail", sha: "p", runId: 4, ancestor: true });
+		expect(
+			decideCIGate([{ sha: "h", runs: [run(7, "completed", "success", "workflow_dispatch", "main")] }]),
+		).toMatchObject({ kind: "pass", runId: 7 });
 	});
 
 	test("no runs anywhere yields none", () => {

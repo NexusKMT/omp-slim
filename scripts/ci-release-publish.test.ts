@@ -36,7 +36,7 @@ describe("concurrent publish runner", () => {
 		let peak = 0;
 		const jobs: PublishJob[] = names.map(name => ({
 			name,
-			async run(log) {
+			async publish(log) {
 				inFlight++;
 				peak = Math.max(peak, inFlight);
 				log(`${name} start`);
@@ -70,6 +70,39 @@ describe("concurrent publish runner", () => {
 			"── c ──\nc start\nc end\n",
 			"── e ──\ne start\ne end\n",
 		]);
+	});
+
+	it("never publishes a dependent after its prerequisite failed, while unrelated jobs still publish", async () => {
+		const published: string[] = [];
+		const discarded: string[] = [];
+		const job = (name: string, dependsOn: string[] = [], fail = false): PublishJob => ({
+			name,
+			dependsOn,
+			async pack() {},
+			async publish() {
+				if (fail) throw new Error(`${name} rejected by the registry`);
+				published.push(name);
+			},
+			async discard() {
+				discarded.push(name);
+			},
+		});
+		// Declared out of dependency order on purpose: coding-agent first, as the
+		// real runner schedules prepack packages; waiting must not deadlock.
+		const jobs = [job("coding-agent", ["utils", "ai"]), job("ai", ["utils"]), job("utils", [], true), job("wire")];
+
+		const failed = await runPublishJobs(jobs, 1, () => {});
+
+		expect(failed).toEqual(["coding-agent", "ai", "utils"]);
+		expect(published).toEqual(["wire"]);
+		expect(discarded.toSorted()).toEqual(["ai", "coding-agent"]);
+	});
+
+	it("rejects a dependency cycle instead of waiting forever", async () => {
+		const job = (name: string, dependsOn: string[]): PublishJob => ({ name, dependsOn, async publish() {} });
+		await expect(runPublishJobs([job("a", ["b"]), job("b", ["a"])], 2, () => {})).rejects.toThrow(
+			"publish dependency cycle",
+		);
 	});
 
 	it("serializes sections sharing a pack lock while unlocked sections run immediately", async () => {

@@ -14,8 +14,8 @@
  * attributable build failure.
  */
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -26,6 +26,7 @@ import {
 	verifyHostAddonLoads,
 } from "../../../scripts/bazel-natives";
 import { detectHostAvx2Support, resolveLocalHostAddon } from "../../../scripts/host-detect";
+import { hasVersionStampSlot, stampNativeVersion } from "../../../scripts/stamp-native-version";
 
 // x64 addon filenames carry an ISA suffix (-modern/-baseline), so the name must
 // come from the same resolver the build uses, not `${platform}-${arch}`.
@@ -72,6 +73,29 @@ describe("verifyHostAddonLoads", () => {
 	test.skipIf(!existsSync(hostAddon))("accepts the addon this checkout actually loads", async () => {
 		expect(await failureOf(verifyHostAddonLoads(hostAddon))).toBeUndefined();
 	});
+
+	// The compiled addon, not the Rust source, is the contract: a slot the stamp
+	// tool can find and the addon then reports back. Skipped while the checkout
+	// only has a prebuilt addon from before the stamp slot existed.
+	test.skipIf(!existsSync(hostAddon) || !hasVersionStampSlot(readFileSync(hostAddon)))(
+		"requires the loaded addon to report the version stamped into it",
+		async () => {
+			const directory = await mkdtemp(path.join(tmpdir(), "omp-addon-load-"));
+			const addon = path.join(directory, path.basename(hostAddon));
+			try {
+				await copyFile(hostAddon, addon);
+				await stampNativeVersion(addon, "0.0.0-probe");
+
+				expect(await failureOf(verifyHostAddonLoads(addon, undefined, "0.0.0-probe"))).toBeUndefined();
+				const mismatch = await failureOf(verifyHostAddonLoads(addon, undefined, "9.9.9"));
+				expect(mismatch instanceof Error ? mismatch.message : "").toContain(
+					'addon reports build version "0.0.0-probe", expected "9.9.9"',
+				);
+			} finally {
+				await rm(directory, { recursive: true, force: true });
+			}
+		},
+	);
 
 	// A FIFO with no writer blocks the loader's open() forever: a stand-in for
 	// an addon whose init hangs. Windows has no FIFOs.
