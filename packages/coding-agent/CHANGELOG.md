@@ -19,7 +19,7 @@
 
 ### Changed
 
-- Redefined `auto` completion mode to use Apple's native dictionary on macOS and N-gram on other platforms
+- Unified `auto` completion mode to use the N-gram engine exclusively across all platforms, removing Apple dictionary integration for standard auto-completion
 - Updated word-completion engine to persist ghost text through manual keystrokes by disabling typed-past exclusion
 - Restricted SmolLM model weight prefetching to explicit model activation
 - Updated /play command help description to show space pauses, q quits

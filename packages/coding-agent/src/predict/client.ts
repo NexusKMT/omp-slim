@@ -44,12 +44,11 @@ const RETRY_AFTER_MS = 30_000;
 const ENSURE_ATTEMPTS = 3;
 
 /**
- * Engine serving a configured method. `auto` is Apple's dictionary on macOS
- * and ngram elsewhere, so it never downloads SmolLM's weights; `apple` falls
- * back to ngram off macOS.
+ * Engine serving a configured method. `auto` is ngram, so it never downloads
+ * SmolLM's weights; `apple` falls back to ngram off macOS.
  */
 export function resolveTextPredictMethod(method: WordCompletionEngine): TextPredictMethod {
-	if (method === "auto" || method === "apple") return process.platform === "darwin" ? "apple" : "ngram";
+	if (method === "auto" || (method === "apple" && process.platform !== "darwin")) return "ngram";
 	return method;
 }
 
