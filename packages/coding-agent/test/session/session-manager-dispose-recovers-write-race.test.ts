@@ -130,6 +130,18 @@ function assistantMessage(text: string) {
 	};
 }
 
+/**
+ * `MemorySessionStorage` with `defersSyncPublish` flipped on and no other
+ * change: `close()`'s terminal-rewrite retry only runs for a deferred-publish
+ * backend (the self-race this PR fixes), and `MemorySessionStorage.writeTextAtomic`
+ * has no readback of its own -- unlike `IndexedSessionStorage`'s, which would
+ * mask the gap under test -- so the tolerance exercised below is entirely
+ * `SessionManager`'s own.
+ */
+class DeferredPublishMemoryStorage extends MemorySessionStorage {
+	readonly defersSyncPublish = true;
+}
+
 describe("SessionManager seal()+close() recovers a sync-rewrite conflict against a deferred-publish backend", () => {
 	it("dispose's seal-then-close still lands the final message and the exit record", async () => {
 		const backend = new FakeIndexedBackend();
@@ -197,11 +209,7 @@ describe("SessionManager seal()+close() recovers a sync-rewrite conflict against
 	});
 
 	it("close()'s terminal rewrite tolerates an ack-lost write that landed durably anyway", async () => {
-		// `IndexedSessionStorage.writeTextAtomic` already has its own
-		// readback-on-failure fallback, so it would mask this gap; exercise it
-		// against `MemorySessionStorage`, which has none, so the tolerance
-		// under test is entirely `SessionManager`'s own.
-		const storage = new MemorySessionStorage();
+		const storage = new DeferredPublishMemoryStorage();
 		const manager = SessionManager.create("/cwd", "/sessions/proj", storage);
 		const sessionFile = manager.getSessionFile();
 		if (!sessionFile) throw new Error("expected a session file");

@@ -2361,14 +2361,18 @@ export class SessionManager {
 			},
 			{ ignorePriorError: true },
 		);
-		if (this.#diskFailure && this.#sessionFile && !this.#entriesReleased && this.#shouldHaveSessionFile()) {
-			// seal() already disabled the ordinary mid-life repair path
-			// (#authoritativelyRewriteCurrentStateLocked returns once
-			// #released), on purpose: a revived session must never race a
-			// stale event handler's rewrite. But close() IS the terminal
-			// write it owns, so issue the one catch-up rewrite directly,
-			// under the same disk-queue serialization and readback-on-failure
-			// as the ordinary repair path.
+		if (
+			this.#diskFailure &&
+			this.#sessionFile &&
+			this.#storage.defersSyncPublish &&
+			!this.#entriesReleased &&
+			this.#shouldHaveSessionFile()
+		) {
+			// Deferred-publish only: a synchronous backend's drain() is a
+			// no-op, so any failure there is a genuine external conflict or a
+			// permanent write failure, not a self-race this retry can catch
+			// up on. seal() disabled the ordinary mid-life repair path, so
+			// close() issues the terminal write directly instead.
 			const operationError = this.#diskFailure;
 			const sessionFile = this.#sessionFile;
 			await this.#scheduleDiskWork(
