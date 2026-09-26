@@ -11,7 +11,7 @@ import { parseModelString, splitUpstreamRouting, formatModelSelectorValue } from
  * in the compact alt+p picker ({@link ./model-picker}).
  */
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { KeysApi, Model } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
@@ -89,7 +89,7 @@ export interface ModelHubSource extends ModelBrowserSource {
 
 /** Catalog capabilities required by the model hub. */
 export interface ModelHubRegistry extends ModelBrowserRegistry {
-	readonly authStorage: { hasAuth(provider: string): boolean };
+	readonly authStorage: { readonly keys: Pick<KeysApi, "source"> };
 	getDiscoverableProviders(): string[];
 	getProviderDiscoveryState(provider: string):
 		| {
@@ -451,7 +451,8 @@ export class ModelHubComponent implements Component {
 				// Discoverable without stored auth: catalog-backed providers stay
 				// locked; keyless/custom endpoints (ollama, vllm, …) surface as
 				// selectable so discovery can populate them.
-				if (authStorage.hasAuth(provider) || !locked.has(provider)) {
+				const authenticated = authStorage.keys.source(provider) !== undefined;
+				if (authenticated || !locked.has(provider)) {
 					// #2761: implicit local endpoints (optional: true) stay hidden
 					// until discovery actually reaches a server. "idle" means never
 					// probed; "unavailable" means the endpoint is unreachable; both
@@ -459,7 +460,7 @@ export class ModelHubComponent implements Component {
 					// configured. models.yml discovery providers (optional: false)
 					// and providers with stored auth keep their entry so
 					// misconfigurations stay visible and diagnosable.
-					if (!authStorage.hasAuth(provider)) {
+					if (!authenticated) {
 						const discovery = this.#registry.getProviderDiscoveryState(provider);
 						if (discovery?.optional && (discovery.status === "idle" || discovery.status === "unavailable")) {
 							continue;
@@ -1021,12 +1022,14 @@ export class ModelHubComponent implements Component {
 		return [ThinkingLevel.Inherit, ThinkingLevel.Off, AUTO_THINKING, ...getSupportedEfforts(model)];
 	}
 
+	/** Offer only the roles this model can actually fill (chat roles for chat models, `web` for search runners, …). */
 	#openRoleStrip(item: ModelBrowserItem): void {
 		const chips: StripChip[] = [];
 		const scopedStorage = this.#settings.modelRoleStorage === "project";
 		const scopes: readonly ModelRoleSelectionScope[] = scopedStorage ? ["project", "global"] : ["global"];
 		for (const role of this.#visibleRoleIds()) {
 			const info = this.#settings.getRoleInfo(role);
+			if (!info.accepts(item.model)) continue;
 			const assignment = this.#roles[role];
 			for (const scope of scopes) {
 				const scopedModel = scopedStorage
@@ -1063,7 +1066,10 @@ export class ModelHubComponent implements Component {
 			styled: theme.fg("muted", `fallbacks:${item.model.provider}/*`),
 			action: "fallbackProvider",
 		});
-		chips.push({ label: "fallback", styled: theme.fg("muted", "retry-fallback"), action: "fallback" });
+		// `retry-fallback` appends to the default chain, so only chat-capable models qualify.
+		if (this.#settings.getRoleInfo("default").accepts(item.model)) {
+			chips.push({ label: "fallback", styled: theme.fg("muted", "retry-fallback"), action: "fallback" });
+		}
 		this.#strip = { kind: "role", item, chips, index: 0, returnToRoles: false };
 	}
 
@@ -1557,20 +1563,19 @@ export class ModelHubComponent implements Component {
 			}
 			return;
 		}
-		if (rolesView && matchesKey(data, "ctrl+left")) {
-			this.#moveRoleTab(-1);
+		// Alt+←/→ cycles whichever tab strip is on screen: role tabs in the
+		// Roles view, kind tabs in every browser view. Ctrl+←/→ is unusable on
+		// macOS (Spaces shortcut). macOS terminals (ghostty, Terminal.app,
+		// iTerm) send ESC b / ESC f for Option+←/→, which parse as alt+b /
+		// alt+f — the same aliases the editor's word-motion bindings accept.
+		if (matchesKey(data, "alt+left") || matchesKey(data, "alt+b")) {
+			if (rolesView) this.#moveRoleTab(-1);
+			else this.#moveModelKind(-1);
 			return;
 		}
-		if (rolesView && matchesKey(data, "ctrl+right")) {
-			this.#moveRoleTab(1);
-			return;
-		}
-		if (matchesKey(data, "alt+left")) {
-			this.#moveModelKind(-1);
-			return;
-		}
-		if (matchesKey(data, "alt+right")) {
-			this.#moveModelKind(1);
+		if (matchesKey(data, "alt+right") || matchesKey(data, "alt+f")) {
+			if (rolesView) this.#moveRoleTab(1);
+			else this.#moveModelKind(1);
 			return;
 		}
 
@@ -1622,6 +1627,13 @@ export class ModelHubComponent implements Component {
 			if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n") {
 				this.#requestLogin(entry);
 			}
+			return;
+		}
+
+		// Enter on the sidebar is a pane switch, like →: it lands on the model
+		// rows instead of acting on a row the user cannot see is selected.
+		if (this.#focus === "scope" && (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\n")) {
+			this.#focus = "list";
 			return;
 		}
 
@@ -2010,7 +2022,7 @@ export class ModelHubComponent implements Component {
 			ROLE_TABS.map(tab => ({ label: tab === "kind" ? "kinds" : tab })),
 			Math.max(0, active),
 		);
-		return truncateToWidth(` ${theme.fg("dim", "Roles:")} ${track}  ${theme.fg("dim", "Ctrl+←/→")}`, width);
+		return truncateToWidth(` ${theme.fg("dim", "Roles:")} ${track}  ${theme.fg("dim", "Alt+←/→")}`, width);
 	}
 
 	#statusRow(width: number): string {
@@ -2269,19 +2281,22 @@ export class ModelHubComponent implements Component {
 			return "←/→ thinking level · Enter apply · Esc keep";
 		}
 		if (this.#assigning !== null) {
+			if (this.#focus === "scope") {
+				return "Enter/→ models · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel";
+			}
 			switch (this.#assigning.kind) {
 				case "fallback":
-					return "Enter pick fallback · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel";
+					return "Enter pick fallback · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel";
 				case "fallbackKey":
-					return "Enter pick the protected model · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel";
+					return "Enter pick the protected model · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel";
 				default:
-					return "Enter assign · ↑/↓ providers · type to search · Alt+←/→ kind · Esc cancel";
+					return "Enter assign · ↑/↓ models · ← providers · type to search · Alt+←/→ kind · Esc cancel";
 			}
 		}
 		const entry = this.#activeEntry();
 		if (entry.kind === "roles") {
 			if (this.#focus !== "list") {
-				return "↑/↓ providers · → roles · Ctrl+←/→ tabs · Esc close";
+				return "↑/↓ providers · Enter/→ roles · Alt+←/→ tabs · Esc close";
 			}
 			const row = this.#rolesRows[this.#roleIndex];
 			if (row?.kind === "fallback") {
@@ -2303,9 +2318,11 @@ export class ModelHubComponent implements Component {
 		if (entry.kind === "provider" && entry.locked) {
 			return entry.oauth ? "Enter log in · ↑/↓ providers · Esc close" : "↑/↓ providers · Esc close";
 		}
-		const arrows = this.#focus === "scope" ? "↑/↓ providers · → models" : "↑/↓ models · ← providers";
 		const refresh = entry.kind === "provider" ? " · F5 refresh" : "";
-		return `Enter assign roles · ${arrows} · type to search · Alt+←/→ kind${refresh} · Esc close`;
+		if (this.#focus === "scope") {
+			return `Enter/→ models · ↑/↓ providers · type to search · Alt+←/→ kind${refresh} · Esc close`;
+		}
+		return `Enter assign roles · ↑/↓ models · ← providers · type to search · Alt+←/→ kind${refresh} · Esc close`;
 	}
 
 	#renderFooter(width: number): string {
