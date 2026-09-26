@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a Collab host ending with `a host is already connected for this room` after a brief network drop: when the relay still holds the dropped connection, the host now retries for up to 150 s and reclaims its room ([#12514](https://github.com/can1357/oh-my-pi/issues/12514), [#13355](https://github.com/can1357/oh-my-pi/pull/13355) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.3.2] - 2026-09-25
 
 ### Added
