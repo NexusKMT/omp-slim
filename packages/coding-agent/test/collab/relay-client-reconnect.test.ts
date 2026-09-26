@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { CollabSocket, HOST_RECLAIM_BACKOFF_MAX_MS, HOST_RECLAIM_WINDOW_MS } from "../../src/collab/relay-client";
+import {
+	CollabSocket,
+	HOST_RECLAIM_BACKOFF_MAX_MS,
+	HOST_RECLAIM_CONFIRM_MS,
+	HOST_RECLAIM_WINDOW_MS,
+} from "../../src/collab/relay-client";
 
 const NativeWebSocket = globalThis.WebSocket;
 
@@ -24,7 +29,15 @@ class ScriptedWebSocket {
 		ScriptedWebSocket.instances.push(this);
 	}
 
-	send(_data: unknown): void {}
+	sent: unknown[] = [];
+
+	send(data: unknown): void {
+		this.sent.push(data);
+	}
+
+	deliver(data: string): void {
+		this.onmessage?.(new MessageEvent("message", { data }));
+	}
 
 	open(): void {
 		this.readyState = ScriptedWebSocket.OPEN;
@@ -164,8 +177,79 @@ describe("CollabSocket host room recovery", () => {
 				if (index < 6) refuseDuplicateHost(index);
 			}
 			instance(6).open();
+			// Provisional until the relay has had its chance to refuse it.
+			expect(socket.isOpen).toBe(false);
+			vi.advanceTimersByTime(HOST_RECLAIM_CONFIRM_MS);
 			expect(socket.isOpen).toBe(true);
 			expect(reconnects).toEqual([true, true, true, true, true, true]);
+		} finally {
+			socket.close();
+		}
+	});
+
+	it("leaves the room and backlog alone for an open the relay then refuses", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		vi.spyOn(crypto.subtle, "encrypt").mockResolvedValue(new Uint8Array([1, 2, 3, 4]).buffer);
+		installScriptedWebSocket();
+		const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+		const socket = hostSocket(key);
+		let opens = 0;
+		let recreations = 0;
+		socket.onOpen = () => opens++;
+		socket.onRoomRecreated = () => recreations++;
+		const flush = async () => {
+			for (let i = 0; i < 10; i++) await Promise.resolve();
+		};
+
+		try {
+			socket.connect();
+			instance(0).open();
+			instance(0).relayClose(1006, "Connection ended");
+			// Broadcast backlog queued while the host is offline.
+			socket.send({ t: "error", message: "backlog" });
+			for (const index of [1, 2]) {
+				vi.advanceTimersByTime(1_000);
+				refuseDuplicateHost(index);
+				await flush();
+				expect(instance(index).sent).toEqual([]);
+			}
+			expect({ opens, recreations }).toEqual({ opens: 1, recreations: 0 });
+
+			vi.advanceTimersByTime(2_000);
+			instance(3).open();
+			await flush();
+			expect(instance(3).sent).toEqual([]);
+			vi.advanceTimersByTime(HOST_RECLAIM_CONFIRM_MS);
+			await flush();
+			expect({ opens, recreations }).toEqual({ opens: 2, recreations: 1 });
+			expect(instance(3).sent).toHaveLength(1);
+		} finally {
+			socket.close();
+		}
+	});
+
+	it("confirms a reclaim on the relay's first message, resetting the room before dispatch", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(Math, "random").mockReturnValue(0.5);
+		installScriptedWebSocket();
+		const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+		const socket = hostSocket(key);
+		const events: string[] = [];
+		socket.onOpen = () => events.push("open");
+		socket.onRoomRecreated = () => events.push("recreated");
+		socket.onControl = msg => events.push(msg.t);
+
+		try {
+			socket.connect();
+			instance(0).open();
+			instance(0).relayClose(1006, "Connection ended");
+			vi.advanceTimersByTime(1_000);
+			instance(1).open();
+			expect(events).toEqual(["open"]);
+			instance(1).deliver(JSON.stringify({ t: "peer-joined", peer: 1 }));
+			expect(events).toEqual(["open", "recreated", "open", "peer-joined"]);
+			expect(socket.isOpen).toBe(true);
 		} finally {
 			socket.close();
 		}
