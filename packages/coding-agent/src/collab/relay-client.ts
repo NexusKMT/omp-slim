@@ -33,6 +33,12 @@ const BACKOFF_MAX_MS = 30_000;
  * refusal after this window, or on a first connect, is a real second host.
  */
 export const HOST_RECLAIM_WINDOW_MS = 150_000;
+/**
+ * Backoff cap for those reclaim retries. Each one is a single upgrade the relay
+ * refuses at once, so a short cap costs little and lands the reclaim within a few
+ * seconds of the relay retiring the old socket instead of up to 30 s later.
+ */
+export const HOST_RECLAIM_BACKOFF_MAX_MS = 5_000;
 const MAX_PENDING_SENDS = 256;
 const MAX_PENDING_SEND_BYTES = 16 * 1024 * 1024;
 /**
@@ -88,7 +94,11 @@ export class CollabSocket {
 	#retryMissingRoom = false;
 	/** Set while a transient drop is being retried; the next open is a new room. */
 	#rejoining = false;
-	/** Until when a host takes the relay's duplicate-host close to be its own dropped connection. */
+	/**
+	 * Until when a host takes the relay's duplicate-host close to be its own dropped connection.
+	 * Left set after a reclaim holds: only a reconnect can draw a 4009, and every reconnect
+	 * starts from the transient-drop path, which re-arms the window from that drop.
+	 */
 	#hostReclaimUntil: number | undefined;
 	/** Backoff for those retries: the relay completes each upgrade before refusing it, so `onopen` cannot reset it. */
 	#reclaimAttempt = 0;
@@ -591,7 +601,7 @@ export class CollabSocket {
 			});
 			this.#rejoining = true;
 			this.onClose?.("the relay still holds this host's previous connection", true);
-			this.#scheduleRetry(this.#reclaimAttempt++);
+			this.#scheduleRetry(this.#reclaimAttempt++, HOST_RECLAIM_BACKOFF_MAX_MS);
 			return;
 		}
 		const fatalReason = RELAY_CLOSE_REASONS[code];
@@ -638,8 +648,8 @@ export class CollabSocket {
 		this.onClose?.(reason, false);
 	}
 
-	#scheduleRetry(attempt: number): void {
-		const base = Math.min(BACKOFF_BASE_MS * 2 ** attempt, BACKOFF_MAX_MS);
+	#scheduleRetry(attempt: number, maxMs = BACKOFF_MAX_MS): void {
+		const base = Math.min(BACKOFF_BASE_MS * 2 ** attempt, maxMs);
 		const delay = base * (0.75 + Math.random() * 0.5);
 		this.#retryTimer = setTimeout(() => {
 			this.#retryTimer = undefined;

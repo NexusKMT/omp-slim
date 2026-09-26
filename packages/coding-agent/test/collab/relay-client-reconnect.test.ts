@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import { CollabSocket, HOST_RECLAIM_WINDOW_MS } from "../../src/collab/relay-client";
+import { CollabSocket, HOST_RECLAIM_BACKOFF_MAX_MS, HOST_RECLAIM_WINDOW_MS } from "../../src/collab/relay-client";
 
 const NativeWebSocket = globalThis.WebSocket;
 
@@ -149,21 +149,23 @@ describe("CollabSocket host room recovery", () => {
 			instance(0).open();
 			// The client sees its connection end before the relay retires it.
 			instance(0).relayClose(1006, "Connection ended");
-			// Refusals back off 1 s, 2 s, 4 s even though each one opened first.
+			// Refusals back off 1 s, 2 s, 4 s, then hold at the 5 s reclaim cap, even though each one opened first.
 			for (const [index, delay] of [
 				[1, 1_000],
 				[2, 1_000],
 				[3, 2_000],
 				[4, 4_000],
+				[5, HOST_RECLAIM_BACKOFF_MAX_MS],
+				[6, HOST_RECLAIM_BACKOFF_MAX_MS],
 			] as const) {
 				vi.advanceTimersByTime(delay - 1);
 				expect(ScriptedWebSocket.instances).toHaveLength(index);
 				vi.advanceTimersByTime(1);
-				if (index < 4) refuseDuplicateHost(index);
+				if (index < 6) refuseDuplicateHost(index);
 			}
-			instance(4).open();
+			instance(6).open();
 			expect(socket.isOpen).toBe(true);
-			expect(reconnects).toEqual([true, true, true, true]);
+			expect(reconnects).toEqual([true, true, true, true, true, true]);
 		} finally {
 			socket.close();
 		}
@@ -190,17 +192,25 @@ describe("CollabSocket host room recovery", () => {
 		instance(1).open();
 		const droppedAt = Date.now();
 		instance(1).relayClose(1006, "Connection ended");
-		let next = 2;
-		while (reconnects.at(-1) && next < 40) {
-			for (let waited = 0; ScriptedWebSocket.instances.length <= next && waited < 60; waited++) {
-				vi.advanceTimersByTime(1_000);
-			}
-			refuseDuplicateHost(next++);
+		// With jitter pinned, attempts land at the drop's 1 s retry, then the reclaim
+		// backoff (1, 2, 4 s, then 5 s each). Every refusal before the window closes
+		// reconnects; the first past the 150 s window, at +153 s, is terminal.
+		const attemptOffsetsMs = [1_000, 2_000, 4_000, 8_000];
+		while (attemptOffsetsMs.at(-1)! < HOST_RECLAIM_WINDOW_MS) {
+			attemptOffsetsMs.push(attemptOffsetsMs.at(-1)! + HOST_RECLAIM_BACKOFF_MAX_MS);
 		}
-		const endedAfter = Date.now() - droppedAt;
-		expect(endedAfter).toBeGreaterThanOrEqual(HOST_RECLAIM_WINDOW_MS);
-		expect(endedAfter).toBeLessThan(HOST_RECLAIM_WINDOW_MS + 30_000);
+		expect(attemptOffsetsMs.at(-1)).toBe(153_000);
+		for (const [i, offsetMs] of attemptOffsetsMs.entries()) {
+			const index = i + 2;
+			vi.advanceTimersByTime(droppedAt + offsetMs - Date.now() - 1);
+			expect(ScriptedWebSocket.instances).toHaveLength(index);
+			vi.advanceTimersByTime(1);
+			expect(ScriptedWebSocket.instances).toHaveLength(index + 1);
+			refuseDuplicateHost(index);
+			expect(reconnects.at(-1)).toBe(offsetMs < HOST_RECLAIM_WINDOW_MS);
+		}
+		expect(reconnects).toEqual([true, ...attemptOffsetsMs.map(offsetMs => offsetMs < HOST_RECLAIM_WINDOW_MS)]);
 		vi.advanceTimersByTime(60_000);
-		expect(ScriptedWebSocket.instances).toHaveLength(next);
+		expect(ScriptedWebSocket.instances).toHaveLength(attemptOffsetsMs.length + 2);
 	});
 });
