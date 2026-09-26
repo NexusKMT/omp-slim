@@ -1403,6 +1403,34 @@ describe("CollabController", () => {
 		await joinAsWriter(replacement!);
 	});
 
+	it("backs off a repeated self-ended room while /collab still hosts at once", async () => {
+		const { ctx } = makeControllerContext({ autoStart: "control" });
+		controller = new CollabController(ctx);
+		controller.autoStart();
+		await settled(publishSpy, 1);
+		const endCurrentRoom = () => {
+			const hostSocket = capturedSockets.findLast(s => s.role === "host");
+			if (!hostSocket) throw new Error("host transport socket was never created");
+			hostSocket.onclose?.({ code: 4001, reason: "room closed" });
+		};
+
+		endCurrentRoom();
+		await settled(publishSpy, 2);
+		await controller.idle();
+		expect(controller.host?.generation).toBe(2);
+
+		// Ending again right away must not relaunch immediately: the relay is still failing.
+		endCurrentRoom();
+		await controller.idle();
+		expect(controller.host).toBeUndefined();
+		expect(publishSpy).toHaveBeenCalledTimes(2);
+
+		// An explicit /collab is not held behind the backoff.
+		const manual = await controller.start({ access: "control" });
+		expect(manual.generation).toBe(3);
+		expect(await registry.listCollabHosts({ dir: tmp })).toMatchObject([{ generation: 3 }]);
+	});
+
 	it("leaves a manual room ended on its own unhosted while auto-start is off", async () => {
 		const { ctx } = makeControllerContext({ autoStart: "off" });
 		controller = new CollabController(ctx);
