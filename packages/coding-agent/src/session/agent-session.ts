@@ -6892,7 +6892,7 @@ export class AgentSession implements SettingsScope {
 		// Handle extension commands first (execute immediately, even during streaming)
 		if (expandPromptTemplates && text.startsWith("/")) {
 			if (options?.runCommands !== false) {
-				const handled = await this.#tryExecuteExtensionCommand(text);
+				const handled = await this.#tryExecuteExtensionCommand(text, options?.onPromptAdmitted);
 				if (handled) {
 					return false;
 				}
@@ -6953,6 +6953,7 @@ export class AgentSession implements SettingsScope {
 				attribution: promptAttribution,
 				prependMessages: keywordNotices,
 				rawText: typedText,
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7009,6 +7010,7 @@ export class AgentSession implements SettingsScope {
 					images: normalizedImages,
 					descriptionNotice: imageDescriptionNotice,
 				},
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7094,7 +7096,7 @@ export class AgentSession implements SettingsScope {
 	 */
 	async promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
@@ -7104,7 +7106,7 @@ export class AgentSession implements SettingsScope {
 
 	async #promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
@@ -7126,7 +7128,7 @@ export class AgentSession implements SettingsScope {
 	async #dispatchCustomPrompt<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options:
-			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 					queueChipText?: string;
 					queueOnly?: boolean;
 			  })
@@ -7173,6 +7175,7 @@ export class AgentSession implements SettingsScope {
 			await this.#queueCustomMessage(message, streamingBehavior, {
 				queueChipText: options?.queueChipText,
 				prependMessages: keywordNotices,
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7211,6 +7214,7 @@ export class AgentSession implements SettingsScope {
 				queueChipText: options?.queueChipText,
 				preprocessed: { content: preparedMessage.content, descriptionNotice },
 				prependMessages: keywordNotices,
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7361,7 +7365,10 @@ export class AgentSession implements SettingsScope {
 	async #promptWithMessage(
 		message: AgentMessage,
 		expandedText: string,
-		options?: Pick<PromptOptions, "toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace"> & {
+		options?: Pick<
+			PromptOptions,
+			"toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace" | "onPromptAdmitted"
+		> & {
 			prependMessages?: AgentMessage[];
 			skipPostPromptRecoveryWait?: boolean;
 			acceptTerminalEmptyStop?: boolean;
@@ -7377,6 +7384,7 @@ export class AgentSession implements SettingsScope {
 		const setupAbort = new AbortController();
 		this.#promptSetupAbortController = setupAbort;
 		try {
+			options?.onPromptAdmitted?.();
 			await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
 			// Flush any pending bash messages before the new prompt
@@ -7595,8 +7603,9 @@ export class AgentSession implements SettingsScope {
 
 	/**
 	 * Try to execute an extension command. Returns true if command was found and executed.
+	 * `onRouted` fires once the command is found, before its handler runs.
 	 */
-	async #tryExecuteExtensionCommand(text: string): Promise<boolean> {
+	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
 		if (!this.#extensionRunner) return false;
 
 		// Parse command name and args
@@ -7606,6 +7615,7 @@ export class AgentSession implements SettingsScope {
 
 		const command = this.#extensionRunner.getCommand(commandName);
 		if (!command) return false;
+		onRouted?.();
 
 		// Get command context from extension runner (includes session control methods)
 		const ctx = this.#extensionRunner.createCommandContext();
@@ -7874,6 +7884,8 @@ export class AgentSession implements SettingsScope {
 				images?: ImageContent[];
 				descriptionNotice?: CustomMessage;
 			};
+			/** Called synchronously once the message is pushed onto its queue. See {@link PromptOptions.onPromptAdmitted}. */
+			onPromptAdmitted?: () => void;
 		},
 	): Promise<void> {
 		const attribution = options?.attribution ?? "user";
@@ -7918,6 +7930,7 @@ export class AgentSession implements SettingsScope {
 			this.#queuedMessageRawText.set(userMessage, rawText);
 			records.push(userMessage);
 			this.#irc.queueAside(records);
+			options?.onPromptAdmitted?.();
 			// The awaits above (image normalization / vision description) can span the run's
 			// settle, so the run may already be idle by the time the record lands in the aside
 			// queue with no loop left to drain it. Resuming here is a no-op while streaming and
@@ -7953,6 +7966,7 @@ export class AgentSession implements SettingsScope {
 			this.#queuedMessageRawText.set(userMessage, rawText);
 			this.agent.steer(userMessage);
 		}
+		options?.onPromptAdmitted?.();
 		this.#scheduleIdleQueueDrain();
 	}
 
@@ -8153,6 +8167,8 @@ export class AgentSession implements SettingsScope {
 			preprocessed?: { content: CustomMessage<T>["content"]; descriptionNotice?: CustomMessage };
 			/** Hidden notices published immediately before this message, in the same synchronous group. */
 			prependMessages?: readonly CustomMessage[];
+			/** Called synchronously once the message is pushed onto its queue. See {@link PromptOptions.onPromptAdmitted}. */
+			onPromptAdmitted?: () => void;
 		},
 	): Promise<void> {
 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
@@ -8178,6 +8194,7 @@ export class AgentSession implements SettingsScope {
 		};
 		const preprocessed = options?.preprocessed;
 		const prependMessages = options?.prependMessages ?? [];
+		const onPromptAdmitted = options?.onPromptAdmitted;
 		const normalizedAppMessage = preprocessed
 			? { ...appMessage, content: preprocessed.content }
 			: await this.#normalizeAgentMessageImages(appMessage);
@@ -8194,6 +8211,7 @@ export class AgentSession implements SettingsScope {
 				...(descriptionNotice ? [descriptionNotice] : []),
 				normalizedAppMessage,
 			]);
+			onPromptAdmitted?.();
 			// The image-normalization await above can span the run's settle, so the run may
 			// already be idle by the time the record lands in the aside queue with no loop
 			// left to drain it. Resuming here is a no-op while streaming and wakes/folds
@@ -8212,6 +8230,7 @@ export class AgentSession implements SettingsScope {
 			if (descriptionNotice) this.agent.steer(descriptionNotice);
 			this.agent.steer(normalizedAppMessage);
 		}
+		onPromptAdmitted?.();
 		this.#scheduleIdleQueueDrain();
 	}
 
