@@ -1,5 +1,5 @@
 import { normalizedRecallWeights, temporalHalflifeHours } from "../../config";
-import { hasCjk, matchesRecallPrefix } from "../../util/regex";
+import { hasCjk, matchesWordForm } from "../../util/regex";
 import { embedQuery } from "../embeddings";
 import { mmrRerank } from "../mmr";
 import { adjustWeights, classifyIntent } from "../query-intent";
@@ -252,7 +252,7 @@ function factExpandedTokenGroups(query: string, content: string): string[][] {
 	return groups;
 }
 
-// Match whole tokens or forward prefixes; CJK text need not separate words with spaces.
+// Match whole tokens or another form of the same word; CJK text need not separate words with spaces.
 function lexicalGroupRelevance(queryGroups: readonly (readonly string[])[], content: string): number {
 	if (queryGroups.length === 0) return 0;
 	const tokens = tokenize(content);
@@ -273,7 +273,7 @@ function lexicalGroupRelevance(queryGroups: readonly (readonly string[])[], cont
 		} else if (
 			group.some(token => {
 				for (const contentToken of contentTokens) {
-					if (matchesRecallPrefix(token, contentToken)) return true;
+					if (matchesWordForm(token, contentToken)) return true;
 				}
 				return false;
 			})

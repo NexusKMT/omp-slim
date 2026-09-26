@@ -12,13 +12,11 @@ import {
 	generateId,
 	generateStableId,
 	inMemoryVecSearch,
-	lexicalRelevance,
 	normalizeImportance,
 	normalizeMetadata,
 	normalizeWeights,
 	recallTokens,
 	recencyDecay,
-	strictFactMatches,
 	temporalBoost,
 	workingMemoryVecSearch,
 } from "@oh-my-pi/pi-mnemopi/core/beam/helpers";
@@ -49,21 +47,6 @@ describe("beam helper ids, weights, and metadata", () => {
 });
 
 describe("beam lexical and FTS helpers", () => {
-	it("does not treat identifier or word substrings as lexical evidence", () => {
-		expect(lexicalRelevance(["1password"], "The gates pass.", "1password")).toBe(0);
-		expect(lexicalRelevance(["redis"], "A predisposition to word games.", "redis")).toBe(0);
-		expect(strictFactMatches("redis", "A predisposition to word games.")).toBe(false);
-		expect(lexicalRelevance(["backup"], "Nightly backups run at 03:00.", "backup")).toBeGreaterThan(0);
-		expect(strictFactMatches("backup", "Nightly backups run at 03:00.")).toBe(true);
-		expect(lexicalRelevance(["backup"], "We will be back tomorrow.", "backup")).toBe(0);
-	});
-
-	it("scores inflected query words against their stored stems", () => {
-		expect(lexicalRelevance(["facts"], "One fact about backups.", "facts")).toBeGreaterThan(0);
-		expect(strictFactMatches("deploying", "The team will deploy on Friday.")).toBe(true);
-		expect(lexicalRelevance(["passwords"], "The gates pass.", "passwords")).toBe(0);
-	});
-
 	it("builds stopword-filtered FTS terms with query-side synonyms", () => {
 		expect(recallTokens("What is my branding preference for the professional URL? 123")).toEqual([
 			"branding",
@@ -90,23 +73,9 @@ describe("beam lexical and FTS helpers", () => {
 		expect(buildFtsQuery('say "hello"')).toBe('"say" OR "hello"');
 	});
 
-	it("matches lexical, strict fact, and CJK queries conservatively", () => {
-		const tokens = recallTokens("telemetry api latency");
-		expect(lexicalRelevance(tokens, "telemetry_api_latency_ms should stay below 200", "telemetry api latency")).toBe(
-			1,
-		);
-		expect(
-			lexicalRelevance(recallTokens("purple quantum oatmeal"), "telemetry_api_latency_ms", "purple quantum oatmeal"),
-		).toBe(0);
-		expect(strictFactMatches("where is hermes profile", "Hermes profile URL is https://example.test/hermes")).toBe(
-			true,
-		);
-		expect(
-			strictFactMatches("where is the unrelated thing", "Hermes profile URL is https://example.test/hermes"),
-		).toBe(false);
+	it("detects spaceless CJK text and builds CJK FTS terms", () => {
 		expect(containsSpacelessCjk("東京で会う")).toBe(true);
 		expect(cjkFtsTerms("東京東京")).toEqual(["東", "京", '"東京"', '"京東"']);
-		expect(lexicalRelevance([], "明日は東京で会議", "東京")).toBe(1);
 	});
 });
 

@@ -142,24 +142,24 @@ describe("beam recall free functions", () => {
 		]);
 	});
 
-	it("retains forward word prefixes without matching shorter or interior fragments", async () => {
+	it("matches other forms of a query word but not longer words that merely start with it", async () => {
 		const beam = makeBeam();
 		insertWorking(beam, "backups", "Nightly backups run at 03:00.");
-		insertWorking(beam, "deployed", "The service was deployed yesterday.");
-		insertWorking(beam, "short-fragment", "We will be back tomorrow.");
-		expect((await recall(beam, "backup", 5, { queryEmbedding: null })).map(result => result.id)).toEqual(["backups"]);
-		expect((await recall(beam, "deploy", 5, { queryEmbedding: null })).map(result => result.id)).toEqual([
-			"deployed",
-		]);
-	});
-
-	it("matches plural and inflected query words against their stored stems, not compounds", async () => {
-		const beam = makeBeam();
-		insertWorking(beam, "stem", "One fact about the nightly backup.");
-		insertWorking(beam, "fragment", "The qualification gates pass.");
-		expect((await recall(beam, "facts", 5, { queryEmbedding: null })).map(result => result.id)).toEqual(["stem"]);
-		expect((await recall(beam, "backups", 5, { queryEmbedding: null })).map(result => result.id)).toEqual(["stem"]);
-		expect(await recall(beam, "passwords", 5, { queryEmbedding: null })).toEqual([]);
+		insertWorking(beam, "deployment", "The deployment finished yesterday.");
+		insertWorking(beam, "cache", "Clear the cache before the benchmark.");
+		insertWorking(beam, "story", "The story covers the login flow.");
+		insertWorking(beam, "fact", "One fact about the nightly job.");
+		insertWorking(beam, "fragments", "We will be back tomorrow; the gates pass; redistribution is paused.");
+		const ids = async (query: string) =>
+			(await recall(beam, query, 5, { queryEmbedding: null })).map(result => result.id);
+		expect(await ids("backup")).toEqual(["backups"]);
+		expect(await ids("deploy")).toEqual(["deployment"]);
+		expect(await ids("caching")).toEqual(["cache"]);
+		expect(await ids("stories")).toEqual(["story"]);
+		expect(await ids("facts")).toEqual(["fact"]);
+		for (const query of ["passwords", "passport", "redis", "background"]) {
+			expect(await ids(query)).toEqual([]);
+		}
 	});
 
 	it("preserves synonym and semantic-only recall without substring lexical evidence", async () => {
