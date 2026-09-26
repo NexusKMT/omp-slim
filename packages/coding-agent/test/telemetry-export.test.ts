@@ -44,6 +44,23 @@ describe("initTelemetryExport gating", () => {
 		expect(isTelemetryExportEnabled()).toBe(false);
 	});
 
+	it("keeps OTLP export disabled when the user opts out despite configured endpoints", async () => {
+		const probe = fileURLToPath(new URL("./otel-disabled-probe.ts", import.meta.url));
+		const proc = Bun.spawn([process.execPath, probe], {
+			env: { ...process.env },
+			stdin: "ignore",
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		const output = new Response(proc.stdout).text();
+		const exitCode = await proc.exited;
+
+		expect({ exitCode, output: (await output).trim() }).toEqual({
+			exitCode: 0,
+			output: "PROBE: DISABLED",
+		});
+	}, 10_000);
+
 	it("stays disabled when OTEL_SDK_DISABLED=true even with an endpoint", async () => {
 		process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4318";
 		process.env.OTEL_SDK_DISABLED = "true";
