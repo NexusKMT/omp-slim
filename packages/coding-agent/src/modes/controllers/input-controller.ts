@@ -877,10 +877,11 @@ export class InputController {
 				return;
 			}
 
-			// Empty submit while streaming with queued messages: abort the active
-			// turn and let the post-unwind drain deliver the agent-core queue.
+			// Empty submit while streaming with queued (or live-steered) messages:
+			// abort the active turn and let the post-unwind drain deliver the
+			// agent-core queue.
 			if (!text && !hasPendingImages && this.ctx.session.isStreaming) {
-				if (this.ctx.session.queuedMessageCount > 0) {
+				if (this.ctx.session.hasInterruptibleInput) {
 					const aborting = this.ctx.session.abort({ reason: USER_INTERRUPT_LABEL });
 					await aborting;
 					this.ctx.updatePendingMessagesDisplay();
@@ -1268,7 +1269,7 @@ export class InputController {
 		const imageLinks =
 			images && this.ctx.editor.pendingImageLinks.length > 0 ? [...this.ctx.editor.pendingImageLinks] : undefined;
 		if (!text && !images) {
-			if (target.isStreaming && target.queuedMessageCount > 0) {
+			if (target.isStreaming && target.hasInterruptibleInput) {
 				const aborting = target.abort({ reason: USER_INTERRUPT_LABEL });
 				await aborting;
 				this.ctx.updatePendingMessagesDisplay();

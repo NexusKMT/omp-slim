@@ -18,6 +18,8 @@
 
 ### Changed
 
+- Updated empty-submit interrupt policy to account for live-steered messages alongside queued input
+- Updated UI chip display to surface live-steered messages pending transcript recording
 - Updated ps command to list exited global services with --all and show live globals by default
 - Migrated all internal download progress UI to a unified activity registry, replacing legacy per-model overlay logic
 - Updated `omp tiny-models download` to support downloading the word-completion model
