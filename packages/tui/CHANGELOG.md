@@ -25,6 +25,10 @@
 
 - Fixed missing background tint on truncated skip lines
 
+### Fixed
+
+- Fixed the rewind filter finding nothing for query words in scripts without spaces (e.g. Chinese): non-Latin words now match as substrings while Latin words keep whole-word matching ([#13361](https://github.com/can1357/oh-my-pi/pull/13361) by [@jchanghong023](https://github.com/jchanghong023))
+
 ## [18.3.1] - 2026-09-25
 
 ### Breaking Changes
