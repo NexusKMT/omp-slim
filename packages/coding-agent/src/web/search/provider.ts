@@ -1,4 +1,5 @@
 import type { WebSearchGrounding } from "@oh-my-pi/pi-catalog/types";
+import { OpenAIProvider } from "./providers/openai";
 import type { SearchProvider } from "./providers/base";
 import { getSearchProviderLabel, type SearchEngineId, SearchProviderError } from "./types";
 
@@ -6,10 +7,9 @@ export type { SearchParams } from "./providers/base";
 export { SearchProvider } from "./providers/base";
 
 /**
- * Search-first-use boundary: every provider module (and its HTTP/MCP/browser
- * dependencies) loads only when a search actually selects it, so the ~40
- * provider modules stay out of interactive startup. Instances are memoized
- * per id, matching the previous singleton-per-provider behavior.
+ * Existing search engines and grounded providers load on first selection.
+ * The lightweight OpenAI API adapter is imported eagerly; instances remain
+ * memoized per id.
  */
 type ProviderLoader = () => Promise<SearchProvider>;
 
@@ -44,6 +44,7 @@ const GROUNDED_PROVIDER_LOADERS: ProviderRegistry<WebSearchGrounding> = {
 	codex: () => import("./providers/codex").then(m => new m.CodexProvider()),
 	xai: () => import("./providers/xai").then(m => new m.XAIProvider()),
 	openrouter: () => import("./providers/openrouter").then(m => new m.OpenRouterGroundedProvider()),
+	openai: async () => new OpenAIProvider(),
 };
 
 const providerInstances = new Map<string, Promise<SearchProvider>>();

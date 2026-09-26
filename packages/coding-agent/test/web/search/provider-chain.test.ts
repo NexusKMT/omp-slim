@@ -68,6 +68,54 @@ describe("web model role resolution", () => {
 		expect(candidates.some(candidate => candidate.model.id === "duckduckgo")).toBe(true);
 	});
 
+	it("keeps direct OpenAI API search after available Codex OAuth candidates", async () => {
+		const authStorage = createInMemoryAuthStorage();
+		storages.add(authStorage);
+		authStorage.keys.setRuntime("openai", "test-openai-key");
+		await authStorage.credentials.set("openai-codex", {
+			type: "oauth",
+			access: "test-codex-access",
+			refresh: "test-codex-refresh",
+			expires: Date.now() + 3_600_000,
+		});
+		const settings = Settings.isolated();
+		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
+		const pool = roleCandidatePool("web", settings, modelRegistry).filter(
+			model => model.provider === "openai-codex" || model.provider === "openai",
+		);
+		const candidates = resolveRoleChain("web", settings, pool);
+
+		const lastCodexIndex = candidates.reduce(
+			(last, candidate, index) => (candidate.model.provider === "openai-codex" ? index : last),
+			-1,
+		);
+		const openAiApiIndex = candidates.findIndex(
+			candidate => candidate.model.provider === "openai" && candidate.model.id === "gpt-5.6-luna",
+		);
+
+		expect(lastCodexIndex).toBeGreaterThanOrEqual(0);
+		expect(openAiApiIndex).toBeGreaterThan(lastCodexIndex);
+		expect(candidates[openAiApiIndex]?.explicit).toBe(false);
+	});
+
+	it("selects the bundled direct OpenAI model when it is the only eligible web candidate", () => {
+		const authStorage = createInMemoryAuthStorage();
+		storages.add(authStorage);
+		authStorage.keys.setRuntime("openai", "test-openai-key");
+		const settings = Settings.isolated();
+		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
+		const pool = roleCandidatePool("web", settings, modelRegistry).filter(
+			model => model.provider === "openai" && model.id === "gpt-5.6-luna",
+		);
+
+		const candidates = resolveRoleChain("web", settings, pool);
+
+		expect(candidates.map(candidate => `${candidate.model.provider}/${candidate.model.id}`)).toEqual([
+			"openai/gpt-5.6-luna",
+		]);
+		expect(candidates[0]?.explicit).toBe(false);
+	});
+
 	it("marks configured primaries and configured fallbacks explicit", () => {
 		const { pool, settings } = createRuntime({
 			modelRoles: { web: "web/perplexity" },

@@ -3,6 +3,7 @@
 provider "openai" {
 	default-model "gpt-5.5"
 	env "OPENAI_API_KEY"
+	web-search "openai"
 	kind-apis {
 		embedding "openai-embeddings"
 		image "openai-responses"

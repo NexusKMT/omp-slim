@@ -52,6 +52,7 @@ describe("outlier catalog policies", () => {
 			["google-antigravity", "google-gemini-cli", "gemini"],
 			["anthropic", "anthropic-messages", "anthropic"],
 			["openai-codex", "openai-codex-responses", "codex"],
+			["openai", "openai-responses", "openai"],
 			["xai", "openai-responses", "xai"],
 			["xai-oauth", "openai-responses", "xai"],
 			["openrouter", "openrouter", "openrouter"],
