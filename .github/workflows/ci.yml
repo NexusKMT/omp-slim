@@ -489,13 +489,15 @@ jobs:
               done
          # The two jobs' target lists must together cover //:natives-linux-all
          # exactly; a target added to the filegroup but to neither list would
-         # otherwise silently never build or ship.
+         # otherwise silently never build or ship. cquery, not query: the rc's
+         # --config=ci is defined for build only, which cquery inherits and
+         # query rejects; this also reuses the warm server.
          - name: Check addon target lists cover natives-linux-all
            run: |
               set -euo pipefail
               read -r -a listed <<< "$NATIVES_X64_TARGETS $NATIVES_CROSS_TARGETS"
               expected="$(printf '%s\n' "${listed[@]}" | sort)"
-              actual="$(bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" query 'labels(srcs, //:natives-linux-all)' 2>"$RUNNER_TEMP/query.err" | sed 's/.*://' | sort)" || {
+              actual="$(bazelisk --bazelrc="${{ steps.cache.outputs.rc }}" cquery 'labels(srcs, //:natives-linux-all)' 2>"$RUNNER_TEMP/query.err" | sed -E 's/ \(.*\)$//; s/.*://' | sort)" || {
                 cat "$RUNNER_TEMP/query.err"
                 exit 1
               }
@@ -830,6 +832,13 @@ jobs:
    # uses Bazel/Xcode and Windows ARM64 uses Cargo/MSVC. They gate on
    # release_metadata alone and start as soon as a release is detected, fully
    # overlapped with the tests.
+   #
+   # darwin-x64 builds on Apple silicon: Xcode cross-compiles the x86_64 addon
+   # and bun cross-compiles the binary, and the leg took 25-35 min on
+   # macos-15-intel vs 11-16 min for darwin-arm64. It must be macos-15, not
+   # macos-14: the smoke runs the x86_64 binary under Rosetta, and only
+   # macOS 15's Rosetta translates the AVX2 the bun-darwin-x64 runtime uses
+   # (macOS 14: "CPU lacks AVX support", SIGILL on --smoke-test).
    release_binary_hosted:
       name: "Release binary: ${{ matrix.target_id }}"
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() }}
@@ -839,7 +848,7 @@ jobs:
          matrix:
             include:
                - {
-                    os: macos-15-intel,
+                    os: macos-15,
                     platform: darwin,
                     target_id: darwin-x64,
                     binary_path: packages/coding-agent/binaries/omp-darwin-x64,
