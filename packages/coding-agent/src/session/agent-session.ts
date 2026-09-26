@@ -312,7 +312,7 @@ import {
 	type CodexResetPlan,
 	type CodexResetTrigger,
 	ATTEMPT_COOLDOWN_MS,
-	codexResetAccountKey,
+	codexResetLockKey,
 	defaultCodexAutoRedeemCoordinator,
 	isTerminalRedeemOutcome,
 	overlayLiveResetCredits,
@@ -11413,8 +11413,8 @@ export class AgentSession implements SettingsScope {
 		return plan;
 	}
 
-	#codexResetLockPath(accountKey: string, coordinator: CodexAutoRedeemCoordinator): string {
-		return `${coordinator.resetLockPath ?? getAgentDbPath()}.reset-${Bun.hash(accountKey).toString(16)}`;
+	#codexResetLockPath(lockKey: string, coordinator: CodexAutoRedeemCoordinator): string {
+		return `${coordinator.resetLockPath ?? getAgentDbPath()}.reset-${Bun.hash(lockKey).toString(16)}`;
 	}
 
 	async #readCodexResetMarker(lockPath: string): Promise<{ state: string; atMs: number }> {
@@ -11434,8 +11434,9 @@ export class AgentSession implements SettingsScope {
 		coordinator: CodexAutoRedeemCoordinator,
 	): Promise<boolean> {
 		const active = statuses.find(status => status.active && status.provider === "openai-codex");
-		if (!active) return false;
-		const lockPath = this.#codexResetLockPath(codexResetAccountKey(active.orgId, active.credentialId), coordinator);
+		const lockKey = active && codexResetLockKey(active);
+		if (!lockKey) return false;
+		const lockPath = this.#codexResetLockPath(lockKey, coordinator);
 		await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
 		return withFileLock(
 			lockPath,
@@ -11474,12 +11475,14 @@ export class AgentSession implements SettingsScope {
 					// Caller cancellation must not leave an ambiguous consume in flight.
 					signal: AbortSignal.timeout(15_000),
 				};
-				if (provider === "anthropic") {
+				const lockKey = provider === "openai-codex" ? codexResetLockKey(action.target) : undefined;
+				if (!lockKey) {
+					// Claude, or a Codex account with no upstream identity to fence on.
 					outcome = await authStorage.resets.redeem(redeemOptions);
 				} else {
 					// The coordinator is process-local. Fence concurrent processes and
 					// remember a recent attempt so a late 429 cannot spend again.
-					const lockPath = this.#codexResetLockPath(action.accountKey, coordinator);
+					const lockPath = this.#codexResetLockPath(lockKey, coordinator);
 					await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
 					outcome = await withFileLock(
 						lockPath,

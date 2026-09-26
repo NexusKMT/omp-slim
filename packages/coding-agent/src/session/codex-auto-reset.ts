@@ -297,7 +297,7 @@ export function planCodexResetRedemptions(input: CodexResetPlanInput): CodexRese
 			skipped.push({ accountKey: "*", rule: "account", reason: "credits-unknown" });
 			continue;
 		}
-		const accountKey = codexResetAccountKey(orgId, credentialId);
+		const accountKey = `openai-codex|${orgId?.trim().toLowerCase() ?? "-"}|${credentialId}`;
 		const isActive =
 			report.metadata?.resetCreditActive === true || reportMatchesActiveAccount(report, input.identity);
 		if (nowMs - report.fetchedAt > REPORT_FRESHNESS_MS) {
@@ -537,9 +537,20 @@ export function planCodexResetRedemptions(input: CodexResetPlanInput): CodexRese
 	return { actions, skipped };
 }
 
-/** Stable per-credential identity for cross-session redemption coordination. */
-export function codexResetAccountKey(orgId: string | undefined, credentialId: number): string {
-	return `openai-codex|${orgId?.trim().toLowerCase() ?? "-"}|${credentialId}`;
+/**
+ * Cross-process lock identity for one upstream Codex account. Saved resets are
+ * a ChatGPT-account balance, not a local credential row: credential stores
+ * (SDK `agentDir`s) reuse row ids, so sessions share a fence exactly when they
+ * share the account. Undefined when the account cannot be identified.
+ */
+export function codexResetLockKey(identity: {
+	accountId?: string;
+	email?: string;
+	orgId?: string;
+}): string | undefined {
+	const account = (identity.accountId ?? identity.email)?.trim().toLowerCase();
+	if (!account) return undefined;
+	return `openai-codex|${identity.orgId?.trim().toLowerCase() ?? "-"}|${account}`;
 }
 
 /** One attempt per (account, weekly-reset-minute) block episode. */

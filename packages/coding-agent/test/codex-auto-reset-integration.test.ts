@@ -57,11 +57,13 @@ interface CodexReportOpts {
 	limitReached: boolean;
 	credits: number;
 	creditExpiresInMs?: number;
+	accountId?: string;
 }
 
 /** A fresh openai-codex usage report for the stubbed account. */
 function codexReport(opts: CodexReportOpts): UsageReport {
 	const now = Date.now();
+	const accountId = opts.accountId ?? ACCOUNT_ID;
 	return {
 		provider: "openai-codex",
 		fetchedAt: now,
@@ -69,14 +71,14 @@ function codexReport(opts: CodexReportOpts): UsageReport {
 			{
 				id: "openai-codex:primary",
 				label: "5 Hour",
-				scope: { provider: "openai-codex", accountId: ACCOUNT_ID },
+				scope: { provider: "openai-codex", accountId },
 				window: { id: "5h", label: "5 Hour", resetsAt: now + 2 * HOUR },
 				amount: { usedFraction: opts.primaryUsed, unit: "percent" },
 			},
 			{
 				id: "openai-codex:secondary",
 				label: "Weekly",
-				scope: { provider: "openai-codex", accountId: ACCOUNT_ID },
+				scope: { provider: "openai-codex", accountId },
 				window: { id: "7d", label: "Weekly", resetsAt: now + 3 * 24 * HOUR },
 				amount: { usedFraction: opts.weeklyUsed, unit: "percent" },
 			},
@@ -88,16 +90,20 @@ function codexReport(opts: CodexReportOpts): UsageReport {
 					? undefined
 					: [{ status: "available", expiresAt: new Date(now + opts.creditExpiresInMs).toISOString() }],
 		},
-		metadata: { accountId: ACCOUNT_ID, email: EMAIL, limitReached: opts.limitReached },
+		metadata: { accountId, email: EMAIL, limitReached: opts.limitReached },
 	};
 }
 
 /** Live credits-route row for the stubbed account, as the overlay consumes it. */
-function liveCreditStatus(availableCount: number, expiresInMs?: number): ResetCreditAccountStatus {
+function liveCreditStatus(
+	availableCount: number,
+	expiresInMs?: number,
+	accountId: string = ACCOUNT_ID,
+): ResetCreditAccountStatus {
 	return {
 		provider: "openai-codex",
 		credentialId: 1,
-		accountId: ACCOUNT_ID,
+		accountId,
 		email: EMAIL,
 		active: true,
 		availableCount,
@@ -151,6 +157,7 @@ describe("codex saved-reset trigger integration", () => {
 		liveCredits: ResetCreditAccountStatus[];
 		streamErrorFirst?: boolean;
 		storage?: AuthStorage;
+		accountId?: string;
 	}
 
 	interface Harness {
@@ -164,7 +171,7 @@ describe("codex saved-reset trigger integration", () => {
 		const model = getBundledModel("openai-codex", "gpt-5.5");
 		if (!model) throw new Error("Expected bundled openai-codex/gpt-5.5 to exist");
 		storage.keys.setRuntime("openai-codex", "test-key");
-		vi.spyOn(storage.oauth, "identity").mockReturnValue({ accountId: ACCOUNT_ID, email: EMAIL });
+		vi.spyOn(storage.oauth, "identity").mockReturnValue({ accountId: opts.accountId ?? ACCOUNT_ID, email: EMAIL });
 		vi.spyOn(storage.usage, "reports").mockImplementation(async () => (opts.report ? [opts.report] : null));
 		vi.spyOn(storage.resets, "list").mockImplementation(async () => opts.liveCredits);
 		const redeemTargets: ResetCreditTarget[] = [];
@@ -384,6 +391,44 @@ describe("codex saved-reset trigger integration", () => {
 					),
 			).toBe(true);
 		}
+	});
+
+	it("does not reuse another account's reset when credential stores share a credential id", async () => {
+		const settings = { "codexResets.autoRedeem": "yes", "codexResets.salvageHorizonHours": 0 };
+		const first = buildSession({
+			settings,
+			report: codexReport({ primaryUsed: 0.6, weeklyUsed: 1, limitReached: true, credits: 1 }),
+			liveCredits: [liveCreditStatus(1)],
+			streamErrorFirst: true,
+		});
+		mockSchedulerWaitWithClock();
+		await first.session.prompt("block the first account");
+		await first.session.waitForIdle();
+
+		// Another agentDir's store also numbers its first Codex row 1, but for a different account.
+		const otherStorage = await AuthStorage.create(":memory:");
+		extraStorages.push(otherStorage);
+		const other = buildSession({
+			settings,
+			storage: otherStorage,
+			accountId: "acct-other",
+			report: codexReport({
+				primaryUsed: 0.6,
+				weeklyUsed: 1,
+				limitReached: true,
+				credits: 1,
+				accountId: "acct-other",
+			}),
+			liveCredits: [liveCreditStatus(1, undefined, "acct-other")],
+			streamErrorFirst: true,
+		});
+		await other.session.prompt("block an unrelated account");
+		await other.session.waitForIdle();
+
+		expect(first.redeemTargets).toHaveLength(1);
+		expect(other.redeemTargets).toEqual([
+			{ provider: "openai-codex", credentialId: 1, accountId: "acct-other", email: EMAIL },
+		]);
 	});
 
 	it("asks before spending in unset mode and never spends headless", async () => {
