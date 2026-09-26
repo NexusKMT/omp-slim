@@ -7,6 +7,7 @@
  */
 
 import * as fs from "node:fs";
+import { APP_NAME } from "./dirs";
 import * as logger from "./logger";
 import { restoreTerminalStderr } from "./stderr-guard";
 
@@ -366,6 +367,40 @@ export function registerStdioDisconnectHandling(): () => void {
 			process.stdout.removeListener("error", onStdoutDisconnect);
 		}
 	};
+}
+
+/**
+ * Fail a process entry whose event loop drains while `work` is still pending.
+ *
+ * The CLI starts from a floating `runCli()` call because top-level await breaks
+ * `--bytecode` builds. When a one-shot command awaits a promise that never
+ * settles and holds no live handle, the loop drains and Bun exits 0 without
+ * output: an unfinished command reported as success. `beforeExit` fires in
+ * exactly that state; explicit exits (`process.exit`, {@link quit},
+ * {@link exitProcess}, the signal handlers) never emit it.
+ *
+ * The report runs once and only sets `process.exitCode`, so later `beforeExit`
+ * listeners (LSP shutdown) still run before the process exits 1. It schedules
+ * no work: a `beforeExit` listener that does fires again after that work drains.
+ */
+export function reportUnsettledEntry(work: Promise<unknown>): void {
+	if (!Bun.isMainThread) return;
+	let pending = true;
+	const settled = (): void => {
+		pending = false;
+	};
+	// Observe both outcomes without claiming the rejection: the caller's `.catch` still owns it.
+	void work.then(settled, settled);
+	process.once("beforeExit", () => {
+		if (!pending) return;
+		const message =
+			"command ended before completing: the event loop drained while it was still pending (rerun with PI_DEBUG_STARTUP=1 to see the last phase reached)";
+		try {
+			fs.writeSync(2, `${APP_NAME}: ${message}\n`);
+		} catch {}
+		logger.error(message);
+		process.exitCode = 1;
+	});
 }
 
 // Well-known key marking an error as an *expected* teardown artifact (e.g. a
