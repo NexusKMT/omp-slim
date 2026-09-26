@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a one-shot command that stopped before completing (for example `omp config set` on a fresh Windows profile) exiting 0 with no output; it now exits 1 with a stderr line pointing at `PI_DEBUG_STARTUP` ([#13373](https://github.com/can1357/oh-my-pi/pull/13373) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.3.2] - 2026-09-25
 
 ### Added
