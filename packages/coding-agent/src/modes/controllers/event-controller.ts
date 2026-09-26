@@ -2051,13 +2051,20 @@ export class EventController {
 		// end of the run: an unsuppressed async job (a `/vibe` worker turn, a bash
 		// `async` job, etc.) will re-wake the loop when its result is delivered.
 		// `AgentSession` tags this on the deferred event (see `#hasPendingAsyncWake`
-		// in agent-session.ts). Skip the idle title/loader teardown so the tab keeps
-		// reading "working"; the later terminal `agent_end` performs it. Still flush
-		// a deferred model switch — the plan-mode reconciler queues it to apply once
-		// the current stream ends, and `#finishAgentEnd` is otherwise its only flush
-		// site, so the automatic continuation would otherwise run on the old
-		// model/thinking level until the terminal settle.
+		// in agent-session.ts). Skip the loader teardown; the later terminal
+		// `agent_end` performs it. Still flush a deferred model switch — the
+		// plan-mode reconciler queues it to apply once the current stream ends, and
+		// `#finishAgentEnd` is otherwise its only flush site, so the automatic
+		// continuation would otherwise run on the old model/thinking level until the
+		// terminal settle.
 		if (event.isTerminal === false) {
+			// The title tracks the model, not background jobs: a `yielded` pause means
+			// the model handed control back and only async work can resume it. That
+			// wake is not guaranteed — a cancelled job enqueues no delivery, and an
+			// acknowledged/watched one is suppressed — so leaving `working` here spins
+			// the title forever. A real wake re-enters `working` at its `agent_start`;
+			// set it before any await so a wake landing mid-flush is not overwritten.
+			if (event.yielded === true) setTerminalTitleState("idle");
 			await this.ctx.flushPendingModelSwitch();
 			// Reaching here means the first guard passed, so `isStreaming` is already
 			// false: a command issued from now on mounts immediately. Leaving earlier

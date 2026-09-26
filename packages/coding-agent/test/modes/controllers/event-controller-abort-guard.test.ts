@@ -379,7 +379,7 @@ describe("EventController — error toast gated while auto-retry is pending", ()
 });
 
 describe("EventController — terminal title across a non-terminal agent_end", () => {
-	it("keeps the working title and skips loader teardown but still flushes a deferred model switch during a pending async-wake pause (isTerminal:false)", async () => {
+	it("keeps the working title and skips loader teardown but still flushes a deferred model switch during a scheduled continuation (isTerminal:false, not yielded)", async () => {
 		const stateSpy = vi.spyOn(titleGenerator, "setTerminalTitleState").mockImplementation(() => {});
 		const ctx = makeTurnEndContext();
 		const markActivityEnd = vi.spyOn(ctx.statusLine, "markActivityEnd");
@@ -389,11 +389,28 @@ describe("EventController — terminal title across a non-terminal agent_end", (
 			...makeAgentEndEvent([makeAssistantMessage("stop")]),
 			isTerminal: false,
 		} as Extract<AgentSessionEvent, { type: "agent_end" }> & { isTerminal: false });
-		// The async job still runs: never drop to `idle`, never run #finishAgentEnd teardown.
+		// The agent's own continuation (reminder/retry) follows: never drop to `idle`, never run #finishAgentEnd teardown.
 		expect(stateSpy).not.toHaveBeenCalledWith("idle");
 		expect(markActivityEnd).not.toHaveBeenCalled();
 		// The automatic continuation must still pick up a queued plan-mode model switch.
 		expect(flushPendingModelSwitch).toHaveBeenCalledTimes(1);
+	});
+
+	it("drops the title to idle when the model yielded and only async work can resume it (isTerminal:false, yielded:true)", async () => {
+		// A cancelled or acknowledged background job never delivers a wake, so no
+		// terminal agent_end follows; a `working` title here would spin forever.
+		const stateSpy = vi.spyOn(titleGenerator, "setTerminalTitleState").mockImplementation(() => {});
+		const ctx = makeTurnEndContext();
+		const markActivityEnd = vi.spyOn(ctx.statusLine, "markActivityEnd");
+		const controller = new EventController(ctx);
+		await controller.handleEvent({
+			...makeAgentEndEvent([makeAssistantMessage("stop")]),
+			isTerminal: false,
+			yielded: true,
+		} as Extract<AgentSessionEvent, { type: "agent_end" }>);
+		expect(stateSpy).toHaveBeenCalledWith("idle");
+		// Loader teardown still waits for the terminal settle.
+		expect(markActivityEnd).not.toHaveBeenCalled();
 	});
 
 	it("transitions to idle and tears down on the terminal agent_end", async () => {
