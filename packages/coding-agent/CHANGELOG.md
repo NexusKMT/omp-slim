@@ -16,9 +16,10 @@
 
 ### Changed
 
+- Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
 - Updated `spelling.autocomplete` to an enum-based configuration for engine selection
 - Optimized mid-session `/computer` toggles to bypass full system-prompt rebuilds
-- Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
+- Updated window input policy to default to background-only delivery, requiring explicit `takeover` for foreground escalation, and clarified cross-platform coordinate and activation semantics
 - Aligned orchestrator task documentation and prompts to a Target/Change/Acceptance format
 - Migrated all hardcoded keyboard and slash-command shortcut labels to dynamic, platform-aware UI hints
 - Centralized usage tracking for slash commands and hints to a persistent, namespaced storage system
