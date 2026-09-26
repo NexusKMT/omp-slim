@@ -1161,6 +1161,19 @@ const response = await complete(
 );
 ```
 
+For credentials managed by `AuthStorage`, a successful OAuth refresh starts a
+five-minute, access-token-bound cooldown in the owning refresher. One broker
+refresher serves all its clients, so repeated refresh requests reuse the stored
+bearer without changing credential data or the broker protocol. Clients also
+remember successful broker recovery. A subsequent 401 during cooldown surfaces
+the request failure without blocking the credential or marking it suspect.
+Other OAuth hard-auth rotation failures use a five-minute block without extending
+an active deadline. Tokens approaching expiry and externally replaced bearers
+remain eligible for refresh; definitive token invalidation still disables the
+credential. Cooldown state is process-local and resets when its owning
+`AuthStorage` is recreated. Cached refreshes rebind by credential ID, preserving
+the selected account when concurrent account changes shift its stored position.
+
 ### Provider Notes
 
 **OpenAI Codex**: Requires a ChatGPT Plus or Pro subscription. Provides access to GPT-5.x Codex models with extended context windows and reasoning capabilities. The library automatically handles session-based prompt caching when `sessionId` is provided in stream options.

@@ -12,6 +12,9 @@ import type { AuthCredential, BlocksApi, StoredCredentialBlock } from "./types";
 /** Default block when no provider reset time is known; used by selectors and rate limits. */
 export const DEFAULT_BLOCK_MS = 60_000;
 
+/** OAuth auth failures need a longer recovery window than ordinary quota fallback. */
+export const OAUTH_AUTH_FAILURE_BACKOFF_MS = 5 * 60_000;
+
 /** Composite key for round-robin tracking: "<provider>:oauth" or "<provider>:api_key". */
 export function providerTypeKey(provider: string, type: AuthCredential["type"]): string {
 	return `${provider}:${type}`;

@@ -4,15 +4,16 @@ import { getOAuthProvider, normalizeOAuthCredentialExpiry, refreshOAuthToken } f
 import type { OAuthCredentials, OAuthProvider } from "../registry/oauth/types";
 import type { Provider } from "../types";
 import { raceSignal } from "./abort";
+import { OAUTH_AUTH_FAILURE_BACKOFF_MS } from "./blocks";
 import { authCredentialEquals, type CredentialPool, credentialDisabledEvent } from "./pool";
 import type { AccountPolicies } from "./policy";
 import { resolveCredentialIdentityKey, serializeCredential } from "./sqlite-credential-store";
 import { hasRefreshLeases, type AuthCredentialStore } from "./store";
 import {
 	REMOTE_REFRESH_SENTINEL,
+	type OAuthCredential,
 	type AuthCredentialSnapshotEntry,
 	type AuthStorageOptions,
-	type OAuthCredential,
 	type StoredOAuthRefreshOptions,
 	type StoredOAuthRefreshResult,
 } from "./types";
@@ -30,6 +31,7 @@ import {
  * the rotation cadence by <4%.
  */
 export const OAUTH_REFRESH_SKEW_MS = 60_000;
+const OAUTH_REFRESH_COOLDOWN_MS = OAUTH_AUTH_FAILURE_BACKOFF_MS;
 const OAUTH_REFRESH_LEASE_TTL_MS = 15_000;
 const OAUTH_REFRESH_LEASE_POLL_MS = 50;
 const OAUTH_REFRESH_LEASE_RENEW_MS = 5_000;
@@ -67,9 +69,39 @@ export class OAuthRefresher {
 	readonly #deps: OAuthRefresherDeps;
 	#oauthRefreshInFlight: Map<number, Promise<AuthCredentialSnapshotEntry>> = new Map();
 	#oauthCredentialRefreshInFlight: Map<number, Promise<OAuthCredentials>> = new Map();
+	// The broker owns one refresher for all clients; no credential or wire fields are needed.
+	#refreshCooldowns = new Map<number, { provider: string; until: number; accessTokenHash: string }>();
 
 	constructor(deps: OAuthRefresherDeps) {
 		this.#deps = deps;
+	}
+
+	/** Whether auth recovery already obtained this still-usable bearer recently. */
+	isCoolingDown(id: number, credential: OAuthCredentials, refreshSkewMs = OAUTH_REFRESH_SKEW_MS): boolean {
+		const cooldown = this.#refreshCooldowns.get(id);
+		if (!cooldown) return false;
+		const now = Date.now();
+		if (
+			cooldown.until <= now ||
+			credential.expires <= now + refreshSkewMs ||
+			cooldown.accessTokenHash !== Bun.SHA256.hash(credential.access, "base64url")
+		) {
+			this.#refreshCooldowns.delete(id);
+			return false;
+		}
+		return true;
+	}
+
+	#rememberRefresh(provider: string, id: number, credential: OAuthCredentials): void {
+		const now = Date.now();
+		for (const [cachedId, cooldown] of this.#refreshCooldowns) {
+			if (cooldown.until <= now) this.#refreshCooldowns.delete(cachedId);
+		}
+		this.#refreshCooldowns.set(id, {
+			provider,
+			until: now + OAUTH_REFRESH_COOLDOWN_MS,
+			accessTokenHash: Bun.SHA256.hash(credential.access, "base64url"),
+		});
 	}
 
 	/**
@@ -115,7 +147,7 @@ export class OAuthRefresher {
 			) {
 				return { credential: current, refreshed: false, removed: false };
 			}
-			if (!options.forceRefresh && currentIsFresh) {
+			if (currentIsFresh && (!options.forceRefresh || this.isCoolingDown(row.id, current, refreshSkewMs))) {
 				return { credential: current, refreshed: false, removed: false };
 			}
 			if (options.canRefresh && !options.canRefresh(current)) {
@@ -161,7 +193,7 @@ export class OAuthRefresher {
 			) {
 				return { credential: current, refreshed: false, removed: false };
 			}
-			if (!options.forceRefresh && currentIsFresh) {
+			if (currentIsFresh && (!options.forceRefresh || this.isCoolingDown(row.id, current, refreshSkewMs))) {
 				return { credential: current, refreshed: false, removed: false };
 			}
 			if (options.canRefresh && !options.canRefresh(current)) {
@@ -278,6 +310,7 @@ export class OAuthRefresher {
 			} else {
 				this.#deps.store.updateAuthCredential(row.id, merged);
 			}
+			this.#rememberRefresh(provider, row.id, merged);
 			this.#deps.pool.replace(
 				provider,
 				rows.map(entry => ({
@@ -368,12 +401,26 @@ export class OAuthRefresher {
 			if (existing) return raceSignal(existing, signal, "credential refresh aborted");
 		}
 		if (Date.now() + OAUTH_REFRESH_SKEW_MS < credential.expires) return credential;
+		if (credentialId !== undefined && this.#refreshCooldowns.has(credentialId)) {
+			const row = this.#deps.store.listAuthCredentials(provider).find(entry => entry.id === credentialId);
+			if (row?.credential.type === "oauth" && this.isCoolingDown(credentialId, row.credential)) {
+				return row.credential;
+			}
+		}
 		if (credentialId === undefined) {
 			return this.#refreshOAuthCredentialUnshared(provider, credential, undefined, signal);
 		}
-		const promise = this.#refreshOAuthCredentialUnshared(provider, credential, credentialId).finally(() => {
-			this.#oauthCredentialRefreshInFlight.delete(credentialId);
-		});
+		const promise = this.#refreshOAuthCredentialUnshared(provider, credential, credentialId)
+			.then(refreshed => {
+				// A broker response may reuse its own recently refreshed bearer.
+				// Remember that successful recovery locally so a repeated 401 never
+				// reaches rotation's block/suspect writes.
+				if (!hasRefreshLeases(this.#deps.store)) this.#rememberRefresh(provider, credentialId, refreshed);
+				return refreshed;
+			})
+			.finally(() => {
+				this.#oauthCredentialRefreshInFlight.delete(credentialId);
+			});
 		this.#oauthCredentialRefreshInFlight.set(credentialId, promise);
 		return raceSignal(promise, signal, "credential refresh aborted");
 	}
@@ -500,6 +547,19 @@ export class OAuthRefresher {
 	async refreshById(id: number, signal?: AbortSignal): Promise<AuthCredentialSnapshotEntry> {
 		const existing = this.#oauthRefreshInFlight.get(id);
 		if (existing) return raceSignal(existing, signal, "credential refresh aborted");
+		const cooldown = this.#refreshCooldowns.get(id);
+		if (cooldown) {
+			const row = this.#deps.store.listAuthCredentials(cooldown.provider).find(entry => entry.id === id);
+			if (row?.credential.type === "oauth" && this.isCoolingDown(id, row.credential)) {
+				const snapshot: AuthCredentialSnapshotEntry = {
+					id,
+					provider: row.provider,
+					credential: { ...row.credential, refresh: REMOTE_REFRESH_SENTINEL },
+					identityKey: resolveCredentialIdentityKey(row.provider, row.credential),
+				};
+				return raceSignal(Promise.resolve(snapshot), signal, "credential refresh aborted");
+			}
+		}
 
 		const promise = (async () => {
 			this.#deps.pool.bump("credential-refresh-start");
