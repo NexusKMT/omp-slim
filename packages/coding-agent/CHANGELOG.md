@@ -18,6 +18,7 @@
 - Cache-warming refreshes cancelled or superseded after the provider accepted them now count toward session usage and cost instead of being dropped ([#13717](https://github.com/can1357/oh-my-pi/pull/13717))
 - `omp plugin upgrade <name>` now upgrades npm- and git-installed plugins (e.g. `ida-mcp` installed from `github:HexRaysSA/ida-mcp#latest`, which `hcli mcp install` relies on) and resolves a bare marketplace plugin name, instead of failing with "Invalid plugin ID"; the plugin's enabled state and feature selection are kept ([#13812](https://github.com/can1357/oh-my-pi/pull/13812) by [@H4vC](https://github.com/H4vC))
 - Extension providers that offer `/login` and also name an env var as their `apiKey` (e.g. the Nexos provider's `NEXOS_API_KEY`) now use the key saved by `/login` when that env var is unset, instead of sending the env var's name as the key, which made their models fail to load or disappear ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
+- Fixed browser relay opens stalling on discarded tabs; update and reload the extension to use the fix ([#13375](https://github.com/can1357/oh-my-pi/pull/13375) by [@jasonharrison](https://github.com/jasonharrison))
 
 ## [18.4.4] - 2026-09-29
 
@@ -285,13 +286,6 @@
 - Preserved MCP `structuredContent` in live tool-result details so evaluation callers can consume server data without reparsing model-facing JSON; spilled results continue to retain an artifact reference without duplicating the payload in session history.
 - Fixed Collab hosts becoming unable to reclaim a room after a brief network interruption; hosts now retry room recovery without losing guests or queued updates.
 - Fixed one-shot commands that stopped before completing, such as `omp config set` on a fresh Windows profile, incorrectly exiting successfully without output; they now report failure with diagnostic guidance.
-- Preserved MCP `structuredContent` in live tool result `details`, allowing eval callers to consume server data without parsing the model-facing JSON rendering; spilled results omit the duplicate structured payload from session persistence while retaining the artifact reference ([#13397](https://github.com/can1357/oh-my-pi/issues/13397), [#13398](https://github.com/can1357/oh-my-pi/pull/13398) by [@shawnkoh](https://github.com/shawnkoh)).
-- Fixed a Collab host ending with `a host is already connected for this room` after a brief network drop: when the relay still holds the dropped connection, the host now retries every few seconds for up to 150 s and reclaims its room, and a refused retry no longer resets the guest list or drops queued updates ([#12514](https://github.com/can1357/oh-my-pi/issues/12514), [#13355](https://github.com/can1357/oh-my-pi/pull/13355) by [@alphastorm](https://github.com/alphastorm))
-- Fixed a one-shot command that stopped before completing (for example `omp config set` on a fresh Windows profile) exiting 0 with no output; it now exits 1 with a stderr line naming the command and pointing at `PI_DEBUG_STARTUP` ([#13373](https://github.com/can1357/oh-my-pi/pull/13373) by [@alphastorm](https://github.com/alphastorm))
-- Fixed browser relay opens stalling on discarded tabs; reinstall and reload the relay extension to use the fix ([#<PR>](https://github.com/can1357/oh-my-pi/pull/<PR>) by [@jasonharrison](https://github.com/jasonharrison))
-### Fixed
-
-- Fixed browser relay opens stalling on discarded tabs; update and reload the extension to use the fix ([#13375](https://github.com/can1357/oh-my-pi/pull/13375) by [@jasonharrison](https://github.com/jasonharrison))
 
 ## [18.3.2] - 2026-09-25
 
