@@ -83,7 +83,14 @@ Rust toolchains are nightly (pinned in `MODULE.bazel`), with repo-local musl re-
 
 `@crates//...` is generated from the workspace `Cargo.toml`/`Cargo.lock`, restricted to exactly the seven Bazel triples. The Windows ARM64 Cargo build resolves the same workspace lock directly. Crate-specific build fixes live as `crate.annotation`s in `MODULE.bazel` (see the debugging playbook below).
 
-The root module intentionally omits `crate_universe`'s optional rendering lock. The first evaluation after crate inputs change splices the workspace and generates external repository specs from the pinned `Cargo.lock`; Bazel records that extension result in `MODULE.bazel.lock`, so later clean output bases reuse it. Cargo manifest, lock, and annotation edits therefore require no separate repin step.
+The root module intentionally omits `crate_universe`'s optional rendering lock. The extension is therefore non-reproducible, and Bazel records its full result in `MODULE.bazel.lock`, keyed by hashes of `Cargo.toml`, `Cargo.lock`, every member manifest, and the `crate.*` tags. While that entry is current, a clean output base (every CI pod) reuses it and never evaluates the extension. After any of those inputs changes (every release version bump, every dependency edit), each fresh server instead re-splices the workspace with `cargo-bazel splice`: about 240 s per CI job, with correct results. That is why the entry must be refreshed and committed together with Cargo changes:
+
+```bash
+bun run gen:bazel-lock                  # bazelisk fetch --repo=@crates --lockfile_mode=update; needs bazelisk
+bun scripts/gen-bazel-lock.ts --check   # hash comparison only; what the CI bazel_lock job runs
+```
+
+`scripts/release.ts` refreshes it after regenerating `Cargo.lock`. The `bazel_lock` CI job (hosted, every event including PRs) fails on a stale entry and uploads a refreshed `MODULE.bazel.lock` artifact. Staleness costs speed, not correctness, so it does not gate publishing.
 
 ## Local development
 
@@ -298,7 +305,7 @@ In compiled mode (`PI_COMPILED`, Bun embedded URL markers, or populated embedded
    - versioned cache dir,
    - legacy compiled-binary dir (`%LOCALAPPDATA%/omp` on Windows, `~/.local/bin` elsewhere),
    - package/executable directories.
-4. First successfully loaded addon with the expected version sentinel is returned.
+4. First successfully loaded addon whose `__piNativesBuildVersion()` reports the package version is returned.
 
 This is why packaging + runtime loader expectations must align: filenames, platform tags, CPU variants, and embedded manifest version must match what `native/loader-state.js` probes.
 
@@ -329,7 +336,7 @@ Generated declarations currently include exports from these Rust modules:
 - Unsupported platform tag: throws with supported platform list after probing fails.
 - No candidate could load: throws with full candidate error list and mode-specific remediation hints.
 - Embedded extraction and Windows staging problems: archive/mkdir/write/copy errors are recorded and included in final diagnostics if load fails.
-- Version mismatch: install/compiled loads that lack the package-version sentinel are rejected during candidate probing.
+- Version mismatch: install/compiled loads whose post-link release stamp differs from the package version are rejected during candidate probing. Addons get the stamp only when installed through `scripts/bazel-natives.ts` (bazel or `--source`) or built by `packages/natives/scripts/build-bindings.ts`; a raw `bazel-bin` output copied elsewhere is unstamped and reports no version.
 
 ## Troubleshooting matrix
 
