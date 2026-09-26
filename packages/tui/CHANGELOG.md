@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the session tree (`/tree`) exhausting memory and freezing the machine on long conversations ([#12622](https://github.com/can1357/oh-my-pi/pull/12622) by [@ParadaCarleton](https://github.com/ParadaCarleton)).
+- Fixed the session tree redrawing and searching slowly on long conversations ([#12622](https://github.com/can1357/oh-my-pi/pull/12622) by [@ParadaCarleton](https://github.com/ParadaCarleton)).
+
 ## [18.3.1] - 2026-09-25
 
 ### Breaking Changes
@@ -11,11 +16,6 @@
 
 ### Added
 
-- Added kind-filtered image, web, speech, dictation, and judge role selection with editable default fallback chains in the model hub.
-### Fixed
-
-- Fixed the session tree (`/tree`) exhausting memory and freezing the machine on long conversations ([#12622](https://github.com/can1357/oh-my-pi/pull/12622) by [@ParadaCarleton](https://github.com/ParadaCarleton)).
-- Fixed the session tree redrawing and searching slowly on long conversations ([#12622](https://github.com/can1357/oh-my-pi/pull/12622) by [@ParadaCarleton](https://github.com/ParadaCarleton)).
 - Added push-to-talk dictation to `Input`, with live transcription and `cursorOverride` support.
 - Added visual indicators for live-steered user messages and paginated content in read-tool results.
 - Added transcript support for `cfg://` configuration read and write tool calls.
