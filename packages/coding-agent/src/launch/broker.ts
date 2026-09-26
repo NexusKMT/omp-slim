@@ -199,6 +199,7 @@ class DaemonLog {
 	#currentBytes = 0;
 	#queue: Promise<void> = Promise.resolve();
 	#closed = false;
+	#closing: Promise<void> | undefined;
 
 	constructor(logPath: string, previousPath: string, file: Bun.BunFile, writer: Bun.FileSink) {
 		this.#path = logPath;
@@ -207,6 +208,17 @@ class DaemonLog {
 		this.#writer = writer;
 	}
 
+	/** Opens an empty log for a newly started daemon, discarding output from any earlier daemon of the same name. */
+	static async create(dir: string): Promise<DaemonLog> {
+		await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+		const logPath = path.join(dir, LOG_FILE);
+		const previousPath = path.join(dir, PREVIOUS_LOG_FILE);
+		await Promise.all([fs.rm(previousPath, { force: true }), fs.rm(logPath, { force: true })]);
+		const file = Bun.file(logPath);
+		return new DaemonLog(logPath, previousPath, file, file.writer());
+	}
+
+	/** Opens a log for a relaunch of the same daemon, keeping the prior generation's output as the previous log. */
 	static async open(dir: string): Promise<DaemonLog> {
 		await fs.mkdir(dir, { recursive: true, mode: 0o700 });
 		const logPath = path.join(dir, LOG_FILE);
@@ -248,11 +260,12 @@ class DaemonLog {
 		return snapshot;
 	}
 
-	async close(): Promise<void> {
-		if (this.#closed) return;
+	close(): Promise<void> {
 		this.#closed = true;
-		await this.#queue;
-		await this.#writer.end();
+		this.#closing ??= this.#queue.then(async () => {
+			await this.#writer.end();
+		});
+		return this.#closing;
 	}
 
 	static async readFiles(
@@ -436,7 +449,7 @@ class DaemonBroker {
 		this.#restartBackoffBaseMs = restartBackoffBaseMs;
 	}
 
-	async run(): Promise<void> {
+	async run(onListening?: () => void): Promise<void> {
 		await this.#recoverRecords();
 		if (process.platform !== "win32") await fs.rm(this.#endpoint, { force: true });
 		const server = net.createServer(socket => this.#accept(socket));
@@ -448,6 +461,7 @@ class DaemonBroker {
 		await listening;
 		if (process.platform !== "win32") await fs.chmod(this.#endpoint, 0o600);
 		this.#scheduleIdleShutdown();
+		onListening?.();
 		await this.#finished.promise;
 	}
 
@@ -459,6 +473,10 @@ class DaemonBroker {
 		for (const record of this.#records.values()) {
 			const detached = record.spec.detached && !record.stopRequested && record.snapshot.pid !== undefined;
 			if (!detached && !terminalState(record.snapshot.state)) await this.#stopRecord(record, 2_000);
+			// The detached daemon outlives this broker and the next one recovers it from
+			// metadata. Retire this broker's generation so a late exit or readiness
+			// callback cannot settle the stale record over the new owner's metadata.
+			if (detached) record.generation++;
 			clearTimeout(record.restartTimer);
 			await record.log?.close();
 			await record.persistQueue;
@@ -673,6 +691,8 @@ class DaemonBroker {
 			if (existing && existing.pendingCompletions.length > 0 && !replace) {
 				throw new Error(`Daemon ${spec.name} has unacknowledged completion notifications`);
 			}
+			// The replaced generation's log writer must finish before its files are discarded.
+			await existing?.log?.close();
 			if (spec.ready?.log) {
 				try {
 					new RegExp(spec.ready.log, "u");
@@ -699,7 +719,7 @@ class DaemonBroker {
 					detached: spec.detached,
 				},
 				dir,
-				log: await DaemonLog.open(dir),
+				log: await DaemonLog.create(dir),
 				generation: 0,
 				stopRequested: false,
 				logReady: !spec.ready?.log,
@@ -1471,6 +1491,12 @@ class DaemonBroker {
 export interface DaemonBrokerStartOptions {
 	/** Base of the exponential child-restart backoff. */
 	restartBackoffBaseMs?: number;
+	/**
+	 * Called once the broker accepts connections. An embedding host connects its
+	 * clients after this; a client that connects earlier finds no endpoint and
+	 * spawns a competing broker process.
+	 */
+	onListening?: () => void;
 }
 
 /** Start the detached project or global daemon broker selected by the CLI worker host. */
@@ -1515,7 +1541,7 @@ export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStar
 	const broker = new DaemonBroker(projectDir, runtimeDir, token, idleGraceMs, restartBackoffBaseMs);
 	const cancelCleanup = postmortem.register("daemon-broker", () => broker.shutdown());
 	try {
-		await broker.run();
+		await broker.run(options.onListening);
 	} finally {
 		cancelCleanup();
 		await releaseBrokerLease(lease);

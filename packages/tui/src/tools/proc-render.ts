@@ -1,5 +1,5 @@
 import type { Component } from "../tui";
-import { createCachedComponent, Ellipsis, renderStatusLine, renderTreeList, truncateToWidth } from "../render";
+import { Ellipsis, renderStatusLine, renderTreeList, truncateToWidth } from "../render";
 import {
 	cappedHeadLines,
 	formatBadge,
@@ -8,7 +8,6 @@ import {
 	formatStatusIcon,
 	PREVIEW_LIMITS,
 	TRUNCATE_LENGTHS,
-	replaceTabs,
 	type ToolUIColor,
 } from "../render/render-utils";
 import type { Theme } from "../theme/theme";
@@ -17,6 +16,7 @@ import type { AgentActivitySnapshot, CoordinationDetails, JobSnapshot } from "./
 import type { IrcDeliveryReceipt } from "./irc";
 import type { DaemonSnapshot } from "./daemon";
 import { styleTerminalRow } from "./terminal-output";
+import { card, type CardToolResult as ToolResult, firstText, safe } from "./result-card";
 
 export interface ProcReadDetails {
 	jobs?: JobSnapshot[];
@@ -32,29 +32,8 @@ export type ProcWriteDetails =
 	| CoordinationDetails
 	| { action: "stop" | "stdin" | "mode"; daemon: DaemonSnapshot; input?: string; mode?: string };
 
-interface ToolResult {
-	content: Array<{ type: string; text?: string }>;
-	isError?: boolean;
-}
-
-function firstText(result: ToolResult): string {
-	return result.content.find(item => item.type === "text")?.text ?? "";
-}
-
-function safe(value: string): string {
-	return replaceTabs(value).replace(/\r/g, "");
-}
-
-function card(lines: (width: number, expanded: boolean) => string[], options: RenderResultOptions): Component {
-	return createCachedComponent(
-		() => Boolean(options.expanded),
-		(width, expanded) =>
-			lines(width, expanded)
-				.flatMap(line => line.split("\n"))
-				.map(line => truncateToWidth(safe(line), width, Ellipsis.Unicode)),
-		{ paddingX: 1 },
-	);
-}
+/** Process operation selected by a write URL, independent of its content. */
+export type ProcWriteAction = "stdin" | "mode" | "kill";
 
 function preview(body: string, expanded: boolean, theme: Theme, tone: "dim" | "toolOutput" = "dim"): string[] {
 	if (!body.trim()) return [];
@@ -161,43 +140,31 @@ function jobRow(job: JobSnapshot, theme: Theme): string {
 	return `${icon} ${formatBadge(job.type, job.status === "failed" ? "error" : job.status === "cancelled" ? "warning" : "accent", theme)} ${theme.fg("toolOutput", safe(job.id))} ${theme.fg("dim", safe(job.label))} ${theme.fg("dim", formatDuration(job.durationMs))}`;
 }
 
+/** Render live and completed process writes with the URL-selected operation. */
 export function renderProcWrite(
 	id: string,
-	modePath: boolean,
+	action: ProcWriteAction,
 	content: string | undefined,
-	argsComplete: boolean,
 	result: ToolResult | undefined,
 	details: ProcWriteDetails | undefined,
 	options: RenderResultOptions,
 	theme: Theme,
 ): Component {
 	return card((_width, expanded) => {
-		const action =
-			details && "action" in details
-				? details.action
-				: details?.op === "cancel"
-					? "cancel"
-					: modePath
-						? "mode"
-						: content
-							? "stdin"
-							: argsComplete
-								? "cancel / stop"
-								: "operation";
 		const title = `Proc ${action} ${safe(id || "…")}`;
 		const daemon = details && "daemon" in details ? details.daemon : undefined;
 		const header = renderStatusLine(
 			{
 				icon:
-					result === undefined ? "pending" : result.isError ? "error" : action === "stop" ? "aborted" : "success",
+					result === undefined ? "pending" : result.isError ? "error" : action === "kill" ? "aborted" : "success",
 				title,
-				meta: daemon ? daemonMeta(daemon, theme) : modePath && content ? [safe(content)] : [],
+				meta: daemon ? daemonMeta(daemon, theme) : action === "mode" && content ? [safe(content)] : [],
 			},
 			theme,
 		);
 		if (result?.isError) return [header, formatErrorDetail(firstText(result) || "Process operation failed.", theme)];
 		const lines = [header];
-		if (content && !modePath) lines.push(...preview(content, expanded, theme));
+		if (content && action === "stdin") lines.push(...preview(content, expanded, theme));
 		if (details && "op" in details && details.op === "cancel") {
 			const jobs = details.jobs ?? [];
 			const outcomes = details.cancelled ?? [];

@@ -1,7 +1,7 @@
 import type { CommandMetadata } from "@oh-my-pi/pi-utils/cli";
 
 export const acpHelp = {
-	description: "Run Oh My Pi as an ACP (Agent Client Protocol) server over stdio",
+	description: "Run omp as an ACP (Agent Client Protocol) server over stdio",
 } satisfies CommandMetadata;
 
 export const agentsHelp = { description: "Manage bundled task agents" } satisfies CommandMetadata;
@@ -16,7 +16,7 @@ export const authGatewayHelp = {
 
 export const benchHelp = {
 	description:
-		"Benchmark models: TTFT/prefill vs decode throughput with p50/p95, across chat, prefill, generation, and prompt-cache workloads",
+		"Benchmark models: TTFT/prefill vs decode throughput with p50/p95, across chat, prefill, generation, and prompt-cache workloads, or single-user vs parallel load (--detailed)",
 } satisfies CommandMetadata;
 
 export const browserRelayHelp = {
