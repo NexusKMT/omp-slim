@@ -21,6 +21,10 @@
 
 - Removed legacy `TinyTitleDownloadProgress` overlay in favor of the new centralized agent HUD
 
+### Fixed
+
+- Fixed missing background tint on truncated skip lines
+
 ## [18.3.1] - 2026-09-25
 
 ### Breaking Changes
