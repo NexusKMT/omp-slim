@@ -325,6 +325,46 @@ describe("subagent warning injection", () => {
 		});
 	});
 
+	it("keeps the latest value when a scalar section is yielded again after finalize", () => {
+		// Reviewer re-yields `explanation` after async jobs settle (#13448); wrapping
+		// the repeat into `["A", "B"]` failed `explanation: string` validation.
+		const result = finalizeSubprocessOutput({
+			rawOutput: "",
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: [
+				{ status: "success", type: ["findings"], data: { title: "first" } },
+				{ status: "success", type: ["findings"], data: { title: "second" } },
+				{ status: "success", type: ["overall_correctness"], data: "incorrect" },
+				{ status: "success", type: ["explanation"], data: "Before jobs settled." },
+				{ status: "success", type: ["confidence"], data: 0.8 },
+				{ status: "success", type: "result" },
+				{ status: "success", type: ["explanation"], data: "After jobs settled." },
+				{ status: "success", type: "result" },
+			],
+			outputSchema: {
+				properties: {
+					overall_correctness: { enum: ["correct", "incorrect"] },
+					explanation: { type: "string" },
+					confidence: { type: "number" },
+				},
+				optionalProperties: {
+					findings: { elements: { properties: { title: { type: "string" } } } },
+				},
+			},
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.rawOutput)).toEqual({
+			findings: [{ title: "first" }, { title: "second" }],
+			overall_correctness: "incorrect",
+			explanation: "After jobs settled.",
+			confidence: 0.8,
+		});
+	});
+
 	it("uses last assistant text as the raw result for terminal string-typed yields without data", () => {
 		const result = finalizeSubprocessOutput({
 			rawOutput: "",
