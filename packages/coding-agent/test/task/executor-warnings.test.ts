@@ -365,6 +365,36 @@ describe("subagent warning injection", () => {
 		});
 	});
 
+	it("keeps the latest scalar section when properties live in JTD discriminator variants", () => {
+		// A discriminator compiles to a root `oneOf`; shapes must come from the variants.
+		const result = finalizeSubprocessOutput({
+			rawOutput: "",
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			yieldItems: [
+				{ status: "success", type: ["kind"], data: "review" },
+				{ status: "success", type: ["verdict"], data: "draft" },
+				{ status: "success", type: ["notes"], data: "only note" },
+				{ status: "success", type: ["verdict"], data: "final" },
+				{ status: "success", type: "result" },
+			],
+			outputSchema: {
+				discriminator: "kind",
+				mapping: {
+					review: {
+						properties: { verdict: { type: "string" }, notes: { elements: { type: "string" } } },
+					},
+					skip: { properties: { verdict: { type: "string" } } },
+				},
+			},
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(JSON.parse(result.rawOutput)).toEqual({ kind: "review", verdict: "final", notes: ["only note"] });
+	});
+
 	it("uses last assistant text as the raw result for terminal string-typed yields without data", () => {
 		const result = finalizeSubprocessOutput({
 			rawOutput: "",
