@@ -18,6 +18,7 @@
 
 ### Changed
 
+- Updated ps command to list exited global services with --all and show live globals by default
 - Migrated all internal download progress UI to a unified activity registry, replacing legacy per-model overlay logic
 - Updated `omp tiny-models download` to support downloading the word-completion model
 - Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
