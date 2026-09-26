@@ -395,6 +395,38 @@ describe("subagent warning injection", () => {
 		expect(JSON.parse(result.rawOutput)).toEqual({ kind: "review", verdict: "final", notes: ["only note"] });
 	});
 
+	it("clears a discarded scalar override after a valid replacement", () => {
+		const result = finalizeSubprocessOutput({
+			rawOutput: "",
+			exitCode: 0,
+			stderr: "",
+			doneAborted: false,
+			signalAborted: false,
+			outputSchemaMode: "strict",
+			outputSchemaSource: "caller",
+			outputSchema: {
+				type: "object",
+				required: ["explanation"],
+				properties: { explanation: { type: "string" } },
+			},
+			yieldItems: [
+				{ status: "success", type: ["explanation"], data: 42, schemaOverridden: true },
+				{ status: "success", type: "result" },
+				{ status: "success", type: ["explanation"], data: "Corrected after jobs settled." },
+				{ status: "success", type: "result" },
+			],
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stderr).toBe("");
+		expect(result.structuredOutput).toEqual({
+			source: "caller",
+			mode: "strict",
+			status: "valid",
+			data: { explanation: "Corrected after jobs settled." },
+		});
+	});
+
 	it("uses last assistant text as the raw result for terminal string-typed yields without data", () => {
 		const result = finalizeSubprocessOutput({
 			rawOutput: "",

@@ -113,18 +113,27 @@ export function assembleYieldResult(
 	// level deep and made output-schema validation report every field missing.
 	const sections: Record<string, unknown> = {};
 	const sectionCounts = new Map<string, number>();
+	const overriddenScalars = new Set<string>();
 	let schemaOverridden = false;
 	let missingData = false;
 	let hasSections = false;
 	for (const item of yieldItems) {
 		if (item.status === "aborted") continue;
 		if (!isIncrementalYieldType(item.type)) continue;
-		schemaOverridden ||= item.schemaOverridden === true;
+		const overridden = item.schemaOverridden === true;
 		const labels = getYieldLabels(item.type);
 		const resolved = resolveYieldPayload(item, lastAssistantText, labels);
 		missingData ||= resolved.missingData;
+		if (labels.length === 0) schemaOverridden ||= overridden;
 		for (const label of labels) {
-			appendYieldSection(sections, sectionCounts, label, resolved.value, sectionShapes?.get(label));
+			const shape = sectionShapes?.get(label);
+			appendYieldSection(sections, sectionCounts, label, resolved.value, shape);
+			if (shape === "scalar") {
+				if (overridden) overriddenScalars.add(label);
+				else overriddenScalars.delete(label);
+			} else {
+				schemaOverridden ||= overridden;
+			}
 			hasSections = true;
 		}
 	}
@@ -145,7 +154,12 @@ export function assembleYieldResult(
 	// A data-less terminal finalize keeps accumulated sections; only when none
 	// exist does the last assistant turn become the raw result.
 	if (hasSections) {
-		return { data: sections, schemaOverridden, rawText: false, missingData };
+		return {
+			data: sections,
+			schemaOverridden: schemaOverridden || overriddenScalars.size > 0,
+			rawText: false,
+			missingData,
+		};
 	}
 
 	if (!terminalItem) return undefined;
