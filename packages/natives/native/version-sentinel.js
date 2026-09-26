@@ -41,6 +41,28 @@ export function containsVersionStamp(bytes, version) {
 }
 
 /**
+ * Check whether pre-stamp addon bytes export the legacy sentinel for exactly
+ * `version` (`__piNativesV18_3_2`, not a longer `__piNativesV18_3_20`). The
+ * loader accepts such an addon for that release, so embedding may too.
+ * @param {Uint8Array} bytes
+ * @param {string} version
+ * @returns {boolean}
+ */
+export function containsLegacyVersionSentinel(bytes, version) {
+	if (version.length === 0) return false;
+	const haystack = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+	const needle = Buffer.from(`__piNativesV${version.replace(/[^A-Za-z0-9]/g, "_")}`, "utf8");
+	for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + 1)) {
+		const next = haystack[at + needle.length];
+		const continues =
+			next !== undefined &&
+			((next >= 0x30 && next <= 0x39) || (next >= 0x41 && next <= 0x5a) || (next >= 0x61 && next <= 0x7a) || next === 0x5f);
+		if (!continues) return true;
+	}
+	return false;
+}
+
+/**
  * Release version a loaded addon reports: the post-link stamp for current
  * addons, the legacy sentinel export name for pre-stamp releases, `null` for
  * unstamped builds and addons that predate both.

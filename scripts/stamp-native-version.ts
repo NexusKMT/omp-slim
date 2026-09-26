@@ -45,6 +45,11 @@ export function isMachO(bytes: Uint8Array): boolean {
 	);
 }
 
+/** Whether `bytes` carries the post-link version stamp slot (addons built before it do not). */
+export function hasVersionStampSlot(bytes: Uint8Array): boolean {
+	return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).indexOf(magicBytes) !== -1;
+}
+
 /**
  * Write `version` into the addon's stamp slot in place. Returns false when the
  * slot already holds exactly `version` (bytes untouched), true when it changed.

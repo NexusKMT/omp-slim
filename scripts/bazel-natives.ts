@@ -46,7 +46,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { detectHostAvx2Support, detectHostMusl, resolveLocalHostAddon } from "./host-detect";
-import { nativesPackageVersion, stampNativeVersion } from "./stamp-native-version";
+import { hasVersionStampSlot, nativesPackageVersion, stampNativeVersion } from "./stamp-native-version";
 
 const repoRoot = path.join(import.meta.dir, "..");
 
@@ -252,15 +252,31 @@ async function runBazel(
 	return { exitCode, stdout: stdoutText, stderrTail: tail };
 }
 
-/** Copy an addon into place, stamping `version` into the copy before the atomic rename. */
-async function installAddon(sourcePath: string, destPath: string, version: string): Promise<void> {
+/**
+ * Copy an addon into place, stamping `version` into the copy before the atomic
+ * rename. Returns whether the copy was stamped.
+ *
+ * `allowUnstamped` accepts a prebuilt addon that predates the stamp slot
+ * (`--source` installs of main-built or npm-release addons on PR runs): it is
+ * installed as-is, and only workspace loads — which skip version validation —
+ * can use it. Release packaging still rejects it (embed-native requires the
+ * stamp), so this never ships an unstamped addon.
+ */
+async function installAddon(
+	sourcePath: string,
+	destPath: string,
+	version: string,
+	allowUnstamped: boolean,
+): Promise<boolean> {
 	const realSource = await fs.realpath(sourcePath); // bazel-bin outputs are symlink-reachable; copy the real bytes
 	const tempPath = `${destPath}.tmp.${process.pid}`;
 	try {
 		await fs.copyFile(realSource, tempPath);
 		await fs.chmod(tempPath, 0o644);
-		await stampNativeVersion(tempPath, version);
+		const stamp = !allowUnstamped || hasVersionStampSlot(await fs.readFile(tempPath));
+		if (stamp) await stampNativeVersion(tempPath, version);
 		await fs.rename(tempPath, destPath); // atomic even if dest is a loaded addon
+		return stamp;
 	} catch (err) {
 		await fs.unlink(tempPath).catch(() => {});
 		throw err;
@@ -331,7 +347,7 @@ async function buildLocalHostAddon(host: HostInfo, destDir: string): Promise<voi
 	const builtPath = path.join(repoRoot, "packages/natives/native", filename);
 	if (path.dirname(builtPath) !== destDir) {
 		await fs.mkdir(destDir, { recursive: true });
-		await installAddon(builtPath, path.join(destDir, filename), await nativesPackageVersion());
+		await installAddon(builtPath, path.join(destDir, filename), await nativesPackageVersion(), false);
 	}
 	console.log(`installed ${filename} → ${path.join(destDir, filename)}`);
 	await verifyHostAddonLoads(path.join(destDir, filename));
@@ -450,8 +466,12 @@ async function main(): Promise<void> {
 	for (const output of outputs) {
 		const absolute = path.isAbsolute(output) ? output : path.join(repoRoot, output);
 		const destPath = path.join(destDir, path.basename(output));
-		await installAddon(absolute, destPath, version);
-		console.log(`installed ${path.basename(output)} (stamped ${version}) → ${destPath}`);
+		const stamped = await installAddon(absolute, destPath, version, options.source !== undefined);
+		console.log(
+			stamped
+				? `installed ${path.basename(output)} (stamped ${version}) → ${destPath}`
+				: `installed ${path.basename(output)} (prebuilt without a version stamp slot; left unstamped) → ${destPath}`,
+		);
 		if (probeFilename && path.basename(output) === probeFilename) await verifyHostAddonLoads(destPath);
 	}
 }
