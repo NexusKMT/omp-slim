@@ -143,6 +143,13 @@ describe("hostProbeFilename", () => {
 		expect(hostProbeFilename(["linux-arm64"], muslArm64)).toBeNull();
 	});
 
+	test("a Windows ARM64 host resolves `host` to the win32-arm64 addon and probes it", () => {
+		const windowsArm64: HostInfo = { platform: "win32", arch: "arm64", avx2: false, musl: false };
+		expect(resolveTargetMembers(["host"], windowsArm64)).toEqual(["win32-arm64"]);
+		expect(hostProbeFilename(["win32-arm64"], windowsArm64)).toBe("pi_natives.win32-arm64.node");
+		expect(hostProbeFilename(["win32-x64-baseline"], windowsArm64)).toBeNull();
+	});
+
 	test("probes the host's own target, however it was requested", () => {
 		expect(hostProbeFilename(["linux-arm64"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
 		expect(hostProbeFilename(["host"], glibcArm64)).toBe("pi_natives.linux-arm64.node");
