@@ -1377,6 +1377,48 @@ describe("CollabController", () => {
 		expect(state.showStatus.some(m => /discovery unavailable/.test(m))).toBe(false);
 	});
 
+	it("re-applies auto-start for the same session after its room ends on its own", async () => {
+		const { ctx, state } = makeControllerContext({ autoStart: "control" });
+		controller = new CollabController(ctx);
+		controller.autoStart();
+		await settled(publishSpy, 1);
+		const first = ctx.collabHost;
+		if (!first) throw new Error("auto-start did not install a host");
+
+		// Non-retryable relay close after open, the path `#failFatal` (send backlog) also takes.
+		const hostSocket = capturedSockets.find(s => s.role === "host");
+		if (!hostSocket) throw new Error("host transport socket was never created");
+		hostSocket.onclose?.({ code: 4001, reason: "room closed" });
+		expect(first.stopped).toBe(true);
+		await settled(publishSpy, 2);
+		await controller.idle();
+
+		const replacement = ctx.collabHost;
+		expect(replacement).toBeDefined();
+		expect(replacement).not.toBe(first);
+		expect(controller.host).toBe(replacement);
+		expect(await registry.listCollabHosts({ dir: tmp })).toMatchObject([
+			{ instanceId: controller.instanceId, generation: 2, sessionId: state.sessionId, access: "control" },
+		]);
+		await joinAsWriter(replacement!);
+	});
+
+	it("leaves a manual room ended on its own unhosted while auto-start is off", async () => {
+		const { ctx } = makeControllerContext({ autoStart: "off" });
+		controller = new CollabController(ctx);
+		const host = await controller.start({ access: "control" });
+
+		const hostSocket = capturedSockets.find(s => s.role === "host");
+		if (!hostSocket) throw new Error("host transport socket was never created");
+		hostSocket.onclose?.({ code: 4001, reason: "room closed" });
+		await host.stop("drain teardown");
+		await controller.idle();
+
+		expect(ctx.collabHost).toBeUndefined();
+		expect(publishSpy).toHaveBeenCalledTimes(1);
+		expect(await registry.listCollabHosts({ dir: tmp })).toEqual([]);
+	});
+
 	it("shutdown withdraws the room and ignores later session changes", async () => {
 		const { ctx, state } = makeControllerContext({ autoStart: "control" });
 		controller = new CollabController(ctx);

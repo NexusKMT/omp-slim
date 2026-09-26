@@ -1,7 +1,7 @@
 /**
  * Owns collaboration hosting for one interactive process: manual `/collab`,
  * the opt-in `collab.autoStart` policy, and room rotation when the active
- * session changes.
+ * session changes or a room ends on its own.
  *
  * Every room this process hosts shares one random `instanceId` and gets the
  * next `generation`, which is what the local registry keys capabilities by.
@@ -218,11 +218,12 @@ export class CollabController {
 		const webUrl = cfgCollabWebUrl.get(this.#ctx.settings) || "";
 		this.#observeSessionChanges();
 		const previous = this.#host;
-		const host = new CollabHost(this.#ctx, {
+		const host: CollabHost = new CollabHost(this.#ctx, {
 			instanceId: this.instanceId,
 			generation: ++this.#generation,
 			access,
 			guestActionsReady: () => this.#startupComplete && !this.#ctx.session.isSessionTransitioning,
+			onEnded: () => this.#onHostEnded(host),
 		});
 		this.#host = host;
 		this.#ctx.collabHost = host;
@@ -271,10 +272,23 @@ export class CollabController {
 	#onSessionChanged(): void {
 		const previous = this.#host;
 		if (this.host) return;
-		const stopEpoch = this.#stopEpoch;
 		// Stop synchronously so a room still connecting is aborted now rather than
 		// after the queued start settles; the chain then waits for that stop.
-		const stopping = previous && this.#stopHost(previous, SESSION_SWITCH_REASON);
+		this.#reapplyAutoStart(previous && this.#stopHost(previous, SESSION_SWITCH_REASON));
+	}
+
+	/**
+	 * The relay ended the current room without `stop()` (fatal close, e.g. send
+	 * backlog). The policy still applies to this session, so host a successor;
+	 * `#launch` waits for the ended room to finish withdrawing first.
+	 */
+	#onHostEnded(host: CollabHost): void {
+		if (host === this.#host) this.#reapplyAutoStart(undefined);
+	}
+
+	/** Queue a policy launch for the current session once `stopping` settles, unless stop, shutdown, or another room intervened. */
+	#reapplyAutoStart(stopping: Promise<void> | undefined): void {
+		const stopEpoch = this.#stopEpoch;
 		this.#ops = this.#ops
 			.then(async () => {
 				await stopping;
