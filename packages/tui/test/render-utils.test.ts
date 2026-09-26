@@ -2,7 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:
 import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import * as natives from "@oh-my-pi/pi-natives";
+import * as natives from "@oh-my-pi/pi-natives/path";
 import { KeybindingsManager, setKeyHintPlatform } from "@oh-my-pi/pi-tui/app-keybindings";
 import { getThemeByName, initTheme, type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import {

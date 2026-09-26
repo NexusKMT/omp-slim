@@ -8,7 +8,8 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
-import { type Ellipsis, expandWindowsLongPath, getWindowsShortPath } from "@oh-my-pi/pi-natives";
+import type { Ellipsis } from "@oh-my-pi/pi-natives";
+import { expandWindowsLongPath, getWindowsShortPath } from "@oh-my-pi/pi-natives/path";
 import { pluralize, sanitizeText } from "@oh-my-pi/pi-utils";
 import { formatKeyHints, type KeyId } from "../app-keybindings";
 import { getKeybindings } from "../keybindings";
