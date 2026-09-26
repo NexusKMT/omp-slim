@@ -469,6 +469,9 @@ async function runTinyWorker(): Promise<void> {
 	await startTinyWorkerFromEnvironment();
 }
 
+/** Resolved top-level command name (never its arguments), for the unsettled-entry report. */
+let runningCommand: string | undefined;
+
 /** Run the CLI with the given argv (no `process.argv` prefix). */
 export async function runCli(argv: string[]): Promise<void> {
 	let resolvedArgv = argv;
@@ -592,6 +595,7 @@ export async function runCli(argv: string[]): Promise<void> {
 			process.exitCode = 1;
 			return;
 		}
+		runningCommand = resolved.argv[0];
 		await run({ bin: APP_NAME, version: VERSION, argv: resolved.argv, commands, metadataHelp: showHelp });
 	} finally {
 		stopStartupComposer?.();
@@ -621,7 +625,7 @@ if (isProcessEntry || !Bun.isMainThread) {
 	// registration lives for the process — a one-shot entry exits right after runCli settles.
 	postmortem?.registerStdioDisconnectHandling();
 	const entry = runCli(process.argv.slice(2));
-	postmortem?.reportUnsettledEntry(entry);
+	postmortem?.reportUnsettledEntry(entry, () => runningCommand);
 	entry.catch(async error => {
 		// Failure boundary: inspector/postmortem is irrelevant to successful startup.
 		const { fatal } = await import("@oh-my-pi/pi-utils/postmortem");

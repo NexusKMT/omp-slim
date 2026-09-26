@@ -8,12 +8,14 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 // call (top-level await breaks `--bytecode` builds), so a one-shot command whose await never
 // settles and holds no live handle let the event loop drain, and Bun exited 0: an unfinished
 // command reported as success. The process entry now fails that drain with exit 1 and a
-// diagnostic. A preload makes `Settings.init` never settle to reach the same state.
+// diagnostic. A preload makes `Settings.init` never settle to reach the same state. #12441
+// reports the same silent exit 0 for `omp auth-broker token` on a fresh Windows profile; the
+// stalled await itself is still unidentified.
 
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 const cliEntry = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
 const settingsUrl = new URL("../src/config/settings.ts", import.meta.url).href;
-const DIAGNOSTIC = "command ended before completing";
+const DIAGNOSTIC = "ended before completing";
 
 interface ConfigSetRun {
 	exitCode: number;
@@ -41,6 +43,7 @@ async function runConfigSet(tempDir: TempDir, options: { stallSettingsInit: bool
 	// The child must resolve its agent dir from the isolated home, not an inherited override or profile.
 	const env: Record<string, string | undefined> = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" };
 	delete env.PI_CODING_AGENT_DIR;
+	delete env.PI_CONFIG_DIR;
 	delete env.OMP_PROFILE;
 	delete env.PI_PROFILE;
 	const proc = Bun.spawn(
@@ -62,7 +65,9 @@ describe("one-shot CLI command settlement", () => {
 		const run = await runConfigSet(tempDir, { stallSettingsInit: true });
 
 		expect(run.exitCode, run.stderr).toBe(1);
-		expect(run.stderr).toContain(DIAGNOSTIC);
+		// Names the stalled subcommand so automation logs show what failed, without its arguments.
+		expect(run.stderr).toContain(`\`omp config\` ${DIAGNOSTIC}`);
+		expect(run.stderr).not.toContain("collab.autoStart");
 		expect(run.stdout).toBe("");
 		expect(fs.existsSync(run.configPath)).toBe(false);
 	}, 30_000);

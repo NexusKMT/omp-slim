@@ -380,11 +380,14 @@ export function registerStdioDisconnectHandling(): () => void {
  * {@link exitProcess}, the signal handlers) never emit it.
  *
  * The report runs once and only sets `process.exitCode`, so later `beforeExit`
- * listeners (LSP shutdown) still run before the process exits 1. It schedules
- * no work: a `beforeExit` listener that does fires again after that work drains.
+ * listeners (LSP shutdown) still run before the process exits 1. It starts no
+ * work of its own beyond the log write; `once` keeps the second `beforeExit`
+ * that any drained follow-up work triggers from reporting again.
+ *
+ * `describe` names what was running (e.g. the resolved subcommand) at report
+ * time; it must return only a command name, never user arguments.
  */
-export function reportUnsettledEntry(work: Promise<unknown>): void {
-	if (!Bun.isMainThread) return;
+export function reportUnsettledEntry(work: Promise<unknown>, describe?: () => string | undefined): void {
 	let pending = true;
 	const settled = (): void => {
 		pending = false;
@@ -393,12 +396,13 @@ export function reportUnsettledEntry(work: Promise<unknown>): void {
 	void work.then(settled, settled);
 	process.once("beforeExit", () => {
 		if (!pending) return;
-		const message =
-			"command ended before completing: the event loop drained while it was still pending (rerun with PI_DEBUG_STARTUP=1 to see the last phase reached)";
+		const command = describe?.();
+		const subject = command ? `\`${APP_NAME} ${command}\`` : "command";
+		const message = `${subject} ended before completing: the event loop drained while it was still pending (rerun with PI_DEBUG_STARTUP=1 to see the last phase reached)`;
 		try {
 			fs.writeSync(2, `${APP_NAME}: ${message}\n`);
 		} catch {}
-		logger.error(message);
+		logger.error(message, { command });
 		process.exitCode = 1;
 	});
 }
