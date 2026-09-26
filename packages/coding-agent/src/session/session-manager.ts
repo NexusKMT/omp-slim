@@ -762,6 +762,8 @@ export class SessionManager {
 	#writer: SessionStorageWriter | undefined;
 	/** Sealed by {@link releaseRetainedEntries}: every later append/title/rewrite is a dropped no-op. */
 	#released = false;
+	/** Set by {@link releaseRetainedEntries}: `#entries` was cleared, so `#fileBody()` is no longer authoritative. */
+	#entriesReleased = false;
 	/** Serializes async disk work (flush/close/atomic rewrite). Appends are synchronous and bypass it. */
 	#diskTail: Promise<void> = Promise.resolve();
 	#diskFailure: Error | undefined;
@@ -1009,32 +1011,11 @@ export class SessionManager {
 						new Error("Session file disappeared during authoritative repair."),
 					]);
 				}
-				const body = this.#fileBody();
-				try {
-					await this.#storage.writeTextAtomic(sessionFile, body, {
-						expectedSize: this.#expectedDiskSize,
-						commitGuard: () => !this.#released && this.#diskEpoch === epoch,
-					});
-				} catch (error) {
-					const recoveryErrors = [toError(error)];
-					try {
-						await this.#storage.drain();
-					} catch (drainFailure) {
-						recoveryErrors.push(toError(drainFailure));
-					}
-					let actual: string;
-					try {
-						actual = await this.#storage.readText(sessionFile);
-					} catch (readFailure) {
-						recoveryErrors.push(toError(readFailure));
-						throw this.#latchIndeterminate(operationError, recoveryErrors);
-					}
-					if (actual !== body) {
-						recoveryErrors.push(new Error("Authoritative session repair did not match durable storage."));
-						throw this.#latchIndeterminate(operationError, recoveryErrors);
-					}
-				}
-				this.#recordFullRewrite(body);
+				await this.#publishAuthoritativeBody(
+					sessionFile,
+					operationError,
+					() => !this.#released && this.#diskEpoch === epoch,
+				);
 				if (this.#diskEpoch !== epoch) {
 					throw this.#latchIndeterminate(operationError, [
 						new Error("Authoritative session repair was superseded before verification."),
@@ -1052,6 +1033,44 @@ export class SessionManager {
 		} finally {
 			if (this.#atomicRewriteFenceEpoch === epoch) this.#atomicRewriteFenceEpoch = null;
 		}
+	}
+
+	/**
+	 * Publish the current in-memory journal as `sessionFile`'s authoritative
+	 * body, tolerating a write whose own acknowledgment failed but that
+	 * landed anyway: a readback matching the intended body still counts as
+	 * durable. Callers own serialization (the disk queue) and any
+	 * `#released`/epoch guard; this only writes and repairs
+	 * `#expectedDiskSize` bookkeeping via {@link #recordFullRewrite}.
+	 */
+	async #publishAuthoritativeBody(
+		sessionFile: string,
+		operationError: Error,
+		commitGuard?: () => boolean,
+	): Promise<void> {
+		const body = this.#fileBody();
+		try {
+			await this.#storage.writeTextAtomic(sessionFile, body, { expectedSize: this.#expectedDiskSize, commitGuard });
+		} catch (error) {
+			const recoveryErrors = [toError(error)];
+			try {
+				await this.#storage.drain();
+			} catch (drainFailure) {
+				recoveryErrors.push(toError(drainFailure));
+			}
+			let actual: string;
+			try {
+				actual = await this.#storage.readText(sessionFile);
+			} catch (readFailure) {
+				recoveryErrors.push(toError(readFailure));
+				throw this.#latchIndeterminate(operationError, recoveryErrors);
+			}
+			if (actual !== body) {
+				recoveryErrors.push(new Error("Authoritative session repair did not match durable storage."));
+				throw this.#latchIndeterminate(operationError, recoveryErrors);
+			}
+		}
+		this.#recordFullRewrite(body);
 	}
 
 	#appendWriter(): SessionStorageWriter {
@@ -2246,25 +2265,6 @@ export class SessionManager {
 		await this.#scheduleDiskWork(async () => {
 			await this.#storage.drain();
 		});
-		if (this.#diskFailure) {
-			// A synchronous rewrite (`flushSync`) against a deferred-publish
-			// backend (any indexed/SQL storage) can conflict purely locally with
-			// a still-unconfirmed prior publish for the same path:
-			// `writeTextSync` is typed `(): void` and so cannot await a same-path
-			// publish already in flight before checking its size precondition
-			// (`IndexedSessionStorage#assertExpectedSize`), unlike
-			// `writeTextAtomic`. Two back-to-back synchronous rewrites for one
-			// path -- the final turn's message persist, then the session-exit
-			// bookkeeping entry `AgentSession#recordSessionExit` writes at
-			// dispose -- routinely land within that window over a real network
-			// round trip (never over an effectively-instant backend), latching
-			// `#diskFailure` before the backend ever sees the second write. The
-			// `drain()` just above lets the original, unconflicted publish
-			// actually confirm, so the authoritative body this manager holds
-			// now has a real chance of writing cleanly with the now-current
-			// size token; retry once before treating the transcript as lost.
-			await this.recoverPersistenceFromCurrentState().catch(() => undefined);
-		}
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
@@ -2339,19 +2339,9 @@ export class SessionManager {
 	/** Flush, then close the append writer. */
 	async close(): Promise<void> {
 		if (!this.#persist) return;
-		// A prior synchronous rewrite (`flushSync`) can have latched
-		// `#diskFailure` purely locally, against this manager's OWN
-		// still-unconfirmed publish for the same path: `writeTextSync` cannot
-		// await a same-path publish already in flight before checking its size
-		// precondition (`IndexedSessionStorage#assertExpectedSize`), unlike
-		// `writeTextAtomic`. The closing/draining work below must run despite
-		// that latch (`ignorePriorError`) so the still-outstanding publish this
-		// same manager queued gets the chance to actually confirm; otherwise
-		// close() rejects before the drain that could resolve it ever runs,
-		// which is indistinguishable from a genuine backend outage to every
-		// caller (`AgentSession#doDispose`, and both print-mode and rpc-mode's
-		// shutdown, all reject the same latched error and report the
-		// transcript lost).
+		// A prior `flushSync` can self-conflict with this manager's own
+		// unconfirmed deferred publish; drain despite the latch so that
+		// publish can still confirm before we give up on the transcript.
 		await this.#scheduleDiskWork(
 			async () => {
 				const hadWriter = this.#writer !== undefined;
@@ -2371,25 +2361,23 @@ export class SessionManager {
 			},
 			{ ignorePriorError: true },
 		);
-		if (this.#diskFailure && this.#sessionFile) {
-			// The drain just above let this manager's own in-flight publish
-			// confirm (or fail for a genuine reason). `seal()` -- already
-			// raised by the caller ahead of close() -- disables the ordinary
-			// mid-life repair path (`#authoritativelyRewriteCurrentStateLocked`
-			// returns without writing once `#released`), on purpose: a revived
-			// session must never race a stale event handler's rewrite. But
-			// close() IS the terminal write it owns, so issue the one
-			// catch-up rewrite directly, with the now-current confirmed size
-			// token, instead of leaving a self-resolvable conflict latched.
+		if (this.#diskFailure && this.#sessionFile && !this.#entriesReleased && this.#shouldHaveSessionFile()) {
+			// seal() already disabled the ordinary mid-life repair path
+			// (#authoritativelyRewriteCurrentStateLocked returns once
+			// #released), on purpose: a revived session must never race a
+			// stale event handler's rewrite. But close() IS the terminal
+			// write it owns, so issue the one catch-up rewrite directly,
+			// under the same disk-queue serialization and readback-on-failure
+			// as the ordinary repair path.
 			const operationError = this.#diskFailure;
-			try {
-				const body = this.#fileBody();
-				await this.#storage.writeTextAtomic(this.#sessionFile, body, { expectedSize: this.#expectedDiskSize });
-				this.#recordFullRewrite(body);
-				this.#clearDiskError();
-			} catch (error) {
-				this.#latchIndeterminate(operationError, [toError(error)]);
-			}
+			const sessionFile = this.#sessionFile;
+			await this.#scheduleDiskWork(
+				async () => {
+					await this.#publishAuthoritativeBody(sessionFile, operationError);
+					this.#clearDiskError();
+				},
+				{ ignorePriorError: true },
+			).catch(() => undefined);
 		}
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
@@ -2435,6 +2423,7 @@ export class SessionManager {
 		this.#entries = [];
 		this.#index.clear();
 		this.#closeWriterEventually();
+		this.#entriesReleased = true;
 	}
 
 	getCwd(): string {

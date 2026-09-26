@@ -32,7 +32,7 @@ import {
 	type SessionStorageIndexEntry,
 } from "@oh-my-pi/pi-coding-agent/session/indexed-session-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { SessionWriteConflictError } from "@oh-my-pi/pi-coding-agent/session/session-storage";
+import { MemorySessionStorage, SessionWriteConflictError } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 
 /** Real-shape indexed backend: local index is set synchronously by the
  * caller (`IndexedSessionStorage`) before this backend is ever invoked, so no
@@ -194,5 +194,53 @@ describe("SessionManager seal()+close() recovers a sync-rewrite conflict against
 
 		manager.seal();
 		await expect(manager.close()).rejects.toThrow();
+	});
+
+	it("close()'s terminal rewrite tolerates an ack-lost write that landed durably anyway", async () => {
+		// `IndexedSessionStorage.writeTextAtomic` already has its own
+		// readback-on-failure fallback, so it would mask this gap; exercise it
+		// against `MemorySessionStorage`, which has none, so the tolerance
+		// under test is entirely `SessionManager`'s own.
+		const storage = new MemorySessionStorage();
+		const manager = SessionManager.create("/cwd", "/sessions/proj", storage);
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("expected a session file");
+
+		manager.appendMessage(assistantMessage("FINAL MESSAGE"));
+		manager.appendCustomEntry("session_exit", { reason: "dispose" });
+
+		// Latch a disk failure via a transient, fully-unresolvable backend
+		// outage (the write fails and the readback returns stale content), so
+		// close() below finds `#diskFailure` already set, the same way a real
+		// conflict or outage would leave it before dispose.
+		const originalReadText = storage.readText.bind(storage);
+		storage.writeTextAtomic = async (): Promise<void> => {
+			throw new Error("transient backend outage");
+		};
+		storage.readText = async (): Promise<string> => "stale content that does not match";
+		await manager.recoverPersistenceFromCurrentState().catch(() => undefined);
+		storage.readText = originalReadText;
+
+		// The retried terminal write close() issues now DOES land -- the
+		// backend accepts the content -- but its own acknowledgment is lost
+		// once, exactly the class of failure the ordinary mid-life repair
+		// path (`#authoritativelyRewriteCurrentStateLocked`) already
+		// tolerates via a readback; close()'s terminal rewrite must tolerate
+		// it the same way now that both share `#publishAuthoritativeBody`.
+		let ackLost = true;
+		storage.writeTextAtomic = async (path: string, content: string): Promise<void> => {
+			storage.writeTextSync(path, content);
+			if (ackLost) {
+				ackLost = false;
+				throw new Error("connection reset after commit");
+			}
+		};
+
+		manager.seal();
+		await manager.close();
+
+		const body = await storage.readText(sessionFile);
+		expect(body).toContain("FINAL MESSAGE");
+		expect(body).toContain("session_exit");
 	});
 });
