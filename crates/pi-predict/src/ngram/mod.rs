@@ -1,12 +1,12 @@
 //! Personal word n-gram engine: the cheap, instantly available engine that
-//! serves `auto` until `SmolLM` has loaded (or when it cannot load).
+//! serves `auto` off macOS.
 //!
 //! A port of the text-prediction research winner (tracks `ngram` ×
 //! `adaptive`): an interpolated absolute-discounting word
 //! trigram model over the user's prose history, backed by an embedded Norvig
 //! web unigram/bigram prior (`web.rs`), ranked under the typed prefix with a
-//! finished-word-aware posterior, typed-past exclusion, a prompt-local cache,
-//! a session cache, and vocabulary hygiene.
+//! finished-word-aware posterior, a prompt-local cache, a session cache, and
+//! vocabulary hygiene.
 //!
 //! # Model
 //! - **Counts** (`model.rs`): prose words only (the editor's gates,
@@ -20,7 +20,8 @@
 //! - **Confidence**: posterior of the best word among *every* word under the
 //!   prefix, including the prefix itself (`the|re` shows only when *there*
 //!   clearly beats stopping at *the*), mixed with the prompt-local and session
-//!   caches, renormalized without the words typed past at shorter prefixes.
+//!   caches. Typing more letters of the shown word keeps it the pick: ghosts do
+//!   not change under the user's fingers.
 //! - **Hygiene**: words outside the web vocabulary and the dictionary need
 //!   [`Params::min_count`] typed occurrences; rare misspellings fold into an
 //!   edit-distance-1 real word at learn time (not across apostrophes, not at
@@ -33,20 +34,16 @@
 //! The show thresholds are the tuned *balanced* points (≤ 70 wrong ghosts per
 //! 100 words on the research harness, `dev` split):
 //! - τ1 = 0.30 ([`Params::show_threshold_k1`]) at a single letter;
-//! - τ = 0.27 ([`Params::show_threshold_k2_after_k1`]) for 2+ letters when
-//!   the client asks from the first letter, since single-letter ghosts spend
-//!   part of the budget;
+//! - τ = 0.27 ([`Params::show_threshold_k2_after_k1`]) for 2+ letters when the
+//!   client asks from the first letter, since single-letter ghosts spend part
+//!   of the budget;
 //! - τ = 0.17 ([`Params::show_threshold`]) for 2+ letters when the client's
 //!   gate starts at two letters.
 //!
 //! The engine infers the client's gate from the shortest prefix it was asked
-//! about for the current word. Typed-past exclusion replays the prefixes
-//! from that length on, each at its own threshold, so a word shown at one
-//! letter and typed past is ruled out at two. A dev check found no gain from
-//! requiring bigram/trigram evidence at one letter. Typed-past exclusion
-//! always assumes these thresholds, and τ1 also floors
-//! [`crate::Config::show_threshold`]; otherwise the override changes gating
-//! only.
+//! about for the current word. A dev check found no gain from requiring
+//! bigram/trigram evidence at one letter. τ1 also floors
+//! [`crate::Config::show_threshold`].
 //!
 //! # Parity (research harness, `test` split, 5,038 prompts)
 //! A simulated typist replays held-out history.db prompts through N-API and
@@ -73,7 +70,7 @@
 //! | cold   | 12.87 / 22.15 / 23.39 | 13.27 / 19.52 / 19.96 | 22.17 @ 69.6 w  |
 //!
 //! At the quiet budget single letters cost 0.4–0.9 KSR: the thresholds
-//! target the balanced budget, and typed-past exclusion assumes them.
+//! target the balanced budget.
 //!
 //! Engine-side costs (replay bench over the same prompts, M4 Max, 52,950
 //! bootstrap rows): `complete` p50 3.6–4.0 µs, p99 14–17
@@ -87,7 +84,7 @@
 //!
 //! The calibrated per-(prefix, word) feedback bias from the adaptive track
 //! was measured on `dev` and not adopted: +0.03 (online) and +0.06 (cold)
-//! balanced KSR, within noise, once typed-past exclusion is on.
+//! balanced KSR, within noise.
 //!
 //! # Persistence
 //! [`Predictor::persist`] writes a versioned zstd snapshot
@@ -193,8 +190,8 @@ impl Predictor for NgramPredictor {
 				.query
 				.complete(&self.model, query.before, query.prefix)?;
 		let confidence = confidence as f32;
-		// Single letters keep their floor under an override: like typed-past
-		// exclusion, it is part of the engine's policy.
+		// Single letters keep their floor under an override: it is part of the
+		// engine's policy.
 		let single = query.prefix.chars().nth(1).is_none();
 		let gate = match self.gate {
 			Some(gate) if single => gate.max(threshold),
@@ -209,9 +206,8 @@ impl Predictor for NgramPredictor {
 	}
 
 	fn feedback(&mut self, _query: &Query<'_>, _suggestion: &str, _accepted: bool) {
-		// Accepted words are learned when the prompt is submitted, and in-word
-		// rejections are already modeled by typed-past exclusion. A calibrated
-		// per-(prefix, word) feedback bias measured no gain on top of it.
+		// Accepted words are learned when the prompt is submitted. A calibrated
+		// per-(prefix, word) feedback bias measured no gain.
 	}
 
 	fn persist(&mut self) -> anyhow::Result<()> {

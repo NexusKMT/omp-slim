@@ -11,6 +11,7 @@
 
 ### Changed
 
+- Refined word-completion persistence to maintain suggestions when users type through existing ghost text
 - Updated ps top UI to show scope kind "(target)" or "(current + global)" in scope label
 - Updated TUI task interfaces to reflect the new `complexity` field requirement
 - Refined right-arrow acceptance behavior to skip forced trailing spaces

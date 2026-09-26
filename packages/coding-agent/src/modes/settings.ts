@@ -888,7 +888,7 @@ export const cfgSpellingAutocomplete = register({
 			{
 				value: "auto",
 				label: "Auto",
-				description: "SmolLM once its weights are ready; N-gram until then (weights download on first use)",
+				description: "Apple dictionary on macOS, N-gram elsewhere (nothing to download)",
 			},
 			{ value: "ngram", label: "N-gram", description: "Learns your vocabulary from prompt history" },
 			{

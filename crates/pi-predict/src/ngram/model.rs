@@ -72,8 +72,7 @@ pub struct Params {
 	/// Recent prompts in the session cache.
 	pub session_prompts: usize,
 	/// Show threshold τ for prefixes of 2+ letters when the client asks from
-	/// the second letter on. Gates suggestions and drives typed-past
-	/// exclusion.
+	/// the second letter on.
 	pub show_threshold: f32,
 	/// Show threshold τ1 for single-letter prefixes. Wrong ghosts after one
 	/// letter are frequent, so it also floors a caller's gate override.
