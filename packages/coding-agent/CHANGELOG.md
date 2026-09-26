@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added a centralized download and installation progress HUD to surface background tool and model fetches
+- Added support for SmolLM2-135M word-completion model weights with background prefetching
 - Added unified predictive text engine with pluggable N-gram, SmolLM2, and macOS native providers
 - Added `omp predict` CLI command for evaluating completion engine performance
 - Added cross-process prediction daemon for managing state, history ingestion, and engine fallbacks
@@ -16,6 +18,8 @@
 
 ### Changed
 
+- Migrated all internal download progress UI to a unified activity registry, replacing legacy per-model overlay logic
+- Updated `omp tiny-models download` to support downloading the word-completion model
 - Updated window input policy to default to background actions and replaced the `delivery` option with a `takeover` boolean flag for opt-in activation
 - Updated `spelling.autocomplete` to an enum-based configuration for engine selection
 - Optimized mid-session `/computer` toggles to bypass full system-prompt rebuilds

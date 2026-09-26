@@ -771,7 +771,6 @@ export class AgentSession implements SettingsScope {
 	 *  generation path. Refresh via {@link AgentSession.setTitleSystemPrompt} when
 	 *  the session cwd changes. */
 	#titleSystemPrompt: string | undefined;
-	#titleGenerationStart: (() => (() => void) | void) | undefined;
 	#titleGenerationInFlightFor: string | undefined;
 	/** First-message auto-title that may be retried from conversation context.
 	 *  Once the title model declines the message (greeting-like or too ambiguous,
@@ -8420,7 +8419,7 @@ export class AgentSession implements SettingsScope {
 	 * user message persists titles with the same environment, signal, and local
 	 * extension-command policy.
 	 */
-	maybeStartTitleGeneration(firstMessage: string, onStart?: () => (() => void) | void): void {
+	maybeStartTitleGeneration(firstMessage: string): void {
 		const extensionCommandSpace = firstMessage.indexOf(" ");
 		const isLocalExtensionCommand =
 			firstMessage.startsWith("/") &&
@@ -8438,7 +8437,7 @@ export class AgentSession implements SettingsScope {
 			return;
 		}
 		this.#deferredTitle = { sessionId, declined: false, replied: false };
-		this.#startAutoTitle(firstMessage, sessionId, onStart ?? this.#titleGenerationStart);
+		this.#startAutoTitle(firstMessage, sessionId);
 	}
 
 	/**
@@ -8446,17 +8445,8 @@ export class AgentSession implements SettingsScope {
 	 * unless the session was renamed or replaced meanwhile. A settled request
 	 * that left the session unnamed advances {@link #deferredTitle}.
 	 */
-	#startAutoTitle(input: string, sessionId: string, onStart: (() => (() => void) | void) | undefined): void {
+	#startAutoTitle(input: string, sessionId: string): void {
 		this.#titleGenerationInFlightFor = sessionId;
-		let cleanupProgress: (() => void) | void;
-		try {
-			cleanupProgress = onStart?.();
-		} catch (error) {
-			if (this.#titleGenerationInFlightFor === sessionId) {
-				this.#titleGenerationInFlightFor = undefined;
-			}
-			throw error;
-		}
 		const signal = this.#titleGenerationAbortController.signal;
 		this.generateTitle(input)
 			.then(async title => {
@@ -8479,7 +8469,6 @@ export class AgentSession implements SettingsScope {
 				if (this.#titleGenerationInFlightFor === sessionId) {
 					this.#titleGenerationInFlightFor = undefined;
 				}
-				cleanupProgress?.();
 				// An interrupted request is cancelled inference, not a decline.
 				if (signal.aborted) this.#deferredTitle = undefined;
 				else this.#advanceDeferredTitle("declined");
@@ -8506,7 +8495,7 @@ export class AgentSession implements SettingsScope {
 		if (this.#titleGenerationInFlightFor === sessionId || $env.PI_NO_TITLE) return;
 		const context = this.#buildReplanTitleContext();
 		if (!context || isLowSignalTitleInput(context)) return;
-		this.#startAutoTitle(context, sessionId, this.#titleGenerationStart);
+		this.#startAutoTitle(context, sessionId);
 	}
 
 	#resolveTitleProviderSessionId(parentSessionId: string): string {
@@ -8587,18 +8576,6 @@ export class AgentSession implements SettingsScope {
 	 *  against the destination project's override. */
 	setTitleSystemPrompt(prompt: string | undefined): void {
 		this.#titleSystemPrompt = prompt;
-	}
-
-	/** Install the interactive title-download UI hook. Used when `/skill:` starts
-	 *  titling from {@link promptCustomMessage} without the input-controller callback.
-	 *  The hook may return cleanup to run when generation settles. */
-	setTitleGenerationStart(handler: (() => (() => void) | void) | undefined): void {
-		this.#titleGenerationStart = handler;
-	}
-
-	/** Notify the host before a user-requested title generation; return its cleanup. */
-	notifyTitleGenerationStart(): (() => void) | void {
-		return this.#titleGenerationStart?.();
 	}
 
 	/** Install the host hook that receives a typed user prompt dropped before
