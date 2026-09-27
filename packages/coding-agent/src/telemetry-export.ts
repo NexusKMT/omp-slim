@@ -15,21 +15,6 @@
  */
 import type { AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
-import { register } from "./config/registry";
-
-/** Whether OMP may register process-global OTLP exporters. */
-export const cfgTelemetryOtlpExportEnabled = register({
-	id: "telemetry.otlpExportEnabled",
-	type: "boolean",
-	default: true,
-	ui: {
-		tab: "providers",
-		group: "Privacy",
-		label: "OTLP Telemetry Export",
-		description:
-			"Allow OMP to export traces, logs, and metrics using OTEL_* endpoints. Changes take effect on the next launch.",
-	},
-});
 
 /** Per-signal OTLP export toggles resolved from the `OTEL_*` env contract. */
 export interface TelemetrySignalConfig {
@@ -80,9 +65,10 @@ export function createTelemetryExportConfig(
  * configured through env. Idempotent, and a no-op when disabled, no signal has
  * an endpoint, or the OTEL kill-switch is engaged.
  *
- * @param exportEnabled Whether OMP's persisted setting allows OTLP export.
+ * @param exportEnabled `telemetry.otlpExportEnabled`; required so every caller
+ *   decides whether the user's opt-out applies.
  */
-export async function initTelemetryExport(exportEnabled = true): Promise<void> {
+export async function initTelemetryExport(exportEnabled: boolean): Promise<void> {
 	if (initPromise) return initPromise;
 
 	if (!exportEnabled || process.env.OTEL_SDK_DISABLED?.trim().toLowerCase() === "true") return;
