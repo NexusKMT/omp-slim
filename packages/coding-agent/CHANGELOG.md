@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added `omp skill list [dir] [--json]`, reporting the skills a session in that directory resolves (with discovery warnings in the JSON output), so tools can query skill listings without drift-prone reimplementations ([#12273](https://github.com/can1357/oh-my-pi/pull/12273) by [@andrebrait](https://github.com/andrebrait))
 - Added automated ingestion of existing Claude Code and Codex prompt histories to bootstrap predictive engine vocabularies for new installs
 - Added a centralized download and installation progress HUD to surface background tool and model fetches
 - Added support for SmolLM2-135M word-completion model weights with background prefetching
