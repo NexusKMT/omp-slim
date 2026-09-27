@@ -1304,10 +1304,8 @@ class DaemonBroker {
 		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
 	}
 
-	#persist(record: ManagedDaemon): void {
-		const metaPath = path.join(record.dir, META_FILE);
-		const tempPath = `${metaPath}.${process.pid}.tmp`;
-		const metadata = {
+	#serializeMetadata(record: ManagedDaemon): string {
+		return JSON.stringify({
 			daemon: { ...record.snapshot },
 			spec: record.spec,
 			completionEvents: record.completionCapable,
@@ -1318,10 +1316,16 @@ class DaemonBroker {
 				...completion,
 				daemon: { ...completion.daemon },
 			})),
-		};
+		});
+	}
+
+	#persist(record: ManagedDaemon): void {
+		const metaPath = path.join(record.dir, META_FILE);
+		const tempPath = `${metaPath}.${process.pid}.tmp`;
+		const metadata = this.#serializeMetadata(record);
 		record.persistQueue = record.persistQueue
 			.then(async () => {
-				await Bun.write(tempPath, JSON.stringify(metadata));
+				await Bun.write(tempPath, metadata);
 				await fs.rename(tempPath, metaPath);
 			})
 			.catch(error => {
@@ -1336,6 +1340,9 @@ class DaemonBroker {
 		const subscriptionId = capable ? this.#completionSubscriptions.get(owner) : undefined;
 		const persistence: Promise<void>[] = [];
 		for (const record of this.#records.values()) {
+			// A settled record has no future completion to deliver once its pending
+			// events are acknowledged. Rebinding the owner must not rewrite its history.
+			if (terminalState(record.snapshot.state) && record.pendingCompletions.length === 0) continue;
 			const clearPendingCompletions = !capable && record.pendingCompletions.length > 0;
 			if (
 				record.snapshot.owner !== owner ||
@@ -1458,7 +1465,9 @@ class DaemonBroker {
 						});
 					});
 				}
-				this.#persist(record);
+				// Recovery may only change a subset of records. In particular, a
+				// terminal record already stored in the current format needs no write.
+				if (JSON.stringify(decoded) !== this.#serializeMetadata(record)) this.#persist(record);
 			} catch (error) {
 				logger.warn("Failed to recover daemon record", {
 					name: entry.name,
