@@ -229,7 +229,7 @@ describe("OpenAI API-billed Responses web search", () => {
 		}
 	});
 
-	it("prioritizes annotated answer URLs over the result cap and retains their citation", async () => {
+	it("hard-caps sources while keeping annotated answer URLs ahead of consulted sources", async () => {
 		const fixture = createFixture();
 		const citedUrl = "https://cited.example.test/11";
 		const consultedSources = Array.from({ length: 10 }, (_, index) => ({
@@ -263,6 +263,8 @@ describe("OpenAI API-billed Responses web search", () => {
 			});
 			expect(result.sources).toHaveLength(10);
 			expect(result.sources[0]).toMatchObject({ url: citedUrl, title: "Answer citation" });
+			expect(result.sources.some(source => source.url === "https://results.example.test/10")).toBe(false);
+			expect(result.citations).toHaveLength(10);
 			expect(result.citations).toContainEqual({ url: citedUrl, title: "Answer citation" });
 		} finally {
 			fixture.authStorage.close();
@@ -343,6 +345,34 @@ describe("OpenAI API-billed Responses web search", () => {
 				expect(error).toMatchObject({ provider: "openai", status, message });
 				expect(error instanceof Error ? error.message : String(error)).not.toContain(API_KEY);
 			}
+
+			let structured: unknown;
+			try {
+				await searchOpenAIResponses(
+					makeParams(
+						fixture,
+						async () =>
+							new Response(
+								JSON.stringify({
+									error: {
+										message: `Incorrect API key provided: ${API_KEY}`,
+										type: "invalid_request_error",
+										code: "invalid_api_key",
+										param: null,
+									},
+								}),
+								{ status: 401, headers: { "Content-Type": "application/json" } },
+							),
+					),
+				);
+			} catch (caught) {
+				structured = caught;
+			}
+			expect(structured).toMatchObject({
+				provider: "openai",
+				status: 401,
+				message: "OpenAI API key was rejected (401): type=invalid_request_error, code=invalid_api_key",
+			});
 		} finally {
 			fixture.authStorage.close();
 		}

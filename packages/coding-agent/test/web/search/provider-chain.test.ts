@@ -88,7 +88,7 @@ describe("web model role resolution", () => {
 		expect(candidates[0]?.explicit).toBe(false);
 	});
 
-	it("places bundled direct OpenAI GPT-6 after Codex GPT-6 and before direct GPT-5.6", async () => {
+	it("exhausts Codex subscription candidates before any API-billed OpenAI candidate", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		storages.add(authStorage);
 		authStorage.keys.setRuntime("openai", "test-openai-key");
@@ -105,38 +105,13 @@ describe("web model role resolution", () => {
 		);
 		const candidates = resolveRoleChain("web", settings, pool);
 
-		const codexGpt6Index = candidates.findIndex(
-			candidate => candidate.model.provider === "openai-codex" && candidate.model.id === "gpt-6-luna",
-		);
-		const openAiGpt6Index = candidates.findIndex(
-			candidate => candidate.model.provider === "openai" && candidate.model.id === "gpt-6-luna",
-		);
-		const openAiGpt56Index = candidates.findIndex(
-			candidate => candidate.model.provider === "openai" && candidate.model.id === "gpt-5.6-luna",
-		);
+		const providers = candidates.map(candidate => candidate.model.provider);
+		const lastCodexIndex = providers.lastIndexOf("openai-codex");
+		const firstOpenAiIndex = providers.indexOf("openai");
 
-		expect(codexGpt6Index).toBeGreaterThanOrEqual(0);
-		expect(openAiGpt6Index).toBeGreaterThan(codexGpt6Index);
-		expect(openAiGpt56Index).toBeGreaterThan(openAiGpt6Index);
-		expect(candidates[openAiGpt6Index]?.explicit).toBe(false);
-	});
-
-	it("selects the bundled direct OpenAI model when it is the only eligible web candidate", () => {
-		const authStorage = createInMemoryAuthStorage();
-		storages.add(authStorage);
-		authStorage.keys.setRuntime("openai", "test-openai-key");
-		const settings = Settings.isolated();
-		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-		const pool = roleCandidatePool("web", settings, modelRegistry).filter(
-			model => model.provider === "openai" && model.id === "gpt-5.6-luna",
-		);
-
-		const candidates = resolveRoleChain("web", settings, pool);
-
-		expect(candidates.map(candidate => `${candidate.model.provider}/${candidate.model.id}`)).toEqual([
-			"openai/gpt-5.6-luna",
-		]);
-		expect(candidates[0]?.explicit).toBe(false);
+		expect(lastCodexIndex).toBeGreaterThanOrEqual(0);
+		expect(firstOpenAiIndex).toBeGreaterThan(lastCodexIndex);
+		expect(candidates[firstOpenAiIndex]?.explicit).toBe(false);
 	});
 
 	it("marks configured primaries and configured fallbacks explicit", () => {

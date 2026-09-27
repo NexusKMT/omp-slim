@@ -1,7 +1,12 @@
 import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { asRecord } from "@oh-my-pi/pi-utils";
-import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
-import { SearchProviderError } from "../../../web/search/types";
+import {
+	type SearchCitation,
+	SearchProviderError,
+	type SearchResponse,
+	type SearchSource,
+	type SearchUsage,
+} from "../types";
 import { formatQuery, GOOGLE_QUERY_SYNTAX, parseSearchQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
@@ -45,7 +50,27 @@ function responsesEndpoint(baseUrl: string): string {
 	return `${baseUrl.replace(/\/+$/, "")}/responses`;
 }
 
-function httpError(status: number): SearchProviderError {
+/**
+ * Structured fields from an OpenAI error body. The free-form `message` is
+ * dropped because OpenAI echoes (masked) API keys in 401 messages.
+ */
+function errorDetail(bodyText: string): string {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(bodyText);
+	} catch {
+		return "";
+	}
+	const error = asRecord(asRecord(parsed)?.error);
+	if (!error) return "";
+	const fields = (["type", "code", "param"] as const).flatMap(field => {
+		const value = error[field];
+		return typeof value === "string" && value.trim() ? [`${field}=${value.trim()}`] : [];
+	});
+	return fields.length > 0 ? `: ${fields.join(", ")}` : "";
+}
+
+function httpError(status: number, bodyText: string): SearchProviderError {
 	const messages: Record<number, string> = {
 		400: "OpenAI Responses API rejected the request (400)",
 		401: "OpenAI API key was rejected (401)",
@@ -53,11 +78,8 @@ function httpError(status: number): SearchProviderError {
 		403: "OpenAI API request forbidden (403)",
 		429: "OpenAI API rate limit reached (429)",
 	};
-	return new SearchProviderError(
-		"openai",
-		messages[status] ?? `OpenAI Responses API request failed (${status})`,
-		status,
-	);
+	const base = messages[status] ?? `OpenAI Responses API request failed (${status})`;
+	return new SearchProviderError("openai", `${base}${errorDetail(bodyText)}`, status);
 }
 
 function readResponse(payload: unknown, modelId: string, resultLimit: number): SearchResponse {
@@ -120,7 +142,6 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 		}
 	}
 
-	const answerCitationUrls = new Set<string>();
 	const answerParts: string[] = [];
 	for (const item of output) {
 		if (item.type !== "message" || !Array.isArray(item.content)) continue;
@@ -139,9 +160,6 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 					typeof start === "number" && typeof end === "number" && start >= 0 && end > start
 						? text.slice(start, end)
 						: undefined;
-				if (typeof annotation.url === "string" && annotation.url.trim()) {
-					answerCitationUrls.add(annotation.url.trim());
-				}
 				addSource(annotation.url, annotation.title, citedText);
 			}
 		}
@@ -149,9 +167,6 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 			for (const rawAnnotation of item.annotations) {
 				const annotation = asRecord(rawAnnotation);
 				if (annotation?.type !== "url_citation") continue;
-				if (typeof annotation.url === "string" && annotation.url.trim()) {
-					answerCitationUrls.add(annotation.url.trim());
-				}
 				addSource(annotation.url, annotation.title);
 			}
 		}
@@ -169,16 +184,16 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 		throw new SearchProviderError("openai", "OpenAI web search returned no answer or sources", 502);
 	}
 
-	const limitedSources = sources.filter((source, index) => index < resultLimit || answerCitationUrls.has(source.url));
-	const limitedCitations = citations.filter(
-		(citation, index) => index < resultLimit || answerCitationUrls.has(citation.url),
-	);
+	// Annotated answer URLs are collected first, so the hard cap keeps them ahead of merely consulted sources.
+	const limitedSources = sources.slice(0, resultLimit);
+	const limitedCitations = citations.slice(0, resultLimit);
 	const usageRecord = asRecord(response.usage);
 	const usage: SearchUsage = {};
 	if (typeof usageRecord?.input_tokens === "number") usage.inputTokens = usageRecord.input_tokens;
 	if (typeof usageRecord?.output_tokens === "number") usage.outputTokens = usageRecord.output_tokens;
 	if (typeof usageRecord?.total_tokens === "number") usage.totalTokens = usageRecord.total_tokens;
-	usage.searchRequests = searchCalls.filter(item => asRecord(item.action)?.type === "search").length;
+	const searchRequests = searchCalls.filter(item => asRecord(item.action)?.type === "search").length;
+	if (searchRequests > 0) usage.searchRequests = searchRequests;
 
 	return {
 		provider: "openai",
@@ -195,8 +210,7 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 
 /** Execute API-billed web search through the selected OpenAI Responses model. */
 export async function searchOpenAIResponses(params: SearchParams): Promise<SearchResponse> {
-	const credentialSource = params.modelRegistry.authStorage.keys.source(params.model.provider);
-	if (credentialSource?.kind === "oauth" && !params.modelRegistry.hasCommandBackedApiKey(params.model.provider)) {
+	if (params.modelRegistry.authStorage.keys.source(params.model.provider)?.kind === "oauth") {
 		throw new SearchProviderError(
 			"openai",
 			`OpenAI API web search requires API-key credentials; OAuth credentials for "${params.model.provider}" are not supported.`,
@@ -219,7 +233,7 @@ export async function searchOpenAIResponses(params: SearchParams): Promise<Searc
 				body: JSON.stringify(body),
 				signal: withHardTimeout(params.signal, params.timeoutMs),
 			});
-			if (!response.ok) throw httpError(response.status);
+			if (!response.ok) throw httpError(response.status, await response.text().catch(() => ""));
 			let payload: unknown;
 			try {
 				payload = await response.json();
