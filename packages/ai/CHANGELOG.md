@@ -9,6 +9,10 @@
 
 - Added `ImageGenerationResult.model` and `GeneratedImage.size`/`quality`, populated from the image model, dimensions, and quality the hosted OpenAI backends report ([#13403](https://github.com/can1357/oh-my-pi/issues/13403))
 
+### Changed
+
+- Removed an unreachable Cursor MCP exec-resolution branch and the test that pinned it; exec-bridged MCP tool calls behave as before ([#13563](https://github.com/can1357/oh-my-pi/pull/13563))
+
 ### Fixed
 
 - Fixed Gemini and Antigravity responses reporting negative input tokens and negative cost when upstream omitted `promptTokenCount` or reported more cached tokens than the prompt
