@@ -7,6 +7,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import {
 	MODEL_MENTION_ENTRY_TYPE,
@@ -111,7 +112,8 @@ describe("model mentions", () => {
 			// the new pseudonym must arrive as a notice carrying its selector.
 			expect(agentSession.getAdvertisedSessionAgents()).toEqual([]);
 			const notice = agent.state.messages.find(
-				message => message.role === "custom" && message.customType === "session-agent-notice",
+				(message): message is CustomMessage =>
+					message.role === "custom" && message.customType === "session-agent-notice",
 			);
 			if (!notice || typeof notice.content !== "string") throw new Error("Missing session agent notice");
 			expect(notice.content).toContain("`m1`");
