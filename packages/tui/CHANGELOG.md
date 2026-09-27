@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `WordCompletionProvider` for ghost-text completion with pluggable backend routing
+- Added prose-gating logic to filter completion suggestions by context
+- Added `wordCompletionFeedback` provider hook for improved ghost-text tracking
+- Added provisional space handling for Tab completions to support seamless punctuation attachment
+
+### Changed
+
+- Refined word-completion persistence to maintain suggestions when users type through existing ghost text
+- Updated ps top UI to show scope kind "(target)" or "(current + global)" in scope label
+- Updated TUI task interfaces to reflect the new `complexity` field requirement
+- Refined right-arrow acceptance behavior to skip forced trailing spaces
+- Replaced all static keyboard labels across overlays, apps, and status lines with dynamic, platform-aware key formatting
+
+### Removed
+
+- Removed legacy `TinyTitleDownloadProgress` overlay in favor of the new centralized agent HUD
+
+### Fixed
+
+- Fixed missing background tint on truncated skip lines
+
 ## [18.3.1] - 2026-09-25
 
 ### Breaking Changes
