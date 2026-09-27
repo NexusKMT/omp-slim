@@ -178,7 +178,7 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 	if (typeof usageRecord?.input_tokens === "number") usage.inputTokens = usageRecord.input_tokens;
 	if (typeof usageRecord?.output_tokens === "number") usage.outputTokens = usageRecord.output_tokens;
 	if (typeof usageRecord?.total_tokens === "number") usage.totalTokens = usageRecord.total_tokens;
-	usage.searchRequests = searchCalls.length;
+	usage.searchRequests = searchCalls.filter(item => asRecord(item.action)?.type === "search").length;
 
 	return {
 		provider: "openai",

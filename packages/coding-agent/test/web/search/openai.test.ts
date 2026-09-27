@@ -72,6 +72,7 @@ describe("OpenAI API-billed Responses web search", () => {
 							type: "web_search_call",
 							status: "completed",
 							action: {
+								type: "search",
 								query: '"Responses web search" -legacy site:docs.openai.com after:2026-01-01',
 								sources: [{ type: "url", url: "https://docs.openai.com/search", title: "OpenAI Search Docs" }],
 							},
@@ -143,6 +144,52 @@ describe("OpenAI API-billed Responses web search", () => {
 				model: "gpt-5.6-luna",
 				requestId: "resp-openai-search-1",
 				authMode: "api_key",
+			});
+		} finally {
+			fixture.authStorage.close();
+		}
+	});
+	it("counts search actions without counting page actions in a valid response", async () => {
+		const fixture = createFixture();
+		const fetch: FetchImpl = async () =>
+			new Response(
+				JSON.stringify({
+					output: [
+						{
+							type: "web_search_call",
+							status: "completed",
+							action: {
+								type: "search",
+								query: "mixed-action lookup",
+								sources: [{ type: "url", url: "https://search.example.test/result", title: "Search result" }],
+							},
+						},
+						{
+							type: "web_search_call",
+							status: "completed",
+							action: { type: "open_page", url: "https://search.example.test/result" },
+						},
+						{
+							type: "web_search_call",
+							status: "completed",
+							action: {
+								type: "find_in_page",
+								url: "https://search.example.test/result",
+								pattern: "result",
+							},
+						},
+						{ type: "message", content: [{ type: "output_text", text: "The page contains the result." }] },
+					],
+				}),
+				{ status: 200, headers: { "Content-Type": "application/json" } },
+			);
+
+		try {
+			const result = await searchOpenAIResponses(makeParams(fixture, fetch));
+			expect(result).toMatchObject({
+				answer: "The page contains the result.",
+				sources: [{ url: "https://search.example.test/result", title: "Search result" }],
+				usage: { searchRequests: 1 },
 			});
 		} finally {
 			fixture.authStorage.close();
