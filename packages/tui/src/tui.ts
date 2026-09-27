@@ -884,15 +884,13 @@ export class TUI extends Container {
 	// normal-screen accounting field (#previousFrameLength, #viewportTopRow, …)
 	// untouched, so exiting reconciles cleanly against the terminal-restored
 	// normal screen. #altPreviousLines is the last alt frame, diffed row by row
-	// against the next one while the geometry it was painted at still holds.
+	// against the next one.
 	#altActive = false;
 	#mouseTracking: MouseTrackingState = "off";
 	/** Product-owned probe for opt-in normal-buffer click capture (`tui.mouse`). Read every frame. */
 	#inlineMouseProvider: (() => boolean) | undefined;
 	#altPreviousLines: string[] = [];
 	#altPreparedRows: PreparedLine[] = [];
-	#altPreviousWidth = 0;
-	#altPreviousHeight = 0;
 	#altEnterWidth = 0;
 	#altEnterHeight = 0;
 	#resizeAltActive = false;
@@ -3447,10 +3445,8 @@ export class TUI extends Container {
 
 	/**
 	 * Whether screen row `index` must be rewritten to turn the previously painted
-	 * frame into this one. Besides a changed line or preparation, a blank row
-	 * under a scaled OSC 66 heading counts as changed when the heading's extent
-	 * over it changed: its own text is "" in both frames, but the glyph half it
-	 * held (or must now preserve) is not.
+	 * frame into this one: its line, or the preparation it was painted with,
+	 * changed.
 	 */
 	#rowNeedsRewrite(
 		previousLines: readonly string[],
@@ -3464,9 +3460,9 @@ export class TUI extends Container {
 		return (
 			previousLines[index] !== lines[index] ||
 			previous === undefined ||
+			previous.width !== current.width ||
 			previous.widthEpoch !== current.widthEpoch ||
-			previous.imageProtocol !== current.imageProtocol ||
-			this.#osc66SpacerGlyphWidth(previousLines, index) !== this.#osc66SpacerGlyphWidth(lines, index)
+			previous.imageProtocol !== current.imageProtocol
 		);
 	}
 
@@ -3579,11 +3575,11 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Paint a frame on the alt buffer: only the rows that changed while the
-	 * geometry the previous frame was painted at still holds, every row
-	 * otherwise. Emits only sync-output brackets, cursor moves, and per-row
-	 * rewrites — never ED3 or any native-scrollback byte. The hardware cursor
-	 * stays hidden here.
+	 * Paint a frame on the alt buffer: only the rows that changed since the
+	 * previous frame, or every row when the height changed, a repaint is forced,
+	 * or either frame holds OSC 66 text. Emits only sync-output brackets, cursor
+	 * moves, and per-row rewrites — never ED3 or any native-scrollback byte. The
+	 * hardware cursor stays hidden here.
 	 */
 	#emitAltFrame(prepared: PreparedLines, width: number, height: number, notifyPaint: boolean): void {
 		// The pass that composed this frame ran with `altScreen`, so the normal
@@ -3607,19 +3603,20 @@ export class TUI extends Container {
 		}
 		// A forced repaint (resetDisplay, requestRender(true)) rewrites every row
 		// even when the cached frame is byte-identical: the redraw gesture must
-		// repair a corrupted modal. Otherwise rewrite only the rows that changed
-		// (a keystroke in a modal touches a row or two), and skip an identical
-		// frame entirely.
+		// repair a corrupted modal. So does a frame with OSC 66 text in it, before
+		// or after: a scaled glyph spans the rows below its own and the terminal
+		// drops it when any of them is written, so those rows are not independent.
+		// Otherwise rewrite only the rows that changed (a keystroke in a modal
+		// touches a row or two), and skip an identical frame entirely.
 		const force = this.#forceViewportRepaintOnNextRender;
 		this.#forceViewportRepaintOnNextRender = false;
-		const geometryStable =
-			this.#altPreviousLines.length === height &&
-			this.#altPreviousWidth === width &&
-			this.#altPreviousHeight === height;
-		const full = force || !geometryStable;
+		const full =
+			force ||
+			this.#altPreviousLines.length !== height ||
+			this.#altPreviousLines.some(isOsc66Line) ||
+			prepared.lines.some(isOsc66Line);
 		let rowsBuffer = "";
 		for (let r = 0; r < height; r++) {
-			const spacerGlyphWidth = this.#osc66SpacerGlyphWidth(prepared.lines, r);
 			if (full) {
 				if (r > 0) rowsBuffer += "\n";
 			} else if (
@@ -3629,12 +3626,17 @@ export class TUI extends Container {
 			} else {
 				continue;
 			}
-			rowsBuffer += this.#lineRewriteSequence(prepared.rows[r]!, width, r, -1, -1, spacerGlyphWidth);
+			rowsBuffer += this.#lineRewriteSequence(
+				prepared.rows[r]!,
+				width,
+				r,
+				-1,
+				-1,
+				this.#osc66SpacerGlyphWidth(prepared.lines, r),
+			);
 		}
 		this.#altPreviousLines = prepared.lines;
 		this.#altPreparedRows = prepared.rows;
-		this.#altPreviousWidth = width;
-		this.#altPreviousHeight = height;
 		if (rowsBuffer === "") return;
 		this.terminal.write(`${this.#paintBeginSequence}${full ? "\x1b[H" : ""}${rowsBuffer}${this.#paintEndSequence}`);
 		this.#debugPaint = { lines: prepared.lines, windowTop: 0, altScreen: true };

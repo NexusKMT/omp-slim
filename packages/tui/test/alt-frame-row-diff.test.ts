@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { type Component, TUI } from "@oh-my-pi/pi-tui";
+import { type Component, TUI, type TuiPaint } from "@oh-my-pi/pi-tui";
 import { withoutTerminalMultiplexer } from "./helpers/terminal-multiplexer";
 import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
@@ -66,7 +66,7 @@ async function openFullscreen(lines: string[], rows = lines.length) {
 }
 
 describe("fullscreen overlay paints", () => {
-	it("rewrites only the rows that changed, and leaves no stale cells behind", async () => {
+	it("rewrites only the rows that changed", async () => {
 		const lines = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
 		const { terminal, scheduler, tui, overlay } = await openFullscreen(lines);
 
@@ -78,40 +78,64 @@ describe("fullscreen overlay paints", () => {
 		for (const unchanged of ["alpha", "bravo", "delta", "echo", "foxtrot"]) expect(grown).not.toContain(unchanged);
 		expect(screen(terminal)).toEqual(overlay.lines);
 
-		// A shorter replacement must clear the rest of the old text.
-		overlay.lines = ["alpha", "bravo", "c", "delta", "echo", "foxtrot"];
+		// Deleting what was just typed returns the row to text an earlier paint
+		// replaced; it must be repainted, not skipped as already on screen.
+		overlay.lines = lines;
 		tui.requestRender();
 		await scheduler.settle(terminal);
 		expect(rewrittenRows(terminal.takeWrites())).toEqual([3]);
-		expect(screen(terminal)).toEqual(overlay.lines);
-		tui.stop();
-	});
-
-	it("still rewrites every row on a forced repaint", async () => {
-		const lines = ["alpha", "bravo", "charlie", "delta"];
-		const { terminal, scheduler, tui } = await openFullscreen(lines);
-
-		tui.requestRender(true);
-		await scheduler.settle(terminal);
-		const frame = terminal.takeWrites();
-		for (const row of lines) expect(frame).toContain(row);
 		expect(screen(terminal)).toEqual(lines);
 		tui.stop();
 	});
 
-	it("rewrites the empty row beneath a sized heading that stops being one", async () => {
-		// Overlay rows are padded to the full width, but the rows below a short
-		// overlay stay empty. An `s=2` heading on its last line holds the empty
-		// row beneath it; when the heading turns into plain text that row is ""
-		// in both frames, yet the glyph half it held must be erased.
-		const { terminal, scheduler, tui, overlay } = await openFullscreen(["top", `${OSC66}s=2;Hi${ST}`], 4);
+	it("still rewrites every row on a forced repaint", async () => {
+		// The redraw gesture repairs output that corrupted the overlay behind the
+		// renderer's back, even though the renderer's own frame is unchanged.
+		const lines = ["alpha", "bravo", "charlie", "delta"];
+		const { terminal, scheduler, tui } = await openFullscreen(lines);
+		terminal.write("\x1b[2;1HGARBAGE\x1b[4;1H\x1b[2K");
+		expect(screen(terminal)).toEqual(["alpha", "GARBAGE", "charlie", ""]);
 
-		overlay.lines = ["top", "plain"];
+		tui.requestRender(true);
+		await scheduler.settle(terminal);
+		expect(screen(terminal)).toEqual(lines);
+		tui.stop();
+	});
+
+	it("sends a scaled heading again after a row under it was written", async () => {
+		// An `s=2` glyph covers the row below its own, and the terminal drops the
+		// whole glyph when anything is written there. Once that row goes back to
+		// the heading's blank spacer, the heading itself must be sent again even
+		// though its own row never changed.
+		const heading = `${OSC66}s=2;Hi${ST}`;
+		const spaced = ["top", heading, "", "bottom"];
+		const { terminal, scheduler, tui, overlay } = await openFullscreen(spaced);
+
+		overlay.lines = ["top", heading, "grown", "bottom"];
 		tui.requestRender();
 		await scheduler.settle(terminal);
-		const plainRow = screen(terminal).indexOf("plain") + 1;
-		expect(plainRow).toBeGreaterThan(0);
-		expect(rewrittenRows(terminal.takeWrites())).toEqual([plainRow, plainRow + 1]);
+		terminal.takeWrites();
+
+		overlay.lines = spaced;
+		tui.requestRender();
+		await scheduler.settle(terminal);
+		expect(terminal.takeWrites()).toContain(`${OSC66}s=2;Hi`);
+		tui.stop();
+	});
+
+	it("reports the complete overlay to paint listeners when one row changes", async () => {
+		// Session streaming and recording mirror the screen from paint events; a
+		// partial repaint that went unreported would freeze their copy of the overlay.
+		const { terminal, scheduler, tui, overlay } = await openFullscreen(["alpha", "bravo", "charlie"]);
+		const paints: TuiPaint[] = [];
+		tui.addPaintListener(paint => paints.push(paint));
+
+		overlay.lines = ["alpha", "BRAVO", "charlie"];
+		tui.requestRender();
+		await scheduler.settle(terminal);
+		expect(paints).toHaveLength(1);
+		expect(paints[0]).toMatchObject({ alt: true, reset: false, rows: 3 });
+		expect(paints[0]!.viewport.map(row => Bun.stripANSI(row).trimEnd())).toEqual(overlay.lines);
 		tui.stop();
 	});
 });
