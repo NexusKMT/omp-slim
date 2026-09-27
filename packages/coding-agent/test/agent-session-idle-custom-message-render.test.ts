@@ -19,7 +19,7 @@ describe("AgentSession idle custom message render", () => {
 	beforeEach(async () => {
 		tempDir = TempDir.createSync("@pi-idle-custom-render-");
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		authStorage.setRuntimeApiKey("openai", "openai-test-key");
+		authStorage.keys.setRuntime("openai", "openai-test-key");
 	});
 
 	afterEach(async () => {
