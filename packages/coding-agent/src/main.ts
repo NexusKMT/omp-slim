@@ -118,7 +118,13 @@ import { registerLocalInferenceApi } from "./tiny/local-inference-api";
 import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import type { LspStartupServerInfo } from "./tools";
 import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
-import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
+import {
+	getChangelogPath,
+	readLastChangelogVersion,
+	resolveStartupChangelogForDisplay,
+	type StartupChangelogSelection,
+} from "./utils/changelog";
+import { checkEvalCapabilities } from "./eval/startup-check";
 import { EventBus } from "./utils/event-bus";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
@@ -2272,6 +2278,17 @@ export async function runRootCommand(
 				stdoutIsTTY: process.stdout.isTTY,
 			});
 
+			// Fresh-install eval capability check. The last-changelog-version marker is
+			// written by every prior interactive launch (and seeded for legacy configs),
+			// so its absence means this is the first run. Read it before the changelog
+			// resolution below writes it. The Python probe overlaps session creation.
+			const evalRequested =
+				!initialArgs.noTools && (initialArgs.tools === undefined || initialArgs.tools.includes("eval"));
+			const evalCapabilityWarningPromise =
+				isInteractive && evalRequested && (await readLastChangelogVersion()) === undefined
+					? checkEvalCapabilities({ cwd: sessionOptions.cwd ?? getProjectDir(), settings: settingsInstance })
+					: undefined;
+
 			// Startup changelog is only consumed by interactive mode below; kick the
 			// CHANGELOG.md parse off now so it overlaps session creation instead of
 			// serializing after it.
@@ -2397,6 +2414,10 @@ export async function runRootCommand(
 					// terminal in raw mode here, and the TUI's first clearScrollback paint
 					// would wipe a pre-TUI line anyway.
 					notifs.push(modelScopeNotification);
+				}
+				const evalCapabilityWarning = await evalCapabilityWarningPromise;
+				if (evalCapabilityWarning) {
+					notifs.push({ kind: "warn", message: evalCapabilityWarning });
 				}
 
 				if ($env.PI_TIMING) {
