@@ -11,6 +11,9 @@
 ### Fixed
 
 - Fixed the native addon keeping every `bun test --isolate`/`--parallel` test file's global object and module graph alive, which grew each test worker by ~15 MB per file until the run was OOM-killed.
+### Fixed
+
+- Fixed the native terminal output pump exiting on temporary nonblocking backpressure ([#13463](https://github.com/can1357/oh-my-pi/pull/13463) by [@hancens1024](https://github.com/hancens1024)).
 
 ## [18.3.3] - 2026-09-27
 
