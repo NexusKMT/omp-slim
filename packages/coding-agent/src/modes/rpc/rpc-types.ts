@@ -245,6 +245,12 @@ export interface RpcSubagentSnapshot {
 	parentToolCallId?: string;
 }
 
+/** Successful `steer_subagent` delivery: the hub receipt minus its `failed` outcome, which is reported as an error. */
+export interface RpcSteerSubagentResult {
+	to: string;
+	outcome: Exclude<IrcDeliveryReceipt["outcome"], "failed">;
+}
+
 export interface RpcSubagentMessagesResult {
 	sessionFile: string;
 	fromByte: number;
@@ -345,7 +351,7 @@ export type RpcResponse =
 			type: "response";
 			command: "steer_subagent";
 			success: true;
-			data: { to: string; outcome: IrcDeliveryReceipt["outcome"] };
+			data: RpcSteerSubagentResult;
 	  }
 
 	// Model

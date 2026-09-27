@@ -40,6 +40,7 @@ import type {
 	RpcSessionState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
+	RpcSteerSubagentResult,
 	RpcSubagentMessagesResult,
 	RpcSubagentProgressFrame,
 	RpcSubagentSnapshot,
@@ -769,12 +770,9 @@ export class RpcClient {
 	 *
 	 * Rejects when the `subagentId` is unknown, no longer running, or delivery fails.
 	 */
-	async steerSubagent(
-		subagentId: string,
-		message: string,
-	): Promise<{ to: string; outcome: "injected" | "woken" | "revived" }> {
+	async steerSubagent(subagentId: string, message: string): Promise<RpcSteerSubagentResult> {
 		const response = await this.#send({ type: "steer_subagent", subagentId, message });
-		return this.#getData<{ to: string; outcome: "injected" | "woken" | "revived" }>(response);
+		return this.#getData<RpcSteerSubagentResult>(response);
 	}
 
 	/**

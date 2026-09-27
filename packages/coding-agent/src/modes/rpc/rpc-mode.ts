@@ -32,7 +32,6 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
-import type { IrcDeliveryReceipt } from "@oh-my-pi/pi-tui/tools/irc";
 import { IrcBus } from "../../irc/bus";
 import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
@@ -78,6 +77,7 @@ import type {
 	RpcOpenSessionResult,
 	RpcResponse,
 	RpcSessionState,
+	RpcSteerSubagentResult,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
@@ -450,10 +450,6 @@ export class RpcShutdownCoordinator {
 
 export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
 
-export type RpcSteerSubagentResult =
-	| { kind: "delivered"; to: string; outcome: IrcDeliveryReceipt["outcome"] }
-	| { kind: "error"; message: string };
-
 /**
  * Steer a running subagent over the hub/IRC bus (RPC `steer_subagent`).
  *
@@ -472,7 +468,7 @@ export async function handleRpcSteerSubagent(
 	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
 	subagentId: string,
 	message: string,
-): Promise<RpcSteerSubagentResult> {
+): Promise<({ kind: "delivered" } & RpcSteerSubagentResult) | { kind: "error"; message: string }> {
 	// Progress can briefly report a terminal status before the terminal
 	// lifecycle frame prunes the snapshot; treat that as not running.
 	const snapshot = subagentRegistry.getSubagents().find(candidate => candidate.id === subagentId);

@@ -24,6 +24,9 @@ describe("handleRpcSteerSubagent", () => {
 
 	afterEach(() => {
 		registry.dispose();
+		IrcBus.resetGlobalForTests();
+		AgentLifecycleManager.resetGlobalForTests();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	function emitLifecycle(id: string, status: SubagentLifecyclePayload["status"]): void {
