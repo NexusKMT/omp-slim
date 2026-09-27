@@ -124,8 +124,8 @@ import {
 	resolveStartupChangelogForDisplay,
 	type StartupChangelogSelection,
 } from "./utils/changelog";
-import { checkEvalCapabilities } from "./eval/startup-check";
 import { EventBus } from "./utils/event-bus";
+import { resolvePythonEvalWarning } from "./eval/startup-warning";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
 import { cfgToolsApprovalMode } from "./tools/settings";
@@ -2278,15 +2278,13 @@ export async function runRootCommand(
 				stdoutIsTTY: process.stdout.isTTY,
 			});
 
-			// Fresh-install eval capability check. The last-changelog-version marker is
-			// written by every prior interactive launch (and seeded for legacy configs),
-			// so its absence means this is the first run. Read it before the changelog
-			// resolution below writes it. The Python probe overlaps session creation.
+			// First run only: every interactive launch writes the last-changelog-version
+			// marker, so read it before the changelog resolution below does.
 			const evalRequested =
 				!initialArgs.noTools && (initialArgs.tools === undefined || initialArgs.tools.includes("eval"));
-			const evalCapabilityWarningPromise =
+			const pythonEvalWarningPromise =
 				isInteractive && evalRequested && (await readLastChangelogVersion()) === undefined
-					? checkEvalCapabilities({ cwd: sessionOptions.cwd ?? getProjectDir(), settings: settingsInstance })
+					? resolvePythonEvalWarning({ cwd: sessionOptions.cwd ?? getProjectDir(), settings: settingsInstance })
 					: undefined;
 
 			// Startup changelog is only consumed by interactive mode below; kick the
@@ -2415,9 +2413,10 @@ export async function runRootCommand(
 					// would wipe a pre-TUI line anyway.
 					notifs.push(modelScopeNotification);
 				}
-				const evalCapabilityWarning = await evalCapabilityWarningPromise;
-				if (evalCapabilityWarning) {
-					notifs.push({ kind: "warn", message: evalCapabilityWarning });
+
+				const pythonEvalWarning = await pythonEvalWarningPromise;
+				if (pythonEvalWarning) {
+					notifs.push({ kind: "warn", message: pythonEvalWarning });
 				}
 
 				if ($env.PI_TIMING) {
