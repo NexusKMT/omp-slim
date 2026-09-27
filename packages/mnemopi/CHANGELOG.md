@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.3] - 2026-09-27
+
 ### Fixed
 
 - Fixed recall search matching query terms inside unrelated words, improving result relevance and ensuring exact matches are prioritized.

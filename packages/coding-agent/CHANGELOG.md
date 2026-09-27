@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.3] - 2026-09-27
+
 ### Added
 
 - Added a unified predictive text engine with N-gram, SmolLM2, and macOS native providers, including cross-engine blending, background model downloads, and a cross-process prediction daemon.

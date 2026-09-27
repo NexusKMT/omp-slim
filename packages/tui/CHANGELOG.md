@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.3] - 2026-09-27
+
 ### Added
 
 - Added responsive ghost-text word completion with pluggable backend providers, context-aware prose filtering, and feedback support.

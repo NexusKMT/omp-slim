@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.3] - 2026-09-27
+
 ### Added
 
 - Added live steering support, allowing models to receive and act on user steering messages during an active stream.
