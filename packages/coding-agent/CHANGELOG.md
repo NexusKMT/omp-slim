@@ -23,6 +23,12 @@
 - Fixed Cursor sessions under-reporting token usage and cost, and compacting from output tokens instead of real context occupancy ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Fixed Cursor shell commands running with their millisecond timeout read as seconds (a 15 s budget became `requested 15000s`) ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Goal mode now waits for input instead of repeatedly asking for approval when all remaining todos are blocked ([#13494](https://github.com/can1357/oh-my-pi/issues/13494)).
+- Fixed installing `pi-background-tasks` 2.6.0 or newer failing to load because the legacy `pi-ai` compatibility shim did not export `anthropicMessagesApi` ([#13250](https://github.com/can1357/oh-my-pi/issues/13250))
+- Fixed blob broker requests failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
+- Fixed `generate_image` reporting the selected catalog model instead of the image model the ChatGPT/Codex backend actually ran, and saved image paths now list the size and quality the provider returned ([#13403](https://github.com/can1357/oh-my-pi/issues/13403))
+- Fixed the fast-model fallback picking Gemini and MiniMax models when no `smol` role is configured; the built-in `mini` pattern now matches only `-mini` model ids ([#13292](https://github.com/can1357/oh-my-pi/issues/13292))
+- Fixed extension tool renderers written in upstream pi's `renderCall(args, theme, context)` order failing to render and logging `Tool renderer failed` on every call ([#13081](https://github.com/can1357/oh-my-pi/issues/13081))
+- Fixed the Nix flake / NixOS module build failing with "does not carry the @oh-my-pi/pi-natives version stamp" ([#13493](https://github.com/can1357/oh-my-pi/issues/13493)).
 
 ## [18.3.5] - 2026-09-27
 

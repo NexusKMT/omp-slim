@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `ImageGenerationResult.model` and `GeneratedImage.size`/`quality`, populated from the image model, dimensions, and quality the hosted OpenAI backends report ([#13403](https://github.com/can1357/oh-my-pi/issues/13403))
+
 ### Fixed
 
 - Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
@@ -9,6 +13,8 @@
 - Fixed Cursor context usage going unrecorded once output tokens had streamed, so compaction and handoff sized the context from output alone ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Fixed Cursor MCP tool calls handed to an external executor (auth-gateway clients) ending the turn as plain text instead of being returned as tool calls ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Fixed Cursor shell tool calls showing their millisecond timeout as seconds (15000 instead of 15) in the transcript ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
+- Fixed unix-socket fetches failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
+- Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
 
 ## [18.3.5] - 2026-09-27
 
