@@ -4,7 +4,7 @@
 
 ### Changed
 
-- The `eval` tool description now says the kernel is shared by the parent session and its concurrent `task` subagents, so agents stop trusting top-level variables another agent can overwrite between cells.
+- The `eval` tool description now says the kernel is shared by the parent session and its concurrent `task` subagents, so agents stop trusting top-level variables another agent can overwrite between cells. ([#13521](https://github.com/can1357/oh-my-pi/pull/13521))
 
 ### Added
 
