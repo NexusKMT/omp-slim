@@ -1258,6 +1258,39 @@ export function huggingfaceModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
+// 4.5 Helmcode
+// ---------------------------------------------------------------------------
+
+export interface HelmcodeModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * Helmcode model manager: OpenAI-compatible chat completions at
+ * `api.helmcode.com/v1`. `/v1/models` also lists embedding, rerank, TTS, and
+ * STT models; the exclusion policy lives in `runtime/behavior.kdl`
+ * (`exclude-models provider="helmcode"`).
+ */
+export function helmcodeModelManagerOptions(
+	config?: HelmcodeModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	return createOpenAICompatibleModelManagerOptions({
+		api: "openai-completions",
+		providerId: "helmcode",
+		defaultBaseUrl: "https://api.helmcode.com/v1",
+		config,
+		requireApiKey: true,
+		filterModel: (_entry, model) => !isExcludedModel("helmcode", model.id),
+		mapModel: mapWithBundledReference,
+		// Must live on the manager options, not only the KDL descriptor:
+		// `createModelManager()` prunes the bundled slice from this flag.
+		dynamicModelsAuthoritative: true,
+	});
+}
+
+// ---------------------------------------------------------------------------
 // 5. NVIDIA
 // ---------------------------------------------------------------------------
 
