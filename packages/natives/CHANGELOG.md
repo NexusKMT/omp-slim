@@ -11,6 +11,10 @@
 - Replaced `deliveryModes` array with a unified `takeover` boolean capability for desktop input control
 - Standardized pointer options to use `takeover: true` for forced foreground interaction
 
+### Fixed
+
+- Fixed omp sessions on macOS adding a terminal icon to the Dock after using the `computer` tool or spell checking ([#13455](https://github.com/can1357/oh-my-pi/pull/13455) by [@VelizarSeleznev](https://github.com/VelizarSeleznev))
+
 ## [18.3.1] - 2026-09-25
 
 ### Added
