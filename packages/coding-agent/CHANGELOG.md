@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.4] - 2026-09-27
+
 ### Breaking Changes
 
 - Replaced the `task` tool's `complexity` field with `solutionSpace`, a description of how open-ended the subtask is; `auto` thinking for spawned subagents now picks effort from it alone
