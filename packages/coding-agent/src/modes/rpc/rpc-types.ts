@@ -9,6 +9,7 @@ import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessageEvent, Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ContextUsage } from "../../extensibility/extensions/types";
+import type { IrcDeliveryReceipt } from "@oh-my-pi/pi-tui/tools/irc";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import type { CacheWarmingMode } from "../../session/cache-warmer";
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
@@ -52,6 +53,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
 	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
+	| { id?: string; type: "steer_subagent"; subagentId: string; message: string }
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -337,6 +339,13 @@ export type RpcResponse =
 			command: "get_subagent_messages";
 			success: true;
 			data: RpcSubagentMessagesResult;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "steer_subagent";
+			success: true;
+			data: { to: string; outcome: IrcDeliveryReceipt["outcome"] };
 	  }
 
 	// Model

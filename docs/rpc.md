@@ -150,6 +150,7 @@ Important edge behavior from runtime:
 - `{ id?, type: "set_event_filter", events: string[] | null, messageUpdates?: "full" | "delta" }`
 - `{ id?, type: "get_subagents" }`
 - `{ id?, type: "get_subagent_messages", subagentId?: string, sessionFile?: string, fromByte?: number }`
+- `{ id?, type: "steer_subagent", subagentId: string, message: string }`
 
 ### Model
 
@@ -779,6 +780,36 @@ message entries. Only complete newline-terminated records are consumed; reuse
 `nextByte` on the next request. A missing transcript returns empty arrays.
 If `fromByte` exceeds the current file size, reading restarts at byte zero and
 reports `reset: true`.
+
+### Steering subagents
+
+`steer_subagent` delivers a direct message to a running subagent over the same
+hub/IRC path the `hub` send tool uses (`IrcBus.global().send`): busy subagents
+receive the message as a non-interrupting aside at their next step boundary,
+and idle ones are woken with a real turn. The sender is attributed to the
+session owner (`Main`), so the subagent sees a normal steering DM. Isolated
+(worktree) subagents run in-process and are steered the same way.
+
+```json
+{ "id": "req_1", "type": "steer_subagent", "subagentId": "OmpWorker", "message": "Drop the glob, keep the direct path." }
+```
+
+Failure responses:
+
+- missing/empty `subagentId` or `message` → validation error
+- `subagentId` not currently listed as running by `get_subagents` (unknown,
+  finished, or released) → `error: "Subagent not running: <id>"`
+- hub delivery failed → `error: "Delivery failed: <reason>"`
+
+Success responses carry delivery metadata:
+
+```json
+{ "id": "req_1", "type": "response", "command": "steer_subagent", "success": true, "data": { "to": "OmpWorker", "outcome": "injected" } }
+```
+
+`outcome` is the hub delivery receipt: `"injected"` (aside into a busy agent or
+consumed waiter), `"woken"` (idle agent woke for a real turn), or `"revived"`
+(parked agent restored before delivery).
 
 ## Prompt/Queue Concurrency and Ordering
 

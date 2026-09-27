@@ -762,6 +762,22 @@ export class RpcClient {
 	}
 
 	/**
+	 * Steer a running subagent over the hub/IRC bus. The message is delivered
+	 * as a normal DM attributed to the session owner, injecting an aside into
+	 * busy agents or waking idle ones. Resolves with the delivery outcome once
+	 * the bus hand-off completes.
+	 *
+	 * Rejects when the `subagentId` is unknown, no longer running, or delivery fails.
+	 */
+	async steerSubagent(
+		subagentId: string,
+		message: string,
+	): Promise<{ to: string; outcome: "injected" | "woken" | "revived" }> {
+		const response = await this.#send({ type: "steer_subagent", subagentId, message });
+		return this.#getData<{ to: string; outcome: "injected" | "woken" | "revived" }>(response);
+	}
+
+	/**
 	 * Set model by provider and ID.
 	 */
 	async setModel(provider: string, modelId: string): Promise<{ provider: string; id: string }> {

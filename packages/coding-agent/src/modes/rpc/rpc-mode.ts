@@ -32,6 +32,9 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+import type { IrcDeliveryReceipt } from "@oh-my-pi/pi-tui/tools/irc";
+import { IrcBus } from "../../irc/bus";
+import { MAIN_AGENT_ID } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
@@ -446,6 +449,43 @@ export class RpcShutdownCoordinator {
 }
 
 export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
+
+export type RpcSteerSubagentResult =
+	| { kind: "delivered"; to: string; outcome: IrcDeliveryReceipt["outcome"] }
+	| { kind: "error"; message: string };
+
+/**
+ * Steer a running subagent over the hub/IRC bus (RPC `steer_subagent`).
+ *
+ * Only subagents this session currently lists as running (`get_subagents`)
+ * are reachable. Their snapshot ids ARE the hub/IRC recipient ids: the task
+ * executor emits lifecycle frames with the same agent id it registers in the
+ * global `AgentRegistry` (see sdk.ts `createAgentSession`).
+ *
+ * Delivery reuses the exact primitive the `hub` send tool executes
+ * (`IrcBus.global().send`): busy peers receive the message as a
+ * non-interrupting aside at their next step boundary and idle ones are woken.
+ * The sender is attributed to the session owner so the subagent sees a normal
+ * steering DM rather than an anonymous peer.
+ */
+export async function handleRpcSteerSubagent(
+	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
+	subagentId: string,
+	message: string,
+): Promise<RpcSteerSubagentResult> {
+	// Progress can briefly report a terminal status before the terminal
+	// lifecycle frame prunes the snapshot; treat that as not running.
+	const snapshot = subagentRegistry.getSubagents().find(candidate => candidate.id === subagentId);
+	if (snapshot?.status !== "running" && snapshot?.status !== "pending") {
+		return { kind: "error", message: `Subagent not running: ${subagentId}` };
+	}
+
+	const receipt = await IrcBus.global().send({ from: MAIN_AGENT_ID, to: subagentId, body: message });
+	if (receipt.outcome === "failed") {
+		return { kind: "error", message: `Delivery failed: ${receipt.error ?? "unknown error"}` };
+	}
+	return { kind: "delivered", to: receipt.to, outcome: receipt.outcome };
+}
 
 export async function handleRpcSessionChange(
 	session: RpcSessionChangeSession,
@@ -1432,6 +1472,24 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				} catch (err) {
 					return error(id, "get_subagent_messages", err instanceof Error ? err.message : String(err));
 				}
+			}
+
+			case "steer_subagent": {
+				if (!subagentRegistry) {
+					return error(id, "steer_subagent", "Subagent event bus is unavailable");
+				}
+				if (typeof command.subagentId !== "string" || command.subagentId.length === 0) {
+					return error(id, "steer_subagent", "`subagentId` must be a non-empty string.");
+				}
+				const message = typeof command.message === "string" ? command.message.trim() : "";
+				if (!message) {
+					return error(id, "steer_subagent", "`message` is required for steer_subagent.");
+				}
+				const result = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, message);
+				if (result.kind === "error") {
+					return error(id, "steer_subagent", result.message);
+				}
+				return success(id, "steer_subagent", { to: result.to, outcome: result.outcome });
 			}
 
 			// =================================================================
