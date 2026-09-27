@@ -418,6 +418,21 @@ describe("message sync", () => {
 		expect(mgr.log.toMessages()[0]!.content).toBe("q2");
 	});
 
+	it("resetSyncCursor forces full re-sync on next call", () => {
+		const mgr = new AppendOnlyContextManager();
+		mgr.build(makeContext(), BUILD_OPTS);
+		mgr.syncMessages([{ role: "user", content: "old" }]);
+
+		mgr.resetSyncCursor();
+		// The stale turn must be gone before the next sync, not just overwritten by it.
+		expect(mgr.build(makeContext(), BUILD_OPTS).messages).toHaveLength(0);
+		mgr.syncMessages([{ role: "user", content: "fresh" }]);
+
+		const result = mgr.build(makeContext(), BUILD_OPTS);
+		expect(result.messages).toHaveLength(1);
+		expect(result.messages[0]!.content).toBe("fresh");
+	});
+
 	it("preserves the byte-stable prefix when a deep message is rewritten (#3406)", () => {
 		const mgr = new AppendOnlyContextManager();
 		mgr.build(makeContext(), BUILD_OPTS);
