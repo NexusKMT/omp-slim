@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AuthStorage, SqliteAuthCredentialStore, withAuth } from "@oh-my-pi/pi-ai";
+import { AuthStorage, SqliteAuthCredentialStore, withAuth, withOAuthAccess } from "@oh-my-pi/pi-ai";
 import {
 	AuthBrokerClient,
 	AuthBrokerRefresher,
@@ -10,6 +10,7 @@ import {
 	RemoteAuthCredentialStore,
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
+import { OAuthError } from "@oh-my-pi/pi-ai/error";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import type { OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
 import { removeWithRetries } from "../../utils/src/temp";
@@ -185,6 +186,34 @@ describe("auth broker OAuth refresh backoff", () => {
 		expect(await clientStorage.keys.get(PROVIDER, "generic", { forceRefresh: true })).toBe(
 			"access-0-renewed-renewed",
 		);
+	});
+
+	test("typed token-refresh replay mints instead of reusing a recent broker token", async () => {
+		if (!handle) throw new Error("test setup failed");
+		const client = new AuthBrokerClient({ url: handle.url, token: TOKEN });
+		const initial = await client.fetchSnapshot();
+		if (initial.status !== 200) throw new Error("expected broker snapshot");
+		await client.refreshCredential(initial.snapshot.credentials[0]!.id);
+		const minted = await client.fetchSnapshot();
+		if (minted.status !== 200) throw new Error("expected minted snapshot");
+		remote = new RemoteAuthCredentialStore({
+			client,
+			initialSnapshot: minted.snapshot,
+			streamSnapshots: false,
+		});
+		clientStorage = new AuthStorage(remote);
+		await clientStorage.credentials.reload();
+		const attempted: string[] = [];
+		const result = await withOAuthAccess(clientStorage, PROVIDER, async access => {
+			attempted.push(access.accessToken);
+			if (access.accessToken === "access-1") {
+				throw new OAuthError("token expired before request", { kind: "token-refresh" });
+			}
+			return access.accessToken;
+		});
+		expect(result).toBe("access-2");
+		expect(attempted).toEqual(["access-1", "access-2"]);
+		expect(refreshCalls).toBe(2);
 	});
 
 	test("scheduled expiry refresh bypasses recent-mint reuse", async () => {
