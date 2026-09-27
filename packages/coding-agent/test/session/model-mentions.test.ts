@@ -91,6 +91,44 @@ describe("model mentions", () => {
 		}
 	});
 
+	test("mid-session tags ride a hidden notice instead of the task description", async () => {
+		vi.spyOn(registry, "getApiKey").mockResolvedValue("test-key");
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: models[0], systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: createMockModel({ responses: [{ content: ["Synthetic done"] }, { content: ["User done"] }] }).stream,
+		});
+		const agentSession = new AgentSession({
+			agent,
+			sessionManager: session,
+			modelRegistry: registry,
+			settings: Settings.isolated({ "compaction.enabled": false }),
+		});
+		try {
+			expect(agentSession.getAdvertisedSessionAgents()).toEqual([]);
+			await agentSession.prompt("ask ^b/y");
+			// The description surface only absorbs tags at a base-prompt rebuild, so
+			// the new pseudonym must arrive as a notice carrying its selector.
+			expect(agentSession.getAdvertisedSessionAgents()).toEqual([]);
+			const notice = agent.state.messages.find(
+				message => message.role === "custom" && message.customType === "session-agent-notice",
+			);
+			if (!notice || typeof notice.content !== "string") throw new Error("Missing session agent notice");
+			expect(notice.content).toContain("`m1`");
+			expect(notice.content).toContain("b/y");
+			expect(notice.display).toBe(false);
+
+			// The notice is not re-emitted: the model already knows m1.
+			await agentSession.prompt("continue");
+			const notices = agent.state.messages.filter(
+				message => message.role === "custom" && message.customType === "session-agent-notice",
+			);
+			expect(notices).toHaveLength(1);
+		} finally {
+			await agentSession.dispose();
+		}
+	});
+
 	test("registers only exact available selectors and reuses their pseudonyms", () => {
 		expect(mentions.expandMentions("ask ^a/x and ^b/y ignore ^nope/z")).toBe(
 			'ask <model agent="m1" name="X One"/> and <model agent="m2" name="Y"/> ignore ^nope/z',
