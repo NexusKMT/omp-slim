@@ -129,7 +129,7 @@
 - Added an "OpenAI API" option to the setup wizard's web-search step; the existing ChatGPT-OAuth option is now labeled "OpenAI Codex" ([#13467](https://github.com/can1357/oh-my-pi/pull/13467) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 ### Added
 
-- Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose gates as ghost-text word completion
+- Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose gates as ghost-text word completion ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
 
 ## [18.3.3] - 2026-09-27
 
