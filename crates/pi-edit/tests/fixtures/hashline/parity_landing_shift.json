@@ -482,7 +482,7 @@
 			]
 		},
 		{
-			"name": "keeps an else branch that closes the if itself literal",
+			"name": "keeps an else branch in place instead of duplicating the if closer",
 			"apply": [
 				{
 					"text": "package p\n\nfunc f(x bool) int {\n\tif x {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
