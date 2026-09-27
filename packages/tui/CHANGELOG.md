@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed fullscreen overlays rewriting the whole terminal on every change; each frame now repaints only the rows that changed
+
 ## [18.3.5] - 2026-09-27
 
 ### Added
