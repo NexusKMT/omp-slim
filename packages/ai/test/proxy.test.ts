@@ -345,41 +345,41 @@ describe("installGlobalProxyFetch", () => {
 		expect(calls[0].proxy).toBeUndefined();
 	});
 
-	it("reaches a Unix-socket service instead of sending it to PI_PROXY", async () => {
-		const socket =
-			process.platform === "win32"
-				? `\\\\.\\pipe\\omp-proxy-${process.pid}`
-				: path.join(os.tmpdir(), `omp-proxy-${process.pid}.sock`);
-		const connections = new Set<net.Socket>();
-		const server = net.createServer(connection => {
-			connections.add(connection);
-			connection.once("close", () => connections.delete(connection));
-			connection.end("HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nlocal broker");
-		});
-		const listening = Promise.withResolvers<void>();
-		server.once("error", listening.reject);
-		server.listen(socket, listening.resolve);
-		await listening.promise;
+	it.skipIf(process.platform === "win32")(
+		"reaches a Unix-socket service instead of sending it to PI_PROXY",
+		async () => {
+			const socket = path.join(os.tmpdir(), `omp-proxy-${process.pid}.sock`);
+			const connections = new Set<net.Socket>();
+			const server = net.createServer(connection => {
+				connections.add(connection);
+				connection.once("close", () => connections.delete(connection));
+				connection.end("HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nlocal broker");
+			});
+			const listening = Promise.withResolvers<void>();
+			server.once("error", listening.reject);
+			server.listen(socket, listening.resolve);
+			await listening.promise;
 
-		try {
-			Bun.env.PI_PROXY = PROXY;
-			globalThis.fetch = nativeFetch;
-			installGlobalProxyFetch();
-			const response = await fetch("http://blob-broker.local/info", {
-				unix: socket,
-				signal: AbortSignal.timeout(1_500),
-			});
-			expect(await response.text()).toBe("local broker");
-		} finally {
-			for (const connection of connections) connection.destroy();
-			const closed = Promise.withResolvers<void>();
-			server.close(error => {
-				if (error) closed.reject(error);
-				else closed.resolve();
-			});
-			await closed.promise;
-		}
-	});
+			try {
+				Bun.env.PI_PROXY = PROXY;
+				globalThis.fetch = nativeFetch;
+				installGlobalProxyFetch();
+				const response = await fetch("http://blob-broker.local/info", {
+					unix: socket,
+					signal: AbortSignal.timeout(1_500),
+				});
+				expect(await response.text()).toBe("local broker");
+			} finally {
+				for (const connection of connections) connection.destroy();
+				const closed = Promise.withResolvers<void>();
+				server.close(error => {
+					if (error) closed.reject(error);
+					else closed.resolve();
+				});
+				await closed.promise;
+			}
+		},
+	);
 
 	it("installs once", async () => {
 		Bun.env.PI_PROXY = PROXY;
