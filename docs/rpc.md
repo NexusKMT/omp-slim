@@ -251,8 +251,8 @@ failed `login` response directing the user to the terminal UI; no ordinary
 
 Composer ghost text for hosts that render their own input box. `text` is the
 whole draft and `cursor` a UTF-16 offset into it. The server applies the same
-gates as the terminal editor (the cursor must end a prose word; code, paths,
-and slash commands get nothing) and answers from the engine selected by
+gates as the terminal editor (the cursor must sit at the end of its line and
+end a prose word; code, paths, and slash commands get nothing) and answers from the engine selected by
 `spelling.autocomplete`; `off` always answers `suffix: null`. The first
 request may take several seconds while the shared prediction daemon starts.
 `predict_word` is dispatched concurrently like `bash`, so a slow prediction

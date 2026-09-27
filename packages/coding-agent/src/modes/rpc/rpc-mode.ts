@@ -32,7 +32,11 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
-import { type WordCompletionQuery, wordCompletionQuery } from "@oh-my-pi/pi-tui/prompt/word-completion";
+import {
+	type WordCompletionMethod,
+	type WordCompletionQuery,
+	wordCompletionQuery,
+} from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { requestTextPrediction, textPredictionBackend } from "../../predict/client";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
@@ -92,11 +96,33 @@ function isTextCursor(text: unknown, cursor: unknown): text is string {
 	);
 }
 
-/** Composer ghost-text query at a UTF-16 cursor offset, gated exactly like the TUI editor's. */
+/**
+ * Composer ghost-text query at a UTF-16 cursor offset, gated like the TUI
+ * editor's: only at the end of a line, and only for a prose word.
+ */
 function wordQueryAt(text: string, cursor: number): WordCompletionQuery | undefined {
+	if (cursor < text.length && text[cursor] !== "\n") return undefined;
 	const head = text.slice(0, cursor);
 	const cursorLine = head.split("\n").length - 1;
 	return wordCompletionQuery(text.split("\n"), cursorLine, cursor - (head.lastIndexOf("\n") + 1));
+}
+
+/**
+ * `predict_word`'s answer: the ghost-text suffix for the word ending at
+ * `cursor`, or `null` when the engine is off or nothing applies. Rejects when
+ * the prediction daemon cannot answer. `request` is a test seam.
+ */
+export async function predictRpcWord(
+	method: WordCompletionMethod,
+	text: string,
+	cursor: number,
+	request: typeof requestTextPrediction = requestTextPrediction,
+): Promise<string | null> {
+	if (method === "off") return null;
+	const query = wordQueryAt(text, cursor);
+	if (!query) return null;
+	const { suggestion } = await request(method, query.before, query.prefix);
+	return suggestion?.suffix || null;
 }
 
 // Re-export types for consumers
@@ -419,7 +445,7 @@ export class RpcInputDispatcher {
  * Coordinates deferred shutdown with in-flight background input tasks.
  *
  * `pi.shutdown()` from an extension only *requests* shutdown; the process must
- * not exit while a background-dispatched command (`bash`, see
+ * not exit while a background-dispatched command (`bash`, `predict_word`, see
  * {@link dispatchRpcInputFrame}) still owes the client a response frame. The
  * coordinator tracks those tasks, re-checks the shutdown request whenever one
  * settles (covering a shutdown requested mid-bash with no follow-up client
@@ -1763,13 +1789,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				if (!isTextCursor(command.text, command.cursor)) {
 					return error(id, "predict_word", INVALID_TEXT_CURSOR_ERROR);
 				}
-				const method = cfgSpellingAutocomplete.get(session.settings);
-				if (method === "off") return success(id, "predict_word", { suffix: null });
-				const query = wordQueryAt(command.text, command.cursor);
-				if (!query) return success(id, "predict_word", { suffix: null });
 				try {
-					const { suggestion } = await requestTextPrediction(method, query.before, query.prefix);
-					return success(id, "predict_word", { suffix: suggestion?.suffix || null });
+					const method = cfgSpellingAutocomplete.get(session.settings);
+					const suffix = await predictRpcWord(method, command.text, command.cursor);
+					return success(id, "predict_word", { suffix });
 				} catch (err: unknown) {
 					return error(id, "predict_word", err instanceof Error ? err.message : String(err));
 				}

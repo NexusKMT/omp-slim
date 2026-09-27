@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { isRecord, readJsonl, TempDir } from "@oh-my-pi/pi-utils";
 import { selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat";
+import { predictRpcWord } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -192,6 +193,38 @@ async function withRpcServer<T>(
 		await stderrPromise.catch(() => {});
 	}
 }
+
+describe("predictRpcWord", () => {
+	test("asks the engine for the prose word ending the line and returns its suffix", async () => {
+		const calls: unknown[][] = [];
+		const draft = "Check it\nthe weath";
+		const suffix = await predictRpcWord("ngram", draft, draft.length, async (...args) => {
+			calls.push(args);
+			return { engine: "ngram", suggestion: { suffix: "er", confidence: 0.9 } };
+		});
+		expect(suffix).toBe("er");
+		expect(calls).toEqual([["ngram", "Check it\nthe ", "weath"]]);
+	});
+
+	test("never asks the engine mid-line or when completion is off", async () => {
+		const request = async (): Promise<never> => {
+			throw new Error("engine must not be asked");
+		};
+		expect(await predictRpcWord("ngram", "the weath and more", 9, request)).toBeNull();
+		expect(await predictRpcWord("off", "the weath", 9, request)).toBeNull();
+	});
+
+	test("no suggestion is null and an unreachable daemon rejects", async () => {
+		expect(
+			await predictRpcWord("ngram", "the weath", 9, async () => ({ engine: "ngram", suggestion: null })),
+		).toBeNull();
+		await expect(
+			predictRpcWord("ngram", "the weath", 9, async () => {
+				throw new Error("text-predict daemon unavailable");
+			}),
+		).rejects.toThrow("text-predict daemon unavailable");
+	});
+});
 
 describe("RPC Pi-compatible primitives (live server)", () => {
 	test("rejects invalid cache warming modes and accepts a subsequent session-scoped mode change", async () => {
