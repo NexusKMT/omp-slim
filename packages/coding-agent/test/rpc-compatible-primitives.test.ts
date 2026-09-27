@@ -305,4 +305,30 @@ describe("RPC Pi-compatible primitives (live server)", () => {
 			expect(ok.success).toBe(true);
 		});
 	}, 60000);
+
+	test("predict_word gates non-prose words and rejects cursors outside the text", async () => {
+		await withRpcServer(async (send, next) => {
+			// The cursor ends a word inside a fenced block on the third line: code
+			// never gets ghost text, so the answer is null without asking an engine.
+			const fenced = "Look:\n```ts\nconst val";
+			send({ type: "predict_word", id: "fenced", text: fenced, cursor: fenced.length });
+			const gated = await next();
+			expect(gated).toMatchObject({ id: "fenced", command: "predict_word", success: true, data: { suffix: null } });
+
+			send({ type: "predict_word", id: "past-end", text: "hello", cursor: 6 });
+			const pastEnd = await next();
+			expect(pastEnd).toMatchObject({ id: "past-end", command: "predict_word", success: false });
+
+			send({
+				type: "predict_word_feedback",
+				id: "fb-bad",
+				text: "hi",
+				cursor: 1.5,
+				suggestion: "x",
+				accepted: true,
+			});
+			const badFeedback = await next();
+			expect(badFeedback).toMatchObject({ id: "fb-bad", command: "predict_word_feedback", success: false });
+		});
+	}, 60000);
 });

@@ -244,6 +244,24 @@ authorization URL. Prompts marked `secret: true` are always rejected with a
 failed `login` response directing the user to the terminal UI; no ordinary
 `input` request is emitted. RPC does not negotiate secret-input support.
 
+### Word prediction
+
+- `{ id?, type: "predict_word", text: string, cursor: number }` → `data: { suffix: string | null }`
+- `{ id?, type: "predict_word_feedback", text: string, cursor: number, suggestion: string, accepted: boolean }`
+
+Composer ghost text for hosts that render their own input box. `text` is the
+whole draft and `cursor` a UTF-16 offset into it. The server applies the same
+gates as the terminal editor (the cursor must end a prose word; code, paths,
+and slash commands get nothing) and answers from the engine selected by
+`spelling.autocomplete`; `off` always answers `suffix: null`. The first
+request may take several seconds while the shared prediction daemon starts.
+`predict_word` is dispatched concurrently like `bash`, so a slow prediction
+never delays other commands; match responses on `id` and drop stale ones.
+
+Send `predict_word_feedback` with the `text` and `cursor` at which a
+suggestion was shown: `accepted: true` when the user took it, `false` when
+they typed past it. Feedback tunes the engine's learned state.
+
 ## Response Schema
 
 All command results use `RpcResponse`:

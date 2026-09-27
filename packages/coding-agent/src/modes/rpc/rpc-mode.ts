@@ -32,6 +32,8 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+import { type WordCompletionQuery, wordCompletionQuery } from "@oh-my-pi/pi-tui/prompt/word-completion";
+import { requestTextPrediction, textPredictionBackend } from "../../predict/client";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
@@ -44,6 +46,7 @@ import { selectRpcEntries } from "./rpc-compat";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
 import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
+import { cfgSpellingAutocomplete } from "../settings";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
 import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
@@ -77,6 +80,24 @@ import type {
 	RpcSessionState,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
+
+const INVALID_TEXT_CURSOR_ERROR = "cursor must be an integer UTF-16 offset within text";
+
+function isTextCursor(text: unknown, cursor: unknown): text is string {
+	return (
+		typeof text === "string" &&
+		Number.isInteger(cursor) &&
+		(cursor as number) >= 0 &&
+		(cursor as number) <= text.length
+	);
+}
+
+/** Composer ghost-text query at a UTF-16 cursor offset, gated exactly like the TUI editor's. */
+function wordQueryAt(text: string, cursor: number): WordCompletionQuery | undefined {
+	const head = text.slice(0, cursor);
+	const cursorLine = head.split("\n").length - 1;
+	return wordCompletionQuery(text.split("\n"), cursorLine, cursor - (head.lastIndexOf("\n") + 1));
+}
 
 // Re-export types for consumers
 export type * from "./rpc-types";
@@ -284,6 +305,12 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 }
 
 /**
+ * Commands answered off the serial queue; see {@link dispatchRpcInputFrame}.
+ * A Set, not a Record: `type` is untrusted input and must not hit prototype keys.
+ */
+const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>(["bash", "predict_word"]);
+
+/**
  * Dispatch a single parsed frame from the RPC input stream.
  *
  * Bash commands are dispatched in the background so the caller can keep reading
@@ -294,9 +321,9 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
  *
  * @returns `undefined` when the frame was routed to a side-channel handler
  *   (extension UI response, host tool/URI frames) or dispatched in the
- *   background (`bash`). Otherwise a promise that resolves once the response
+ *   background (`bash`, `predict_word`). Otherwise a promise that resolves once the response
  *   for the command has been emitted via `output`. Errors from `handleCommand`
- *   on non-`bash` commands propagate; the caller is expected to wrap them.
+ *   on serial commands propagate; the caller is expected to wrap them.
  */
 export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps): Promise<void> | undefined {
 	if (dispatchRpcControlFrame(parsed, deps)) return undefined;
@@ -308,15 +335,17 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 
 	// `bash` can run for a long time. Dispatch it in the background so a
 	// subsequent `abort_bash` frame can be read and handled without waiting
-	// for the shell command to finish on its own. The response is emitted
-	// when `handleCommand` resolves; clients correlate via `command.id`.
-	if (command.type === "bash") {
+	// for the shell command to finish on its own. `predict_word` is backgrounded
+	// so a cold prediction engine never stalls the command queue behind a
+	// keystroke. The response is emitted when `handleCommand` resolves; clients
+	// correlate via `command.id`.
+	if (BACKGROUND_COMMANDS.has(command.type)) {
 		const task = (async () => {
 			try {
 				deps.output(await deps.handleCommand(command));
 			} catch (err: unknown) {
 				const message = err instanceof Error ? err.message : String(err);
-				deps.output(deps.errorResponse(command.id, "bash", message));
+				deps.output(deps.errorResponse(command.id, command.type, message));
 			}
 		})();
 		deps.trackBackgroundTask?.(task);
@@ -346,7 +375,7 @@ export class RpcInputDispatcher {
 			if (dispatchRpcControlFrame(parsed, this.#deps)) return;
 
 			const command = parsed as RpcCommand;
-			if (command.type === "bash") {
+			if (BACKGROUND_COMMANDS.has(command.type)) {
 				dispatchRpcInputFrame(command, this.#deps);
 				return;
 			}
@@ -1724,6 +1753,41 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				} catch (err: unknown) {
 					return error(id, "login", err instanceof Error ? err.message : String(err));
 				}
+			}
+
+			// =================================================================
+			// Word prediction
+			// =================================================================
+
+			case "predict_word": {
+				if (!isTextCursor(command.text, command.cursor)) {
+					return error(id, "predict_word", INVALID_TEXT_CURSOR_ERROR);
+				}
+				const method = cfgSpellingAutocomplete.get(session.settings);
+				if (method === "off") return success(id, "predict_word", { suffix: null });
+				const query = wordQueryAt(command.text, command.cursor);
+				if (!query) return success(id, "predict_word", { suffix: null });
+				try {
+					const { suggestion } = await requestTextPrediction(method, query.before, query.prefix);
+					return success(id, "predict_word", { suffix: suggestion?.suffix || null });
+				} catch (err: unknown) {
+					return error(id, "predict_word", err instanceof Error ? err.message : String(err));
+				}
+			}
+
+			case "predict_word_feedback": {
+				if (!isTextCursor(command.text, command.cursor)) {
+					return error(id, "predict_word_feedback", INVALID_TEXT_CURSOR_ERROR);
+				}
+				if (typeof command.suggestion !== "string" || typeof command.accepted !== "boolean") {
+					return error(id, "predict_word_feedback", "suggestion must be a string and accepted a boolean");
+				}
+				const method = cfgSpellingAutocomplete.get(session.settings);
+				const query = method === "off" ? undefined : wordQueryAt(command.text, command.cursor);
+				if (method !== "off" && query) {
+					textPredictionBackend(method).feedback(query.before, query.prefix, command.suggestion, command.accepted);
+				}
+				return success(id, "predict_word_feedback");
 			}
 
 			default: {
