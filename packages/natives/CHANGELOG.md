@@ -6,6 +6,10 @@
 
 - Improved syntax highlighting to use about 5x less memory and run 3-5x faster by compiling grammars with Oniguruma instead of fancy-regex; highlighted output is unchanged.
 
+### Fixed
+
+- Fixed SmolLM word completion (`spelling.autocomplete: smollm`) being about 25x slower on Windows x64 and Intel Macs; suggestions are unchanged.
+
 ## [18.3.4] - 2026-09-27
 
 ### Fixed
