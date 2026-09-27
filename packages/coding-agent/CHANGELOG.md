@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `ask` tool's "Other (type your own)" prompt sending RPC and SDK clients a terminal-rendered title (options with icon glyphs, each line clipped to 80 columns); the editor title is now the question text, and the interactive TUI's own ask dialog is unaffected
+
 ## [18.3.4] - 2026-09-27
 
 ### Breaking Changes
