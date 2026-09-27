@@ -700,6 +700,7 @@ fn mismatch_messages_distinguish_stale_and_unrecognized_hashes() {
 		file_lines:         vec!["one".into(), "two".into(), "three".into()],
 		anchor_lines:       vec![2],
 		hash_recognized:    true,
+		tag_origin_paths:   Vec::new(),
 	};
 	let message = format_mismatch_message(&stale);
 	assert!(message.contains("Edit rejected for a.ts: file changed between read and edit."));
@@ -707,6 +708,24 @@ fn mismatch_messages_distinguish_stale_and_unrecognized_hashes() {
 	let unknown = MismatchDetails { hash_recognized: false, ..stale };
 	let message = format_mismatch_message(&unknown);
 	assert!(message.contains("hash #1A2B is not from this session"));
+	assert!(message.contains("never invent the tag"));
+	// When the unrecognized tag was actually issued earlier in this session
+	// for a different path, the rejection names that path so a relative
+	// worktree lane doesn't follow a wrong-tree suggestion.
+	let known_elsewhere = MismatchDetails {
+		path:               Some("a.ts".into()),
+		expected_file_hash: "1A2B".into(),
+		actual_file_hash:   "3C4D".into(),
+		file_lines:         vec!["one".into(), "two".into(), "three".into()],
+		anchor_lines:       vec![2],
+		hash_recognized:    false,
+		tag_origin_paths:   vec!["/build/x/wt/crates/a/mcp.rs".into()],
+	};
+	let message = format_mismatch_message(&known_elsewhere);
+	assert!(message.contains("hash #1A2B is not from this session"));
+	assert!(
+		message.contains("Hash #1A2B was issued in this session for /build/x/wt/crates/a/mcp.rs.")
+	);
 	assert!(message.contains("never invent the tag"));
 }
 
