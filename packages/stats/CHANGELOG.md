@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `/trace` and `omp stats` dashboards failing to load after operating-system temporary-file cleanup.
+- Fixed `/trace` and `omp stats` dashboards failing to load after operating-system temporary-file cleanup ([#13487](https://github.com/can1357/oh-my-pi/pull/13487) by [@Peter-Tam](https://github.com/Peter-Tam)).
 
 ## [18.2.9] - 2026-09-22
 
