@@ -22,11 +22,7 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { PromptTemplate } from "@oh-my-pi/pi-coding-agent/config/prompt-templates";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { dispatchRpcSkillPrompt, tryRunRpcSkillCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
-import {
-	RpcExtensionUserMessageTracker,
-	RpcPromptResults,
-} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-prompt-results";
+import { tryRunRpcSkillCommand } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -796,10 +792,8 @@ describe("AgentSession queued steer delivery", () => {
 				if (injected) return;
 				injected = true;
 				const queued = Promise.withResolvers<void>();
-				const results = new RpcPromptResults(session, () => {});
-				await dispatchRpcSkillPrompt({
-					ticket: results.begin("queued-skill"),
-					session: {
+				void tryRunRpcSkillCommand(
+					{
 						skillsSettings: { enableSkillCommands: true },
 						skills: [
 							{
@@ -816,12 +810,9 @@ describe("AgentSession queued steer delivery", () => {
 							return result;
 						},
 					},
-					message: invocation,
-					streamingBehavior: "followUp",
-					results,
-					onError: error => queued.reject(error),
-					extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
-				});
+					invocation,
+					"followUp",
+				).catch(error => queued.reject(error));
 				await withTimeout(queued.promise, 2_000, "Skill did not reach the native queue");
 				promoted = session.promoteQueuedMessage(invocation);
 				queueAfterPromotion = session.getQueuedMessages();
