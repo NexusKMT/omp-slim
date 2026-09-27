@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/trace` and `omp stats` dashboards failing to load after operating-system temporary-file cleanup.
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed
