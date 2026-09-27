@@ -2357,14 +2357,14 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** A blocked-only todo list has no work the agent can advance without another turn. */
 	#goalOpenWorkAllBlocked(): boolean {
-		let blocked = false;
-		for (const phase of this.session.getTodoPhases()) {
+		const phases = this.session.getTodoPhases();
+		if (nextActionableTask(phases)) return false;
+		for (const phase of phases) {
 			for (const task of phase.tasks) {
-				if (task.status === "pending" || task.status === "in_progress") return false;
-				if (task.status === "blocked") blocked = true;
+				if (task.status === "blocked") return true;
 			}
 		}
-		return blocked;
+		return false;
 	}
 
 	#cancelGoalContinuation(): void {
