@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { resolveAnthropicMetadataUserId, streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
+import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { Context, Model, ModelSpec, TJsonSchema } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
@@ -76,18 +77,19 @@ async function sentPayload(
 
 async function sentThroughClient(model: Model<"anthropic-messages">, baseURL: string): Promise<WirePayload> {
 	let payload: WirePayload | undefined;
+	const client = {
+		baseURL,
+		messages: {
+			create: (value: object) => {
+				payload = { ...value } as WirePayload;
+				throw new Error("captured");
+			},
+		},
+	};
 	await streamAnthropic(model, context, {
 		apiKey: "bedrock-api-key",
 		metadata: { user_id: JSON_USER_ID },
-		client: {
-			...{ baseURL },
-			messages: {
-				create: value => {
-					payload = { ...value } as WirePayload;
-					throw new Error("captured");
-				},
-			},
-		},
+		client,
 	}).result();
 	if (!payload) throw new Error("request was not sent");
 	return payload;
@@ -103,6 +105,36 @@ function expectBedrockShape(payload: WirePayload): void {
 withOfficialAnthropicEndpoint();
 
 describe("Amazon Bedrock /anthropic requests", () => {
+	it("resolves a Mantle region template before sending an Anthropic Messages request", async () => {
+		const templateModel = claude(
+			"bedrock-mantle",
+			"anthropic.claude-opus-5-5",
+			"https://bedrock-mantle.{region}.api.aws/anthropic",
+		);
+		let request: { url: string; payload: WirePayload } | undefined;
+		const fetchMock: typeof fetch = Object.assign(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				request = {
+					url: String(input instanceof Request ? input.url : input),
+					payload: JSON.parse(String(init?.body ?? "{}")) as WirePayload,
+				};
+				return new Response(
+					JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "x" } }),
+					{ status: 400, headers: { "Content-Type": "application/json" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		await stream(templateModel, context, {
+			apiKey: "bedrock-api-key",
+			providerOptions: { region: "us-east-2" },
+			metadata: { user_id: JSON_USER_ID },
+			fetch: fetchMock,
+		}).result();
+		expect(request?.url).toBe("https://bedrock-mantle.us-east-2.api.aws/anthropic/v1/messages");
+		expectBedrockShape(request?.payload ?? {});
+	});
+
 	it.each([
 		["bedrock-runtime", runtime],
 		["bedrock-mantle", mantle],
