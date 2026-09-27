@@ -143,6 +143,19 @@ override matching model tags. These fields do not configure the Anthropic Messag
 
 `typesafe` and `openrouter-decisions` are judgment APIs, not chat transports: a model declared with one answers System One judgment requests (`{baseUrl}/v1/systemone` and `{baseUrl}/decisions` respectively) and is selected by the `judge` model role. Its `headers` carry gateway routing or custom authentication headers for that traffic.
 
+A model or `modelOverrides` entry may also use a runner API, which serves one model `kind`: `openai-images`/`openrouter-images` (`image`), `openai-speech`/`xai-tts` (`tts`), `openai-transcriptions` (`stt`), `openai-embeddings` (`embedding`), `openrouter-rerank` (`rerank`), `openrouter-video` (`video`). `kind` defaults to the api's kind (`chat` for chat transports); an explicit `kind` that does not match its api fails validation. This moves a discovered gateway model to its role:
+
+```yaml
+providers:
+  my-gateway:
+    api: openai-responses
+    discovery:
+      type: openai-models-list
+    modelOverrides:
+      gpt-image-2:
+        api: openai-images # now kind: image, served by generate_image
+```
+
 ### Allowed auth/discovery values
 
 - `auth`: `apiKey` (default), `none`, or `oauth`. `none` and `oauth` waive the custom-provider `apiKey` requirement, but `oauth` does not create credentials or register a login flow. It forces OAuth-style request shaping; a usable credential must come from stored auth, environment, or a configured key. Custom `anthropic-messages` models also use OAuth-style shaping when `auth` is omitted; set `auth: apiKey` for plain API-key shaping.
@@ -265,10 +278,10 @@ Provider defaults vs per-model overrides:
 
 - Provider `headers`, `compat`, and `remoteCompaction` are baselines.
 - Model `headers` override provider header keys.
-- `modelOverrides` can override model metadata (`name`, `reasoning`, `thinking`, `input`, `imageInputDecoder`,
-  `tokenizer`, `supportsTools`, `cost`, `promptCache`, `premiumMultiplier`, `contextWindow`, `maxContextWindow`, `maxTokens`,
-  `omitMaxOutputTokens`, `preferWebsockets`, `headers`, `compat`, `contextPromotionTarget`, `compactionModel`, and
-  `remoteCompaction`).
+- `modelOverrides` can override model metadata (`name`, `api`, `kind`, `reasoning`, `thinking`, `input`,
+  `imageInputDecoder`, `tokenizer`, `supportsTools`, `cost`, `promptCache`, `premiumMultiplier`, `contextWindow`,
+  `maxContextWindow`, `maxTokens`, `omitMaxOutputTokens`, `preferWebsockets`, `headers`, `compat`,
+  `contextPromotionTarget`, `compactionModel`, and `remoteCompaction`).
 - `compat` is deep-merged for nested routing blocks (`openRouterRouting`, `vercelGatewayRouting`,
   `extraBody`, and `whenThinking`).
 
