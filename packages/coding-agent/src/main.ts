@@ -126,6 +126,7 @@ import {
 } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
 import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
+import { CliUsageError } from "./cli/usage-error";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
 import { cfgToolsApprovalMode } from "./tools/settings";
@@ -2324,10 +2325,17 @@ export async function runRootCommand(
 				preloadedExtensions: extensionsResult,
 			});
 
+			const sessionToolNames = session.getAllToolNames();
 			try {
-				validateToolNames(initialArgs.tools, session.getAllToolNames());
+				validateToolNames(initialArgs.tools, sessionToolNames);
 			} catch (error) {
 				await session.dispose();
+				// With no working eval backend, `--tools eval` is rejected here, before the startup
+				// notification path; carry the interpreter diagnosis instead of a bare "Unknown tool".
+				const evalWarning = sessionToolNames.includes("eval") ? undefined : await pythonEvalWarningPromise;
+				if (evalWarning && error instanceof CliUsageError) {
+					throw new CliUsageError(`${error.message}\n${evalWarning}`);
+				}
 				throw error;
 			}
 
