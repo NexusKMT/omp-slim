@@ -320,7 +320,9 @@ export class OAuthRefresher {
 			} else {
 				this.#deps.store.updateAuthCredential(row.id, merged);
 			}
-			this.#rememberMint(provider, row.id, merged);
+			if (this.#deps.override === undefined && this.#deps.store.refreshOAuthCredential === undefined) {
+				this.#rememberMint(provider, row.id, merged);
+			}
 			this.#deps.pool.replace(
 				provider,
 				rows.map(entry => ({
@@ -405,11 +407,18 @@ export class OAuthRefresher {
 		credentialId: number | undefined,
 		signal?: AbortSignal,
 	): Promise<OAuthCredentials> {
-		if (credentialId !== undefined && !this.#oauthCredentialRefreshInFlight.has(credentialId)) {
+		const authRecovery = credential.expires === 0;
+		if (authRecovery && credentialId !== undefined && !this.#oauthCredentialRefreshInFlight.has(credentialId)) {
 			const recent = this.#recentMint(credentialId);
 			if (recent) return recent.credential;
 		}
-		return this.#refreshSingleFlight(provider, credential, credentialId, signal, "auth-recovery");
+		return this.#refreshSingleFlight(
+			provider,
+			credential,
+			credentialId,
+			signal,
+			authRecovery ? "auth-recovery" : undefined,
+		);
 	}
 
 	/** Refresh without recent-mint reuse; still shares the per-credential in-flight request. */

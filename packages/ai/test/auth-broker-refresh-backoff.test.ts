@@ -127,6 +127,23 @@ describe("auth broker OAuth refresh backoff", () => {
 		expect(refreshCalls).toBe(2);
 	});
 
+	test("delegated durable refresh does not establish a local mint cooldown", async () => {
+		if (!store) throw new Error("test setup failed");
+		let delegatedCalls = 0;
+		clientStorage = new AuthStorage(store, {
+			async refreshOAuthCredential(_provider, _id, credential) {
+				delegatedCalls += 1;
+				return { ...credential, access: `delegated-${delegatedCalls}`, expires: Date.now() + HOUR_MS };
+			},
+		});
+		await clientStorage.credentials.reload();
+		const id = store.listAuthCredentials(PROVIDER)[0]!.id;
+		await clientStorage.oauth.refresh(id);
+		const recovered = await clientStorage.oauth.refresh(id, undefined, { reuseRecentMint: true });
+		expect(recovered.credential.type === "oauth" && recovered.credential.access).toBe("delegated-2");
+		expect(delegatedCalls).toBe(2);
+	});
+
 	test("scheduled expiry refresh bypasses recent-mint reuse", async () => {
 		if (!handle || !brokerStorage) throw new Error("test setup failed");
 		const client = new AuthBrokerClient({ url: handle.url, token: TOKEN });
