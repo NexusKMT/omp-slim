@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.3.5] - 2026-09-27
+
 ### Changed
 
 - Improved syntax highlighting to use about 5x less memory and run 3-5x faster by compiling grammars with Oniguruma instead of fancy-regex; highlighted output is unchanged.
