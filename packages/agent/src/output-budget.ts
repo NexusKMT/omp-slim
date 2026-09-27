@@ -18,6 +18,16 @@ export const MIN_FITTED_OUTPUT_TOKENS = 1024;
 const PROMPT_ESTIMATE_MARGIN_DIVISOR = 10;
 
 /**
+ * Absolute headway subtracted after the proportional margin. Proportional padding covers
+ * tokenizer drift that scales with the prompt, but a host can still count a few tokens more
+ * than any local estimate can see (chat-template framing, reasoning wrappers). Measured
+ * against a 262,144-token host: fitted caps landed +11 to +42 tokens over and were rejected
+ * with 400s. 64 tokens covers the observed drift with margin to spare; the
+ * {@link MIN_FITTED_OUTPUT_TOKENS} floor still applies.
+ */
+const PROMPT_ESTIMATE_ABSOLUTE_HEADWAY_TOKENS = 64;
+
+/**
  * Output cap for a request, so prompt plus output stays inside the model's
  * context window.
  *
@@ -67,7 +77,7 @@ export function fitOutputTokensToContextWindow(
 	if (!requested || !contextWindow || contextWindow <= 0) return maxTokens;
 	if (stopsOutputAtContextWindow(model)) return maxTokens;
 
-	const room = contextWindow - countPromptTokens(context, tokenizer);
+	const room = contextWindow - countPromptTokens(context, tokenizer) - PROMPT_ESTIMATE_ABSOLUTE_HEADWAY_TOKENS;
 	if (room >= requested) return maxTokens;
 	return Math.max(MIN_FITTED_OUTPUT_TOKENS, room);
 }
