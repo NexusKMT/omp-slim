@@ -8,19 +8,22 @@ const PYTHON_FIX_HINT = "Install Python 3.8+ or set python.interpreter, then ver
 
 /**
  * Warning for an enabled Python eval backend with no working interpreter.
- * Disabled backends (`eval.py` / `eval.js`, `PI_PY` / `PI_JS`) are intentional and never reported.
+ * Disabled backends (`eval.py` / `eval.js`, `PI_PY` / `PI_JS`) are intentional and never reported,
+ * and neither is a probe cancelled through `signal`.
  */
 export async function resolvePythonEvalWarning({
 	cwd,
 	settings,
+	signal,
 }: {
 	cwd: string;
 	settings: Settings;
+	signal?: AbortSignal;
 }): Promise<string | undefined> {
 	if (!cfgEvalPy.get(settings)) return undefined;
 	const interpreter = cfgPythonInterpreter.get(settings)?.trim() || undefined;
-	const availability = await checkPythonKernelAvailability(cwd, interpreter);
-	if (availability.ok) return undefined;
+	const availability = await checkPythonKernelAvailability(cwd, interpreter, { signal });
+	if (availability.ok || signal?.aborted) return undefined;
 	// The reason embeds interpreter paths and spawn errors: shorten home, strip controls, bound length.
 	const [reason] = sanitizeDisplayWarnings([availability.reason ?? "no working Python interpreter"]);
 	return cfgEvalJs.get(settings)
@@ -40,16 +43,18 @@ export async function resolveFirstLaunchPythonEvalWarning({
 	lastChangelogVersion,
 	cwd,
 	settings,
+	signal,
 }: {
 	args: Pick<Args, "continue" | "resume" | "fromClaude" | "fromCodex" | "tools" | "noTools">;
 	lastChangelogVersion: string | undefined;
 	cwd: string;
 	settings: Settings;
+	signal?: AbortSignal;
 }): Promise<string | undefined> {
 	if (lastChangelogVersion !== undefined) return undefined;
 	if (args.continue || args.resume || args.fromClaude || args.fromCodex) return undefined;
 	// An explicit --tools list wins over --no-tools, matching session tool selection.
 	const evalExposed = args.tools ? args.tools.includes("eval") : !args.noTools;
 	if (!evalExposed) return undefined;
-	return resolvePythonEvalWarning({ cwd, settings });
+	return resolvePythonEvalWarning({ cwd, settings, signal });
 }

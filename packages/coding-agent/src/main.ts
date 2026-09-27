@@ -2279,14 +2279,24 @@ export async function runRootCommand(
 			});
 
 			// Read the changelog marker before the changelog resolution below writes it.
-			const pythonEvalWarningPromise = isInteractive
-				? resolveFirstLaunchPythonEvalWarning({
-						args: parsedArgs,
-						lastChangelogVersion: await readLastChangelogVersion(),
-						cwd: sessionOptions.cwd ?? getProjectDir(),
-						settings: settingsInstance,
-					})
-				: undefined;
+			// The probe may spawn a detached interpreter; abort it on process exit so Ctrl-C
+			// during startup cannot orphan a hung configured python.interpreter.
+			let pythonEvalWarningPromise: Promise<string | undefined> | undefined;
+			if (isInteractive) {
+				const pythonEvalProbeAbort = new AbortController();
+				const unregisterPythonEvalProbe = postmortem.register(
+					"python-eval-startup-probe",
+					() => pythonEvalProbeAbort.abort(),
+					{ exitOnly: true },
+				);
+				pythonEvalWarningPromise = resolveFirstLaunchPythonEvalWarning({
+					args: parsedArgs,
+					lastChangelogVersion: await readLastChangelogVersion(),
+					cwd: sessionOptions.cwd ?? getProjectDir(),
+					settings: settingsInstance,
+					signal: pythonEvalProbeAbort.signal,
+				}).finally(unregisterPythonEvalProbe);
+			}
 
 			// Startup changelog is only consumed by interactive mode below; kick the
 			// CHANGELOG.md parse off now so it overlaps session creation instead of
