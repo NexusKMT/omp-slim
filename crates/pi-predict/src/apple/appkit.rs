@@ -15,7 +15,7 @@ use objc2::{
 	runtime::{AnyObject, Bool},
 };
 use objc2_app_kit::NSSpellChecker;
-use objc2_foundation::{NSArray, NSRange, NSString, NSTextCheckingType};
+use objc2_foundation::{NSArray, NSBundle, NSRange, NSString, NSTextCheckingType};
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
@@ -49,15 +49,19 @@ unsafe extern "C" {
 	static NSApp: *mut AnyObject;
 }
 
-/// Makes a process that is not an application yet background-only before
-/// `AppKit` registers it with the window server.
+/// Makes an unbundled process background-only before `AppKit` registers it
+/// with the window server.
 ///
 /// An unbundled process like omp registers as a regular application, so each
 /// session that checked spelling would gain a Dock icon until it exited (the
-/// terminal's icon, through the inherited `__CFBundleIdentifier`). A host that
-/// already created its `NSApplication`, such as a GUI app embedding the SDK,
-/// keeps its own policy.
+/// terminal's icon, through the inherited `__CFBundleIdentifier`). Bundled
+/// hosts, such as a GUI app embedding the SDK, keep their own policy even
+/// when they check spelling before creating their `NSApplication`, and so
+/// does an unbundled host that already created one.
 fn keep_process_background_only() {
+	if !is_unbundled_executable() {
+		return;
+	}
 	// SAFETY: Reading AppKit's `NSApp` global; it is written once, by the
 	// first `sharedApplication` call.
 	if !unsafe { NSApp }.is_null() {
@@ -70,6 +74,26 @@ fn keep_process_background_only() {
 		let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
 		let _: Bool = msg_send![app, setActivationPolicy: ACTIVATION_POLICY_PROHIBITED];
 	}
+}
+
+/// Whether the executable has no bundle of its own.
+///
+/// Foundation treats the directory holding an unbundled executable as its
+/// main bundle; a bundled executable lives inside its bundle, such as
+/// `Name.app/Contents/MacOS/`. Anything that cannot be resolved counts as
+/// bundled, so an unknown host keeps its policy.
+fn is_unbundled_executable() -> bool {
+	let bundle = NSBundle::mainBundle();
+	let executable_dir = bundle
+		.executableURL()
+		.and_then(|executable| executable.URLByDeletingLastPathComponent())
+		.and_then(|directory| directory.URLByStandardizingPath())
+		.and_then(|directory| directory.path());
+	let bundle_dir = bundle
+		.bundleURL()
+		.URLByStandardizingPath()
+		.and_then(|directory| directory.path());
+	matches!((executable_dir, bundle_dir), (Some(executable), Some(bundle)) if executable == bundle)
 }
 
 /// A misspelled span in UTF-16 code units.
