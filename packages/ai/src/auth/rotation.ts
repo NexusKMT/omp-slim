@@ -6,7 +6,6 @@ import type { RankingStrategyResolver } from "../usage/registry";
 import { raceSignal } from "./abort";
 import {
 	DEFAULT_BLOCK_MS,
-	OAUTH_AUTH_FAILURE_BACKOFF_MS,
 	credentialBlockScopesForRequest,
 	modelAccountPolicyBlockScope,
 	providerTypeKey,
@@ -15,7 +14,6 @@ import type { CredentialBlocks } from "./blocks";
 import type { KeyOverrides } from "./cascade";
 import type { SessionAffinity } from "./affinity";
 import type { CredentialPool } from "./pool";
-import type { OAuthRefresher } from "./refresh";
 import type { AuthCredentialStore } from "./store";
 import type {
 	AuthCredential,
@@ -51,7 +49,6 @@ export interface RateLimitsDeps {
 	blocks: CredentialBlocks;
 	affinity: SessionAffinity;
 	usage: UsageService;
-	refresher: OAuthRefresher;
 	strategies: RankingStrategyResolver;
 }
 
@@ -331,8 +328,6 @@ export class RateLimits implements LimitsApi {
 			await this.#deps.pool.reload();
 			return false;
 		}
-		const credential = stored[matched.index]?.credential;
-		if (credential?.type === "oauth" && this.#deps.refresher.isCoolingDown(matched.id, credential)) return false;
 
 		this.#deps.affinity.clear(provider, sessionId);
 		this.#deps.blocks.mark(
@@ -447,18 +442,6 @@ export class RateLimits implements LimitsApi {
 				false,
 			).switched;
 		}
-		const target = this.#deps.pool.entries(provider)[sessionCredential.index];
-		const invalidatedOAuthToken = AIError.isInvalidatedOAuthTokenError(error);
-		// A just-minted bearer failing auth is not evidence of a bad credential.
-		// Leave the shared row, block store, and session affinity untouched.
-		if (
-			!invalidatedOAuthToken &&
-			(status === 401 || (status === undefined && AIError.isAuthRetryableError(error))) &&
-			target?.credential.type === "oauth" &&
-			this.#deps.refresher.isCoolingDown(target.id, target.credential)
-		) {
-			return false;
-		}
 
 		const providerKey = providerTypeKey(provider, sessionCredential.type);
 		// Snapshot sibling availability before mutating so a soft-deleting
@@ -471,6 +454,7 @@ export class RateLimits implements LimitsApi {
 					index !== sessionCredential.index &&
 					!this.#deps.blocks.isBlocked(provider, providerKey, index),
 			);
+		const target = this.#deps.pool.entries(provider)[sessionCredential.index];
 		const sticky = this.#deps.affinity.get(provider, sessionId);
 		if (
 			!sessionCredential.explicit ||
@@ -478,15 +462,9 @@ export class RateLimits implements LimitsApi {
 		) {
 			this.#deps.affinity.clear(provider, sessionId);
 		}
-		// Overlapping failures share the existing backoff. Re-marking it would
-		// extend the deadline and make every worker trigger another broker refresh.
-		if (!invalidatedOAuthToken && this.#deps.blocks.isBlocked(provider, providerKey, sessionCredential.index)) {
-			return hasSibling;
-		}
-		const backoffMs = sessionCredential.type === "oauth" ? OAUTH_AUTH_FAILURE_BACKOFF_MS : DEFAULT_BLOCK_MS;
-		this.#deps.blocks.mark(provider, providerKey, sessionCredential.index, Date.now() + backoffMs);
+		this.#deps.blocks.mark(provider, providerKey, sessionCredential.index, Date.now() + DEFAULT_BLOCK_MS);
 
-		if (target && invalidatedOAuthToken) {
+		if (target && AIError.isInvalidatedOAuthTokenError(error)) {
 			const disabledCause = message ?? "upstream reported invalidated OAuth token";
 			const deleted = await this.#deps.pool.disable(target.id, disabledCause);
 			if (deleted) {

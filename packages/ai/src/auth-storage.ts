@@ -213,7 +213,7 @@ export class AuthStorage {
 			refresher,
 			strategies,
 		});
-		const limits = new RateLimits({ store, pool, overrides, blocks, affinity, usage, strategies, refresher });
+		const limits = new RateLimits({ store, pool, overrides, blocks, affinity, usage, strategies });
 		const keys = new KeyCascade({
 			pool,
 			overrides,

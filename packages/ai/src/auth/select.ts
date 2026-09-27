@@ -9,7 +9,6 @@ import type { SessionAffinity } from "./affinity";
 import { credentialBlockScopesForRequest, DEFAULT_BLOCK_MS, providerTypeKey, type CredentialBlocks } from "./blocks";
 import type { AccountPolicies } from "./policy";
 import { authCredentialEquals, type CredentialPool } from "./pool";
-import { serializeCredential } from "./sqlite-credential-store";
 import {
 	orderUsageRankedCandidates,
 	planPriority,
@@ -695,11 +694,7 @@ export class CredentialSelector {
 					);
 					const beforeRefresh = candidate.selection.credential;
 					const updated = mergeRefreshedCredential(beforeRefresh, refreshedCredentials);
-					const beforeData = serializeCredential(provider, beforeRefresh)?.data;
-					const updatedData = serializeCredential(provider, updated)?.data;
-					const sameCredentialData =
-						beforeData !== undefined && updatedData !== undefined && beforeData === updatedData;
-					if (sameCredentialData && credentialId !== undefined) {
+					if (credentialId !== undefined && authCredentialEquals(beforeRefresh, updated)) {
 						// The await may have allowed a peer to replace/remove this row or
 						// compact its index. Rebind by id without writing the cached result.
 						if (!this.#syncOAuthSelectionFromStore(provider, candidate.selection, credentialId)) {
@@ -713,9 +708,7 @@ export class CredentialSelector {
 						if (idx !== -1) candidate.selection.index = idx;
 					} else {
 						const rowId = this.#deps.pool.entries(provider)[candidate.selection.index]?.id;
-						if (rowId !== undefined && !sameCredentialData) {
-							this.#deps.pool.replaceById(provider, rowId, updated);
-						}
+						if (rowId !== undefined) this.#deps.pool.replaceById(provider, rowId, updated);
 					}
 				} catch (error) {
 					// A failed preflight already exercised the provider refresh path.

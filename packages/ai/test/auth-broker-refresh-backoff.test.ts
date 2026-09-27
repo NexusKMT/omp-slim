@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { AuthStorage, SqliteAuthCredentialStore, withAuth } from "@oh-my-pi/pi-ai";
 import {
 	AuthBrokerClient,
+	AuthBrokerRefresher,
 	type AuthBrokerServerHandle,
 	RemoteAuthCredentialStore,
 	startAuthBroker,
@@ -16,14 +17,15 @@ import { removeWithRetries } from "../../utils/src/temp";
 const PROVIDER = "unit-broker-refresh-backoff";
 const SOURCE = "auth-broker-refresh-backoff-test";
 const TOKEN = "auth-broker-refresh-backoff-bearer";
+const HOUR_MS = 60 * 60_000;
 
 describe("auth broker OAuth refresh backoff", () => {
 	let tempDir = "";
 	let store: SqliteAuthCredentialStore | undefined;
 	let brokerStorage: AuthStorage | undefined;
-	let clientStorage: AuthStorage | undefined;
 	let handle: AuthBrokerServerHandle | undefined;
 	let remote: RemoteAuthCredentialStore | undefined;
+	let clientStorage: AuthStorage | undefined;
 	let refreshCalls = 0;
 
 	beforeEach(async () => {
@@ -33,7 +35,7 @@ describe("auth broker OAuth refresh backoff", () => {
 			name: "Broker Refresh Backoff Unit",
 			sourceId: SOURCE,
 			async login() {
-				return { access: "login-access", refresh: "login-refresh", expires: Date.now() + 60 * 60_000 };
+				return { access: "login-access", refresh: "login-refresh", expires: Date.now() + HOUR_MS };
 			},
 			async refreshToken(credentials: OAuthCredentials) {
 				refreshCalls += 1;
@@ -41,7 +43,7 @@ describe("auth broker OAuth refresh backoff", () => {
 					...credentials,
 					access: `access-${refreshCalls}`,
 					refresh: `refresh-${refreshCalls}`,
-					expires: Date.now() + 60 * 60_000,
+					expires: Date.now() + HOUR_MS,
 				};
 			},
 			getApiKey(credentials) {
@@ -53,7 +55,7 @@ describe("auth broker OAuth refresh backoff", () => {
 		await store.saveOAuth(PROVIDER, {
 			access: "access-0",
 			refresh: "refresh-0",
-			expires: Date.now() + 60 * 60_000,
+			expires: Date.now() + HOUR_MS,
 			accountId: "broker-refresh-backoff-account",
 		});
 		brokerStorage = new AuthStorage(store);
@@ -69,82 +71,72 @@ describe("auth broker OAuth refresh backoff", () => {
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		unregisterOAuthProviders(SOURCE);
+		clientStorage?.close();
 		remote?.close();
 		await handle?.close();
-		clientStorage?.close();
 		brokerStorage?.close();
 		store?.close();
 		if (tempDir) await removeWithRetries(tempDir);
 	});
 
-	test("broker clients share outage cooldown without blocking a freshly refreshed credential", async () => {
-		if (!store || !handle || !brokerStorage) throw new Error("test setup failed");
+	test("reuses a recent broker mint without extending its original cooldown", async () => {
+		if (!handle || !brokerStorage) throw new Error("test setup failed");
 		const start = Date.now();
 		const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-		const firstClient = new AuthBrokerClient({ url: handle.url, token: TOKEN });
-		const initial = await firstClient.fetchSnapshot();
+		const mintingClient = new AuthBrokerClient({ url: handle.url, token: TOKEN });
+		const initial = await mintingClient.fetchSnapshot();
 		if (initial.status !== 200) throw new Error("expected initial broker snapshot");
 		const credentialId = initial.snapshot.credentials[0]!.id;
-		await firstClient.refreshCredential(credentialId);
+		await mintingClient.refreshCredential(credentialId);
 		expect(refreshCalls).toBe(1);
 
-		// A separate client must reuse the broker's recent refresh, not rotate
-		// the same row independently or change its snapshot generation.
-		const secondClient = new AuthBrokerClient({ url: handle.url, token: TOKEN });
-		const refreshedSnapshot = await secondClient.fetchSnapshot();
+		clock.mockReturnValue(start + 299_000);
+		const recoveryClient = new AuthBrokerClient({ url: handle.url, token: TOKEN });
+		const refreshedSnapshot = await recoveryClient.fetchSnapshot();
 		if (refreshedSnapshot.status !== 200) throw new Error("expected refreshed broker snapshot");
-		const redundantRefresh = await secondClient.refreshCredential(credentialId);
-		expect(redundantRefresh.entry.credential).toMatchObject({ type: "oauth", access: "access-1" });
-		expect(refreshCalls).toBe(1);
-		expect(brokerStorage.credentials.snapshot().generation).toBe(refreshedSnapshot.snapshot.generation);
-
 		remote = new RemoteAuthCredentialStore({
-			client: secondClient,
+			client: recoveryClient,
 			initialSnapshot: refreshedSnapshot.snapshot,
 			streamSnapshots: false,
 		});
 		clientStorage = new AuthStorage(remote);
 		await clientStorage.credentials.reload();
-		const suspectSpy = vi.spyOn(remote, "markCredentialSuspect");
-		const blockWriteSpy = vi.spyOn(remote, "upsertCredentialBlock");
 		const authError = Object.assign(new Error("401 invalid_api_key"), { status: 401 });
-		const generation = brokerStorage.credentials.snapshot().generation;
-		for (const elapsed of [0, 60_000, 180_000, 299_999]) {
-			clock.mockReturnValue(start + elapsed);
-			await expect(
-				withAuth(clientStorage.keys.resolver(PROVIDER, { sessionId: `outage-${elapsed}` }), async () => {
-					throw authError;
-				}),
-			).rejects.toBe(authError);
-			expect(refreshCalls).toBe(1);
-			expect(suspectSpy).not.toHaveBeenCalled();
-			expect(blockWriteSpy).not.toHaveBeenCalled();
-			expect(store.listCredentialBlocks([credentialId])).toEqual([]);
-			expect(brokerStorage.credentials.snapshot().generation).toBe(generation);
-		}
-
-		expect(await clientStorage.limits.invalidateMatching(PROVIDER, "access-1")).toBe(false);
-		expect(suspectSpy).not.toHaveBeenCalled();
-		expect(blockWriteSpy).not.toHaveBeenCalled();
-
-		// Recovery is allowed at the backoff boundary, but another 401 on the
-		// new bearer still must not enter the credential-block write path.
-		clock.mockReturnValue(start + 300_000);
+		const firstBearers: string[] = [];
 		await expect(
-			withAuth(clientStorage.keys.resolver(PROVIDER), async () => {
+			withAuth(clientStorage.keys.resolver(PROVIDER, { sessionId: "late-recovery" }), async key => {
+				firstBearers.push(key);
 				throw authError;
 			}),
 		).rejects.toBe(authError);
-		expect(refreshCalls).toBe(2);
-		expect(suspectSpy).not.toHaveBeenCalled();
-		expect(blockWriteSpy).not.toHaveBeenCalled();
-		expect(store.listCredentialBlocks([credentialId])).toEqual([]);
+		expect(firstBearers).toEqual(["access-1"]);
+		expect(refreshCalls).toBe(1);
 
-		await clientStorage.limits.rotate(PROVIDER, "outage", {
-			credentialId,
-			apiKey: "access-2",
-			error: new Error("Encountered invalidated oauth token for user, failing request"),
-		});
-		expect(store.listAuthCredentials(PROVIDER)).toEqual([]);
+		// The 60 s credential block has elapsed and the broker's original mint is
+		// older than five minutes. A cached response received at t=4:59 must not
+		// restart the cooldown in this client process.
+		clock.mockReturnValue(start + 389_000);
+		const secondBearers: string[] = [];
+		await expect(
+			withAuth(clientStorage.keys.resolver(PROVIDER, { sessionId: "post-cooldown" }), async key => {
+				secondBearers.push(key);
+				throw authError;
+			}),
+		).rejects.toBe(authError);
+		expect(secondBearers).toEqual(["access-1", "access-2"]);
+		expect(refreshCalls).toBe(2);
+	});
+
+	test("scheduled expiry refresh bypasses recent-mint reuse", async () => {
+		if (!handle || !brokerStorage) throw new Error("test setup failed");
+		const client = new AuthBrokerClient({ url: handle.url, token: TOKEN });
+		const initial = await client.fetchSnapshot();
+		if (initial.status !== 200) throw new Error("expected initial broker snapshot");
+		const credentialId = initial.snapshot.credentials[0]!.id;
+
+		await client.refreshCredential(credentialId);
+		expect(refreshCalls).toBe(1);
+		await new AuthBrokerRefresher({ storage: brokerStorage, refreshSkewMs: 2 * HOUR_MS }).tick();
+		expect(refreshCalls).toBe(2);
 	});
 });
