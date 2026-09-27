@@ -150,6 +150,7 @@ Important edge behavior from runtime:
 - `{ id?, type: "set_event_filter", events: string[] | null, messageUpdates?: "full" | "delta" }`
 - `{ id?, type: "get_subagents" }`
 - `{ id?, type: "get_subagent_messages", subagentId?: string, sessionFile?: string, fromByte?: number }`
+- `{ id?, type: "cancel_subagent", subagentId: string }`
 
 ### Model
 
@@ -779,6 +780,24 @@ message entries. Only complete newline-terminated records are consumed; reuse
 `nextByte` on the next request. A missing transcript returns empty arrays.
 If `fromByte` exceeds the current file size, reading restarts at byte zero and
 reports `reset: true`.
+
+### Cancelling subagents
+
+`cancel_subagent` hard-kills one subagent currently listed by `get_subagents`
+(foreground or background, at any nesting depth) without aborting the parent
+turn. It uses the same path as the Agent Hub kill: the subagent's live turn is
+aborted and its registry entry becomes an `aborted` tombstone, so the owning
+`task` call settles with an aborted result, a `subagent_lifecycle` frame with
+`status: "aborted"` follows, and the subagent cannot be revived.
+
+```json
+{ "id": "req_1", "type": "cancel_subagent", "subagentId": "OmpWorker" }
+{ "id": "req_1", "type": "response", "command": "cancel_subagent", "success": true, "data": { "cancelled": true } }
+```
+
+`cancelled` is `false` when the id is not in that roster (unknown, finished —
+including idle keep-alive subagents after their terminal lifecycle frame — or
+already cancelled), so hosts can treat it as idempotent.
 
 ## Prompt/Queue Concurrency and Ordering
 

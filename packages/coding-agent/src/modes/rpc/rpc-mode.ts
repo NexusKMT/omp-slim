@@ -32,6 +32,8 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
+import { AgentRegistry } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
@@ -446,6 +448,28 @@ export class RpcShutdownCoordinator {
 }
 
 export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
+
+/**
+ * Handle RPC `cancel_subagent`: hard-kill one of this session's running
+ * subagents through the same path as the Agent Hub / collab `kill` command.
+ * Aborting the live turn and releasing the registry ref as an `aborted`
+ * tombstone settles the owning `task` call (foreground or background) with an
+ * aborted result, and disposing the session cancels its nested children.
+ *
+ * Only ids this session reported as running are reachable. Returns `false`
+ * (a no-op) for unknown, finished, or already-cancelled subagents so hosts can
+ * treat cancelling a vanished subagent as success.
+ */
+export async function handleRpcCancelSubagent(
+	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
+	subagentId: string,
+): Promise<boolean> {
+	if (!subagentRegistry.getSubagents().some(snapshot => snapshot.id === subagentId)) return false;
+	const ref = AgentRegistry.global().get(subagentId);
+	if (!ref || ref.kind !== "sub" || ref.status === "aborted") return false;
+	if (ref.status === "running" && ref.session) await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
+	return AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
+}
 
 export async function handleRpcSessionChange(
 	session: RpcSessionChangeSession,
@@ -1431,6 +1455,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					return success(id, "get_subagent_messages", transcript);
 				} catch (err) {
 					return error(id, "get_subagent_messages", err instanceof Error ? err.message : String(err));
+				}
+			}
+
+			case "cancel_subagent": {
+				if (!subagentRegistry) {
+					return error(id, "cancel_subagent", "Subagent event bus is unavailable");
+				}
+				if (typeof command.subagentId !== "string" || command.subagentId.length === 0) {
+					return error(id, "cancel_subagent", "`subagentId` must be a non-empty string.");
+				}
+				try {
+					const cancelled = await handleRpcCancelSubagent(subagentRegistry, command.subagentId);
+					return success(id, "cancel_subagent", { cancelled });
+				} catch (err) {
+					return error(id, "cancel_subagent", err instanceof Error ? err.message : String(err));
 				}
 			}
 

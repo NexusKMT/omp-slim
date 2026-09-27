@@ -762,6 +762,16 @@ export class RpcClient {
 	}
 
 	/**
+	 * Cancel one running subagent (foreground or background) without aborting
+	 * the session. Resolves `false` when the subagent is unknown or already
+	 * finished.
+	 */
+	async cancelSubagent(subagentId: string): Promise<boolean> {
+		const response = await this.#send({ type: "cancel_subagent", subagentId });
+		return this.#getData<{ cancelled: boolean }>(response).cancelled;
+	}
+
+	/**
 	 * Set model by provider and ID.
 	 */
 	async setModel(provider: string, modelId: string): Promise<{ provider: string; id: string }> {
