@@ -580,11 +580,8 @@ type AgentContinueOutcome =
 	| { status: "failed"; error: unknown };
 
 /**
- * Reported by `#dispatchPrompt` to `prompt()`: whether the prompt took the
- * session — a turn dispatched or queued, or the agent already owning one.
- * Distinct from the public return value, which stays `true` for a dropped
- * prompt. A dispatch that `agent.prompt` rejects started no turn and claims
- * nothing.
+ * Whether a prompt claimed the session for compaction resume handoff, including
+ * an already-owned turn when dispatch throws `AgentBusyError`.
  */
 type PromptDispatchOutcome = { sessionClaimed: boolean };
 
@@ -6753,11 +6750,10 @@ export class AgentSession implements SettingsScope {
 	 * @throws Error if streaming and no streamingBehavior specified
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 *
-	 * Returns `false` when the command was fully handled locally (extension or
-	 * custom-TS command consumed without calling the LLM). Returns `true` when
-	 * the prompt was forwarded to the agent — either directly or queued as a
-	 * steer/follow-up. Callers that render a UI or manage turn lifecycle (e.g.
-	 * the ACP agent) use this to know whether to expect an `agent_end` event.
+	 * Returns `false` when a command was fully handled locally or dispatch
+	 * stopped before the agent received the prompt. Returns `true` when
+	 * forwarded directly or queued as a steer/follow-up. Hosts managing turn
+	 * lifecycle (e.g. ACP) use this to know whether to expect `agent_end`.
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<boolean> {
 		return this.#admitSubmission(() => this.#prompt(text, options));
@@ -6993,7 +6989,7 @@ export class AgentSession implements SettingsScope {
 			// a message that was never persisted).
 			this.#promptDropped?.({ text: typedText, images: options?.images });
 		}
-		return true;
+		return dispatched;
 	}
 
 	/**

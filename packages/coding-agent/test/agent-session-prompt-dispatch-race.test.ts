@@ -216,4 +216,30 @@ describe("AgentSession concurrent prompt dispatch", () => {
 		// first turn longer than the retry deadline dropped the prompt.
 		expect(users[secondIndex]?.steering).toBe(true);
 	});
+
+	it("reports a headless prompt dropped by a session transition before provider dispatch", async () => {
+		const manager = SessionManager.inMemory();
+		const retained = manager.appendMessage({ role: "user", content: "Retained", timestamp: 1 });
+		manager.appendMessage({ role: "user", content: "Abandoned", timestamp: 2 });
+		createSession(manager);
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const getApiKey = modelRegistry.getApiKey.bind(modelRegistry);
+		vi.spyOn(modelRegistry, "getApiKey").mockImplementation(async (...args) => {
+			reached.resolve();
+			await release.promise;
+			return getApiKey(...args);
+		});
+		const pending = session.prompt("headless assignment", { attribution: "agent", synthetic: true });
+		try {
+			await reached.promise;
+			expect((await session.navigateTree(retained)).cancelled).toBe(false);
+		} finally {
+			release.resolve();
+		}
+		expect(await pending).toBe(false);
+		expect(manager.getEntries().some(entry => entry.type === "message" && entry.message.role === "custom")).toBe(
+			false,
+		);
+	});
 });

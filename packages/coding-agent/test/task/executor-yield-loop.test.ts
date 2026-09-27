@@ -44,7 +44,7 @@ function createMockSession(
 		promptIndex: number;
 		emit: (event: AgentSessionEvent) => void;
 		pushMessage: (message: unknown) => void;
-	}) => void | Promise<void>,
+	}) => boolean | void | Promise<boolean | void>,
 ): MockSessionHandle {
 	const listeners: Array<(event: AgentSessionEvent) => void> = [];
 	const messages: unknown[] = [];
@@ -77,8 +77,8 @@ function createMockSession(
 		prompt: async (text: string, options?: PromptOptions) => {
 			promptIndex += 1;
 			prompts.push({ text, options });
-			await onPrompt({ promptIndex, emit, pushMessage: message => messages.push(message) });
-			return true;
+			const accepted = await onPrompt({ promptIndex, emit, pushMessage: message => messages.push(message) });
+			return accepted !== false;
 		},
 		getLastAssistantMessage: () => messages[messages.length - 1] as never,
 		sendUserMessage: async () => {},
@@ -231,6 +231,117 @@ describe("runSubprocess incremental yield loops", () => {
 		} as AgentSessionEvent);
 	}
 
+	it("retries a dropped assignment before sending any yield reminder", async () => {
+		const id = "DroppedScout";
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex === 1) return false;
+			emitTerminalYieldTurn("DELIVERED", emit, pushMessage);
+		});
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts.map(({ text }) => text)).toEqual([
+			"inventory the api surface",
+			"inventory the api surface",
+		]);
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("DELIVERED");
+	});
+
+	it("fails after four dropped assignments without sending a yield reminder", async () => {
+		const id = "LostScout";
+		const handle = createMockSession(() => false);
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts.map(({ text }) => text)).toEqual(Array(4).fill("inventory the api surface"));
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("initial prompt dropped before provider dispatch after 4 attempts");
+	});
+
+	it("delivers an assignment on the fourth attempt", async () => {
+		const id = "RecoveredScout";
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex < 4) return false;
+			emitTerminalYieldTurn("RECOVERED", emit, pushMessage);
+		});
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts.map(({ text }) => text)).toEqual(Array(4).fill("inventory the api surface"));
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("RECOVERED");
+	});
+
+	it("fails explicitly when a dropped assignment never reaches idle", async () => {
+		const id = "WedgedScout";
+		const handle = createMockSession(() => false);
+		handle.session.waitForIdle = () => Promise.withResolvers<void>().promise;
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts).toHaveLength(1);
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("initial prompt dropped before provider dispatch; session did not become idle");
+	}, 10_000);
+
+	it("retries a dropped yield reminder without consuming another reminder", async () => {
+		const id = "ReminderScout";
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex === 2) return false;
+			if (promptIndex === 1) {
+				const message = {
+					role: "assistant" as const,
+					content: [{ type: "text" as const, text: "Working" }],
+					stopReason: "stop" as const,
+				};
+				pushMessage(message);
+				emit({ type: "message_end", message } as AgentSessionEvent);
+				return;
+			}
+			emitTerminalYieldTurn("REMINDER", emit, pushMessage);
+		});
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts[1]?.text).toBe(handle.prompts[2]?.text);
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("REMINDER");
+	});
+
+	it("fails when every attempt to send a yield reminder is dropped", async () => {
+		const id = "LostReminderScout";
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex > 1) return false;
+			const message = {
+				role: "assistant" as const,
+				content: [{ type: "text" as const, text: "Working" }],
+				stopReason: "stop" as const,
+			};
+			pushMessage(message);
+			emit({ type: "message_end", message } as AgentSessionEvent);
+		});
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts).toHaveLength(5);
+		expect(handle.prompts.slice(1).map(({ text }) => text)).toEqual(Array(4).fill(handle.prompts[1]?.text));
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("yield reminder dropped before provider dispatch after 4 attempts");
+	});
+
 	it("keeps a run of incremental-yield-only turns inside the soft budget", async () => {
 		const id = "YieldLoopScout";
 		// Budget 2 → stop at 3 requests, hard abort at 3 + BUDGET_STOP_GRACE_REQUESTS.
@@ -309,9 +420,10 @@ describe("runSubprocess incremental yield loops", () => {
 				emitTerminalYieldTurn("PARKED", emit, pushMessage);
 				return;
 			}
-			if (promptIndex === 5) {
-				// The barrier's async-pending notice turn. The force belonged to
-				// prompt 4 only: a section here is progress, not the report.
+			if (promptIndex === 5) return false;
+			if (promptIndex === 6) {
+				// The retried notice can make progress without satisfying the
+				// terminal yield parked behind the quiescence barrier.
 				handle.asyncPending.value = false;
 				emitIncrementalYieldTurn(1, emit, pushMessage);
 				return;
@@ -326,8 +438,26 @@ describe("runSubprocess incremental yield loops", () => {
 
 		// The notice turn's section did not end the run: the ladder ran again
 		// and the run completed on the fresh terminal yield.
-		expect(handle.prompts.length).toBeGreaterThan(5);
+		expect(handle.prompts[4]?.text).toBe(handle.prompts[5]?.text);
 		expect(result.exitCode).toBe(0);
 		expect(result.output).toContain("FRESH");
+	});
+
+	it("fails when every async-pending notice dispatch is dropped", async () => {
+		const id = "LostNoticeScout";
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex > 1) return false;
+			emitTerminalYieldTurn("PARKED", emit, pushMessage);
+		});
+		handle.asyncPending.value = true;
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts).toHaveLength(5);
+		expect(handle.prompts.slice(1).map(({ text }) => text)).toEqual(Array(4).fill(handle.prompts[1]?.text));
+		expect(result.exitCode).toBe(1);
+		expect(result.error).toContain("async-pending notice dropped before provider dispatch after 4 attempts");
 	});
 });
