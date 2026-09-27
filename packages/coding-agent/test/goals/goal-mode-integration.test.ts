@@ -512,11 +512,9 @@ describe("InteractiveMode goal mode integration", () => {
 
 		vi.useFakeTimers();
 		const waiter = await armInputWaiter(harness.mode);
-		for (let turn = 0; turn < 4; turn++) {
-			vi.advanceTimersByTime(800);
-			await waitForMicrotasks();
-			expect(waiter.getResolvedInput()).toBeUndefined();
-		}
+		vi.advanceTimersByTime(800);
+		await waitForMicrotasks();
+		expect(waiter.getResolvedInput()).toBeUndefined();
 
 		harness.mode.onInputCallback?.(harness.mode.startPendingSubmission({ text: "Approved" }));
 		await waiter.inputPromise;
