@@ -6,6 +6,10 @@
 
 - Removed the stream-level Anthropic prompt-cache keep-alive: `StreamOptions.anthropicCacheRefresh`, `StreamOptions.anthropicCacheRefreshRequest`, and the zero-output refresh request path. Prompt-cache warming now lives in the coding agent's session-level cache warmer ([#12699](https://github.com/can1357/oh-my-pi/pull/12699) by [@KamijoToma](https://github.com/KamijoToma)).
 
+### Fixed
+
+- Fixed `PI_PROXY` blocking local Unix-socket fetch requests ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
+
 ## [18.3.4] - 2026-09-27
 
 ### Fixed
