@@ -7723,20 +7723,6 @@ export class AgentSession {
 			return outcome.sessionClaimed;
 		}
 
-		if (normalizedAppMessage.display === true && this.#unsubscribeAgent !== undefined) {
-			// Displayable idle append with no turn: paint to the interactive transcript
-			// immediately instead of leaving it invisible until the next rebuild. The
-			// event-emitting fold path fires message_start + message_end so subscribers
-			// (the interactive renderer) append exactly one block; message_end appends the
-			// message to agent state and #persistMessageEnd writes the CustomMessageEntry
-			// (onEntryAppended intact), so no direct appendMessage/appendCustomMessageEntry
-			// here — those would double-append. No turn starts and isStreaming stays false,
-			// so the return value is still false.
-			this.#foldStrandedIrcAsidesIntoContext([normalizedAppMessage]);
-			// Preserve the no-turn contract that the entry is persisted before this resolves.
-			await this.settleInFlightMessagePersistence();
-			return false;
-		}
 		this.agent.appendMessage(normalizedAppMessage);
 		this.sessionManager.appendCustomMessageEntry(
 			normalizedAppMessage.customType,
@@ -7745,6 +7731,21 @@ export class AgentSession {
 			normalizedAppMessage.details,
 			normalizedAppMessage.attribution,
 		);
+		if (normalizedAppMessage.display === true) {
+			// Idle display append with no turn: notify session listeners so the interactive
+			// transcript paints it now instead of on the next rebuild. The entry is persisted
+			// above, before any listener sees these events, so a transcript replay racing this
+			// append always finds it — EventController defers pre-initial-render custom paints
+			// to that replay. Extension observers are detached so they cannot stall the caller.
+			await this.#emitSessionEvent(
+				{ type: "message_start", message: normalizedAppMessage },
+				{ detachExtensions: true },
+			);
+			await this.#emitSessionEvent(
+				{ type: "message_end", message: normalizedAppMessage },
+				{ detachExtensions: true },
+			);
+		}
 		return false;
 	}
 
