@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { handleSkillList, runSkillsCommand } from "../../src/cli/skill-list";
 import { resetSettingsForTest } from "../../src/config/settings";
+import { AgentStorage } from "../../src/session/agent-storage";
 import { getAgentDir, removeWithRetries, setAgentDir, Snowflake } from "@oh-my-pi/pi-utils";
 import { CliUsageError } from "@oh-my-pi/pi-utils/cli";
 
@@ -99,6 +100,9 @@ describe("runSkillsCommand", () => {
 describe("handleSkillList", () => {
 	afterEach(() => {
 		resetSettingsForTest();
+		// `Settings.init()` opens `<agentDir>/agent.db`; release it so the temp
+		// home can be removed (Windows refuses to delete open files).
+		AgentStorage.close();
 	});
 
 	test("keeps stdout to TSV rows and sends warnings to stderr", async () => {
