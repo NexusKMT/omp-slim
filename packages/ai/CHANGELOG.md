@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
+- Fixed unix-socket fetches failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
 - Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
 
 ## [18.3.5] - 2026-09-27
