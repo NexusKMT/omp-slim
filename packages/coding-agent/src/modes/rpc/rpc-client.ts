@@ -966,8 +966,9 @@ export class RpcClient {
 	 * into `text`), from the `spelling.autocomplete` engine; `null` when none applies.
 	 */
 	async predictWord(text: string, cursor: number): Promise<string | null> {
-		// Outlast the server's own 30s budget for a cold daemon start so its answer, not ours, decides.
-		const response = await this.#send({ type: "predict_word", text, cursor }, 40_000);
+		// A cold start may spend up to 3 daemon-start rounds of 30s plus a 30s first
+		// completion; outlast that so the server's answer, not our timeout, decides.
+		const response = await this.#send({ type: "predict_word", text, cursor }, 125_000);
 		return this.#getData<{ suffix: string | null }>(response).suffix;
 	}
 

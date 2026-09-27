@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { isRecord, readJsonl, TempDir } from "@oh-my-pi/pi-utils";
 import { selectRpcEntries } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-compat";
-import { predictRpcWord } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import { RpcWordPredictor } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import type { TextPrediction } from "@oh-my-pi/pi-coding-agent/predict/client";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import type { SessionEntry, SessionTreeNode } from "@oh-my-pi/pi-coding-agent/session/session-entries";
@@ -194,35 +195,55 @@ async function withRpcServer<T>(
 	}
 }
 
-describe("predictRpcWord", () => {
+describe("RpcWordPredictor", () => {
+	const answer = (suffix: string | null): TextPrediction => ({
+		engine: "ngram",
+		suggestion: suffix === null ? null : { suffix, confidence: 0.9 },
+	});
+
 	test("asks the engine for the prose word ending the line and returns its suffix", async () => {
 		const calls: unknown[][] = [];
 		const draft = "Check it\nthe weath";
-		const suffix = await predictRpcWord("ngram", draft, draft.length, async (...args) => {
+		const predictor = new RpcWordPredictor(async (...args) => {
 			calls.push(args);
-			return { engine: "ngram", suggestion: { suffix: "er", confidence: 0.9 } };
+			return answer("er");
 		});
-		expect(suffix).toBe("er");
+		expect(await predictor.predict("ngram", draft, draft.length)).toBe("er");
 		expect(calls).toEqual([["ngram", "Check it\nthe ", "weath"]]);
 	});
 
 	test("never asks the engine mid-line or when completion is off", async () => {
-		const request = async (): Promise<never> => {
+		const predictor = new RpcWordPredictor(async () => {
 			throw new Error("engine must not be asked");
-		};
-		expect(await predictRpcWord("ngram", "the weath and more", 9, request)).toBeNull();
-		expect(await predictRpcWord("off", "the weath", 9, request)).toBeNull();
+		});
+		expect(await predictor.predict("ngram", "the weath and more", 9)).toBeNull();
+		expect(await predictor.predict("off", "the weath", 9)).toBeNull();
 	});
 
 	test("no suggestion is null and an unreachable daemon rejects", async () => {
-		expect(
-			await predictRpcWord("ngram", "the weath", 9, async () => ({ engine: "ngram", suggestion: null })),
-		).toBeNull();
-		await expect(
-			predictRpcWord("ngram", "the weath", 9, async () => {
-				throw new Error("text-predict daemon unavailable");
-			}),
-		).rejects.toThrow("text-predict daemon unavailable");
+		expect(await new RpcWordPredictor(async () => answer(null)).predict("ngram", "the weath", 9)).toBeNull();
+		const down = new RpcWordPredictor(async () => {
+			throw new Error("text-predict daemon unavailable");
+		});
+		await expect(down.predict("ngram", "the weath", 9)).rejects.toThrow("text-predict daemon unavailable");
+	});
+
+	test("a burst keeps one request in flight and only the newest waiting one reaches the engine", async () => {
+		const first = Promise.withResolvers<TextPrediction>();
+		const prefixes: string[] = [];
+		const predictor = new RpcWordPredictor(async (_engine, _before, prefix) => {
+			prefixes.push(prefix);
+			return prefixes.length === 1 ? first.promise : answer(`${prefix}!`);
+		});
+		const a = predictor.predict("ngram", "w", 1);
+		const b = predictor.predict("ngram", "we", 2);
+		const c = predictor.predict("ngram", "wea", 3);
+		expect(await b).toBeNull();
+		expect(prefixes).toEqual(["w"]);
+		first.resolve(answer("hat"));
+		expect(await a).toBe("hat");
+		expect(await c).toBe("wea!");
+		expect(prefixes).toEqual(["w", "wea"]);
 	});
 });
 

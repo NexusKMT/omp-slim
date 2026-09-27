@@ -33,6 +33,7 @@ import {
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import {
+	type WordCompletionEngine,
 	type WordCompletionMethod,
 	type WordCompletionQuery,
 	wordCompletionQuery,
@@ -90,9 +91,10 @@ const INVALID_TEXT_CURSOR_ERROR = "cursor must be an integer UTF-16 offset withi
 function isTextCursor(text: unknown, cursor: unknown): text is string {
 	return (
 		typeof text === "string" &&
+		typeof cursor === "number" &&
 		Number.isInteger(cursor) &&
-		(cursor as number) >= 0 &&
-		(cursor as number) <= text.length
+		cursor >= 0 &&
+		cursor <= text.length
 	);
 }
 
@@ -102,27 +104,64 @@ function isTextCursor(text: unknown, cursor: unknown): text is string {
  */
 function wordQueryAt(text: string, cursor: number): WordCompletionQuery | undefined {
 	if (cursor < text.length && text[cursor] !== "\n") return undefined;
-	const head = text.slice(0, cursor);
-	const cursorLine = head.split("\n").length - 1;
-	return wordCompletionQuery(text.split("\n"), cursorLine, cursor - (head.lastIndexOf("\n") + 1));
+	const lines = text.split("\n");
+	let cursorLine = 0;
+	let lineStart = 0;
+	while (lineStart + lines[cursorLine]!.length < cursor) lineStart += lines[cursorLine++]!.length + 1;
+	return wordCompletionQuery(lines, cursorLine, cursor - lineStart);
+}
+
+interface QueuedWordPrediction {
+	engine: WordCompletionEngine;
+	query: WordCompletionQuery;
+	resolve(suffix: string | null): void;
+	reject(error: unknown): void;
 }
 
 /**
- * `predict_word`'s answer: the ghost-text suffix for the word ending at
- * `cursor`, or `null` when the engine is off or nothing applies. Rejects when
- * the prediction daemon cannot answer. `request` is a test seam.
+ * `predict_word` answers for one RPC session, with the TUI provider's flow
+ * control: one engine request in flight, and a newer request replaces the one
+ * waiting behind it (the replaced request answers `null`), so a burst of
+ * typing costs the shared daemon at most two inferences.
  */
-export async function predictRpcWord(
-	method: WordCompletionMethod,
-	text: string,
-	cursor: number,
-	request: typeof requestTextPrediction = requestTextPrediction,
-): Promise<string | null> {
-	if (method === "off") return null;
-	const query = wordQueryAt(text, cursor);
-	if (!query) return null;
-	const { suggestion } = await request(method, query.before, query.prefix);
-	return suggestion?.suffix || null;
+export class RpcWordPredictor {
+	#busy = false;
+	#queued: QueuedWordPrediction | undefined;
+	readonly #request: typeof requestTextPrediction;
+
+	/** `request` is a test seam. */
+	constructor(request: typeof requestTextPrediction = requestTextPrediction) {
+		this.#request = request;
+	}
+
+	/**
+	 * Ghost-text suffix for the word ending at `cursor`, or `null` when the
+	 * engine is off, nothing applies, or a newer request superseded this one.
+	 * Rejects when the prediction daemon cannot answer.
+	 */
+	predict(method: WordCompletionMethod, text: string, cursor: number): Promise<string | null> {
+		if (method === "off") return Promise.resolve(null);
+		const query = wordQueryAt(text, cursor);
+		if (!query) return Promise.resolve(null);
+		if (!this.#busy) return this.#run(method, query);
+		this.#queued?.resolve(null);
+		const { promise, resolve, reject } = Promise.withResolvers<string | null>();
+		this.#queued = { engine: method, query, resolve, reject };
+		return promise;
+	}
+
+	async #run(engine: WordCompletionEngine, query: WordCompletionQuery): Promise<string | null> {
+		this.#busy = true;
+		try {
+			const { suggestion } = await this.#request(engine, query.before, query.prefix);
+			return suggestion?.suffix || null;
+		} finally {
+			this.#busy = false;
+			const next = this.#queued;
+			this.#queued = undefined;
+			if (next) void this.#run(next.engine, next.query).then(next.resolve, next.reject);
+		}
+	}
 }
 
 // Re-export types for consumers
@@ -870,6 +909,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	};
 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
+	const wordPredictor = new RpcWordPredictor();
 	const promptResults = new RpcPromptResults(session, output);
 	const sessionEvents = new RpcSessionEventForwarder(output);
 	const settleWatcher = new RpcSessionSettleWatcher(session, output);
@@ -1791,7 +1831,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				}
 				try {
 					const method = cfgSpellingAutocomplete.get(session.settings);
-					const suffix = await predictRpcWord(method, command.text, command.cursor);
+					const suffix = await wordPredictor.predict(method, command.text, command.cursor);
 					return success(id, "predict_word", { suffix });
 				} catch (err: unknown) {
 					return error(id, "predict_word", err instanceof Error ? err.message : String(err));
@@ -1806,9 +1846,16 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					return error(id, "predict_word_feedback", "suggestion must be a string and accepted a boolean");
 				}
 				const method = cfgSpellingAutocomplete.get(session.settings);
-				const query = method === "off" ? undefined : wordQueryAt(command.text, command.cursor);
-				if (method !== "off" && query) {
-					textPredictionBackend(method).feedback(query.before, query.prefix, command.suggestion, command.accepted);
+				if (method !== "off") {
+					const query = wordQueryAt(command.text, command.cursor);
+					if (query) {
+						textPredictionBackend(method).feedback(
+							query.before,
+							query.prefix,
+							command.suggestion,
+							command.accepted,
+						);
+					}
 				}
 				return success(id, "predict_word_feedback");
 			}
