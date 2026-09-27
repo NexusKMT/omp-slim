@@ -5,6 +5,8 @@
 ### Fixed
 
 - `wait` with no owned background jobs no longer blocks silently for up to 30 minutes while its parent or another agent keeps running: it returns after a 5-second window that grows to at most 5 minutes over repeated waits, names the agents still running, and says when the parent is blocked waiting on the caller's own result ([#13513](https://github.com/can1357/oh-my-pi/issues/13513), [#13516](https://github.com/can1357/oh-my-pi/pull/13516) by [@H4vC](https://github.com/H4vC)).
+- Fixed `omp update` and other one-shot commands on Windows printing "ended before completing" and exiting 1 after they had actually completed ([#13470](https://github.com/can1357/oh-my-pi/issues/13470))
+- Fixed `omp update` on Windows printing "ended before completing: the event loop drained" and exiting 1 when no `~/.npmrc` or `~/.bunfig.toml` exists ([#13470](https://github.com/can1357/oh-my-pi/issues/13470))
 
 ## [18.3.5] - 2026-09-27
 
