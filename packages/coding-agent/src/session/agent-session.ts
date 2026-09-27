@@ -7005,12 +7005,29 @@ export class AgentSession implements SettingsScope {
 			attribution: message.attribution ?? "agent",
 			timestamp: Date.now(),
 		};
-
-		outcome.sessionClaimed = await this.#promptWithMessage(customMessage, textContent, {
+		const hasSkillImages =
+			isUserInvokedSkillPrompt(customMessage) &&
+			Array.isArray(customMessage.content) &&
+			customMessage.content.some(part => part.type === "image");
+		const preparedMessage = hasSkillImages ? await this.#normalizeAgentMessageImages(customMessage) : customMessage;
+		const descriptionNotice = hasSkillImages
+			? await this.#buildSkillImageDescriptionNotice(preparedMessage)
+			: undefined;
+		outcome.sessionClaimed = await this.#promptWithMessage(preparedMessage, textContent, {
 			...options,
-			prependMessages: keywordNotices.length > 0 ? keywordNotices : undefined,
+			prependMessages:
+				keywordNotices.length > 0 || descriptionNotice
+					? [...keywordNotices, ...(descriptionNotice ? [descriptionNotice] : [])]
+					: undefined,
 		});
 		return outcome.sessionClaimed;
+	}
+
+	/** Describe normalized images in a user-invoked skill prompt before delivery. */
+	async #buildSkillImageDescriptionNotice(message: CustomMessage): Promise<CustomMessage | undefined> {
+		if (!isUserInvokedSkillPrompt(message) || !Array.isArray(message.content)) return undefined;
+		const images = message.content.filter((part): part is ImageContent => part.type === "image");
+		return images.length > 0 ? this.#buildImageDescriptionNotice(images) : undefined;
 	}
 
 	/** Queue ownership belongs to Agent; only actual user deliveries refresh submission policy. */
@@ -7925,12 +7942,13 @@ export class AgentSession implements SettingsScope {
 			timestamp: Date.now(),
 		};
 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
+		const descriptionNotice = await this.#buildSkillImageDescriptionNotice(normalizedAppMessage);
 		if (deliverAs === "aside") {
 			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
 			// Non-interrupting: rides the same step-boundary aside poll as
 			// sendCustomMessage's streaming aside branch — not an agent-core queue
 			// entry, so no drain-retry latch and no idle-queue drain scheduling.
-			this.#irc.queueAside([normalizedAppMessage]);
+			this.#irc.queueAside(descriptionNotice ? [descriptionNotice, normalizedAppMessage] : [normalizedAppMessage]);
 			// The image-normalization await above can span the run's settle, so the run may
 			// already be idle by the time the record lands in the aside queue with no loop
 			// left to drain it. Resuming here is a no-op while streaming and wakes/folds
@@ -7940,8 +7958,10 @@ export class AgentSession implements SettingsScope {
 		}
 		this.#allowQueuedMessageDrainRetry();
 		if (deliverAs === "followUp") {
+			if (descriptionNotice) this.agent.followUp(descriptionNotice);
 			this.agent.followUp(normalizedAppMessage);
 		} else {
+			if (descriptionNotice) this.agent.steer(descriptionNotice);
 			this.agent.steer(normalizedAppMessage);
 		}
 		this.#scheduleIdleQueueDrain();
