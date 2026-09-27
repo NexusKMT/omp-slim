@@ -459,16 +459,25 @@ export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
  * Only ids this session reported as running are reachable. Returns `false`
  * (a no-op) for unknown, finished, or already-cancelled subagents so hosts can
  * treat cancelling a vanished subagent as success.
+ *
+ * Agent ids are unique only within one parent session's artifacts scope, and
+ * the process-global registry keeps the latest ref per id. The ref must
+ * therefore carry the transcript file this session's roster recorded
+ * (`<artifactsDir>/<id>.jsonl`, unique per parent session) before it is
+ * released; an id match alone could kill another session's same-name agent.
  */
 export async function handleRpcCancelSubagent(
 	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
 	subagentId: string,
 ): Promise<boolean> {
-	if (!subagentRegistry.getSubagents().some(snapshot => snapshot.id === subagentId)) return false;
+	const sessionFile = subagentRegistry.getSubagents().find(snapshot => snapshot.id === subagentId)?.sessionFile;
+	if (!sessionFile) return false;
 	const ref = AgentRegistry.global().get(subagentId);
 	// A ref goes idle once its result is accepted, before the terminal lifecycle
 	// frame prunes the roster; a finished subagent must not be tombstoned.
-	if (ref?.kind !== "sub" || ref.status !== "running" || !ref.session) return false;
+	if (ref?.kind !== "sub" || ref.status !== "running" || !ref.session || ref.sessionFile !== sessionFile) {
+		return false;
+	}
 	await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
 	return AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
 }
