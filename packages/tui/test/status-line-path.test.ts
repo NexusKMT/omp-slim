@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "bun:test";
-import { dlopen, FFIType, ptr } from "bun:ffi";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SegmentContext } from "../src/status-line/segments";
 import { renderSegment } from "../src/status-line/segments";
 import { initTheme, theme } from "../src/theme";
+import { getWindowsShortPath } from "@oh-my-pi/pi-natives/path";
 import {
 	__resetProjectDirCacheForTests,
 	getProjectDir,
@@ -99,23 +99,6 @@ function expectContentToContainPath(content: string, expected: string): void {
 	expect(content).toContain(expected);
 }
 
-/** Get an existing 8.3 spelling without requiring the volume to create new aliases. */
-function shortWindowsPath(inputPath: string): string | null {
-	const kernel32 = dlopen("kernel32.dll", {
-		GetShortPathNameW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
-	});
-	try {
-		const input = Buffer.from(`${inputPath}\0`, "utf16le");
-		const needed = kernel32.symbols.GetShortPathNameW(ptr(input), null, 0);
-		if (!needed) return null;
-		const output = Buffer.alloc(needed * 2);
-		const written = kernel32.symbols.GetShortPathNameW(ptr(input), ptr(output), needed);
-		return written > 0 && written < needed ? output.toString("utf16le", 0, written * 2) : null;
-	} finally {
-		kernel32.close();
-	}
-}
-
 // `createFakeHome` needs a directory outside every scratch root, and the only
 // location it can rely on is the checkout itself. `SCRATCH_ROOTS` in
 // `status-line/segments.ts` is a module-load constant covering `/tmp`,
@@ -140,7 +123,7 @@ function createFakeHome(): { home: string; projectsRoot: string } {
 describe("status line path segment", () => {
 	it.skipIf(process.platform !== "win32")("renders the long cwd when launched through an existing 8.3 alias", () => {
 		const home = os.homedir();
-		const shortHome = shortWindowsPath(home);
+		const shortHome = getWindowsShortPath(home);
 		// Some Windows volumes have no short names, including for the profile.
 		if (!shortHome || shortHome.toLowerCase() === home.toLowerCase()) return;
 
@@ -160,7 +143,7 @@ describe("status line path segment", () => {
 
 	it.skipIf(process.platform !== "win32")("abbreviates a raw 8.3 repository path only when enabled", () => {
 		const home = os.homedir();
-		const shortHome = shortWindowsPath(home);
+		const shortHome = getWindowsShortPath(home);
 		if (!shortHome || shortHome.toLowerCase() === home.toLowerCase()) return;
 
 		const ctx = createPathContext();

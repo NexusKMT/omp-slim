@@ -206,22 +206,26 @@ let projectDir: string | undefined;
 /** Get the project directory. */
 export function getProjectDir(): string {
 	if (projectDir === undefined) {
+		let cwd: string | undefined;
 		try {
-			projectDir = standardizeProjectPath(process.cwd());
+			cwd = process.cwd();
 		} catch {
 			const candidates = [process.env.PWD, os.homedir(), os.tmpdir()];
 			for (const candidate of candidates) {
 				if (!candidate || !path.isAbsolute(candidate)) continue;
 				try {
 					process.chdir(candidate);
-					projectDir = standardizeProjectPath(candidate);
+					cwd = candidate;
 					break;
 				} catch {}
 			}
-			if (projectDir === undefined) {
+			if (cwd === undefined) {
 				throw new Error("Unable to determine an accessible working directory");
 			}
 		}
+		// Normalize outside the fallback: a native-addon failure is not an inaccessible cwd,
+		// and must surface as itself instead of relocating the process.
+		projectDir = standardizeProjectPath(cwd);
 	}
 	return projectDir;
 }

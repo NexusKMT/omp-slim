@@ -183,6 +183,12 @@ describe("shortenPath", () => {
 		const sibling = String.raw`C:\Users\me2\projects\demo`;
 		expect(shortenPath(sibling, home)).toBe(sibling);
 	});
+
+	it("shortens under a home given with a trailing separator", () => {
+		expect(shortenPath(String.raw`C:\Users\me\projects\demo`, "C:\\Users\\me\\")).toBe("~/projects/demo");
+		expect(shortenPath("/home/me/projects/demo", "/home/me/")).toBe("~/projects/demo");
+		expect(shortenPath("/home/me2/demo", "/home/me/")).toBe("/home/me2/demo");
+	});
 });
 
 describe("Windows home aliases", () => {

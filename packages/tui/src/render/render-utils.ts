@@ -887,12 +887,15 @@ function homePatternFor(homeDir: string, windowsStyle: boolean): HomePattern {
 	const key = `${windowsStyle ? 1 : 0} ${homeDir}`;
 	let pattern = homePatternCache.get(key);
 	if (pattern === undefined) {
-		let escapedHome = RegExp.escape(homeDir);
+		// A trailing separator (`C:\Users\me\`, `/home/me/`) must still match `<home>/child`;
+		// roots such as `/` and `C:\` keep theirs.
+		const home = homeDir.replace(/(?<=[^\\/:])[\\/]+$/, "");
+		let escapedHome = RegExp.escape(home);
 		if (windowsStyle) {
 			// Query only home, once per cached pattern: descendants need not exist,
 			// and rendering must neither resolve junctions nor probe output paths.
-			const parts = homeDir.replaceAll("/", "\\").split("\\");
-			const longHome = expandWindowsLongPath(homeDir);
+			const parts = home.replaceAll("/", "\\").split("\\");
+			const longHome = expandWindowsLongPath(home);
 			const aliases = [longHome, getWindowsShortPath(longHome)]
 				.map(alias => alias.replaceAll("/", "\\").split("\\"))
 				.filter(alias => alias.length === parts.length);
