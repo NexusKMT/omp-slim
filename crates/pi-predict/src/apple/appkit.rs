@@ -9,7 +9,11 @@
 use std::sync::LazyLock;
 
 use anyhow::{Context, bail};
-use objc2::rc::Retained;
+use objc2::{
+	class, msg_send,
+	rc::Retained,
+	runtime::{AnyObject, Bool},
+};
 use objc2_app_kit::NSSpellChecker;
 use objc2_foundation::{NSArray, NSRange, NSString, NSTextCheckingType};
 
@@ -28,16 +32,44 @@ static SPELLING_THREAD: LazyLock<flume::Sender<Job>> = LazyLock::new(|| {
 	sender
 });
 static APP_KIT_LOADED: LazyLock<bool> = LazyLock::new(|| {
+	keep_process_background_only();
 	// SAFETY: AppKit documents `NSApplicationLoad` as process-global and
 	// idempotent; `LazyLock` guarantees this process calls it at most once.
 	unsafe { NSApplicationLoad() }
 });
 const NS_NOT_FOUND: usize = isize::MAX as usize;
 const THREAD_STOPPED: &str = "native spelling thread stopped";
+/// `NSApplicationActivationPolicyProhibited`.
+const ACTIVATION_POLICY_PROHIBITED: isize = 2;
 
 #[link(name = "AppKit", kind = "framework")]
 unsafe extern "C" {
 	fn NSApplicationLoad() -> bool;
+	/// The shared `NSApplication`; nil until something creates it.
+	static NSApp: *mut AnyObject;
+}
+
+/// Makes a process that is not an application yet background-only before
+/// `AppKit` registers it with the window server.
+///
+/// An unbundled process like omp registers as a regular application, so each
+/// session that checked spelling would gain a Dock icon until it exited (the
+/// terminal's icon, through the inherited `__CFBundleIdentifier`). A host that
+/// already created its `NSApplication`, such as a GUI app embedding the SDK,
+/// keeps its own policy.
+fn keep_process_background_only() {
+	// SAFETY: Reading AppKit's `NSApp` global; it is written once, by the
+	// first `sharedApplication` call.
+	if !unsafe { NSApp }.is_null() {
+		return;
+	}
+	// SAFETY: `sharedApplication` takes no arguments and returns the shared
+	// instance; `setActivationPolicy:` takes an `NSInteger` and returns `BOOL`.
+	// Both are invoked before this process runs any AppKit event loop.
+	unsafe {
+		let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+		let _: Bool = msg_send![app, setActivationPolicy: ACTIVATION_POLICY_PROHIBITED];
+	}
 }
 
 /// A misspelled span in UTF-16 code units.
