@@ -12,6 +12,7 @@
 - The `eval` tool description now notes that the kernel may be shared with the parent session and concurrent `task` subagents ([#13521](https://github.com/can1357/oh-my-pi/pull/13521) by [@radkawar](https://github.com/radkawar))
 
 ### Fixed
+- Fixed SDK requests using an `ApiKeyResolver` from `createApiKeyResolver` failing with a drained account's multi-hour quota error instead of briefly waiting for a healthy sibling credential whose block expires within seconds ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
 - Fixed headless subagents losing an assignment during a session transition and then entering yield reminders without ever receiving it ([#13538](https://github.com/can1357/oh-my-pi/issues/13538)).
 
 - Fixed Windows sessions started from an 8.3 short path (such as `C:\Users\ADMINI~1\project`) using the short spelling as the project directory, and home-directory paths written with 8.3 aliases not being shortened to `~` in the status line, tool labels, and errors ([#13394](https://github.com/can1357/oh-my-pi/pull/13394) by [@CoderTCY](https://github.com/CoderTCY))

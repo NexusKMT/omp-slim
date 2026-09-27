@@ -2,9 +2,14 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `LimitsApi.rotate()` now returns a `CredentialRotation` object (`{ switched, afterSiblingWait? }`) instead of a boolean; check `.switched`, since the object is always truthy ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
+
 ### Fixed
 
 - Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
+- Fixed credential rotation failing with a drained account's multi-hour quota error when a healthy sibling was blocked for only a few seconds (such as a Cloud Code Assist capacity 429); rotation now waits out sibling blocks of up to 5 seconds, abortable via `signal`, and retries the freed credential ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
 
 ## [18.3.5] - 2026-09-27
 
