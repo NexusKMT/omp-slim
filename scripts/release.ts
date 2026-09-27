@@ -100,7 +100,7 @@ const CI_ANCESTOR_LIMIT = 30;
 
 async function listCIRuns(sha: string): Promise<CIRun[]> {
 	const out =
-		await $`gh run list --commit ${sha} --workflow CI --json databaseId,status,conclusion,event,headBranch`.text();
+		await $`gh run list --commit ${sha} --workflow ci.yml --json databaseId,status,conclusion,event,headBranch`.text();
 	return JSON.parse(out) as CIRun[];
 }
 
