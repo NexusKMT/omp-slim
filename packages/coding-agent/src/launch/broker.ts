@@ -1257,6 +1257,11 @@ class DaemonBroker {
 		await record.log?.close();
 		record.log = await DaemonLog.open(record.dir);
 		record.stopRequested = false;
+		// Settled history does not need subscription writes, but a new generation
+		// must persist the owner's current capability for crash recovery.
+		const owner = record.snapshot.owner;
+		record.completionCapable = owner !== undefined && this.#completionSubscriptions.has(owner);
+		record.completionSubscriptionId = owner === undefined ? undefined : this.#completionSubscriptions.get(owner);
 		await this.#launch(record);
 		await record.persistQueue;
 		return { op: "restart", daemon: record.snapshot };

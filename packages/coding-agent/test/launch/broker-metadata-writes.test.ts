@@ -60,41 +60,67 @@ describe("daemon metadata writes", () => {
 				},
 			}),
 		);
+		const initialClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const initialBroker = startBroker(projectDir, runtimeDir);
+		try {
+			await initialBroker.listening;
+			await initialClient.request({ op: "ping" });
+		} finally {
+			await initialClient.request({ op: "shutdown" }).catch(() => undefined);
+			initialClient.close();
+			await initialBroker.finished;
+		}
+		// The initial recovery may normalize the fixture. Shutdown flushes all
+		// queued metadata writes before establishing the stable inode baseline.
+		const inode = (await fs.stat(metadataPath)).ino;
 		const first = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const second = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
 		const broker = startBroker(projectDir, runtimeDir);
 		try {
 			await broker.listening;
-			await first.request({ op: "ping" });
-			const inode = (await fs.stat(metadataPath)).ino;
 			first.onCompletion("shared-session", () => undefined);
 			second.onCompletion("shared-session", () => undefined);
 			for (let index = 0; index < 3; index++) {
 				await first.request({ op: "ping" });
 				await second.request({ op: "ping" });
 			}
-			expect((await fs.stat(metadataPath)).ino).toBe(inode);
 			await first.request({ op: "shutdown" });
 			first.close();
 			second.close();
 			await broker.finished;
-
-			const restarted = startBroker(projectDir, runtimeDir);
-			const restartClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
-			try {
-				await restarted.listening;
-				await restartClient.request({ op: "ping" });
-				expect((await fs.stat(metadataPath)).ino).toBe(inode);
-			} finally {
-				await restartClient.request({ op: "shutdown" }).catch(() => undefined);
-				restartClient.close();
-				await restarted.finished;
-			}
 		} finally {
 			await first.request({ op: "shutdown" }).catch(() => undefined);
 			first.close();
 			second.close();
 			await broker.finished;
+		}
+		expect((await fs.stat(metadataPath)).ino).toBe(inode);
+
+		const restartClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const restarted = startBroker(projectDir, runtimeDir);
+		try {
+			await restarted.listening;
+			await restartClient.request({ op: "ping" });
+			await restartClient.request({ op: "shutdown" });
+			await restarted.finished;
+			expect((await fs.stat(metadataPath)).ino).toBe(inode);
+		} finally {
+			restartClient.close();
+			await restarted.finished;
+		}
+
+		const relaunchClient = await createDaemonBrokerClient(projectDir, { runtimeDir, idleGraceMs: 5_000 });
+		const relaunchBroker = startBroker(projectDir, runtimeDir);
+		try {
+			await relaunchBroker.listening;
+			relaunchClient.onCompletion("shared-session", () => undefined);
+			await relaunchClient.request({ op: "restart", name: "historical" });
+			const metadata = (await Bun.file(metadataPath).json()) as { completionEvents: boolean };
+			expect(metadata.completionEvents).toBe(true);
+		} finally {
+			await relaunchClient.request({ op: "shutdown" }).catch(() => undefined);
+			relaunchClient.close();
+			await relaunchBroker.finished;
 		}
 	}, 20_000);
 });
