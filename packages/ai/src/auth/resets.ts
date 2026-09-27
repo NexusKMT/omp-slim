@@ -154,7 +154,9 @@ export class ResetCredits implements ResetsApi {
 					selected.remainingCount < pending.remainingCount
 				) {
 					this.#pendingClaudeResets.delete(accountKey);
-					this.#deps.usageCache.invalidate(provider, options.baseUrl);
+					this.#deps.usageCache.invalidate(provider, options.baseUrl, {
+						resetSpentCredentialId: access.credentialId,
+					});
 					return { ...identity, ok: false, code: "already_redeemed", creditId };
 				}
 				if (pending.program === "juniper_tide") {
@@ -217,7 +219,7 @@ export class ResetCredits implements ResetsApi {
 			result = { ...identity, ok: consumed.ok, code: consumed.code, creditId };
 		}
 		if (result.ok) {
-			this.#deps.usageCache.invalidate(provider, options.baseUrl);
+			this.#deps.usageCache.invalidate(provider, options.baseUrl, { resetSpentCredentialId: access.credentialId });
 			if (this.#deps.store.invalidateUsageCache) {
 				await this.#deps.store.invalidateUsageCache(options.signal).catch(err => {
 					logger.debug("Failed to notify store of stale usage", { err });

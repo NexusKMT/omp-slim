@@ -260,18 +260,22 @@ export class UsageCache {
 	/**
 	 * Force the next usage fetch for `provider` to bypass the 5-min cache, so
 	 * `/usage` reflects a freshly-redeemed reset instead of stale numbers.
+	 * `resetSpentCredentialId` also forgets that credential's cached saved-reset
+	 * block, so a failed follow-up reset probe cannot carry the pre-spend
+	 * inventory forward.
 	 */
-	invalidate(provider: string, baseUrl?: string): void {
+	invalidate(provider: string, baseUrl?: string, options?: { resetSpentCredentialId?: number }): void {
 		this.#epoch += 1;
 		const expired = Date.now() - 1;
 		for (const entry of this.#pool.entries(provider)) {
 			if (entry.credential.type !== "oauth") continue;
 			const cacheKey = this.reportKey(oauthUsageRequest(provider, entry.credential, baseUrl));
-			const existing = this.getStale<UsageReport | null>(cacheKey);
-			this.set(cacheKey, {
-				value: existing?.value ?? null,
-				expiresAt: expired,
-			});
+			let value = this.getStale<UsageReport | null>(cacheKey)?.value ?? null;
+			if (value?.resetCredits && entry.id === options?.resetSpentCredentialId) {
+				const { resetCredits: _spent, ...rest } = value;
+				value = rest;
+			}
+			this.set(cacheKey, { value, expiresAt: expired });
 		}
 	}
 

@@ -260,9 +260,13 @@ export class UsageService implements UsageApi {
 		if (providerImpl.supports && !providerImpl.supports(params)) return null;
 
 		try {
+			const previousReport = this.#deps.cache.getStale<UsageReport | null>(
+				this.#deps.cache.reportKey(request),
+			)?.value;
 			const report = await providerImpl.fetchUsage(params, {
 				fetch: this.fetch,
 				logger: this.logger,
+				...(previousReport ? { previousReport } : {}),
 			});
 			// Attribute the report to the credential's organization. The orgId and
 			// orgName fallbacks apply independently: Claude's usage endpoint stamps
