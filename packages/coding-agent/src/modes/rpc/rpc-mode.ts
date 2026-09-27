@@ -466,8 +466,10 @@ export async function handleRpcCancelSubagent(
 ): Promise<boolean> {
 	if (!subagentRegistry.getSubagents().some(snapshot => snapshot.id === subagentId)) return false;
 	const ref = AgentRegistry.global().get(subagentId);
-	if (!ref || ref.kind !== "sub" || ref.status === "aborted") return false;
-	if (ref.status === "running" && ref.session) await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
+	// A ref goes idle once its result is accepted, before the terminal lifecycle
+	// frame prunes the roster; a finished subagent must not be tombstoned.
+	if (ref?.kind !== "sub" || ref.status !== "running" || !ref.session) return false;
+	await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
 	return AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
 }
 

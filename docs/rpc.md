@@ -787,8 +787,9 @@ reports `reset: true`.
 (foreground or background, at any nesting depth) without aborting the parent
 turn. It uses the same path as the Agent Hub kill: the subagent's live turn is
 aborted and its registry entry becomes an `aborted` tombstone, so the owning
-`task` call settles with an aborted result, a `subagent_lifecycle` frame with
-`status: "aborted"` follows, and the subagent cannot be revived.
+`task` call settles with an aborted result and the subagent cannot be revived.
+When `set_subagent_subscription` is `"progress"` or `"events"`, a
+`subagent_lifecycle` frame with `status: "aborted"` follows.
 
 ```json
 { "id": "req_1", "type": "cancel_subagent", "subagentId": "OmpWorker" }

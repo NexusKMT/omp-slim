@@ -73,6 +73,18 @@ describe("handleRpcCancelSubagent", () => {
 		expect(calls).toEqual([]);
 	});
 
+	test("does not tombstone a subagent whose result was accepted before its terminal frame", async () => {
+		emitLifecycle("SubagentA", "started");
+		registerLiveAgent("SubagentA");
+		// Yield acceptance flips the ref to idle while the roster still lists it.
+		AgentRegistry.global().markResultAccepted("SubagentA");
+
+		await expect(handleRpcCancelSubagent(registry, "SubagentA")).resolves.toBe(false);
+
+		expect(calls).toEqual([]);
+		expect(AgentRegistry.global().get("SubagentA")?.status).toBe("idle");
+	});
+
 	test("does not touch a live agent this session never reported", async () => {
 		registerLiveAgent("Stranger");
 
