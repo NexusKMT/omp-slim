@@ -512,6 +512,24 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "still slides a shallower statement when an unrelated edit in the batch breaks the parse",
+			"apply": [
+				{
+					"text": "package p\n\nfunc f(x bool) int {\n\tif x {\n\t\tx = false\n\t}\n\treturn 0\n}\n",
+					"input": "PUT >5:\n+\tx = true\nPUT >7:\n+\ty := (",
+					"path": "fixture.go",
+					"expect": {
+						"text": "package p\n\nfunc f(x bool) int {\n\tif x {\n\t\tx = false\n\t}\n\tx = true\n\treturn 0\n\ty := (\n}\n",
+						"firstChangedLine": 6,
+						"warnings": [
+							"PUT >5: body indented shallower than the anchor, so the landing moved past 1 closing line to after line 6. For the deeper position inside the block, re-issue with the body indented to match.",
+							"This edit introduced a syntax error near line 6: the file parsed before the patch and no longer does. It was applied exactly as written, so a line number or range endpoint is likely wrong — re-read the touched region and re-issue a correcting edit."
+						]
+					}
+				}
+			]
 		}
 	]
 }
