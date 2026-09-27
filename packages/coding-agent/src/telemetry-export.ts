@@ -72,6 +72,7 @@ export async function initTelemetryExport(exportEnabled: boolean): Promise<void>
 	if (initPromise) return initPromise;
 
 	if (!exportEnabled || process.env.OTEL_SDK_DISABLED?.trim().toLowerCase() === "true") return;
+
 	const signalConfig = resolveSignalConfig();
 	if (!signalConfig.trace && !signalConfig.log && !signalConfig.metric) return;
 
