@@ -5456,18 +5456,25 @@ dependencies = [
 [[package]]
 name = "napi"
 version = "3.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b12638855cec016784a7e17cc4ecbdee7ca8b0a3456aa50640d0ee5ed1a42f8"
 dependencies = [
+ "anyhow",
  "bitflags 2.13.2",
+ "chrono",
  "ctor",
+ "encoding_rs",
  "futures",
+ "futures-core",
+ "indexmap",
  "libc",
  "napi-build",
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "serde",
+ "serde_json",
  "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -8697,6 +8704,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

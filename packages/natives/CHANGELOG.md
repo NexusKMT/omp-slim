@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the native addon keeping every `bun test --isolate`/`--parallel` test file's global object and module graph alive, which grew each test worker by ~15 MB per file until the run was OOM-killed.
+
 ## [18.3.3] - 2026-09-27
 
 ### Added
