@@ -775,13 +775,17 @@ export function requestRpcDialog<T>(
 		opts?.signal?.removeEventListener("abort", onAbort);
 		pendingRequests.delete(id);
 	};
-	const onAbort = () => {
+	// Tells the host to close a dialog omp has already settled, so a late answer
+	// cannot look actionable after abort or timeout.
+	const cancelHostDialog = () =>
 		output({
 			type: "extension_ui_request",
 			id: Snowflake.next() as string,
 			method: "cancel",
 			targetId: id,
 		} as RpcExtensionUIRequest);
+	const onAbort = () => {
+		cancelHostDialog();
 		cleanup();
 		resolve(defaultValue);
 	};
@@ -790,6 +794,7 @@ export function requestRpcDialog<T>(
 	if (opts?.timeout !== undefined) {
 		timeoutId = setTimeout(() => {
 			opts.onTimeout?.();
+			cancelHostDialog();
 			cleanup();
 			resolve(defaultValue);
 		}, opts.timeout);

@@ -485,6 +485,14 @@ describe("RPC ask dialog", () => {
 			],
 		});
 		expect(onTimeout).toHaveBeenCalledTimes(1);
+		// omp settled the dialog; only its own timer must tell the host to close it.
+		const request = requireRequest(output.mock.calls[0]?.[0]);
+		const cancels = output.mock.calls
+			.map(([frame]) => frame)
+			.filter(frame => "method" in frame && frame.method === "cancel");
+		expect(cancels).toEqual(
+			timeout === undefined ? [] : [expect.objectContaining({ method: "cancel", targetId: request.id })],
+		);
 	});
 
 	it("resolves a plain host cancel as a cancelled dialog", async () => {

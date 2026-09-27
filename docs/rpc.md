@@ -926,11 +926,11 @@ Example:
 
 `select` and `input` resolve to `undefined`, and `confirm` to `false`, on
 cancellation, timeout, or signal abort. Signal abort emits a `cancel` request
-with `targetId`; the server's timeout resolves locally without emitting that
-request. `editor` supports cancellation and signal abort but has no wire timeout.
+with `targetId`. `editor` supports cancellation and signal abort but has no wire timeout.
 Presentation methods and `open_url` are fire-and-forget and require no response.
 
-If a dialog has a timeout, RPC mode resolves to a default value when timeout/abort fires. For `ask`, a timeout
+If a dialog has a timeout, RPC mode resolves to a default value when timeout/abort fires, and emits
+`{ method: "cancel", targetId }` so the host closes the dialog; a later answer to it is ignored. For `ask`, a timeout
 (omp's timer or a host `cancelled: true, timedOut: true` reply) answers every question with its recommended
 option, else its first.
 
