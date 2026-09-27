@@ -21,6 +21,7 @@
 - Fixed `wait` with no owned background jobs blocking silently for up to 30 minutes while its parent or a peer kept running; it now returns after a 5-second window that grows to 5 minutes on repeated waits and names who is still running ([#13513](https://github.com/can1357/oh-my-pi/issues/13513), [#13516](https://github.com/can1357/oh-my-pi/pull/13516) by [@H4vC](https://github.com/H4vC))
 - Fixed missing judge token counts corrupting session usage totals and showing `$NaN` in the status line ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
 - Goal mode now waits for input instead of repeatedly asking for approval when all remaining todos are blocked ([#13494](https://github.com/can1357/oh-my-pi/issues/13494)).
+- Fixed installing `pi-background-tasks` 2.6.0 or newer failing to load because the legacy `pi-ai` compatibility shim did not export `anthropicMessagesApi` ([#13250](https://github.com/can1357/oh-my-pi/issues/13250))
 - Fixed blob broker requests failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
 - Fixed `generate_image` reporting the selected catalog model instead of the image model the ChatGPT/Codex backend actually ran, and saved image paths now list the size and quality the provider returned ([#13403](https://github.com/can1357/oh-my-pi/issues/13403))
 - Fixed the fast-model fallback picking Gemini and MiniMax models when no `smol` role is configured; the built-in `mini` pattern now matches only `-mini` model ids ([#13292](https://github.com/can1357/oh-my-pi/issues/13292))
