@@ -18,11 +18,15 @@ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { $env, isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
+	type ExtensionAskDialogQuestion,
+	type ExtensionAskDialogResult,
+	type ExtensionAskDialogSubmitResult,
 	type ExtensionUIContext,
 	type ExtensionUIDialogOptions,
 	type ExtensionUISelectItem,
 	type ExtensionWidgetOptions,
 	getExtensionUISelectOptionLabel,
+	timedOutAskDialogResult,
 } from "../../extensibility/extensions";
 import {
 	type BuiltSkillPromptMessage,
@@ -599,6 +603,94 @@ export function requestRpcSelect(
 	);
 }
 
+/** Validates `ask` answers against the questions; any mismatch throws instead of guessing. */
+function parseAskDialogResponse(
+	response: RpcExtensionUIResponse,
+	questions: ExtensionAskDialogQuestion[],
+	dialogOptions: ExtensionUIDialogOptions,
+): ExtensionAskDialogSubmitResult | undefined {
+	if ("cancelled" in response && response.cancelled) {
+		if (response.timedOut) dialogOptions.onTimeout?.();
+		return undefined;
+	}
+	const answers: unknown = "answers" in response ? response.answers : undefined;
+	if (!Array.isArray(answers) || answers.length !== questions.length) {
+		throw new Error(`Ask dialog response must carry ${questions.length} answers in question order`);
+	}
+	return {
+		kind: "submit",
+		results: questions.map((question, index) => {
+			const answer: unknown = answers[index];
+			if (!isRecord(answer) || answer.id !== question.id) {
+				throw new Error(`Ask dialog answer ${index} must have id ${JSON.stringify(question.id)}`);
+			}
+			const labels = question.options.map(option => option.label);
+			const multi = question.multi ?? false;
+			const { selectedOptions, customInput } = answer;
+			if (!Array.isArray(selectedOptions)) {
+				throw new Error(`Ask dialog answer ${JSON.stringify(question.id)} must carry a selectedOptions array`);
+			}
+			const selected: string[] = [];
+			for (const label of selectedOptions) {
+				if (typeof label !== "string" || !labels.includes(label)) {
+					throw new Error(
+						`Ask dialog answer ${JSON.stringify(question.id)} selected unknown option ${JSON.stringify(label)}`,
+					);
+				}
+				if (selected.includes(label)) {
+					throw new Error(
+						`Ask dialog answer ${JSON.stringify(question.id)} selected ${JSON.stringify(label)} twice`,
+					);
+				}
+				selected.push(label);
+			}
+			if (customInput !== undefined && typeof customInput !== "string") {
+				throw new Error(`Ask dialog answer ${JSON.stringify(question.id)} customInput must be a string`);
+			}
+			const custom = customInput?.trim() || undefined;
+			if (!multi && (selected.length > 1 || (selected.length > 0 && custom !== undefined))) {
+				throw new Error(
+					`Ask dialog answer ${JSON.stringify(question.id)} is single-select but carries more than one answer`,
+				);
+			}
+			return {
+				id: question.id,
+				question: question.question,
+				options: labels,
+				multi,
+				selectedOptions: selected,
+				customInput: custom,
+			};
+		}),
+	};
+}
+
+/** Sends all ask questions as one RPC `ask` dialog; a timeout answers every question with its recommended option. */
+export async function requestRpcAskDialog(
+	pendingRequests: Map<string, PendingExtensionRequest>,
+	output: RpcOutput,
+	questions: ExtensionAskDialogQuestion[],
+	dialogOptions?: ExtensionUIDialogOptions,
+): Promise<ExtensionAskDialogResult | undefined> {
+	let timedOut = false;
+	const opts: ExtensionUIDialogOptions = {
+		...dialogOptions,
+		onTimeout: () => {
+			timedOut = true;
+			dialogOptions?.onTimeout?.();
+		},
+	};
+	const result = await requestRpcDialog(
+		pendingRequests,
+		output,
+		opts,
+		undefined,
+		{ method: "ask", questions, timeout: dialogOptions?.timeout },
+		response => parseAskDialogResponse(response, questions, opts),
+	);
+	return timedOut ? timedOutAskDialogResult(questions) : result;
+}
+
 export function requestRpcEditor(
 	pendingRequests: Map<string, PendingExtensionRequest>,
 	output: RpcOutput,
@@ -706,7 +798,11 @@ export function requestRpcDialog<T>(
 	pendingRequests.set(id, {
 		resolve: response => {
 			cleanup();
-			resolve(parseResponse(response));
+			try {
+				resolve(parseResponse(response));
+			} catch (err) {
+				reject(err);
+			}
 		},
 		reject,
 	});
@@ -831,10 +927,19 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	 * Extension UI context that uses the RPC protocol.
 	 */
 	class RpcExtensionUIContext implements ExtensionUIContext {
+		/** Set by `set_ask_dialog`; hosts that never opt in keep the select/editor ask fallback. */
+		askDialogEnabled = false;
+
 		constructor(
 			private pendingRequests: Map<string, PendingExtensionRequest>,
 			private output: (obj: RpcResponse | RpcExtensionUIRequest | object) => void,
 		) {}
+
+		get askDialog(): ExtensionUIContext["askDialog"] {
+			if (!this.askDialogEnabled) return undefined;
+			return (questions, dialogOptions) =>
+				requestRpcAskDialog(this.pendingRequests, this.output, questions, dialogOptions);
+		}
 
 		select(
 			title: string,
@@ -1328,6 +1433,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					enabled: session.isFastModeEnabled(),
 					active: session.isFastModeActive(),
 				});
+			}
+
+			case "set_ask_dialog": {
+				rpcUiContext.askDialogEnabled = command.enabled === true;
+				return success(id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
 			}
 
 			case "get_available_commands": {

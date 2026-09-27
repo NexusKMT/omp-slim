@@ -728,6 +728,15 @@ export class RpcClient {
 	}
 
 	/**
+	 * Opt in to the `ask` extension UI request: the ask tool then sends all its
+	 * questions in one dialog instead of one `select` per choice. Servers default to off.
+	 */
+	async setAskDialog(enabled: boolean): Promise<{ enabled: boolean }> {
+		const response = await this.#send({ type: "set_ask_dialog", enabled });
+		return this.#getData(response);
+	}
+
+	/**
 	 * Configure subagent frames emitted by the RPC server. Servers default to "off".
 	 * "progress" emits lifecycle/progress frames; "events" additionally emits raw subagent session events.
 	 */

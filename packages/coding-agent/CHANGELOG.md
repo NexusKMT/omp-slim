@@ -149,6 +149,11 @@
 - Fixed Cursor native Grep ignoring requested context, Read negative offsets starting at the top, and Delete reporting zero-byte files ([#13600](https://github.com/can1357/oh-my-pi/issues/13600)).
 
 ## [18.4.1] - 2026-09-28
+### Added
+
+- Added a `telemetry.otlpExportEnabled` setting (`/settings` → Providers → Privacy) that stops OMP from exporting OTLP traces, logs, and metrics even when `OTEL_*` endpoints are set in its environment; export stays enabled by default ([#13444](https://github.com/can1357/oh-my-pi/pull/13444) by [@krizh-p](https://github.com/krizh-p))
+- Added a first-launch warning when Python eval is enabled but no working Python interpreter is found, pointing to `python.interpreter` and `omp setup python --check` ([#13529](https://github.com/can1357/oh-my-pi/pull/13529) by [@H4vC](https://github.com/H4vC))
+- Added an opt-in RPC ask dialog: after `set_ask_dialog` enables it, the `ask` tool sends all its questions in one `ask` extension UI request and takes the answers back in one `answers` response, so hosts can render every question with checkboxes or radio buttons and submit them together; hosts that don't opt in keep the one-`select`-per-choice prompts
 
 ### Changed
 
