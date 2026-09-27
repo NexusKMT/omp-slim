@@ -21,6 +21,7 @@
 - Fixed `wait` with no owned background jobs blocking silently for up to 30 minutes while its parent or a peer kept running; it now returns after a 5-second window that grows to 5 minutes on repeated waits and names who is still running ([#13513](https://github.com/can1357/oh-my-pi/issues/13513), [#13516](https://github.com/can1357/oh-my-pi/pull/13516) by [@H4vC](https://github.com/H4vC))
 - Fixed missing judge token counts corrupting session usage totals and showing `$NaN` in the status line ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
 - Goal mode now waits for input instead of repeatedly asking for approval when all remaining todos are blocked ([#13494](https://github.com/can1357/oh-my-pi/issues/13494)).
+- Fixed extension tool renderers written in upstream pi's `renderCall(args, theme, context)` order failing to render and logging `Tool renderer failed` on every call ([#13081](https://github.com/can1357/oh-my-pi/issues/13081))
 - Fixed the Nix flake / NixOS module build failing with "does not carry the @oh-my-pi/pi-natives version stamp" ([#13493](https://github.com/can1357/oh-my-pi/issues/13493)).
 
 ## [18.3.5] - 2026-09-27
