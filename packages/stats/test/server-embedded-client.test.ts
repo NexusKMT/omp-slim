@@ -66,7 +66,7 @@ process.stdout.write(JSON.stringify({ url: "http://" + server.hostname + ":" + s
 	if (ready.done) {
 		throw new Error(`Dashboard failed to start: ${await new Response(child.stderr).text()}`);
 	}
-	const { url } = JSON.parse(new TextDecoder().decode(ready.value)) as { url: string };
+	const { url }: { url: string } = JSON.parse(new TextDecoder().decode(ready.value));
 	return { url, tmpDir };
 }
 
