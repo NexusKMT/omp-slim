@@ -200,6 +200,7 @@
 ### Fixed
 
 - Corrected Cerebras model pricing so cached input tokens are charged at the model’s input rate, consistent with Cerebras billing.
+- Added `RUNNER_API_KINDS` and `runnerApiKind()`, the model kind each single-purpose runner API serves; the compat compiler now rejects a provider `kind-apis` entry that lists a runner API under a different kind ([#13533](https://github.com/can1357/oh-my-pi/pull/13533) by [@oshinop](https://github.com/oshinop))
 
 ## [18.3.5] - 2026-09-27
 
