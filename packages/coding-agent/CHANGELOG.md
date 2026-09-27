@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp update` and other one-shot commands on Windows printing "ended before completing" and exiting 1 after they had actually completed ([#13470](https://github.com/can1357/oh-my-pi/issues/13470))
+- Fixed `omp update` on Windows printing "ended before completing: the event loop drained" and exiting 1 when no `~/.npmrc` or `~/.bunfig.toml` exists ([#13470](https://github.com/can1357/oh-my-pi/issues/13470))
+
+## [18.3.5] - 2026-09-27
+
 ### Added
 
 - Added unified predictive text engine with pluggable N-gram, SmolLM2, and macOS native providers
