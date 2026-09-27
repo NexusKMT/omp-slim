@@ -1783,6 +1783,40 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "applies a same-shape if-opener replacement when an unrelated edit in the batch breaks the parse",
+			"apply": [
+				{
+					"text": "package p\n\nfunc f(x int) int {\n\tif x > 1 {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+					"input": "PUT 4.=4:\n+\tif x > 2 {\nPUT >7:\n+\ty := (",
+					"path": "fixture.go",
+					"expect": {
+						"text": "package p\n\nfunc f(x int) int {\n\tif x > 2 {\n\t\treturn 1\n\t}\n\treturn 0\n\ty := (\n}\n",
+						"firstChangedLine": 4,
+						"warnings": [
+							"This edit introduced a syntax error near line 4: the file parsed before the patch and no longer does. It was applied exactly as written, so a line number or range endpoint is likely wrong — re-read the touched region and re-issue a correcting edit."
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "applies a same-shape case-label replacement when an unrelated edit in the batch breaks the parse",
+			"apply": [
+				{
+					"text": "package p\n\nfunc f(x int) int {\n\tswitch x {\n\tcase 1:\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
+					"input": "PUT 5.=5:\n+\tcase 1, 2:\nPUT >8:\n+\ty := (",
+					"path": "fixture.go",
+					"expect": {
+						"text": "package p\n\nfunc f(x int) int {\n\tswitch x {\n\tcase 1, 2:\n\t\treturn 1\n\t}\n\treturn 0\n\ty := (\n}\n",
+						"firstChangedLine": 5,
+						"warnings": [
+							"This edit introduced a syntax error near line 5: the file parsed before the patch and no longer does. It was applied exactly as written, so a line number or range endpoint is likely wrong — re-read the touched region and re-issue a correcting edit."
+						]
+					}
+				}
+			]
 		}
 	]
 }
