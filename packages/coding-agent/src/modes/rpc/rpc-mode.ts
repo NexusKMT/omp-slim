@@ -1477,11 +1477,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				if (typeof command.subagentId !== "string" || command.subagentId.length === 0) {
 					return error(id, "steer_subagent", "`subagentId` must be a non-empty string.");
 				}
-				const message = typeof command.message === "string" ? command.message.trim() : "";
-				if (!message) {
+				if (typeof command.message !== "string" || !command.message.trim()) {
 					return error(id, "steer_subagent", "`message` is required for steer_subagent.");
 				}
-				const result = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, message);
+				const result = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, command.message);
 				if (result.kind === "error") {
 					return error(id, "steer_subagent", result.message);
 				}
