@@ -203,7 +203,7 @@ describe("AgentSession todo reminder async-job deferral", () => {
 
 		expect(reminderAttempts).toEqual([1]);
 		// The reminder is the agent's own continuation, not an async wait.
-		expect(agentEndAwaitingAsyncWork).not.toContain(true);
+		expect(agentEndAwaitingAsyncWork).toEqual([undefined]);
 	});
 
 	it("fires the reminder on the next stop once the owned job completes and its delivery drains", async () => {
