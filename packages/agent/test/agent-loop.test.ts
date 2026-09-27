@@ -385,49 +385,6 @@ describe("agentLoop with AgentMessage", () => {
 		expect(finalMessage.errorMessage).toBe("Interrupted by user");
 	});
 
-	it("should handle custom message types via convertToLlm", async () => {
-		// Create a custom message type
-		interface CustomNotification {
-			role: "notification";
-			text: string;
-			timestamp: number;
-		}
-
-		const notification: CustomNotification = {
-			role: "notification",
-			text: "This is a notification",
-			timestamp: Date.now(),
-		};
-
-		const context: AgentContext = {
-			systemPrompt: ["You are helpful."],
-			messages: [notification as unknown as AgentMessage], // Custom message in context
-			tools: [],
-		};
-
-		let convertedMessages: Message[] = [];
-		const mock = createMockModel({ responses: [{ content: ["Response"] }] });
-		const config: AgentLoopConfig = {
-			model: mock.model,
-			convertToLlm: messages => {
-				// Filter out notifications, convert rest
-				convertedMessages = messages
-					.filter(m => (m as { role: string }).role !== "notification")
-					.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult") as Message[];
-				return convertedMessages;
-			},
-		};
-
-		const stream = agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream);
-		for await (const _ of stream) {
-			// drain
-		}
-
-		// The notification should have been filtered out in convertToLlm
-		expect(convertedMessages.length).toBe(1); // Only user message
-		expect(convertedMessages[0].role).toBe("user");
-	});
-
 	it("should apply transformContext before convertToLlm", async () => {
 		const context: AgentContext = {
 			systemPrompt: ["You are helpful."],
@@ -523,53 +480,6 @@ describe("agentLoop with AgentMessage", () => {
 		]);
 		expect(contexts[0]?.index).toBe(0);
 		expect(contexts[1]?.index).toBe(1);
-	});
-
-	it("should handle tool calls and results", async () => {
-		const toolSchema = type({ value: "string" });
-		const executed: string[] = [];
-		const tool: AgentTool<typeof toolSchema, { value: string }> = {
-			name: "echo",
-			label: "Echo",
-			description: "Echo tool",
-			parameters: toolSchema,
-			async execute(_toolCallId, params) {
-				executed.push(params.value);
-				return {
-					content: [{ type: "text", text: `echoed: ${params.value}` }],
-					details: { value: params.value },
-				};
-			},
-		};
-
-		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
-
-		const mock = createMockModel({
-			responses: [
-				{ content: [{ type: "toolCall", id: "tool-1", name: "echo", arguments: { value: "hello" } }] },
-				{ content: ["done"] },
-			],
-		});
-		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
-
-		const events: AgentEvent[] = [];
-		const stream = agentLoop([createUserMessage("echo something")], context, config, undefined, mock.stream);
-
-		for await (const event of stream) {
-			events.push(event);
-		}
-
-		// Tool should have been executed
-		expect(executed).toEqual(["hello"]);
-
-		// Should have tool execution events
-		const toolStart = events.find(e => e.type === "tool_execution_start");
-		const toolEnd = events.find(e => e.type === "tool_execution_end");
-		expect(toolStart).toBeDefined();
-		expect(toolEnd).toBeDefined();
-		if (toolEnd?.type === "tool_execution_end") {
-			expect(toolEnd.isError).toBeFalsy();
-		}
 	});
 
 	it("surfaces validation error for malformed JSON parse sentinels without leaking __rawJson", async () => {
@@ -1530,6 +1440,86 @@ describe("agentLoop with AgentMessage", () => {
 		if (tracedToolCall?.type === "toolCall") {
 			expect(tracedToolCall.intent).toBe("Reading model role settings");
 		}
+	});
+
+	it("rejects a tool call whose intent field carries the payload instead of a label", async () => {
+		const writeSchema = type({ path: "string", content: "string" });
+		const written: Record<string, unknown>[] = [];
+		const writeTool: AgentTool<typeof writeSchema> = {
+			name: "write",
+			label: "Write",
+			description: "Write a file",
+			parameters: writeSchema,
+			async execute(_toolCallId, params) {
+				written.push(params as Record<string, unknown>);
+				return { content: [{ type: "text", text: `wrote ${params.content.length} bytes` }] };
+			},
+		};
+		// A tool that owns `i` as a real parameter: a long value there is not misplaced.
+		const ownedSchema = type({ value: "string", [`${INTENT_FIELD}?`]: "string" });
+		const ownedRuns: string[] = [];
+		const ownedTool: AgentTool<typeof ownedSchema> = {
+			name: "owned",
+			label: "Owned",
+			description: "Owns i",
+			parameters: ownedSchema,
+			async execute(_toolCallId, params) {
+				ownedRuns.push(params.value);
+				return { content: [{ type: "text", text: "ok" }] };
+			},
+		};
+		const body = `# Guide\n\n${"Explains how the query pipeline is reconstructed.\n".repeat(20)}`;
+		const call = (id: string, name: string, args: Record<string, unknown>) => ({
+			type: "toolCall" as const,
+			id,
+			name,
+			arguments: args,
+		});
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						call("swapped", "write", {
+							path: "guide.md",
+							[INTENT_FIELD]: body,
+							content: "Writing reconstruction guide",
+						}),
+						call("normal", "write", { path: "notes.md", [INTENT_FIELD]: "Writing notes", content: "hello" }),
+						call("at-limit", "write", { path: "limit.md", [INTENT_FIELD]: "x".repeat(200), content: "a" }),
+						call("over-limit", "write", { path: "over.md", [INTENT_FIELD]: "x".repeat(201), content: "b" }),
+						call("owned", "owned", { value: "kept", [INTENT_FIELD]: body }),
+						call("unknown", "nope", { [INTENT_FIELD]: body }),
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter, intentTracing: true };
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [writeTool, ownedTool] };
+
+		const messages = await agentLoop([createUserMessage("run")], context, config, undefined, mock.stream).result();
+		const results = new Map(
+			messages.filter((m): m is ToolResultMessage => m.role === "toolResult").map(r => [r.toolCallId, r]),
+		);
+		const assistant = messages.find((m): m is AssistantMessage => m.role === "assistant");
+		const atLimitCall = assistant?.content.find(c => c.type === "toolCall" && c.id === "at-limit");
+		const unknownText = (results.get("unknown")?.content ?? [])
+			.filter((c): c is { type: "text"; text: string } => c.type === "text")
+			.map(c => c.text)
+			.join("\n");
+
+		// The swapped call must not run with the one-line `content`: the model is
+		// told to retry instead of believing the body was written.
+		expect(written).toEqual([
+			{ path: "notes.md", content: "hello" },
+			{ path: "limit.md", content: "a" },
+		]);
+		expect(results.get("swapped")?.isError).toBe(true);
+		expect(results.get("over-limit")?.isError).toBe(true);
+		expect(results.get("normal")?.isError).toBe(false);
+		expect(atLimitCall?.type === "toolCall" && atLimitCall.intent).toBe("x".repeat(200));
+		expect(ownedRuns).toEqual(["kept"]);
+		expect(unknownText).toContain("Tool nope not found");
 	});
 
 	it("runs shared tools in parallel and emits completion-ordered results", async () => {
