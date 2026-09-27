@@ -291,8 +291,8 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(payload.system?.[0]?.cache_control).toBeUndefined();
 		expect(claudeCodeSystemInstruction).toBe("You are Claude Code, Anthropic's official CLI for Claude.");
 		expect(payload.system?.[1]?.text).toBe(claudeCodeSystemInstruction);
-		expect(payload.system?.[1]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
-		expect(payload.system?.[2]?.cache_control).toBeUndefined();
+		expect(payload.system?.[1]?.cache_control).toBeUndefined();
+		expect(payload.system?.[2]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 		const content = payload.messages?.[0]?.content;
 		expect(Array.isArray(content)).toBe(true);
 		expect(Array.isArray(content) ? content[0]?.cache_control : undefined).toEqual({
@@ -314,7 +314,7 @@ describe("Anthropic request fingerprint alignment", () => {
 			messages?: Array<{ content?: Array<{ cache_control?: unknown }> | string }>;
 		};
 
-		expect(payload.system?.[1]?.cache_control).toEqual({ type: "ephemeral" });
+		expect(payload.system?.[2]?.cache_control).toEqual({ type: "ephemeral" });
 		const content = payload.messages?.[0]?.content;
 		expect(Array.isArray(content) ? content[0]?.cache_control : undefined).toEqual({
 			type: "ephemeral",
@@ -1742,15 +1742,15 @@ describe("Anthropic request fingerprint alignment", () => {
 		expect(payload.tools?.[1]?.cache_control).toBeUndefined();
 		expect(payload.tools?.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 
-		// The trailing message window is untouched; the OAuth identity block carries its
-		// own breakpoint, while caller system blocks stay uncached.
+		// The trailing message window is untouched; the system breakpoint sits on the
+		// last caller system block, not on the OAuth identity block before it.
 		const content = payload.messages?.at(-1)?.content;
 		expect(Array.isArray(content) ? content.at(-1)?.cache_control : undefined).toEqual({
 			type: "ephemeral",
 			ttl: "1h",
 		});
-		expect(payload.system?.[1]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
-		expect(payload.system?.[2]?.cache_control).toBeUndefined();
+		expect(payload.system?.[1]?.cache_control).toBeUndefined();
+		expect(payload.system?.[2]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 		// Anthropic rejects a fifth breakpoint, so the total must stay in budget.
 		const marked = (blocks: Array<{ cache_control?: unknown }> | undefined) =>
 			(blocks ?? []).filter(block => block.cache_control != null).length;

@@ -4036,9 +4036,12 @@ function stableSystemSuffixStart(systemBlocks: readonly AnthropicSystemBlock[]):
  * sit first in wire order and survive message rewrites, and sibling subagents of
  * the same definition share this prefix byte for byte.
  *
- * When the OAuth Claude Code path already anchors its identity system block at
- * buildAnthropicSystemBlocks, the system check skips adding a second system
- * breakpoint, while the tool check still anchors the last tool definition.
+ * The OAuth Claude Code path pre-decorates its identity system block in
+ * buildAnthropicSystemBlocks. With no volatile suffix, that breakpoint moves to
+ * the last system block instead of a second one being added: the identity
+ * block is a prefix of the anchored head, so the move keeps the breakpoint
+ * count (and the message budget) unchanged while the agent's system prompt,
+ * not just the identity line, becomes a cached prefix of its own.
  *
  * Runs on the fresh system blocks and wire tools built for this request, after
  * the declared tool list was derived from the transcript's request controls.
@@ -4063,20 +4066,24 @@ function applyHeadCaching(
 
 	if (systemBlocks && systemBlocks.length > 0) {
 		// Anchor on the last stable block so a volatile recall suffix refresh
-		// re-bills only the suffix, not the whole head. The skip-if-decorated
-		// check applies only when there is no volatile suffix (previous
-		// behavior): with a suffix present the boundary anchor is added
-		// whenever the anchor block itself lacks a breakpoint, even if the
-		// OAuth path pre-decorated its identity block — otherwise the only
-		// system breakpoint sits before the stable prompt and a recall
-		// refresh re-bills it. The message budget in `applyPromptCaching`
-		// shrinks accordingly (4 minus head breakpoints). All-volatile falls
-		// back to tail anchoring (previous behavior).
+		// re-bills only the suffix, not the whole head. Without a volatile
+		// suffix, an earlier system breakpoint (the OAuth identity block) moves
+		// to the last block rather than suppressing the anchor: a breakpoint
+		// left on the identity block caches only tools + identity, so every
+		// message-prefix miss rewrites the whole system prompt. With a suffix
+		// present the boundary anchor is added whenever the anchor block itself
+		// lacks a breakpoint, even if the OAuth path pre-decorated its identity
+		// block — otherwise the only system breakpoint sits before the stable
+		// prompt and a recall refresh re-bills it. The message budget in
+		// `applyPromptCaching` shrinks accordingly (4 minus head breakpoints).
+		// All-volatile falls back to tail anchoring (previous behavior).
 		const suffixStart = stableSystemSuffixStart(systemBlocks);
 		if (suffixStart === systemBlocks.length) {
-			if (!systemBlocks.some(block => block.cache_control != null)) {
-				const lastBlock = systemBlocks[systemBlocks.length - 1];
-				if (lastBlock) lastBlock.cache_control = cloneAnthropicCacheControl(cacheControl);
+			const lastBlock = systemBlocks[systemBlocks.length - 1];
+			if (lastBlock && lastBlock.cache_control == null) {
+				const earlier = systemBlocks.find(block => block.cache_control != null);
+				if (earlier) delete earlier.cache_control;
+				lastBlock.cache_control = cloneAnthropicCacheControl(cacheControl);
 			}
 		} else {
 			const anchorIndex = suffixStart === 0 ? systemBlocks.length - 1 : suffixStart - 1;

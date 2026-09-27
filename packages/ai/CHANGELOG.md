@@ -19,6 +19,7 @@
 - Fixed Cursor shell tool calls showing their millisecond timeout as seconds (15000 instead of 15) in the transcript ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 - Fixed unix-socket fetches failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
 - Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
+- Fixed Anthropic OAuth requests leaving the agent system prompt without its own cache breakpoint: the breakpoint on the short Claude Code identity block now moves to the last system block, so a request whose messages miss the cache (such as the first after a compaction) reads the cached system prompt instead of writing it again ([#13104](https://github.com/can1357/oh-my-pi/issues/13104))
 
 ## [18.3.5] - 2026-09-27
 
