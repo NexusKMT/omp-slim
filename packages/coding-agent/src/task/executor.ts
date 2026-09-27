@@ -54,7 +54,13 @@ import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-life
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../registry/persisted-agents";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
-import type { AgentSession, AgentSessionEvent, Prewalk } from "../session/agent-session";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	type Prewalk,
+	PromptDroppedError,
+	type PromptOptions,
+} from "../session/agent-session";
 import { type ArtifactManager, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
@@ -104,7 +110,7 @@ import {
 	type TaskToolDetails,
 	type YieldItem,
 } from "@oh-my-pi/pi-tui/tools/task";
-import { arrayValuedLabels } from "./yield-assembly";
+import { yieldSectionShapes } from "./yield-assembly";
 import { assembleYieldResult } from "@oh-my-pi/pi-tui/tools/task-yield-assembly";
 import {
 	cfgTaskPrewalk,
@@ -468,6 +474,8 @@ export interface ExecutorOptions {
 	thinkingLevel?: ConfiguredThinkingLevel;
 	/** Caller-requested coarse effort (`lo`/`med`/`hi`); maps onto the resolved model's supported thinking range and wins over {@link thinkingLevel}. */
 	effort?: TaskEffort;
+	/** Caller's description of how open-ended the work is; rides the initial prompt into the child's `auto` thinking classifier. */
+	solutionSpace?: string;
 	/** Schema used to validate the final structured completion. */
 	outputSchema?: unknown;
 	/** Enforcement policy for {@link outputSchema}; defaults to legacy permissive behavior. */
@@ -737,7 +745,7 @@ export function finalizeSubprocessOutput(args: FinalizeSubprocessOutputArgs): Fi
 				rawOutput = `{"aborted":true,"error":"${lastYield.error || "Unknown error"}"}`;
 			}
 		} else {
-			const assembled = assembleYieldResult(yieldItems, lastAssistantText, arrayValuedLabels(outputSchema));
+			const assembled = assembleYieldResult(yieldItems, lastAssistantText, yieldSectionShapes(outputSchema));
 			if (!assembled || assembled.missingData) {
 				rawOutput = rawOutput ? `${SUBAGENT_WARNING_NULL_YIELD}\n\n${rawOutput}` : SUBAGENT_WARNING_NULL_YIELD;
 				if (includeStructuredOutput) {
@@ -2149,6 +2157,10 @@ interface DriveOutcome {
 }
 
 const MAX_YIELD_RETRIES = 3;
+const MAX_PROMPT_DISPATCH_ATTEMPTS = 4;
+const PROMPT_DISPATCH_IDLE_TIMEOUT_MS = 5_000;
+
+class PromptDispatchError extends Error {}
 
 /**
  * Drive one assignment through a live session: send the prompt, wait for idle,
@@ -2161,11 +2173,18 @@ async function driveSessionToYield(
 	session: AgentSession,
 	monitor: SubagentRunMonitor,
 	task: string,
-	// Invoked when the initial prompt loses a prompt race (AgentBusyError) before
-	// retrying. Lets the caller restore a safe contract and detach its monitor
-	// while backing off. Absent, the busy error keeps the old path.
-	onPromptBusy?: () => Promise<void>,
+	options: {
+		/** Open-endedness description forwarded to the session's `auto` thinking classifier. */
+		solutionSpace?: string;
+		/**
+		 * Invoked when the initial prompt loses a prompt race (AgentBusyError) before
+		 * retrying. Lets the caller restore a safe contract and detach its monitor
+		 * while backing off. Absent, the busy error keeps the old path.
+		 */
+		onPromptBusy?: () => Promise<void>;
+	} = {},
 ): Promise<DriveOutcome> {
+	const { solutionSpace, onPromptBusy } = options;
 	using _keepalive = new EventLoopKeepalive();
 	const abortSignal = monitor.abortSignal;
 	let exitCode = 0;
@@ -2199,6 +2218,44 @@ async function driveSessionToYield(
 			abortSignal.removeEventListener("abort", onAbort);
 		}
 	};
+	/**
+	 * Send a headless prompt, retrying pre-provider drops (`PromptDroppedError`).
+	 * Local slash commands are disabled so an assignment always reaches the
+	 * model. `forceFinalYield` arms the monitor's forced-final latch only while
+	 * an attempt dispatches, so another turn's incremental `yield` during drop
+	 * recovery stays incremental.
+	 */
+	const dispatchPrompt = async (
+		text: string,
+		promptOptions: PromptOptions,
+		label: string,
+		{ forceFinalYield = false }: { forceFinalYield?: boolean } = {},
+	): Promise<void> => {
+		for (let attempt = 1; attempt <= MAX_PROMPT_DISPATCH_ATTEMPTS; attempt++) {
+			if (forceFinalYield) monitor.markFinalYieldForced(true);
+			try {
+				await awaitAbortable(session.prompt(text, { ...promptOptions, runCommands: false, throwOnDrop: true }));
+				return;
+			} catch (err) {
+				if (!(err instanceof PromptDroppedError)) throw err;
+			}
+			if (forceFinalYield) monitor.markFinalYieldForced(false);
+			if (attempt === MAX_PROMPT_DISPATCH_ATTEMPTS) {
+				throw new PromptDispatchError(`${label} dropped before provider dispatch after ${attempt} attempts`);
+			}
+			const deadline = AbortSignal.timeout(PROMPT_DISPATCH_IDLE_TIMEOUT_MS);
+			try {
+				await untilAborted(AbortSignal.any([abortSignal, deadline]), () => session.waitForIdle());
+			} catch (err) {
+				checkAbort();
+				if (deadline.aborted) {
+					throw new PromptDispatchError(`${label} dropped before provider dispatch; session did not become idle`);
+				}
+				throw err;
+			}
+			await untilAborted(abortSignal, () => Bun.sleep(250 * 2 ** (attempt - 1)));
+		}
+	};
 
 	try {
 		try {
@@ -2209,7 +2266,7 @@ async function driveSessionToYield(
 			let promptAttempts = 0;
 			for (;;) {
 				try {
-					await awaitAbortable(session.prompt(task, { attribution: "agent" }));
+					await dispatchPrompt(task, { attribution: "agent", solutionSpace }, "initial prompt");
 					break;
 				} catch (error) {
 					promptAttempts++;
@@ -2226,7 +2283,7 @@ async function driveSessionToYield(
 			// below; real caller/timeout aborts (monitor signal) and genuine
 			// failures keep the old path.
 			const recoverableStop = monitor.budgetStopRequested() || monitor.yieldTurnStopRequested();
-			if (!recoverableStop || abortSignal.aborted) throw err;
+			if (!recoverableStop || abortSignal.aborted || err instanceof PromptDispatchError) throw err;
 		}
 
 		const reminderToolChoice = buildNamedToolChoice("yield", session.model);
@@ -2264,16 +2321,19 @@ async function driveSessionToYield(
 					// Armed for this prompt's turn only — the quiescence barrier's
 					// later notice turn may legitimately submit more sections.
 					retriesForced = isFinalRetry;
-					if (retriesForced) monitor.markFinalYieldForced(true);
-					await awaitAbortable(
-						session.prompt(reminder, {
+					await dispatchPrompt(
+						reminder,
+						{
 							attribution: "agent",
 							synthetic: true,
 							...(isFinalRetry && reminderToolChoice ? { toolChoice: reminderToolChoice } : {}),
-						}),
+						},
+						"yield reminder",
+						{ forceFinalYield: isFinalRetry },
 					);
 					await awaitAbortable(session.waitForIdle());
 				} catch (err) {
+					if (err instanceof PromptDispatchError) throw err;
 					if (abortSignal.aborted || err instanceof ToolAbortError) {
 						// Benign control-flow exit — user cancel (^C) or compaction aborting
 						// pending operations both surface here as ToolAbortError. The outer
@@ -2342,12 +2402,12 @@ async function driveSessionToYield(
 						jobs,
 					});
 					try {
-						await awaitAbortable(session.prompt(notice, { attribution: "agent", synthetic: true }));
+						await dispatchPrompt(notice, { attribution: "agent", synthetic: true }, "async-pending notice");
 						await awaitAbortable(session.waitForIdle());
 					} catch (err) {
-						if (abortSignal.aborted || err instanceof ToolAbortError) throw err;
-						// A failed notice turn must not kill the run — fall through
-						// to the passive settle below.
+						if (abortSignal.aborted || err instanceof ToolAbortError || err instanceof PromptDispatchError)
+							throw err;
+						// Other notice-turn failures leave the pending jobs to settle passively.
 						logger.warn("Subagent async-pending notice failed", {
 							error: err instanceof Error ? err.message : String(err),
 						});
@@ -3324,18 +3384,20 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	// then reinstall and reattach for the retry.
 	let attemptUnsubscribe = monitor.attach(session);
 	try {
-		outcome = await driveSessionToYield(session, monitor, message, async () => {
-			attemptUnsubscribe();
-			logger.debug("Subagent follow-up lost the prompt race to an IRC wake; backing off", { id });
-			await session.setWorkPoolYieldItems([]);
-			if (signal) {
-				await untilAborted(signal, () => session.waitForIdle());
-			} else {
-				await session.waitForIdle();
-			}
-			resetYieldTurnState(session.getToolByName("yield"));
-			await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
-			attemptUnsubscribe = monitor.attach(session);
+		outcome = await driveSessionToYield(session, monitor, message, {
+			onPromptBusy: async () => {
+				attemptUnsubscribe();
+				logger.debug("Subagent follow-up lost the prompt race to an IRC wake; backing off", { id });
+				await session.setWorkPoolYieldItems([]);
+				if (signal) {
+					await untilAborted(signal, () => session.waitForIdle());
+				} else {
+					await session.waitForIdle();
+				}
+				resetYieldTurnState(session.getToolByName("yield"));
+				await session.setWorkPoolYieldItems(options.workPoolYieldItems ?? []);
+				attemptUnsubscribe = monitor.attach(session);
+			},
 		});
 		if (monitor.yieldCalled()) {
 			// A follow-up turn's accepted yield is the run's final result too:
@@ -3490,6 +3552,18 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		if (backends.python || backends.js) expanded.push("eval");
 		expanded.push("bash");
 		toolNames = Array.from(new Set(expanded));
+	}
+	// Agents that can start background work (`task`, `bash`) need `wait` to block on it;
+	// without it they `sleep`. Runs after `exec` expansion and the max-depth `task` strip.
+	// `createTools` still drops it when no wake source (async/IRC/services) is enabled.
+	// Restricted sessions own their explicit list and are never widened.
+	if (
+		toolNames &&
+		!options.restrictToolNames &&
+		!toolNames.includes("wait") &&
+		(toolNames.includes("task") || toolNames.includes("bash"))
+	) {
+		toolNames = [...toolNames, "wait"];
 	}
 	// Inbound steering works without messaging; outbound peer coordination requires write.
 	const ircEnabled =
@@ -3839,6 +3913,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					model || modelOverride === undefined ? undefined : inheritedRetryFallbackChain,
 				thinkingLevel: effectiveThinkingLevel,
 				thinkingLevelCeiling: spawnEffortCeiling,
+				// Subagents are short-lived; never schedule background warm requests.
+				cacheWarming: false,
 				// A revived session restores the tier history it persisted (including
 				// tiers a provider rejected or an extension changed since spawn); only
 				// the fresh spawn resolves the per-agent override.
@@ -4181,7 +4257,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			}
 
 			readyAt = performance.now();
-			const outcome = await driveSessionToYield(session, monitor, task);
+			const outcome = await driveSessionToYield(session, monitor, task, { solutionSpace: options.solutionSpace });
 			// Acceptance boundary (#11079): the run's final result is settled, so
 			// stamp the lifecycle and terminalize a ref the run-state mirror left
 			// `running` before the (possibly slow) cleanup below.
