@@ -125,7 +125,7 @@ import {
 	type StartupChangelogSelection,
 } from "./utils/changelog";
 import { EventBus } from "./utils/event-bus";
-import { resolvePythonEvalWarning } from "./eval/startup-warning";
+import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
 
 import { cfgAdvisorEnabled } from "./advisor/settings";
 import { cfgToolsApprovalMode } from "./tools/settings";
@@ -2278,14 +2278,15 @@ export async function runRootCommand(
 				stdoutIsTTY: process.stdout.isTTY,
 			});
 
-			// First run only: every interactive launch writes the last-changelog-version
-			// marker, so read it before the changelog resolution below does.
-			const evalRequested =
-				!initialArgs.noTools && (initialArgs.tools === undefined || initialArgs.tools.includes("eval"));
-			const pythonEvalWarningPromise =
-				isInteractive && evalRequested && (await readLastChangelogVersion()) === undefined
-					? resolvePythonEvalWarning({ cwd: sessionOptions.cwd ?? getProjectDir(), settings: settingsInstance })
-					: undefined;
+			// Read the changelog marker before the changelog resolution below writes it.
+			const pythonEvalWarningPromise = isInteractive
+				? resolveFirstLaunchPythonEvalWarning({
+						args: parsedArgs,
+						lastChangelogVersion: await readLastChangelogVersion(),
+						cwd: sessionOptions.cwd ?? getProjectDir(),
+						settings: settingsInstance,
+					})
+				: undefined;
 
 			// Startup changelog is only consumed by interactive mode below; kick the
 			// CHANGELOG.md parse off now so it overlaps session creation instead of
