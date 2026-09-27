@@ -2213,9 +2213,11 @@ async function driveSessionToYield(
 		}
 	};
 	/**
-	 * Send a headless prompt, retrying pre-provider drops. `forceFinalYield`
-	 * arms the monitor's forced-final latch only while an attempt dispatches, so
-	 * another turn's incremental `yield` during drop recovery stays incremental.
+	 * Send a headless prompt, retrying pre-provider drops. Local slash commands
+	 * are disabled so `false` only means a drop, never a command that already
+	 * ran. `forceFinalYield` arms the monitor's forced-final latch only while an
+	 * attempt dispatches, so another turn's incremental `yield` during drop
+	 * recovery stays incremental.
 	 */
 	const dispatchPrompt = async (
 		text: string,
@@ -2225,7 +2227,7 @@ async function driveSessionToYield(
 	): Promise<void> => {
 		for (let attempt = 1; attempt <= MAX_PROMPT_DISPATCH_ATTEMPTS; attempt++) {
 			if (forceFinalYield) monitor.markFinalYieldForced(true);
-			if (await awaitAbortable(session.prompt(text, promptOptions))) return;
+			if (await awaitAbortable(session.prompt(text, { ...promptOptions, runCommands: false }))) return;
 			if (forceFinalYield) monitor.markFinalYieldForced(false);
 			if (attempt === MAX_PROMPT_DISPATCH_ATTEMPTS) {
 				throw new PromptDispatchError(`${label} dropped before provider dispatch after ${attempt} attempts`);

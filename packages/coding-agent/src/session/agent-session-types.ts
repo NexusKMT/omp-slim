@@ -352,6 +352,12 @@ export interface AgentSessionConfig {
 export interface PromptOptions {
 	/** Whether to expand file-based prompt templates (default: true). */
 	expandPromptTemplates?: boolean;
+	/**
+	 * Whether a leading `/` may run an extension or custom TypeScript command
+	 * locally instead of prompting the agent (default: true). With `false`,
+	 * `prompt()` returning `false` means the prompt was dropped before dispatch.
+	 */
+	runCommands?: boolean;
 	/** Image attachments. */
 	images?: ImageContent[];
 	/** Queue behavior while streaming. `"aside"` is non-interrupting — it does not steer/follow-up

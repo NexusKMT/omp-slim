@@ -242,4 +242,31 @@ describe("AgentSession concurrent prompt dispatch", () => {
 			false,
 		);
 	});
+
+	it("sends a slash-prefixed prompt to the agent without running its command when commands are disabled", async () => {
+		const manager = SessionManager.inMemory();
+		const runtime = new ExtensionRuntime();
+		let commandRuns = 0;
+		const extension = await loadExtensionFromFactory(
+			api =>
+				api.registerCommand("deploy", {
+					handler: async () => {
+						commandRuns++;
+					},
+				}),
+			manager.getCwd(),
+			new EventBus(),
+			runtime,
+			"deploy-command",
+		);
+		createSession(manager, new ExtensionRunner([extension], runtime, manager.getCwd(), manager, modelRegistry));
+
+		expect(await session.prompt("/deploy staging", { attribution: "agent", runCommands: false })).toBe(true);
+		await session.waitForIdle();
+		expect(commandRuns).toBe(0);
+		expect(session.messages.some(message => message.role === "assistant")).toBe(true);
+
+		expect(await session.prompt("/deploy staging")).toBe(false);
+		expect(commandRuns).toBe(1);
+	});
 });

@@ -6797,18 +6797,20 @@ export class AgentSession implements SettingsScope {
 		const typedText = text;
 		// Handle extension commands first (execute immediately, even during streaming)
 		if (expandPromptTemplates && text.startsWith("/")) {
-			const handled = await this.#tryExecuteExtensionCommand(text);
-			if (handled) {
-				return false;
-			}
-
-			// Try custom commands (TypeScript slash commands)
-			const customResult = await this.#tryExecuteCustomCommand(text);
-			if (customResult !== null) {
-				if (customResult === "") {
+			if (options?.runCommands !== false) {
+				const handled = await this.#tryExecuteExtensionCommand(text);
+				if (handled) {
 					return false;
 				}
-				text = customResult;
+
+				// Try custom commands (TypeScript slash commands)
+				const customResult = await this.#tryExecuteCustomCommand(text);
+				if (customResult !== null) {
+					if (customResult === "") {
+						return false;
+					}
+					text = customResult;
+				}
 			}
 
 			// Try file-based slash commands (markdown files from commands/ directories)
