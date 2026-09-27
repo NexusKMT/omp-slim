@@ -1,7 +1,7 @@
 import { afterEach, expect, it, spyOn } from "bun:test";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -28,7 +28,7 @@ afterEach(async () => {
 	for (const dispose of cleanup.splice(0)) await dispose();
 });
 
-function setup() {
+function setup(options: { responses?: MockResponseSource; beforeVisionReply?: () => Promise<void> } = {}) {
 	const tempDir = TempDir.createSync("@skill-image-");
 	const authStorage = createInMemoryAuthStorage();
 	authStorage.keys.setRuntime("zai", "test-key");
@@ -37,7 +37,7 @@ function setup() {
 		"compaction.enabled": false,
 		modelRoles: { vision: "zai/glm-5.3-flash:max", default: "zai/glm-5.3:max" },
 	});
-	const mock = createMockModel({ handler: () => ({ content: ["done"] }) });
+	const mock = createMockModel({ responses: options.responses, handler: () => ({ content: ["done"] }) });
 	const agent = new Agent({
 		getApiKey: () => "test-key",
 		initialState: {
@@ -75,9 +75,13 @@ function setup() {
 		}) +
 		"data: [DONE]\n\n";
 	const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
-		Object.assign(async () => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } }), {
-			preconnect: fetch.preconnect,
-		}),
+		Object.assign(
+			async () => {
+				await options.beforeVisionReply?.();
+				return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+			},
+			{ preconnect: fetch.preconnect },
+		),
 	);
 	cleanup.push(async () => {
 		fetchSpy.mockRestore();
@@ -115,5 +119,43 @@ it("describes a queued user-invoked skill image before delivery", async () => {
 	const skillRequest = mock.calls.find(call =>
 		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
 	);
+	expectDescriptionBeforeSkill(skillRequest?.context.messages ?? []);
+});
+
+it("queues an image-bearing skill when another turn starts during vision preprocessing", async () => {
+	const visionStarted = Promise.withResolvers<void>();
+	const releaseVision = Promise.withResolvers<void>();
+	const otherStarted = Promise.withResolvers<void>();
+	const releaseOther = Promise.withResolvers<void>();
+	const { session, mock, fetchSpy } = setup({
+		beforeVisionReply: async () => {
+			visionStarted.resolve();
+			await releaseVision.promise;
+		},
+		responses: [
+			async () => {
+				otherStarted.resolve();
+				await releaseOther.promise;
+				return { content: ["other done"] };
+			},
+		],
+	});
+	const skillDispatch = session.promptCustomMessage(skill, { streamingBehavior: "followUp" });
+	await visionStarted.promise;
+	const otherTurn = session.prompt("other turn");
+	await otherStarted.promise;
+	releaseVision.resolve();
+	// Queued into the running turn, the skill settles while that turn is still blocked;
+	// dispatching it as its own turn would wait for the other turn and never settle here.
+	await skillDispatch;
+	expect(session.agent.state.isStreaming).toBe(true);
+	releaseOther.resolve();
+	await otherTurn;
+	await session.waitForIdle();
+	expect(fetchSpy).toHaveBeenCalledTimes(1);
+	const skillRequest = mock.calls.find(call =>
+		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
+	);
+	expect(JSON.stringify(skillRequest?.context.messages)).toContain("other turn");
 	expectDescriptionBeforeSkill(skillRequest?.context.messages ?? []);
 });
