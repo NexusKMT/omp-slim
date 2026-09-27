@@ -102,6 +102,30 @@ describe("handleRpcCancelSubagent", () => {
 		expect(AgentRegistry.global().get("SubagentA")?.status).toBe("running");
 	});
 
+	test("does not let the run's result be accepted while the abort settles", async () => {
+		emitLifecycle("SubagentA", "started");
+		let acceptedDuringAbort: boolean | undefined;
+		AgentRegistry.global().register({
+			id: "SubagentA",
+			displayName: "SubagentA",
+			kind: "sub",
+			session: {
+				// The executor may accept a yield that lands while the abort is in flight.
+				abort: async () => {
+					acceptedDuringAbort = AgentRegistry.global().markResultAccepted("SubagentA");
+				},
+				dispose: async () => {},
+			} as never,
+			sessionFile: ownSessionFile,
+			status: "running",
+		});
+
+		await expect(handleRpcCancelSubagent(registry, "SubagentA")).resolves.toBe(true);
+
+		expect(acceptedDuringAbort).toBe(false);
+		expect(AgentRegistry.global().get("SubagentA")?.status).toBe("aborted");
+	});
+
 	test("is a no-op for a second cancel of the same subagent", async () => {
 		emitLifecycle("SubagentA", "started");
 		registerLiveAgent("SubagentA");

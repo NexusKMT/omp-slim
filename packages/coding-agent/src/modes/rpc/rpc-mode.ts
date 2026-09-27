@@ -478,8 +478,13 @@ export async function handleRpcCancelSubagent(
 	if (ref?.kind !== "sub" || ref.status !== "running" || !ref.session || ref.sessionFile !== sessionFile) {
 		return false;
 	}
-	await ref.session.abort({ reason: USER_INTERRUPT_LABEL });
-	return AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
+	// Start the release first: it publishes the `aborted` tombstone synchronously,
+	// so the executor cannot accept the run's result (flipping the ref to idle)
+	// while the abort below is still settling.
+	const session = ref.session;
+	const released = AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
+	await session.abort({ reason: USER_INTERRUPT_LABEL });
+	return released;
 }
 
 export async function handleRpcSessionChange(
