@@ -456,32 +456,6 @@ struct Variant {
 	dropped: usize,
 }
 
-/// Net count of opening minus closing brackets on a row, ignoring quoted text.
-fn bracket_delta(line: &str) -> i32 {
-	let mut delta = 0;
-	let mut quote = None;
-	let mut escaped = false;
-	for ch in line.chars() {
-		if let Some(open) = quote {
-			if escaped {
-				escaped = false;
-			} else if ch == '\\' {
-				escaped = true;
-			} else if ch == open {
-				quote = None;
-			}
-			continue;
-		}
-		match ch {
-			'"' | '\'' | '`' => quote = Some(ch),
-			'{' | '[' | '(' => delta += 1,
-			'}' | ']' | ')' => delta -= 1,
-			_ => {},
-		}
-	}
-	delta
-}
-
 fn group_variants(
 	group: &ReplacementGroup,
 	edits: &[Edit],
@@ -536,12 +510,15 @@ fn group_variants(
 				} else if baseline
 					&& first_essential
 					&& indent_columns(trail) == indent_columns(first)
-					&& bracket_delta(trail) != bracket_delta(first)
-				{
-					// Only a replacement that drops or adds an opener/closer leaves the
-					// row's position in question. Swapping an `if` opener, `case`
-					// label, or signature for another of the same shape does not, so
-					// a parse failure elsewhere in the batch must not reject it.
+					&& !parses_cleanly(
+						Some(path),
+						&materialize(lines, &[inserts.clone(), deletes.clone()].concat()).0,
+					) {
+					// Only a replacement that breaks the file on its own leaves the row's
+					// position in question (e.g. a closer swapped for a statement).
+					// Swapping an `if` opener, `case` label, or signature for another of
+					// the same shape parses fine alone, so a parse failure elsewhere in
+					// the batch must not reject it.
 					ambiguous = true;
 				}
 			} else {
