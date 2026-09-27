@@ -53,9 +53,30 @@ function takeQueuedMessage(messaging: WaitMessaging | undefined): IrcMessage | u
 }
 
 /**
+ * Jobs some agent's `wait` is blocked on right now, refcounted per shared job
+ * manager. Delivery watches cannot answer "is the owner parked on this
+ * result?": a workpool watches every member turn while its owner keeps working.
+ */
+const blockedWaits = new WeakMap<AsyncJobManager, Map<string, number>>();
+
+/** Mark `jobIds` as blocked on until the returned release runs. */
+function holdBlockedWait(manager: AsyncJobManager, jobIds: string[]): () => void {
+	const held = blockedWaits.get(manager) ?? new Map<string, number>();
+	blockedWaits.set(manager, held);
+	for (const id of jobIds) held.set(id, (held.get(id) ?? 0) + 1);
+	return () => {
+		for (const id of jobIds) {
+			const count = (held.get(id) ?? 0) - 1;
+			if (count > 0) held.set(id, count);
+			else held.delete(id);
+		}
+	};
+}
+
+/**
  * An elapsed message window: name the running peers that kept it open and,
- * when the caller's own result job is being awaited by its owner, say so — that
- * owner is parked on this agent, the cycle a bare liveness check cannot see.
+ * when the caller's own result job is blocked on by its owner's `wait`, say so —
+ * that owner is parked on this agent, the cycle a bare liveness check cannot see.
  */
 function noMessageResult(
 	messaging: WaitMessaging | undefined,
@@ -68,10 +89,10 @@ function noMessageResult(
 				.filter(ref => messaging.registry.isRunning(ref))
 				.map(ref => ref.id)
 		: [];
+	const blocked = manager ? blockedWaits.get(manager) : undefined;
 	const awaitedBy =
-		messaging && manager
-			? manager.getRunningJobs().find(job => job.agentId === messaging.senderId && manager.isWatched(job.id))
-					?.ownerId
+		messaging && manager && blocked
+			? manager.getRunningJobs().find(job => job.agentId === messaging.senderId && blocked.has(job.id))?.ownerId
 			: undefined;
 	const text = prompt.render(waitNoMessageTemplate, {
 		elapsed: formatDuration(Date.now() - window.openedAt),
@@ -234,6 +255,7 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
 			});
 		const progressTimer = onUpdate && jobs.length > 0 ? setInterval(emitProgress, PROGRESS_INTERVAL_MS) : undefined;
 		if (jobs.length > 0) emitProgress();
+		const releaseBlockedWait = manager ? holdBlockedWait(manager, watchedIds) : undefined;
 		let wake: "job" | "message" | "service" | "timeout" | "abort";
 		try {
 			wake = await Promise.race([
@@ -245,6 +267,7 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
 			]);
 		} finally {
 			clearTimeout(timer);
+			releaseBlockedWait?.();
 			clearInterval(progressTimer);
 			busAbort?.abort(busCancelled);
 			serviceAbort.abort();

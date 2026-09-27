@@ -210,7 +210,7 @@ describe("wait", () => {
 		expect(result.details?.jobs?.[0]).toMatchObject({ id, status: "completed", resultText: "late result" });
 	});
 
-	test("points a message-only wait at the owner blocked on the caller's own result", async () => {
+	test("points a message-only wait at an owner blocked in wait on its result, not at a delivery watch", async () => {
 		vi.useFakeTimers();
 		const registry = AgentRegistry.global();
 		const streaming = { isStreaming: true } as never;
@@ -231,11 +231,17 @@ describe("wait", () => {
 			agentId: "Child",
 			ownerId: "Main",
 		});
+		const childWaitText = async () => {
+			const waiting = new WaitTool(session(manager, "Child")).execute("child-wait", {});
+			vi.advanceTimersByTime(5_000);
+			const result = await waiting;
+			return result.content[0]?.type === "text" ? result.content[0].text : "";
+		};
+		// A workpool watches each member turn to suppress auto-delivery while its owner keeps working.
+		manager.watchJobs(["Child"]);
+		expect(await childWaitText()).not.toContain("agent://Main");
 		const parentWait = new WaitTool(session(manager, "Main")).execute("parent-wait", {});
-		const childWait = new WaitTool(session(manager, "Child")).execute("child-wait", {});
-		vi.advanceTimersByTime(5_000);
-		const child = await childWait;
-		const text = child.content[0]?.type === "text" ? child.content[0].text : "";
+		const text = await childWaitText();
 		expect(text).toStartWith("No message within 5.0s");
 		expect(text).toContain("agent://Main");
 		childRun.resolve("migration API ready");

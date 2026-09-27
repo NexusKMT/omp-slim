@@ -1023,11 +1023,6 @@ export class AsyncJobManager {
 		return this.#suppressedDeliveries.has(jobId) || this.#watchedJobs.has(jobId);
 	}
 
-	/** Whether a consumer (an owner's `wait`, a workpool) is currently blocked on this job's result. */
-	isWatched(jobId: string): boolean {
-		return this.#watchedJobs.has(jobId);
-	}
-
 	#enqueueDelivery(jobId: string, text: string): void {
 		// Skip delivery if already acknowledged
 		if (this.isDeliverySuppressed(jobId)) {
