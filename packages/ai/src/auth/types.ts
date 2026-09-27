@@ -482,6 +482,8 @@ export type AuthApiKeyOptions = {
 	 * that a peer/broker rotated out from under us is replaced before retrying.
 	 */
 	forceRefresh?: boolean;
+	/** Explicit provider-401 recovery; generic force refreshes leave this unset. */
+	refreshReason?: OAuthRefreshReason;
 };
 
 /**

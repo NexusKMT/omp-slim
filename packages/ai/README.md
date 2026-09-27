@@ -1169,6 +1169,9 @@ direct forced refreshes such as MCP recovery, ordinary hard-auth blocks, and
 sibling rotation keep their existing behavior. Cached refresh responses rebind
 by durable credential ID so concurrent row removal cannot switch a pinned
 session to another account.
+Generic `forceRefresh: true` requests do not opt into reuse. Provider-401 retry
+paths pass `refreshReason: "auth-recovery"` explicitly; expiry sentinels and
+usage polling do not imply that reason.
 
 ### Provider Notes
 

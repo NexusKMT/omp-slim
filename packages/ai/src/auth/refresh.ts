@@ -406,19 +406,14 @@ export class OAuthRefresher {
 		credential: OAuthCredential,
 		credentialId: number | undefined,
 		signal?: AbortSignal,
+		reason?: OAuthRefreshReason,
 	): Promise<OAuthCredentials> {
-		const authRecovery = credential.expires === 0;
+		const authRecovery = reason === "auth-recovery";
 		if (authRecovery && credentialId !== undefined && !this.#oauthCredentialRefreshInFlight.has(credentialId)) {
 			const recent = this.#recentMint(credentialId);
 			if (recent) return recent.credential;
 		}
-		return this.#refreshSingleFlight(
-			provider,
-			credential,
-			credentialId,
-			signal,
-			authRecovery ? "auth-recovery" : undefined,
-		);
+		return this.#refreshSingleFlight(provider, credential, credentialId, signal, reason);
 	}
 
 	/** Refresh without recent-mint reuse; still shares the per-credential in-flight request. */

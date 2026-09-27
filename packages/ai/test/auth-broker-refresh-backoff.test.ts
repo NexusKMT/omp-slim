@@ -144,6 +144,49 @@ describe("auth broker OAuth refresh backoff", () => {
 		expect(delegatedCalls).toBe(2);
 	});
 
+	test("generic forced refresh mints while only a provider 401 opts into reuse", async () => {
+		if (!handle) throw new Error("test setup failed");
+		const client = new AuthBrokerClient({ url: handle.url, token: TOKEN });
+		const initial = await client.fetchSnapshot();
+		if (initial.status !== 200) throw new Error("expected broker snapshot");
+		remote = new RemoteAuthCredentialStore({
+			client,
+			initialSnapshot: initial.snapshot,
+			streamSnapshots: false,
+		});
+		clientStorage = new AuthStorage(remote);
+		await clientStorage.credentials.reload();
+		expect(await clientStorage.keys.get(PROVIDER, "generic", { forceRefresh: true })).toBe("access-1");
+		expect(await clientStorage.keys.get(PROVIDER, "generic", { forceRefresh: true })).toBe("access-2");
+		const resolve = clientStorage.keys.resolver(PROVIDER, { sessionId: "generic" });
+		expect(
+			await resolve({ lastChance: false, error: Object.assign(new Error("server error"), { status: 500 }) }),
+		).toMatchObject({ apiKey: "access-3" });
+		expect(
+			await resolve({ lastChance: false, error: Object.assign(new Error("unauthorized"), { status: 401 }) }),
+		).toMatchObject({ apiKey: "access-3" });
+		expect(refreshCalls).toBe(3);
+	});
+
+	test("generic delegated force refresh leaves recovery intent unset", async () => {
+		if (!store) throw new Error("test setup failed");
+		clientStorage = new AuthStorage(store, {
+			async refreshOAuthCredential(_provider, _id, credential, _signal, reason) {
+				// A delegate may return its cached token only for explicit recovery.
+				return {
+					...credential,
+					access: reason === "auth-recovery" ? credential.access : `${credential.access}-renewed`,
+					expires: Date.now() + HOUR_MS,
+				};
+			},
+		});
+		await clientStorage.credentials.reload();
+		expect(await clientStorage.keys.get(PROVIDER, "generic", { forceRefresh: true })).toBe("access-0-renewed");
+		expect(await clientStorage.keys.get(PROVIDER, "generic", { forceRefresh: true })).toBe(
+			"access-0-renewed-renewed",
+		);
+	});
+
 	test("scheduled expiry refresh bypasses recent-mint reuse", async () => {
 		if (!handle || !brokerStorage) throw new Error("test setup failed");
 		const client = new AuthBrokerClient({ url: handle.url, token: TOKEN });

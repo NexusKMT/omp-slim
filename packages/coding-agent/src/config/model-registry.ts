@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { ApiKeyResolver, FetchImpl, ResolvedApiKey, UsageProvider } from "@oh-my-pi/pi-ai";
+import type { AuthApiKeyOptions } from "@oh-my-pi/pi-ai/auth-storage";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
@@ -2822,7 +2823,7 @@ export class ModelRegistry {
 	async getApiKeyForProvider(
 		provider: string,
 		sessionId?: string,
-		options?: { baseUrl?: string; modelId?: string; forceRefresh?: boolean; signal?: AbortSignal },
+		options?: AuthApiKeyOptions,
 	): Promise<string | undefined> {
 		return (await this.getApiKeyWithCredentialForProvider(provider, sessionId, options))?.apiKey;
 	}
@@ -2830,7 +2831,7 @@ export class ModelRegistry {
 	async getApiKeyWithCredentialForProvider(
 		provider: string,
 		sessionId?: string,
-		options?: { baseUrl?: string; modelId?: string; forceRefresh?: boolean; signal?: AbortSignal },
+		options?: AuthApiKeyOptions,
 	): Promise<ResolvedApiKey | undefined> {
 		if (options?.forceRefresh) this.#invalidateProviderCommandConfigs(provider);
 		if (this.#keylessProviders.has(provider) && this.authStorage.keys.source(provider) === undefined) {
@@ -2842,6 +2843,7 @@ export class ModelRegistry {
 			modelId: options?.modelId,
 			accountIds: accountAccess && Object.keys(accountAccess),
 			forceRefresh: options?.forceRefresh,
+			refreshReason: options?.refreshReason,
 			signal: options?.signal,
 		});
 	}
