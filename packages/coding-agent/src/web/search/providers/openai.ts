@@ -170,7 +170,9 @@ function readResponse(payload: unknown, modelId: string, resultLimit: number): S
 	}
 
 	const limitedSources = sources.filter((source, index) => index < resultLimit || answerCitationUrls.has(source.url));
-	const limitedCitations = citations.filter((citation, index) => index < resultLimit || answerCitationUrls.has(citation.url));
+	const limitedCitations = citations.filter(
+		(citation, index) => index < resultLimit || answerCitationUrls.has(citation.url),
+	);
 	const usageRecord = asRecord(response.usage);
 	const usage: SearchUsage = {};
 	if (typeof usageRecord?.input_tokens === "number") usage.inputTokens = usageRecord.input_tokens;

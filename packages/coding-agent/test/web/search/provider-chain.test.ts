@@ -68,6 +68,31 @@ describe("web model role resolution", () => {
 		expect(candidates.some(candidate => candidate.model.id === "duckduckgo")).toBe(true);
 	});
 
+	it("prioritizes dynamically discovered OpenAI GPT-6 over the bundled GPT-5.6 fallback", () => {
+		const authStorage = createInMemoryAuthStorage();
+		storages.add(authStorage);
+		authStorage.keys.setRuntime("openai", "test-openai-key");
+		const settings = Settings.isolated();
+		const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
+		const apiGpt56Models = roleCandidatePool("web", settings, modelRegistry).filter(
+			model => model.provider === "openai" && model.id === "gpt-5.6-luna",
+		);
+		const bundledGpt56 = apiGpt56Models[0];
+		if (!bundledGpt56) throw new Error("Bundled direct OpenAI GPT-5.6 model missing");
+
+		const bundledChain = resolveRoleChain("web", settings, apiGpt56Models);
+		expect(bundledChain.map(candidate => `${candidate.model.provider}/${candidate.model.id}`)).toEqual([
+			"openai/gpt-5.6-luna",
+		]);
+
+		const discoveredGpt6 = { ...bundledGpt56, id: "gpt-6-luna", name: "GPT-6 Luna" };
+		const discoveredChain = resolveRoleChain("web", settings, [...apiGpt56Models, discoveredGpt6]);
+		expect(discoveredChain.map(candidate => `${candidate.model.provider}/${candidate.model.id}`)).toEqual([
+			"openai/gpt-6-luna",
+			"openai/gpt-5.6-luna",
+		]);
+	});
+
 	it("keeps direct OpenAI API search after available Codex OAuth candidates", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		storages.add(authStorage);
