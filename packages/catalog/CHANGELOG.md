@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Responses web-search capability metadata for supported OpenAI API models ([#13467](https://github.com/can1357/oh-my-pi/pull/13467) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+
 ## [18.3.1] - 2026-09-25
 
 ### Added

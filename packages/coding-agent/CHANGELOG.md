@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added API-key-billed OpenAI Responses web search, with GPT-6 Luna immediately after Codex GPT-6 in the default search fallback chain ([#13467](https://github.com/can1357/oh-my-pi/pull/13467) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+
 ## [18.3.4] - 2026-09-27
 
 ### Breaking Changes
