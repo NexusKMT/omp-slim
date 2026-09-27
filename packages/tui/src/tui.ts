@@ -3577,9 +3577,9 @@ export class TUI extends Container {
 	/**
 	 * Paint a frame on the alt buffer: only the rows that changed since the
 	 * previous frame, or every row when the height changed, a repaint is forced,
-	 * or either frame holds OSC 66 text. Emits only sync-output brackets, cursor
-	 * moves, and per-row rewrites — never ED3 or any native-scrollback byte. The
-	 * hardware cursor stays hidden here.
+	 * or a changed frame holds OSC 66 text before or after. Emits only
+	 * sync-output brackets, cursor moves, and per-row rewrites — never ED3 or
+	 * any native-scrollback byte. The hardware cursor stays hidden here.
 	 */
 	#emitAltFrame(prepared: PreparedLines, width: number, height: number, notifyPaint: boolean): void {
 		// The pass that composed this frame ran with `altScreen`, so the normal
@@ -3603,18 +3603,20 @@ export class TUI extends Container {
 		}
 		// A forced repaint (resetDisplay, requestRender(true)) rewrites every row
 		// even when the cached frame is byte-identical: the redraw gesture must
-		// repair a corrupted modal. So does a frame with OSC 66 text in it, before
-		// or after: a scaled glyph spans the rows below its own and the terminal
-		// drops it when any of them is written, so those rows are not independent.
-		// Otherwise rewrite only the rows that changed (a keystroke in a modal
-		// touches a row or two), and skip an identical frame entirely.
+		// repair a corrupted modal. So does a changed frame with OSC 66 text in
+		// it, before or after: a scaled glyph spans the rows below its own and the
+		// terminal drops it when any of them is written, so those rows are not
+		// independent. Otherwise rewrite only the rows that changed (a keystroke
+		// in a modal touches a row or two), and skip an identical frame entirely.
 		const force = this.#forceViewportRepaintOnNextRender;
 		this.#forceViewportRepaintOnNextRender = false;
 		const full =
 			force ||
 			this.#altPreviousLines.length !== height ||
-			this.#altPreviousLines.some(isOsc66Line) ||
-			prepared.lines.some(isOsc66Line);
+			((this.#altPreviousLines.some(isOsc66Line) || prepared.lines.some(isOsc66Line)) &&
+				prepared.rows.some((_row, r) =>
+					this.#rowNeedsRewrite(this.#altPreviousLines, this.#altPreparedRows, prepared.lines, prepared.rows, r),
+				));
 		let rowsBuffer = "";
 		for (let r = 0; r < height; r++) {
 			if (full) {

@@ -102,7 +102,7 @@ describe("fullscreen overlay paints", () => {
 		tui.stop();
 	});
 
-	it("sends a scaled heading again after a row under it was written", async () => {
+	it("repaints a frame holding a scaled heading whole when it changes, and not at all when it doesn't", async () => {
 		// An `s=2` glyph covers the row below its own, and the terminal drops the
 		// whole glyph when anything is written there. Once that row goes back to
 		// the heading's blank spacer, the heading itself must be sent again even
@@ -120,6 +120,12 @@ describe("fullscreen overlay paints", () => {
 		tui.requestRender();
 		await scheduler.settle(terminal);
 		expect(terminal.takeWrites()).toContain(`${OSC66}s=2;Hi`);
+
+		// A render that changes nothing (a spinner behind the overlay) still writes
+		// nothing while the heading is on screen.
+		tui.requestRender();
+		await scheduler.settle(terminal);
+		expect(terminal.takeWrites()).toBe("");
 		tui.stop();
 	});
 
