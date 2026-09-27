@@ -54,7 +54,13 @@ import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-life
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../registry/persisted-agents";
 import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
-import type { AgentSession, AgentSessionEvent, Prewalk, PromptOptions } from "../session/agent-session";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	type Prewalk,
+	PromptDroppedError,
+	type PromptOptions,
+} from "../session/agent-session";
 import { type ArtifactManager, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
@@ -2213,10 +2219,10 @@ async function driveSessionToYield(
 		}
 	};
 	/**
-	 * Send a headless prompt, retrying pre-provider drops. Local slash commands
-	 * are disabled so `false` only means a drop, never a command that already
-	 * ran. `forceFinalYield` arms the monitor's forced-final latch only while an
-	 * attempt dispatches, so another turn's incremental `yield` during drop
+	 * Send a headless prompt, retrying pre-provider drops (`PromptDroppedError`).
+	 * Local slash commands are disabled so an assignment always reaches the
+	 * model. `forceFinalYield` arms the monitor's forced-final latch only while
+	 * an attempt dispatches, so another turn's incremental `yield` during drop
 	 * recovery stays incremental.
 	 */
 	const dispatchPrompt = async (
@@ -2227,7 +2233,12 @@ async function driveSessionToYield(
 	): Promise<void> => {
 		for (let attempt = 1; attempt <= MAX_PROMPT_DISPATCH_ATTEMPTS; attempt++) {
 			if (forceFinalYield) monitor.markFinalYieldForced(true);
-			if (await awaitAbortable(session.prompt(text, { ...promptOptions, runCommands: false }))) return;
+			try {
+				await awaitAbortable(session.prompt(text, { ...promptOptions, runCommands: false, throwOnDrop: true }));
+				return;
+			} catch (err) {
+				if (!(err instanceof PromptDroppedError)) throw err;
+			}
 			if (forceFinalYield) monitor.markFinalYieldForced(false);
 			if (attempt === MAX_PROMPT_DISPATCH_ATTEMPTS) {
 				throw new PromptDispatchError(`${label} dropped before provider dispatch after ${attempt} attempts`);

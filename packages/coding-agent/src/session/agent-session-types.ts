@@ -354,10 +354,15 @@ export interface PromptOptions {
 	expandPromptTemplates?: boolean;
 	/**
 	 * Whether a leading `/` may run an extension or custom TypeScript command
-	 * locally instead of prompting the agent (default: true). With `false`,
-	 * `prompt()` returning `false` means the prompt was dropped before dispatch.
+	 * locally instead of prompting the agent (default: true). Headless task
+	 * drivers disable it so an assignment is always delivered to the model.
 	 */
 	runCommands?: boolean;
+	/**
+	 * Reject with `PromptDroppedError` when the prompt is dropped before
+	 * reaching the agent, instead of resolving `true` (default: false).
+	 */
+	throwOnDrop?: boolean;
 	/** Image attachments. */
 	images?: ImageContent[];
 	/** Queue behavior while streaming. `"aside"` is non-interrupting — it does not steer/follow-up

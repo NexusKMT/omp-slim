@@ -20,7 +20,9 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
-import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { RpcPromptResults, reportPromptResult } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-prompt-results";
+import type { RpcPromptResultFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import { AgentSession, PromptDroppedError } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
@@ -217,7 +219,12 @@ describe("AgentSession concurrent prompt dispatch", () => {
 		expect(users[secondIndex]?.steering).toBe(true);
 	});
 
-	it("reports a headless prompt dropped by a session transition before provider dispatch", async () => {
+	/**
+	 * Runs `start` (which must call `session.prompt()` and attach its handlers)
+	 * and lets a tree navigation drop that prompt while usage preflight awaits
+	 * the API key.
+	 */
+	async function dropPromptByTransition(start: () => void): Promise<void> {
 		const manager = SessionManager.inMemory();
 		const retained = manager.appendMessage({ role: "user", content: "Retained", timestamp: 1 });
 		manager.appendMessage({ role: "user", content: "Abandoned", timestamp: 2 });
@@ -230,17 +237,48 @@ describe("AgentSession concurrent prompt dispatch", () => {
 			await release.promise;
 			return getApiKey(...args);
 		});
-		const pending = session.prompt("headless assignment", { attribution: "agent", synthetic: true });
+		start();
 		try {
 			await reached.promise;
 			expect((await session.navigateTree(retained)).cancelled).toBe(false);
 		} finally {
 			release.resolve();
 		}
-		expect(await pending).toBe(false);
-		expect(manager.getEntries().some(entry => entry.type === "message" && entry.message.role === "custom")).toBe(
-			false,
-		);
+	}
+
+	it("reports a transition-dropped RPC prompt as aborted, not as a completed local command", async () => {
+		const frames: RpcPromptResultFrame[] = [];
+		const settled = Promise.withResolvers<void>();
+		await dropPromptByTransition(() => {
+			const results = new RpcPromptResults(session, frame => {
+				frames.push(frame);
+				settled.resolve();
+			});
+			reportPromptResult({
+				ticket: results.begin("req_dropped"),
+				prompt: session.prompt("dropped by transition"),
+				results,
+				onError: () => {},
+			});
+		});
+		await settled.promise;
+
+		expect(frames).toEqual([expect.objectContaining({ id: "req_dropped", agentInvoked: true, status: "aborted" })]);
+	});
+
+	it("rejects a transition-dropped headless prompt when throwOnDrop is set", async () => {
+		let outcome: Promise<unknown> = Promise.resolve();
+		await dropPromptByTransition(() => {
+			outcome = session
+				.prompt("dropped by transition", { attribution: "agent", synthetic: true, throwOnDrop: true })
+				.then(
+					() => "resolved",
+					(error: unknown) => error,
+				);
+		});
+
+		expect(await outcome).toBeInstanceOf(PromptDroppedError);
+		expect(session.messages.some(message => message.role === "assistant")).toBe(false);
 	});
 
 	it("sends a slash-prefixed prompt to the agent without running its command when commands are disabled", async () => {

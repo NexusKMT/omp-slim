@@ -7,7 +7,12 @@ import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	PromptDroppedError,
+	type PromptOptions,
+} from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
@@ -44,7 +49,7 @@ function createMockSession(
 		promptIndex: number;
 		emit: (event: AgentSessionEvent) => void;
 		pushMessage: (message: unknown) => void;
-	}) => boolean | void | Promise<boolean | void>,
+	}) => "dropped" | void | Promise<"dropped" | void>,
 ): MockSessionHandle {
 	const listeners: Array<(event: AgentSessionEvent) => void> = [];
 	const messages: unknown[] = [];
@@ -77,8 +82,10 @@ function createMockSession(
 		prompt: async (text: string, options?: PromptOptions) => {
 			promptIndex += 1;
 			prompts.push({ text, options });
-			const accepted = await onPrompt({ promptIndex, emit, pushMessage: message => messages.push(message) });
-			return accepted !== false;
+			const outcome = await onPrompt({ promptIndex, emit, pushMessage: message => messages.push(message) });
+			// Mirrors AgentSession.prompt(): a dropped prompt resolves `true` unless the caller opted into rejection.
+			if (outcome === "dropped" && options?.throwOnDrop) throw new PromptDroppedError();
+			return true;
 		},
 		getLastAssistantMessage: () => messages[messages.length - 1] as never,
 		sendUserMessage: async () => {},
@@ -234,7 +241,7 @@ describe("runSubprocess incremental yield loops", () => {
 	it("retries a dropped assignment before sending any yield reminder", async () => {
 		const id = "DroppedScout";
 		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
-			if (promptIndex === 1) return false;
+			if (promptIndex === 1) return "dropped";
 			emitTerminalYieldTurn("DELIVERED", emit, pushMessage);
 		});
 		mockCreateAgentSession(handle.session);
@@ -252,7 +259,7 @@ describe("runSubprocess incremental yield loops", () => {
 
 	it("fails after four dropped assignments without sending a yield reminder", async () => {
 		const id = "LostScout";
-		const handle = createMockSession(() => false);
+		const handle = createMockSession(() => "dropped");
 		mockCreateAgentSession(handle.session);
 		registerRunning(id, handle.session);
 
@@ -266,7 +273,7 @@ describe("runSubprocess incremental yield loops", () => {
 	it("delivers an assignment on the fourth attempt", async () => {
 		const id = "RecoveredScout";
 		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
-			if (promptIndex < 4) return false;
+			if (promptIndex < 4) return "dropped";
 			emitTerminalYieldTurn("RECOVERED", emit, pushMessage);
 		});
 		mockCreateAgentSession(handle.session);
@@ -281,7 +288,7 @@ describe("runSubprocess incremental yield loops", () => {
 
 	it("fails explicitly when a dropped assignment never reaches idle", async () => {
 		const id = "WedgedScout";
-		const handle = createMockSession(() => false);
+		const handle = createMockSession(() => "dropped");
 		handle.session.waitForIdle = () => Promise.withResolvers<void>().promise;
 		mockCreateAgentSession(handle.session);
 		registerRunning(id, handle.session);
@@ -296,7 +303,7 @@ describe("runSubprocess incremental yield loops", () => {
 	it("retries a dropped yield reminder without consuming another reminder", async () => {
 		const id = "ReminderScout";
 		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
-			if (promptIndex === 2) return false;
+			if (promptIndex === 2) return "dropped";
 			if (promptIndex === 1) {
 				const message = {
 					role: "assistant" as const,
@@ -322,7 +329,7 @@ describe("runSubprocess incremental yield loops", () => {
 	it("fails when every attempt to send a yield reminder is dropped", async () => {
 		const id = "LostReminderScout";
 		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
-			if (promptIndex > 1) return false;
+			if (promptIndex > 1) return "dropped";
 			const message = {
 				role: "assistant" as const,
 				content: [{ type: "text" as const, text: "Working" }],
@@ -360,7 +367,7 @@ describe("runSubprocess incremental yield loops", () => {
 			}
 			if (promptIndex === 4) {
 				droppedFinal = { emit, pushMessage };
-				return false;
+				return "dropped";
 			}
 			emitTerminalYieldTurn("FINAL", emit, pushMessage);
 		});
@@ -460,7 +467,7 @@ describe("runSubprocess incremental yield loops", () => {
 				emitTerminalYieldTurn("PARKED", emit, pushMessage);
 				return;
 			}
-			if (promptIndex === 5) return false;
+			if (promptIndex === 5) return "dropped";
 			if (promptIndex === 6) {
 				// The retried notice can make progress without satisfying the
 				// terminal yield parked behind the quiescence barrier.
@@ -486,7 +493,7 @@ describe("runSubprocess incremental yield loops", () => {
 	it("fails when every async-pending notice dispatch is dropped", async () => {
 		const id = "LostNoticeScout";
 		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
-			if (promptIndex > 1) return false;
+			if (promptIndex > 1) return "dropped";
 			emitTerminalYieldTurn("PARKED", emit, pushMessage);
 		});
 		handle.asyncPending.value = true;
