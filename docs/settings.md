@@ -635,7 +635,7 @@ lsp:
 | `lsp.diagnosticsOnEdit`           | boolean | `false`   | Run diagnostics after an edit.                                                                                                                              |
 | `lsp.formatOnWrite`               | boolean | `false`   | Format files on write.                                                                                                                                      |
 | `lsp.diagnosticsDeduplicate`      | boolean | `true`    | Collapse duplicate diagnostics.                                                                                                                             |
-| `shellPath`                       | string  | _(unset)_ | Override the shell binary used by bash.                                                                                                                     |
+| `shellPath`                       | string  | _(unset)_ | External shell for services, terminals, and `!`; plain bash tool calls use embedded brush.                                                                  |
 
 ### Files: editing and reading
 
@@ -782,6 +782,8 @@ tui:
 | `tui.resizeScrollback`      | enum    | `rebuild`        | How a settled width resize refreshes transcript rows kept in terminal scrollback: `append` replays the transcript at the new width below retained history, `rebuild` erases pane scrollback then replays one current-width copy, `preserve` repaints only the viewport. |
 
 For a custom status line, set `statusLine.preset: custom` and configure `statusLine.leftSegments`, `statusLine.rightSegments`, and `statusLine.segmentOptions`. Include `status` in either segment list to render extension statuses registered through `ctx.ui.setStatus()`, ordered by key and joined inline. Set `statusLine.showHookStatus: false` to suppress the same statuses in the footer.
+
+The `path` segment abbreviates the home directory to `~`. On Windows, shared path formatting recognizes both the long home name and its existing 8.3 aliases (such as `ADMINI~1`), including in tool labels and error text. Only the home prefix is abbreviated; remaining path components keep their spelling, and formatting does not change the working directory or environment. Set `statusLine.segmentOptions.path.abbreviate: false` to keep the full path in the status line.
 
 The `cost` segment shows recorded session costs. For an active provider/model with scheduled pricing, it appends `↑` during peak hours or `↓` off-peak, refreshing at boundaries even while idle. The arrow reflects the current tariff, not past spending; flat-price models and explicit cost overrides have no arrow. See [usage costs and time-based pricing](models.md#usage-costs-and-time-based-pricing) for the UTC schedule and estimation semantics.
 
