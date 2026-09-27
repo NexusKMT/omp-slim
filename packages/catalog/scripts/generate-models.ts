@@ -555,24 +555,6 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 	return [...models];
 }
 
-/** Rebuild the committed snapshot against current rules without refreshing upstream catalogs. */
-async function rebakeSnapshot(): Promise<void> {
-	const previousModels = prevModelsJson as unknown as Record<string, Record<string, Model<Api>>>;
-	const models: Record<string, Record<string, Model<Api>>> = {};
-	for (const [provider, providerModels] of Object.entries(previousModels)) {
-		models[provider] = {};
-		for (const [id, model] of Object.entries(providerModels)) {
-			models[provider][id] = buildModel(toModelSpec(model));
-		}
-	}
-	await Bun.write(path.join(packageRoot, "src/models.json"), JSON.stringify(models));
-	const totalModels = Object.values(models).reduce(
-		(total, providerModels) => total + Object.keys(providerModels).length,
-		0,
-	);
-	console.log(`Rebaked ${totalModels} bundled models across ${Object.keys(models).length} providers from snapshot`);
-}
-
 async function generateModels() {
 	// Fetch models from dynamic sources.
 	const modelsDevModels = await loadModelsDevData();
@@ -791,6 +773,5 @@ function canonicalizeModelCompat(model: ModelSpec<Api>): void {
 }
 
 if (import.meta.main) {
-	const run = Bun.argv.includes("--rebake-snapshot") ? rebakeSnapshot : generateModels;
-	run().catch(console.error);
+	generateModels().catch(console.error);
 }
