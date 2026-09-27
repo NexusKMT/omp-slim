@@ -4,12 +4,11 @@
 
 ### Added
 
-- Added `TextPredictor` N-API binding for high-performance ghost-text completion engine management
+- Added a `TextPredictor` N-API binding for managing the high-performance ghost-text completion engine.
 
 ### Changed
 
-- Replaced `deliveryModes` array with a unified `takeover` boolean capability for desktop input control
-- Standardized pointer options to use `takeover: true` for forced foreground interaction
+- Updated desktop input-control capabilities to use a unified `takeover` setting, including `takeover: true` for forced foreground pointer interaction.
 
 ## [18.3.1] - 2026-09-25
 
