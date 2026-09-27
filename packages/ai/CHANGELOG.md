@@ -5,6 +5,10 @@
 ### Fixed
 
 - Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
+- Fixed Cursor turn usage and cost reporting only streamed output tokens; turns now use Cursor's final input, cache-read, cache-write, and reasoning counters ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
+- Fixed Cursor context usage going unrecorded once output tokens had streamed, so compaction and handoff sized the context from output alone ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
+- Fixed Cursor MCP tool calls handed to an external executor (auth-gateway clients) ending the turn as plain text instead of being returned as tool calls ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
+- Fixed Cursor shell tool calls showing their millisecond timeout as seconds (15000 instead of 15) in the transcript ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
 
 ## [18.3.5] - 2026-09-27
 

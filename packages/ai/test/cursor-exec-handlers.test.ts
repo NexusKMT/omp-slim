@@ -32,6 +32,7 @@ import {
 	ReadRejectedSchema,
 	ReadResultSchema,
 	ReadSuccessSchema,
+	ShellArgsSchema,
 } from "@oh-my-pi/pi-catalog/discovery/cursor-proto";
 import { create, encodeJsonValue } from "@oh-my-pi/pi-catalog/discovery/protobuf";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -1746,6 +1747,53 @@ describe("Cursor exec local-work tracking (issue #4593)", () => {
 		expect(blocks).toHaveLength(1);
 		expect(blocks[0][kCursorExecResolved]).toBeUndefined();
 	});
+
+	it.each(["shellArgs", "shellStreamArgs", "miniSweAgentBashArgs"] as const)(
+		"records a %s display block's millisecond timeout in bash-tool seconds",
+		async frameCase => {
+			// Cursor states shell budgets in milliseconds; the bridge converts them
+			// before running bash, and the transcript block must match what ran
+			// rather than showing a 15 s budget as 15000.
+			const output = cursorAssistantMessage();
+			const stream = new AssistantMessageEventStream();
+			const state = newBlockState();
+			const h2Request = { write: () => true } as unknown as Parameters<typeof handleServerMessage>[5];
+			await handleServerMessage(
+				create(AgentServerMessageSchema, {
+					message: {
+						case: "execServerMessage",
+						value: create(ExecServerMessageSchema, {
+							id: 1,
+							execId: `exec-${frameCase}`,
+							message: {
+								case: frameCase,
+								value: create(ShellArgsSchema, {
+									command: "sleep 1",
+									workingDirectory: "/tmp",
+									timeout: 15000,
+									toolCallId: `call-${frameCase}`,
+								}),
+							},
+						}),
+					},
+				}),
+				output,
+				stream,
+				state,
+				new Map(),
+				h2Request,
+				undefined,
+				undefined,
+				{ sawTokenDelta: false },
+				[],
+			);
+
+			const blocks = output.content.filter((block): block is ToolCallState => block.type === "toolCall");
+			expect(blocks).toHaveLength(1);
+			expect(blocks[0]).toMatchObject({ id: `call-${frameCase}`, name: "bash" });
+			expect(blocks[0].arguments.timeout).toBe(15);
+		},
+	);
 
 	it("survives a local exec tool outliving the lazy idle budget end to end", async () => {
 		const workDone = Promise.withResolvers<void>();

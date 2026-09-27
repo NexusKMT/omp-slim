@@ -243,6 +243,7 @@ import {
 	piReadDisplayPath,
 	piReadPathHasRange,
 	piTimeout,
+	shellTimeoutSeconds,
 } from "./cursor/exec-modern";
 import { handleInteractionQuery } from "./cursor/interaction-query";
 
@@ -1806,12 +1807,11 @@ async function handleExecServerMessage(
 			if (!args.toolCallId) args.toolCallId = crypto.randomUUID();
 			const normalizedArgs: ShellArgs = { ...args, workingDirectory: args.workingDirectory || process.cwd() };
 			// Match the bridge (`CursorExecHandlers.shell`): map `workingDirectory`
-			// → `cwd`, drop non-positive timeouts.
-			const shellTimeout = args.timeout && args.timeout > 0 ? args.timeout : undefined;
+			// → `cwd`, convert the millisecond budget to bash-tool seconds.
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
 				command: args.command,
 				cwd: args.workingDirectory || undefined,
-				timeout: shellTimeout,
+				timeout: shellTimeoutSeconds(args.timeout),
 			});
 			const { execResult } = await resolveExecHandler(
 				args,
@@ -1829,11 +1829,10 @@ async function handleExecServerMessage(
 		case "shellStreamArgs": {
 			const args = execMsg.message.value;
 			if (!args.toolCallId) args.toolCallId = crypto.randomUUID();
-			const shellStreamTimeout = args.timeout && args.timeout > 0 ? args.timeout : undefined;
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
 				command: args.command,
 				cwd: args.workingDirectory || undefined,
-				timeout: shellStreamTimeout,
+				timeout: shellTimeoutSeconds(args.timeout),
 			});
 			await handleShellStreamArgs(args, execMsg, h2Request, execHandlers, onToolResult);
 			return;
@@ -2311,7 +2310,7 @@ async function handleExecServerMessage(
 			synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "bash", {
 				command: args.command,
 				cwd: args.workingDirectory || undefined,
-				timeout: args.timeout && args.timeout > 0 ? args.timeout : undefined,
+				timeout: shellTimeoutSeconds(args.timeout),
 			});
 			const { execResult } = await resolveExecHandler(
 				normalizedArgs,
@@ -4307,7 +4306,7 @@ export function processInteractionUpdate(
 			if (mcpCall) {
 				const args = mcpCall.args || {};
 				const id = args.toolCallId || crypto.randomUUID();
-				const resolvedByExec = state.resolvedMcpToolCallIds.delete(id);
+				state.resolvedMcpToolCallIds.delete(id);
 				// The exec channel may have emitted this block first — executed
 				// (marked resolved) or handed to an external executor (deliberately
 				// unmarked). Either way the call is already in the transcript, so a
@@ -4327,9 +4326,6 @@ export function processInteractionUpdate(
 					[kStreamingBlockKind]: "mcp",
 					[kStreamingEnvelopeId]: update.message.value.callId || undefined,
 				};
-				if (resolvedByExec) {
-					markCursorExecResolved(block);
-				}
 				output.content.push(block);
 				retainStreamedCall(state, block, update.message.value.callId);
 				stream.push({ type: "toolcall_start", contentIndex: output.content.length - 1, partial: output });

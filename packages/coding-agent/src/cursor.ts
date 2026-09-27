@@ -29,6 +29,7 @@ import {
 	piLsPath,
 	piReadPath,
 	piTimeout,
+	shellTimeoutSeconds,
 } from "@oh-my-pi/pi-ai/providers/cursor-pi-args";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { cursorMcpPrefersReplaceEdit, normalizeCursorReplaceArgs } from "./cursor-bridge-tools";
@@ -462,20 +463,6 @@ function buildTodoSyncResult(
 		isError: error !== null,
 		timestamp: Date.now(),
 	};
-}
-
-/**
- * Convert a legacy `ShellArgs`/`ShellStreamArgs` timeout into bash-tool seconds.
- *
- * Cursor states that budget in milliseconds — its own `ShellTimeout` result
- * echoes it as `timeout_ms`, and `hard_timeout` documents the same unit — while
- * the bash tool takes seconds and rejects anything past 3600, so forwarding the
- * raw value turned a model-requested 15 s into `requested 15000s`. Sub-second
- * budgets round up: 0 seconds means "no deadline" to the bash tool.
- */
-function shellTimeoutSeconds(timeoutMs: number | undefined): number | undefined {
-	if (!timeoutMs || timeoutMs <= 0) return undefined;
-	return Math.max(1, Math.round(timeoutMs / 1000));
 }
 
 export class CursorExecHandlers implements ICursorExecHandlers {
