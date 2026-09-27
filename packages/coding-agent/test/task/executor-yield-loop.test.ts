@@ -342,6 +342,46 @@ describe("runSubprocess incremental yield loops", () => {
 		expect(result.error).toContain("yield reminder dropped before provider dispatch after 4 attempts");
 	});
 
+	it("keeps a section from another turn incremental while a dropped final reminder retries", async () => {
+		const id = "ForcedDropScout";
+		let droppedFinal:
+			| { emit: (event: AgentSessionEvent) => void; pushMessage: (message: unknown) => void }
+			| undefined;
+		const handle = createMockSession(({ promptIndex, emit, pushMessage }) => {
+			if (promptIndex <= 3) {
+				const message = {
+					role: "assistant" as const,
+					content: [{ type: "text" as const, text: `working ${promptIndex}` }],
+					stopReason: "stop" as const,
+				};
+				pushMessage(message);
+				emit({ type: "message_end", message } as AgentSessionEvent);
+				return;
+			}
+			if (promptIndex === 4) {
+				droppedFinal = { emit, pushMessage };
+				return false;
+			}
+			emitTerminalYieldTurn("FINAL", emit, pushMessage);
+		});
+		handle.session.waitForIdle = async () => {
+			if (!droppedFinal) return;
+			// A concurrent wake turn submits a section while the dropped final
+			// reminder waits to retry; the forced-final pin was never delivered.
+			emitIncrementalYieldTurn(1, droppedFinal.emit, droppedFinal.pushMessage);
+			droppedFinal = undefined;
+		};
+		mockCreateAgentSession(handle.session);
+		registerRunning(id, handle.session);
+
+		const result = await runSubprocess(baseOptions(id, 0));
+
+		expect(handle.prompts).toHaveLength(5);
+		expect(handle.prompts[4]?.text).toBe(handle.prompts[3]?.text);
+		expect(result.exitCode).toBe(0);
+		expect(result.output).toContain("FINAL");
+	});
+
 	it("keeps a run of incremental-yield-only turns inside the soft budget", async () => {
 		const id = "YieldLoopScout";
 		// Budget 2 → stop at 3 requests, hard abort at 3 + BUDGET_STOP_GRACE_REQUESTS.

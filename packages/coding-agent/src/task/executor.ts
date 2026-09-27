@@ -2212,9 +2212,21 @@ async function driveSessionToYield(
 			abortSignal.removeEventListener("abort", onAbort);
 		}
 	};
-	const dispatchPrompt = async (text: string, promptOptions: PromptOptions, label: string): Promise<void> => {
+	/**
+	 * Send a headless prompt, retrying pre-provider drops. `forceFinalYield`
+	 * arms the monitor's forced-final latch only while an attempt dispatches, so
+	 * another turn's incremental `yield` during drop recovery stays incremental.
+	 */
+	const dispatchPrompt = async (
+		text: string,
+		promptOptions: PromptOptions,
+		label: string,
+		{ forceFinalYield = false }: { forceFinalYield?: boolean } = {},
+	): Promise<void> => {
 		for (let attempt = 1; attempt <= MAX_PROMPT_DISPATCH_ATTEMPTS; attempt++) {
+			if (forceFinalYield) monitor.markFinalYieldForced(true);
 			if (await awaitAbortable(session.prompt(text, promptOptions))) return;
+			if (forceFinalYield) monitor.markFinalYieldForced(false);
 			if (attempt === MAX_PROMPT_DISPATCH_ATTEMPTS) {
 				throw new PromptDispatchError(`${label} dropped before provider dispatch after ${attempt} attempts`);
 			}
@@ -2296,7 +2308,6 @@ async function driveSessionToYield(
 					// Armed for this prompt's turn only — the quiescence barrier's
 					// later notice turn may legitimately submit more sections.
 					retriesForced = isFinalRetry;
-					if (retriesForced) monitor.markFinalYieldForced(true);
 					await dispatchPrompt(
 						reminder,
 						{
@@ -2305,6 +2316,7 @@ async function driveSessionToYield(
 							...(isFinalRetry && reminderToolChoice ? { toolChoice: reminderToolChoice } : {}),
 						},
 						"yield reminder",
+						{ forceFinalYield: isFinalRetry },
 					);
 					await awaitAbortable(session.waitForIdle());
 				} catch (err) {
