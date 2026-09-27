@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The `eval` tool description now says the kernel is shared by the parent session and its concurrent `task` subagents, so agents stop trusting top-level variables another agent can overwrite between cells.
+
 ### Added
 
 - Added a `telemetry.otlpExportEnabled` setting (`/settings` → Providers → Privacy) that stops OMP from exporting OTLP traces, logs, and metrics even when `OTEL_*` endpoints are set in its environment; export stays enabled by default ([#13444](https://github.com/can1357/oh-my-pi/pull/13444) by [@krizh-p](https://github.com/krizh-p))
