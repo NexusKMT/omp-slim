@@ -9,16 +9,16 @@
 ### Added
 
 - Added the `web-search-model`, `hosted-image`, and `image-model` catalog axes (`Model.webSearchModel`, `hostedImage`, `imageModel`). `web-search` now comes from the model's lineage and API (GPT-5+ Responses, Claude 4+ Messages, Gemini 2+), so proxies and gateways that expose these models inherit it.
-- Added Command Code's typesafe/jev decision model for the judge role
+- Added Command Code's typesafe/jev decision model for the judge role ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ### Changed
 
-- Routed Command Code GPT models through the OpenAI Responses API
-- Command Code login now rejects invalid API keys
+- Routed Command Code GPT models through the OpenAI Responses API ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- Command Code login now rejects invalid API keys ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ### Fixed
 
-- Fixed missing thinking levels, image input, and prices for Command Code models
+- Fixed missing thinking levels, image input, and prices for Command Code models ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ## [18.4.2] - 2026-09-28
 
