@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed fullscreen overlays rewriting the whole terminal on every change; each frame now repaints only the rows that changed
+- Fixed fullscreen overlays rewriting the whole terminal on every change; each frame now repaints only the rows that changed ([#13568](https://github.com/can1357/oh-my-pi/pull/13568) by [@sjawhar](https://github.com/sjawhar))
 
 ## [18.3.5] - 2026-09-27
 
