@@ -1230,6 +1230,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			additionalExtensionPaths: cmd.extensions,
 			disableExtensionDiscovery: cmd.noExtensions,
 			includeAmbientHooks: false,
+			discoverModels: false,
 		});
 		// The broker may serve reports for credentials newer than the local
 		// snapshot. Refresh before probing extension providers with local keys

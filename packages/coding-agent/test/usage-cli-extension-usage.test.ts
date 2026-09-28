@@ -83,6 +83,36 @@ test("omp usage reports accounts through an extension-registered usage provider 
 	expect(output.accountsWithoutUsage).toEqual([]);
 });
 
+test("omp usage fetches extension usage without discovering the extension's model catalog", async () => {
+	const marker = tmp.join("catalog-fetched");
+	const catalogExtPath = tmp.join("catalog-ext.ts");
+	await Bun.write(
+		catalogExtPath,
+		`export default function (pi) {
+	pi.registerProvider("ext-catalog", {
+		baseUrl: "http://127.0.0.1:1/v1",
+		api: "openai-completions",
+		apiKey: "literal-key",
+		fetchDynamicModels: async () => {
+			await Bun.write(${JSON.stringify(marker)}, "fetched");
+			return [];
+		},
+		usage: {
+			id: "ext-catalog",
+			async fetchUsage() {
+				return { provider: "ext-catalog", fetchedAt: Date.now(), limits: [] };
+			},
+		},
+	});
+}
+`,
+	);
+
+	const output = await usageJson({ extensions: [catalogExtPath], noExtensions: true, provider: "ext-catalog" });
+	expect(output.reports.map(report => report.provider)).toEqual(["ext-catalog"]);
+	expect(await Bun.file(marker).exists()).toBe(false);
+});
+
 test("omp usage skips ambient hook factories but retains configured usage providers", async () => {
 	const marker = tmp.join("hook-loaded");
 	const hookPath = path.join(getProjectAgentDir(tmp.path()), "hooks", "pre", "usage-hook.ts");
