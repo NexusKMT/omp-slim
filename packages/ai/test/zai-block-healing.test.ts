@@ -86,6 +86,17 @@ describe("ZAI usage-block healing", () => {
 		expect(await storage.keys.get("zai", "recovered", { modelId: "glm-5.3" })).toBe("zai-access");
 	});
 
+	it("recovers a previously unscoped block during the usage preflight", async () => {
+		const { storage, blocks } = makeStorage(report(0.013));
+		storages.push(storage);
+		await storage.credentials.reload();
+
+		const health = await storage.health.model("zai", { modelId: "glm-5.3", reserveFraction: 0.1 });
+
+		expect(health.accounts[0]?.state).toBe("healthy");
+		expect(blocks.has("")).toBe(false);
+	});
+
 	it("selects a previously blocked account after a healthy scoped quota probe", async () => {
 		const { storage, blocks } = makeStorage(report(0.013), "credits");
 		storages.push(storage);

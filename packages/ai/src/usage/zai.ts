@@ -402,6 +402,8 @@ export const zaiUsageProvider: UsageProvider = {
 
 /** Ranks ZAI credentials and identifies quota blocks a live report can heal. */
 export const zaiRankingStrategy: CredentialRankingStrategy = {
+	// Pre-scoping ZAI quota blocks are unscoped; let the usage preflight probe them.
+	healsGlobalBlocks: true,
 	findWindowLimits(report) {
 		const ranked = rankZaiRequestLimits(report);
 		return { primary: ranked[0], secondary: ranked[1] };
