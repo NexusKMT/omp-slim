@@ -88,6 +88,7 @@ describe("manual /compact scrollback pairing", () => {
 			loadingAnimation: undefined,
 			statusContainer: container,
 			ui: { requestRender: vi.fn(), requestComponentRender: vi.fn() },
+			keybindings: { getKeys: vi.fn(() => ["escape"]) },
 			session: { compact: vi.fn(async () => {}) },
 			rebuildChatFromMessages: vi.fn(),
 			statusLine: { invalidate: vi.fn() },
