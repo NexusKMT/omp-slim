@@ -10,9 +10,11 @@ import {
 	RemoteAuthCredentialStore,
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
+import { buildGatewayApiKeyResolver } from "@oh-my-pi/pi-ai/auth-gateway/dispatch";
 import { OAuthError } from "@oh-my-pi/pi-ai/error";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import type { OAuthCredentials } from "@oh-my-pi/pi-ai/registry/oauth/types";
+import type { Api, Model } from "@oh-my-pi/pi-ai/types";
 import { removeWithRetries } from "../../utils/src/temp";
 
 const PROVIDER = "unit-broker-refresh-backoff";
@@ -167,6 +169,27 @@ describe("auth broker OAuth refresh backoff", () => {
 			await resolve({ lastChance: false, error: Object.assign(new Error("unauthorized"), { status: 401 }) }),
 		).toMatchObject({ apiKey: "access-3" });
 		expect(refreshCalls).toBe(3);
+	});
+
+	test("auth gateway reuses a recent mint only for provider 401 recovery", async () => {
+		if (!brokerStorage) throw new Error("test setup failed");
+		const model = { provider: PROVIDER, id: "gateway-model", api: "openai-responses", baseUrl: "http://gateway" };
+		const resolve = buildGatewayApiKeyResolver(
+			brokerStorage,
+			model as Model<Api>,
+			"gateway",
+			"access-0",
+			new AbortController().signal,
+			"openai",
+			"peer",
+		);
+		const unauthorized = Object.assign(new Error("401 invalid_api_key"), { status: 401 });
+		expect(await resolve({ lastChance: false, error: unauthorized })).toBe("access-1");
+		expect(await resolve({ lastChance: false, error: unauthorized })).toBe("access-1");
+		expect(
+			await resolve({ lastChance: false, error: Object.assign(new Error("server error"), { status: 500 }) }),
+		).toBe("access-2");
+		expect(refreshCalls).toBe(2);
 	});
 
 	test("generic delegated force refresh leaves recovery intent unset", async () => {
