@@ -635,4 +635,30 @@ describe("terminal frame plans", () => {
 		expect(plainBuffer(terminal)).toEqual(["history-one@34", "history-two@34", "editor@34"]);
 		tui.stop();
 	});
+
+	for (const mode of ["rebuild", "append"] as const) {
+		it(`refreshes history in ${mode} mode after a burst that returns to its starting width`, async () => {
+			const terminal = new VirtualTerminal(20, 2);
+			const provider = new WidthReplayProvider();
+			const renderScheduler = new VirtualRenderScheduler();
+			const tui = new TUI(terminal, undefined, { renderScheduler });
+			tui.setResizeScrollback(mode);
+			tui.setFrameProvider(provider);
+			tui.start();
+			await renderScheduler.settle(terminal);
+			provider.resetCount = 0;
+
+			// A drag out and back coalesces into one transaction whose settled size
+			// equals the committed one, but the terminal reflowed the normal buffer
+			// at the intermediate width. Gating the refresh on the net change left
+			// that reflow's stale rows stacked above the repainted viewport.
+			terminal.resize(30, 2);
+			await renderScheduler.advance(terminal, 100);
+			terminal.resize(20, 2);
+			await renderScheduler.advance(terminal, 560);
+
+			expect(provider.resetCount).toBe(1);
+			tui.stop();
+		});
+	}
 });

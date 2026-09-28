@@ -749,6 +749,13 @@ export class TUI extends Container {
 	// shrink-then-regrow that never exceeds the pre-burst height (see the
 	// CPR-timeout fallback in #resolveResizeAnchor).
 	#resizeBurstPull = 0;
+	// Whether any step of the burst left the committed width / geometry. The
+	// terminal reflowed the normal buffer at every intermediate step, so a drag
+	// that returns to its starting size still shredded retained history and
+	// pushed unerased live rows into it; the settled refresh must key on the
+	// whole burst, not on the net change (see #prepareResizeReplay).
+	#resizeBurstWidthChanged = false;
+	#resizeBurstResized = false;
 	// Geometry epoch: bumped on every resize transaction entry, so each CSI 6n
 	// request records the geometry it was parked under.
 	#geometryEpoch = 0;
@@ -1396,15 +1403,15 @@ export class TUI extends Container {
 	 * the drag-end window: every later SIGWINCH re-arms it, and a drag then
 	 * commits once at its final geometry instead of flashing a full
 	 * clear-and-replay per intermediate step. Transactions that never refresh —
-	 * `preserve`, an in-place (Warp) settle, an append settle that keeps its
-	 * width, or a host with no replay hook — keep the short window so a single
+	 * `preserve`, an in-place (Warp) settle, an append settle whose burst never
+	 * left its width, or a host with no replay hook — keep the short window so a single
 	 * resize commits promptly.
 	 */
 	#resizeSettleDelayMs(): number {
 		const short = TUI.#RESIZE_VIEWPORT_SETTLE_MS;
 		if (this.#resizeScrollbackMode === "preserve" || this.#resizeRepaintsInPlace()) return short;
 		if (this.#frameProvider?.beginHistoryReplay === undefined) return short;
-		if (this.#resizeScrollbackMode !== "rebuild" && this.terminal.columns === this.#previousWidth) return short;
+		if (this.#resizeScrollbackMode !== "rebuild" && !this.#resizeBurstWidthChanged) return short;
 		return TUI.#RESIZE_REFRESH_SETTLE_MS;
 	}
 
@@ -1437,6 +1444,10 @@ export class TUI extends Container {
 		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
 		this.#resizeBurstLastHeight = this.terminal.rows;
 		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
+		if (this.terminal.columns !== this.#previousWidth) this.#resizeBurstWidthChanged = true;
+		if (this.terminal.columns !== this.#previousWidth || this.terminal.rows !== this.#previousHeight) {
+			this.#resizeBurstResized = true;
+		}
 		this.#geometryEpoch++;
 	}
 
@@ -2702,15 +2713,24 @@ export class TUI extends Container {
 	 * editor/status chrome included — below the retained copy. Skip it, matching
 	 * the `widthChanged`-gated commit-ledger logic in {@link #doRender}.
 	 *
+	 * Both gates key on the whole coalesced burst, not the net change: the
+	 * terminal reflowed the normal buffer at every intermediate geometry, so a
+	 * drag that ends where it started (80 → 60 → 80) has still rewrapped
+	 * retained history and pushed unerased live rows into it. Comparing only
+	 * the settled size against the committed one would skip the refresh and
+	 * leave those stale copies stacked above the repainted viewport.
+	 *
 	 * The refresh itself is what makes a settled resize expensive, so the
 	 * transaction that runs it holds its settle window longer than a plain
 	 * repaint would — see {@link #resizeSettleDelayMs}.
 	 */
 	#prepareResizeReplay(width: number, height: number): void {
 		const size = `${width}x${height}`;
+		const widthChanged = this.#resizeBurstWidthChanged || width !== this.#previousWidth;
+		const resized = this.#resizeBurstResized || widthChanged || height !== this.#previousHeight;
 		if (
 			!this.#hasEverRendered ||
-			(this.#previousWidth === width && this.#previousHeight === height) ||
+			!resized ||
 			this.#resizeReplaySize === size ||
 			this.#resizeScrollbackMode === "preserve" ||
 			// In-place resizes (Warp) repaint the settled viewport once the drag
@@ -2731,7 +2751,7 @@ export class TUI extends Container {
 			this.#prepareForcedRender(true);
 			return;
 		}
-		if (width === this.#previousWidth) return;
+		if (!widthChanged) return;
 		provider.beginHistoryReplay();
 		this.#forceViewportRepaintOnNextRender = true;
 	}
@@ -2989,6 +3009,8 @@ export class TUI extends Container {
 		this.#resizeBurstGrew = false;
 		this.#resizeBurstLastHeight = undefined;
 		this.#resizeBurstPull = 0;
+		this.#resizeBurstWidthChanged = false;
+		this.#resizeBurstResized = false;
 		this.#previousFrameLength = mutablePreparedLines.length;
 		this.#clearScrollbackOnNextRender = false;
 		this.#forceViewportRepaintOnNextRender = false;
