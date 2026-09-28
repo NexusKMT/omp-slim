@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Command Code usage limits (5-hour, weekly, and credit balance) to /usage and the status line
+
 ## [18.4.2] - 2026-09-28
 
 ### Fixed
