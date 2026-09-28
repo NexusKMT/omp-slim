@@ -2,17 +2,25 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added live steering mechanism allowing models to ingest steering messages mid-stream
-
-### Changed
-
-- Renamed live steering callback to onLiveSteeringTaken and invoke it when messages are taken
+## [18.4.1] - 2026-09-28
 
 ### Fixed
 
-- Fixed lost steering input during stream aborts by requeueing unrecorded live-steered messages
+- Fixed fitted output caps overshooting the context window by a few tokens on strict Chat Completions hosts (e.g. llama.cpp), causing 400s.
+- Fixed native remote compaction sending requests already estimated past the model's context window (e.g. after re-expanding history behind another provider's native boundary); it now fails fast so the next configured compaction method runs ([#13502](https://github.com/can1357/oh-my-pi/issues/13502))
+- Fixed V2 remote compaction retrying a standalone stream `error` event three times and reporting it as `stream closed before response.completed`; the upstream status, code, and message (e.g. `context_too_large`) are now surfaced ([#13502](https://github.com/can1357/oh-my-pi/issues/13502))
+
+## [18.4.0] - 2026-09-28
+
+### Changed
+
+- Updated telemetry attribute names from the `pi.*` namespace to the `omp.*` namespace.
+
+## [18.3.3] - 2026-09-27
+
+### Added
+
+- Added live steering support, allowing models to receive and act on user steering messages during an active stream.
 
 ## [18.3.2] - 2026-09-25
 
