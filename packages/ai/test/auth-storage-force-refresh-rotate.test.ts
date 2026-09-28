@@ -240,7 +240,7 @@ describe("AuthStorage forceRefresh + rotateSessionCredential", () => {
 				apiKey: "minted-access",
 				error: authError(),
 			}),
-		).toBe(true);
+		).toEqual({ switched: true });
 		expect(await authStorage.keys.get(PROVIDER, sessionId)).toBe(sibling.credential.access);
 	});
 
