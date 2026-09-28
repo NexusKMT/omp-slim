@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed notes-backed context rollover restoring an older parent assignment after a subagent is revived instead of its latest idle parent request ([#13553](https://github.com/can1357/oh-my-pi/issues/13553)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added

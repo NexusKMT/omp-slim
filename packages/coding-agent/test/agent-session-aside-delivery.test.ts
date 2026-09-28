@@ -10,6 +10,7 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
@@ -765,6 +766,82 @@ describe("AgentSession aside delivery", () => {
 		expect(await dispatchedPromise).toBe(false);
 		await session.waitForIdle();
 		expect(contexts).toHaveLength(0);
+	});
+
+	it("marks parent IRC but not peer IRC across idle wake and plan-mode persistence", async () => {
+		const manager = SessionManager.inMemory();
+		const wakeRecords: AgentMessage[] = [];
+		const appended: AgentMessage[] = [];
+		let planMode = false;
+		const host: IrcBridgeHost = {
+			agent: {
+				appendMessage: (message: AgentMessage) => appended.push(message),
+			} as unknown as Agent,
+			sessionManager: manager,
+			isDisposed: () => false,
+			isStreaming: () => false,
+			planModeEnabled: () => planMode,
+			emitSessionEvent: async () => {},
+			wakeForIrc: records => wakeRecords.push(...records),
+		};
+		const registry = AgentRegistry.global();
+		const recipient = "ParentMarkerRecipient";
+		registry.register({
+			id: recipient,
+			displayName: "task",
+			kind: "sub",
+			parentId: "ParentMarkerSender",
+			session: null,
+		});
+		try {
+			const irc = new IrcBridge(host);
+			await irc.deliver({
+				id: "parent-wake",
+				from: "ParentMarkerSender",
+				to: recipient,
+				body: "parent assignment",
+				ts: 1,
+			});
+			await irc.deliver({
+				id: "peer-wake",
+				from: "PeerMarkerSender",
+				to: recipient,
+				body: "peer note",
+				ts: 2,
+			});
+
+			expect(wakeRecords[0]).toMatchObject({
+				role: "custom",
+				customType: "irc:incoming",
+				details: { from: "ParentMarkerSender", fromParent: true },
+			});
+			const peerWake = wakeRecords[1];
+			expect(peerWake).toMatchObject({
+				role: "custom",
+				customType: "irc:incoming",
+				details: { from: "PeerMarkerSender" },
+			});
+			if (peerWake?.role !== "custom") throw new Error("Expected peer IRC wake record");
+			expect(peerWake.details).not.toHaveProperty("fromParent");
+
+			planMode = true;
+			await irc.deliver({
+				id: "parent-plan",
+				from: "ParentMarkerSender",
+				to: recipient,
+				body: "plan-mode parent assignment",
+				ts: 3,
+			});
+			expect(appended).toHaveLength(1);
+			const persisted = manager.getBranch().find(entry => entry.type === "custom_message");
+			expect(persisted).toMatchObject({
+				type: "custom_message",
+				customType: "irc:incoming",
+				details: { from: "ParentMarkerSender", fromParent: true },
+			});
+		} finally {
+			registry.unregister(recipient);
+		}
 	});
 
 	it("IrcBridge.restorePending merges a rolled-back snapshot ahead of records queued during the rollback instead of discarding them", () => {
