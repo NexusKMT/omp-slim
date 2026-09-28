@@ -198,7 +198,7 @@ export class TtsrCoordinator {
 
 		this.#emitTriggerOnce(matchContext, matches);
 		if (!this.#shouldInterrupt(matches, matchContext)) {
-			this.#addPerToolInjections(toolCallId, matches, false);
+			this.#addPerToolInjections(toolCallId, matches, { markInjected: false });
 			return undefined;
 		}
 
@@ -370,7 +370,11 @@ export class TtsrCoordinator {
 		return id.length > 0 ? id : undefined;
 	}
 
-	#addPerToolInjections(toolCallId: string, rules: Rule[], markInjected = true): void {
+	#addPerToolInjections(
+		toolCallId: string,
+		rules: Rule[],
+		{ markInjected = true }: { markInjected?: boolean } = {},
+	): void {
 		const bucket = this.#perToolInjections.get(toolCallId) ?? [];
 		const seen = new Set(bucket.map(rule => rule.name));
 		const claimedElsewhere = new Set<string>();
