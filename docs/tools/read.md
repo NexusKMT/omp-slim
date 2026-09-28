@@ -109,7 +109,7 @@ Literal filesystem paths take precedence over selector interpretation, so an exi
 
 ### Local text files
 
-- No selector: if summarization is enabled and the file is eligible, `#trySummarize()` calls `summarizeCode()`.
+- No selector: if summarization is enabled and the file is eligible, `#trySummarize()` calls `summarizeCodeAsync()`.
    - Defaults: `read.summarize.enabled = true`; prose (`.md` variants and `.txt`) stays unsummarized unless `read.summarize.prose = true`; files below `read.summarize.minTotalLines = 100` stay verbatim.
    - Hard guards: file size `<= 2 MiB` (`MAX_SUMMARY_BYTES`), line count `<= 20_000` (`MAX_SUMMARY_LINES`).
    - Summary output keeps selected declarations and replaces elided spans with `…` or merged brace-pair lines containing `{ … }`. When at least one span is elided, the text content ends with a footer like `[…NNln elided; re-read needed ranges, e.g. <path>:5-16,40-80]` using concrete ranges from the actual elisions.
