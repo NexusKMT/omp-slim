@@ -85,7 +85,7 @@ describe("StdoutStallWatchdog", () => {
 
 	it("with the production window, keeps a session whose terminal pauses for seconds during an oversized frame", () => {
 		// A live reader can stop consuming for seconds: a busy tmux server holding
-		// a slow client, a container's attach stream, XOFF. Declaring it gone kills
+		// a slow client, or a container's attach stream. Declaring it gone kills
 		// the session (exit 129) although the terminal comes back. A reader that
 		// never returns must still be torn down.
 		const wd = new StdoutStallWatchdog();

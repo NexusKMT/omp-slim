@@ -172,8 +172,8 @@ export const STDOUT_BACKLOG_CLEAR_BYTES = 256 * 1024;
  * How long an armed backlog may go without any drain progress before the
  * consumer is declared gone. A slow-but-alive terminal keeps reaching new
  * low-water marks (so it never trips), but a live one can also stop reading
- * for seconds at a time: a busy tmux server holding a slow client, a
- * container's attach stream, XOFF. Waiting costs no memory, because frames are
+ * for seconds at a time: a busy tmux server holding a slow client, or a
+ * container's attach stream. Waiting costs no memory, because frames are
  * deferred while the backlog is up (`TUI.#deferRenderForOutputBacklog`), so the
  * window is long enough to ride those out; a reader that never comes back is
  * still torn down within it.
