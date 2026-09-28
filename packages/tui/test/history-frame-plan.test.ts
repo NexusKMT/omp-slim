@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { withoutTerminalMultiplexer } from "./terminal-multiplexer-environment";
 import {
 	type Component,
 	CURSOR_MARKER,
@@ -183,6 +184,7 @@ class ConptyPendingWrapTerminal extends VirtualTerminal {
 }
 
 describe("terminal frame plans", () => {
+	withoutTerminalMultiplexer();
 	it("appends finalized history once and leaves the requested mutable viewport intact", () => {
 		const terminal = new VirtualTerminal(20, 3);
 		const provider = new Provider({
@@ -524,6 +526,62 @@ describe("terminal frame plans", () => {
 		expect(provider.resetCount).toBe(0);
 		expect(resized.filter(row => row === "history-one@20")).toEqual(["history-one@20"]);
 		tui.stop();
+	});
+
+	it("skips the destructive rebuild and drag-end hold on a height-only zoom grow", async () => {
+		const terminal = new CountingTerminal(20, 2);
+		const provider = new WidthReplayProvider();
+		const renderScheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		tui.start();
+		await renderScheduler.settle(terminal);
+		provider.resetCount = 0;
+		terminal.writes.length = 0;
+
+		// A tmux zoom toggles the pane height at a constant width: nothing
+		// rewraps, so the settled transaction must not clear and re-stream the
+		// ledger ("one flash, ~0.5 s after the toggle"), and it commits at the
+		// short settle window instead of holding the drag-end one.
+		terminal.resize(20, 6);
+		await renderScheduler.advance(terminal, 440);
+
+		expect(provider.resetCount).toBe(0);
+		expect(terminal.writes.join("")).not.toContain("\x1b[3J");
+		const resized = plainBuffer(terminal);
+		expect(resized.filter(row => row === "history-one@20")).toEqual(["history-one@20"]);
+		expect(resized).toContain("editor@20");
+		tui.stop();
+	});
+
+	it("skips the destructive rebuild on a multiplexer height shrink (tmux clip discards, never pushes)", async () => {
+		Bun.env.TMUX = "/tmp/tmux-0/default,1,0"; // isInsideTerminalMultiplexer ← authoritative
+		try {
+			const terminal = new CountingTerminal(20, 6);
+			const provider = new WidthReplayProvider();
+			const renderScheduler = new VirtualRenderScheduler();
+			const tui = new TUI(terminal, undefined, { renderScheduler });
+			tui.setResizeScrollback("rebuild");
+			tui.setFrameProvider(provider);
+			tui.start();
+			await renderScheduler.settle(terminal);
+			provider.resetCount = 0;
+			terminal.writes.length = 0;
+
+			// Unzooming a tmux pane shrinks it at a constant width. The mux clip
+			// model discards rows below the parked cursor instead of pushing them
+			// into pane scrollback, so there is nothing to purge: the settled
+			// transaction must not clear and re-stream the ledger.
+			terminal.resize(20, 2);
+			await renderScheduler.advance(terminal, 440);
+
+			expect(provider.resetCount).toBe(0);
+			expect(terminal.writes.join("")).not.toContain("\x1b[3J");
+			tui.stop();
+		} finally {
+			delete Bun.env.TMUX;
+		}
 	});
 
 	it("re-anchors retained history after a height grow behind a fullscreen overlay", async () => {

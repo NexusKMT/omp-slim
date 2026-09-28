@@ -756,6 +756,12 @@ export class TUI extends Container {
 	// whole burst, not on the net change (see #prepareResizeReplay).
 	#resizeBurstWidthChanged = false;
 	#resizeBurstResized = false;
+	// Whether any step of the burst shrank the height. On a direct terminal the
+	// bottom-preserving reflow pushes live pane rows into scrollback, which the
+	// destructive ledger refresh purges. A multiplexer shrink clips instead —
+	// rows below the parked cursor are discarded, nothing pushes — so mux
+	// zoom-out skips the refresh (see #settledResizeRefreshes).
+	#resizeBurstShrank = false;
 	// Geometry epoch: bumped on every resize transaction entry, so each CSI 6n
 	// request records the geometry it was parked under.
 	#geometryEpoch = 0;
@@ -1409,15 +1415,18 @@ export class TUI extends Container {
 	 * the drag-end window: every later SIGWINCH re-arms it, and a drag then
 	 * commits once at its final geometry instead of flashing a full
 	 * clear-and-replay per intermediate step. Transactions that never refresh —
-	 * `preserve`, an in-place (Warp) settle, an append settle whose burst never
-	 * left its width, or a host with no replay hook — keep the short window so a single
-	 * resize commits promptly.
+	 * `preserve`, an in-place (Warp) settle, a burst that never left its width
+	 * (either mode), or a host with no replay hook — keep the short window so a
+	 * single resize commits promptly.
 	 */
 	#resizeSettleDelayMs(): number {
 		const short = TUI.#RESIZE_VIEWPORT_SETTLE_MS;
 		if (this.#resizeScrollbackMode === "preserve" || this.#resizeRepaintsInPlace()) return short;
 		if (this.#frameProvider?.beginHistoryReplay === undefined) return short;
-		if (this.#resizeScrollbackMode !== "rebuild" && !this.#resizeBurstWidthChanged) return short;
+		// Only a transaction that will run the history refresh holds the drag-end
+		// window: a later qualifying step inside the burst re-arms the timer on
+		// re-entry at the long window.
+		if (!this.#settledResizeRefreshes(this.#resizeBurstWidthChanged)) return short;
 		return TUI.#RESIZE_REFRESH_SETTLE_MS;
 	}
 
@@ -1448,6 +1457,7 @@ export class TUI extends Container {
 	#trackResizeBurst(): void {
 		const burstLastHeight = this.#resizeBurstLastHeight ?? this.#previousHeight;
 		if (this.terminal.rows > burstLastHeight) this.#resizeBurstGrew = true;
+		if (this.terminal.rows < burstLastHeight) this.#resizeBurstShrank = true;
 		this.#resizeBurstLastHeight = this.terminal.rows;
 		this.#resizeBurstPull += Math.max(0, this.terminal.rows - burstLastHeight);
 		if (this.terminal.columns !== this.#previousWidth) this.#resizeBurstWidthChanged = true;
@@ -2795,13 +2805,45 @@ export class TUI extends Container {
 			this.#forceViewportRepaintOnNextRender = true;
 			return;
 		}
+		// A height-only settled resize rewraps nothing — rewrap is a width change
+		// everywhere. A pure height grow pulls committed scrollback down without
+		// polluting a copy, so the rebuild (an ED3 plus a full ledger replay)
+		// would be a destructive repaint that buys nothing: a tmux zoom toggle
+		// waits out the drag-end window and then flashes one full
+		// clear-and-replay for exactly this case. `rebuild` still refreshes on a
+		// burst shrink (the multiplexer pushes live pane rows into its
+		// scrollback; the destructive refresh is the only purge) and on a host
+		// that repaints its own grid (ConPTY's stale re-emission is untrusted).
 		if (this.#resizeScrollbackMode === "rebuild") {
+			if (!this.#settledResizeRefreshes(widthChanged)) return;
 			this.#prepareForcedRender(true);
 			return;
 		}
 		if (!widthChanged) return;
 		provider.beginHistoryReplay();
 		this.#forceViewportRepaintOnNextRender = true;
+	}
+
+	/**
+	 * Whether a settle that has reached {@link #prepareResizeReplay} will run
+	 * the history refresh. `widthChanged` is the caller's already-computed whole-
+	 * burst width verdict. `append` refreshes only width-shredded copies; in
+	 * rebuild every destructive cause warrants it: a burst shrink on a direct
+	 * terminal (its bottom-preserving reflow pushes live pane rows into
+	 * scrollback), and a host that repaints its own grid (ConPTY's stale
+	 * re-emission is untrusted). A multiplexer shrink clips instead — rows
+	 * below the parked cursor are discarded, nothing is pushed — so a tmux
+	 * zoom-out skips the refresh like a zoom-in.
+	 */
+	#settledResizeRefreshes(widthChanged: boolean): boolean {
+		if (this.#resizeScrollbackMode === "rebuild") {
+			return (
+				widthChanged ||
+				this.terminal.hostOwnsGridOnResize === true ||
+				(this.#resizeBurstShrank && !isInsideTerminalMultiplexer())
+			);
+		}
+		return widthChanged;
 	}
 
 	/**
@@ -3056,6 +3098,7 @@ export class TUI extends Container {
 		this.#previousWidth = width;
 		this.#previousHeight = height;
 		this.#resizeBurstGrew = false;
+		this.#resizeBurstShrank = false;
 		this.#resizeBurstLastHeight = undefined;
 		this.#resizeBurstPull = 0;
 		this.#resizeBurstWidthChanged = false;
