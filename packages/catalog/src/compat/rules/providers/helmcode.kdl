@@ -12,6 +12,10 @@ provider "helmcode" {
 	// Helmcode's own endpoint and docs are the deployment truth: same-id rows on
 	// other hosts carry different output ceilings and effort ladders, so the
 	// generator must not backfill names, limits, or capabilities from them.
+	// Runtime discovery still resolves bare resold frontier ids (Claude, GPT,
+	// Gemini) against the vendor's own bundled row for context, output cap,
+	// modalities, and USD list price; Helmcode bills that list price with no
+	// markup (helmcode.com/docs/models, "Frontier models").
 	skip-cross-provider-reference-fills #true
 	discovery label="Helmcode"
 
@@ -53,8 +57,8 @@ provider "helmcode" {
 	// sends `xhigh`, a value Helmcode does not document) applies. `none` is the
 	// off state, not an effort tier. Qwen3.6 and Gemma 4 default to a 16,384
 	// token budget, which is the `high` tier. `/v1/models` carries no
-	// capability data, so an id without a bundled row arrives as non-reasoning;
-	// every listed chat model reasons, so the reviewed ladders upgrade it.
+	// capability data, so a discovered id with no bundled row and no ladder
+	// below arrives as non-reasoning.
 	thinking-mode "effort"
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
 	models "deepseek-v4-flash" {
@@ -62,15 +66,44 @@ provider "helmcode" {
 		thinking-efforts "minimal" "low" "medium" "high" "max"
 	}
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
+	// Helmcode serves Qwen3.6 on the OpenAI `reasoning_effort` field, not the
+	// Qwen class's `enable_thinking` toggle, which would drop the chosen tier.
 	models "qwen3.6" "gemma4" {
 		thinking-upgrade-neutral #true
 		thinking-efforts "minimal" "low" "medium" "high" "max"
 		thinking-default-level "high"
+		thinking-format "openai"
 	}
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
 	models "glm5.3" "glm5.3-flash" "glm5.2" {
 		thinking-upgrade-neutral #true
 		thinking-efforts "low" "medium" "high" "max"
 		thinking-default-level "max"
+	}
+
+	// The resold frontier models run on their vendors behind this same
+	// chat-completions surface, and Helmcode documents no `reasoning_effort`
+	// values for them. Keep them to the core low/medium/high tiers of that
+	// field so the inherited vendor ladders never send `minimal`, `xhigh`, or
+	// `max`, nor a vendor-native thinking shape, to this host. priority=1
+	// outranks the equally scoped lineage ladders in classes/*.kdl; Gemini's
+	// ladders are family-scoped there, so the override is too.
+	class "anthropic" priority=1 {
+		thinking-mode "effort"
+		thinking-efforts "low" "medium" "high"
+	}
+	class "openai" priority=1 {
+		thinking-mode "effort"
+		thinking-efforts "low" "medium" "high"
+	}
+	class "gemini" {
+		family "flash" priority=1 {
+			thinking-mode "effort"
+			thinking-efforts "low" "medium" "high"
+		}
+		family "lite" priority=1 {
+			thinking-mode "effort"
+			thinking-efforts "low" "medium" "high"
+		}
 	}
 }

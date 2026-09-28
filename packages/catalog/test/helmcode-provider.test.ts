@@ -11,6 +11,8 @@ import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 /** helmcode.com/docs/models "Controlling reasoning"; host class ladders would send `xhigh`. */
 const OPEN_WEIGHT_LADDER = [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.Max];
 const GLM_LADDER = [Effort.Low, Effort.Medium, Effort.High, Effort.Max];
+/** Helmcode documents no effort values for resold models; vendor ladders would send minimal/xhigh/max. */
+const FRONTIER_LADDER = [Effort.Low, Effort.Medium, Effort.High];
 
 function rosterFetch(ids: readonly string[]): FetchImpl {
 	return vi.fn(
@@ -61,6 +63,45 @@ describe("Helmcode provider support", () => {
 			expect(byId.get("qwen3.6")?.thinking?.efforts).toEqual(OPEN_WEIGHT_LADDER);
 			expect(byId.get("glm5.3")?.thinking?.efforts).toEqual(GLM_LADDER);
 			expect(byId.get("glm5.3-flash")?.thinking?.efforts).toEqual(GLM_LADDER);
+		} finally {
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("resold frontier ids inherit vendor capabilities but keep Helmcode's wire shape", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-helmcode-"));
+		const options = {
+			...helmcodeModelManagerOptions({
+				apiKey: "sk-helmcode",
+				fetch: rosterFetch(["claude-sonnet-5", "gpt-5.6-luna", "gemini-3.6-flash"]),
+			}),
+			staticModels: getBundledModels("helmcode"),
+			cacheDbPath: path.join(tempDir, "models.db"),
+		};
+
+		try {
+			const result = await resolveProviderModels(options, "online");
+			const vendors: Record<string, "anthropic" | "openai" | "google"> = {
+				"claude-sonnet-5": "anthropic",
+				"gpt-5.6-luna": "openai",
+				"gemini-3.6-flash": "google",
+			};
+			for (const [id, vendorProvider] of Object.entries(vendors)) {
+				const model = result.models.find(candidate => candidate.id === id);
+				const vendor = getBundledModels(vendorProvider).find(candidate => candidate.id === id);
+				expect(vendor).toBeDefined();
+				expect(model).toMatchObject({
+					api: "openai-completions",
+					baseUrl: "https://api.helmcode.com/v1",
+					reasoning: true,
+					input: vendor?.input,
+					contextWindow: vendor?.contextWindow,
+					maxTokens: vendor?.maxTokens,
+					cost: vendor?.cost,
+				});
+				expect(model?.thinking).toMatchObject({ mode: "effort", efforts: FRONTIER_LADDER });
+				expect(model?.webSearch).toBeUndefined();
+			}
 		} finally {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}

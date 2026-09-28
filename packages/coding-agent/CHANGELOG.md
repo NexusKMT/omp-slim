@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `HELMCODE_API_KEY` to the environment variables listed in `omp --help` ([#13630](https://github.com/can1357/oh-my-pi/pull/13630) by [@alexcerezo](https://github.com/alexcerezo)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added

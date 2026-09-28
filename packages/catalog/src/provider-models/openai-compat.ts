@@ -1272,10 +1272,18 @@ export interface HelmcodeModelManagerConfig {
  * `api.helmcode.com/v1`. `/v1/models` also lists embedding, rerank, TTS, and
  * STT models; the exclusion policy lives in `runtime/behavior.kdl`
  * (`exclude-models provider="helmcode"`).
+ *
+ * `/v1/models` carries no capability data. Bare resold frontier ids (Claude,
+ * GPT, Gemini) take only capability facts from the vendor's bundled row:
+ * reasoning, modalities, context window, output cap, and list price. The rest
+ * of that row (thinking shape, compat, native web search, tool dialects,
+ * cache semantics) describes the vendor's own API, not this chat-completions
+ * proxy; the host's `reasoning_effort` ladders live in `providers/helmcode.kdl`.
  */
 export function helmcodeModelManagerOptions(
 	config?: HelmcodeModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
+	const resolveReference = createReferenceResolver(() => createBundledReferenceMap<"openai-completions">("helmcode"));
 	return createOpenAICompatibleModelManagerOptions({
 		api: "openai-completions",
 		providerId: "helmcode",
@@ -1283,7 +1291,20 @@ export function helmcodeModelManagerOptions(
 		config,
 		requireApiKey: true,
 		filterModel: (_entry, model) => !isExcludedModel("helmcode", model.id),
-		mapModel: mapWithBundledReference,
+		mapModel: (entry, defaults, helmcodeReference) => {
+			if (helmcodeReference) return mapWithBundledReference(entry, defaults, helmcodeReference);
+			const vendor = resolveReference(defaults.id);
+			if (!vendor) return mapWithBundledReference(entry, defaults, undefined);
+			return {
+				...defaults,
+				name: toModelName(entry.name, vendor.name),
+				reasoning: vendor.reasoning,
+				input: vendor.input,
+				cost: vendor.cost,
+				contextWindow: toPositiveNumber(entry.context_length, vendor.contextWindow),
+				maxTokens: toPositiveNumber(entry.max_completion_tokens, vendor.maxTokens),
+			};
+		},
 		// Must live on the manager options, not only the KDL descriptor:
 		// `createModelManager()` prunes the bundled slice from this flag.
 		dynamicModelsAuthoritative: true,
