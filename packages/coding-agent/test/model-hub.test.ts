@@ -625,6 +625,7 @@ describe("ModelHub", () => {
 			const { hub, onAssign } = createHub({ models: [model], scoped: true });
 			installTestTheme();
 
+			hub.handleInput("\n"); // Sidebar → model list.
 			hub.handleInput("\n");
 			expect(footerLine(hub.render(220))).toContain("dictation");
 
@@ -664,6 +665,7 @@ describe("ModelHub", () => {
 			const { hub } = createHub({ models: [model], scoped: true });
 			installTestTheme();
 
+			hub.handleInput("\n"); // Sidebar → model list.
 			hub.handleInput("\n");
 			hub.handleInput("\n"); // assign to default (first chip)
 			const thinking = footerLine(hub.render(220));
