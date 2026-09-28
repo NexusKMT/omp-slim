@@ -83,6 +83,7 @@ import {
 	summarizeUsageResetCredits,
 } from "@oh-my-pi/pi-tui/overlays/usage-display";
 import { formatRemainingOnlyTotal, isUsedOnlyAbsoluteAmount } from "@oh-my-pi/pi-tui/prompt/usage-amounts";
+import type { UnavailableUsageAccount } from "@oh-my-pi/pi-tui/overlays/usage-dashboard";
 
 import { cfgTerminalShowImages } from "../settings";
 import { cfgProviderAppendOnlyContext } from "../../session/settings";
@@ -644,16 +645,10 @@ export class CommandController {
 				usageReports = await provider.fetchUsageReports();
 			} catch (error) {
 				this.ctx.showError(`Failed to fetch usage data: ${error instanceof Error ? error.message : String(error)}`);
-				return;
 			}
 		}
 
-		if (!usageReports || usageReports.length === 0) {
-			this.ctx.showWarning("No usage data available.");
-			return;
-		}
-
-		this.ctx.showUsageDashboard(usageReports);
+		this.ctx.showUsageDashboard(usageReports ?? []);
 	}
 
 	async handleChangelogCommand(args = ""): Promise<void> {
@@ -2101,10 +2096,11 @@ export function renderUsageReports(
 	availableWidth: number,
 	resolveActiveAccount?: (provider: string) => OAuthAccountIdentity | undefined,
 	usageModelSelectors: readonly string[] = [],
+	unavailableAccounts: readonly UnavailableUsageAccount[] = [],
 ): string {
 	const displayReports = collapseSharedUsageReports(reports);
 	const lines: string[] = [];
-	const latestFetchedAt = Math.max(...reports.map(report => report.fetchedAt ?? 0));
+	const latestFetchedAt = Math.max(0, ...reports.map(report => report.fetchedAt ?? 0));
 	const headerSuffix = latestFetchedAt ? ` (${formatDuration(nowMs - latestFetchedAt)} ago)` : "";
 	lines.push(uiTheme.bold(uiTheme.fg("accent", `Usage${headerSuffix}`)));
 	const grouped = new Map<string, UsageReport[]>();
@@ -2112,6 +2108,9 @@ export function renderUsageReports(
 		const list = grouped.get(report.provider) ?? [];
 		list.push(report);
 		grouped.set(report.provider, list);
+	}
+	for (const account of unavailableAccounts) {
+		if (!grouped.has(account.provider)) grouped.set(account.provider, []);
 	}
 	const providerEntries = Array.from(grouped.entries())
 		.map(([provider, providerReports]) => ({
@@ -2187,6 +2186,13 @@ export function renderUsageReports(
 			for (const selector of reportingModels) {
 				lines.push(`    ${replaceTabs(truncateToWidth(sanitizeText(selector), availableWidth - 4))}`);
 			}
+		}
+		for (const account of unavailableAccounts) {
+			if (account.provider !== provider) continue;
+			const label = replaceTabs(sanitizeText(account.label.replace(/[\r\n]+/g, " ")));
+			const status = " — usage unavailable";
+			const boundedLabel = truncateToWidth(label, Math.max(0, availableWidth - 2 - visibleWidth(status)));
+			lines.push(`  ${uiTheme.fg("dim", truncateToWidth(`${boundedLabel}${status}`, availableWidth - 2))}`);
 		}
 
 		// Provider-wide disclaimers (e.g. "OMP-observed spend only") render once
