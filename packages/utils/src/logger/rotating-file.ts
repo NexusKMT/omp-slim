@@ -2,7 +2,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { localDayStamp } from "../dates";
+import { localDay } from "../dirs";
+import { openCloexecSync } from "../fs-open";
 
 interface AuditEntry {
 	readonly date: number;
@@ -74,7 +75,7 @@ export class RotatingFileSink {
 		this.#onRotate = options.onRotate;
 		this.#files = this.#readAudit();
 		const now = new Date();
-		this.#selectFile(localDayStamp(now));
+		this.#selectFile(localDay(now));
 		const activePath = this.#activePath;
 		if (activePath) {
 			this.#registerFile(activePath, now.getTime());
@@ -84,7 +85,7 @@ export class RotatingFileSink {
 
 	#openFd(filePath: string): void {
 		this.#closeFd();
-		this.#fd = fs.openSync(filePath, "a");
+		this.#fd = openCloexecSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND);
 		try {
 			this.#onRotate?.(filePath);
 		} catch {
@@ -108,7 +109,7 @@ export class RotatingFileSink {
 		if (this.#closed) return;
 		const prevPath = this.#activePath;
 		const now = new Date();
-		this.#selectFile(localDayStamp(now));
+		this.#selectFile(localDay(now));
 		const activePath = this.#activePath;
 		if (!activePath) return;
 		// Rotation moved the active path: close the old descriptor BEFORE

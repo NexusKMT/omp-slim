@@ -14,8 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isPromise } from "node:util/types";
-import { localDayStamp } from "./dates";
-import { getLogsDir } from "./dirs";
+import { getLogsDir, localDay } from "./dirs";
 import { RotatingFileSink } from "./logger/rotating-file";
 import { setStderrRedirectTarget } from "./stderr-guard";
 import { drainModuleLoadEvents } from "./timing-buffer";
@@ -84,10 +83,10 @@ function pruneStaleProcessLogs(dir: string): void {
 		return;
 	}
 	const current = new Date();
-	const currentDate = localDayStamp(current);
+	const currentDate = localDay(current);
 	const cutoff = new Date(current);
 	cutoff.setDate(cutoff.getDate() - (RETAINED_STALE_LOG_DAYS - 1));
-	const cutoffDate = localDayStamp(cutoff);
+	const cutoffDate = localDay(cutoff);
 
 	const staleLogsByProcessDay = new Map<string, Array<{ path: string; rollover: number }>>();
 	for (const entry of entries) {
