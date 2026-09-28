@@ -76,4 +76,34 @@ describe("launch without a terminal on stdin", () => {
 		expect(run.stderr).toContain("No models available.");
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
+
+	it("reports an invalid enum value before the terminal requirement", async () => {
+		using tempDir = TempDir.createSync("@omp-non-tty-bad-mode-");
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "bogus"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).toContain('Error: Invalid --mode value: "bogus"');
+		expect(run.stderr).not.toContain(TTY_ERROR);
+	}, 30_000);
+
+	it("delivers an extension-owned --mode before failing on the missing terminal", async () => {
+		using tempDir = TempDir.createSync("@omp-non-tty-ext-mode-");
+		const extensionPath = tempDir.join("mode-extension.ts");
+		// The TTY failure exits before any session event, so report the flag at exit.
+		await Bun.write(
+			extensionPath,
+			[
+				"export default function (pi) {",
+				'\tpi.registerFlag("mode", { type: "string" });',
+				'\tprocess.once("exit", () => process.stderr.write("EXT_MODE=" + pi.getFlag("mode") + "\\n"));',
+				"}",
+			].join("\n"),
+		);
+		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "compact"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).not.toContain("Invalid --mode value");
+		expect(run.stderr).toContain(`Error: ${TTY_ERROR}, but stdin is not a TTY.`);
+		expect(run.stderr).toContain("EXT_MODE=compact");
+	}, 30_000);
 });

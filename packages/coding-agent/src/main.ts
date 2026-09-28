@@ -247,6 +247,15 @@ function applyProtocolDefaults(host: ProtocolHost, targetSettings: Settings = se
 	}
 }
 
+/** Fail an interactive launch whose stdin is not a terminal: the TUI cannot run there. */
+function exitWithoutTerminal(): never {
+	process.stderr.write(
+		`${chalk.red("Error: interactive mode requires a terminal, but stdin is not a TTY.")}\n` +
+			`Pass a prompt (\`${APP_NAME} -p "…"\`), pipe one on stdin, or use \`--mode rpc\`.\n`,
+	);
+	process.exit(2);
+}
+
 /** Reads a non-TTY stdin stream as prompt text. */
 export async function readPipedInput(): Promise<string | undefined> {
 	if (process.stdin.isTTY === true) return undefined;
@@ -1749,12 +1758,12 @@ export async function runRootCommand(
 			!parsedArgs.print &&
 			parsedArgs.mode === undefined;
 		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
-		if (isInteractive && !stdinIsTerminal) {
-			process.stderr.write(
-				`${chalk.red("Error: interactive mode requires a terminal, but stdin is not a TTY.")}\n` +
-					`Pass a prompt (\`${APP_NAME} -p "…"\`), pipe one on stdin, or use \`--mode rpc\`.\n`,
-			);
-			process.exit(2);
+		// Pending unknown flags or invalid enum values may belong to an extension
+		// (e.g. one that owns `--mode`); only the post-extension reparse can tell,
+		// so defer to the recheck there, which reports flag errors first.
+		const needsTerminal = isInteractive && !stdinIsTerminal;
+		if (needsTerminal && parsedArgs.unrecognizedFlags.length === 0 && parsedArgs.invalidFlagValues.length === 0) {
+			exitWithoutTerminal();
 		}
 		// Only the interactive host renders a focusable Agent Hub / subagent session
 		// tree; declare it so headless subagent optimizations (e.g. skipping replan
@@ -2233,6 +2242,9 @@ export async function runRootCommand(
 			const unknownFlags = reportUnrecognizedFlags(initialArgs);
 			if (invalidValues || unknownFlags) {
 				process.exit(2);
+			}
+			if (needsTerminal) {
+				exitWithoutTerminal();
 			}
 			const processedFiles =
 				initialArgs.fileArgs.length > 0
