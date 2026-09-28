@@ -731,6 +731,36 @@ describe("Factory Droid gemini wire — tool schema allowlist", () => {
 		});
 		expect(declarations(captured)[0].name).toMatch(/^x{64}_[0-9a-f]{8}$/);
 	});
+
+	const dotted = { description: "d", parameters: { type: "object", properties: {} } };
+
+	it("returns calls under the caller's tool name, not the sanitized wire name", async () => {
+		const call = JSON.stringify({
+			candidates: [{ content: { parts: [{ functionCall: { name: "my_tool", args: { a: "1" } } }] } }],
+		});
+		const { result, captured } = await run(
+			{ messages: [{ role: "user", content: "hi", timestamp: 1 }], tools: [{ name: "my.tool", ...dotted }] },
+			[call, finishChunk("STOP")],
+		);
+		expect(declarations(captured)[0].name).toBe("my_tool");
+		expect(result.content.find(block => block.type === "toolCall")).toMatchObject({
+			name: "my.tool",
+			arguments: { a: "1" },
+		});
+	});
+
+	it("rejects two tools that encode to the same wire name before sending", async () => {
+		const { result, captured } = await run({
+			messages: [{ role: "user", content: "hi", timestamp: 1 }],
+			tools: [
+				{ name: "my.tool", ...dotted },
+				{ name: "my_tool", ...dotted },
+			],
+		});
+		expect(captured).toHaveLength(0);
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toContain('both encode as "my_tool"');
+	});
 });
 
 describe("Factory Droid gemini wire — HTTP error envelope", () => {

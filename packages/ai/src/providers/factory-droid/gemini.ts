@@ -51,6 +51,24 @@ function sanitizeFactoryDroidToolName(name: string): string {
 	return `${sanitized.slice(0, 64)}_${Bun.SHA256.hash(sanitized, "hex").slice(0, 8)}`;
 }
 
+/**
+ * Wire name -> caller tool name for the declared tools, so returned calls
+ * dispatch to the tool that was advertised. Two tools sharing one wire name
+ * could not be told apart, so that request is rejected.
+ */
+function factoryDroidToolNamesByWire(tools: Tool[] | undefined): Map<string, string> {
+	const names = new Map<string, string>();
+	for (const tool of tools ?? []) {
+		const wire = sanitizeFactoryDroidToolName(tool.name);
+		const existing = names.get(wire);
+		if (existing !== undefined && existing !== tool.name) {
+			throw new Error(`Factory Gemini tool names "${existing}" and "${tool.name}" both encode as "${wire}"`);
+		}
+		names.set(wire, tool.name);
+	}
+	return names;
+}
+
 /** Finish reasons the CLI reports as a content-filter block (with stopDetails). */
 const FACTORY_DROID_BLOCK_REASONS: Record<string, true> = {
 	BLOCKLIST: true,
@@ -325,6 +343,7 @@ export function streamFactoryDroidGemini(
 								},
 				},
 			};
+			const toolNamesByWire = factoryDroidToolNamesByWire(context.tools);
 			const tools = toGeminiTools(context.tools);
 			if (tools) body.tools = tools;
 			const replacement = await options.onPayload?.(body, model, options.signal);
@@ -411,10 +430,11 @@ export function streamFactoryDroidGemini(
 					if (part.functionCall) {
 						closeBlock();
 						const contentIndex = output.content.length;
+						const wireName = part.functionCall.name || "";
 						const toolCall: ToolCall = {
 							type: "toolCall",
-							id: nextToolCallId(part.functionCall.name || "tool"),
-							name: part.functionCall.name || "",
+							id: nextToolCallId(wireName || "tool"),
+							name: toolNamesByWire.get(wireName) ?? wireName,
 							arguments: part.functionCall.args ?? {},
 							...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
 						};
