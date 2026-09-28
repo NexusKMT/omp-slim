@@ -18,7 +18,7 @@ import {
 } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
-import { resetShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
+import { refreshShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
 import { MAIN_AGENT_RULE_NAME } from "../../capability/rule";
 import type { ModelRegistry } from "../../config/model-registry";
 import { type Settings, withActiveSettings } from "../../config/settings";
@@ -1622,12 +1622,14 @@ export class ExtensionRunner {
 
 		// Handlers for these events export session-scoped environment (a session
 		// id, per-session tool config). The shell spawn environment is a cached
-		// copy that may predate them or belong to the previous session, so rebuild
-		// it once they have run. Only the main agent's session owns it: in-process
-		// subagents share process.env, and a subagent's session start must not
-		// hand its values to the parent's commands.
+		// copy that may predate them or belong to the previous session, so capture
+		// process.env for it as soon as they have run. Only the main agent's events
+		// do this: in-process subagents share process.env, and a subagent's session
+		// start must not hand its values to the parent's commands. A process that
+		// hosts several top-level sessions (ACP) still has one spawn environment,
+		// which follows the latest of their events.
 		if (ctx !== undefined && this.agent.kind === "main" && SESSION_IDENTITY_EVENTS[event.type] === true) {
-			resetShellConfigCache();
+			refreshShellConfigCache();
 		}
 
 		return result as RunnerEmitResult<TEvent>;

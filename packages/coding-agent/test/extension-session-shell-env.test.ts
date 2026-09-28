@@ -17,7 +17,7 @@ import type { ExtensionAgentIdentity } from "@oh-my-pi/pi-coding-agent/extensibi
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { getShellConfig, resetShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
+import { __resetShellConfigCacheForTests, getShellConfig } from "@oh-my-pi/pi-utils/procmgr";
 
 const SUBAGENT: ExtensionAgentIdentity = { kind: "sub", id: "0-Task", name: "task", depth: 1, parentId: "Main" };
 
@@ -60,9 +60,9 @@ describe("session lifecycle environment reaches bash commands", () => {
 
 	afterEach(() => {
 		delete process.env[ENV_KEY];
-		// The last session event rebuilt the cached spawn environment while the
-		// variable was set; drop it so later test files see the restored env.
-		resetShellConfigCache();
+		// The last session event captured the spawn environment while the variable
+		// was set; forget the capture so later test files build from the live env.
+		__resetShellConfigCacheForTests();
 		resetSettingsForTest();
 		tempDir.removeSync();
 	});
@@ -140,12 +140,14 @@ describe("session lifecycle environment reaches bash commands", () => {
 		const parent = await createRunner(parentSession);
 		await parent.emit({ type: "session_start" });
 		const parentId = parentSession.getSessionId();
-		expect(await run(`printf '%s' "$${ENV_KEY}"`, parentId)).toBe(parentId);
 
 		// An in-process subagent: its own runner and session, the same process.env.
+		// Nothing has built the spawn environment since the parent's event, so the
+		// subagent's own command is the first to need it.
 		const childSession = SessionManager.inMemory(tempDir.path());
 		const child = await createRunner(childSession, SUBAGENT);
 		await child.emit({ type: "session_start" });
+		await run("true", childSession.getSessionId());
 
 		expect(await run(`printf '%s' "$${ENV_KEY}"`, parentId)).toBe(parentId);
 	});
