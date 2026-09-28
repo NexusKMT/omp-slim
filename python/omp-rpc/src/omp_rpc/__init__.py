@@ -1,6 +1,8 @@
 from .client import (
     AgentEventListener,
     ExtensionErrorListener,
+    HostToolCompletedEvent,
+    HostToolCompletedListener,
     ListenerErrorEvent,
     ListenerErrorListener,
     NotificationListener,
@@ -133,6 +135,8 @@ __all__ = [
     "ExtensionUiRequest",
     "FileMentionMessage",
     "HostTool",
+    "HostToolCompletedEvent",
+    "HostToolCompletedListener",
     "HostToolContext",
     "HostToolResultPayload",
     "HostToolResultValue",

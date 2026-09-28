@@ -42,6 +42,9 @@ class _FakeRpcClient:
     def on_tool_execution_end(self, _cb) -> None:
         pass
 
+    def on_host_tool_completed(self, _cb) -> None:
+        pass
+
     def on_message_update(self, _cb) -> None:
         pass
 
@@ -831,6 +834,54 @@ async def test_run_rpc_review_pr_still_reminds_when_submit_fails(tmp_path: Path,
     fake = _FakeRpcClient.instances[0]
     assert len(fake.prompts) == 1 + settings.task_completion_max_reminders
     assert all("submit_pr_review" in p for p in fake.prompts[1:])
+
+
+@pytest.mark.asyncio
+async def test_run_rpc_review_pr_stops_after_eval_bridged_submit(tmp_path: Path, settings: Settings) -> None:
+    """A `submit_pr_review` reached through the eval bridge ends the review task.
+
+    The only transport end event is the enclosing `eval`; the host-tool
+    completion signal must still satisfy the terminal-action gate, otherwise
+    the completion reminders make the agent submit the review again (#13583).
+    """
+    inputs, bindings = _make_inputs(tmp_path, settings, session_has_jsonl=False)
+    original_on_tool_end = _FakeRpcClient.on_tool_execution_end
+    original_on_host_tool_completed = _FakeRpcClient.on_host_tool_completed
+
+    def _record_tool_end(self, cb) -> None:
+        self._tool_end_callbacks = [*getattr(self, "_tool_end_callbacks", []), cb]
+
+    def _record_host_tool_completed(self, cb) -> None:
+        self._host_completed_callbacks = [*getattr(self, "_host_completed_callbacks", []), cb]
+
+    def _on_prompt(client: _FakeRpcClient, _prompt: str) -> None:
+        for cb in getattr(client, "_host_completed_callbacks", []):
+            cb(SimpleNamespace(tool_name="submit_pr_review", tool_call_id="js-submit_pr_review-1"))
+        for cb in client._tool_end_callbacks:
+            cb(SimpleNamespace(tool_name="eval", result={}, is_error=False))
+
+    _FakeRpcClient.on_tool_execution_end = _record_tool_end  # type: ignore[assignment]
+    _FakeRpcClient.on_host_tool_completed = _record_host_tool_completed  # type: ignore[assignment]
+    try:
+        _FakeRpcClient.on_prompt = staticmethod(_on_prompt)  # type: ignore[attr-defined]
+        loop = asyncio.new_event_loop()
+        try:
+            worker._run_rpc_blocking(
+                inputs,
+                task_kind="review_pr",
+                prompt="kickoff",
+                loop=loop,
+                bindings=bindings,  # type: ignore[arg-type]
+            )
+        finally:
+            loop.close()
+    finally:
+        _FakeRpcClient.on_tool_execution_end = original_on_tool_end  # type: ignore[assignment]
+        _FakeRpcClient.on_host_tool_completed = original_on_host_tool_completed  # type: ignore[assignment]
+        delattr(_FakeRpcClient, "on_prompt")
+
+    fake = _FakeRpcClient.instances[0]
+    assert fake.prompts == ["kickoff"]
 
 
 # ---------------------------------------------------------------------------
