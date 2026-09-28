@@ -334,6 +334,7 @@ class DirResolver {
 	// With XDG on Linux, they point to $XDG_*_HOME/omp/.
 	readonly #rootDirs: Record<XdgCategory, string>;
 	readonly #agentDirs: Record<XdgCategory, string>;
+	readonly #baseRootDirs: Record<XdgCategory, string>;
 
 	readonly #rootCache = new Map<string, string>();
 	readonly #agentCache = new Map<string, string>();
@@ -362,7 +363,20 @@ class DirResolver {
 		let xdgData: string | undefined;
 		let xdgState: string | undefined;
 		let xdgCache: string | undefined;
+		let baseXdgData: string | undefined;
+		let baseXdgState: string | undefined;
+		let baseXdgCache: string | undefined;
 		if ((process.platform === "linux" || process.platform === "darwin") && isDefault) {
+			// XDG choice for profile-scoped paths. Named profiles follow a stricter
+			// rule: the XDG choice is keyed on the profile-specific XDG path, never
+			// the base app root. Why: if we consulted the base app root for named
+			// profiles too, the same profile could resolve to `~/.omp/profiles/<name>`
+			// on first activation (when no $XDG_*_HOME/omp exists yet) and then
+			// silently move to `$XDG_*_HOME/omp/profiles/<name>` the moment the base
+			// appeared, orphaning the earlier state. Pinning on the profile path
+			// means a profile's location is decided at first activation and stays put
+			// until the user explicitly migrates it (e.g. by mkdir'ing the XDG
+			// profile dir).
 			const resolveIf = (envVar: string) => {
 				const value = process.env[envVar];
 				if (!value) return undefined;
@@ -370,20 +384,32 @@ class DirResolver {
 					const appRoot = path.join(value, APP_NAME);
 					if (profile) {
 						const profilePath = path.join(appRoot, "profiles", profile);
-						if (fs.existsSync(profilePath)) {
-							return profilePath;
-						}
+						if (fs.existsSync(profilePath)) return profilePath;
 						return undefined;
 					}
-					if (fs.existsSync(appRoot)) {
-						return appRoot;
-					}
+					return fs.existsSync(appRoot) ? appRoot : undefined;
+				} catch {}
+				return undefined;
+			};
+			// XDG choice for profile-independent paths (machine-global daemon
+			// scopes): always keyed on the base app root, never the profile path.
+			// These hold process-scoped runtime state (sockets, tokens), so there is
+			// no migration to protect — a plain existence check suffices.
+			const resolveBase = (envVar: string) => {
+				const value = process.env[envVar];
+				if (!value) return undefined;
+				try {
+					const appRoot = path.join(value, APP_NAME);
+					return fs.existsSync(appRoot) ? appRoot : undefined;
 				} catch {}
 				return undefined;
 			};
 			xdgData = resolveIf("XDG_DATA_HOME");
 			xdgState = resolveIf("XDG_STATE_HOME");
 			xdgCache = resolveIf("XDG_CACHE_HOME");
+			baseXdgData = resolveBase("XDG_DATA_HOME");
+			baseXdgState = resolveBase("XDG_STATE_HOME");
+			baseXdgCache = resolveBase("XDG_CACHE_HOME");
 		}
 
 		this.#rootDirs = {
@@ -397,6 +423,17 @@ class DirResolver {
 			state: xdgState ?? this.agentDir,
 			cache: xdgCache ?? this.agentDir,
 		};
+		const baseRoot = getBaseConfigRoot();
+		this.#baseRootDirs = {
+			data: baseXdgData ?? baseRoot,
+			state: baseXdgState ?? baseRoot,
+			cache: baseXdgCache ?? baseRoot,
+		};
+	}
+
+	/** Profile-independent config-root subdirectory, with optional XDG override. Shared across profiles. */
+	baseRootSubdir(subdir: string, xdg?: XdgCategory): string {
+		return path.join(xdg ? this.#baseRootDirs[xdg] : getBaseConfigRoot(), subdir);
 	}
 
 	/** Config-root subdirectory, with optional XDG override. */
@@ -1031,9 +1068,9 @@ export function getDaemonRuntimeDir(projectDir: string): string {
 	return path.join(getDaemonRuntimeRoot(), key);
 }
 
-/** Root directory containing every machine-global daemon service scope. */
+/** Root directory containing every machine-global daemon service scope (~/.omp/run/daemons/global; XDG default: $XDG_STATE_HOME/omp/run/daemons/global). Shared across profiles. */
 export function getGlobalDaemonRuntimeRoot(): string {
-	return path.join(getBaseConfigRoot(), "run", "daemons", "global");
+	return dirs.baseRootSubdir(path.join("run", "daemons", "global"), "state");
 }
 
 /** Get a profile-independent runtime directory for a machine-global daemon service. */

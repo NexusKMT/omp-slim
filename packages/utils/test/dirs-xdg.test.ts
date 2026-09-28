@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
 	__resetProfileSnapshotForTests,
 	getAgentDir,
+	getGlobalDaemonRuntimeDir,
 	getPredictStateDir,
 	getSkillDescriptionsDbPath,
 	setAgentDir,
@@ -84,6 +85,20 @@ describe("XDG-aware runtime paths", () => {
 		await Bun.write(path.join(stateDir, "cursor.json"), JSON.stringify({ historyId: 42 }));
 		expect(getPredictStateDir(undefined, "ngram")).toBe(stateDir);
 		expect(await Bun.file(path.join(stateDir, "cursor.json")).json()).toEqual({ historyId: 42 });
+	});
+
+	it("shares the global daemon runtime dir across profiles under an initialized $XDG_STATE_HOME/omp", async () => {
+		const xdgState = path.join(tempRoot, "state");
+		await fs.mkdir(path.join(xdgState, "omp"), { recursive: true });
+		process.env.XDG_STATE_HOME = xdgState;
+		setAgentDir(path.join(os.homedir(), configDir, "agent"));
+
+		if (process.platform !== "linux" && process.platform !== "darwin") return;
+
+		const shared = path.join(xdgState, "omp", "run", "daemons", "global", "text-predict");
+		expect(getGlobalDaemonRuntimeDir("text-predict")).toBe(shared);
+		setProfile("profile-a");
+		expect(getGlobalDaemonRuntimeDir("text-predict")).toBe(shared);
 	});
 
 	it("keeps paths under an explicit custom agent dir, ignoring XDG", async () => {
