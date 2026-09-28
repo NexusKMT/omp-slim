@@ -14,6 +14,10 @@
 
 - Routed Command Code GPT models through the OpenAI Responses API
 
+### Fixed
+
+- Fixed missing thinking levels, image input, and prices for Command Code models
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed
