@@ -64,6 +64,11 @@
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
 
+### Fixed
+
+- Fixed `tool_call` `additionalContext` being delivered more than once when several extension or hook handlers on the same call returned identical text ([#13633](https://github.com/can1357/oh-my-pi/pull/13633) by [@andrebrait](https://github.com/andrebrait))
+- Same-named skills from different sources are no longer silently discarded. A duplicate with identical content still collapses without a warning; otherwise the higher-precedence skill (an authored skill over an installed package, a custom-directory skill over a provider skill, else whichever loaded first) keeps its bare name and the other stays reachable as `<namespace>/<name>` via `skill://<namespace>/<name>` and `/skill:<namespace>/<name>`, with a collision warning naming both files. Skill names containing `/` or `\` are now rejected for every provider and custom directory, since `/` is reserved for that addressing ([#12151](https://github.com/can1357/oh-my-pi/pull/12151) by [@andrebrait](https://github.com/andrebrait))
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
@@ -156,11 +161,6 @@
 - Fixed multiline pastes splitting into separate submissions after a terminal drops bracketed-paste mode, and text typed right after Enter being erased by the post-submit clear ([#13440](https://github.com/can1357/oh-my-pi/pull/13440) by [@Dante-dan](https://github.com/Dante-dan)).
 - Fixed subagents never compacting when the parent sets `compaction.midTurnEnabled: false`; a subagent's run is a single turn, so subagents keep mid-run compaction on unless a spawn overrides it ([#13212](https://github.com/can1357/oh-my-pi/pull/13212)).
 - Fixed the exit resume hint so the `omp --resume <id>` command prints on its own line, letting triple-click select just the command ([#12748](https://github.com/can1357/oh-my-pi/pull/12748) by [@F0Rextasy](https://github.com/F0Rextasy)).
-### Fixed
-
-- Same-named skills from different sources are no longer silently discarded. A byte-identical duplicate (the same skill installed twice) still collapses without a warning; a skill whose body differs stays reachable as `<namespace>/<name>` (the owning plugin or skill-root directory) via `skill://<namespace>/<name>` and the leading `/skill:<namespace>/<name>` form, with a collision warning naming both files; a taken namespaced slot gets a `~N` suffix. Raw skill names containing a path separator are now rejected at scan time, since `/` is reserved for that addressing ([#12151](https://github.com/can1357/oh-my-pi/pull/12151) by [@andrebrait](https://github.com/andrebrait)).
-- Same-named skills from different sources are no longer silently discarded. A byte-identical duplicate (the same skill installed twice) still collapses without a warning; on a skill whose body differs, the higher-precedence skill (an authored skill over an installed package, a custom-directory skill over a provider skill, otherwise whichever loaded first) keeps its bare name, and the other skill stays reachable as `<namespace>/<name>` (the owning plugin or skill-root directory) via `skill://<namespace>/<name>` and the leading `/skill:<namespace>/<name>` form, with a collision warning naming both files; a taken namespaced slot gets a `~N` suffix. Raw skill names containing a path separator are now rejected at scan time, since `/` is reserved for that addressing ([#12151](https://github.com/can1357/oh-my-pi/pull/12151) by [@andrebrait](https://github.com/andrebrait)).
-- Same-named skills from different sources no longer silently discard the loser: the higher-precedence skill keeps its bare name and the other stays reachable as `<namespace>/<name>` ([#12151](https://github.com/can1357/oh-my-pi/pull/12151) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.4.0] - 2026-09-28
 

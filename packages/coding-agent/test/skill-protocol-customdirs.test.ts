@@ -232,10 +232,12 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 
 		// An identical body must not short-circuit the override contract: the
 		// custom-directory copy still has to be the one reachable on the bare
-		// name, not whichever side happened to admit first.
-		const bareEntry = skills.find(s => s.name === "shared-name");
-		expect(bareEntry).toBeDefined();
-		expect(bareEntry!.filePath).toBe(path.join(customSkill, "SKILL.md"));
+		// name, not whichever side happened to admit first. The provider copy
+		// carries nothing the override lacks, so it is not re-admitted either.
+		const sharedNames = skills.filter(s => s.name.endsWith("shared-name"));
+		expect(sharedNames.map(s => s.name)).toEqual(["shared-name"]);
+		const bareEntry = sharedNames[0];
+		expect(bareEntry.filePath).toBe(path.join(customSkill, "SKILL.md"));
 
 		const handler = new SkillProtocolHandler();
 		const resource = await handler.resolve(parseInternalUrl("skill://shared-name/"));

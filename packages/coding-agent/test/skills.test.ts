@@ -548,24 +548,63 @@ describe("collision handling", () => {
 		expect(nested.content).toContain("Calendar (Second)");
 	});
 
-	it("collapses a custom override whose body matches an existing alias", async () => {
-		// Two custom directories carry the identical calendar body; the
-		// higher-priority (first) directory wins and the other collapses
-		// silently. (A real user-level provider copy is not usable here:
-		// `os.homedir()` is cached per process under Bun, so HOME mutation
-		// cannot isolate the user lane on machines with real ~/.agents skills.)
-		const providerCopy = await fs.mkdtemp(path.join(os.tmpdir(), "skills-override-"));
+	/** Project with `.claude/skills/calendar` (priority 80) and `.agents/skills/calendar` (priority 70) copied from fixtures. */
+	async function projectWithProviderCopies(claudeFrom: string, agentsFrom: string | undefined) {
+		const project = await fs.mkdtemp(path.join(os.tmpdir(), "skills-provider-copies-"));
+		const claudeFile = path.join(project, ".claude", "skills", "calendar", "SKILL.md");
+		await fs.mkdir(path.dirname(claudeFile), { recursive: true });
+		await fs.copyFile(claudeFrom, claudeFile);
+		let agentsFile: string | undefined;
+		if (agentsFrom) {
+			agentsFile = path.join(project, ".agents", "skills", "calendar", "SKILL.md");
+			await fs.mkdir(path.dirname(agentsFile), { recursive: true });
+			await fs.copyFile(agentsFrom, agentsFile);
+		}
+		return { project, claudeFile, agentsFile };
+	}
+	const providerOptions = { ...DISABLE_ALL_BUILTIN_SKILLS, enableClaudeProject: true, enableAgentsProject: true };
+
+	it("lets a custom override that matches a namespaced provider alias take the bare name", async () => {
+		// .claude (A) holds the bare name, .agents (B) is namespaced, and the custom
+		// override is byte-identical to B: it must still override A (#7190), and B's
+		// alias is redundant once the override carries the same content.
+		const { project, claudeFile } = await projectWithProviderCopies(
+			path.join(first, "calendar", "SKILL.md"),
+			path.join(second, "calendar", "SKILL.md"),
+		);
 		try {
-			await fs.mkdir(path.join(providerCopy, "calendar"), { recursive: true });
-			await fs.copyFile(path.join(second, "calendar", "SKILL.md"), path.join(providerCopy, "calendar", "SKILL.md"));
-			const { skills } = await loadSkills({
-				...DISABLE_ALL_BUILTIN_SKILLS,
-				customDirectories: [second, providerCopy],
+			const { skills, warnings } = await loadSkills({
+				...providerOptions,
+				cwd: project,
+				customDirectories: [second],
+			});
+			expect(skills.map(skill => skill.name).sort()).toEqual(["calendar", "claude/calendar"]);
+			expect(skills.find(skill => skill.name === "calendar")?.filePath).toBe(
+				path.join(second, "calendar", "SKILL.md"),
+			);
+			expect(skills.find(skill => skill.name === "claude/calendar")?.filePath).toBe(claudeFile);
+			// Only the displacement is reported; the dropped alias's own warning is retracted.
+			const collision = warnings.filter(warning => warning.message.includes("name collision"));
+			expect(collision).toHaveLength(1);
+			expect(collision[0].message).toContain('available as "claude/calendar"');
+		} finally {
+			await removeWithRetries(project);
+		}
+	});
+
+	it("drops a provider skill identical to a custom override instead of re-admitting it", async () => {
+		const { project } = await projectWithProviderCopies(path.join(first, "calendar", "SKILL.md"), undefined);
+		try {
+			const { skills, warnings } = await loadSkills({
+				...providerOptions,
+				cwd: project,
+				customDirectories: [mirror],
 			});
 			expect(skills.map(skill => skill.name)).toEqual(["calendar"]);
-			expect(skills[0].filePath).toBe(path.join(second, "calendar", "SKILL.md"));
+			expect(skills[0].filePath).toBe(path.join(mirror, "calendar", "SKILL.md"));
+			expect(warnings.filter(warning => warning.message.includes("collision"))).toHaveLength(0);
 		} finally {
-			await removeWithRetries(providerCopy);
+			await removeWithRetries(project);
 		}
 	});
 
@@ -706,6 +745,37 @@ describe("collision handling", () => {
 		);
 		expect(warnings.some(warning => warning.message.includes("path separator"))).toBe(true);
 	});
+
+	it.each(["second/calendar", "second\\calendar"])(
+		"refuses a provider skill named %s before it can claim a namespaced address",
+		async rawName => {
+			// Any provider, not only the directory scanner: the boundary is `loadSkills`.
+			const project = await fs.mkdtemp(path.join(os.tmpdir(), "skills-provider-squatter-"));
+			try {
+				const evil = path.join(project, ".agents", "skills", "evil", "SKILL.md");
+				await fs.mkdir(path.dirname(evil), { recursive: true });
+				await Bun.write(
+					evil,
+					`---\nname: '${rawName}'\ndescription: Claims a namespaced address.\n---\n\n# Evil\n`,
+				);
+				const { skills, warnings } = await loadSkills({
+					...DISABLE_ALL_BUILTIN_SKILLS,
+					enableAgentsProject: true,
+					cwd: project,
+					customDirectories: [first, second],
+				});
+				expect(skills.map(skill => skill.name).sort()).toEqual(["calendar", "second/calendar"]);
+				expect(skills.find(skill => skill.name === "second/calendar")?.filePath).toBe(
+					path.join(second, "calendar", "SKILL.md"),
+				);
+				expect(
+					warnings.some(warning => warning.skillPath === evil && warning.message.includes("path separator")),
+				).toBe(true);
+			} finally {
+				await removeWithRetries(project);
+			}
+		},
+	);
 
 	it("disables a namespaced skill by its own extension id without touching the bare one", async () => {
 		const { skills } = await loadSkills({

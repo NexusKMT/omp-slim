@@ -109,23 +109,16 @@ interface AdmittedBody {
 interface CollisionResolution {
 	name: string;
 	warning?: string;
-	displaced?: {
-		skill: Skill;
-		newName: string;
-		warning: string;
-	};
+	/** Registered names the candidate makes redundant: byte-identical content it
+	 * now covers under the bare name. Removed without an alias or a warning. */
+	dropped: string[];
+	/** The current bare holder, moved to `newName` to make room for an outranking candidate. */
+	displaced?: { newName: string; warning: string };
 }
 
 /**
  * Resolve a same-name skill against what is already loaded.
- * - Identical body AND frontmatter to any admitted instance of this raw name
- *   → silently drop, UNLESS the candidate outranks the current bare holder
- *   (see precedence below), in which case it still takes the bare name: the
- *   override contract is about which FILE is authoritative, not just which
- *   text currently renders the same.
- * - Otherwise the higher-precedence side keeps the bare name and the other
- *   side is namespaced as `<namespace>/<name>` (a taken namespaced slot gets
- *   a numeric `~N` suffix). Precedence, when raw names collide:
+ * - Precedence, when raw names collide:
  *   1. An authored skill always outranks a registry-installed package
  *      (`omp skill install`, the `skillshare` provider) — installed steps
  *      aside regardless of admission order.
@@ -134,7 +127,15 @@ interface CollisionResolution {
  *      was admitted first (custom directories are merged after providers).
  *   3. Otherwise, whichever was admitted first — provider-priority order for
  *      providers, array order within `skills.customDirectories` for custom
- *      directories — keeps the bare name; the later candidate is namespaced.
+ *      directories — keeps the bare name.
+ * - A candidate that outranks the bare holder always takes the bare name (the
+ *   override contract is about which FILE is authoritative, not which text
+ *   renders the same). Registered copies with identical body AND frontmatter
+ *   are dropped rather than kept as aliases; if the bare holder itself is
+ *   identical it is dropped too, otherwise it is namespaced as
+ *   `<namespace>/<name>` (a taken slot gets a numeric `~N` suffix).
+ * - Any other candidate identical to a registered copy → silently dropped
+ *   (`undefined`); a differing one is namespaced.
  */
 function resolveCollision(
 	skillMap: Map<string, Skill>,
@@ -146,7 +147,7 @@ function resolveCollision(
 ): CollisionResolution | undefined {
 	const existingEntries = [...admitted.entries()].filter(([_, e]) => e.rawName === candidate.name);
 	if (existingEntries.length === 0) {
-		return { name: candidate.name };
+		return { name: candidate.name, dropped: [] };
 	}
 
 	const bareSkill = skillMap.get(candidate.name);
@@ -154,69 +155,45 @@ function resolveCollision(
 	const bareInstalled = bareSkill?._source?.provider === SKILLSHARE_PROVIDER_ID;
 	const candidateCustom = candidate._source?.provider === CUSTOM_DIR_PROVIDER_ID;
 	const bareCustom = bareSkill?._source?.provider === CUSTOM_DIR_PROVIDER_ID;
-	// True exactly when a precedence rule below would displace the current
-	// bare holder in the candidate's favor; identical content must not
-	// short-circuit that displacement.
-	const candidateOutranksBare =
-		bareSkill !== undefined && ((bareInstalled && !candidateInstalled) || (candidateCustom && !bareCustom));
+	const identical = existingEntries
+		.filter(([_, e]) => e.body === candidateBody && Bun.deepEquals(e.frontmatter, candidateFrontmatter))
+		.map(([name]) => name);
 
-	for (const [name, entry] of admitted) {
-		if (entry.rawName !== candidate.name) continue;
-		if (entry.body !== candidateBody || !Bun.deepEquals(entry.frontmatter, candidateFrontmatter)) continue;
-		if (name === candidate.name && candidateOutranksBare) continue;
-		return undefined;
-	}
-
-	if (bareSkill && !bareInstalled && candidateInstalled) {
-		// The authored skill already holds the name; the package steps aside.
-		let namespaced = `${namespace}/${candidate.name}`;
-		for (let n = 2; skillMap.has(namespaced); n++) namespaced = `${namespace}/${candidate.name}~${n}`;
-		return {
-			name: namespaced,
-			warning: `name collision: installed "${candidate.name}" from ${candidate.filePath} is overridden by ${bareSkill.filePath}; available as "${namespaced}"`,
-		};
-	}
-	if (bareSkill && bareInstalled && !candidateInstalled) {
+	if (bareSkill && ((bareInstalled && !candidateInstalled) || (candidateCustom && !bareCustom))) {
+		if (identical.includes(candidate.name)) return { name: candidate.name, dropped: identical };
 		const bareEntry = admitted.get(candidate.name)!;
 		let namespacedBare = `${bareEntry.namespace}/${bareEntry.rawName}`;
-		for (let n = 2; skillMap.has(namespacedBare); n++)
+		for (let n = 2; skillMap.has(namespacedBare) && !identical.includes(namespacedBare); n++)
 			namespacedBare = `${bareEntry.namespace}/${bareEntry.rawName}~${n}`;
 		return {
 			name: candidate.name,
+			dropped: identical,
 			displaced: {
-				skill: bareSkill,
 				newName: namespacedBare,
-				warning: `name collision: installed "${bareEntry.rawName}" from ${bareSkill.filePath} is overridden by ${candidate.filePath}; available as "${namespacedBare}"`,
+				warning: `name collision: ${bareInstalled ? "installed " : ""}"${bareEntry.rawName}" from ${bareSkill.filePath} is overridden by ${candidate.filePath}; available as "${namespacedBare}"`,
 			},
 		};
 	}
-	if (bareSkill && candidateCustom && !bareCustom) {
-		// A custom-directory skill overrides a same-named provider skill, even
-		// though the provider skill was admitted first (#7190's override contract:
-		// custom directories are always merged after provider discovery).
-		const bareEntry = admitted.get(candidate.name)!;
-		let namespacedBare = `${bareEntry.namespace}/${bareEntry.rawName}`;
-		for (let n = 2; skillMap.has(namespacedBare); n++)
-			namespacedBare = `${bareEntry.namespace}/${bareEntry.rawName}~${n}`;
-		return {
-			name: candidate.name,
-			displaced: {
-				skill: bareSkill,
-				newName: namespacedBare,
-				warning: `name collision: "${bareEntry.rawName}" from ${bareSkill.filePath} is overridden by ${candidate.filePath}; available as "${namespacedBare}"`,
-			},
-		};
-	}
+	if (identical.length > 0) return undefined;
 
 	// Otherwise the already-admitted skill keeps the bare name (first-admitted
-	// wins); only the new candidate is namespaced.
+	// wins, or the authored skill over an installed package); only the new
+	// candidate is namespaced.
 	let namespaced = `${namespace}/${candidate.name}`;
 	for (let n = 2; skillMap.has(namespaced); n++) {
 		namespaced = `${namespace}/${candidate.name}~${n}`;
 	}
+	if (bareSkill && !bareInstalled && candidateInstalled) {
+		return {
+			name: namespaced,
+			dropped: [],
+			warning: `name collision: installed "${candidate.name}" from ${candidate.filePath} is overridden by ${bareSkill.filePath}; available as "${namespaced}"`,
+		};
+	}
 	const referencePath = existingEntries[0][1].filePath;
 	return {
 		name: namespaced,
+		dropped: [],
 		warning: `name collision: "${candidate.name}" from ${candidate.filePath} differs from ${referencePath}; available as "${namespaced}"`,
 	};
 }
@@ -404,9 +381,15 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 	/**
 	 * Resolve the skill's final name, apply the exclusion filters to it, and
 	 * store it. Returns the stored name, or undefined when the skill was a
-	 * duplicate or excluded. Include patterns run once every name is final (see
-	 * the end of this function): filtering here would drop the bare skill and
-	 * leave a namespaced candidate with nothing to collide against.
+	 * duplicate, excluded, or rejected. Include patterns run once every name is
+	 * final (see the end of this function): filtering here would drop the bare
+	 * skill and leave a namespaced candidate with nothing to collide against.
+	 *
+	 * Every authored skill — any provider, any custom directory — is admitted
+	 * here, which makes this the one place to reserve `/` and `\`: they belong
+	 * to the `<namespace>/<name>` form and `skill://<name>/<path>` resolution,
+	 * so a raw name (frontmatter is untrusted for registry installs) must never
+	 * claim a namespaced address.
 	 */
 	function admit(
 		skill: Skill,
@@ -414,21 +397,35 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		frontmatter: SkillFrontmatter | undefined,
 		namespace: string,
 	): string | undefined {
+		if (/[\\/]/.test(skill.name)) {
+			collisionWarnings.push({
+				skillPath: skill.filePath,
+				message: `Skill name "${skill.name}" contains a path separator, skipping: ${skill.filePath}`,
+			});
+			return undefined;
+		}
 		const resolved = resolveCollision(skillMap, admitted, skill, body, frontmatter, namespace);
 		if (!resolved) return undefined;
-		const { name, warning, displaced } = resolved;
+		const { name, warning, dropped, displaced } = resolved;
 		if (disabledSkillNames.has(name) || matchesIgnorePatterns(name)) return undefined;
 
+		for (const droppedName of dropped) {
+			skillMap.delete(droppedName);
+			admitted.delete(droppedName);
+			// The alias no longer exists: retract the warning that advertised it.
+			const stale = collisionWarnings.findIndex(w => w.message.endsWith(`available as "${droppedName}"`));
+			if (stale !== -1) collisionWarnings.splice(stale, 1);
+		}
 		if (displaced) {
-			skillMap.delete(displaced.skill.name);
-			const displacedEntry = admitted.get(displaced.skill.name)!;
-			admitted.delete(displaced.skill.name);
-			displaced.skill.name = displaced.newName;
+			// The bare holder; `name` is overwritten by the candidate below.
+			const displacedSkill = skillMap.get(name)!;
+			const displacedEntry = admitted.get(name)!;
+			displacedSkill.name = displaced.newName;
 			if (!disabledSkillNames.has(displaced.newName) && !matchesIgnorePatterns(displaced.newName)) {
-				skillMap.set(displaced.newName, displaced.skill);
+				skillMap.set(displaced.newName, displacedSkill);
 				admitted.set(displaced.newName, displacedEntry);
 			}
-			collisionWarnings.push({ skillPath: displaced.skill.filePath, message: displaced.warning });
+			collisionWarnings.push({ skillPath: displacedSkill.filePath, message: displaced.warning });
 		}
 
 		if (warning) collisionWarnings.push({ skillPath: skill.filePath, message: warning });
