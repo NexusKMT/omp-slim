@@ -70,6 +70,8 @@ console.log(stats.byModel[0].avgTokensPerSecond);
 - **Session logs**: `~/.omp/agent/sessions/` (JSONL files)
 - **Stats database**: `~/.omp/stats.db` (SQLite)
 
+Synchronization fetches file metadata and saved cursors in bounded batches and overlaps transcript reads, including on macOS without worker threads. Statistics and cursors commit atomically; unchanged files are skipped, and interrupted batches are retried without double-counting usage.
+
 ## Dashboard
 
 The web dashboard provides:
