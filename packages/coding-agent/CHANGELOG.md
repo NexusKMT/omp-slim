@@ -15,6 +15,9 @@
 ### Removed
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
+### Fixed
+
+- Fixed `tool_call` `additionalContext` being delivered more than once when several extension or hook handlers on the same call returned identical text
 
 ## [18.4.2] - 2026-09-28
 
