@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed the `@` completion popup swallowing Tab and cursor-movement keys while a narrowed filter matched nothing: with no candidate to accept they now fall through to their normal completion and cursor roles instead of being trapped ([#13046](https://github.com/can1357/oh-my-pi/pull/13046) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed the Esc-Esc rewind and fullscreen `/copy` selectors getting stuck at the oldest turn of a long session's recent tail; stepping past it now loads the earlier history
 
 ## [18.4.1] - 2026-09-28
 
