@@ -555,7 +555,7 @@ describe("terminal frame plans", () => {
 		tui.stop();
 	});
 
-	it("skips the destructive rebuild on a multiplexer height shrink (tmux clip discards, never pushes)", async () => {
+	it("rebuilds on a multiplexer height shrink to repair clipped and pushed live rows", async () => {
 		Bun.env.TMUX = "/tmp/tmux-0/default,1,0"; // isInsideTerminalMultiplexer ← authoritative
 		try {
 			const terminal = new CountingTerminal(20, 6);
@@ -569,15 +569,13 @@ describe("terminal frame plans", () => {
 			provider.resetCount = 0;
 			terminal.writes.length = 0;
 
-			// Unzooming a tmux pane shrinks it at a constant width. The mux clip
-			// model discards rows below the parked cursor instead of pushing them
-			// into pane scrollback, so there is nothing to purge: the settled
-			// transaction must not clear and re-stream the ledger.
+			// tmux discards below the cursor first, then pushes above it. A
+			// current-width replay must replace that damaged physical copy.
 			terminal.resize(20, 2);
 			await renderScheduler.advance(terminal, 440);
 
-			expect(provider.resetCount).toBe(0);
-			expect(terminal.writes.join("")).not.toContain("\x1b[3J");
+			expect(provider.resetCount).toBe(1);
+			expect(plainBuffer(terminal)).toEqual(["history-one@20", "history-two@20", "editor@20"]);
 			tui.stop();
 		} finally {
 			delete Bun.env.TMUX;

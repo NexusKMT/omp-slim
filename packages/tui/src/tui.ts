@@ -39,6 +39,7 @@ import {
 	synchronizedOutputUserOverride,
 	TERMINAL,
 } from "./terminal-capabilities";
+import { classifyTerminalMultiplexer } from "./terminal-multiplexer";
 import {
 	Ellipsis,
 	extractSegments,
@@ -80,6 +81,9 @@ const LINE_FIT_SOURCE_WIDTH_MULTIPLIER = 64;
 const HIDE_CURSOR = "\x1b[?25l";
 const SYNC_OUTPUT_BEGIN = "\x1b[?2026h";
 const SYNC_OUTPUT_END = "\x1b[?2026l";
+// tmux expires synchronized output after one second. Renew during large
+// replays as the output queue drains, at complete sequence/row boundaries.
+const SYNC_OUTPUT_RENEW_BYTES = 16 * 1024;
 const DISABLE_AUTOWRAP = "\x1b[?7l";
 const ENABLE_AUTOWRAP = "\x1b[?7h";
 const PAINT_BEGIN = `${HIDE_CURSOR}${SYNC_OUTPUT_BEGIN}${DISABLE_AUTOWRAP}`;
@@ -756,11 +760,8 @@ export class TUI extends Container {
 	// whole burst, not on the net change (see #prepareResizeReplay).
 	#resizeBurstWidthChanged = false;
 	#resizeBurstResized = false;
-	// Whether any step of the burst shrank the height. On a direct terminal the
-	// bottom-preserving reflow pushes live pane rows into scrollback, which the
-	// destructive ledger refresh purges. A multiplexer shrink clips instead —
-	// rows below the parked cursor are discarded, nothing pushes — so mux
-	// zoom-out skips the refresh (see #settledResizeRefreshes).
+	// A shrink can discard live rows below the cursor and push others into
+	// scrollback. Rebuild must repair that even when the burst ends taller.
 	#resizeBurstShrank = false;
 	// Geometry epoch: bumped on every resize transaction entry, so each CSI 6n
 	// request records the geometry it was parked under.
@@ -863,6 +864,7 @@ export class TUI extends Container {
 	 * borrowed resize frame keeps the pane correct in the meantime.
 	 */
 	static readonly #RESIZE_REFRESH_SETTLE_MS = 400;
+	static readonly #RESIZE_REBUILD_INDICATOR_DELAY_MS = 150;
 	#inputRenderGraceUntilMs = 0;
 	// A scale-`s` OSC 66 heading reserves `s - 1` rows, and the protocol
 	// caps `s` at 7. This bounds spacer lookups and supplies enough context
@@ -921,6 +923,8 @@ export class TUI extends Container {
 	#altEnterHeight = 0;
 	#resizeAltActive = false;
 	#resizeSettleTimer: RenderTimer | undefined;
+	#resizeRebuildIndicatorTimer: RenderTimer | undefined;
+	#resizeRebuildIndicatorVisible = false;
 	#suppressResizeUntil = 0;
 	// Baseline geometry at the last alt-buffer toggle, plus whether its echo is
 	// still pending. A Warp-only echo is a height-only ±1 SIGWINCH against this
@@ -930,9 +934,8 @@ export class TUI extends Container {
 	#altToggleColumns = 0;
 	#altToggleRows = 0;
 	#altToggleEchoPending = false;
-	// True while an in-place resize transaction (Warp) is inside its settle
-	// window: the normal-buffer anchor is stale until the settled CPR probe
-	// resolves, so ordinary paints are dropped until then.
+	// True while an in-place resize waits for its settled rebuild (tmux) or
+	// anchor recovery (Warp): ordinary paints must not use the stale anchor.
 	#resizeInPlaceActive = false;
 	#resizeScrollbackMode: ResizeScrollbackMode = TUI.#initialResizeScrollbackMode();
 	#resizeReplaySize: string | undefined;
@@ -1323,7 +1326,7 @@ export class TUI extends Container {
 						return;
 					}
 					this.#cancelResizeProbe();
-					if (this.#resizeRepaintsInPlace()) this.#beginResizeInPlacePaint();
+					if (this.#resizeAvoidsAltBuffer()) this.#beginResizeInPlacePaint();
 					else this.#beginResizeAltPaint(true);
 					return;
 				}
@@ -1352,7 +1355,7 @@ export class TUI extends Container {
 					this.requestRender(true);
 					return;
 				}
-				if (this.#resizeRepaintsInPlace()) {
+				if (this.#resizeAvoidsAltBuffer()) {
 					this.#beginResizeInPlacePaint();
 					return;
 				}
@@ -1380,11 +1383,11 @@ export class TUI extends Container {
 		this.requestRender(true, { clearScrollback: options?.clearScrollback === true });
 	}
 	/**
-	 * Whether a resize repaints the visible window in place — no alternate-screen
-	 * borrow. Warp-only: Warp re-reports its size on alt-buffer toggles, so borrowing
-	 * there self-sustains. Every other terminal keeps the alt-borrow path. Inside a
-	 * multiplexer the mux owns the grid and consumes the toggles itself, so an
-	 * inherited Warp marker must not divert the mux-tuned borrow path.
+	 * Whether a resize only repaints the visible window in place, without history
+	 * replay. Warp re-reports its size on alt-buffer toggles, so borrowing there
+	 * self-sustains. Inside a multiplexer the mux owns the grid and consumes the
+	 * toggles itself, so an inherited Warp marker must not suppress its replay.
+	 * tmux's synchronized rebuild is selected separately in #resizeAvoidsAltBuffer.
 	 *
 	 * A ConPTY host is excluded for the same reason as a multiplexer: conhost owns
 	 * the grid the application writes to. Measured on conhost, resizing the
@@ -1403,6 +1406,21 @@ export class TUI extends Container {
 		return Bun.env.TERM_PROGRAM?.toLowerCase() === "warpterminal";
 	}
 
+	#resizeAvoidsAltBuffer(): boolean {
+		if (this.#resizeRepaintsInPlace()) return true;
+		// Unlike Warp's viewport-only repaint, tmux still rebuilds history.
+		// Restoring an alternate buffer schedules a tmux redraw that ends its
+		// synchronized update early, exposing the rest of a long replay.
+		return (
+			!this.#resizeAltActive &&
+			!this.#pendingAltExit &&
+			resizeInPlaceOverride() !== false &&
+			this.#resizeScrollbackMode === "rebuild" &&
+			this.#synchronizedOutputEnabled &&
+			classifyTerminalMultiplexer() === "tmux"
+		);
+	}
+
 	#noteAltBufferToggle(): void {
 		this.#altToggleColumns = this.terminal.columns;
 		this.#altToggleRows = this.terminal.rows;
@@ -1415,9 +1433,8 @@ export class TUI extends Container {
 	 * the drag-end window: every later SIGWINCH re-arms it, and a drag then
 	 * commits once at its final geometry instead of flashing a full
 	 * clear-and-replay per intermediate step. Transactions that never refresh —
-	 * `preserve`, an in-place (Warp) settle, a burst that never left its width
-	 * (either mode), or a host with no replay hook — keep the short window so a
-	 * single resize commits promptly.
+	 * `preserve`, an in-place (Warp) settle, a height-only grow, or a host with
+	 * no replay hook — keep the short window so a single resize commits promptly.
 	 */
 	#resizeSettleDelayMs(): number {
 		const short = TUI.#RESIZE_VIEWPORT_SETTLE_MS;
@@ -1468,11 +1485,9 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Coalesced in-place resize transaction for Warp-class terminals: never
-	 * borrows the alt buffer. Drag SIGWINCHes only re-arm the settle window, so a
-	 * drag emits no paints and no scrollback replay; once quiet, the transaction
-	 * snapshots the live window and runs the CPR anchor probe, and the single
-	 * settled repaint lands on the recovered anchor with no ED3 rewrap.
+	 * Coalesced resize without borrowing the alt buffer. Once quiet, tmux can
+	 * rebuild directly under synchronized output; viewport-only repaints recover
+	 * their anchor with CPR. The existing screen remains visible while waiting.
 	 */
 	#beginResizeInPlacePaint(): void {
 		if (this.#altActive) {
@@ -1482,6 +1497,37 @@ export class TUI extends Container {
 		this.#trackResizeBurst();
 		this.#resizeInPlaceActive = true;
 		this.#resizeSettleTimer?.cancel();
+		this.#resizeRebuildIndicatorTimer?.cancel();
+		this.#resizeRebuildIndicatorTimer = this.#renderScheduler.scheduleRender(() => {
+			this.#resizeRebuildIndicatorTimer = undefined;
+			if (
+				this.#stopped ||
+				!this.#resizeInPlaceActive ||
+				!this.#hasEverRendered ||
+				this.#resizeRepaintsInPlace() ||
+				this.#resizeScrollbackMode !== "rebuild" ||
+				!this.#synchronizedOutputEnabled ||
+				classifyTerminalMultiplexer() !== "tmux" ||
+				!this.#frameProvider?.beginHistoryReplay ||
+				!this.#settledResizeRefreshes(this.#resizeBurstWidthChanged) ||
+				this.#getTopmostVisibleOverlay()?.options?.fullscreen === true ||
+				// ProcessTerminal retains a small cached upper bound after draining;
+				// only a deep backlog should suppress feedback, just like a frame.
+				(this.terminal.pendingOutputBytes ?? 0) > TUI.#MAX_PENDING_OUTPUT_BYTES
+			) {
+				return;
+			}
+			const { columns, rows } = this.terminal;
+			if (columns <= 0 || rows <= 0) return;
+			const label = truncateToWidth("↻ Rebuilding…", columns, Ellipsis.Omit);
+			// Publish the notice before holding the long replay. Cursor save/restore
+			// and no newline keep this temporary row out of native scrollback. The
+			// destructive rebuild replaces it together with the rest of the screen.
+			this.terminal.write(
+				`${this.#paintBeginSequence}\x1b7\x1b[${rows};1H${SEGMENT_RESET}${ERASE_LINE}${label}${LINE_TERMINATOR}\x1b8${this.#paintEndSequence}`,
+			);
+			this.#resizeRebuildIndicatorVisible = true;
+		}, TUI.#RESIZE_REBUILD_INDICATOR_DELAY_MS);
 		this.#forgetHardwareCursorState();
 		this.#recordHardwareCursorHidden();
 		if (this.#eraseLiveViewportForResize()) {
@@ -1492,10 +1538,16 @@ export class TUI extends Container {
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped) return;
+			this.#prepareResizeReplay(this.terminal.columns, this.terminal.rows);
+			if (this.#clearScrollbackOnNextRender) {
+				this.#resizeInPlaceActive = false;
+				this.requestRender();
+				return;
+			}
 			this.#resizeProbeWindow = this.#providerWindow;
 			this.#resizeProbeOffset = this.#parkedViewportOffset;
 			this.#beginResizeAnchorProbe();
-		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
+		}, this.#resizeSettleDelayMs());
 	}
 
 	/**
@@ -2074,6 +2126,8 @@ export class TUI extends Container {
 		this.#debugServer = undefined;
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = undefined;
+		this.#resizeRebuildIndicatorTimer?.cancel();
+		this.#resizeRebuildIndicatorTimer = undefined;
 		if (this.#resizeInPlaceActive && this.terminal.rows > 0) {
 			// The hardware cursor sits wherever the drag left it, but tracking still
 			// describes the pre-resize row (no alt-buffer restore replays it back).
@@ -2114,6 +2168,10 @@ export class TUI extends Container {
 			// and loses native selection until a manual reset.
 			this.terminal.write(MOUSE_TRACKING_OFF);
 			this.#mouseTracking = "off";
+		}
+		if (this.#resizeRebuildIndicatorVisible) {
+			this.terminal.write(`\x1b7\x1b[${Math.max(1, this.terminal.rows)};1H${ERASE_LINE}\x1b8`);
+			this.#resizeRebuildIndicatorVisible = false;
 		}
 		// A latched destructive reset (settled rebuild-mode resize, /clear) pairs
 		// ED3 with a complete-ledger replay. Running that pair during stop would
@@ -2354,7 +2412,10 @@ export class TUI extends Container {
 				const tagEpoch = this.#cprColumnTags.get(column);
 				this.#cprColumnTags.delete(column);
 				const probe = this.#resizeProbe;
-				if (probe !== undefined && tagEpoch === probe.epoch) {
+				// tmux can resize its grid before the application receives SIGWINCH.
+				// A reply below our known screen is from that newer geometry: do not
+				// repaint it using the stale height. Wait for resize or the probe retry.
+				if (probe !== undefined && tagEpoch === probe.epoch && row >= 1 && row <= this.terminal.rows) {
 					this.#resolveResizeAnchor(Number(match[1]) - 1);
 				}
 			}
@@ -2828,20 +2889,15 @@ export class TUI extends Container {
 	 * Whether a settle that has reached {@link #prepareResizeReplay} will run
 	 * the history refresh. `widthChanged` is the caller's already-computed whole-
 	 * burst width verdict. `append` refreshes only width-shredded copies; in
-	 * rebuild every destructive cause warrants it: a burst shrink on a direct
-	 * terminal (its bottom-preserving reflow pushes live pane rows into
-	 * scrollback), and a host that repaints its own grid (ConPTY's stale
-	 * re-emission is untrusted). A multiplexer shrink clips instead — rows
-	 * below the parked cursor are discarded, nothing is pushed — so a tmux
-	 * zoom-out skips the refresh like a zoom-in.
+	 * rebuild every destructive cause warrants it: a burst shrink can push live
+	 * rows into history, and ConPTY can repaint its own stale grid. tmux first
+	 * discards rows below the cursor, then pushes rows above it into history.
+	 * A later grow cannot undo that clipping or the provider's retirement, so
+	 * even a height-only shrink/grow burst needs a complete settled rebuild.
 	 */
 	#settledResizeRefreshes(widthChanged: boolean): boolean {
 		if (this.#resizeScrollbackMode === "rebuild") {
-			return (
-				widthChanged ||
-				this.terminal.hostOwnsGridOnResize === true ||
-				(this.#resizeBurstShrank && !isInsideTerminalMultiplexer())
-			);
+			return widthChanged || this.terminal.hostOwnsGridOnResize === true || this.#resizeBurstShrank;
 		}
 		return widthChanged;
 	}
@@ -2938,6 +2994,9 @@ export class TUI extends Container {
 		// then repaint from row zero.
 		const destructiveReset = this.#clearScrollbackOnNextRender;
 		if (destructiveReset) {
+			this.#resizeRebuildIndicatorTimer?.cancel();
+			this.#resizeRebuildIndicatorTimer = undefined;
+			this.#resizeRebuildIndicatorVisible = false;
 			this.#providerViewportTop = 0;
 			this.#providerWindow = [];
 			this.#providerPreparedRows = [];
@@ -2951,6 +3010,20 @@ export class TUI extends Container {
 		const newTop = Math.max(0, Math.min(startTop + historyRows.length, height - rows));
 		const pendingAltExit = this.#pendingAltExit;
 		let buffer = this.#paintBeginSequence + pendingAltExit;
+		const renewSync =
+			destructiveReset &&
+			this.#resizeScrollbackMode === "rebuild" &&
+			this.#synchronizedOutputEnabled &&
+			classifyTerminalMultiplexer() === "tmux";
+		let syncBytes = Buffer.byteLength(buffer);
+		const append = (sequence: string): void => {
+			buffer += sequence;
+			if (!renewSync) return;
+			syncBytes += Buffer.byteLength(sequence);
+			if (syncBytes < SYNC_OUTPUT_RENEW_BYTES) return;
+			buffer += SYNC_OUTPUT_BEGIN;
+			syncBytes = 0;
+		};
 		if (destructiveReset && TERMINAL.imageProtocol === ImageProtocol.Kitty) {
 			// A reset is explicitly destructive, so remove every placement—not only
 			// the ones this TUI tracked—then resend images composed for the clean
@@ -2985,7 +3058,7 @@ export class TUI extends Container {
 		// image the terminal no longer had and every inline image vanished
 		// after a settled width resize.
 		if (destructiveReset) buffer += "\x1b[H\x1b[2J\x1b[3J";
-		for (const sequence of this.#imageBudget.takeTransmits()) buffer += sequence;
+		for (const sequence of this.#imageBudget.takeTransmits()) append(sequence);
 		const diffable =
 			geometryStable &&
 			historyRows.length === 0 &&
@@ -3033,25 +3106,29 @@ export class TUI extends Container {
 			let screenRow = startTop;
 			for (let index = 0; index < preparedHistory.lines.length; index++) {
 				if (screenRow > startTop) buffer += "\n";
-				buffer += this.#lineRewriteSequence(
-					preparedHistory.rows[index]!,
-					width,
-					Math.min(screenRow, height - 1),
-					-1,
-					-1,
-					this.#osc66SpacerGlyphWidth(preparedHistory.lines, index),
+				append(
+					this.#lineRewriteSequence(
+						preparedHistory.rows[index]!,
+						width,
+						Math.min(screenRow, height - 1),
+						-1,
+						-1,
+						this.#osc66SpacerGlyphWidth(preparedHistory.lines, index),
+					),
 				);
 				screenRow++;
 			}
 			for (let index = 0; index < rows; index++) {
 				if (screenRow > startTop) buffer += "\n";
-				buffer += this.#lineRewriteSequence(
-					prepared.rows[index]!,
-					width,
-					Math.min(screenRow, height - 1),
-					-1,
-					-1,
-					this.#osc66SpacerGlyphWidth(prepared.lines, index),
+				append(
+					this.#lineRewriteSequence(
+						prepared.rows[index]!,
+						width,
+						Math.min(screenRow, height - 1),
+						-1,
+						-1,
+						this.#osc66SpacerGlyphWidth(prepared.lines, index),
+					),
 				);
 				screenRow++;
 			}
@@ -3142,11 +3219,9 @@ export class TUI extends Container {
 			return;
 		}
 		if (this.#resizeInPlaceActive && !this.#altActive) {
-			// In-place resize settling (Warp): the normal-buffer anchor is stale until
-			// the settled CPR probe resolves. Painting now would overwrite retained
-			// history and record the new geometry over the pending recovery, so drop
-			// the frame — the resolve repaints. Fullscreen overlay paints are
-			// buffer-isolated and still allowed.
+			// The normal-buffer anchor is stale until the settled rebuild or CPR
+			// recovery. Painting now would overwrite history and record the new
+			// geometry over the pending recovery, so defer until the settle.
 			return;
 		}
 
