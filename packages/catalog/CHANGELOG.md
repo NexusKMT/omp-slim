@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- Added `modelAcceptsSamplingParams(model)` in `compat/resolve`, which decides sampling-parameter support from model identity whichever provider serves the model, and still honors a compat or rule-level `supportsSamplingParams: false` ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
 ### Breaking Changes
 
 - Renamed the Codex image model `openai-codex/gpt-image-1` to `openai-codex/gpt-image-2` to match what the Codex backend runs (`gpt-image-2-codex`); update `image` roles that name the old id.
@@ -12,6 +9,10 @@
 ### Added
 
 - Added the `web-search-model`, `hosted-image`, and `image-model` catalog axes (`Model.webSearchModel`, `hostedImage`, `imageModel`). `web-search` now comes from the model's lineage and API (GPT-5+ Responses, Claude 4+ Messages, Gemini 2+), so proxies and gateways that expose these models inherit it.
+
+### Fixed
+
+- Fixed OpenAI GPT-5+/o-series and Claude Opus 4.7+, Sonnet/Fable/Mythos 5+ being marked as accepting sampling parameters when served over Amazon Bedrock, Google, Devin, or an OpenAI-compatible gateway such as OpenRouter: the `supports-sampling-params` axis now applies to every compat record, and the `openai` and `anthropic` class rules set it to `false` for those lines on every provider. An explicit `compat.supportsSamplingParams` override still wins ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
 
 ## [18.4.2] - 2026-09-28
 

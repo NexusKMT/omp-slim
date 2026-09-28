@@ -687,6 +687,12 @@ export interface BedrockCompat {
 	 * `PI_OPENAI_STREAM_IDLE_TIMEOUT_MS` alias, then the 300s default.
 	 */
 	streamIdleTimeoutMs?: number;
+	/**
+	 * Whether the served model accepts explicit sampling parameters
+	 * (`temperature`, `topP`, …). Class rules set `false` for model lines that
+	 * reject them on every host. Unassigned: accepted.
+	 */
+	supportsSamplingParams?: boolean;
 }
 
 /** Fully-resolved Bedrock Converse prompt-cache capabilities, materialized once by `buildModel`. */
@@ -697,6 +703,8 @@ export interface ResolvedBedrockCompat {
 	supportsLongPromptCacheRetention: boolean;
 	promptCacheMinimumTokens: number;
 	promptCacheMaximumCheckpoints: number;
+	/** See {@link BedrockCompat.supportsSamplingParams}. */
+	supportsSamplingParams?: boolean;
 	/**
 	 * Stream-watchdog idle-timeout fallback in ms for hosts with no keepalive
 	 * events; 0 disables the idle watchdog. Undefined defers to
@@ -1007,10 +1015,13 @@ export interface DevinCompat {
 	modelRouter?: boolean;
 	/** Whether the upstream model supports native parallel tool calls. */
 	supportsParallelToolCalls?: boolean;
+	/** See {@link BedrockCompat.supportsSamplingParams}. */
+	supportsSamplingParams?: boolean;
 }
 
 /** Fully-resolved devin-agent compat view. */
-export type ResolvedDevinCompat = Required<DevinCompat>;
+export type ResolvedDevinCompat = Required<Omit<DevinCompat, "supportsSamplingParams">> &
+	Pick<DevinCompat, "supportsSamplingParams">;
 /**
  * Compatibility settings for the Google API family (google-generative-ai,
  * google-vertex, google-gemini-cli). Class-driven defaults come from the
@@ -1045,19 +1056,26 @@ export interface GoogleCompat {
 	stripImageInput?: boolean;
 	/** Thinking-loop watchdog guard family applied to streamed reasoning. */
 	thinkingLoopGuard?: "gemini" | "deepseek" | "xai";
+	/** See {@link BedrockCompat.supportsSamplingParams}. */
+	supportsSamplingParams?: boolean;
 }
 
 /** Fully-resolved google-API compat view, materialized once by `buildModel`. */
 export type ResolvedGoogleCompat = Required<
 	Omit<
 		GoogleCompat,
-		"streamFirstEventTimeoutMs" | "streamIdleTimeoutMs" | "thinkingLoopGuard" | "antigravityUsageLabel"
+		| "streamFirstEventTimeoutMs"
+		| "streamIdleTimeoutMs"
+		| "thinkingLoopGuard"
+		| "antigravityUsageLabel"
+		| "supportsSamplingParams"
 	>
 > & {
 	streamFirstEventTimeoutMs?: number;
 	streamIdleTimeoutMs?: number;
 	thinkingLoopGuard?: GoogleCompat["thinkingLoopGuard"];
 	antigravityUsageLabel?: string;
+	supportsSamplingParams?: boolean;
 };
 
 /** Sparse, user-authored compat overrides for a given API (models.json / config vocabulary). */

@@ -4,7 +4,6 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
-import { modelAcceptsSamplingParams } from "@oh-my-pi/pi-catalog/compat/resolve";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { isVertexExpressOpenAIUrl, isVertexRawPredictUrl, resolveVertexEndpointHost } from "@oh-my-pi/pi-catalog/hosts";
 import {
@@ -1265,14 +1264,15 @@ function withInferenceSessionId(options?: SimpleStreamOptions): SimpleStreamOpti
 
 type SamplingOptions = Pick<
 	StreamOptions,
-	"temperature" | "topP" | "topK" | "minP" | "presencePenalty" | "repetitionPenalty"
+	"temperature" | "topP" | "topK" | "minP" | "presencePenalty" | "repetitionPenalty" | "frequencyPenalty"
 >;
 
 /**
- * Drop explicit sampling parameters the model rejects, before any provider
- * builds its payload. Support is a property of the model (OpenAI GPT-5+,
- * adaptive Claude reject them on every host), so it is enforced here once
- * instead of in each provider.
+ * Drop explicit sampling parameters before any provider builds its payload
+ * when the model's resolved `compat.supportsSamplingParams` is `false`. The
+ * catalog's class rules assign that per model lineage on every compat record,
+ * and an explicit compat override still wins, so this one check covers every
+ * provider.
  */
 function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api>, options: T): T {
 	if (
@@ -1281,11 +1281,13 @@ function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api
 		options.topK === undefined &&
 		options.minP === undefined &&
 		options.presencePenalty === undefined &&
-		options.repetitionPenalty === undefined
+		options.repetitionPenalty === undefined &&
+		options.frequencyPenalty === undefined
 	) {
 		return options;
 	}
-	if (modelAcceptsSamplingParams(model)) return options;
+	const compat = model.compat;
+	if (!compat || !("supportsSamplingParams" in compat) || compat.supportsSamplingParams !== false) return options;
 	const supported = { ...options };
 	delete supported.temperature;
 	delete supported.topP;
@@ -1293,6 +1295,7 @@ function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api
 	delete supported.minP;
 	delete supported.presencePenalty;
 	delete supported.repetitionPenalty;
+	delete supported.frequencyPenalty;
 	return supported;
 }
 

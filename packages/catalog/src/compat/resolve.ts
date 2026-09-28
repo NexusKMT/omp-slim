@@ -20,7 +20,6 @@ import { hostMatchesUrl, modelMatchesHost } from "../hosts";
 import type {
 	Api,
 	CompatOf,
-	Model,
 	ModelSpec,
 	OpenAICompat,
 	ResolvedAnthropicCompat,
@@ -91,35 +90,6 @@ class IdentityFacts {
 		if (this.family("sonnet", "fable", "mythos")) return this.revGte("5");
 		return false;
 	}
-
-	/**
-	 * Model lines that reject explicit sampling parameters (`temperature`,
-	 * `top_p`, `top_k`, …) with a 400 on every serving host: OpenAI o-series and
-	 * GPT-5+ (#5606), and adaptive Claude (Opus 4.7+, Sonnet/Fable/Mythos 5+).
-	 * This is a property of the model, not of the API or provider serving it.
-	 */
-	get openAIRejectsSamplingParams(): boolean {
-		return this.is("openai") && (this.family("o-series") || this.revGte("5"));
-	}
-
-	get anthropicRejectsSamplingParams(): boolean {
-		return this.anthropicAdaptiveGenAtLeast("4.7");
-	}
-}
-
-/**
- * Whether a request to `model` may carry explicit sampling parameters,
- * whichever provider serves it. The per-API `compat.supportsSamplingParams`
- * only exists for OpenAI- and Anthropic-shaped routes, so Bedrock, Vertex,
- * OpenRouter and other hosts of the same model would otherwise still send
- * them; this check applies the model identity everywhere and still honors a
- * compat or rule-level `false`.
- */
-export function modelAcceptsSamplingParams(model: Pick<Model<Api>, "identity" | "compat">): boolean {
-	const compat = model.compat as { supportsSamplingParams?: boolean } | undefined;
-	if (compat?.supportsSamplingParams === false) return false;
-	const facts = new IdentityFacts(model.identity);
-	return !facts.openAIRejectsSamplingParams && !facts.anthropicRejectsSamplingParams;
 }
 
 function resolveIdentity<TApi extends Api>(spec: ModelSpec<TApi>): ModelIdentity {
@@ -511,7 +481,7 @@ function detectOpenAICompat(
 		// API-conditional: this completions-only Copilot exclusion cannot be a
 		// provider rule without changing Copilot Responses rows.
 		supportsReasoningParams: provider !== "github-copilot",
-		supportsSamplingParams: !facts.openAIRejectsSamplingParams,
+		supportsSamplingParams: true,
 		supportsPenaltyAndStopParams: !(isGrok && reasoningCapable),
 		reasoningEffortMap: {},
 		supportsUsageInStreaming: !isCerebrasHost,
@@ -762,7 +732,7 @@ function resolveOpenAIResponsesPolicy(
 		thinkingLoopGuard: undefined,
 		reasoningEffortMap: {},
 		supportsReasoningParams: true,
-		supportsSamplingParams: !facts.openAIRejectsSamplingParams,
+		supportsSamplingParams: true,
 		supportsPenaltyAndStopParams: !isXaiHost,
 		thinkingFormat,
 		reasoningDisableMode: resolveReasoningDisableMode(thinkingFormat),
@@ -903,7 +873,7 @@ function resolveAnthropicPolicy(
 		supportsPerMessageEffort: false,
 		supportsThinkingBindingControls: false,
 		supportsForcedToolChoice: !requiresThinkingEnabled && !facts.family("fable", "mythos"),
-		supportsSamplingParams: !facts.anthropicRejectsSamplingParams,
+		supportsSamplingParams: true,
 		requiresToolResultId: false,
 		requiresThinkingEnabled,
 		replayUnsignedThinking:
