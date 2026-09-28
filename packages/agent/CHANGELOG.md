@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Updated telemetry attributes from `pi.*` to `omp.*` namespace
+- Updated telemetry attribute names from the `pi.*` namespace to the `omp.*` namespace.
 
 ## [18.3.3] - 2026-09-27
 
