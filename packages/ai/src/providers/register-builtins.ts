@@ -160,6 +160,7 @@ function forwardStream<TApi extends Api>(
 				// first response (slow first-token from reasoning models, cold proxies, etc.).
 				isProgressItem: event => (event as AssistantMessageEvent).type !== "start",
 				hasPendingLocalWork: localWorkSource ? () => localWorkSource.hasPendingLocalWork : undefined,
+				localWorkSettledAt: localWorkSource ? () => localWorkSource.localWorkSettledAt : undefined,
 			});
 
 			for await (const event of watchedSource) {

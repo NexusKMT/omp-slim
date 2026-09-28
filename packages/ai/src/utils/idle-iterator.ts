@@ -143,10 +143,19 @@ export interface IdleTimeoutIteratorOptions {
 	 * Cursor exec channel) before anything can flow upstream again. While it
 	 * returns true, an expired idle / first-item deadline slides forward
 	 * instead of aborting — the silence is ours, not a provider stall. The
-	 * watchdog re-arms with a full budget once the local work completes, so a
-	 * provider that stalls afterwards is still caught.
+	 * watchdog re-arms with a full budget once the local work completes (see
+	 * {@link localWorkSettledAt}), so a provider that stalls afterwards is
+	 * still caught.
 	 */
 	hasPendingLocalWork?: () => boolean;
+	/**
+	 * Epoch ms at which pending local work last drained to zero (0 when none
+	 * has completed). The provider cannot respond before it receives the local
+	 * result, so the idle and first-item deadlines are measured from no earlier
+	 * than this instant — a tool that finishes just before the deadline must
+	 * not leave the provider only the remainder of the old window.
+	 */
+	localWorkSettledAt?: () => number;
 	/**
 	 * Cancel iteration as soon as this signal aborts. Required for caller-driven
 	 * cancellation (ESC) when the underlying transport does not surface signal
@@ -217,10 +226,18 @@ export async function* iterateWithIdleTimeout<T>(
 			return false;
 		}
 	};
+	const localWorkSettledAt = (): number => {
+		if (!options.localWorkSettledAt) return 0;
+		try {
+			return options.localWorkSettledAt();
+		} catch {
+			return 0;
+		}
+	};
 	// Local work means the current gap is attributable to the consumer side,
 	// not the provider: slide the active deadline a full budget past now
-	// instead of aborting. Once the work completes the watchdog resumes from
-	// the last extension, so a provider that stalls afterwards is still caught.
+	// instead of aborting. Completion restarts the budget via
+	// `localWorkSettledAt`, so a provider that stalls afterwards is still caught.
 	const extendDeadlineForLocalWork = (): void => {
 		if (awaitingFirstItem) {
 			if (firstItemDeadlineMs !== undefined && firstItemTimeoutMs !== undefined) {
@@ -229,6 +246,13 @@ export async function* iterateWithIdleTimeout<T>(
 		} else {
 			lastProgressAt = Date.now();
 		}
+	};
+	// Deadlines as seen by the provider: never earlier than a full budget after
+	// the last local tool result became available to send upstream.
+	const firstItemDeadline = (): number | undefined => {
+		if (firstItemDeadlineMs === undefined || firstItemTimeoutMs === undefined) return firstItemDeadlineMs;
+		const settledAt = localWorkSettledAt();
+		return settledAt > 0 ? Math.max(firstItemDeadlineMs, settledAt + firstItemTimeoutMs) : firstItemDeadlineMs;
 	};
 
 	const noTimeoutEnforced =
@@ -265,9 +289,9 @@ export async function* iterateWithIdleTimeout<T>(
 	let timerFireAtMs = Infinity;
 
 	const currentDeadlineMs = (): number | undefined => {
-		if (awaitingFirstItem) return firstItemDeadlineMs;
+		if (awaitingFirstItem) return firstItemDeadline();
 		if (options.idleTimeoutMs !== undefined && options.idleTimeoutMs > 0) {
-			return lastProgressAt + options.idleTimeoutMs;
+			return Math.max(lastProgressAt, localWorkSettledAt()) + options.idleTimeoutMs;
 		}
 		return undefined;
 	};
@@ -328,8 +352,9 @@ export async function* iterateWithIdleTimeout<T>(
 			}
 			let activeTimeoutMs: number | undefined;
 			if (awaitingFirstItem) {
-				if (firstItemDeadlineMs !== undefined) {
-					activeTimeoutMs = firstItemDeadlineMs - Date.now();
+				const deadlineMs = firstItemDeadline();
+				if (deadlineMs !== undefined) {
+					activeTimeoutMs = deadlineMs - Date.now();
 					if (activeTimeoutMs <= 0) {
 						if (!hasPendingLocalWork()) {
 							options.onFirstItemTimeout?.();
@@ -337,11 +362,11 @@ export async function* iterateWithIdleTimeout<T>(
 							throw new AIError.StreamTimeoutError(options.firstItemErrorMessage ?? options.errorMessage);
 						}
 						extendDeadlineForLocalWork();
-						activeTimeoutMs = firstItemDeadlineMs! - Date.now();
+						activeTimeoutMs = firstItemDeadline()! - Date.now();
 					}
 				}
 			} else if (options.idleTimeoutMs !== undefined && options.idleTimeoutMs > 0) {
-				activeTimeoutMs = options.idleTimeoutMs - (Date.now() - lastProgressAt);
+				activeTimeoutMs = options.idleTimeoutMs - (Date.now() - Math.max(lastProgressAt, localWorkSettledAt()));
 				if (activeTimeoutMs <= 0) {
 					if (!hasPendingLocalWork()) {
 						options.onIdle?.();
