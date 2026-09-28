@@ -33,6 +33,7 @@ describe("Command Code provider support", () => {
 						context_length: 1_000_000,
 					},
 					{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context_length: 1_050_000 },
+					{ id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", context_length: 1_000_000 },
 				],
 			});
 		});
@@ -62,7 +63,7 @@ describe("Command Code provider support", () => {
 			},
 		});
 		expect(models.find(model => model.id === "gpt-5.6-sol")).toMatchObject({
-			api: "openai-completions",
+			api: "openai-responses",
 			baseUrl: "https://api.commandcode.ai/provider/v1",
 			reasoning: true,
 			contextWindow: 1_050_000,
@@ -74,9 +75,11 @@ describe("Command Code provider support", () => {
 			compat: {
 				supportsDeveloperRole: false,
 				supportsReasoningEffort: true,
-				supportsStore: false,
-				maxTokensField: "max_tokens",
 			},
+		});
+		expect(models.find(model => model.id === "deepseek/deepseek-v4-flash")).toMatchObject({
+			api: "openai-completions",
+			baseUrl: "https://api.commandcode.ai/provider/v1",
 		});
 	});
 
@@ -133,16 +136,16 @@ describe("Command Code provider support", () => {
 			fetch: async () =>
 				Response.json({
 					data: [
-						{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context_length: 1_050_000 },
+						{ id: "xiaomi/mimo-v2.5", name: "MiMo V2.5", context_length: 1_050_000 },
 						{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
 					],
 				}),
 		});
 		const specs = await catalog.fetchDynamicModels?.();
 		const models = (specs ?? []).map(spec => buildModel(spec));
-		const gpt = models.find(model => model.id === "gpt-5.6-sol");
+		const completions = models.find(model => model.id === "xiaomi/mimo-v2.5");
 		const claude = models.find(model => model.id === "claude-sonnet-4-6");
-		if (!gpt || !claude) throw new Error("Expected Command Code transport fixtures");
+		if (!completions || !claude) throw new Error("Expected Command Code transport fixtures");
 		let clock = 0;
 		vi.spyOn(performance, "now").mockImplementation(() => ++clock);
 
@@ -151,8 +154,8 @@ describe("Command Code provider support", () => {
 			if (url.endsWith("/chat/completions")) {
 				return new Response(
 					[
-						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-5.6-sol","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}',
-						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"gpt-5.6-sol","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2}}}',
+						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"xiaomi/mimo-v2.5","choices":[{"index":0,"delta":{"role":"assistant","content":"ok"},"finish_reason":null}]}',
+						'data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1,"model":"xiaomi/mimo-v2.5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3,"cache_write_tokens":2}}}',
 						"data: [DONE]",
 						"",
 					].join("\n\n"),
@@ -176,11 +179,14 @@ describe("Command Code provider support", () => {
 			return new Response("unexpected route", { status: 404 });
 		});
 		const context = { messages: [{ role: "user" as const, content: "Reply ok", timestamp: Date.now() }] };
-		const gptResult = await streamSimple(gpt, context, { apiKey: "user_test", fetch: fetchMock }).result();
+		const completionsResult = await streamSimple(completions, context, {
+			apiKey: "user_test",
+			fetch: fetchMock,
+		}).result();
 		const claudeResult = await streamSimple(claude, context, { apiKey: "user_test", fetch: fetchMock }).result();
 
 		expect(fetchMock).toHaveBeenCalledTimes(2);
-		expect(gptResult.usage).toMatchObject({
+		expect(completionsResult.usage).toMatchObject({
 			input: 5,
 			output: 2,
 			cacheRead: 3,
@@ -194,7 +200,7 @@ describe("Command Code provider support", () => {
 			cacheWrite: 2,
 			totalTokens: 12,
 		});
-		for (const result of [gptResult, claudeResult]) {
+		for (const result of [completionsResult, claudeResult]) {
 			expect(result.duration).toBeGreaterThan(0);
 			expect(result.ttft).toBeGreaterThan(0);
 			expect(result.ttft).toBeLessThanOrEqual(result.duration ?? 0);

@@ -10,6 +10,10 @@
 
 - Added the `web-search-model`, `hosted-image`, and `image-model` catalog axes (`Model.webSearchModel`, `hostedImage`, `imageModel`). `web-search` now comes from the model's lineage and API (GPT-5+ Responses, Claude 4+ Messages, Gemini 2+), so proxies and gateways that expose these models inherit it.
 
+### Changed
+
+- Routed Command Code GPT models through the OpenAI Responses API
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed
