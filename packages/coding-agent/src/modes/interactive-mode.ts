@@ -7184,7 +7184,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	/** Queue slash-command input behind the active turn. */
-	handleQueueCommand(message: string, detached?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<void> {
+	handleQueueCommand(
+		message: string,
+		detached?: Pick<SubmittedUserInput, "text" | "images" | "imageLinks">,
+	): Promise<void> {
 		return this.#inputController.handleQueueCommand(message, detached);
 	}
 

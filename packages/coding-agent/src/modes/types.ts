@@ -507,9 +507,13 @@ export interface InteractiveModeContext {
 	handleImagePaste(): Promise<boolean>;
 	/**
 	 * Queue a message for delivery only after the active agent turn would stop.
-	 * `detached` carries the attachments of a submission whose draft already left the editor.
+	 * `detached` is a submission whose draft already left the editor: its attachments
+	 * are queued and its text is restored if queueing fails.
 	 */
-	handleQueueCommand(message: string, detached?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<void>;
+	handleQueueCommand(
+		message: string,
+		detached?: Pick<SubmittedUserInput, "text" | "images" | "imageLinks">,
+	): Promise<void>;
 	handleBtwCommand(question: string): Promise<void>;
 	handleTanCommand(work: string): Promise<void>;
 	hasActiveBtw(): boolean;

@@ -20,6 +20,7 @@ import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 const ENTER = "\r";
 const FOLLOW_UP = "\x1b[13;5u";
 const originalImage: ImageContent = { type: "image", mimeType: "image/png", data: "b3JpZ2luYWw=" };
+const newerImage: ImageContent = { type: "image", mimeType: "image/jpeg", data: "bmV3ZXI=" };
 
 async function createHarness(factory: ExtensionFactory) {
 	const runtime = new ExtensionRuntime();
@@ -119,9 +120,9 @@ async function createHarness(factory: ExtensionFactory) {
 		}
 		throw new Error("The editor did not dispatch the submit key");
 	}
-	function draftWithImage(text = "original [Image #1]") {
-		editor.pendingImages = [originalImage];
-		editor.pendingImageLinks = ["local://original.png"];
+	function draftWithImage(text = "original [Image #1]", image = originalImage, link = "local://original.png") {
+		editor.pendingImages = [image];
+		editor.pendingImageLinks = [link];
 		editor.imageLinks = editor.pendingImageLinks;
 		editor.setText(text);
 	}
@@ -136,5 +137,54 @@ describe("interactive native input ingress", () => {
 		h.draftWithImage("/queue inspect [Image #1]");
 		await h.pressSubmit(FOLLOW_UP);
 		expect(h.session.followUp.mock.calls).toEqual([["inspect [Image #1]", [originalImage]]]);
+	});
+
+	it("Ctrl+Enter /queue that rejects restores its text and image beside a newer draft", async () => {
+		const h = await createHarness(() => {});
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		h.session.followUp.mockImplementationOnce(async () => {
+			entered.resolve();
+			await release.promise;
+			throw new Error("queue rejected");
+		});
+		h.draftWithImage("/queue inspect [Image #1]");
+		const submitting = h.pressSubmit(FOLLOW_UP);
+		await entered.promise;
+		// Typed after the draft detached for dispatch, while the queue call is in flight.
+		h.draftWithImage("newer [Image #1]", newerImage, "local://newer.jpg");
+		release.resolve();
+		await submitting;
+
+		expect(h.editor.getExpandedText()).toBe("/queue inspect [Image #2]\n\nnewer [Image #1]");
+		expect(h.editor.pendingImages).toEqual([newerImage, originalImage]);
+		expect(h.editor.pendingImageLinks).toEqual(["local://newer.jpg", "local://original.png"]);
+		expect(h.ctx.showError).toHaveBeenCalledWith("queue rejected");
+	});
+
+	it("Ctrl+Enter /queue that rejects after queueing some messages restores the rest beside a newer draft", async () => {
+		const h = await createHarness(() => {});
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		h.session.followUp.mockImplementationOnce(async () => {});
+		h.session.followUp.mockImplementationOnce(async () => {
+			entered.resolve();
+			await release.promise;
+			throw new Error("queue rejected");
+		});
+		h.draftWithImage("/queue 1. first [Image #1]\n2. second");
+		const submitting = h.pressSubmit(FOLLOW_UP);
+		await entered.promise;
+		h.draftWithImage("newer [Image #1]", newerImage, "local://newer.jpg");
+		release.resolve();
+		await submitting;
+
+		expect(h.session.followUp.mock.calls).toEqual([
+			["first [Image #1]", [originalImage]],
+			["second", undefined],
+		]);
+		expect(h.editor.getExpandedText()).toBe("=> second\n\nnewer [Image #1]");
+		expect(h.editor.pendingImages).toEqual([newerImage]);
+		expect(h.ctx.showError).toHaveBeenCalledWith("queue rejected");
 	});
 });

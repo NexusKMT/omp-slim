@@ -1004,13 +1004,7 @@ export class InputController {
 					// editor before dispatch — restores the submission and reports
 					// the error, mirroring `handleFollowUp`'s Ctrl+Enter path.
 					if (!draftDetached) throw error;
-					const editor = this.ctx.editor;
-					if (!editor.getText() && editor.pendingImages.length === 0) {
-						editor.setText(text);
-						editor.pendingImages = inputImages ? [...inputImages] : [];
-						editor.pendingImageLinks = inputImageLinks ? [...inputImageLinks] : [];
-						editor.imageLinks = editor.pendingImageLinks.length > 0 ? editor.pendingImageLinks : undefined;
-					}
+					this.#restoreInputDraft(text, inputImages, inputImageLinks);
 					this.ctx.showError(error instanceof Error ? error.message : String(error));
 					return;
 				}
@@ -1611,17 +1605,21 @@ export class InputController {
 
 	/**
 	 * Queue `/queue` input behind an active turn, or start it immediately when idle.
-	 * `detached` carries the attachments of a submission whose draft already left
-	 * the editor; without it, the live editor draft is the submission.
+	 * `detached` is a submission whose draft already left the editor: its
+	 * attachments are queued and its text is restored if queueing fails. Without
+	 * it, the live editor draft is the submission.
 	 */
-	async handleQueueCommand(text: string, detached?: Pick<SubmittedUserInput, "images" | "imageLinks">): Promise<void> {
+	async handleQueueCommand(
+		text: string,
+		detached?: Pick<SubmittedUserInput, "text" | "images" | "imageLinks">,
+	): Promise<void> {
 		const source = detached ?? {
 			images: this.ctx.editor.pendingImages,
 			imageLinks: this.ctx.editor.pendingImageLinks,
 		};
 		const images = source.images?.length ? [...source.images] : undefined;
 		const imageLinks = images && source.imageLinks?.length ? [...source.imageLinks] : undefined;
-		await this.#queueForYield(text, { images, imageLinks, draftDetached: detached !== undefined });
+		await this.#queueForYield(text, { images, imageLinks, detachedText: detached?.text });
 	}
 
 	async #queueForYield(
@@ -1630,13 +1628,13 @@ export class InputController {
 			historyText?: string;
 			images?: ImageContent[];
 			imageLinks?: (string | undefined)[];
-			/** The submitted draft already left the editor; anything there now is newer. */
-			draftDetached?: boolean;
+			/** The submitted draft already left the editor; anything there now is newer. Restored on failure. */
+			detachedText?: string;
 		},
 	): Promise<void> {
 		const splitMessages = splitQueuedMessages(text);
 		if (splitMessages.length === 0 && !options.images?.length) {
-			if (!options.draftDetached) this.ctx.editor.clearDraft();
+			if (options.detachedText === undefined) this.ctx.editor.clearDraft();
 			this.ctx.showWarning("Usage: /queue <message> (or start a prompt with -> / =>)");
 			return;
 		}
@@ -1649,7 +1647,7 @@ export class InputController {
 			: images
 				? images.map(() => undefined)
 				: undefined;
-		if (!options.draftDetached) this.ctx.editor.clearDraft(options.historyText);
+		if (options.detachedText === undefined) this.ctx.editor.clearDraft(options.historyText);
 
 		if (this.ctx.session.isCompacting) {
 			for (let index = 0; index < messages.length; index++) {
@@ -1704,11 +1702,15 @@ export class InputController {
 			}
 		} catch (error) {
 			if (queuedCount === 0) {
-				this.ctx.editor.setText(originalDraft);
-				if (images) {
-					this.ctx.editor.pendingImages = images;
-					this.ctx.editor.pendingImageLinks = imageLinks ?? images.map(() => undefined);
-					this.ctx.editor.imageLinks = this.ctx.editor.pendingImageLinks;
+				if (options.detachedText !== undefined) {
+					this.#restoreInputDraft(options.detachedText, images, imageLinks);
+				} else {
+					this.ctx.editor.setText(originalDraft);
+					if (images) {
+						this.ctx.editor.pendingImages = images;
+						this.ctx.editor.pendingImageLinks = imageLinks ?? images.map(() => undefined);
+						this.ctx.editor.imageLinks = this.ctx.editor.pendingImageLinks;
+					}
 				}
 			} else {
 				const remaining = messages.slice(queuedCount);
@@ -1718,7 +1720,8 @@ export class InputController {
 						: `=>\n${remaining
 								.map((message, index) => `${index + 1}. ${message.replaceAll("\n", "\n   ")}`)
 								.join("\n")}`;
-				this.ctx.editor.setText(restored);
+				if (options.detachedText !== undefined) this.#restoreInputDraft(restored);
+				else this.ctx.editor.setText(restored);
 			}
 			this.ctx.showError(error instanceof Error ? error.message : String(error));
 		}
