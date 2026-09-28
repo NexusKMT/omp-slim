@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed native remote compaction refusing Codex/OpenAI histories as over the context window by counting encrypted reasoning payloads in its size estimate (e.g. `estimated 494492 tokens > 272000`) ([#13611](https://github.com/can1357/oh-my-pi/issues/13611))
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
