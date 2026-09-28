@@ -617,7 +617,14 @@ export function buildSessionContext(
 		if (notes && renderedNotes.length > 0) {
 			const sourceEntry = path.find(entry => entry.id === notes.entryId);
 			if (sourceEntry) {
-				messages.unshift(
+				// A native Anthropic compaction block must open the request; nothing
+				// may precede it, so the notes follow that summary instead.
+				const head = messages[0];
+				const insertAt =
+					head?.role === "compactionSummary" && head.providerPayload?.type === "anthropicCompaction" ? 1 : 0;
+				messages.splice(
+					insertAt,
+					0,
 					createCustomMessage(CONTEXT_NOTES_ENTRY_TYPE, renderedNotes, false, undefined, sourceEntry.timestamp),
 				);
 			}

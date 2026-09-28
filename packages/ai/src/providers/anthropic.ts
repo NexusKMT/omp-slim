@@ -4193,12 +4193,21 @@ function collectAnthropicControlRecords(messages: readonly Message[]): Anthropic
  * lands between a `tool_use` and its `tool_result`, where `transformMessages`
  * would flush synthetic aborted results; a mid-turn change therefore takes
  * effect from the next step.
+ *
+ * A compaction summary is never a slot: its replayed `compaction` block must
+ * open the request, so nothing may precede it. A response opened by the block
+ * (no real user turn between them) takes the change from its next step.
  */
 function anthropicEffortInsertIndex(messages: readonly Message[], end: number): number {
 	for (let i = end - 1; i >= 0; i--) {
-		const role = messages[i]?.role;
-		if (role === "user") return i;
-		if (role === "assistant") return end;
+		const message = messages[i];
+		if (message?.role === "assistant") return end;
+		if (message?.role !== "user") continue;
+		if (message.providerPayload?.type !== "anthropicCompaction") return i;
+		let next = end;
+		if (messages[next]?.role === "assistant") next++;
+		while (messages[next]?.role === "toolResult") next++;
+		return next;
 	}
 	return end;
 }
