@@ -60,7 +60,16 @@ pub(super) fn parse(text: &str) -> Option<DateRequest> {
 
 impl DateRequest {
 	/// The `CFAbsoluteTime` to write, given the control's current value.
-	pub(super) fn absolute_time(self, current: f64, offset_at: impl Fn(f64) -> i64) -> f64 {
+	///
+	/// A local time the zone skips (the hour clocks jump over when
+	/// daylight saving starts) or repeats (the hour they go back through when
+	/// it ends) is refused rather than moved or guessed: the error names it, and
+	/// a date-time with an offset writes either instant exactly.
+	pub(super) fn absolute_time(
+		self,
+		current: f64,
+		offset_at: impl Fn(f64) -> i64,
+	) -> Result<f64, String> {
 		match self {
 			Self::Day(date) => {
 				let local = current + offset_at(current) as f64;
@@ -70,7 +79,7 @@ impl DateRequest {
 			Self::Local { date, seconds } => {
 				local_to_absolute(civil_seconds(date, seconds), offset_at)
 			},
-			Self::Instant(at) => at,
+			Self::Instant(at) => Ok(at),
 		}
 	}
 }
@@ -79,30 +88,55 @@ impl DateRequest {
 /// `2026-10-05T09:30:00+02:00`, a form [`parse`] accepts back.
 pub(super) fn format_local(at: f64, offset_at: impl Fn(f64) -> i64) -> String {
 	let offset = offset_at(at);
-	let local = (at + offset as f64).floor() as i64;
+	format!("{}{}", format_civil(at + offset as f64), format_offset(offset))
+}
+
+/// Local wall-clock seconds (on the `CFAbsoluteTime` scale) to the one
+/// absolute time that shows that clock in the local zone.
+fn local_to_absolute(local: f64, offset_at: impl Fn(f64) -> i64) -> Result<f64, String> {
+	// A zone changes its offset at most once within a day of any local time,
+	// so the offsets a day either side are the only ones that can apply.
+	let earlier = offset_at(local - SECONDS_PER_DAY as f64);
+	let later = offset_at(local + SECONDS_PER_DAY as f64);
+	let shows = |offset: i64| offset_at(local - offset as f64) == offset;
+	match (shows(earlier), earlier != later && shows(later)) {
+		(true, false) => Ok(local - earlier as f64),
+		(false, true) => Ok(local - later as f64),
+		(true, true) => Err(format!(
+			"{} occurs twice in the local time zone as clocks go back; add {} for the first or {} \
+			 for the second",
+			format_civil(local),
+			format_offset(earlier),
+			format_offset(later),
+		)),
+		(false, false) => Err(format!(
+			"{} does not exist in the local time zone: clocks skip it for daylight saving",
+			format_civil(local),
+		)),
+	}
+}
+
+/// Local wall-clock seconds as `YYYY-MM-DDTHH:MM:SS`.
+fn format_civil(local: f64) -> String {
+	let local = local.floor() as i64;
 	let date = civil_from_days(local.div_euclid(SECONDS_PER_DAY) + CF_EPOCH_DAYS);
 	let clock = local.rem_euclid(SECONDS_PER_DAY);
-	let sign = if offset < 0 { '-' } else { '+' };
-	let offset_minutes = offset.abs() / 60;
 	format!(
-		"{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{sign}{:02}:{:02}",
+		"{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
 		date.year,
 		date.month,
 		date.day,
 		clock / 3600,
 		clock / 60 % 60,
 		clock % 60,
-		offset_minutes / 60,
-		offset_minutes % 60,
 	)
 }
 
-/// Local wall-clock seconds (on the `CFAbsoluteTime` scale) to an absolute
-/// time. The offset is looked up again at the first estimate so a date across
-/// a daylight-saving change from today still lands on the requested clock.
-fn local_to_absolute(local: f64, offset_at: impl Fn(f64) -> i64) -> f64 {
-	let estimate = local - offset_at(local) as f64;
-	local - offset_at(estimate) as f64
+/// Seconds east of UTC as `±HH:MM`.
+fn format_offset(offset: i64) -> String {
+	let sign = if offset < 0 { '-' } else { '+' };
+	let minutes = offset.abs() / 60;
+	format!("{sign}{:02}:{:02}", minutes / 60, minutes % 60)
 }
 
 fn civil_seconds(date: CivilDate, seconds: f64) -> f64 {
@@ -232,17 +266,35 @@ mod tests {
 
 	/// 2026-09-25T17:00:00+02:00.
 	const SEPT_25_17H_CEST: f64 = 812_041_200.0;
+	/// 2026-03-29T01:00:00Z, when Central European summer time starts.
+	const CEST_FROM: f64 = 796_438_800.0;
 	/// 2026-10-25T01:00:00Z, when Central European summer time ends.
 	const CET_FROM: f64 = 814_582_800.0;
 
-	/// Central European time: +02:00 in summer, +01:00 from `CET_FROM`.
+	/// Central European time: +02:00 from `CEST_FROM` to `CET_FROM`, else
+	/// +01:00.
 	fn berlin(at: f64) -> i64 {
-		if at < CET_FROM { 7200 } else { 3600 }
+		if (CEST_FROM..CET_FROM).contains(&at) {
+			7200
+		} else {
+			3600
+		}
+	}
+
+	fn resolve(text: &str, current: f64) -> Result<f64, String> {
+		let request = parse(text).unwrap_or_else(|| panic!("{text:?} was refused"));
+		request.absolute_time(current, berlin)
 	}
 
 	fn write(text: &str, current: f64) -> String {
-		let request = parse(text).unwrap_or_else(|| panic!("{text:?} was refused"));
-		format_local(request.absolute_time(current, berlin), berlin)
+		let at = resolve(text, current).unwrap_or_else(|error| panic!("{text:?}: {error}"));
+		format_local(at, berlin)
+	}
+
+	fn refusal(text: &str, current: f64) -> String {
+		resolve(text, current)
+			.map(|at| format_local(at, berlin))
+			.expect_err(&format!("{text:?} was written"))
 	}
 
 	#[test]
@@ -250,7 +302,32 @@ mod tests {
 		assert_eq!(write("2026-10-05", SEPT_25_17H_CEST), "2026-10-05T17:00:00+02:00");
 		// Across the change to winter time the wall clock stays at 17:00.
 		assert_eq!(write("2026-12-24", SEPT_25_17H_CEST), "2026-12-24T17:00:00+01:00");
-		assert_eq!(write("2024-02-29", SEPT_25_17H_CEST), "2024-02-29T17:00:00+02:00");
+		assert_eq!(write("2024-02-29", SEPT_25_17H_CEST), "2024-02-29T17:00:00+01:00");
+	}
+
+	#[test]
+	fn a_local_time_skipped_by_daylight_saving_is_refused() {
+		let skipped = refusal("2026-03-29T02:30", SEPT_25_17H_CEST);
+		assert!(skipped.contains("2026-03-29T02:30:00 does not exist"), "{skipped}");
+		// A day whose kept time of day (02:30) falls in the skipped hour.
+		let kept = refusal("2026-03-29", SEPT_25_17H_CEST - 14.5 * 3600.0);
+		assert!(kept.contains("2026-03-29T02:30:00 does not exist"), "{kept}");
+		assert_eq!(write("2026-03-29T01:59:59", 0.0), "2026-03-29T01:59:59+01:00");
+		assert_eq!(write("2026-03-29T03:00", 0.0), "2026-03-29T03:00:00+02:00");
+	}
+
+	#[test]
+	fn a_local_time_repeated_as_clocks_go_back_is_refused_naming_both_offsets() {
+		let repeated = refusal("2026-10-25T02:30", SEPT_25_17H_CEST);
+		assert!(
+			repeated.contains("2026-10-25T02:30:00 occurs twice")
+				&& repeated.contains("add +02:00 for the first or +01:00 for the second"),
+			"{repeated}"
+		);
+		assert_eq!(write("2026-10-25T02:30+02:00", 0.0), "2026-10-25T02:30:00+02:00");
+		assert_eq!(write("2026-10-25T02:30+01:00", 0.0), "2026-10-25T02:30:00+01:00");
+		assert_eq!(write("2026-10-25T01:59:59", 0.0), "2026-10-25T01:59:59+02:00");
+		assert_eq!(write("2026-10-25T03:00", 0.0), "2026-10-25T03:00:00+01:00");
 	}
 
 	#[test]

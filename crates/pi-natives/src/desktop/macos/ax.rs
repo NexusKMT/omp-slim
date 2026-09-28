@@ -656,7 +656,9 @@ fn set_date_value(element: &AXUIElement, text: &str, current: f64) -> CoreResult
 			date::format_local(current, offset_at),
 		)));
 	};
-	let target = request.absolute_time(current, offset_at);
+	let target = request
+		.absolute_time(current, offset_at)
+		.map_err(|reason| DesktopError::ax_failed(format!("{reason}; nothing was written")))?;
 	let value = CFDate::new(None, target)
 		.ok_or_else(|| DesktopError::ax_failed("creating the CFDate to write failed"))?;
 	let attribute = CFString::from_str("AXValue");
