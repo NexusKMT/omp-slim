@@ -6881,6 +6881,7 @@ dependencies = [
  "os_pipe",
  "parking_lot",
  "pi-builtins",
+ "pi-vcs",
  "pi-vfs",
  "regex",
  "serde",
