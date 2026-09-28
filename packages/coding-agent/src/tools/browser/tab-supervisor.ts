@@ -18,7 +18,13 @@ import { gracefulKillTreeOnce, pickElectronTarget, shouldPreserveConnectedBrowse
 import { CmuxTab, runCmuxCode } from "./cmux/cmux-tab";
 import { mapWaitUntil } from "./cmux/rpc";
 import { DEFAULT_VIEWPORT } from "./launch";
-import { closeCdpTarget, forgetSharedTarget, recordSharedTarget, type SharedTargetScope } from "./orphan-registry";
+import {
+	closeCdpTarget,
+	forgetSharedTarget,
+	forgetSharedTargets,
+	recordSharedTarget,
+	type SharedTargetScope,
+} from "./orphan-registry";
 import { stopSharedBrowserIfUnreachable } from "./shared-daemon";
 import {
 	type BrowserHandle,
@@ -932,7 +938,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
 				// Chromium that stopped answering its CDP endpoint holds every
 				// unclosable target and must be replaced, not left to grow until
 				// the last omp client in the project exits.
-				void stopSharedBrowserIfUnreachable(scope);
+				recheckSharedBrowser(scope);
 			} else {
 				void forgetSharedTarget(scope, tab.targetId);
 			}
@@ -1537,7 +1543,7 @@ async function forceKillTabTeardown(tab: WorkerTabSession): Promise<void> {
 	const scope = sharedScopeOf(tab.browser);
 	if (scope) {
 		if (targetClosed) void forgetSharedTarget(scope, tab.targetId);
-		else void stopSharedBrowserIfUnreachable(scope);
+		else recheckSharedBrowser(scope);
 	}
 }
 
@@ -1560,6 +1566,21 @@ function sharedScopeOf(browser: BrowserHandle): SharedTargetScope | undefined {
 	if ("client" in browser) return undefined;
 	if (browser.kind.kind !== "headless" || !browser.sharedDaemon) return undefined;
 	return { projectDir: browser.sharedDaemon.projectDir, daemonName: browser.sharedDaemon.name };
+}
+
+/**
+ * Re-check the shared browser after a close it could not confirm, and forget
+ * what the outcome proves. A browser that answers is left alone: the retained
+ * record is not retried by this process (`collectOrphanTargets` skips a live
+ * pid) but is reaped after it exits, which is the same guarantee the registry
+ * gave before. A browser that gets stopped takes every target this process
+ * still claims in it — including the one whose close failed — so those records
+ * go with it instead of being rewritten on every later flush.
+ */
+function recheckSharedBrowser(scope: SharedTargetScope): void {
+	void stopSharedBrowserIfUnreachable(scope).then(stopped => {
+		if (stopped) void forgetSharedTargets(scope);
+	});
 }
 
 /**

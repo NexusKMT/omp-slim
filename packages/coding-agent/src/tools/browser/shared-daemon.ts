@@ -231,11 +231,12 @@ async function checkSharedBrowserReachable(scope: SharedTargetScope, deps: Share
 		if (!wsEndpoint) return false;
 		const probe = deps.probe ?? probeEndpoint;
 		/**
-		 * `silent` when the endpoint gave no answer inside the cap, `answered`
-		 * when it responded, `unknown` when the budget was already spent.
-		 * `rawHttpGet` awaits `Bun.connect` before its own timer can settle the
-		 * call, so the cap — not the probe's HTTP budget — is what a stalled
-		 * connect runs into.
+		 * `silent` when the endpoint did not answer in time — an answer slower
+		 * than the probe's own 1.5 s budget, or an attempt the cap abandoned —
+		 * `answered` when it responded, and `unknown` only when the health
+		 * budget was already spent. `rawHttpGet` awaits `Bun.connect` before its
+		 * own timer can settle the call, so the cap — not the probe's HTTP
+		 * budget — is what a stalled connect runs into.
 		 */
 		async function probeAttempt(endpoint: string): Promise<"answered" | "silent" | "unknown"> {
 			const capMs = Math.min(deps.probeCapMs ?? PROBE_ATTEMPT_CAP_MS, deadlineAt - Date.now());
@@ -251,9 +252,11 @@ async function checkSharedBrowserReachable(scope: SharedTargetScope, deps: Share
 			}
 		}
 		// Two silent attempts or nothing. `silent` is the only outcome that
-		// counts against the browser: an answer — however slow — means sessions
-		// are still using it, and an attempt the budget could not cover (or the
-		// cap abandoned) proves nothing and is retried by the next failed close.
+		// counts against the browser, and it includes both a slow answer past
+		// the probe's 1.5 s budget and an attempt the cap abandoned: at that
+		// point the endpoint is not servicing requests, so the sessions sharing
+		// the browser cannot drive it either. Only `unknown` — no budget left to
+		// try — proves nothing, and leaves the browser alone.
 		if ((await probeAttempt(wsEndpoint)) !== "silent") return false;
 		if ((await probeAttempt(wsEndpoint)) !== "silent") return false;
 		// Two silent probes can have raced another session's replacement of the

@@ -112,6 +112,25 @@ export async function forgetSharedTarget(scope: SharedTargetScope, targetId: str
 	);
 }
 
+/**
+ * Drop every target this process still claims in `scope`. For when the whole
+ * shared browser is gone (it was stopped after its CDP endpoint stopped
+ * answering), which takes the targets that could not be closed with it — the
+ * records are dead weight that would otherwise be rewritten on every later
+ * write until this process exits.
+ */
+export async function forgetSharedTargets(scope: SharedTargetScope): Promise<void> {
+	const dir = registryDir(scope);
+	const owned = ownedByDir.get(dir);
+	if (!owned || owned.size === 0) return;
+	owned.clear();
+	await chain(dir, () => flush(dir)).catch(err =>
+		logger.debug("Failed to clear shared-browser target ownership", {
+			error: err instanceof Error ? err.message : String(err),
+		}),
+	);
+}
+
 /** True when `pid` names a live process; non-`ESRCH` probe failures are treated as alive (safe direction). */
 function isPidAlive(pid: number): boolean {
 	try {

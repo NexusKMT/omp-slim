@@ -47,8 +47,18 @@ const DAEMON_NAME = "omp.browser.headless";
 const TARGET_ID = "D6895F960DB1F4D842FD7B0286F3F818";
 
 /** Unique per-test scope so registry dirs never collide across the suite. */
-function trackedScope(): SharedTargetScope {
+function makeScope(): SharedTargetScope {
 	return { projectDir: path.join("/tmp", `omp-wedge-test-${crypto.randomUUID()}`), daemonName: DAEMON_NAME };
+}
+
+/** Scopes created since the last sweep; `afterEach` removes them even when a test fails. */
+const scopes: SharedTargetScope[] = [];
+
+/** A scope registered for cleanup, so no assertion failure can leave it on disk. */
+function trackedScope(): SharedTargetScope {
+	const scope = makeScope();
+	scopes.push(scope);
+	return scope;
 }
 
 /** Targets this process still claims ownership of, straight from the durable record. */
@@ -69,10 +79,6 @@ async function ownedTargets(scope: SharedTargetScope): Promise<string[]> {
 	if (typeof parsed !== "object" || parsed === null || !("targets" in parsed)) return [];
 	const { targets } = parsed;
 	return Array.isArray(targets) ? targets.filter((id): id is string => typeof id === "string") : [];
-}
-
-async function dropScopeDir(scope: SharedTargetScope): Promise<void> {
-	await fs.rm(daemonRuntimeDir(scope.projectDir), { recursive: true, force: true }).catch(() => undefined);
 }
 
 /** How the stub's CDP close behaves: never answers, fails fast, or fails after a gate. */
@@ -201,6 +207,9 @@ afterEach(async () => {
 	for (const name of [...getTabsMapForTest().keys()]) {
 		await releaseTab(name, { kill: false }).catch(() => undefined);
 	}
+	for (const scope of scopes.splice(0)) {
+		await fs.rm(daemonRuntimeDir(scope.projectDir), { recursive: true, force: true }).catch(() => undefined);
+	}
 });
 
 describe("browser cleanup — timed-out target close in a shared browser", () => {
@@ -222,7 +231,21 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 		expect(await ownedTargets(scope)).toEqual([TARGET_ID]);
 		expect(healthCheck).toHaveBeenCalledTimes(1);
 		expect(healthCheck.mock.calls[0]?.[0]).toEqual(scope);
-		await dropScopeDir(scope);
+	});
+
+	it("forgets the retained target once the browser it belonged to is stopped", async () => {
+		const scope = trackedScope();
+		// The check proves the whole browser gone: the target that could not be
+		// closed died with it, so its record must not linger until this process
+		// exits and be rewritten on every later write.
+		const healthCheck = spyOn(sharedDaemon, "stopSharedBrowserIfUnreachable").mockResolvedValue(true);
+		await recordSharedTarget(scope, TARGET_ID);
+		getTabsMapForTest().set("logos-b2b", makeWedgeTab(scope, { close: "fail" }));
+
+		await expect(releaseTab("logos-b2b", { timeoutMs: 60 })).resolves.toBe(true);
+
+		expect(healthCheck).toHaveBeenCalledTimes(1);
+		expect(await ownedTargets(scope)).toEqual([]);
 	});
 
 	it("still forgets a tab that was already dead when it was released", async () => {
@@ -237,7 +260,6 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 
 		expect(await ownedTargets(scope)).toEqual([]);
 		expect(healthCheck).not.toHaveBeenCalled();
-		await dropScopeDir(scope);
 	});
 
 	it("force-kills a wedged tab without forgetting the target it could not close", async () => {
@@ -257,7 +279,6 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 		expect(await ownedTargets(scope)).toEqual([TARGET_ID]);
 		expect(healthCheck).toHaveBeenCalledTimes(1);
 		expect(healthCheck.mock.calls[0]?.[0]).toEqual(scope);
-		await dropScopeDir(scope);
 	});
 
 	it("lets a release join an in-flight force-kill instead of tearing the tab down twice", async () => {
@@ -300,7 +321,6 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 		expect(tab.browser.refCount).toBe(1);
 		expect(await ownedTargets(scope)).toEqual([TARGET_ID]);
 		expect(healthCheck).toHaveBeenCalledTimes(1);
-		await dropScopeDir(scope);
 	});
 
 	it("bounds the close a joining release waits on when force-kill is stuck on a wedged browser", async () => {
@@ -336,7 +356,6 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 		await killed;
 		expect(await ownedTargets(scope)).toEqual([TARGET_ID]);
 		expect(healthCheck).toHaveBeenCalledTimes(1);
-		await dropScopeDir(scope);
 	}, 20_000);
 
 	it("never checks a browser that is not the shared one", async () => {
@@ -359,7 +378,6 @@ describe("browser cleanup — timed-out target close in a shared browser", () =>
 
 		expect(await ownedTargets(scope)).toEqual([TARGET_ID]);
 		expect(healthCheck).toHaveBeenCalledTimes(1);
-		await dropScopeDir(scope);
 	});
 });
 
@@ -483,7 +501,7 @@ describe("shared browser reachability check", () => {
 		expect(stops).toEqual([]);
 	});
 
-	it("leaves a browser that answers the real endpoint slowly, but alive, alone", async () => {
+	it("treats one timed-out real probe followed by an answer as not a wedge", async () => {
 		// The production probe, against an endpoint that misses its 1.5 s budget
 		// once — a loaded machine, not a dead browser. Real wall-clock time is
 		// the subject here, so the slow answer is held until the probe's own
@@ -495,9 +513,9 @@ describe("shared browser reachability check", () => {
 			async fetch(req) {
 				requests++;
 				if (requests === 1) {
-					await new Promise<void>(resolve => {
-						req.signal.addEventListener("abort", () => resolve(), { once: true });
-					});
+					const aborted = Promise.withResolvers<void>();
+					req.signal.addEventListener("abort", () => aborted.resolve(), { once: true });
+					await aborted.promise;
 					return new Response("too late", { status: 504 });
 				}
 				return Response.json({ Browser: "Chrome/150.0.7871.24" });
