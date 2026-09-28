@@ -127,20 +127,13 @@ export function isThinkingPart(part: Pick<Part, "thought" | "thoughtSignature">)
  * Retain thought signatures during streaming.
  *
  * Some backends only send `thoughtSignature` on the first delta for a given part/block; later deltas may omit it.
- * This helper preserves the last non-empty signature for the current block (first non-empty when `firstWins`).
+ * This helper preserves the last non-empty signature for the current block.
  *
  * Note: this does NOT merge or move signatures across distinct response parts. It only prevents
  * a signature from being overwritten with `undefined` within the same streamed block.
  */
-export function retainThoughtSignature(
-	existing: string | undefined,
-	incoming: string | undefined,
-	firstWins = false,
-): string | undefined {
-	if (typeof incoming === "string" && incoming.length > 0) {
-		if (firstWins && typeof existing === "string" && existing.length > 0) return existing;
-		return incoming;
-	}
+export function retainThoughtSignature(existing: string | undefined, incoming: string | undefined): string | undefined {
+	if (typeof incoming === "string" && incoming.length > 0) return incoming;
 	return existing;
 }
 
@@ -1136,7 +1129,7 @@ function paramsToWireBody(params: GenerateContentParameters): Record<string, unk
  * hid both, so every billing 429 replayed as a transient rate limit (#13090).
  * The Cloud Code Assist path keeps the whole raw body for the same reason.
  */
-function extractGoogleErrorMessage(errorText: string, status: number): string {
+export function extractGoogleErrorMessage(errorText: string, status: number): string {
 	if (!errorText) return "Unknown error";
 	try {
 		const parsed = JSON.parse(errorText) as {
