@@ -605,17 +605,20 @@ export function formatRoleChip(role: string, assignment: RoleAssignment, setting
 	return theme.fg(info.color ?? "muted", `${theme.status.enabled} ${label}`) + suffix;
 }
 
-/** Both token legs at zero cost — the condition {@link formatCostPair} renders as `free`. */
+/** No token price and no subscription-credit charge. */
 function isFreeModel(model: Model): boolean {
 	const cost = model.cost;
-	return !cost || (cost.input === 0 && cost.output === 0);
+	const credits = model.factoryDroidCredits;
+	return (!cost || (cost.input === 0 && cost.output === 0)) && (credits === undefined || credits === 0);
 }
 
-/** `$in/out` per-million cost pair; `free` when both legs are zero. */
+/**
+ * `$in/out` per-million cost pair; `free` when both legs are zero. Factory
+ * Droid models also carry an `N×` base Standard Credits rate. Neither the
+ * reference dollar price nor the base credit rate includes live promotions.
+ */
 function formatCostPair(model: Model): string {
-	if (isFreeModel(model)) return "free";
 	const cost = model.cost;
-
 	const fmt = (n: number): string => {
 		if (!Number.isFinite(n) || n < 0) return "?";
 		if (n > 0 && n < 0.01) {
@@ -624,7 +627,11 @@ function formatCostPair(model: Model): string {
 		const s = n >= 100 ? String(Math.round(n)) : n >= 10 ? n.toFixed(1) : n.toFixed(2);
 		return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 	};
-	return `$${fmt(cost.input)}/${fmt(cost.output)}`;
+	const credits = model.factoryDroidCredits;
+	if (credits === undefined) return isFreeModel(model) ? "free" : `$${fmt(cost.input)}/${fmt(cost.output)}`;
+	const badge = `${fmt(credits)}×`;
+	const hasListPrice = cost && (cost.input !== 0 || cost.output !== 0);
+	return hasListPrice ? `$${fmt(cost.input)}/${fmt(cost.output)} ${badge}` : badge;
 }
 
 /**
