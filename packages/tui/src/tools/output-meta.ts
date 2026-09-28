@@ -188,7 +188,7 @@ function isGeneratedOutputNoticeLine(line: string): boolean {
 	return (
 		body.startsWith("Showing ") ||
 		/^\d+ matches limit reached\. Use limit=\d+ for more/u.test(body) ||
-		/^\d+ results limit reached(?:\. Use limit=\d+ for more)?$/u.test(body) ||
+		/^\d+ results limit reached(?:\.|$)/u.test(body) ||
 		body.startsWith("Some lines truncated to ")
 	);
 }
