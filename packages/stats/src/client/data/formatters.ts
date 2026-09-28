@@ -6,7 +6,7 @@ import type { MessageStats } from "../types";
  * (`toFixed`), durations and dates are English, so following the browser
  * locale mixed conventions (e.g. `1,4 Mr` beside `97.0%` on a tr-TR browser).
  */
-export const NUMBER_LOCALE = "en-US";
+const NUMBER_LOCALE = "en-US";
 
 export function formatInteger(value: number): string {
 	return value.toLocaleString(NUMBER_LOCALE);

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import { formatCompact, formatCost, formatInteger } from "../src/client/data/formatters";
 
 // Simulate a browser whose default locale is tr-TR, where compact "B" means
@@ -6,22 +6,20 @@ import { formatCompact, formatCost, formatInteger } from "../src/client/data/for
 // to the default locale would render `546 B` and `$38.003,33` here.
 const nativeToLocaleString = Number.prototype.toLocaleString;
 
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 describe("dashboard number formatting", () => {
-	beforeAll(() => {
-		Number.prototype.toLocaleString = function (
+	it("ignores the browser locale so figures match the English UI", () => {
+		vi.spyOn(Number.prototype, "toLocaleString").mockImplementation(function (
 			this: number,
 			locales?: Intl.LocalesArgument,
 			options?: Intl.NumberFormatOptions,
 		) {
 			return nativeToLocaleString.call(this, locales ?? "tr-TR", options);
-		};
-	});
+		});
 
-	afterAll(() => {
-		Number.prototype.toLocaleString = nativeToLocaleString;
-	});
-
-	it("ignores the browser locale so figures match the English UI", () => {
 		expect(formatInteger(435_087)).toBe("435,087");
 		expect(formatCompact(546_000)).toBe("546K");
 		expect(formatCompact(1_400_000_000)).toBe("1.4B");
