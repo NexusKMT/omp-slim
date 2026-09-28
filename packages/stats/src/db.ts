@@ -676,7 +676,10 @@ export interface ParsedSession {
 	replay: boolean;
 }
 
-function* parsedRows<T>(results: ParseSessionResult[], select: (result: ParseSessionResult) => Iterable<T>): Generator<T> {
+function* parsedRows<T>(
+	results: ParseSessionResult[],
+	select: (result: ParseSessionResult) => Iterable<T>,
+): Generator<T> {
 	for (const result of results) yield* select(result);
 }
 
@@ -717,8 +720,12 @@ export function applySessionParseResults(sessions: ParsedSession[]): {
 				if (result.reset || rebuild) {
 					// Only removed owners require another full replay, not an identity-only file replacement.
 					if (!reconcile && (messages.length > 0 || users.length > 0 || tools.length > 0)) {
-						const retainedMessages = new Set(result.stats.map(row => JSON.stringify([row.entryId, row.timestamp])));
-						const retainedUsers = new Set(result.userStats.map(row => JSON.stringify([row.entryId, row.timestamp])));
+						const retainedMessages = new Set(
+							result.stats.map(row => JSON.stringify([row.entryId, row.timestamp])),
+						);
+						const retainedUsers = new Set(
+							result.userStats.map(row => JSON.stringify([row.entryId, row.timestamp])),
+						);
 						const retainedTools = new Set(
 							result.toolCalls.map(row => JSON.stringify([row.entryId, row.timestamp, row.toolCallId])),
 						);
@@ -730,7 +737,8 @@ export function applySessionParseResults(sessions: ParsedSession[]): {
 							);
 					}
 					if (messages.length > 0) database.query("DELETE FROM messages WHERE session_file = ?").run(sessionFile);
-					if (users.length > 0) database.query("DELETE FROM user_messages WHERE session_file = ?").run(sessionFile);
+					if (users.length > 0)
+						database.query("DELETE FROM user_messages WHERE session_file = ?").run(sessionFile);
 					if (tools.length > 0) database.query("DELETE FROM tool_calls WHERE session_file = ?").run(sessionFile);
 				} else {
 					// A reconciliation replay only needs missing rows and unfinished links. Keep stable request
