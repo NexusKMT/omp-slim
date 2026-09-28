@@ -71,7 +71,7 @@ describe("status line loop mode segment", () => {
 
 	it("masks the armed label during startup placeholder rendering", () => {
 		const ctx = createContext({ state: "waiting" });
-		const rendered = renderSegment("mode", { ...ctx, startupPlaceholder: true });
+		const rendered = renderSegment("mode", { ...ctx, startupPlaceholder: "session" });
 
 		expect(Bun.stripANSI(rendered.content)).toBe(withIcon(theme.icon.loop, "Loop: …"));
 	});

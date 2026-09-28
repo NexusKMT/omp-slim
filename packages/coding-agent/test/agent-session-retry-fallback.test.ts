@@ -5960,6 +5960,46 @@ describe("AgentSession retry fallback", () => {
 		expect(session.configWarnings.filter(w => w.includes(`${primaryModel.provider}/${primaryModel.id}`))).toEqual([]);
 	});
 
+	it("surfaces deferred chain warnings once, with a config_warnings_changed event", () => {
+		const primaryModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel) {
+			throw new Error("Expected bundled OpenAI test model to exist");
+		}
+		const warning = "retry.fallbackChains key references unknown model: nonexistent-provider/nonexistent-model";
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.fallbackChains": {
+				"nonexistent-provider/nonexistent-model": [`${primaryModel.provider}/${primaryModel.id}`],
+			},
+		});
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: () => {
+				throw new Error("Not exercised");
+			},
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+			deferRetryFallbackValidation: true,
+		});
+		let warningEvents = 0;
+		session.subscribe(event => {
+			if (event.type === "config_warnings_changed") warningEvents++;
+		});
+
+		expect(session.configWarnings).not.toContain(warning);
+		session.validateRetryFallbackChains();
+		session.validateRetryFallbackChains();
+
+		expect(session.configWarnings.filter(w => w === warning)).toHaveLength(1);
+		expect(warningEvents).toBe(1);
+	});
+
 	it("normalizes suppression by base selector and clears it on model refresh", async () => {
 		const future = Date.now() + 60_000;
 		modelRegistry.suppressSelector("openai/gpt-4o:high", future);

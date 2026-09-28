@@ -60,9 +60,11 @@ export interface ComposerWelcomeUpdate {
 }
 
 /**
- * Placeholder-only status chrome replayed on the next first frame so the
- * status band/border exists before the session-aware status line attaches.
- * Bound to the composer shape it was rendered for; a different shape drops it.
+ * Cached status chrome replayed on the next first frame so the status
+ * band/border exists before the session-aware status line attaches. Session
+ * values are elided; project values (model, path, branch) appear only while
+ * still current (see `ComposerStatusCache`). Bound to the composer shape it was
+ * rendered for; a different shape drops it.
  */
 export interface ComposerStatusSnapshot {
 	readonly shape: string;

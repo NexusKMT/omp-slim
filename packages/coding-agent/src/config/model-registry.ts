@@ -547,8 +547,9 @@ export class ModelRegistry {
 	/**
 	 * Resolve once the initial background discovery has settled, arming a waiter
 	 * even when the refresh has not started yet. In the CLI path
-	 * {@link refreshInBackground} runs right after the session is constructed
-	 * (`main.ts`), so a consumer created in the constructor cannot rely on an
+	 * {@link refreshInBackground} runs after the session is constructed
+	 * (`main.ts`; interactive mode waits for the first frame), so a consumer
+	 * created in the constructor cannot rely on an
 	 * in-flight snapshot — it must observe the settle whenever it happens.
 	 * Resolves immediately once any background refresh has completed; never
 	 * rejects (discovery errors are swallowed by `refreshInBackground`). Stays

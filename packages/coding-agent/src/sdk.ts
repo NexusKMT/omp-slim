@@ -538,6 +538,13 @@ export interface CreateAgentSessionOptions {
 	 * so caller-owned routing and limits remain authoritative.
 	 */
 	rebindModelAfterDiscovery?: boolean;
+	/**
+	 * Skip retry.fallbackChains validation while building the session; the host
+	 * MUST call `session.validateRetryFallbackChains()` once its first frame is
+	 * up. Validation composes the catalog slice of every provider a chain names,
+	 * so interactive startup keeps it off the first-frame path.
+	 */
+	deferRetryFallbackValidation?: boolean;
 	/** Raw model pattern(s) (e.g. from --model CLI flag) to resolve after extensions load.
 	 * Used when model lookup is deferred because extension-provided models aren't registered yet. */
 	modelPattern?: string | string[];
@@ -1692,10 +1699,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		}
 	});
 	startupCleanup.defer(unsubscribeCredentialDisabled);
-	await logger.time("hydrateCredentialScopedModelCaches", () => modelRegistry.hydrateCredentialScopedModelCaches());
-	if (!options.modelRegistry) {
-		modelRegistry.refreshInBackground();
-	}
+	// Local-only and never rejects; awaited just before the first catalog read so
+	// its credential/cache I/O overlaps the cwd-scoped discoveries started below.
+	const credentialScopedCacheHydration = logger.time("hydrateCredentialScopedModelCaches", () =>
+		modelRegistry.hydrateCredentialScopedModelCaches(),
+	);
 	// Kick off workspace tree discovery early. The native workspace scan returns
 	// both the rendered-tree input and the AGENTS.md directory-context index, so
 	// startup does not perform a second recursive filesystem search. Subagents
@@ -1866,6 +1874,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 			if (providers.size > 0) explicitDefaultProviders = providers;
 		}
+	}
+	await credentialScopedCacheHydration;
+	if (!options.modelRegistry) {
+		modelRegistry.refreshInBackground();
 	}
 	const allowedModels = await logger.time("resolveAllowedModels", () =>
 		explicitDefaultProviders
@@ -4428,6 +4440,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			thinkingLevel: autoThinking ? AUTO_THINKING : effectiveThinkingLevel,
 			thinkingLevelCeiling: options.thinkingLevelCeiling,
 			initialRetryFallback,
+			deferRetryFallbackValidation: options.deferRetryFallbackValidation,
 			prewalk,
 			planYolo: options.planYolo,
 			serviceTierByFamily: initialServiceTierByFamily,

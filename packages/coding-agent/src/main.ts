@@ -586,7 +586,7 @@ async function runInteractiveMode(
 	initialMessage?: string,
 	initialImages?: ImageContent[],
 	joinLink?: string,
-	startBackgroundModelDiscovery?: () => Promise<void>,
+	startDeferredStartupWork?: () => void,
 	startupLease?: ComposerLease,
 ): Promise<void> {
 	const InteractiveModeConstructor = await loadInteractiveModeConstructor();
@@ -641,7 +641,7 @@ async function runInteractiveMode(
 				recentSessions: startupLease?.recentSessions,
 			}),
 		);
-		void startBackgroundModelDiscovery?.();
+		startDeferredStartupWork?.();
 
 		if (setupWizard && playStartupSplash) {
 			await setupWizard.runStartupSplash(mode);
@@ -2064,9 +2064,13 @@ export async function runRootCommand(
 			}
 		}
 		await pluginPreloadPromise;
-		if (deps === DEFAULT_RUN_ROOT_DEPENDENCIES) {
-			await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
-		}
+		// Pure file I/O: overlap it with session-option building, but land it before
+		// extensions load or the session can start project daemons.
+		const daemonPresencePromise =
+			deps === DEFAULT_RUN_ROOT_DEPENDENCIES
+				? logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd)
+				: undefined;
+		daemonPresencePromise?.catch(() => {});
 
 		scheduleMarketplaceAutoUpdate({
 			autoUpdate: cfgMarketplaceAutoUpdate.get(settingsInstance),
@@ -2106,6 +2110,7 @@ export async function runRootCommand(
 		if (isTelemetryExportEnabled()) {
 			sessionOptions.telemetry = createTelemetryExportConfig(sessionOptions.telemetry);
 		}
+		await daemonPresencePromise;
 
 		// Handle CLI --api-key as runtime override (not persisted)
 		if (parsedArgs.apiKey) {
@@ -2125,8 +2130,9 @@ export async function runRootCommand(
 			const result = await logger.time("createAgentSession", createAgentSessionImpl, options);
 			// Kick off background model discovery only after createAgentSession finishes its parallel
 			// discovery arms; running these concurrently contends for the event loop and stretches
-			// every parallel arm by ~30ms.
-			modelRegistry.refreshInBackground();
+			// every parallel arm by ~30ms. Interactive startup defers it further, behind the first
+			// frame (see `startDeferredStartupWork`), for the same reason.
+			if (!isInteractive) modelRegistry.refreshInBackground();
 			return result;
 		};
 
@@ -2268,6 +2274,8 @@ export async function runRootCommand(
 				eventBus,
 				subagentEventBus,
 				preloadedExtensions: extensionsResult,
+				// runInteractiveMode validates once init has painted the first frame.
+				deferRetryFallbackValidation: isInteractive,
 			});
 
 			const sessionToolNames = session.getAllToolNames();
@@ -2314,11 +2322,21 @@ export async function runRootCommand(
 			// empty (issue #9220). Fire-and-forget: the prompt must never block on the
 			// background pass.
 			const configuredScope = parsedArgs.models ?? cfgEnabledModels.get(settingsInstance);
-			if (isInteractive && configuredScope.length > 0) {
-				void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(error =>
-					logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
-				);
-			}
+			// Interactive-only work that must not delay the first session-bound frame:
+			// runInteractiveMode calls it once init has painted. Neither feeds the first
+			// prompt: fallback-chain validation only produces header warnings, and the
+			// background refresh already raced the first prompt when it ran earlier.
+			const startDeferredStartupWork = (): void => {
+				session.validateRetryFallbackChains();
+				modelRegistry.refreshInBackground();
+				if (configuredScope.length > 0) {
+					// Must follow refreshInBackground: it waits on the in-flight refresh.
+					void rebuildScopedModelsAfterDiscovery(session, parsedArgs, modelRegistry, settingsInstance).catch(
+						error => logger.warn("Scoped model rebuild after discovery failed", { error: String(error) }),
+					);
+				}
+				void startBackgroundModelDiscovery?.();
+			};
 			watchScopedModelSettings(session, parsedArgs, modelRegistry, settingsInstance);
 
 			if (modelFallbackMessage) {
@@ -2411,7 +2429,7 @@ export async function runRootCommand(
 						initialMessage,
 						initialImages,
 						parsedArgs.join,
-						startBackgroundModelDiscovery,
+						startDeferredStartupWork,
 						startupLease,
 					);
 				} finally {

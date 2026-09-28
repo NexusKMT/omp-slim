@@ -268,6 +268,8 @@ export interface TurnRecoveryHost {
 /** Construction-time retry state restored from model selection. */
 export interface TurnRecoveryOptions {
 	initialRetryFallback?: InitialRetryFallbackState;
+	/** Skip construction-time fallback-chain validation; the owner runs {@link TurnRecovery.validateRetryFallbackChains}. */
+	deferFallbackChainValidation?: boolean;
 }
 
 type PendingRetryError = {
@@ -344,6 +346,8 @@ export class TurnRecovery {
 	#fallbackChainWarnings = new Set<string>();
 	/** Whether startup validation deferred any warning pending in-flight discovery (#10048). */
 	#pendingDiscoveryDeferredValidation = false;
+	/** Whether startup fallback-chain validation has run; later checks go through the post-discovery reconcile. */
+	#fallbackChainsValidated = false;
 
 	constructor(host: TurnRecoveryHost, options: TurnRecoveryOptions = {}) {
 		this.#host = host;
@@ -355,7 +359,7 @@ export class TurnRecovery {
 			};
 			this.#markFallbackRouted();
 		}
-		this.#validateRetryFallbackChains();
+		if (!options.deferFallbackChainValidation) this.validateRetryFallbackChains();
 	}
 
 	/** Current automatic retry attempt. */
@@ -1623,7 +1627,13 @@ export class TurnRecovery {
 		return getRetryFallbackChains(this.#host.settings);
 	}
 
-	#validateRetryFallbackChains(): void {
+	/**
+	 * Validate configured fallback chains, logging each warning and appending it
+	 * to `configWarnings`. Runs once: at construction unless deferred by the owner.
+	 */
+	validateRetryFallbackChains(): void {
+		if (this.#fallbackChainsValidated) return;
+		this.#fallbackChainsValidated = true;
 		let deferred = false;
 		validateRetryFallbackChains(
 			this.#host.settings,
