@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Helmcode as a built-in provider with API-key login, live model discovery, and Helmcode's documented reasoning effort levels ([#13630](https://github.com/can1357/oh-my-pi/pull/13630) by [@alexcerezo](https://github.com/alexcerezo)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed
