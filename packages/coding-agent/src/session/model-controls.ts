@@ -182,6 +182,16 @@ export class ModelControls {
 		this.#applyThinkingLevelToAgent(level);
 	}
 
+	/**
+	 * Drop only the per-turn classifier cache, leaving the configured mode
+	 * (`#autoThinking`) and the effective level untouched. Used by `newSession()`
+	 * so `/new` doesn't pre-seed the new session's first turn with the previous
+	 * session's auto-resolved effort before it has classified anything.
+	 */
+	clearAutoResolvedLevel(): void {
+		this.#autoResolvedLevel = undefined;
+	}
+
 	/** Restores service tiers without persisting a duplicate transcript entry. */
 	restoreServiceTiers(tiers: ServiceTierByFamily): void {
 		this.#serviceTierByFamily = tiers;
