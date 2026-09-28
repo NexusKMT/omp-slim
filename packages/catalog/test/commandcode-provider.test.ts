@@ -7,7 +7,7 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import { DEFAULT_MODEL_PER_PROVIDER, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import { commandCodeModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
-import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
+import type { FetchImpl, ModelSpec } from "@oh-my-pi/pi-catalog/types";
 
 const originalPrimaryKey = Bun.env.COMMAND_CODE_API_KEY;
 const originalLegacyKey = Bun.env.COMMANDCODE_API_KEY;
@@ -131,6 +131,10 @@ const textOnlyIds: Record<string, true> = {
 	"zai-org/GLM-5.3": true,
 };
 
+function chatSpecs(specs: readonly ModelSpec[] | null | undefined) {
+	return (specs ?? []).filter(spec => buildModel(spec).kind !== "judge");
+}
+
 async function discoverModels(ids: string[]) {
 	const fetchMock: FetchImpl = vi.fn(async () =>
 		Response.json({
@@ -139,7 +143,7 @@ async function discoverModels(ids: string[]) {
 	);
 	const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 	const specs = await options.fetchDynamicModels?.();
-	return (specs ?? []).map(spec => buildModel(spec));
+	return chatSpecs(specs).map(spec => buildModel(spec));
 }
 
 describe("Command Code provider support", () => {
@@ -206,6 +210,39 @@ describe("Command Code provider support", () => {
 		});
 	});
 
+	test("discovers the typesafe/jev judge model beside the served roster", async () => {
+		const fetchMock: FetchImpl = vi.fn(async () =>
+			Response.json({
+				data: [{ id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", context_length: 1_000_000 }],
+			}),
+		);
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const specs = await options.fetchDynamicModels?.();
+		const models = (specs ?? []).map(spec => buildModel(spec));
+
+		expect(models.find(model => model.id === "typesafe/jev")).toMatchObject({
+			api: "typesafe",
+			baseUrl: "https://api.commandcode.ai/provider",
+			kind: "judge",
+			cost: { input: 0.042, output: 0 },
+		});
+		expect(chatSpecs(specs).map(spec => spec.id)).toEqual(["deepseek/deepseek-v4-flash"]);
+
+		const proxied = commandCodeModelManagerOptions({
+			apiKey: "user_test",
+			baseUrl: "https://proxy.example/provider/v1",
+			fetch: fetchMock,
+		});
+		const proxiedModels = ((await proxied.fetchDynamicModels?.()) ?? []).map(spec => buildModel(spec));
+		expect(proxiedModels.find(model => model.id === "typesafe/jev")?.baseUrl).toBe("https://proxy.example/provider");
+	});
+
+	test("returns null from a failed discovery instead of the jev seed alone", async () => {
+		const fetchMock: FetchImpl = vi.fn(async () => new Response("unavailable", { status: 503 }));
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		expect(await options.fetchDynamicModels?.()).toBeNull();
+	});
+
 	test("resolves DeepSeek V4.1 Flash's rule-owned surface over neutral discovery metadata", async () => {
 		// The Provider API ships no capability metadata for this id, so the
 		// ladder, image input, and DeepSeek reasoning-content contract have to
@@ -250,7 +287,8 @@ describe("Command Code provider support", () => {
 		});
 		const options = commandCodeModelManagerOptions({ fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		expect(specs).toHaveLength(1);
+		const models = chatSpecs(specs).map(spec => buildModel(spec));
+		expect(models).toHaveLength(1);
 		expect(requestHeaders).not.toHaveProperty("Authorization");
 	});
 
@@ -504,7 +542,7 @@ describe("Command Code provider support", () => {
 		);
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec));
+		const models = chatSpecs(specs).map(spec => buildModel(spec));
 		expect(models).toHaveLength(4);
 		for (const model of models) {
 			expect(model.reasoning).toBe(false);
@@ -534,11 +572,12 @@ describe("Command Code provider support", () => {
 		);
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		expect(specs).toHaveLength(2);
-		for (const spec of specs ?? []) {
+		const chatRows = chatSpecs(specs);
+		expect(chatRows).toHaveLength(2);
+		for (const spec of chatRows) {
 			expect(spec.contextWindow).toBeNull();
 		}
-		const models = (specs ?? []).map(spec => buildModel(spec));
+		const models = chatRows.map(spec => buildModel(spec));
 		for (const model of models) {
 			expect(model.contextWindow).toBeNull();
 			expect(model.input).toEqual(["text"]);

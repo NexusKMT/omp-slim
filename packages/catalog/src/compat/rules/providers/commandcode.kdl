@@ -14,6 +14,18 @@ provider "commandcode" {
 	// backfill reasoning, input, or limits during generation.
 	skip-cross-provider-reference-fills #true
 	discovery label="Command Code" allow-unauthenticated=#true
+	// Command Code serves TypeSafe's jev only through the System One route
+	// (`POST /provider/v1/systemone`); `/provider/v1/models` omits it.
+	seed api="typesafe" base-url="https://api.commandcode.ai/provider" bundle="always" {
+		model "typesafe/jev" name="TypeSafe Jev" {
+			reasoning #false
+			input "text"
+			// Jev bills input only (command-code@1.66.0 display rate after its free window).
+			cost input=0.042 output=0 cache-read=0 cache-write=0
+			limits
+			supports-tools #false
+		}
+	}
 
 	supports-developer-role #false
 	supports-store #false
@@ -37,6 +49,9 @@ provider "commandcode" {
 		thinking-mode "anthropic-adaptive"
 		supports-eager-tool-input-streaming #false
 		supports-long-cache-retention #false
+	}
+	models "typesafe/jev" {
+		kind "judge"
 	}
 	models "claude-fable-5" "claude-fable-5-1" "claude-opus-4-7" "claude-opus-4-8" \
 		"claude-opus-5" "claude-opus-5-5" "claude-sonnet-4-6" "claude-sonnet-5" \

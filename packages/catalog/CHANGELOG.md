@@ -9,6 +9,7 @@
 ### Added
 
 - Added the `web-search-model`, `hosted-image`, and `image-model` catalog axes (`Model.webSearchModel`, `hostedImage`, `imageModel`). `web-search` now comes from the model's lineage and API (GPT-5+ Responses, Claude 4+ Messages, Gemini 2+), so proxies and gateways that expose these models inherit it.
+- Added Command Code's typesafe/jev decision model for the judge role
 
 ### Changed
 
