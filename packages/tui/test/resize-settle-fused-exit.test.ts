@@ -1,14 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import {
-	type RenderScheduler,
-	type RenderTimer,
-	type TerminalFramePlan,
-	type TerminalFrameProvider,
-	Text,
-	TUI,
-	type ViewportSize,
-} from "@oh-my-pi/pi-tui";
+import { Text, TUI } from "@oh-my-pi/pi-tui";
+import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
+import { WidthReplayProvider } from "./width-replay-provider";
 
 // A settled rebuild-mode resize erases the screen and history and repaints
 // from row zero, so it needs no viewport anchor. Restoring the normal buffer
@@ -20,6 +14,9 @@ const ALT_ENTER = "\x1b[?1049h";
 const ALT_EXIT = "\x1b[?1049l";
 const ERASE_SCREEN_AND_HISTORY = "\x1b[2J\x1b[3J";
 const DSR = "\x1b[6n";
+// Drag-end settle window for a history-refreshing resize (400 ms) plus the
+// virtual scheduler's 40 ms drain horizon for the frames the settle schedules.
+const DRAG_END_ADVANCE_MS = 440;
 
 /** Records every engine write and reports a settable output backlog. */
 class RecordingTerminal extends VirtualTerminal {
@@ -36,74 +33,14 @@ class RecordingTerminal extends VirtualTerminal {
 	}
 }
 
-/** Manual clock: immediates run inline, timers fire only as the clock advances past them. */
-class ManualScheduler implements RenderScheduler {
-	#now = 0;
-	#timers = new Set<{ at: number; run: () => void }>();
-
-	now(): number {
-		return this.#now;
-	}
-
-	scheduleImmediate(callback: () => void): void {
-		callback();
-	}
-
-	scheduleRender(callback: () => void, delayMs: number): RenderTimer {
-		const timer = { at: this.#now + Math.max(0, delayMs), run: callback };
-		this.#timers.add(timer);
-		return { cancel: () => this.#timers.delete(timer) };
-	}
-
-	advance(ms: number): void {
-		const end = this.#now + ms;
-		for (;;) {
-			let next: { at: number; run: () => void } | undefined;
-			for (const timer of this.#timers) {
-				if (timer.at <= end && (next === undefined || timer.at < next.at)) next = timer;
-			}
-			if (next === undefined) break;
-			this.#timers.delete(next);
-			this.#now = next.at;
-			next.run();
-		}
-		this.#now = end;
-	}
-}
-
-class WidthReplayProvider implements TerminalFrameProvider {
-	#nextHistoryId = 1;
-	#retired = false;
-
-	renderFrame(viewport: ViewportSize): TerminalFramePlan {
-		const width = viewport.columns;
-		return {
-			history: this.#retired
-				? undefined
-				: { id: this.#nextHistoryId, rows: [`history-one@${width}`, `history-two@${width}`] },
-			viewport: [`editor@${width}`],
-		};
-	}
-
-	acknowledgeHistory(id: number): void {
-		if (id !== this.#nextHistoryId) return;
-		this.#nextHistoryId++;
-		this.#retired = true;
-	}
-
-	beginHistoryReplay(): void {
-		this.#retired = false;
-	}
-}
-
-function startRig() {
+async function startRig() {
 	const terminal = new RecordingTerminal(20, 4);
-	const scheduler = new ManualScheduler();
+	const scheduler = new VirtualRenderScheduler();
 	const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
 	tui.setResizeScrollback("rebuild");
 	tui.setFrameProvider(new WidthReplayProvider());
 	tui.start();
-	scheduler.advance(50);
+	await scheduler.settle(terminal);
 	terminal.written = [];
 	return { terminal, scheduler, tui };
 }
@@ -120,11 +57,11 @@ function count(haystack: string, needle: string): number {
 }
 
 describe("resize settle fused alt exit", () => {
-	it("restores the normal buffer in the same write as the settled rebuild", () => {
-		const { terminal, scheduler, tui } = startRig();
+	it("restores the normal buffer in the same write as the settled rebuild", async () => {
+		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			scheduler.advance(500);
+			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
 
 			// Restoring on a write of its own would expose the reflowed stale screen
 			// until the rebuild lands; the anchor probe that used to fill that gap
@@ -140,18 +77,18 @@ describe("resize settle fused alt exit", () => {
 		}
 	});
 
-	it("resumes the borrow when a resize lands before the fused rebuild is written", () => {
-		const { terminal, scheduler, tui } = startRig();
+	it("resumes the borrow when a resize lands before the fused rebuild is written", async () => {
+		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			scheduler.advance(100);
+			await scheduler.advance(terminal, 100);
 			// A previous replay is still draining, so the settled rebuild — and the
 			// alt exit fused into it — is deferred while the pane moves again.
 			terminal.pendingBytes = Number.MAX_SAFE_INTEGER;
-			scheduler.advance(600);
+			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
 			terminal.resize(34, 4);
 			terminal.pendingBytes = 0;
-			scheduler.advance(500);
+			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
 
 			// The terminal never left the borrowed buffer, so entering it again
 			// would stack a second switch whose extra exit then lands on the
@@ -165,20 +102,20 @@ describe("resize settle fused alt exit", () => {
 		}
 	});
 
-	it("hands the borrowed buffer to a fullscreen overlay opened before the rebuild is written", () => {
-		const { terminal, scheduler, tui } = startRig();
+	it("hands the borrowed buffer to a fullscreen overlay opened before the rebuild is written", async () => {
+		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			scheduler.advance(100);
+			await scheduler.advance(terminal, 100);
 			const overlay = tui.showOverlay(new Text("modal"), { fullscreen: true });
-			scheduler.advance(500);
+			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
 
 			// The overlay's first frame runs while the fused exit is still pending:
 			// it must take over the buffer the terminal is already on.
 			expect(count(terminal.written.join(""), ALT_ENTER)).toBe(1);
 
 			overlay.hide();
-			scheduler.advance(50);
+			await scheduler.advance(terminal, 50);
 
 			const emitted = terminal.written.join("");
 			expect(count(emitted, ALT_EXIT)).toBe(1);

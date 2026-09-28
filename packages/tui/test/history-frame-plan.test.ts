@@ -9,6 +9,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { VirtualRenderScheduler } from "./virtual-render-scheduler";
 import { VirtualTerminal } from "./virtual-terminal";
+import { WidthReplayProvider } from "./width-replay-provider";
 
 class Provider implements TerminalFrameProvider {
 	plan: TerminalFramePlan;
@@ -80,37 +81,6 @@ class ResizeScheduler {
 		const pending = [...this.#pending];
 		this.#pending.clear();
 		for (const callback of pending) callback();
-	}
-}
-class WidthReplayProvider implements TerminalFrameProvider {
-	#nextHistoryId = 1;
-	#retired = false;
-	readonly #historyRows: readonly string[];
-	resetCount = 0;
-
-	constructor(historyRows: readonly string[] = ["history-one", "history-two"]) {
-		this.#historyRows = historyRows;
-	}
-
-	renderFrame(viewport: ViewportSize): TerminalFramePlan {
-		const width = viewport.columns;
-		return {
-			history: this.#retired
-				? undefined
-				: { id: this.#nextHistoryId, rows: this.#historyRows.map(row => `${row}@${width}`) },
-			viewport: [`editor@${width}`],
-		};
-	}
-
-	acknowledgeHistory(id: number): void {
-		if (id !== this.#nextHistoryId) return;
-		this.#nextHistoryId++;
-		this.#retired = true;
-	}
-
-	beginHistoryReplay(): void {
-		this.#retired = false;
-		this.resetCount++;
 	}
 }
 
@@ -522,9 +492,10 @@ describe("terminal frame plans", () => {
 		expect(plainBuffer(terminal)).toContain("history-one@20");
 
 		terminal.resize(30, 2);
-		// A refresh-capable settle waits out the drag-end window and then replays
-		// the ledger at the settled width in the same transaction.
-		await renderScheduler.advance(terminal, 560);
+		// A refresh-capable settle waits out the 400 ms drag-end window plus the
+		// 40 ms drain horizon and then replays the ledger at the settled width
+		// in the same transaction.
+		await renderScheduler.advance(terminal, 440);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
@@ -592,9 +563,10 @@ describe("terminal frame plans", () => {
 		await renderScheduler.settle(terminal);
 
 		terminal.resize(30, 2);
-		// A refresh-capable settle waits out the drag-end window and then erases
-		// and re-streams the ledger at the settled width in the same transaction.
-		await renderScheduler.advance(terminal, 560);
+		// A refresh-capable settle waits out the 400 ms drag-end window plus the
+		// 40 ms drain horizon and then erases and re-streams the ledger at the
+		// settled width in the same transaction.
+		await renderScheduler.advance(terminal, 440);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
@@ -629,7 +601,9 @@ describe("terminal frame plans", () => {
 			expect(plainBuffer(terminal)).toContain(`editor@${width}`);
 		}
 
-		await renderScheduler.advance(terminal, 400); // drag end → single settled commit
+		// Drag end: the 400 ms window plus the 40 ms drain horizon elapses and
+		// the burst commits exactly one settled refresh.
+		await renderScheduler.advance(terminal, 440);
 
 		expect(provider.resetCount).toBe(1);
 		expect(plainBuffer(terminal)).toEqual(["history-one@34", "history-two@34", "editor@34"]);
@@ -655,7 +629,10 @@ describe("terminal frame plans", () => {
 			terminal.resize(30, 2);
 			await renderScheduler.advance(terminal, 100);
 			terminal.resize(20, 2);
-			await renderScheduler.advance(terminal, 560);
+			// The re-armed 400 ms drag-end window plus the 40 ms drain horizon
+			// elapses, and the burst commits one refresh even though its settled
+			// size equals the committed one.
+			await renderScheduler.advance(terminal, 440);
 
 			expect(provider.resetCount).toBe(1);
 			tui.stop();
