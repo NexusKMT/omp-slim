@@ -6,6 +6,10 @@
 
 - Reduced repeated token-counting work with a bounded, model-scoped cache of exact text and short-message fragment counts.
 
+### Fixed
+
+- Fixed an issue where streaming tool call arguments could be incorrectly modified in-place
+
 ## [18.4.1] - 2026-09-28
 
 ### Fixed

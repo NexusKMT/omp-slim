@@ -51,7 +51,7 @@ import {
 	recoverHarmonyToolCall,
 	signalListLabel,
 } from "@oh-my-pi/pi-ai/utils/harmony-leak";
-import { logger, sanitizeText, structuredCloneJSON } from "@oh-my-pi/pi-utils";
+import { cloneJsonTree, logger, sanitizeText, structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { LiveSteeringChannel } from "./live-steering";
 import { agentPauseGate } from "./pause";
@@ -377,13 +377,17 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 		case "redactedThinking":
 			return { ...block };
 		case "anthropicServerTool":
-			return { ...block, block: structuredCloneJSON(block.block) };
+			return { ...block, block: cloneJsonTree(block.block) };
 		case "fallback":
 			return { ...block, from: { ...block.from }, to: { ...block.to } };
 		case "toolCall": {
 			const snap = {
 				...block,
-				arguments: structuredCloneJSON(block.arguments),
+				// Providers mutate streaming arguments in place (owned-stream, GLM)
+				// as well as replacing them, so containers are always copied; the
+				// strings inside are immutable and shared, keeping the per-delta
+				// cost independent of the argument payload size.
+				arguments: cloneJsonTree(block.arguments),
 				providerMetadata: snapshotToolCallProviderMetadata(block.providerMetadata),
 			};
 			// Object spread copies enumerable symbols in Bun, but the Cursor
