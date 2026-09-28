@@ -2646,7 +2646,8 @@ export class ModelRegistry {
 		return (
 			keyConfig !== undefined ||
 			this.#keylessProviders.has(model.provider) ||
-			this.authStorage.keys.source(model.provider, { env: "aliases" }) !== undefined
+			this.authStorage.keys.source(model.provider, { env: "aliases" }) !== undefined ||
+			this.authStorage.keys.keyless(model.provider)
 		);
 	}
 
@@ -2664,7 +2665,8 @@ export class ModelRegistry {
 		return (
 			keyConfig !== undefined ||
 			this.#keylessProviders.has(provider) ||
-			this.authStorage.keys.source(provider)?.concrete === true
+			this.authStorage.keys.source(provider)?.concrete === true ||
+			this.authStorage.keys.keyless(provider)
 		);
 	}
 

@@ -302,6 +302,9 @@ describe("issue #12281 — lm-studio empty-fallback placeholder vs. wire auth", 
 		expect(model).toBeDefined();
 		if (!model) throw new Error("Expected discovered vllm model");
 		expect(await registry.getApiKey(model)).toBe(kNoAuth);
+		// Explicit selection (`--model`, /model, setModel) gates on these.
+		expect(registry.hasConfiguredAuth(model)).toBe(true);
+		expect(registry.hasConcreteAuth("vllm")).toBe(true);
 		expect(registry.getAll().some(entry => entry.provider === "vllm" && entry.id === "qwen3-8b")).toBe(true);
 		expect(registry.getAvailable().some(entry => entry.provider === "vllm" && entry.id === "qwen3-8b")).toBe(true);
 		storage.close();
