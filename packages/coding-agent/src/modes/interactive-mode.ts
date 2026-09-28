@@ -1385,9 +1385,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		applyHyperlinkSetting();
 		// The TUI polls the provider every frame, so it reads a field kept in sync by
 		// subscription rather than resolving the setting per render.
-		this.#mouseCapture = cfgTuiMouse.get(settings);
+		// Session settings overlay the global layer and forward its changes.
+		this.#mouseCapture = cfgTuiMouse.get(this.settings);
 		this.#eventBusUnsubscribers.push(
-			cfgTuiMouse.listen(settings, on => {
+			cfgTuiMouse.listen(this.settings, on => {
 				this.#mouseCapture = on;
 				// Dropping capture must also drop the band: with reporting off no
 				// motion event will ever arrive to clear a mid-hover highlight.
