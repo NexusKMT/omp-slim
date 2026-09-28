@@ -46,7 +46,7 @@ async function reloadTypeScriptProjectsAfterCreate(
 	cwd: string,
 	servers: Array<[string, ServerConfig]>,
 	signal?: AbortSignal,
-	createMissing = true,
+	{ createMissing = true }: { createMissing?: boolean } = {},
 ): Promise<void> {
 	await Promise.all(
 		servers.map(async ([, serverConfig]) => {
@@ -465,7 +465,9 @@ async function runLspWritethrough(
 				await commitWrite();
 				await notifyWriteCommitted(operationSignal);
 				if (changeType === FileChangeType.Created) {
-					await reloadTypeScriptProjectsAfterCreate(cwd, lspServers, operationSignal, enableDiagnostics);
+					await reloadTypeScriptProjectsAfterCreate(cwd, lspServers, operationSignal, {
+						createMissing: enableDiagnostics,
+					});
 				}
 				await syncFileContent(dst, finalContent, cwd, lspServers, operationSignal, enableDiagnostics);
 			} else {
