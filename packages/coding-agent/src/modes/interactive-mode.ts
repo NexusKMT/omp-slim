@@ -1345,11 +1345,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					version,
 					modelName: session.model?.name ?? "Unknown",
 					providerName: session.model?.provider ?? "Unknown",
-					lspServers: lspServers?.map(server => ({
-						name: server.name,
-						status: server.status,
-						fileTypes: server.fileTypes,
-					})),
+					lspServers: this.#getWelcomeLspServers(lspServers),
 				},
 			});
 		this.composer.setPreferences(preferences);
@@ -6551,13 +6547,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	#getWelcomeLspServers(): WelcomeLspServerInfo[] {
+	/** Welcome rows for startup LSP servers; `null` (section hidden) when the session skipped LSP discovery. */
+	#getWelcomeLspServers(servers = this.lspServers): WelcomeLspServerInfo[] | null {
 		return (
-			this.lspServers?.map(server => ({
+			servers?.map(server => ({
 				name: server.name,
 				status: server.status,
 				fileTypes: server.fileTypes,
-			})) ?? []
+			})) ?? null
 		);
 	}
 

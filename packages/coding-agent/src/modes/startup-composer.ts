@@ -164,8 +164,8 @@ export function applyStartupComposerPreferences(update: PrepaintComposerPreferen
 	}
 }
 
-/** Apply discovered project LSP rows and cache them for the next first frame. */
-export function setStartupComposerLspServers(servers: LspServerInfo[]): void {
+/** Apply discovered project LSP rows (`null` = LSP disabled) and cache them for the next first frame. */
+export function setStartupComposerLspServers(servers: LspServerInfo[] | null): void {
 	const pending = pendingComposer;
 	if (!pending) return;
 	pending.composer.updateWelcome({ lspServers: servers });

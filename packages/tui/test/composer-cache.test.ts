@@ -64,6 +64,10 @@ describe("composer startup cache", () => {
 			});
 			const jsonl: unknown = Bun.JSONL.parse(await Bun.file(path.join(cacheDir, "recent-sessions.jsonl")).text());
 			expect(jsonl).toEqual(recentSessions);
+
+			// Disabling LSP must replace the cached rows so the next prepaint hides the section.
+			await writeComposerLspCache(cwd, null);
+			expect(readComposerStartupCache(cwd).lspServers).toBeNull();
 		} finally {
 			await Promise.all([
 				fs.rm(cwd, { recursive: true, force: true }),

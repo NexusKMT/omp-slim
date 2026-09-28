@@ -4,6 +4,7 @@
 
 ### Changed
 
+- LSP discovery can be disabled via `--no-lsp` or `cfg.lsp.enabled`, hiding the LSP section in the startup screen
 - Changed the startup status bar placeholder to show the cached model, thinking level, path, and git branch instead of `…` (falling back to `…` when the branch changed since the last run), and to no longer freeze a turn spinner or job badges from a previous session.
 - Improved interactive startup: the session status bar appears sooner because `retry.fallbackChains` validation, the background model-catalog refresh, and project daemon registration no longer block the first session frame.
 - Reduced CPU use from subagent HUD repaints during active sessions ([#13245](https://github.com/can1357/oh-my-pi/pull/13245) by [@iliaal](https://github.com/iliaal)).

@@ -44,7 +44,8 @@ export interface ComposerStartupCache {
 	readonly theme?: ComposerThemePreferences;
 	readonly welcome?: ComposerWelcomeCache;
 	readonly recentSessions: RecentSession[];
-	readonly lspServers: LspServerInfo[];
+	/** `null` when the last run had LSP disabled. */
+	readonly lspServers: LspServerInfo[] | null;
 	readonly status?: ComposerStatusSnapshot;
 }
 
@@ -86,7 +87,7 @@ function readRecentSessions(file: string): RecentSession[] {
 	return sessions;
 }
 
-function readLspServers(file: string): LspServerInfo[] {
+function readLspServers(file: string): LspServerInfo[] | null {
 	const content = readFile(file);
 	if (!content) return [];
 	let parsed: unknown;
@@ -98,6 +99,7 @@ function readLspServers(file: string): LspServerInfo[] {
 	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
 	if (field(parsed, "version") !== CACHE_VERSION) return [];
 	const values = field(parsed, "servers");
+	if (values === null) return null;
 	if (!Array.isArray(values)) return [];
 	const servers: LspServerInfo[] = [];
 	for (const value of values) {
@@ -336,8 +338,8 @@ export async function writeComposerRecentSessionsCache(cwd: string, sessions: re
 	await Bun.write(path.join(projectCacheDir(cwd), "recent-sessions.jsonl"), content ? `${content}\n` : "");
 }
 
-/** Persist the latest detected project LSP rows for the next prepaint. */
-export async function writeComposerLspCache(cwd: string, servers: readonly LspServerInfo[]): Promise<void> {
+/** Persist the latest detected project LSP rows (`null` = LSP disabled) for the next prepaint. */
+export async function writeComposerLspCache(cwd: string, servers: readonly LspServerInfo[] | null): Promise<void> {
 	await Bun.write(
 		path.join(projectCacheDir(cwd), "lsp-servers.json"),
 		JSON.stringify({ version: CACHE_VERSION, servers }),

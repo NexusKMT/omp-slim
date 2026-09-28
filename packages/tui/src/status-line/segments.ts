@@ -107,7 +107,7 @@ function singleStatSegment(
 			if (!value) return { content: "", visible: false };
 			const content = formatMetric({
 				leading: theme.icon[iconKey] || undefined,
-				value: statusValue(ctx, formatNumber(value)),
+				value: formatNumber(value),
 			});
 			return { content: theme.fg(color, content ?? ""), visible: true };
 		},
@@ -168,7 +168,7 @@ const piSegment: StatusLineSegment = {
 		if (ctx.focusedAgentId && !ctx.startupPlaceholder) {
 			const icon = theme.icon.ghost ? `${theme.icon.ghost} ` : "";
 			return {
-				content: theme.fg("warning", `${icon}${statusValue(ctx, ctx.focusedAgentId)}`),
+				content: theme.fg("warning", `${icon}${ctx.focusedAgentId}`),
 				visible: true,
 			};
 		}
@@ -228,7 +228,7 @@ const modelSegment: StatusLineSegment = {
 		if (modelName.startsWith("Claude ")) {
 			modelName = modelName.slice(7);
 		}
-		modelName = stableValue(ctx, modelName);
+		modelName = modelName;
 
 		// Resolve the current thinking-level display ("◉ xhigh", "⟳ auto", …)
 		// when the model supports thinking and the segment isn't hiding it.
@@ -346,7 +346,7 @@ function renderGoalMode(ctx: SegmentContext, mode: { enabled: boolean; paused: b
 	const parts: string[] = [withIcon(icon, "Goal")];
 	const showBudget = ctx.goalStatusInFooter === true;
 	if (showBudget && goal) {
-		parts.push(statusValue(ctx, formatGoalBudget(goal.tokensUsed, goal.tokenBudget)));
+		parts.push(formatGoalBudget(goal.tokensUsed, goal.tokenBudget));
 	}
 	return {
 		content: color === "accent" ? accentFg(ctx, color, parts.join(" ")) : theme.fg(color, parts.join(" ")),
@@ -407,12 +407,12 @@ const modeSegment: StatusLineSegment = {
 			const icon = loop.state === "paused" ? theme.icon.pause || theme.icon.loop : theme.icon.loop;
 			const color: ThemeColor = loop.state === "paused" ? "warning" : "customMessageLabel";
 			const stateLabel = loop.state === "waiting" ? "next prompt repeats" : loop.state;
-			const label = `Loop${loop.state === "waiting" ? ":" : ""} ${statusValue(ctx, stateLabel)}`;
+			const label = `Loop${loop.state === "waiting" ? ":" : ""} ${stateLabel}`;
 			const parts = [withIcon(icon, label)];
 			const limit = formatLoopLimit(loop.limit, ctx.now?.getTime());
-			if (limit) parts.push(statusValue(ctx, limit));
+			if (limit) parts.push(limit);
 			if (loop.condition) {
-				parts.push(statusValue(ctx, summarizeLoopCondition(loop.condition, TRUNCATE_LENGTHS.SHORT)));
+				parts.push(summarizeLoopCondition(loop.condition, TRUNCATE_LENGTHS.SHORT));
 			}
 			return { content: theme.fg(color, parts.join(" ")), visible: true };
 		}
@@ -482,20 +482,20 @@ const gitSegment: StatusLineSegment = {
 		const showBranch = opts.showBranch !== false;
 		let content = "";
 		if (showBranch && branch) {
-			content = withIcon(theme.icon.branch, stableValue(ctx, branch));
+			content = withIcon(theme.icon.branch, branch);
 		}
 
 		// Add status indicators
 		if (gitStatus) {
 			const indicators: string[] = [];
 			if (opts.showUnstaged !== false && gitStatus.unstaged > 0) {
-				indicators.push(theme.fg("statusLineDirty", `*${statusValue(ctx, `${gitStatus.unstaged}`)}`));
+				indicators.push(theme.fg("statusLineDirty", `*${`${gitStatus.unstaged}`}`));
 			}
 			if (opts.showStaged !== false && gitStatus.staged > 0) {
-				indicators.push(theme.fg("statusLineStaged", `+${statusValue(ctx, `${gitStatus.staged}`)}`));
+				indicators.push(theme.fg("statusLineStaged", `+${`${gitStatus.staged}`}`));
 			}
 			if (opts.showUntracked !== false && gitStatus.untracked > 0) {
-				indicators.push(theme.fg("statusLineUntracked", `?${statusValue(ctx, `${gitStatus.untracked}`)}`));
+				indicators.push(theme.fg("statusLineUntracked", `?${`${gitStatus.untracked}`}`));
 			}
 			if (indicators.length > 0) {
 				const indicatorText = indicators.join(" ");
@@ -520,7 +520,7 @@ const prSegment: StatusLineSegment = {
 		const { pr } = ctx.git;
 		if (!pr) return { content: "", visible: false };
 
-		const label = withIcon(theme.icon.pr, `#${statusValue(ctx, `${pr.number}`)}`);
+		const label = withIcon(theme.icon.pr, `#${`${pr.number}`}`);
 		const content =
 			!ctx.startupPlaceholder && TERMINAL.hyperlinks ? `\x1b]8;;${pr.url}\x07${label}\x1b]8;;\x07` : label;
 		return { content: accentFg(ctx, "accent", content), visible: true };
@@ -533,7 +533,7 @@ const subagentsSegment: StatusLineSegment = {
 		if (ctx.subagentCount === 0) {
 			return { content: "", visible: false };
 		}
-		const content = withIcon(theme.icon.agents, statusValue(ctx, `${ctx.subagentCount}`));
+		const content = withIcon(theme.icon.agents, `${ctx.subagentCount}`);
 		return { content: theme.fg("statusLineSubagents", content), visible: true };
 	},
 };
@@ -555,7 +555,7 @@ const tokenTotalSegment: StatusLineSegment = {
 
 		const content = formatMetric({
 			leading: theme.icon.tokens || undefined,
-			value: statusValue(ctx, formatNumber(total)),
+			value: formatNumber(total),
 		});
 		return { content: theme.fg("statusLineSpend", content ?? ""), visible: true };
 	},
@@ -569,7 +569,7 @@ const tokenRateSegment: StatusLineSegment = {
 
 		const content = formatMetric({
 			leading: theme.icon.throughput || undefined,
-			value: `${statusValue(ctx, tokensPerSecond.toFixed(1))} tok/s`,
+			value: `${tokensPerSecond.toFixed(1)} tok/s`,
 		});
 		return { content: theme.fg("statusLineOutput", content ?? ""), visible: true };
 	},
@@ -652,7 +652,7 @@ const contextTotalSegment: StatusLineSegment = {
 		const window = ctx.contextWindow;
 		if (!window) return { content: "", visible: false };
 		return {
-			content: theme.fg("statusLineContext", withIcon(theme.icon.context, stableValue(ctx, formatNumber(window)))),
+			content: theme.fg("statusLineContext", withIcon(theme.icon.context, formatNumber(window))),
 			visible: true,
 		};
 	},
@@ -670,7 +670,7 @@ const timeSpentSegment: StatusLineSegment = {
 	id: "time_spent",
 	render(ctx) {
 		if (ctx.activeMs < 1000) return { content: "", visible: false };
-		return { content: withIcon(theme.icon.time, statusValue(ctx, formatDuration(ctx.activeMs))), visible: true };
+		return { content: withIcon(theme.icon.time, formatDuration(ctx.activeMs)), visible: true };
 	},
 };
 
@@ -694,7 +694,7 @@ const timeSegment: StatusLineSegment = {
 		}
 		timeStr += suffix;
 
-		return { content: withIcon(theme.icon.time, statusValue(ctx, timeStr)), visible: true };
+		return { content: withIcon(theme.icon.time, timeStr), visible: true };
 	},
 };
 
@@ -703,7 +703,7 @@ const sessionSegment: StatusLineSegment = {
 	render(ctx) {
 		const sessionManager = ctx.session.sessionManager;
 		const sessionId = sessionManager?.getSessionId?.();
-		const display = statusValue(ctx, sessionId?.slice(0, 8) || "new");
+		const display = sessionId?.slice(0, 8) || "new";
 
 		return { content: withIcon(theme.icon.session, display), visible: true };
 	},
@@ -712,7 +712,7 @@ const sessionSegment: StatusLineSegment = {
 const hostnameSegment: StatusLineSegment = {
 	id: "hostname",
 	render(ctx) {
-		const name = stableValue(ctx, ctx.hostname ?? os.hostname().split(".")[0]);
+		const name = ctx.hostname ?? os.hostname().split(".")[0];
 		const content = withIcon(theme.icon.host, name);
 		const ansi = sessionAccentAnsi(ctx);
 		return { content: ansi ? `${ansi}${content}\x1b[39m` : content, visible: true };
@@ -742,7 +742,7 @@ const cacheHitSegment: StatusLineSegment = {
 		const total = cacheRead + cacheWrite + input;
 
 		const rate = (cacheRead / total) * 100;
-		const rateStr = statusValue(ctx, rate.toFixed(2));
+		const rateStr = rate.toFixed(2);
 
 		const parts: string[] = [theme.icon.cache];
 		parts.push(theme.fg("statusLineSpend", `${rateStr}%`));
@@ -766,7 +766,7 @@ const collabSegment: StatusLineSegment = {
 	id: "collab",
 	render(ctx) {
 		if (!ctx.collab) return { content: "", visible: false };
-		const participants = statusValue(ctx, `${ctx.collab.participantCount}`);
+		const participants = `${ctx.collab.participantCount}`;
 		const label = ctx.collab.role === "host" ? `⇄ collab:${participants}` : `⇄ collab guest:${participants}`;
 		return { content: accentFg(ctx, "accent", label), visible: true };
 	},
@@ -776,7 +776,7 @@ const streamSegment: StatusLineSegment = {
 	id: "stream",
 	render(ctx) {
 		const badges: string[] = [];
-		if (ctx.stream) badges.push(`● LIVE ${statusValue(ctx, `${ctx.stream.viewers}`)}`);
+		if (ctx.stream) badges.push(`● LIVE ${`${ctx.stream.viewers}`}`);
 		if (ctx.recording) badges.push("● REC");
 		if (badges.length === 0) return { content: "", visible: false };
 		return { content: theme.fg("thinkingHigh", badges.join(" ")), visible: true };
@@ -851,7 +851,7 @@ function formatQuotaWindow(
 	integer: "round" | "floor",
 ): string {
 	const whole = integer === "floor" ? Math.floor(percent) : Math.round(percent);
-	const pctText = theme.fg(pickUsageColor(percent), `${statusValue(ctx, `${whole}`)}%`);
+	const pctText = theme.fg(pickUsageColor(percent), `${`${whole}`}%`);
 	const resetText =
 		reset !== undefined
 			? theme.fg("muted", ctx.startupPlaceholder ? " (…)" : ` (${formatUsageReset(reset, resetUnit)})`)

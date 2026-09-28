@@ -56,7 +56,8 @@ export interface ComposerWelcomeUpdate {
 	readonly modelName?: string;
 	readonly providerName?: string;
 	readonly recentSessions?: readonly RecentSession[];
-	readonly lspServers?: readonly LspServerInfo[];
+	/** Detected project servers; `null` means LSP is disabled and hides the welcome section. */
+	readonly lspServers?: readonly LspServerInfo[] | null;
 }
 
 /**
@@ -222,7 +223,7 @@ export class Composer implements TerminalFrameProvider {
 	#modelName = "";
 	#providerName = "";
 	#recentSessions: RecentSession[] = [];
-	#lspServers: LspServerInfo[] = [];
+	#lspServers: LspServerInfo[] | null = [];
 	#headerBefore: readonly Component[] = [];
 	#headerAfter: readonly Component[] = [];
 	#runtimeChildren: readonly Component[] = [];
@@ -921,7 +922,7 @@ export class Composer implements TerminalFrameProvider {
 		if (update.modelName !== undefined) this.#modelName = update.modelName;
 		if (update.providerName !== undefined) this.#providerName = update.providerName;
 		if (update.recentSessions !== undefined) this.#recentSessions = [...update.recentSessions];
-		if (update.lspServers !== undefined) this.#lspServers = [...update.lspServers];
+		if (update.lspServers !== undefined) this.#lspServers = update.lspServers && [...update.lspServers];
 	}
 
 	#ensureWelcome(): void {
