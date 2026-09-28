@@ -813,6 +813,7 @@ dependencies = [
  "pi-vfs",
  "pretty_assertions",
  "rand 0.10.3",
+ "rlimit",
  "rpds",
  "serde",
  "strum",

@@ -11,6 +11,7 @@
 - Fixed Windows path stats lacking a file identity, which let `rg` search its own redirected output and made `tail -F` report spurious replacements ([#13367](https://github.com/can1357/oh-my-pi/pull/13367) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed the embedded shell running backtick spans inside a quoted heredoc within a double-quoted command substitution ([#13307](https://github.com/can1357/oh-my-pi/issues/13307)).
 - Fixed native operations to deliver results completed within their timeout and reject results when an abort signal arrives before settlement ([#13209](https://github.com/can1357/oh-my-pi/pull/13209) by [@Komzpa](https://github.com/Komzpa)).
+- Fixed `ulimit` in the embedded shell changing the host process's own resource limits, including from inside `( … )` subshells: limits are now shell state applied only to the external commands the shell spawns ([#13325](https://github.com/can1357/oh-my-pi/issues/13325))
 
 ## [18.4.0] - 2026-09-28
 
