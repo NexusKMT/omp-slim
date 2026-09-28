@@ -666,10 +666,8 @@ export class CustomEditor extends Editor {
 			return cached.chips;
 		}
 		const recorded = new Map<string, ChipKind>();
-		for (const entry of this.pendingTexts) recorded.set(entry.label, "paste");
 		if (this.pendingImages.length > 0) {
 			for (const [label, expansion] of this.atoms) {
-				if (recorded.has(label)) continue;
 				const kind = expansion.startsWith("[Image #")
 					? "image"
 					: expansion.startsWith("[Video #")
@@ -679,6 +677,10 @@ export class CustomEditor extends Editor {
 					recorded.set(label, kind);
 				}
 			}
+		}
+		for (const entry of this.pendingTexts) {
+			// A reused label belongs to the atom currently expanding it, not a deleted paste.
+			if (!recorded.has(entry.label)) recorded.set(entry.label, "paste");
 		}
 		const refs = referencedAttachments(this.getText(), recorded);
 		const chips: ComposerChipDescriptor[] = [];

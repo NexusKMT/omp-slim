@@ -288,6 +288,25 @@ describe("CustomEditor bracketed path paste", () => {
 		expect(editor.getExpandedText()).toBe("[Image #1] blob 10 edited");
 	});
 
+	it("favors an active image atom when its glyph reuses a deleted paste label", async () => {
+		await initTheme();
+		const { editor } = makeEditor();
+		const symbol = theme.symbol.bind(theme);
+		const spy = vi.spyOn(theme, "symbol").mockImplementation(key => (key === "chip.paste" ? "📎" : symbol(key)));
+		try {
+			editor.insertTextAttachment("deleted paste");
+			editor.setText("");
+			spy.mockImplementation(key => (key === "chip.image" ? "📎" : symbol(key)));
+			editor.pendingImages.push({ type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
+			editor.insertAtom(chipLabel("image", 1), "[Image #1]");
+
+			expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["image#1"]);
+			expect(editor.getExpandedText().trimEnd()).toBe("[Image #1]");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	describe("skill chips", () => {
 		function makeSkillEditor() {
 			const { editor } = makeEditor();
