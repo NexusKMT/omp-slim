@@ -46,6 +46,7 @@ import type { ToolPathWithSource } from "../extensibility/custom-tools";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import { getSessionSlashCommands } from "../extensibility/extensions/get-commands-handler";
+import type { ExtensionRunner } from "../extensibility/extensions/runner";
 import type { PreparedExtension } from "../extensibility/extensions/types";
 import { buildSkillPromptMessage, type Skill } from "../extensibility/skills";
 import type { HindsightSessionState } from "../hindsight/state";
@@ -2250,6 +2251,76 @@ const PROMPT_DISPATCH_IDLE_TIMEOUT_MS = 5_000;
 class PromptDispatchError extends Error {}
 
 /**
+ * Wire a subagent session's extension actions. Kept out of `runSubprocess` so the
+ * action closures capture this function's `session` parameter rather than the
+ * run's setup-block binding: JSC gives every closure in a block one shared scope
+ * object, so any setup closure that referenced `session` would let the lifecycle
+ * reviver (built in the same block) pin the parked, disposed session forever.
+ */
+function initializeSubagentExtensionActions(
+	session: AgentSession,
+	extensionRunner: ExtensionRunner,
+	isParentOwnedTool: (name: string) => boolean,
+): Array<Promise<unknown>> {
+	const pendingExtensionMessages: Array<Promise<unknown>> = [];
+	extensionRunner.initialize(
+		{
+			sendMessage: (message, options) => {
+				const sendPromise = session.sendCustomMessage(message, options).catch(e => {
+					logger.error("Extension sendMessage failed", {
+						error: e instanceof Error ? e.message : String(e),
+					});
+				});
+				pendingExtensionMessages.push(sendPromise);
+			},
+			sendUserMessage: (content, options) => {
+				const sendPromise = session.sendUserMessage(content, options).catch(e => {
+					logger.error("Extension sendUserMessage failed", {
+						error: e instanceof Error ? e.message : String(e),
+					});
+				});
+				pendingExtensionMessages.push(sendPromise);
+			},
+			appendEntry: (customType, data) => {
+				session.sessionManager.appendCustomEntry(customType, data);
+			},
+			setLabel: (targetId, label) => {
+				session.sessionManager.appendLabelChange(targetId, label);
+			},
+			getActiveTools: () => session.getEnabledToolNames(),
+			getAllTools: () => session.getAllToolInfos(),
+			setActiveTools: (toolNames: string[]) =>
+				session.setActiveToolsByName(toolNames.filter(name => !isParentOwnedTool(name))),
+			getCommands: () => getSessionSlashCommands(session),
+			setModel: model => runExtensionSetModel(session, model),
+			getThinkingLevel: () => session.thinkingLevel,
+			setThinkingLevel: level => session.setThinkingLevel(level),
+			getServiceTiers: () => session.serviceTierByFamily,
+			setServiceTier: (family, tier) => session.setServiceTierFamily(family, tier),
+			getSessionName: () => session.sessionManager.getSessionName(),
+			setSessionName: async name => {
+				await session.sessionManager.setSessionName(name, "user");
+			},
+		},
+		{
+			getModel: () => session.model,
+			isIdle: () => !session.isStreaming,
+			abort: () => session.abort({ reason: USER_INTERRUPT_LABEL }),
+			hasPendingMessages: () => session.queuedMessageCount > 0,
+			shutdown: () => {},
+			getContextUsage: () => session.getContextUsage(),
+			getSystemPrompt: () => session.systemPrompt,
+			runEphemeralTurn: args => session.runEphemeralTurn(args),
+			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
+		},
+	);
+	extensionRunner.onError(err => {
+		logger.error("Extension error", { path: err.extensionPath, error: err.error });
+	});
+	return pendingExtensionMessages;
+}
+
+/**
  * Drive one assignment through a live session: send the prompt, wait for idle,
  * remind the agent to `yield` (up to {@link MAX_YIELD_RETRIES} times), then
  * classify the terminal assistant state. A soft-budget stop short-circuits the
@@ -4275,63 +4346,13 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				void monitor.abortActiveSession();
 			}
 
-			const pendingExtensionMessages: Array<Promise<unknown>> = [];
 			const extensionRunner = session.extensionRunner;
 			if (extensionRunner) {
-				extensionRunner.initialize(
-					{
-						sendMessage: (message, options) => {
-							const sendPromise = session.sendCustomMessage(message, options).catch(e => {
-								logger.error("Extension sendMessage failed", {
-									error: e instanceof Error ? e.message : String(e),
-								});
-							});
-							pendingExtensionMessages.push(sendPromise);
-						},
-						sendUserMessage: (content, options) => {
-							const sendPromise = session.sendUserMessage(content, options).catch(e => {
-								logger.error("Extension sendUserMessage failed", {
-									error: e instanceof Error ? e.message : String(e),
-								});
-							});
-							pendingExtensionMessages.push(sendPromise);
-						},
-						appendEntry: (customType, data) => {
-							session.sessionManager.appendCustomEntry(customType, data);
-						},
-						setLabel: (targetId, label) => {
-							session.sessionManager.appendLabelChange(targetId, label);
-						},
-						getActiveTools: () => session.getEnabledToolNames(),
-						getAllTools: () => session.getAllToolInfos(),
-						setActiveTools: (toolNames: string[]) =>
-							session.setActiveToolsByName(toolNames.filter(name => !isParentOwnedTool(name))),
-						getCommands: () => getSessionSlashCommands(session),
-						setModel: model => runExtensionSetModel(session, model),
-						getThinkingLevel: () => session.thinkingLevel,
-						setThinkingLevel: level => session.setThinkingLevel(level),
-						getServiceTiers: () => session.serviceTierByFamily,
-						setServiceTier: (family, tier) => session.setServiceTierFamily(family, tier),
-						getSessionName: () => session.sessionManager.getSessionName(),
-						setSessionName: async name => {
-							await session.sessionManager.setSessionName(name, "user");
-						},
-					},
-					{
-						getModel: () => session.model,
-						isIdle: () => !session.isStreaming,
-						abort: () => session.abort({ reason: USER_INTERRUPT_LABEL }),
-						hasPendingMessages: () => session.queuedMessageCount > 0,
-						shutdown: () => {},
-						getContextUsage: () => session.getContextUsage(),
-						getSystemPrompt: () => session.systemPrompt,
-						runEphemeralTurn: args => session.runEphemeralTurn(args),
-						compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
-					},
+				const pendingExtensionMessages = initializeSubagentExtensionActions(
+					session,
+					extensionRunner,
+					isParentOwnedTool,
 				);
-				extensionRunner.onError(err => {
-					logger.error("Extension error", { path: err.extensionPath, error: err.error });
-				});
 				await awaitAbortable(extensionRunner.emit({ type: "session_start" }));
 				while (pendingExtensionMessages.length > 0) {
 					await awaitAbortable(Promise.all(pendingExtensionMessages.splice(0)));
