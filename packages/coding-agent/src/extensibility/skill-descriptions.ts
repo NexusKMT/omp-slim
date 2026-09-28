@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type AgentTelemetry, instrumentedCompleteSimple } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model } from "@oh-my-pi/pi-ai";
-import { getAgentDir, isBunTestRuntime, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
+import { getSkillDescriptionsDbPath, isBunTestRuntime, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { getModelMatchPreferences, parseModelPattern, resolveRoleSelection } from "../config/model-resolver";
 import type { Settings } from "../config/settings";
@@ -136,7 +136,7 @@ export function sharedSkillDescriptionStore(): SkillDescriptionStore | undefined
 export function openSessionSkillDescriptionStore(agentDir: string): SkillDescriptionStore | undefined {
 	if (isBunTestRuntime()) return undefined;
 	try {
-		return SkillDescriptionStore.open(path.join(agentDir, "skill-descriptions.db"));
+		return SkillDescriptionStore.open(getSkillDescriptionsDbPath(agentDir));
 	} catch (error) {
 		logger.warn("Skill description cache unavailable", { agentDir, error: String(error) });
 		return undefined;
@@ -162,7 +162,7 @@ export class SkillDescriptionStore {
 	 * Open (creating if needed) the store at `dbPath`.
 	 * @throws when the directory or database cannot be created.
 	 */
-	static open(dbPath: string = path.join(getAgentDir(), "skill-descriptions.db")): SkillDescriptionStore {
+	static open(dbPath: string = getSkillDescriptionsDbPath()): SkillDescriptionStore {
 		fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
 		const db = new Database(dbPath, { create: true });
 		try {
