@@ -6717,7 +6717,7 @@ describe("speculative tool execution", () => {
 		]);
 	});
 
-	it.each([
+	it.each<{ preserves: boolean; expected: string[] }>([
 		{ preserves: false, expected: ["execute"] },
 		{ preserves: true, expected: ["open:stream-1", "execute"] },
 	])(
