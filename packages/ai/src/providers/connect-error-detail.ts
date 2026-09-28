@@ -57,6 +57,23 @@ export function summarizeConnectErrorDetails(details: unknown): string | undefin
 }
 
 /**
+ * True when a typed Connect error detail declares the failure retryable.
+ * Cursor attaches `aiserver.v1.ErrorDetails` whose JSON `debug` form carries
+ * `details.isRetryable` — set on upstream outages such as ERROR_OPENAI
+ * ("Unable to reach the model provider") whose bare `code: message` text
+ * (`unavailable: Error`) classifies as a hard failure on its own.
+ */
+export function hasRetryableConnectErrorDetail(details: unknown): boolean {
+	if (!Array.isArray(details)) return false;
+	for (const entry of details) {
+		if (!isRecord(entry) || !isRecord(entry.debug)) continue;
+		const inner = entry.debug.details;
+		if (isRecord(inner) && inner.isRetryable === true) return true;
+	}
+	return false;
+}
+
+/**
  * Formats a Connect end-stream error object into a diagnosable message.
  * The "Connect error code: message" prefix is preserved exactly; detail
  * entries are appended when present, and when the message itself is generic
