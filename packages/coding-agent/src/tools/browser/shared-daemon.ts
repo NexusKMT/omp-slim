@@ -231,12 +231,13 @@ async function checkSharedBrowserReachable(scope: SharedTargetScope, deps: Share
 		if (!wsEndpoint) return false;
 		const probe = deps.probe ?? probeEndpoint;
 		/**
-		 * `silent` when the endpoint did not answer in time — an answer slower
-		 * than the probe's own 1.5 s budget, or an attempt the cap abandoned —
-		 * `answered` when it responded, and `unknown` only when the health
-		 * budget was already spent. `rawHttpGet` awaits `Bun.connect` before its
-		 * own timer can settle the call, so the cap — not the probe's HTTP
-		 * budget — is what a stalled connect runs into.
+		 * `silent` when the endpoint did not answer 2xx in time — a refused or
+		 * stalled connect, a non-2xx status, an answer slower than the probe's
+		 * own 1.5 s budget, or an attempt the cap abandoned — `answered` only on
+		 * a 2xx, and `unknown` when the health budget was already spent.
+		 * `rawHttpGet` awaits `Bun.connect` before its own timer can settle the
+		 * call, so the cap — not the probe's HTTP budget — is what a stalled
+		 * connect runs into.
 		 */
 		async function probeAttempt(endpoint: string): Promise<"answered" | "silent" | "unknown"> {
 			const capMs = Math.min(deps.probeCapMs ?? PROBE_ATTEMPT_CAP_MS, deadlineAt - Date.now());
@@ -252,11 +253,12 @@ async function checkSharedBrowserReachable(scope: SharedTargetScope, deps: Share
 			}
 		}
 		// Two silent attempts or nothing. `silent` is the only outcome that
-		// counts against the browser, and it includes both a slow answer past
-		// the probe's 1.5 s budget and an attempt the cap abandoned: at that
-		// point the endpoint is not servicing requests, so the sessions sharing
-		// the browser cannot drive it either. Only `unknown` — no budget left to
-		// try — proves nothing, and leaves the browser alone.
+		// counts against the browser, and it covers every way of not answering
+		// 2xx in time (refused, non-2xx, slow past the 1.5 s budget, or an
+		// attempt the cap abandoned): at that point the endpoint is not
+		// servicing requests, so the sessions sharing the browser cannot drive it
+		// either. Only `unknown` — no budget left to try — proves nothing, and
+		// leaves the browser alone.
 		if ((await probeAttempt(wsEndpoint)) !== "silent") return false;
 		if ((await probeAttempt(wsEndpoint)) !== "silent") return false;
 		// Two silent probes can have raced another session's replacement of the
@@ -265,8 +267,16 @@ async function checkSharedBrowserReachable(scope: SharedTargetScope, deps: Share
 		// closes that window; closing it needs a broker protocol change.)
 		const confirmed = await describeQuietly(client, scope.daemonName, "Shared browser", signal);
 		if (!isSameDaemonInstance(existing, confirmed)) return false;
-		await stopQuietly(client, scope.daemonName, "Shared browser", signal);
-		logger.warn("Requested a stop of the project-shared browser after a cleanup failure", {
+		const stopped = await stopQuietly(client, scope.daemonName, "Shared browser", signal);
+		// `stopQuietly` absorbs a rejected or unanswered stop, so only a terminal
+		// snapshot proves the daemon actually ended. Reporting a stop that never
+		// happened would let the caller forget targets that are still open —
+		// exactly the leak this check exists to prevent.
+		if (stopped?.state !== "exited" && stopped?.state !== "failed") {
+			logger.debug("Shared browser stop was not confirmed", { daemon: scope.daemonName, state: stopped?.state });
+			return false;
+		}
+		logger.warn("Stopped the project-shared browser after a cleanup failure", {
 			daemon: scope.daemonName,
 			projectDir: scope.projectDir,
 			reason: "its CDP endpoint stopped answering",

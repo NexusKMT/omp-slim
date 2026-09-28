@@ -1570,12 +1570,14 @@ function sharedScopeOf(browser: BrowserHandle): SharedTargetScope | undefined {
 
 /**
  * Re-check the shared browser after a close it could not confirm, and forget
- * what the outcome proves. A browser that answers is left alone: the retained
- * record is not retried by this process (`collectOrphanTargets` skips a live
- * pid) but is reaped after it exits, which is the same guarantee the registry
- * gave before. A browser that gets stopped takes every target this process
- * still claims in it — including the one whose close failed — so those records
- * go with it instead of being rewritten on every later flush.
+ * only what the outcome proves. A browser that answers is left alone: the
+ * retained record is not retried by this process (`collectOrphanTargets` skips
+ * a live pid) but is reaped after it exits, which is the same guarantee the
+ * registry gave before. When — and only when — the broker confirms the daemon
+ * ended (`stopSharedBrowserIfUnreachable` resolves true on a terminal stop
+ * snapshot), every target this process still claims in it went with the
+ * browser, so those records go too instead of being rewritten on every later
+ * flush. An unconfirmed stop forgets nothing.
  */
 function recheckSharedBrowser(scope: SharedTargetScope): void {
 	void stopSharedBrowserIfUnreachable(scope).then(stopped => {

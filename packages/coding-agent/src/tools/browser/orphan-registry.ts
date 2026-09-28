@@ -114,10 +114,12 @@ export async function forgetSharedTarget(scope: SharedTargetScope, targetId: str
 
 /**
  * Drop every target this process still claims in `scope`. For when the whole
- * shared browser is gone (it was stopped after its CDP endpoint stopped
- * answering), which takes the targets that could not be closed with it — the
- * records are dead weight that would otherwise be rewritten on every later
- * write until this process exits.
+ * shared browser is confirmed gone — the broker reported its daemon in a
+ * terminal state after a stop — which takes the targets that could not be
+ * closed with it; the records are dead weight that would otherwise be
+ * rewritten on every later write until this process exits. Only call this on
+ * that confirmation: while the browser lives, the records are the only handle
+ * a later reap has on its orphaned targets.
  */
 export async function forgetSharedTargets(scope: SharedTargetScope): Promise<void> {
 	const dir = registryDir(scope);

@@ -179,8 +179,16 @@ function makeSnapshot(readyMatch: string | undefined): DaemonSnapshot {
 	};
 }
 
-/** Broker double: answers `describe` with a snapshot and records every `stop`. */
-function makeBroker(opts: { snapshot?: DaemonSnapshot; fail?: boolean }, stops: string[]): DaemonBrokerClient {
+/**
+ * Broker double: answers `describe` with a snapshot, records every `stop`, and
+ * reports a terminal snapshot for a stop unless told otherwise — a real broker
+ * returns the post-stop record, so a stop that never landed is either a
+ * rejected request (`stopFails`) or a non-terminal snapshot (`stopState`).
+ */
+function makeBroker(
+	opts: { snapshot?: DaemonSnapshot; fail?: boolean; stopFails?: boolean; stopState?: DaemonSnapshot["state"] },
+	stops: string[],
+): DaemonBrokerClient {
 	return {
 		projectDir: "/tmp/omp-wedge-broker",
 		close: () => undefined,
@@ -190,7 +198,9 @@ function makeBroker(opts: { snapshot?: DaemonSnapshot; fail?: boolean }, stops: 
 			if (operation.op === "describe") return { op: "describe", daemon: opts.snapshot };
 			if (operation.op === "stop") {
 				stops.push(operation.name);
-				return { op: "stop", daemon: opts.snapshot };
+				if (opts.stopFails === true) throw new Error("broker rejected the stop");
+				const stopped = { ...(opts.snapshot ?? makeSnapshot(undefined)), state: opts.stopState ?? "exited" };
+				return { op: "stop", daemon: stopped };
 			}
 			throw new Error(`unexpected broker op ${operation.op}`);
 		},
@@ -480,6 +490,24 @@ describe("shared browser reachability check", () => {
 		} finally {
 			connectSpy.mockRestore();
 			connect.resolve(undefined);
+		}
+	});
+
+	it("does not report a stop the broker never confirmed", async () => {
+		// `stopQuietly` absorbs a rejected stop, so the only proof a daemon ended
+		// is a terminal snapshot. Reporting success without one would let the
+		// caller forget targets that are still open — the leak this exists for.
+		for (const opts of [{ stopFails: true }, { stopState: "stopping" as const }]) {
+			const stops: string[] = [];
+			const broker = makeBroker({ snapshot: makeSnapshot(READY_MATCH), ...opts }, stops);
+
+			const stopped = await stopSharedBrowserIfUnreachable(
+				{ projectDir: "/tmp/omp-wedge-unconfirmed", daemonName: DAEMON_NAME },
+				{ client: broker, probe: async () => false },
+			);
+
+			expect(stopped).toBe(false);
+			expect(stops).toEqual([DAEMON_NAME]);
 		}
 	});
 
