@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `@` completion popup swallowing Tab and cursor-movement keys while a narrowed filter matched nothing: with no candidate to accept they now fall through to their normal completion and cursor roles instead of being trapped ([#13046](https://github.com/can1357/oh-my-pi/pull/13046) by [@jchanghong023](https://github.com/jchanghong023)).
+
 ## [18.4.1] - 2026-09-28
 
 ### Breaking Changes
@@ -107,8 +111,6 @@
 ### Fixed
 
 - Fixed AltGr characters, including `[`, `]`, `{`, and `}`, being dropped in Windows Terminal when using the kitty keyboard protocol on Hungarian and other international keyboard layouts ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Fixed AltGr characters (such as `[`, `]`, `{`, `}` on Hungarian and other international layouts) being dropped in Windows Terminal with the kitty keyboard protocol, where they instead triggered Alt shortcuts like word movement ([#12984](https://github.com/can1357/oh-my-pi/pull/12984) by [@H4vC](https://github.com/H4vC)).
-- Fixed the `@` completion popup swallowing Tab and cursor-movement keys while a narrowed filter matched nothing: with no candidate to accept they now fall through to their normal completion and cursor roles instead of being trapped ([#13046](https://github.com/can1357/oh-my-pi/pull/13046) by [@jchanghong023](https://github.com/jchanghong023)).
 
 ## [18.2.11] - 2026-09-23
 
