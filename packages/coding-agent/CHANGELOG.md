@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Optimized internal role chain resolution and caching to reduce event-loop contention during judge initialization
 - On macOS, the shell's `cp` builtin now also clones (copy-on-write) when overwriting an existing file, instead of rewriting its data; the destination keeps its permissions, and hard-linked destinations are still written in place.
 - The `find` tool now fails with a timeout error after 20 seconds instead of blocking the turn when the judge model stalls.
 - Reduced CPU while an agent streams: the working-row token rate and status line no longer re-tokenize or re-resolve settings every frame, and `^` model mentions no longer rebuild the model scope per keystroke.
