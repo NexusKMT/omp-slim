@@ -89,11 +89,16 @@ const MAX_CONPTY_WRITE_CHUNK_BYTES = 16 * 1024;
  * together so the chunker never splits a non-BMP character.
  *
  * Exported for unit testing of the chunking contract; `#safeWrite` is the
- * sole production caller.
+ * sole production caller. Callers that already measured `data` pass its UTF-8
+ * length as `byteLength` so the buffer is not measured twice.
  */
-export function chunkForConPTY(data: string, maxChunkBytes: number = MAX_CONPTY_WRITE_CHUNK_BYTES): string[] {
+export function chunkForConPTY(
+	data: string,
+	maxChunkBytes: number = MAX_CONPTY_WRITE_CHUNK_BYTES,
+	byteLength: number = Buffer.byteLength(data, "utf8"),
+): string[] {
 	// Fast path: whole buffer fits in one write.
-	if (Buffer.byteLength(data, "utf8") <= maxChunkBytes) return [data];
+	if (byteLength <= maxChunkBytes) return [data];
 	const chunks: string[] = [];
 	const len = data.length;
 	let pos = 0;
@@ -2194,9 +2199,12 @@ export class ProcessTerminal implements Terminal {
 			// `process.stdout.write(string)` UTF-8-encodes before `WriteFile`,
 			// and a code-unit cap would let CJK transcript rows expand past the
 			// threshold. See #2034 and #2095.
-			const bytes = Buffer.byteLength(data, "utf8");
-			if (this.#conpty && bytes > MAX_CONPTY_WRITE_CHUNK_BYTES) {
-				for (const chunk of chunkForConPTY(data, MAX_CONPTY_WRITE_CHUNK_BYTES)) {
+			// UTF-8 needs at most 3 bytes per UTF-16 code unit, so short frames
+			// cannot reach the cap and skip the full-buffer measurement.
+			const bytes =
+				this.#conpty && data.length * 3 > MAX_CONPTY_WRITE_CHUNK_BYTES ? Buffer.byteLength(data, "utf8") : 0;
+			if (bytes > MAX_CONPTY_WRITE_CHUNK_BYTES) {
+				for (const chunk of chunkForConPTY(data, MAX_CONPTY_WRITE_CHUNK_BYTES, bytes)) {
 					if (this.#dead) break;
 					process.stdout.write(chunk);
 				}
