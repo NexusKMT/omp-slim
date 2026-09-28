@@ -1701,7 +1701,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (!startupQuiet && this.#startupChangelog && cfgStartupChangelogMode.get(settings) !== "hidden") {
 			headerAfter.push(
 				new DynamicBorder(),
-				new Text(theme.bold(theme.fg("accent", "What's New")), 1, 0),
+				new Text("What's New", 1, 0).setStyleFn(t => theme.bold(theme.fg("accent", t))),
 				new Spacer(1),
 			);
 			if (cfgStartupChangelogMode.get(settings) === "summary") {
@@ -6557,7 +6557,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	#buildConfigWarningComponents(): Component[] {
 		const components: Component[] = [];
 		for (const warning of this.session.configWarnings) {
-			components.push(new Text(theme.fg("warning", `Warning: ${warning}`), 1, 0), new Spacer(1));
+			components.push(
+				new Text(`Warning: ${warning}`, 1, 0).setStyleFn(t => theme.fg("warning", t)),
+				new Spacer(1),
+			);
 		}
 		return components;
 	}
