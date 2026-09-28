@@ -86,12 +86,7 @@ function isJsonRecord(value: object): value is Record<string, unknown> {
 
 function cloneJsonNode(value: unknown): unknown {
 	if (value === null || typeof value !== "object") return value;
-	if (Array.isArray(value)) {
-		const length = value.length;
-		const out: unknown[] = new Array(length);
-		for (let i = 0; i < length; i++) out[i] = cloneJsonNode(value[i]);
-		return out;
-	}
+	if (Array.isArray(value)) return value.map(cloneJsonNode);
 	if (!isJsonRecord(value)) return structuredCloneJSON(value);
 	const out: Record<string, unknown> = {};
 	for (const key in value) {

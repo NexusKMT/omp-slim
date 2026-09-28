@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Improved session storage reliability by using atomic inode identity verification for lock management
 - Optimized internal role chain resolution and caching to reduce event-loop contention during judge initialization
 - On macOS, the shell's `cp` builtin now also clones (copy-on-write) when overwriting an existing file, instead of rewriting its data; the destination keeps its permissions, and hard-linked destinations are still written in place.
 - The `find` tool now fails with a timeout error after 20 seconds instead of blocking the turn when the judge model stalls.
