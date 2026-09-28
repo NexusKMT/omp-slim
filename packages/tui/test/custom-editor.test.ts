@@ -262,6 +262,32 @@ describe("CustomEditor bracketed path paste", () => {
 		}
 	});
 
+	it("keeps recorded paste and image chips after their theme glyph changes", async () => {
+		await initTheme();
+		const { editor } = makeEditor();
+		const symbol = theme.symbol.bind(theme);
+		const spy = vi.spyOn(theme, "symbol").mockImplementation(key => {
+			if (key === "chip.paste") return "🧷";
+			if (key === "chip.image") return "🔶";
+			return symbol(key);
+		});
+		let draft = "";
+		try {
+			const image: ImageContent = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+			editor.setDraft("[Image #1]", [image]);
+			for (let n = 1; n <= 10; n++) editor.insertTextAttachment(`blob ${n}`);
+			draft = `${chipLabel("image", 1)} ${chipLabel("paste", 10)}`;
+			editor.setText(draft);
+			expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["image#1", "paste#10"]);
+		} finally {
+			spy.mockRestore();
+		}
+
+		editor.setText(`${draft} edited`);
+		expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["image#1", "paste#10"]);
+		expect(editor.getExpandedText()).toBe("[Image #1] blob 10 edited");
+	});
+
 	describe("skill chips", () => {
 		function makeSkillEditor() {
 			const { editor } = makeEditor();

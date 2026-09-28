@@ -14,6 +14,7 @@ import { imageAttachmentSource } from "./image-source";
 import { isVideoPath } from "./video";
 import {
 	attachmentSgr,
+	type ChipKind,
 	COMPOSER_TOKEN_REGEX,
 	chipLabel,
 	collapseImageMarkers,
@@ -21,6 +22,7 @@ import {
 	collapseSkillTokens,
 	composerTokenRegex,
 	modelChipStyle,
+	PLACEHOLDER_REGEX,
 	referencedAttachments,
 	renderPlaceholders,
 	skillChipLabel,
@@ -663,7 +665,22 @@ export class CustomEditor extends Editor {
 		) {
 			return cached.chips;
 		}
-		const refs = referencedAttachments(this.getText());
+		const recorded = new Map<string, ChipKind>();
+		for (const entry of this.pendingTexts) recorded.set(entry.label, "paste");
+		if (this.pendingImages.length > 0) {
+			for (const [label, expansion] of this.atoms) {
+				if (recorded.has(label)) continue;
+				const kind = expansion.startsWith("[Image #")
+					? "image"
+					: expansion.startsWith("[Video #")
+						? "video"
+						: undefined;
+				if (kind !== undefined && expansion.match(PLACEHOLDER_REGEX)?.[0] === expansion) {
+					recorded.set(label, kind);
+				}
+			}
+		}
+		const refs = referencedAttachments(this.getText(), recorded);
 		const chips: ComposerChipDescriptor[] = [];
 		for (let i = 0; i < this.pendingImages.length; i++) {
 			const n = i + 1;

@@ -166,23 +166,38 @@ export const COMPOSER_TOKEN_REGEX = new RegExp(
 /**
  * Attachment indices referenced by a composer buffer, per kind. Image/video count compact chips
  * and expanded markers; paste counts compact chips only, since `[Paste #N]` markers number the
- * base editor's separate paste buffer. Chips are recognized by every preset glyph plus the active
- * theme's (possibly overridden) glyph, and whole numbers are parsed, so `#1` never matches inside `#10`.
+ * base editor's separate paste buffer. Registered labels take precedence over theme glyphs so
+ * tokens created before a theme switch keep their kind; full numbers prevent `#1` matching `#10`.
  */
-export function referencedAttachments(text: string): Record<ChipKind, Set<number>> {
+export function referencedAttachments(
+	text: string,
+	recorded: ReadonlyMap<string, ChipKind>,
+): Record<ChipKind, Set<number>> {
 	const kinds: readonly ChipKind[] = ["image", "video", "paste"];
 	const kindByIcon = new Map<string, ChipKind>();
 	for (const kind of kinds) for (const icon of CHIP_ICONS[kind]) kindByIcon.set(icon, kind);
 	for (const kind of kinds) kindByIcon.set(activeChipIcon(kind), kind);
 	const icons = [...kindByIcon.keys()].sort((a, b) => b.length - a.length).map(glyphSource);
-	const scanner = new RegExp(`${PLACEHOLDER_REGEX.source}|(${icons.join("|")}) #([1-9]\\d*)`, "gu");
+	const labels = [...recorded.keys()].sort((a, b) => b.length - a.length).map(label => RegExp.escape(label));
+	const recordedSource = labels.length > 0 ? labels.join("|") : "(?!)";
+	const scanner = new RegExp(
+		`${PLACEHOLDER_REGEX.source}|(${recordedSource})(?!\\d)|(${icons.join("|")}) #([1-9]\\d*)`,
+		"gu",
+	);
 
 	const refs: Record<ChipKind, Set<number>> = { image: new Set(), video: new Set(), paste: new Set() };
 	for (const match of text.matchAll(scanner)) {
 		if (match[1] === "Image") refs.image.add(Number(match[2]));
 		else if (match[1] === "Video") refs.video.add(Number(match[2]));
-		const chipKind = match[3] === undefined ? undefined : kindByIcon.get(match[3]);
-		if (chipKind !== undefined) refs[chipKind].add(Number(match[4]));
+		const label = match[3];
+		if (label !== undefined) {
+			const kind = recorded.get(label);
+			if (kind !== undefined) refs[kind].add(Number(label.slice(label.lastIndexOf("#") + 1)));
+		} else {
+			const icon = match[4];
+			const kind = icon === undefined ? undefined : kindByIcon.get(icon);
+			if (kind !== undefined) refs[kind].add(Number(match[5]));
+		}
 	}
 	return refs;
 }
