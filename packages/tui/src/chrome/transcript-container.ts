@@ -900,6 +900,7 @@ export class TranscriptContainer extends Container {
 				if (rows.length > 0) rows.push("");
 				rows.push(...block);
 			}
+			if (entry.state === "committed") this.#releaseRenderCaches(entry);
 			if (budgetMs !== undefined && performance.now() - startedAt >= budgetMs) break;
 		}
 		if (trailingBlank && rows.length > 0) rows.push("");
@@ -935,6 +936,18 @@ export class TranscriptContainer extends Container {
 		entry.stableRows = EMPTY_STABLE_ROWS;
 		entry.renderedStableByWidth = new Map();
 		entry.stableRowCountByWidth = new Map();
+		this.#releaseRenderCaches(entry);
+	}
+
+	/**
+	 * A committed block renders again only when a replay re-emits the ledger,
+	 * which renders it whole and releases it again. Between replays its memoized
+	 * rows and parse state are dead weight that grows with session length, so
+	 * drop them through the same `invalidate()` a theme change or display reset
+	 * already applies; the component keeps the state it renders from.
+	 */
+	#releaseRenderCaches(entry: TranscriptEntry): void {
+		entry.component.invalidate?.();
 	}
 
 	#startReplay(): void {

@@ -481,6 +481,7 @@ export class Container implements Component {
 	clear(): void {
 		this.children = [];
 		this.#memoLines = undefined;
+		this.#memoChildLines = [];
 	}
 
 	/** Dispose every child, then detach it from this container. */
@@ -490,7 +491,10 @@ export class Container implements Component {
 	}
 
 	invalidate(): void {
+		// The per-child refs pin every row the children last rendered; dropping
+		// only the concatenation would keep all of them reachable.
 		this.#memoLines = undefined;
+		this.#memoChildLines = [];
 		for (const child of this.children) {
 			child.invalidate?.();
 		}

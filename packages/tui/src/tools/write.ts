@@ -522,10 +522,14 @@ export const writeToolRenderer = {
 
 	renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: WriteToolDetails; isError?: boolean },
-		options: RenderResultOptions & { renderContext?: WriteRenderContext },
+		options: RenderResultOptions & WriteStreamingPreviewStateCarrier & { renderContext?: WriteRenderContext },
 		uiTheme: Theme,
 		args?: WriteRenderArgs,
 	): Component {
+		// With mergeCallAndResult the call card never renders again once a result
+		// exists, so the incremental preview (a highlighted copy of the whole
+		// streamed file) is unreachable from here on.
+		delete options[writeStreamingPreviewStateKey];
 		const cardPath =
 			typeof args?.path === "string" ? args.path : typeof args?.file_path === "string" ? args.file_path : "";
 		const routed = writeUrlCard(cardPath, result.details);
