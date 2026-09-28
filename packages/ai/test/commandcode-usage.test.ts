@@ -172,6 +172,14 @@ describe("command code usage provider", () => {
 		).rejects.toMatchObject({ status: 401 });
 	});
 
+	it("keeps a key usable when a usage route answers 403", async () => {
+		const report = await commandCodeUsageProvider.fetchUsage(
+			makeParams(),
+			makeCtx({ ...WINDOWED_ROUTES, "/alpha/billing/credits": { status: 403, body: { success: false } } }),
+		);
+		expect(report).toBeNull();
+	});
+
 	it("returns null when the credits endpoint fails transiently", async () => {
 		const report = await commandCodeUsageProvider.fetchUsage(
 			makeParams(),

@@ -58,7 +58,7 @@ async function getJson(
 			signal,
 		});
 		if (!response.ok) {
-			if (response.status === 401 || response.status === 403) {
+			if (response.status === 401) {
 				throw new ProviderHttpError(
 					`Command Code usage endpoint returned ${response.status} ${response.statusText}`.trim(),
 					response.status,
