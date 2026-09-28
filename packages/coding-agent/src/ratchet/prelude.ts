@@ -88,10 +88,10 @@ export function ratchetApproval(args: unknown): ToolApprovalDecision {
 }
 
 /**
- * Catalog-backed pricing: a served id resolves when every registry entry with
- * that id (bare or `provider/id`) agrees on a non-zero rate card. Zero-cost
- * subscription entries and conflicting providers stay unpriced so a report
- * never presents `$0.00` as a measurement.
+ * Catalog-backed pricing: a served id resolves only when every registry entry
+ * with that id (bare or `provider/id`) carries the same non-zero rate card. A
+ * zero-cost subscription entry or a conflicting provider leaves the id
+ * unpriced (surfaced as a warning) rather than guessing which rate applied.
  */
 function catalogPriceLookup(session: ToolSession): PriceLookup {
 	const cache = new Map<string, ModelCost | undefined>();
@@ -100,15 +100,36 @@ function catalogPriceLookup(session: ToolSession): PriceLookup {
 		const candidates = (session.modelRegistry?.getAll("all") ?? []).filter(
 			entry => entry.id === model || `${entry.provider}/${entry.id}` === model,
 		);
-		const priced = candidates.filter(entry => entry.cost.input > 0 || entry.cost.output > 0);
-		const distinct = new Set(priced.map(entry => JSON.stringify(entry.cost)));
-		const resolved = distinct.size === 1 ? priced[0]!.cost : undefined;
+		const allPriced = candidates.every(entry => entry.cost.input > 0 || entry.cost.output > 0);
+		const distinct = new Set(candidates.map(entry => JSON.stringify(entry.cost)));
+		const resolved = candidates.length > 0 && allPriced && distinct.size === 1 ? candidates[0]!.cost : undefined;
 		cache.set(model, resolved);
 		return resolved;
 	};
 }
 
-type ApprovalOutcome = { approved: true } | { approved: false; aborted: boolean; feedback?: string };
+/**
+ * Serializes read-modify-write of one flow's `_state.json` within this process,
+ * so concurrent calls (e.g. two approvals) never overwrite each other's update.
+ */
+const flowLocks = new Map<string, Promise<unknown>>();
+
+async function withFlowLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+	const previous = flowLocks.get(key) ?? Promise.resolve();
+	const run = previous.then(fn, fn);
+	const settled = run.then(
+		() => undefined,
+		() => undefined,
+	);
+	flowLocks.set(key, settled);
+	try {
+		return await run;
+	} finally {
+		if (flowLocks.get(key) === settled) flowLocks.delete(key);
+	}
+}
+
+export type ApprovalOutcome = { approved: true } | { approved: false; aborted: boolean; feedback?: string };
 
 /** Host-owned approval dialog: no recommended option and no timeout, so only an explicit Approve counts. */
 async function askApproval(
@@ -125,6 +146,9 @@ async function askApproval(
 		);
 	}
 	const header = `ratchet · ${stage}`;
+	// The reviewed material goes in the question body: every dialog surface renders it
+	// (ACP forwards the question text but not per-option previews).
+	const body = `${question}\n\n${preview}`;
 	if (ui.askDialog) {
 		const askDialog = ui.askDialog;
 		const result: ExtensionAskDialogResult | undefined = await untilAborted(context.signal, () =>
@@ -132,10 +156,10 @@ async function askApproval(
 				{
 					id: stage,
 					header,
-					question,
+					question: body,
 					options: [
-						{ label: "Approve", description: "Record this approval and continue", preview },
-						{ label: "Revise", description: "Say what to change; nothing is recorded", preview },
+						{ label: "Approve", description: "Record this approval and continue" },
+						{ label: "Revise", description: "Say what to change; nothing is recorded" },
 						{ label: "Abort", description: "Stop the ratchet run" },
 					],
 				},
@@ -152,7 +176,7 @@ async function askApproval(
 		return { approved: false, aborted: false, feedback: feedback ?? "" };
 	}
 	const choice = await untilAborted(context.signal, () =>
-		ui.select(`${header}\n\n${question}\n\n${preview}`, ["Approve", "Revise", "Abort"]),
+		ui.select(`${header}\n\n${body}`, ["Approve", "Revise", "Abort"]),
 	);
 	if (choice === "Approve") return { approved: true };
 	if (choice !== "Revise") return { approved: false, aborted: true };
@@ -170,43 +194,66 @@ async function invokeRatchet(
 	lookup: PriceLookup,
 ): Promise<AgentToolResult<unknown>> {
 	const cwd = session.cwd;
+	const lockKey = `${cwd}\0${params.flow}`;
 	if (params.action === "init") {
-		const state = await initFlow(cwd, params.flow, params);
+		const state = await withFlowLock(lockKey, () => initFlow(cwd, params.flow, params));
 		return result(`ratchet flow ${state.flow} ready`, state);
 	}
-	const state = await requireState(cwd, params.flow);
 	switch (params.action) {
 		case "plan": {
-			applyPlan(state, params);
-			await saveState(cwd, state);
+			const state = await withFlowLock(lockKey, async () => {
+				const fresh = await requireState(cwd, params.flow);
+				applyPlan(fresh, params);
+				await saveState(cwd, fresh);
+				return fresh;
+			});
 			return result(`plan updated for ${state.flow}`, state);
 		}
 		case "split": {
-			splitCases(state, params.cases, params.test_fraction, params.seed);
-			await saveState(cwd, state);
+			const state = await withFlowLock(lockKey, async () => {
+				const fresh = await requireState(cwd, params.flow);
+				splitCases(fresh, params.cases, params.test_fraction, params.seed);
+				await saveState(cwd, fresh);
+				return fresh;
+			});
 			return result(
 				`split ${state.flow}: ${state.train_ids.length} train / ${state.test_ids.length} test (seed ${state.split_seed})`,
 				{ train_ids: state.train_ids, test_ids: state.test_ids, seed: state.split_seed },
 			);
 		}
 		case "approve": {
-			const sha = await stageDigest(cwd, state, params.stage);
-			if (state.approvals[params.stage]?.sha === sha) {
+			const reviewed = await requireState(cwd, params.flow);
+			const sha = await stageDigest(cwd, reviewed, params.stage);
+			if (reviewed.approvals[params.stage]?.sha === sha) {
 				return result("", { approved: true, already: true });
 			}
 			const outcome = await askApproval(context, params.stage, params.question, params.preview);
-			if (outcome.approved) {
-				state.approvals[params.stage] = { sha, at: new Date().toISOString() };
-				await saveState(cwd, state);
-			}
-			return result("", outcome);
+			if (!outcome.approved) return result("", outcome);
+			// Record against freshly loaded state so approvals made meanwhile survive, and only
+			// if the material is still what the user just reviewed.
+			const recorded = await withFlowLock(lockKey, async (): Promise<ApprovalOutcome> => {
+				const fresh = await requireState(cwd, params.flow);
+				if ((await stageDigest(cwd, fresh, params.stage)) !== sha) {
+					return {
+						approved: false,
+						aborted: false,
+						feedback: "The material changed during review; approve again",
+					};
+				}
+				fresh.approvals[params.stage] = { sha, at: new Date().toISOString() };
+				await saveState(cwd, fresh);
+				return outcome;
+			});
+			return result("", recorded);
 		}
 		case "check": {
-			const check = await checkVariant(cwd, state, params.variant);
+			const check = await checkVariant(cwd, await requireState(cwd, params.flow), params.variant);
 			return result("", check);
 		}
 		case "gate": {
-			const gate = await gateVariant(cwd, state, params.variant, params.change ?? "", lookup);
+			const gate = await withFlowLock(lockKey, async () =>
+				gateVariant(cwd, await requireState(cwd, params.flow), params.variant, params.change ?? "", lookup),
+			);
 			const lines = [`${gate.variant}: ${gate.decision} — ${gate.reasons.join("; ")}`];
 			for (const warning of gate.warnings) lines.push(`warning: ${warning}`);
 			if (gate.plateau)
@@ -215,8 +262,9 @@ async function invokeRatchet(
 			return result(lines.join("\n"), gate);
 		}
 		case "train":
-			return result("", await trainView(cwd, state, params.variant, lookup));
+			return result("", await trainView(cwd, await requireState(cwd, params.flow), params.variant, lookup));
 		case "status": {
+			const state = await requireState(cwd, params.flow);
 			const approvals = await approvalStatus(cwd, state);
 			const approvalLine = RATCHET_STAGES.map(stage => `${stage}=${approvals[stage]}`).join(" ");
 			return result(`${state.flow}: ${approvalLine}\n${renderStatusTable(state)}`, {

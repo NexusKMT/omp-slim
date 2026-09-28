@@ -81,6 +81,8 @@ export interface RatchetState {
 	train_ids: string[];
 	test_ids: string[];
 	split_seed?: number;
+	/** Inputs digest the baseline was run against; a different case set needs a new flow. */
+	baseline_inputs_sha?: string;
 	approvals: Partial<Record<RatchetStage, { sha: string; at: string }>>;
 	rounds: RatchetRound[];
 	best?: { round: number; variant: string; test_score: number | null };
@@ -281,13 +283,11 @@ export function applyPlan(state: RatchetState, options: PlanOptions): void {
 	if (options.stop) {
 		const plateau = options.stop.plateau ?? state.stop.plateau;
 		if (!Number.isInteger(plateau) || plateau < 2) throw new RatchetError("stop.plateau must be an integer >= 2");
-		state.stop = { plateau };
-		if (options.stop.rounds !== undefined) {
-			if (!Number.isInteger(options.stop.rounds) || options.stop.rounds < 1) {
-				throw new RatchetError("stop.rounds must be a positive integer");
-			}
-			state.stop.rounds = options.stop.rounds;
+		const rounds = options.stop.rounds ?? state.stop.rounds;
+		if (rounds !== undefined && (!Number.isInteger(rounds) || rounds < 1)) {
+			throw new RatchetError("stop.rounds must be a positive integer");
 		}
+		state.stop = rounds === undefined ? { plateau } : { plateau, rounds };
 	}
 	if (options.command !== undefined) state.command = options.command;
 	if (options.prices) state.prices = { ...state.prices, ...options.prices };
@@ -403,6 +403,10 @@ export async function stageDigest(cwd: string, state: RatchetState, stage: Ratch
 				off_limits: state.off_limits,
 				train_ids: state.train_ids,
 				test_ids: state.test_ids,
+				// Price overrides decide cost guardrails, so changing them must re-open the plan.
+				prices: Object.entries(state.prices)
+					.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+					.map(([model, rate]) => [model, rate.in, rate.out, rate.cache_read ?? null, rate.cache_write ?? null]),
 			};
 			return new Bun.CryptoHasher("sha256").update(JSON.stringify(plan)).digest("hex");
 		}
@@ -671,6 +675,14 @@ export interface CheckResult {
 export async function checkVariant(cwd: string, state: RatchetState, variant: string): Promise<CheckResult> {
 	if (!VARIANT_NAME.test(variant)) throw new RatchetError(`Variant must be "baseline" or v<N>, got ${variant}`);
 	await requireApprovals(cwd, state);
+	if (
+		state.baseline_inputs_sha !== undefined &&
+		(await stageDigest(cwd, state, "inputs")) !== state.baseline_inputs_sha
+	) {
+		throw new RatchetError(
+			"The cases changed after the baseline was gated; the frozen split and baseline no longer cover them. Start a new flow with init() under a new name.",
+		);
+	}
 	const last = state.rounds.at(-1);
 	const rerun = last?.variant === variant && last.decision === "rerun";
 	const expected = expectedVariant(state);
@@ -728,16 +740,42 @@ export async function gateVariant(
 	const known = new Set(splitIds);
 	const warnings: string[] = [];
 
-	// Completeness: every (case, rep) must be scored or recorded as an infra error.
-	const seen = new Set([...data.rows, ...data.errors].map(row => `${row.prompt_id}\0${row.rep}`));
+	// Completeness: every (case, rep) must be scored or recorded as an infra error. A result row
+	// supersedes earlier error rows for its slot (errors.jsonl is append-only across resumes), but
+	// two result rows for one slot would be averaged as extra reps, so they are rejected.
+	const slotKey = (row: ResultRow) => `${row.prompt_id}#${row.rep}`;
+	const resultSlots = new Set<string>();
+	const duplicates = new Set<string>();
+	for (const row of data.rows) {
+		const key = slotKey(row);
+		if (resultSlots.has(key)) duplicates.add(key);
+		resultSlots.add(key);
+	}
+	if (duplicates.size > 0) {
+		throw new RatchetError(
+			`${variant}/results.jsonl has duplicate (case, rep) rows (${[...duplicates].slice(0, 10).join(", ")}); keep one row per slot and re-gate`,
+		);
+	}
+	const errorSlots = new Set(data.errors.map(slotKey));
 	const missing: string[] = [];
+	const erroredOnly: string[] = [];
 	for (const id of splitIds) {
-		for (let rep = 0; rep < reps; rep++) if (!seen.has(`${id}\0${rep}`)) missing.push(`${id}#${rep}`);
+		for (let rep = 0; rep < reps; rep++) {
+			const key = `${id}#${rep}`;
+			if (resultSlots.has(key)) continue;
+			if (errorSlots.has(key)) erroredOnly.push(key);
+			else missing.push(key);
+		}
 	}
 	if (missing.length > 0) {
 		const shown = missing.slice(0, 10).join(", ");
 		throw new RatchetError(
 			`${variant} is incomplete: ${missing.length} (case, rep) slots have no result or error row (${shown}${missing.length > 10 ? ", …" : ""})`,
+		);
+	}
+	if (variant === "baseline" && erroredOnly.length > 0) {
+		throw new RatchetError(
+			`baseline has ${erroredOnly.length} slots that only errored (${erroredOnly.slice(0, 10).join(", ")}); fix the harness and resume the run until every slot is scored`,
 		);
 	}
 	// Held-out isolation: no transcript may exist for a test case.
@@ -777,7 +815,15 @@ export async function gateVariant(
 	}
 	const truncated = scored.filter(row => row.status === "truncated").length;
 	if (truncated > 0) warnings.push(`${truncated} truncated rows excluded from quality means`);
-	if (data.errors.length > 0) warnings.push(`${data.errors.length} infra errors recorded in errors.jsonl`);
+	if (data.errors.length > 0) warnings.push(`${data.errors.length} infra error rows recorded in errors.jsonl`);
+	// A guardrail with no measurement would read as "flat" and pass silently.
+	const measured = (summary: SplitSummary | undefined) => summary !== undefined && summary.n >= 2;
+	const unmeasured = goal.hold.filter(metric => !measured(train[metric]) || !measured(test[metric]));
+	if (unmeasured.length > 0) {
+		throw new RatchetError(
+			`Guardrail ${unmeasured.join(", ")} has fewer than 2 measured cases on train or test in ${variant}${unpriced.size > 0 ? " (unpriced models; add plan(prices=…))" : ""}; the gate cannot hold a guardrail it cannot measure`,
+		);
+	}
 
 	const last = state.rounds.at(-1);
 	const rerun = last?.variant === variant && last.decision === "rerun";
@@ -805,6 +851,11 @@ export async function gateVariant(
 				warnings.push(`Train and test ${goal.target} means differ beyond noise; the split may be unrepresentative`);
 			}
 		}
+	} else if (erroredOnly.length > 0) {
+		decision = "rerun";
+		reasons.push(
+			`${erroredOnly.length} slots only errored (${erroredOnly.slice(0, 5).join(", ")}); resume ${variant} until every slot is scored, then gate it again`,
+		);
 	} else {
 		const reference = state.best!.variant;
 		const referenceData = await readVariant(dir, reference);
@@ -819,6 +870,12 @@ export async function gateVariant(
 				train: paired(means, referenceMeans, state.train_ids, metric, direction),
 				test: paired(means, referenceMeans, state.test_ids, metric, direction),
 			};
+		}
+		const unpaired = goal.hold.filter(metric => !measured(deltas[metric]!.train) || !measured(deltas[metric]!.test));
+		if (unpaired.length > 0) {
+			throw new RatchetError(
+				`Guardrail ${unpaired.join(", ")} has fewer than 2 cases measured in both ${variant} and ${reference} on train or test; the gate cannot compare it`,
+			);
 		}
 		const regressed = goal.hold.filter(
 			metric => deltas[metric]!.train.verdict === "down" || deltas[metric]!.test.verdict === "down",
@@ -862,6 +919,7 @@ export async function gateVariant(
 	if (rerun) state.rounds[state.rounds.length - 1] = round;
 	else state.rounds.push(round);
 	state.current_round = roundNumber;
+	if (decision === "baseline") state.baseline_inputs_sha = await stageDigest(cwd, state, "inputs");
 	if (decision === "baseline" || decision === "keep") {
 		state.best = { round: roundNumber, variant, test_score: test[goal.target]!.mean };
 		state.flat_rounds = 0;
