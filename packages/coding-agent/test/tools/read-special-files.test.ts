@@ -43,7 +43,7 @@ async function expectFifoRejection(tool: ReadTool, readPath: string, fifo: strin
 	]);
 	if (outcome === "HUNG") releaseFifoReader(fifo);
 	expect(outcome).toBeInstanceOf(ToolError);
-	expect((outcome as ToolError).message).toContain("FIFO");
+	expect(outcome).toHaveProperty("message", expect.stringContaining("FIFO"));
 }
 
 // Regression: reading `/dev/stdin` blocked a thread no abort can cancel and swallowed the TUI's
