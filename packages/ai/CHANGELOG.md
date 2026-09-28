@@ -2,15 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Factory Droid OAuth, HTTP streaming across Anthropic, OpenAI and Gemini protocols, and pool-aware usage reporting ([#8577](https://github.com/can1357/oh-my-pi/pull/8577) by [@will-bogusz](https://github.com/will-bogusz), continued in [#13276](https://github.com/can1357/oh-my-pi/pull/13276) by [@DusKing1](https://github.com/DusKing1)).
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed
 
 - Reduced per-token CPU and allocations while streaming: the leaked-thinking scanner used for OpenAI-compatible and custom endpoints no longer allocates per character, chat-completions and Bedrock look up a delta's content block in constant time, Google, Gemini CLI, Codex, and chat-completions streams skip raw SSE line capture unless an `onSseEvent` listener is attached, and event streams drain backlogs without `Array#shift` ([#13650](https://github.com/can1357/oh-my-pi/pull/13650) by [@H4vC](https://github.com/H4vC)).
-
-### Added
-
-- Added Factory Droid OAuth, HTTP streaming across Anthropic, OpenAI and Gemini protocols, and pool-aware usage reporting ([#8577](https://github.com/can1357/oh-my-pi/pull/8577) by [@will-bogusz](https://github.com/will-bogusz), continued in [#13276](https://github.com/can1357/oh-my-pi/pull/13276) by [@DusKing1](https://github.com/DusKing1)).
 
 ## [18.4.2] - 2026-09-28
 
