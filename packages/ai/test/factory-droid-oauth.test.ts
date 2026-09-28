@@ -193,6 +193,34 @@ describe("Factory Droid stored region", () => {
 		);
 		expect(refreshed).toMatchObject({ orgId: "factory-org", region: "eu", inferenceRegion: "us" });
 	});
+
+	it("binds a changed Factory org claim to the refreshed bearer within the same WorkOS org", async () => {
+		const refreshed = await attachFactoryDroidRegion(
+			{ access: "new", refresh: "new", expires: 1, orgId: "factory-new" },
+			{
+				provider: "factory-droid",
+				phase: "refresh",
+				stored: {
+					access: "old",
+					refresh: "old",
+					expires: 0,
+					orgId: "factory-org",
+					activeOrganizationId: "workos-org",
+					region: "eu",
+					inferenceRegion: "us",
+				},
+				raw: { refresh_token: "new", organization_id: "workos-org" },
+				fetch: async (url, init) => {
+					expect(String(url)).toBe("https://api.factory.ai/api/cli/whoami");
+					expect(new Headers(init?.headers).get("x-factory-org-id")).toBe("factory-new");
+					return jsonResponse(503, {});
+				},
+			},
+		);
+		expect(refreshed).toMatchObject({ orgId: "factory-new", activeOrganizationId: "workos-org" });
+		expect(refreshed.region).toBeUndefined();
+		expect(refreshed.inferenceRegion).toBeUndefined();
+	});
 });
 
 describe("Factory Droid OAuth", () => {

@@ -13,14 +13,18 @@ export const attachFactoryDroidRegion: AfterExchangeHook = async (credentials, c
 		typeof context.raw.organization_id === "string"
 			? context.raw.organization_id
 			: context.stored?.activeOrganizationId;
+	// The token's Factory org claim belongs to the new bearer: a different
+	// claim is an org change even when the WorkOS selection is unchanged.
+	const factoryOrgChanged = Boolean(
+		credentials.orgId && context.stored?.orgId && credentials.orgId !== context.stored.orgId,
+	);
 	const sameOrg =
-		selectedOrg && context.stored?.activeOrganizationId
-			? selectedOrg === context.stored.activeOrganizationId
-			: !credentials.orgId || !context.stored?.orgId || credentials.orgId === context.stored.orgId;
+		!factoryOrgChanged &&
+		(!selectedOrg || !context.stored?.activeOrganizationId || selectedOrg === context.stored.activeOrganizationId);
 	const identity = {
 		...credentials,
 		activeOrganizationId: selectedOrg,
-		orgId: (sameOrg ? context.stored?.orgId : undefined) ?? credentials.orgId,
+		orgId: credentials.orgId ?? (sameOrg ? context.stored?.orgId : undefined),
 		region: sameOrg ? context.stored?.region : undefined,
 		inferenceRegion: sameOrg ? context.stored?.inferenceRegion : undefined,
 	};
