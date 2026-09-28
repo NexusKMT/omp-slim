@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the optional `supersedeComplete` hook (`SupersedeCompleteFn`) to `PruneConfig` and `SupersedePruneConfig`: a selector-free result supersedes selector-carrying results of its key only when the hook reports it complete ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
+### Changed
+
+- `readToolSupersedeKey()` now keys `:raw` and `:conflicts` reads as `path\u0001selector`, so a bare-path read no longer supersedes them; a failed result now supersedes only older failed results of its key ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
+### Fixed
+
+- Fixed code the agent had already read disappearing from context when a later read of the same file returned only a summary, a truncated page, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
