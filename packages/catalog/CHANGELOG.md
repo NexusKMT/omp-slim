@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.3] - 2026-09-28
+
 ### Added
 
 - Added support for Claude Sonnet 5.5 model with image and text inputs

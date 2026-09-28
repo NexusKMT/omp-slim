@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.3] - 2026-09-28
+
 ### Added
 
 - Added `transformAssistantMessagePreservesToolCalls`, letting stream speculation and direct speculative candidates run under a `transformAssistantMessage` that never rewrites streamed tool calls
