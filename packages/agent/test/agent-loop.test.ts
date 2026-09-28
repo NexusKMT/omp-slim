@@ -6179,7 +6179,8 @@ describe("agentLoop streaming snapshots", () => {
 				...["x", "y", "z"].map(delta => () => {
 					args.content = `${args.content}${delta}`;
 					const meta = args.meta;
-					if (meta && typeof meta === "object" && "tags" in meta && Array.isArray(meta.tags)) meta.tags.push(delta);
+					if (meta && typeof meta === "object" && "tags" in meta && Array.isArray(meta.tags))
+						meta.tags.push(delta);
 					stream.push({ type: "toolcall_delta", contentIndex: 0, delta, partial });
 				}),
 				() => stream.push({ type: "toolcall_end", contentIndex: 0, toolCall, partial }),
@@ -6195,7 +6196,10 @@ describe("agentLoop streaming snapshots", () => {
 		const seen: { event: AgentEvent; json: string }[] = [];
 		for await (const event of agentLoop([createUserMessage("go")], context, config, undefined, streamFn)) {
 			if (event.type === "message_update" && turn === 1) seen.push({ event, json: JSON.stringify(event) });
-			if ((event.type === "message_start" && event.message.role === "assistant") || event.type === "message_update") {
+			if (
+				(event.type === "message_start" && event.message.role === "assistant") ||
+				event.type === "message_update"
+			) {
 				advance();
 			}
 		}

@@ -371,7 +371,11 @@ export function readModelCache<TApi extends Api>(
 				entry = parseCacheRow<TApi>(db, providerId, row, ttlMs, now);
 			}
 			if (readRowCache.size >= READ_ROW_CACHE_MAX) readRowCache.clear();
-			readRowCache.set(key, { dataVersion, row: entry === null ? null : row, entry: entry as CacheEntry<Api> | null });
+			readRowCache.set(key, {
+				dataVersion,
+				row: entry === null ? null : row,
+				entry: entry as CacheEntry<Api> | null,
+			});
 			return entry;
 		});
 	} catch {
