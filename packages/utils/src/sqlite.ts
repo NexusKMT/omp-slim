@@ -67,23 +67,20 @@ export interface SqliteOpenOptions {
  */
 function revealHiddenCorruption(db: Database | undefined, error: unknown): unknown {
 	if (!db || isSqliteCorruptionError(error) || isSqliteBusyError(error)) return error;
-	let problem: string | undefined;
+	let detail: string;
+	let code: unknown = "SQLITE_CORRUPT";
+	let errno: unknown = 11;
 	try {
 		const rows = db.query<{ quick_check: string }, []>("PRAGMA quick_check(1)").all();
 		if (rows[0]?.quick_check === "ok") return error;
-		problem = rows[0]?.quick_check;
+		detail = `database disk image is malformed (${rows[0]?.quick_check})`;
 	} catch (probeError) {
-		return isSqliteCorruptionError(probeError) ? probeError : error;
+		if (!isSqliteCorruptionError(probeError)) return error;
+		detail = probeError instanceof Error ? probeError.message : String(probeError);
+		({ code, errno } = probeError as { code: unknown; errno?: unknown });
 	}
 	const original = error instanceof Error ? error.message : String(error);
-	return Object.assign(
-		new Error(`database disk image is malformed (${problem}); initialization failed: ${original}`),
-		{
-			code: "SQLITE_CORRUPT",
-			errno: 11,
-			cause: error,
-		},
-	);
+	return Object.assign(new Error(`${detail}; initialization failed: ${original}`, { cause: error }), { code, errno });
 }
 
 async function openWithBusyRetries<T>(
