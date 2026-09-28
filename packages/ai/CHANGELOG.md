@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Anthropic requests with thinking enabled failing on models whose output ceiling cannot fit the minimum thinking budget; thinking is now disabled for those requests instead ([#13359](https://github.com/can1357/oh-my-pi/pull/13359) by [@jchanghong023](https://github.com/jchanghong023))
+
 ## [18.4.1] - 2026-09-28
 
 ### Fixed
@@ -59,10 +63,6 @@
 ### Fixed
 
 - Fixed Anthropic OAuth requests capping output at 64k tokens; they now request the model's full ceiling (128k on Opus 5.5), matching Claude Code and API-key requests
-
-### Fixed
-
-- Fixed Anthropic requests with thinking enabled failing on models whose output ceiling cannot fit the thinking budget: the budget now shrinks below the model cap — including the interleaved-thinking path — and thinking is disabled when its minimum no longer fits ([#13359](https://github.com/can1357/oh-my-pi/pull/13359) by [@jchanghong023](https://github.com/jchanghong023))
 
 ## [18.3.2] - 2026-09-25
 
