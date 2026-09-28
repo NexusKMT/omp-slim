@@ -8083,7 +8083,9 @@ export class AgentSession implements SettingsScope {
 	 * Handles three cases:
 	 * - Streaming: queue as steer/follow-up, aside (next step boundary), or store for next turn
 	 * - Not streaming + triggerTurn: appends to state/session, starts new turn unless the client cannot own it
-	 * - Not streaming + no trigger: appends to state/session, no turn
+	 * - Not streaming + no trigger: appends to state/session, no turn; with the default delivery
+	 *   (no deliverAs) a display:true message also paints to the interactive transcript
+	 *   immediately (message_start/message_end, no turn)
 	 *
 	 * @returns true iff this call synchronously started a new turn (awaited
 	 * `agent.prompt`); false when the message was queued/appended without a turn
@@ -8260,6 +8262,21 @@ export class AgentSession implements SettingsScope {
 			normalizedAppMessage.details,
 			normalizedAppMessage.attribution,
 		);
+		if (normalizedAppMessage.display === true) {
+			// Idle display append with no turn: notify session listeners so the interactive
+			// transcript paints it now instead of on the next rebuild. The entry is persisted
+			// above, before any listener sees these events, so a transcript replay racing this
+			// append always finds it — EventController defers pre-initial-render custom paints
+			// to that replay. Extension observers are detached so they cannot stall the caller.
+			await this.#emitSessionEvent(
+				{ type: "message_start", message: normalizedAppMessage },
+				{ detachExtensions: true },
+			);
+			await this.#emitSessionEvent(
+				{ type: "message_end", message: normalizedAppMessage },
+				{ detachExtensions: true },
+			);
+		}
 		return false;
 	}
 

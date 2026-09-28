@@ -963,6 +963,17 @@ export class EventController {
 	async #handleMessageStart(event: Extract<AgentSessionEvent, { type: "message_start" }>): Promise<void> {
 		this.#ensureWorkingLoaderWhileStreaming();
 		if (event.message.role === "hookMessage" || event.message.role === "custom") {
+			if (event.message.role === "custom" && !this.ctx.initialChatRendered && !this.ctx.viewSession.isStreaming) {
+				// Idle custom append while no transcript render has committed (e.g. a startup
+				// display:true sendMessage before renderInitialMessages): AgentSession persists the
+				// entry before emitting this event, so the replay owns the paint — a render not yet
+				// started reads it from session entries, and one in progress sees the entry count
+				// change and restarts. Painting live too would duplicate it, since
+				// renderInitialMessages({ preserveExistingChat: true }) re-appends existing chat
+				// children. Mirrors ExtensionUiController.#applyCustomMessageDisplay's gate.
+				// Streaming is excluded so live-turn rendering is unchanged.
+				return;
+			}
 			const signature = `${event.message.role}:${event.message.customType}:${event.message.timestamp}`;
 			if (this.#renderedCustomMessages.has(signature)) {
 				return;
