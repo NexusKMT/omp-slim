@@ -61,4 +61,22 @@ describe("buildSkillPromptMessage", () => {
 			await removeWithRetries(dir);
 		}
 	});
+
+	test("omits CRLF frontmatter from user-invoked and autoload skill messages", async () => {
+		const { dir, skill } = await createSkill("Review the supplied code carefully.");
+		try {
+			await Bun.write(
+				skill.filePath,
+				"---\r\nname: reviewer\r\ndescription: Review code\r\n---\r\n\r\nReview the supplied code carefully.\r\n",
+			);
+			for (const invocation of ["user", "autoload"] as const) {
+				const built = await buildSkillPromptMessage(skill, { args: "" }, invocation);
+				expect(built.message).toContain("Review the supplied code carefully.");
+				expect(built.message).not.toContain("description: Review code");
+				expect(built.message).not.toContain("name: reviewer");
+			}
+		} finally {
+			await removeWithRetries(dir);
+		}
+	});
 });
