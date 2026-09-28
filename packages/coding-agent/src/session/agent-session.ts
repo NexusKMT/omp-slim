@@ -8918,11 +8918,10 @@ export class AgentSession implements SettingsScope {
 			this.#freshProviderSessionId = undefined;
 			this.#clearInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
-			// Drop the previous session's per-turn classifier cache: the configured
-			// auto mode and effective level stay, but the first post-/new turn
-			// must classify its own prompt from undefined rather than inheriting
-			// the parent's last auto-resolved effort (#13383).
-			this.#models.clearAutoResolvedLevel();
+			// Re-apply the configured selector so the new session does not inherit
+			// the previous session's auto-classified effort: auto stays auto but
+			// restarts at the provisional level; a pinned level re-resolves to itself.
+			this.#models.restoreThinkingLevel(this.configuredThinkingLevel());
 			// Drop the frozen system-prompt/tool snapshot and synced message bytes
 			// (mirrors freshSession()/resetSessionContext()): without this the first
 			// post-/new turns keep sending the previous session's StablePrefix, and

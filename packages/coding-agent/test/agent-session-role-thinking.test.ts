@@ -842,5 +842,10 @@ describe("AgentSession role model thinking behavior", () => {
 		expect(session.isAutoThinking).toBe(true);
 		expect(session.configuredThinkingLevel()).toBe(AUTO_THINKING);
 		expect(session.autoResolvedThinkingLevel()).toBeUndefined();
+		const provisional = resolveProvisionalAutoLevel(model);
+		const entries = session.sessionManager.getEntries().filter(e => e.type === "thinking_level_change");
+		expect(session.thinkingLevel).toBe(provisional);
+		expect(session.agent.state.thinkingLevel).toBe(provisional);
+		expect(entries.at(-1)).toMatchObject({ thinkingLevel: provisional, configured: AUTO_THINKING });
 	});
 });

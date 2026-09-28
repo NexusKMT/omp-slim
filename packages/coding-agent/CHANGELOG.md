@@ -16,6 +16,11 @@
 - Clarified the `eval` tool documentation to explain that its kernel may be shared with the parent session and concurrent task subagents.
 
 ### Fixed
+- Fixed ongoing Claude tasks stopping instead of automatically redeeming eligible saved resets when usage polling is throttled or earlier failures exhausted the retry budget; concurrent tasks now share confirmed resets without spending again
+- Fixed user-tagged `^model` agents from the main session being unavailable to nested subagents.
+- Fixed SDK requests using an `ApiKeyResolver` from `createApiKeyResolver` failing with a drained account's multi-hour quota error instead of briefly waiting for a healthy sibling credential whose block expires within seconds ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
+- Fixed headless subagents losing an assignment during a session transition and then entering yield reminders without ever receiving it ([#13538](https://github.com/can1357/oh-my-pi/issues/13538)).
+- Fixed `/new` with automatic thinking starting the new session at the previous session's classified effort instead of the provisional level, both in its first `thinking_level_change` entry and on the wire ([#13383](https://github.com/can1357/oh-my-pi/issues/13383))
 
 - Fixed `/tree` reopening saved Ask results instead of navigating past them when an optional preview was saved as `null`.
 - Fixed the legacy `createGrepTool()` API when searching with both a file path and a `glob` filter.
