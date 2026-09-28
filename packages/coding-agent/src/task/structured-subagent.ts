@@ -186,11 +186,18 @@ export interface StructuredSubagentResult {
 /** Machine-readable failure category so adapters can retain their native errors. */
 export class StructuredSubagentError extends Error {
 	readonly kind: "preflight" | "isolation" | "execution";
+	/** The child's settled result, when the child finished before a later step failed. */
+	readonly result?: SingleResult;
 
-	constructor(kind: "preflight" | "isolation" | "execution", message: string, options?: ErrorOptions) {
+	constructor(
+		kind: "preflight" | "isolation" | "execution",
+		message: string,
+		options?: ErrorOptions & { result?: SingleResult },
+	) {
 		super(message, options);
 		this.name = "StructuredSubagentError";
 		this.kind = kind;
+		this.result = options?.result;
 	}
 }
 
@@ -677,6 +684,17 @@ function attachStructuredOutputMetadata(result: SingleResult, schema: Structured
 	};
 }
 
+/** Name a settled child's exit status and artifact for a post-settle failure message. */
+function describeSalvagedWork(result: SingleResult): string {
+	const exit = result.aborted
+		? `aborted${result.abortReason ? ` (${result.abortReason})` : ""}`
+		: `exit ${result.exitCode}${result.error ? ` (${result.error})` : ""}`;
+	const artifact = result.outputPath
+		? ` Its output is at \`agent://${result.id}\` (${result.outputPath}); read it before rerunning this work.`
+		: " It wrote no output artifact.";
+	return `\nThe child finished before this failure: ${exit}.${artifact}`;
+}
+
 /**
  * Execute a validated subagent. Preflight errors occur before any artifact
  * lease or child dispatch; callers keep responsibility for their result text.
@@ -690,6 +708,11 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 	let completedSuccessfully = false;
 	let hasValidStructuredOutput = false;
 	let deferredCleanup: Promise<void> | undefined;
+	// Set once the child returns: every later step (structured-output
+	// metadata, isolation merge, nested patch apply) can still throw, and the
+	// failure must carry the exit status and artifact the child produced.
+	let settled: SingleResult | undefined;
+	let retainSalvagedArtifact = false;
 	const onSubprocessResult =
 		request.invocationKind === "eval"
 			? (result: SingleResult) => request.session.recordEvalSubagentUsage?.(result.usage?.output ?? 0)
@@ -735,6 +758,7 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 				onSubprocessResult,
 			});
 		}
+		settled = result;
 		attachStructuredOutputMetadata(result, policy.schema);
 		hasValidStructuredOutput = result.structuredOutput?.status === "valid";
 		requiresRecoveryArtifacts =
@@ -796,14 +820,18 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 		};
 	} catch (error) {
 		if (error instanceof StructuredSubagentError) throw error;
+		// The failure message points the parent at the artifact, so it must
+		// survive the cleanup below.
+		retainSalvagedArtifact = settled?.outputPath !== undefined;
 		throw new StructuredSubagentError(
 			"execution",
-			`Subagent execution failed: ${error instanceof Error ? error.message : String(error)}`,
-			{ cause: error },
+			`Subagent execution failed: ${error instanceof Error ? error.message : String(error)}${settled ? describeSalvagedWork(settled) : ""}`,
+			{ cause: error, result: settled },
 		);
 	} finally {
 		const shouldRetainArtifacts =
 			request.detached === true ||
+			retainSalvagedArtifact ||
 			(request.retainArtifacts && (completedSuccessfully || hasValidStructuredOutput)) ||
 			(policy.isIsolated && (!policy.applyChanges || changesApplied === false || requiresRecoveryArtifacts));
 		const shouldCleanup = lease.temporary && !shouldRetainArtifacts;
