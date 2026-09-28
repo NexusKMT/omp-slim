@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `modelAcceptsSamplingParams(model)` in `compat/resolve`, which decides sampling-parameter support from model identity whichever provider serves the model, and still honors a compat or rule-level `supportsSamplingParams: false`
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed

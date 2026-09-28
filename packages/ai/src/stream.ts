@@ -4,6 +4,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { scheduler } from "node:timers/promises";
 import { isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
+import { modelAcceptsSamplingParams } from "@oh-my-pi/pi-catalog/compat/resolve";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { isVertexExpressOpenAIUrl, isVertexRawPredictUrl, resolveVertexEndpointHost } from "@oh-my-pi/pi-catalog/hosts";
 import {
@@ -987,7 +988,10 @@ function streamDispatch<TApi extends Api>(
 	context: Context,
 	options?: OptionsForApi<TApi>,
 ): AssistantMessageEventStream {
-	const requestOptions = withTransportFetch(model, (options || {}) as StreamOptions) as OptionsForApi<TApi>;
+	const requestOptions = withSupportedSamplingParams(
+		model,
+		withTransportFetch(model, (options || {}) as StreamOptions),
+	) as OptionsForApi<TApi>;
 	assertExplicitOpenAIResponsesPromptCacheSupport(model, requestOptions);
 
 	// Check custom API registry first (extension-provided APIs like "vertex-claude-api")
@@ -1259,6 +1263,39 @@ function withInferenceSessionId(options?: SimpleStreamOptions): SimpleStreamOpti
 	return { ...options, sessionId: crypto.randomUUID() };
 }
 
+type SamplingOptions = Pick<
+	StreamOptions,
+	"temperature" | "topP" | "topK" | "minP" | "presencePenalty" | "repetitionPenalty"
+>;
+
+/**
+ * Drop explicit sampling parameters the model rejects, before any provider
+ * builds its payload. Support is a property of the model (OpenAI GPT-5+,
+ * adaptive Claude reject them on every host), so it is enforced here once
+ * instead of in each provider.
+ */
+function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api>, options: T): T {
+	if (
+		options.temperature === undefined &&
+		options.topP === undefined &&
+		options.topK === undefined &&
+		options.minP === undefined &&
+		options.presencePenalty === undefined &&
+		options.repetitionPenalty === undefined
+	) {
+		return options;
+	}
+	if (modelAcceptsSamplingParams(model)) return options;
+	const supported = { ...options };
+	delete supported.temperature;
+	delete supported.topP;
+	delete supported.topK;
+	delete supported.minP;
+	delete supported.presencePenalty;
+	delete supported.repetitionPenalty;
+	return supported;
+}
+
 export function streamSimple<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
@@ -1307,7 +1344,10 @@ function streamSimpleRequest<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
-	const requestOptions = withTransportFetch(model, (options || {}) as SimpleStreamOptions);
+	const requestOptions = withSupportedSamplingParams(
+		model,
+		withTransportFetch(model, (options || {}) as SimpleStreamOptions),
+	);
 
 	const apiKeyResolver = isApiKeyResolver(requestOptions?.apiKey) ? requestOptions.apiKey : undefined;
 	if (apiKeyResolver) {
