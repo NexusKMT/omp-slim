@@ -42,6 +42,10 @@
 
 - Removed the legacy TinyTitleDownloadProgress overlay in favor of the centralized agent HUD.
 
+### Fixed
+
+- Fixed the armed `/loop` status reading `Loop waiting`, which hid that the next prompt becomes the repeated loop body; it now reads `Loop: next prompt repeats` ([#13435](https://github.com/can1357/oh-my-pi/pull/13435) by [@Dante-dan](https://github.com/Dante-dan)).
+
 ## [18.3.1] - 2026-09-25
 
 ### Breaking Changes
