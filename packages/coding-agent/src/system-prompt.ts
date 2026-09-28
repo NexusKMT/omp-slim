@@ -603,6 +603,9 @@ export interface BuildSystemPromptResult {
 	xdevCatalogNames?: readonly string[];
 }
 
+/** Static wrapper; compiled (not rendered) so user-authored Markdown passes through byte-for-byte. */
+const renderUserAppend = prompt.compile(userAppendPromptTemplate.trimEnd());
+
 /**
  * Join generated append blocks (memory, auto-learn, `xd://` routes, MCP server
  * instructions) with the user's append prompt. Keep the user text in its own
@@ -616,11 +619,7 @@ export function composeAppendPrompt(appendParts: readonly string[], appendSystem
 	if (!generated) {
 		return appendSystemPrompt;
 	}
-	// Render the static wrapper without reformatting user-authored Markdown.
-	return prompt.compile(userAppendPromptTemplate.trimEnd())({
-		generatedAppend: generated,
-		userAppend: appendSystemPrompt,
-	});
+	return renderUserAppend({ generatedAppend: generated, userAppend: appendSystemPrompt });
 }
 
 /** Build the system prompt with tools, guidelines, and context */
