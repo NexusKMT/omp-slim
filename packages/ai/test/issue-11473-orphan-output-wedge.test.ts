@@ -1,6 +1,9 @@
 import { expect, it } from "bun:test";
 import type { ResponseInput } from "@oh-my-pi/pi-ai/providers/openai-responses-wire";
-import { buildResponsesInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
+import {
+	buildResponsesInput,
+	hoistInterleavedResponsesToolBatchMessages,
+} from "@oh-my-pi/pi-ai/providers/openai-shared";
 import type { AssistantMessage, Context, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { createOpenAIResponsesHistoryPayload } from "@oh-my-pi/pi-ai/utils";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -170,4 +173,22 @@ it("hoists a repaired orphan-output note from between two outputs (#13083)", () 
 		"message:user",
 	]);
 	expect(JSON.stringify(items[1])).toContain("[Orphan tool result; call_id=call_01]");
+});
+
+it("leaves commentary between completed sequential tool rounds in place (#13083)", () => {
+	// Each round's call → output pair is complete before the next round's
+	// commentary, so no message interrupts a batch and nothing may move.
+	const input = [
+		{ type: "message", role: "user", content: "go" },
+		{ type: "function_call", call_id: "call_a", name: "read", arguments: "{}" },
+		{ type: "function_call_output", call_id: "call_a", output: "a" },
+		{ type: "message", role: "assistant", content: "after a" },
+		{ type: "function_call", call_id: "call_b", name: "read", arguments: "{}" },
+		{ type: "function_call_output", call_id: "call_b", output: "b" },
+		{ type: "message", role: "assistant", content: "after b" },
+		{ type: "function_call", call_id: "call_c", name: "read", arguments: "{}" },
+		{ type: "function_call_output", call_id: "call_c", output: "c" },
+	] as ResponseInput;
+
+	expect(hoistInterleavedResponsesToolBatchMessages(input)).toEqual(input);
 });
