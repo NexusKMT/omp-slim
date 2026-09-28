@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `resetShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added

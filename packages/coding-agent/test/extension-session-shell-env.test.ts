@@ -13,10 +13,13 @@ import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config
 import { executeBash } from "@oh-my-pi/pi-coding-agent/exec/bash-executor";
 import { loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
+import type { ExtensionAgentIdentity } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { getShellConfig } from "@oh-my-pi/pi-utils/procmgr";
+import { getShellConfig, resetShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
+
+const SUBAGENT: ExtensionAgentIdentity = { kind: "sub", id: "0-Task", name: "task", depth: 1, parentId: "Main" };
 
 const ENV_KEY = "PI_TEST_SESSION_SCOPED_ENV";
 
@@ -57,16 +60,33 @@ describe("session lifecycle environment reaches bash commands", () => {
 
 	afterEach(() => {
 		delete process.env[ENV_KEY];
+		// The last session event rebuilt the cached spawn environment while the
+		// variable was set; drop it so later test files see the restored env.
+		resetShellConfigCache();
 		resetSettingsForTest();
 		tempDir.removeSync();
 	});
 
-	async function createRunner(sessionManager: SessionManager): Promise<ExtensionRunner> {
+	async function createRunner(
+		sessionManager: SessionManager,
+		agent?: ExtensionAgentIdentity,
+	): Promise<ExtensionRunner> {
 		const extensionPath = tempDir.join("session-env.ts");
 		fs.writeFileSync(extensionPath, SESSION_ENV_EXTENSION);
 		const loaded = await loadExtensions([extensionPath], tempDir.path());
 		expect(loaded.errors).toEqual([]);
-		return new ExtensionRunner(loaded.extensions, loaded.runtime, tempDir.path(), sessionManager, modelRegistry);
+		return new ExtensionRunner(
+			loaded.extensions,
+			loaded.runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			agent,
+		);
 	}
 
 	async function run(command: string, sessionKey: string): Promise<string> {
@@ -113,5 +133,20 @@ describe("session lifecycle environment reaches bash commands", () => {
 		await runner.emit({ type: "session_start" });
 
 		expect(await run(`printf '%s' "$PI_TEST_PERSISTENT_MARK"`, sessionKey)).toBe("kept");
+	});
+
+	it("a subagent's session start leaves the parent's commands with the parent's value", async () => {
+		const parentSession = SessionManager.inMemory(tempDir.path());
+		const parent = await createRunner(parentSession);
+		await parent.emit({ type: "session_start" });
+		const parentId = parentSession.getSessionId();
+		expect(await run(`printf '%s' "$${ENV_KEY}"`, parentId)).toBe(parentId);
+
+		// An in-process subagent: its own runner and session, the same process.env.
+		const childSession = SessionManager.inMemory(tempDir.path());
+		const child = await createRunner(childSession, SUBAGENT);
+		await child.emit({ type: "session_start" });
+
+		expect(await run(`printf '%s' "$${ENV_KEY}"`, parentId)).toBe(parentId);
 	});
 });

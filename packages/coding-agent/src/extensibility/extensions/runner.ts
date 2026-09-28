@@ -1623,8 +1623,10 @@ export class ExtensionRunner {
 		// Handlers for these events export session-scoped environment (a session
 		// id, per-session tool config). The shell spawn environment is a cached
 		// copy that may predate them or belong to the previous session, so rebuild
-		// it once they have run.
-		if (ctx !== undefined && SESSION_IDENTITY_EVENTS[event.type] === true) {
+		// it once they have run. Only the main agent's session owns it: in-process
+		// subagents share process.env, and a subagent's session start must not
+		// hand its values to the parent's commands.
+		if (ctx !== undefined && this.agent.kind === "main" && SESSION_IDENTITY_EVENTS[event.type] === true) {
 			resetShellConfigCache();
 		}
 
