@@ -469,7 +469,8 @@ pi.on("tool_call", async event => {
 
 `additionalContext` carries trusted handler-authored instructions for the next provider request. The
 host emits them after the tool results with developer/system priority where the selected transport
-supports it. Raw tool output and other untrusted data must stay in the ordinary tool result.
+supports it; a value repeated within one tool batch is emitted once, at its first position. Raw tool
+output and other untrusted data must stay in the ordinary tool result.
 
 Non-empty context from every non-blocking handler is preserved in registration order. OMP waits
 until the tool batch settles, then emits the context after the corresponding tool results in

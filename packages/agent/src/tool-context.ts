@@ -24,15 +24,15 @@ export function isNonBlankContext(value: unknown): value is string {
 }
 
 /**
- * Join passive context values in order, dropping blanks. Returns undefined
- * when nothing remains.
+ * Join passive context values in order, dropping blanks and repeats of an
+ * earlier value. Returns undefined when nothing remains.
  */
 export function joinAdditionalContext(values: Iterable<string | undefined>): string | undefined {
-	const kept: string[] = [];
+	const kept = new Set<string>();
 	for (const value of values) {
-		if (isNonBlankContext(value)) kept.push(value);
+		if (isNonBlankContext(value)) kept.add(value);
 	}
-	return kept.length > 0 ? kept.join("\n\n") : undefined;
+	return kept.size > 0 ? [...kept].join("\n\n") : undefined;
 }
 
 /**
