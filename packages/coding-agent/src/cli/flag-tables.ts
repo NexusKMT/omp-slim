@@ -36,16 +36,15 @@ import type { Args } from "./args";
 import { CliUsageError } from "./usage-error";
 
 /**
- * Runtime dependencies injected into setters that need to validate input or
- * warn about bad values. `args.ts` constructs one object at module load and
- * passes it to each {@link STRING_SETTERS} call.
+ * Runtime dependencies injected into setters that need to validate input.
+ * `args.ts` constructs one object at module load and passes it to each
+ * {@link STRING_SETTERS} call.
  *
  * Keeping these out of the setter closures means this module stays free of
  * runtime imports from `@oh-my-pi/pi-utils`, which is the whole reason it can
  * be safely imported by `profile-bootstrap.ts` before `setProfile` runs.
  */
 export interface ParseDeps {
-	logger: { warn: (message: string, meta?: Record<string, unknown>) => void };
 	parseThinking: (value: string | null | undefined) => ConfiguredThinkingLevel | undefined;
 	normalizeToolNames: (values: Iterable<string>) => string[];
 	thinkingEfforts: readonly string[];
@@ -123,6 +122,10 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--mode": (result, value) => {
 		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
 			result.mode = value;
+		} else {
+			throw new CliUsageError(
+				`Invalid --mode value: ${JSON.stringify(value)}. Expected one of: text, json, rpc, rpc-ui, acp.`,
+			);
 		}
 	},
 	"--fork": (result, value) => {
@@ -197,14 +200,12 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	},
 	"--thinking": (result, value, deps) => {
 		const thinking = deps.parseThinking(value);
-		if (thinking !== undefined) {
-			result.thinking = thinking;
-		} else {
-			deps.logger.warn("Invalid thinking level passed to --thinking", {
-				level: value,
-				validThinkingLevels: deps.thinkingEfforts,
-			});
+		if (thinking === undefined) {
+			throw new CliUsageError(
+				`Invalid --thinking value: ${JSON.stringify(value)}. Expected one of: ${deps.thinkingEfforts.join(", ")}.`,
+			);
 		}
+		result.thinking = thinking;
 	},
 	"--export": (result, value) => {
 		result.export = value;
@@ -226,15 +227,13 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--skills": (result, value) => {
 		result.skills = value.split(",").map(s => s.trim());
 	},
-	"--approval-mode": (result, value, deps) => {
-		if (value === "always-ask" || value === "write" || value === "yolo") {
-			result.approvalMode = value;
-		} else {
-			deps.logger.warn("Invalid value passed to --approval-mode", {
-				value,
-				validValues: ["always-ask", "write", "yolo"],
-			});
+	"--approval-mode": (result, value) => {
+		if (value !== "always-ask" && value !== "write" && value !== "yolo") {
+			throw new CliUsageError(
+				`Invalid --approval-mode value: ${JSON.stringify(value)}. Expected one of: always-ask, write, yolo.`,
+			);
 		}
+		result.approvalMode = value;
 	},
 };
 

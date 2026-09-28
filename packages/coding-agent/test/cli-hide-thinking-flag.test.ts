@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
+import { CliUsageError } from "@oh-my-pi/pi-coding-agent/cli/usage-error";
 import { AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
 
 describe("parseArgs — --hide-thinking flag", () => {
@@ -41,8 +42,8 @@ describe("parseArgs — --thinking flag", () => {
 		expect(parseArgs(["--thinking", "max"]).thinking).toBe(ThinkingLevel.Max);
 	});
 
-	it("ignores invalid levels and the internal inherit selector", () => {
-		expect(parseArgs(["--thinking", "bogus"]).thinking).toBeUndefined();
-		expect(parseArgs(["--thinking", "inherit"]).thinking).toBeUndefined();
+	it("rejects invalid levels and the internal inherit selector as usage errors", () => {
+		expect(() => parseArgs(["--thinking", "bogus"])).toThrow(CliUsageError);
+		expect(() => parseArgs(["--thinking", "inherit"])).toThrow(/Invalid --thinking value: "inherit"/);
 	});
 });

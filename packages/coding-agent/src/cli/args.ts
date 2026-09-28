@@ -2,11 +2,11 @@
  * CLI argument parsing and help display
  */
 import * as path from "node:path";
-import { $env, APP_NAME, logger } from "@oh-my-pi/pi-utils";
+import { $env, APP_NAME } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import type { ServiceTierOpenAISettingValue } from "../config/service-tier";
 import { CLI_THINKING_LEVELS, type ConfiguredThinkingLevel, parseCliThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
-import { normalizeToolNames } from "../tools/builtin-names";
+import { BUILTIN_TOOL_NAMES, normalizeToolNames } from "../tools/builtin-names";
 import {
 	OPTIONAL_FLAGS,
 	OPTIONAL_VALUE_FLAGS,
@@ -109,7 +109,6 @@ export interface Args {
  * (which would otherwise trip the profile bootstrap's env-init ordering).
  */
 const PARSE_DEPS: ParseDeps = {
-	logger,
 	parseThinking: parseCliThinkingLevel,
 	normalizeToolNames,
 	thinkingEfforts: CLI_THINKING_LEVELS,
@@ -340,14 +339,19 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
 	return result;
 }
 
-/** Reject requested tool names absent from the fully discovered session registry. */
+/**
+ * Reject requested tool names absent from the fully discovered session registry.
+ * The registry is already narrowed by the `--tools` filter, so the listed
+ * choices also include every built-in name.
+ */
 export function validateToolNames(requested: readonly string[] | undefined, known: readonly string[]): void {
 	if (!requested) return;
 	const knownNames = new Set(known);
 	const unknown = requested.filter(name => !knownNames.has(name));
 	if (unknown.length === 0) return;
+	const choices = [...new Set<string>([...BUILTIN_TOOL_NAMES, ...known])];
 	throw new CliUsageError(
-		`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Valid tools: ${known.join(", ")}.`,
+		`Unknown tool${unknown.length === 1 ? "" : "s"} in --tools: ${unknown.join(", ")}. Available tools: ${choices.join(", ")}.`,
 	);
 }
 

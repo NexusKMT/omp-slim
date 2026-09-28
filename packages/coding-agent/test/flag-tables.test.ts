@@ -106,6 +106,26 @@ describe("--tools discovered-registry validation", () => {
 			/Unknown tool in --tools: missing/,
 		);
 	});
+
+	it("lists built-ins the --tools filter kept out of the registry alongside discovered tools", () => {
+		// With `--tools python` the registry holds only always-on/custom tools, so
+		// the choices must not be limited to that filtered set.
+		expect(() => validateToolNames(["python"], ["goal", "custom_tool"])).toThrow(
+			/Available tools: read, bash, edit,.*\bcustom_tool\b/,
+		);
+	});
+});
+
+describe("enum flag validation", () => {
+	it("rejects an unknown --approval-mode instead of silently keeping the default", () => {
+		expect(parseArgs(["--approval-mode", "yolo"]).approvalMode).toBe("yolo");
+		expect(() => parseArgs(["--approval-mode", "sometimes"])).toThrow(CliUsageError);
+	});
+
+	it("rejects an unknown --mode instead of falling back to text", () => {
+		expect(parseArgs(["--mode=json"]).mode).toBe("json");
+		expect(() => parseArgs(["--mode", "bogus"])).toThrow(/Invalid --mode value: "bogus"/);
+	});
 });
 
 describe("OPTIONAL_FLAGS per-flag quirks", () => {

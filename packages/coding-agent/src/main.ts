@@ -10,6 +10,7 @@ import type { ThinkingLevel } from "@oh-my-pi/pi-agent-core/thinking";
 import { EventLoopKeepalive } from "@oh-my-pi/pi-agent-core/utils/yield";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
 import {
+	APP_NAME,
 	directoryIsMissing,
 	getLogPath,
 	getProjectDir,
@@ -20,6 +21,7 @@ import {
 import { $env, isBunTestRuntime, setInteractiveHost } from "@oh-my-pi/pi-utils/env";
 import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
+import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "./capability";
 import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
@@ -1732,8 +1734,23 @@ export async function runRootCommand(
 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
-		const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
+		// Without a terminal on stdin the TUI cannot run: a prompt given as arguments
+		// runs headless like a piped one, and a bare launch fails with a usage error
+		// instead of booting the interactive stack and exiting silently.
+		const stdinIsTerminal = process.stdin.isTTY === true;
+		const hasArgPrompt = parsedArgs.messages.length > 0 || parsedArgs.fileArgs.length > 0;
+		const autoPrint =
+			(pipedInput !== undefined || (!stdinIsTerminal && hasArgPrompt)) &&
+			!parsedArgs.print &&
+			parsedArgs.mode === undefined;
 		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
+		if (isInteractive && !stdinIsTerminal) {
+			process.stderr.write(
+				`${chalk.red("Error: interactive mode requires a terminal, but stdin is not a TTY.")}\n` +
+					`Pass a prompt (\`${APP_NAME} -p "…"\`), pipe one on stdin, or use \`--mode rpc\`.\n`,
+			);
+			process.exit(2);
+		}
 		// Only the interactive host renders a focusable Agent Hub / subagent session
 		// tree; declare it so headless subagent optimizations (e.g. skipping replan
 		// title refresh) can tell a focusable process from a print/RPC/eval one.
@@ -2359,6 +2376,24 @@ export async function runRootCommand(
 					process.stderr.write(`${chalk.red(modelFallbackMessage)}\n`);
 				} else {
 					process.stderr.write(`${chalk.red("No models available.")}\n`);
+				}
+				const availableModels = modelRegistry.getAvailable();
+				if (parsedArgs.model && availableModels.length > 0) {
+					// Credentials work; the requested selector is what failed. Point at
+					// the nearest usable models instead of an API-key checklist.
+					const suggestions = fuzzyFilter(
+						availableModels.map(model => `${model.provider}/${model.id}`),
+						parsedArgs.model,
+						selector => selector,
+					).slice(0, 5);
+					if (suggestions.length > 0) {
+						process.stderr.write(`${chalk.yellow("\nDid you mean:")}\n`);
+						for (const selector of suggestions) process.stderr.write(`  ${selector}\n`);
+					}
+					process.stderr.write(
+						`\nRun \`${APP_NAME} models find <pattern>\` to search, or \`${APP_NAME} models\` to list all.\n`,
+					);
+					process.exit(1);
 				}
 				process.stderr.write(`${chalk.yellow("\nSet an API key environment variable:")}\n`);
 				process.stderr.write("  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.\n");
