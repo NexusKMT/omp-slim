@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `read` tool hanging, and the TUI ignoring every keystroke, when reading `/dev/stdin`, a FIFO, or another non-regular file; such paths are now rejected ([#13585](https://github.com/can1357/oh-my-pi/pull/13585) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
+
 ## [18.4.1] - 2026-09-28
 
 ### Changed
