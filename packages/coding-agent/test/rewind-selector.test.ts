@@ -151,6 +151,23 @@ describe("RewindSelectorComponent", () => {
 		}
 	});
 
+	it("filters the whole branch, not just the startup tail", () => {
+		const selected: string[] = [];
+		const selector = makeSelector(id => selected.push(id), undefined, longEntriesWithBoundaryTool());
+		try {
+			selector.render(120);
+			selector.handleInput("f");
+			selector.render(120);
+			selector.handleInput("prompt 0");
+			selector.render(120);
+			selector.handleInput(ENTER);
+
+			expect(selected).toEqual(["u0"]);
+		} finally {
+			selector.dispose();
+		}
+	});
+
 	it("keeps the selected sibling entry and main anchor when `a` loads earlier history", () => {
 		const selected: string[] = [];
 		const selector = makeSelector(

@@ -179,6 +179,7 @@ export class RewindSelectorComponent implements Component {
 		previous.dispose();
 		this.#truncated = false;
 		this.#mainVisible = undefined;
+		this.#mainRows = [];
 		const restored = selectedId ? this.#targets.findIndex(target => target.turnId === selectedId) : -1;
 		this.#selected = restored >= 0 ? restored : Math.max(0, this.#targets.length - 1);
 		this.deps.requestRender();
@@ -285,6 +286,8 @@ export class RewindSelectorComponent implements Component {
 			return;
 		}
 		if (matchesKey(data, "f")) {
+			// The filter must search the whole branch, not just the startup tail.
+			this.#loadFullHistory();
 			this.#filter = "";
 			this.#activeVariant = 0;
 			this.#siblingSelected = 0;
