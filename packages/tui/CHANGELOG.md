@@ -44,6 +44,9 @@
 ### Removed
 
 - Removed the legacy TinyTitleDownloadProgress overlay in favor of the centralized agent HUD.
+### Fixed
+
+- Fixed OSC 8 hyperlinks (file paths, URLs, GitHub refs) rendering as plain text in Herdr panes. Herdr reports `TERM=xterm-256color` without `TERM_PROGRAM`, so its panes were treated as an unknown terminal, although Herdr renders OSC 8 itself and opens links on Ctrl+click. Screen or tmux nested inside a pane still follow their own rules, and `PI_NO_HYPERLINKS=1` still opts out ([#13289](https://github.com/can1357/oh-my-pi/pull/13289) by [@andrebrait](https://github.com/andrebrait)).
 
 ### Fixed
 
