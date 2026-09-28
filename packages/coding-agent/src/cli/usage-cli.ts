@@ -1229,6 +1229,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		await loadCliExtensionProviders(modelRegistry, settings, getProjectDir(), {
 			additionalExtensionPaths: cmd.extensions,
 			disableExtensionDiscovery: cmd.noExtensions,
+			includeAmbientHooks: false,
 		});
 		const reports =
 			(await authStorage.usage.reports({

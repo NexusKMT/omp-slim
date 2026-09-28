@@ -6,12 +6,14 @@
  * landed in `accountsWithoutUsage` instead of producing a report.
  */
 import { Database } from "bun:sqlite";
+import * as path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "bun:test";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { runUsageCommand } from "@oh-my-pi/pi-coding-agent/cli/usage-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import * as utils from "@oh-my-pi/pi-utils";
+import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 
 const EXTENSION_SOURCE = `export default function (pi) {
 	pi.registerProvider("ext-usage", {
@@ -53,7 +55,7 @@ afterEach(async () => {
 	await tmp.remove();
 });
 
-async function usageJson(extensions: string[]): Promise<{
+async function usageJson(options: { extensions?: string[]; noExtensions?: boolean }): Promise<{
 	reports: Array<{ provider: string; limits: Array<{ id: string }> }>;
 	accountsWithoutUsage: Array<{ provider: string }>;
 }> {
@@ -62,14 +64,26 @@ async function usageJson(extensions: string[]): Promise<{
 		chunks.push(String(chunk));
 		return true;
 	});
-	await runUsageCommand({ json: true, provider: "ext-usage", extensions, noExtensions: true });
+	await runUsageCommand({ json: true, provider: "ext-usage", ...options });
 	return JSON.parse(chunks.join(""));
 }
 
 test("omp usage reports accounts through an extension-registered usage provider (issue #13579)", async () => {
-	const output = await usageJson([extPath]);
+	const output = await usageJson({ extensions: [extPath], noExtensions: true });
 	expect(output.reports.map(report => [report.provider, report.limits.map(limit => limit.id)])).toEqual([
 		["ext-usage", ["credits"]],
 	]);
 	expect(output.accountsWithoutUsage).toEqual([]);
+});
+
+test("omp usage skips ambient hook factories but retains configured usage providers", async () => {
+	const marker = tmp.join("hook-loaded");
+	const hookPath = path.join(getProjectAgentDir(tmp.path()), "hooks", "pre", "usage-hook.ts");
+	await Bun.write(hookPath, `await Bun.write(${JSON.stringify(marker)}, "loaded"); export default function () {}`);
+	vi.spyOn(utils, "getProjectDir").mockReturnValue(tmp.path());
+	vi.spyOn(Settings, "loadReadOnly").mockResolvedValue(Settings.isolated({ extensions: [extPath] }));
+
+	const output = await usageJson({});
+	expect(output.reports.map(report => report.provider)).toEqual(["ext-usage"]);
+	expect(await Bun.file(marker).exists()).toBe(false);
 });

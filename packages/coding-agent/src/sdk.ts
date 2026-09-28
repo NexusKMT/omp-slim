@@ -941,6 +941,11 @@ export async function discoverExtensions(cwd?: string): Promise<LoadExtensionsRe
 	return discoverAndLoadExtensions([], resolvedCwd);
 }
 
+type ExtensionDiscoveryOptions = Pick<
+	CreateAgentSessionOptions,
+	"disableExtensionDiscovery" | "additionalExtensionPaths" | "extensionRoots"
+> & { includeAmbientHooks?: boolean };
+
 /**
  * Path-only counterpart of {@link loadSessionExtensions}: the FS-heavy scan
  * without the per-session module load. Subagents reuse the parent's path list
@@ -949,10 +954,7 @@ export async function discoverExtensions(cwd?: string): Promise<LoadExtensionsRe
  * runtime) is its own.
  */
 export async function discoverSessionExtensionPaths(
-	options: Pick<
-		CreateAgentSessionOptions,
-		"disableExtensionDiscovery" | "additionalExtensionPaths" | "extensionRoots"
-	>,
+	options: ExtensionDiscoveryOptions,
 	cwd: string,
 	settings: Settings,
 ): Promise<string[]> {
@@ -965,6 +967,7 @@ export async function discoverSessionExtensionPaths(
 	const disabledExtensionIds = explicitOnly ? undefined : cfgDisabledExtensions.get(settings);
 	return discoverExtensionPaths(configuredPaths, cwd, disabledExtensionIds, {
 		ambient: !explicitOnly,
+		includeAmbientHooks: options.includeAmbientHooks,
 	});
 }
 
@@ -978,7 +981,7 @@ export async function discoverSessionExtensionPaths(
  * repeated. Keep this the single source of the discovery branch logic.
  */
 export async function loadSessionExtensions(
-	options: Pick<CreateAgentSessionOptions, "disableExtensionDiscovery" | "additionalExtensionPaths">,
+	options: ExtensionDiscoveryOptions,
 	cwd: string,
 	settings: Settings,
 	eventBus: EventBus,
@@ -1006,7 +1009,7 @@ export async function loadCliExtensionProviders(
 	modelRegistry: ModelRegistry,
 	settings: Settings,
 	cwd: string,
-	options: Pick<CreateAgentSessionOptions, "disableExtensionDiscovery" | "additionalExtensionPaths"> = {},
+	options: ExtensionDiscoveryOptions = {},
 ): Promise<void> {
 	const eventBus = new EventBus();
 	const extensionsResult = await loadSessionExtensions(options, cwd, settings, eventBus);
