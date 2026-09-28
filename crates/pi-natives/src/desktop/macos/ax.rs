@@ -1,3 +1,5 @@
+mod popup;
+
 use std::{
 	collections::{HashSet, VecDeque},
 	ffi::c_void,
@@ -475,6 +477,14 @@ impl AxBackend for MacAx {
 
 	fn set_value(&mut self, h: &AxHandle, value: &str) -> CoreResult<()> {
 		let element = mac_handle(h)?;
+		// A popup's value is chosen from its menu, not written. This runs before
+		// the text-target refusals: nothing is typed or written, and the verdict
+		// is the popup's own read-back after a real menu press.
+		if copy_string(element, "AXRole").as_deref() == Some("AXPopUpButton") {
+			return skylight::with_background_guard(element_pid(element)?, || {
+				popup::choose(element, value)
+			});
+		}
 		// Web AXValue can echo a write without the renderer accepting it. The
 		// API has no "unverified" outcome, so refuse before mutating that surface.
 		ensure_native_text_target(element)?;

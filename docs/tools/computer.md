@@ -111,6 +111,8 @@ Screenshots are PNGs written under the OS temp directory. Unless `silent: true`,
 - reads: `value()`, `bounds()`, `attributes()`, `actions()`, `parent()`, `children()`;
 - mutations: `setValue(value)`, `perform(action)`, `press()`, `click({ delivery? })`, and `focus()`.
 
+On macOS, `setValue(value)` on a popup button (`popupbutton`) chooses the menu option titled exactly `value`: it opens a closed menu, presses the option, and confirms the choice by reading the popup's value back. No match, or several options with that title, throws with the available option titles, and a menu the call opened is closed again.
+
 AX actions need no screenshot. AX bounds and `desktop.elementAt()` use global logical desktop coordinates, not screenshot pixels. A window AX snapshot advances its ref generation; current and immediately previous refs remain valid, while older refs throw `StaleRef`.
 
 ### Clipboard
