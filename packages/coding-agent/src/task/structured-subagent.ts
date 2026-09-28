@@ -22,6 +22,7 @@ import { loadOverallPlanReference } from "../plan-mode/plan-handoff";
 import planModeSubagentPrompt from "../prompts/system/plan-mode-subagent.md" with { type: "text" };
 import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
 import isolationRecoveryHintTemplate from "../prompts/tools/isolation-recovery-hint.md" with { type: "text" };
+import salvagedChildHintTemplate from "../prompts/tools/salvaged-child-hint.md" with { type: "text" };
 import { MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { TaskEffort } from "@oh-my-pi/pi-tui/thinking";
 import type { ToolSession } from "../tools";
@@ -686,13 +687,15 @@ function attachStructuredOutputMetadata(result: SingleResult, schema: Structured
 
 /** Name a settled child's exit status and artifact for a post-settle failure message. */
 function describeSalvagedWork(result: SingleResult): string {
-	const exit = result.aborted
-		? `aborted${result.abortReason ? ` (${result.abortReason})` : ""}`
-		: `exit ${result.exitCode}${result.error ? ` (${result.error})` : ""}`;
-	const artifact = result.outputPath
-		? ` Its output is at \`agent://${result.id}\` (${result.outputPath}); read it before rerunning this work.`
-		: " It wrote no output artifact.";
-	return `\nThe child finished before this failure: ${exit}.${artifact}`;
+	const hint = prompt.render(salvagedChildHintTemplate, {
+		aborted: result.aborted,
+		abortReason: result.abortReason,
+		exitCode: result.exitCode,
+		error: result.error,
+		id: result.id,
+		outputPath: result.outputPath,
+	});
+	return `\n${hint.trim()}`;
 }
 
 /**

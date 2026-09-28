@@ -44,13 +44,16 @@ describe("failed child evidence", () => {
 	it("hands the parent the finished child's exit status and readable artifact when the merge throws", async () => {
 		using tempDir = TempDir.createSync("@omp-failed-child-");
 		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [AGENT], projectAgentsDir: null });
-		// The merge runs against a directory that is no longer a git repository,
-		// so the real merge step throws after the child already finished.
-		vi.spyOn(isolationRunner, "prepareIsolationContext").mockResolvedValue({
-			repoRoot: tempDir.path(),
-		} as never);
+		const git = (...args: string[]) => Bun.spawnSync(["git", ...args], { cwd: tempDir.path(), stdout: "ignore" });
+		git("init", "-q");
+		await fs.writeFile(path.join(tempDir.path(), "README.md"), "seed\n");
+		git("add", "README.md");
+		git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed");
 		let artifactPath = "";
 		vi.spyOn(isolationRunner, "runIsolatedSubprocess").mockImplementation(async ({ baseOptions, agentId }) => {
+			// The real isolation context was prepared; the checkout stops being a
+			// git repository after the child finishes, so the merge step throws.
+			await fs.rm(path.join(tempDir.path(), ".git"), { recursive: true, force: true });
 			const artifactsDir = baseOptions.artifactsDir;
 			if (!artifactsDir) throw new Error("artifactsDir missing");
 			artifactPath = path.join(artifactsDir, `${agentId}.md`);
@@ -95,7 +98,7 @@ describe("failed child evidence", () => {
 		expect(result.isError).toBe(true);
 		expect(salvaged?.exitCode).toBe(0);
 		expect(salvaged?.outputPath).toBe(artifactPath);
-		expect(text?.type === "text" ? text.text : "").toContain(`agent://${salvaged?.id}`);
+		expect(text?.type === "text" ? text.text : "").toContain(`exit 0. Its output is at \`agent://${salvaged?.id}\``);
 		// The artifact the failure points at survives the run's cleanup.
 		const resolved = await new AgentProtocolHandler().resolve(parseInternalUrl(`agent://${salvaged?.id}`));
 		expect(resolved.content).toBe("Findings: 42 rows.");
