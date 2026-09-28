@@ -278,6 +278,33 @@ describe("RewindSelectorComponent", () => {
 		expect(selected).toEqual(["u2"]);
 	});
 
+	it("matches words in scripts without spaces as substrings", () => {
+		const selected: string[] = [];
+		const selector = new RewindSelectorComponent(
+			[
+				entry("u1", null, userMessage("first prompt")),
+				entry("u2", "u1", userMessage("打开文件后输出你好世界")),
+				entry("u3", "u2", userMessage("third prompt")),
+			],
+			{
+				ui: { requestRender: () => {}, requestComponentRender: () => {} } as unknown as TUI,
+				cwd: "/tmp",
+				requestRender: () => {},
+				onSelect: id => selected.push(id),
+				onCancel: () => {},
+			},
+		);
+		selector.render(80);
+
+		for (const key of ["f", ..."你好"]) selector.handleInput(key);
+		const body = Bun.stripANSI(selector.render(80).join("\n"));
+		expect(body).not.toContain('No items match "你好"');
+		expect(body).not.toContain("first prompt");
+		selector.handleInput(ENTER);
+
+		expect(selected).toEqual(["u2"]);
+	});
+
 	it("Esc leaves the filter with the match kept instead of closing the selector", () => {
 		const selected: string[] = [];
 		let cancelled = false;
