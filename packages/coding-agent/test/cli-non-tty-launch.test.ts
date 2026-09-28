@@ -20,7 +20,11 @@ interface LaunchRun {
 	stderr: string;
 }
 
-async function launchWithoutTerminal(tempDir: TempDir, args: string[]): Promise<LaunchRun> {
+async function launchWithoutTerminal(
+	tempDir: TempDir,
+	args: string[],
+	{ extensionDiscovery = false }: { extensionDiscovery?: boolean } = {},
+): Promise<LaunchRun> {
 	const home = tempDir.join("home");
 	fs.mkdirSync(home, { recursive: true });
 	// Isolated home and no credentials: print mode can only end at the headless
@@ -42,7 +46,8 @@ async function launchWithoutTerminal(tempDir: TempDir, args: string[]): Promise<
 	]) {
 		delete env[key];
 	}
-	const proc = Bun.spawn([process.execPath, cliEntry, "--no-session", "--no-extensions", ...args], {
+	const discoveryArgs = extensionDiscovery ? [] : ["--no-extensions"];
+	const proc = Bun.spawn([process.execPath, cliEntry, "--no-session", ...discoveryArgs, ...args], {
 		cwd: tempDir.path(),
 		env,
 		stdin: "ignore",
@@ -58,16 +63,20 @@ async function launchWithoutTerminal(tempDir: TempDir, args: string[]): Promise<
 }
 
 /**
- * Write an extension registering string flag `name` that reports the value it
- * received on exit — usage failures exit before any session event fires.
+ * Write an extension registering flag `name` that reports the value it received
+ * on exit — usage failures exit before any session event fires.
  */
-async function writeStringFlagExtension(tempDir: TempDir, name: string): Promise<string> {
+async function writeFlagExtension(
+	tempDir: TempDir,
+	name: string,
+	type: "string" | "boolean" = "string",
+): Promise<string> {
 	const extensionPath = tempDir.join(`${name}-extension.ts`);
 	await Bun.write(
 		extensionPath,
 		[
 			"export default function (pi) {",
-			`\tpi.registerFlag(${JSON.stringify(name)}, { type: "string" });`,
+			`\tpi.registerFlag(${JSON.stringify(name)}, { type: ${JSON.stringify(type)} });`,
 			`\tprocess.once("exit", () => process.stderr.write("EXT_FLAG=" + pi.getFlag(${JSON.stringify(name)}) + "\\n"));`,
 			"}",
 		].join("\n"),
@@ -106,7 +115,7 @@ describe("launch without a terminal on stdin", () => {
 
 	it("delivers an extension-owned --mode before failing on the missing terminal", async () => {
 		using tempDir = TempDir.createSync("@omp-non-tty-ext-mode-");
-		const extensionPath = await writeStringFlagExtension(tempDir, "mode");
+		const extensionPath = await writeFlagExtension(tempDir, "mode");
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "compact"]);
 
 		expect(run.exitCode, run.stderr).toBe(2);
@@ -117,7 +126,7 @@ describe("launch without a terminal on stdin", () => {
 
 	it("treats an extension flag value as a flag value, not a prompt, on a bare launch", async () => {
 		using tempDir = TempDir.createSync("@omp-non-tty-ext-value-");
-		const extensionPath = await writeStringFlagExtension(tempDir, "spawn-peer");
+		const extensionPath = await writeFlagExtension(tempDir, "spawn-peer");
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--spawn-peer", "reviewer"]);
 
 		expect(run.exitCode, run.stderr).toBe(2);
@@ -128,11 +137,25 @@ describe("launch without a terminal on stdin", () => {
 
 	it("still runs a real prompt after an extension flag value in print mode", async () => {
 		using tempDir = TempDir.createSync("@omp-non-tty-ext-prompt-");
-		const extensionPath = await writeStringFlagExtension(tempDir, "spawn-peer");
+		const extensionPath = await writeFlagExtension(tempDir, "spawn-peer");
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--spawn-peer", "reviewer", "say ok"]);
 
 		expect(run.stderr).not.toContain(TTY_ERROR);
 		expect(run.stderr).toContain("No models available.");
+		expect(run.exitCode, run.stderr).toBe(1);
+	}, 30_000);
+
+	it("runs the prompt a boolean extension flag shadowing --mode leaves behind", async () => {
+		// Bootstrap reads `--mode compact` as an invalid built-in mode; with the
+		// extension's boolean `mode`, `compact` is the prompt.
+		using tempDir = TempDir.createSync("@omp-non-tty-ext-bool-");
+		const extensionPath = await writeFlagExtension(tempDir, "mode", "boolean");
+		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "compact"]);
+
+		expect(run.stderr).not.toContain(TTY_ERROR);
+		expect(run.stderr).not.toContain("Invalid --mode value");
+		expect(run.stderr).toContain("No models available.");
+		expect(run.stderr).toContain("EXT_FLAG=true");
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
 });
@@ -157,7 +180,7 @@ describe("mode-dependent guards defer to flag-value errors", () => {
 });
 
 describe("ACP launch flag validation", () => {
-	it("fails an invalid --thinking before serving instead of on every session/new", async () => {
+	it("fails an invalid --thinking before serving when extension discovery is off", async () => {
 		using tempDir = TempDir.createSync("@omp-acp-bad-thinking-");
 		const run = await launchWithoutTerminal(tempDir, ["--mode", "acp", "--thinking", "bogus"]);
 
@@ -166,11 +189,22 @@ describe("ACP launch flag validation", () => {
 		expect(run.stdout).toBe("");
 	}, 30_000);
 
-	it("serves when a launch-cwd extension owns the rejected flag", async () => {
+	it("serves when an explicit extension owns the rejected flag", async () => {
 		using tempDir = TempDir.createSync("@omp-acp-ext-thinking-");
-		const extensionPath = await writeStringFlagExtension(tempDir, "thinking");
+		const extensionPath = await writeFlagExtension(tempDir, "thinking");
 		// Closed stdin ends the ACP transport right after startup, so a served launch exits 0.
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "acp", "--thinking", "bogus"]);
+
+		expect(run.stderr).not.toContain("Invalid --thinking value");
+		expect(run.exitCode, run.stderr).toBe(0);
+	}, 30_000);
+
+	it("leaves the verdict to each session/new when discovery can load per-cwd extensions", async () => {
+		// A session cwd's own extension may own `--thinking`; the launch cwd cannot rule it out.
+		using tempDir = TempDir.createSync("@omp-acp-discovery-thinking-");
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "acp", "--thinking", "bespoke"], {
+			extensionDiscovery: true,
+		});
 
 		expect(run.stderr).not.toContain("Invalid --thinking value");
 		expect(run.exitCode, run.stderr).toBe(0);

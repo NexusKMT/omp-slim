@@ -1756,27 +1756,27 @@ export async function runRootCommand(
 		const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
 		// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
 		const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
-		// Without a terminal on stdin the TUI cannot run: a prompt given as arguments
-		// runs headless like a piped one, and a bare launch fails with a usage error
-		// instead of booting the interactive stack and exiting silently.
+		// Without a terminal on stdin the TUI cannot run, so such a launch is always
+		// headless: a piped or argv prompt runs like `-p`, and one with no prompt
+		// fails with a usage error instead of booting the interactive stack and
+		// exiting silently.
 		const stdinIsTerminal = process.stdin.isTTY === true;
-		const hasArgPrompt = parsedArgs.messages.length > 0 || parsedArgs.fileArgs.length > 0;
 		const autoPrint =
-			(pipedInput !== undefined || (!stdinIsTerminal && hasArgPrompt)) &&
-			!parsedArgs.print &&
-			parsedArgs.mode === undefined;
+			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
 		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
-		// Pending unknown flags or invalid enum values may belong to an extension
-		// (e.g. one that owns `--mode`); only the post-extension reparse can tell,
-		// so defer to the recheck there, which reports flag errors first.
-		const needsTerminal = isInteractive && !stdinIsTerminal;
-		// Print mode chosen only because argv looked like a prompt. The bootstrap
-		// parse cannot tell an extension string flag's value (`--spawn-peer
-		// reviewer`) from a prompt; headless is still the right early class for a
-		// non-TTY stdin, and the post-extension recheck turns an argv whose
-		// "prompt" was all flag values back into a bare launch.
-		const autoPrintFromArgs = autoPrint && pipedInput === undefined;
-		if (needsTerminal && parsedArgs.unrecognizedFlags.length === 0 && parsedArgs.invalidFlagValues.length === 0) {
+		// Without piped text the prompt must come from argv, which only the
+		// post-extension reparse can settle: an extension string flag's value
+		// (`--spawn-peer reviewer`) looks like a prompt here, and a boolean flag
+		// shadowing a built-in (`--mode compact`) hides one. Fail early only for
+		// an unambiguous argv; otherwise the recheck there decides.
+		const autoPrintNeedsArgPrompt = autoPrint && pipedInput === undefined;
+		if (
+			autoPrintNeedsArgPrompt &&
+			parsedArgs.messages.length === 0 &&
+			parsedArgs.fileArgs.length === 0 &&
+			parsedArgs.unrecognizedFlags.length === 0 &&
+			parsedArgs.invalidFlagValues.length === 0
+		) {
 			exitWithoutTerminal();
 		}
 		// Only the interactive host renders a focusable Agent Hub / subagent session
@@ -2185,13 +2185,14 @@ export async function runRootCommand(
 		};
 
 		if (mode === "acp") {
-			// ACP loads extensions per `session/new` cwd, so a pending invalid enum
-			// value would otherwise fail every session while the server keeps
-			// running. Settle it against the launch cwd's extensions (one may own
-			// the flag) — loaded only on this error path to keep ACP startup lazy —
-			// and fail the launch as a usage error. The per-session factory check
-			// still covers extensions of other session cwds.
-			if (parsedArgs.invalidFlagValues.length > 0) {
+			// ACP loads extensions per `session/new` cwd, and an extension there may
+			// own a flag the bootstrap parse rejected, so pending invalid enum values
+			// are normally settled by the per-session factory. With discovery off
+			// (`--no-extensions`, trusted-only) every session loads the same
+			// explicit extensions, so the verdict cannot vary by cwd: settle it now
+			// — loading them only on this error path keeps ACP startup lazy — and
+			// fail the launch instead of every `session/new`.
+			if (parsedArgs.invalidFlagValues.length > 0 && sessionOptions.disableExtensionDiscovery) {
 				const launchEventBus = new EventBus();
 				const launchExtensions = parsedArgs.trustedExtensions?.length
 					? await loadTrustedSessionExtensions(sessionOptions, cwd, launchEventBus)
@@ -2274,10 +2275,7 @@ export async function runRootCommand(
 				process.exit(2);
 			}
 			rejectNoUiWithoutRpc(parsedArgs);
-			if (
-				needsTerminal ||
-				(autoPrintFromArgs && initialArgs.messages.length === 0 && initialArgs.fileArgs.length === 0)
-			) {
+			if (autoPrintNeedsArgPrompt && initialArgs.messages.length === 0 && initialArgs.fileArgs.length === 0) {
 				exitWithoutTerminal();
 			}
 			const processedFiles =
