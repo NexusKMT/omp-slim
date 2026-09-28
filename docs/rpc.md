@@ -795,8 +795,10 @@ Isolated (worktree) subagents run in-process and are steered the same way.
 { "id": "req_1", "type": "response", "command": "steer_subagent", "success": true }
 ```
 
-The response arrives once the message is handed to the subagent's session; it
-does not wait for the subagent's turn. The message text is delivered verbatim.
+The response arrives once the message is accepted: queued into the running
+turn, or the idle subagent's new turn started. It does not wait for the turn
+to finish. The text is delivered literally: slash commands and prompt templates
+are not expanded.
 
 Failure responses:
 
@@ -804,6 +806,8 @@ Failure responses:
 - `subagentId` not currently listed as running by `get_subagents` (unknown,
   finished, released, or another session's agent) → `error: "Subagent not running: <id>"`
 - a parked subagent that cannot be revived → `error: "Subagent not reachable: <reason>"`
+- the subagent refuses the message before accepting it (for example a failed
+  preflight) → `error: "Subagent refused the message: <reason>"`
 
 ## Prompt/Queue Concurrency and Ordering
 

@@ -451,19 +451,22 @@ export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
 
 /**
  * Handle RPC `steer_subagent`: send the host's message to a running subagent
- * as its user, the same way Agent Hub chat does (`AgentLifecycleManager.ensureLive`
- * then `prompt` with `streamingBehavior: "steer"`). A mid-turn subagent is
- * steered at its next step boundary; an idle one starts a turn. The message is
- * recorded in the subagent's own transcript, never attributed to the parent
- * agent, so the subagent cannot "reply" into the parent's context.
+ * as its user, the same way Agent Hub chat does: `AgentLifecycleManager.ensureLive`,
+ * then a user message on the subagent's own session. A mid-turn subagent is
+ * steered at its next step boundary; an idle one starts a turn. The text is
+ * delivered literally (`sendUserMessage` skips slash commands and prompt
+ * templates) and recorded in the subagent's transcript, never attributed to
+ * the parent agent.
  *
  * Only subagents this session lists as running (`get_subagents`) are
  * reachable, and the registry ref must carry the transcript file this
  * session's roster recorded: agent ids are unique only per parent session.
- * The prompt is not awaited, so an idle subagent's whole turn does not hold
- * the serialized RPC dispatcher; later failures are logged.
  *
- * Returns an error message, or `undefined` once the message is handed off.
+ * Resolves once the message is accepted: queued into a running turn, or the
+ * idle subagent's new turn started (`agent_start`). A refusal before that is
+ * returned as the error; the rest of an idle subagent's turn is not awaited,
+ * so it does not hold the serialized RPC dispatcher, and later failures are
+ * logged. Returns an error message, or `undefined` once accepted.
  */
 export async function handleRpcSteerSubagent(
 	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
@@ -474,6 +477,7 @@ export async function handleRpcSteerSubagent(
 	// lifecycle frame prunes the snapshot; treat that as not running.
 	const snapshot = subagentRegistry.getSubagents().find(candidate => candidate.id === subagentId);
 	const ref = AgentRegistry.global().get(subagentId);
+	const notRunning = `Subagent not running: ${subagentId}`;
 	if (
 		(snapshot?.status !== "running" && snapshot?.status !== "pending") ||
 		!snapshot.sessionFile ||
@@ -481,7 +485,7 @@ export async function handleRpcSteerSubagent(
 		ref.status === "aborted" ||
 		ref.sessionFile !== snapshot.sessionFile
 	) {
-		return `Subagent not running: ${subagentId}`;
+		return notRunning;
 	}
 	let session: AgentSession;
 	try {
@@ -489,10 +493,28 @@ export async function handleRpcSteerSubagent(
 	} catch (err) {
 		return `Subagent not reachable: ${err instanceof Error ? err.message : String(err)}`;
 	}
-	session.prompt(message, { streamingBehavior: "steer" }).catch(err => {
-		logger.warn("steer_subagent prompt failed", { subagentId, error: String(err) });
+	// ensureLive awaits; the id may now belong to a different (same-name) agent.
+	const current = AgentRegistry.global().get(subagentId);
+	if (current !== ref || current.session !== session || current.sessionFile !== snapshot.sessionFile) {
+		return notRunning;
+	}
+
+	const accepted = Promise.withResolvers<void>();
+	const unsubscribe = session.subscribe(event => {
+		if (event.type === "agent_start") accepted.resolve();
 	});
-	return undefined;
+	session.sendUserMessage(message).then(accepted.resolve, err => {
+		accepted.reject(err);
+		logger.warn("steer_subagent message failed", { subagentId, error: String(err) });
+	});
+	try {
+		await accepted.promise;
+		return undefined;
+	} catch (err) {
+		return `Subagent refused the message: ${err instanceof Error ? err.message : String(err)}`;
+	} finally {
+		unsubscribe();
+	}
 }
 
 export async function handleRpcSessionChange(

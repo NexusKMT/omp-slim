@@ -764,11 +764,12 @@ export class RpcClient {
 	/**
 	 * Send a message to a running subagent as its user, the same way Agent Hub
 	 * chat does: a mid-turn subagent is steered at its next step boundary and an
-	 * idle one starts a turn. Resolves once the message is handed to the
-	 * subagent's session; rejects when the subagent is not running.
+	 * idle one starts a turn. Resolves once the message is queued or the
+	 * subagent's turn starts; rejects when the subagent is not running or the
+	 * message is refused before that.
 	 */
 	async steerSubagent(subagentId: string, message: string): Promise<void> {
-		await this.#send({ type: "steer_subagent", subagentId, message });
+		this.#getData(await this.#send({ type: "steer_subagent", subagentId, message }));
 	}
 
 	/**

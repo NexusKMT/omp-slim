@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,23 +10,25 @@ import { type SubagentLifecyclePayload, TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 
-interface PromptCall {
+interface SentMessage {
 	id: string;
-	text: string;
-	streamingBehavior: unknown;
+	text: unknown;
 }
+
+/** How the fake session answers `sendUserMessage`. */
+type Delivery = "queued" | "turn-started" | { refuse: Error };
 
 describe("handleRpcSteerSubagent", () => {
 	let registry: RpcSubagentRegistry;
 	let eventBus: EventBus;
-	let prompts: PromptCall[];
+	let sent: SentMessage[];
 	let sessionDir: string;
 	let ownSessionFile: string;
 
 	beforeEach(() => {
 		AgentRegistry.resetGlobalForTests();
 		AgentLifecycleManager.resetGlobalForTests();
-		prompts = [];
+		sent = [];
 		sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-rpc-steer-"));
 		ownSessionFile = path.join(sessionDir, "SubagentA.jsonl");
 		eventBus = new EventBus();
@@ -34,6 +36,7 @@ describe("handleRpcSteerSubagent", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		registry.dispose();
 		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
@@ -51,16 +54,31 @@ describe("handleRpcSteerSubagent", () => {
 		} satisfies SubagentLifecyclePayload);
 	}
 
-	/** Register a live subagent whose session records prompts; `prompt` never settles, like a real turn. */
-	function registerLiveAgent(id: string, sessionFile = ownSessionFile): void {
+	/**
+	 * Register a live subagent whose session records `sendUserMessage` calls.
+	 * `queued` resolves as a mid-turn steer does; `turn-started` emits
+	 * `agent_start` and never settles, like an idle subagent's whole turn.
+	 */
+	function registerLiveAgent(id: string, sessionFile = ownSessionFile, delivery: Delivery = "queued"): void {
+		const listeners: Array<(event: { type: string }) => void> = [];
 		AgentRegistry.global().register({
 			id,
 			displayName: id,
 			kind: "sub",
 			session: {
-				prompt: (text: string, options: { streamingBehavior?: unknown }) => {
-					prompts.push({ id, text, streamingBehavior: options.streamingBehavior });
-					return Promise.withResolvers<void>().promise;
+				subscribe: (listener: (event: { type: string }) => void) => {
+					listeners.push(listener);
+					return () => listeners.splice(listeners.indexOf(listener), 1);
+				},
+				sendUserMessage: async (text: unknown) => {
+					sent.push({ id, text });
+					if (delivery === "queued") return;
+					if (delivery === "turn-started") {
+						for (const listener of [...listeners]) listener({ type: "agent_start" });
+						await Promise.withResolvers<void>().promise;
+						return;
+					}
+					throw delivery.refuse;
 				},
 			} as never,
 			sessionFile,
@@ -68,15 +86,46 @@ describe("handleRpcSteerSubagent", () => {
 		});
 	}
 
-	test("prompts the subagent's own session as a steer, verbatim, without waiting for its turn", async () => {
+	test("sends the message to the subagent's own session verbatim", async () => {
 		emitLifecycle("SubagentA", "started");
 		registerLiveAgent("SubagentA");
-		const message = "  fn main() {\n      todo!()\n  }\n";
+		const message = "/review  fn main() {\n      todo!()\n  }\n";
 
-		// Resolves even though the subagent's prompt never settles.
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", message)).resolves.toBeUndefined();
 
-		expect(prompts).toEqual([{ id: "SubagentA", text: message, streamingBehavior: "steer" }]);
+		expect(sent).toEqual([{ id: "SubagentA", text: message }]);
+	});
+
+	test("accepts once an idle subagent's turn starts, without waiting for the turn", async () => {
+		emitLifecycle("SubagentA", "started");
+		registerLiveAgent("SubagentA", ownSessionFile, "turn-started");
+
+		await expect(handleRpcSteerSubagent(registry, "SubagentA", "go")).resolves.toBeUndefined();
+	});
+
+	test("reports a message the subagent refuses before accepting it", async () => {
+		emitLifecycle("SubagentA", "started");
+		registerLiveAgent("SubagentA", ownSessionFile, { refuse: new Error("usage limit reached") });
+
+		await expect(handleRpcSteerSubagent(registry, "SubagentA", "go")).resolves.toBe(
+			"Subagent refused the message: usage limit reached",
+		);
+	});
+
+	test("does not deliver when the id changes owner while the subagent is brought live", async () => {
+		emitLifecycle("SubagentA", "started");
+		registerLiveAgent("SubagentA");
+		const original = AgentRegistry.global().get("SubagentA")?.session;
+		vi.spyOn(AgentLifecycleManager.global(), "ensureLive").mockImplementation(async () => {
+			// Another session's same-name agent replaces the ref during the await.
+			registerLiveAgent("SubagentA", path.join(sessionDir, "other-session", "SubagentA.jsonl"));
+			return original as never;
+		});
+
+		await expect(handleRpcSteerSubagent(registry, "SubagentA", "hi")).resolves.toBe(
+			"Subagent not running: SubagentA",
+		);
+		expect(sent).toEqual([]);
 	});
 
 	test("does not reach another session's same-name subagent", async () => {
@@ -86,14 +135,14 @@ describe("handleRpcSteerSubagent", () => {
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", "hi")).resolves.toBe(
 			"Subagent not running: SubagentA",
 		);
-		expect(prompts).toEqual([]);
+		expect(sent).toEqual([]);
 	});
 
 	test("does not reach a live agent this session never reported", async () => {
 		registerLiveAgent("Stranger");
 
 		await expect(handleRpcSteerSubagent(registry, "Stranger", "hi")).resolves.toBe("Subagent not running: Stranger");
-		expect(prompts).toEqual([]);
+		expect(sent).toEqual([]);
 	});
 
 	test("does not reach a subagent that already finished", async () => {
@@ -104,7 +153,7 @@ describe("handleRpcSteerSubagent", () => {
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", "hello")).resolves.toBe(
 			"Subagent not running: SubagentA",
 		);
-		expect(prompts).toEqual([]);
+		expect(sent).toEqual([]);
 	});
 
 	test("reports a subagent the lifecycle cannot bring back", async () => {
