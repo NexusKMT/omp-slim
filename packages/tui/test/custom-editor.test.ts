@@ -236,6 +236,16 @@ describe("CustomEditor bracketed path paste", () => {
 		expect(editor.composerChips()).toMatchObject([{ kind: "video", n: 1 }]);
 	});
 
+	it("shows only the chip whose full attachment number remains in the buffer", () => {
+		const { editor } = makeEditor();
+		for (let n = 1; n <= 10; n++) editor.insertTextAttachment(`blob ${n}`);
+		const image: ImageContent = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+		editor.pendingImages = Array.from({ length: 10 }, () => image);
+		editor.setText(`${chipLabel("paste", 10)} ${chipLabel("image", 10)}`);
+
+		expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["image#10", "paste#10"]);
+	});
+
 	describe("skill chips", () => {
 		function makeSkillEditor() {
 			const { editor } = makeEditor();

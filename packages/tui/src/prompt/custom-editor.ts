@@ -21,6 +21,7 @@ import {
 	collapseSkillTokens,
 	composerTokenRegex,
 	modelChipStyle,
+	referencedAttachments,
 	renderPlaceholders,
 	skillChipLabel,
 	skillChipStyle,
@@ -662,14 +663,12 @@ export class CustomEditor extends Editor {
 		) {
 			return cached.chips;
 		}
-		const text = this.getText();
+		const refs = referencedAttachments(this.getText());
 		const chips: ComposerChipDescriptor[] = [];
 		for (let i = 0; i < this.pendingImages.length; i++) {
 			const n = i + 1;
-			const video =
-				text.includes(chipLabel("video", n)) || text.includes(`[Video #${n}]`) || text.includes(`[Video #${n},`);
-			const image =
-				text.includes(chipLabel("image", n)) || text.includes(`[Image #${n}]`) || text.includes(`[Image #${n},`);
+			const video = refs.video.has(n);
+			const image = refs.image.has(n);
 			if (!video && !image) continue;
 			chips.push({
 				kind: video ? "video" : "image",
@@ -679,7 +678,7 @@ export class CustomEditor extends Editor {
 			});
 		}
 		for (const entry of this.pendingTexts) {
-			if (!text.includes(entry.label)) continue;
+			if (!refs.paste.has(entry.n)) continue;
 			chips.push({ kind: "paste", n: entry.n, text: entry });
 		}
 		this.#composerChipsCache = {

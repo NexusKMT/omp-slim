@@ -155,6 +155,25 @@ export const COMPOSER_TOKEN_REGEX = new RegExp(
 	"gu",
 );
 
+/**
+ * Attachment indices referenced by a composer buffer, per kind. Image/video count compact chips
+ * and expanded markers; paste counts compact chips only, since `[Paste #N]` markers number the
+ * base editor's separate paste buffer. Whole tokens are parsed, so `#1` never matches inside `#10`.
+ */
+export function referencedAttachments(text: string): Record<ChipKind, Set<number>> {
+	const refs: Record<ChipKind, Set<number>> = { image: new Set(), video: new Set(), paste: new Set() };
+	for (const match of text.matchAll(COMPOSER_TOKEN_REGEX)) {
+		const label = match[0];
+		if (label.startsWith("[")) {
+			if (match[1] === "Image") refs.image.add(Number(match[2]));
+			else if (match[1] === "Video") refs.video.add(Number(match[2]));
+		} else if (match[3] === undefined) {
+			refs[chipLabelKind(label)].add(Number(label.slice(label.lastIndexOf("#") + 1)));
+		}
+	}
+	return refs;
+}
+
 /** Add the registered model-chip labels to the composer placeholder matcher. */
 export function composerTokenRegex(mentionLabels: Iterable<string>): RegExp {
 	const labels = [...new Set(mentionLabels)].sort((a, b) => b.length - a.length);
