@@ -797,8 +797,8 @@ Isolated (worktree) subagents run in-process and are steered the same way.
 
 The response arrives once the message is accepted: queued into the running
 turn, or the idle subagent's new turn started. It does not wait for the turn
-to finish. The text is delivered literally: slash commands and prompt templates
-are not expanded.
+to finish. As in Agent Hub chat and RPC `steer`, slash commands and prompt
+templates in the message are handled by the subagent's session.
 
 Failure responses:
 

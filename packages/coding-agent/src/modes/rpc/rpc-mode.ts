@@ -452,11 +452,11 @@ export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
 /**
  * Handle RPC `steer_subagent`: send the host's message to a running subagent
  * as its user, the same way Agent Hub chat does: `AgentLifecycleManager.ensureLive`,
- * then a user message on the subagent's own session. A mid-turn subagent is
- * steered at its next step boundary; an idle one starts a turn. The text is
- * delivered literally (`sendUserMessage` skips slash commands and prompt
- * templates) and recorded in the subagent's transcript, never attributed to
- * the parent agent.
+ * then `prompt(message, { streamingBehavior: "steer" })` on the subagent's own
+ * session. A mid-turn subagent is steered at its next step boundary; an idle
+ * one starts a turn. Slash commands and prompt templates are handled as in the
+ * Agent Hub and RPC `steer`. The message is recorded in the subagent's
+ * transcript, never attributed to the parent agent.
  *
  * Only subagents this session lists as running (`get_subagents`) are
  * reachable, and the registry ref must carry the transcript file this
@@ -503,10 +503,13 @@ export async function handleRpcSteerSubagent(
 	const unsubscribe = session.subscribe(event => {
 		if (event.type === "agent_start") accepted.resolve();
 	});
-	session.sendUserMessage(message).then(accepted.resolve, err => {
-		accepted.reject(err);
-		logger.warn("steer_subagent message failed", { subagentId, error: String(err) });
-	});
+	session.prompt(message, { streamingBehavior: "steer" }).then(
+		() => accepted.resolve(),
+		err => {
+			accepted.reject(err);
+			logger.warn("steer_subagent message failed", { subagentId, error: String(err) });
+		},
+	);
 	try {
 		await accepted.promise;
 		return undefined;

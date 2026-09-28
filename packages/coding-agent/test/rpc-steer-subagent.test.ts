@@ -13,9 +13,10 @@ import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
 interface SentMessage {
 	id: string;
 	text: unknown;
+	streamingBehavior: unknown;
 }
 
-/** How the fake session answers `sendUserMessage`. */
+/** How the fake session answers `prompt`. */
 type Delivery = "queued" | "turn-started" | { refuse: Error };
 
 describe("handleRpcSteerSubagent", () => {
@@ -55,7 +56,7 @@ describe("handleRpcSteerSubagent", () => {
 	}
 
 	/**
-	 * Register a live subagent whose session records `sendUserMessage` calls.
+	 * Register a live subagent whose session records `prompt` calls.
 	 * `queued` resolves as a mid-turn steer does; `turn-started` emits
 	 * `agent_start` and never settles, like an idle subagent's whole turn.
 	 */
@@ -70,8 +71,8 @@ describe("handleRpcSteerSubagent", () => {
 					listeners.push(listener);
 					return () => listeners.splice(listeners.indexOf(listener), 1);
 				},
-				sendUserMessage: async (text: unknown) => {
-					sent.push({ id, text });
+				prompt: async (text: unknown, options: { streamingBehavior?: unknown }) => {
+					sent.push({ id, text, streamingBehavior: options.streamingBehavior });
 					if (delivery === "queued") return;
 					if (delivery === "turn-started") {
 						for (const listener of [...listeners]) listener({ type: "agent_start" });
@@ -86,14 +87,14 @@ describe("handleRpcSteerSubagent", () => {
 		});
 	}
 
-	test("sends the message to the subagent's own session verbatim", async () => {
+	test("steers the subagent's own session with the message untrimmed", async () => {
 		emitLifecycle("SubagentA", "started");
 		registerLiveAgent("SubagentA");
-		const message = "/review  fn main() {\n      todo!()\n  }\n";
+		const message = "  fn main() {\n      todo!()\n  }\n";
 
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", message)).resolves.toBeUndefined();
 
-		expect(sent).toEqual([{ id: "SubagentA", text: message }]);
+		expect(sent).toEqual([{ id: "SubagentA", text: message, streamingBehavior: "steer" }]);
 	});
 
 	test("accepts once an idle subagent's turn starts, without waiting for the turn", async () => {
