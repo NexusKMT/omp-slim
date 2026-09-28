@@ -1994,6 +1994,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		preconnectModelHost(model.baseUrl);
 	}
 
+	// Re-derives the thinking level whenever startup settles on a different
+	// model than the one (possibly none) the level above was resolved against,
+	// so the settings default is clamped to the model's actual effort ladder.
+	const adoptThinkingForModel = (selectedModel: Model): void => {
+		thinkingLevel = pickInitialThinkingLevel(selectedModel);
+		autoThinking = thinkingLevel === AUTO_THINKING;
+		const concreteLevel = concreteThinkingLevel(thinkingLevel);
+		effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
+			autoThinking
+				? resolveProvisionalAutoLevel(selectedModel)
+				: resolveThinkingLevelForModel(selectedModel, concreteLevel),
+		);
+	};
+
 	let skills: Skill[];
 	let skillWarnings: SkillWarning[];
 	if (options.skills !== undefined) {
@@ -2674,14 +2688,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						// Recompute thinking-level from scratch against the reclaimed
 						// model: any value derived from the earlier fallback model's
 						// `thinking.defaultLevel` must not become sticky.
-						thinkingLevel = pickInitialThinkingLevel(restoredModel);
-						autoThinking = thinkingLevel === AUTO_THINKING;
-						effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-						effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-							autoThinking
-								? resolveProvisionalAutoLevel(restoredModel)
-								: resolveThinkingLevelForModel(restoredModel, effectiveThinkingLevel),
-						);
+						adoptThinkingForModel(restoredModel);
 						preconnectModelHost(restoredModel.baseUrl);
 						return true;
 					}
@@ -3024,14 +3031,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				if (selectedExplicitThinkingLevel) {
 					restoredSessionThinkingLevel = selectedThinkingLevel;
 				}
-				thinkingLevel = pickInitialThinkingLevel(selectedModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(selectedModel)
-						: resolveThinkingLevelForModel(selectedModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(selectedModel);
 				if (usageFallbackReason) {
 					const target = formatModelSelectorValue(
 						formatModelStringWithRouting(selectedModel),
@@ -3083,14 +3083,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// Recompute the thinking level against the now-real model.
 				// `pickInitialThinkingLevel` closes over `defaultRoleSpec`,
 				// so the role's explicit selector (e.g. `:max`) now applies.
-				thinkingLevel = pickInitialThinkingLevel(resolvedDefaultModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(resolvedDefaultModel)
-						: resolveThinkingLevelForModel(resolvedDefaultModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(resolvedDefaultModel);
 				preconnectModelHost(resolvedDefaultModel.baseUrl);
 				return true;
 			};
@@ -3137,6 +3130,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 				if (!model && pick) {
 					model = pick;
+					adoptThinkingForModel(pick);
 				}
 			}
 			if (model) {
@@ -3178,14 +3172,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			);
 			if (refreshedModel !== selectedModel) {
 				model = refreshedModel;
-				thinkingLevel = pickInitialThinkingLevel(refreshedModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(refreshedModel)
-						: resolveThinkingLevelForModel(refreshedModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(refreshedModel);
 			}
 		}
 
