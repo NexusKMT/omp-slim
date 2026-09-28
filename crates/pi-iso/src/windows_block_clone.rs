@@ -1,9 +1,9 @@
 //! Windows block-clone based isolation.
 //!
-//! `FSCTL_DUPLICATE_EXTENTS_TO_FILE` asks `ReFS` (including Dev Drive) to share
-//! file extents copy-on-write between a source file and a destination file;
-//! other filesystems such as NTFS reject it, which surfaces as
-//! [`IsoError::unavailable`](crate::IsoError). The backend
+//! [`cow::clone_file`](crate::cow::clone_file) asks `ReFS` (including Dev
+//! Drive) to share file extents copy-on-write between a source file and a
+//! destination file; other filesystems such as NTFS reject it, which surfaces
+//! as [`IsoError::unavailable`](crate::IsoError). The backend
 //! recursively materializes the directory tree and block-clones each regular
 //! file. There is no mount/session state to undo, so
 //! [`stop`](IsolationBackend::stop) is a recursive remove.
@@ -79,37 +79,23 @@ impl IsolationBackend for WindowsBlockCloneBackend {
 #[cfg(windows)]
 mod imp {
 	use std::{
-		ffi::c_void,
-		fs::{self, File, OpenOptions},
+		fs::{self, OpenOptions},
 		io,
 		os::windows::{
-			fs::{FileTypeExt, MetadataExt, OpenOptionsExt},
+			fs::{FileTypeExt, OpenOptionsExt},
 			io::AsRawHandle,
 		},
 		path::{Path, PathBuf},
 	};
 
 	use windows_sys::Win32::{
-		Foundation::{
-			ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER,
-			ERROR_NOT_SAME_DEVICE, ERROR_NOT_SUPPORTED, FILETIME,
-		},
+		Foundation::FILETIME,
 		Storage::FileSystem::{
-			FILE_ATTRIBUTE_SPARSE_FILE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-			SetFileTime,
-		},
-		System::{
-			IO::DeviceIoControl,
-			Ioctl::{
-				DUPLICATE_EXTENTS_DATA, FILE_SET_SPARSE_BUFFER, FSCTL_DUPLICATE_EXTENTS_TO_FILE,
-				FSCTL_GET_INTEGRITY_INFORMATION, FSCTL_GET_INTEGRITY_INFORMATION_BUFFER,
-				FSCTL_SET_INTEGRITY_INFORMATION, FSCTL_SET_INTEGRITY_INFORMATION_BUFFER,
-				FSCTL_SET_SPARSE,
-			},
+			FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, SetFileTime,
 		},
 	};
 
-	use crate::{IsoError, IsoResult};
+	use crate::{IsoError, IsoResult, cow};
 
 	pub fn start(lower: &Path, merged: &Path) -> IsoResult<()> {
 		let lower = canonical_existing_dir(lower)?;
@@ -275,147 +261,18 @@ mod imp {
 	}
 
 	fn clone_regular_file(src: &Path, dst: &Path) -> IsoResult<()> {
-		let src_meta = fs::metadata(src)
-			.map_err(|err| IsoError::other(format!("metadata {}: {err}", src.display())))?;
-		let len = src_meta.len();
-
-		let src_file = OpenOptions::new().read(true).open(src).map_err(|err| {
-			IsoError::other(format!("open block-clone source {}: {err}", src.display()))
-		})?;
-		let dst_file = OpenOptions::new()
-			.write(true)
-			.create_new(true)
-			.open(dst)
-			.map_err(|err| {
-				IsoError::other(format!("create block-clone destination {}: {err}", dst.display()))
-			})?;
-
-		if len == 0 {
-			return Ok(());
-		}
-		let Err(err) = clone_file_data(&src_file, &dst_file, len) else {
+		let Err(err) = cow::clone_file(src, dst) else {
 			return Ok(());
 		};
-		if is_unavailable_error(&err) {
+		if cow::is_unsupported(&err) {
 			Err(IsoError::unavailable(format!(
 				"Windows block clone unsupported for {} -> {}: {err}",
 				src.display(),
 				dst.display()
 			)))
 		} else {
-			Err(IsoError::other(format!(
-				"block clone {} -> {}: {err}",
-				src.display(),
-				dst.display()
-			)))
+			Err(IsoError::other(format!("block clone {} -> {}: {err}", src.display(), dst.display())))
 		}
-	}
-
-	/// Block-clones the `len` bytes of `src` into the empty, writable `dst`.
-	///
-	/// Follows the `ReFS` rules from
-	/// <https://learn.microsoft.com/windows/win32/fileio/block-cloning>: each
-	/// region is cluster-aligned and under 4 GiB, `dst` is extended to `len`
-	/// first, and it matches `src`'s integrity-stream and sparse settings.
-	/// The last region is rounded up to the whole cluster holding the end of
-	/// file, as the `reflink` tools do (`0xbadfca11/reflink`, `reflink-copy`).
-	///
-	/// # Errors
-	///
-	/// The first failing `FSCTL`; a filesystem without block cloning (NTFS,
-	/// FAT, a different volume) fails `FSCTL_GET_INTEGRITY_INFORMATION` or the
-	/// clone with an error [`is_unavailable_error`] accepts.
-	fn clone_file_data(src: &File, dst: &File, len: u64) -> io::Result<()> {
-		/// The largest cloned region is under 4 GiB.
-		const MAX_REGION: u64 = (4 << 30) - 1;
-
-		let mut integrity = FSCTL_GET_INTEGRITY_INFORMATION_BUFFER::default();
-		fsctl(src, FSCTL_GET_INTEGRITY_INFORMATION, &(), &mut integrity)?;
-		let cluster = u64::from(integrity.ClusterSizeInBytes).max(1);
-		// Best effort: some volumes (reportedly Dev Drive) refuse the change,
-		// and a real mismatch then fails the clone itself.
-		let _ = fsctl(
-			dst,
-			FSCTL_SET_INTEGRITY_INFORMATION,
-			&FSCTL_SET_INTEGRITY_INFORMATION_BUFFER {
-				ChecksumAlgorithm: integrity.ChecksumAlgorithm,
-				Reserved:          0,
-				Flags:             integrity.Flags,
-			},
-			&mut (),
-		);
-
-		// Sparse while cloning, so extending the end of file allocates no
-		// clusters the clone replaces anyway; ReFS also requires it of the
-		// destination of a sparse source.
-		fsctl(dst, FSCTL_SET_SPARSE, &FILE_SET_SPARSE_BUFFER { SetSparse: true }, &mut ())?;
-		dst.set_len(len)?;
-
-		let region_limit = MAX_REGION / cluster * cluster;
-		let end = len.div_ceil(cluster) * cluster;
-		let mut offset = 0;
-		while offset < end {
-			let count = region_limit.min(end - offset);
-			let offset_i64 = i64::try_from(offset).map_err(|_| io::ErrorKind::FileTooLarge)?;
-			let data = DUPLICATE_EXTENTS_DATA {
-				FileHandle:       src.as_raw_handle() as _,
-				SourceFileOffset: offset_i64,
-				TargetFileOffset: offset_i64,
-				ByteCount:        i64::try_from(count).map_err(|_| io::ErrorKind::FileTooLarge)?,
-			};
-			fsctl(dst, FSCTL_DUPLICATE_EXTENTS_TO_FILE, &data, &mut ())?;
-			offset += count;
-		}
-
-		let src_is_sparse = src.metadata()?.file_attributes() & FILE_ATTRIBUTE_SPARSE_FILE != 0;
-		if !src_is_sparse {
-			fsctl(dst, FSCTL_SET_SPARSE, &FILE_SET_SPARSE_BUFFER { SetSparse: false }, &mut ())?;
-		}
-		Ok(())
-	}
-
-	/// Issues the filesystem control `code` on `file` with the plain-data
-	/// `input` and `output` buffers; `()` passes no buffer.
-	fn fsctl<I, O>(file: &File, code: u32, input: &I, output: &mut O) -> io::Result<()> {
-		fn buffer_size<T>() -> u32 {
-			u32::try_from(size_of::<T>()).expect("FSCTL buffer fits u32")
-		}
-		let input_ptr: *const c_void =
-			if size_of::<I>() == 0 { std::ptr::null() } else { std::ptr::from_ref(input).cast() };
-		let output_ptr: *mut c_void =
-			if size_of::<O>() == 0 { std::ptr::null_mut() } else { std::ptr::from_mut(output).cast() };
-		let mut returned = 0u32;
-		// SAFETY: `file` owns a valid handle for the call, and each buffer
-		// pointer is either null with size 0 or points to a live `I`/`O` of the
-		// stated size. The call is synchronous, so no pointer outlives it.
-		let ok = unsafe {
-			DeviceIoControl(
-				file.as_raw_handle() as _,
-				code,
-				input_ptr,
-				buffer_size::<I>(),
-				output_ptr,
-				buffer_size::<O>(),
-				&raw mut returned,
-				std::ptr::null_mut(),
-			)
-		};
-		if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
-	}
-
-	fn is_unavailable_error(err: &io::Error) -> bool {
-		let Some(code) = err.raw_os_error() else {
-			return false;
-		};
-		let code = code as u32;
-		matches!(
-			code,
-			ERROR_INVALID_FUNCTION
-				| ERROR_NOT_SUPPORTED
-				| ERROR_NOT_SAME_DEVICE
-				| ERROR_INVALID_PARAMETER
-				| ERROR_ACCESS_DENIED
-		)
 	}
 
 	fn copy_metadata_best_effort(src: &Path, dst: &Path) {

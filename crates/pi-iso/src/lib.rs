@@ -31,6 +31,7 @@ use async_trait::async_trait;
 
 mod apfs;
 mod btrfs;
+pub mod cow;
 mod diff;
 mod linux_reflink;
 mod overlayfs;
