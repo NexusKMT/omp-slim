@@ -7,6 +7,9 @@
 ### Fixed
 
 - Prevented interrupted wait operations from appearing in the transcript when a queued completion or message is received.
+### Fixed
+
+- Fixed sessions exiting as if the terminal hung up when it only stopped reading for a few seconds during a very large repaint (a long transcript's replay behind a busy tmux or container attach) ([#13576](https://github.com/can1357/oh-my-pi/pull/13576) by [@sjawhar](https://github.com/sjawhar))
 
 ## [18.3.5] - 2026-09-27
 
