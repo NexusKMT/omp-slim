@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `@` completion popup showing a `Searching…` placeholder while a refreshed file search is pending; the popup now stays hidden until results arrive, and Escape is no longer swallowed by it
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed
