@@ -65,7 +65,9 @@ describe("fitOutputTokensToContextWindow", () => {
 	});
 
 	test("lowers an explicit caller cap that no longer fits", () => {
-		expect(fitOutputTokensToContextWindow(deepseek, promptOf(800_000), 200_000, tokenizer)).toBe(120_000 - OUTPUT_FIT_HEADWAY_TOKENS);
+		expect(fitOutputTokensToContextWindow(deepseek, promptOf(800_000), 200_000, tokenizer)).toBe(
+			120_000 - OUTPUT_FIT_HEADWAY_TOKENS,
+		);
 	});
 
 	test("counts system prompt, active and retired tool definitions, not just messages", () => {
@@ -86,9 +88,13 @@ describe("fitOutputTokensToContextWindow", () => {
 		// a fitted default would become an explicit, upstream-filtering cap.
 		const openrouter = { ...deepseek, compat: { isOpenRouterHost: true, alwaysSendMaxTokens: false } } as never;
 		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), undefined, tokenizer)).toBeUndefined();
-		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), 200_000, tokenizer)).toBe(120_000 - OUTPUT_FIT_HEADWAY_TOKENS);
+		expect(fitOutputTokensToContextWindow(openrouter, promptOf(800_000), 200_000, tokenizer)).toBe(
+			120_000 - OUTPUT_FIT_HEADWAY_TOKENS,
+		);
 		const alwaysSends = { ...deepseek, compat: { isOpenRouterHost: true, alwaysSendMaxTokens: true } } as never;
-		expect(fitOutputTokensToContextWindow(alwaysSends, promptOf(800_000), undefined, tokenizer)).toBe(120_000 - OUTPUT_FIT_HEADWAY_TOKENS);
+		expect(fitOutputTokensToContextWindow(alwaysSends, promptOf(800_000), undefined, tokenizer)).toBe(
+			120_000 - OUTPUT_FIT_HEADWAY_TOKENS,
+		);
 	});
 
 	test("sizes the prompt from the provider's last report plus only the unreported tail", () => {
@@ -114,7 +120,9 @@ describe("fitOutputTokensToContextWindow", () => {
 		const fresh: Context = {
 			messages: [summary, reported(950_000, 5), userOf(1_000, 11), reported(700_000, 12), userOf(1_000, 13)],
 		};
-		expect(fitOutputTokensToContextWindow(deepseek, fresh, undefined, tokenizer)).toBe(1_000_000 - (700_000 + 1_100) - OUTPUT_FIT_HEADWAY_TOKENS);
+		expect(fitOutputTokensToContextWindow(deepseek, fresh, undefined, tokenizer)).toBe(
+			1_000_000 - (700_000 + 1_100) - OUTPUT_FIT_HEADWAY_TOKENS,
+		);
 	});
 
 	test("leaves the cap alone on hosts that stop generation at the window", () => {
@@ -150,9 +158,6 @@ describe("fitOutputTokensToContextWindow", () => {
 		const context: Context = { messages: [reported(990_000, 1), userOf(1_000, 2)] };
 		expect(fitOutputTokensToContextWindow(deepseek, context, 384_000, tokenizer)).toBe(
 			1_000_000 - 991_100 - OUTPUT_FIT_HEADWAY_TOKENS,
-		);
-		expect(991_100 + (1_000_000 - 991_100 - OUTPUT_FIT_HEADWAY_TOKENS) + OUTPUT_FIT_HEADWAY_TOKENS).toBeLessThanOrEqual(
-			1_000_000,
 		);
 	});
 
