@@ -459,13 +459,7 @@ impl AxBackend for MacAx {
 				actions.join(", "),
 			)));
 		}
-		let action = CFString::from_str(&native);
-		let perform = || {
-			// SAFETY: The retained element and action CFString remain valid for the
-			// synchronous AX request.
-			let error = unsafe { element.perform_action(&action) };
-			ax_result(error, format!("AX action '{native}' failed"))
-		};
+		let perform = || perform_action(element, &native);
 		// AXRaise is an explicit request to change stacking, including the
 		// takeover preparation path. Other semantic actions must stay background.
 		if native == "AXRaise" {
@@ -722,6 +716,14 @@ fn replace_utf16_selection(
 	result.push_str(text);
 	result.push_str(&before[end_byte..]);
 	Some(result)
+}
+
+fn perform_action(element: &AXUIElement, action: &str) -> CoreResult<()> {
+	let name = CFString::from_str(action);
+	// SAFETY: The retained element and action CFString remain valid for the
+	// synchronous AX request.
+	let error = unsafe { element.perform_action(&name) };
+	ax_result(error, format!("AX action '{action}' failed"))
 }
 
 fn ensure_trusted() -> CoreResult<()> {

@@ -12,11 +12,11 @@ use std::{
 };
 
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::{CFRetained, CFString};
+use objc2_core_foundation::CFRetained;
 
 use super::{
-	CoreResult, DesktopError, ax_result, copy_bool, copy_elements_optional, copy_string,
-	copy_strings_from_action_names,
+	CoreResult, DesktopError, copy_bool, copy_elements_optional, copy_string,
+	copy_strings_from_action_names, perform_action,
 };
 
 /// How long a popup has to publish its menu items after the open action.
@@ -52,14 +52,16 @@ pub(super) fn choose(popup: &AXUIElement, value: &str) -> CoreResult<()> {
 		.map_err(|refusal| DesktopError::ax_failed(refusal_message(&refusal, value, &titles)))
 		.and_then(|index| press_option(popup, &items[index], value));
 	match result {
-		Err(mut error) if opened && !close_menu(popup) => {
-			error
-				.message
-				.push_str(" The menu this call opened is still open.");
-			Err(error)
-		},
+		Err(error) if opened && !close_menu(popup) => Err(menu_left_open(error)),
 		result => result,
 	}
+}
+
+fn menu_left_open(mut error: DesktopError) -> DesktopError {
+	error
+		.message
+		.push_str("; the menu this call opened is still open");
+	error
 }
 
 /// Why a requested value chooses no option.
@@ -140,29 +142,30 @@ fn open_menu_element(popup: &AXUIElement) -> Option<CFRetained<AXUIElement>> {
 fn open_menu(popup: &AXUIElement) -> CoreResult<Vec<CFRetained<AXUIElement>>> {
 	let actions = copy_strings_from_action_names(popup)?;
 	let mut attempts = Vec::new();
+	let mut left_open = false;
 	for action in ["AXPress", "AXShowMenu"] {
 		if !actions.iter().any(|name| name == action) {
 			continue;
 		}
-		if let Err(error) = perform(popup, action) {
+		if let Err(error) = perform_action(popup, action) {
 			attempts.push(error.message);
 			continue;
 		}
-		let deadline = Instant::now() + MENU_OPEN_WAIT;
-		loop {
+		let published = poll(MENU_OPEN_WAIT, || {
 			let items = menu_items(popup);
-			if !items.is_empty() {
-				return Ok(items);
-			}
-			if Instant::now() >= deadline {
-				break;
-			}
-			thread::sleep(POLL_INTERVAL);
+			(!items.is_empty()).then_some(items)
+		});
+		if let Some(items) = published {
+			return Ok(items);
 		}
-		// Close an empty menu so the next action opens it instead of toggling it shut.
-		close_menu(popup);
 		attempts
 			.push(format!("{action} published no options within {} ms", MENU_OPEN_WAIT.as_millis()));
+		// Close an empty menu so the next action opens it instead of toggling it
+		// shut; a menu that stays open ends the attempts.
+		if !close_menu(popup) {
+			left_open = true;
+			break;
+		}
 	}
 	if attempts.is_empty() {
 		return Err(DesktopError::ax_failed(format!(
@@ -171,10 +174,15 @@ fn open_menu(popup: &AXUIElement) -> CoreResult<Vec<CFRetained<AXUIElement>>> {
 			actions.join(", ")
 		)));
 	}
-	Err(DesktopError::ax_failed(format!(
+	let error = DesktopError::ax_failed(format!(
 		"popup menu published no options ({}); nothing was selected",
 		attempts.join("; ")
-	)))
+	));
+	Err(if left_open {
+		menu_left_open(error)
+	} else {
+		error
+	})
 }
 
 /// Presses the chosen item and waits for the popup to report it. The popup's
@@ -185,27 +193,25 @@ fn press_option(popup: &AXUIElement, item: &AXUIElement, title: &str) -> CoreRes
 			"popup option \"{title}\" is disabled; nothing was selected"
 		)));
 	}
-	perform(item, "AXPress")?;
-	let deadline = Instant::now() + CHOICE_SETTLE_WAIT;
-	loop {
-		let after = copy_string(popup, "AXValue");
-		if after.as_deref() == Some(title) {
-			return Ok(());
-		}
-		if Instant::now() >= deadline {
-			return Err(DesktopError::ax_failed(match after {
-				Some(after) => format!(
-					"pressed popup option \"{title}\" but the popup still reads \"{after}\"; the app \
-					 did not take the choice"
-				),
-				None => format!(
-					"pressed popup option \"{title}\" but the popup publishes no readable value, so \
-					 the choice could not be confirmed"
-				),
-			}));
-		}
-		thread::sleep(POLL_INTERVAL);
+	perform_action(item, "AXPress")?;
+	let mut after = None;
+	let taken = poll(CHOICE_SETTLE_WAIT, || {
+		after = copy_string(popup, "AXValue");
+		(after.as_deref() == Some(title)).then_some(())
+	});
+	if taken.is_some() {
+		return Ok(());
 	}
+	Err(DesktopError::ax_failed(match after {
+		Some(after) => format!(
+			"pressed popup option \"{title}\" but the popup still reads \"{after}\"; the app did not \
+			 take the choice"
+		),
+		None => format!(
+			"pressed popup option \"{title}\" but the popup publishes no readable value, so the \
+			 choice could not be confirmed"
+		),
+	}))
 }
 
 /// Cancels the popup's open menu. `true` once no menu is open.
@@ -213,27 +219,25 @@ fn close_menu(popup: &AXUIElement) -> bool {
 	let Some(menu) = open_menu_element(popup) else {
 		return true;
 	};
-	if perform(&menu, "AXCancel").is_err() {
+	if perform_action(&menu, "AXCancel").is_err() {
 		return false;
 	}
-	let deadline = Instant::now() + MENU_CLOSE_WAIT;
+	poll(MENU_CLOSE_WAIT, || open_menu_element(popup).is_none().then_some(())).is_some()
+}
+
+/// Runs `probe` every `POLL_INTERVAL` until it yields a value or `wait` has
+/// elapsed; the last probe runs at or after the deadline.
+fn poll<T>(wait: Duration, mut probe: impl FnMut() -> Option<T>) -> Option<T> {
+	let deadline = Instant::now() + wait;
 	loop {
-		if open_menu_element(popup).is_none() {
-			return true;
+		if let Some(value) = probe() {
+			return Some(value);
 		}
 		if Instant::now() >= deadline {
-			return false;
+			return None;
 		}
 		thread::sleep(POLL_INTERVAL);
 	}
-}
-
-fn perform(element: &AXUIElement, action: &str) -> CoreResult<()> {
-	let name = CFString::from_str(action);
-	// SAFETY: The retained element and action CFString remain valid for the
-	// synchronous AX request.
-	let error = unsafe { element.perform_action(&name) };
-	ax_result(error, format!("AX action '{action}' failed"))
 }
 
 #[cfg(test)]
