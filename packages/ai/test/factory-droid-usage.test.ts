@@ -1,6 +1,17 @@
 import { describe, expect, it } from "bun:test";
+import { FACTORY_DROID_MODELS } from "@oh-my-pi/pi-catalog/discovery";
 import type { UsageFetchContext } from "../src/usage";
-import { factoryDroidUsageProvider, parseFactoryDroidUsage } from "../src/usage/factory-droid";
+import {
+	factoryDroidRankingStrategy,
+	factoryDroidUsageProvider,
+	parseFactoryDroidUsage,
+} from "../src/usage/factory-droid";
+
+function modelInPool(pool: "core" | "standard"): string {
+	const model = FACTORY_DROID_MODELS.find(candidate => candidate.billingPool === pool);
+	if (!model) throw new Error(`no ${pool} model in the Factory registry`);
+	return model.id;
+}
 
 /** Live shape captured from GET /api/billing/limits (droid 0.189.0 account). */
 const LIVE_PAYLOAD = {
@@ -100,6 +111,30 @@ describe("parseFactoryDroidUsage", () => {
 		expect(standard5h?.status).toBe("ok");
 	});
 
+	it("treats a window ending exactly at fetch time as active but a past end as lapsed", () => {
+		const end = Date.parse("2026-08-25T12:00:00.000Z");
+		const payload = { limits: { core: { fiveHour: { usedPercent: 100, windowEnd: new Date(end).toISOString() } } } };
+		const atEnd = parseFactoryDroidUsage(payload, end)?.limits[0];
+		const afterEnd = parseFactoryDroidUsage(payload, end + 1)?.limits[0];
+		expect(atEnd?.status).toBe("exhausted");
+		expect(atEnd?.window?.resetsAt).toBe(end);
+		expect(afterEnd?.status).toBe("ok");
+		expect(afterEnd?.window?.resetsAt).toBeUndefined();
+	});
+
+	it("keeps a valid non-window-billed account visible without inventing quota", () => {
+		const fetchedAt = 123456;
+		const report = parseFactoryDroidUsage(
+			{ usesTokenRateLimitsBilling: false, overagePreference: null, canManageOverage: false },
+			fetchedAt,
+		);
+		expect(report).toMatchObject({ provider: "factory-droid", fetchedAt, limits: [] });
+		expect(parseFactoryDroidUsage({ usesTokenRateLimitsBilling: true }, fetchedAt)).toBeNull();
+		expect(parseFactoryDroidUsage({ ...LIVE_PAYLOAD, usesTokenRateLimitsBilling: false }, fetchedAt)?.limits).toEqual(
+			[],
+		);
+	});
+
 	it("returns null for payloads without limit windows", () => {
 		expect(parseFactoryDroidUsage({})).toBeNull();
 		expect(parseFactoryDroidUsage({ limits: {} })).toBeNull();
@@ -107,10 +142,72 @@ describe("parseFactoryDroidUsage", () => {
 	});
 });
 
+describe("Factory Droid model quota routing", () => {
+	it("scopes ranking and blocking to the model's billing pool", () => {
+		const fetchedAt = Date.parse("2026-08-07T06:00:00.000Z");
+		const report = parseFactoryDroidUsage(
+			{
+				limits: {
+					standard: {
+						fiveHour: { usedPercent: 100, windowEnd: "2026-08-07T07:00:00.000Z" },
+						weekly: { usedPercent: 95, windowEnd: "2026-08-10T07:00:00.000Z" },
+					},
+					core: {
+						fiveHour: { usedPercent: 20, windowEnd: "2026-08-07T07:00:00.000Z" },
+						weekly: { usedPercent: 30, windowEnd: "2026-08-10T07:00:00.000Z" },
+					},
+				},
+			},
+			fetchedAt,
+		);
+		if (!report) throw new Error("expected usage windows");
+		const coreContext = { modelId: modelInPool("core") };
+		const standardContext = { modelId: modelInPool("standard") };
+		expect(factoryDroidRankingStrategy.blockScope?.(coreContext)).toBe("pool:core");
+		expect(factoryDroidRankingStrategy.findWindowLimits(report, coreContext).primary?.amount.usedFraction).toBe(0.2);
+		expect(
+			factoryDroidRankingStrategy.scopeLimits?.(report, coreContext).every(limit => limit.id.includes(":core:")),
+		).toBe(true);
+		expect(factoryDroidRankingStrategy.blockScope?.(standardContext)).toBe("pool:standard");
+		expect(factoryDroidRankingStrategy.findWindowLimits(report, standardContext).primary?.status).toBe("exhausted");
+		expect(
+			factoryDroidRankingStrategy
+				.scopeLimits?.(report, standardContext)
+				.every(limit => limit.id.includes(":standard:")),
+		).toBe(true);
+		const healable = factoryDroidRankingStrategy.healableBlockScopes?.(report);
+		expect(
+			healable?.find(scope => scope.blockScope === "pool:core")?.limits.every(limit => limit.status !== "exhausted"),
+		).toBe(true);
+		expect(
+			healable
+				?.find(scope => scope.blockScope === "pool:standard")
+				?.limits.some(limit => limit.status === "exhausted"),
+		).toBe(true);
+		expect(factoryDroidRankingStrategy.blockScope?.({ modelId: "unknown-model" })).toBe("pool:unknown");
+		expect(factoryDroidRankingStrategy.scopeLimits?.(report, { modelId: "unknown-model" })).toHaveLength(4);
+		const fundedReport = parseFactoryDroidUsage(
+			{
+				limits: {
+					standard: { fiveHour: { usedPercent: 100, windowEnd: "2026-08-07T07:00:00.000Z" } },
+					core: { fiveHour: { usedPercent: 100, windowEnd: "2026-08-07T07:00:00.000Z" } },
+				},
+				extraUsageBalanceCents: 200,
+			},
+			fetchedAt,
+		);
+		if (!fundedReport) throw new Error("expected funded windows");
+		expect(factoryDroidRankingStrategy.findWindowLimits(fundedReport, coreContext).primary?.status).toBe("exhausted");
+		expect(
+			factoryDroidRankingStrategy.healableBlockScopes?.(fundedReport)?.some(scope => scope.healthy === true),
+		).toBe(false);
+	});
+});
+
 describe("factoryDroidUsageProvider.fetchUsage", () => {
 	const ctx: UsageFetchContext = { fetch: async () => new Response(JSON.stringify(LIVE_PAYLOAD), { status: 200 }) };
 
-	it("fetches and parses the billing limits endpoint with droid identity headers", async () => {
+	it("fetches billing for the credential's residency and canonical organization", async () => {
 		let seenUrl = "";
 		let seenHeaders: Record<string, string> = {};
 		const capturingCtx: UsageFetchContext = {
@@ -123,13 +220,23 @@ describe("factoryDroidUsageProvider.fetchUsage", () => {
 			},
 		};
 		const report = await factoryDroidUsageProvider.fetchUsage(
-			{ provider: "factory-droid", credential: { type: "oauth", accessToken: "workos-token" } },
+			{
+				provider: "factory-droid",
+				credential: {
+					type: "oauth",
+					accessToken: "workos-token",
+					orgId: "canonical-org",
+					region: "eu",
+					inferenceRegion: "us",
+				},
+			},
 			capturingCtx,
 		);
-		expect(report?.limits.length).toBeGreaterThan(0);
-		expect(seenUrl).toBe("https://api.factory.ai/api/billing/limits");
+		expect(report?.limits.find(limit => limit.id === "factory-droid:core:5h")?.status).toBe("ok");
+		expect(seenUrl).toBe("https://api.eu.factory.ai/api/billing/limits");
 		expect(seenHeaders.authorization).toBe("Bearer workos-token");
 		expect(seenHeaders["x-factory-client"]).toBe("cli");
+		expect(seenHeaders["x-factory-org-id"]).toBe("canonical-org");
 	});
 
 	it("returns null on http errors and missing tokens", async () => {

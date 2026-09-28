@@ -1,39 +1,31 @@
-import { FACTORY_DROID_CLIENT_VERSION } from "@oh-my-pi/pi-catalog/discovery";
+import { factoryDroidPoolForModel } from "@oh-my-pi/pi-catalog/discovery";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 import { toNumber } from "@oh-my-pi/pi-catalog/utils";
+import { factoryDroidApiBaseUrl, factoryDroidClientHeaders } from "@oh-my-pi/pi-catalog/wire/factory-droid";
 import type {
+	CredentialRankingContext,
+	CredentialRankingStrategy,
 	UsageAmount,
 	UsageFetchContext,
 	UsageFetchParams,
 	UsageLimit,
 	UsageProvider,
 	UsageReport,
-	UsageStatus,
 	UsageWindow,
 } from "../usage";
-
-const FACTORY_BILLING_LIMITS_URL = "https://api.factory.ai/api/billing/limits";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isRecord } from "../utils";
+import { DAY_MS, HOUR_MS, parseIsoTimestamp, usageStatus, WEEK_MS } from "./shared";
 
 const WINDOW_DEFS = [
-	{ key: "fiveHour", id: "5h", label: "5 Hour", durationMs: 5 * 60 * 60_000 },
-	{ key: "weekly", id: "weekly", label: "Weekly", durationMs: 7 * 24 * 60 * 60_000 },
-	{ key: "monthly", id: "monthly", label: "Monthly", durationMs: 30 * 24 * 60 * 60_000 },
+	{ key: "fiveHour", id: "5h", label: "5 Hour", durationMs: 5 * HOUR_MS },
+	{ key: "weekly", id: "weekly", label: "Weekly", durationMs: WEEK_MS },
+	{ key: "monthly", id: "monthly", label: "Monthly", durationMs: 30 * DAY_MS },
 ] as const;
 
 const POOL_DEFS = [
 	{ key: "standard", label: "Standard credits" },
 	{ key: "core", label: "Droid Core" },
 ] as const;
-
-function statusFor(usedFraction: number): UsageStatus {
-	if (usedFraction >= 1) return "exhausted";
-	if (usedFraction >= 0.9) return "warning";
-	return "ok";
-}
 
 /**
  * Parses `GET /api/billing/limits` into a usage report: per-pool
@@ -42,7 +34,17 @@ function statusFor(usedFraction: number): UsageStatus {
  * usage balance when present.
  */
 export function parseFactoryDroidUsage(payload: unknown, fetchedAt = Date.now()): UsageReport | null {
-	if (!isRecord(payload) || !isRecord(payload.limits)) return null;
+	if (!isRecord(payload)) return null;
+	if (payload.usesTokenRateLimitsBilling === false) {
+		return {
+			provider: "factory-droid",
+			fetchedAt,
+			limits: [],
+			notes: ["This Factory account does not use token-rate-limit billing; no quota windows are exposed."],
+			raw: payload,
+		};
+	}
+	if (!isRecord(payload.limits)) return null;
 	const limits: UsageLimit[] = [];
 
 	for (const pool of POOL_DEFS) {
@@ -61,8 +63,8 @@ export function parseFactoryDroidUsage(payload: unknown, fetchedAt = Date.now())
 			// CLI treats windowEnd >= now as "active" and filters everything
 			// else out of the display ("Use Droid to start"); mirror that —
 			// an inactive window reads as 0% used with no reset countdown.
-			const windowEnd = typeof windowValue.windowEnd === "string" ? Date.parse(windowValue.windowEnd) : undefined;
-			const active = windowEnd !== undefined && Number.isFinite(windowEnd) && windowEnd >= fetchedAt;
+			const windowEnd = parseIsoTimestamp(windowValue.windowEnd);
+			const active = windowEnd !== undefined && windowEnd >= fetchedAt;
 			const window: UsageWindow = {
 				id: `${pool.key}-${windowDef.id}`,
 				label: `${pool.label} ${windowDef.label}`,
@@ -86,7 +88,7 @@ export function parseFactoryDroidUsage(payload: unknown, fetchedAt = Date.now())
 				scope: { provider: "factory-droid", windowId: window.id },
 				window,
 				amount,
-				status: statusFor(usedFraction),
+				status: usageStatus(usedFraction),
 			});
 		}
 	}
@@ -115,24 +117,21 @@ export function parseFactoryDroidUsage(payload: unknown, fetchedAt = Date.now())
 }
 
 /**
- * Fetches and parses `GET /api/billing/limits`. Shared between the usage
- * provider (quota widgets) and the factory-droid transport's error path,
- * which re-checks pool state to turn the proxy's bare 403s into actionable
- * quota messages. Returns null on any failure — callers treat that as
- * "quota unknown", never as exhaustion.
+ * Fetches scoped billing usage for account display and ranking. Failure means
+ * quota unknown; inference failures never trigger a billing probe.
  */
-export async function fetchFactoryDroidUsageReport(
+async function fetchFactoryDroidUsageReport(
 	accessToken: string,
 	fetchImpl: FetchImpl,
 	signal?: AbortSignal,
+	scope: { region?: string; orgId?: string } = {},
 ): Promise<UsageReport | null> {
 	try {
-		const response = await fetchImpl(FACTORY_BILLING_LIMITS_URL, {
+		const response = await fetchImpl(`${factoryDroidApiBaseUrl(scope.region)}/api/billing/limits`, {
 			headers: {
 				Accept: "application/json",
 				Authorization: `Bearer ${accessToken}`,
-				"X-Client-Version": FACTORY_DROID_CLIENT_VERSION,
-				"X-Factory-Client": "cli",
+				...factoryDroidClientHeaders(scope.orgId),
 			},
 			signal,
 		});
@@ -145,6 +144,7 @@ export async function fetchFactoryDroidUsageReport(
 }
 
 export const factoryDroidUsageProvider: UsageProvider = {
+	cacheVersion: 4,
 	id: "factory-droid",
 	supports(params: UsageFetchParams): boolean {
 		if (params.provider !== "factory-droid") return false;
@@ -156,18 +156,58 @@ export const factoryDroidUsageProvider: UsageProvider = {
 		const { credential } = params;
 		if (credential.type !== "oauth" || !credential.accessToken) return null;
 
-		const report = await fetchFactoryDroidUsageReport(credential.accessToken, ctx.fetch, params.signal);
+		const report = await fetchFactoryDroidUsageReport(credential.accessToken, ctx.fetch, params.signal, credential);
 		if (!report) {
 			ctx.logger?.warn("Factory Droid usage request failed", { provider: params.provider });
 			return null;
 		}
-		if (report) {
-			const metadata = {
-				...(credential.email ? { email: credential.email } : {}),
-				...(credential.orgId ? { orgId: credential.orgId } : {}),
-			};
-			if (Object.keys(metadata).length > 0) report.metadata = metadata;
-		}
+		const metadata = {
+			...(credential.email ? { email: credential.email } : {}),
+			...(credential.orgId ? { orgId: credential.orgId } : {}),
+		};
+		if (Object.keys(metadata).length > 0) report.metadata = metadata;
 		return report;
 	},
+};
+
+/** Limits a model's pool draws from; unknown models see every quota window. */
+function scopeFactoryDroidLimits(report: UsageReport, context?: CredentialRankingContext): UsageLimit[] {
+	const pool = context?.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+	if (!pool) return report.limits.filter(limit => limit.id !== "factory-droid:extra-balance");
+	return report.limits.filter(limit => limit.id.startsWith(`factory-droid:${pool}:`));
+}
+
+/** Factory's Core and Standard credits have independent subscription windows. */
+export const factoryDroidRankingStrategy: CredentialRankingStrategy = {
+	findWindowLimits(report, context) {
+		const limits = scopeFactoryDroidLimits(report, context);
+		return {
+			primary: limits.find(limit => limit.window?.id.endsWith("-5h")),
+			secondary: limits.find(limit => limit.window?.id.endsWith("-weekly")),
+		};
+	},
+	scopeLimits: scopeFactoryDroidLimits,
+	blockScope(context) {
+		const pool = context?.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+		return pool ? `pool:${pool}` : "pool:unknown";
+	},
+	blockScopes(context) {
+		if (!context) return ["pool:core", "pool:standard", "pool:unknown"];
+		const pool = context.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+		return pool ? [`pool:${pool}`] : ["pool:unknown"];
+	},
+	healableBlockScopes(report) {
+		// A funded balance alone does not establish permission or preference to use it.
+		return [
+			...(["core", "standard"] as const).map(pool => ({
+				blockScope: `pool:${pool}`,
+				limits: report.limits.filter(limit => limit.id.startsWith(`factory-droid:${pool}:`)),
+			})),
+			{
+				blockScope: "pool:unknown",
+				limits: report.limits.filter(limit => limit.id !== "factory-droid:extra-balance"),
+			},
+		];
+	},
+	windowDefaults: { primaryMs: 5 * HOUR_MS, secondaryMs: WEEK_MS },
 };
