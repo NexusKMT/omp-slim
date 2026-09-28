@@ -580,6 +580,8 @@ export class Editor implements Component, Focusable {
 	#wrapCache = new Map<string, WrapEntry>();
 	#wrapCacheWidth = -1;
 	#wrapCacheEpoch = -1;
+	/** Last `#getPromptGutter` result, keyed by (gutter string, clamped gutter width). */
+	#promptGutterCache: { source: string; firstLine: string; continuation: string; width: number } | undefined;
 	#paddingXOverride: number | undefined;
 	#maxHeight?: number;
 	#scrollOffset: number = 0;
@@ -1075,11 +1077,16 @@ export class Editor implements Component, Focusable {
 		if (!gutter) return undefined;
 		const gutterWidth = this.#getPromptGutterWidth(width, paddingX);
 		if (gutterWidth === 0) return undefined;
-		return {
+		const cached = this.#promptGutterCache;
+		if (cached !== undefined && cached.source === gutter && cached.width === gutterWidth) return cached;
+		const next = {
+			source: gutter,
 			firstLine: sliceByColumn(gutter, 0, gutterWidth, true),
 			continuation: padding(gutterWidth),
 			width: gutterWidth,
 		};
+		this.#promptGutterCache = next;
+		return next;
 	}
 
 	#getContentWidth(width: number, paddingX: number): number {
