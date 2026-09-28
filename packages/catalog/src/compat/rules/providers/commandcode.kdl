@@ -156,10 +156,12 @@ provider "commandcode" {
 	}
 	// Command Code's Responses endpoint rejects an object `tool_choice` and returns
 	// no bytes from `image_generation` (verified 2026-09-29), so the openai
-	// class's hosted-image grant does not apply and named choices degrade to
-	// `"required"`. Hosted web search still works with a string `tool_choice`.
-	models "gpt-*" {
+	// class's hosted-image and image-model grants do not apply and named choices
+	// degrade to `"required"`. Hosted web search still works with a string `tool_choice`.
+	models "gpt-5.3-codex" "gpt-5.4" "gpt-5.4-mini" "gpt-5.5" "gpt-5.6-luna" "gpt-5.6-sol" \
+		"gpt-5.6-terra" "gpt-6-astra" "gpt-6-luna" "gpt-6-sol" {
 		hosted-image #false
+		image-model #false
 		supports-named-tool-choice #false
 	}
 	// ---------------------------------------------------------------------------

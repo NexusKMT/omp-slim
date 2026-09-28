@@ -243,6 +243,23 @@ describe("Command Code provider support", () => {
 		expect(proxiedModels.find(model => model.id === "typesafe/jev")?.baseUrl).toBe("https://proxy.example/provider");
 	});
 
+	test("keeps one System One jev row when the models route also lists it", async () => {
+		const fetchMock: FetchImpl = vi.fn(async () =>
+			Response.json({
+				data: [
+					{ id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", context_length: 1_000_000 },
+					{ id: "typesafe/jev", name: "TypeSafe Jev", context_length: 32_000 },
+				],
+			}),
+		);
+		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
+		const models = ((await options.fetchDynamicModels?.()) ?? []).map(spec => buildModel(spec));
+
+		const jevRows = models.filter(model => model.id === "typesafe/jev");
+		expect(jevRows).toHaveLength(1);
+		expect(jevRows[0]).toMatchObject({ api: "typesafe", kind: "judge" });
+	});
+
 	test("returns null from a failed discovery instead of the jev seed alone", async () => {
 		const fetchMock: FetchImpl = vi.fn(async () => new Response("unavailable", { status: 503 }));
 		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
@@ -443,6 +460,25 @@ describe("Command Code provider support", () => {
 		}
 	});
 
+	test("trusts a pasted key when the whoami route answers 403", async () => {
+		const login = getProviderDefinition("commandcode")?.login;
+		const forbiddenFetch: FetchImpl = async () =>
+			Response.json({ success: false, error: { code: "FORBIDDEN" } }, { status: 403 });
+
+		await expect(
+			login?.({ onAuth: vi.fn(), onPrompt: async () => "  user_test  ", fetch: forbiddenFetch }),
+		).resolves.toBe("user_test");
+	});
+
+	test("still rejects a 403 from an optional probe that does not trust it", async () => {
+		const login = getProviderDefinition("nvidia")?.login;
+		const forbiddenFetch: FetchImpl = async () => Response.json({ error: { message: "forbidden" } }, { status: 403 });
+
+		await expect(
+			login?.({ onAuth: vi.fn(), onPrompt: async () => "nvapi-test", fetch: forbiddenFetch }),
+		).rejects.toMatchObject({ status: 403 });
+	});
+
 	test("prices live-discovered models from the Command Code rate card", async () => {
 		const models = await discoverModels([
 			{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
@@ -529,15 +565,24 @@ describe("Command Code provider support", () => {
 		});
 	});
 
-	test("keeps Responses-routed GPT rows off hosted image generation and named tool choice", async () => {
+	test("keeps Responses-routed GPT rows off hosted image generation, the image model, and named tool choice", async () => {
 		const models = await discoverModels(["gpt-6-luna", "gpt-5.4-mini", "gpt-5.3-codex"]);
 		expect(models).toHaveLength(3);
 		for (const model of models) {
 			expect(model.api).toBe("openai-responses");
 			expect(model.hostedImage).not.toBe(true);
+			expect(model.imageModel).toBeUndefined();
 			expect(model.compat).toMatchObject({ supportsNamedToolChoice: false });
 			expect(model.webSearch).toBe("openai");
 		}
+	});
+
+	test("leaves other gpt-prefixed ids on chat completions without the Responses opt-outs", async () => {
+		const [model] = await discoverModels(["gpt-oss-120b"]);
+		if (!model) throw new Error("Expected the gpt-oss-120b fixture");
+		expect(model.api).toBe("openai-completions");
+		expect(model.baseUrl).toBe("https://api.commandcode.ai/provider/v1");
+		expect(model.compat).not.toMatchObject({ supportsNamedToolChoice: false });
 	});
 
 	test("clears hosted image generation from a bundled GPT row that still carries it", async () => {
@@ -545,6 +590,13 @@ describe("Command Code provider support", () => {
 		if (!discovered) throw new Error("Expected the gpt-6-luna fixture");
 		const rebuilt = buildModel({ ...discovered, hostedImage: true });
 		expect(rebuilt.hostedImage).toBeUndefined();
+	});
+
+	test("clears the image model from a bundled GPT row that still carries it", async () => {
+		const [discovered] = await discoverModels(["gpt-6-luna"]);
+		if (!discovered) throw new Error("Expected the gpt-6-luna fixture");
+		const rebuilt = buildModel({ ...discovered, imageModel: "gpt-image-2" });
+		expect(rebuilt.imageModel).toBeUndefined();
 	});
 
 	test("advertises image input exactly outside the text-only set", async () => {

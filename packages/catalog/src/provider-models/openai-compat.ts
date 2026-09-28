@@ -7378,7 +7378,9 @@ export function commandCodeModelManagerOptions(config?: CommandCodeModelManagerC
 				fetch: config?.fetch,
 			});
 			if (!discovered) return null;
-			return [...discovered, ...seedModels("commandcode").map(seed => ({ ...seed, baseUrl: basePath }))];
+			const seeds = seedModels("commandcode").map(seed => ({ ...seed, baseUrl: basePath }));
+			const seedIds = new Set(seeds.map(seed => seed.id));
+			return [...discovered.filter(model => !seedIds.has(model.id)), ...seeds];
 		},
 	};
 }

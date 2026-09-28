@@ -98,7 +98,11 @@ export function createApiKeyLogin(
 			} catch (error) {
 				// An optional probe only rejects on a real auth failure (401/403);
 				// any other validation-endpoint failure trusts the supplied key.
-				if (!rule.validate.optional || AIError.is(AIError.classify(error), AIError.Flag.AuthFailed)) {
+				const trustsForbidden = rule.validate.trustForbidden && AIError.status(error) === 403;
+				if (
+					!rule.validate.optional ||
+					(AIError.is(AIError.classify(error), AIError.Flag.AuthFailed) && !trustsForbidden)
+				) {
 					throw error;
 				}
 				options.onProgress?.(`Skipping ${label} validation endpoint; continuing with provided API key.`);
