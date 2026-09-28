@@ -12,7 +12,7 @@
 
 ### Changed
 
-- Routed Command Code GPT models through the OpenAI Responses API ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- Routed Command Code's 10 GPT models through the OpenAI Responses API ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Command Code login now rejects a key that Command Code answers with 401; a 403 or an unreachable check keeps the pasted key, as the Command Code CLI does ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Command Code GPT models no longer advertise hosted image generation or the `gpt-image-2` image model, which Command Code does not serve ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Command Code Muse Spark models drop the minimal thinking level, and Muse Spark 1.3 adds max, matching the Command Code CLI ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
