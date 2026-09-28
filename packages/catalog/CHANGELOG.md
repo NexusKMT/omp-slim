@@ -2,15 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `--thinking xhigh` on Amazon Bedrock Grok 4.6 (`us.xai.grok-4.6`, `global.xai.grok-4.6`, `xai.grok-4.6`), which was silently lowered to `high` ([#13515](https://github.com/can1357/oh-my-pi/pull/13515) by [@pgkt04](https://github.com/pgkt04)).
+- Fixed `--thinking xhigh` and `--thinking max` on Amazon Bedrock Claude Opus 5.5, which were silently lowered to `high` ([#13515](https://github.com/can1357/oh-my-pi/pull/13515) by [@pgkt04](https://github.com/pgkt04)).
+- Fixed GitHub Copilot GPT-5.6 and GPT-6 Astra starting on the 1.05M premium context window instead of the default tier ([#13017](https://github.com/can1357/oh-my-pi/pull/13017)).
+- Added Cursor model pricing so usage stats no longer record zero cost for Cursor turns ([#13302](https://github.com/can1357/oh-my-pi/pull/13302) by [@eggpeat](https://github.com/eggpeat)).
+
 ## [18.4.0] - 2026-09-28
 
 ### Fixed
 
 - Corrected Cerebras model pricing so cached input tokens are charged at the model’s input rate, consistent with Cerebras billing.
-### Fixed
-
-- Fixed `--thinking xhigh` on Amazon Bedrock Grok 4.6 (`us.xai.grok-4.6`, `global.xai.grok-4.6`, `xai.grok-4.6`), which was silently lowered to `high` ([#13515](https://github.com/can1357/oh-my-pi/pull/13515) by [@pgkt04](https://github.com/pgkt04)).
-- Fixed `--thinking xhigh` and `--thinking max` on Amazon Bedrock Claude Opus 5.5, which were silently lowered to `high` ([#13515](https://github.com/can1357/oh-my-pi/pull/13515) by [@pgkt04](https://github.com/pgkt04)).
 
 ## [18.3.5] - 2026-09-27
 

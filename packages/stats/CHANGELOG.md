@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/trace` and `omp stats` dashboards failing to load after operating-system temporary-file cleanup ([#13487](https://github.com/can1357/oh-my-pi/pull/13487) by [@Peter-Tam](https://github.com/Peter-Tam)).
+
 ## [18.4.0] - 2026-09-28
 
 ### Changed
@@ -17,9 +21,6 @@
 
 - Made session-statistics synchronization atomic to prevent duplicate entries when synchronization is interrupted.
 - Improved the speed and reliability of initial and repeat `omp stats` imports, including large session histories and already-indexed histories.
-- Fixed `/trace` and `omp stats` dashboards failing to load after operating-system temporary-file cleanup ([#13487](https://github.com/can1357/oh-my-pi/pull/13487) by [@Peter-Tam](https://github.com/Peter-Tam)).
-- Ensure synchronization of session statistics is atomic, preventing duplicate entries during interrupted syncs
-- Sped up initial imports and repeat syncs in `omp stats`, including histories with tens of thousands of session files.
 
 ## [18.2.9] - 2026-09-22
 

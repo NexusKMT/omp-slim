@@ -118,7 +118,7 @@ export function canUseRemoteCompaction(model: Model | null | undefined, settings
 export function resolveSpeculationMethod(
 	model: Model | null | undefined,
 	settings: CompactionSettings,
-	skipRemote = false,
+	{ skipRemote = false }: { skipRemote?: boolean } = {},
 ): "remote" | "handoff" | "soft" | undefined {
 	for (const candidate of resolveCompactionMethodOrder(settings.methodOrder)) {
 		if (skipRemote && candidate === "remote") continue;

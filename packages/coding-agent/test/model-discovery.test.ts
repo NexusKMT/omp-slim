@@ -1470,7 +1470,6 @@ describe("ModelRegistry runtime discovery", () => {
 		}
 	});
 
-
 	test("configured llama.cpp Qwen model keeps its /v1 runtime URL despite a native-root baseUrl override", async () => {
 		writeRawModelsJson({
 			"llama.cpp": {

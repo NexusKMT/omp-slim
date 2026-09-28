@@ -255,7 +255,7 @@ function makeFileTransport(dir?: string): RotatingFileSink {
 		maxBytes: 10 * 1024 * 1024,
 		maxFiles: 5,
 		auditFile: path.join(logsDir, `.omp.${process.pid}-audit.json`),
-		// Keep the macOS stderr guard's fd 2 on the file this sink is writing.
+		// Keep the stderr guard's fd 2 on the file this sink is writing.
 		onRotate: setStderrRedirectTarget,
 	});
 }

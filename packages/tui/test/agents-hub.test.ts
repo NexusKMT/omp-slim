@@ -108,7 +108,8 @@ async function createHub(settings: TestSettings): Promise<{
 			resolvePatterns: () => undefined,
 			effectivePrewalkPattern: () => undefined,
 			effectiveAdvisorPattern: agent => (agent.advisorOverride === "on" ? "@advisor" : undefined),
-			setAgentDisabled: (name, { disabled }) => settings.setMember("task.disabledAgents", name, { member: disabled }),
+			setAgentDisabled: (name, { disabled }) =>
+				settings.setMember("task.disabledAgents", name, { member: disabled }),
 			setAgentOverride: (property, name, value) => settings.setEntry(OVERRIDE_KEYS[property], name, value),
 			generateAgent: async () => {
 				throw new Error("Agent generation is not used by configuration tests");

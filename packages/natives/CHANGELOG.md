@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed omp crashing at startup on macOS when built from source with `SDKROOT` set (e.g. via Nix) on a host whose Command Line Tools ship the macOS 27 SDK ([#13168](https://github.com/can1357/oh-my-pi/pull/13168) by [@johnrichardrinehart](https://github.com/johnrichardrinehart)).
+- Hashline edit rejections for a tag issued for another file now name the path the tag belongs to ([#13464](https://github.com/can1357/oh-my-pi/pull/13464) by [@holny](https://github.com/holny)).
+- Fixed the native terminal output pump exiting on temporary nonblocking backpressure ([#13463](https://github.com/can1357/oh-my-pi/pull/13463) by [@hancens1024](https://github.com/hancens1024)).
+- Fixed commits failing on Windows when a repository has commit hooks; hooks now run through `git hook run` ([#13366](https://github.com/can1357/oh-my-pi/pull/13366) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed Windows path stats lacking a file identity, which let `rg` search its own redirected output and made `tail -F` report spurious replacements ([#13367](https://github.com/can1357/oh-my-pi/pull/13367) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed the embedded shell running backtick spans inside a quoted heredoc within a double-quoted command substitution ([#13307](https://github.com/can1357/oh-my-pi/issues/13307)).
+
 ## [18.4.0] - 2026-09-28
 
 ### Added
@@ -28,9 +37,6 @@
 ### Fixed
 
 - Fixed the native addon keeping every `bun test --isolate`/`--parallel` test file's global object and module graph alive, which grew each test worker by ~15 MB per file until the run was OOM-killed.
-### Fixed
-
-- Fixed the native terminal output pump exiting on temporary nonblocking backpressure ([#13463](https://github.com/can1357/oh-my-pi/pull/13463) by [@hancens1024](https://github.com/hancens1024)).
 
 ## [18.3.3] - 2026-09-27
 
@@ -53,9 +59,6 @@
 - Fixed shell access to standard and special file descriptors, including `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/N`, and `/dev/tty`, preventing heredoc commands from hanging the TUI.
 - Fixed native operations such as grep, glob, AST, shell, and VCS calls to promptly honor an `AbortSignal` that was already aborted when the operation starts.
 - Fixed Windows path formatting in the shell’s `fd` and `find` builtins so POSIX path patterns match correctly.
-- Fixed shell commands using `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/N`, and `/dev/tty` so they now access the command's descriptors correctly, including preventing heredoc commands from hanging the TUI.
-- Fixed native operations such as grep, glob, AST, shell, and VCS calls so they promptly honor an `AbortSignal` that was already aborted when the operation starts.
-- Fixed omp crashing at startup on macOS when built from source with `SDKROOT` set (e.g. via Nix) on a host whose Command Line Tools ship the macOS 27 SDK ([#13168](https://github.com/can1357/oh-my-pi/pull/13168) by [@johnrichardrinehart](https://github.com/johnrichardrinehart)).
 
 ## [18.3.0] - 2026-09-24
 

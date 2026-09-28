@@ -211,7 +211,9 @@ describe("HTML export template", () => {
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.html$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/template-[^.]+\.js$/.test(filePath))).toHaveLength(1);
 		expect(packedAssets.filter(filePath => /^dist\/tool-views\.generated-[^.]+\.js$/.test(filePath))).toHaveLength(1);
-		expect(packedAssets.filter(filePath => /^dist\/(?:marked|highlight)\.min-[^.]+\.js$/.test(filePath))).toHaveLength(2);
+		expect(
+			packedAssets.filter(filePath => /^dist\/(?:marked|highlight)\.min-[^.]+\.js$/.test(filePath)),
+		).toHaveLength(2);
 	}, 30_000);
 
 	test("serves the cached normal-bundle template after its asset files are removed", async () => {
