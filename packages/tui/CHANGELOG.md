@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Optimized activity clock rendering by caching timestamp formatting strings
 - Reduced CPU overhead during animated terminal redraws, transcript updates, inline-image bookkeeping, and status-line layout.
 - Reduced per-keystroke CPU in `^` model-mention autocomplete and per-frame CPU while streaming (status line, live transcript blocks, tool cards, frame writes).
 
