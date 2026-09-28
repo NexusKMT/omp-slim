@@ -617,11 +617,18 @@ export function buildSessionContext(
 		if (notes && renderedNotes.length > 0) {
 			const sourceEntry = path.find(entry => entry.id === notes.entryId);
 			if (sourceEntry) {
-				// A native Anthropic compaction block must open the request; nothing
-				// may precede it, so the notes follow that summary instead.
+				// A native Anthropic compaction block must open the request, and the
+				// provider folds it into a directly following retained assistant turn
+				// (whose signed thinking is bound to that prefix). Nothing may precede
+				// the block or split that fold, so the notes follow the summary and any
+				// retained assistant turn with its tool results.
 				const head = messages[0];
-				const insertAt =
-					head?.role === "compactionSummary" && head.providerPayload?.type === "anthropicCompaction" ? 1 : 0;
+				let insertAt = 0;
+				if (head?.role === "compactionSummary" && head.providerPayload?.type === "anthropicCompaction") {
+					insertAt = 1;
+					if (messages[insertAt]?.role === "assistant") insertAt++;
+					while (messages[insertAt]?.role === "toolResult") insertAt++;
+				}
 				messages.splice(
 					insertAt,
 					0,

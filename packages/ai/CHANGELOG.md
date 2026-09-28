@@ -29,7 +29,7 @@
 - Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
 ### Fixed
 
-- Fixed Anthropic requests failing with "`compaction` block must be sent first" when a per-message effort change was recorded on the turn right after a native compaction; the effort control now follows the compaction block
+- Fixed Anthropic requests failing with "`compaction` block must be sent first" when a per-message effort change was recorded on the turn right after a native compaction; the effort control now follows the compaction block ([#13569](https://github.com/can1357/oh-my-pi/pull/13569) by [@H4vC](https://github.com/H4vC))
 
 ## [18.3.5] - 2026-09-27
 

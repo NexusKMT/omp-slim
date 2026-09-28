@@ -554,4 +554,21 @@ describe("Anthropic compaction replay", () => {
 		expect(effortIndex).toBe(1);
 		expect(nextIndex).toBe(2);
 	});
+
+	it("applies an effort change before a summary replayed as text", async () => {
+		const opened: AssistantMessage = {
+			...keptFrom({ message: {} as AssistantMessage }),
+			requestControls: { messageIndex: 1, effort: { topLevel: "high", tail: "low" } },
+		};
+		const request = await captureRequest(preserved, { ...options, thinkingEnabled: true, effort: "low" }, [
+			summaryMessage({ signature: SIGNATURE }, "different-provider"),
+			opened,
+			{ role: "user", content: "next", timestamp: 3 },
+		]);
+		const wire = request.payload.messages;
+		if (!Array.isArray(wire)) throw new Error("Expected wire messages");
+		expect(JSON.stringify(wire)).not.toContain('"type":"compaction"');
+		expect(wire.findIndex(message => message.output_config?.effort === "low")).toBe(0);
+		expect(JSON.stringify(wire[1])).toContain("<summary>");
+	});
 });
