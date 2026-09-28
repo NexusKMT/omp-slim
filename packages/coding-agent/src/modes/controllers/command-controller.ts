@@ -1175,7 +1175,7 @@ export class CommandController {
 				theme.fg(
 					"accent",
 					previousSessionId
-						? `${theme.status.success} Session forked · resume: ${resumeCommand(previousSessionId)} or /resume ${previousSessionId}`
+						? `${theme.status.success} Session forked · return to original: ${resumeCommand(previousSessionId)} or /resume ${previousSessionId}`
 						: `${theme.status.success} Session forked`,
 				),
 				1,
