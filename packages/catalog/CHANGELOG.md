@@ -14,6 +14,7 @@
 ### Changed
 
 - Routed Command Code GPT models through the OpenAI Responses API
+- Command Code login now rejects invalid API keys
 
 ### Fixed
 

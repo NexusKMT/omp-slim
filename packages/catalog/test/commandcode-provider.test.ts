@@ -391,22 +391,40 @@ describe("Command Code provider support", () => {
 		expect(getEnvApiKey("commandcode")).toBe("primary-key");
 	});
 
-	test("accepts a pasted Provider API key through the login selector", async () => {
+	test("validates a pasted Provider API key against the whoami endpoint", async () => {
 		const provider = getOAuthProviders().find(item => item.id === "commandcode");
 		expect(provider?.name).toBe("Command Code");
 		const login = getProviderDefinition("commandcode")?.login;
 		expect(login).toBeDefined();
+
+		const probed: string[] = [];
+		const probeFetch: FetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+			probed.push(`${new Headers(init?.headers).get("authorization")} ${String(input)}`);
+			return Response.json({ success: true, user: { id: "user_1" }, org: null });
+		};
 		const onAuth = vi.fn();
 		await expect(
 			login?.({
 				onAuth,
 				onPrompt: async () => "  user_test  ",
+				fetch: probeFetch,
 			}),
 		).resolves.toBe("user_test");
 		expect(onAuth).toHaveBeenCalledWith({
 			url: "https://commandcode.ai/studio",
 			instructions: "Create or copy a Provider API key from Command Code Studio",
 		});
+		expect(probed).toEqual(["Bearer user_test https://api.commandcode.ai/alpha/whoami"]);
+	});
+
+	test("rejects a key the whoami endpoint refuses", async () => {
+		const login = getProviderDefinition("commandcode")?.login;
+		const unauthorizedFetch: FetchImpl = async () =>
+			Response.json({ success: false, error: { code: "UNAUTHORIZED" } }, { status: 401 });
+
+		await expect(
+			login?.({ onAuth: vi.fn(), onPrompt: async () => "user_bogus", fetch: unauthorizedFetch }),
+		).rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
 	});
 
 	test("prices live-discovered models from the Command Code rate card", async () => {
