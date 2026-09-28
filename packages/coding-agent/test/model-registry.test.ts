@@ -2304,7 +2304,7 @@ describe("ModelRegistry", () => {
 			expect(registry.find("github-copilot", "gpt-5.6-sol")?.contextWindow).toBe(272_000);
 			expect(registry.find("github-copilot", "gpt-6-astra")?.contextWindow).toBe(272_000);
 
-			testSettings.set("extendedContext", true);
+			cfgExtendedContext.set(testSettings, true);
 			await registry.reapplyModelPolicies();
 			expect(registry.find("github-copilot", "gpt-5.6-sol")?.contextWindow).toBe(1_050_000);
 		});
