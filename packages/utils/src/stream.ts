@@ -401,7 +401,7 @@ export interface ServerSentEvent {
 	 * `{ captureRaw: true }` — the field is allocation-free by default so
 	 * the token path pays no per-frame array/slice cost.
 	 */
-	raw: string[];
+	raw: readonly string[];
 	id?: string;
 	retry?: number;
 }
@@ -430,7 +430,7 @@ const SSE_DECODER = new TextDecoder("utf-8");
  * fresh array per event; frozen so an in-place mutation throws rather than
  * leaking lines into every other event (consumers copy or reassign `raw`).
  */
-const EMPTY_RAW = Object.freeze<string[]>([]) as string[];
+const EMPTY_RAW: readonly string[] = Object.freeze<string[]>([]);
 
 function flushSseEvent(state: SseEventState): ServerSentEvent | null {
 	if (state.event === null && state.data === null && state.id === undefined && state.retry === undefined) {

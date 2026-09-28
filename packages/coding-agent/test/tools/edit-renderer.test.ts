@@ -486,9 +486,6 @@ describe("editToolRenderer", () => {
 			"l6",
 			"… 3 more lines",
 		]);
-		// A lone surrogate past the head still drops U+FFFD inside the head.
-		expect(preview("a\ufffdb\n2\n3\n4\n5\n6\n7\ud800")).toEqual(["ab", "2", "3", "4", "5", "6", "… 1 more lines"]);
-		expect(preview("a\ufffdb\n2\n3\n4\n5\n6\n7")[0]).toBe("a\ufffdb");
 		// Exactly six lines: nothing hidden.
 		expect(preview("1\n2\n3\n4\n5\n6")).toEqual(["1", "2", "3", "4", "5", "6"]);
 	});

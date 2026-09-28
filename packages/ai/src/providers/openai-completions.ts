@@ -4,7 +4,13 @@ import { resolveWireModelId } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost } from "@oh-my-pi/pi-catalog/models";
 import type { ResolvedOpenAICompat } from "@oh-my-pi/pi-catalog/types";
 import { clinePassClientHeaders } from "@oh-my-pi/pi-catalog/wire/cline-pass";
-import { $env, logger, parseStreamingJson, parseStreamingJsonThrottled } from "@oh-my-pi/pi-utils";
+import {
+	$env,
+	logger,
+	parseStreamingJson,
+	parseStreamingJsonThrottled,
+	type ServerSentEvent,
+} from "@oh-my-pi/pi-utils";
 import { renderDemotedThinking } from "../dialect/demotion";
 import * as AIError from "../error";
 import { getKimiCommonHeaders } from "../registry/oauth/kimi";
@@ -16,7 +22,6 @@ import type {
 	MessageAttribution,
 	Model,
 	ProviderSessionState,
-	RawSseEvent,
 	ServiceTier,
 	StopReason,
 	StreamFunction,
@@ -804,7 +809,7 @@ const streamOpenAICompletionsOnce = (
 		// stays unset (and raw wire-line capture off) when nobody listens.
 		let sawDoneSentinel = false;
 		const rawSseObserver = onSseEvent
-			? (event: RawSseEvent) => {
+			? (event: ServerSentEvent) => {
 					if (!event.event && event.data && event.data !== "[DONE]") {
 						try {
 							const parsed = JSON.parse(event.data);
@@ -820,7 +825,7 @@ const streamOpenAICompletionsOnce = (
 							}
 						} catch {}
 					}
-					onSseEvent(event, model);
+					onSseEvent({ event: event.event, data: event.data, raw: [...event.raw] }, model);
 				}
 			: undefined;
 		// Assigned once the block helpers exist (they are scoped to the `try`);

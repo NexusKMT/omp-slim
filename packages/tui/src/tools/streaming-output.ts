@@ -741,7 +741,8 @@ export class TailBuffer {
 		// If the incoming chunk alone is >= budget, it fully dominates the tail.
 		if (n >= max) {
 			const { text: t, bytes } = truncateTailBytes(text, max);
-			this.#setHead(t, bytes, true);
+			// A chunk of exactly `max` bytes comes back verbatim, lone surrogates included.
+			this.#setHead(t, bytes, t.isWellFormed());
 			return;
 		}
 
@@ -841,9 +842,13 @@ export class TailBuffer {
 				this.#pending[0] = head.slice(index);
 				this.#headBytes -= dropped;
 			} else {
+				// A head that already fits comes back verbatim, lone surrogates included.
 				const { text, bytes } = truncateTailBytes(head, keep);
 				this.#pending[0] = text;
 				this.#headBytes = bytes;
+				this.#headClean = text.isWellFormed();
+				this.#pos = this.#headBytes + restBytes;
+				return;
 			}
 			this.#headClean = true;
 			this.#pos = this.#headBytes + restBytes;
@@ -851,7 +856,7 @@ export class TailBuffer {
 		}
 
 		const { text, bytes } = truncateTailBytes(this.#flush(), max);
-		this.#setHead(text, bytes, true);
+		this.#setHead(text, bytes, text.isWellFormed());
 	}
 }
 

@@ -238,9 +238,8 @@ function unchangedSinceSnap(snapped: SnappedBlock[], content: AssistantMessage["
 	for (let i = 0; i < snapped.length; i++) {
 		const { block, fields } = snapped[i]!;
 		if (content[i] !== block || Object.keys(block).length !== fields.length) return false;
-		const record = block as unknown as Record<string, unknown>;
 		for (const [key, value] of fields) {
-			if (record[key] !== value) return false;
+			if (Reflect.get(block, key) !== value) return false;
 		}
 	}
 	return true;

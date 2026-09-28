@@ -227,6 +227,14 @@ describe("TailBuffer", () => {
 		expect(tail.text()).toBe("😀cd");
 		expect(tail.bytes()).toBe(6);
 	});
+
+	test("keeps the character after a lone surrogate when trimming a budget-sized chunk", () => {
+		const tail = new TailBuffer(6);
+		tail.append("ab\uD800x");
+		tail.append("yzw");
+		expect(tail.text()).toBe("xyzw");
+		expect(tail.bytes()).toBe(4);
+	});
 });
 
 describe("OutputSink", () => {
