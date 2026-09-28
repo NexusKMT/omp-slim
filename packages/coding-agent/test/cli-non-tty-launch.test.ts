@@ -136,3 +136,22 @@ describe("launch without a terminal on stdin", () => {
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
 });
+
+describe("mode-dependent guards defer to flag-value errors", () => {
+	it("reports an invalid --mode (exit 2) before judging --no-ui against it", async () => {
+		using tempDir = TempDir.createSync("@omp-no-ui-bad-mode-");
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "bogus", "--no-ui"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).toContain('Error: Invalid --mode value: "bogus"');
+		expect(run.stderr).not.toContain("--no-ui requires --mode rpc");
+	}, 30_000);
+
+	it("still rejects --no-ui outside rpc mode when the flags are otherwise valid", async () => {
+		using tempDir = TempDir.createSync("@omp-no-ui-text-");
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "json", "--no-ui"]);
+
+		expect(run.exitCode, run.stderr).toBe(1);
+		expect(run.stderr).toContain("Error: --no-ui requires --mode rpc");
+	}, 30_000);
+});

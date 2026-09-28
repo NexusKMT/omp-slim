@@ -247,6 +247,13 @@ function applyProtocolDefaults(host: ProtocolHost, targetSettings: Settings = se
 	}
 }
 
+/** `--no-ui` only applies to `--mode rpc`; reject it elsewhere (exit 1). */
+function rejectNoUiWithoutRpc(args: Pick<Args, "noUi" | "mode">): void {
+	if (!args.noUi || args.mode === "rpc") return;
+	process.stderr.write(`${chalk.red("Error: --no-ui requires --mode rpc")}\n`);
+	process.exit(1);
+}
+
 /** Fail an interactive launch whose stdin is not a terminal: the TUI cannot run there. */
 function exitWithoutTerminal(): never {
 	process.stderr.write(
@@ -1707,9 +1714,10 @@ export async function runRootCommand(
 			process.stderr.write(`${chalk.red("Error: @file arguments are not supported in RPC mode")}\n`);
 			process.exit(1);
 		}
-		if (parsedArgs.noUi && parsedArgs.mode !== "rpc") {
-			process.stderr.write(`${chalk.red("Error: --no-ui requires --mode rpc")}\n`);
-			process.exit(1);
+		// A pending invalid `--mode` leaves `mode` unset; report it (exit 2) at the
+		// post-extension recheck before judging `--no-ui` against the mode.
+		if (parsedArgs.invalidFlagValues.length === 0) {
+			rejectNoUiWithoutRpc(parsedArgs);
 		}
 		const mode = parsedArgs.mode || "text";
 		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
@@ -2249,6 +2257,7 @@ export async function runRootCommand(
 			if (invalidValues || unknownFlags) {
 				process.exit(2);
 			}
+			rejectNoUiWithoutRpc(parsedArgs);
 			if (
 				needsTerminal ||
 				(autoPrintFromArgs && initialArgs.messages.length === 0 && initialArgs.fileArgs.length === 0)
