@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `setValue` failing on macOS date and time controls such as Calendar's date pickers: an ISO-8601 date or date-time is now written as a date and read back, and any other text is refused naming the accepted forms ([#13660](https://github.com/can1357/oh-my-pi/pull/13660) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [18.4.4] - 2026-09-29
 
 ### Fixed

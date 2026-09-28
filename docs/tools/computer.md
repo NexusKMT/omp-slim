@@ -111,6 +111,8 @@ Screenshots are PNGs written under the OS temp directory. Unless `silent: true`,
 - reads: `value()`, `bounds()`, `attributes()`, `actions()`, `parent()`, `children()`;
 - mutations: `setValue(value)`, `perform(action)`, `press()`, `click({ delivery? })`, and `focus()`.
 
+On macOS, `setValue` on a date or time control (one whose `AXValue` is a date) takes ISO-8601: `YYYY-MM-DD` changes the day and keeps the control's time of day, `YYYY-MM-DDTHH:MM[:SS]` is local time, and a date-time followed by `Z` or `±HH:MM` is that exact instant. Anything else is refused before a write, naming these forms and the control's current date.
+
 AX actions need no screenshot. AX bounds and `desktop.elementAt()` use global logical desktop coordinates, not screenshot pixels. A window AX snapshot advances its ref generation; current and immediately previous refs remain valid, while older refs throw `StaleRef`.
 
 ### Clipboard
