@@ -1,7 +1,11 @@
-import { describe, expect, it } from "bun:test";
-import { type AuthCredentialStore, AuthStorage } from "../src/auth-storage";
+import { describe, expect, it, vi } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "../src/auth-storage";
 import { isUsageLimitReached } from "../src/auth/usage-report";
-import type { UsageFetchContext, UsageFetchParams } from "../src/usage";
+import * as oauthUtils from "../src/registry/oauth";
+import type { UsageFetchContext, UsageFetchParams, UsageProvider, UsageReport } from "../src/usage";
 import { cursorUsageProvider, parseCursorIndividualUsage, parseCursorUsage } from "../src/usage/cursor";
 import { defaultRankingStrategy } from "../src/usage/registry";
 
@@ -472,6 +476,55 @@ describe("cursor usage provider", () => {
 			const limits = scopeLimits(report, { modelId: "grok-4.7-xhigh" });
 			expect(limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-plan"]);
 			expect(isUsageLimitReached(limits)).toBe(true);
+		});
+
+		it("keeps an Other Models block from sidelining the account for Grok", async () => {
+			const splitReport = (autoPercentUsed: number, apiPercentUsed: number): UsageReport => {
+				const report = parseCursorIndividualUsage({
+					billingCycleEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+					individualUsage: { plan: { enabled: true, limit: 2000, autoPercentUsed, apiPercentUsed } },
+				});
+				if (!report) throw new Error("expected Cursor usage report");
+				return report;
+			};
+			const reports: Record<string, UsageReport> = {
+				"acct-a": splitReport(5, 100),
+				"acct-b": splitReport(95, 50),
+			};
+			const usageProvider: UsageProvider = {
+				id: "cursor",
+				async fetchUsage(params) {
+					return reports[params.credential.accountId ?? ""] ?? null;
+				},
+			};
+			const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-ai-cursor-pool-block-"));
+			const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
+			const storage = new AuthStorage(store, {
+				usageProviderResolver: provider => (provider === "cursor" ? usageProvider : undefined),
+			});
+			vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (_provider, credentials) => {
+				const credential = credentials.cursor;
+				return credential ? { apiKey: `api-${credential.accountId}`, newCredentials: credential } : null;
+			});
+			try {
+				const expires = Date.now() + 60 * 60 * 1000;
+				await storage.credentials.set("cursor", [
+					{ type: "oauth", access: "access-a", refresh: "refresh-a", expires, accountId: "acct-a" },
+					{ type: "oauth", access: "access-b", refresh: "refresh-b", expires, accountId: "acct-b" },
+				]);
+
+				// Account A's Other Models pool is spent: third-party models must use B.
+				expect(await storage.keys.get("cursor", "session-other", { modelId: "claude-opus-5-high" })).toBe(
+					"api-acct-b",
+				);
+				// Account A's Cursor Models pool is nearly unused, so Grok still prefers it.
+				expect(await storage.keys.get("cursor", "session-grok", { modelId: "grok-4.7-xhigh" })).toBe("api-acct-a");
+			} finally {
+				vi.restoreAllMocks();
+				storage.close();
+				store.close();
+				await fs.rm(tempDir, { recursive: true, force: true });
+			}
 		});
 	});
 

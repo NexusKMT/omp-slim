@@ -383,6 +383,11 @@ export const cursorRankingStrategy: CredentialRankingStrategy = {
 	},
 	scopeLimits: scopeCursorLimitsForModel,
 	scopeLimitsForReserve: scopeCursorLimitsForModel,
+	// Back off per billing pool so an exhausted Other Models pool does not
+	// block Grok/Composer on the same account (and vice versa).
+	blockScope(context) {
+		return context?.modelId ? `pool:${quotaTierFor("cursor", context.modelId)}` : undefined;
+	},
 	windowDefaults: {
 		primaryMs: 30 * DAY_MS,
 		secondaryMs: 30 * DAY_MS,
