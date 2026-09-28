@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `modelAcceptsSamplingParams(model)` in `compat/resolve`, which decides sampling-parameter support from model identity whichever provider serves the model, and still honors a compat or rule-level `supportsSamplingParams: false`
+- Added `modelAcceptsSamplingParams(model)` in `compat/resolve`, which decides sampling-parameter support from model identity whichever provider serves the model, and still honors a compat or rule-level `supportsSamplingParams: false` ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
 
 ## [18.4.2] - 2026-09-28
 
