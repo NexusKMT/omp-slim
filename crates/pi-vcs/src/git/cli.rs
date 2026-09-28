@@ -11,8 +11,8 @@
 //! The runner ports the hardened subprocess contract of the TS wrapper:
 //! non-interactive env (`GIT_TERMINAL_PROMPT=0`, askpass rejection, `LC_ALL`
 //! handling), `--no-optional-locks` for reads, fsmonitor/untracked-cache
-//! disabled for writes, ambient `GIT_DIR`-family vars stripped, bounded output capture,
-//! and deadline + SIGTERM→SIGKILL termination via tokio.
+//! disabled for writes, ambient `GIT_DIR`-family vars stripped, bounded output
+//! capture, and deadline + SIGTERM→SIGKILL termination via tokio.
 
 use std::{path::Path, process::Stdio, time::Duration};
 
@@ -68,7 +68,8 @@ impl CliOutput {
 /// Options for one fallback invocation.
 #[derive(Debug, Default)]
 pub(crate) struct RunOptions {
-	/// Prefix `--no-optional-locks` instead of pinning fsmonitor/untracked-cache off.
+	/// Prefix `--no-optional-locks` instead of pinning fsmonitor/untracked-cache
+	/// off.
 	pub read_only: bool,
 	/// Deadline; [`COMMAND_TIMEOUT`] when unset.
 	pub timeout:   Option<Duration>,
