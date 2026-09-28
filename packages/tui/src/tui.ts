@@ -933,6 +933,12 @@ export class TUI extends Container {
 	// Holds an alternate-screen exit until its replacement full paint can emit it
 	// atomically. It must survive a deferred Ghostty image frame.
 	#pendingAltExit = "";
+	// True while #pendingAltExit holds the resize borrow's own exit: the
+	// settle fused it into the destructive rebuild, so the terminal is still
+	// on the borrowed alt buffer until that frame is written. A SIGWINCH or a
+	// fullscreen overlay arriving first adopts the buffer instead of entering
+	// it again (see #settleResizeAltPaint).
+	#resizeAltExitFused = false;
 
 	// Overlay stack for modal components rendered on top of base content
 	overlayStack: {
@@ -1535,7 +1541,15 @@ export class TUI extends Container {
 			return;
 		}
 		this.#trackResizeBurst();
-		if (!this.#resizeAltActive) {
+		if (!this.#resizeAltActive && this.#resizeAltExitFused) {
+			// The settled rebuild has not been written yet, so its fused exit never
+			// left the borrowed buffer: resume the borrow there. The live window was
+			// already stashed and the rebuild stays latched, so there is nothing to
+			// snapshot or erase, and entering again would stack another alt switch.
+			this.#resizeAltActive = true;
+			this.#pendingAltExit = "";
+			this.#resizeAltExitFused = false;
+		} else if (!this.#resizeAltActive) {
 			this.#resizeAltActive = true;
 			setAltScreenActive(true);
 			this.#altPreviousLines = [];
@@ -1583,16 +1597,49 @@ export class TUI extends Container {
 		this.#resizeSettleTimer = this.#renderScheduler.scheduleRender(() => {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped || !this.#resizeAltActive) return;
-			this.#resizeAltActive = false;
-			this.#suppressResizeUntil = this.#renderScheduler.now() + 100;
-			this.#noteAltBufferToggle();
-			this.terminal.write(`${this.#keyboardEnhancementExit()}\x1b[?1049l`);
-			setAltScreenActive(false);
-			this.#altPreviousLines = [];
-			this.#altPreparedRows = [];
-			this.#beginResizeAnchorProbe();
+			this.#settleResizeAltPaint();
 		}, this.#resizeSettleDelayMs());
 		this.requestRender(true);
+	}
+
+	/**
+	 * End the alt-buffer borrow once the resize settles.
+	 *
+	 * A settle that rebuilds history never needs the viewport anchor: the
+	 * destructive reset erases the screen and history and repaints from row
+	 * zero. Restoring the normal buffer on its own write would only expose the
+	 * reflowed stale screen for the CPR round trip, then clear it and stream
+	 * the replay — the one flash a large resize (a tmux zoom) still showed. So
+	 * that settle latches the rebuild now and fuses the restore into the same
+	 * synchronized write as ED2+ED3 and the replay: the terminal goes straight
+	 * from the resize frame to the rebuilt screen.
+	 *
+	 * Every other settle restores the normal buffer and probes the reflowed
+	 * anchor, which the non-destructive repaint depends on.
+	 */
+	#settleResizeAltPaint(): void {
+		this.#resizeAltActive = false;
+		this.#suppressResizeUntil = this.#renderScheduler.now() + 100;
+		this.#altPreviousLines = [];
+		this.#altPreparedRows = [];
+		const exitSequence = `${this.#keyboardEnhancementExit()}\x1b[?1049l`;
+		// Only the provider plan frame emits a pending exit, and an exit already
+		// pending (a fused overlay close) owns that slot.
+		if (this.#frameProvider !== undefined && this.#pendingAltExit === "") {
+			if (this.#resizeScrollbackMode === "rebuild") {
+				this.#prepareResizeReplay(this.terminal.columns, this.terminal.rows);
+			}
+			if (this.#clearScrollbackOnNextRender) {
+				this.#pendingAltExit = exitSequence;
+				this.#resizeAltExitFused = true;
+				this.requestRender(true);
+				return;
+			}
+		}
+		this.#noteAltBufferToggle();
+		this.terminal.write(exitSequence);
+		setAltScreenActive(false);
+		this.#beginResizeAnchorProbe();
 	}
 	/**
 	 * Recover the reflowed viewport anchor after the resize settle window ends.
@@ -2050,6 +2097,7 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#altPreparedRows = [];
 			this.#pendingAltExit = "";
+			this.#resizeAltExitFused = false;
 		} else if (this.#mouseTracking !== "off") {
 			// Inline capture with no overlay: still owned by us at quit, so
 			// release it — otherwise the parent shell keeps mouse reporting
@@ -2996,6 +3044,7 @@ export class TUI extends Container {
 		if (pendingAltExit) {
 			this.#noteAltBufferToggle();
 			this.#pendingAltExit = "";
+			this.#resizeAltExitFused = false;
 			setAltScreenActive(false);
 		}
 		if (target) this.#recordHardwareCursorState(target);
@@ -3076,9 +3125,19 @@ export class TUI extends Container {
 			// modified-key reporting sequence on the freshly entered alternate
 			// screen, or Esc/modified keys revert to legacy encoding inside
 			// fullscreen overlays (Ghostty/kitty/iTerm2).
-			this.#noteAltBufferToggle();
-			this.#imageBudget.beginAltScreenLifecycle();
-			this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
+			if (this.#resizeAltExitFused) {
+				// An overlay opened while the settled resize rebuild was still
+				// pending: the terminal never left the borrowed buffer, which already
+				// carries the pushed keyboard mode and its image store, so the overlay
+				// takes it over. The latched rebuild then lands with the overlay's
+				// own fused exit when it closes.
+				this.#pendingAltExit = "";
+				this.#resizeAltExitFused = false;
+			} else {
+				this.#noteAltBufferToggle();
+				this.#imageBudget.beginAltScreenLifecycle();
+				this.terminal.write(`\x1b[?1049h${this.#keyboardEnhancementEnter()}`);
+			}
 			this.#setMouseTracking(wantMouse);
 			setAltScreenActive(true);
 			this.terminal.hideCursor();
