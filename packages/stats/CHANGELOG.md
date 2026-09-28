@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `omp stats` dashboard numbers following the browser locale while the rest of the UI is English (e.g. `546 B` meaning 546 thousand and `$38.003,33` on a Turkish browser); figures now always use en-US formatting
+
 ## [18.4.1] - 2026-09-28
 
 ### Fixed
