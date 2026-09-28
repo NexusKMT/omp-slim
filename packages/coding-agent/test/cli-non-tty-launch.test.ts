@@ -57,6 +57,24 @@ async function launchWithoutTerminal(tempDir: TempDir, args: string[]): Promise<
 	return { exitCode, stdout, stderr };
 }
 
+/**
+ * Write an extension registering string flag `name` that reports the value it
+ * received on exit — usage failures exit before any session event fires.
+ */
+async function writeStringFlagExtension(tempDir: TempDir, name: string): Promise<string> {
+	const extensionPath = tempDir.join(`${name}-extension.ts`);
+	await Bun.write(
+		extensionPath,
+		[
+			"export default function (pi) {",
+			`\tpi.registerFlag(${JSON.stringify(name)}, { type: "string" });`,
+			`\tprocess.once("exit", () => process.stderr.write("EXT_FLAG=" + pi.getFlag(${JSON.stringify(name)}) + "\\n"));`,
+			"}",
+		].join("\n"),
+	);
+	return extensionPath;
+}
+
 // Each case cold-starts the CLI graph in a child process; the budget covers that transpile.
 describe("launch without a terminal on stdin", () => {
 	it("fails a bare launch with a usage error and exit 2", async () => {
@@ -88,22 +106,33 @@ describe("launch without a terminal on stdin", () => {
 
 	it("delivers an extension-owned --mode before failing on the missing terminal", async () => {
 		using tempDir = TempDir.createSync("@omp-non-tty-ext-mode-");
-		const extensionPath = tempDir.join("mode-extension.ts");
-		// The TTY failure exits before any session event, so report the flag at exit.
-		await Bun.write(
-			extensionPath,
-			[
-				"export default function (pi) {",
-				'\tpi.registerFlag("mode", { type: "string" });',
-				'\tprocess.once("exit", () => process.stderr.write("EXT_MODE=" + pi.getFlag("mode") + "\\n"));',
-				"}",
-			].join("\n"),
-		);
+		const extensionPath = await writeStringFlagExtension(tempDir, "mode");
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "compact"]);
 
 		expect(run.exitCode, run.stderr).toBe(2);
 		expect(run.stderr).not.toContain("Invalid --mode value");
 		expect(run.stderr).toContain(`Error: ${TTY_ERROR}, but stdin is not a TTY.`);
-		expect(run.stderr).toContain("EXT_MODE=compact");
+		expect(run.stderr).toContain("EXT_FLAG=compact");
+	}, 30_000);
+
+	it("treats an extension flag value as a flag value, not a prompt, on a bare launch", async () => {
+		using tempDir = TempDir.createSync("@omp-non-tty-ext-value-");
+		const extensionPath = await writeStringFlagExtension(tempDir, "spawn-peer");
+		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--spawn-peer", "reviewer"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).toContain(`Error: ${TTY_ERROR}, but stdin is not a TTY.`);
+		expect(run.stderr).not.toContain("No models available.");
+		expect(run.stderr).toContain("EXT_FLAG=reviewer");
+	}, 30_000);
+
+	it("still runs a real prompt after an extension flag value in print mode", async () => {
+		using tempDir = TempDir.createSync("@omp-non-tty-ext-prompt-");
+		const extensionPath = await writeStringFlagExtension(tempDir, "spawn-peer");
+		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--spawn-peer", "reviewer", "say ok"]);
+
+		expect(run.stderr).not.toContain(TTY_ERROR);
+		expect(run.stderr).toContain("No models available.");
+		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
 });

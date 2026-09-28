@@ -1762,6 +1762,12 @@ export async function runRootCommand(
 		// (e.g. one that owns `--mode`); only the post-extension reparse can tell,
 		// so defer to the recheck there, which reports flag errors first.
 		const needsTerminal = isInteractive && !stdinIsTerminal;
+		// Print mode chosen only because argv looked like a prompt. The bootstrap
+		// parse cannot tell an extension string flag's value (`--spawn-peer
+		// reviewer`) from a prompt; headless is still the right early class for a
+		// non-TTY stdin, and the post-extension recheck turns an argv whose
+		// "prompt" was all flag values back into a bare launch.
+		const autoPrintFromArgs = autoPrint && pipedInput === undefined;
 		if (needsTerminal && parsedArgs.unrecognizedFlags.length === 0 && parsedArgs.invalidFlagValues.length === 0) {
 			exitWithoutTerminal();
 		}
@@ -2243,7 +2249,10 @@ export async function runRootCommand(
 			if (invalidValues || unknownFlags) {
 				process.exit(2);
 			}
-			if (needsTerminal) {
+			if (
+				needsTerminal ||
+				(autoPrintFromArgs && initialArgs.messages.length === 0 && initialArgs.fileArgs.length === 0)
+			) {
 				exitWithoutTerminal();
 			}
 			const processedFiles =
