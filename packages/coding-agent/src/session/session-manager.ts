@@ -3210,7 +3210,7 @@ export class SessionManager {
 			logger.warn("Loaded assistant messages without usage; treating as zero", { count: missingUsage });
 		}
 
-		return changed || missingUsage > 0;
+		return changed;
 	}
 
 	getHeader(): SessionHeader | null {
