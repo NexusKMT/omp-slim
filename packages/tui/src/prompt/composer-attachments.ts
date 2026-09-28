@@ -216,12 +216,26 @@ export function composerTokenRegex(mentionLabels: Iterable<string>): RegExp {
 
 const VISION_MARKER_REGEX = /\[(Image|Video) #([1-9]\d*)((?:,[^\]\n]*)?)\](?: attachment:\/\/(\2))?/g;
 
-/** Offsets image marker indices, including matching `attachment://` references. */
-export function shiftImageMarkers(text: string, offset: number): string {
-	if (offset === 0) return text;
+/** Marker for the Nth attached image or video preview: `[Image #N, WxH]`, or `[Image #N]` without dims. */
+export function formatVisionMarker(
+	kind: "image" | "video",
+	n: number,
+	dims?: { width: number; height: number },
+): string {
+	const label = `${kind === "video" ? "Video" : "Image"} #${n}`;
+	return dims ? `[${label}, ${dims.width}x${dims.height}]` : `[${label}]`;
+}
+
+/**
+ * Offsets image marker indices, including matching `attachment://` references. With `imageCount`,
+ * markers above it are left alone: like `compactImageMarkers`, they are not this text's attachments.
+ */
+export function shiftImageMarkers(text: string, offset: number, imageCount?: number): string {
+	if (offset === 0 || imageCount === 0) return text;
 	return text.replace(
 		VISION_MARKER_REGEX,
-		(_match, kind: string, idx: string, tail: string, attachmentIdx: string | undefined) => {
+		(match, kind: string, idx: string, tail: string, attachmentIdx: string | undefined) => {
+			if (imageCount !== undefined && Number(idx) > imageCount) return match;
 			const marker = `[${kind} #${Number(idx) + offset}${tail}]`;
 			return attachmentIdx === undefined ? marker : `${marker} attachment://${Number(attachmentIdx) + offset}`;
 		},
