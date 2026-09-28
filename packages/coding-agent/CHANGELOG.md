@@ -121,6 +121,11 @@
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
 
+### Fixed
+
+- Fixed `tool_call` `additionalContext` being delivered more than once when several extension or hook handlers on the same call returned identical text ([#13633](https://github.com/can1357/oh-my-pi/pull/13633) by [@andrebrait](https://github.com/andrebrait))
+- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output, including for Cursor-bridged calls; eval-bridged calls, which have no such channel, still receive the reminder as a leading block in their result ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
@@ -303,9 +308,6 @@
 - Preserved MCP `structuredContent` in live tool-result details so evaluation callers can consume server data without reparsing model-facing JSON; spilled results continue to retain an artifact reference without duplicating the payload in session history.
 - Fixed Collab hosts becoming unable to reclaim a room after a brief network interruption; hosts now retry room recovery without losing guests or queued updates.
 - Fixed one-shot commands that stopped before completing, such as `omp config set` on a fresh Windows profile, incorrectly exiting successfully without output; they now report failure with diagnostic guidance.
-### Fixed
-
-- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.2] - 2026-09-25
 

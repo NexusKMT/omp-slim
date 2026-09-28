@@ -21,6 +21,9 @@
 
 - Added `transformAssistantMessagePreservesToolCalls`, letting stream speculation and direct speculative candidates run under a `transformAssistantMessage` that never rewrites streamed tool calls
 - Added `authorizeLaunch` to the speculative execution host and coordinator so tool stream sessions can start host-approved effectful work (e.g. subagents) before their call dispatches
+### Added
+
+- Added `additionalContext` to `afterToolCall` results, allowing trusted post-tool guidance to reach the next provider request outside tool output, including after failed results ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ### Fixed
 
@@ -61,9 +64,6 @@
 ### Added
 
 - Added live steering support, allowing models to receive and act on user steering messages during an active stream.
-### Added
-
-- Added `additionalContext` to `afterToolCall` results, allowing trusted post-tool guidance to reach the next provider request outside tool output, including after failed results ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.3.2] - 2026-09-25
 

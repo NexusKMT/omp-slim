@@ -7,6 +7,7 @@ import {
 	type AgentEvent,
 	type AgentMessage,
 	type AgentTool,
+	type AgentToolContext,
 	type AgentToolResult,
 	type BeforeToolCallContext,
 	type BeforeToolCallResult,
@@ -265,10 +266,23 @@ export class TtsrCoordinator {
 		return reminder ? { additionalContext: reminder } : undefined;
 	}
 
-	/** Eval-bridged calls bypass the agent loop, so their reminder is folded into the result. */
-	afterBridgedToolCall(toolCallId: string, result: AgentToolResult): AgentToolResult | undefined {
+	/**
+	 * Bridged calls (Cursor exec handlers, eval) bypass the agent loop's `afterToolCall`. When the caller
+	 * installed a passive-context sink the reminder goes there and the result stays untouched; without one
+	 * (eval-bridged calls) it is folded into the result as a leading block, the only channel left.
+	 */
+	afterBridgedToolCall(
+		toolCallId: string,
+		result: AgentToolResult,
+		context?: AgentToolContext,
+	): AgentToolResult | undefined {
 		const reminder = this.#buildToolReminder(toolCallId);
-		return reminder ? { ...result, content: [{ type: "text", text: reminder }, ...result.content] } : undefined;
+		if (!reminder) return undefined;
+		if (context?.addAdditionalContext) {
+			context.addAdditionalContext(reminder);
+			return undefined;
+		}
+		return { ...result, content: [{ type: "text", text: reminder }, ...result.content] };
 	}
 
 	cancelBridgedToolCall(toolCallId: string): void {
