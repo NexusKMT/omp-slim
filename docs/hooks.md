@@ -119,8 +119,8 @@ Hook events are strongly typed in `types.ts`.
 
 ### Tool events (pre/post model)
 
-- `tool_call` (pre-execution) → can return `{ block?: boolean; reason?: string; input?: Record<string, unknown>; additionalContext?: string }`. A non-blocking handler that returns `input` replaces the arguments the tool executes with (the raw execution input, not the normalized `event.input` view); ignored when `block` is true. Non-empty `additionalContext` values from all non-blocking handlers carry trusted handler-authored instructions delivered after the tool results and before the next provider request, with developer/system priority where the transport supports it; raw tool output and other untrusted data must stay in the tool result.
-- `tool_result` (post-execution) → can return `{ content?; details?; isError?; additionalContext?: string }`. Context is delivered outside tool output on both success and failure; check `event.isError` when guidance applies to only one outcome.
+- `tool_call` (pre-execution) → can return `{ block?: boolean; reason?: string; input?: Record<string, unknown>; additionalContext?: string }`. A non-blocking handler that returns `input` replaces the arguments the tool executes with (the raw execution input, not the normalized `event.input` view); ignored when `block` is true. Distinct non-empty `additionalContext` values from all non-blocking handlers carry trusted handler-authored instructions delivered after the tool results and before the next provider request, with developer/system priority where the transport supports it; raw tool output and other untrusted data must stay in the tool result.
+- `tool_result` (post-execution) → can return `{ content?; details?; isError?; additionalContext?: string }`. Context is delivered outside tool output on both success and failure; check `event.isError` when guidance applies to only one outcome. A context-only return (no `content`/`details`/`isError`) never replaces an earlier handler's override.
 
 This is the hook subsystem’s core pre/post interception model. Eval prelude invocations such as `browser.open(...)`, direct `BrowserTab` helpers, `tab.run(...)`, direct `computer` helpers, and `computer.run(fnOrCode, options)` are host bridge calls, not AgentTool calls, so they do not emit `tool_call` or `tool_result`.
 
@@ -171,7 +171,7 @@ If a handler returns overrides:
 
 - `content` can replace result content
 - `details` can replace result details
-- `additionalContext` carries trusted guidance outside the tool result; non-blank values from every handler are joined in registration order and delivered before the call's `tool_call` context
+- `additionalContext` carries trusted guidance outside the tool result; distinct non-blank values from every handler are joined in registration order (repeats, compared ignoring surrounding whitespace, are dropped) and delivered before the call's `tool_call` context. A call whose joined context is identical to an earlier call's in the same batch is delivered once
 
 On tool failure, the wrapper emits `tool_result` with `isError: true` and error text content, delivers any returned `additionalContext`, then rethrows the original error. A handler that should run only after failure must test `event.isError`; a `PostToolUse`-equivalent handler must reject it.
 

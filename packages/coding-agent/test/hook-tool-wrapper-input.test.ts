@@ -201,6 +201,108 @@ describe("HookToolWrapper tool_call contract", () => {
 		expect(result.isError).toBe(true);
 	});
 
+	// A secret-leaking tool: the model must only ever see the redacted text.
+	function makeSecretTool(isError: boolean): AgentTool {
+		return {
+			...makeRecordingTool([]),
+			execute: async () => ({ content: [{ type: "text" as const, text: "token sk-SECRET" }], isError }),
+		};
+	}
+	// Rewrites the secret tool's output the way a real redaction hook would, and attaches its own context.
+	const redactHook = () =>
+		makeHook(
+			() => ({ content: [{ type: "text", text: "token [REDACTED]" }], additionalContext: "redaction note" }),
+			"tool_result",
+		);
+
+	it.each([true, false])(
+		"keeps a redaction and delivers every hook's context when the redacting hook runs first: %s",
+		async redactFirst => {
+			const contextOnly = makeHook(() => ({ additionalContext: "context-only note" }), "tool_result");
+			const hooks = redactFirst ? [redactHook(), contextOnly] : [contextOnly, redactHook()];
+			const wrapped = new HookToolWrapper(makeSecretTool(false), makeRunner(hooks));
+			const delivered: string[] = [];
+
+			const result = await wrapped.execute("call-chained", { command: "cat" } as never, undefined, undefined, {
+				addAdditionalContext: (context: string) => {
+					delivered.push(context);
+				},
+			} as unknown as AgentToolContext);
+
+			expect(result.content).toEqual([{ type: "text", text: "token [REDACTED]" }]);
+			expect(JSON.stringify(result)).not.toContain("sk-SECRET");
+			expect(delivered).toEqual([
+				redactFirst ? "redaction note\n\ncontext-only note" : "context-only note\n\nredaction note",
+			]);
+		},
+	);
+
+	it("keeps a details patch when a later hook returns only context", async () => {
+		const runner = makeRunner([
+			makeHook(() => ({ details: { patched: true } }), "tool_result"),
+			makeHook(() => ({ additionalContext: "context-only note" }), "tool_result"),
+		]);
+
+		const result = await new HookToolWrapper(makeSecretTool(false), runner).execute("call-details", {
+			command: "cat",
+		} as never);
+
+		expect(result.details).toEqual({ patched: true });
+	});
+
+	it("keeps a redacted non-throwing error result an error when a later hook returns only context", async () => {
+		const runner = makeRunner([
+			redactHook(),
+			makeHook(() => ({ additionalContext: "inspect the failure" }), "tool_result"),
+		]);
+		const delivered: string[] = [];
+
+		const result = await new HookToolWrapper(makeSecretTool(true), runner).execute(
+			"call-chained-error",
+			{ command: "cat" } as never,
+			undefined,
+			undefined,
+			{
+				addAdditionalContext: (context: string) => {
+					delivered.push(context);
+				},
+			} as unknown as AgentToolContext,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(JSON.stringify(result)).not.toContain("sk-SECRET");
+		expect(delivered).toEqual(["redaction note\n\ninspect the failure"]);
+	});
+
+	it("rethrows the original error and delivers chained context when the tool throws", async () => {
+		const runner = makeRunner([
+			redactHook(),
+			makeHook(() => ({ additionalContext: "inspect the failure" }), "tool_result"),
+		]);
+		const throwingTool = {
+			...makeRecordingTool([]),
+			execute: async () => {
+				throw new Error("command failed");
+			},
+		} as AgentTool;
+		const delivered: string[] = [];
+
+		await expect(
+			new HookToolWrapper(throwingTool, runner).execute(
+				"call-chained-throw",
+				{ command: "cat" } as never,
+				undefined,
+				undefined,
+				{
+					addAdditionalContext: (context: string) => {
+						delivered.push(context);
+					},
+				} as unknown as AgentToolContext,
+			),
+		).rejects.toThrow("command failed");
+		expect(delivered).toEqual(["redaction note\n\ninspect the failure"]);
+	});
+
 	it("discards replacement input and collected context when a later hook blocks", async () => {
 		const executed: unknown[] = [];
 		const runner = makeRunner([

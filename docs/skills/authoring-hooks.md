@@ -125,10 +125,10 @@ omp.on("tool_result", async (event, ctx) => {
 
 Contract:
 
-- Handlers run in registration order. For `HookAPI`, each handler receives the original tool result event, and the last returned override wins.
+- Handlers run in registration order. For `HookAPI`, each handler receives the original tool result event, and the last returned `content`/`details`/`isError` override wins; a handler that returns only `additionalContext` never replaces an earlier override.
 - `content` replaces the full content array for the LLM.
 - `details` replaces the structured details object.
-- `additionalContext` is not part of the tool result. Every non-blank value is retained in registration order and delivered before that call's `tool_call` context.
+- `additionalContext` is not part of the tool result. Distinct non-blank values are retained in registration order (repeats, compared ignoring surrounding whitespace, are dropped) and delivered before that call's `tool_call` context; a call whose joined context is identical to an earlier call's in the same batch is delivered once.
 - `isError` exists on the shared result type, but `HookToolWrapper` does not propagate it into a successful tool result; on a tool failure, the original error is rethrown after handlers complete.
 - On a tool failure, `tool_result` is still emitted with `isError: true`, and returned `additionalContext` is delivered. Filter on `event.isError` so success-only and failure-only handlers cannot fire on the opposite outcome.
 

@@ -3440,6 +3440,50 @@ describe("ExtensionRunner", () => {
 			).resolves.toEqual({ additionalContext: "first result context\n\nsecond result context" });
 		});
 
+		it("keeps an earlier extension's redaction when a later one returns only repeated context", async () => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "tool-result-redact-a.ts"),
+				`export default function(pi) {
+					pi.on("tool_result", async () => ({
+						content: [{ type: "text", text: "token [REDACTED]" }],
+						additionalContext: "use the redacted result",
+					}));
+				}`,
+			);
+			fs.writeFileSync(
+				path.join(extensionsDir, "tool-result-redact-b.ts"),
+				`export default function(pi) {
+					pi.on("tool_result", async () => ({ additionalContext: "use the redacted result  " }));
+				}`,
+			);
+
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+
+			await expect(
+				runner.emitToolResult({
+					type: "tool_result",
+					toolName: "bash",
+					toolCallId: "tool-call-id",
+					input: { command: "cat" },
+					content: [{ type: "text", text: "token sk-SECRET" }],
+					details: undefined,
+					isError: false,
+				}),
+			).resolves.toEqual({
+				content: [{ type: "text", text: "token [REDACTED]" }],
+				details: undefined,
+				isError: false,
+				additionalContext: "use the redacted result",
+			});
+		});
+
 		it("forwards failure-specific tool_result context through the tool context", async () => {
 			const extCode = `
 				export default function(pi) {

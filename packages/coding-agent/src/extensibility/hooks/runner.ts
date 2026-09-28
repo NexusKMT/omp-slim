@@ -299,12 +299,20 @@ export class HookRunner {
 						}
 					}
 
-					// For tool_result events, capture the result (last wins) and keep
-					// every handler's passive context in registration order.
+					// For tool_result events, capture the override (last one wins) and keep
+					// every handler's passive context in registration order. A context-only
+					// return is not an override: it must not erase an earlier handler's patch.
 					if (event.type === "tool_result" && handlerResult) {
-						result = handlerResult as ToolResultEventResult;
-						const context = (handlerResult as ToolResultEventResult).additionalContext;
-						if (isNonBlankContext(context)) toolResultContexts.push(context);
+						const toolResult = handlerResult as ToolResultEventResult;
+						if (
+							toolResult.content !== undefined ||
+							toolResult.details !== undefined ||
+							toolResult.isError !== undefined
+						) {
+							result = toolResult;
+						}
+						if (isNonBlankContext(toolResult.additionalContext))
+							toolResultContexts.push(toolResult.additionalContext);
 					}
 					if (event.type === "session.compacting" && handlerResult) {
 						result = handlerResult as SessionCompactingResult;

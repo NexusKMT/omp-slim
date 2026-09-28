@@ -433,7 +433,7 @@ and `/new`. Commands retain their explicit prefill and session-transition action
 - `tool_execution_start` / `tool_execution_update` / `tool_execution_end` (observability)
 - `tool_approval_requested` / `tool_approval_resolved` (observability; emitted by `wrapper.ts` only when a tool requires approval and an approval handler is registered)
 
-`tool_result` is middleware-style: handlers run in extension order and each sees prior modifications. Non-blank `additionalContext` from every handler is preserved in registration order and delivered before that call's `tool_call` context.
+`tool_result` is middleware-style: handlers run in extension order and each sees prior modifications. Distinct non-blank `additionalContext` from every handler is preserved in registration order (repeats, compared ignoring surrounding whitespace, are dropped) and delivered before that call's `tool_call` context.
 
 ### Subagent lifecycle
 

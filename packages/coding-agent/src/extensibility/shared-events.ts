@@ -396,8 +396,8 @@ export interface ToolResultEventResult {
 	 * delivered like `ToolCallEventResult.additionalContext` but outside the tool
 	 * result. Unlike `tool_call` context it is also delivered when the call
 	 * failed: the handler sees the outcome (`event.isError`) and decides, which is
-	 * how failure-specific guidance reaches the model. Non-blank values from every
-	 * handler are preserved in registration order and precede the call's
+	 * how failure-specific guidance reaches the model. Distinct non-blank values from
+	 * every handler are preserved in registration order (repeats are dropped) and precede the call's
 	 * `tool_call` context. Dropped only when the loop skips the call.
 	 */
 	additionalContext?: string;
