@@ -838,6 +838,18 @@ export class TUI extends Container {
 	static readonly #RESIZE_VIEWPORT_SETTLE_MS = 120;
 	/** Longest wait for a CPR reply before the settled repaint falls back. */
 	static readonly #RESIZE_PROBE_TIMEOUT_MS = 200;
+	/**
+	 * Quiet window for a resize transaction whose settle refreshes terminal
+	 * history: it re-renders and re-streams the whole ledger, so it must outlast
+	 * the step cadence of a pane/window drag — tmux and window managers deliver
+	 * SIGWINCH per mouse-motion event, tens to a few hundred ms apart. Holding
+	 * the whole transaction (not just the refresh) makes a drag commit once, at
+	 * its final geometry: per-step intermediate clears are what flash, and each
+	 * one also blocks the loop long enough that the next queued SIGWINCH lands
+	 * after the short settle window and starts yet another transaction. The
+	 * borrowed resize frame keeps the pane correct in the meantime.
+	 */
+	static readonly #RESIZE_REFRESH_SETTLE_MS = 400;
 	#inputRenderGraceUntilMs = 0;
 	// A scale-`s` OSC 66 heading reserves `s - 1` rows, and the protocol
 	// caps `s` at 7. This bounds spacer lookups and supplies enough context
@@ -1379,6 +1391,24 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Settle window for the current resize transaction. A settle that refreshes
+	 * terminal history re-renders and re-streams the whole ledger, so it takes
+	 * the drag-end window: every later SIGWINCH re-arms it, and a drag then
+	 * commits once at its final geometry instead of flashing a full
+	 * clear-and-replay per intermediate step. Transactions that never refresh —
+	 * `preserve`, an in-place (Warp) settle, an append settle that keeps its
+	 * width, or a host with no replay hook — keep the short window so a single
+	 * resize commits promptly.
+	 */
+	#resizeSettleDelayMs(): number {
+		const short = TUI.#RESIZE_VIEWPORT_SETTLE_MS;
+		if (this.#resizeScrollbackMode === "preserve" || this.#resizeRepaintsInPlace()) return short;
+		if (this.#frameProvider?.beginHistoryReplay === undefined) return short;
+		if (this.#resizeScrollbackMode !== "rebuild" && this.terminal.columns === this.#previousWidth) return short;
+		return TUI.#RESIZE_REFRESH_SETTLE_MS;
+	}
+
+	/**
 	 * Warp-only echo: height-only ±1 SIGWINCH against the pending alt-toggle
 	 * baseline. Single-shot: the first SIGWINCH after the toggle consumes the
 	 * expectation either way, so at most one signal is ever swallowed per toggle.
@@ -1550,7 +1580,7 @@ export class TUI extends Container {
 			this.#altPreviousLines = [];
 			this.#altPreparedRows = [];
 			this.#beginResizeAnchorProbe();
-		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
+		}, this.#resizeSettleDelayMs());
 		this.requestRender(true);
 	}
 	/**
@@ -2671,6 +2701,10 @@ export class TUI extends Container {
 	 * out of scrollback), so replaying would write an identical duplicate — the
 	 * editor/status chrome included — below the retained copy. Skip it, matching
 	 * the `widthChanged`-gated commit-ledger logic in {@link #doRender}.
+	 *
+	 * The refresh itself is what makes a settled resize expensive, so the
+	 * transaction that runs it holds its settle window longer than a plain
+	 * repaint would — see {@link #resizeSettleDelayMs}.
 	 */
 	#prepareResizeReplay(width: number, height: number): void {
 		const size = `${width}x${height}`;

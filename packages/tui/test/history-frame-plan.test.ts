@@ -500,6 +500,7 @@ describe("terminal frame plans", () => {
 		renderScheduler.settle(); // restore the normal buffer, start the anchor probe
 		renderScheduler.settle(); // probe timeout → one bounded retry under a multiplexer
 		renderScheduler.settle(); // final timeout → settled repaint (no-op settle on direct)
+		renderScheduler.settle(); // drag-end quiet window → destructive rebuild
 
 		const scrollback = plainBuffer(terminal).slice(0, terminal.getBufferPosition().baseY);
 		expect(scrollback.some(row => row.includes("dot-live"))).toBe(false);
@@ -521,7 +522,9 @@ describe("terminal frame plans", () => {
 		expect(plainBuffer(terminal)).toContain("history-one@20");
 
 		terminal.resize(30, 2);
-		await renderScheduler.advance(terminal, 160);
+		// A refresh-capable settle waits out the drag-end window and then replays
+		// the ledger at the settled width in the same transaction.
+		await renderScheduler.advance(terminal, 560);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
@@ -589,12 +592,47 @@ describe("terminal frame plans", () => {
 		await renderScheduler.settle(terminal);
 
 		terminal.resize(30, 2);
-		await renderScheduler.advance(terminal, 160);
+		// A refresh-capable settle waits out the drag-end window and then erases
+		// and re-streams the ledger at the settled width in the same transaction.
+		await renderScheduler.advance(terminal, 560);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
 		expect(resized.some(row => row.includes("@20"))).toBe(false);
 		expect(resized).toEqual(["history-one@30", "history-two@30", "editor@30"]);
+		tui.stop();
+	});
+
+	it("commits one history refresh for a resize burst", async () => {
+		const terminal = new VirtualTerminal(20, 2);
+		const provider = new WidthReplayProvider();
+		const renderScheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler });
+		tui.setResizeScrollback("rebuild");
+		tui.setFrameProvider(provider);
+		tui.start();
+		await renderScheduler.settle(terminal);
+		provider.resetCount = 0;
+
+		// A pane drag delivers every step inside one settle window. Each step
+		// repaints the borrowed resize frame at its own geometry, but the
+		// transaction that clears and re-streams the ledger waits for the drag to
+		// end: refreshing per step is what flashes a full clear-and-replay per
+		// mouse move, and each refresh is long enough that the next queued
+		// SIGWINCH lands after the short settle window and starts another one.
+		for (const width of [30, 32, 34]) {
+			terminal.resize(width, 2);
+			await renderScheduler.advance(terminal, 100);
+			expect(provider.resetCount).toBe(0);
+			// The borrowed resize frame tracks the dragged geometry; the ledger
+			// refresh — the clear-and-replay this guard exists for — has not run.
+			expect(plainBuffer(terminal)).toContain(`editor@${width}`);
+		}
+
+		await renderScheduler.advance(terminal, 400); // drag end → single settled commit
+
+		expect(provider.resetCount).toBe(1);
+		expect(plainBuffer(terminal)).toEqual(["history-one@34", "history-two@34", "editor@34"]);
 		tui.stop();
 	});
 });

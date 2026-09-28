@@ -152,6 +152,14 @@ describe("libkitty end-to-end", () => {
 		await Bun.sleep(300);
 		await term.waitForRender();
 
+		// The settled commit lands after the drag-end quiet window (the transaction
+		// that refreshes history waits it out), so sample the settled screen rather
+		// than a mid-burst frame: the contract is that the buffer converges to
+		// exactly one copy of each row.
+		await term.waitForRender(
+			() => plainRows(term.getViewport()).filter(row => row.includes("Welcome back!")).length <= 1,
+		);
+
 		const buffer = plainRows(term.getScrollBuffer());
 		const drafts = buffer.filter(row => row.includes("MARKER_DRAFT"));
 		if (drafts.length !== 1) dump("scroll buffer after drag storm", buffer);
