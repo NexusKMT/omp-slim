@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `ida` tool's worker exiting with `AttributeError: module 'signal' has no attribute 'pthread_sigmask'` on every request on Windows ([#13619](https://github.com/can1357/oh-my-pi/issues/13619)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
