@@ -9,7 +9,6 @@ import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessageEvent, Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ContextUsage } from "../../extensibility/extensions/types";
-import type { IrcDeliveryReceipt } from "@oh-my-pi/pi-tui/tools/irc";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import type { CacheWarmingMode } from "../../session/cache-warmer";
 import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
@@ -245,12 +244,6 @@ export interface RpcSubagentSnapshot {
 	parentToolCallId?: string;
 }
 
-/** Successful `steer_subagent` delivery: the hub receipt minus its `failed` outcome, which is reported as an error. */
-export interface RpcSteerSubagentResult {
-	to: string;
-	outcome: Exclude<IrcDeliveryReceipt["outcome"], "failed">;
-}
-
 export interface RpcSubagentMessagesResult {
 	sessionFile: string;
 	fromByte: number;
@@ -346,13 +339,7 @@ export type RpcResponse =
 			success: true;
 			data: RpcSubagentMessagesResult;
 	  }
-	| {
-			id?: string;
-			type: "response";
-			command: "steer_subagent";
-			success: true;
-			data: RpcSteerSubagentResult;
-	  }
+	| { id?: string; type: "response"; command: "steer_subagent"; success: true }
 
 	// Model
 	| {

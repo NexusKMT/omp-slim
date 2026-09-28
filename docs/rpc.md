@@ -783,33 +783,27 @@ reports `reset: true`.
 
 ### Steering subagents
 
-`steer_subagent` delivers a direct message to a running subagent over the same
-hub/IRC path the `hub` send tool uses (`IrcBus.global().send`): busy subagents
-receive the message as a non-interrupting aside at their next step boundary,
-and idle ones are woken with a real turn. The sender is attributed to the
-session owner (`Main`), so the subagent sees a normal steering DM. Isolated
-(worktree) subagents run in-process and are steered the same way.
+`steer_subagent` sends a message to a running subagent as its user, the same
+way Agent Hub chat does: a mid-turn subagent is steered at its next step
+boundary, an idle one starts a turn, and a parked one is revived first. The
+message is recorded in the subagent's own transcript; it is not attributed to
+the parent agent, and the parent sees only the subagent's eventual result.
+Isolated (worktree) subagents run in-process and are steered the same way.
 
 ```json
 { "id": "req_1", "type": "steer_subagent", "subagentId": "OmpWorker", "message": "Drop the glob, keep the direct path." }
+{ "id": "req_1", "type": "response", "command": "steer_subagent", "success": true }
 ```
+
+The response arrives once the message is handed to the subagent's session; it
+does not wait for the subagent's turn. The message text is delivered verbatim.
 
 Failure responses:
 
-- missing/empty `subagentId` or `message` → validation error
+- missing/empty `subagentId` or blank `message` → validation error
 - `subagentId` not currently listed as running by `get_subagents` (unknown,
-  finished, or released) → `error: "Subagent not running: <id>"`
-- hub delivery failed → `error: "Delivery failed: <reason>"`
-
-Success responses carry delivery metadata:
-
-```json
-{ "id": "req_1", "type": "response", "command": "steer_subagent", "success": true, "data": { "to": "OmpWorker", "outcome": "injected" } }
-```
-
-`outcome` is the hub delivery receipt: `"injected"` (aside into a busy agent or
-consumed waiter), `"woken"` (idle agent woke for a real turn), or `"revived"`
-(parked agent restored before delivery).
+  finished, released, or another session's agent) → `error: "Subagent not running: <id>"`
+- a parked subagent that cannot be revived → `error: "Subagent not reachable: <reason>"`
 
 ## Prompt/Queue Concurrency and Ordering
 

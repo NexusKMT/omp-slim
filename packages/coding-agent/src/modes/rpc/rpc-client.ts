@@ -40,7 +40,6 @@ import type {
 	RpcSessionState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
-	RpcSteerSubagentResult,
 	RpcSubagentMessagesResult,
 	RpcSubagentProgressFrame,
 	RpcSubagentSnapshot,
@@ -763,16 +762,13 @@ export class RpcClient {
 	}
 
 	/**
-	 * Steer a running subagent over the hub/IRC bus. The message is delivered
-	 * as a normal DM attributed to the session owner, injecting an aside into
-	 * busy agents or waking idle ones. Resolves with the delivery outcome once
-	 * the bus hand-off completes.
-	 *
-	 * Rejects when the `subagentId` is unknown, no longer running, or delivery fails.
+	 * Send a message to a running subagent as its user, the same way Agent Hub
+	 * chat does: a mid-turn subagent is steered at its next step boundary and an
+	 * idle one starts a turn. Resolves once the message is handed to the
+	 * subagent's session; rejects when the subagent is not running.
 	 */
-	async steerSubagent(subagentId: string, message: string): Promise<RpcSteerSubagentResult> {
-		const response = await this.#send({ type: "steer_subagent", subagentId, message });
-		return this.#getData<RpcSteerSubagentResult>(response);
+	async steerSubagent(subagentId: string, message: string): Promise<void> {
+		await this.#send({ type: "steer_subagent", subagentId, message });
 	}
 
 	/**

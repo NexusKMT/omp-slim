@@ -32,8 +32,8 @@ import {
 	type SkillPromptInput,
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
-import { IrcBus } from "../../irc/bus";
-import { MAIN_AGENT_ID } from "../../registry/agent-registry";
+import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
+import { AgentRegistry } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
@@ -77,7 +77,6 @@ import type {
 	RpcOpenSessionResult,
 	RpcResponse,
 	RpcSessionState,
-	RpcSteerSubagentResult,
 	RpcSubagentSubscriptionLevel,
 } from "./rpc-types";
 
@@ -451,36 +450,49 @@ export class RpcShutdownCoordinator {
 export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
 
 /**
- * Steer a running subagent over the hub/IRC bus (RPC `steer_subagent`).
+ * Handle RPC `steer_subagent`: send the host's message to a running subagent
+ * as its user, the same way Agent Hub chat does (`AgentLifecycleManager.ensureLive`
+ * then `prompt` with `streamingBehavior: "steer"`). A mid-turn subagent is
+ * steered at its next step boundary; an idle one starts a turn. The message is
+ * recorded in the subagent's own transcript, never attributed to the parent
+ * agent, so the subagent cannot "reply" into the parent's context.
  *
- * Only subagents this session currently lists as running (`get_subagents`)
- * are reachable. Their snapshot ids ARE the hub/IRC recipient ids: the task
- * executor emits lifecycle frames with the same agent id it registers in the
- * global `AgentRegistry` (see sdk.ts `createAgentSession`).
+ * Only subagents this session lists as running (`get_subagents`) are
+ * reachable, and the registry ref must carry the transcript file this
+ * session's roster recorded: agent ids are unique only per parent session.
+ * The prompt is not awaited, so an idle subagent's whole turn does not hold
+ * the serialized RPC dispatcher; later failures are logged.
  *
- * Delivery reuses the exact primitive the `hub` send tool executes
- * (`IrcBus.global().send`): busy peers receive the message as a
- * non-interrupting aside at their next step boundary and idle ones are woken.
- * The sender is attributed to the session owner so the subagent sees a normal
- * steering DM rather than an anonymous peer.
+ * Returns an error message, or `undefined` once the message is handed off.
  */
 export async function handleRpcSteerSubagent(
 	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
 	subagentId: string,
 	message: string,
-): Promise<({ kind: "delivered" } & RpcSteerSubagentResult) | { kind: "error"; message: string }> {
+): Promise<string | undefined> {
 	// Progress can briefly report a terminal status before the terminal
 	// lifecycle frame prunes the snapshot; treat that as not running.
 	const snapshot = subagentRegistry.getSubagents().find(candidate => candidate.id === subagentId);
-	if (snapshot?.status !== "running" && snapshot?.status !== "pending") {
-		return { kind: "error", message: `Subagent not running: ${subagentId}` };
+	const ref = AgentRegistry.global().get(subagentId);
+	if (
+		(snapshot?.status !== "running" && snapshot?.status !== "pending") ||
+		!snapshot.sessionFile ||
+		ref?.kind !== "sub" ||
+		ref.status === "aborted" ||
+		ref.sessionFile !== snapshot.sessionFile
+	) {
+		return `Subagent not running: ${subagentId}`;
 	}
-
-	const receipt = await IrcBus.global().send({ from: MAIN_AGENT_ID, to: subagentId, body: message });
-	if (receipt.outcome === "failed") {
-		return { kind: "error", message: `Delivery failed: ${receipt.error ?? "unknown error"}` };
+	let session: AgentSession;
+	try {
+		session = await AgentLifecycleManager.global().ensureLive(subagentId);
+	} catch (err) {
+		return `Subagent not reachable: ${err instanceof Error ? err.message : String(err)}`;
 	}
-	return { kind: "delivered", to: receipt.to, outcome: receipt.outcome };
+	session.prompt(message, { streamingBehavior: "steer" }).catch(err => {
+		logger.warn("steer_subagent prompt failed", { subagentId, error: String(err) });
+	});
+	return undefined;
 }
 
 export async function handleRpcSessionChange(
@@ -1480,11 +1492,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				if (typeof command.message !== "string" || !command.message.trim()) {
 					return error(id, "steer_subagent", "`message` is required for steer_subagent.");
 				}
-				const result = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, command.message);
-				if (result.kind === "error") {
-					return error(id, "steer_subagent", result.message);
-				}
-				return success(id, "steer_subagent", { to: result.to, outcome: result.outcome });
+				const failure = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, command.message);
+				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
 			}
 
 			// =================================================================
