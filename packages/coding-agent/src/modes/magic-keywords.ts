@@ -1,6 +1,7 @@
 import { prompt } from "@oh-my-pi/pi-utils";
 import jevifyNotice from "../prompts/system/jevify-notice.md" with { type: "text" };
 import orchestrateNotice from "../prompts/system/orchestrate-notice.md" with { type: "text" };
+import ratchetNotice from "../prompts/system/ratchet-notice.md" with { type: "text" };
 import ultrathinkNotice from "../prompts/system/ultrathink-notice.md" with { type: "text" };
 import workflowNotice from "../prompts/system/workflow-notice.md" with { type: "text" };
 
@@ -65,6 +66,11 @@ export function renderWorkflowNotice({
 	return prompt.render(workflowNotice, { taskBatch, scoutAvailable, evalTools }).trim();
 }
 
+/** Hidden notice for "ratchetz": grill, build an eval, then hillclimb via the `ratchet` eval prelude. */
+export function renderRatchetNotice({ tools }: Pick<MagicKeywordContext, "tools">): string {
+	return prompt.render(ratchetNotice, { tools }).trim();
+}
+
 export const MAGIC_KEYWORDS = [
 	{
 		id: "ultrathink",
@@ -103,6 +109,17 @@ export const MAGIC_KEYWORDS = [
 		// The contract is entirely about the eval kernel's `judge()` helper.
 		requires: ["eval"],
 		notice: () => JEVIFY_NOTICE,
+	},
+	{
+		id: "ratchet",
+		word: "ratchetz",
+		hue: [180, 240],
+		label: "Ratchet Keyword",
+		description:
+			"Let standalone ratchetz build an eval and hillclimb it through the ratchet eval prelude; disabling it also removes the prelude",
+		// The loop runs in the eval kernel and dispatches its analyzer as a subagent.
+		requires: ["eval", "task"],
+		notice: renderRatchetNotice,
 	},
 ] as const satisfies readonly MagicKeyword[];
 
