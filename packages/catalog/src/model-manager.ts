@@ -62,10 +62,9 @@ export interface ModelManagerOptions<TApi extends Api = Api, TModelsDevPayload =
 	 * dynamic fetch always runs (an explicit `"offline"` strategy is still
 	 * honored), and the cache serves only as the fetch-failure fallback. For
 	 * providers whose dynamic result encodes fast-changing live state that a
-	 * TTL cache would replay wrongly — e.g. factory-droid, where discovery
-	 * filters by the request's serving region and crossing a network border
-	 * must re-filter immediately rather than replay the region cached
-	 * elsewhere.
+	 * TTL cache would replay wrongly — e.g. Factory discovery includes live
+	 * organization model policy and upstream blocks. Cached eligibility is
+	 * an offline snapshot, not current entitlement.
 	 */
 	alwaysRefetchDynamicModels?: boolean;
 	/** Cached model ids whose presence forces refresh when the static or migration-policy fingerprint changes. */
