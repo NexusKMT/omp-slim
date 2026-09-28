@@ -46,11 +46,13 @@ const servedIds = [
 	"claude-opus-5-5",
 	"claude-sonnet-4-6",
 	"claude-sonnet-5",
+	"claude-sonnet-5-5",
 	"deepseek/deepseek-v4-flash",
 	"deepseek/deepseek-v4-flash-fast",
 	"deepseek/deepseek-v4-flash-vision-exp",
 	"deepseek/deepseek-v4-pro",
 	"deepseek/deepseek-v4.1-flash",
+	"deepseek/deepseek-v4.1-flash-fast",
 	"google/gemini-3.1-flash-lite",
 	"google/gemini-3.5-flash",
 	"google/gemini-3.5-flash-lite",
@@ -502,7 +504,7 @@ describe("Command Code provider support", () => {
 		}
 	});
 
-	test("follows the command-code@1.66.0 effort registry", async () => {
+	test("follows the command-code@1.67.0 effort registry", async () => {
 		const models = await discoverModels([
 			"claude-opus-5-5",
 			"deepseek/deepseek-v4-pro",
@@ -527,6 +529,24 @@ describe("Command Code provider support", () => {
 		});
 	});
 
+	test("keeps Responses-routed GPT rows off hosted image generation and named tool choice", async () => {
+		const models = await discoverModels(["gpt-6-luna", "gpt-5.4-mini", "gpt-5.3-codex"]);
+		expect(models).toHaveLength(3);
+		for (const model of models) {
+			expect(model.api).toBe("openai-responses");
+			expect(model.hostedImage).not.toBe(true);
+			expect(model.compat).toMatchObject({ supportsNamedToolChoice: false });
+			expect(model.webSearch).toBe("openai");
+		}
+	});
+
+	test("clears hosted image generation from a bundled GPT row that still carries it", async () => {
+		const [discovered] = await discoverModels(["gpt-6-luna"]);
+		if (!discovered) throw new Error("Expected the gpt-6-luna fixture");
+		const rebuilt = buildModel({ ...discovered, hostedImage: true });
+		expect(rebuilt.hostedImage).toBeUndefined();
+	});
+
 	test("advertises image input exactly outside the text-only set", async () => {
 		const models = await discoverModels(servedIds);
 		expect(models).toHaveLength(servedIds.length);
@@ -536,7 +556,7 @@ describe("Command Code provider support", () => {
 		}
 	});
 
-	test("applies the command-code@1.66.0 per-model output caps", async () => {
+	test("applies the command-code@1.67.0 per-model output caps", async () => {
 		const models = await discoverModels([
 			"inclusionai/ling-3.0-flash-sante:free",
 			"z-ai/glm-5.3-flashx",

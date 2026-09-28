@@ -1,9 +1,12 @@
 // Command Code Provider API deployment contract. Model capabilities and effort
-// ladders follow command-code@1.66.0. The thinking-efforts below reproduce that
+// ladders follow command-code@1.67.0. The thinking-efforts below reproduce that
 // bundle's effort registry exactly, including the Muse Spark ids it now lists.
-// An id that 1.66.0 serves without an effort dial has no ladder here on
+// An id that 1.67.0 serves without an effort dial has no ladder here on
 // purpose, not by oversight (`modelSupportsReasoningEffort` is false for it in
-// that bundle).
+// that bundle). The one exception is `claude-sonnet-5-5`: served since
+// 2026-09-29 but not yet in the command-code@1.67.0 registry, so its ladder,
+// image input, and price come from Anthropic's first-party catalog at
+// Anthropic list price.
 provider "commandcode" {
 	default-model "claude-sonnet-5"
 	env "COMMAND_CODE_API_KEY" "COMMANDCODE_API_KEY"
@@ -20,7 +23,7 @@ provider "commandcode" {
 		model "typesafe/jev" name="TypeSafe Jev" {
 			reasoning #false
 			input "text"
-			// Jev bills input only (command-code@1.66.0 display rate after its free window).
+			// Jev bills input only (command-code@1.67.0 display rate after its free window).
 			cost input=0.042 output=0 cache-read=0 cache-write=0
 			limits
 			supports-tools #false
@@ -30,7 +33,7 @@ provider "commandcode" {
 	supports-developer-role #false
 	supports-store #false
 	// No effort dial by default. Only the exact ids below expose one upstream
-	// (command-code@1.66.0 effort registry); every other served id must omit
+	// (command-code@1.67.0 effort registry); every other served id must omit
 	// the effort control on the wire.
 	supports-reasoning-effort #false
 	// Discovery rows carry no reasoning metadata and stay neutral, so exact
@@ -42,7 +45,7 @@ provider "commandcode" {
 	// Default output cap: the Provider API exposes no per-model maximum, and
 	// the CLI requests 64K by default, so the default is 64K (2^16). The
 	// per-model caps below are the only maxOutputTokens that the
-	// command-code@1.66.0 registry sets.
+	// command-code@1.67.0 registry sets.
 	limits-patch {
 		max-tokens 65536
 	}
@@ -55,7 +58,7 @@ provider "commandcode" {
 		kind "judge"
 	}
 	models "claude-fable-5" "claude-fable-5-1" "claude-opus-4-7" "claude-opus-4-8" \
-		"claude-opus-5" "claude-opus-5-5" "claude-sonnet-4-6" "claude-sonnet-5" \
+		"claude-opus-5" "claude-opus-5-5" "claude-sonnet-4-6" "claude-sonnet-5" "claude-sonnet-5-5" \
 		"gpt-5.6-luna" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-6-astra" "gpt-6-luna" "gpt-6-sol" \
 		"meta/muse-spark-1.3" {
 		supports-reasoning-effort #true
@@ -66,8 +69,9 @@ provider "commandcode" {
 		supports-reasoning-effort #true
 		thinking-efforts "high" "max"
 	}
-	models "deepseek/deepseek-v4-flash-fast" "deepseek/deepseek-v4.1-flash" "moonshotai/Kimi-K3" \
-		"z-ai/glm-5.3-flash" "z-ai/glm-5.3-flashx" "zai-org/GLM-5.3" {
+	models "deepseek/deepseek-v4-flash-fast" "deepseek/deepseek-v4.1-flash" \
+		"deepseek/deepseek-v4.1-flash-fast" "moonshotai/Kimi-K3" "z-ai/glm-5.3-flash" \
+		"z-ai/glm-5.3-flashx" "zai-org/GLM-5.3" {
 		supports-reasoning-effort #true
 		thinking-efforts "low" "high" "max"
 	}
@@ -93,13 +97,15 @@ provider "commandcode" {
 		supports-reasoning-effort #true
 		thinking-efforts "high" "xhigh"
 	}
-	// Image input follows command-code@1.66.0: every served id outside its text-only set.
+	// Image input follows command-code@1.67.0: every served id outside its text-only set.
 	// residue: the vendor's text-only set cuts across classes (Qwen, DeepSeek, GLM,
 	// MiniMax, and Xiaomi each have ids on both sides), so no class selector
 	// expresses this list.
 	models "claude-fable-5" "claude-fable-5-1" "claude-haiku-4-5-20251001" "claude-opus-4-7" \
 		"claude-opus-4-8" "claude-opus-5" "claude-opus-5-5" "claude-sonnet-4-6" "claude-sonnet-5" \
-		"deepseek/deepseek-v4-flash-vision-exp" "google/gemini-3.1-flash-lite" \
+		"claude-sonnet-5-5" \
+		"deepseek/deepseek-v4-flash-vision-exp" "deepseek/deepseek-v4.1-flash-fast" \
+		"google/gemini-3.1-flash-lite" \
 		"google/gemini-3.5-flash" "google/gemini-3.5-flash-lite" "google/gemini-3.6-flash" \
 		"google/gemini-3.7-flash" "google/gemini-3.8-flash" "gpt-5.3-codex" "gpt-5.4" \
 		"gpt-5.4-mini" "gpt-5.5" "gpt-5.6-luna" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-6-astra" \
@@ -148,12 +154,20 @@ provider "commandcode" {
 			max-tokens 65536
 		}
 	}
+	// Command Code's Responses endpoint rejects an object `tool_choice` and returns
+	// no bytes from `image_generation` (verified 2026-09-29), so the openai
+	// class's hosted-image grant does not apply and named choices degrade to
+	// `"required"`. Hosted web search still works with a string `tool_choice`.
+	models "gpt-*" {
+		hosted-image #false
+		supports-named-tool-choice #false
+	}
 	// ---------------------------------------------------------------------------
 	// This table prices every model id that GET /provider/v1/models serves.
 	// Discovery defaults each model to zero cost and the mapper never inherits
 	// another provider's rates, so this table is the only pricing source.
 	// Base rates are Command Code's per-1M-token USD display rates. They follow
-	// `getDisplayRates` in command-code@1.66.0, read on 2026-09-29, for all 82
+	// `getDisplayRates` in command-code@1.67.0, read on 2026-09-29, for all 83
 	// ids the live catalog served that day. DeepSeek V4 Flash and its
 	// vision-exp variant bill on the V4.1 Flash gateway slug.
 	// A missing cache-write rate means 0. Standing deals (MiniMax M3 50% off,
@@ -162,7 +176,7 @@ provider "commandcode" {
 	// `inclusionai/ling-3.0-flash-sante:free`, `stealth/pixel-canary`,
 	// `stealth/space-bunny-alpha`) keep the zero discovery default.
 	// ---------------------------------------------------------------------------
-	models "claude-sonnet-5" {
+	models "claude-sonnet-5" "claude-sonnet-5-5" {
 		cost-patch {
 			input 2.0
 			output 10.0
@@ -323,6 +337,7 @@ provider "commandcode" {
 	// DeepSeek V4 bills time-dependent rates; the page displays the off-peak
 	// rates that apply 17h/day (peak doubles input/output). Off-peak is the
 	// documented display convention; the Usage page stays authoritative.
+	// V4.1 Flash Fast displays 0.16 / 0.58 / 0.016.
 	models "deepseek/deepseek-v4-pro" {
 		cost-patch {
 			input 0.66
@@ -331,7 +346,7 @@ provider "commandcode" {
 			cache-write 0.0
 		}
 	}
-	// command-code@1.66.0 bills the flash id and its vision-exp variant on the
+	// command-code@1.67.0 bills the flash id and its vision-exp variant on the
 	// V4.1 Flash gateway slug, so all three ids share the V4.1 Flash off-peak rates.
 	models "deepseek/deepseek-v4-flash" "deepseek/deepseek-v4-flash-vision-exp" \
 		"deepseek/deepseek-v4.1-flash" {
@@ -347,6 +362,14 @@ provider "commandcode" {
 			input 0.28
 			output 0.56
 			cache-read 0.07
+			cache-write 0.0
+		}
+	}
+	models "deepseek/deepseek-v4.1-flash-fast" {
+		cost-patch {
+			input 0.16
+			output 0.58
+			cache-read 0.016
 			cache-write 0.0
 		}
 	}
