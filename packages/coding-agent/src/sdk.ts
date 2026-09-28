@@ -1901,7 +1901,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const rulesResult =
 			options.rules !== undefined
 				? { items: options.rules, warnings: undefined }
-				: await loadCapability<Rule>(ruleCapability.id, { cwd });
+				: await loadCapability<Rule>(ruleCapability.id, { cwd, agentDir });
 		const { rulebookRules, alwaysApplyRules } = bucketRules(rulesResult.items, ttsrManager, {
 			builtinRules: ttsrSettings.builtinRules,
 			disabledRules: ttsrSettings.disabledRules,
@@ -2366,7 +2366,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// pending-action queueing.
 			customToolPaths =
 				options.preloadedCustomToolPaths ??
-				(await logger.time("discoverCustomToolPaths", () => discoverCustomToolPaths([], cwd)));
+				(await logger.time("discoverCustomToolPaths", () => discoverCustomToolPaths([], cwd, agentDir)));
 			const customToolsLoadResult = await logger.time("loadCustomTools", () =>
 				loadCustomTools(customToolPaths, cwd, builtInToolNames, action => queueResolveHandler(toolSession, action)),
 			);
@@ -3547,8 +3547,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				const ttsrSettings = cfgTtsr.get(settings);
 				const ruleItems =
 					options.rules ??
-					(await logger.time("rediscoverRules", () => loadCapability<Rule>(ruleCapability.id, { cwd: promptCwd })))
-						.items;
+					(
+						await logger.time("rediscoverRules", () =>
+							loadCapability<Rule>(ruleCapability.id, { cwd: promptCwd, agentDir }),
+						)
+					).items;
 				const buckets = bucketRules(ruleItems, ttsrManager, {
 					builtinRules: ttsrSettings.builtinRules,
 					disabledRules: ttsrSettings.disabledRules,
