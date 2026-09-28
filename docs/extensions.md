@@ -472,7 +472,7 @@ host emits them after the tool results with developer/system priority where the 
 supports it; a value repeated within one tool batch is emitted once, at its first position. Raw tool
 output and other untrusted data must stay in the ordinary tool result.
 
-Non-empty context from every non-blocking handler is preserved in registration order. OMP waits
+Distinct non-empty context from every non-blocking handler is preserved in registration order. OMP waits
 until the tool batch settles, then emits the context after the corresponding tool results in
 assistant tool-call order and before the next provider request. Handler context is delivered only when
 the call actually runs and returns a non-error result: if the call is blocked by this or a later

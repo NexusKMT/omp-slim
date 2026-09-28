@@ -208,7 +208,7 @@ Inside `HookRunner`, order is deterministic by registration sequence:
 
 Conflict behavior by event type:
 
-- `tool_call`: every non-empty `additionalContext` is preserved in handler order; `input` remains last-wins; first block short-circuits and discards context collected for that call. Handlers do not observe each other's input revisions
+- `tool_call`: every distinct non-empty `additionalContext` is preserved in handler order (a repeat within one tool batch is dropped); `input` remains last-wins; first block short-circuits and discards context collected for that call. Handlers do not observe each other's input revisions
 - `tool_result`: last returned override wins (no short-circuit)
 - `context`: chained; each handler receives prior handler’s message output
 - `before_agent_start`: first returned message is kept; later messages ignored
