@@ -246,6 +246,22 @@ describe("CustomEditor bracketed path paste", () => {
 		expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["image#10", "paste#10"]);
 	});
 
+	it("tracks chips drawn with a theme's overridden chip glyph", async () => {
+		await initTheme();
+		const symbol = theme.symbol.bind(theme);
+		const spy = vi.spyOn(theme, "symbol").mockImplementation(key => (key === "chip.paste" ? "📎" : symbol(key)));
+		try {
+			const { editor } = makeEditor();
+			for (let n = 1; n <= 10; n++) editor.insertTextAttachment(`blob ${n}`);
+			editor.setText(`see ${chipLabel("paste", 10)}`);
+
+			expect(editor.getText()).toBe("see 📎 #10");
+			expect(editor.composerChips().map(chip => `${chip.kind}#${chip.n}`)).toEqual(["paste#10"]);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	describe("skill chips", () => {
 		function makeSkillEditor() {
 			const { editor } = makeEditor();

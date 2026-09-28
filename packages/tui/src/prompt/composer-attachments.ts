@@ -50,9 +50,12 @@ const SKILL_ICONS = [...new Set(Object.values(SYMBOL_PRESETS).map(m => m["icon.e
 /** Skill names as they appear in chips: word characters and dashes, dots only between segments. */
 const SKILL_NAME_SOURCE = "[\\w-]+(?:\\.[\\w-]+)*";
 
-const SKILL_CHIP_SOURCE = `(?:${SKILL_ICONS.map(icon =>
-	/^[a-z]+$/i.test(icon) ? `(?<![A-Za-z])${RegExp.escape(icon)}` : RegExp.escape(icon),
-).join("|")}) (${SKILL_NAME_SOURCE})(?![\\w-])`;
+/** Regex source for a chip glyph; word glyphs (ASCII preset) must not continue a preceding word. */
+function glyphSource(icon: string): string {
+	return /^[a-z]+$/i.test(icon) ? `(?<![A-Za-z])${RegExp.escape(icon)}` : RegExp.escape(icon);
+}
+
+const SKILL_CHIP_SOURCE = `(?:${SKILL_ICONS.map(glyphSource).join("|")}) (${SKILL_NAME_SOURCE})(?![\\w-])`;
 
 /**
  * Replaces `/skill:<name>` tokens for known skills with compact chip labels and
@@ -96,11 +99,16 @@ export function collapseModelMentions(
 
 const CHIP_ICON_KEY = { image: "chip.image", video: "chip.video", paste: "chip.paste" } as const;
 
+/** Chip glyph the active theme renders for `kind`, including `symbols.overrides`. */
+function activeChipIcon(kind: ChipKind): string {
+	return typeof theme === "undefined"
+		? SYMBOL_PRESETS.unicode[CHIP_ICON_KEY[kind]]
+		: theme.symbol(CHIP_ICON_KEY[kind]);
+}
+
 /** Compact atomic composer token for attachment `n` in the active symbol preset. */
 export function chipLabel(kind: ChipKind, n: number): string {
-	const icon =
-		typeof theme === "undefined" ? SYMBOL_PRESETS.unicode[CHIP_ICON_KEY[kind]] : theme.symbol(CHIP_ICON_KEY[kind]);
-	return `${icon} #${n}`;
+	return `${activeChipIcon(kind)} #${n}`;
 }
 
 /** Every glyph a chip token may start with, across all symbol presets. */
@@ -111,7 +119,7 @@ const CHIP_ICONS: Record<ChipKind, readonly string[]> = {
 };
 
 const CHIP_TOKEN_SOURCE = `(?:${[...CHIP_ICONS.image, ...CHIP_ICONS.video, ...CHIP_ICONS.paste]
-	.map(icon => (/^[a-z]+$/i.test(icon) ? `(?<![A-Za-z])${RegExp.escape(icon)}` : RegExp.escape(icon)))
+	.map(glyphSource)
 	.join("|")}) #[1-9]\\d*`;
 
 /** Infers an attachment kind from a chip label emitted by any configured symbol preset. */
@@ -158,18 +166,23 @@ export const COMPOSER_TOKEN_REGEX = new RegExp(
 /**
  * Attachment indices referenced by a composer buffer, per kind. Image/video count compact chips
  * and expanded markers; paste counts compact chips only, since `[Paste #N]` markers number the
- * base editor's separate paste buffer. Whole tokens are parsed, so `#1` never matches inside `#10`.
+ * base editor's separate paste buffer. Chips are recognized by every preset glyph plus the active
+ * theme's (possibly overridden) glyph, and whole numbers are parsed, so `#1` never matches inside `#10`.
  */
 export function referencedAttachments(text: string): Record<ChipKind, Set<number>> {
+	const kinds: readonly ChipKind[] = ["image", "video", "paste"];
+	const kindByIcon = new Map<string, ChipKind>();
+	for (const kind of kinds) for (const icon of CHIP_ICONS[kind]) kindByIcon.set(icon, kind);
+	for (const kind of kinds) kindByIcon.set(activeChipIcon(kind), kind);
+	const icons = [...kindByIcon.keys()].sort((a, b) => b.length - a.length).map(glyphSource);
+	const scanner = new RegExp(`${PLACEHOLDER_REGEX.source}|(${icons.join("|")}) #([1-9]\\d*)`, "gu");
+
 	const refs: Record<ChipKind, Set<number>> = { image: new Set(), video: new Set(), paste: new Set() };
-	for (const match of text.matchAll(COMPOSER_TOKEN_REGEX)) {
-		const label = match[0];
-		if (label.startsWith("[")) {
-			if (match[1] === "Image") refs.image.add(Number(match[2]));
-			else if (match[1] === "Video") refs.video.add(Number(match[2]));
-		} else if (match[3] === undefined) {
-			refs[chipLabelKind(label)].add(Number(label.slice(label.lastIndexOf("#") + 1)));
-		}
+	for (const match of text.matchAll(scanner)) {
+		if (match[1] === "Image") refs.image.add(Number(match[2]));
+		else if (match[1] === "Video") refs.video.add(Number(match[2]));
+		const chipKind = match[3] === undefined ? undefined : kindByIcon.get(match[3]);
+		if (chipKind !== undefined) refs[chipKind].add(Number(match[4]));
 	}
 	return refs;
 }
