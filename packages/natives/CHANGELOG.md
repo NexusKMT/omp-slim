@@ -10,6 +10,7 @@
 - Fixed commits failing on Windows when a repository has commit hooks; hooks now run through `git hook run` ([#13366](https://github.com/can1357/oh-my-pi/pull/13366) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed Windows path stats lacking a file identity, which let `rg` search its own redirected output and made `tail -F` report spurious replacements ([#13367](https://github.com/can1357/oh-my-pi/pull/13367) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed the embedded shell running backtick spans inside a quoted heredoc within a double-quoted command substitution ([#13307](https://github.com/can1357/oh-my-pi/issues/13307)).
+- Fixed native operations to deliver results completed within their timeout and reject results when an abort signal arrives before settlement ([#13209](https://github.com/can1357/oh-my-pi/pull/13209) by [@Komzpa](https://github.com/Komzpa)).
 
 ## [18.4.0] - 2026-09-28
 
@@ -47,7 +48,6 @@
 ### Changed
 
 - Updated desktop input-control capabilities to use a unified `takeover` setting, including `takeover: true` for forced foreground pointer interaction.
-- Fixed native operations to deliver results completed within their timeout and reject results when an abort signal arrives before settlement ([#13209](https://github.com/can1357/oh-my-pi/pull/13209) by [@Komzpa](https://github.com/Komzpa)).
 
 ## [18.3.1] - 2026-09-25
 
