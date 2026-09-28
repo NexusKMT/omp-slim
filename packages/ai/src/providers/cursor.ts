@@ -59,7 +59,6 @@ import {
 	GrepContentResultSchema,
 	GrepCountResultSchema,
 	GrepErrorSchema,
-	type GrepFileCount,
 	GrepFileCountSchema,
 	GrepFileMatchSchema,
 	GrepFilesResultSchema,
@@ -99,6 +98,7 @@ import {
 	McpToolResultSchema,
 	ModelDetailsSchema,
 	ReadErrorSchema,
+	ReadFileNotFoundSchema,
 	ReadMcpResourceErrorSchema,
 	type ReadMcpResourceExecResult,
 	ReadMcpResourceExecResultSchema,
@@ -233,7 +233,8 @@ import {
 	buildPiWriteError,
 	buildPiWriteRejected,
 	buildPiWriteResult,
-	cursorEditOwnedReadPath,
+	cursorExecReadPath,
+	cursorRawReadPath,
 	omitUndefinedArgs,
 	piEscapeRegexLiteral,
 	piGrepSkip,
@@ -1654,39 +1655,87 @@ async function handleExecServerMessage(
 			const args = execMsg.message.value;
 			if (!args.toolCallId) args.toolCallId = crypto.randomUUID();
 			const editOwned = isEditOwnedToolCallId(state, output, args.toolCallId);
-			// Native StrReplace materializes by reading then writing the same
-			// toolCallId. The server treats the read result as file bytes, so a
-			// hashline-formatted native read would be written back as markup.
-			// Force `:raw` and skip the extra transcript block — the edit card
-			// already owns this id.
-			const composed = editOwned ? cursorEditOwnedReadPath(args.path, args.offset, args.limit) : args.path;
-			const handlerArgs = editOwned
-				? composed === null
+			// Cursor numbers raw content itself; StrReplace also writes it back.
+			// Neither frame may receive hashline gutters or summarized bodies.
+			// Edit-owned reads omit the extra transcript block owned by the edit card.
+			// The handler needs the original negative offset to resolve it against
+			// the file length; positive windows can be composed before dispatch.
+			const negativeOffset = args.offset !== undefined && args.offset < 0;
+			const composed = negativeOffset
+				? cursorRawReadPath(args.path)
+				: cursorExecReadPath(args.path, args.offset, args.limit);
+			const handlerArgs =
+				composed === null
 					? args
-					: { ...args, path: composed, offset: undefined, limit: undefined }
-				: args;
+					: {
+							...args,
+							path: composed,
+							offset: negativeOffset ? args.offset : undefined,
+							limit: negativeOffset ? args.limit : undefined,
+						};
 			if (!editOwned) {
-				// The same composed selector the bridge executes: showing a bare path
-				// for a ranged read makes the returned slice look like the whole
-				// file in every rebuilt transcript.
-				synthesizeCursorExecToolCall(output, stream, state, args.toolCallId, "read", {
-					path: piReadDisplayPath(args.path, args.offset, args.limit),
-				});
+				synthesizeCursorExecToolCall(
+					output,
+					stream,
+					state,
+					args.toolCallId,
+					"read",
+					negativeOffset
+						? { path: composed, offset: args.offset, limit: args.limit }
+						: { path: piReadDisplayPath(args.path, args.offset, args.limit) },
+				);
 			}
-			const { execResult } = await resolveExecHandler(
+			const { execResult: readResult, toolResult } = await resolveExecHandler(
 				handlerArgs,
 				execHandlers?.read?.bind(execHandlers),
 				editOwned ? undefined : onToolResult,
-				toolResult =>
+				result =>
 					buildReadResultFromToolResult(
 						args.path,
-						toolResult,
+						result,
 						args.offset !== undefined || args.limit !== undefined || piReadPathHasRange(args.path),
 					),
 				reason => buildReadRejectedResult(args.path, reason),
 				error => buildReadErrorResult(args.path, error),
 				editOwned ? null : { toolCallId: args.toolCallId, toolName: "read" },
 			);
+			let execResult = readResult;
+			// StrReplace writes the returned bytes back. A truncated raw read would
+			// make every replacement below the read limit invisible to the server.
+			if (
+				editOwned &&
+				args.offset === undefined &&
+				args.limit === undefined &&
+				!piReadPathHasRange(args.path) &&
+				toolResult &&
+				!toolResult.isError &&
+				toolResultWasTruncated(toolResult)
+			) {
+				const details = toolResult.details;
+				const source = details && typeof details === "object" && "meta" in details && details.meta;
+				const path = source && typeof source === "object" && "source" in source && source.source;
+				if (
+					path &&
+					typeof path === "object" &&
+					"type" in path &&
+					path.type === "path" &&
+					"value" in path &&
+					typeof path.value === "string"
+				) {
+					try {
+						const content = await fs.readFile(path.value, "utf8");
+						execResult = buildReadResultFromToolResult(args.path, {
+							...toolResult,
+							content: [{ type: "text", text: content }],
+							details: { fileSize: Buffer.byteLength(content, "utf8") },
+						});
+					} catch (error) {
+						execResult = buildReadErrorResult(args.path, error instanceof Error ? error.message : String(error));
+					}
+				} else {
+					execResult = buildReadErrorResult(args.path, "Unable to read the complete file for StrReplace");
+				}
+			}
 			sendExecClientMessage(h2Request, execMsg, "readResult", execResult);
 			return;
 		}
@@ -2845,6 +2894,11 @@ function readFileSizeFromDetails(toolResult: ToolResultMessage): number | undefi
 function buildReadResultFromToolResult(path: string, toolResult: ToolResultMessage, rangeApplied = false) {
 	const text = toolResultToText(toolResult);
 	if (toolResult.isError) {
+		if (/^Path '.*' not found$/.test(text)) {
+			return create(ReadResultSchema, {
+				result: { case: "fileNotFound", value: create(ReadFileNotFoundSchema, { path }) },
+			});
+		}
 		return buildReadErrorResult(path, text || "Read failed");
 	}
 	// Counting the payload is only the file's length when the payload is the
@@ -2942,7 +2996,7 @@ function buildDeleteResultFromToolResult(path: string, toolResult: ToolResultMes
 			value: create(DeleteSuccessSchema, {
 				path,
 				deletedFile: path,
-				fileSize: BigInt(0),
+				fileSize: BigInt(readFileSizeFromDetails(toolResult) ?? 0),
 				prevContent: "",
 			}),
 		},
@@ -2973,7 +3027,14 @@ function buildShellResultFromToolResult(
 ) {
 	const output = toolResultToText(toolResult);
 	if (toolResult.isError) {
-		return buildShellFailureResult(args.command, args.workingDirectory, output || "Shell failed");
+		const details = toolResult.details;
+		const code = details && typeof details === "object" && "exitCode" in details ? details.exitCode : undefined;
+		return buildShellFailureResult(
+			args.command,
+			args.workingDirectory,
+			output || "Shell failed",
+			typeof code === "number" && Number.isInteger(code) ? code : 1,
+		);
 	}
 	return create(ShellResultSchema, {
 		result: {
@@ -2991,14 +3052,14 @@ function buildShellResultFromToolResult(
 	});
 }
 
-function buildShellFailureResult(command: string, workingDirectory: string, error: string) {
+function buildShellFailureResult(command: string, workingDirectory: string, error: string, exitCode = 1) {
 	return create(ShellResultSchema, {
 		result: {
 			case: "failure",
 			value: create(ShellFailureSchema, {
 				command,
 				workingDirectory,
-				exitCode: 1,
+				exitCode,
 				signal: "",
 				stdout: "",
 				stderr: error,
@@ -3101,16 +3162,16 @@ function buildGrepResultFromToolResult(
 
 	const outputMode = args.outputMode || "content";
 	const clientTruncated = toolResultDetailBoolean(toolResult, "truncated");
-	const lines = text
-		.split("\n")
-		.map(line => line.trimEnd())
-		.filter(line => line.length > 0 && !line.startsWith("[") && !line.toLowerCase().startsWith("no matches"));
+	const details = toolResult.details;
+	const files =
+		details && typeof details === "object" && "files" in details && Array.isArray(details.files)
+			? details.files.filter((file): file is string => typeof file === "string")
+			: [];
 
 	const workspaceKey = args.path || ".";
 	let unionResult: GrepUnionResult;
 
 	if (outputMode === "files_with_matches") {
-		const files = lines;
 		unionResult = create(GrepUnionResultSchema, {
 			result: {
 				case: "files",
@@ -3128,20 +3189,21 @@ function buildGrepResultFromToolResult(
 			},
 		});
 	} else if (outputMode === "count") {
-		const counts = lines
-			.map(line => {
-				const separatorIndex = line.lastIndexOf(":");
-				if (separatorIndex === -1) {
-					return null;
-				}
-				const file = line.slice(0, separatorIndex);
-				const count = Number.parseInt(line.slice(separatorIndex + 1), 10);
-				if (!file || Number.isNaN(count)) {
-					return null;
-				}
-				return create(GrepFileCountSchema, { file, count });
-			})
-			.filter((entry): entry is GrepFileCount => entry !== null);
+		const fileMatches =
+			details && typeof details === "object" && "fileMatches" in details && Array.isArray(details.fileMatches)
+				? details.fileMatches
+				: [];
+		const counts = fileMatches
+			.filter(
+				(entry): entry is { path: string; count: number } =>
+					entry !== null &&
+					typeof entry === "object" &&
+					"path" in entry &&
+					typeof entry.path === "string" &&
+					"count" in entry &&
+					typeof entry.count === "number",
+			)
+			.map(({ path, count }) => create(GrepFileCountSchema, { file: path, count }));
 		const totalMatches = counts.reduce((sum, entry) => sum + entry.count, 0);
 		unionResult = create(GrepUnionResultSchema, {
 			result: {
@@ -3159,22 +3221,40 @@ function buildGrepResultFromToolResult(
 	} else {
 		const matchMap = new Map<string, Array<{ line: number; content: string; isContextLine: boolean }>>();
 		let totalMatchedLines = 0;
+		const directories = new Map<number, string>();
+		let currentFile = files.length === 1 ? files[0] : undefined;
 
-		for (const line of lines) {
-			const matchLine = line.match(/^(.+?):(\d+):\s?(.*)$/);
-			const contextLine = line.match(/^(.+?)-(\d+)-\s?(.*)$/);
-			const match = matchLine ?? contextLine;
-			if (!match) {
+		for (const line of text.split("\n")) {
+			const header = /^(#+) (.+)$/.exec(line);
+			if (header) {
+				const depth = header[1]!.length;
+				const name = header[2]!;
+				for (const level of directories.keys()) {
+					if (level >= depth) directories.delete(level);
+				}
+				const parent = directories.get(depth - 1);
+				const candidate = parent ? `${parent}/${name}` : name;
+				if (name.endsWith("/")) {
+					directories.set(depth, candidate.slice(0, -1));
+					currentFile = undefined;
+				} else {
+					currentFile = files.includes(candidate) ? candidate : candidate.replace(/#[0-9a-f]{4,}$/i, "");
+				}
 				continue;
 			}
-			const [, file, lineNumber, content] = match;
-			const isContextLine = Boolean(contextLine);
-			const list = matchMap.get(file) ?? [];
-			list.push({ line: Number(lineNumber), content, isContextLine });
-			matchMap.set(file, list);
-			if (!isContextLine) {
-				totalMatchedLines += 1;
+			const singleHeader = /^\[(.+)#[0-9a-f]{4,}\]$/i.exec(line);
+			if (singleHeader) {
+				currentFile = files[0] ?? singleHeader[1]!;
+				continue;
 			}
+			const match = /^([* ])(\d+)[:|](.*)$/.exec(line);
+			if (!match || !currentFile) continue;
+			const [, marker, lineNumber, content] = match;
+			const isContextLine = marker === " ";
+			const list = matchMap.get(currentFile) ?? [];
+			list.push({ line: Number(lineNumber), content, isContextLine });
+			matchMap.set(currentFile, list);
+			if (!isContextLine) totalMatchedLines++;
 		}
 
 		const matches = Array.from(matchMap.entries()).map(([file, matches]) =>
