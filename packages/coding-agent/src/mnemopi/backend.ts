@@ -10,6 +10,7 @@ import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import { roleCandidatePool } from "../config/model-roles";
 import { resolveRoleChain } from "../config/model-resolver";
+import { type JudgmentUsageLedger, journalJudgmentUsage } from "../judgment";
 import type {
 	MemoryBackend,
 	MemoryBackendSaveInput,
@@ -121,7 +122,13 @@ export const mnemopiBackend: MemoryBackend = {
 		}
 
 		try {
-			const config = await loadMnemopiConfigWithProviders(settings, agentDir, modelRegistry, sessionId);
+			const config = await loadMnemopiConfigWithProviders(
+				settings,
+				agentDir,
+				modelRegistry,
+				sessionId,
+				session.sessionManager,
+			);
 			await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 			await installMnemopiState(session, config);
 		} catch (error) {
@@ -194,6 +201,7 @@ export const mnemopiBackend: MemoryBackend = {
 					agentDir,
 					session.modelRegistry,
 					session.sessionId,
+					session.sessionManager,
 				);
 				await Promise.all([loadMnemopi(), loadMnemopiCore()]);
 				state = await installMnemopiState(session, config);
@@ -491,9 +499,16 @@ async function loadMnemopiConfigWithProviders(
 	agentDir: string,
 	modelRegistry: ModelRegistry,
 	sessionId: string,
+	usageLedger: Partial<JudgmentUsageLedger>,
 ): Promise<MnemopiBackendConfig> {
 	const config = loadMnemopiConfig(settings, agentDir);
-	config.providerOptions = await resolveMnemopiProviderOptions(config, settings, modelRegistry, sessionId);
+	config.providerOptions = await resolveMnemopiProviderOptions(
+		config,
+		settings,
+		modelRegistry,
+		sessionId,
+		usageLedger,
+	);
 	return config;
 }
 
@@ -521,7 +536,9 @@ async function resolveMnemopiProviderOptions(
 	settings: MemoryBackendStartOptions["settings"],
 	modelRegistry: ModelRegistry,
 	sessionId: string,
+	usageLedger: Partial<JudgmentUsageLedger>,
 ): Promise<MnemopiProviderOptions> {
+	const onUsage = journalJudgmentUsage(usageLedger);
 	const base: MnemopiProviderOptions = {
 		noEmbeddings: config.providerOptions.noEmbeddings,
 		embeddingModel: config.providerOptions.embeddingModel,
@@ -606,6 +623,17 @@ async function resolveMnemopiProviderOptions(
 									maxTokens: opts?.maxTokens,
 									temperature: opts?.temperature,
 									signal,
+									onAttempt: message =>
+										onUsage?.({
+											purpose: "memory",
+											role: "memory",
+											api: model.api,
+											provider: model.provider,
+											model: model.id,
+											usage: message.usage,
+											stopReason: message.stopReason,
+											errorMessage: message.errorMessage,
+										}),
 								},
 							),
 						{ provider: model.provider, signal },

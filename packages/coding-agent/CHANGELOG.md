@@ -36,6 +36,10 @@
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
 
+### Fixed
+
+- Fixed session usage and cost totals omitting Mnemopi memory completions, including billed failures before a fallback succeeds.
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
