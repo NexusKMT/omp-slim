@@ -180,7 +180,7 @@ describe("mode-dependent guards defer to flag-value errors", () => {
 });
 
 describe("ACP launch flag validation", () => {
-	it("fails an invalid --thinking before serving when extension discovery is off", async () => {
+	it("fails an invalid --thinking before serving when no session can load an extension", async () => {
 		using tempDir = TempDir.createSync("@omp-acp-bad-thinking-");
 		const run = await launchWithoutTerminal(tempDir, ["--mode", "acp", "--thinking", "bogus"]);
 
@@ -189,7 +189,7 @@ describe("ACP launch flag validation", () => {
 		expect(run.stdout).toBe("");
 	}, 30_000);
 
-	it("serves when an explicit extension owns the rejected flag", async () => {
+	it("serves without binding an explicit extension that may own the rejected flag", async () => {
 		using tempDir = TempDir.createSync("@omp-acp-ext-thinking-");
 		const extensionPath = await writeFlagExtension(tempDir, "thinking");
 		// Closed stdin ends the ACP transport right after startup, so a served launch exits 0.
@@ -197,6 +197,9 @@ describe("ACP launch flag validation", () => {
 
 		expect(run.stderr).not.toContain("Invalid --thinking value");
 		expect(run.exitCode, run.stderr).toBe(0);
+		// The extension reports at exit only if its factory ran: no session opened,
+		// so validation must not have bound it either.
+		expect(run.stderr).not.toContain("EXT_FLAG=");
 	}, 30_000);
 
 	it("leaves the verdict to each session/new when discovery can load per-cwd extensions", async () => {
@@ -208,5 +211,16 @@ describe("ACP launch flag validation", () => {
 
 		expect(run.stderr).not.toContain("Invalid --thinking value");
 		expect(run.exitCode, run.stderr).toBe(0);
+	}, 30_000);
+});
+
+describe("--export flag validation", () => {
+	it("reports an invalid enum value instead of exporting", async () => {
+		using tempDir = TempDir.createSync("@omp-export-bad-thinking-");
+		const run = await launchWithoutTerminal(tempDir, ["--export", "missing.jsonl", "--thinking", "bogus"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).toContain('Error: Invalid --thinking value: "bogus"');
+		expect(run.stdout).not.toContain("Exported to:");
 	}, 30_000);
 });

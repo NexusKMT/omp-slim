@@ -24,7 +24,7 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "./capability";
-import { type Args, parseArgs, reportInvalidFlagValues, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
+import { type Args, reportInvalidFlagValues, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
@@ -1696,6 +1696,11 @@ export async function runRootCommand(
 		}
 
 		if (parsedArgs.export) {
+			// Export loads no extensions, so none can own a value the bootstrap parse
+			// rejected: report it as the usage error it is instead of exporting.
+			if (reportInvalidFlagValues(parsedArgs)) {
+				process.exit(2);
+			}
 			let result: string;
 			try {
 				const outputPath = parsedArgs.messages.length > 0 ? parsedArgs.messages[0] : undefined;
@@ -2185,22 +2190,18 @@ export async function runRootCommand(
 		};
 
 		if (mode === "acp") {
-			// ACP loads extensions per `session/new` cwd, and an extension there may
-			// own a flag the bootstrap parse rejected, so pending invalid enum values
-			// are normally settled by the per-session factory. With discovery off
-			// (`--no-extensions`, trusted-only) every session loads the same
-			// explicit extensions, so the verdict cannot vary by cwd: settle it now
-			// — loading them only on this error path keeps ACP startup lazy — and
-			// fail the launch instead of every `session/new`.
-			if (parsedArgs.invalidFlagValues.length > 0 && sessionOptions.disableExtensionDiscovery) {
-				const launchEventBus = new EventBus();
-				const launchExtensions = parsedArgs.trustedExtensions?.length
-					? await loadTrustedSessionExtensions(sessionOptions, cwd, launchEventBus)
-					: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, launchEventBus);
-				const launchArgs = parseArgs(rawArgs, ExtensionRunner.aggregateFlags(launchExtensions.extensions));
-				if (reportInvalidFlagValues(launchArgs)) {
-					process.exit(2);
-				}
+			// ACP binds extensions per `session/new`, and any of them may own a flag
+			// the bootstrap parse rejected, so pending invalid enum values are
+			// normally settled by the per-session factory. With discovery off and no
+			// explicit extension (`-e`, `--hook`, trusted) no session can load one,
+			// so fail the launch now instead of every `session/new` — without
+			// binding anything, since extension factories have side effects.
+			if (
+				sessionOptions.disableExtensionDiscovery &&
+				(sessionOptions.additionalExtensionPaths?.length ?? 0) === 0 &&
+				reportInvalidFlagValues(parsedArgs)
+			) {
+				process.exit(2);
 			}
 			const createAcpSession = createAcpSessionFactory({
 				baseOptions: sessionOptions,
