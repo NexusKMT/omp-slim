@@ -14,10 +14,16 @@ import { getModelMatchPreferences, resolveModelScope } from "@oh-my-pi/pi-coding
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { buildSessionOptions as buildCliSessionOptions } from "@oh-my-pi/pi-coding-agent/main";
 import { createAgentSession, type ExtensionFactory } from "@oh-my-pi/pi-coding-agent/sdk";
+import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
+import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
+import { getBundledAgent } from "@oh-my-pi/pi-coding-agent/task/agents";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+
+import { cfgRetryFallbackChains } from "@oh-my-pi/pi-coding-agent/session/settings";
 
 describe("createAgentSession deferred model pattern resolution", () => {
 	let tempDir: string;
@@ -141,6 +147,54 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-model");
 			expect(modelFallbackMessage).toBeUndefined();
+		} finally {
+			await session.dispose();
+		}
+	});
+
+	test("lets a child task spawn a model agent inherited from its parent", async () => {
+		const bundledTask = getBundledAgent("task");
+		if (!bundledTask) throw new Error("Expected bundled task agent");
+		const modelAgent: AgentDefinition = {
+			...bundledTask,
+			name: "m1",
+			model: ["runtime-provider/runtime-model"],
+		};
+		vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [bundledTask], projectAgentsDir: null });
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return {
+				index: options.index,
+				id: options.id,
+				agent: options.agent.name,
+				agentSource: options.agent.source,
+				task: options.task,
+				exitCode: 0,
+				output: "done",
+				stderr: "",
+				truncated: false,
+				durationMs: 1,
+				tokens: 0,
+				requests: 1,
+			};
+		});
+		const { session } = await createAgentSession({
+			...buildSessionOptions("runtime-provider/runtime-model"),
+			settings: Settings.isolated({ "async.enabled": false }),
+			toolNames: ["task"],
+			inheritedSessionAgents: [modelAgent],
+		});
+
+		try {
+			const taskTool = session.getToolByName("task");
+			if (!taskTool) throw new Error("Expected child task tool");
+			await taskTool.execute("nested-model-agent-call", {
+				agent: "m1",
+				task: "Inspect the target with the tagged model.",
+			});
+
+			expect(dispatched[0]?.modelOverride).toEqual(["runtime-provider/runtime-model"]);
 		} finally {
 			await session.dispose();
 		}
@@ -844,7 +898,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-model");
 			expect(session.settings.getModelRole("subagent:deferred")).toBe("runtime-provider/runtime-model");
-			expect(session.settings.get("retry.fallbackChains")["subagent:deferred"]).toEqual([
+			expect(cfgRetryFallbackChains.get(session.settings)["subagent:deferred"]).toEqual([
 				"runtime-provider/runtime-fallback-model",
 			]);
 			expect(modelFallbackMessage).toBeUndefined();
@@ -981,7 +1035,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-model");
 			expect(session.settings.getModelRole("subagent:deferred")).toBe("runtime-provider/runtime-model");
-			expect(session.settings.get("retry.fallbackChains")["subagent:deferred"]).toEqual([
+			expect(cfgRetryFallbackChains.get(session.settings)["subagent:deferred"]).toEqual([
 				"runtime-provider/runtime-fallback-model",
 			]);
 		} finally {
@@ -1007,7 +1061,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-model");
 			expect(session.settings.getModelRole("subagent:deferred-default")).toBe("runtime-provider/runtime-model");
-			expect(session.settings.get("retry.fallbackChains")["subagent:deferred-default"]).toEqual([
+			expect(cfgRetryFallbackChains.get(session.settings)["subagent:deferred-default"]).toEqual([
 				"runtime-provider/runtime-fallback-model",
 			]);
 		} finally {
@@ -1025,7 +1079,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-model");
 			expect(session.settings.getModelRole("subagent:deferred")).toBe("runtime-provider/runtime-model");
-			expect(session.settings.get("retry.fallbackChains")["subagent:deferred"]).toEqual([
+			expect(cfgRetryFallbackChains.get(session.settings)["subagent:deferred"]).toEqual([
 				"runtime-provider/runtime-fallback-model",
 			]);
 		} finally {
@@ -1034,7 +1088,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 	});
 
 	test("does not apply default role thinking override when modelPattern is explicit", async () => {
-		const settings = Settings.isolated({ defaultThinkingLevel: "off" });
+		const settings = Settings.isolated({ defaultThinkingLevel: Effort.Low });
 		settings.setModelRole("smol", "runtime-provider/runtime-fallback-model");
 		settings.setModelRole("default", "@smol:high");
 
@@ -1046,7 +1100,7 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		try {
 			expect(session.model?.provider).toBe("runtime-provider");
 			expect(session.model?.id).toBe("runtime-fallback-model");
-			expect(session.thinkingLevel).toBe("off");
+			expect(session.thinkingLevel).toBe(Effort.Low);
 		} finally {
 			await session.dispose();
 		}
