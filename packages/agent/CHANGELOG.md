@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added tool_execution_end events that fire as each tool call settles for live UI updates
+
 ### Changed
 
+- Emitted tool result messages in the order of tool calls, preserving call order regardless of completion order
 - Reduced repeated token-counting work with a bounded, model-scoped cache of exact text and short-message fragment counts.
 
 ### Fixed
