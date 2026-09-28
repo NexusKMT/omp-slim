@@ -220,7 +220,7 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	options: OpenAIResponsesReplaySanitizeOptions = {},
 ): ResponseInput {
 	const replayItems = dropMalformedOpenAIResponsesToolCalls(items);
-	const supportsImageDetailOriginal = options.supportsImageDetailOriginal !== false;
+	const supportsImageDetailOriginal = options.supportsImageDetailOriginal === true;
 	const computerLinkedReasoningItems =
 		options.supportsComputerUse === false
 			? undefined
