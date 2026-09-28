@@ -10,7 +10,7 @@ use std::{
 
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-	CFArray, CFBoolean, CFRange, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
+	CFArray, CFBoolean, CFNumber, CFRange, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
 };
 
 use super::{
@@ -832,6 +832,13 @@ fn action_name(action: &str) -> String {
 	}
 }
 
+/// Renders an AX attribute value as stable, agent-readable text for
+/// [`AxProps::value`] and `attributes()`.
+///
+/// Numbers print as numbers (checkbox/radio state, slider position) and an
+/// element reference (a radio group's selected button) prints as that
+/// element's title or description, so snapshots never carry CF debug text
+/// whose pointer addresses change between otherwise identical reads.
 fn stringify_value(value: &CFType) -> String {
 	if let Some(string) = value.downcast_ref::<CFString>() {
 		return string.to_string();
@@ -839,7 +846,28 @@ fn stringify_value(value: &CFType) -> String {
 	if let Some(boolean) = value.downcast_ref::<CFBoolean>() {
 		return boolean.as_bool().to_string();
 	}
+	if let Some(number) = value.downcast_ref::<CFNumber>() {
+		return stringify_number(number);
+	}
+	if let Some(element) = value.downcast_ref::<AXUIElement>() {
+		return nonempty(copy_string(element, "AXTitle"))
+			.or_else(|| nonempty(copy_string(element, "AXDescription")))
+			.unwrap_or_default();
+	}
 	format!("{value:?}")
+}
+
+/// Formats a `CFNumber` at its stored precision: `Float32` values read back
+/// as `f32` so `0.185` does not widen to `0.18500000238418579`.
+fn stringify_number(number: &CFNumber) -> String {
+	let text = if !number.is_float_type() {
+		number.as_i64().map(|value| value.to_string())
+	} else if number.byte_size() <= 4 {
+		number.as_f32().map(|value| value.to_string())
+	} else {
+		number.as_f64().map(|value| value.to_string())
+	};
+	text.unwrap_or_default()
 }
 
 fn nonempty(value: Option<String>) -> Option<String> {
@@ -865,7 +893,17 @@ fn ax_result(error: AXError, context: impl Into<String>) -> CoreResult<()> {
 
 #[cfg(test)]
 mod tests {
-	use super::replace_utf16_selection;
+	use objc2_core_foundation::CFNumber;
+
+	use super::{replace_utf16_selection, stringify_value};
+
+	#[test]
+	fn numeric_values_render_as_numbers_at_stored_precision() {
+		assert_eq!(stringify_value(&CFNumber::new_i32(1)), "1");
+		assert_eq!(stringify_value(&CFNumber::new_i64(-3)), "-3");
+		assert_eq!(stringify_value(&CFNumber::new_f64(0.185)), "0.185");
+		assert_eq!(stringify_value(&CFNumber::new_f32(0.185)), "0.185");
+	}
 
 	#[test]
 	fn selected_text_replaces_utf16_selection_without_losing_surrounding_text() {
