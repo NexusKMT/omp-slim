@@ -285,11 +285,11 @@ describe("cursor native editToolCall (StrReplace)", () => {
 		expect(readPaths).toEqual([`${TARGET}:raw`]);
 	});
 
-	it("provides the full file to StrReplace when the local raw read is capped", async () => {
+	/** Materialize `fullText` through a capped local read and return Cursor's decoded read result. */
+	async function materializeCappedRead(fullText: string) {
 		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-edit-full-"));
 		try {
 			const target = path.join(dir, "big.txt");
-			const fullText = Array.from({ length: 1000 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
 			await Bun.write(target, fullText);
 			const output = cursorAssistantMessage();
 			const stream = new AssistantMessageEventStream();
@@ -330,14 +330,25 @@ describe("cursor native editToolCall (StrReplace)", () => {
 			if (answer.message.case !== "execClientMessage" || answer.message.value.message.case !== "readResult") {
 				throw new Error("expected read result");
 			}
-			const result = answer.message.value.message.value.result;
-			if (result.case !== "success" || result.value.output.case !== "content")
-				throw new Error("expected text content");
-			expect(result.value.truncated).toBe(false);
-			expect(result.value.output.value).toBe(fullText);
+			return answer.message.value.message.value.result;
 		} finally {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
+	}
+
+	it("provides the full file to StrReplace when the local raw read is capped", async () => {
+		const fullText = Array.from({ length: 1000 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
+		const result = await materializeCappedRead(fullText);
+		if (result.case !== "success" || result.value.output.case !== "content") throw new Error("expected text content");
+		expect(result.value.truncated).toBe(false);
+		expect(result.value.output.value).toBe(fullText);
+	});
+
+	it("fails StrReplace materialization instead of loading a file past the size cap", async () => {
+		const line = `${"x".repeat(1023)}\n`;
+		const result = await materializeCappedRead(line.repeat(4 * 1024 + 1));
+		if (result.case !== "error") throw new Error(`expected read error, got ${result.case}`);
+		expect(result.value.error).toContain("line-range read");
 	});
 
 	it("appends streamContentDelta onto the open edit block", () => {

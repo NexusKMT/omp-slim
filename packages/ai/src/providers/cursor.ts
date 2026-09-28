@@ -1723,12 +1723,18 @@ async function handleExecServerMessage(
 					typeof path.value === "string"
 				) {
 					try {
-						const content = await fs.readFile(path.value, "utf8");
-						execResult = buildReadResultFromToolResult(args.path, {
-							...toolResult,
-							content: [{ type: "text", text: content }],
-							details: { fileSize: Buffer.byteLength(content, "utf8") },
-						});
+						const content = await readEditMaterialization(path.value);
+						execResult =
+							content === null
+								? buildReadErrorResult(
+										args.path,
+										`File exceeds ${EDIT_MATERIALIZATION_MAX_BYTES} bytes; StrReplace cannot load it whole. Use a line-range read and a targeted edit instead.`,
+									)
+								: buildReadResultFromToolResult(args.path, {
+										...toolResult,
+										content: [{ type: "text", text: content }],
+										details: { fileSize: Buffer.byteLength(content, "utf8") },
+									});
 					} catch (error) {
 						execResult = buildReadErrorResult(args.path, error instanceof Error ? error.message : String(error));
 					}
@@ -2889,6 +2895,42 @@ function readFileSizeFromDetails(toolResult: ToolResultMessage): number | undefi
 	if (!details || typeof details !== "object" || !("fileSize" in details)) return undefined;
 	const { fileSize } = details;
 	return typeof fileSize === "number" && Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : undefined;
+}
+
+/**
+ * Largest file a native StrReplace materializes whole; matches the local
+ * `read` tool's whole-file snapshot cap (`SNAPSHOT_MAX_BYTES`).
+ */
+const EDIT_MATERIALIZATION_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Read a file for native StrReplace materialization, or `null` when it exceeds
+ * {@link EDIT_MATERIALIZATION_MAX_BYTES}. The buffer is sized from the handle's
+ * stat and reading stops one byte past it, so a file growing during the read
+ * cannot exhaust memory.
+ *
+ * Throws when the file grew during the read while still under the cap.
+ */
+async function readEditMaterialization(filePath: string): Promise<string | null> {
+	const handle = await fs.open(filePath, "r");
+	try {
+		const { size } = await handle.stat();
+		if (size > EDIT_MATERIALIZATION_MAX_BYTES) return null;
+		const buffer = Buffer.allocUnsafe(size + 1);
+		let length = 0;
+		while (length < buffer.length) {
+			const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+			if (bytesRead === 0) break;
+			length += bytesRead;
+		}
+		if (length > size) {
+			if (size === EDIT_MATERIALIZATION_MAX_BYTES) return null;
+			throw new Error(`File changed while reading: ${filePath}`);
+		}
+		return buffer.toString("utf8", 0, length);
+	} finally {
+		await handle.close();
+	}
 }
 
 function buildReadResultFromToolResult(path: string, toolResult: ToolResultMessage, rangeApplied = false) {
