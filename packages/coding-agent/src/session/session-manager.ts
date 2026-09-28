@@ -15,7 +15,6 @@ import {
 	getBlobsDir,
 	getProjectDir,
 	getSessionsDir,
-	isBunTestRuntime,
 	isEexist,
 	isEnoent,
 	isEnotdir,
@@ -370,12 +369,11 @@ function entryUsage(entry: SessionEntry): Usage | undefined {
 
 /**
  * Give a usage-less assistant message zero usage so renderers and totals never
- * dereference `undefined`. Every producer should set usage, so under test a
- * missing one throws to surface the producer instead of hiding it.
+ * dereference `undefined`. Persisted and imported transcripts can predate usage
+ * metadata, so this is legitimate history, not a producer bug.
  */
 function repairMissingUsage(entry: SessionEntry): boolean {
 	if (entry.type !== "message" || entry.message.role !== "assistant" || entry.message.usage) return false;
-	if (isBunTestRuntime()) throw new Error(`Assistant message ${entry.id} has no usage`);
 	entry.message.usage = {
 		input: 0,
 		output: 0,
