@@ -816,6 +816,7 @@ export class ProcessTerminal implements Terminal {
 	// Ghostty expires OSC 9;4 state without a heartbeat. Persistent hosts such
 	// as Windows Terminal restart their indeterminate animation on every write.
 	readonly #keepProgressAlive = TERMINAL.id === "ghostty";
+	#bracketedPasteRefreshTimer?: Timer;
 	#progressTimer?: Timer;
 
 	constructor(options?: ProcessTerminalOptions) {
@@ -1772,7 +1773,15 @@ export class ProcessTerminal implements Terminal {
 		// heuristic pure downside — turn it off so stall-batched keystrokes are
 		// not misread as a paste (#12540). `supported` is only true here after an
 		// explicit DECRPM reply (the DA1-sentinel fallback resolves unsupported).
-		if (mode === 2004 && supported) this.#stdinBuffer?.setRawPasteClassification(false);
+		if (mode === 2004 && supported) {
+			this.#stdinBuffer?.setRawPasteClassification(false);
+			// A terminal can reset this mode after the initial probe (for example,
+			// iTerm2's Terminal State toggle). Keep the mode asserted while we own
+			// the TTY, since the raw fallback is disabled after confirmation.
+			this.#bracketedPasteRefreshTimer ??= setInterval(() => {
+				if (this.#active && !this.#dead) this.#safeWrite("\x1b[?2004h");
+			}, 1000);
+		}
 	}
 
 	#syncWindowsTerminalAppearancePolling(mode2031Supported: boolean): void {
@@ -1904,6 +1913,10 @@ export class ProcessTerminal implements Terminal {
 		// Suppress observer/timer callbacks before any teardown can yield or throw.
 		this.#active = false;
 		this.#inputDeferred = false;
+		if (this.#bracketedPasteRefreshTimer) {
+			clearInterval(this.#bracketedPasteRefreshTimer);
+			this.#bracketedPasteRefreshTimer = undefined;
+		}
 		if (this.#headless) return;
 		// Unregister from emergency cleanup
 		if (activeTerminal === this) {
@@ -2070,6 +2083,10 @@ export class ProcessTerminal implements Terminal {
 	#markTerminalDisconnected(reason: string, err?: unknown): void {
 		if (this.#dead) return;
 		this.#dead = true;
+		if (this.#bracketedPasteRefreshTimer) {
+			clearInterval(this.#bracketedPasteRefreshTimer);
+			this.#bracketedPasteRefreshTimer = undefined;
+		}
 		this.#disarmStdoutStallWatchdog();
 		logger.warn("terminal disconnected; stopping interactive rendering", { reason, err });
 
