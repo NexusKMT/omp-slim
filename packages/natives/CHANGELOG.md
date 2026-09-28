@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `summarizeCodeAsync` for non-blocking source structure summarization on the libuv thread pool
+
 ### Fixed
 
 - Fixed ngram word completion losing learned state between sessions on Windows when saving its snapshot ([#13589](https://github.com/can1357/oh-my-pi/issues/13589)).
