@@ -16,6 +16,10 @@
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
 
+### Fixed
+
+- Fixed a wedged shared headless browser staying resident — with every tab omp could not close — until the last session in the project exited; after a failed close omp now replaces a browser whose CDP endpoint has stopped answering ([#<<PR>>](https://github.com/can1357/oh-my-pi/pull/<<PR>>) by [@rlfleming93](https://github.com/rlfleming93)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Added
