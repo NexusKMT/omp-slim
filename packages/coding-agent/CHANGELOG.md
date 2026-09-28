@@ -9,6 +9,8 @@
 
 ### Changed
 
+- `omp stats` and `/stats` open the redesigned stats dashboard immediately instead of waiting for a full session sync; syncing continues in the background with live progress (`omp stats --json`/`--summary` still sync first)
+- `omp stats` and `/stats` now replace the dashboard's Behavior page with a Frustration page that can classify your messages with the `judge` model role (cost estimate first; `/stats` records the spend on the current session)
 - The `eval` tool description now notes that the kernel may be shared with the parent session and concurrent `task` subagents ([#13521](https://github.com/can1357/oh-my-pi/pull/13521) by [@radkawar](https://github.com/radkawar))
 
 ### Fixed

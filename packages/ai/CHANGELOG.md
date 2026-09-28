@@ -11,6 +11,7 @@
 
 ### Changed
 
+- Redesigned the browser page shown during OAuth login
 - Removed an unreachable Cursor MCP exec-resolution branch and the test that pinned it; exec-bridged MCP tool calls behave as before ([#13563](https://github.com/can1357/oh-my-pi/pull/13563))
 
 ### Fixed

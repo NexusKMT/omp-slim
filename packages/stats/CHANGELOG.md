@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Redesigned the dashboard: new layout, navigation (`g` + letter to jump, `1`–`6` to pick a range), sortable tables and in-house charts on every page
+- The dashboard opens immediately and ingests sessions in the background, most recent activity first, with live progress in the header; pages update as data lands and new session activity appears within seconds
+- Switching time ranges is now near-instant: range queries read hourly rollups instead of scanning every request (seconds → milliseconds on large histories)
+- Provider subscription windows load separately from the rest of the Providers page, and the Projects page lists the 2,000 busiest folders
+- Replaced the dashboard's Behavior page with a Frustration page showing, per model version, how often users are annoyed, annoyed at the assistant, and angry at it; a button judges unclassified messages with the host's `judge` model (after a cost estimate) and the chart refines live as verdicts arrive
+
 ### Fixed
 
 - Ensure synchronization of session statistics is atomic, preventing duplicate entries during interrupted syncs
