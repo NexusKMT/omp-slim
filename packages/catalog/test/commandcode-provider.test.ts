@@ -431,6 +431,16 @@ describe("Command Code provider support", () => {
 		).rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
 	});
 
+	test("trusts a pasted key when the whoami route is unavailable", async () => {
+		const login = getProviderDefinition("commandcode")?.login;
+		for (const status of [404, 503]) {
+			const unavailableFetch: FetchImpl = async () => new Response("unavailable", { status });
+			await expect(
+				login?.({ onAuth: vi.fn(), onPrompt: async () => "user_test", fetch: unavailableFetch }),
+			).resolves.toBe("user_test");
+		}
+	});
+
 	test("prices live-discovered models from the Command Code rate card", async () => {
 		const models = await discoverModels([
 			{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },

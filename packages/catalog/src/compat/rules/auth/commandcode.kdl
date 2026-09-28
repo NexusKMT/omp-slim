@@ -1,7 +1,9 @@
 // `/provider/v1/models` is public: it answers 200 to a missing or bogus key.
 // Login therefore validates against `GET /alpha/whoami`, the identity route
 // that command-code@1.66.0 calls. That route answers 401 to a bad key
-// (verified 2026-09-29) and bills nothing.
+// (verified 2026-09-29) and bills nothing. It is not in the Provider API
+// docs, so the probe is optional: a 401/403 still rejects the key, and any
+// other failure (a moved route, a 404, an outage) trusts the pasted key.
 auth "commandcode" {
 	name "Command Code"
 	env "COMMAND_CODE_API_KEY" "COMMANDCODE_API_KEY"
@@ -9,6 +11,6 @@ auth "commandcode" {
 		auth-url "https://commandcode.ai/studio"
 		instructions "Create or copy a Provider API key from Command Code Studio"
 		prompt "Paste your Command Code API key" placeholder="user_..."
-		validate "models-endpoint" label="Command Code" url="https://api.commandcode.ai/alpha/whoami"
+		validate "models-endpoint" label="Command Code" url="https://api.commandcode.ai/alpha/whoami" optional=#true
 	}
 }
