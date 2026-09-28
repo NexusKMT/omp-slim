@@ -15,6 +15,7 @@
 - Fixed keyless Anthropic-compatible endpoints receiving `Authorization: Bearer N/A` and `X-Api-Key: N/A` headers ([#13043](https://github.com/can1357/oh-my-pi/pull/13043) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed legacy Windsurf Enterprise API keys being rejected because they were always sent with the Devin session-token prefix ([#12960](https://github.com/can1357/oh-my-pi/pull/12960)).
 - Fixed an exhausted Cursor "Other Models" pool blocking Grok and Composer, which Cursor bills to its own pool ([#13198](https://github.com/can1357/oh-my-pi/issues/13198)).
+- Fixed Anthropic OAuth requests leaving the agent system prompt without its own cache breakpoint: the breakpoint on the short Claude Code identity block now moves to the last system block, so a request whose messages miss the cache (such as the first after a compaction) reads the cached system prompt instead of writing it again ([#13104](https://github.com/can1357/oh-my-pi/issues/13104), [#13556](https://github.com/can1357/oh-my-pi/pull/13556) by [@aktanazat](https://github.com/aktanazat)).
 
 ## [18.4.0] - 2026-09-28
 
@@ -43,15 +44,6 @@
 - Fixed fetch requests over Unix sockets when `PI_PROXY` is configured.
 - Fixed Ollama chat turns being recorded with zero cost; usage is now priced using the model’s cost information.
 - Fixed Anthropic requests failing after native compaction when per-message effort settings were present; effort controls are now handled correctly with compaction.
-- Fixed native judge responses without token counts producing non-finite usage and cost ([#13490](https://github.com/can1357/oh-my-pi/issues/13490)).
-- Fixed credential rotation failing with a drained account's multi-hour quota error when a healthy sibling was blocked for only a few seconds (such as a Cloud Code Assist capacity 429); rotation now waits out sibling blocks of up to 5 seconds, abortable via `signal`, and retries the freed credential ([#13270](https://github.com/can1357/oh-my-pi/issues/13270))
-- Fixed Cursor turn usage and cost reporting only streamed output tokens; turns now use Cursor's final input, cache-read, cache-write, and reasoning counters ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
-- Fixed Cursor context usage going unrecorded once output tokens had streamed, so compaction and handoff sized the context from output alone ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
-- Fixed Cursor MCP tool calls handed to an external executor (auth-gateway clients) ending the turn as plain text instead of being returned as tool calls ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
-- Fixed Cursor shell tool calls showing their millisecond timeout as seconds (15000 instead of 15) in the transcript ([#13082](https://github.com/can1357/oh-my-pi/issues/13082))
-- Fixed unix-socket fetches failing when `PI_PROXY` is set ([#13505](https://github.com/can1357/oh-my-pi/issues/13505)).
-- Fixed Ollama chat turns recording zero cost; usage is now priced from the model's cost card ([#13056](https://github.com/can1357/oh-my-pi/issues/13056)).
-- Fixed Anthropic OAuth requests leaving the agent system prompt without its own cache breakpoint: the breakpoint on the short Claude Code identity block now moves to the last system block, so a request whose messages miss the cache (such as the first after a compaction) reads the cached system prompt instead of writing it again ([#13104](https://github.com/can1357/oh-my-pi/issues/13104))
 
 ## [18.3.5] - 2026-09-27
 
