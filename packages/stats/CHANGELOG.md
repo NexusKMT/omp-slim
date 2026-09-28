@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.0] - 2026-09-28
+
 ### Changed
 
 - Redesigned the dashboard: new layout, navigation (`g` + letter to jump, `1`–`6` to pick a range), sortable tables and in-house charts on every page
