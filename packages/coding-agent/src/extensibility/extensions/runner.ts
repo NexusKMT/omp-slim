@@ -1328,6 +1328,9 @@ export class ExtensionRunner {
 	 * metadata, `signal`/`onUpdate` default to the wrapper's own channels so aborting the outer tool
 	 * call stops the native one and native progress still streams, and `depth` bounds recursion per
 	 * call chain. Explicit options passed to `invokeTool` override the inherited `signal`/`onUpdate`.
+	 *
+	 * `agent` replaces this runner's identity as `ctx.agent` for work done on behalf of another
+	 * agent that shares the runner (the advisor's toolset, see `ExtensionToolWrapper`).
 	 */
 	createContext(
 		model?: Model,
@@ -1338,6 +1341,7 @@ export class ExtensionRunner {
 			signal?: AbortSignal;
 			onUpdate?: AgentToolUpdateCallback;
 		},
+		agent: ExtensionAgentIdentity = this.agent,
 	): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
 		const runEphemeralTurn = this.#runEphemeralTurnFn;
@@ -1352,7 +1356,7 @@ export class ExtensionRunner {
 			sessionManager: this.sessionManager,
 			modelRegistry: this.modelRegistry,
 			isProjectTrusted: () => true,
-			agent: this.agent,
+			agent,
 			get model() {
 				return getModel();
 			},
@@ -1615,8 +1619,15 @@ export class ExtensionRunner {
 		return result as RunnerEmitResult<TEvent>;
 	}
 
-	async emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined> {
-		const ctx = this.createContext();
+	/**
+	 * Emit a `tool_result` event, letting handlers rewrite content, details and error state.
+	 * `agent` overrides `ctx.agent` when the tool ran for another agent sharing this runner.
+	 */
+	async emitToolResult(
+		event: ToolResultEvent,
+		agent?: ExtensionAgentIdentity,
+	): Promise<ToolResultEventResult | undefined> {
+		const ctx = this.createContext(undefined, undefined, agent);
 		const currentEvent: ToolResultEvent = { ...event };
 		let modified = false;
 
@@ -1672,9 +1683,15 @@ export class ExtensionRunner {
 	 * symmetric with the existing error path below and safer for a
 	 * pre-execution gate — an unresponsive extension MUST NOT be treated as
 	 * silent consent to run the tool.
+	 *
+	 * `agent` overrides `ctx.agent` when the tool runs for another agent sharing this runner.
 	 */
-	async emitToolCall(event: ToolCallEvent, signal?: AbortSignal): Promise<ToolCallEventResult | undefined> {
-		const ctx = this.createContext();
+	async emitToolCall(
+		event: ToolCallEvent,
+		signal?: AbortSignal,
+		agent?: ExtensionAgentIdentity,
+	): Promise<ToolCallEventResult | undefined> {
+		const ctx = this.createContext(undefined, undefined, agent);
 		const timeoutMs = normalizeHandlerTimeout(
 			(this.settings ? cfgExtensionHandlersToolCallTimeoutMs.get(this.settings) : undefined) ??
 				extensionHandlerTimeoutMs,

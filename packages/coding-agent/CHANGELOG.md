@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed advisor tool calls reaching extension `tool_call`/`tool_result` handlers as the main agent; `ctx.agent` now reports `{ kind: "sub", id: "advisor", name: "advisor" }` for them ([#13598](https://github.com/can1357/oh-my-pi/issues/13598))
+
 ## [18.4.1] - 2026-09-28
 
 ### Changed
