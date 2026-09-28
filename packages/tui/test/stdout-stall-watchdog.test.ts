@@ -92,6 +92,7 @@ describe("StdoutStallWatchdog", () => {
 		const oversized = 64 * 1024 * 1024 + 1;
 		expect(wd.sample(oversized, 0)).toBe(false); // arms
 		expect(wd.sample(oversized, 10_000)).toBe(false); // paused 10 s: still alive
-		expect(wd.sample(oversized, 300_000)).toBe(true); // never came back: disconnect
+		expect(wd.sample(oversized, 60_000 - 1)).toBe(false); // still inside the window
+		expect(wd.sample(oversized, 60_000)).toBe(true); // never came back: disconnect at 60 s
 	});
 });
