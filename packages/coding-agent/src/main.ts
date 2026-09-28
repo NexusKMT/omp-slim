@@ -24,7 +24,7 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "./capability";
-import { type Args, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
+import { type Args, reportInvalidFlagValues, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
@@ -466,7 +466,7 @@ export interface AcpSessionFactoryOptions {
 	sessionDir?: string;
 	authStorage: AuthStorage;
 	modelRegistry: ModelRegistry;
-	parsedArgs: Pick<Args, "apiKey" | "trustedExtensions" | "tools">;
+	parsedArgs: Pick<Args, "apiKey" | "trustedExtensions" | "tools" | "invalidFlagValues">;
 	rawArgs: string[];
 	createSession: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>;
 }
@@ -558,6 +558,11 @@ export function createAcpSessionFactory(args: AcpSessionFactoryOptions): AcpSess
 				: undefined,
 			args.rawArgs,
 		);
+		const effectiveArgs = reparsedArgs ?? args.parsedArgs;
+		if (effectiveArgs.invalidFlagValues.length > 0) {
+			await nextSession.dispose();
+			throw new CliUsageError(effectiveArgs.invalidFlagValues.join("\n"));
+		}
 		const requestedTools = reparsedArgs?.tools ?? args.parsedArgs.tools;
 		if (requestedTools) {
 			try {
@@ -2216,13 +2221,17 @@ export async function runRootCommand(
 					process.stderr.write(`${chalk.yellow(`${message}\n`)}`);
 				}
 			}
-			// Fail fast on stale/typo flags (e.g. `omp --list-models`) now that we
-			// know the real extension flag set. Without this check the unrecognized
-			// token gets silently consumed and any following positional leaks as the
-			// initial prompt — kicking off a real LLM session, MCP connection, and
-			// tool calls (issue #2459). Exit code 2 matches the conventional
-			// "command line usage error" convention.
-			if (reportUnrecognizedFlags(initialArgs)) {
+			// Fail fast on stale/typo flags (e.g. `omp --list-models`) and invalid
+			// built-in enum values now that we know the real extension flag set —
+			// an extension may shadow `--mode`/`--thinking`/`--approval-mode`, so
+			// neither can be judged by the pre-extension parse. Without this check
+			// the unrecognized token gets silently consumed and any following
+			// positional leaks as the initial prompt — kicking off a real LLM
+			// session, MCP connection, and tool calls (issue #2459). Exit code 2
+			// matches the conventional "command line usage error" convention.
+			const invalidValues = reportInvalidFlagValues(initialArgs);
+			const unknownFlags = reportUnrecognizedFlags(initialArgs);
+			if (invalidValues || unknownFlags) {
 				process.exit(2);
 			}
 			const processedFiles =

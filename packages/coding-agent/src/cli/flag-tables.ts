@@ -123,7 +123,7 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
 			result.mode = value;
 		} else {
-			throw new CliUsageError(
+			result.invalidFlagValues.push(
 				`Invalid --mode value: ${JSON.stringify(value)}. Expected one of: text, json, rpc, rpc-ui, acp.`,
 			);
 		}
@@ -201,9 +201,10 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	"--thinking": (result, value, deps) => {
 		const thinking = deps.parseThinking(value);
 		if (thinking === undefined) {
-			throw new CliUsageError(
+			result.invalidFlagValues.push(
 				`Invalid --thinking value: ${JSON.stringify(value)}. Expected one of: ${deps.thinkingEfforts.join(", ")}.`,
 			);
+			return;
 		}
 		result.thinking = thinking;
 	},
@@ -229,9 +230,10 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
 	},
 	"--approval-mode": (result, value) => {
 		if (value !== "always-ask" && value !== "write" && value !== "yolo") {
-			throw new CliUsageError(
+			result.invalidFlagValues.push(
 				`Invalid --approval-mode value: ${JSON.stringify(value)}. Expected one of: always-ask, write, yolo.`,
 			);
+			return;
 		}
 		result.approvalMode = value;
 	},
