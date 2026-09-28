@@ -1,8 +1,7 @@
 import { mock } from "bun:test";
-import type { Model } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { buildFactoryDroidModel } from "@oh-my-pi/pi-catalog/discovery";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { buildFactoryDroidModel, FACTORY_DROID_MODEL_META } from "@oh-my-pi/pi-catalog/discovery";
 
 /** One captured request: URL, lowercased headers, and the parsed JSON body. */
 export interface CapturedRequest {
@@ -11,28 +10,20 @@ export interface CapturedRequest {
 	body: Record<string, unknown>;
 }
 
-/** Build a 200 `text/event-stream` response from bare SSE data lines. */
-export function sseResponse(chunks: string[], responseHeaders?: Record<string, string>): Response {
-	const body = `${chunks.map(chunk => `data: ${chunk}`).join("\n\n")}\n\ndata: [DONE]\n\n`;
-	return new Response(body, {
-		status: 200,
-		headers: { "Content-Type": "text/event-stream", ...responseHeaders },
-	});
-}
-
 /**
  * Mock fetch that records every request into `captured` (normalizing headers
  * to lowercase and decoding string/Uint8Array bodies) and replies with the
- * given SSE chunks. When `eventNames` is provided, chunks are wrapped in
- * named SSE `event:` frames (the anthropic wire); otherwise they use the
- * bare `data:` framing.
+ * given SSE chunks. Chunks carrying a `type` ride named `event:` frames, as the
+ * anthropic wire streams them; the rest use bare `data:` framing ended by
+ * `[DONE]`.
  */
-export function captureFetch(
-	captured: CapturedRequest[],
-	chunks: string[],
-	eventNames?: string[],
-	responseHeaders?: Record<string, string>,
-) {
+export function captureFetch(captured: CapturedRequest[], chunks: string[], responseHeaders?: Record<string, string>) {
+	const frames = chunks.map(chunk => {
+		const { type } = JSON.parse(chunk) as { type?: unknown };
+		return typeof type === "string" ? `event: ${type}\ndata: ${chunk}` : `data: ${chunk}`;
+	});
+	if (!frames.some(frame => frame.startsWith("event:"))) frames.push("data: [DONE]");
+	const body = `${frames.join("\n\n")}\n\n`;
 	return mock(async (url: string | URL | Request, init?: RequestInit) => {
 		const rawHeaders = (init?.headers ?? {}) as Record<string, string>;
 		const headers: Record<string, string> = {};
@@ -49,8 +40,6 @@ export function captureFetch(
 			headers,
 			body: JSON.parse(bodyText || "{}") as Record<string, unknown>,
 		});
-		if (!eventNames) return sseResponse(chunks, responseHeaders);
-		const body = `${chunks.map((chunk, i) => `event: ${eventNames[i] ?? "message"}\ndata: ${chunk}`).join("\n\n")}\n\n`;
 		return new Response(body, {
 			status: 200,
 			headers: { "Content-Type": "text/event-stream", ...responseHeaders },
@@ -99,16 +88,6 @@ export function responsesChunks(text: string): string[] {
 	];
 }
 
-/** Named SSE event sequence for the anthropic messages stream. */
-export const ANTHROPIC_EVENTS = [
-	"message_start",
-	"content_block_start",
-	"content_block_delta",
-	"content_block_stop",
-	"message_delta",
-	"message_stop",
-];
-
 /** Anthropic messages SSE chunks for a single text turn. */
 export function anthropicChunks(text: string): string[] {
 	return [
@@ -132,29 +111,6 @@ export function anthropicChunks(text: string): string[] {
 	];
 }
 
-/** Gemini generateContent chunks carrying two signed function calls, then STOP. */
-export function geminiToolChunks(): string[] {
-	return [
-		JSON.stringify({
-			candidates: [
-				{
-					content: {
-						role: "model",
-						parts: [
-							{ functionCall: { name: "Read", args: { path: "/tmp/x" } }, thoughtSignature: "sig-abc" },
-							{ functionCall: { name: "Read", args: { path: "/tmp/y" } }, thoughtSignature: "sig-def" },
-						],
-					},
-				},
-			],
-		}),
-		JSON.stringify({
-			candidates: [{ content: { role: "model", parts: [{ text: "" }] }, finishReason: "STOP" }],
-			usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 4 },
-		}),
-	];
-}
-
 /** Gemini generateContent chunks for a plain text turn. */
 export function geminiChunks(text: string): string[] {
 	return [
@@ -174,81 +130,35 @@ export function finishChunk(reason: string): string {
 	});
 }
 
-export function kimiK3(): Model<"factory-droid-agent"> {
-	return buildModel(
-		buildFactoryDroidModel({
-			id: "kimi-k3",
-			name: "Kimi K3 (Droid Core)",
-			wire: "openai-completions",
-			contextWindow: 262_144,
-			maxTokens: 65_536,
-			apiProviders: ["fireworks", "baseten"],
-			supportedReasoningEfforts: ["off", Effort.Low, Effort.High, Effort.Max],
-			defaultReasoningEffort: Effort.High,
-		}),
-	);
+/** A Factory model built from its native registry row, optionally pinned to a live rotation. */
+export function factoryModel(id: string, rotation?: readonly string[]): Model<"factory-droid-agent"> {
+	const meta = FACTORY_DROID_MODEL_META[id];
+	if (!meta) throw new Error(`Unknown Factory Droid model: ${id}`);
+	return buildModel(buildFactoryDroidModel(meta, { apiProviders: rotation }));
 }
 
-export function nemotron(): Model<"factory-droid-agent"> {
-	return buildModel(
-		buildFactoryDroidModel({
-			id: "nemotron-3-ultra",
-			name: "Nemotron 3 Ultra (Droid Core)",
-			wire: "openai-completions",
-			contextWindow: 136_464,
-			maxTokens: 65_536,
-			apiProviders: ["baseten", "fireworks"],
-			supportedReasoningEfforts: ["off", Effort.High],
-			defaultReasoningEffort: Effort.High,
-			noImageSupport: true,
-		}),
-	);
+/** A stored Factory completions assistant turn; tool calls make it a `toolUse` stop. */
+export function assistantTurn(content: AssistantMessage["content"], model: string): AssistantMessage {
+	return {
+		role: "assistant",
+		content,
+		api: "openai-completions",
+		provider: "factory-droid",
+		model,
+		usage: {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: content.some(block => block.type === "toolCall") ? "toolUse" : "stop",
+		timestamp: 2,
+	};
 }
 
-export function gptTerra(): Model<"factory-droid-agent"> {
-	return buildModel(
-		buildFactoryDroidModel({
-			id: "gpt-5.6-terra",
-			name: "GPT-5.6 Terra",
-			wire: "openai-responses",
-			contextWindow: 922_000,
-			maxTokens: 128_000,
-			apiProviders: ["openai"],
-			supportedReasoningEfforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
-			defaultReasoningEffort: Effort.Medium,
-			responsesConfig: { verbosity: "low", parallelToolCalls: true, extendedCache: true, safetyId: true },
-		}),
-	);
-}
-
-export function sonnet5(): Model<"factory-droid-agent"> {
-	return buildModel(
-		buildFactoryDroidModel({
-			id: "claude-sonnet-5",
-			name: "Sonnet 5",
-			wire: "anthropic-messages",
-			contextWindow: 872_000,
-			maxTokens: 128_000,
-			apiProviders: ["anthropic", "vertex_anthropic", "bedrock_anthropic"],
-			supportedReasoningEfforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
-			defaultReasoningEffort: Effort.High,
-			thinkingStyle: "adaptive-summarized",
-		}),
-	);
-}
-
-export function gemini(): Model<"factory-droid-agent"> {
-	return buildModel(
-		buildFactoryDroidModel({
-			id: "gemini-3.1-pro-preview",
-			name: "Gemini 3.1 Pro",
-			wire: "google-generate",
-			contextWindow: 1_000_000,
-			maxTokens: 65_536,
-			apiProviders: ["google"],
-			supportedReasoningEfforts: [Effort.Low, Effort.Medium, Effort.High],
-			defaultReasoningEffort: Effort.High,
-			geminiMedium: true,
-		}),
-	);
-}
+export const kimiK3 = (): Model<"factory-droid-agent"> => factoryModel("kimi-k3");
+export const gptTerra = (): Model<"factory-droid-agent"> => factoryModel("gpt-5.6-terra");
+export const sonnet5 = (): Model<"factory-droid-agent"> => factoryModel("claude-sonnet-5");
+export const gemini = (): Model<"factory-droid-agent"> => factoryModel("gemini-3.1-pro-preview");

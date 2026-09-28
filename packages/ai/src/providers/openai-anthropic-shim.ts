@@ -9,8 +9,7 @@
  */
 
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { ANTHROPIC_THINKING } from "@oh-my-pi/pi-catalog/effort";
-import { mapAnthropicToolChoice } from "../stream";
+import { ANTHROPIC_THINKING, mapAnthropicToolChoice } from "../stream";
 import type { Context, Model, ModelSpec, SimpleStreamOptions, ThinkingControlMode } from "../types";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { createProviderErrorMessage } from "./error-message";
