@@ -8,9 +8,9 @@
 
 ### Fixed
 
-- Fixed pane and window resizes replaying the whole transcript — one destructive clear-and-replay per settled step of a drag — which flashed the screen and stalled the loop; a resize burst now commits a single settled repaint, erasing and re-streaming history once at its final geometry
-- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen
-- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step
+- Fixed pane and window resizes replaying the whole transcript — one destructive clear-and-replay per settled step of a drag — which flashed the screen and stalled the loop; a resize burst now commits a single settled repaint, erasing and re-streaming history once at its final geometry ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed the `@` completion popup showing a `Searching…` placeholder while a refreshed file search is pending; the popup now stays hidden until results arrive, and Escape is no longer swallowed by it
 - Fixed multi-line IME and dictation input (for example, voice input in Ghostty or cmux) being sent as one message per line; it now lands in the prompt as a single multi-line draft, while Enter typed during a UI freeze still submits ([#13378](https://github.com/can1357/oh-my-pi/pull/13378) by [@goransh-walia](https://github.com/goransh-walia))
 
