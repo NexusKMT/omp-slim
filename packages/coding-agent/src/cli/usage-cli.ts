@@ -1231,19 +1231,18 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			disableExtensionDiscovery: cmd.noExtensions,
 			includeAmbientHooks: false,
 		});
-		const reports =
-			(await authStorage.usage.reports({
-				baseUrlResolver: provider => modelRegistry.getProviderBaseUrl(provider),
-			})) ?? [];
-		// Reports are always fresh (broker-side fetch) but the account list can
-		// come from a disk-cached snapshot up to an hour old — revalidate so a
-		// just-logged-in (or just-rotated-identity) credential isn't rendered
-		// as a stale duplicate. Best-effort: offline broker keeps the cache.
+		// The broker may serve reports for credentials newer than the local
+		// snapshot. Refresh before probing extension providers with local keys
+		// and before labeling accounts; offline brokers keep the cached snapshot.
 		try {
 			await authStorage.credentials.revalidate();
 		} catch {
 			// Stale identities beat no output.
 		}
+		const reports =
+			(await authStorage.usage.reports({
+				baseUrlResolver: provider => modelRegistry.getProviderBaseUrl(provider),
+			})) ?? [];
 		const storedAccounts = collectStoredAccounts(authStorage);
 		let accounts = selectReportableAccounts(
 			storedAccounts,

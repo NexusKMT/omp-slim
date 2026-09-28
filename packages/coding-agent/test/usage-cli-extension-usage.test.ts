@@ -8,7 +8,7 @@
 import { Database } from "bun:sqlite";
 import * as path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "bun:test";
-import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
+import { AuthStorage, SqliteAuthCredentialStore, type UsageReport } from "@oh-my-pi/pi-ai";
 import { runUsageCommand } from "@oh-my-pi/pi-coding-agent/cli/usage-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
@@ -36,14 +36,21 @@ const EXTENSION_SOURCE = `export default function (pi) {
 }
 `;
 
+class BrokerUsageStore extends SqliteAuthCredentialStore {
+	async fetchUsageReports(): Promise<UsageReport[]> {
+		return [{ provider: "anthropic", fetchedAt: Date.now(), limits: [] }];
+	}
+}
+
 let tmp: TempDir;
 let extPath: string;
+let authStorage: AuthStorage;
 
 beforeEach(async () => {
 	tmp = await TempDir.create("@issue-13579-");
 	extPath = tmp.join("ext.ts");
 	await Bun.write(extPath, EXTENSION_SOURCE);
-	const authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+	authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
 	await authStorage.credentials.reload();
 	await authStorage.credentials.set("ext-usage", { type: "api_key", key: "sk-test" });
 	vi.spyOn(Settings, "loadReadOnly").mockResolvedValue(Settings.isolated());
@@ -55,7 +62,7 @@ afterEach(async () => {
 	await tmp.remove();
 });
 
-async function usageJson(options: { extensions?: string[]; noExtensions?: boolean }): Promise<{
+async function usageJson(options: { extensions?: string[]; noExtensions?: boolean; provider?: string }): Promise<{
 	reports: Array<{ provider: string; limits: Array<{ id: string }> }>;
 	accountsWithoutUsage: Array<{ provider: string }>;
 }> {
@@ -86,4 +93,27 @@ test("omp usage skips ambient hook factories but retains configured usage provid
 	const output = await usageJson({});
 	expect(output.reports.map(report => report.provider)).toEqual(["ext-usage"]);
 	expect(await Bun.file(marker).exists()).toBe(false);
+});
+
+test("omp usage combines broker reports with locally registered extension usage", async () => {
+	authStorage.close();
+	authStorage = new AuthStorage(new BrokerUsageStore(new Database(":memory:")));
+	await authStorage.credentials.reload();
+	await authStorage.credentials.set("ext-usage", { type: "api_key", key: "sk-test" });
+	await authStorage.credentials.set("anthropic", { type: "api_key", key: "sk-broker" });
+	const brokerProbe = vi.fn(async (): Promise<UsageReport> => ({
+		provider: "anthropic",
+		fetchedAt: Date.now(),
+		limits: [],
+	}));
+	authStorage.usage.setProvider("anthropic", { id: "anthropic", fetchUsage: brokerProbe });
+	vi.spyOn(sdkModule, "discoverAuthStorage").mockResolvedValue(authStorage);
+
+	const output = await usageJson({ extensions: [extPath], noExtensions: true, provider: undefined });
+	expect(output.reports.map(report => [report.provider, report.limits.map(limit => limit.id)])).toEqual([
+		["anthropic", []],
+		["ext-usage", ["credits"]],
+	]);
+	expect(output.accountsWithoutUsage).toEqual([]);
+	expect(brokerProbe).not.toHaveBeenCalled();
 });
