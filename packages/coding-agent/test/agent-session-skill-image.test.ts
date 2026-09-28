@@ -76,8 +76,11 @@ function setup(options: { responses?: MockResponseSource; beforeVisionReply?: ()
 		"data: [DONE]\n\n";
 	const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
 		Object.assign(
-			async () => {
-				await options.beforeVisionReply?.();
+			async (input: string | URL | Request) => {
+				// Only the vision role (openai-completions) is gated; unrelated side requests
+				// such as auto-title generation on the anthropic endpoint pass straight through.
+				const url = input instanceof Request ? input.url : String(input);
+				if (url.endsWith("/chat/completions")) await options.beforeVisionReply?.();
 				return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 			},
 			{ preconnect: fetch.preconnect },
@@ -89,7 +92,11 @@ function setup(options: { responses?: MockResponseSource; beforeVisionReply?: ()
 		authStorage.close();
 		tempDir.removeSync();
 	});
-	return { session, mock, fetchSpy };
+	const visionCalls = () =>
+		fetchSpy.mock.calls.filter(([input]) =>
+			(input instanceof Request ? input.url : String(input)).endsWith("/chat/completions"),
+		).length;
+	return { session, mock, visionCalls };
 }
 
 function expectDescriptionBeforeSkill(messages: { role: string; content: unknown }[]) {
@@ -104,18 +111,18 @@ function expectDescriptionBeforeSkill(messages: { role: string; content: unknown
 }
 
 it("describes a pasted image in an idle user-invoked skill before the main model call", async () => {
-	const { session, mock, fetchSpy } = setup();
+	const { session, mock, visionCalls } = setup();
 	await session.promptCustomMessage(skill);
-	expect(fetchSpy).toHaveBeenCalledTimes(1);
+	expect(visionCalls()).toBe(1);
 	expectDescriptionBeforeSkill(mock.calls[0]?.context.messages ?? []);
 });
 
 it("describes a queued user-invoked skill image before delivery", async () => {
-	const { session, mock, fetchSpy } = setup();
+	const { session, mock, visionCalls } = setup();
 	await session.promptCustomMessage(skill, { streamingBehavior: "followUp", queueOnly: true });
 	await session.prompt("kickoff");
 	await session.waitForIdle();
-	expect(fetchSpy).toHaveBeenCalledTimes(1);
+	expect(visionCalls()).toBe(1);
 	const skillRequest = mock.calls.find(call =>
 		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
 	);
@@ -127,7 +134,7 @@ it("queues an image-bearing skill when another turn starts during vision preproc
 	const releaseVision = Promise.withResolvers<void>();
 	const otherStarted = Promise.withResolvers<void>();
 	const releaseOther = Promise.withResolvers<void>();
-	const { session, mock, fetchSpy } = setup({
+	const { session, mock, visionCalls } = setup({
 		beforeVisionReply: async () => {
 			visionStarted.resolve();
 			await releaseVision.promise;
@@ -152,7 +159,7 @@ it("queues an image-bearing skill when another turn starts during vision preproc
 	releaseOther.resolve();
 	await otherTurn;
 	await session.waitForIdle();
-	expect(fetchSpy).toHaveBeenCalledTimes(1);
+	expect(visionCalls()).toBe(1);
 	const skillRequest = mock.calls.find(call =>
 		call.context.messages.some(message => JSON.stringify(message.content).includes("Expanded skill.")),
 	);
