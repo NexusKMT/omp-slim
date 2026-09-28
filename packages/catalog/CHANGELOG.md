@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Changed
 
 - Improved model cache invalidation efficiency by implementing deep equality checks on cached rows when database version signals change

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Added
 
 - Added tool_execution_end events that fire as each tool call settles for live UI updates

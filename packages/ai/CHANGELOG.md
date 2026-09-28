@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Fixed
 
 - Fixed successful Cursor agent turns being treated as context overflows, which ran overflow compaction and showed "Compaction freed too little context to make progress" while `/context` read well under the window; overflow detection now uses the reported context size instead of input totals summed across a turn's model calls ([#13608](https://github.com/can1357/oh-my-pi/pull/13608) by [@H4vC](https://github.com/H4vC))

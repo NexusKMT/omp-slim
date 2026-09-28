@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Added
 
 - Added `summarizeCodeAsync` for non-blocking source structure summarization on the libuv thread pool

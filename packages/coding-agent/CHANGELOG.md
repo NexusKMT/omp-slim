@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Added
 
 - The shell's `cp` builtin accepts macOS's `-c` (clone where possible, else copy; same as `--reflink=auto`).

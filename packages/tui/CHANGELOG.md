@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.2] - 2026-09-28
+
 ### Changed
 
 - Optimized activity clock rendering by caching timestamp formatting strings
