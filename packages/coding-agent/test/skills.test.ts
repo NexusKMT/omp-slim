@@ -17,6 +17,7 @@ import { SkillProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/sk
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
 import { restoreEnvValue } from "./helpers/settings-test-state";
 const fixturesDir = path.resolve(import.meta.dirname, "fixtures/skills");
+const collisionFixturesDir = path.resolve(import.meta.dirname, "fixtures/skills-collision");
 
 const longSkillName = "this-is-a-very-long-skill-name-that-exceeds-the-sixty-four-character-limit-set-by-the-standard";
 const expectedFixtureSkillOrder: string[] = [
