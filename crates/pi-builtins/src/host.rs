@@ -491,17 +491,7 @@ impl Host {
 			.get_or_init(|| self.stdout_handle.as_ref().and_then(output_metadata))
 			.as_ref()
 			.is_some_and(|stdout| {
-				if !stdout.is_file() {
-					return false;
-				}
-				// Windows path stats do not carry a file index, so compare an
-				// open handle there. On Unix, stat is sufficient and avoids
-				// blocking while probing a FIFO or other non-regular path.
-				#[cfg(windows)]
-				let candidate = self.fs().open(path).and_then(|file| file.metadata());
-				#[cfg(not(windows))]
-				let candidate = self.fs().metadata(path);
-				candidate.is_ok_and(|candidate| stdout.same_file(&candidate))
+				stdout.is_file() && self.fs().metadata(path).is_ok_and(|candidate| stdout.same_file(&candidate))
 			})
 	}
 
