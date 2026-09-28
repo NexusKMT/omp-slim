@@ -477,6 +477,29 @@ describe("TranscriptContainer", () => {
 		expect(blocks[39]!.renders).toBeGreaterThan(0);
 	});
 
+	it("keeps an emergency row from a block behind the bounded viewport walk", () => {
+		class HintBlock extends Block {
+			renderTranscriptBlockEmergencyRow(): string {
+				return "hint";
+			}
+		}
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["running"], false));
+		transcript.addChild(new HintBlock(["hint body"], true));
+		for (let index = 0; index < 5; index++) transcript.addChild(new Block([`settled ${index}`], true));
+
+		expect(transcript.renderViewport(80, 2, frame)).toEqual(["hint", "settled 4"]);
+	});
+
+	it("does not count empty active blocks behind the viewport as hidden work", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new Block(["running"], false));
+		transcript.addChild(new Block([], false));
+		for (let index = 0; index < 4; index++) transcript.addChild(new Block([`settled ${index}`], true));
+
+		expect(transcript.renderViewport(80, 2, frame)).toEqual(["settled 2", "settled 3"]);
+	});
+
 	it("excludes empty blocks so pressure never emits blank rows (issue 9483)", () => {
 		const transcript = new TranscriptContainer();
 		// Text blocks interleaved with empty (hidden tool-activity) blocks that

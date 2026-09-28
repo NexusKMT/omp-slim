@@ -388,13 +388,9 @@ export class TranscriptContainer extends Container {
 			return EMPTY_ROWS;
 		}
 		if (shown.length > capacity) {
-			// Blocks the walk never reached are still transcript state: their
-			// active count feeds the emergency summary without rendering them.
-			let hiddenBelow = 0;
-			for (let cursor = 0; cursor < unrendered; cursor++) {
-				if (live[cursor]!.entry.state === "active") hiddenBelow++;
-			}
-			return this.#renderEmergency(shown, width, capacity, frame, hiddenBelow);
+			// Blocks the walk never reached are still transcript state: the
+			// emergency layout consults them only where it must.
+			return this.#renderEmergency(shown, live.slice(0, unrendered), width, capacity, frame);
 		}
 		if (total <= capacity) {
 			const output: string[] = [];
@@ -887,16 +883,40 @@ export class TranscriptContainer extends Container {
 
 	/**
 	 * One-row-per-block fallback for a live region that cannot fit the viewport.
-	 * `hiddenBelow` counts active blocks `renderViewport` deliberately left
-	 * unrendered behind the screen, so the summary still reports them.
+	 * `behind` holds the older live blocks `renderViewport` deliberately left
+	 * unrendered. Only its active blocks (few) and the newest settled block
+	 * offering an emergency row are rendered, so the summary count and the
+	 * surviving emergency row match a full walk without rendering the ledger.
 	 */
 	#renderEmergency(
 		shown: readonly { entry: TranscriptEntry; index: number }[],
+		behind: readonly { entry: TranscriptEntry; index: number }[],
 		width: number,
 		rows: number,
 		frame: AnimationFrame,
-		hiddenBelow: number,
 	): readonly string[] {
+		let hiddenBelow = 0;
+		for (const candidate of behind) {
+			if (candidate.entry.state !== "active") continue;
+			if (this.#liveBlockRows(candidate.entry, candidate.index, width).length > 0) hiddenBelow++;
+		}
+		let behindEmergency: { candidate: { entry: TranscriptEntry; index: number }; row: string } | null | undefined;
+		const findBehindEmergency = () => {
+			if (behindEmergency !== undefined) return behindEmergency;
+			behindEmergency = null;
+			for (let index = behind.length - 1; index >= 0; index--) {
+				const candidate = behind[index]!;
+				if (candidate.entry.state !== "settled") continue;
+				const block = candidate.entry.component as Component & FinalizableBlock;
+				if (block.renderTranscriptBlockEmergencyRow === undefined) continue;
+				if (this.#liveBlockRows(candidate.entry, candidate.index, width).length === 0) continue;
+				const row = block.renderTranscriptBlockEmergencyRow(width);
+				if (row === undefined) continue;
+				behindEmergency = { candidate, row };
+				break;
+			}
+			return behindEmergency;
+		};
 		let visibleRows = rows;
 		let visible: { entry: TranscriptEntry; index: number }[] = [];
 		let emergencyCandidate: { entry: TranscriptEntry; index: number } | undefined;
@@ -917,6 +937,14 @@ export class TranscriptContainer extends Container {
 				emergencyRow = row;
 				visible = [candidate, ...visible.slice(1)];
 				break;
+			}
+			if (emergencyCandidate === undefined) {
+				const found = findBehindEmergency();
+				if (found !== null) {
+					emergencyCandidate = found.candidate;
+					emergencyRow = found.row;
+					visible = [found.candidate, ...visible.slice(1)];
+				}
 			}
 
 			let activeTotal = hiddenBelow;
