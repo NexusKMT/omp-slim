@@ -24,7 +24,7 @@ class TestSettings {
 	readonly records = new Map<string, Record<string, string>>();
 	readonly writes: string[] = [];
 
-	setMember(key: string, item: string, member: boolean): void {
+	setMember(key: string, item: string, { member }: { member: boolean }): void {
 		const rest = (this.lists.get(key) ?? []).filter(entry => entry !== item);
 		this.lists.set(key, member ? [...rest, item] : rest);
 		this.writes.push(`${key}[${item}]`);
@@ -108,7 +108,7 @@ async function createHub(settings: TestSettings): Promise<{
 			resolvePatterns: () => undefined,
 			effectivePrewalkPattern: () => undefined,
 			effectiveAdvisorPattern: agent => (agent.advisorOverride === "on" ? "@advisor" : undefined),
-			setAgentDisabled: (name, disabled) => settings.setMember("task.disabledAgents", name, disabled),
+			setAgentDisabled: (name, { disabled }) => settings.setMember("task.disabledAgents", name, { member: disabled }),
 			setAgentOverride: (property, name, value) => settings.setEntry(OVERRIDE_KEYS[property], name, value),
 			generateAgent: async () => {
 				throw new Error("Agent generation is not used by configuration tests");

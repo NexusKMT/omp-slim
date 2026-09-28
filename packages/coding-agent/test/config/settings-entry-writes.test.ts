@@ -141,8 +141,8 @@ describe("Settings entry-level writes", () => {
 	it("changes the persisted agent list by the toggled item only while an overlay supplies the list", async () => {
 		const settings = await load({ task: { disabledAgents: ["reviewer"] } }, { task: { disabledAgents: ["scout"] } });
 
-		cfgTaskDisabledAgents.setMember(settings, "dev", true);
-		cfgTaskDisabledAgents.setMember(settings, "reviewer", false);
+		cfgTaskDisabledAgents.setMember(settings, "dev", { member: true });
+		cfgTaskDisabledAgents.setMember(settings, "reviewer", { member: false });
 		await settings.flush();
 
 		expect(await readConfig()).toEqual({ task: { disabledAgents: ["dev"] } });

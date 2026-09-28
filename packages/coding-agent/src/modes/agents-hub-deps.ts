@@ -112,7 +112,7 @@ export function createAgentsHubDeps(
 			});
 			return selection ? (selection.model ?? "@advisor") : undefined;
 		},
-		setAgentDisabled: (name, disabled) => cfgTaskDisabledAgents.setMember(settings, name, disabled),
+		setAgentDisabled: (name, { disabled }) => cfgTaskDisabledAgents.setMember(settings, name, { member: disabled }),
 		setAgentOverride: (property, name, value) => {
 			const setting =
 				property === "model"

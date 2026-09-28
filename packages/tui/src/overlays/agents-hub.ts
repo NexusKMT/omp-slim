@@ -111,7 +111,7 @@ export interface AgentsHubDeps {
 	effectivePrewalkPattern: (agent: HubAgent) => string | undefined;
 	effectiveAdvisorPattern: (agent: HubAgent) => string | undefined;
 	/** Persist one agent's enabled state; other agents are untouched. */
-	setAgentDisabled: (name: string, disabled: boolean) => void;
+	setAgentDisabled: (name: string, options: { disabled: boolean }) => void;
 	/** Persist one agent's override for `property`; `undefined` clears it. Other agents are untouched. */
 	setAgentOverride: (property: PropertyKind, name: string, value: string | undefined) => void;
 	generateAgent: (description: string, onText: (text: string) => void) => Promise<string>;
@@ -343,7 +343,7 @@ export class AgentsHubComponent implements Component {
 
 	#toggleAgent(agent: HubAgent): void {
 		agent.disabled = !agent.disabled;
-		this.#deps.setAgentDisabled(agent.name, agent.disabled);
+		this.#deps.setAgentDisabled(agent.name, { disabled: agent.disabled });
 		this.#notice = `${agent.name} ${agent.disabled ? "disabled" : "enabled"}`;
 		this.#tui.requestRender();
 	}

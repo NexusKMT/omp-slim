@@ -752,8 +752,8 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
 	 *
 	 * @throws Error when this is not a list setting or the resulting list does not fit the definition.
 	 */
-	setMember(scope: ScopeLike, item: string, member: boolean): void {
-		settingsOf(scope).writeMember(this, item, member);
+	setMember(scope: ScopeLike, item: string, options: { member: boolean }): void {
+		settingsOf(scope).writeMember(this, item, options);
 	}
 
 	/**

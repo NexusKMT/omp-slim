@@ -932,7 +932,7 @@ export class Settings {
 	 *
 	 * @throws Error when `setting` is not a list or the resulting list fails its `items`/`validate` check.
 	 */
-	writeMember(setting: AnySetting, item: string, member: boolean): void {
+	writeMember(setting: AnySetting, item: string, { member }: { member: boolean }): void {
 		if (setting.type !== "array") throw new Error(`Setting ${setting.id} is not a list`);
 		const list = getByPath(this.#global, setting.segments);
 		const base: readonly unknown[] = Array.isArray(list) ? list : (setting.default as readonly unknown[]);
