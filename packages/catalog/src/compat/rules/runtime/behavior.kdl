@@ -193,7 +193,7 @@ behavior {
 	}
 	// Command Code serves Claude ids through its Anthropic-compatible Messages
 	// endpoint, `gpt-*` ids through its Responses endpoint (the same split
-	// command-code@1.66.0 uses), and every other id through chat completions.
+	// command-code@1.67.0 uses), and every other id through chat completions.
 	api-routes provider="commandcode" default="openai-completions" {
 		route "anthropic-messages" prefix="claude-"
 		route "openai-responses" prefix="gpt-"

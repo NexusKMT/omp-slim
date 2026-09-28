@@ -40,8 +40,8 @@ function finiteNumber(value: unknown): number | undefined {
 
 /**
  * Returns the unwrapped JSON body, or `null` for any failure that should read
- * as "no data". Only an auth status throws, so a revoked key purges the cached
- * report instead of re-serving it.
+ * as "no data", 403 included. Only a 401 throws, so a revoked key purges the
+ * cached report instead of re-serving it.
  */
 async function getJson(
 	url: string,

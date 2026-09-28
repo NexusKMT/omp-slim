@@ -183,7 +183,7 @@ describe("Command Code provider support", () => {
 			api: "anthropic-messages",
 			baseUrl: "https://api.commandcode.ai/provider",
 			reasoning: true,
-			// KDL grants image input from the command-code@1.66.0 registry; the
+			// KDL grants image input from the command-code@1.67.0 registry; the
 			// discovery row carries no modality metadata of its own.
 			input: ["text", "image"],
 			contextWindow: 1_000_000,

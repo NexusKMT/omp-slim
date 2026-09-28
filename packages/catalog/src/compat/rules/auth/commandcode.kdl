@@ -1,6 +1,6 @@
 // `/provider/v1/models` is public: it answers 200 to a missing or bogus key.
 // Login therefore validates against `GET /alpha/whoami`, the identity route
-// that command-code@1.66.0 calls. That route answers 401 to a bad key
+// that command-code@1.67.0 calls. That route answers 401 to a bad key
 // (verified 2026-09-29) and bills nothing. It is not in the Provider API
 // docs, so the probe is optional: a 401/403 still rejects the key, and any
 // other failure (a moved route, a 404, an outage) trusts the pasted key.
