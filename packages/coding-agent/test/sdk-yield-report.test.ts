@@ -30,10 +30,15 @@ afterEach(async () => {
 });
 
 async function harness(
-	doneOnly: boolean,
-	delayed: boolean,
-	options: { input?: Record<string, unknown>; outputSchema?: unknown; text?: string } = {},
+	options: {
+		doneOnly?: boolean;
+		delayed?: boolean;
+		input?: Record<string, unknown>;
+		outputSchema?: unknown;
+		text?: string;
+	} = {},
 ) {
+	const { doneOnly = false, delayed = false } = options;
 	const root = TempDir.createSync("@pi-yield-report-");
 	roots.push(root);
 	const auth = createInMemoryAuthStorage();
@@ -109,7 +114,7 @@ describe("SDK data-less yield report", () => {
 		[false, false, true],
 	]) {
 		it(`submits preceding prose through the real loop (done-only=${doneOnly}, delayed=${delayed}, budget-stop=${budgetStop})`, async () => {
-			const { session, releaseUpdate } = await harness(doneOnly, delayed);
+			const { session, releaseUpdate } = await harness({ doneOnly, delayed });
 			const report = "# Review\nNo confirmed defects.\n";
 			const history: AgentMessage[] = [
 				{ role: "user", content: "Review the source", timestamp: Date.now() },
@@ -165,7 +170,7 @@ describe("SDK data-less yield report", () => {
 		],
 	] as const) {
 		it(`refuses preceding prose across ${name}`, async () => {
-			const { session } = await harness(false, false);
+			const { session } = await harness();
 			session.agent.replaceMessages([createAssistantMessage("Stale report"), boundary as AgentMessage, reminder()]);
 			await session.agent.continue();
 			const result = session.messages.find(
@@ -177,7 +182,7 @@ describe("SDK data-less yield report", () => {
 	}
 
 	it("prefers report prose beside yield over a previous report", async () => {
-		const { session } = await harness(true, false, { text: "Current report" });
+		const { session } = await harness({ doneOnly: true, text: "Current report" });
 		session.agent.replaceMessages([createAssistantMessage("Superseded report"), reminder()]);
 		await session.agent.continue();
 		const result = session.messages.find(message => message.role === "toolResult");
@@ -185,9 +190,9 @@ describe("SDK data-less yield report", () => {
 	});
 
 	it("never borrows another child's report", async () => {
-		const { session: other } = await harness(false, false);
+		const { session: other } = await harness();
 		other.agent.replaceMessages([createAssistantMessage("Other child's report")]);
-		const { session } = await harness(false, false);
+		const { session } = await harness();
 		session.agent.replaceMessages([{ role: "user", content: "Work", timestamp: Date.now() }]);
 		await session.agent.continue();
 		const result = session.messages.find(message => message.role === "toolResult");
@@ -196,7 +201,7 @@ describe("SDK data-less yield report", () => {
 	});
 
 	it("does not reuse preceding prose for incremental sections", async () => {
-		const { session } = await harness(false, false, { input: { type: ["notes"] } });
+		const { session } = await harness({ input: { type: ["notes"] } });
 		session.agent.replaceMessages([createAssistantMessage("Earlier report"), reminder()]);
 		await session.agent.continue();
 		const result = session.messages.find(message => message.role === "toolResult");
@@ -205,7 +210,7 @@ describe("SDK data-less yield report", () => {
 	});
 
 	it("retains strict-mode null-as-omitted semantics", async () => {
-		const { session } = await harness(false, false, { input: { type: "result", data: null, error: null } });
+		const { session } = await harness({ input: { type: "result", data: null, error: null } });
 		session.agent.replaceMessages([createAssistantMessage("Strict-mode report"), reminder()]);
 		await session.agent.continue();
 		const result = session.messages.find(message => message.role === "toolResult");
@@ -223,7 +228,7 @@ describe("SDK data-less yield report", () => {
 		],
 	] as const) {
 		it(`preserves explicit ${Object.hasOwn(input, "error") ? "error" : "data"}`, async () => {
-			const { session } = await harness(false, false, { input });
+			const { session } = await harness({ input });
 			session.agent.replaceMessages([createAssistantMessage("Earlier report"), reminder()]);
 			await session.agent.continue();
 			const result = session.messages.find(message => message.role === "toolResult");
@@ -232,7 +237,7 @@ describe("SDK data-less yield report", () => {
 	}
 
 	it("preserves structured last-turn refusal before any retry downgrade", async () => {
-		const { session } = await harness(false, false, {
+		const { session } = await harness({
 			outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
 		});
 		const current = createAssistantMessage("");
