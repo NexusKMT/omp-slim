@@ -21,6 +21,12 @@ async function createSkill(body: string): Promise<{ dir: string; skill: Skill }>
 	};
 }
 
+async function createSkillFromRaw(raw: string): Promise<{ dir: string; skill: Skill }> {
+	const { dir, skill } = await createSkill("");
+	await Bun.write(skill.filePath, raw);
+	return { dir, skill };
+}
+
 describe("buildSkillPromptMessage", () => {
 	test("defaults public skill prompt rendering to user-invoked bug-fix directory guidance", async () => {
 		const { dir, skill } = await createSkill("Review the supplied code carefully.");
@@ -75,6 +81,28 @@ describe("buildSkillPromptMessage", () => {
 				expect(built.message).not.toContain("description: Review code");
 				expect(built.message).not.toContain("name: reviewer");
 			}
+		} finally {
+			await removeWithRetries(dir);
+		}
+	});
+
+	test("strips frontmatter whose closing delimiter ends the file", async () => {
+		const { dir, skill } = await createSkillFromRaw("---\nname: reviewer\ndescription: Review code\n---");
+		try {
+			const built = await buildSkillPromptMessage(skill, { args: "" }, "autoload");
+			expect(built.message).not.toContain("name: reviewer");
+			expect(built.details.lineCount).toBe(0);
+		} finally {
+			await removeWithRetries(dir);
+		}
+	});
+
+	test("trims a skill body without frontmatter before the autoload separator", async () => {
+		const { dir, skill } = await createSkillFromRaw("Plain skill body.\n");
+		try {
+			const built = await buildSkillPromptMessage(skill, { args: "" }, "autoload");
+			expect(built.message.startsWith("Plain skill body.\n\n---\n")).toBe(true);
+			expect(built.details.lineCount).toBe(1);
 		} finally {
 			await removeWithRetries(dir);
 		}

@@ -489,7 +489,7 @@ export async function buildSkillPromptMessage(
 	const content = await Bun.file(skill.filePath).text();
 	// Only the body is used: keep HTML comments (`repair: false`) and leave YAML
 	// diagnostics to the loader, which already parsed this frontmatter.
-	const { body } = parseFrontmatter(content, { source: skill.filePath, repair: false, level: "off" });
+	const body = parseFrontmatter(content, { source: skill.filePath, repair: false, level: "off" }).body.trim();
 	const trimmedArgs = input.args.trim();
 	let message: string;
 	if (invocation === "user") {
