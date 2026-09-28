@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor models now see earlier multi-step tool work in the order it happened, instead of as one batch of simultaneous calls ([#13725](https://github.com/can1357/oh-my-pi/pull/13725) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
