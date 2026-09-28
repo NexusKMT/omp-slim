@@ -185,7 +185,7 @@ describe("task spawn routing", () => {
 			const firstJob = manager.getJob(first.details?.async?.jobId ?? "");
 			if (!firstJob) throw new Error("First task did not spawn");
 			await firstJob.promise;
-			deps.setOverrides("model", { task: "anthropic/claude-opus-5-5" });
+			deps.setAgentOverride("model", "task", "anthropic/claude-opus-5-5");
 			await tool.execute("tc-new", { agent: "task", name: "New", task: "Second task" } as TaskParams);
 			await Promise.all(manager.getAllJobs().map(job => job.promise));
 
