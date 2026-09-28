@@ -239,12 +239,20 @@ describe("factoryDroidUsageProvider.fetchUsage", () => {
 		expect(seenHeaders["x-factory-org-id"]).toBe("canonical-org");
 	});
 
-	it("returns null on http errors and missing tokens", async () => {
-		const failing: UsageFetchContext = { fetch: async () => new Response("nope", { status: 403 }) };
+	it.each([401, 403])("surfaces revoked access (%i) so cached quota is purged", async status => {
 		await expect(
 			factoryDroidUsageProvider.fetchUsage(
 				{ provider: "factory-droid", credential: { type: "oauth", accessToken: "workos-token" } },
-				failing,
+				{ fetch: async () => new Response("nope", { status }) },
+			),
+		).rejects.toThrow(`Factory Droid usage endpoint returned ${status}`);
+	});
+
+	it("treats transient failures and missing tokens as unknown quota", async () => {
+		await expect(
+			factoryDroidUsageProvider.fetchUsage(
+				{ provider: "factory-droid", credential: { type: "oauth", accessToken: "workos-token" } },
+				{ fetch: async () => new Response("busy", { status: 503 }) },
 			),
 		).resolves.toBeNull();
 		await expect(

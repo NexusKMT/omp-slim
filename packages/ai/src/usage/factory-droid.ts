@@ -2,6 +2,7 @@ import { factoryDroidPoolForModel } from "@oh-my-pi/pi-catalog/discovery";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 import { toNumber } from "@oh-my-pi/pi-catalog/utils";
 import { factoryDroidApiBaseUrl, factoryDroidClientHeaders } from "@oh-my-pi/pi-catalog/wire/factory-droid";
+import { ProviderHttpError } from "../error";
 import type {
 	CredentialRankingContext,
 	CredentialRankingStrategy,
@@ -117,8 +118,10 @@ export function parseFactoryDroidUsage(payload: unknown, fetchedAt = Date.now())
 }
 
 /**
- * Fetches scoped billing usage for account display and ranking. Failure means
- * quota unknown; inference failures never trigger a billing probe.
+ * Fetches scoped billing usage for account display and ranking. A 401/403
+ * means the credential lost access and throws so cached quota is dropped;
+ * any other failure means quota unknown. Inference failures never trigger a
+ * billing probe.
  */
 async function fetchFactoryDroidUsageReport(
 	accessToken: string,
@@ -135,10 +138,19 @@ async function fetchFactoryDroidUsageReport(
 			},
 			signal,
 		});
-		if (!response.ok) return null;
+		if (!response.ok) {
+			if (response.status === 401 || response.status === 403) {
+				throw new ProviderHttpError(
+					`Factory Droid usage endpoint returned ${response.status} ${response.statusText}`.trim(),
+					response.status,
+				);
+			}
+			return null;
+		}
 		const payload: unknown = await response.json();
 		return parseFactoryDroidUsage(payload);
-	} catch {
+	} catch (error) {
+		if (error instanceof ProviderHttpError) throw error;
 		return null;
 	}
 }
