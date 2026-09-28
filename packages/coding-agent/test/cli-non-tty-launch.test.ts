@@ -155,3 +155,24 @@ describe("mode-dependent guards defer to flag-value errors", () => {
 		expect(run.stderr).toContain("Error: --no-ui requires --mode rpc");
 	}, 30_000);
 });
+
+describe("ACP launch flag validation", () => {
+	it("fails an invalid --thinking before serving instead of on every session/new", async () => {
+		using tempDir = TempDir.createSync("@omp-acp-bad-thinking-");
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "acp", "--thinking", "bogus"]);
+
+		expect(run.exitCode, run.stderr).toBe(2);
+		expect(run.stderr).toContain('Error: Invalid --thinking value: "bogus"');
+		expect(run.stdout).toBe("");
+	}, 30_000);
+
+	it("serves when a launch-cwd extension owns the rejected flag", async () => {
+		using tempDir = TempDir.createSync("@omp-acp-ext-thinking-");
+		const extensionPath = await writeStringFlagExtension(tempDir, "thinking");
+		// Closed stdin ends the ACP transport right after startup, so a served launch exits 0.
+		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--mode", "acp", "--thinking", "bogus"]);
+
+		expect(run.stderr).not.toContain("Invalid --thinking value");
+		expect(run.exitCode, run.stderr).toBe(0);
+	}, 30_000);
+});

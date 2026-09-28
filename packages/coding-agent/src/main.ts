@@ -24,7 +24,7 @@ import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "./capability";
-import { type Args, reportInvalidFlagValues, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
+import { type Args, parseArgs, reportInvalidFlagValues, reportUnrecognizedFlags, validateToolNames } from "./cli/args";
 import { applyExtensionFlags, type ExtensionFlagSink } from "./cli/extension-flags";
 import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
@@ -2185,6 +2185,22 @@ export async function runRootCommand(
 		};
 
 		if (mode === "acp") {
+			// ACP loads extensions per `session/new` cwd, so a pending invalid enum
+			// value would otherwise fail every session while the server keeps
+			// running. Settle it against the launch cwd's extensions (one may own
+			// the flag) — loaded only on this error path to keep ACP startup lazy —
+			// and fail the launch as a usage error. The per-session factory check
+			// still covers extensions of other session cwds.
+			if (parsedArgs.invalidFlagValues.length > 0) {
+				const launchEventBus = new EventBus();
+				const launchExtensions = parsedArgs.trustedExtensions?.length
+					? await loadTrustedSessionExtensions(sessionOptions, cwd, launchEventBus)
+					: await loadSessionExtensions(sessionOptions, cwd, settingsInstance, launchEventBus);
+				const launchArgs = parseArgs(rawArgs, ExtensionRunner.aggregateFlags(launchExtensions.extensions));
+				if (reportInvalidFlagValues(launchArgs)) {
+					process.exit(2);
+				}
+			}
 			const createAcpSession = createAcpSessionFactory({
 				baseOptions: sessionOptions,
 				settings: settingsInstance,
