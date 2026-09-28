@@ -486,6 +486,11 @@ export const readToolRenderer = {
 		let cachedWidth: number | undefined;
 		let cachedExpanded: boolean | undefined;
 		let cachedLines: string[] | undefined;
+		const dropCache = () => {
+			cachedWidth = undefined;
+			cachedExpanded = undefined;
+			cachedLines = undefined;
+		};
 		return markFramedBlockComponent({
 			render: (width: number) => {
 				const expanded = options.expanded;
@@ -520,11 +525,8 @@ export const readToolRenderer = {
 				cachedExpanded = expanded;
 				return cachedLines;
 			},
-			invalidate: () => {
-				cachedWidth = undefined;
-				cachedExpanded = undefined;
-				cachedLines = undefined;
-			},
+			invalidate: dropCache,
+			releaseRenderCaches: dropCache,
 		});
 	},
 	mergeCallAndResult: true,

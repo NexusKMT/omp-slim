@@ -461,6 +461,11 @@ export class AssistantMessageComponent extends Container {
 		}
 	}
 
+	override releaseRenderCaches(): void {
+		super.releaseRenderCaches();
+		this.#stableRenderCache.clear();
+	}
+
 	setHideThinkingBlock(hide: boolean): void {
 		this.#hideThinkingBlock = hide;
 	}

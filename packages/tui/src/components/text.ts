@@ -104,6 +104,13 @@ export class Text implements Component {
 		this.#cachedLines = undefined;
 	}
 
+	releaseRenderCaches(): void {
+		this.#cachedText = undefined;
+		this.#cachedWidth = undefined;
+		this.#cachedWidthConfigEpoch = undefined;
+		this.#cachedLines = undefined;
+	}
+
 	render(width: number): readonly string[] {
 		// Check cache
 		if (

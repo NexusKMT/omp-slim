@@ -2,15 +2,17 @@ import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { ToolExecutionComponent, type ToolExecutionUi } from "@oh-my-pi/pi-tui/chat/tool-execution";
+import { FramedMessageComponent } from "@oh-my-pi/pi-tui/chrome/message-frame";
 import { TranscriptContainer, trimBlankEdges } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { getThemeByName, initTheme } from "@oh-my-pi/pi-tui/theme";
 import { writeToolRenderer } from "@oh-my-pi/pi-tui/tools/write";
-import { type Component, Container } from "@oh-my-pi/pi-tui";
+import { type Component, Container, Text } from "@oh-my-pi/pi-tui";
 
 const frame = { tick: 0, now: 0 };
 
-/** A settled block that counts how often it was asked to drop its render caches. */
+/** A block that counts cache releases and eager rebuilds separately. */
 class ReleaseCountingBlock implements Component {
+	releases = 0;
 	invalidations = 0;
 	readonly #rows: readonly string[];
 	#finalized: boolean;
@@ -30,6 +32,31 @@ class ReleaseCountingBlock implements Component {
 
 	invalidate(): void {
 		this.invalidations++;
+	}
+
+	releaseRenderCaches(): void {
+		this.releases++;
+	}
+
+	render(): readonly string[] {
+		return this.#rows;
+	}
+}
+
+/** A settled block whose every cache hook throws, as a broken custom component might. */
+class ThrowingHooksBlock implements Component {
+	readonly #rows: readonly string[];
+
+	constructor(rows: readonly string[]) {
+		this.#rows = rows;
+	}
+
+	invalidate(): void {
+		throw new Error("invalidate failed");
+	}
+
+	releaseRenderCaches(): void {
+		throw new Error("release failed");
 	}
 
 	render(): readonly string[] {
@@ -122,13 +149,13 @@ function streamedWrite(): ToolExecutionComponent {
 	return component;
 }
 
-/** Commit the only live block and return the exact rows the terminal received for it. */
+/** Commit every live block and return the exact rows the terminal received for them. */
 function commitAll(transcript: TranscriptContainer, width: number): readonly string[] {
 	transcript.renderViewport(width, 40, frame);
 	const batch = transcript.peekFlushBatch(width);
 	if (!batch) throw new Error("expected a retirement batch");
 	transcript.acknowledgeFinalizedBatch(batch.id);
-	expect(transcript.blockStates()).toEqual(["committed"]);
+	expect(transcript.blockStates().every(state => state === "committed")).toBe(true);
 	return batch.rows;
 }
 
@@ -187,22 +214,98 @@ describe("committed transcript blocks release render caches", () => {
 		const offered = transcript.peekFinalizedBatch(80, 1);
 		if (!offered) throw new Error("expected a pressure retirement");
 		// An unacknowledged offer can still be recomposed for a discarded frame.
-		expect(settled.invalidations).toBe(0);
+		expect(settled.releases).toBe(0);
 		transcript.acknowledgeFinalizedBatch(offered.id);
 		expect(transcript.blockStates()).toEqual(["committed", "active"]);
-		expect(settled.invalidations).toBe(1);
+		expect(settled.releases).toBe(1);
 
 		replay(transcript, 60);
-		expect(settled.invalidations).toBe(2);
+		expect(settled.releases).toBe(2);
 
 		transcript.renderViewport(80, 10, frame);
-		expect(active.invalidations).toBe(0);
+		expect(active.releases).toBe(0);
 		active.finalize();
 		const final = transcript.peekFlushBatch(80);
 		if (!final) throw new Error("expected the finalized block to retire");
 		transcript.acknowledgeFinalizedBatch(final.id);
-		expect(active.invalidations).toBe(1);
-		expect(settled.invalidations).toBe(2);
+		expect(active.releases).toBe(1);
+		expect(settled.releases).toBe(2);
+		// Releasing is not a theme-change rebuild.
+		expect(settled.invalidations + active.invalidations).toBe(0);
+	});
+
+	it("never re-runs extension renderers when a block commits or replays", () => {
+		const frameCalls = { count: 0 };
+		const framed = () =>
+			new FramedMessageComponent({
+				message: { customType: "note", content: "" },
+				customRenderer: () => {
+					frameCalls.count++;
+					return new Text("custom note body rendered by an extension, long enough to wrap when narrowed", 1, 0);
+				},
+			});
+		const thinkingCalls = { count: 0 };
+		const assistant = () =>
+			new AssistantMessageComponent(assistantMessage(ANSWER), false, undefined, [
+				context => {
+					thinkingCalls.count++;
+					return new Text(`extension view of thinking block ${context.thinkingIndex}`, 1, 0);
+				},
+			]);
+
+		const committedFrame = framed();
+		const committedAssistant = assistant();
+		const twins = [framed(), assistant()];
+		const built = { frame: frameCalls.count, thinking: thinkingCalls.count };
+		const transcript = new TranscriptContainer();
+		transcript.addChild(committedFrame);
+		transcript.addChild(committedAssistant);
+
+		const retired = commitAll(transcript, 80);
+		expect(replay(transcript, 80)).toEqual(retired);
+		const narrow = replay(transcript, 52);
+
+		expect({ frame: frameCalls.count, thinking: thinkingCalls.count }).toEqual(built);
+		expect(narrow).toEqual([
+			...trimBlankEdges(twins[0]!.render(52)),
+			"",
+			...trimBlankEdges(twins[1]!.render(52)),
+			"",
+		]);
+	});
+
+	it("keeps the ledger consistent when a block's cache hooks throw", () => {
+		const transcript = new TranscriptContainer();
+		transcript.addChild(new ThrowingHooksBlock(["broken"]));
+		transcript.addChild(new ReleaseCountingBlock(["healthy"], true));
+		expect(commitAll(transcript, 80)).toEqual(["broken", "", "healthy", ""]);
+		expect(transcript.blockStates()).toEqual(["committed", "committed"]);
+
+		// The frontier moved past both blocks: the next retirement carries only the new one.
+		transcript.addChild(new ReleaseCountingBlock(["later"], true));
+		expect(commitAll(transcript, 80)).toEqual(["later", ""]);
+		expect(replay(transcript, 80)).toEqual(["broken", "", "healthy", "", "later", ""]);
+		expect(replay(transcript, 60)).toEqual(["broken", "", "healthy", "", "later", ""]);
+	});
+
+	it("releases committed blocks after a full semantic render", async () => {
+		const rendered: WeakRef<readonly string[]>[] = [];
+		const block = new Container();
+		block.addChild({
+			render: () => {
+				const rows = [`row ${rendered.length}`];
+				rendered.push(new WeakRef(rows));
+				return rows;
+			},
+		});
+		const transcript = new TranscriptContainer();
+		transcript.addChild(block);
+		commitAll(transcript, 80);
+
+		expect(transcript.render(80)).toEqual([`row ${rendered.length - 1}`]);
+		expect(await becomesCollectible(rendered.at(-1)!)).toBe(true);
+		// The transcript stays live throughout, so only its blocks could have pinned the rows.
+		expect(transcript.render(80)).toEqual([`row ${rendered.length - 1}`]);
 	});
 
 	it("replays a streamed assistant message byte-identically after release", () => {
@@ -219,25 +322,41 @@ describe("write renderer streaming preview state", () => {
 		await initTheme(false);
 	});
 
-	it("drops the incremental preview from the persistent render state once a result renders", async () => {
+	it("stops retaining the incremental preview once a result renders", async () => {
 		const uiTheme = await getThemeByName("dark");
 		if (!uiTheme) throw new Error("expected the dark theme");
 		const args = { path: "src/values.ts", content: WRITE_CONTENT };
 		const renderState = { expanded: false, isPartial: true, argsComplete: true };
 		writeToolRenderer.renderCall(args, renderState, uiTheme)?.render(80);
-		// Control: the streaming call render keeps its incremental highlighter state here.
-		expect(Object.getOwnPropertySymbols(renderState)).toHaveLength(1);
+		const preview = previewHighlightedLines(renderState);
 
 		const result = { content: [{ type: "text", text: "Successfully wrote src/values.ts" }], details: {} };
 		// ToolExecutionComponent hands both renderers the same mutable render state.
 		renderState.isPartial = false;
 		const rows = writeToolRenderer.renderResult(result, renderState, uiTheme, args).render(80);
 
-		expect(Object.getOwnPropertySymbols(renderState)).toHaveLength(0);
-		const fresh = writeToolRenderer.renderResult(result, { expanded: false, isPartial: false }, uiTheme, args);
-		expect(rows).toEqual(fresh.render(80));
+		expect(await becomesCollectible(preview)).toBe(true);
+		// renderState stays live for the re-render below, so only it could have kept the preview reachable.
+		const fresh = writeToolRenderer
+			.renderResult(result, { expanded: false, isPartial: false }, uiTheme, args)
+			.render(80);
+		expect(rows).toEqual(fresh);
+		expect(writeToolRenderer.renderResult(result, renderState, uiTheme, args).render(80)).toEqual(fresh);
 	});
 });
+
+/**
+ * The highlighted rows the streaming write preview keeps on the shared render
+ * state. The state lives under a module-private symbol, so find it by shape.
+ */
+function previewHighlightedLines(renderState: object): WeakRef<object> {
+	const carrier = renderState as Record<symbol, { highlightedLines?: unknown } | undefined>;
+	for (const key of Object.getOwnPropertySymbols(renderState)) {
+		const lines = carrier[key]?.highlightedLines;
+		if (Array.isArray(lines) && lines.length > 0) return new WeakRef(lines);
+	}
+	throw new Error("expected the streaming call render to keep highlighted preview rows");
+}
 
 /** Whether `target` becomes collectible within `deadlineMs`; a retained target never does. */
 async function becomesCollectible(target: WeakRef<object>, deadlineMs = 3_000): Promise<boolean> {

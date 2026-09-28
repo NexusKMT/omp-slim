@@ -1901,6 +1901,26 @@ export class Markdown implements Component {
 	}
 
 	/**
+	 * Drop the L1 rows and, once the text is final (transient rendering off),
+	 * the streaming lex/row/highlight state: only transient renders read it,
+	 * and a later stream re-derives it from a full lex, as after a non-append
+	 * edit.
+	 */
+	releaseRenderCaches(): void {
+		this.#cachedText = undefined;
+		this.#cachedWidth = undefined;
+		this.#cachedLines = undefined;
+		if (this.#transientRenderCache) return;
+		this.#streamPrefixText = undefined;
+		this.#streamPrefixTokens = undefined;
+		this.#streamPrefixLineCache = undefined;
+		this.#tailRowCache = undefined;
+		this.#streamingHighlightCache = undefined;
+		this.#fastTail = undefined;
+		this.#lastTailCapture = undefined;
+	}
+
+	/**
 	 * Width-independent source prefix of the last render ending at a frozen
 	 * Markdown block boundary. Only meaningful while streaming (transient
 	 * render cache on); grows monotonically under append-only `setText`.

@@ -36,6 +36,11 @@ export class TruncatedText implements Component {
 		this.#cachedLines = undefined;
 	}
 
+	releaseRenderCaches(): void {
+		this.#cachedWidth = -1;
+		this.#cachedLines = undefined;
+	}
+
 	render(width: number): readonly string[] {
 		if (this.#cachedLines && this.#cachedWidth === width) {
 			return this.#cachedLines;

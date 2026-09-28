@@ -265,6 +265,10 @@ export class OutputPane implements Component {
 		this.#text.invalidate();
 	}
 
+	releaseRenderCaches(): void {
+		this.#text.releaseRenderCaches();
+	}
+
 	#appendToTail(text: string): void {
 		if (!text) return;
 		if (this.#lines.length === 0) this.#lines.push("");

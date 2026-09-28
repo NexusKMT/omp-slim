@@ -256,6 +256,16 @@ export interface Component {
 	 */
 	invalidate?(): void;
 	/**
+	 * Optional hook to drop memoized render output (rows, parse and wrap state)
+	 * that the next `render()` can rebuild from state the component keeps.
+	 * Unlike {@link invalidate}, it must not rebuild anything eagerly: no
+	 * renderer or extension callbacks, no image conversions, and no child
+	 * replacement or disposal. The next render must return the same rows it
+	 * would have returned without the release. Components without it are
+	 * simply not released.
+	 */
+	releaseRenderCaches?(): void;
+	/**
 	 * Optional hook to set whether this component ignores tight layout mode.
 	 */
 	setIgnoreTight?(ignore: boolean): any;
@@ -497,6 +507,14 @@ export class Container implements Component {
 		this.#memoChildLines = [];
 		for (const child of this.children) {
 			child.invalidate?.();
+		}
+	}
+
+	releaseRenderCaches(): void {
+		this.#memoLines = undefined;
+		this.#memoChildLines = [];
+		for (const child of this.children) {
+			child.releaseRenderCaches?.();
 		}
 	}
 

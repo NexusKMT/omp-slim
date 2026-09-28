@@ -61,6 +61,11 @@ export interface ToolCardOptions {
 	paddingY?: number;
 	ignoreTight?: boolean;
 	onInvalidate?: () => void;
+	/**
+	 * Drop builder-owned memos the next build recomputes. Called by
+	 * {@link ToolCard.releaseRenderCaches}, which never calls `onInvalidate`.
+	 */
+	onReleaseRenderCaches?: () => void;
 	onDispose?: () => void;
 }
 
@@ -242,6 +247,14 @@ export class ToolCard implements Component {
 		this.#plainText.invalidate();
 		for (const child of this.#renderedChildren) child.invalidate?.();
 		this.#options.onInvalidate?.();
+	}
+
+	releaseRenderCaches(): void {
+		this.#block.invalidate();
+		this.#lastBlockOptions = undefined;
+		this.#plainText.releaseRenderCaches();
+		for (const child of this.#renderedChildren) child.releaseRenderCaches?.();
+		this.#options.onReleaseRenderCaches?.();
 	}
 
 	dispose(): void {

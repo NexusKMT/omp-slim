@@ -189,6 +189,8 @@ export class TranscriptContainer extends Container {
 	 */
 	#frameRows = new Map<TranscriptEntry, readonly string[]>();
 	#frameRowsWidth = 0;
+	/** Blocks whose release hook already threw and was logged. */
+	#releaseFailures = new WeakSet<Component>();
 	override addChild(component: Component): void {
 		if (isToolActivityComponent(component)) component.setToolActivityVisible(this.#toolActivityVisible);
 		super.addChild(component);
@@ -758,6 +760,7 @@ export class TranscriptContainer extends Container {
 			if (rows.length > 0) rows.push("");
 			this.#childStartRows.set(entry.component, rows.length);
 			rows.push(...block);
+			if (entry.state === "committed") this.#releaseRenderCaches(entry);
 		}
 		return rows;
 	}
@@ -940,14 +943,25 @@ export class TranscriptContainer extends Container {
 	}
 
 	/**
-	 * A committed block renders again only when a replay re-emits the ledger,
-	 * which renders it whole and releases it again. Between replays its memoized
-	 * rows and parse state are dead weight that grows with session length, so
-	 * drop them through the same `invalidate()` a theme change or display reset
-	 * already applies; the component keeps the state it renders from.
+	 * A committed block renders again only when a replay or a full semantic
+	 * render needs its rows, and each of those releases it again. Between them
+	 * its memoized rows and parse state are dead weight that grows with session
+	 * length. A throwing hook is component code failing, not a ledger event: it
+	 * is logged once and never aborts a retirement or a replay.
 	 */
 	#releaseRenderCaches(entry: TranscriptEntry): void {
-		entry.component.invalidate?.();
+		const release = entry.component.releaseRenderCaches;
+		if (release === undefined) return;
+		try {
+			release.call(entry.component);
+		} catch (err) {
+			if (this.#releaseFailures.has(entry.component)) return;
+			this.#releaseFailures.add(entry.component);
+			logger.warn("Transcript block failed to release render caches", {
+				component: entry.component.constructor.name,
+				error: String(err),
+			});
+		}
 	}
 
 	#startReplay(): void {

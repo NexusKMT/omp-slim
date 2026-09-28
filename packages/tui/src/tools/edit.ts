@@ -1254,5 +1254,9 @@ function renderMultiFileResult(
 			cached = undefined;
 			for (const c of fileComponents) c.invalidate?.();
 		},
+		releaseRenderCaches() {
+			cached = undefined;
+			for (const c of fileComponents) c.releaseRenderCaches?.();
+		},
 	};
 }
