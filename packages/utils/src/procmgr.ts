@@ -20,7 +20,7 @@ export interface ShellConfigOptions {
 	/** File path or runtime layer that supplied the active shell setting. */
 	configSource?: string;
 }
-/** Auto-resolved shell (no custom path); stable for the process lifetime. */
+/** Auto-resolved shell (no custom path); kept until {@link resetShellConfigCache}. */
 let cachedDefaultShellConfig: ShellConfig | null = null;
 /** Config for the most recent custom `shellPath`; never served once the path is cleared. */
 let cachedCustomShellConfig: ShellConfig | null = null;
@@ -200,6 +200,17 @@ export function getShellConfig(customShellPath?: string, options: ShellConfigOpt
 	}
 	cachedDefaultShellConfig ??= buildConfig(resolveDefaultShell());
 	return cachedDefaultShellConfig;
+}
+
+/**
+ * Drop both cached shell configs so the next {@link getShellConfig} rebuilds the
+ * spawn environment from the live process environment. Call after code that may
+ * have changed `process.env` in a way child shells must see, such as extension
+ * session lifecycle handlers exporting session-scoped variables.
+ */
+export function resetShellConfigCache(): void {
+	cachedDefaultShellConfig = null;
+	cachedCustomShellConfig = null;
 }
 
 /** Platform shell discovery used when no custom `shellPath` is configured. */
