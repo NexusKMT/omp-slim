@@ -922,6 +922,12 @@ describe("tool path arrays", () => {
 			await tool.execute("grep-mixed-globs", { pattern: "depth-needle", path: "*.go; ./root.go" }),
 		);
 		expect(mixedGlobs).toContain("awsapi-nested");
+		// A bare glob listed beside a directory keeps matching at any depth.
+		const globBesideDir = getText(
+			await tool.execute("grep-glob-beside-dir", { pattern: "depth-needle", path: "*.go; internal/awsapi" }),
+		);
+		expect(globBesideDir).toContain("kms");
+		expect(globBesideDir).toContain("awsapi-nested");
 		await removeWithRetries(tmp);
 	});
 
