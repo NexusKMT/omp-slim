@@ -66,6 +66,15 @@ describe("compat compiler grammar", () => {
 		).toThrow(/providers\/test\.kdl:2.*unknown directive `default-model`/);
 	});
 
+	test("on-upstream rejects nested upstreams, empty selectors and catalog-entry directives", () => {
+		const source = (text: string) => compileCascade([{ file: "providers/test.kdl", text }]);
+		expect(() => source('provider "p" { on-upstream "a" { on-upstream "b" { supports-store #true } } }')).toThrow(
+			/unexpected node/,
+		);
+		expect(() => source('provider "p" { on-upstream { supports-store #true } }')).toThrow(/malformed/);
+		expect(() => source('provider "p" { on-upstream "a" { default-model "m" } }')).toThrow(/unknown directive/);
+	});
+
 	test("boolean-valued axes reject non-boolean scalars", () => {
 		// KDL rejects a bare `false` keyword already, but a quoted `"false"` is a
 		// string: `=== true` / `!== false` consumers would read it as the opposite

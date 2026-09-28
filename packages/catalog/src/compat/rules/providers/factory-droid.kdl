@@ -1,0 +1,194 @@
+// Factory's registry supplies native facts; the actual selected upstream picks
+// the request dialect. These are Factory contracts, NOT direct-host inheritance.
+// Ground truth is the native CLI's own requests: packages/ai/test/fixtures/
+// factory-droid-native-requests.json, checked by factory-droid-native-parity.test.ts.
+provider "factory-droid" {
+	default-model "kimi-k3"
+	allow-unauthenticated #true
+	dynamic-models-authoritative #true
+	// Native subscription limits are not direct-host price-tier or capacity heuristics.
+	context-window-authoritative #true
+
+	on-api "openai-completions" {
+		max-tokens-field "max_tokens"
+		supports-store #false
+		thinking-format "openai"
+		disable-reasoning-on-forced-tool-choice #false
+		disable-reasoning-on-tool-choice #false
+		allows-synthetic-reasoning-content-for-tool-calls #false
+		requires-assistant-content-for-tool-calls #false
+		requires-reasoning-content-for-tool-calls #false
+		requires-reasoning-content-for-all-assistant-turns #false
+		replay-reasoning-content #true
+		mistral-reasoning-content-parts #false
+		requires-thinking-as-text #false
+		reasoning-content-field "reasoning_content"
+	}
+	on-api "openai-responses" {
+		// Native declares every Responses tool `strict: false`; the field must reach the wire.
+		supports-strict-mode #true
+	}
+	models "glm-*" "kimi-*" "deepseek-*" "nemotron-*" "inkling" "mistral-medium-3.5" "qwen3.8-max" "minimax-m3" {
+		clamp-output-to-model-max #true
+		completions-reasoning-mode "none"
+		completions-reasoning-history "omit"
+		on-upstream "fireworks" {
+			completions-reasoning-mode "effort"
+			completions-reasoning-history "preserved"
+		}
+		on-upstream "baseten" {
+			completions-reasoning-mode "effort"
+		}
+	}
+	// MiniMax M3 uses Completions with high effort, but NO reasoning_history.
+	models "minimax-m3" {
+		on-upstream "fireworks" priority=10 {
+			completions-reasoning-history "omit"
+		}
+	}
+	models "kimi-k3" {
+		requires-tool-result-name #true
+		// Native Factory exposes off even though direct K3 deployments do not.
+		thinking-requires-effort #false
+	}
+	models "nemotron-3-ultra" {
+		on-upstream "baseten" {
+			completions-reasoning-mode "opt-in"
+		}
+	}
+	models "deepseek-*" {
+		on-upstream "baseten" priority=10 {
+			completions-reasoning-mode "forced-on"
+		}
+		on-upstream "fireworks" priority=10 {
+			completions-reasoning-history "interleaved"
+		}
+		on-upstream "fireworks" "baseten" {
+			requires-reasoning-content-for-tool-calls #true
+			synthetic-reasoning-content-fallback " "
+		}
+	}
+	// The replay codec follows the selected route, including EU GLM routes.
+	on-upstream "mistral" {
+		models "glm-*" "mistral-medium-3.5" {
+			completions-reasoning-mode "effort"
+			completions-reasoning-history "omit"
+			mistral-reasoning-content-parts #true
+		}
+	}
+
+	// Native budget ladder for the Messages models that still use token budgets.
+	models "claude-sonnet-4-5-20250929" "claude-haiku-4-5-20251001" "claude-opus-4-5-20251101" "minimax-m2.7" {
+		thinking-effort-budgets {
+			low 4096
+			medium 12288
+			high 24576
+		}
+	}
+
+	// Messages contract on every Factory Anthropic route: non-thinking-led
+	// history drops thinking, disabled thinking omits the field, and the effort
+	// beta rides only where the route requires it alongside output effort.
+	on-api "anthropic-messages" {
+		strip-thinking-history #true
+		disabled-thinking "omit"
+		effort-beta #false
+		// Bedrock/Vertex require the beta alongside any output effort.
+		on-upstream "bedrock_anthropic" "vertex_anthropic" {
+			effort-beta #true
+		}
+		on-upstream "snowflake" {
+			disabled-thinking "disabled"
+		}
+	}
+	models "claude-*" "atlas-07-21" "aster-07-15" {
+		anthropic-thinking "adaptive-summarized"
+	}
+	models "claude-opus-4-6" "claude-sonnet-4-6" {
+		anthropic-thinking "adaptive"
+	}
+	models "claude-sonnet-4-5-20250929" "claude-haiku-4-5-20251001" {
+		anthropic-thinking "budget-interleaved"
+	}
+	// Native Opus 4.5 thinking always pairs output effort with its beta, on every upstream.
+	models "claude-opus-4-5-20251101" {
+		anthropic-thinking "budget-effort"
+		effort-beta #true
+	}
+	models "minimax-m2.7" {
+		anthropic-thinking "budget-effort"
+	}
+	// Always-thinking models keep adaptive thinking on disabled turns, on every upstream.
+	models "claude-fable-5.1" "claude-opus-5-5" "claude-opus-5-5-fast" "claude-sonnet-5-5" {
+		disabled-thinking "adaptive"
+	}
+	// Fast tiers are distinct SKUs served with `speed: "fast"`.
+	models "claude-opus-5-5-fast" "claude-opus-5-fast" "claude-opus-4-8-fast" {
+		fast-mode #true
+	}
+	// Refusals retry server-side only on the first-party Anthropic upstream.
+	models "claude-fable-5" "claude-fable-5.1" {
+		on-upstream "anthropic" {
+			server-side-fallback-models "claude-opus-5"
+		}
+	}
+	// With tools, Anthropic and Vertex stream tool input eagerly and advertise
+	// fine-grained tool streaming; Bedrock takes the beta alone.
+	on-upstream "anthropic" "vertex_anthropic" {
+		supports-eager-tool-input-streaming #true
+		anthropic-tool-streaming-beta #true
+	}
+	on-upstream "bedrock_anthropic" {
+		anthropic-tool-streaming-beta #true
+	}
+	// xAI and Google sessions lock their upstream.
+	on-upstream "xai" "google" {
+		routing-session-lock #true
+	}
+	// OpenAI-family upstreams carry native's platform organization hint.
+	on-upstream "openai" "azure_openai" {
+		openai-platform-header "org-bHuLtG1fGmYk5YaOihAAXFBw"
+	}
+
+	models "gpt-*" "grok-*" {
+		// Disabled reasoning omits the reasoning object, except on routes that
+		// need the literal `none` tier.
+		reasoning-disable-mode "omit"
+		responses-cache-retention #false
+		responses-parallel-tool-calls #true
+		on-upstream "bedrock_openai" "snowflake" {
+			reasoning-disable-mode "none-effort"
+		}
+	}
+	models "gpt-*" {
+		omit-max-output-tokens #true
+		responses-verbosity "low"
+		responses-safety-identifier #true
+		// Native defaults tool_choice to auto for the OpenAI family only.
+		responses-tool-choice-auto #true
+		reasoning-effort-map {
+			max "max"
+		}
+		on-upstream "openai" {
+			responses-cache-retention #true
+		}
+	}
+	models "gpt-5.2" {
+		responses-cache-retention #false
+		responses-safety-identifier #false
+	}
+	models "gpt-*-fast" {
+		responses-service-tier "priority"
+	}
+	models "grok-*" {
+		supports-reasoning-summary #false
+	}
+	models "gemini-*" "garnet-07-15" {
+		omit-max-output-tokens #true
+		google-thinking "level"
+	}
+	models "gemini-3.1-pro-preview" "gemini-3.7-flash" "gemini-3.8-flash" {
+		google-thinking "level-medium"
+	}
+	// FACTORY_API_KEY is a control-plane key, not a subscription proxy token.
+}

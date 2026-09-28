@@ -213,6 +213,8 @@ export interface CompiledRule {
 	providers?: string[];
 	/** Request adapter identifiers matched by an `on-api` selector. */
 	apis?: string[];
+	/** Selected upstream behind a deployment, matched by `on-upstream`. */
+	upstreams?: string[];
 	family?: string;
 	revision?: CompiledRevisionTerm[];
 	models?: CompiledSelector[];
@@ -695,6 +697,8 @@ export interface ResolveTarget {
 	provider: string;
 	/** Request adapter used to serialize the model. */
 	api: string;
+	/** Actual upstream chosen for this request, not the deployment provider. */
+	upstream?: string;
 	/** Centrally classified vendor lineage. */
 	class: string;
 	/** Classified product family within the class, when known. */
@@ -720,4 +724,25 @@ export interface ResolvedAxes {
 	 * wire contracts depending on whether it came from discovery or the bake.
 	 */
 	reasoning: boolean;
+}
+
+/** Selected-route request dialect. Absent fields impose no deployment override. */
+export interface RequestPolicy {
+	completionsReasoningMode?: "none" | "effort" | "opt-in" | "forced-on";
+	completionsReasoningHistory?: "omit" | "preserved" | "interleaved";
+	anthropicThinking?: "adaptive" | "adaptive-summarized" | "budget-interleaved" | "budget-effort";
+	/** Advertise `fine-grained-tool-streaming-2025-05-14` on requests that carry tools. */
+	anthropicToolStreamingBeta?: boolean;
+	/** `OpenAI-Platform` header value the route sends on OpenAI-family wires. */
+	openaiPlatformHeader?: string;
+	responsesCacheRetention?: boolean;
+	responsesVerbosity?: "low";
+	responsesServiceTier?: "priority";
+	responsesParallelToolCalls?: boolean;
+	responsesSafetyIdentifier?: boolean;
+	/** Default `tool_choice` to `auto` when the request carries tools and the caller picks none. */
+	responsesToolChoiceAuto?: boolean;
+	googleThinking?: "level" | "level-medium";
+	/** The route locks its upstream for the session (`x-provider-routing-source: session_lock`). */
+	routingSessionLock?: boolean;
 }

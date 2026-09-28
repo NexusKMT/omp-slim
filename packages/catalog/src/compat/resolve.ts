@@ -37,7 +37,7 @@ import { API_COMPAT_RECORDS, AXES, type CompatRecordName } from "./axes";
 import { hasModelScopedEffortsRule, resolveCascade } from "./cascade";
 import { compareRevision, parseRevision, type Revision } from "./revision";
 import { classifyModel, stripThinkingVariantSuffix } from "./taxonomy";
-import type { ModelIdentity, ResolvedAxes, ResolveTarget } from "./types";
+import type { ModelIdentity, RequestPolicy, ResolvedAxes, ResolveTarget } from "./types";
 
 /** Result of resolving one model spec through the compat engine. */
 export interface ResolvedModelPolicy<TApi extends Api = Api> {
@@ -46,6 +46,25 @@ export interface ResolvedModelPolicy<TApi extends Api = Api> {
 	thinking: ThinkingConfig | undefined;
 	/** Catalog-data axis assignments (longContext, priority, …) for generation. */
 	catalog: Record<string, unknown>;
+	/** Request-shaping directives for the selected upstream. */
+	request: RequestPolicy;
+}
+
+/** Request routing context is separate from model identity and deployment. */
+export interface ResolveRoute {
+	upstream?: string;
+}
+
+const REQUEST_AXIS_KEYS = Object.values(AXES)
+	.filter(axis => axis.records?.includes("request"))
+	.map(axis => axis.key);
+
+function resolveRequestPolicy(axes: ResolvedAxes): RequestPolicy {
+	const policy: Record<string, unknown> = {};
+	for (const key of REQUEST_AXIS_KEYS) {
+		if (key in axes.wire) policy[key] = axes.wire[key];
+	}
+	return policy as RequestPolicy;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +530,7 @@ function detectOpenAICompat(
 		filterReasoningHistory: d.isOpenRouter && isAnthropicModel,
 		thinkingKeep: usesMoonshotKimiPreservedThinking ? "all" : undefined,
 		reasoningContentField: d.isClinePass ? "reasoning" : "reasoning_content",
+		mistralReasoningContentParts: undefined,
 		requiresReasoningContentForToolCalls:
 			(facts.is("kimi") && !d.isOpenCodeProvider) ||
 			(isDeepseekFamily && reasoningCapable) ||
@@ -519,6 +539,8 @@ function detectOpenAICompat(
 		requiresReasoningContentForAllAssistantTurns:
 			((isDeepseekFamily && reasoningCapable) || d.isXiaomiMimo) && !d.isOpenRouter,
 		allowsSyntheticReasoningContentForToolCalls: (!isDeepseekFamily || !reasoningCapable) && !d.isXiaomiMimo,
+		// Keep the typed sparse override key present for DeepSeek proxy replay.
+		syntheticReasoningContentFallback: undefined,
 		replayReasoningContent: d.isLocalOpenAICompatBackend,
 		qwenPreserveThinking:
 			(thinkingFormat === "qwen" || thinkingFormat === "qwen-chat-template") && d.isLocalOpenAICompatBackend,
@@ -751,6 +773,7 @@ function resolveOpenAIResponsesPolicy(
 			reasoningCapable,
 		requiresReasoningContentForAllAssistantTurns: isDeepseekFamily && reasoningCapable && !isOpenRouter,
 		allowsSyntheticReasoningContentForToolCalls: !isDeepseekFamily || !reasoningCapable,
+		syntheticReasoningContentFallback: undefined,
 		replayReasoningContent: false,
 		qwenPreserveThinking: false,
 		qwenTemplateReasoningEffort: false,
@@ -882,6 +905,8 @@ function resolveAnthropicPolicy(
 		injectClaudeCodeInstruction: true,
 		stripImageInput: false,
 		thinkingLoopGuard: undefined,
+		stripThinkingHistory: false,
+		fastMode: false,
 		streamIdleTimeoutMs: spec.compat?.streamIdleTimeoutMs,
 	};
 	applyWireAxes(compat, axes.wire, "anthropic-messages");
@@ -1197,7 +1222,15 @@ function fillExplicitThinking<TApi extends Api>(
 			(impliesMandatoryReasoning(facts, spec.id) || isQwenTemplateReasoningEffortCompat(compat)));
 	const needsDefaultLevel = thinking.defaultLevel === undefined && rule.defaultLevel !== undefined;
 	const needsPrefixBinding = thinking.prefixBinding === undefined && rule.prefixBinding === true;
-	if (effortMap === undefined && !needsDisplay && !needsRequiresEffort && !needsDefaultLevel && !needsPrefixBinding) {
+	const needsEffortBudgets = thinking.effortBudgets === undefined && rule.effortBudgets !== undefined;
+	if (
+		effortMap === undefined &&
+		!needsDisplay &&
+		!needsRequiresEffort &&
+		!needsDefaultLevel &&
+		!needsPrefixBinding &&
+		!needsEffortBudgets
+	) {
 		return thinking;
 	}
 	const filled: ThinkingConfig = { ...thinking };
@@ -1206,6 +1239,7 @@ function fillExplicitThinking<TApi extends Api>(
 	if (needsDefaultLevel && rule.defaultLevel !== undefined) filled.defaultLevel = rule.defaultLevel;
 	if (needsRequiresEffort) filled.requiresEffort = true;
 	if (needsPrefixBinding) filled.prefixBinding = true;
+	if (needsEffortBudgets) filled.effortBudgets = rule.effortBudgets;
 	return filled;
 }
 
@@ -1254,11 +1288,16 @@ export function resolveCatalogAxes(spec: ModelSpec<Api>): Record<string, unknown
  * Resolves the full policy surface for one model spec: structured identity,
  * complete compat record, thinking metadata, and catalog-data corrections.
  */
-export function resolveModelPolicy<TApi extends Api>(spec: ModelSpec<TApi>): ResolvedModelPolicy<TApi>;
-export function resolveModelPolicy(spec: ModelSpec<Api>): ResolvedModelPolicy<Api> {
+export function resolveModelPolicy<TApi extends Api>(
+	spec: ModelSpec<TApi>,
+	route?: ResolveRoute,
+): ResolvedModelPolicy<TApi>;
+export function resolveModelPolicy(spec: ModelSpec<Api>, route?: ResolveRoute): ResolvedModelPolicy<Api> {
 	const identity = resolveIdentity(spec);
 	const facts = new IdentityFacts(identity);
-	const axes = resolveCascade(buildResolveTarget(spec, identity));
+	const target = buildResolveTarget(spec, identity);
+	target.upstream = route?.upstream;
+	const axes = resolveCascade(target);
 	let compat: CompatOf<Api>;
 	if (specUsesApi(spec, "openrouter")) {
 		const chat = resolveOpenAICompletionsPolicy(spec, facts, axes);
@@ -1292,6 +1331,7 @@ export function resolveModelPolicy(spec: ModelSpec<Api>): ResolvedModelPolicy<Ap
 		compat,
 		thinking: resolveThinkingPolicy(spec, facts, axes, compat),
 		catalog: axes.catalog,
+		request: resolveRequestPolicy(axes),
 	};
 }
 
