@@ -5133,7 +5133,9 @@ describe("agentLoop passive additionalContext", () => {
 			model: mock.model,
 			convertToLlm: developerConverter,
 			beforeToolCall: async ({ args }) => ({
-				additionalContext: args.value === "b" ? "context for b" : "shared guidance",
+				// "c" repeats "a" with a trailing newline: still the same guidance.
+				additionalContext:
+					args.value === "b" ? "context for b" : args.value === "c" ? "shared guidance\n" : "shared guidance",
 			}),
 		};
 		const stream = agentLoop([createUserMessage("echo thrice")], context, config, undefined, mock.stream);
