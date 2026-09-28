@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Redesigned the web client: black chassis with one inset session panel, glass top bar with the omp mark and a live status pill, a docked composer card, prompts shown as cards in the transcript, a sectioned agents rail, and a floating agent drawer; the connect screen was rebuilt too
+
 ## [18.3.1] - 2026-09-25
 
 ### Fixed
