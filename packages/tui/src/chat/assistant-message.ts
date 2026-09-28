@@ -193,6 +193,11 @@ export class AssistantMessageComponent extends Container {
 	 * themselves are shared process-wide by {@link convertImageToPngShared}.
 	 */
 	#kittyConversionsAwaited = new Set<string>();
+	/**
+	 * Conversions this component displays, held so a later re-render (theme
+	 * invalidation) still finds them after the bounded shared cache evicts them.
+	 */
+	#kittyConverted = new Map<string, ImageContent>();
 	#showImages = true;
 	#showToolResultImages = true;
 	#transcriptBlockFinalized: boolean;
@@ -852,12 +857,18 @@ export class AssistantMessageComponent extends Container {
 		if (TERMINAL.imageProtocol !== ImageProtocol.Kitty) return;
 		for (const { image } of entries) {
 			if (image.mimeType === "image/png") continue;
-			if (cachedPngConversion(image)) continue;
 			const key = imagePayloadKey(image);
+			if (this.#kittyConverted.has(key)) continue;
+			const cached = cachedPngConversion(image);
+			if (cached) {
+				this.#kittyConverted.set(key, cached);
+				continue;
+			}
 			if (this.#kittyConversionsAwaited.has(key)) continue;
 			this.#kittyConversionsAwaited.add(key);
 			convertImageToPngShared(image)
-				.then(() => {
+				.then(converted => {
+					this.#kittyConverted.set(key, converted);
 					if (this.#lastMessage) {
 						this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
 					}
@@ -877,7 +888,7 @@ export class AssistantMessageComponent extends Container {
 		for (const { image, key } of entries) {
 			const displayImage =
 				TERMINAL.imageProtocol === ImageProtocol.Kitty && image.mimeType !== "image/png"
-					? cachedPngConversion(image)
+					? this.#kittyConverted.get(imagePayloadKey(image))
 					: image;
 			if (TERMINAL.imageProtocol && displayImage) {
 				this.#contentContainer.addChild(

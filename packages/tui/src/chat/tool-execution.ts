@@ -301,6 +301,9 @@ export class ToolExecutionComponent extends Container {
 	// images themselves live in the process-wide cache behind
 	// `convertImageToPngShared`, so rebuilt components reuse them.
 	#kittyConversionsAwaited = new Set<string>();
+	// Conversions this component displays, held so a later re-render still finds
+	// them after the bounded shared cache evicts them.
+	#kittyConverted = new Map<string, ImageContent>();
 	// Spinner animation for partial task results
 	#spinnerFrame?: number;
 	#spinnerActive = false;
@@ -553,14 +556,20 @@ export class ToolExecutionComponent extends Container {
 			// Skip if already PNG or already converted anywhere in this process
 			if (img.mimeType === "image/png") continue;
 			const image: ImageContent = { type: "image", data: img.data, mimeType: img.mimeType };
-			if (cachedPngConversion(image)) continue;
 			const key = imagePayloadKey(image);
+			if (this.#kittyConverted.has(key)) continue;
+			const cached = cachedPngConversion(image);
+			if (cached) {
+				this.#kittyConverted.set(key, cached);
+				continue;
+			}
 			if (this.#kittyConversionsAwaited.has(key)) continue;
 			this.#kittyConversionsAwaited.add(key);
 
 			// Convert async - catch errors from processing
 			convertImageToPngShared(image)
-				.then(() => {
+				.then(converted => {
+					this.#kittyConverted.set(key, converted);
 					this.#displayInputVersion++;
 					this.#updateDisplay();
 					this.#ui.requestRender();
@@ -1212,9 +1221,10 @@ export class ToolExecutionComponent extends Container {
 				const img = imageBlocks[i];
 				if (TERMINAL.imageProtocol && this.#showImages && img.data && img.mimeType) {
 					// Use converted PNG for Kitty protocol if available
+					const source: ImageContent = { type: "image", data: img.data, mimeType: img.mimeType };
 					const converted =
 						TERMINAL.imageProtocol === ImageProtocol.Kitty && img.mimeType !== "image/png"
-							? cachedPngConversion({ type: "image", data: img.data, mimeType: img.mimeType })
+							? (this.#kittyConverted.get(imagePayloadKey(source)) ?? cachedPngConversion(source))
 							: undefined;
 					const imageData = converted?.data ?? img.data;
 					const imageMimeType = converted?.mimeType ?? img.mimeType;

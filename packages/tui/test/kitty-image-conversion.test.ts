@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
-import type { ImageContent } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent } from "@oh-my-pi/pi-ai";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
 import { ToolExecutionComponent } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
@@ -89,8 +89,32 @@ describe("Kitty PNG conversion cache", () => {
 	const images: ImageContent[] = [];
 	let rebuildImage: ImageContent;
 	let liveImage: ImageContent;
+	let evictedImage: ImageContent;
+	const floodImages: ImageContent[] = [];
 	let encodes = 0;
 	let originalPng: typeof Bun.Image.prototype.png;
+	/** When set, conversions publish this base64 payload instead of the real PNG. */
+	let oversizedPng: string | undefined;
+
+	function finishedMessage(): AssistantMessage {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text: "done" }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			stopReason: "stop",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		};
+	}
 
 	/** Resolves once `count` conversions have published their result. */
 	function converted(count: number): { promise: Promise<void>; notify: () => void } {
@@ -114,15 +138,21 @@ describe("Kitty PNG conversion cache", () => {
 		for (const edge of [137, 139, 141]) images.push(await webpImage(edge));
 		rebuildImage = await webpImage(143);
 		liveImage = await webpImage(145);
+		evictedImage = await webpImage(147);
+		for (const edge of [149, 151]) floodImages.push(await webpImage(edge));
 	});
 
 	beforeEach(() => {
 		setTerminalImageProtocol(ImageProtocol.Kitty);
 		encodes = 0;
+		oversizedPng = undefined;
 		originalPng = Bun.Image.prototype.png;
 		vi.spyOn(Bun.Image.prototype, "png").mockImplementation(function (this: Bun.Image) {
 			encodes++;
-			return originalPng.call(this);
+			const encoder = originalPng.call(this);
+			if (oversizedPng === undefined) return encoder;
+			const payload = oversizedPng;
+			return Object.assign(Object.create(encoder), { toBase64: async () => payload });
 		});
 	});
 
@@ -155,31 +185,28 @@ describe("Kitty PNG conversion cache", () => {
 		warm.setToolResultImages("call-1", [rebuildImage]);
 		await warmed.promise;
 
-		const rebuilt = new AssistantMessageComponent(
-			{
-				role: "assistant",
-				content: [{ type: "text", text: "done" }],
-				api: "anthropic-messages",
-				provider: "anthropic",
-				model: "claude-sonnet-4-5",
-				stopReason: "stop",
-				usage: {
-					input: 0,
-					output: 0,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				},
-				timestamp: Date.now(),
-			},
-			false,
-			() => {},
-		);
+		const rebuilt = new AssistantMessageComponent(finishedMessage(), false, () => {});
 		rebuilt.setToolResultImages("call-1", [rebuildImage]);
 
 		// Synchronous: no await between delivery and render.
 		expect(rebuilt.render(80).join("\n")).toContain("\x1b_G");
+	});
+
+	it("keeps a displayed conversion after the shared cache evicts it", async () => {
+		const shown = converted(1);
+		const component = new AssistantMessageComponent(finishedMessage(), false, shown.notify);
+		component.setToolResultImages("call-1", [evictedImage]);
+		await shown.promise;
+
+		// Flood the bounded shared cache with conversions past its byte ceiling.
+		oversizedPng = "A".repeat(20 * 1024 * 1024);
+		const flooded = converted(floodImages.length);
+		new AssistantMessageComponent(undefined, false, flooded.notify).setToolResultImages("call-2", floodImages);
+		await flooded.promise;
+
+		// A theme change re-renders every component synchronously.
+		component.invalidate();
+		expect(component.render(80).join("\n")).toContain("\x1b_G");
 	});
 
 	it("converts a live tool-result image once across repeated results and rebuilt components", async () => {
