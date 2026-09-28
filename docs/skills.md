@@ -235,4 +235,4 @@ No fallback search is performed for missing assets.
 - Always include explicit `name` and `description` frontmatter
 - Keep referenced assets under the same skill directory and access with `skill://<name>/...`
 - For nested taxonomy (`team/domain/skill`), point `skills.customDirectories` to the nested parent directory; scanning itself remains non-recursive
-- Avoid duplicate skill names across sources; first match wins by provider precedence
+- On a name collision, the higher-precedence skill keeps the bare name; identical copies collapse, and differing copies remain reachable under a namespace.
