@@ -131,19 +131,21 @@ const textOnlyIds: Record<string, true> = {
 	"zai-org/GLM-5.3": true,
 };
 
-function chatSpecs(specs: readonly ModelSpec[] | null | undefined) {
-	return (specs ?? []).filter(spec => buildModel(spec).kind !== "judge");
+function chatModels(specs: readonly ModelSpec[] | null | undefined) {
+	return (specs ?? []).map(spec => buildModel(spec)).filter(model => model.kind !== "judge");
 }
 
-async function discoverModels(ids: string[]) {
-	const fetchMock: FetchImpl = vi.fn(async () =>
-		Response.json({
-			data: ids.map(id => ({ id, name: id, context_length: 1_000_000 })),
-		}),
-	);
+type ServedRow = { id: string; name?: string; context_length?: number };
+
+async function discoverModels(rows: ReadonlyArray<string | ServedRow>) {
+	const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+		expect(init?.method).toBe("GET");
+		return Response.json({
+			data: rows.map(row => (typeof row === "string" ? { id: row, name: row, context_length: 1_000_000 } : row)),
+		});
+	});
 	const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
-	const specs = await options.fetchDynamicModels?.();
-	return chatSpecs(specs).map(spec => buildModel(spec));
+	return chatModels(await options.fetchDynamicModels?.());
 }
 
 describe("Command Code provider support", () => {
@@ -226,7 +228,9 @@ describe("Command Code provider support", () => {
 			kind: "judge",
 			cost: { input: 0.042, output: 0 },
 		});
-		expect(chatSpecs(specs).map(spec => spec.id)).toEqual(["deepseek/deepseek-v4-flash"]);
+		expect(models.filter(model => model.kind !== "judge").map(model => model.id)).toEqual([
+			"deepseek/deepseek-v4-flash",
+		]);
 
 		const proxied = commandCodeModelManagerOptions({
 			apiKey: "user_test",
@@ -287,12 +291,12 @@ describe("Command Code provider support", () => {
 		});
 		const options = commandCodeModelManagerOptions({ fetch: fetchMock });
 		const specs = await options.fetchDynamicModels?.();
-		const models = chatSpecs(specs).map(spec => buildModel(spec));
+		const models = chatModels(specs);
 		expect(models).toHaveLength(1);
 		expect(requestHeaders).not.toHaveProperty("Authorization");
 	});
 
-	test("preserves disjoint cache usage and timing through both native transports", async () => {
+	test("preserves disjoint cache usage and timing through the chat-completions and Messages transports", async () => {
 		const catalog = commandCodeModelManagerOptions({
 			fetch: async () =>
 				Response.json({
@@ -428,20 +432,12 @@ describe("Command Code provider support", () => {
 	});
 
 	test("prices live-discovered models from the Command Code rate card", async () => {
-		const fetchMock: FetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-			expect(init?.method).toBe("GET");
-			return Response.json({
-				data: [
-					{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
-					{ id: "Qwen/Qwen3.7-Flash", name: "Qwen 3.7 Flash", context_length: 1_000_000 },
-					{ id: "xai/grok-4.6", name: "Grok 4.6", context_length: 500_000 },
-					{ id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", context_length: 256_000 },
-				],
-			});
-		});
-		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
-		const specs = await options.fetchDynamicModels?.();
-		const models = (specs ?? []).map(spec => buildModel(spec));
+		const models = await discoverModels([
+			{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", context_length: 1_000_000 },
+			{ id: "Qwen/Qwen3.7-Flash", name: "Qwen 3.7 Flash", context_length: 1_000_000 },
+			{ id: "xai/grok-4.6", name: "Grok 4.6", context_length: 500_000 },
+			{ id: "poolside/laguna-s-2.1-free", name: "Laguna S 2.1", context_length: 256_000 },
+		]);
 
 		expect(models.find(model => model.id === "claude-sonnet-4-6")).toMatchObject({
 			cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -495,6 +491,7 @@ describe("Command Code provider support", () => {
 			}
 		}
 	});
+
 	test("follows the command-code@1.66.0 effort registry", async () => {
 		const models = await discoverModels([
 			"claude-opus-5-5",
@@ -519,6 +516,7 @@ describe("Command Code provider support", () => {
 			"meta/muse-spark-1.3": [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
 		});
 	});
+
 	test("advertises image input exactly outside the text-only set", async () => {
 		const models = await discoverModels(servedIds);
 		expect(models).toHaveLength(servedIds.length);
@@ -527,6 +525,7 @@ describe("Command Code provider support", () => {
 			expect(model.input).toEqual(textOnlyIds[model.id] ? ["text"] : ["text", "image"]);
 		}
 	});
+
 	test("applies the command-code@1.66.0 per-model output caps", async () => {
 		const models = await discoverModels([
 			"inclusionai/ling-3.0-flash-sante:free",
@@ -548,19 +547,12 @@ describe("Command Code provider support", () => {
 		// `supports-reasoning-effort #false` — including on the Anthropic
 		// route, where a fallback ladder would otherwise emit an
 		// unsupported thinking payload.
-		const fetchMock: FetchImpl = vi.fn(async () =>
-			Response.json({
-				data: [
-					{ id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", context_length: 262_144 },
-					{ id: "moonshotai/Kimi-K2.5", name: "Kimi K2.5", context_length: 262_144 },
-					{ id: "Qwen/Qwen3.7-Max", name: "Qwen 3.7 Max", context_length: 1_000_000 },
-					{ id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", context_length: 200_000 },
-				],
-			}),
-		);
-		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
-		const specs = await options.fetchDynamicModels?.();
-		const models = chatSpecs(specs).map(spec => buildModel(spec));
+		const models = await discoverModels([
+			{ id: "moonshotai/Kimi-K2.7-Code", name: "Kimi K2.7 Code", context_length: 262_144 },
+			{ id: "moonshotai/Kimi-K2.5", name: "Kimi K2.5", context_length: 262_144 },
+			{ id: "Qwen/Qwen3.7-Max", name: "Qwen 3.7 Max", context_length: 1_000_000 },
+			{ id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", context_length: 200_000 },
+		]);
 		expect(models).toHaveLength(4);
 		for (const model of models) {
 			expect(model.reasoning).toBe(false);
@@ -580,22 +572,11 @@ describe("Command Code provider support", () => {
 		// A catalog row that omits or misreports `context_length` retains a
 		// null window rather than inheriting another provider's deployment
 		// limit; verified corrections arrive through KDL, never the mapper.
-		const fetchMock: FetchImpl = vi.fn(async () =>
-			Response.json({
-				data: [
-					{ id: "mystery-model", name: "Mystery Model" },
-					{ id: "broken-model", name: "Broken Model", context_length: -5 },
-				],
-			}),
-		);
-		const options = commandCodeModelManagerOptions({ apiKey: "user_test", fetch: fetchMock });
-		const specs = await options.fetchDynamicModels?.();
-		const chatRows = chatSpecs(specs);
-		expect(chatRows).toHaveLength(2);
-		for (const spec of chatRows) {
-			expect(spec.contextWindow).toBeNull();
-		}
-		const models = chatRows.map(spec => buildModel(spec));
+		const models = await discoverModels([
+			{ id: "mystery-model", name: "Mystery Model" },
+			{ id: "broken-model", name: "Broken Model", context_length: -5 },
+		]);
+		expect(models).toHaveLength(2);
 		for (const model of models) {
 			expect(model.contextWindow).toBeNull();
 			expect(model.input).toEqual(["text"]);

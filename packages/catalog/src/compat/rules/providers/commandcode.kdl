@@ -1,9 +1,9 @@
 // Command Code Provider API deployment contract. Model capabilities and effort
-// ladders follow command-code@1.66.0: the thinking-efforts below reproduce that
-// bundle's effort registry one to one, including the Muse Spark ids it now lists.
-// Every id 1.66.0 serves without an effort dial keeps a missing ladder here as
-// a deliberate absence, not a gap (`modelSupportsReasoningEffort` is false for
-// those ids in that bundle).
+// ladders follow command-code@1.66.0. The thinking-efforts below reproduce that
+// bundle's effort registry exactly, including the Muse Spark ids it now lists.
+// An id that 1.66.0 serves without an effort dial has no ladder here on
+// purpose, not by oversight (`modelSupportsReasoningEffort` is false for it in
+// that bundle).
 provider "commandcode" {
 	default-model "claude-sonnet-5"
 	env "COMMAND_CODE_API_KEY" "COMMANDCODE_API_KEY"
@@ -29,9 +29,9 @@ provider "commandcode" {
 
 	supports-developer-role #false
 	supports-store #false
-	// No effort dial by default: only the exact ids below expose one
-	// upstream (command-code@1.66.0 effort registry).
-	// Every other served id must omit the effort control on the wire.
+	// No effort dial by default. Only the exact ids below expose one upstream
+	// (command-code@1.66.0 effort registry); every other served id must omit
+	// the effort control on the wire.
 	supports-reasoning-effort #false
 	// Discovery rows carry no reasoning metadata and stay neutral, so exact
 	// ladders below opt into repairing the neutral default (the cascade
@@ -39,9 +39,10 @@ provider "commandcode" {
 	thinking-upgrade-neutral #true
 	thinking-mode "effort"
 	max-tokens-field "max_tokens"
-	// Default output cap: the Provider API exposes no per-model maximum and
-	// the CLI requests 64K by default, so 64K (2^16); the per-model caps below
-	// are the only maxOutputTokens the command-code@1.66.0 registry sets.
+	// Default output cap: the Provider API exposes no per-model maximum, and
+	// the CLI requests 64K by default, so the default is 64K (2^16). The
+	// per-model caps below are the only maxOutputTokens that the
+	// command-code@1.66.0 registry sets.
 	limits-patch {
 		max-tokens 65536
 	}
@@ -93,6 +94,9 @@ provider "commandcode" {
 		thinking-efforts "high" "xhigh"
 	}
 	// Image input follows command-code@1.66.0: every served id outside its text-only set.
+	// residue: the vendor's text-only set cuts across classes (Qwen, DeepSeek, GLM,
+	// MiniMax, and Xiaomi each have ids on both sides), so no class selector
+	// expresses this list.
 	models "claude-fable-5" "claude-fable-5-1" "claude-haiku-4-5-20251001" "claude-opus-4-7" \
 		"claude-opus-4-8" "claude-opus-5" "claude-opus-5-5" "claude-sonnet-4-6" "claude-sonnet-5" \
 		"deepseek/deepseek-v4-flash-vision-exp" "google/gemini-3.1-flash-lite" \
@@ -145,19 +149,18 @@ provider "commandcode" {
 		}
 	}
 	// ---------------------------------------------------------------------------
-	// This table prices every model id that GET /provider/v1/models serves:
-	// discovery defaults each model to zero cost and the mapper never inherits
-	// another provider's rates, so this table is the sole pricing source. Base
-	// rates are Command Code's per-1M-token USD display rates, taken from
-	// `getDisplayRates` in command-code@1.66.0 on 2026-09-29 for the 82 ids the
-	// live catalog served that day. They match every price this table carried
-	// before, except three corrections: DeepSeek V4 Flash, DeepSeek V4 Flash
-	// vision-exp, and the Step-3.5-Flash input rate. A missing cache-write rate
-	// means 0. This table prices standing deals (MiniMax M3 50% off, MiMo
-	// discounts) at their current effective rates. Free models
-	// (`poolside/laguna-s-2.1-free`, `inclusionai/ling-3.0-flash-sante:free`,
-	// `stealth/pixel-canary`, `stealth/space-bunny-alpha`) keep the zero
-	// discovery default.
+	// This table prices every model id that GET /provider/v1/models serves.
+	// Discovery defaults each model to zero cost and the mapper never inherits
+	// another provider's rates, so this table is the only pricing source.
+	// Base rates are Command Code's per-1M-token USD display rates. They follow
+	// `getDisplayRates` in command-code@1.66.0, read on 2026-09-29, for all 82
+	// ids the live catalog served that day. DeepSeek V4 Flash and its
+	// vision-exp variant bill on the V4.1 Flash gateway slug.
+	// A missing cache-write rate means 0. Standing deals (MiniMax M3 50% off,
+	// MiMo discounts) use their current effective rates.
+	// Free models (`poolside/laguna-s-2.1-free`,
+	// `inclusionai/ling-3.0-flash-sante:free`, `stealth/pixel-canary`,
+	// `stealth/space-bunny-alpha`) keep the zero discovery default.
 	// ---------------------------------------------------------------------------
 	models "claude-sonnet-5" {
 		cost-patch {

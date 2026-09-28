@@ -46,7 +46,7 @@ function finiteNumber(value: unknown): number | undefined {
 async function getJson(
 	url: string,
 	apiKey: string,
-	params: UsageFetchParams,
+	signal: AbortSignal | undefined,
 	ctx: UsageFetchContext,
 ): Promise<Record<string, unknown> | null> {
 	try {
@@ -55,7 +55,7 @@ async function getJson(
 				Authorization: `Bearer ${apiKey}`,
 				Accept: "application/json",
 			},
-			signal: params.signal,
+			signal,
 		});
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
@@ -122,12 +122,10 @@ function buildWindowLimit(spec: WindowSpec, raw: unknown, accountId: string): Us
  */
 async function fetchCommandCodeUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
 	if (params.provider !== PROVIDER) return null;
-	const credential = params.credential;
-	if (credential.type !== "api_key" || !credential.apiKey) return null;
-	const apiKey = credential.apiKey;
+	if (params.credential.type !== "api_key" || !params.credential.apiKey) return null;
 	const origin = resolveOrigin(params.baseUrl);
 
-	const whoami = await getJson(`${origin}${WHOAMI_PATH}`, apiKey, params, ctx);
+	const whoami = await getJson(`${origin}${WHOAMI_PATH}`, params.credential.apiKey, params.signal, ctx);
 	if (!whoami) return null;
 	const user = isRecord(whoami.user) ? whoami.user : undefined;
 	const org = isRecord(whoami.org) ? whoami.org : undefined;
@@ -137,7 +135,7 @@ async function fetchCommandCodeUsage(params: UsageFetchParams, ctx: UsageFetchCo
 	const orgLogin = nonEmptyString(org?.login);
 
 	const creditsUrl = `${origin}${CREDITS_PATH}${orgId ? `?orgId=${encodeURIComponent(orgId)}` : ""}`;
-	const creditsBody = await getJson(creditsUrl, apiKey, params, ctx);
+	const creditsBody = await getJson(creditsUrl, params.credential.apiKey, params.signal, ctx);
 	if (!creditsBody) return null;
 	const credits = isRecord(creditsBody.credits) ? creditsBody.credits : undefined;
 	if (!credits) return null;

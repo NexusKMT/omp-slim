@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import type { UsageFetchContext, UsageFetchParams, UsageReport, UsageStatus } from "@oh-my-pi/pi-ai/usage";
+import type { UsageFetchContext, UsageFetchParams, UsageLimit, UsageReport, UsageStatus } from "@oh-my-pi/pi-ai/usage";
 import { commandCodeRankingStrategy, commandCodeUsageProvider } from "@oh-my-pi/pi-ai/usage/commandcode";
 
 function makeCredential(): UsageFetchParams["credential"] {
@@ -21,6 +21,10 @@ function makeCtx(routes: Record<string, Route>, seen: SeenRequest[] = []): Usage
 		return new Response(body, { status: route.status ?? 200, headers: { "content-type": "application/json" } });
 	};
 	return { fetch };
+}
+
+function makeParams(overrides: Partial<UsageFetchParams> = {}): UsageFetchParams {
+	return { provider: "commandcode", credential: makeCredential(), ...overrides };
 }
 
 const FIVE_HOUR_RESET = 1_800_000_000_000;
@@ -50,10 +54,7 @@ const WINDOWED_ROUTES: Record<string, Route> = {
 describe("command code usage provider", () => {
 	it("maps a windowed plan to 5-hour, weekly, and balance limits", async () => {
 		const seen: SeenRequest[] = [];
-		const report = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: makeCredential(), signal: undefined },
-			makeCtx(WINDOWED_ROUTES, seen),
-		);
+		const report = await commandCodeUsageProvider.fetchUsage(makeParams(), makeCtx(WINDOWED_ROUTES, seen));
 
 		expect(seen.map(request => request.url)).toEqual([
 			"https://api.commandcode.ai/alpha/whoami?limits=1",
@@ -109,7 +110,7 @@ describe("command code usage provider", () => {
 		];
 		for (const [used, expected] of cases) {
 			const report = await commandCodeUsageProvider.fetchUsage(
-				{ provider: "commandcode", credential: makeCredential(), signal: undefined },
+				makeParams(),
 				makeCtx({
 					...WINDOWED_ROUTES,
 					"/alpha/billing/credits": {
@@ -126,7 +127,7 @@ describe("command code usage provider", () => {
 
 	it("normalizes a seconds-precision reset timestamp to milliseconds", async () => {
 		const report = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: makeCredential(), signal: undefined },
+			makeParams(),
 			makeCtx({
 				...WINDOWED_ROUTES,
 				"/alpha/billing/credits": {
@@ -143,7 +144,7 @@ describe("command code usage provider", () => {
 	it("reports only the balance for a pay-as-you-go account", async () => {
 		const seen: SeenRequest[] = [];
 		const report = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: makeCredential(), signal: undefined },
+			makeParams(),
 			makeCtx(
 				{
 					"/alpha/whoami": { body: { user: { id: "user_2" } } },
@@ -165,7 +166,7 @@ describe("command code usage provider", () => {
 	it("throws on a revoked key so the cached report is purged", async () => {
 		await expect(
 			commandCodeUsageProvider.fetchUsage(
-				{ provider: "commandcode", credential: makeCredential(), signal: undefined },
+				makeParams(),
 				makeCtx({ "/alpha/whoami": { status: 401, body: { success: false, error: { code: "UNAUTHORIZED" } } } }),
 			),
 		).rejects.toMatchObject({ status: 401 });
@@ -173,7 +174,7 @@ describe("command code usage provider", () => {
 
 	it("returns null when the credits endpoint fails transiently", async () => {
 		const report = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: makeCredential(), signal: undefined },
+			makeParams(),
 			makeCtx({ ...WINDOWED_ROUTES, "/alpha/billing/credits": { status: 500, body: "{}" } }),
 		);
 		expect(report).toBeNull();
@@ -185,10 +186,7 @@ describe("command code usage provider", () => {
 			["no balance fields", { ...WINDOWED_ROUTES, "/alpha/billing/credits": { body: { credits: {} } } }],
 		];
 		for (const [name, routes] of cases) {
-			const report = await commandCodeUsageProvider.fetchUsage(
-				{ provider: "commandcode", credential: makeCredential(), signal: undefined },
-				makeCtx(routes),
-			);
+			const report = await commandCodeUsageProvider.fetchUsage(makeParams(), makeCtx(routes));
 			expect(report, name).toBeNull();
 		}
 	});
@@ -196,12 +194,7 @@ describe("command code usage provider", () => {
 	it("sends both probes to the configured origin instead of the canonical host", async () => {
 		const seen: SeenRequest[] = [];
 		await commandCodeUsageProvider.fetchUsage(
-			{
-				provider: "commandcode",
-				credential: makeCredential(),
-				baseUrl: "https://proxy.example/provider/v1",
-				signal: undefined,
-			},
+			makeParams({ baseUrl: "https://proxy.example/provider/v1" }),
 			makeCtx(WINDOWED_ROUTES, seen),
 		);
 		expect(seen.map(request => request.url)).toEqual([
@@ -213,15 +206,11 @@ describe("command code usage provider", () => {
 	it("returns null for credentials it has no bearer key for", async () => {
 		const seen: SeenRequest[] = [];
 		const oauth = await commandCodeUsageProvider.fetchUsage(
-			{
-				provider: "commandcode",
-				credential: { type: "oauth" } as UsageFetchParams["credential"],
-				signal: undefined,
-			},
+			makeParams({ credential: { type: "oauth" } as UsageFetchParams["credential"] }),
 			makeCtx(WINDOWED_ROUTES, seen),
 		);
 		const keyless = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: { type: "api_key" }, signal: undefined },
+			makeParams({ credential: { type: "api_key" } }),
 			makeCtx(WINDOWED_ROUTES, seen),
 		);
 		expect(oauth).toBeNull();
@@ -231,12 +220,20 @@ describe("command code usage provider", () => {
 });
 
 describe("command code credential ranking", () => {
-	it("ranks by the 5-hour window first and the weekly window second", async () => {
-		const report: UsageReport | null = await commandCodeUsageProvider.fetchUsage(
-			{ provider: "commandcode", credential: makeCredential(), signal: undefined },
-			makeCtx(WINDOWED_ROUTES),
-		);
-		const windows = commandCodeRankingStrategy.findWindowLimits(report!);
+	it("picks the 5-hour and weekly limits by window id, not by position", () => {
+		const limit = (windowId: string): UsageLimit => ({
+			id: `commandcode:${windowId}`,
+			label: windowId,
+			scope: { provider: "commandcode", windowId },
+			window: { id: windowId, label: windowId },
+			amount: { unit: "credits" },
+		});
+		const report: UsageReport = {
+			provider: "commandcode",
+			fetchedAt: 0,
+			limits: [limit("balance"), limit("7d"), limit("5h")],
+		};
+		const windows = commandCodeRankingStrategy.findWindowLimits(report);
 		expect(windows.primary?.id).toBe("commandcode:5h");
 		expect(windows.secondary?.id).toBe("commandcode:7d");
 	});

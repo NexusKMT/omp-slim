@@ -1,7 +1,7 @@
-// `/provider/v1/models` is public (200 with no or bogus credentials), so login
-// validates against `GET /alpha/whoami`, the identity route command-code@1.66.0
-// calls. That route returns 401 for a bad key (verified 2026-09-29) and bills
-// nothing.
+// `/provider/v1/models` is public: it answers 200 to a missing or bogus key.
+// Login therefore validates against `GET /alpha/whoami`, the identity route
+// that command-code@1.66.0 calls. That route answers 401 to a bad key
+// (verified 2026-09-29) and bills nothing.
 auth "commandcode" {
 	name "Command Code"
 	env "COMMAND_CODE_API_KEY" "COMMANDCODE_API_KEY"
