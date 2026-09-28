@@ -1,5 +1,5 @@
 use std::{
-	collections::HashSet,
+	collections::{HashSet, VecDeque},
 	ffi::c_void,
 	mem,
 	ptr::{self, NonNull},
@@ -29,6 +29,10 @@ const AX_TIMEOUT_SECONDS: f32 = 2.0;
 const PROBE_TIMEOUT_SECONDS: f32 = 0.5;
 /// Bounded `AXParent` ascent when an element does not expose `AXWindow`.
 const MAX_ANCESTRY_DEPTH: usize = 40;
+/// Bounds the search for a sheet, popover, or open menu that `AXWindows` does
+/// not list, matching the snapshot walk's own node and depth budget.
+const MAX_ATTACHED_SEARCH_NODES: usize = 5_000;
+const MAX_ATTACHED_SEARCH_DEPTH: usize = 24;
 
 type GetWindowIdFn = unsafe extern "C" fn(&AXUIElement, *mut u32) -> AXError;
 
@@ -206,6 +210,98 @@ fn element_window(element: &AXUIElement) -> Option<CFRetained<AXUIElement>> {
 	None
 }
 
+/// An element that stands for its own `WindowServer` window but is absent
+/// from `AXWindows`, with what can identify that window.
+#[derive(Clone, Copy, Debug)]
+enum AttachedCandidate {
+	/// An `AXSheet` or `AXPopover`: `_AXUIElementGetWindow` reports its own
+	/// window id.
+	OwnWindow(Option<u32>),
+	/// An open `AXMenu`: it reports no window id, or the id of the window it
+	/// was opened from, so only its frame can identify it.
+	Menu { frame_matches: bool },
+}
+
+/// Picks the candidate that represents native window `expected`: the sheet
+/// or popover reporting that exact id, else the one menu whose frame matches.
+///
+/// A sheet or popover reporting another id is a different window and never
+/// inherits the target by frame. Ambiguity refuses rather than guessing.
+fn select_attached(candidates: &[AttachedCandidate], expected: u32) -> CoreResult<Option<usize>> {
+	let unique = |is_match: &dyn Fn(&AttachedCandidate) -> bool, what: &str| {
+		let mut matches = (0..candidates.len()).filter(|&index| is_match(&candidates[index]));
+		match (matches.next(), matches.next()) {
+			(None, _) => Ok(None),
+			(Some(index), None) => Ok(Some(index)),
+			(Some(_), Some(_)) => Err(DesktopError::ax_failed(format!(
+				"native window {expected} matches more than one accessibility {what}"
+			))),
+		}
+	};
+	let exact = unique(
+		&|candidate| matches!(candidate, AttachedCandidate::OwnWindow(Some(id)) if *id == expected),
+		"sheet or popover",
+	)?;
+	if exact.is_some() {
+		return Ok(exact);
+	}
+	unique(
+		&|candidate| matches!(candidate, AttachedCandidate::Menu { frame_matches: true }),
+		"menu frame",
+	)
+}
+
+/// Finds the sheet, popover, or open menu of `app` that represents `win`,
+/// by a bounded breadth-first walk of the application's accessibility tree.
+/// `AppKit` gives each its own `WindowServer` window but lists only standard
+/// windows in `AXWindows`.
+fn attached_window(
+	app: &AXUIElement,
+	expected: u32,
+	win: &DesktopWindow,
+) -> CoreResult<Option<CFRetained<AXUIElement>>> {
+	let mut queue: VecDeque<_> = copy_elements_optional(app, "AXChildren")
+		.unwrap_or_default()
+		.into_iter()
+		.map(|element| (element, 1usize))
+		.collect();
+	let mut elements = Vec::new();
+	let mut candidates = Vec::new();
+	let mut visited = 0usize;
+	while let Some((element, depth)) = queue.pop_front() {
+		visited += 1;
+		if visited > MAX_ATTACHED_SEARCH_NODES {
+			break;
+		}
+		let (candidate, descend) = match copy_string(&element, "AXRole").as_deref() {
+			Some("AXSheet" | "AXPopover") => {
+				(Some(AttachedCandidate::OwnWindow(window_id(&element))), true)
+			},
+			Some("AXMenu") => {
+				// A closed menu keeps its items in the tree at zero size; only
+				// an open menu can hold an open submenu.
+				let frame = bounds(&element).filter(|b| b.width > 0.0 && b.height > 0.0);
+				let frame_matches = frame.is_some_and(|b| bounds_matches_window(b, win));
+				(Some(AttachedCandidate::Menu { frame_matches }), frame.is_some())
+			},
+			_ => (None, true),
+		};
+		if descend && depth < MAX_ATTACHED_SEARCH_DEPTH {
+			queue.extend(
+				copy_elements_optional(&element, "AXChildren")
+					.unwrap_or_default()
+					.into_iter()
+					.map(|child| (child, depth + 1)),
+			);
+		}
+		if let Some(candidate) = candidate {
+			candidates.push(candidate);
+			elements.push(element);
+		}
+	}
+	Ok(select_attached(&candidates, expected)?.map(|index| elements.swap_remove(index)))
+}
+
 impl AxBackend for MacAx {
 	fn window_root(&mut self, win: &DesktopWindow) -> CoreResult<AxHandle> {
 		ensure_trusted()?;
@@ -232,8 +328,15 @@ impl AxBackend for MacAx {
 					return Ok(AxHandle::Mac(element.clone()));
 				}
 			}
+			// Sheets, popovers, and open menus are separate native windows that
+			// `AXWindows` omits.
+			if let Some(element) = attached_window(&app, expected_id, win)? {
+				set_timeout(&element)?;
+				return Ok(AxHandle::Mac(element));
+			}
 			return Err(DesktopError::ax_failed(format!(
-				"native window {expected_id} was not found in the application's accessibility windows"
+				"native window {expected_id} was not found in the application's accessibility \
+				 windows, sheets, popovers, or open menus"
 			)));
 		}
 		// Without the native id SPI, require a unique title AND frame match.
@@ -865,7 +968,7 @@ fn ax_result(error: AXError, context: impl Into<String>) -> CoreResult<()> {
 
 #[cfg(test)]
 mod tests {
-	use super::replace_utf16_selection;
+	use super::{AttachedCandidate, replace_utf16_selection, select_attached};
 
 	#[test]
 	fn selected_text_replaces_utf16_selection_without_losing_surrounding_text() {
@@ -880,5 +983,36 @@ mod tests {
 		for (start, length) in [(-1, 0), (0, -1), (2, 0), (1, 1), (4, 9), (6, 0)] {
 			assert_eq!(replace_utf16_selection("a😀bc", start, length, "X"), None);
 		}
+	}
+
+	#[test]
+	fn sheet_or_popover_window_id_beats_a_menu_at_the_same_frame() {
+		let candidates =
+			[AttachedCandidate::Menu { frame_matches: true }, AttachedCandidate::OwnWindow(Some(51))];
+		assert_eq!(select_attached(&candidates, 51).unwrap(), Some(1));
+	}
+
+	#[test]
+	fn open_menu_resolves_by_its_unique_matching_frame() {
+		let candidates = [
+			AttachedCandidate::OwnWindow(Some(69)),
+			AttachedCandidate::Menu { frame_matches: false },
+			AttachedCandidate::Menu { frame_matches: true },
+		];
+		assert_eq!(select_attached(&candidates, 57).unwrap(), Some(2));
+	}
+
+	#[test]
+	fn sheet_reporting_another_window_id_never_inherits_the_target() {
+		let candidates = [AttachedCandidate::OwnWindow(Some(60)), AttachedCandidate::OwnWindow(None)];
+		assert_eq!(select_attached(&candidates, 51).unwrap(), None);
+	}
+
+	#[test]
+	fn ambiguous_menu_frames_are_refused() {
+		let candidates = [AttachedCandidate::Menu { frame_matches: true }, AttachedCandidate::Menu {
+			frame_matches: true,
+		}];
+		assert!(select_attached(&candidates, 57).is_err());
 	}
 }
