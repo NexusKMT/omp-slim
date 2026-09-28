@@ -23,13 +23,14 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { getTimeRangeConfig } from "./aggregator";
 import {
 	type FrustrationModelRow,
+	type FrustrationVerdict,
 	getFrustrationByModel,
 	getFrustrationOverall,
 	getPendingFrustrationProse,
 	getPendingFrustrationTotals,
 	initDb,
 	type PendingProse,
-	upsertFrustrationVerdict,
+	upsertFrustrationVerdicts,
 } from "./db";
 import type {
 	FrustrationDashboardStats,
@@ -84,7 +85,17 @@ const REQUEST_OVERHEAD_TOKENS = 561;
 const CHARS_PER_TOKEN = 5.9;
 /** Output tokens a prompted chat judge bills per request; native judges bill none (zero output price). */
 const OUTPUT_TOKENS_PER_REQUEST = 8;
-const RUN_CONCURRENCY = 32;
+/** Judge requests in flight at the start of a run; {@link AdaptiveLimit} tunes it from there. */
+const INITIAL_CONCURRENCY = 32;
+const MIN_CONCURRENCY = 4;
+const MAX_CONCURRENCY = 256;
+/** Wait before the second attempt at a text; doubles for the third. */
+const RETRY_DELAY_MS = 250;
+/** Failures within this window after a backoff don't halve the limit again. */
+const BACKOFF_COOLDOWN_MS = 2_000;
+/** Verdicts buffered before a write; a partial batch is written after {@link VERDICT_FLUSH_MS}. */
+const VERDICT_BATCH = 64;
+const VERDICT_FLUSH_MS = 500;
 const ATTEMPTS_PER_TEXT = 3;
 /** Stop the run when this many texts failed before any succeeded: the judge is not working. */
 const CIRCUIT_BREAKER_FAILURES = 25;
@@ -107,6 +118,7 @@ let currentJob: FrustrationJobStatus = {
 	error: null,
 	startedAt: null,
 	finishedAt: null,
+	concurrency: 0,
 };
 let currentController: AbortController | undefined;
 /** Set while a start request is resolving the judge / loading the queue, so a concurrent start gets 409. */
@@ -274,6 +286,7 @@ export async function startFrustrationRun(range?: string | null): Promise<StartF
 			error: null,
 			startedAt: now,
 			finishedAt: pending.length > 0 ? null : now,
+			concurrency: 0,
 		};
 		currentJob = job;
 		if (pending.length === 0) return { started: true, job: { ...job }, finished: Promise.resolve() };
@@ -305,6 +318,36 @@ function shuffle<T>(items: T[]): T[] {
 	return items;
 }
 
+/**
+ * In-flight limit for judge requests, adapted like TCP congestion control:
+ * it grows by one per success until the first failure (slow start), then by
+ * about four per window of successes, and halves on failure — at most once
+ * per {@link BACKOFF_COOLDOWN_MS}, so one burst of rate-limit errors from the
+ * same window counts once. Judges are latency-bound (a call takes ~1s whatever
+ * the model speed), so throughput scales with how many calls are in flight.
+ */
+class AdaptiveLimit {
+	#limit = INITIAL_CONCURRENCY;
+	#slowStart = true;
+	#lastBackoff = 0;
+
+	get value(): number {
+		return Math.floor(this.#limit);
+	}
+
+	succeeded(): void {
+		this.#limit = Math.min(MAX_CONCURRENCY, this.#limit + (this.#slowStart ? 1 : 4 / this.#limit));
+	}
+
+	failed(): void {
+		this.#slowStart = false;
+		const now = Date.now();
+		if (now - this.#lastBackoff < BACKOFF_COOLDOWN_MS) return;
+		this.#lastBackoff = now;
+		this.#limit = Math.max(MIN_CONCURRENCY, this.#limit / 2);
+	}
+}
+
 async function runJob(
 	job: FrustrationJobStatus,
 	judge: StatsJudge,
@@ -312,20 +355,59 @@ async function runJob(
 	controller: AbortController,
 ): Promise<void> {
 	const { signal } = controller;
+	const limit = new AdaptiveLimit();
 	let next = 0;
+	let inFlight = 0;
 	let labelFromResult = false;
 	let lastError: string | null = null;
 	let tripped = false;
 
+	// Verdicts are written in batches: one transaction per flush instead of one per text.
+	let buffered: FrustrationVerdict[] = [];
+	let flushTimer: NodeJS.Timeout | undefined;
+	const flush = () => {
+		clearTimeout(flushTimer);
+		flushTimer = undefined;
+		const batch = buffered;
+		buffered = [];
+		upsertFrustrationVerdicts(batch);
+	};
+	const crash = (error: unknown) => {
+		if (tripped) return;
+		// Only non-judge failures (e.g. a SQLite write) reach here.
+		tripped = true;
+		lastError = errorMessage(error);
+		logger.error("frustration judge run crashed", { error: lastError });
+		controller.abort(error);
+	};
+	const record = (verdict: FrustrationVerdict) => {
+		buffered.push(verdict);
+		if (buffered.length >= VERDICT_BATCH) {
+			flush();
+		} else {
+			flushTimer ??= setTimeout(() => {
+				try {
+					flush();
+				} catch (error) {
+					crash(error);
+				}
+			}, VERDICT_FLUSH_MS);
+		}
+	};
+
 	const judgeText = async (item: PendingProse): Promise<void> => {
 		for (let attempt = 1; attempt <= ATTEMPTS_PER_TEXT; attempt++) {
 			if (signal.aborted) return;
+			// Failures are mostly rate limits: give the judge a moment before retrying.
+			if (attempt > 1) await Bun.sleep(RETRY_DELAY_MS * (attempt - 1));
+			if (signal.aborted) return;
 			try {
 				const result = await judge.judge({ state: item.prose, questions: FRUSTRATION_QUESTIONS }, { signal });
+				limit.succeeded();
 				const levels = result.answers.annoyed.probabilities;
 				const pAngry = levels["3"] ?? 0;
 				const label = `${result.provider}/${result.model}`;
-				upsertFrustrationVerdict({
+				record({
 					proseHash: item.hash,
 					pAnnoyed: (levels["2"] ?? 0) + pAngry,
 					pAngry,
@@ -342,6 +424,7 @@ async function runJob(
 				return;
 			} catch (error) {
 				if (signal.aborted) return;
+				limit.failed();
 				lastError = errorMessage(error);
 				logger.warn("frustration judge attempt failed", { hash: item.hash, attempt, error: lastError });
 			}
@@ -354,20 +437,30 @@ async function runJob(
 		}
 	};
 
-	const worker = async (): Promise<void> => {
-		while (!signal.aborted && next < queue.length) {
-			await judgeText(queue[next++]);
+	// Keep `limit.value` requests in flight; every completion refills the pool.
+	const { promise: drained, resolve } = Promise.withResolvers<void>();
+	const pump = () => {
+		while (!signal.aborted && inFlight < limit.value && next < queue.length) {
+			const item = queue[next++];
+			inFlight++;
+			judgeText(item)
+				.catch(crash)
+				.finally(() => {
+					inFlight--;
+					pump();
+				});
 		}
+		job.concurrency = limit.value;
+		if (inFlight === 0 && (signal.aborted || next >= queue.length)) resolve();
 	};
+	pump();
+	await drained;
 
+	// Verdicts already paid for are kept, even when the run was cancelled.
 	try {
-		await Promise.all(Array.from({ length: Math.min(RUN_CONCURRENCY, queue.length) }, worker));
+		flush();
 	} catch (error) {
-		// Only non-judge failures (e.g. a SQLite write) reach here.
-		tripped = true;
-		lastError = errorMessage(error);
-		logger.error("frustration judge run crashed", { error: lastError });
-		controller.abort(error);
+		crash(error);
 	}
 	if (tripped) {
 		job.state = "failed";

@@ -253,6 +253,8 @@ export interface FrustrationJobStatus {
 	error: string | null;
 	startedAt: number | null;
 	finishedAt: number | null;
+	/** Judge requests the run currently keeps in flight (adapts to the judge's rate limits). */
+	concurrency: number;
 }
 
 /** Payload of `GET /api/stats/frustration`. */

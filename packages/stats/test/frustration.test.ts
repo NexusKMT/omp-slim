@@ -92,6 +92,11 @@ class FakeJudge implements StatsJudge {
 	/** Resolves when the first judgment starts. */
 	readonly entered = this.#entered.promise;
 	gate: Promise<void> | undefined;
+	/** Reject calls beyond this many concurrent ones, as a rate-limited judge would. */
+	capacity = Number.POSITIVE_INFINITY;
+	delayMs = 0;
+	inFlight = 0;
+	maxInFlight = 0;
 
 	primaryModel(): Model | undefined {
 		return testModel();
@@ -103,6 +108,14 @@ class FakeJudge implements StatsJudge {
 	): Promise<JudgmentResult<Q>> {
 		if (typeof request.state === "string") this.states.push(request.state);
 		this.#entered.resolve();
+		this.inFlight++;
+		this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+		try {
+			if (this.inFlight > this.capacity) throw new Error("429 rate limited");
+			if (this.delayMs) await Bun.sleep(this.delayMs);
+		} finally {
+			this.inFlight--;
+		}
 		if (this.gate) {
 			const signal = options.signal;
 			await Promise.race([
@@ -274,6 +287,25 @@ describe("frustration dashboard", () => {
 		expect(judge.states).toHaveLength(1);
 		expect(getFrustrationJobStatus()).toMatchObject({ state: "cancelled", done: 0 });
 		expect((await getFrustrationDashboardStats("all")).overall.judged).toBe(0);
+	});
+
+	it("raises concurrency past its starting point, rides out rate limits, and persists every verdict", async () => {
+		await initDb();
+		const texts = Array.from({ length: 400 }, (_, i) => `text number ${i}`);
+		insertUserMessageStats(texts.map(text => userMessage(text, "gpt-5.4", "openai")));
+		const judge = new FakeJudge();
+		judge.delayMs = 5;
+		judge.capacity = 64;
+		setStatsJudgeProvider(async () => judge);
+
+		const started = await startFrustrationRun("all");
+		if (!started.started) throw new Error(started.error);
+		await started.finished;
+
+		expect(getFrustrationJobStatus()).toMatchObject({ state: "done", total: 400, done: 400, failed: 0 });
+		// The run starts at 32 in flight; a latency-bound judge should be driven harder.
+		expect(judge.maxInFlight).toBeGreaterThan(32);
+		expect((await getFrustrationDashboardStats("all")).overall.judged).toBe(400);
 	});
 
 	it("reports why a run is unavailable without a host judge", async () => {

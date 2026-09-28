@@ -424,6 +424,10 @@ function JudgeProgress({
 				</span>
 				{job.judge && <span className="mono">{job.judge}</span>}
 				{job.startedAt !== null && <span>elapsed {formatElapsed(Date.now() - job.startedAt)}</span>}
+				{job.startedAt !== null && job.done > 0 && (
+					<span className="num">{(job.done / Math.max(1, (Date.now() - job.startedAt) / 1000)).toFixed(0)}/s</span>
+				)}
+				{job.concurrency > 0 && <span className="num">{formatInteger(job.concurrency)} in flight</span>}
 			</div>
 		</div>
 	);
