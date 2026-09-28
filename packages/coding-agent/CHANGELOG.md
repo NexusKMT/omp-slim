@@ -399,6 +399,9 @@
 - Improved responsiveness in long sessions by significantly reducing the time required to scan provider context for credential patterns.
 - Fixed native judges failing to honor configured request headers, enabling authenticated and header-routed judge providers to work as configured.
 - Fixed LSP requests hanging when aborted while waiting for an earlier write to complete.
+### Fixed
+
+- Fixed the exit resume hint so the `omp --resume <id>` command prints on its own line, letting triple-click select just the command ([#11001](https://github.com/can1357/oh-my-pi/issues/11001))
 
 ## [18.2.7] - 2026-09-21
 
