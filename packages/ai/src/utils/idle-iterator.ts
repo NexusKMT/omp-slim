@@ -1,5 +1,6 @@
 import { $env } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
+import type { LocalWorkSource } from "./event-stream";
 
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
 const DEFAULT_STREAM_FIRST_EVENT_TIMEOUT_MS = 300_000;
@@ -138,24 +139,17 @@ export interface IdleTimeoutIteratorOptions {
 	 */
 	isProgressItem?: (item: unknown) => boolean;
 	/**
-	 * Reports consumer-side local work in flight for the stream: the provider
-	 * transport is waiting on a server-requested local tool bridge (e.g. the
-	 * Cursor exec channel) before anything can flow upstream again. While it
-	 * returns true, an expired idle / first-item deadline slides forward
-	 * instead of aborting — the silence is ours, not a provider stall. The
-	 * watchdog re-arms with a full budget once the local work completes (see
-	 * {@link localWorkSettledAt}), so a provider that stalls afterwards is
+	 * Consumer-side local work in flight for the stream: the provider transport
+	 * is waiting on a server-requested local tool bridge (e.g. the Cursor exec
+	 * channel) before anything can flow upstream again. While work is pending,
+	 * an expired idle / first-item deadline slides forward instead of aborting —
+	 * the silence is ours, not a provider stall. The provider cannot respond
+	 * before it receives the local result, so both deadlines are measured from
+	 * no earlier than `localWorkSettledAt`: a tool that finishes just before the
+	 * deadline gets a full budget, and a provider that stalls afterwards is
 	 * still caught.
 	 */
-	hasPendingLocalWork?: () => boolean;
-	/**
-	 * Epoch ms at which pending local work last drained to zero (0 when none
-	 * has completed). The provider cannot respond before it receives the local
-	 * result, so the idle and first-item deadlines are measured from no earlier
-	 * than this instant — a tool that finishes just before the deadline must
-	 * not leave the provider only the remainder of the old window.
-	 */
-	localWorkSettledAt?: () => number;
+	localWork?: LocalWorkSource;
 	/**
 	 * Cancel iteration as soon as this signal aborts. Required for caller-driven
 	 * cancellation (ESC) when the underlying transport does not surface signal
@@ -218,22 +212,8 @@ export async function* iterateWithIdleTimeout<T>(
 	};
 	let lastProgressAt = Date.now();
 
-	const hasPendingLocalWork = (): boolean => {
-		if (!options.hasPendingLocalWork) return false;
-		try {
-			return options.hasPendingLocalWork();
-		} catch {
-			return false;
-		}
-	};
-	const localWorkSettledAt = (): number => {
-		if (!options.localWorkSettledAt) return 0;
-		try {
-			return options.localWorkSettledAt();
-		} catch {
-			return 0;
-		}
-	};
+	const hasPendingLocalWork = (): boolean => options.localWork?.hasPendingLocalWork ?? false;
+	const localWorkSettledAt = (): number => options.localWork?.localWorkSettledAt ?? 0;
 	// Local work means the current gap is attributable to the consumer side,
 	// not the provider: slide the active deadline a full budget past now
 	// instead of aborting. Completion restarts the budget via
