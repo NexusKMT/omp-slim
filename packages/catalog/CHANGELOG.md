@@ -8,12 +8,9 @@
 - Added GPT-6.1 Sol pricing for `openai-codex` (`gpt-6.1-sol`, `gpt-6.1-sol-wm`: $2 input, $10 output, $0.10 cached input), so Codex usage shows cost instead of $0 ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 - Added `Model.serviceTiers`, the service tiers a provider advertises for a model; Codex discovery fills it from `service_tiers` (e.g. `priority`, `ultrafast`) ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 
-### Changed
-
-- Codex requests now report client version 0.159.0 (was 0.155.1), matching the current Codex CLI, so the backend's per-model client-version gates stay current ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
-
 ### Fixed
 
+- Fixed `openai-codex/gpt-6.1-sol` not appearing in Codex discovery even on accounts where the Codex CLI lists it: the backend hides it from client version 0.155.1, so Codex requests now report 0.159.0, the current Codex CLI release ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 - Fixed on-demand compaction staying off for Claude models on the `amazon-bedrock` and `bedrock-mantle` providers when they use Bedrock's `/anthropic` routes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Fixed Claude models on Bedrock's `/anthropic` routes resolving `compat.disableStrictTools: false`, although those routes reject the tool `strict` field ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Fixed Bedrock's FIPS (`bedrock-runtime-fips`) and AWS PrivateLink (`vpce-….vpce.amazonaws.com`) hostnames, and Mantle's documented `/v1` OpenAI base, not being recognized as Bedrock routes, which left them without native compaction and the `/anthropic` request fixes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
