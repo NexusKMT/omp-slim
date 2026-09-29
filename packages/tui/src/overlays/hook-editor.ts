@@ -42,7 +42,7 @@ export interface HookEditorOptions {
 	/**
 	 * With `acceptImages`, called for each path of a bracketed paste made only of image paths.
 	 * Same signature as `CustomEditor.onPasteImagePath`; calls are not awaited in turn, so images
-	 * are numbered as they finish loading.
+	 * attach as they finish loading and are renumbered in text order on submit.
 	 */
 	onPasteImagePath?: (path: string) => void | Promise<void>;
 	/**
@@ -221,7 +221,8 @@ export class HookEditorComponent extends OverlayPanel implements Focusable {
 		if (requireText && text.trim().length === 0) return;
 		let images: ImageContent[] | undefined;
 		if (this.#images.length > 0) {
-			const compacted = compactImageMarkers(text, this.#images.length);
+			// Path pastes attach as they finish loading; submit numbers images in text order.
+			const compacted = compactImageMarkers(text, this.#images.length, { byAppearance: true });
 			if (compacted) {
 				text = compacted.text;
 				images = compacted.keep.map(index => this.#images[index]);

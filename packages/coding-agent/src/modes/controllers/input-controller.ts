@@ -2209,8 +2209,13 @@ export class InputController {
 	async #pasteImagePath(path: string, sink: ImagePasteSink): Promise<void> {
 		try {
 			if (isVideoPath(path)) {
-				if (sink.attachVideo) await sink.attachVideo(path);
-				else sink.pasteText(path);
+				if (sink.attachVideo) {
+					await sink.attachVideo(path);
+					return;
+				}
+				// Image-only prompts keep the path as text, like other unattachable pastes.
+				sink.pasteText(path);
+				this.ctx.showStatus("Video paste is not supported in this prompt");
 				return;
 			}
 			const image = await loadImageInput({

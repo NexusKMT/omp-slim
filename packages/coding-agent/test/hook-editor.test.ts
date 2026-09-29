@@ -208,6 +208,29 @@ describe("HookEditorComponent prompt-style mode", () => {
 		expect(disposed.attachImage(image)).toBeUndefined();
 	});
 
+	it("numbers images in text order on submit when they attached out of order", () => {
+		// Concurrent path loads: the second-pasted file finished first and took #1.
+		const later: ImageContent = { type: "image", data: "later", mimeType: "image/png" };
+		const earlier: ImageContent = { type: "image", data: "earlier", mimeType: "image/png" };
+		const onSubmit = vi.fn();
+		const component = new HookEditorComponent(
+			createTui(),
+			"Prompt",
+			"[Image #2] then [Image #1]",
+			onSubmit,
+			vi.fn(),
+			{
+				promptStyle: true,
+				acceptImages: true,
+				images: [later, earlier],
+			},
+		);
+
+		component.handleInput("\r");
+
+		expect(onSubmit).toHaveBeenCalledWith("[Image #1] then [Image #2]", [earlier, later]);
+	});
+
 	it("drops images whose markers were deleted and renumbers the rest on submit", () => {
 		const first: ImageContent = { type: "image", data: "first", mimeType: "image/png" };
 		const second: ImageContent = { type: "image", data: "second", mimeType: "image/jpeg" };

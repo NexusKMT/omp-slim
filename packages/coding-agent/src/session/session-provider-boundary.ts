@@ -58,13 +58,19 @@ export class SessionProviderBoundary {
 		this.#host = host;
 	}
 
-	/** Latest image attachments addressable by tools as `Image #N` or `attachment://N`. */
+	/**
+	 * Latest image attachments addressable by tools as `Image #N` or `attachment://N`: the newest
+	 * user/developer message with images, or `ask` result whose answers carry pasted images.
+	 */
 	getImageAttachments(): { label: string; uri: string; image: ImageContent; sourcePath: string }[] {
 		for (let i = this.#host.agent.state.messages.length - 1; i >= 0; i--) {
 			const message = this.#host.agent.state.messages[i];
-			if (!message || (message.role !== "user" && message.role !== "developer") || !Array.isArray(message.content)) {
-				continue;
-			}
+			if (!message) continue;
+			const carriesUserImages =
+				message.role === "user" ||
+				message.role === "developer" ||
+				(message.role === "toolResult" && message.toolName === "ask");
+			if (!carriesUserImages || !Array.isArray(message.content)) continue;
 			const images = message.content.filter((part): part is ImageContent => part.type === "image");
 			if (images.length === 0) continue;
 			return images.flatMap((image, index) => {

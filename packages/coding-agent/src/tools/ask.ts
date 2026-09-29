@@ -632,7 +632,8 @@ export class AskTool implements AgentTool<typeof askSchema, AskToolDetails> {
 		for (const [index, image] of images.entries()) {
 			const notice = renderAttachmentSourceNotice(image, index + 1, { askAnswer: true });
 			if (notice) blocks.push({ type: "text", text: notice.content });
-			blocks.push({ type: "image", data: image.data, mimeType: image.mimeType });
+			// Keep the source tag: `attachment://N` resolves this result's images to their files.
+			blocks.push(image);
 			const description = descriptions?.[index];
 			if (description) blocks.push(description);
 		}

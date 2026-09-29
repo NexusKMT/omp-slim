@@ -33,7 +33,7 @@
   - single question: selected/custom answer plus an optional `User added note: ...`
   - multiple questions: `User answers:` followed by one line per `id`
   - rich-dialog chat redirect: `User chose to chat about this instead of answering...`
-- Images pasted into rich-dialog custom answers and notes follow the text block, each with the source-path notice a main-editor attachment gets. `[Image #N]` markers are numbered across the whole result; image data stays out of `details`.
+- Images pasted into rich-dialog custom answers and notes follow the text block, each with the source-path notice a main-editor attachment gets. `[Image #N]` markers are numbered across the whole result, in text order within each answer, and `attachment://N` resolves to them until a newer message attaches images; image data stays out of `details`.
 - For a text-only active model with `images.describeForTextModels` on (the default), each answer image is followed by the vision-model description a pasted prompt image gets.
 - `details`:
   - single question: `{ question, options, multi, selectedOptions, customInput?, note?, timedOut? }`

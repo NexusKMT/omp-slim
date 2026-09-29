@@ -1502,7 +1502,8 @@ describe("AskTool rich ask dialog", () => {
 				text: 'User answers:\nq1: "Like [Image #1]" (note: Evidence [Image #2])\nq2: B (note: Evidence [Image #3])',
 			},
 			{ type: "text", text: expect.stringContaining("local://pasted-image-abc.webp") },
-			{ type: "image", data: "custom-image", mimeType: "image/webp" },
+			// The source tag stays on the block so `attachment://1` resolves to the pasted file.
+			customImage,
 			{ type: "image", data: "first-image", mimeType: "image/png" },
 			{ type: "image", data: "second-image", mimeType: "image/jpeg" },
 		]);

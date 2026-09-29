@@ -265,8 +265,14 @@ export function collapseImageMarkers(
 /**
  * Drops unreferenced vision attachments from a submission and densely remaps
  * retained image/video markers. Returns `null` when no compaction is needed.
+ * With `byAppearance`, retained markers are also renumbered in the order they first
+ * appear, for editors whose images attach out of order (concurrent path loads).
  */
-export function compactImageMarkers(text: string, imageCount: number): { text: string; keep: number[] } | null {
+export function compactImageMarkers(
+	text: string,
+	imageCount: number,
+	options?: { byAppearance?: boolean },
+): { text: string; keep: number[] } | null {
 	if (imageCount === 0) return null;
 	const referenced = new Set<number>();
 	const scanner = new RegExp(VISION_MARKER_REGEX.source, "g");
@@ -276,8 +282,8 @@ export function compactImageMarkers(text: string, imageCount: number): { text: s
 		const n = Number(match[2]);
 		if (n <= imageCount) referenced.add(n);
 	}
-	if (referenced.size === imageCount) return null;
-	const keep = [...referenced].sort((a, b) => a - b);
+	const keep = options?.byAppearance ? [...referenced] : [...referenced].sort((a, b) => a - b);
+	if (keep.length === imageCount && keep.every((n, i) => n === i + 1)) return null;
 	const remap = new Map<number, number>(keep.map((n, i) => [n, i + 1]));
 	const rewritten = text.replace(
 		VISION_MARKER_REGEX,

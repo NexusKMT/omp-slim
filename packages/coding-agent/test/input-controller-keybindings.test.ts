@@ -909,6 +909,18 @@ describe("InputController image paste into an image-accepting prompt", () => {
 		expect(context.editor.pendingImages).toHaveLength(0);
 	});
 
+	it("keeps a pasted video path as text and says why in an image-accepting prompt", async () => {
+		const context = await createPromptContext();
+		const { prompt, onSubmit } = createPrompt(context, { acceptImages: true });
+		const videoPath = tempDir.join("clip.mp4");
+
+		await new InputController(context.ctx).handleImagePathPaste(videoPath);
+		prompt.handleInput("\r");
+
+		expect(context.ctx.showStatus).toHaveBeenCalledWith("Video paste is not supported in this prompt");
+		expect(onSubmit).toHaveBeenCalledWith(videoPath);
+	});
+
 	it("refuses a clipboard image in a prompt that did not opt in", async () => {
 		const context = await createPromptContext();
 		const { prompt, onSubmit } = createPrompt(context);
