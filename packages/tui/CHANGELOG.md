@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
+- Fixed idle terminal activity notifications by rearming bracketed paste on input and rendering; the first paste after a silent host reset can still submit lines if the event loop is stalled ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
 
 ### Added
 

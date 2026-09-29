@@ -815,6 +815,33 @@ describe("ProcessTerminal DECRQM + in-band resize (DEC 2026/2048)", () => {
 		terminal.stop();
 	});
 
+	it("replays the first paste after a silent mode reset as keys when the loop is stalled", () => {
+		vi.useFakeTimers();
+		const { terminal, writes, received } = setup({ isLoopStalled: () => true });
+		try {
+			process.stdin.emit("data", "\x1b[?2004;1$y");
+			vi.advanceTimersByTime(1000);
+			writes.length = 0;
+			// A host-side reset has no stdin notification. Without input or a
+			// render since the reset, no output can rearm mode 2004 before paste.
+			vi.advanceTimersByTime(15000);
+			expect(writes).toEqual([]);
+			process.stdin.emit("data", "first\rsecond\rthird");
+			// Rearming in the callback is too late for these already-unmarked
+			// bytes: both Returns reach the editor as individual submit keys.
+			expect(writes).toEqual(["\x1b[?2004h"]);
+			expect(received).toEqual(Array.from("first\rsecond\rthird"));
+
+			received.length = 0;
+			// Once the terminal applies that write, a later paste is bracketed
+			// and stays a single input even while the loop-stall probe is true.
+			process.stdin.emit("data", "\x1b[200~first\rsecond\rthird\x1b[201~");
+			expect(received).toEqual(["\x1b[200~first\rsecond\rthird\x1b[201~"]);
+		} finally {
+			terminal.stop();
+		}
+	});
+
 	it("rearms confirmed bracketed paste in the same write as a render, only while active", () => {
 		const { terminal, writes } = setup();
 		terminal.write("before confirmation");
