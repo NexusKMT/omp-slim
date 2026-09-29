@@ -835,13 +835,16 @@ export function renderSubagentHudLines(
 	const items = running.slice(0, layout.itemRows);
 	const showModelBadge = showResolvedModelBadge;
 	const outerIndent = " ";
+	// `SubagentHudComponent` renders through `Text` with horizontal padding, so rows that fill
+	// the full terminal width would wrap and push the elapsed marker onto its own line.
+	const contentColumns = Math.max(0, columns - getPaddingX(1) * 2);
 	const lineOwners: (string | undefined)[] = [undefined, undefined];
 	const rows = renderTreeList(
 		{
 			items,
 			expanded: true,
 			renderItem: (session, context) => {
-				const rowWidth = Math.max(0, columns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
+				const rowWidth = Math.max(0, contentColumns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
 				const role = session.agent ?? session.progress?.agent;
 				const displayId = truncateToWidth(
 					formatTaskId(session.id),

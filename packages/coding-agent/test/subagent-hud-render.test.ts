@@ -490,6 +490,17 @@ describe("subagent HUD lines", () => {
 			for (const row of rows) expect(Bun.stringWidth(Bun.stripANSI(row))).toBeLessThanOrEqual(60);
 			expect(Bun.stripANSI(rows.join("\n"))).toContain("30.0s");
 		});
+
+		it("never wraps a full-width argument row or its elapsed marker at narrow widths", () => {
+			for (const columns of [40, 60, 80]) {
+				const session = runningSession({ currentToolArgs: "argument ".repeat(60) });
+				const lines = renderSubagentHudLines([session], columns, false, false, true, startMs + 30_000);
+				const rows = new SubagentHudComponent(lines, ["Runner"]).render(columns);
+				expect(rows).toHaveLength(lines.join("\n").split("\n").length);
+				for (const row of rows) expect(Bun.stringWidth(Bun.stripANSI(row))).toBeLessThanOrEqual(columns);
+				expect(Bun.stripANSI(rows.join("\n"))).toContain("30.0s");
+			}
+		});
 	});
 
 	it("preserves model revision and effort in a roomy HUD badge", () => {
