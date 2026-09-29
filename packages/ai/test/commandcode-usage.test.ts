@@ -1,7 +1,15 @@
 import { describe, expect, it } from "bun:test";
 
+import { type } from "@oh-my-pi/omptype";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
-import type { UsageFetchContext, UsageFetchParams, UsageLimit, UsageReport, UsageStatus } from "@oh-my-pi/pi-ai/usage";
+import {
+	type UsageFetchContext,
+	type UsageFetchParams,
+	type UsageLimit,
+	type UsageReport,
+	type UsageStatus,
+	usageReportSchema,
+} from "@oh-my-pi/pi-ai/usage";
 import { commandCodeRankingStrategy, commandCodeUsageProvider } from "@oh-my-pi/pi-ai/usage/commandcode";
 
 function makeCredential(): UsageFetchParams["credential"] {
@@ -57,7 +65,7 @@ describe("command code usage provider", () => {
 		const report = await commandCodeUsageProvider.fetchUsage(makeParams(), makeCtx(WINDOWED_ROUTES, seen));
 
 		expect(seen.map(request => request.url)).toEqual([
-			"https://api.commandcode.ai/alpha/whoami?limits=1",
+			"https://api.commandcode.ai/alpha/whoami",
 			"https://api.commandcode.ai/alpha/billing/credits?orgId=org_1",
 		]);
 		for (const request of seen) {
@@ -75,21 +83,21 @@ describe("command code usage provider", () => {
 		const [fiveHour, weekly, balance] = report!.limits;
 		expect(fiveHour).toMatchObject({
 			label: "5-hour limit",
-			scope: { provider: "commandcode", accountId: "user_1", windowId: "5h", shared: true },
+			scope: { provider: "commandcode", accountId: "user_1", orgId: "org_1", windowId: "5h", shared: true },
 			window: { id: "5h", label: "5-hour", durationMs: 18_000_000, resetsAt: FIVE_HOUR_RESET },
 			amount: { used: 4, limit: 10, usedFraction: 0.4, unit: "credits" },
 			status: "ok",
 		});
 		expect(weekly).toMatchObject({
 			label: "Weekly limit",
-			scope: { windowId: "7d" },
+			scope: { orgId: "org_1", windowId: "7d" },
 			window: { id: "7d", label: "Weekly", durationMs: 604_800_000, resetsAt: WEEKLY_RESET },
 			amount: { used: 3, limit: 100, usedFraction: 0.03, unit: "credits" },
 			status: "exhausted",
 		});
 		expect(balance).toMatchObject({
 			label: "Credit balance",
-			scope: { provider: "commandcode", accountId: "user_1", windowId: "balance", shared: true },
+			scope: { provider: "commandcode", accountId: "user_1", orgId: "org_1", windowId: "balance", shared: true },
 			amount: { remaining: 16, unit: "credits" },
 		});
 		expect(balance!.window).toBeUndefined();
@@ -141,6 +149,21 @@ describe("command code usage provider", () => {
 		expect(report!.limits[0]!.window?.resetsAt).toBe(1_790_000_000_000);
 	});
 
+	it("emits a report the usage wire schema accepts when a window has no cap or reset time", async () => {
+		const report = await commandCodeUsageProvider.fetchUsage(
+			makeParams(),
+			makeCtx({
+				...WINDOWED_ROUTES,
+				"/alpha/billing/credits": {
+					body: { credits: { monthlyCredits: 1 }, windowLimits: { fiveHour: { used: 1 } } },
+				},
+			}),
+		);
+		expect(report!.limits.map(limit => limit.id)).toEqual(["commandcode:5h", "commandcode:balance"]);
+		const validated = usageReportSchema(report);
+		expect(validated instanceof type.errors ? validated.summary : "valid").toBe("valid");
+	});
+
 	it("reports only the balance for a pay-as-you-go account", async () => {
 		const seen: SeenRequest[] = [];
 		const report = await commandCodeUsageProvider.fetchUsage(
@@ -161,6 +184,7 @@ describe("command code usage provider", () => {
 			amount: { remaining: 5, unit: "credits" },
 		});
 		expect(report!.metadata).toMatchObject({ accountId: "user_2" });
+		expect(report!.limits[0]!.scope).not.toHaveProperty("orgId");
 	});
 
 	it("throws on a revoked key so the cached report is purged", async () => {
@@ -206,7 +230,7 @@ describe("command code usage provider", () => {
 			makeCtx(WINDOWED_ROUTES, seen),
 		);
 		expect(seen.map(request => request.url)).toEqual([
-			"https://proxy.example/alpha/whoami?limits=1",
+			"https://proxy.example/alpha/whoami",
 			"https://proxy.example/alpha/billing/credits?orgId=org_1",
 		]);
 	});

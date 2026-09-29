@@ -7296,8 +7296,8 @@ export function modelsDevCatalogFallback(
  * `baseUrl` overrides the Provider API base path for testing; it is
  * normalized to the shared `/provider` root (a trailing `/v1` is stripped)
  * so Claude ids route to the Anthropic-compatible Messages endpoint at the
- * root, `gpt-*` ids to the Responses endpoint under `/v1`, and every other
- * id to chat completions under `/v1`.
+ * root, the ten GPT ids listed in the `api-routes` table to the Responses
+ * endpoint under `/v1`, and every other id to chat completions under `/v1`.
  */
 export interface CommandCodeModelManagerConfig {
 	apiKey?: string;
@@ -7316,8 +7316,8 @@ function normalizeCommandCodeBasePath(baseUrl: string | undefined): string {
  * Builds the Command Code model manager: a mixed-protocol OpenAI-compatible
  * discovery client. The public `/v1/models` catalog is fetched once per
  * options instance; `mapModel` pins each row's transport from the
- * `api-routes` table (Claude ids to `anthropic-messages`, `gpt-*` ids to
- * `openai-responses`, everything else to `openai-completions`) and seeds
+ * `api-routes` table (Claude ids to `anthropic-messages`, the listed GPT ids
+ * to `openai-responses`, everything else to `openai-completions`) and seeds
  * neutral capability defaults. Reviewed Command Code policy (effort ladders,
  * pricing, limits, modalities) is applied later by `buildModel` from
  * `providers/commandcode.kdl` — the mapper never inherits another provider's

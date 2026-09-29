@@ -12,7 +12,9 @@ import { HOUR_MS, parsePositiveTimestamp, usageStatus, WEEK_MS } from "./shared"
 
 const PROVIDER = "commandcode";
 const DEFAULT_ORIGIN = "https://api.commandcode.ai";
-const WHOAMI_PATH = "/alpha/whoami?limits=1";
+// The CLI also sends `?limits=1` for its org spend-limit panel; omp reads no
+// field from that, so the plain identity route is enough.
+const WHOAMI_PATH = "/alpha/whoami";
 const CREDITS_PATH = "/alpha/billing/credits";
 
 /**
@@ -94,23 +96,36 @@ const WINDOWS: readonly WindowSpec[] = [
 	{ key: "weekly", id: "7d", limitLabel: "Weekly limit", windowLabel: "Weekly", durationMs: WEEK_MS },
 ];
 
-function buildWindowLimit(spec: WindowSpec, raw: unknown, accountId: string): UsageLimit | undefined {
+function buildWindowLimit(
+	spec: WindowSpec,
+	raw: unknown,
+	accountId: string,
+	orgId: string | undefined,
+): UsageLimit | undefined {
 	if (!isRecord(raw)) return undefined;
 	const used = finiteNumber(raw.used);
 	if (used === undefined) return undefined;
 	const cap = finiteNumber(raw.cap);
 	const usedFraction = cap !== undefined && cap > 0 ? used / cap : undefined;
+	const resetsAt = parsePositiveTimestamp(raw.resetAt);
+	// Absent fields are omitted, not set to `undefined`: the usage wire schema
+	// rejects an explicit `undefined` for an optional key.
 	return {
 		id: `${PROVIDER}:${spec.id}`,
 		label: spec.limitLabel,
-		scope: { provider: PROVIDER, accountId, windowId: spec.id, shared: true },
+		scope: { provider: PROVIDER, accountId, ...(orgId ? { orgId } : {}), windowId: spec.id, shared: true },
 		window: {
 			id: spec.id,
 			label: spec.windowLabel,
 			durationMs: spec.durationMs,
-			resetsAt: parsePositiveTimestamp(raw.resetAt),
+			...(resetsAt !== undefined ? { resetsAt } : {}),
 		},
-		amount: { used, limit: cap, usedFraction, unit: "credits" },
+		amount: {
+			used,
+			...(cap !== undefined ? { limit: cap } : {}),
+			...(usedFraction !== undefined ? { usedFraction } : {}),
+			unit: "credits",
+		},
 		status: raw.exceeded === true ? "exhausted" : usageStatus(usedFraction),
 	};
 }
@@ -118,7 +133,9 @@ function buildWindowLimit(spec: WindowSpec, raw: unknown, accountId: string): Us
 /**
  * Reads the account routes that the Command Code CLI calls with the same API
  * key; the Provider API documents no usage endpoint. Pay-as-you-go accounts
- * carry no `windowLimits`, so they report only the credit balance.
+ * carry no `windowLimits`, so they report only the credit balance. Credits
+ * are queried per org, as the CLI does, so each limit records the org that
+ * owns the pool alongside the user.
  */
 async function fetchCommandCodeUsage(params: UsageFetchParams, ctx: UsageFetchContext): Promise<UsageReport | null> {
 	if (params.provider !== PROVIDER) return null;
@@ -147,13 +164,13 @@ async function fetchCommandCodeUsage(params: UsageFetchParams, ctx: UsageFetchCo
 	const limits: UsageLimit[] = [];
 	const windowLimits = isRecord(creditsBody.windowLimits) ? creditsBody.windowLimits : undefined;
 	for (const spec of WINDOWS) {
-		const limit = buildWindowLimit(spec, windowLimits?.[spec.key], userId);
+		const limit = buildWindowLimit(spec, windowLimits?.[spec.key], userId, orgId);
 		if (limit) limits.push(limit);
 	}
 	limits.push({
 		id: `${PROVIDER}:balance`,
 		label: "Credit balance",
-		scope: { provider: PROVIDER, accountId: userId, windowId: "balance", shared: true },
+		scope: { provider: PROVIDER, accountId: userId, ...(orgId ? { orgId } : {}), windowId: "balance", shared: true },
 		amount: { remaining: (monthly ?? 0) + (purchased ?? 0) + (free ?? 0), unit: "credits" },
 	});
 
