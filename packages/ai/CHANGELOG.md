@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Runtime usage providers (`usage.setProvider`, extension `registerProvider({ usage })`) now key cached reports by their own `cacheVersion`, so reports written by processes without the override are no longer served to it ([#13814](https://github.com/can1357/oh-my-pi/issues/13814)).
+
 ## [18.4.4] - 2026-09-29
 
 ### Added

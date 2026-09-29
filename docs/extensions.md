@@ -180,6 +180,11 @@ long as that extension registration is active. `pi.unregisterProvider(name)` (an
 extension source cleanup) removes only that runtime override, restoring the built-in
 or configured usage resolver.
 
+Cached usage reports live in the shared `agent.db`, keyed by provider name and the
+usage provider's `cacheVersion`. When overriding a built-in provider, set a `cacheVersion`
+distinct from the built-in one so processes without the extension (older sessions,
+`--no-extensions` runs, SDK scripts) never serve their reports to yours, or yours to them.
+
 Extension-registered providers (`registerProvider`) can supply `fetchDynamicModels` for runtime model discovery; these fetches are hard-bounded to a 15-second timeout (`RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS` in `model-provider-discovery.ts`) so a hung endpoint cannot stall discovery.
 
 Provider login callbacks can request masked entry with
