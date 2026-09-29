@@ -47,18 +47,6 @@ export function registerStdoutErrorHandler(handler: (err: Error) => void): () =>
 }
 
 /**
- * Hand `data` to the active terminal's ordered output path. Returns false when
- * no terminal in this thread has started. On the main thread that means the
- * caller owns stdout; a worker thread never sees the main thread's terminal, so
- * there `false` is not permission to write. Prefer {@link writeTerminalSequence}.
- */
-export function writeThroughActiveTerminal(data: string): boolean {
-	if (!activeTerminal) return false;
-	activeTerminal.write(data);
-	return true;
-}
-
-/**
  * Write an out-of-band escape sequence (window title, OSC 52 clipboard,
  * notification). While a TUI owns stdout, its frames go through an off-thread
  * pump in chunks that ignore escape boundaries; a direct `process.stdout.write`
@@ -70,7 +58,10 @@ export function writeThroughActiveTerminal(data: string): boolean {
  */
 export function writeTerminalSequence(data: string): void {
 	if (!Bun.isMainThread) return;
-	if (writeThroughActiveTerminal(data)) return;
+	if (activeTerminal) {
+		activeTerminal.write(data);
+		return;
+	}
 	installStdoutErrorListener();
 	try {
 		process.stdout.write(data);
