@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering
+
 ### Added
 
 - Added Tern Surface Protocol (TSP) integration for native terminal rendering

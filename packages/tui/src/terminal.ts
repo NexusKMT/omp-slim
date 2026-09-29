@@ -860,7 +860,6 @@ export class ProcessTerminal implements Terminal {
 	// Ghostty expires OSC 9;4 state without a heartbeat. Persistent hosts such
 	// as Windows Terminal restart their indeterminate animation on every write.
 	readonly #keepProgressAlive = TERMINAL.id === "ghostty";
-	#bracketedPasteRefreshTimer?: Timer;
 	#progressTimer?: Timer;
 
 	constructor(options?: ProcessTerminalOptions) {
@@ -1587,6 +1586,8 @@ export class ProcessTerminal implements Terminal {
 
 		// Handler that pipes stdin data through the buffer
 		this.#stdinDataHandler = (data: string) => {
+			// Recover modes reset by the host before the user's next paste.
+			if (data && this.#active && this.#privateModeSupport.get(2004)) this.#safeWrite("\x1b[?2004h");
 			this.#stdinBuffer!.process(data);
 		};
 	}
@@ -1918,12 +1919,6 @@ export class ProcessTerminal implements Terminal {
 		// fallback resolves unsupported).
 		if (mode === 2004 && supported) {
 			this.#stdinBuffer?.setRawPasteStallProbe(this.#isLoopStalled);
-			// A terminal can reset this mode after the initial probe (for example,
-			// iTerm2's Terminal State toggle). Keep the mode asserted while we own
-			// the TTY, since a stalled loop now replays unmarked bursts as keys.
-			this.#bracketedPasteRefreshTimer ??= setInterval(() => {
-				if (this.#active && !this.#dead) this.#safeWrite("\x1b[?2004h");
-			}, 1000);
 		}
 	}
 
@@ -2056,10 +2051,6 @@ export class ProcessTerminal implements Terminal {
 		// Suppress observer/timer callbacks before any teardown can yield or throw.
 		this.#active = false;
 		this.#inputDeferred = false;
-		if (this.#bracketedPasteRefreshTimer) {
-			clearInterval(this.#bracketedPasteRefreshTimer);
-			this.#bracketedPasteRefreshTimer = undefined;
-		}
 		if (this.#headless) return;
 		// Unregister from emergency cleanup
 		if (activeTerminal === this) {
@@ -2230,10 +2221,6 @@ export class ProcessTerminal implements Terminal {
 	#markTerminalDisconnected(reason: string, err?: unknown): void {
 		if (this.#dead) return;
 		this.#dead = true;
-		if (this.#bracketedPasteRefreshTimer) {
-			clearInterval(this.#bracketedPasteRefreshTimer);
-			this.#bracketedPasteRefreshTimer = undefined;
-		}
 		this.#disarmStdoutStallWatchdog();
 		logger.warn("terminal disconnected; stopping interactive rendering", { reason, err });
 
@@ -2262,6 +2249,9 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	write(data: string): void {
+		// Hosts can reset bracketed paste (e.g. iTerm2's Terminal State toggle).
+		// Reassert it with existing output, never on a timer while idle.
+		if (data && this.#active && this.#privateModeSupport.get(2004)) data = `\x1b[?2004h${data}`;
 		this.#safeWrite(data);
 		if (this.#writeLogPath) {
 			try {
