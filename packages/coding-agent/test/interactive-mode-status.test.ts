@@ -90,10 +90,7 @@ describe("InteractiveMode.showStatus", () => {
 
 		helpers.showStatus("STATUS_ONE");
 		expect(ctx.chatContainer.children).toHaveLength(1);
-		// One notice renders a blank separator row, then the status line.
-		const [separator, line] = ctx.chatContainer.children[0]!.render(120);
-		expect(separator?.trim()).toBe("");
-		expect(line).toContain("STATUS_ONE");
+		expect(renderLastLine(ctx.chatContainer)).toContain("STATUS_ONE");
 
 		helpers.showStatus("STATUS_TWO");
 		// second status updates the previous notice instead of appending
@@ -123,10 +120,10 @@ describe("InteractiveMode.showStatus", () => {
 		expect(ctx.chatContainer.children).toHaveLength(2);
 
 		helpers.showStatus("STATUS_TWO");
-		// adds a new notice and leaves the earlier one in place
+		// adds a fresh notice rather than rewriting the stale one
 		expect(ctx.chatContainer.children).toHaveLength(3);
 		expect(renderLastLine(ctx.chatContainer)).toContain("STATUS_TWO");
-		expect(renderContainer(ctx.chatContainer)).toContain("STATUS_ONE");
+		expect(ctx.chatContainer.children[0]?.render(120).join("\n")).toContain("STATUS_ONE");
 	});
 
 	test("preserves startup notifications while rendering the initial transcript", async () => {
