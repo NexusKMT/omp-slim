@@ -1902,6 +1902,13 @@ export interface BuildResponsesInputOptions<TApi extends Api> {
 	supportsImageDetailOriginal: boolean;
 	systemRole?: "system" | "developer";
 	nativeHistory?: {
+		/**
+		 * Replay same-provider native history. `false` marks a cold provider
+		 * session (#489): native items are withheld except remote-compaction
+		 * history and assistant turns that carry no server-issued state
+		 * ({@link isColdReplayableResponsesTurn}); other turns are rebuilt from
+		 * message content.
+		 */
 		replay: boolean;
 		filterReasoning: boolean;
 	};
@@ -2006,6 +2013,27 @@ export function escapeReplayedControlTokens(items: ResponseInput): ResponseInput
 		}
 		return item;
 	});
+}
+
+/**
+ * Whether a same-provider assistant turn may replay its native items while the
+ * provider session is still cold (#489). A cold session rebuilds turns from
+ * message content because some backends bind native items to one connection
+ * (GitHub Copilot: `401 input item does not belong to this connection`, #488).
+ * Binding needs server-issued state that survives replay sanitization: an
+ * `encrypted_content` blob or an item id. A turn with neither, whose reasoning
+ * the server returned in plaintext, carries nothing to bind and is exactly what
+ * the server receives once the session warms; rebuilding it would drop that
+ * reasoning and change the prompt prefix the server cached.
+ */
+function isColdReplayableResponsesTurn(items: ResponseInput): boolean {
+	let hasReasoning = false;
+	for (const item of items) {
+		const serverState = item as { id?: unknown; encrypted_content?: unknown };
+		if (typeof serverState.id === "string" || typeof serverState.encrypted_content === "string") return false;
+		if (item.type === "reasoning") hasReasoning = true;
+	}
+	return hasReasoning;
 }
 
 export function buildResponsesInput<TApi extends Api>(options: BuildResponsesInputOptions<TApi>): ResponseInput {
@@ -2132,7 +2160,12 @@ export function buildResponsesInput<TApi extends Api>(options: BuildResponsesInp
 							options.requiresReasoningReplayForToolCalls ?? false,
 						)
 					: undefined;
-				if (nativeReplayEnabled && sanitizedHistoryItems) {
+				const replayNativeItems =
+					nativeReplayEnabled ||
+					(options.nativeHistory !== undefined &&
+						rawSanitizedHistoryItems !== undefined &&
+						isColdReplayableResponsesTurn(rawSanitizedHistoryItems));
+				if (replayNativeItems && sanitizedHistoryItems) {
 					// Model-owned replay items can carry reserved control-token
 					// spellings as data (the model writing *about* Harmony); escape the
 					// transport copy just like client turns.
