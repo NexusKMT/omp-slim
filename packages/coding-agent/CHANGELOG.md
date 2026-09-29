@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed IRC-woken keep-alive subagents dead-lettering their background-job completions: the wake turn now waits for owned async work to settle (including the async-result continuation) before finishing its turn observer, so a yield after the continuation still registers the parent-owned job and refreshes the artifact ([#11564](https://github.com/can1357/oh-my-pi/issues/11564))
 - Fixed hosted OpenAI web search on hosts that accept only string tool_choice values, such as Command Code ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ## [18.4.3] - 2026-09-28

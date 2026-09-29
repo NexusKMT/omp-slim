@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
 import type { AssistantMessage, Context, ImageContent } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
@@ -18,7 +19,7 @@ import { SessionAdvisors } from "@oh-my-pi/pi-coding-agent/session/session-advis
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import * as imageLoading from "@oh-my-pi/pi-coding-agent/utils/image-loading";
-import { TempDir } from "@oh-my-pi/pi-utils";
+import { TempDir, untilAborted } from "@oh-my-pi/pi-utils";
 
 const zeroUsage = {
 	input: 0,
@@ -44,6 +45,7 @@ describe("AgentSession aside delivery", () => {
 		await session?.dispose();
 		authStorage.close();
 		tempDir.removeSync();
+		AsyncJobManager.resetForTests();
 	});
 
 	it("an aside delivered mid-run neither aborts the in-flight tool nor waits for the run to end", async () => {
@@ -1292,5 +1294,90 @@ describe("AgentSession aside delivery", () => {
 			normalizeSpy.mockRestore();
 			setSessionFileSpy.mockRestore();
 		}
+	});
+
+	it("holds the wake observer across the async-result continuation so a late yield still registers (#11564)", async () => {
+		const modelRegistry = new ModelRegistry(authStorage);
+		const started = Promise.withResolvers<void>();
+		const wakeModelCalled = Promise.withResolvers<void>();
+		const observerFinished = Promise.withResolvers<void>();
+		const gate = Promise.withResolvers<string>();
+		const events: string[] = [];
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					started.resolve();
+					return { content: ["go turn"], delayMs: 60_000 };
+				},
+				() => {
+					wakeModelCalled.resolve();
+					return { content: ["started the rebuild"] };
+				},
+				() => {
+					events.push("continuation-ran");
+					return { content: ["rebuild finished"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		const manager = new AsyncJobManager({});
+		AsyncJobManager.setInstance(manager);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+			agentId: "SubAgent",
+			ownedAsyncJobManager: manager,
+		});
+
+		session.setIrcWakeTurnObserver(_records => {
+			events.push("observer-start");
+			// The agent auto-backgrounded a build during the wake turn: the job
+			// outlives the turn and its async-result continuation is where the
+			// agent would finally yield.
+			manager.register(
+				"bash",
+				"wake rebuild",
+				({ signal }) => untilAborted(signal, gate.promise).then(() => "build ok"),
+				{ id: "wake-job", ownerId: "SubAgent" },
+			);
+			return async () => {
+				events.push("observer-finish");
+				observerFinished.resolve();
+			};
+		});
+
+		const run = session.prompt("go");
+		await started.promise;
+		await session.sendUserMessage("WAKE_BG_ASIDE", { deliverAs: "aside" });
+		await session.abort({ reason: "internal" });
+		await session.waitForIdle();
+		await run.catch(() => {});
+		await wakeModelCalled.promise;
+
+		// The wake turn ended in prose and the gated job is still running: the
+		// observer finish must wait for the job's continuation, not race it.
+		gate.resolve("BUILD GREEN");
+		await observerFinished.promise;
+		await session.waitForIdle();
+
+		expect(events).toContain("observer-start");
+		expect(mock.calls.length).toBe(3);
+		expect(events.indexOf("continuation-ran")).toBeGreaterThanOrEqual(0);
+		expect(events.indexOf("observer-finish")).toBeGreaterThan(events.indexOf("continuation-ran"));
+		// The continuation turn received the job result through the delivery
+		// (injected as the background-completion system notice).
+		expect(JSON.stringify(mock.calls[2]!.context.messages)).toContain("build ok");
 	});
 });
