@@ -14,6 +14,7 @@
 ### Fixed
 
 - Cache-warming refreshes cancelled or superseded after the provider accepted them now count toward session usage and cost instead of being dropped ([#13717](https://github.com/can1357/oh-my-pi/pull/13717))
+- Plan mode (and device-only `write` sessions) no longer block `write proc://<id>/kill`, so the agent can cancel its own background jobs and subagents ([#13803](https://github.com/can1357/oh-my-pi/issues/13803))
 
 ## [18.4.4] - 2026-09-29
 
