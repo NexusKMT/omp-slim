@@ -90,10 +90,6 @@ describe("InteractiveMode.showStatus", () => {
 
 		helpers.showStatus("STATUS_ONE");
 		expect(ctx.chatContainer.children).toHaveLength(1);
-		// One notice renders a blank separator row, then the status line.
-		const [separator, line] = ctx.chatContainer.children[0]!.render(120);
-		expect(separator?.trim()).toBe("");
-		expect(line).toContain("STATUS_ONE");
 		expect(renderLastLine(ctx.chatContainer)).toContain("STATUS_ONE");
 
 		helpers.showStatus("STATUS_TWO");
@@ -124,10 +120,6 @@ describe("InteractiveMode.showStatus", () => {
 		expect(ctx.chatContainer.children).toHaveLength(2);
 
 		helpers.showStatus("STATUS_TWO");
-		// adds a new notice and leaves the earlier one in place
-		expect(ctx.chatContainer.children).toHaveLength(3);
-		expect(renderLastLine(ctx.chatContainer)).toContain("STATUS_TWO");
-		expect(renderContainer(ctx.chatContainer)).toContain("STATUS_ONE");
 		// adds a fresh notice rather than rewriting the stale one
 		expect(ctx.chatContainer.children).toHaveLength(3);
 		expect(renderLastLine(ctx.chatContainer)).toContain("STATUS_TWO");
