@@ -45,6 +45,13 @@ function identityConverter(messages: AgentMessage[]): Message[] {
 	return messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult") as Message[];
 }
 
+/** Narrow a tool result's first text block for pairing assertions. */
+function toolResultText(result: { content: Array<{ type: string; text?: string }> }): string {
+	const block = result.content[0];
+	if (block?.type !== "text" || block.text === undefined) throw new Error("tool result must be text");
+	return block.text;
+}
+
 const harmonyMitigationModel = createHarmonyMitigationModel();
 
 describe("agentLoop with AgentMessage", () => {
@@ -1644,6 +1651,139 @@ describe("agentLoop with AgentMessage", () => {
 		expect(turnEndEvent).toBeDefined();
 		if (!turnEndEvent) return;
 		expect(turnEndEvent.toolResults.map(result => result.toolCallId)).toEqual(["tool-1", "tool-2"]);
+	});
+
+	it("runs each sibling under a reused tool-call id with its own arguments and pairs its own result", async () => {
+		// Failure mode if this regresses: a provider that mints or truncates
+		// tool-call ids can deliver two parallel calls under one id (the replay
+		// pipeline's `deduplicateToolCallIds` exists for the same occurrence).
+		// The id-keyed prepare map then keeps only the later sibling's entry, so
+		// BOTH calls execute the later payload and the transcript records the
+		// wrong result under each call, with the colliding result ids merging or
+		// dropping one sibling's output in every id-keyed consumer.
+		const toolSchema = type({ value: "string" });
+		const executions: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executions.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "alpha" } },
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "beta" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) events.push(event);
+		const messages = await stream.result();
+
+		// Each call must run its own payload, not its sibling's.
+		expect(executions.sort()).toEqual(["alpha", "beta"]);
+
+		const assistant = messages.find((m): m is AssistantMessage => m.role === "assistant");
+		const callIds: string[] = [];
+		for (const block of assistant?.content ?? []) {
+			if (block.type !== "toolCall") continue;
+			callIds.push(block.id);
+		}
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results).toHaveLength(2);
+		// Results pair with their own call block positionally, under distinct ids.
+		expect(callIds[0]).not.toBe(callIds[1]);
+		expect(results.map(r => r.toolCallId)).toEqual(callIds);
+		expect(results.map(toolResultText)).toEqual(["echoed: alpha", "echoed: beta"]);
+		// Live completion events carry the same per-call pairing.
+		const ends = events.filter(
+			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
+		);
+		expect(ends).toHaveLength(2);
+		for (const end of ends) {
+			const index = callIds.indexOf(end.toolCallId);
+			expect(index).toBeGreaterThanOrEqual(0);
+			expect(toolResultText(end.result)).toBe(`echoed: ${index === 0 ? "alpha" : "beta"}`);
+		}
+	});
+
+	it("runs each sibling under a never-materialized tool-call id with its own arguments and pairs its own result", async () => {
+		// Failure mode if this regresses: a provider/native passthrough whose
+		// streamed call id never materializes (`id: ""`, documented in pi-ai's
+		// malformed-call sanitizer and the owned-stream projector) leaves every
+		// sibling keyed on one empty id — the later sibling's prepared entry
+		// overwrites the earlier's, both run the later payload, and the empty
+		// result ids can never be matched to their call by any id-keyed consumer.
+		const toolSchema = type({ value: "string" });
+		const executions: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executions.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "alpha" } },
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "beta" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const event of stream) events.push(event);
+		const messages = await stream.result();
+
+		expect(executions.sort()).toEqual(["alpha", "beta"]);
+
+		const assistant = messages.find((m): m is AssistantMessage => m.role === "assistant");
+		const callIds: string[] = [];
+		for (const block of assistant?.content ?? []) {
+			if (block.type !== "toolCall") continue;
+			callIds.push(block.id);
+		}
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results).toHaveLength(2);
+		// Ids must materialize and stay distinct so results can pair with calls.
+		expect(callIds).toHaveLength(2);
+		expect(callIds[0]).not.toBe(callIds[1]);
+		expect(callIds.every(id => id.length > 0)).toBe(true);
+		expect(results.map(r => r.toolCallId)).toEqual(callIds);
+		expect(results.map(toolResultText)).toEqual(["echoed: alpha", "echoed: beta"]);
+		const ends = events.filter(
+			(e): e is Extract<AgentEvent, { type: "tool_execution_end" }> => e.type === "tool_execution_end",
+		);
+		expect(ends).toHaveLength(2);
+		expect(ends.map(e => e.toolCallId).sort()).toEqual([...callIds].sort());
 	});
 
 	it("resolves function-form concurrency per call", async () => {

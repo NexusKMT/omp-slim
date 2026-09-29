@@ -33,6 +33,7 @@ import {
 	wrapInbandToolStream,
 } from "@oh-my-pi/pi-ai/dialect";
 import * as AIError from "@oh-my-pi/pi-ai/error";
+import { appendDuplicateSuffix, MAX_TOOL_CALL_ID_LENGTH } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import {
 	type CursorExecResolvedCarrier,
 	copyCursorExecResolved,
@@ -2840,14 +2841,63 @@ function formatToolNotFoundMessage(
 }
 
 /**
+ * Enforce the invariant every downstream matcher keys on: `toolCall.id` is
+ * unique and non-empty within one assistant message. Providers can deliver a
+ * reused id (wire length truncation, Responses `callId|itemId` composite
+ * collapse) or an id that never materialized (`""`) — the same occurrences the
+ * replay pipeline repairs or drops (`deduplicateToolCallIds` /
+ * `sanitizeMalformedToolCalls`). Id-keyed per-call state — the prepare map
+ * below, every UI and persistence matcher — would otherwise merge sibling
+ * calls: the later call's prepared entry overwrites the earlier's, both calls
+ * execute the sibling's payload, and colliding result ids merge or drop one
+ * sibling's output in every consumer. Cursor server-resolved blocks are
+ * skipped: the provider correlates their results out-of-band under its own
+ * ids. Idempotent.
+ */
+function ensureUniqueToolCallIds(content: AssistantMessage["content"]): void {
+	const reserved = new Set<string>();
+	for (const block of content) {
+		if (block.type === "toolCall" && block.id) reserved.add(block.id);
+	}
+	const seen = new Set<string>();
+	for (const block of content) {
+		if (block.type !== "toolCall") continue;
+		if ((block as CursorExecResolvedCarrier)[kCursorExecResolved] === true) continue;
+		if (block.id && !seen.has(block.id)) {
+			seen.add(block.id);
+			continue;
+		}
+		let candidate: string;
+		if (block.id) {
+			let suffix = 1;
+			candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
+			while (seen.has(candidate) || reserved.has(candidate)) {
+				suffix += 1;
+				candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
+			}
+		} else {
+			let mint = 1;
+			candidate = `call_${mint}`;
+			while (seen.has(candidate) || reserved.has(candidate)) {
+				mint += 1;
+				candidate = `call_${mint}`;
+			}
+		}
+		block.id = candidate;
+		seen.add(candidate);
+	}
+}
+
+/**
  * Pre-dispatch phase for every pending tool call on `assistantMessage`, run in
- * call order: intent extraction, argument validation, and the `beforeToolCall`
- * hook. A hook `args` revision is revalidated against the tool schema and
- * written back to `toolCall.arguments`; run before `message_start`/`message_end`
- * (the streamed path) that makes the revision the single source of truth —
- * history, execution events, persistence, provider replay, concurrency
- * scheduling, and `tool.execute` all agree. Failures are recorded per call and
- * surfaced by `executeToolCalls` at the record's scheduled slot.
+ * call order: tool-call id repair, intent extraction, argument validation, and
+ * the `beforeToolCall` hook. A hook `args` revision is revalidated against the
+ * tool schema and written back to `toolCall.arguments`; run before
+ * `message_start`/`message_end` (the streamed path) that makes the revision the
+ * single source of truth — history, execution events, persistence, provider
+ * replay, concurrency scheduling, and `tool.execute` all agree. Id repair in
+ * {@link ensureUniqueToolCallIds} follows the same rule. Failures are recorded
+ * per call and surfaced by `executeToolCalls` at the record's scheduled slot.
  */
 async function prepareToolCallDispatch(
 	assistantMessage: AssistantMessage,
@@ -2856,6 +2906,9 @@ async function prepareToolCallDispatch(
 	signal: AbortSignal | undefined,
 ): Promise<Map<string, PreparedToolCall>> {
 	const { resolveFallbackTool, suggestFallbackToolNames, intentTracing, beforeToolCall } = config;
+	// Unique, non-empty ids first: everything below and every consumer of this
+	// message keys per-call state on `toolCall.id`.
+	ensureUniqueToolCallIds(assistantMessage.content);
 	const prepared = new Map<string, PreparedToolCall>();
 	for (const toolCall of assistantMessage.content) {
 		if (toolCall.type !== "toolCall") continue;

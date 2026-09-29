@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed parallel tool calls that arrive under a reused or empty tool-call id running their sibling's arguments and merging results — each call now executes and reports its own payload
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
