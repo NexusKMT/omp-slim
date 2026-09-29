@@ -217,7 +217,7 @@ describe("input controller — bare exit on empty session (#3850)", () => {
 		resetSettingsForTest();
 	});
 
-	it.each(["exit", "quit", "q"])("quits on exactly %p before the first message", async word => {
+	it.each(["exit", "quit", "q", "Exit", "QUIT", "Q"])("quits on exactly %p before the first message", async word => {
 		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
 		controllerFor(ctx);
 
@@ -227,7 +227,7 @@ describe("input controller — bare exit on empty session (#3850)", () => {
 		expect(onInputCallback).not.toHaveBeenCalled();
 	});
 
-	it.each(["Exit", "QUIT", " exit", "q ", "exit.", "exit the loop"])(
+	it.each([" exit", "q ", "exit.", "exit the loop"])(
 		"sends %p to the model because the whole input is not exactly the word",
 		async input => {
 			const { ctx, editor, shutdown, onInputCallback } = makeCtx();

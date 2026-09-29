@@ -834,7 +834,7 @@ export const cfgBareExitOnEmptySession = register({
 		group: "Input",
 		label: "Bare Exit on Empty Session",
 		description:
-			"Submitting exactly `exit`, `quit`, or `q` before the first message quits instead of prompting the model",
+			"Submitting exactly `exit`, `quit`, or `q` (any case) before the first message quits instead of prompting the model",
 	},
 });
 
