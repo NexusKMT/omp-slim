@@ -13,6 +13,7 @@ import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
 import { getThemeEpoch } from "../theme/theme";
+import { canCacheMarkdownListItems } from "../theme/tui-adapters";
 import type { Component } from "../tui";
 import {
 	applyBackgroundToLine,
@@ -1726,7 +1727,6 @@ interface ListItemRowsCache {
 	signature: RenderSignature;
 	width: number;
 	themeEpoch: number;
-	bulletProbe: string;
 	ordered: boolean;
 	start: number | undefined;
 	loose: boolean;
@@ -3379,21 +3379,22 @@ export class Markdown implements Component {
 		// Use the list's start property (defaults to 1 for ordered lists)
 		const startNumber = token.start ?? 1;
 		const signature =
-			depth === 0 && styleContext === undefined && this.#transientRenderCache && this.#lastScanCanStream
+			depth === 0 &&
+			styleContext === undefined &&
+			this.#defaultTextStyle === undefined &&
+			this.#transientRenderCache &&
+			this.#lastScanCanStream &&
+			canCacheMarkdownListItems(this.#theme)
 				? this.#activeRenderSignature
 				: undefined;
 		const themeEpoch = signature === undefined ? undefined : getThemeEpoch();
-		const bulletProbe =
-			signature === undefined ? undefined : this.#theme.listBullet(token.ordered ? `${startNumber}. ` : "- ");
 		const previous = this.#listItemRowsCache;
 		const reusable =
 			signature !== undefined &&
 			themeEpoch !== undefined &&
-			bulletProbe !== undefined &&
 			previous !== undefined &&
 			previous.width === width &&
 			previous.themeEpoch === themeEpoch &&
-			previous.bulletProbe === bulletProbe &&
 			previous.ordered === token.ordered &&
 			previous.start === token.start &&
 			previous.loose === token.loose &&
@@ -3488,18 +3489,11 @@ export class Markdown implements Component {
 				rows.push(lines.slice(rowStart));
 			}
 		}
-		if (
-			signature !== undefined &&
-			themeEpoch !== undefined &&
-			bulletProbe !== undefined &&
-			raws !== undefined &&
-			rows !== undefined
-		) {
+		if (signature !== undefined && themeEpoch !== undefined && raws !== undefined && rows !== undefined) {
 			this.#listItemRowsCache = {
 				signature,
 				width,
 				themeEpoch,
-				bulletProbe,
 				ordered: token.ordered,
 				start: token.start,
 				loose: token.loose,

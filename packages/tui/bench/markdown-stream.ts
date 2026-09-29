@@ -12,7 +12,7 @@
  * Run: bun packages/tui/bench/markdown-stream.ts
  */
 import { clearRenderCache, Markdown } from "../src/components/markdown";
-import { getMarkdownTheme, initTheme } from "../src/theme/theme";
+import { getMarkdownTheme, getMarkdownThemeWithLinkTargets, initTheme } from "../src/theme/theme";
 import { defaultMarkdownTheme } from "../test/test-themes";
 
 const WIDTH = 100;
@@ -61,7 +61,11 @@ const DOC = process.argv.includes("--list-only")
 let theme = defaultMarkdownTheme;
 if (process.argv.includes("--production-theme")) {
 	await initTheme();
-	theme = getMarkdownTheme();
+	theme = process.argv.includes("--resolved-links")
+		? getMarkdownThemeWithLinkTargets(
+				new Map([["https://github.com/can1357/oh-my-pi/issues/1000", "https://example.com/resolved"]]),
+			)
+		: getMarkdownTheme();
 }
 
 // --- Bench ----------------------------------------------------------------

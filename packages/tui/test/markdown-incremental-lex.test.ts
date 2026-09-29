@@ -1,5 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import { clearRenderCache, Markdown } from "@oh-my-pi/pi-tui/components/markdown";
+import { getMarkdownTheme, getMarkdownThemeWithLinkTargets, theme } from "@oh-my-pi/pi-tui/theme";
+import { TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { defaultMarkdownTheme } from "./test-themes.js";
 
 // E2 contract: the streaming incremental lexer (lex(prefix) ++ lex(tail), reusing
@@ -199,40 +201,170 @@ describe("Markdown incremental streaming lex (E2)", () => {
 		expect(streaming.render(40)).toEqual(renderColdTransient(`${edited}\n- fourth item`, 40));
 	});
 
-	it("transient list at the start reuses earlier item styling after an append", () => {
+	it("transient list at the start reuses earlier item styling with the managed theme", () => {
 		let styledBullets = 0;
-		const theme = {
-			...THEME,
-			listBullet: (bullet: string) => {
-				styledBullets++;
-				return THEME.listBullet(bullet);
-			},
-		};
+		const markdownTheme = getMarkdownTheme();
+		const originalFg = theme.fg.bind(theme);
+		const spy = vi.spyOn(theme, "fg").mockImplementation((color, text) => {
+			if (color === "mdListBullet") styledBullets++;
+			return originalFg(color, text);
+		});
 		const first = Array.from({ length: 20 }, (_, index) => `- item ${index}`).join("\n");
 		const next = `${first}\n- item 20`;
-		const streaming = new Markdown(first, 0, 0, theme);
-		streaming.transientRenderCache = true;
-		streaming.render(60);
-		styledBullets = 0;
-		streaming.setText(next);
-		const rendered = streaming.render(60);
-		expect(styledBullets).toBeLessThan(6);
-		expect(rendered).toEqual(renderColdTransient(next, 60));
+		try {
+			const streaming = new Markdown(first, 0, 0, markdownTheme);
+			streaming.transientRenderCache = true;
+			streaming.render(60);
+			styledBullets = 0;
+			streaming.setText(next);
+			const rendered = streaming.render(60);
+			expect(styledBullets).toBeLessThan(6);
+			clearRenderCache();
+			const cold = new Markdown(next, 0, 0, markdownTheme);
+			cold.transientRenderCache = true;
+			expect(rendered).toEqual(cold.render(60));
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
-	it("transient list rows restyle when the bullet theme callback changes", () => {
+	it("transient ordered list restyles an earlier marker when a custom callback changes", () => {
+		let markTen = false;
+		const customTheme = {
+			...THEME,
+			listBullet: (bullet: string) => (markTen && bullet === "10. " ? `[${bullet}]` : bullet),
+		};
+		const first = Array.from({ length: 12 }, (_, index) => `${index + 1}. item ${index + 1}`).join("\n");
+		const next = `${first}\n13. item 13`;
+		const streaming = new Markdown(first, 0, 0, customTheme);
+		streaming.transientRenderCache = true;
+		streaming.render(60);
+		markTen = true;
+		streaming.setText(next);
+		const rendered = streaming.render(60);
+		clearRenderCache();
+		const cold = new Markdown(next, 0, 0, customTheme);
+		cold.transientRenderCache = true;
+		expect(rendered).toEqual(cold.render(60));
+		expect(rendered.some(line => line.includes("[10. ]item 10"))).toBe(true);
+	});
+
+	it("transient list restyles earlier bold text when a custom callback changes", () => {
+		let decorate = false;
+		const customTheme = { ...THEME, bold: (text: string) => (decorate ? `{${text}}` : text) };
+		const first = "- **one**\n- **two**";
+		const next = `${first}\n- three`;
+		const streaming = new Markdown(first, 0, 0, customTheme);
+		streaming.transientRenderCache = true;
+		streaming.render(60);
+		decorate = true;
+		streaming.setText(next);
+		const rendered = streaming.render(60);
+		clearRenderCache();
+		const cold = new Markdown(next, 0, 0, customTheme);
+		cold.transientRenderCache = true;
+		expect(rendered).toEqual(cold.render(60));
+		expect(rendered.some(line => line.includes("{one}"))).toBe(true);
+	});
+
+	it("transient list restyles when a managed theme callback is replaced", () => {
+		const markdownTheme = getMarkdownTheme();
+		const originalBold = markdownTheme.bold;
+		const first = "- **one**\n- **two**";
+		const next = `${first}\n- three`;
+		const streaming = new Markdown(first, 0, 0, markdownTheme);
+		streaming.transientRenderCache = true;
+		streaming.render(60);
+		try {
+			markdownTheme.bold = (text: string) => `{${text}}`;
+			streaming.setText(next);
+			const rendered = streaming.render(60);
+			clearRenderCache();
+			const cold = new Markdown(next, 0, 0, markdownTheme);
+			cold.transientRenderCache = true;
+			expect(rendered).toEqual(cold.render(60));
+		} finally {
+			markdownTheme.bold = originalBold;
+		}
+	});
+
+	it("transient list updates earlier links when a managed theme gains a resolver", () => {
+		const terminalState = TERMINAL as { hyperlinks: boolean };
+		const originalHyperlinks = terminalState.hyperlinks;
+		const markdownTheme = getMarkdownTheme();
+		const originalResolveLink = markdownTheme.resolveLink;
+		const first = "- [one](https://example.com)\n- two";
+		const next = `${first}\n- three`;
+		try {
+			terminalState.hyperlinks = true;
+			const streaming = new Markdown(first, 0, 0, markdownTheme);
+			streaming.transientRenderCache = true;
+			streaming.render(60);
+			markdownTheme.resolveLink = () => "https://changed.example";
+			streaming.setText(next);
+			const rendered = streaming.render(60);
+			clearRenderCache();
+			const cold = new Markdown(next, 0, 0, markdownTheme);
+			cold.transientRenderCache = true;
+			expect(rendered).toEqual(cold.render(60));
+			expect(rendered.join("\n")).toContain("https://changed.example");
+		} finally {
+			if (originalResolveLink === undefined) delete markdownTheme.resolveLink;
+			else markdownTheme.resolveLink = originalResolveLink;
+			terminalState.hyperlinks = originalHyperlinks;
+		}
+	});
+
+	it("transient list reuses rows with a stable resolved-link theme", () => {
+		const target = "https://example.com";
+		const targets = new Map([[target, "https://resolved.example"]]);
+		const markdownTheme = getMarkdownThemeWithLinkTargets(targets);
+		const first = Array.from({ length: 20 }, (_, index) => `- [item ${index}](${target})`).join("\n");
+		const next = `${first}\n- item 20`;
+		let styledBullets = 0;
+		const terminalState = TERMINAL as { hyperlinks: boolean };
+		const originalHyperlinks = terminalState.hyperlinks;
+		const originalFg = theme.fg.bind(theme);
+		const spy = vi.spyOn(theme, "fg").mockImplementation((color, text) => {
+			if (color === "mdListBullet") styledBullets++;
+			return originalFg(color, text);
+		});
+		try {
+			terminalState.hyperlinks = true;
+			const streaming = new Markdown(first, 0, 0, markdownTheme);
+			streaming.transientRenderCache = true;
+			streaming.render(60);
+			styledBullets = 0;
+			targets.set(target, "https://changed.example");
+			streaming.setText(next);
+			const rendered = streaming.render(60);
+			expect(styledBullets).toBeLessThan(6);
+			expect(rendered.join("\n")).toContain("https://resolved.example");
+			expect(rendered.join("\n")).not.toContain("https://changed.example");
+			clearRenderCache();
+			const cold = new Markdown(next, 0, 0, markdownTheme);
+			cold.transientRenderCache = true;
+			expect(rendered).toEqual(cold.render(60));
+		} finally {
+			spy.mockRestore();
+			terminalState.hyperlinks = originalHyperlinks;
+		}
+	});
+
+	it("transient list restyles when a caller text-style callback changes", () => {
 		let prefix = "A";
-		const theme = { ...THEME, listBullet: (bullet: string) => prefix + bullet };
+		const markdownTheme = getMarkdownTheme();
+		const textStyle = { color: (text: string) => prefix + text };
 		const first = "- one\n- two";
 		const next = `${first}\n- three`;
-		const streaming = new Markdown(first, 0, 0, theme);
+		const streaming = new Markdown(first, 0, 0, markdownTheme, textStyle);
 		streaming.transientRenderCache = true;
 		streaming.render(60);
 		prefix = "B";
 		streaming.setText(next);
 		const rendered = streaming.render(60);
 		clearRenderCache();
-		const cold = new Markdown(next, 0, 0, theme);
+		const cold = new Markdown(next, 0, 0, markdownTheme, textStyle);
 		cold.transientRenderCache = true;
 		expect(rendered).toEqual(cold.render(60));
 	});

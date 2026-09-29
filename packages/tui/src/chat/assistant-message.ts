@@ -9,7 +9,7 @@ import { formatNumber } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import type { AssistantThinkingRenderer } from "./extension-types";
-import { ensureThemeSync, getMarkdownTheme, theme } from "../theme";
+import { ensureThemeSync, getMarkdownTheme, getMarkdownThemeWithLinkTargets, theme } from "../theme";
 import { EMPTY_LINK_TARGETS, resolveImageOptions } from "../render/render-utils";
 import { WidthAwareText } from "../render";
 import { cachedPngConversion, convertImageToPngShared, imagePayloadKey } from "./image-loading";
@@ -332,7 +332,7 @@ export class AssistantMessageComponent extends Container {
 		if (this.#markdownTheme) return this.#markdownTheme;
 		const base = getMarkdownTheme();
 		const snapshot = this.#linkTargets;
-		const markdownTheme = snapshot.size > 0 ? { ...base, resolveLink: (href: string) => snapshot.get(href) } : base;
+		const markdownTheme = snapshot.size > 0 ? getMarkdownThemeWithLinkTargets(snapshot) : base;
 		this.#markdownTheme = markdownTheme;
 		return markdownTheme;
 	}
