@@ -2021,17 +2021,21 @@ export function escapeReplayedControlTokens(items: ResponseInput): ResponseInput
  * message content because some backends bind native items to one connection
  * (GitHub Copilot: `401 input item does not belong to this connection`, #488).
  * Binding needs server-issued state that survives replay sanitization: an
- * `encrypted_content` blob or an item id. A turn with neither, whose reasoning
- * the server returned in plaintext, carries nothing to bind and is exactly what
- * the server receives once the session warms; rebuilding it would drop that
- * reasoning and change the prompt prefix the server cached.
+ * `encrypted_content` blob or an item id. A turn with neither, whose every
+ * reasoning item carries plaintext `reasoning_text`, has nothing to bind and is
+ * exactly what the server receives once the session warms; rebuilding it would
+ * drop that reasoning and change the prompt prefix the server cached.
+ * Summary-only reasoning keeps the rebuild: it is no evidence of a server that
+ * returns plaintext reasoning.
  */
 function isColdReplayableResponsesTurn(items: ResponseInput): boolean {
 	let hasReasoning = false;
 	for (const item of items) {
-		const serverState = item as { id?: unknown; encrypted_content?: unknown };
-		if (typeof serverState.id === "string" || typeof serverState.encrypted_content === "string") return false;
-		if (item.type === "reasoning") hasReasoning = true;
+		if ("id" in item && typeof item.id === "string") return false;
+		if ("encrypted_content" in item && typeof item.encrypted_content === "string") return false;
+		if (item.type !== "reasoning") continue;
+		if (!item.content?.some(part => part.type === "reasoning_text")) return false;
+		hasReasoning = true;
 	}
 	return hasReasoning;
 }

@@ -951,11 +951,12 @@ describe("OpenAI responses history payload", () => {
 		expect(cold.input).toEqual(warm.input);
 	});
 
-	it("replays only the cold-session turns that carry no server-issued state", async () => {
-		// Plaintext reasoning alone does not make a turn safe to replay across
-		// processes: an `encrypted_content` blob or a surviving item id is exactly
-		// what #488's backends bind to one connection, so those turns stay rebuilt
-		// even when an earlier turn of the same request replays natively.
+	it("replays only plaintext reasoning turns without server-issued state on a cold session", async () => {
+		// Reasoning alone does not make a turn safe to replay across processes: an
+		// `encrypted_content` blob or a surviving item id is exactly what #488's
+		// backends bind to one connection, and summary-only reasoning is no evidence
+		// of a plaintext-reasoning server. Those turns stay rebuilt even when an
+		// earlier turn of the same request replays natively.
 		const context: Context = {
 			messages: [
 				{ role: "user", content: "Read a.txt and b.txt, then draw them.", timestamp: Date.now() },
@@ -1017,6 +1018,20 @@ describe("OpenAI responses history payload", () => {
 					],
 					"stop",
 				),
+				{ role: "user", content: "Summarize.", timestamp: Date.now() },
+				selfHostedAssistantTurn(
+					[{ type: "text", text: "Summary." }],
+					[
+						{ type: "reasoning", id: "rs_d", summary: [{ type: "summary_text", text: "Summarize both." }] },
+						{
+							type: "message",
+							role: "assistant",
+							status: "completed",
+							content: [{ type: "output_text", text: "Summary.", annotations: [] }],
+						},
+					],
+					"stop",
+				),
 				{ role: "user", content: "Thanks.", timestamp: Date.now() },
 			],
 		};
@@ -1038,6 +1053,8 @@ describe("OpenAI responses history payload", () => {
 			"function_call_output:call_a",
 			"function_call:call_b",
 			"function_call_output:call_b",
+			"message",
+			"user",
 			"message",
 			"user",
 		]);
