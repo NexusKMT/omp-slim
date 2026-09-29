@@ -1115,6 +1115,8 @@ async function polyphonicRecallEnhanced(
 		includeFacts: options.includeFacts === true,
 		baseline,
 		forcePolyphonic: true,
+		// `recallEnhanced` promises `topK` rows, not a token budget.
+		contextBudget: Number.POSITIVE_INFINITY,
 	});
 	const previewChars = options.contentPreviewChars ?? RECALL_CONTENT_PREVIEW_CHARS;
 	const results: RecallResult[] = [];

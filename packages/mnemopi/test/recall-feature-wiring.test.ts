@@ -2,11 +2,20 @@
  * `polyphonicRecall` / `enhancedRecall` must change what `recallEnhanced` returns
  * (the surface hosts such as the coding-agent call), per memory instance.
  */
+import type { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Mnemopi, type MnemopiOptions } from "@oh-my-pi/pi-mnemopi/core/memory";
+import {
+	GRAPH_VOICE_MAX_DEPTH,
+	GRAPH_VOICE_MAX_RESULTS,
+	PolyphonicRecallEngine,
+	type VoiceRecallResult,
+} from "@oh-my-pi/pi-mnemopi/core/polyphonic-recall";
+import { VeracityConsolidator } from "@oh-my-pi/pi-mnemopi/core/veracity-consolidation";
+import { logger } from "@oh-my-pi/pi-utils";
 
 const roots: string[] = [];
 const open: Mnemopi[] = [];
@@ -126,6 +135,106 @@ describe("polyphonic recall wiring", () => {
 			writer.beam.db.query("SELECT COUNT(*) AS n FROM consolidated_facts WHERE subject = 'Alice'").get(),
 		).toEqual({ n: 6 });
 		expect(writer.beam.db.query("SELECT COUNT(*) AS n FROM conflicts").get()).toEqual({ n: 0 });
+	});
+
+	it("retries a failed fact backfill on the next polyphonic recall", async () => {
+		const dbPath = tempDbPath();
+		const writer = memory(dbPath);
+		const id = writer.remember("Our primary database keeps the billing ledger", { veracity: "stated" });
+		writer.beam.extractAndStoreFacts("PostgreSQL runs the billing ledger", 0, id);
+		const reader = memory(dbPath, { polyphonicRecall: true });
+		const warn = spyOn(logger, "warn").mockImplementation(() => {});
+		const busy = spyOn(VeracityConsolidator.prototype, "serializedWrite").mockImplementationOnce(() => {
+			throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+		});
+		try {
+			const failed = await reader.recallEnhanced("PostgreSQL", 10);
+			expect(failed.find(result => result.id === id)?.voice_scores?.fact).toBeUndefined();
+			expect(warn).toHaveBeenCalledTimes(1);
+
+			const retried = await reader.recallEnhanced("PostgreSQL", 10);
+			expect(retried.find(result => result.id === id)?.voice_scores?.fact).toBeGreaterThan(0);
+			expect(warn).toHaveBeenCalledTimes(1);
+		} finally {
+			busy.mockRestore();
+			warn.mockRestore();
+		}
+	});
+
+	it("returns topK rows when enough candidates exist", async () => {
+		const mem = memory(":memory:", { polyphonicRecall: true });
+		for (let i = 0; i < 130; i++) mem.remember(`Alice deploy runbook note ${i}`);
+
+		// No token budget applies: 120 rows overflow the engine's default 4000-token context.
+		expect(await mem.recallEnhanced("Alice deploy runbook", 120)).toHaveLength(120);
+	});
+});
+
+describe("polyphonic graph voice bounds", () => {
+	function countEdgeQueries(db: Database): { readonly count: number; restore(): void } {
+		const query = db.query.bind(db);
+		let count = 0;
+		const spy = spyOn(db, "query").mockImplementation(((sql: string) => {
+			if (sql.includes("graph_edges")) count++;
+			return query(sql);
+		}) as typeof db.query);
+		return {
+			get count() {
+				return count;
+			},
+			restore: () => spy.mockRestore(),
+		};
+	}
+
+	it("bounds the walk on a densely linked bank", async () => {
+		const mem = memory(":memory:", { proactiveLinking: true, polyphonicRecall: true });
+		for (let i = 0; i < 48; i++) mem.remember(`Alice deploy runbook note ${i}`, { extractEntities: true });
+
+		const edgeQueries = countEdgeQueries(mem.beam.db);
+		try {
+			expect(await mem.recallEnhanced("Alice deploy runbook", 10)).toHaveLength(10);
+		} finally {
+			edgeQueries.restore();
+		}
+		// One batched query per hop, not one per expanded node (48 seeds × 49 nodes before).
+		expect(edgeQueries.count).toBeGreaterThan(0);
+		expect(edgeQueries.count).toBeLessThanOrEqual(GRAPH_VOICE_MAX_DEPTH);
+	});
+
+	it("walks two hops from each seed and caps what it reports", () => {
+		const engine = new PolyphonicRecallEngine();
+		try {
+			const at = new Date().toISOString();
+			engine.graph.storeGist(engine.graph.extractGist("Alice planned the launch", "seed"), "seed");
+			engine.graph.addEdge({ source: "seed", target: "hub", edgeType: "ctx", weight: 0.9, timestamp: at });
+			for (let i = 0; i < 200; i++) {
+				engine.graph.addEdge({ source: "hub", target: `leaf-${i}`, edgeType: "ctx", weight: 0.5, timestamp: at });
+				engine.graph.addEdge({
+					source: `leaf-${i}`,
+					target: `far-${i}`,
+					edgeType: "ctx",
+					weight: 0.5,
+					timestamp: at,
+				});
+			}
+
+			const edgeQueries = countEdgeQueries(engine.db);
+			let results: VoiceRecallResult[];
+			try {
+				results = engine.graphVoice("Alice");
+			} finally {
+				edgeQueries.restore();
+			}
+
+			const depthOf = new Map(results.map(result => [result.memoryId, result.metadata.depth]));
+			expect(depthOf.get("hub")).toBe(1);
+			expect(depthOf.get("leaf-0")).toBe(2);
+			expect(results).toHaveLength(GRAPH_VOICE_MAX_RESULTS);
+			expect(new Set(results.map(result => result.memoryId)).size).toBe(results.length);
+			expect(edgeQueries.count).toBe(GRAPH_VOICE_MAX_DEPTH);
+		} finally {
+			engine.close();
+		}
 	});
 });
 

@@ -1,4 +1,5 @@
 import type { SQLQueryBindings } from "bun:sqlite";
+import { logger } from "@oh-my-pi/pi-utils";
 import { polyphonicRecallEnabled } from "../../config";
 import { generateId, stableMemoryId } from "../../util/ids";
 import { aaakEncode } from "../aaak";
@@ -379,8 +380,10 @@ function consolidateKgFact(
 			sourceMemoryVeracity(beam, sourceMemoryId),
 			sourceMemoryId,
 		);
-	} catch {
-		// Fact consolidation is an enrichment; the MEMORIA/KG rows above are already written.
+	} catch (error) {
+		// Fact consolidation is an enrichment; the MEMORIA/KG rows above are already written,
+		// and the next polyphonic engine built on this bank backfills the fact.
+		logger.warn("mnemopi: fact consolidation failed", { subject: cleanSubject, error: String(error) });
 	}
 }
 

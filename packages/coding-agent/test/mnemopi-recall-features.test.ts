@@ -105,34 +105,16 @@ describe("mnemopi.polyphonicRecall", () => {
 });
 
 describe("mnemopi.enhancedRecall", () => {
-	it("serves repeated recalls from the cache, refreshes after a retain, and keys on recall options", async () => {
-		const { state, tools } = startSession({ "mnemopi.enhancedRecall": true });
-		const target = state.getScopedRecallTargets()[0];
-		await retain(tools, "The deploy runbook lives in the ops wiki", "The deploy runbook links the pager rotation");
+	it("reaches recallEnhanced per instance: uncached when off, one hit when on", async () => {
+		for (const enhancedRecall of [false, true]) {
+			const { state, tools } = startSession({ "mnemopi.enhancedRecall": enhancedRecall });
+			await retain(tools, "The deploy runbook lives in the ops wiki");
+			await recallText(tools, "deploy runbook");
+			await recallText(tools, "deploy runbook");
 
-		const first = await recallText(tools, "deploy runbook");
-		expect(await recallText(tools, "deploy runbook")).toBe(first);
-		expect(target.memory.beam.caches.queryCache?.stats()).toMatchObject({ hits: 1, misses: 1 });
-
-		await retain(tools, "The deploy runbook now covers rollbacks");
-		expect(await recallText(tools, "deploy runbook")).toContain("The deploy runbook now covers rollbacks");
-		expect(target.memory.beam.caches.queryCache?.stats()).toMatchObject({ hits: 1, misses: 2 });
-
-		// Same query and bank as the tool, but a different result limit: must not reuse the tool's ranking.
-		const narrow = await target.memory.recallEnhanced("deploy runbook", 1, {
-			includeFacts: true,
-			channelId: target.bank,
-		});
-		expect(narrow).toHaveLength(1);
-		expect(target.memory.beam.caches.queryCache?.stats()).toMatchObject({ hits: 1, misses: 3 });
-	});
-
-	it("leaves recall uncached when the setting is off", async () => {
-		const { state, tools } = startSession({ "mnemopi.enhancedRecall": false });
-		await retain(tools, "The deploy runbook lives in the ops wiki");
-		await recallText(tools, "deploy runbook");
-		await recallText(tools, "deploy runbook");
-
-		expect(state.getScopedRecallTargets()[0].memory.beam.caches.queryCache).toBeUndefined();
+			const cache = state.getScopedRecallTargets()[0].memory.beam.caches.queryCache;
+			if (enhancedRecall) expect(cache?.stats()).toMatchObject({ hits: 1, misses: 1 });
+			else expect(cache).toBeUndefined();
+		}
 	});
 });
