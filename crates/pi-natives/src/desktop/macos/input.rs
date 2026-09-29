@@ -567,9 +567,8 @@ fn post_hover(
 }
 
 /// Stamps the window-routing fields on a background pointer event and posts it
-/// through both `SkyLight` and the public per-pid queue, which drops or accepts
-/// events differently across `AppKit`, `WebKit`, and Catalyst targets. The
-/// window location is window-local, as the public route expects.
+/// with `skylight::post_dual`. The window location is window-local, as the
+/// public route expects.
 fn post_window_pointer(
 	pid: libc::pid_t,
 	wid: u32,
