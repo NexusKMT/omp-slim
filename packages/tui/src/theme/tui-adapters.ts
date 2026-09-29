@@ -232,11 +232,21 @@ function registerCacheableMarkdownTheme(markdownTheme: MarkdownTheme): void {
 export function getMarkdownThemeWithLinkTargets(targets: ReadonlyMap<string, string>): MarkdownTheme {
 	const base = getMarkdownTheme();
 	let snapshot = linkTargetSnapshots.get(targets);
-	if (snapshot === undefined) {
+	let matches = snapshot?.size === targets.size;
+	if (matches && snapshot !== undefined) {
+		for (const [href, target] of targets) {
+			if (snapshot.get(href) !== target) {
+				matches = false;
+				break;
+			}
+		}
+	}
+	if (snapshot === undefined || !matches) {
 		snapshot = new Map(targets);
 		linkTargetSnapshots.set(targets, snapshot);
 	}
-	const linked: MarkdownTheme = { ...base, resolveLink: href => snapshot.get(href) };
+	const stableSnapshot = snapshot;
+	const linked: MarkdownTheme = { ...base, resolveLink: href => stableSnapshot.get(href) };
 	if (canCacheMarkdownListItems(base)) registerCacheableMarkdownTheme(linked);
 	return linked;
 }

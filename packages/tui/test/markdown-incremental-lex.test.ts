@@ -345,6 +345,8 @@ describe("Markdown incremental streaming lex (E2)", () => {
 			const cold = new Markdown(next, 0, 0, markdownTheme);
 			cold.transientRenderCache = true;
 			expect(rendered).toEqual(cold.render(60));
+			const refreshed = getMarkdownThemeWithLinkTargets(targets);
+			expect(new Markdown(next, 0, 0, refreshed).render(60).join("\n")).toContain("https://changed.example");
 		} finally {
 			spy.mockRestore();
 			terminalState.hyperlinks = originalHyperlinks;
