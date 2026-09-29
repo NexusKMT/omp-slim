@@ -33,6 +33,7 @@ import {
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import type { AgentSession } from "../../session/agent-session";
+import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
@@ -1530,6 +1531,18 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "set_auto_compaction": {
 				session.setAutoCompactionEnabled(command.enabled);
 				return success(id, "set_auto_compaction");
+			}
+
+			// =================================================================
+			// Cache warming
+			// =================================================================
+
+			case "set_cache_warming": {
+				if (!CACHE_WARMING_MODES.includes(command.mode)) {
+					return error(id, "set_cache_warming", `Invalid cache warming mode: ${String(command.mode)}`);
+				}
+				const mode = session.setCacheWarmingMode(command.mode);
+				return success(id, "set_cache_warming", { mode });
 			}
 
 			// =================================================================
