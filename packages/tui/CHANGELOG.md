@@ -14,6 +14,7 @@
 ### Fixed
 
 - Fixed long Markdown messages sometimes showing raw display math, a visible HTML comment, or a code block split in two
+- Fixed streamed Markdown keeping raw `$$` math or an unresolved reference link after the message finished, when a display-math block contained blank lines or a link definition sat inside a quote or list
 
 ## [18.4.3] - 2026-09-28
 

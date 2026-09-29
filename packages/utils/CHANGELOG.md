@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `mathBlockMayCloseAt` to `math-delimiters`, which tells whether an own-line display block in a streaming prefix could still close as the text grows
+
 ## [18.4.4] - 2026-09-29
 
 ### Added

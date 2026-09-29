@@ -6,8 +6,9 @@ import {
 	Tokenizer,
 	type TokenizerAndRendererExtension,
 	type Tokens,
+	type TokensList,
 } from "@oh-my-pi/pi-utils/marked";
-import { mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
+import { mathBlockAt, mathBlockMayCloseAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -1144,7 +1145,7 @@ function listMayContinueAt(text: string, tailStart: number, listRaw: string): bo
 const NO_BLOCK_BOUNDARY = { end: 0, count: 0 } as const;
 
 // Tokens that may open a display-math block start with `$$` or `\[` after up
-// to 3 spaces. A cheap filter only: mathBlockAt decides.
+// to 3 spaces. A cheap filter only: mathBlockAt/mathBlockMayCloseAt decide.
 const DISPLAY_MATH_START_RE = /^ {0,3}(?:\$\$|\\\[)/;
 
 /**
@@ -1174,6 +1175,13 @@ const DISPLAY_MATH_START_RE = /^ {0,3}(?:\$\$|\\\[)/;
  *    that block one `math` token across its blank lines. An opener with no
  *    closer, or with a whitespace-only body, is no block in either lex, so it
  *    leaves later boundaries alone.
+ *  - With `growing` (text that appends may still extend, i.e. the streaming
+ *    freeze), the same holds for a block an append could still close, which
+ *    `mathBlockMayCloseAt` must also reject for the rest of `text`. A pair
+ *    that `mathBlockAt` rejects at a closer line that has already ended (a
+ *    whitespace-only body, as in `$$`, ` `, `$$`) is no block whatever
+ *    follows, so it leaves later boundaries alone; any later token that
+ *    starts with an opener still gets its own check.
  *
  * `startIndex` resumes the scan at `tokens[startIndex]` (positions still
  * accumulate from `base`). The streaming freeze passes the frozen-prefix
@@ -1184,8 +1192,7 @@ function stableBlockBoundary(
 	text: string,
 	base: number,
 	tokens: Token[],
-	startIndex = 0,
-	windowEnd = text.length,
+	{ startIndex = 0, windowEnd = text.length, growing = false } = {},
 ): { end: number; count: number } {
 	const windowIsWhole = windowEnd === text.length;
 	let pos = base;
@@ -1195,8 +1202,9 @@ function stableBlockBoundary(
 		const token = tokens[i];
 		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
-		if (token.type !== "math" && DISPLAY_MATH_START_RE.test(raw) && mathBlockAt(text.slice(pos)) !== undefined) {
-			break;
+		if (token.type !== "math" && DISPLAY_MATH_START_RE.test(raw)) {
+			const rest = text.slice(pos);
+			if (growing ? mathBlockMayCloseAt(rest) : mathBlockAt(rest) !== undefined) break;
 		}
 		if (raw.endsWith("\n\n") && (windowIsWhole || tokenEnd < windowEnd)) {
 			const prev = i > 0 ? tokens[i - 1] : undefined;
@@ -1244,7 +1252,7 @@ const WINDOWED_LEX_MIN_BYTES = 16 * 1024;
  * ({@link firstProbeSize}); a tail with no blank line left (e.g. one long
  * tight list) goes to the lexer whole.
  */
-function lexWindowed(text: string): Token[] {
+function lexWindowed(text: string): TokensList {
 	const lexer = new Lexer(markdownParser.defaults);
 	let offset = 0;
 	while (offset < text.length) {
@@ -1283,11 +1291,14 @@ function firstProbeSize(text: string, offset: number): number {
 function probeBoundary(text: string, offset: number, size: number): number {
 	const probe = new Lexer(markdownParser.defaults);
 	probe.blockTokens(text.slice(offset, offset + size), probe.tokens);
-	return stableBlockBoundary(text, offset, probe.tokens, 0, offset + size).end;
+	return stableBlockBoundary(text, offset, probe.tokens, { windowEnd: offset + size }).end;
 }
 
-/** Lex a whole document, windowing anything large enough for the quadratic scan to bite. */
-function lexDocument(text: string): Token[] {
+/**
+ * Lex a whole document, windowing anything large enough for the quadratic scan
+ * to bite. `links` holds every reference definition, at any nesting depth.
+ */
+function lexDocument(text: string): TokensList {
 	// A CR shifts every `raw` span (marked normalizes CRLF before tokenizing), so
 	// window offsets would address the wrong characters — lex those in one pass.
 	if (text.length < WINDOWED_LEX_MIN_BYTES || text.includes("\r")) return markdownParser.lexer(text);
@@ -2015,11 +2026,11 @@ export class Markdown implements Component {
 	// raw-span offsets). Every fallback is correctness-preserving — only speed
 	// differs; the render loop sees the identical token list either way.
 	#lexTokens(text: string): Token[] {
-		// When a frozen prefix exists, it was already verified ref-def-free when
-		// frozen (#freezeStablePrefix only runs when canStream was true). The prefix
-		// ends at a "\n\n" block boundary (stableBlockBoundary), so the tail starts
-		// at a fresh line — scanning only the tail for ref defs is sufficient and
-		// avoids re-scanning the grown prefix every frame (O(n²) → O(n) overall).
+		// A prefix is frozen only while canStream holds and its lex registered no
+		// definitions, and it ends at a "\n\n" block boundary (stableBlockBoundary),
+		// so the tail starts at a fresh line. The scan below then catches a
+		// top-level definition or CR in the new text and the tail lex's links catch
+		// a nested one, so the grown prefix is never re-scanned (O(n²) → O(n)).
 		const prefix = this.#streamPrefixText;
 		const prefixTokens = this.#streamPrefixTokens;
 		const hasPrefix =
@@ -2073,13 +2084,21 @@ export class Markdown implements Component {
 		this.#appendOnlySinceLastScan = true;
 		if (canStream && hasPrefix) {
 			const tailTokens = lexDocument(refDefText);
-			const tokens = [...prefixTokens, ...tailTokens];
-			if (retainPrefix) this.#freezeStablePrefix(text, tokens, { preserveExisting: true });
-			else this.#dropStreamPrefix();
-			return tokens;
+			// HAS_REF_DEF sees top-level definition lines only. A definition nested
+			// in a quote or list item still registers for the whole document and
+			// can resolve a reference in the frozen prefix, which was lexed
+			// without it, so any definition in the tail sends the text to a full lex.
+			if (Object.keys(tailTokens.links).length === 0) {
+				const tokens = [...prefixTokens, ...tailTokens];
+				if (retainPrefix) this.#freezeStablePrefix(text, tokens, { preserveExisting: true });
+				else this.#dropStreamPrefix();
+				return tokens;
+			}
 		}
 		const tokens = lexDocument(text);
-		if (canStream && retainPrefix) {
+		// A definition frozen into the prefix would be missing from every later
+		// tail lex, so a full lex that registered any definition freezes nothing.
+		if (canStream && retainPrefix && Object.keys(tokens.links).length === 0) {
 			this.#freezeStablePrefix(text, tokens, { preserveExisting: false });
 		} else {
 			this.#dropStreamPrefix();
@@ -2110,12 +2129,10 @@ export class Markdown implements Component {
 		// path (preserveExisting: false) re-derives the whole stream, so it
 		// must keep walking from 0.
 		const skipPrefix = opts.preserveExisting ? (this.#streamPrefixTokens?.length ?? 0) : 0;
-		const frozen = stableBlockBoundary(
-			text,
-			skipPrefix > 0 ? (this.#streamPrefixText?.length ?? 0) : 0,
-			tokens,
-			skipPrefix,
-		);
+		const frozen = stableBlockBoundary(text, skipPrefix > 0 ? (this.#streamPrefixText?.length ?? 0) : 0, tokens, {
+			startIndex: skipPrefix,
+			growing: true,
+		});
 		if (frozen.count > 0) {
 			this.#streamPrefixText = text.slice(0, frozen.end);
 			this.#streamPrefixTokens = tokens.slice(0, frozen.count);

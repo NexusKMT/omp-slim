@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mathBlockAt, mathOpenerAt, mathSpanAt, mathStartIndex } from "../src/math-delimiters";
+import { mathBlockAt, mathBlockMayCloseAt, mathOpenerAt, mathSpanAt, mathStartIndex } from "../src/math-delimiters";
 
 describe("math span grammar", () => {
 	test("reports opener, display mode, body and end offset for each delimiter form", () => {
@@ -106,5 +106,32 @@ describe("math block grammar", () => {
 		expect(mathBlockAt("$$\n \n$$\n")).toBeUndefined();
 		expect(mathBlockAt("$$ x^2 $$\n")).toBeUndefined();
 		expect(mathBlockAt("    $$\nx\n    $$\n")).toBeUndefined(); // four spaces: indented code
+	});
+});
+
+describe("mathBlockMayCloseAt", () => {
+	test("reports a $$ opener that would close once its closer line arrives", () => {
+		expect(mathBlockMayCloseAt("$$\nx^2\n")).toBe(true);
+	});
+
+	test("reports a \\[ opener that would close once its closer line arrives", () => {
+		expect(mathBlockMayCloseAt("\\[\nx^2\n")).toBe(true);
+	});
+
+	test("declines a pseudo-pair whose body is whitespace-only", () => {
+		// Same blank-body rejection as mathBlockAt: a real closer is already
+		// present, but the body between opener and closer is whitespace-only.
+		expect(mathBlockMayCloseAt("$$\n \n$$\n")).toBe(false);
+	});
+
+	test("reports a block already closed within `source`", () => {
+		// mathBlockAt matches the first closer line, so the appended one is unused.
+		expect(mathBlockMayCloseAt("$$\nx\n$$\n")).toBe(true);
+	});
+
+	test("treats a closer on the still-growing last line as unconfirmed", () => {
+		// The trailing `$$` may yet become `$$ E = mc^2 $$`, which closes
+		// nothing, so the block can still close further down.
+		expect(mathBlockMayCloseAt("$$\n\n\n$$")).toBe(true);
 	});
 });

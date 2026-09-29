@@ -94,14 +94,33 @@ export function mathBlockAt(source: string): MathBlock | undefined {
 	return { raw: match[0], body: match[1] };
 }
 
+/** Closer of `opener`: dollar closers equal their openers; the bracket forms flip the bracket. */
+function closerOf(opener: MathOpener): string {
+	return opener === "\\(" ? "\\)" : opener === "\\[" ? "\\]" : opener;
+}
+
+// A display opener (`$$` or `\[` after up to 3 spaces) at the start of the text, captured.
+const MATH_BLOCK_OPENER_RE = /^ {0,3}(\$\$|\\\[)/;
+
+/**
+ * Whether the own-line display block opened at offset 0 of `source` is closed,
+ * or could still close once more text is appended: `source` is a streaming
+ * prefix whose real closer may not have arrived. The closer line is appended
+ * after a sentinel character (`x`), so the last line of `source`, which the
+ * next append may still extend, is never read as a finished closer line.
+ */
+export function mathBlockMayCloseAt(source: string): boolean {
+	const opener = MATH_BLOCK_OPENER_RE.exec(source);
+	return opener !== null && mathBlockAt(`${source}x\n${closerOf(opener[1] as MathOpener)}`) !== undefined;
+}
+
 /**
  * Offset of the `$$` / `\)` / `\]` that closes a span, or -1. In `\(a \\) b\)`
  * the `\\` is a TeX row break, so that `)` is body text and the span closes at
  * the final `\)`.
  */
 function closerIndex(source: string, opener: MathOpener, from: number): number {
-	// Dollar closers equal their openers; the bracket forms flip the bracket.
-	const closer = opener === "\\(" ? "\\)" : opener === "\\[" ? "\\]" : opener;
+	const closer = closerOf(opener);
 	for (let at = source.indexOf(closer, from); at !== -1; at = source.indexOf(closer, at + 1)) {
 		if (!escapedAt(source, at, from)) return at;
 	}

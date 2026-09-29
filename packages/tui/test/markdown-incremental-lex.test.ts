@@ -447,6 +447,92 @@ describe("Markdown incremental streaming lex (E2)", () => {
 	});
 });
 
+describe("Streamed Markdown equals a one-shot render across the frozen prefix", () => {
+	/** Stream `full` in `step`-character chunks through one transient instance, as
+	 *  a live message does. Every frame must equal a cold transient render of the
+	 *  same text, and the finalized render a cold final render. Returns the frozen
+	 *  prefix length at the last streamed frame. */
+	function streamAgainstOneShot(full: string, step: number, width = 60): number {
+		const streaming = new Markdown("", 0, 0, THEME);
+		streaming.transientRenderCache = true;
+		for (let len = Math.min(step, full.length); ; len = Math.min(len + step, full.length)) {
+			const slice = full.slice(0, len);
+			clearRenderCache();
+			streaming.setText(slice);
+			expect(streaming.render(width)).toEqual(renderColdTransient(slice, width));
+			if (len === full.length) break;
+		}
+		const frozen = streaming.getLastRenderStableText().length;
+		streaming.transientRenderCache = false;
+		clearRenderCache();
+		expect(streaming.render(width)).toEqual(renderCold(full, width));
+		return frozen;
+	}
+
+	const paragraphs = (count: number) =>
+		Array.from({ length: count }, (_, i) => `Body paragraph ${i} keeps the stream going.`).join("\n\n");
+	// No `_`: an intraword `_{` at a partial line trips a separate, older
+	// same-line fast-path divergence at some chunk alignments.
+	const mathBody = Array.from({ length: 6 }, (_, i) => `a${i} + b${i} = c${i}`).join("\n\n");
+
+	for (const step of [1, 7, 40]) {
+		it(`keeps a display-math block with blank lines whole, streamed in ${step}-character chunks`, () => {
+			// The freeze must not cut at a blank line inside the block before its
+			// closer arrives: that left raw `$$` rows even after finalizing.
+			streamAgainstOneShot(`Intro.\n\n$$\n${mathBody}\n$$\n\nAfter the math.\n`, step);
+		});
+	}
+
+	for (const definition of ["> [d]: https://example.com/docs", "- [d]: https://example.com/docs"]) {
+		it(`resolves a reference whose definition streams in nested: ${definition.slice(0, 5)}`, () => {
+			// A definition inside a quote or list resolves the reference above it,
+			// which a frozen prefix lexed without the definition kept raw.
+			const doc = `See [the docs][d] for details.\n\nMiddle paragraph one.\n\nMiddle paragraph two.\n\n${definition}\n`;
+			for (const step of [1, 7, 40]) streamAgainstOneShot(doc, step);
+		});
+	}
+
+	it("resolves a reference that streams in after a nested definition", () => {
+		// The definition sits in a list that a full lex could freeze; a later
+		// tail lexed without it would leave the reference raw.
+		const doc = `- [d]: https://example.com/docs\n\nMiddle paragraph.\n\nSee [the docs][d] for details.\n`;
+		for (const step of [1, 7, 40]) streamAgainstOneShot(doc, step);
+	});
+
+	it("renders an own-line $$ that never closes as a one-shot render does", () => {
+		const doc = `Intro.\n\n$$\nx = 1\n\n${paragraphs(4)}\n`;
+		for (const step of [1, 7, 40]) streamAgainstOneShot(doc, step);
+	});
+
+	it("keeps a display-math block open while its last streamed line could still grow past a closer", () => {
+		// The last streamed line reads as a closer (`$$`, `\]`) until the next
+		// chunk extends it into text, so the block opened above it can still
+		// close further down; freezing past its opener would split that block.
+		for (const doc of [
+			"Intro.\n\n$$\n\n\n$$ E = mc^2 $$\n\nMiddle.\n\n$$\n\nAfter.\n",
+			"Intro.\n\n\\[\n\n\n\\] E = mc^2\n\nMiddle.\n\n\\]\n\nAfter.\n",
+		])
+			streamAgainstOneShot(doc, 1);
+	});
+
+	it("keeps freezing past a closed $$ pair around a blank body", () => {
+		// mathBlockAt rejects a whitespace-only body and no append can move its
+		// first closer, so this is no math block, and the freeze must not stall
+		// in front of it for the rest of the stream.
+		const doc = `Intro.\n\n$$\n \n$$\n\n${paragraphs(80)}\n`;
+		const frozen = streamAgainstOneShot(doc, 40);
+		expect(frozen).toBeGreaterThan(doc.indexOf("$$\n\n") + 4);
+	});
+
+	it("keeps freezing past a fenced block with an indented line that looks like a definition", () => {
+		// Code registers no reference definitions, so the freeze still advances
+		// over the block once the stream grows past it.
+		const doc = `Intro paragraph.\n\n\`\`\`ts\ninterface Bag {\n    [key: string]: T;\n}\n\`\`\`\n\n${paragraphs(40)}\n`;
+		const frozen = streamAgainstOneShot(doc, 40);
+		expect(frozen).toBeGreaterThan(doc.indexOf("```\n\n") + 3);
+	});
+});
+
 describe("Markdown OSC 8 tail normalization across streaming appends", () => {
 	const ST = "\x1b\\";
 	const LINK = "\x1b]8;;https://example.com";
