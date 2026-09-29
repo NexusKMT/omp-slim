@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Subagents now show their current activity and a separate, width-bounded current-tool row; resolved model labels follow the model badge setting.
+- Subagents now show their current activity, and `display.subagentLivePreview` (off by default) adds a width-bounded current-tool row with an elapsed marker once a call runs past five seconds; resolved model labels follow the model badge setting.
 
 ### Added
 

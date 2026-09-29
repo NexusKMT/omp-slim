@@ -453,6 +453,45 @@ describe("subagent HUD lines", () => {
 		expect(text).not.toContain(process.env.HOME!);
 	});
 
+	describe("live tool row", () => {
+		const startMs = 1_000_000;
+		const runningSession = (overrides: Partial<AgentProgress> = {}) =>
+			makeSession({
+				id: "Runner",
+				progress: makeProgress({
+					id: "Runner",
+					currentTool: "bash",
+					currentToolArgs: "sleep 40",
+					currentToolArgsKey: "command",
+					currentToolStartMs: startMs,
+					...overrides,
+				}),
+			});
+		const hudText = (sessions: ObservableSession[], showToolRow: boolean, now: number) =>
+			Bun.stripANSI(renderSubagentHudLines(sessions, 120, false, false, showToolRow, now).join("\n"));
+
+		it("hides the tool row when the live preview is off but keeps the agent row", () => {
+			const text = hudText([runningSession()], false, startMs + 30_000);
+			expect(text).toContain("Runner");
+			expect(text).not.toContain("bash(sleep 40)");
+		});
+
+		it("shows the elapsed marker only once a call outlasts five seconds", () => {
+			expect(hudText([runningSession()], true, startMs + 4_000)).not.toContain("4.0s");
+			expect(hudText([runningSession()], true, startMs + 5_000)).not.toContain("5.0s");
+			expect(hudText([runningSession()], true, startMs + 6_000)).toContain("6.0s");
+		});
+
+		it("keeps the elapsed marker when a long tool name would overflow the row", () => {
+			const session = runningSession({ currentTool: `mcp__${"x".repeat(120)}`, currentToolArgs: "query" });
+			const lines = renderSubagentHudLines([session], 60, false, false, true, startMs + 30_000);
+			const rows = new SubagentHudComponent(lines, ["Runner"]).render(60);
+			expect(rows).toHaveLength(lines.join("\n").split("\n").length);
+			for (const row of rows) expect(Bun.stringWidth(Bun.stripANSI(row))).toBeLessThanOrEqual(60);
+			expect(Bun.stripANSI(rows.join("\n"))).toContain("30.0s");
+		});
+	});
+
 	it("preserves model revision and effort in a roomy HUD badge", () => {
 		const selector = "anthropic/claude-sonnet-4-20250514:high";
 		const text = Bun.stripANSI(
@@ -903,7 +942,7 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		await Settings.init({
 			inMemory: true,
 			cwd: tempDir.path(),
-			overrides: { "startup.quiet": true },
+			overrides: { "startup.quiet": true, "display.subagentLivePreview": true },
 		});
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
@@ -987,6 +1026,38 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		expect(hud).toContain("3 more — expand");
 		expect(rebuildHud).toHaveBeenCalledTimes(1);
 		expect(requestRender).toHaveBeenCalledTimes(1);
+	});
+
+	it("repaints the live tool row once a second only while a listed agent is mid-call", async () => {
+		await mode.init({ suppressWelcomeIntro: true });
+		vi.useFakeTimers();
+		const requestRender = vi.spyOn(mode.ui, "requestRender").mockImplementation(() => {});
+		const rebuildHud = vi.spyOn(mode.subagentContainer, "clear");
+		const payload = makeProgressPayload("QuietSleeper", 0, "Sleeping", true);
+		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
+			...payload,
+			progress: { ...payload.progress, currentTool: "bash", currentToolArgs: "sleep 40", currentToolStartMs: 1 },
+		});
+		await Promise.resolve();
+		vi.advanceTimersByTime(100);
+		rebuildHud.mockClear();
+		requestRender.mockClear();
+
+		vi.advanceTimersByTime(1000);
+		expect(rebuildHud).toHaveBeenCalledTimes(1);
+		expect(requestRender).toHaveBeenCalledTimes(1);
+		vi.advanceTimersByTime(1000);
+		expect(rebuildHud).toHaveBeenCalledTimes(2);
+
+		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
+			...payload,
+			progress: { ...payload.progress, currentTool: undefined, currentToolStartMs: undefined },
+		});
+		await Promise.resolve();
+		vi.advanceTimersByTime(100);
+		rebuildHud.mockClear();
+		vi.advanceTimersByTime(5000);
+		expect(rebuildHud).not.toHaveBeenCalled();
 	});
 
 	it("applies the setting over a clicked expand override", async () => {

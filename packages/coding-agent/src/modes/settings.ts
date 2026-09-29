@@ -565,6 +565,19 @@ export const cfgDisplayPinnedAgents = register({
 	},
 });
 
+export const cfgDisplaySubagentLivePreview = register({
+	id: "display.subagentLivePreview",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "appearance",
+		group: "Display",
+		label: "Subagent Live Preview",
+		description:
+			"Show each pinned subagent's current (or most recent) tool call beneath its row, with an elapsed marker once a call runs longer than five seconds",
+	},
+});
+
 export const cfgDisplaySmoothStreaming = register({
 	id: "display.smoothStreaming",
 	type: "boolean",
