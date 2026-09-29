@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added a delayed `Rebuilding…` notice while tmux resize rebuilds are in progress
+- Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
 
 ### Fixed
 

@@ -852,9 +852,16 @@ export class TUI extends Container {
 	static readonly #RESIZE_VIEWPORT_SETTLE_MS = 120;
 	/** Longest wait for a CPR reply before the settled repaint falls back. */
 	static readonly #RESIZE_PROBE_TIMEOUT_MS = 200;
-	// Publish feedback before the settled replay starts holding synchronized
-	// output. The notice must not extend the resize settle window.
-	static readonly #RESIZE_REBUILD_INDICATOR_DELAY_MS = 80;
+	/**
+	 * Smallest settled tmux replay that is preceded by a `Rebuilding…` notice.
+	 * The notice can only be published ahead of the replay (tmux holds the
+	 * pane's synchronized update until the replay ends), so it stays up for
+	 * exactly as long as tmux takes to ingest the replay. tmux next-3.9 on
+	 * Apple silicon ingests a real transcript replay at ~14 MiB/s, so this is
+	 * about half a second there. A smaller replay finishes before the notice
+	 * can be read, and showing it would only flash a status row.
+	 */
+	static readonly #RESIZE_REBUILD_NOTICE_MIN_BYTES = 7 * 1024 * 1024;
 	#inputRenderGraceUntilMs = 0;
 	// A scale-`s` OSC 66 heading reserves `s - 1` rows, and the protocol
 	// caps `s` at 7. This bounds spacer lookups and supplies enough context
@@ -913,8 +920,6 @@ export class TUI extends Container {
 	#altEnterHeight = 0;
 	#resizeAltActive = false;
 	#resizeSettleTimer: RenderTimer | undefined;
-	#resizeRebuildIndicatorTimer: RenderTimer | undefined;
-	#resizeRebuildIndicatorVisible = false;
 	#suppressResizeUntil = 0;
 	// Baseline geometry at the last alt-buffer toggle, plus whether its echo is
 	// still pending. A Warp-only echo is a height-only ±1 SIGWINCH against this
@@ -1467,37 +1472,6 @@ export class TUI extends Container {
 		this.#trackResizeBurst();
 		this.#resizeInPlaceActive = true;
 		this.#resizeSettleTimer?.cancel();
-		this.#resizeRebuildIndicatorTimer?.cancel();
-		this.#resizeRebuildIndicatorTimer = this.#renderScheduler.scheduleRender(() => {
-			this.#resizeRebuildIndicatorTimer = undefined;
-			if (
-				this.#stopped ||
-				!this.#resizeInPlaceActive ||
-				!this.#hasEverRendered ||
-				this.#resizeRepaintsInPlace() ||
-				this.#resizeScrollbackMode !== "rebuild" ||
-				!this.#synchronizedOutputEnabled ||
-				classifyTerminalMultiplexer() !== "tmux" ||
-				!this.#frameProvider?.beginHistoryReplay ||
-				!this.#settledResizeRefreshes(this.#resizeBurstWidthChanged) ||
-				this.#getTopmostVisibleOverlay()?.options?.fullscreen === true ||
-				// ProcessTerminal retains a small cached upper bound after draining;
-				// only a deep backlog should suppress feedback, just like a frame.
-				(this.terminal.pendingOutputBytes ?? 0) > TUI.#MAX_PENDING_OUTPUT_BYTES
-			) {
-				return;
-			}
-			const { columns, rows } = this.terminal;
-			if (columns <= 0 || rows <= 0) return;
-			const label = truncateToWidth("↻ Rebuilding…", columns, Ellipsis.Omit);
-			// Publish the notice before holding the long replay. Cursor save/restore
-			// and no newline keep this temporary row out of native scrollback. The
-			// destructive rebuild replaces it together with the rest of the screen.
-			this.terminal.write(
-				`${this.#paintBeginSequence}\x1b7\x1b[${rows};1H${SEGMENT_RESET}${ERASE_LINE}${label}${LINE_TERMINATOR}\x1b8${this.#paintEndSequence}`,
-			);
-			this.#resizeRebuildIndicatorVisible = true;
-		}, TUI.#RESIZE_REBUILD_INDICATOR_DELAY_MS);
 		this.#forgetHardwareCursorState();
 		this.#recordHardwareCursorHidden();
 		if (this.#eraseLiveViewportForResize()) {
@@ -2113,8 +2087,6 @@ export class TUI extends Container {
 		this.#debugServer = undefined;
 		this.#resizeSettleTimer?.cancel();
 		this.#resizeSettleTimer = undefined;
-		this.#resizeRebuildIndicatorTimer?.cancel();
-		this.#resizeRebuildIndicatorTimer = undefined;
 		if (this.#resizeInPlaceActive && this.terminal.rows > 0) {
 			// The hardware cursor sits wherever the drag left it, but tracking still
 			// describes the pre-resize row (no alt-buffer restore replays it back).
@@ -2155,10 +2127,6 @@ export class TUI extends Container {
 			// and loses native selection until a manual reset.
 			this.terminal.write(MOUSE_TRACKING_OFF);
 			this.#mouseTracking = "off";
-		}
-		if (this.#resizeRebuildIndicatorVisible) {
-			this.terminal.write(`\x1b7\x1b[${Math.max(1, this.terminal.rows)};1H${ERASE_LINE}\x1b8`);
-			this.#resizeRebuildIndicatorVisible = false;
 		}
 		// A latched destructive reset (settled rebuild-mode resize, /clear) pairs
 		// ED3 with a complete-ledger replay. Running that pair during stop would
@@ -2903,6 +2871,17 @@ export class TUI extends Container {
 	 * A later grow cannot undo that clipping or the provider's retirement, so
 	 * even a height-only shrink/grow burst needs a complete settled rebuild.
 	 */
+	/**
+	 * Bottom-row `Rebuilding…` notice, closed as its own synchronized update so
+	 * tmux forwards it before the replay that follows starts a new hold. Cursor
+	 * save/restore and no newline keep the row out of native scrollback; the
+	 * replay's ED2 erases it together with the rest of the screen.
+	 */
+	#rebuildNoticeSequence(width: number, height: number): string {
+		const label = truncateToWidth("↻ Rebuilding…", width, Ellipsis.Omit);
+		return `${this.#paintBeginSequence}\x1b7\x1b[${height};1H${SEGMENT_RESET}${ERASE_LINE}${label}${LINE_TERMINATOR}\x1b8${this.#paintEndSequence}`;
+	}
+
 	#settledResizeRefreshes(widthChanged: boolean): boolean {
 		if (this.#resizeScrollbackMode === "rebuild") {
 			return widthChanged || this.terminal.hostOwnsGridOnResize === true || this.#resizeBurstShrank;
@@ -3003,9 +2982,6 @@ export class TUI extends Container {
 		const destructiveReset = this.#clearScrollbackOnNextRender;
 		const compactReplay = destructiveReset && classifyTerminalMultiplexer() === "tmux";
 		if (destructiveReset) {
-			this.#resizeRebuildIndicatorTimer?.cancel();
-			this.#resizeRebuildIndicatorTimer = undefined;
-			this.#resizeRebuildIndicatorVisible = false;
 			this.#providerViewportTop = 0;
 			this.#providerWindow = [];
 			this.#providerPreparedRows = [];
@@ -3164,6 +3140,14 @@ export class TUI extends Container {
 			this.#parkedViewportOffset = 0;
 		}
 		buffer += this.#paintEndSequence;
+		if (
+			renewSync &&
+			pendingAltExit === "" &&
+			this.#resizeReplaySize !== undefined &&
+			Buffer.byteLength(buffer) >= TUI.#RESIZE_REBUILD_NOTICE_MIN_BYTES
+		) {
+			this.terminal.write(this.#rebuildNoticeSequence(width, height));
+		}
 		this.terminal.write(buffer);
 		this.#debugPaint = {
 			lines: prepared.lines,
