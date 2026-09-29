@@ -44,6 +44,9 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+### Added
+
+- RPC hosts can send `messageUpdates: "delta"` with `set_event_filter` to receive `message_update` frames without the accumulated message snapshots (`message` shrinks to `{ role }` and `assistantMessageEvent.partial` is omitted); the response echoes the active mode ([#13716](https://github.com/can1357/oh-my-pi/pull/13716) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.4.3] - 2026-09-28
 
