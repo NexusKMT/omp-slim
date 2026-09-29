@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed session usage and cost totals omitting Mnemopi memory completions, including billed failures before a fallback succeeds. ([#13631](https://github.com/can1357/oh-my-pi/pull/13631) by [@sm0keyyy](https://github.com/sm0keyyy))
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
@@ -35,10 +39,6 @@
 ### Removed
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
-
-### Fixed
-
-- Fixed session usage and cost totals omitting Mnemopi memory completions, including billed failures before a fallback succeeds.
 
 ## [18.4.2] - 2026-09-28
 

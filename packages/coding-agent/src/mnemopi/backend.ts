@@ -538,7 +538,6 @@ async function resolveMnemopiProviderOptions(
 	sessionId: string,
 	usageLedger: Partial<JudgmentUsageLedger>,
 ): Promise<MnemopiProviderOptions> {
-	const onUsage = journalJudgmentUsage(usageLedger);
 	const base: MnemopiProviderOptions = {
 		noEmbeddings: config.providerOptions.noEmbeddings,
 		embeddingModel: config.providerOptions.embeddingModel,
@@ -577,6 +576,10 @@ async function resolveMnemopiProviderOptions(
 		}
 
 		const complete = async (prompt: string, opts?: MnemopiLlmCompleteOptions): Promise<string | null> => {
+			// journalJudgmentUsage snapshots the session id. /new, fork, and session
+			// switch keep this function, so bind inside each call. An in-flight call
+			// keeps the callback it already created and still journals to its start.
+			const onUsage = journalJudgmentUsage(usageLedger);
 			const request = resolveMemoryCompletionInput(prompt, opts);
 			const signal =
 				typeof opts?.timeout === "number" && Number.isFinite(opts.timeout) && opts.timeout > 0

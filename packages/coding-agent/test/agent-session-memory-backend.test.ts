@@ -245,6 +245,36 @@ describe("AgentSession memory backend lifecycle", () => {
 		expect(current.sessionManager.getBranch().filter(entry => entry.type === "model_usage")).toEqual([]);
 	});
 
+	it("journals a successful memory completion on the session that started after a switch", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-6")!;
+		const response = memoryReply(model);
+		spyOn(ai, "completeSimple").mockImplementation(async (_model, _context, options) => {
+			options?.onAttempt?.(response);
+			return response;
+		});
+		const { current, complete } = await startMemoryCompletion([model]);
+		const previousSessionId = current.sessionManager.getSessionId();
+		await current.sessionManager.newSession();
+		expect(current.sessionManager.getSessionId()).not.toBe(previousSessionId);
+		current.sessionManager.appendMessage({ role: "user", content: "Remember Sam's employer.", timestamp: 1 });
+		const leafBefore = current.sessionManager.getLeafId();
+
+		expect(await complete("Sam works at Globex.")).toBe("Sam works at Globex.");
+
+		const usage = current.sessionManager.getBranch().filter(entry => entry.type === "model_usage");
+		expect(usage).toHaveLength(1);
+		expect(usage[0]).toMatchObject({
+			parentId: leafBefore,
+			purpose: "memory",
+			role: "memory",
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: response.usage,
+			stopReason: "stop",
+		});
+	});
+
 	it("removes unusable Hindsight tools after a cwd reload clears the URL and restores them when configured", async () => {
 		const apiUrl = "http://127.0.0.1:1";
 		cfgMemoryBackend.override(settings, "hindsight");
