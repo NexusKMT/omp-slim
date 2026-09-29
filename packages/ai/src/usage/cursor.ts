@@ -480,9 +480,12 @@ export const cursorUsageProvider: UsageProvider = {
 		if (legacyReport && summaryReport) {
 			// `/auth/usage` is Cursor's request-count API from before usage-based
 			// plans. Current plans answer it with an uncapped, always-zero `gpt-4`
-			// bucket; beside the summary's dollar rails it carries no quota, so only
-			// capped legacy buckets are kept. Without a summary it stays the fallback.
-			const legacyLimits = legacyReport.limits.filter(limit => limit.amount.limit !== undefined);
+			// bucket; beside the summary's dollar rails an uncapped, unused bucket
+			// carries nothing, so it is dropped. Capped buckets and uncapped buckets
+			// with recorded requests stay. Without a summary it stays the fallback.
+			const legacyLimits = legacyReport.limits.filter(
+				limit => limit.amount.limit !== undefined || (limit.amount.used ?? 0) > 0,
+			);
 			report = {
 				provider: "cursor",
 				fetchedAt,

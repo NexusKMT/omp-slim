@@ -679,6 +679,10 @@ describe("cursor usage provider", () => {
 					numRequests: 80,
 					maxRequestUsage: 500,
 				},
+				"gpt-4-32k": {
+					numRequests: 12,
+					maxRequestUsage: null,
+				},
 			};
 			const usageSummaryPayload = {
 				individualUsage: {
@@ -747,13 +751,16 @@ describe("cursor usage provider", () => {
 			// The legacy `gpt-4` bucket is uncapped and always zero on usage-based
 			// plans; next to the personal dollar rails it is dropped, not rendered
 			// as a meaningless "0 requests used" row. A capped legacy bucket still
-			// carries a quota and stays.
+			// carries a quota, and an uncapped one with recorded requests still
+			// carries a count, so both stay.
 			expect(report?.limits.map(limit => limit.id)).toEqual([
 				"cursor:requests:claude-3-5-sonnet",
+				"cursor:requests:gpt-4-32k",
 				"cursor:usd:individual-overall",
 			]);
 			expect(report?.limits[0]?.amount).toMatchObject({ used: 80, limit: 500, unit: "requests" });
-			expect(report?.limits[1]).toMatchObject({
+			expect(report?.limits[1]?.amount).toMatchObject({ used: 12, unit: "requests" });
+			expect(report?.limits[2]).toMatchObject({
 				id: "cursor:usd:individual-overall",
 				amount: {
 					used: 20,
