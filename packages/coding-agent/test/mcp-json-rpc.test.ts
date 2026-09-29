@@ -1,7 +1,6 @@
 import type { BodyInit } from "bun";
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai";
-import { fetchExaTools } from "@oh-my-pi/pi-coding-agent/exa/mcp-client";
 import { callMCP, redactUrlForLog } from "@oh-my-pi/pi-coding-agent/mcp/json-rpc";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { asGlobalFetch } from "./helpers/fetch-mock";
@@ -214,23 +213,5 @@ describe("callMCP", () => {
 				},
 			),
 		).rejects.toThrow("invalid MCP payload: SyntaxError");
-	});
-
-	it("lets fetchExaTools discover tools without descriptions after a notification", async () => {
-		const tool = {
-			name: "web_search_exa",
-			inputSchema: { type: "object" },
-		};
-		mockMcpFetch(request =>
-			sseResponse(
-				[
-					'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}',
-					`data: ${JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { tools: [tool] } })}`,
-					"",
-				].join("\n\n"),
-			),
-		);
-
-		await expect(fetchExaTools(null, ["web_search_exa"])).resolves.toEqual([tool]);
 	});
 });

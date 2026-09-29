@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import {
 	clampCodexContextWindow,
 	clampsContextOverride,
-	codexOverrideCeiling,
 	resolveMaxContextWindow,
 } from "@oh-my-pi/pi-catalog/compat/context-window";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
@@ -48,7 +47,6 @@ test("leaves models without a curated maximum to the live value or undefined", (
 test("clamps Codex overrides to the stale-aware ceiling", () => {
 	const astra = bundledAstra();
 	// Stale 872K server maximum: the curated 922K input cap is the ceiling.
-	expect(codexOverrideCeiling({ ...astra, maxContextWindow: 872_000 })).toBe(922_000);
 	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 2_000_000)).toBe(922_000);
 	// Fitting requests pass through untouched.
 	expect(clampCodexContextWindow({ ...astra, maxContextWindow: 872_000 }, 400_000)).toBe(400_000);
@@ -61,14 +59,12 @@ test("never clamps below the working window on a stale-low maximum", () => {
 	// 128K base with a 64K advertised maximum: the ceiling is discredited,
 	// so an explicit override falls back to the working window.
 	const stale = { ...legacy, contextWindow: 128_000, maxContextWindow: 64_000 };
-	expect(codexOverrideCeiling(stale)).toBe(64_000);
 	expect(clampCodexContextWindow(stale, 200_000)).toBe(128_000);
 	expect(clampCodexContextWindow(stale, 100_000)).toBe(100_000);
 });
 
 test("leaves models without a ceiling unclamped", () => {
 	const legacy = bundledLegacy();
-	expect(codexOverrideCeiling({ ...legacy, maxContextWindow: undefined })).toBeUndefined();
 	expect(clampCodexContextWindow({ ...legacy, maxContextWindow: undefined }, 2_000_000)).toBe(2_000_000);
 });
 

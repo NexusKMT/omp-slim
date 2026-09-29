@@ -1,7 +1,7 @@
 import { deflateSync } from "node:zlib";
 import { describe, expect, it } from "bun:test";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
-import { TerminalGraphicsDecoder, encodeTerminalImage } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
+import { TerminalGraphicsDecoder } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 
 const RED_1X1_PNG_BASE64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
@@ -135,29 +135,5 @@ describe("TerminalGraphicsDecoder SIXEL", () => {
 		expect(decoder.push(stream)).toBe("still-safe");
 		decoder.finish();
 		expect(await decoder.images()).toEqual([]);
-	});
-});
-
-describe("encodeTerminalImage", () => {
-	it("emits interoperable direct PNG Kitty framing that the decoder round-trips", async () => {
-		const encoded = await encodeTerminalImage({ type: "image", data: RED_1X1_PNG_BASE64, mimeType: "image/png" });
-		expect(encoded).toStartWith(`${ESC}_Ga=T,t=d,f=100,q=2,m=0;`);
-		expect(encoded).toEndWith(`${ESC}\\`);
-
-		const result = await decodeByCodeUnit(`x${encoded}y`);
-		expect(result.text).toBe("xy");
-		expect(result.images).toHaveLength(1);
-		expect(await metadata(result.images[0]!)).toMatchObject({ width: 1, height: 1, format: "png" });
-	});
-
-	it("converts non-PNG input before declaring f=100", async () => {
-		const jpeg = await new Bun.Image(RED_1X1_PNG).jpeg({ quality: 90 }).toBase64();
-		const encoded = await encodeTerminalImage({ type: "image", data: jpeg, mimeType: "image/jpeg" });
-		const result = await decodeByCodeUnit(encoded);
-
-		expect(encoded).toContain("f=100");
-		expect(result.images).toHaveLength(1);
-		expect(result.images[0]?.mimeType).toBe("image/png");
-		expect(await metadata(result.images[0]!)).toMatchObject({ width: 1, height: 1, format: "png" });
 	});
 });

@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { ChangelogEntry } from "../../src/utils/changelog";
-import { formatStartupChangelogSummary, parseChangelog, selectStartupChangelog } from "../../src/utils/changelog";
+import {
+	formatStartupChangelogSummary,
+	parseChangelog,
+	selectStartupChangelogEntries,
+} from "../../src/utils/changelog";
 
 const shippedChangelogPath = `${import.meta.dir}/../../CHANGELOG.md`;
 
 function summarize(content: string) {
 	const entries: ChangelogEntry[] = [{ major: 1, minor: 1, patch: 0, content: `## [1.1.0] - 2026-01-01\n${content}` }];
-	return selectStartupChangelog(entries, "1.0.0", "1.1.0");
+	return selectStartupChangelogEntries(entries, entries.length);
 }
 
 describe("startup changelog summary", () => {
@@ -196,7 +200,7 @@ An intervening paragraph closes the list.
 		const release = entries.find(entry => entry.major === 18 && entry.minor === 1 && entry.patch === 12);
 		expect(release).toBeDefined();
 
-		const selection = selectStartupChangelog([release as ChangelogEntry], "18.1.11", "18.1.12");
+		const selection = selectStartupChangelogEntries([release as ChangelogEntry], 1);
 		const breakdown = Object.values(selection.categoryCounts).reduce((total, count) => total + count, 0);
 		expect(selection.changeCount).toBe(breakdown);
 		// The released section is immutable, so its bullet above `### Changed` stays uncategorized rather than lost.

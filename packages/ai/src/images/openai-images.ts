@@ -1,5 +1,6 @@
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import * as AIError from "../error";
+import { resolveXaiBaseUrl } from "../providers/xai-base-url";
 import {
 	decodeImageResponse,
 	imageBaseUrl,
@@ -53,7 +54,7 @@ export async function generateOpenAIImage(
 			? { ...generationBody, image: firstReference }
 			: { ...generationBody, images: references }
 		: { ...generationBody, input_references: references };
-	const baseUrl = imageBaseUrl(model);
+	const baseUrl = imageBaseUrl(isXAI ? { ...model, baseUrl: resolveXaiBaseUrl(model.baseUrl) ?? "" } : model);
 	let response: unknown;
 	if (references.length === 0) {
 		response = await postJson({

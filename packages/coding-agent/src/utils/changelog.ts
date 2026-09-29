@@ -315,9 +315,9 @@ async function parseStartupChangelogFile(
 			newlineIndex = pending.indexOf("\n");
 		}
 	}
-	if (pending && !processLine(pending + decoder.decode())) {
-		finishCurrentEntry();
-	}
+	// A seen-version stop already finished the current entry, so this is a no-op then.
+	if (pending) processLine(pending + decoder.decode());
+	finishCurrentEntry();
 	return { entries, totalUnseenEntries };
 }
 
@@ -388,7 +388,8 @@ export function renderChangelogEntries(
 	return { markdown: markdown.slice(0, low) + suffix, truncated: true };
 }
 
-function selectStartupChangelogEntries(
+/** Build the bounded startup selection from the newest-first unseen entries. */
+export function selectStartupChangelogEntries(
 	newEntries: ChangelogEntry[],
 	totalUnseenEntries: number,
 ): StartupChangelogSelection {

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -578,5 +578,40 @@ describe("xAI Responses answer extraction from relay output items", () => {
 			provider: "xai",
 			status: 502,
 		});
+	});
+});
+
+describe("XAI_BASE_URL", () => {
+	const originalXaiBaseUrl = Bun.env.XAI_BASE_URL;
+	afterEach(() => {
+		if (originalXaiBaseUrl === undefined) delete Bun.env.XAI_BASE_URL;
+		else Bun.env.XAI_BASE_URL = originalXaiBaseUrl;
+	});
+
+	function captureUrl(): { fetch: FetchImpl; url: () => string | undefined } {
+		let requestUrl: string | undefined;
+		const fetch: FetchImpl = async input => {
+			requestUrl = String(input);
+			return new Response(JSON.stringify({ id: "resp-env", model: SELECTED_MODEL_ID, output_text: "Answer." }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		};
+		return { fetch, url: () => requestUrl };
+	}
+
+	it("redirects a model on the bundled xAI endpoint", async () => {
+		Bun.env.XAI_BASE_URL = "https://xai-env.example.test/v1/";
+		const bundled = { ...model, baseUrl: "https://api.x.ai/v1" };
+		const capture = captureUrl();
+		await searchXAI(makeParams(capture.fetch, { model: bundled }));
+		expect(capture.url()).toBe("https://xai-env.example.test/v1/responses");
+	});
+
+	it("keeps a custom model baseUrl", async () => {
+		Bun.env.XAI_BASE_URL = "https://xai-env.example.test/v1";
+		const capture = captureUrl();
+		await searchXAI(makeParams(capture.fetch));
+		expect(capture.url()).toBe(`${SELECTED_BASE_URL}/responses`);
 	});
 });

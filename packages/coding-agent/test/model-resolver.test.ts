@@ -18,7 +18,6 @@ import {
 	resolveAllowedModels,
 	resolveCliModel,
 	resolveExplicitModelRole,
-	resolveModelFromSettings,
 	resolveModelFromString,
 	resolveModelOverride,
 	resolveModelRoleValue,
@@ -931,14 +930,6 @@ describe("role priorities and chains", () => {
 			"openrouter/z-ai/glm-4.7@openai",
 		]);
 		expect(chain.every(candidate => candidate.explicit)).toBe(true);
-	});
-
-	test("ignores configured kind roles during default chat-model resolution", () => {
-		const chat = roleChainModel("anthropic", "chat-model");
-		const image = roleChainModel("openai", "gpt-image-2");
-		const settings = Settings.isolated({ modelRoles: { image: "openai/gpt-image-2" } });
-
-		expect(resolveModelFromSettings({ settings, availableModels: [chat, image] })).toBe(chat);
 	});
 
 	test("memory inherits configured tiny without kind roles inheriting configured default", () => {

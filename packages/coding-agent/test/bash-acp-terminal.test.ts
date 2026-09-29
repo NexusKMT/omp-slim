@@ -4,7 +4,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ClientBridge, ClientBridgeTerminalHandle } from "@oh-my-pi/pi-coding-agent/session/client-bridge";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { BashTool } from "@oh-my-pi/pi-coding-agent/tools/bash";
-import { encodeTerminalImage } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
+import { kittyPngFrame, RED_1X1_PNG_BASE64 } from "./helpers/kitty-frame";
 
 function makeSession(bridge: ClientBridge): ToolSession {
 	return {
@@ -105,11 +105,7 @@ describe("BashTool ACP terminal routing", () => {
 	});
 
 	it("extracts graphics from cumulative terminal snapshots without leaking escapes", async () => {
-		const frame = await encodeTerminalImage({
-			type: "image",
-			mimeType: "image/png",
-			data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
-		});
+		const frame = kittyPngFrame(RED_1X1_PNG_BASE64);
 		const handle: ClientBridgeTerminalHandle = {
 			terminalId: "term-image",
 			waitForExit: async () => ({ exitCode: 7, signal: null }),

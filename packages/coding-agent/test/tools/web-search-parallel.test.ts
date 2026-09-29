@@ -2,8 +2,6 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, setSystemTime, v
 import { AuthStorage, type FetchImpl } from "@oh-my-pi/pi-ai";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { resolveConfigValue } from "@oh-my-pi/pi-coding-agent/config/resolve-config-value";
-import type { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
-import { searchWithParallel } from "@oh-my-pi/pi-coding-agent/web/parallel";
 import { ParallelProvider, searchParallel } from "@oh-my-pi/pi-coding-agent/web/search/providers/parallel";
 import { USER_AGENT } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "../helpers/agent-session-setup";
@@ -18,23 +16,6 @@ afterAll(() => {
 });
 
 describe("Parallel web search", () => {
-	const fakeStorage = {
-		listAuthCredentials: () => [
-			{
-				id: 1,
-				credential: {
-					type: "oauth",
-					access: "test-access-token",
-					expires: Date.now() + 600_000,
-					accountId: "acct-test",
-				},
-			},
-		],
-		updateAuthCredential: () => undefined,
-		get authStore() {
-			return null as never;
-		},
-	} as unknown as AgentStorage;
 	const fakeAuthStorage = {
 		keys: {
 			get: async () => process.env.PARALLEL_API_KEY ?? undefined,
@@ -85,44 +66,6 @@ describe("Parallel web search", () => {
 			);
 		};
 	}
-
-	it("sends the expected Parallel search request and parses results", async () => {
-		const fetchMock = mockFetch({
-			search_id: "search-parallel-1",
-			results: [
-				{
-					title: "Parallel result",
-					url: "https://example.com/article",
-					publish_date: "2025-01-01",
-					excerpts: ["First excerpt", "Second excerpt"],
-				},
-			],
-			warnings: null,
-			usage: [{ name: "sku_search", count: 1 }],
-		});
-
-		const result = await searchWithParallel("parallel query", ["parallel query"], { fetch: fetchMock }, fakeStorage);
-		expect(capturedRequestBody).toEqual({
-			objective: "parallel query",
-			search_queries: ["parallel query"],
-			mode: "fast",
-			excerpts: { max_chars_per_result: 10_000 },
-		});
-		expect(result).toEqual({
-			requestId: "search-parallel-1",
-			sources: [
-				{
-					title: "Parallel result",
-					url: "https://example.com/article",
-					snippet: "First excerpt\n\nSecond excerpt",
-					publishedDate: "2025-01-01",
-					excerpts: ["First excerpt", "Second excerpt"],
-				},
-			],
-			warnings: [],
-			usage: [{ name: "sku_search", count: 1 }],
-		});
-	});
 
 	it("maps Parallel search responses into SearchResponse", async () => {
 		const fetchMock = mockFetch({

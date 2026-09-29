@@ -1,5 +1,5 @@
 import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
-import type { XAIHttpTransport } from "../../../lib/xai-http";
+import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/providers/xai-base-url";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatQuery, parseSearchQuery, type QuerySyntax } from "../query";
@@ -8,7 +8,6 @@ import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
 import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
-const XAI_DEFAULT_BASE_URL = "https://api.x.ai/v1";
 // xAI web search is latency-sensitive, so keep reasoning effort low regardless
 // of the selected model's configured timeout.
 const XAI_WEB_SEARCH_REASONING_EFFORT = "low";
@@ -16,6 +15,12 @@ const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 30;
 /** Messages at least this long are treated as substantive content, not relay narration. */
 const SUBSTANTIVE_MIN_CHARS = 300;
+
+/** Resolved endpoint and configured headers for an xAI HTTP request. */
+interface XAIHttpTransport {
+	baseURL: string;
+	headers?: Record<string, string>;
+}
 
 interface XAIUrlCitationAnnotation {
 	type?: string;
@@ -408,8 +413,9 @@ export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 			400,
 		);
 	}
+	const baseURL = resolveXaiBaseUrl(params.model.baseUrl) ?? params.model.baseUrl;
 	const transport: XAIHttpTransport = {
-		baseURL: params.model.baseUrl,
+		baseURL,
 		headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
 	};
 	const customEndpoint = transport.baseURL.replace(/\/+$/, "") !== XAI_DEFAULT_BASE_URL;
@@ -432,7 +438,7 @@ export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 		keyOrResolver,
 		async key => {
 			const requestTransport: XAIHttpTransport = {
-				baseURL: params.model.baseUrl,
+				baseURL,
 				headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
 			};
 			return callXAIResponses(key, params, requestTransport);

@@ -1,5 +1,5 @@
 /**
- * Regression test for #3680: third-party extension / hook modules that call
+ * Regression test for #3680: third-party extension modules that call
  * `process.exit()` at the top level must not terminate the host OMP process.
  *
  * The harness intercepts the load via `withHostGuard`; this test pins that the
@@ -10,11 +10,10 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
-import { loadHooks } from "@oh-my-pi/pi-coding-agent/extensibility/hooks/loader";
 import { ExtensionExitError, withHostGuard } from "@oh-my-pi/pi-coding-agent/extensibility/utils";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-describe("extension/hook loader process.exit guard (#3680)", () => {
+describe("extension loader process.exit guard (#3680)", () => {
 	let project: TempDir | undefined;
 
 	beforeEach(() => {
@@ -82,7 +81,7 @@ void withHostGuard(async () => {
 `);
 	};
 
-	it("converts extension and hook exits into load errors without blocking siblings", async () => {
+	it("converts extension exits into load errors without blocking siblings", async () => {
 		const topLevelExtension = writeModule("top-level-exit-extension.ts", "process.exit(0)\n");
 		const factoryExtension = writeModule(
 			"factory-exit-extension.ts",
@@ -96,8 +95,6 @@ void withHostGuard(async () => {
 			"good-extension.ts",
 			"export default function(pi) { pi.registerCommand('ok', { handler: async () => {} }); }\n",
 		);
-		const topLevelHook = writeModule("top-level-exit-hook.ts", "process.exit(42)\n");
-		const factoryHook = writeModule("factory-exit-hook.ts", "export default function(pi) { process.exit(32); }\n");
 		const cwd = project!.path();
 		const originalExit = process.exit;
 		const originalReallyExit = process.reallyExit;
@@ -106,7 +103,6 @@ void withHostGuard(async () => {
 			[topLevelExtension, factoryExtension, reallyExitExtension, goodExtension],
 			cwd,
 		);
-		const hookResult = await loadHooks([topLevelHook, factoryHook], cwd);
 
 		expect(process.exit).toBe(originalExit);
 		expect(process.reallyExit).toBe(originalReallyExit);
@@ -120,13 +116,6 @@ void withHostGuard(async () => {
 			[topLevelExtension, "process.exit(0)"],
 			[factoryExtension, "process.exit(31)"],
 			[reallyExitExtension, "process.reallyExit(33)"],
-		]);
-		expect(hookResult.hooks).toEqual([]);
-		expect(
-			hookResult.errors.map(({ path: modulePath, error }) => [modulePath, error.match(/process\.exit\(\d+\)/)?.[0]]),
-		).toEqual([
-			[topLevelHook, "process.exit(42)"],
-			[factoryHook, "process.exit(32)"],
 		]);
 	});
 

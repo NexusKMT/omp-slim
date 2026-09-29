@@ -10,6 +10,7 @@
 ### Changed
 
 - Changed to fall back to adaptive thinking when between_tools is used with xhigh effort
+- xAI requests (`xai`, `xai-oauth` chat and image generation) honor `XAI_BASE_URL` again when the model uses the bundled `https://api.x.ai/v1` endpoint; a custom `baseUrl` from models.yml still wins.
 
 ## [18.4.3] - 2026-09-28
 

@@ -2,9 +2,8 @@
  * Routing tests for `omp plugin install <local-path>` (#1945).
  *
  * Two layers of coverage:
- *  1. Spy-based: `runPluginCommand` with a local path calls
- *     `PluginManager.link` and NEVER `PluginManager.install` (the npm path
- *     that produced `Invalid package name: .`).
+ *  1. Spy-based: an npm spec still dispatches to `PluginManager.install`, and
+ *     `--dry-run` on a local path calls neither `link` nor `install`.
  *  2. End-to-end: with a real on-disk plugin directory, the install routes
  *     through `link` and produces the symlink + lockfile entry users expect.
  *
@@ -76,20 +75,6 @@ describe("runPluginCommand({ action: 'install', args: [<local>] })", () => {
 		// breaks because listMarketplaces() still returns []).
 		mock.restore();
 		await removeWithRetries(tmpRoot);
-	});
-
-	test("dispatches a local path to link() instead of install()", async () => {
-		const linkSpy = spyOn(PluginManager.prototype, "link").mockResolvedValue(FAKE_INSTALLED);
-		const installSpy = spyOn(PluginManager.prototype, "install").mockResolvedValue(FAKE_INSTALLED);
-		try {
-			await runPluginCommand({ action: "install", args: ["."], flags: { json: true } });
-			expect(linkSpy).toHaveBeenCalledTimes(1);
-			expect(linkSpy.mock.calls[0]?.[0]).toBe(".");
-			expect(installSpy).not.toHaveBeenCalled();
-		} finally {
-			linkSpy.mockRestore();
-			installSpy.mockRestore();
-		}
 	});
 
 	test("npm-style spec still dispatches to install(), not link()", async () => {

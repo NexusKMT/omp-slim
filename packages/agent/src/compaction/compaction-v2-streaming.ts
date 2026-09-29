@@ -33,7 +33,7 @@ import {
 	OPENAI_HEADER_VALUES,
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
-import { $env, isUnexpectedSocketCloseMessage, logger, stringifyJson } from "@oh-my-pi/pi-utils";
+import { $env, isUnexpectedSocketCloseMessage, logger, ptree, stringifyJson } from "@oh-my-pi/pi-utils";
 import { prepareBedrockCompactionRequest } from "./bedrock";
 
 // ============================================================================
@@ -98,7 +98,7 @@ export interface CompactionV2Response {
 /** Resolve the streaming Responses endpoint for a V2-capable model. */
 export function getCompactionV2Endpoint(model: Model): string | undefined {
 	if (model.remoteCompaction?.enabled === false) return undefined;
-	if (!isOpenAiV2CompatibleModel(model)) return undefined;
+	if (!isOpenAiRemoteCompactionApi(compactionV2Api(model))) return undefined;
 
 	const configuredEndpoint = model.remoteCompaction?.v2Endpoint ?? model.remoteCompaction?.streamingEndpoint;
 	if (configuredEndpoint && configuredEndpoint.length > 0) return configuredEndpoint;
@@ -133,8 +133,8 @@ function compactionV2Api(model: Model): Api | undefined {
 	return model.remoteCompaction?.api ?? model.api;
 }
 
-function isOpenAiV2CompatibleModel(model: Model): boolean {
-	const api = compactionV2Api(model);
+/** APIs that speak the OpenAI Responses compaction protocol (V1 `/responses/compact` and V2 streaming). */
+export function isOpenAiRemoteCompactionApi(api: Api | undefined): boolean {
 	return api === "openai-responses" || api === "azure-openai-responses" || api === "openai-codex-responses";
 }
 
@@ -162,7 +162,7 @@ function resolveOpenAiCodexResponsesEndpoint(baseUrl: string | undefined): strin
 	return `${normalizedBase}/codex/responses`;
 }
 
-function resolveAzureOpenAiBaseUrl(model: Model): string {
+export function resolveAzureOpenAiBaseUrl(model: Model): string {
 	const baseUrl = $env.AZURE_OPENAI_BASE_URL?.trim() || undefined;
 	const resourceName = $env.AZURE_OPENAI_RESOURCE_NAME;
 	const resolvedBaseUrl =
@@ -175,7 +175,7 @@ function resolveAzureOpenAiBaseUrl(model: Model): string {
 	return resolvedBaseUrl.replace(/\/+$/, "");
 }
 
-function appendAzureApiVersion(endpoint: string): string {
+export function appendAzureApiVersion(endpoint: string): string {
 	if (/[?&]api-version=/.test(endpoint)) return endpoint;
 	const separator = endpoint.includes("?") ? "&" : "?";
 	return `${endpoint}${separator}api-version=${encodeURIComponent($env.AZURE_OPENAI_API_VERSION || DEFAULT_AZURE_API_VERSION)}`;
@@ -258,13 +258,6 @@ export function buildCompactionV2RequestFromBody(
 // Streaming Request Handler
 // ============================================================================
 
-/** Race the caller's signal against the V2 request timeout. */
-function withRequestTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal | undefined {
-	if (timeoutMs <= 0) return signal;
-	const timeout = AbortSignal.timeout(timeoutMs);
-	return signal ? AbortSignal.any([signal, timeout]) : timeout;
-}
-
 /** Request V2 compaction over the normal OpenAI Responses streaming endpoint. */
 export async function requestCompactionV2Streaming(
 	model: Model,
@@ -310,7 +303,7 @@ export async function requestCompactionV2Streaming(
 	let lastError: Error | undefined;
 
 	for (let attempt = 0; attempt <= V2_COMPACTION_MAX_RETRIES; attempt++) {
-		const timeoutSignal = withRequestTimeout(signal, options?.timeoutMs ?? V2_COMPACTION_TIMEOUT_MS);
+		const timeoutSignal = ptree.combineSignals(signal, options?.timeoutMs ?? V2_COMPACTION_TIMEOUT_MS);
 		try {
 			return await attemptCompactionV2Streaming(endpoint, apiKey, model, request, fetchImpl, timeoutSignal, {
 				codexMetadata,

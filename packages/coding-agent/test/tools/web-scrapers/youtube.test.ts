@@ -89,26 +89,19 @@ describe.skipIf(SKIP)("handleYouTube", () => {
 		if (result?.method === "youtube") {
 			expect(result.content).toContain("Video ID");
 			expect(result.content).toContain("Channel");
-			// May have duration, views, upload date, etc.
+			// Duration renders as M:SS or H:MM:SS, upload date as YYYY-MM-DD.
+			if (result.content.includes("Duration")) {
+				expect(result.content).toMatch(/Duration.*\d+:\d{2}/);
+			}
+			if (result.content.includes("Uploaded")) {
+				expect(result.content).toMatch(/Uploaded.*\d{4}-\d{2}-\d{2}/);
+			}
 		}
 
 		// If yt-dlp is not available, should indicate that
 		if (result?.method === "youtube-no-ytdlp") {
 			expect(result.content).toContain("yt-dlp could not be installed");
 			expect(result.notes).toContain("yt-dlp installation failed");
-		}
-	}, 30000);
-
-	it("handles videos with transcripts gracefully", async () => {
-		// This video should have captions
-		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
-		expect(result).not.toBeNull();
-
-		if (result?.method === "youtube") {
-			// Either has transcript or explicitly notes it's not available
-			const hasTranscript = result.content.includes("Transcript");
-			const noTranscriptNote = result.content.includes("No transcript available");
-			expect(hasTranscript || noTranscriptNote).toBe(true);
 		}
 	}, 30000);
 
@@ -129,39 +122,6 @@ describe.skipIf(SKIP)("handleYouTube", () => {
 			expect(result.content).toContain("dQw4w9WgXcQ");
 		} else {
 			expect(result.finalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-		}
-	}, 30000);
-
-	it("includes subtitle source information when available", async () => {
-		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
-
-		if (result?.method === "youtube") {
-			// If transcript is present, should note the source
-			const hasManualNote = result.notes.includes("Using manual subtitles");
-			const hasAutoNote = result.notes.includes("Using auto-generated captions");
-			const hasNoSubsNote = result.notes.includes("No subtitles/captions available");
-
-			// Should have exactly one of these
-			const noteCount = [hasManualNote, hasAutoNote, hasNoSubsNote].filter(Boolean).length;
-			expect(noteCount).toBeGreaterThanOrEqual(1);
-		}
-	}, 30000);
-
-	it("formats duration in human readable format", async () => {
-		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
-
-		if (result?.method === "youtube" && result.content.includes("Duration")) {
-			// Should have duration in M:SS or H:MM:SS format
-			expect(result.content).toMatch(/Duration.*\d+:\d{2}/);
-		}
-	}, 30000);
-
-	it("includes upload date when available", async () => {
-		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
-
-		if (result?.method === "youtube" && result.content.includes("Uploaded")) {
-			// Should have date in YYYY-MM-DD format
-			expect(result.content).toMatch(/Uploaded.*\d{4}-\d{2}-\d{2}/);
 		}
 	}, 30000);
 

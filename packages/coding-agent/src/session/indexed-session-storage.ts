@@ -76,7 +76,7 @@ interface IndexAppend {
 
 const RESOLVED = Promise.resolve();
 
-function enoent(p: string): NodeJS.ErrnoException {
+export function enoent(p: string): NodeJS.ErrnoException {
 	const err = new Error(`ENOENT: no such file, '${p}'`) as NodeJS.ErrnoException;
 	err.code = "ENOENT";
 	err.errno = -2;

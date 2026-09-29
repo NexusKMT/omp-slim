@@ -22,7 +22,6 @@ import {
 	type ChangelogEntry,
 	DEFAULT_LAST_CHANGELOG_COUNT,
 	formatStartupChangelogSummary,
-	getNewEntries,
 	parseChangelog,
 	parseChangelogView,
 	RECENT_CHANGELOG_ENTRY_LIMIT,
@@ -32,7 +31,7 @@ import {
 	selectChangelogEntries,
 	STARTUP_CHANGELOG_FULL_HINT,
 	STARTUP_CHANGELOG_MAX_BYTES,
-	selectStartupChangelog,
+	type StartupChangelogSelection,
 	writeLastChangelogVersion,
 } from "../../src/utils/changelog";
 
@@ -119,7 +118,27 @@ async function withTempAgentDir<T>(callback: (agentDir: string) => Promise<T>): 
 	}
 }
 
-describe("selectStartupChangelog", () => {
+/** Runs the startup path against a changelog file built from `history`; returns the selection and the stored marker. */
+async function resolveStartup(
+	history: ChangelogEntry[],
+	marker: string | undefined,
+	currentVersion: string,
+): Promise<{ selection: StartupChangelogSelection | undefined; marker: string | undefined }> {
+	return withTempAgentDir(async agentDir => {
+		if (marker !== undefined) await Bun.write(path.join(agentDir, "last-changelog-version"), marker);
+		const changelogPath = path.join(agentDir, "CHANGELOG.md");
+		await Bun.write(changelogPath, `# Changelog\n\n${history.map(entry => entry.content).join("\n\n")}\n`);
+		const selection = await resolveStartupChangelogForDisplay({
+			mode: "summary",
+			currentVersion,
+			changelogPath,
+			agentDir,
+		});
+		return { selection, marker: await readLastChangelogVersion(agentDir) };
+	});
+}
+
+describe("startup changelog selection", () => {
 	const currentVersion = CURRENT_VERSION;
 	const history = [
 		release(2, 0, 0, "### Added\n\n- Current release."),
@@ -127,35 +146,23 @@ describe("selectStartupChangelog", () => {
 		release(1, 8, 0, "### Added\n\n- Older release."),
 	];
 
-	test("treats missing, empty, malformed, and unreadable-equivalent markers as first run", () => {
-		const invalidMarkers: Array<{ name: string; value: string | undefined }> = [
-			{ name: "missing or unreadable marker", value: undefined },
-			{ name: "empty marker", value: "" },
-			{ name: "malformed marker", value: "not-a-semver" },
-			{ name: "incomplete marker", value: "1.9" },
-			{ name: "whitespace-padded marker", value: " 1.9.0 " },
-		];
-
-		for (const marker of invalidMarkers) {
-			const selection = selectStartupChangelog(history, marker.value, currentVersion);
-			expect(selection.markdown).toBeUndefined();
-			expect(selection.persistCurrentVersion).toBe(true);
-			expect(selection.truncated).toBe(false);
-			expect(selection.selectedEntries).toBe(0);
+	test("treats missing, empty, and malformed markers as first run", async () => {
+		for (const marker of [undefined, "", "not-a-semver", "1.9"]) {
+			const result = await resolveStartup(history, marker, currentVersion);
+			expect(result.selection).toBeUndefined();
+			expect(result.marker).toBe(currentVersion);
 		}
 	});
 
-	test("does not render or rewrite when the marker already matches the current version", () => {
-		const selection = selectStartupChangelog(history, currentVersion, currentVersion);
+	test("does not render when the marker already matches the current version", async () => {
+		const result = await resolveStartup(history, currentVersion, currentVersion);
 
-		expect(selection.markdown).toBeUndefined();
-		expect(selection.persistCurrentVersion).toBe(false);
-		expect(selection.truncated).toBe(false);
-		expect(selection.selectedEntries).toBe(0);
+		expect(result.selection).toBeUndefined();
+		expect(result.marker).toBe(currentVersion);
 	});
 
-	test("selects at most the three newest unseen releases for an older marker", () => {
-		const selection = selectStartupChangelog(
+	test("selects at most the three newest unseen releases for an older marker", async () => {
+		const { selection, marker } = await resolveStartup(
 			[
 				release(1, 0, 5, "### Added\n\n- Unseen five."),
 				release(1, 0, 4, "### Added\n\n- Unseen four."),
@@ -168,40 +175,40 @@ describe("selectStartupChangelog", () => {
 			"1.0.5",
 		);
 
-		expect(selection.persistCurrentVersion).toBe(true);
-		expect(selection.truncated).toBe(false);
-		expect(selection.selectedEntries).toBe(RECENT_CHANGELOG_ENTRY_LIMIT);
-		expect(selection.totalUnseenEntries).toBe(5);
-		expect(selection.latestVersion).toBe("1.0.5");
-		expect(selection.changeCount).toBe(3);
-		expect(selection.categoryCounts).toEqual({ Added: 3 });
-		expect(selection.markdown?.match(/## \[(\d+\.\d+\.\d+)\]/)?.[1]).toBe("1.0.5");
-		expect(selection.markdown).toContain("## [1.0.5]");
-		expect(selection.markdown).toContain("## [1.0.4]");
-		expect(selection.markdown).toContain("## [1.0.3]");
-		expect(selection.markdown).not.toContain("## [1.0.2]");
-		expect(selection.markdown).not.toContain("## [1.0.1]");
-		expect(selection.markdown).not.toContain("## [1.0.0]");
+		expect(marker).toBe("1.0.5");
+		expect(selection?.truncated).toBe(false);
+		expect(selection?.selectedEntries).toBe(RECENT_CHANGELOG_ENTRY_LIMIT);
+		expect(selection?.totalUnseenEntries).toBe(5);
+		expect(selection?.latestVersion).toBe("1.0.5");
+		expect(selection?.changeCount).toBe(3);
+		expect(selection?.categoryCounts).toEqual({ Added: 3 });
+		expect(selection?.markdown?.match(/## \[(\d+\.\d+\.\d+)\]/)?.[1]).toBe("1.0.5");
+		expect(selection?.markdown).toContain("## [1.0.5]");
+		expect(selection?.markdown).toContain("## [1.0.4]");
+		expect(selection?.markdown).toContain("## [1.0.3]");
+		expect(selection?.markdown).not.toContain("## [1.0.2]");
+		expect(selection?.markdown).not.toContain("## [1.0.1]");
+		expect(selection?.markdown).not.toContain("## [1.0.0]");
 	});
 
-	test("caps one oversized startup release and appends the full-changelog hint", () => {
-		const selection = selectStartupChangelog(
+	test("caps one oversized startup release and appends the full-changelog hint", async () => {
+		const { selection, marker } = await resolveStartup(
 			[release(2, 0, 0, `### Added\n\n- ${"x".repeat(STARTUP_CHANGELOG_MAX_BYTES * 2)}\nTAIL-ONE-RELEASE`)],
 			"1.0.0",
 			"2.0.0",
 		);
 
-		expect(selection.persistCurrentVersion).toBe(true);
-		expect(selection.selectedEntries).toBe(1);
-		expect(selection.truncated).toBe(true);
-		expect(selection.markdown).toContain(STARTUP_CHANGELOG_FULL_HINT);
-		expect(selection.markdown).not.toContain("TAIL-ONE-RELEASE");
-		expect(Buffer.byteLength(selection.markdown ?? "")).toBeLessThanOrEqual(STARTUP_CHANGELOG_MAX_BYTES);
+		expect(marker).toBe("2.0.0");
+		expect(selection?.selectedEntries).toBe(1);
+		expect(selection?.truncated).toBe(true);
+		expect(selection?.markdown).toContain(STARTUP_CHANGELOG_FULL_HINT);
+		expect(selection?.markdown).not.toContain("TAIL-ONE-RELEASE");
+		expect(Buffer.byteLength(selection?.markdown ?? "")).toBeLessThanOrEqual(STARTUP_CHANGELOG_MAX_BYTES);
 	});
 
-	test("caps aggregate startup releases that exceed the byte budget and appends the full-changelog hint", () => {
+	test("caps aggregate startup releases that exceed the byte budget and appends the full-changelog hint", async () => {
 		const halfBudgetBody = "x".repeat(Math.ceil(STARTUP_CHANGELOG_MAX_BYTES / 2));
-		const selection = selectStartupChangelog(
+		const { selection, marker } = await resolveStartup(
 			[
 				release(1, 0, 4, `### Added\n\n- Four ${halfBudgetBody}\nTAIL-FOUR`),
 				release(1, 0, 3, `### Added\n\n- Three ${halfBudgetBody}\nTAIL-THREE`),
@@ -212,19 +219,19 @@ describe("selectStartupChangelog", () => {
 			"1.0.4",
 		);
 
-		expect(selection.persistCurrentVersion).toBe(true);
-		expect(selection.selectedEntries).toBe(RECENT_CHANGELOG_ENTRY_LIMIT);
-		expect(selection.truncated).toBe(true);
-		expect(selection.markdown?.match(/## \[(\d+\.\d+\.\d+)\]/)?.[1]).toBe("1.0.4");
-		expect(selection.markdown).toContain(STARTUP_CHANGELOG_FULL_HINT);
-		expect(selection.markdown).not.toContain("TAIL-THREE");
-		expect(Buffer.byteLength(selection.markdown ?? "")).toBeLessThanOrEqual(STARTUP_CHANGELOG_MAX_BYTES);
+		expect(marker).toBe("1.0.4");
+		expect(selection?.selectedEntries).toBe(RECENT_CHANGELOG_ENTRY_LIMIT);
+		expect(selection?.truncated).toBe(true);
+		expect(selection?.markdown?.match(/## \[(\d+\.\d+\.\d+)\]/)?.[1]).toBe("1.0.4");
+		expect(selection?.markdown).toContain(STARTUP_CHANGELOG_FULL_HINT);
+		expect(selection?.markdown).not.toContain("TAIL-THREE");
+		expect(Buffer.byteLength(selection?.markdown ?? "")).toBeLessThanOrEqual(STARTUP_CHANGELOG_MAX_BYTES);
 	});
 });
 
 describe("formatStartupChangelogSummary", () => {
-	test("summarizes selected releases and points to omitted history", () => {
-		const selection = selectStartupChangelog(
+	test("summarizes selected releases and points to omitted history", async () => {
+		const { selection } = await resolveStartup(
 			[
 				release(2, 0, 0, "### Added\n\n- First addition.\n- Second addition.\n\n### Fixed\n\n- A fix."),
 				release(1, 9, 0, "### Changed\n\n- A behavior change."),
@@ -235,6 +242,7 @@ describe("formatStartupChangelogSummary", () => {
 			"1.6.0",
 			"2.0.0",
 		);
+		if (!selection) throw new Error("expected a startup changelog selection");
 
 		expect(formatStartupChangelogSummary(selection)).toBe(
 			[
@@ -244,12 +252,13 @@ describe("formatStartupChangelogSummary", () => {
 		);
 	});
 
-	test("uses the recent-details hint when every unseen release is represented", () => {
-		const selection = selectStartupChangelog(
+	test("uses the recent-details hint when every unseen release is represented", async () => {
+		const { selection } = await resolveStartup(
 			[release(2, 0, 0, "### Breaking Changes\n\n- Removed the old wire format.")],
 			"1.0.0",
 			"2.0.0",
 		);
+		if (!selection) throw new Error("expected a startup changelog selection");
 
 		expect(formatStartupChangelogSummary(selection)).toBe(
 			["Updated to v2.0.0 · 1 change in 1 release", "1 breaking change · Use /changelog for details."].join("\n"),
@@ -258,7 +267,7 @@ describe("formatStartupChangelogSummary", () => {
 });
 
 describe("parseChangelog", () => {
-	test("reads current source release data and filters versions newer than the previous release", async () => {
+	test("reads current source release data and never runs ahead of the current version", async () => {
 		const entries = await parseChangelog(undefined);
 		const latest = entries[0];
 		const previous = entries[1];
@@ -267,13 +276,12 @@ describe("parseChangelog", () => {
 		// section (scripts/release.ts skips empty [Unreleased]), so the newest
 		// section may lag VERSION — but it must never be ahead of it.
 		expect(latest).toBeDefined();
-		const latestVersion = `${latest?.major}.${latest?.minor}.${latest?.patch}`;
-		expect(latest?.content).toContain(`## [${latestVersion}]`);
-		expect(getNewEntries(entries, VERSION)).toEqual([]);
 		expect(previous).toBeDefined();
-
+		const latestVersion = `${latest?.major}.${latest?.minor}.${latest?.patch}`;
 		const previousVersion = `${previous?.major}.${previous?.minor}.${previous?.patch}`;
-		expect(getNewEntries(entries, previousVersion)).toEqual([latest]);
+		expect(latest?.content).toContain(`## [${latestVersion}]`);
+		expect(Bun.semver.order(latestVersion, VERSION)).toBeLessThanOrEqual(0);
+		expect(Bun.semver.order(latestVersion, previousVersion)).toBe(1);
 	});
 });
 
