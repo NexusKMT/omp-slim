@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor turns being aborted with "Provider stream stalled while waiting for the next event" right after a long local tool finished; the provider now gets a full idle window once local tool work completes ([#13682](https://github.com/can1357/oh-my-pi/pull/13682) by [@eggpeat](https://github.com/eggpeat))
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed
