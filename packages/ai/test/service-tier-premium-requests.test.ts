@@ -115,6 +115,35 @@ describe("shouldSendServiceTier", () => {
 		expect(shouldSendServiceTier("priority", "anthropic")).toBe(false);
 	});
 
+	it("sends ultrafast to OpenAI, and to Codex only when discovery advertises it", () => {
+		expect(shouldSendServiceTier("ultrafast", openai)).toBe(true);
+		expect(shouldSendServiceTier("ultrafast", codex)).toBe(false);
+		expect(shouldSendServiceTier("ultrafast", { ...codex, serviceTiers: ["priority"] })).toBe(false);
+		expect(shouldSendServiceTier("ultrafast", { ...codex, serviceTiers: ["priority", "ultrafast"] })).toBe(true);
+		// The advertised list, not the provider id, gates Codex-backend models; without it no relay gets ultrafast.
+		expect(shouldSendServiceTier("ultrafast", { ...customCodex, serviceTiers: ["ultrafast"] })).toBe(true);
+		expect(shouldSendServiceTier("ultrafast", customCodex)).toBe(false);
+		expect(shouldSendServiceTier("ultrafast", customOpenAI)).toBe(false);
+		expect(shouldSendServiceTier("ultrafast", orOpenAI)).toBe(false);
+		expect(shouldSendServiceTier("ultrafast", gemini)).toBe(false);
+		expect(realizesPriorityServiceTier("ultrafast", openai)).toBe(false);
+	});
+
+	it("gates Codex tiers on the discovered tier list once it is known", () => {
+		const unlisted = { ...codex, serviceTiers: ["ultrafast"] };
+		expect(shouldSendServiceTier("priority", unlisted)).toBe(false);
+		expect(realizesPriorityServiceTier("priority", unlisted)).toBe(false);
+		expect(getPriorityPremiumRequests("priority", unlisted)).toBe(0);
+		expect(shouldSendServiceTier("scale", { ...codex, serviceTiers: [] })).toBe(false);
+		expect(shouldSendServiceTier("priority", { ...codex, serviceTiers: ["priority"] })).toBe(true);
+		// Flex is always an accepted request option; `default` is out of this gate's scope.
+		expect(shouldSendServiceTier("flex", { ...codex, serviceTiers: [] })).toBe(true);
+		expect(shouldSendServiceTier("default", { ...codex, serviceTiers: [] })).toBe(true);
+		// No discovered list (bundled/custom rows): the provider-level answer stands.
+		expect(shouldSendServiceTier("priority", codex)).toBe(true);
+		expect(shouldSendServiceTier("priority", customCodex)).toBe(true);
+	});
+
 	it("returns false for unset tiers", () => {
 		expect(shouldSendServiceTier(undefined, "openai")).toBe(false);
 		expect(shouldSendServiceTier(null, "openai")).toBe(false);
