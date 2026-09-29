@@ -740,14 +740,11 @@ describe("cursor usage provider", () => {
 				accountId: "account_123",
 				projectId: "project_123",
 			});
-			// The legacy bucket is uncapped (`maxRequestUsage: null`) but still reported,
-			// so it merges ahead of the personal summary instead of vanishing (#6381).
-			expect(report?.limits.map(limit => limit.id)).toEqual([
-				"cursor:requests:gpt-4",
-				"cursor:usd:individual-overall",
-			]);
-			expect(report?.limits[0]?.amount).toEqual({ used: 0, unit: "requests" });
-			expect(report?.limits[1]).toMatchObject({
+			// The legacy `gpt-4` bucket is uncapped and always zero on usage-based
+			// plans; next to the personal dollar rails it is dropped, not rendered
+			// as a meaningless "0 requests used" row.
+			expect(report?.limits.map(limit => limit.id)).toEqual(["cursor:usd:individual-overall"]);
+			expect(report?.limits[0]).toMatchObject({
 				id: "cursor:usd:individual-overall",
 				amount: {
 					used: 20,
