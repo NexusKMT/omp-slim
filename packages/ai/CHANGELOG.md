@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Cursor usage no longer counts cached prompt tokens twice, which had inflated input tokens and cost on every cached turn ([#13723](https://github.com/can1357/oh-my-pi/pull/13723) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
