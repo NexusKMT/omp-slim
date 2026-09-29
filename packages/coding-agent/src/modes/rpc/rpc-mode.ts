@@ -341,8 +341,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 	})();
 }
 
-/** Serializes ordinary RPC commands while allowing control frames, `bash`, and
- *  `prompt` to dispatch immediately (see dispatchRpcInputFrame). */
+/** Starts prompts after earlier ordinary commands, without awaiting admission.
+ * Control frames and `bash` dispatch immediately (see dispatchRpcInputFrame). */
 export class RpcInputDispatcher {
 	#tail: Promise<void> = Promise.resolve();
 	#tasks = new Set<Promise<void>>();
@@ -360,10 +360,9 @@ export class RpcInputDispatcher {
 			if (dispatchRpcControlFrame(parsed, this.#deps)) return;
 
 			const command = parsed as RpcCommand;
-			// `bash` and `prompt` dispatch in the background (see dispatchRpcInputFrame)
-			// so neither holds up the serialized queue below — most importantly, so
-			// `abort` reaches the session while a `prompt` is still admitting.
-			if (command.type === "bash" || command.type === "prompt") {
+			// Bash retains its immediate side channel. Prompts start through the
+			// serial tail, but dispatchRpcInputFrame backgrounds their admission.
+			if (command.type === "bash") {
 				dispatchRpcInputFrame(command, this.#deps);
 				return;
 			}

@@ -331,6 +331,57 @@ describe("RpcInputDispatcher", () => {
 		expect((outputs[1] as RpcResponse).command).toBe("get_state");
 	});
 
+	test("a prompt waits for an earlier session change without blocking a later abort", async () => {
+		const reset = Promise.withResolvers<void>();
+		const admission = Promise.withResolvers<void>();
+		let currentSession = "old";
+		let promptedSession: string | undefined;
+		let background: Promise<void> | undefined;
+		const { deps, outputs } = makeDeps(async command => {
+			if (command.type === "new_session") {
+				await reset.promise;
+				currentSession = "new";
+				return {
+					id: command.id,
+					type: "response",
+					command: "new_session",
+					success: true,
+					data: { cancelled: false },
+				};
+			}
+			if (command.type === "prompt") {
+				promptedSession = currentSession;
+				await admission.promise;
+				return { id: command.id, type: "response", command: "prompt", success: true };
+			}
+			if (command.type === "abort") {
+				return { id: command.id, type: "response", command: "abort", success: true };
+			}
+			throw new Error(`unexpected command type: ${command.type}`);
+		});
+		deps.trackBackgroundTask = task => {
+			background = task;
+		};
+		const dispatcher = new RpcInputDispatcher({ deps });
+		try {
+			dispatcher.dispatch({ id: "reset", type: "new_session" });
+			dispatcher.dispatch({ id: "prompt", type: "prompt", message: "use the new session" });
+			dispatcher.dispatch({ id: "abort", type: "abort" });
+			await flushMicrotasks();
+			expect(promptedSession).toBeUndefined();
+			reset.resolve();
+			await dispatcher.drain();
+			expect(promptedSession).toBe("new");
+			expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["reset", "abort"]);
+		} finally {
+			reset.resolve();
+			admission.resolve();
+			await dispatcher.drain();
+			await background;
+		}
+		expect(outputs.map(frame => (frame as RpcResponse).id)).toEqual(["reset", "abort", "prompt"]);
+	});
+
 	test("serial command rejection emits an error response and does not poison the queue", async () => {
 		const started: string[] = [];
 		const { deps, outputs } = makeDeps(async command => {
