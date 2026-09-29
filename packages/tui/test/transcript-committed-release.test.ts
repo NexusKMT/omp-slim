@@ -239,6 +239,7 @@ describe("committed transcript blocks release render caches", () => {
 		const framed = () =>
 			new FramedMessageComponent({
 				message: { customType: "note", content: "" },
+				role: "omp.custom",
 				customRenderer: () => {
 					frameCalls.count++;
 					return new Text("custom note body rendered by an extension, long enough to wrap when narrowed", 1, 0);
