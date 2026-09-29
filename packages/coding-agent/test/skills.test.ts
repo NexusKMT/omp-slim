@@ -14,6 +14,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import { SkillProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/skill-protocol";
+import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import { restoreEnvValue } from "./helpers/settings-test-state";
 const fixturesDir = path.resolve(import.meta.dirname, "fixtures/skills");
@@ -971,6 +972,26 @@ describe("parseSkillInvocation", () => {
 				args: "fix the bug focus on auth",
 				prompt: "fix the bug /skill:superpowers/tdd focus on auth",
 			});
+		});
+
+		it("invokes every skill that mid-prompt completion suggests, namespaced ones included", async () => {
+			const provider = new CombinedAutocompleteProvider(
+				[
+					{ name: "skill:tdd", description: "Local test-driven development" },
+					{ name: "skill:superpowers/tdd", description: "Plugin test-driven development" },
+				],
+				os.tmpdir(),
+			);
+			const before = "fix the bug /skill:";
+			const lines = [`${before} focus on auth`];
+			const suggestions = await provider.getSuggestions(lines, 0, before.length);
+			const values = suggestions?.items.map(item => item.value) ?? [];
+			expect(values).toEqual(expect.arrayContaining(["skill:tdd", "skill:superpowers/tdd"]));
+
+			for (const item of suggestions?.items ?? []) {
+				const accepted = provider.applyCompletion(lines, 0, before.length, item, suggestions?.prefix ?? "");
+				expect(parseSkillInvocation(accepted.lines[0])?.name).toBe(item.value.slice("skill:".length));
+			}
 		});
 
 		it("rejects mid-prompt skill tokens with more than one namespace segment", () => {
