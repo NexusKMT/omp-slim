@@ -9,6 +9,7 @@
 - Added Command Code's Claude Sonnet 5.5 model ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Added `trust-forbidden=#true` for optional login `validate` checks, so a key check that answers 403 keeps the pasted key instead of rejecting it ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - `hosted-image #false` and `image-model #false` now remove a hosted image flag or image model that a class rule grants ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- MiniMax-M3.1-Flash-Preview now offers thinking levels low through max on MiniMax hosts; turning thinking off uses the lowest level, since the model always thinks ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
 
 ### Changed
 
@@ -17,6 +18,7 @@
 - Command Code GPT models no longer advertise hosted image generation or the `gpt-image-2` image model, which Command Code does not serve ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Command Code Muse Spark models drop the minimal thinking level, and Muse Spark 1.3 adds max, matching the Command Code CLI ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Changed Command Code prices to match the Command Code CLI: DeepSeek V4 Flash and V4 Flash Vision Exp drop from 0.22 / 0.66 to 0.15 / 0.6 per 1M tokens, Step 3.5 Flash input drops from 0.1 to 0.09, and LongCat 2.0 is no longer shown as free (0.3 / 1.2) ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) now uses MiniMax's recommended Anthropic-compatible API, and `/login` checks keys against the same endpoint ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
 
 ### Fixed
 
