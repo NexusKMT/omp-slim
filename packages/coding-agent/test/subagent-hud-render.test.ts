@@ -93,8 +93,8 @@ function makeProgressPayload(
 	};
 }
 
-function render(sessions: ObservableSession[], columns = 120): string {
-	return Bun.stripANSI(renderSubagentHudLines(sessions, columns).join("\n"));
+function render(sessions: ObservableSession[], columns = 120, livePreview = false): string {
+	return Bun.stripANSI(renderSubagentHudLines(sessions, columns, false, livePreview).join("\n"));
 }
 
 describe("subagent HUD lines", () => {
@@ -483,6 +483,108 @@ describe("subagent HUD lines", () => {
 		expect(out).not.toContain("Worker3: job 3");
 		expect(out).toContain("7 more — expand");
 		expect(out).not.toContain("show less");
+	});
+
+	describe("live preview", () => {
+		it("shows the current tool call only when enabled", () => {
+			const sessions = [
+				makeSession({
+					id: "AuthLoader",
+					description: "Refactoring the auth flow",
+					progress: makeProgress({
+						id: "AuthLoader",
+						currentTool: "read",
+						currentToolArgs: "src/auth.ts:50-100",
+					}),
+				}),
+			];
+			expect(render(sessions)).not.toContain("read: src/auth.ts:50-100");
+			const out = render(sessions, 120, true);
+			expect(out).toContain("AuthLoader: Refactoring the auth flow");
+			expect(out).toContain("read: src/auth.ts:50-100");
+		});
+
+		it("falls back to the most recent tool when idle between calls", () => {
+			const out = render(
+				[
+					makeSession({
+						id: "Worker",
+						progress: makeProgress({
+							id: "Worker",
+							recentTools: [{ tool: "grep", args: "renderSubagentHudLines", endMs: Date.now() }],
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("grep: renderSubagentHudLines");
+		});
+
+		it("adds an elapsed marker to long-running calls and stays within the viewport", () => {
+			const columns = 120;
+			const out = render(
+				[
+					makeSession({
+						id: "Builder",
+						progress: makeProgress({
+							id: "Builder",
+							currentTool: "bash",
+							currentToolArgs: "npm test",
+							currentToolStartMs: Date.now() - 10_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			const toolRow = out.split("\n").find(line => line.includes("bash: npm test"));
+			expect(toolRow).toMatch(/\d+s$/);
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+
+		it("shortens long tool details to the viewport", () => {
+			const columns = 60;
+			const out = render(
+				[
+					makeSession({
+						id: "Reader",
+						progress: makeProgress({
+							id: "Reader",
+							currentTool: "read",
+							currentToolArgs: "x".repeat(300),
+							currentToolStartMs: Date.now() - 10_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			expect(out).toContain("read: xxxxxxxx");
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+
+		it("routes clicks on a preview row to its agent and keeps later rows and the expander aligned", () => {
+			const sessions = ["Alpha", "Beta", "Gamma", "Delta"].map(id =>
+				makeSession({ id, progress: makeProgress({ id, currentTool: "read", currentToolArgs: `${id}.ts` }) }),
+			);
+			const layout = layoutPinnedHud(sessions.length, false);
+			const hud = new SubagentHudComponent(
+				renderSubagentHudLines(sessions, 120, false, true),
+				sessions.map(session => session.id),
+				layout.toggleRow,
+			);
+			const rows = hud.render(120).map(row => Bun.stripANSI(row));
+			const rowOf = (text: string) => rows.findIndex(row => row.includes(text));
+			expect(hud.getClickAgentAtRow(rowOf("Alpha.ts"))).toBe("Alpha");
+			expect(hud.getClickAgentAtRow(rowOf("Beta"))).toBe("Beta");
+			expect(hud.getClickAgentAtRow(rowOf("Gamma.ts"))).toBe("Gamma");
+			expect(hud.getClickAgentAtRow(rowOf("more — expand"))).toBe(PINNED_HUD_TOGGLE_ID);
+		});
 	});
 });
 

@@ -58,6 +58,9 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+### Added
+
+- Pinned Subagents rows can show each agent's current (or most recent) tool call with a one-line detail and an elapsed marker; enable with `display.subagentLivePreview` (off by default) ([#3821](https://github.com/can1357/oh-my-pi/pull/3821) by [@abilliontokens](https://github.com/abilliontokens))
 
 ## [18.4.3] - 2026-09-28
 
