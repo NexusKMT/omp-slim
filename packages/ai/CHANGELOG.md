@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed
