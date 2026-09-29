@@ -1143,14 +1143,23 @@ function listMayContinueAt(text: string, tailStart: number, listRaw: string): bo
 
 const NO_BLOCK_BOUNDARY = { end: 0, count: 0 } as const;
 
+// Tokens that may open a display-math block start with `$$` or `\[` after up
+// to 3 spaces. A cheap filter only: mathBlockAt decides.
+const DISPLAY_MATH_START_RE = /^ {0,3}(?:\$\$|\\\[)/;
+
 /**
  * Offset just past the last token in `tokens` that closes a block on a hard
  * `"\n\n"` break, together with the number of tokens up to and including it.
  * `count === 0` means the run holds no usable boundary.
  *
- * `base` is where `tokens[0]` starts inside `text`. A boundary qualifies only
- * when splitting there is invisible to the lexer, i.e. `lex(head) ++ lex(tail)
- * === lex(text)`:
+ * `base` is where `tokens[0]` starts inside `text`, and `tokens` lex
+ * `text.slice(base, windowEnd)`. A boundary qualifies only when splitting
+ * there is invisible to the lexer, i.e. `lex(head) ++ lex(tail) ===
+ * lex(text)`:
+ *  - The token must end before `windowEnd` unless the window reaches the end
+ *    of `text`. An unclosed fence, HTML block or comment runs to the end of
+ *    its input, so a window that ends just after a blank line inside one
+ *    hands back a truncated token whose raw ends in `"\n\n"`.
  *  - The break must sit inside `text`. At end-of-text the next character is
  *    unknown (and, while streaming, may still arrive), so the cut is deferred.
  *  - The next character must start real block content. Whitespace means the
@@ -1159,6 +1168,12 @@ const NO_BLOCK_BOUNDARY = { end: 0, count: 0 } as const;
  *  - A preceding `list` must be provably closed: CommonMark lets a same-marker
  *    item continue the list across the blank line, and marked merges both into
  *    one renumbered loose list (`listMayContinueAt`).
+ *  - No earlier token in the window may open a display-math block that the
+ *    window cut short: a token other than `math` (which is the block itself)
+ *    where `mathBlockAt` matches the rest of `text`. The one-pass lex makes
+ *    that block one `math` token across its blank lines. An opener with no
+ *    closer, or with a whitespace-only body, is no block in either lex, so it
+ *    leaves later boundaries alone.
  *
  * `startIndex` resumes the scan at `tokens[startIndex]` (positions still
  * accumulate from `base`). The streaming freeze passes the frozen-prefix
@@ -1170,14 +1185,20 @@ function stableBlockBoundary(
 	base: number,
 	tokens: Token[],
 	startIndex = 0,
+	windowEnd = text.length,
 ): { end: number; count: number } {
+	const windowIsWhole = windowEnd === text.length;
 	let pos = base;
 	let end = 0;
 	let count = 0;
 	for (let i = startIndex; i < tokens.length; i++) {
-		const raw = tokens[i].raw;
+		const token = tokens[i];
+		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
-		if (raw.endsWith("\n\n")) {
+		if (token.type !== "math" && DISPLAY_MATH_START_RE.test(raw) && mathBlockAt(text.slice(pos)) !== undefined) {
+			break;
+		}
+		if (raw.endsWith("\n\n") && (windowIsWhole || tokenEnd < windowEnd)) {
 			const prev = i > 0 ? tokens[i - 1] : undefined;
 			if (prev === undefined || prev.type !== "list" || !listMayContinueAt(text, tokenEnd, prev.raw)) {
 				end = tokenEnd;
@@ -1219,38 +1240,50 @@ const WINDOWED_LEX_MIN_BYTES = 16 * 1024;
  * so a `[label]: dest` definition anywhere in the document still resolves for
  * every inline span.
  *
- * A boundary requires some top-level token whose raw ends in `"\n\n"`, so a
- * window that contains no blank line cannot cut: each round starts at the next
- * `"\n\n"` (skipping straight to the end when there is none — e.g. a tail
- * that is one long tight list) instead of probing sizes that cannot succeed.
+ * Each round's first window reaches just past the next blank line
+ * ({@link firstProbeSize}); a tail with no blank line left (e.g. one long
+ * tight list) goes to the lexer whole.
  */
 function lexWindowed(text: string): Token[] {
 	const lexer = new Lexer(markdownParser.defaults);
 	let offset = 0;
 	while (offset < text.length) {
-		let segment = "";
-		const nextBlank = text.indexOf("\n\n", offset);
-		if (nextBlank === -1) {
-			segment = text.slice(offset);
-		} else {
-			const minSize = Math.max(LEX_WINDOW_BYTES, nextBlank + 2 - offset);
-			for (let size = minSize; segment.length === 0; size *= 2) {
-				if (offset + size >= text.length) {
-					segment = text.slice(offset);
-					break;
-				}
-				const probe = new Lexer(markdownParser.defaults);
-				probe.blockTokens(text.slice(offset, offset + size), probe.tokens);
-				const boundary = stableBlockBoundary(text, offset, probe.tokens);
-				if (boundary.count > 0) segment = text.slice(offset, boundary.end);
+		let end = text.length;
+		for (let size = firstProbeSize(text, offset); offset + size < text.length; size *= 2) {
+			const boundary = probeBoundary(text, offset, size);
+			if (boundary > 0) {
+				end = boundary;
+				break;
 			}
 		}
-		lexer.blockTokens(segment, lexer.tokens);
-		offset += segment.length;
+		lexer.blockTokens(text.slice(offset, end), lexer.tokens);
+		offset = end;
 	}
 	for (const queued of lexer.inlineQueue) lexer.inlineTokens(queued.src, queued.tokens);
 	lexer.inlineQueue = [];
 	return lexer.tokens;
+}
+
+/**
+ * Size of the first probe window at `offset`: `LEX_WINDOW_BYTES`, or up to one
+ * character past the next blank line when that lies further. A boundary is a
+ * token whose raw ends in `"\n\n"` and that ends inside its window, so no
+ * smaller window can cut. With no blank line left, it is the rest of the text.
+ */
+function firstProbeSize(text: string, offset: number): number {
+	const nextBlank = text.indexOf("\n\n", offset);
+	return nextBlank === -1 ? text.length - offset : Math.max(LEX_WINDOW_BYTES, nextBlank + 3 - offset);
+}
+
+/**
+ * End of the last stable block boundary ({@link stableBlockBoundary}) in the
+ * window `text.slice(offset, offset + size)`, or 0 when it holds none, from a
+ * throwaway block-only lex of the window.
+ */
+function probeBoundary(text: string, offset: number, size: number): number {
+	const probe = new Lexer(markdownParser.defaults);
+	probe.blockTokens(text.slice(offset, offset + size), probe.tokens);
+	return stableBlockBoundary(text, offset, probe.tokens, 0, offset + size).end;
 }
 
 /** Lex a whole document, windowing anything large enough for the quadratic scan to bite. */

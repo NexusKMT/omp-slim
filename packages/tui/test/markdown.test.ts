@@ -13,6 +13,7 @@ import { type Component, TUI } from "@oh-my-pi/pi-tui/tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import { Chalk } from "@oh-my-pi/pi-utils/chalk";
 import { mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
+import { straddleFirstWindow } from "./markdown-fixtures.js";
 import { defaultMarkdownTheme } from "./test-themes.js";
 import { VirtualTerminal } from "./virtual-terminal.js";
 
@@ -2564,6 +2565,10 @@ describe("windowed lexing (documents past WINDOWED_LEX_MIN_BYTES)", () => {
 			.render(width)
 			.map(line => stripVTControlCharacters(line).trimEnd());
 
+	// A document containing CR is lexed in one pass (marked normalizes CRLF,
+	// which shifts raw offsets), so its CRLF twin is the one-pass oracle.
+	const onePass = (text: string, width = 100) => plain(text.replaceAll("\n", "\r\n"), width);
+
 	it("resolves a reference definition that lands in a later window", () => {
 		const doc = `Follow [the label][ref] first.\n\n${filler("body", 400)}\n\n[ref]: https://example.com/late\n`;
 		expect(doc.length).toBeGreaterThan(16 * 1024);
@@ -2603,5 +2608,63 @@ describe("windowed lexing (documents past WINDOWED_LEX_MIN_BYTES)", () => {
 		}
 		// A window cut that restarted the list would renumber later items.
 		expect(rendered.filter(line => line.includes(" 1. item 0 ")).length).toBeLessThanOrEqual(1);
+	});
+
+	const mathLines = Array.from({ length: 150 }, (_, i) => `x_{${i}} = y_{${i}} + z_{${i}}`).join("\n\n");
+
+	for (const [opener, closer] of [
+		["$$", "$$"],
+		["\\[", "\\]"],
+	] as const) {
+		it(`keeps a ${opener} display-math block with blank lines intact across window cuts`, () => {
+			const doc = ["Intro line before the math.", "", opener, mathLines, closer, "", filler("outro", 250)].join(
+				"\n",
+			);
+			expect(doc.length).toBeGreaterThan(16 * 1024);
+			expect(doc.lastIndexOf(closer) - doc.indexOf(opener)).toBeGreaterThan(2 * 1024);
+
+			const rendered = plain(doc);
+			// A cut inside the block renders the delimiters (`$$`, or `[` for the
+			// escaped bracket) and the raw TeX (`x{0} = y{0} + z_{0}`) as prose.
+			expect(rendered.slice(0, 3)).toEqual(["Intro line before the math.", "", "x₀ = y₀ + z₀"]);
+			expect(rendered.filter(line => ["$$", "[", "]"].includes(line.trim()))).toEqual([]);
+			expect(rendered.filter(line => line.includes("{"))).toEqual([]);
+			expect(rendered).toEqual(onePass(doc));
+		});
+	}
+
+	it("renders an own-line $$ that never closes as the one-pass lex does", () => {
+		const doc = `Intro.\n\n$$\nx = 1\n\n${filler("body", 350)}\n`;
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+		expect(plain(doc)).toEqual(onePass(doc));
+	});
+
+	it("renders a $$ pair around a blank body as the one-pass lex does", () => {
+		// mathBlockAt rejects a whitespace-only body, so this is no math block.
+		const doc = `Intro.\n\n$$\n \n$$\n\n${filler("body", 350)}\n`;
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+		expect(plain(doc)).toEqual(onePass(doc));
+	});
+
+	it("does not cut a fence whose blank line ends at the probe window's edge", () => {
+		const doc = straddleFirstWindow("```", i => `code line ${i}`, "```", filler("outro", 400));
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+		const rendered = plain(doc);
+		expect(rendered.filter(line => line.trimStart().startsWith("```"))).toHaveLength(2);
+		expect(rendered).toEqual(onePass(doc));
+	});
+
+	it("does not cut an HTML comment whose blank line ends at the probe window's edge", () => {
+		const doc = straddleFirstWindow("<!--", i => `comment line ${i}`, "-->", filler("outro", 400));
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+		const rendered = plain(doc);
+		expect(rendered.filter(line => line.includes("<!--"))).toEqual([]);
+		expect(rendered).toEqual(onePass(doc));
+	});
+
+	it("does not cut an HTML block whose blank line ends at the probe window's edge", () => {
+		const doc = straddleFirstWindow("<div>", i => `html line ${i}`, "</div>", filler("outro", 400));
+		expect(doc.length).toBeGreaterThan(16 * 1024);
+		expect(plain(doc)).toEqual(onePass(doc));
 	});
 });

@@ -11,6 +11,10 @@
 - `HookEditorComponent` accepts pasted images when constructed with `acceptImages`; the ask dialog returns them as `customInputImages` / `noteImages` ([#13774](https://github.com/can1357/oh-my-pi/pull/13774) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
 - Added `formatFileMatches` and `FileMatchSection` to `tools/grouped-file-output` for rendering per-file grep/ast-grep matches in grouped or flat mode.
 
+### Fixed
+
+- Fixed long Markdown messages sometimes showing raw display math, a visible HTML comment, or a code block split in two
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
