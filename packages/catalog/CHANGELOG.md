@@ -21,7 +21,7 @@
 ### Fixed
 
 - Fixed missing thinking levels, image input, and prices for Command Code models ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
-- Fixed MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) usage showing as free; turns are now priced at MiniMax's pay-as-you-go rates, with MiniMax-M3.1-Flash-Preview at the MiniMax-M3 rate ([#13695](https://github.com/can1357/oh-my-pi/pull/13695) by [@eggpeat](https://github.com/eggpeat))
+- Fixed MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) usage showing as free; turns now show the pay-as-you-go equivalent cost, with MiniMax-M3.1-Flash-Preview estimated at the MiniMax-M3 rate since it has no published price ([#13695](https://github.com/can1357/oh-my-pi/pull/13695) by [@eggpeat](https://github.com/eggpeat))
 
 ## [18.4.3] - 2026-09-28
 
