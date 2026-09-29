@@ -24,6 +24,8 @@ import type { AssistantMessage, AssistantMessageEvent, Context, Message, ToolRes
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import { kCursorExecResolved, setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
+import type { HarmonyDetection } from "@oh-my-pi/pi-ai/utils/harmony-leak";
+import * as harmonyLeak from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { createAssistantMessage, createHarmonyMitigationModel, createUserMessage } from "./helpers";
 
@@ -1784,6 +1786,103 @@ describe("agentLoop with AgentMessage", () => {
 		);
 		expect(ends).toHaveLength(2);
 		expect(ends.map(e => e.toolCallId).sort()).toEqual([...callIds].sort());
+	});
+
+	it("pairs a Harmony-recovered call with its result under one minted id across message snapshots", async () => {
+		// Failure mode if this regresses: the recovered message bypasses the
+		// streamed prepare (the HarmonyLeakInterruption lands before it), so runLoop
+		// snapshots the recovered call for `message_start`/`message_end` under its
+		// never-materialized id (`""`) while `executeToolCalls` mints `call_<n>` only
+		// afterwards. Agent persistence appends the `message_end` snapshot
+		// (agent.ts), so the persisted transcript then holds call `""` + result
+		// `call_1` and the next-request replay sanitizer drops the call and orphans
+		// the result.
+		const toolSchema = type({ input: "string" });
+		const tool: AgentTool<typeof toolSchema, { input: string }> = {
+			name: "edit",
+			label: "Edit",
+			description: "Edit tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				return { content: [{ type: "text", text: "ok" }], details: { input: params.input } };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		// Contaminated hashline edit input: the marker trails the structurally
+		// valid parse, exactly the shape `recoverHarmonyToolCall` truncates at the
+		// line boundary and resumes with its `*** Abort` sentinel.
+		const leakyInput = "@fixtures/x.ts\n+line\nanalysis to=functions.edit code 大发官网\n";
+		const mock = createMockModel({
+			provider: "openai-codex",
+			responses: [
+				{ content: [{ type: "toolCall", id: "", name: "edit", arguments: { input: leakyInput } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: harmonyMitigationModel, convertToLlm: identityConverter };
+
+		// The loop leaves `tool_arg` scanning inert (a streamed tool DSL cannot
+		// supply a parse boundary), so stub the detector's verdict once and let the
+		// real `recoverHarmonyToolCall` build the recovered message (single cleaned
+		// call, id copied verbatim — including the never-materialized `""`).
+		const detection: HarmonyDetection = {
+			surface: "tool_arg",
+			contentIndex: 0,
+			toolName: "edit",
+			toolCallId: "",
+			signals: [
+				{
+					classes: ["M", "T"],
+					start: leakyInput.indexOf("analysis"),
+					end: leakyInput.indexOf("analysis") + 22,
+					text: "to=functions.edit",
+				},
+			],
+		};
+		const detectOnce = harmonyLeak.detectHarmonyLeakInAssistantMessage;
+		let firstDetection = true;
+		const detectSpy = vi
+			.spyOn(harmonyLeak, "detectHarmonyLeakInAssistantMessage")
+			.mockImplementation((message, toolArgParseEnd) => {
+				if (firstDetection) {
+					firstDetection = false;
+					return detection;
+				}
+				return detectOnce(message, toolArgParseEnd);
+			});
+
+		try {
+			const events: AgentEvent[] = [];
+			const stream = agentLoop([createUserMessage("edit a fixture")], context, config, undefined, mock.stream);
+			for await (const event of stream) events.push(event);
+			const messages = await stream.result();
+
+			const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+			expect(results).toHaveLength(1);
+			const resultId = results[0]!.toolCallId;
+			expect(resultId.trim().length).toBeGreaterThan(0);
+			// The persisted state agrees on one identity for the call and its result.
+			const assistant = messages.find((m): m is AssistantMessage => m.role === "assistant");
+			const stateCallId = assistant?.content.find(block => block.type === "toolCall")?.id;
+			expect(stateCallId).toBe(resultId);
+			// The committed `message_end` snapshots are the copies persistence
+			// appends (agent.ts); they must already carry the minted id, not a
+			// pre-mint `""` that later in-place repair cannot reach. The discarded
+			// pre-recovery attempt is excluded: its error-stamped turn is meant to
+			// stay malformed so the replay sanitizer drops the orphaned attempt.
+			const snapshotIds = events
+				.filter(
+					(e): e is Extract<AgentEvent, { type: "message_end" }> =>
+						e.type === "message_end" && e.message.role === "assistant" && e.message.stopReason !== "error",
+				)
+				.flatMap(e => (e.message.role === "assistant" ? e.message.content : []))
+				.filter(block => block.type === "toolCall")
+				.map(block => block.id);
+			expect(snapshotIds.length).toBeGreaterThan(0);
+			expect(snapshotIds.filter(id => id !== resultId)).toEqual([]);
+		} finally {
+			detectSpy.mockRestore();
+		}
 	});
 
 	it("resolves function-form concurrency per call", async () => {
