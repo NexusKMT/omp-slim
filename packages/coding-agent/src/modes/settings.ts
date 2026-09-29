@@ -825,6 +825,18 @@ export const cfgDoubleEscapeAction = register({
 	},
 });
 
+export const cfgBareExitOnEmptySession = register({
+	id: "input.bareExitOnEmptySession",
+	type: "boolean",
+	default: true,
+	ui: {
+		tab: "interaction",
+		group: "Input",
+		label: "Bare Exit on Empty Session",
+		description: "Typing just `exit`, `quit`, or `q` before the first message quits instead of prompting the model",
+	},
+});
+
 export const cfgTreeFilterMode = register({
 	id: "treeFilterMode",
 	type: "enum",

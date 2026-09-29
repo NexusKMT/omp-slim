@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { InputController } from "@oh-my-pi/pi-coding-agent/modes/controllers/input-controller";
+import { cfgBareExitOnEmptySession } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { isQueuedMessageList, splitQueuedMessages } from "@oh-my-pi/pi-tui/prompt/queue-input";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 
@@ -10,13 +13,14 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 // executeBuiltinSlashCommand and the controller returned before any
 // addToHistory call. The fix centralizes recording after dispatch, with a
 // secret filter (shouldSkipHistory) for credential-bearing commands.
-function makeCtx(isStreaming = false) {
+function makeCtx(isStreaming = false, messages: AgentMessage[] = []) {
 	const addToHistory = vi.fn();
 	const handleMCPCommand = vi.fn(async () => {});
 	const followUp = vi.fn(async (_text: string, _images?: ImageContent[]) => {});
 	const steer = vi.fn(async (_text: string, _images?: ImageContent[]) => {});
 	const prompt = vi.fn(async () => false);
 	const onInputCallback = vi.fn();
+	const shutdown = vi.fn(async () => {});
 	let text = "";
 	const editor = {
 		onSubmit: undefined as undefined | ((t: string) => Promise<void>),
@@ -43,6 +47,8 @@ function makeCtx(isStreaming = false) {
 	const ctx = {
 		editor,
 		session: {
+			messages,
+			maybeStartTitleGeneration: vi.fn(),
 			isStreaming,
 			isCompacting: false,
 			queuedMessageCount: 0,
@@ -55,6 +61,8 @@ function makeCtx(isStreaming = false) {
 		},
 		focusedAgentId: undefined,
 		collabGuest: undefined,
+		shutdown,
+		flushPendingBashComponents: vi.fn(),
 		handleHotkeysCommand: vi.fn(),
 		handleMCPCommand,
 		showStatus: vi.fn(),
@@ -86,6 +94,7 @@ function makeCtx(isStreaming = false) {
 		handleMCPCommand,
 		showStatus: ctx.showStatus,
 		prompt,
+		shutdown,
 	};
 }
 
@@ -193,6 +202,56 @@ describe("input controller — slash command history (#3148)", () => {
 		]);
 		expect(addToHistory).toHaveBeenCalledWith(input);
 		expect(showStatus).toHaveBeenCalledWith("Queued 3 messages for when the agent yields");
+	});
+});
+
+describe("input controller — bare exit on empty session (#3850)", () => {
+	afterEach(() => {
+		resetSettingsForTest();
+	});
+
+	it.each(["exit", "quit", "q", "Exit", "QUIT"])("quits on bare %p before the first message", async word => {
+		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
+		controllerFor(ctx);
+
+		await editor.onSubmit?.(`  ${word}  `);
+
+		expect(shutdown).toHaveBeenCalledTimes(1);
+		expect(onInputCallback).not.toHaveBeenCalled();
+	});
+
+	it("sends bare exit to the model once the session has messages", async () => {
+		const history: AgentMessage[] = [{ role: "user", content: "hi", timestamp: 0 }];
+		const { ctx, editor, shutdown, onInputCallback } = makeCtx(false, history);
+		controllerFor(ctx);
+
+		await editor.onSubmit?.("exit");
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: "exit" }));
+	});
+
+	it("sends a sentence containing exit to the model", async () => {
+		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
+		controllerFor(ctx);
+
+		await editor.onSubmit?.("exit the loop");
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: "exit the loop" }));
+	});
+
+	it("sends bare exit to the model when input.bareExitOnEmptySession is off", async () => {
+		resetSettingsForTest();
+		await Settings.init({ inMemory: true });
+		cfgBareExitOnEmptySession.set(Settings.instance, false);
+		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
+		controllerFor(ctx);
+
+		await editor.onSubmit?.("exit");
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: "exit" }));
 	});
 });
 

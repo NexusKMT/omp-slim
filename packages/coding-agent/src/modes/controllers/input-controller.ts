@@ -65,6 +65,7 @@ import { resizeImage } from "../../utils/image-resize";
 
 import { cfgCycleOrder } from "../../config/model-settings";
 import {
+	cfgBareExitOnEmptySession,
 	cfgDisplayHideToolActivity,
 	cfgDoubleEscapeAction,
 	cfgEmojiAutocomplete,
@@ -73,6 +74,9 @@ import {
 	cfgTuiMouse,
 } from "../settings";
 import { cfgHideThinkingBlock } from "../../session/settings";
+
+/** Bare words that quit (as `/<word>`) when typed alone into a session with no messages. */
+const BARE_EXIT_WORDS: Record<string, true> = { exit: true, quit: true, q: true };
 
 /**
  * Slash commands that may carry secrets in their arguments should never be
@@ -961,6 +965,18 @@ export class InputController {
 					imageLinks: inputImageLinks,
 				});
 				return;
+			}
+
+			// Bare `exit`/`quit`/`q` on a session with no messages: nobody opens a
+			// fresh session to send that word to the model, so route it to the
+			// slash command (collab-guest gating applies there unchanged).
+			if (
+				Object.hasOwn(BARE_EXIT_WORDS, text.toLowerCase()) &&
+				!hasInputImages &&
+				this.ctx.session.messages.length === 0 &&
+				(!isSettingsInitialized() || cfgBareExitOnEmptySession.get(settings))
+			) {
+				text = `/${text.toLowerCase()}`;
 			}
 
 			// Handle built-in slash commands

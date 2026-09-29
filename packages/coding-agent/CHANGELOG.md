@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Typing just `exit`, `quit`, or `q` (no leading `/`) in a session with no messages now quits; turn off with `input.bareExitOnEmptySession` ([#3850](https://github.com/can1357/oh-my-pi/issues/3850))
+
 ### Fixed
 
 - Fixed `computer.window(74)` matching every open window and `computer.window({ id: 74 })` matching none; a numeric id now resolves the same window as `"74"` ([#13649](https://github.com/can1357/oh-my-pi/pull/13649) by [@will-bogusz](https://github.com/will-bogusz))
