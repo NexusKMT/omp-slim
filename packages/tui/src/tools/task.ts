@@ -32,6 +32,7 @@ import {
 	previewLine,
 	previewWindowRows,
 	replaceTabs,
+	shortenToolArgumentPaths,
 	shortenPath,
 	type ToolUIStatus,
 	TRUNCATE_LENGTHS,
@@ -713,7 +714,9 @@ function renderAgentProgress(
 	if (progress.status === "running") {
 		if (progress.currentTool) {
 			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("muted", sanitizeText(progress.currentTool))}`;
-			const toolDetail = progress.lastIntent ?? progress.currentToolArgs;
+			const toolDetail =
+				progress.lastIntent ??
+				shortenToolArgumentPaths(progress.currentToolArgs ?? "", progress.currentToolArgsKey);
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", previewLine(sanitizeText(toolDetail), 40))}`;
 			}
@@ -728,7 +731,7 @@ function renderAgentProgress(
 			// Show most recent completed tool when idle between tools
 			const recent = progress.recentTools[0];
 			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("dim", sanitizeText(recent.tool))}`;
-			const toolDetail = progress.lastIntent ?? recent.args;
+			const toolDetail = progress.lastIntent ?? shortenToolArgumentPaths(recent.args, recent.argsKey);
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", previewLine(sanitizeText(toolDetail), 40))}`;
 			}
@@ -1850,8 +1853,10 @@ export interface AgentProgress {
 	lastIntent?: string;
 	currentTool?: string;
 	currentToolArgs?: string;
+	/** Argument key selected for the display preview, when known. */
+	currentToolArgsKey?: string;
 	currentToolStartMs?: number;
-	recentTools: Array<{ tool: string; args: string; endMs: number }>;
+	recentTools: Array<{ tool: string; args: string; argsKey?: string; isError?: boolean; endMs: number }>;
 	recentOutput: string[];
 	toolCount: number;
 	/** Count of assistant requests (assistant message_end events) across the run. Drives the soft request budget guard. */
