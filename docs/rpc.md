@@ -22,7 +22,7 @@ omp --mode rpc [regular CLI options]
 Behavior notes:
 
 - `@file` CLI arguments are rejected in RPC mode.
-- `--no-ui` (only with `--mode rpc`) runs extensions headless: `ctx.hasUI` is `false`, dialogs resolve to their defaults, and no `extension_ui_request` frames are emitted except for a host-issued `login`. Use it when the host has no interactive surface and must not be left owing dialog answers.
+- `--no-ui` (with `--mode rpc` or `--mode rpc-ui`) runs extensions headless: `ctx.hasUI` is `false`, dialogs resolve to their defaults, and extension presentation updates are dropped. With `rpc-ui`, tool UI such as `ask` remains enabled. With `rpc`, no UI requests are emitted except for a host-issued `login`. See [Extension UI Sub-Protocol](#extension-ui-sub-protocol) for the exact boundaries.
 - RPC mode disables automatic session title generation by default to avoid an extra model call.
 - RPC/ACP host defaults cover task isolation/execution, memory, advisor, tier, async-job, and bash auto-background settings. They are applied only when a path is not explicitly configured; project/global config, `--config`, and isolated settings remain authoritative. Todo settings are not host-defaulted.
 - The process claims stdin before extension discovery, then parses it one non-empty JSONL line at a time. Malformed JSON emits a recoverable `command: "parse"` failure and does not terminate the loop.
@@ -787,7 +787,17 @@ From `packages/agent/src/agent.ts` defaults:
 
 ## Extension UI Sub-Protocol
 
-Extensions in RPC mode use request/response UI frames. A host that cannot answer them starts with `--no-ui`: extensions then see `ctx.hasUI === false`, dialogs resolve to their defaults without emitting frames, and presentation updates (`notify`, `setStatus`, `setWidget`, `set_editor_text`) are dropped. `--mode rpc-ui` additionally routes tool UI (e.g. the `ask` tool) through this sub-protocol.
+Extensions in RPC mode use request/response UI frames. `--no-ui` disables the extension runner's UI in both RPC modes: extensions see `ctx.hasUI === false`, dialogs resolve to their defaults without emitting frames, and presentation updates (`notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`) are dropped.
+
+`--mode rpc-ui` independently enables the tool UI context, including with `--no-ui`:
+
+- `ask` still sends `select` requests. Free-text answers use `editor` with `promptStyle: true`; `ask` does not send `input` requests. Dialog cancellation can send `cancel`.
+- Other callers using the tool UI context retain its supported dialog methods (`select`, `confirm`, `input`, `editor`, and cancellation) and presentation methods (`notify`, `setStatus`, string-array `setWidget`, `set_editor_text`, and opt-in `setTitle`). `--no-ui` is not a transport-level filter on these methods.
+- Tool approval prompts use the extension runner, not the tool UI context. Under `--no-ui`, tools requiring approval fail closed with a no-interactive-UI error rather than sending an approval dialog, just as with `--mode rpc --no-ui`.
+- MCP authentication challenges do not gain an RPC UI handler in either mode; the interactive-mode MCP auth handler is not installed.
+- A host-issued `login` is independent of both UI settings: it can emit `open_url`, progress `notify`, and non-secret `input` requests after the authorization URL. Secret input and prompts before an authorization URL remain unsupported.
+
+Use `--mode rpc --no-ui` for a host without a tool UI surface; use `--mode rpc-ui --no-ui` to answer tool dialogs while keeping extensions headless. Plain `--mode rpc-ui` enables both extension and tool UI.
 
 ### Outbound request
 
