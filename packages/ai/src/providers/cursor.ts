@@ -5136,8 +5136,14 @@ function buildRootPromptMessagesJson(
 				// The final step's results stay in message order below: they are
 				// what the following turn responds to, and may arrive out of order.
 				if (stepIndex === steps.length - 1) continue;
-				for (const callId of step.callIds) {
-					const result = toolResults.get(callId);
+				// Replay this round's results in the order they arrived: calls issued
+				// together can finish out of call order.
+				const roundCallIds = new Set(step.callIds);
+				for (let j = i + 1; j < historyEnd; j++) {
+					const later = messages[j];
+					if (later.role !== "toolResult" || !roundCallIds.has(later.toolCallId)) continue;
+					if (emittedResults.has(later.toolCallId)) continue;
+					const result = toolResults.get(later.toolCallId);
 					if (result) pushToolResult(result);
 				}
 			}

@@ -525,6 +525,7 @@ describe("Cursor history encoding", () => {
 		// calls interleave with the text and reasoning that followed each result.
 		// Replayed as one message it tells the model every call was issued at
 		// once; the native client replays one assistant step per model round.
+		// Within a round, results replay in the order they arrived, not call order.
 		const result = (id: string, text: string): ToolResultMessage => ({
 			role: "toolResult",
 			toolCallId: id,
@@ -535,7 +536,7 @@ describe("Cursor history encoding", () => {
 		});
 		const call = (id: string, path: string) => ({ type: "toolCall", id, name: "read", arguments: { path } }) as const;
 		const messages: Context["messages"] = [
-			{ role: "user", content: "Read a.txt, then b.txt and c.txt together.", timestamp: 1 },
+			{ role: "user", content: "Read a.txt, then b.txt and c.txt together, then d.txt.", timestamp: 1 },
 			cursorAssistant(
 				"cursor-composer-2.5",
 				[
@@ -544,13 +545,16 @@ describe("Cursor history encoding", () => {
 					{ type: "thinking", thinking: "a is 7; now b and c." },
 					call("call-b", "b.txt"),
 					call("call-c", "c.txt"),
-					{ type: "text", text: "The sum is 31." },
+					{ type: "thinking", thinking: "c came back first; now d." },
+					call("call-d", "d.txt"),
+					{ type: "text", text: "The sum is 48." },
 				],
 				2,
 			),
 			result("call-a", "alpha=7"),
-			result("call-b", "beta=11"),
 			result("call-c", "gamma=13"),
+			result("call-b", "beta=11"),
+			result("call-d", "delta=17"),
 			{ role: "user", content: "What was in b.txt?", timestamp: 4 },
 		];
 
@@ -565,8 +569,10 @@ describe("Cursor history encoding", () => {
 			"assistant:text,call-a",
 			"tool:call-a",
 			"assistant:call-b,call-c",
-			"tool:call-b",
 			"tool:call-c",
+			"tool:call-b",
+			"assistant:call-d",
+			"tool:call-d",
 			"assistant:text",
 		]);
 	});
