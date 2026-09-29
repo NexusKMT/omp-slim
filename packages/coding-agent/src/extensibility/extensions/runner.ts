@@ -1628,6 +1628,11 @@ export class ExtensionRunner {
 	 * Run extension rewrites on a detached finalized assistant message. Text may
 	 * change only in its original block position; all other metadata and blocks
 	 * remain unchanged. Text replay signatures are tied to their original text.
+	 *
+	 * Handlers see a structured clone, but the result is rebuilt from the
+	 * original blocks: unchanged blocks keep their identity and symbol-keyed
+	 * provider markers (e.g. `kCursorExecResolved`, which `structuredClone`
+	 * drops and without which agent-loop re-runs Cursor-settled tool calls).
 	 */
 	async emitAssistantMessage(
 		message: AssistantMessage,
@@ -1635,7 +1640,19 @@ export class ExtensionRunner {
 	): Promise<AssistantMessage["content"] | undefined> {
 		if (!this.hasHandlers("assistant_message")) return undefined;
 		const ctx = this.createContext();
-		let currentContent = structuredClone(message.content);
+		const original = message.content;
+		// Accepted text per block position; every other field comes from `original`.
+		const texts = original.map(block => (block.type === "text" ? block.text : undefined));
+		const isRewritten = (index: number) => {
+			const block = original[index];
+			return block?.type === "text" && texts[index] !== block.text;
+		};
+		const currentContent = (): AssistantMessage["content"] =>
+			original.map((block, index) => {
+				if (block.type !== "text" || !isRewritten(index)) return block;
+				const { textSignature: _stale, ...rest } = block;
+				return { ...rest, text: texts[index] as string };
+			});
 		const textMetadata = (block: TextContent) => {
 			const { text: _text, textSignature: _textSignature, ...metadata } = block;
 			return metadata;
@@ -1646,9 +1663,10 @@ export class ExtensionRunner {
 			if (!handlers?.length) continue;
 			for (const handler of handlers) {
 				if (signal?.aborted) break extensions;
+				const presented = structuredClone(currentContent());
 				const event: AssistantMessageRewriteEvent = {
 					type: "assistant_message",
-					message: { ...message, content: structuredClone(currentContent) },
+					message: { ...message, content: presented },
 				};
 				const result = (await this.#runHandlerWithTimeout(
 					handler,
@@ -1662,11 +1680,13 @@ export class ExtensionRunner {
 				if (signal?.aborted) break extensions;
 				if (result?.content === undefined) continue;
 				const replacement = result.content;
+				// Compare against a fresh clone: the handler may have mutated `presented`.
+				const expected = structuredClone(currentContent());
 				if (
 					!Array.isArray(replacement) ||
-					replacement.length !== currentContent.length ||
+					replacement.length !== expected.length ||
 					replacement.some((block, index) => {
-						const previous = currentContent[index];
+						const previous = expected[index];
 						if (!block || typeof block !== "object" || block.type !== previous?.type) return true;
 						if (block.type !== "text") return !Bun.deepEquals(block, previous);
 						return (
@@ -1683,19 +1703,12 @@ export class ExtensionRunner {
 					});
 					continue;
 				}
-				currentContent = structuredClone(replacement);
-				for (const [index, block] of currentContent.entries()) {
-					const original = message.content[index];
-					if (block.type !== "text" || original?.type !== "text") continue;
-					if (block.text !== original.text || original.textSignature === undefined) {
-						delete block.textSignature;
-					} else {
-						block.textSignature = original.textSignature;
-					}
+				for (const [index, block] of replacement.entries()) {
+					if (block.type === "text") texts[index] = block.text;
 				}
 			}
 		}
-		return Bun.deepEquals(currentContent, message.content) ? undefined : currentContent;
+		return original.some((_block, index) => isRewritten(index)) ? currentContent() : undefined;
 	}
 
 	async emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined> {

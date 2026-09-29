@@ -10,6 +10,7 @@ import type { AgentMessage, AgentTool, AgentToolContext } from "@oh-my-pi/pi-age
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
+import { kCursorExecResolved } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { convertToLlm, wrapSteeringForModel } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -600,6 +601,47 @@ describe("ExtensionRunner", () => {
 			expect(errors).toHaveLength(1);
 			expect(errors[0]?.event).toBe("assistant_message");
 			expect(errors[0]?.error).toContain("rewrite failed");
+		});
+		it("preserves Cursor-resolved tool markers across no-op and text rewrite handlers", async () => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "assistant-message-cursor.ts"),
+				`
+				export default function(pi) {
+					pi.on("assistant_message", event => ({ content: event.message.content }));
+					pi.on("assistant_message", event => ({
+						content: [
+							{ ...event.message.content[0], text: "rewritten" },
+							event.message.content[1],
+						],
+					}));
+				}
+				`,
+			);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const resolvedToolCall = {
+				type: "toolCall" as const,
+				id: "call-cursor",
+				name: "read",
+				arguments: { path: "x" },
+				[kCursorExecResolved]: true as const,
+			};
+			const message = {
+				...createAssistantMessage("original"),
+				content: [{ type: "text" as const, text: "original" }, resolvedToolCall],
+			};
+
+			const rewritten = await runner.emitAssistantMessage(message);
+
+			expect(rewritten?.[0]).toMatchObject({ type: "text", text: "rewritten" });
+			expect(rewritten?.[1]).toBe(resolvedToolCall);
+			expect((rewritten?.[1] as typeof resolvedToolCall | undefined)?.[kCursorExecResolved]).toBe(true);
 		});
 
 		it("normalizes each text signature against its original text across chained rewrites", async () => {
