@@ -912,7 +912,7 @@ function homePatternFor(homeDir: string, windowsStyle: boolean): HomePattern {
 		pattern = {
 			leading: new RegExp(`^${escapedHome}(?=$|[\\\\/])`, windowsStyle ? "i" : ""),
 			embedded: new RegExp(
-				`[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s"'<>]+|(^|[\\s"'\\x60([{=,:])(${escapedHome})(?=$|[\\\\/\\s"'\\x60)\\]},;:])`,
+				`[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s"'<>]+|(^|[\\s"'\\x60([{=,:<>&|*_])(${escapedHome})(?=$|[\\\\/\\s"'\\x60)\\]},;:<>&|*_])`,
 				windowsStyle ? "gi" : "g",
 			),
 		};
