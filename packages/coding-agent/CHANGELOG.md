@@ -58,6 +58,9 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+### Fixed
+
+- Auto-retry now retries the same model once after a mid-stream socket drop that had already streamed reasoning or tool calls, instead of switching to the fallback chain on the first attempt; the fallback chain is consulted only if that retry also fails.
 
 ## [18.4.3] - 2026-09-28
 

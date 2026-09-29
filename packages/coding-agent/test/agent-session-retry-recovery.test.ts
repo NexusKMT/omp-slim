@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import * as path from "node:path";
 import { Agent, AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { ApiKey, AssistantMessage, AssistantRetryRecovery, Usage } from "@oh-my-pi/pi-ai";
-import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
 import * as aiStream from "@oh-my-pi/pi-ai/stream";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -27,6 +27,8 @@ type RecoveryRun = {
 
 const RATE_LIMIT_ERROR =
 	'429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit. Please try again later."}} retry-after-ms=11180000';
+const SOCKET_CLOSE_MID_STREAM =
+	"The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()";
 const RETRIABLE_SERVER_ERROR = "503 service unavailable: overloaded_error";
 
 function emptyUsage(): Usage {
@@ -496,6 +498,127 @@ describe("AgentSession retry recovery", () => {
 			.filter(presentation => presentation.kind !== "none");
 		expect(visibleErrors).toHaveLength(1);
 		expect(sessionManager.buildSessionContext().messages.map(message => message.role)).toEqual(["user"]);
+	});
+	it("retries a mid-stream socket drop on the same model before consulting the fallback chain", async () => {
+		// The transport died after the model had already emitted reasoning, so the
+		// failure says nothing about model health: the first attempt stays on the
+		// primary instead of switching to the fallback chain.
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-5.5");
+		if (!model || !fallbackModel) {
+			throw new Error("Expected bundled Anthropic and OpenAI test models to exist");
+		}
+		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+		authStorage.keys.setRuntime("openai", "openai-test-key");
+
+		const requestedModels: string[] = [];
+		const responses: MockResponse[] = [
+			{
+				content: [{ type: "thinking", thinking: "partial plan for the edit" }],
+				stopReason: "error",
+				errorMessage: SOCKET_CLOSE_MID_STREAM,
+			},
+			{ content: ["recovered on the same model"], stopReason: "stop" },
+		];
+		const mock = createMockModel({ responses });
+		const agent = new Agent({
+			getApiKey: requestedModel => modelRegistry.resolver(requestedModel, agent.sessionId),
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxDelayMs": 100,
+			"retry.maxRetries": 2,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+
+		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
+		managers.push(sessionManager);
+		const session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
+		sessions.push(session);
+		mockSchedulerWaitWithClock();
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		await session.prompt("Trigger a mid-stream socket drop");
+		await session.waitForIdle();
+		await sessionManager.flush();
+
+		expect(requestedModels).toEqual([`${model.provider}/${model.id}`, `${model.provider}/${model.id}`]);
+		expect(fallbackEvents).toEqual([]);
+		successfulAssistantEntry(sessionManager, "recovered on the same model");
+		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "plain", note: "error; retried" });
+	});
+
+	it("keeps the immediate fallback for a socket drop with no streamed content", async () => {
+		// No progress streamed before the drop, so a different route may genuinely
+		// help: the first attempt still switches to the fallback chain.
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-5.5");
+		if (!model || !fallbackModel) {
+			throw new Error("Expected bundled Anthropic and OpenAI test models to exist");
+		}
+		authStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+		authStorage.keys.setRuntime("openai", "openai-test-key");
+
+		const requestedModels: string[] = [];
+		const responses: MockResponse[] = [
+			{ stopReason: "error", errorMessage: SOCKET_CLOSE_MID_STREAM },
+			{ content: ["recovered on fallback"], stopReason: "stop" },
+		];
+		const mock = createMockModel({ responses });
+		const agent = new Agent({
+			getApiKey: requestedModel => modelRegistry.resolver(requestedModel, agent.sessionId),
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: (requestedModel, context, options) => {
+				requestedModels.push(`${requestedModel.provider}/${requestedModel.id}`);
+				return mock.stream(requestedModel, context, options);
+			},
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 5,
+			"retry.maxDelayMs": 100,
+			"retry.maxRetries": 2,
+			"retry.modelFallback": true,
+			"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+		});
+		settings.setModelRole("default", `${model.provider}/${model.id}`);
+
+		const sessionManager = SessionManager.create(tempDir.path(), path.join(tempDir.path(), "sessions"));
+		managers.push(sessionManager);
+		const session = new AgentSession({ agent, sessionManager, settings, modelRegistry });
+		sessions.push(session);
+		mockSchedulerWaitWithClock();
+		const fallbackEvents: Array<Extract<AgentSessionEvent, { type: "retry_fallback_applied" }>> = [];
+		session.subscribe(event => {
+			if (event.type === "retry_fallback_applied") fallbackEvents.push(event);
+		});
+
+		await session.prompt("Trigger an empty socket drop");
+		await session.waitForIdle();
+		await sessionManager.flush();
+
+		expect(requestedModels).toEqual([
+			`${model.provider}/${model.id}`,
+			`${fallbackModel.provider}/${fallbackModel.id}`,
+		]);
+		expect(fallbackEvents).toHaveLength(1);
+		successfulAssistantEntry(sessionManager, "recovered on fallback");
+		const errors = assistantEntries(sessionManager).filter(candidate => candidate.message.stopReason === "error");
+		expect(errors).toHaveLength(1);
+		expect(errors[0].message.retryRecovery).toMatchObject({ recovery: "model" });
 	});
 
 	it("maps assistant error presentation for recovered, unrecovered, and silent abort turns", () => {

@@ -1608,6 +1608,27 @@ export class TurnRecovery {
 				/OpenAI responses stream closed before a terminal response event was received/i.test(errorMessage))
 		);
 	}
+	/**
+	 * First-attempt mid-stream socket drop with streamed progress: the transport
+	 * died after the model had already emitted reasoning or tool calls, so the
+	 * failure says nothing about model health — retry the same model once before
+	 * consulting the fallback chain. A drop with no streamed content keeps the
+	 * immediate fallback (a different route may genuinely help), as do later
+	 * attempts. Mirrors the stall handler's socket check, extended to turns with
+	 * tool calls.
+	 */
+	#isFirstAttemptMidStreamSocketDrop(message: AssistantMessage, id: number): boolean {
+		if (this.#retryAttempt !== 1) return false;
+		if (message.stopReason !== "error" || !AIError.retriable(id)) return false;
+		if (this.#host.streamingEditAbortTriggered()) return false;
+		if (!isUnexpectedSocketCloseMessage(message.errorMessage ?? "")) return false;
+		return message.content.some(
+			block =>
+				(block.type === "thinking" && block.thinking.trim().length > 0) ||
+				block.type === "toolCall" ||
+				(block.type === "text" && block.text.trim().length > 0),
+		);
+	}
 
 	/** Checks whether a provider error represents a classifier refusal. */
 	isClassifierRefusal(message: AssistantMessage): boolean {
@@ -2602,7 +2623,8 @@ export class TurnRecovery {
 				retrySettings.modelFallback &&
 				!thinkingLoop &&
 				!waitForSiblingCredential &&
-				!(retryBudgetExhausted && classifierRefusal)
+				!(retryBudgetExhausted && classifierRefusal) &&
+				!this.#isFirstAttemptMidStreamSocketDrop(message, id)
 			) {
 				if (!classifierRefusal) {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
