@@ -2,16 +2,23 @@
 
 ## [Unreleased]
 
-## [18.4.4] - 2026-09-29
-
 ### Added
 
-- Added `compat.bedrockMessagesApi` for `anthropic-messages` models: detected from a Bedrock `/anthropic` base URL under any provider id, it drops tool `strict`, fits `metadata.user_id` to Bedrock's pattern, and enables on-demand compaction; set it in `models.yml` to opt a proxy or an `ANTHROPIC_BASE_URL` reroute in, or `false` to opt out ([#13311](https://github.com/can1357/oh-my-pi/pull/13311)).
 - MiniMax-M3.1-Flash-Preview now offers thinking levels low through max on MiniMax hosts; turning thinking off uses the lowest level, since the model always thinks ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
 
 ### Changed
 
 - MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) now uses MiniMax's recommended Anthropic-compatible API, and `/login` checks keys against the same endpoint ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
+
+### Fixed
+
+- Fixed MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) usage showing as free; turns now show the pay-as-you-go equivalent cost, with MiniMax-M3.1-Flash-Preview estimated at the MiniMax-M3 rate since it has no published price ([#13695](https://github.com/can1357/oh-my-pi/pull/13695) by [@eggpeat](https://github.com/eggpeat))
+
+## [18.4.4] - 2026-09-29
+
+### Added
+
+- Added `compat.bedrockMessagesApi` for `anthropic-messages` models: detected from a Bedrock `/anthropic` base URL under any provider id, it drops tool `strict`, fits `metadata.user_id` to Bedrock's pattern, and enables on-demand compaction; set it in `models.yml` to opt a proxy or an `ANTHROPIC_BASE_URL` reroute in, or `false` to opt out ([#13311](https://github.com/can1357/oh-my-pi/pull/13311)).
 - Added GPT-6.1 Sol pricing for `openai-codex` (`gpt-6.1-sol`, `gpt-6.1-sol-wm`: $2 input, $10 output, $0.10 cached input), so Codex usage shows cost instead of $0 ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 - Added `Model.serviceTiers`, the service tiers a provider advertises for a model; Codex discovery fills it from `service_tiers` (e.g. `priority`, `ultrafast`) ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 - Added the documented 922K input maximum for `openai-codex/gpt-6.1-sol` with extended context on (Codex reports a stale 872K), matching GPT-6 Astra; the default window stays 272K ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
@@ -23,7 +30,6 @@
 - Fixed Claude models on Bedrock's `/anthropic` routes resolving `compat.disableStrictTools: false`, although those routes reject the tool `strict` field ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Fixed Bedrock's FIPS (`bedrock-runtime-fips`) and AWS PrivateLink (`vpce-….vpce.amazonaws.com`) hostnames, and Mantle's documented `/v1` OpenAI base, not being recognized as Bedrock routes, which left them without native compaction and the `/anthropic` request fixes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Added `supportsBetweenToolsThinking` Anthropic compat flag (`supports-between-tools-thinking` KDL axis), enabled for Claude Sonnet 5.5
-- Fixed MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) usage showing as free; turns now show the pay-as-you-go equivalent cost, with MiniMax-M3.1-Flash-Preview estimated at the MiniMax-M3 rate since it has no published price ([#13695](https://github.com/can1357/oh-my-pi/pull/13695) by [@eggpeat](https://github.com/eggpeat))
 
 ## [18.4.3] - 2026-09-28
 
