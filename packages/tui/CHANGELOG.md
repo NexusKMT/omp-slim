@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering
+- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
 
 ### Added
 
