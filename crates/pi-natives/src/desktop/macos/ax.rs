@@ -251,15 +251,29 @@ fn select_attached(candidates: &[AttachedCandidate], expected: u32) -> CoreResul
 	)
 }
 
+/// Outcome of the bounded search for an attached window.
+enum AttachedSearch {
+	Found(CFRetained<AXUIElement>),
+	/// Nothing matched; `truncated` is set when the node or depth budget cut
+	/// the walk short, so the window may still exist deeper in the tree.
+	Missing {
+		truncated: bool,
+	},
+}
+
 /// Finds the sheet, popover, or open menu of `app` that represents `win`,
 /// by a bounded breadth-first walk of the application's accessibility tree.
 /// `AppKit` gives each its own `WindowServer` window but lists only standard
 /// windows in `AXWindows`.
+///
+/// A sheet or popover reporting `expected` ends the walk at once: a window id
+/// names one window, so no later candidate can compete with it. Only menus,
+/// which match by frame, need the whole walk to prove uniqueness.
 fn attached_window(
 	app: &AXUIElement,
 	expected: u32,
 	win: &DesktopWindow,
-) -> CoreResult<Option<CFRetained<AXUIElement>>> {
+) -> CoreResult<AttachedSearch> {
 	let mut queue: VecDeque<_> = copy_elements_optional(app, "AXChildren")
 		.unwrap_or_default()
 		.into_iter()
@@ -268,14 +282,20 @@ fn attached_window(
 	let mut elements = Vec::new();
 	let mut candidates = Vec::new();
 	let mut visited = 0usize;
+	let mut truncated = false;
 	while let Some((element, depth)) = queue.pop_front() {
 		visited += 1;
 		if visited > MAX_ATTACHED_SEARCH_NODES {
+			truncated = true;
 			break;
 		}
 		let (candidate, descend) = match copy_string(&element, "AXRole").as_deref() {
 			Some("AXSheet" | "AXPopover") => {
-				(Some(AttachedCandidate::OwnWindow(window_id(&element))), true)
+				let id = window_id(&element);
+				if id == Some(expected) {
+					return Ok(AttachedSearch::Found(element));
+				}
+				(Some(AttachedCandidate::OwnWindow(id)), true)
 			},
 			Some("AXMenu") => {
 				// A closed menu keeps its items in the tree at zero size; only
@@ -286,20 +306,23 @@ fn attached_window(
 			},
 			_ => (None, true),
 		};
-		if descend && depth < MAX_ATTACHED_SEARCH_DEPTH {
-			queue.extend(
-				copy_elements_optional(&element, "AXChildren")
-					.unwrap_or_default()
-					.into_iter()
-					.map(|child| (child, depth + 1)),
-			);
+		if descend {
+			let children = copy_elements_optional(&element, "AXChildren").unwrap_or_default();
+			if depth < MAX_ATTACHED_SEARCH_DEPTH {
+				queue.extend(children.into_iter().map(|child| (child, depth + 1)));
+			} else if !children.is_empty() {
+				truncated = true;
+			}
 		}
 		if let Some(candidate) = candidate {
 			candidates.push(candidate);
 			elements.push(element);
 		}
 	}
-	Ok(select_attached(&candidates, expected)?.map(|index| elements.swap_remove(index)))
+	Ok(match select_attached(&candidates, expected)? {
+		Some(index) => AttachedSearch::Found(elements.swap_remove(index)),
+		None => AttachedSearch::Missing { truncated },
+	})
 }
 
 impl AxBackend for MacAx {
@@ -330,13 +353,24 @@ impl AxBackend for MacAx {
 			}
 			// Sheets, popovers, and open menus are separate native windows that
 			// `AXWindows` omits.
-			if let Some(element) = attached_window(&app, expected_id, win)? {
-				set_timeout(&element)?;
-				return Ok(AxHandle::Mac(element));
-			}
+			let truncated = match attached_window(&app, expected_id, win)? {
+				AttachedSearch::Found(element) => {
+					set_timeout(&element)?;
+					return Ok(AxHandle::Mac(element));
+				},
+				AttachedSearch::Missing { truncated } => truncated,
+			};
+			let scope = if truncated {
+				format!(
+					"; the search stopped at its limit of {MAX_ATTACHED_SEARCH_NODES} nodes or depth \
+					 {MAX_ATTACHED_SEARCH_DEPTH}, so the window may be nested deeper"
+				)
+			} else {
+				String::new()
+			};
 			return Err(DesktopError::ax_failed(format!(
 				"native window {expected_id} was not found in the application's accessibility \
-				 windows, sheets, popovers, or open menus"
+				 windows, sheets, popovers, or open menus{scope}"
 			)));
 		}
 		// Without the native id SPI, require a unique title AND frame match.
