@@ -5,6 +5,7 @@ import {
 	adaptSchemaForStrict,
 	normalizeEmptySchemas,
 	stripSchemaDescriptions,
+	stripToolDescriptions,
 	toolWireSchema,
 } from "@oh-my-pi/pi-ai/utils/schema";
 
@@ -443,5 +444,34 @@ describe("stripSchemaDescriptions", () => {
 		stripSchemaDescriptions(schema);
 		expect(schema.description).toBe("keep");
 		expect(schema.properties.a.description).toBe("keep a");
+	});
+});
+
+describe("stripToolDescriptions", () => {
+	const tool: Tool = {
+		name: "demo",
+		description: "top-level tool description",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "where to read" },
+			},
+			required: ["path"],
+		},
+	};
+
+	it("empties the top-level description and strips nested schema descriptions", () => {
+		const [stripped] = stripToolDescriptions([tool]);
+		expect(stripped.description).toBe("");
+		expect(JSON.stringify(stripped.parameters)).not.toContain("where to read");
+		expect((stripped.parameters as { properties: Record<string, { type: string }> }).properties.path.type).toBe(
+			"string",
+		);
+	});
+
+	it("leaves the original tool and the cached wire schema intact", () => {
+		stripToolDescriptions([tool]);
+		expect(tool.description).toBe("top-level tool description");
+		expect(JSON.stringify(toolWireSchema(tool))).toContain("where to read");
 	});
 });

@@ -3,18 +3,23 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	buildFtsQuery,
+	cjkFtsTerms,
+	containsSpacelessCjk,
 	decodeVector,
 	detectLanguage,
 	encodeVector,
+	ftsQueryTerms,
 	generateId,
 	generateStableId,
 	inMemoryVecSearch,
 	normalizeImportance,
 	normalizeMetadata,
 	normalizeWeights,
+	recallTokens,
+	recencyDecay,
+	temporalBoost,
 	workingMemoryVecSearch,
 } from "@oh-my-pi/pi-mnemopi/core/beam/helpers";
-import { cjkFtsTerms, containsSpacelessCjk, ftsQueryTerms, recallTokens } from "@oh-my-pi/pi-mnemopi/util/regex";
 
 describe("beam helper ids, weights, and metadata", () => {
 	it("generates unique timed ids and deterministic stable ids", () => {
@@ -74,7 +79,16 @@ describe("beam lexical and FTS helpers", () => {
 	});
 });
 
-describe("beam language helpers", () => {
+describe("beam temporal and language helpers", () => {
+	it("computes recency decay and temporal boost from UTC timestamps", () => {
+		const now = new Date("2024-01-02T12:00:00.000Z");
+		expect(recencyDecay("2024-01-02T06:00:00.000Z", 6, now)).toBeCloseTo(Math.exp(-1), 12);
+		expect(recencyDecay(null, 6, now)).toBe(0.5);
+		expect(temporalBoost("2024-01-02T06:00:00.000Z", now, 6)).toBeCloseTo(Math.exp(-1), 12);
+		expect(temporalBoost("2024-01-03T06:00:00.000Z", now, 6)).toBe(1);
+		expect(temporalBoost("not-a-date", now, 6)).toBe(0);
+	});
+
 	it("detects supported languages without external dependencies", () => {
 		expect(detectLanguage("Привет, это мой проект и это важно")).toBe("ru");
 		expect(detectLanguage("ich bin sehr gern dabei und das ist gut")).toBe("de");

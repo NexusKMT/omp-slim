@@ -6,9 +6,8 @@ import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	createSnapcompactSavingsRecorder,
-	type SnapcompactSavingsRecord,
+	readSnapcompactSavingsJournal,
 } from "@oh-my-pi/pi-coding-agent/session/snapcompact-savings-journal";
-import { isEnoent } from "@oh-my-pi/pi-utils";
 
 function model(provider = "anthropic", id = "claude-test"): Model {
 	return buildModel({
@@ -30,15 +29,6 @@ async function tmpJournal(): Promise<string> {
 	return path.join(dir, "snapcompact-savings.jsonl");
 }
 
-async function readJournal(journalPath: string): Promise<SnapcompactSavingsRecord[]> {
-	try {
-		return Bun.JSONL.parse(await Bun.file(journalPath).text()) as SnapcompactSavingsRecord[];
-	} catch (err) {
-		if (isEnoent(err)) return [];
-		throw err;
-	}
-}
-
 describe("snapcompact savings journal", () => {
 	it("appends one attributed record per imaged tool result", async () => {
 		const journal = await tmpJournal();
@@ -51,7 +41,7 @@ describe("snapcompact savings journal", () => {
 			model("google", "gemini-test"),
 		);
 
-		const recs = await readJournal(journal);
+		const recs = await readSnapcompactSavingsJournal(journal);
 		expect(recs.map(r => r.toolCallId).sort()).toEqual(["call_1", "call_2"]);
 		const first = recs.find(r => r.toolCallId === "call_1");
 		expect(first).toMatchObject({
@@ -76,7 +66,7 @@ describe("snapcompact savings journal", () => {
 			model(),
 		);
 
-		const recs = await readJournal(journal);
+		const recs = await readSnapcompactSavingsJournal(journal);
 		expect(recs.map(r => r.toolCallId).sort()).toEqual(["call_1", "call_2"]);
 	});
 
@@ -93,6 +83,10 @@ describe("snapcompact savings journal", () => {
 			],
 			model(),
 		);
-		expect(await readJournal(journal)).toEqual([]);
+		expect(await readSnapcompactSavingsJournal(journal)).toEqual([]);
+	});
+
+	it("returns empty for a missing journal file", async () => {
+		expect(await readSnapcompactSavingsJournal(await tmpJournal())).toEqual([]);
 	});
 });

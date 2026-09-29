@@ -388,8 +388,7 @@ export function renderChangelogEntries(
 	return { markdown: markdown.slice(0, low) + suffix, truncated: true };
 }
 
-/** Build the bounded startup selection from the newest-first unseen entries. */
-export function selectStartupChangelogEntries(
+function selectStartupChangelogEntries(
 	newEntries: ChangelogEntry[],
 	totalUnseenEntries: number,
 ): StartupChangelogSelection {

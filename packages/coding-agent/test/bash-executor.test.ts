@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ShellMinimizerSettings } from "@oh-my-pi/pi-coding-agent/exec/settings";
 import {
@@ -13,10 +14,10 @@ import {
 import * as direnvModule from "@oh-my-pi/pi-coding-agent/exec/direnv";
 import { DEFAULT_MAX_BYTES } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import * as shellSnapshot from "@oh-my-pi/pi-coding-agent/utils/shell-snapshot";
+import { encodeTerminalImage } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 import type { Shell, ShellRunResult } from "@oh-my-pi/pi-natives";
 import * as piNatives from "@oh-my-pi/pi-natives";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
-import { kittyPngFrame, RED_1X1_PNG_BASE64 } from "./helpers/kitty-frame";
 
 import { cfgBashDirenvLoadTimeoutMs, cfgShellPath } from "@oh-my-pi/pi-coding-agent/exec/settings";
 
@@ -155,7 +156,12 @@ describe("executeBash", () => {
 	});
 
 	it("extracts terminal graphics before sanitization on failed and truncated output", async () => {
-		const frame = kittyPngFrame(RED_1X1_PNG_BASE64);
+		const image: ImageContent = {
+			type: "image",
+			mimeType: "image/png",
+			data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+		};
+		const frame = await encodeTerminalImage(image);
 		const result = await executeBash(`printf '%s' ${shellQuote(frame)}; printf '%060000d\n' 0; printf tail; exit 7`, {
 			cwd: tempDir,
 			timeout: 5000,
@@ -166,7 +172,7 @@ describe("executeBash", () => {
 		expect(result.images?.[0]).toMatchObject({ type: "image", mimeType: "image/png" });
 		expect(result.output).toContain("tail");
 		expect(result.output).not.toContain("\x1b_G");
-		expect(result.output).not.toContain(RED_1X1_PNG_BASE64);
+		expect(result.output).not.toContain(image.data);
 	});
 
 	it("extracts Sixel emitted by an arbitrary subprocess", async () => {
@@ -183,7 +189,12 @@ describe("executeBash", () => {
 	});
 
 	it("keeps images emitted before a timeout", async () => {
-		const frame = kittyPngFrame(RED_1X1_PNG_BASE64);
+		const image: ImageContent = {
+			type: "image",
+			mimeType: "image/png",
+			data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+		};
+		const frame = await encodeTerminalImage(image);
 		const result = await executeBash(`printf '%s' ${shellQuote(frame)}; sleep 3`, {
 			cwd: tempDir,
 			timeout: 20,

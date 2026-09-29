@@ -14,10 +14,11 @@ afterEach(() => {
 	}
 });
 
-function baseUrlFor(provider: string, baseUrl?: string): string | undefined {
-	return resolveOpenAIRequestSetup({ provider, id: "grok-4.6", baseUrl }, { apiKey: "xai-test", messages: [] })
-		.baseUrl;
+function baseUrlFor(provider: string, baseUrl?: string, apiKey = "xai-test"): string | undefined {
+	return resolveOpenAIRequestSetup({ provider, id: "grok-4.6", baseUrl }, { apiKey, messages: [] }).baseUrl;
 }
+
+const OAUTH_ACCESS_TOKEN = `e30.${Buffer.from(JSON.stringify({ sub: "xai-user" })).toString("base64url")}.sig`;
 
 describe("XAI_BASE_URL", () => {
 	test("redirects the bundled default endpoint for xai and xai-oauth, stripping trailing slashes", () => {
@@ -37,6 +38,12 @@ describe("XAI_BASE_URL", () => {
 		expect(baseUrlFor("xai", "https://api.x.ai/v1")).toBe("https://api.x.ai/v1");
 		Bun.env.XAI_BASE_URL = "https://xai-proxy.example/v1";
 		expect(baseUrlFor("openai", "https://api.x.ai/v1")).toBe("https://api.x.ai/v1");
+	});
+
+	test("never sends an xai-oauth OAuth access token to the override", () => {
+		Bun.env.XAI_BASE_URL = "https://xai-proxy.example/v1";
+		expect(baseUrlFor("xai-oauth", "https://api.x.ai/v1", OAUTH_ACCESS_TOKEN)).toBe("https://api.x.ai/v1");
+		expect(baseUrlFor("xai-oauth", undefined, OAUTH_ACCESS_TOKEN)).toBeUndefined();
 	});
 });
 

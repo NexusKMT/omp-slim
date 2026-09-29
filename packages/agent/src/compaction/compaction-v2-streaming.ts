@@ -34,6 +34,7 @@ import {
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, isUnexpectedSocketCloseMessage, logger, ptree, stringifyJson } from "@oh-my-pi/pi-utils";
+import { appendAzureApiVersion, resolveAzureOpenAiBaseUrl } from "./azure-openai-endpoint";
 import { prepareBedrockCompactionRequest } from "./bedrock";
 
 // ============================================================================
@@ -49,7 +50,6 @@ export const V2_COMPACTION_MAX_RETRIES = 2;
 /** Timeout for V2 streaming compaction (5 minutes, same as V1). */
 export const V2_COMPACTION_TIMEOUT_MS = 300_000;
 
-const DEFAULT_AZURE_API_VERSION = "v1";
 const OPENAI_REMOTE_COMPACTION_PRESERVE_KEY = "openaiRemoteCompaction";
 const COMPACTION_TRIGGER_ITEM = { type: "compaction_trigger" } as const;
 // OpenAI image metering depends on detail and dimensions; charge the common
@@ -160,25 +160,6 @@ function resolveOpenAiCodexResponsesEndpoint(baseUrl: string | undefined): strin
 	if (normalizedBase.endsWith("/codex/responses")) return normalizedBase;
 	if (normalizedBase.endsWith("/codex")) return `${normalizedBase}/responses`;
 	return `${normalizedBase}/codex/responses`;
-}
-
-export function resolveAzureOpenAiBaseUrl(model: Model): string {
-	const baseUrl = $env.AZURE_OPENAI_BASE_URL?.trim() || undefined;
-	const resourceName = $env.AZURE_OPENAI_RESOURCE_NAME;
-	const resolvedBaseUrl =
-		baseUrl ?? (resourceName ? `https://${resourceName}.openai.azure.com/openai/v1` : undefined) ?? model.baseUrl;
-	if (!resolvedBaseUrl) {
-		throw new Error(
-			"Azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME, or configure model.baseUrl.",
-		);
-	}
-	return resolvedBaseUrl.replace(/\/+$/, "");
-}
-
-export function appendAzureApiVersion(endpoint: string): string {
-	if (/[?&]api-version=/.test(endpoint)) return endpoint;
-	const separator = endpoint.includes("?") ? "&" : "?";
-	return `${endpoint}${separator}api-version=${encodeURIComponent($env.AZURE_OPENAI_API_VERSION || DEFAULT_AZURE_API_VERSION)}`;
 }
 
 function resolveCompactionV2Model(model: Model): string {

@@ -1,6 +1,49 @@
 import { describe, expect, it } from "bun:test";
 import { mmrRerank } from "@oh-my-pi/pi-mnemopi/core/mmr";
 import { adjustWeights, classifyIntent } from "@oh-my-pi/pi-mnemopi/core/query-intent";
+import { DEFAULT_HALFLIFE_HOURS, weibullBoost, weibullDecayFactor } from "@oh-my-pi/pi-mnemopi/core/weibull";
+
+describe("Weibull decay", () => {
+	it("keeps stable profile memories longer than fast request memories", () => {
+		const profileDecay = weibullDecayFactor(720, "profile");
+		const requestDecay = weibullDecayFactor(720, "request");
+
+		expect(profileDecay).toBeGreaterThan(requestDecay);
+		expect(profileDecay).toBeGreaterThan(0.5);
+	});
+
+	it("decays request memories quickly", () => {
+		expect(weibullDecayFactor(168, "request")).toBeLessThan(0.1);
+	});
+
+	it("gives a fresh memory a full boost", () => {
+		const now = new Date("2026-05-30T12:00:00.000Z");
+		expect(weibullBoost(now.toISOString(), now, "general")).toBeCloseTo(1.0, 5);
+	});
+
+	it("retains profiles longer than the default exponential fallback", () => {
+		const age = 5000;
+		const profileDecay = weibullDecayFactor(age, "profile");
+		const exponentialDecay = Math.exp(-age / DEFAULT_HALFLIFE_HOURS);
+
+		expect(profileDecay).toBeGreaterThan(exponentialDecay);
+	});
+
+	it("uses one-week exponential behavior for the general type", () => {
+		const age = 168;
+		expect(weibullDecayFactor(age, "general")).toBeCloseTo(Math.exp(-age / 168.0), 5);
+	});
+
+	it("returns zero for missing or invalid timestamps", () => {
+		expect(weibullBoost("not-a-date", undefined, "general")).toBe(0.0);
+		expect(weibullBoost(null, undefined, "general")).toBe(0.0);
+	});
+
+	it("clamps future timestamps to full boost", () => {
+		const queryTime = new Date("2026-05-30T12:00:00.000Z");
+		expect(weibullBoost("2026-05-30T13:00:00.000Z", queryTime, "general")).toBe(1.0);
+	});
+});
 
 describe("Query intent", () => {
 	it("classifies temporal queries", () => {

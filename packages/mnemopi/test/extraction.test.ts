@@ -4,9 +4,8 @@ import {
 	buildExtractionPrompt,
 	extractFacts,
 	extractFactsSafe,
-	flattenExtractedFactCategories,
 	heuristicExtractFacts,
-	parseExtractedFactCategories,
+	parseFacts,
 } from "@oh-my-pi/pi-mnemopi/core/extraction";
 import { getExtractionStats, resetExtractionStats } from "@oh-my-pi/pi-mnemopi/core/extraction/diagnostics";
 import {
@@ -19,11 +18,6 @@ import {
 	type ResolvedMnemopiRuntimeOptions,
 	withMnemopiRuntimeOptions,
 } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
-
-/** Parse extractor output the way the extraction pipeline does: categories, then the flat list. */
-function parseFacts(rawOutput: string): string[] {
-	return flattenExtractedFactCategories(parseExtractedFactCategories(rawOutput));
-}
 
 const OLD_ENV = { ...process.env };
 function restoreEnv(): void {

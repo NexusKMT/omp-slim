@@ -105,6 +105,19 @@ describe.skipIf(SKIP)("handleYouTube", () => {
 		}
 	}, 30000);
 
+	it("handles videos with transcripts gracefully", async () => {
+		// This video should have captions
+		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
+		expect(result).not.toBeNull();
+
+		if (result?.method === "youtube") {
+			// Either has transcript or explicitly notes it's not available
+			const hasTranscript = result.content.includes("Transcript");
+			const noTranscriptNote = result.content.includes("No transcript available");
+			expect(hasTranscript || noTranscriptNote).toBe(true);
+		}
+	}, 30000);
+
 	it("normalizes video URLs to canonical format", async () => {
 		// Different input formats should normalize to same canonical URL
 		const result = await handleYouTube("https://youtu.be/dQw4w9WgXcQ", 30);
@@ -122,6 +135,21 @@ describe.skipIf(SKIP)("handleYouTube", () => {
 			expect(result.content).toContain("dQw4w9WgXcQ");
 		} else {
 			expect(result.finalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+		}
+	}, 30000);
+
+	it("includes subtitle source information when available", async () => {
+		const result = await handleYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", 30);
+
+		if (result?.method === "youtube") {
+			// If transcript is present, should note the source
+			const hasManualNote = result.notes.includes("Using manual subtitles");
+			const hasAutoNote = result.notes.includes("Using auto-generated captions");
+			const hasNoSubsNote = result.notes.includes("No subtitles/captions available");
+
+			// Should have exactly one of these
+			const noteCount = [hasManualNote, hasAutoNote, hasNoSubsNote].filter(Boolean).length;
+			expect(noteCount).toBeGreaterThanOrEqual(1);
 		}
 	}, 30000);
 

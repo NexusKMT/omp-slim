@@ -5,7 +5,12 @@
  * never silently become 90 seconds.
  */
 import { describe, expect, it } from "bun:test";
-import { parseVideoSelector, parseVideoTimestamp, splitVideoReadTarget } from "@oh-my-pi/pi-coding-agent/utils/video";
+import {
+	formatVideoTimestamp,
+	parseVideoSelector,
+	parseVideoTimestamp,
+	splitVideoReadTarget,
+} from "@oh-my-pi/pi-coding-agent/utils/video";
 
 describe("parseVideoSelector", () => {
 	it("reads a bare integer as a frame index", () => {
@@ -48,6 +53,16 @@ describe("parseVideoTimestamp", () => {
 	it("rejects non-timestamp shapes", () => {
 		expect(parseVideoTimestamp("412")).toBeNull();
 		expect(parseVideoTimestamp("abc")).toBeNull();
+	});
+});
+
+describe("formatVideoTimestamp", () => {
+	it("formats sub-hour positions as m:ss", () => {
+		expect(formatVideoTimestamp(83)).toBe("1:23");
+	});
+
+	it("formats hour positions with h/m/s units", () => {
+		expect(formatVideoTimestamp(3942)).toBe("1h5m42s");
 	});
 });
 

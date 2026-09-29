@@ -2,7 +2,15 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ANNOTATION_KINDS, AnnotationStore, filterCleanMentions } from "@oh-my-pi/pi-mnemopi/core/annotations";
+import {
+	ANNOTATION_KINDS,
+	AnnotationStore,
+	addAnnotation,
+	filterCleanMentions,
+	filterFacts,
+	initAnnotations,
+	queryAnnotations,
+} from "@oh-my-pi/pi-mnemopi/core/annotations";
 import { openDatabase } from "@oh-my-pi/pi-mnemopi/db";
 
 const cleanup: string[] = [];
@@ -79,11 +87,12 @@ describe("AnnotationStore", () => {
 		}
 	});
 
-	it("filters known annotation kinds and noisy mention rows like the Python helpers", () => {
+	it("filters known annotation kinds, noisy mention rows, and short facts like the Python helpers", () => {
 		expect(ANNOTATION_KINDS.has("mentions")).toBe(true);
 		expect(ANNOTATION_KINDS.has("fact")).toBe(true);
 		expect(ANNOTATION_KINDS.has("occurred_on")).toBe(true);
 		expect(ANNOTATION_KINDS.has("has_source")).toBe(true);
+		expect(filterFacts(["short", "This fact is long enough"])).toEqual(["This fact is long enough"]);
 		expect(
 			filterCleanMentions([{ value: "Alice" }, { value: "assistant" }, { value: "Project Alice" }]).map(
 				row => row.value,
@@ -119,7 +128,9 @@ describe("AnnotationStore", () => {
 	});
 
 	it("initializes and reuses a shared bun:sqlite connection", () => {
-		const db = openDatabase(tempDb());
+		const path = tempDb();
+		initAnnotations(path);
+		const db = openDatabase(path);
 		try {
 			const store = new AnnotationStore({ conn: db });
 			store.add("mem-1", "has_source", "custom-tool");
@@ -133,5 +144,12 @@ describe("AnnotationStore", () => {
 		} finally {
 			db.close();
 		}
+	});
+
+	it("provides module-level snake_case convenience APIs", () => {
+		const path = tempDb();
+		addAnnotation("mem-1", "occurred_on", "2026-05-30", "test", 1.0, path);
+		addAnnotation("mem-1", "mentions", "Alice", "test", 1.0, path);
+		expect(queryAnnotations("mem-1", "occurred_on", undefined, path).map(row => row.value)).toEqual(["2026-05-30"]);
 	});
 });

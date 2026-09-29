@@ -27,6 +27,8 @@ interface ProbeReport {
 	gateResult: boolean;
 	forced: boolean;
 	secondSuppress: boolean;
+	suppressedWhileActive: boolean;
+	suppressedAfterRestore: boolean;
 }
 
 interface RotationReport {
@@ -47,13 +49,14 @@ describe("stderr guard", () => {
 		fs.writeFileSync(
 			probePath,
 			[
-				`import { restoreTerminalStderr, suppressTerminalStderr } from ${JSON.stringify(GUARD_MODULE)};`,
+				`import { isTerminalStderrSuppressed, restoreTerminalStderr, suppressTerminalStderr } from ${JSON.stringify(GUARD_MODULE)};`,
 				`import * as fs from "node:fs";`,
 				`const redirectPath = process.argv[2];`,
 				`fs.writeSync(2, "before\\n");`,
 				`// stderr is a pipe here, so the same-terminal gate must refuse.`,
 				`const gateResult = suppressTerminalStderr();`,
 				`const forced = suppressTerminalStderr({ force: true, redirectPath });`,
+				`const suppressedWhileActive = isTerminalStderrSuppressed();`,
 				`if (forced) fs.writeSync(2, "hidden\\n");`,
 				`// Idempotent while active: must not stack a second saved fd.`,
 				`const secondSuppress = suppressTerminalStderr({ force: true, redirectPath });`,
@@ -66,6 +69,8 @@ describe("stderr guard", () => {
 				`	gateResult,`,
 				`	forced,`,
 				`	secondSuppress,`,
+				`	suppressedWhileActive,`,
+				`	suppressedAfterRestore: isTerminalStderrSuppressed(),`,
 				`}));`,
 			].join("\n"),
 		);
@@ -84,8 +89,10 @@ describe("stderr guard", () => {
 		const report = JSON.parse(stdout) as ProbeReport;
 		// Piped stderr is not the stdout terminal → the non-forced gate refuses.
 		expect(report.gateResult).toBe(false);
+		expect(report.suppressedAfterRestore).toBe(false);
 
 		if (report.forced) {
+			expect(report.suppressedWhileActive).toBe(true);
 			expect(report.secondSuppress).toBe(true);
 			expect(stderr).toBe("before\nafter\nstill-visible\n");
 			expect(fs.readFileSync(redirectPath, "utf8")).toBe("hidden\n");

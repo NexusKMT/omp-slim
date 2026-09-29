@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { peekFile, peekFileEnds, peekFileTail } from "@oh-my-pi/pi-utils/peek-file";
+import { peekFile, peekFileEnds, peekFileSync, peekFileTail } from "@oh-my-pi/pi-utils/peek-file";
 
 function rangeBuffer(length: number, offset = 0): Buffer {
 	return Buffer.from(Array.from({ length }, (_, index) => (index + offset) % 256));
@@ -30,6 +30,15 @@ describe("peekFile", () => {
 
 		const header = await peekFile(filePath, 37, bytes => bytes.slice());
 		expect(bytesOf(header)).toEqual(bytesOf(content.subarray(0, 37)));
+	});
+
+	it("reads an exact header slice synchronously", () => {
+		const filePath = path.join(tempDir, "sample.bin");
+		const content = rangeBuffer(2048);
+		fs.writeFileSync(filePath, content);
+
+		const header = peekFileSync(filePath, 777, bytes => bytes.slice());
+		expect(bytesOf(header)).toEqual(bytesOf(content.subarray(0, 777)));
 	});
 
 	it("keeps a retained 512-byte slice stable across later peeks", async () => {

@@ -19,6 +19,7 @@ import {
 	type ManagerUpdateSteps,
 	migrateRenamedInstall,
 	parseReportedVersion,
+	parseUpdateArgs,
 	pruneBunInstallCache,
 	type ReleaseInfo,
 	type RenameMigrationSteps,
@@ -37,7 +38,6 @@ import {
 	updateViaShimTakeover,
 } from "@oh-my-pi/pi-coding-agent/cli/update-cli";
 import Update from "@oh-my-pi/pi-coding-agent/commands/update";
-import { CliUsageError } from "@oh-my-pi/pi-coding-agent/cli/usage-error";
 import { $which, removeWithRetries } from "@oh-my-pi/pi-utils";
 import type { CliConfig } from "@oh-my-pi/pi-utils/cli";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
@@ -100,29 +100,30 @@ describe("update command plugin dispatch", () => {
 		expect(updateSpy).toHaveBeenCalledWith({ force: true, check: true, channel: undefined });
 		expect(pluginSpy).not.toHaveBeenCalled();
 	});
-
-	it("parses update channels", async () => {
-		const updateSpy = spyOn(updateCli, "runUpdateCommand").mockResolvedValue(undefined);
-
-		await new Update(["--canary"], TEST_CONFIG).run();
-		await new Update(["--stable"], TEST_CONFIG).run();
-		await new Update([], TEST_CONFIG).run();
-
-		expect(updateSpy.mock.calls.map(([options]) => options.channel)).toEqual(["canary", "stable", undefined]);
-	});
-
-	it("rejects conflicting update channels", async () => {
-		const pluginSpy = spyOn(pluginCli, "runPluginCommand").mockResolvedValue(undefined);
-		const updateSpy = spyOn(updateCli, "runUpdateCommand").mockResolvedValue(undefined);
-
-		const run = new Update(["--canary", "--stable"], TEST_CONFIG).run();
-		await expect(run).rejects.toBeInstanceOf(CliUsageError);
-		await expect(run).rejects.toThrow("--canary and --stable are mutually exclusive");
-		expect(updateSpy).not.toHaveBeenCalled();
-		expect(pluginSpy).not.toHaveBeenCalled();
-	});
 });
 
+describe("parseUpdateArgs", () => {
+	it("preserves the legacy plugin update shorthand", () => {
+		expect(parseUpdateArgs(["update", "-l"])).toEqual({
+			force: false,
+			check: false,
+			plugins: true,
+			channel: undefined,
+		});
+	});
+
+	it("parses update channels", () => {
+		expect(parseUpdateArgs(["update", "--canary"])?.channel).toBe("canary");
+		expect(parseUpdateArgs(["update", "--stable"])?.channel).toBe("stable");
+		expect(parseUpdateArgs(["update"])?.channel).toBeUndefined();
+	});
+
+	it("rejects conflicting update channels", () => {
+		expect(() => parseUpdateArgs(["update", "--canary", "--stable"])).toThrow(
+			"--canary and --stable are mutually exclusive",
+		);
+	});
+});
 describe("GitHub update credentials", () => {
 	it("prefers an explicit environment token over gh auth", async () => {
 		let calls = 0;

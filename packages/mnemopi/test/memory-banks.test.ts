@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BankManager, ValueError } from "@oh-my-pi/pi-mnemopi/core/banks";
+import { BankManager, bankDbPath, ValueError } from "@oh-my-pi/pi-mnemopi/core/banks";
 
 describe("BankManager", () => {
 	it("creates, lists, renames, stats, and deletes isolated bank directories", () => {
@@ -36,6 +36,7 @@ describe("BankManager", () => {
 			expect(() => manager.createBank("bank.with.dots")).toThrow();
 			expect(() => manager.getBankDbPath("../escape")).toThrow(ValueError);
 			expect(() => manager.deleteBank("../escape", true)).toThrow(ValueError);
+			expect(() => bankDbPath("../escape", root)).toThrow(ValueError);
 			expect(manager.getBankDbPath("")).toBe(join(root, "mnemopi.db"));
 			expect(() => manager.deleteBank("default")).toThrow();
 			expect(manager.deleteBank("default", true)).toBe(false);

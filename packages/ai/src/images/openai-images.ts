@@ -54,12 +54,17 @@ export async function generateOpenAIImage(
 			? { ...generationBody, image: firstReference }
 			: { ...generationBody, images: references }
 		: { ...generationBody, input_references: references };
-	const baseUrl = imageBaseUrl(isXAI ? { ...model, baseUrl: resolveXaiBaseUrl(model.baseUrl) ?? "" } : model);
+	const baseUrl = imageBaseUrl(model);
+	// xAI resolves the endpoint per bearer: XAI_BASE_URL never receives an xai-oauth OAuth access token.
+	const endpoint = (path: string) =>
+		isXAI
+			? (bearer: string) => `${resolveXaiBaseUrl(model.provider, baseUrl, bearer) ?? baseUrl}${path}`
+			: `${baseUrl}${path}`;
 	let response: unknown;
 	if (references.length === 0) {
 		response = await postJson({
 			model,
-			url: `${baseUrl}/images/generations`,
+			url: endpoint("/images/generations"),
 			body: generationBody,
 			apiKey: options.apiKey,
 			fetch: fetchImpl,
@@ -79,7 +84,7 @@ export async function generateOpenAIImage(
 				}
 				response = await postMultipart({
 					model,
-					url: `${baseUrl}/images/edits`,
+					url: endpoint("/images/edits"),
 					body: form,
 					apiKey: options.apiKey,
 					fetch: fetchImpl,
@@ -88,7 +93,7 @@ export async function generateOpenAIImage(
 			} else {
 				response = await postJson({
 					model,
-					url: `${baseUrl}/images/edits`,
+					url: endpoint("/images/edits"),
 					body,
 					apiKey: options.apiKey,
 					fetch: fetchImpl,
@@ -99,7 +104,7 @@ export async function generateOpenAIImage(
 			if (!(error instanceof AIError.ProviderHttpError) || error.status !== 404) throw error;
 			response = await postJson({
 				model,
-				url: `${baseUrl}/images/generations`,
+				url: endpoint("/images/generations"),
 				body,
 				apiKey: options.apiKey,
 				fetch: fetchImpl,

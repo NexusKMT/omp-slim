@@ -8,8 +8,8 @@ import {
 	type CacheWarmerDeps,
 	type CacheWarmStream,
 	getCacheWarmingDelayMs,
+	getPromptCacheTtlMs,
 	isReplayable,
-	resolvePromptCacheTier,
 } from "../src/session/cache-warmer";
 
 const SHORT_DELAY_MS = 4.5 * 60_000; // 90% of the 300s short tier
@@ -170,26 +170,29 @@ describe("cache warming scheduling math", () => {
 		expect(getCacheWarmingDelayMs(5_000)).toBeUndefined();
 	});
 
-	test("resolves the tier matching the request retention and the OAuth default", () => {
+	test("reads the tier matching the request retention and the OAuth default", () => {
 		// PI_CACHE_RETENTION feeds the default tier; scrub it so the
 		// undefined-options assertions hold on any developer/CI environment.
 		const savedRetention = process.env.PI_CACHE_RETENTION;
 		delete process.env.PI_CACHE_RETENTION;
 		try {
 			const model = makeModel();
-			expect(resolvePromptCacheTier(model, { cacheRetention: "short" })).toBe("short");
-			expect(resolvePromptCacheTier(model, { cacheRetention: "long" })).toBe("long");
-			expect(resolvePromptCacheTier(model, undefined)).toBe("short");
+			expect(getPromptCacheTtlMs(model, { cacheRetention: "short" })).toBe(300_000);
+			expect(getPromptCacheTtlMs(model, { cacheRetention: "long" })).toBe(3_600_000);
+			expect(getPromptCacheTtlMs(model, undefined)).toBe(300_000);
 			// OAuth seats default to the 1h tier, but an explicit retention still wins.
-			expect(resolvePromptCacheTier(model, undefined, true)).toBe("long");
-			expect(resolvePromptCacheTier(model, { cacheRetention: "short" }, true)).toBe("short");
+			expect(getPromptCacheTtlMs(model, undefined, true)).toBe(3_600_000);
+			expect(getPromptCacheTtlMs(model, { cacheRetention: "short" }, true)).toBe(300_000);
 		} finally {
 			if (savedRetention !== undefined) process.env.PI_CACHE_RETENTION = savedRetention;
 		}
 	});
 
-	test("never picks a tier with caching off", () => {
-		expect(resolvePromptCacheTier(makeModel(), { cacheRetention: "none" })).toBeUndefined();
+	test("never warms without a declared lifetime or with caching off", () => {
+		const model = makeModel();
+		model.promptCache = undefined;
+		expect(getPromptCacheTtlMs(model, undefined)).toBeUndefined();
+		expect(getPromptCacheTtlMs(makeModel(), { cacheRetention: "none" })).toBeUndefined();
 	});
 
 	test("skips budget-based Anthropic thinking but allows adaptive thinking and other providers", () => {
@@ -256,28 +259,6 @@ describe("cache warmer lifecycle", () => {
 		expect(h.warmer.status).toMatchObject({ state: "inactive", reason: "refresh missed the cache" });
 		await advance(SHORT_DELAY_MS * 4);
 		expect(h.replays).toHaveLength(1);
-	});
-
-	test("never warms a model without a declared promptCache lifetime", async () => {
-		const h = harness();
-		const model = makeModel();
-		model.promptCache = undefined;
-		h.warmer.start({ model, context: { messages: [] }, options: {} }, () => h.current);
-		expect(h.warmer.status).toMatchObject({ state: "inactive", reason: "cache lifetime unavailable" });
-		await advance(LONG_DELAY_MS * 2);
-		expect(h.replays).toHaveLength(0);
-		expect(h.warmed).toHaveLength(0);
-	});
-
-	test("never warms a retention tier the model does not declare", async () => {
-		const h = harness();
-		const model = makeModel();
-		model.promptCache = { short: 300 };
-		h.warmer.start({ model, context: { messages: [] }, options: { cacheRetention: "long" } }, () => h.current);
-		expect(h.warmer.status).toMatchObject({ state: "inactive", reason: "cache lifetime unavailable" });
-		await advance(LONG_DELAY_MS * 2);
-		expect(h.replays).toHaveLength(0);
-		expect(h.warmed).toHaveLength(0);
 	});
 
 	test("stops after a failed refresh instead of retrying every interval", async () => {

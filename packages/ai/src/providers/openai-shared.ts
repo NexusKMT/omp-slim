@@ -258,7 +258,7 @@ export function resolveOpenAIRequestSetup(
 		}
 	}
 	if (model.provider === "xai" || model.provider === "xai-oauth") {
-		baseUrl = resolveXaiBaseUrl(baseUrl);
+		baseUrl = resolveXaiBaseUrl(model.provider, baseUrl, rawApiKey);
 	}
 	if (model.provider === "github-copilot") {
 		const copilotApiKey = parseGitHubCopilotApiKey(rawApiKey);

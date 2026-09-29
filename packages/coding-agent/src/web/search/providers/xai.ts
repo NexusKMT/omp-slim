@@ -1,5 +1,6 @@
 import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/providers/xai-base-url";
+import type { XAIHttpTransport } from "../../../lib/xai-http";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatQuery, parseSearchQuery, type QuerySyntax } from "../query";
@@ -15,12 +16,6 @@ const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 30;
 /** Messages at least this long are treated as substantive content, not relay narration. */
 const SUBSTANTIVE_MIN_CHARS = 300;
-
-/** Resolved endpoint and configured headers for an xAI HTTP request. */
-interface XAIHttpTransport {
-	baseURL: string;
-	headers?: Record<string, string>;
-}
 
 interface XAIUrlCitationAnnotation {
 	type?: string;
@@ -413,20 +408,18 @@ export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 			400,
 		);
 	}
-	const baseURL = resolveXaiBaseUrl(params.model.baseUrl) ?? params.model.baseUrl;
 	const transport: XAIHttpTransport = {
-		baseURL,
+		baseURL: params.model.baseUrl,
 		headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
 	};
 	const customEndpoint = transport.baseURL.replace(/\/+$/, "") !== XAI_DEFAULT_BASE_URL;
 	const credentialOrigin = params.authStorage.keys.source(params.model.provider);
 	const hasCommandBackedKey = params.modelRegistry.hasCommandBackedApiKey(params.model.provider);
-	if (
-		customEndpoint &&
+	const officialOAuthCredential =
 		params.model.provider === "xai-oauth" &&
 		!hasCommandBackedKey &&
-		(credentialOrigin?.kind === "oauth" || credentialOrigin?.kind === "env")
-	) {
+		(credentialOrigin?.kind === "oauth" || credentialOrigin?.kind === "env");
+	if (customEndpoint && officialOAuthCredential) {
 		throw new SearchProviderError(
 			"xai",
 			`Refusing to send official xAI OAuth credentials to custom endpoint ${transport.baseURL}. Configure an API key for provider "xai-oauth".`,
@@ -438,7 +431,11 @@ export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 		keyOrResolver,
 		async key => {
 			const requestTransport: XAIHttpTransport = {
-				baseURL,
+				// XAI_BASE_URL never receives official OAuth credentials: neither an OAuth-origin
+				// credential nor an OAuth access-token bearer leaves the bundled endpoint.
+				baseURL: officialOAuthCredential
+					? params.model.baseUrl
+					: (resolveXaiBaseUrl(params.model.provider, params.model.baseUrl, key) ?? params.model.baseUrl),
 				headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
 			};
 			return callXAIResponses(key, params, requestTransport);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isProbablyBinary, isProbablyBinaryHeader } from "@oh-my-pi/pi-utils/binary";
+import { isProbablyBinary, isProbablyBinaryHeader, isProbablyBinarySync } from "@oh-my-pi/pi-utils/binary";
 
 describe("isProbablyBinaryHeader", () => {
 	it("treats empty input as text", () => {
@@ -38,7 +38,7 @@ describe("isProbablyBinaryHeader", () => {
 	});
 });
 
-describe("isProbablyBinary", () => {
+describe("isProbablyBinary / isProbablyBinarySync", () => {
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-binary-"));
 
 	function writeFile(name: string, bytes: Uint8Array | string): string {
@@ -47,13 +47,15 @@ describe("isProbablyBinary", () => {
 		return filePath;
 	}
 
-	it("classifies a binary file from disk", async () => {
+	it("classifies a binary file from disk (async + sync agree)", async () => {
 		const filePath = writeFile("font.ttf", Buffer.from([0x00, 0x01, 0x00, 0x00, 0x00, 0x0c]));
 		expect(await isProbablyBinary(filePath)).toBe(true);
+		expect(isProbablyBinarySync(filePath)).toBe(true);
 	});
 
 	it("classifies a UTF-8 text file from disk as text", async () => {
 		const filePath = writeFile("notes.md", "# Title\n\nbody text\n");
 		expect(await isProbablyBinary(filePath)).toBe(false);
+		expect(isProbablyBinarySync(filePath)).toBe(false);
 	});
 });
