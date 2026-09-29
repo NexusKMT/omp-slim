@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Improved rendering speed for long Markdown lists while replies stream in.
+- Improved rendering speed for long Markdown lists while replies stream in ([#13701](https://github.com/can1357/oh-my-pi/pull/13701) by [@iliaal](https://github.com/iliaal)).
 
 ## [18.4.3] - 2026-09-28
 
