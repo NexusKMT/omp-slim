@@ -163,7 +163,17 @@ describe("launch without a terminal on stdin", () => {
 describe("mode-dependent guards defer to flag-value errors", () => {
 	it("starts rpc-ui with headless extensions instead of rejecting --no-ui", async () => {
 		using tempDir = TempDir.createSync("@omp-no-ui-rpc-ui-");
-		const run = await launchWithoutTerminal(tempDir, ["--mode", "rpc-ui", "--no-ui"]);
+		// An explicit catalog model starts RPC without credentials, so the result
+		// does not depend on which keyless local models the host provides.
+		const run = await launchWithoutTerminal(tempDir, [
+			"--mode",
+			"rpc-ui",
+			"--no-ui",
+			"--provider",
+			"anthropic",
+			"--model",
+			"claude-sonnet-4-5",
+		]);
 
 		expect(run.stderr).not.toContain("--no-ui requires --mode rpc");
 		expect(run.exitCode, run.stderr).toBe(0);
