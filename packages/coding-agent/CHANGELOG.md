@@ -4,7 +4,7 @@
 
 ### Added
 
-- Typing just `exit`, `quit`, or `q` (no leading `/`) in a session with no messages now quits; turn off with `input.bareExitOnEmptySession` ([#3850](https://github.com/can1357/oh-my-pi/issues/3850))
+- Typing just `exit`, `quit`, or `q` (no leading `/`) in a session with no messages now quits; turn off with `input.bareExitOnEmptySession` ([#13755](https://github.com/can1357/oh-my-pi/pull/13755) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
