@@ -261,6 +261,22 @@ describe("Anthropic on-demand compaction requests", () => {
 		expect(supportsAnthropicCompaction(bedrock, origin)).toBe(false);
 		expect(supportsAnthropicCompaction(bedrock, `${origin}/openai/v1`)).toBe(false);
 	});
+
+	it("gates a first-party reroute and an opt-out on compat.bedrockMessagesApi", () => {
+		const runtimeRoute = "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
+		// Rerouted without the flag: excluded, as before Bedrock support.
+		expect(supportsAnthropicCompaction(model, runtimeRoute)).toBe(false);
+		const optedIn = buildModel({ ...spec, compat: { bedrockMessagesApi: true } });
+		expect(supportsAnthropicCompaction(optedIn, runtimeRoute)).toBe(true);
+		const optedOut = buildModel({
+			...spec,
+			id: "us.anthropic.claude-fable-5",
+			provider: "amazon-bedrock",
+			baseUrl: runtimeRoute,
+			compat: { bedrockMessagesApi: false },
+		});
+		expect(supportsAnthropicCompaction(optedOut)).toBe(false);
+	});
 });
 
 describe("Anthropic on-demand compaction response", () => {

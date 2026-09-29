@@ -46,10 +46,15 @@ export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, 
 		(model.provider === "anthropic"
 			? resolveDirectAnthropicBaseUrl(model)
 			: normalizeAnthropicBaseUrl(model.baseUrl));
-	// Bedrock's own `/anthropic` routes are AWS endpoints, not gateways; catalog policy
-	// grants the capability to the Bedrock providers, whose request hooks fit the body
-	// to these routes. A first-party model rerouted here stays excluded, as before.
-	if (isBedrockAnthropicRoute(route)) return model.compat.firstPartyProvider !== true;
+	// Bedrock's Anthropic Messages API implements on-demand compaction. The flag is detected
+	// from a Bedrock `/anthropic` baseUrl, or set in models.yml for a proxy or a reroute; it
+	// applies to the model's own endpoint or a Bedrock `/anthropic` route it reaches.
+	if (
+		model.compat.bedrockMessagesApi === true &&
+		(isBedrockAnthropicRoute(route) || route === normalizeAnthropicBaseUrl(model.baseUrl))
+	) {
+		return true;
+	}
 	return (
 		isSupportedCompactionEndpoint(route) &&
 		(model.compat.firstPartyProvider === true ||

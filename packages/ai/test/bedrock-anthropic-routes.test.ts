@@ -25,7 +25,12 @@ const context: Context = {
 	],
 };
 
-function claude(provider: string, id: string, baseUrl: string): Model<"anthropic-messages"> {
+function claude(
+	provider: string,
+	id: string,
+	baseUrl: string,
+	compat?: ModelSpec<"anthropic-messages">["compat"],
+): Model<"anthropic-messages"> {
 	const spec: ModelSpec<"anthropic-messages"> = {
 		id,
 		name: "Claude Opus 5.5",
@@ -37,6 +42,7 @@ function claude(provider: string, id: string, baseUrl: string): Model<"anthropic
 		cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 		contextWindow: 1_000_000,
 		maxTokens: 128_000,
+		compat,
 	};
 	return buildModel(spec);
 }
@@ -186,6 +192,26 @@ describe("Amazon Bedrock /anthropic requests", () => {
 			expect(payload.tools?.find(tool => tool.name === "bash")?.strict).toBe(true);
 			expect(payload.metadata?.user_id).toBe(JSON_USER_ID);
 		});
+	});
+
+	it("shapes a rerouted first-party request when compat.bedrockMessagesApi opts in", async () => {
+		const optedIn = claude("anthropic", "claude-opus-5-5", "https://api.anthropic.com", { bedrockMessagesApi: true });
+		await withEnv({ ANTHROPIC_BASE_URL: RUNTIME_URL }, async () => {
+			expectBedrockShape(await sentPayload(optedIn, { isOAuth: false, metadata: { user_id: JSON_USER_ID } }));
+		});
+	});
+
+	it("shapes a custom provider id on a Bedrock route", async () => {
+		const custom = claude("my-bedrock", "us.anthropic.claude-opus-5-5", RUNTIME_URL);
+		expectBedrockShape(await sentPayload(custom, { isOAuth: false, metadata: { user_id: JSON_USER_ID } }));
+	});
+
+	it("keeps caller metadata when compat.bedrockMessagesApi opts a Bedrock route out", async () => {
+		const optedOut = claude("amazon-bedrock", "us.anthropic.claude-opus-5-5", RUNTIME_URL, {
+			bedrockMessagesApi: false,
+		});
+		const payload = await sentPayload(optedOut, { isOAuth: false, metadata: { user_id: JSON_USER_ID } });
+		expect(payload.metadata?.user_id).toBe(JSON_USER_ID);
 	});
 
 	it("omits metadata whose user id cannot fit Bedrock's pattern", async () => {

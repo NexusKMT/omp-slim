@@ -680,7 +680,7 @@ For `anthropic-messages` models the runtime uses a separate `AnthropicCompat` sh
 top-level provider field; inside `compat` it honors every shared key that also names an
 `AnthropicCompat` field: `supportsContextManagement`, `supportsEagerToolInputStreaming`,
 `supportsForcedToolChoice`, `allowAnthropicHeaderOverrides`, `requiresToolResultId`,
-`replayUnsignedThinking`, `stripImageInput`, and `streamIdleTimeoutMs`. Other Anthropic-side knobs
+`replayUnsignedThinking`, `bedrockMessagesApi`, `stripImageInput`, and `streamIdleTimeoutMs`. Other Anthropic-side knobs
 are supplied by built-in catalog metadata and are not configurable here — `applyCompatOverrides`
 drops override keys the resolved shape does not declare.
 
@@ -768,14 +768,28 @@ providers:
         input: [text, image]
 ```
 
-For models under the `amazon-bedrock` and `bedrock-mantle` providers, the provider's request hook
-fits each request to these routes after any `onPayload` hook runs. Both routes reject the tool
-`strict` field, so OMP drops it. OMP also fits `metadata.user_id` to
+Requests on these routes are shaped by `compat.bedrockMessagesApi`, which OMP detects from a Bedrock
+`/anthropic` `baseUrl` under any provider id. Both routes reject the tool `strict` field, so OMP drops
+it. OMP also fits `metadata.user_id` to
 Bedrock's [request-metadata pattern](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
 which the runtime route enforces: a value that fits is kept, otherwise its session id is sent,
-otherwise it is left out. The first-party `anthropic` provider pointed at a Bedrock URL (for
-example through `ANTHROPIC_BASE_URL`) gets none of this and no native compaction. Both routes verify
-thinking signatures, so by default OMP does not replay unsigned thinking to them.
+otherwise it is left out. Both run after any `onPayload` hook. Both routes verify thinking
+signatures, so by default OMP does not replay unsigned thinking to them.
+
+The URL check cannot see a Bedrock route behind a proxy or an `ANTHROPIC_BASE_URL` reroute of the
+first-party `anthropic` provider; those keep plain Anthropic requests unless you opt in. Set the flag
+in `compat` (provider-wide or under `modelOverrides`) to opt in, or to `false` to opt a Bedrock URL
+out:
+
+```yaml
+providers:
+  anthropic:
+    compat:
+      bedrockMessagesApi: true # ANTHROPIC_BASE_URL points at bedrock-runtime /anthropic
+```
+
+On-demand compaction still needs a model line the catalog grants it to (`amazon-bedrock`,
+`bedrock-mantle`, or `anthropic` provider ids).
 
 ### Strict tool schemas (`disableStrictTools`)
 
