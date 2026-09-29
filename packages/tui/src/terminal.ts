@@ -1586,9 +1586,7 @@ export class ProcessTerminal implements Terminal {
 
 		// Handler that pipes stdin data through the buffer
 		this.#stdinDataHandler = (data: string) => {
-			// Reassert for subsequent input; this cannot bracket bytes already received.
-			// After a silent host reset with no intervening input/render, the first
-			// unmarked paste still replays as keys if the loop-stall probe is true.
+			// Recover modes reset by the host before the user's next paste.
 			if (data && this.#active && this.#privateModeSupport.get(2004)) this.#safeWrite("\x1b[?2004h");
 			this.#stdinBuffer!.process(data);
 		};
@@ -1913,7 +1911,7 @@ export class ProcessTerminal implements Terminal {
 		}
 		if (mode === 2048 && supported) this.#enableInBandResize();
 		if (mode === 2031) this.#syncWindowsTerminalAppearancePolling(supported);
-		// With bracketed-paste mode still enabled, a genuine paste arrives
+		// Confirmed bracketed-paste support means a genuine paste arrives
 		// wrapped, so an unmarked multiline burst is an input-method commit
 		// (#13344) unless an event-loop stall batched typed keys into one read
 		// (#12540). Let the host's stall probe decide per burst. `supported` is

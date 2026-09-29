@@ -650,14 +650,12 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 	/**
 	 * Gate unbracketed raw-paste classification on event-loop responsiveness.
 	 * Terminal installs a probe once DECRQM confirms bracketed-paste (mode
-	 * 2004) support: while that mode remains enabled, a genuine paste arrives
-	 * wrapped, so an unmarked multiline burst is either an input-method commit — IME,
+	 * 2004) support: a genuine paste then always arrives wrapped, so an
+	 * unmarked multiline burst is either an input-method commit — IME,
 	 * dictation, and emoji commits are typed input, never bracketed (#13344) —
 	 * or keystrokes an event-loop stall batched into one read (#12540). A burst
 	 * classified while `stalled()` reports a stall is replayed as the original
 	 * keys so every Enter submits; otherwise it is delivered as one paste.
-	 * A host reset can leave the first paste unmarked before mode recovery;
-	 * this is indistinguishable from batched typing when the probe reports a stall.
 	 * `undefined` restores unconditional classification.
 	 */
 	setRawPasteStallProbe(stalled: (() => boolean) | undefined): void {
