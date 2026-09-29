@@ -7,9 +7,13 @@
 - Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
 ### Added
 
-- Added Command Code usage limits (5-hour, weekly, and credit balance) to /usage and the status line ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- Cursor turns routed through an HTTP proxy now finish instead of hanging after the response completes ([#13724](https://github.com/can1357/oh-my-pi/pull/13724) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.3] - 2026-09-28
+
+### Added
+
+- Added Command Code usage limits (5-hour, weekly, and credit balance) to /usage and the status line ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ### Changed
 
