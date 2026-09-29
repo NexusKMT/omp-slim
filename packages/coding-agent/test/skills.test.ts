@@ -932,10 +932,20 @@ describe("parseSkillInvocation", () => {
 			expect(parseSkillInvocation("https://example.com/skill:foo")).toBeUndefined();
 		});
 
-		it("excludes embedded slashes from the mid-prompt skill name", () => {
-			// `/skill:foo/bar` mid-prompt is ambiguous with a path — the mid-prompt
-			// regex requires `[^\s/]+`, so this falls through with no match.
-			expect(parseSkillInvocation("see /skill:foo/bar")).toBeUndefined();
+		it("parses a collision-namespaced skill mid-prompt", () => {
+			// `<namespace>/<name>` is the address a differing same-name skill gets,
+			// and mid-prompt completion inserts it, so the token must invoke it.
+			expect(parseSkillInvocation("fix the bug /skill:superpowers/tdd focus on auth")).toEqual({
+				name: "superpowers/tdd",
+				args: "fix the bug focus on auth",
+				prompt: "fix the bug /skill:superpowers/tdd focus on auth",
+			});
+		});
+
+		it("rejects mid-prompt skill tokens with more than one namespace segment", () => {
+			// Only one `/` is a namespaced name; deeper tokens read as paths.
+			expect(parseSkillInvocation("see /skill:foo/bar/baz")).toBeUndefined();
+			expect(parseSkillInvocation("see /skill:foo/")).toBeUndefined();
 		});
 	});
 });
