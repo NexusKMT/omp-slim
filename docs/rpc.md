@@ -166,6 +166,23 @@ Important edge behavior from runtime:
 - `{ id?, type: "compact", customInstructions?: string }`
 - `{ id?, type: "set_auto_compaction", enabled: boolean }`
 
+### Cache warming
+
+- `{ id?, type: "set_cache_warming", mode: "off" | "streaming" | "idle" }`
+
+Sets `providers.cacheWarming` for the current session without writing `config.yml`.
+`off` clears scheduled refreshes and aborts any refresh in flight; `streaming`
+warms during active agent runs; `idle` also warms between runs. Enabling warming
+does not replay an old, cancelled run: the next real provider request arms it.
+Invalid modes return the usual `success: false` response. Success reports the
+effective mode after applying the override:
+
+```json
+{"id":"warming-off","type":"response","command":"set_cache_warming","success":true,"data":{"mode":"off"}}
+```
+
+The TypeScript client exposes `setCacheWarming(mode): Promise<CacheWarmingMode>`.
+
 ### Retry
 
 - `{ id?, type: "set_auto_retry", enabled: boolean }`
@@ -552,6 +569,7 @@ Common event types:
 - `tool_execution_start`, `tool_execution_update`, `tool_execution_end`
 - `auto_compaction_start`, `auto_compaction_end`
 - `auto_retry_start`, `auto_retry_end`
+- `cache_warming_start`, `cache_warming_end`
 - `retry_fallback_applied`, `retry_fallback_succeeded`
 - `model_changed`, `thinking_level_changed`
 - `ttsr_triggered`
@@ -615,6 +633,54 @@ Each command replaces the whole filter state: omitting `messageUpdates` resets i
 so the session will resume before its true final settle. Treat an `agent_end` as
 run completion only when `isTerminal !== false`; the field is optional so frames
 from older runtimes, where it is absent, remain terminal-compatible.
+
+### Cache warming events
+
+Each refresh handed to the provider stream emits one start and one matching end
+(a session disposed mid-refresh emits no end).
+Warm-or-stop decisions that do not send a request emit neither. These are
+session events, so **both types must be listed in `set_event_filter` when a filter
+is active** to observe complete refresh lifecycles:
+
+```ts
+{
+  type: "cache_warming_start";
+  phase: "streaming" | "idle";
+  provider: string;
+  model: string; // model id
+}
+{
+  type: "cache_warming_end";
+  phase: "streaming" | "idle"; // same phase as the matching start
+  provider: string;
+  model: string;
+  outcome: "hit" | "miss" | "error" | "aborted";
+  usage?: Usage;
+  warmingStopReason?: string;
+}
+```
+
+- `hit`: the refresh read cached tokens without writing a new cache entry.
+- `miss`: it read no cached tokens or wrote cache tokens; warming stops.
+- `error`: no response was available or the response reported an error; warming stops.
+- `aborted`: the run was cancelled or replaced while the refresh was in flight.
+
+`usage` is present only when the refresh was recorded as a `model_usage` entry
+(`purpose: "cache-warm"`, or `"cache-warm:extension-override"` when an extension
+forced it). This includes paid misses, errors, and `aborted` refreshes the
+provider had already accepted (usage reported before the cancellation); an
+abort before the provider responded has no usage. Summing `usage.cost.total`
+attributes the warming costs already included in `get_session_stats`, rather
+than adding another charge.
+
+These events are ordinary session events, so `--mode json` output includes them
+as well.
+
+`warmingStopReason` explains why warming stopped because of or during the
+refresh, for example `"refresh missed the cache"`, `"refresh failed"`,
+`"cache warming disabled"`, or `"conversation context changed"`. It is absent
+when warming continues: the refresh rescheduled, or a new request replaced the
+run.
 
 ### Available commands
 
