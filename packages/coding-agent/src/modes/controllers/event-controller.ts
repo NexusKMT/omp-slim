@@ -533,6 +533,14 @@ export class EventController {
 			this.#toolTimelineComponents.delete(oldId);
 			this.#toolTimelineComponents.set(newId, timeline);
 		}
+		// A held stream preview is id-keyed and consumed under the card's final id
+		// (message_update creation / tool_execution_start); move it with the card
+		// or the lookup under `newId` misses and the preview is lost.
+		const preview = this.#pendingStreamPreviews.get(oldId);
+		if (preview !== undefined && !this.#pendingStreamPreviews.has(newId)) {
+			this.#pendingStreamPreviews.delete(oldId);
+			this.#pendingStreamPreviews.set(newId, preview);
+		}
 		// The reveal controller is id-keyed; drop the stale target so the loop's
 		// setTarget/bind under the new id owns the paced reveal.
 		this.#toolArgsReveal.finish(oldId);
@@ -1560,6 +1568,21 @@ export class EventController {
 				this.ctx.streamingComponent.setLinkTargets(
 					assistantMessageLinkTargets(displayTimeline.beforeTools, linkTargets),
 				);
+			}
+			// The final snapshot can carry a per-index id change no delta ever
+			// showed — agent-loop mints never-materialized ids at `done`, after the
+			// last `message_update` — so replay the same reconciliation
+			// #handleMessageUpdate runs per delta. Without it the pre-mint card is
+			// never re-keyed: tool_execution_start mounts a second card under the
+			// minted id and the streamed one ghosts until sealed.
+			for (let contentIndex = 0; contentIndex < this.ctx.streamingMessage.content.length; contentIndex++) {
+				const content = this.ctx.streamingMessage.content[contentIndex]!;
+				if (content.type !== "toolCall") continue;
+				const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
+				if (priorId !== undefined && priorId !== content.id) {
+					this.#migrateStreamedToolCallId(priorId, content.id);
+				}
+				this.#streamedToolCallIdByIndex.set(contentIndex, content.id);
 			}
 			this.ctx.streamingComponent.updateContent(displayTimeline.beforeTools);
 
