@@ -4,7 +4,7 @@
 
 ### Added
 
-- In a focused subagent view, submitting `.` or `c` now sends the same hidden continue directive to that subagent as it does in the main session ([#13790](https://github.com/can1357/oh-my-pi/issues/13790)).
+- In a focused subagent view, submitting `.` or `c` now sends the same hidden continue directive to that subagent as it does in the main session ([#13801](https://github.com/can1357/oh-my-pi/pull/13801) by [@Dante-dan](https://github.com/Dante-dan); [issue #13790](https://github.com/can1357/oh-my-pi/issues/13790)).
 
 ## [18.4.4] - 2026-09-29
 
