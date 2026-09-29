@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed on-demand compaction staying off for Claude models on the `amazon-bedrock` and `bedrock-mantle` providers when they use Bedrock's `/anthropic` routes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
+- Fixed Claude models on Bedrock's `/anthropic` routes resolving `compat.disableStrictTools: false`, although those routes reject the tool `strict` field ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
+- Fixed Bedrock's FIPS (`bedrock-runtime-fips`) and AWS PrivateLink (`vpce-….vpce.amazonaws.com`) hostnames, and Mantle's documented `/v1` OpenAI base, not being recognized as Bedrock routes, which left them without native compaction and the `/anthropic` request fixes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
@@ -61,10 +67,6 @@
 
 - Added the `openai` web-search grounding for OpenAI API models that support Responses web search (`gpt-5.5`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6-luna`) ([#13467](https://github.com/can1357/oh-my-pi/pull/13467) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Added `Model.promptCache`, per-retention-tier prompt-cache entry lifetimes in seconds (`short` / `long`), declared per provider through the `prompt-cache` KDL rule (bundled: direct Anthropic, 5 min / 1 h). Custom models and `modelOverrides` opt in with the models.yml `promptCache` key ([#12699](https://github.com/can1357/oh-my-pi/pull/12699) by [@KamijoToma](https://github.com/KamijoToma)).
-
-### Fixed
-
-- Fixed on-demand compaction staying off for Claude models on the `amazon-bedrock` and `bedrock-mantle` providers when they use Bedrock's `/anthropic` routes ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali))
 
 ## [18.3.1] - 2026-09-25
 

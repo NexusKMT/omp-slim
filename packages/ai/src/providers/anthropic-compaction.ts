@@ -46,8 +46,10 @@ export function supportsAnthropicCompaction(model: Model<"anthropic-messages">, 
 		(model.provider === "anthropic"
 			? resolveDirectAnthropicBaseUrl(model)
 			: normalizeAnthropicBaseUrl(model.baseUrl));
-	// Bedrock's own `/anthropic` routes are AWS endpoints, not gateways.
-	if (isBedrockAnthropicRoute(route)) return true;
+	// Bedrock's own `/anthropic` routes are AWS endpoints, not gateways; catalog policy
+	// grants the capability to the Bedrock providers, whose request hooks fit the body
+	// to these routes. A first-party model rerouted here stays excluded, as before.
+	if (isBedrockAnthropicRoute(route)) return model.compat.firstPartyProvider !== true;
 	return (
 		isSupportedCompactionEndpoint(route) &&
 		(model.compat.firstPartyProvider === true ||

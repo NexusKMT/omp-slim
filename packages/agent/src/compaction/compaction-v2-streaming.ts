@@ -34,7 +34,7 @@ import {
 	OPENAI_HEADERS,
 } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, isUnexpectedSocketCloseMessage, logger, stringifyJson } from "@oh-my-pi/pi-utils";
-import { prepareCompactionRequest } from "./provider-request";
+import { prepareBedrockCompactionRequest } from "./bedrock";
 
 // ============================================================================
 // Types & Configuration
@@ -280,24 +280,25 @@ export async function requestCompactionV2Streaming(
 		preferWebsockets?: boolean;
 	},
 ): Promise<CompactionV2Response> {
-	const prepared = await prepareCompactionRequest(model, apiKey, options?.fetch, signal);
-	const providerModel = prepared.model;
-	const endpoint = getCompactionV2Endpoint(providerModel);
+	let fetchImpl: FetchImpl = options?.fetch ?? globalThis.fetch;
+	if (isBedrockOpenAIUrl(model.baseUrl)) {
+		({
+			model,
+			apiKey,
+			fetch: fetchImpl,
+		} = await prepareBedrockCompactionRequest(model, apiKey, options?.fetch, signal));
+	}
+	const endpoint = getCompactionV2Endpoint(model);
 	if (!endpoint) {
 		throw new Error(`Model ${model.id} does not support V2 streaming compaction`);
 	}
-	const providerRequest: CompactionV2Request = {
-		...request,
-		body: { ...request.body, model: resolveCompactionV2Model(providerModel) },
-	};
 
 	const retryWait = options?.retryWait ?? ((delayMs: number) => Bun.sleep(delayMs));
-	const isCodexResponses =
-		compactionV2Api(providerModel) === "openai-codex-responses" || providerModel.provider === "openai-codex";
+	const isCodexResponses = compactionV2Api(model) === "openai-codex-responses" || model.provider === "openai-codex";
 	const codexMetadata =
-		isCodexResponses && !shouldUseCodexProviderTransport(providerModel)
+		isCodexResponses && !shouldUseCodexProviderTransport(model)
 			? createOpenAICodexCompatibilityMetadata({
-					sessionId: providerRequest.sessionId,
+					sessionId: request.sessionId,
 					providerSessionState: options?.providerSessionState,
 					requestKind: "compaction",
 					compaction: createOpenAICodexCompactionRequestContext({
@@ -311,20 +312,12 @@ export async function requestCompactionV2Streaming(
 	for (let attempt = 0; attempt <= V2_COMPACTION_MAX_RETRIES; attempt++) {
 		const timeoutSignal = withRequestTimeout(signal, options?.timeoutMs ?? V2_COMPACTION_TIMEOUT_MS);
 		try {
-			return await attemptCompactionV2Streaming(
-				endpoint,
-				prepared.apiKey,
-				providerModel,
-				providerRequest,
-				prepared.fetch,
-				timeoutSignal,
-				{
-					codexMetadata,
-					providerSessionState: options?.providerSessionState,
-					codexCompaction: options?.codexCompaction,
-					preferWebsockets: options?.preferWebsockets,
-				},
-			);
+			return await attemptCompactionV2Streaming(endpoint, apiKey, model, request, fetchImpl, timeoutSignal, {
+				codexMetadata,
+				providerSessionState: options?.providerSessionState,
+				codexCompaction: options?.codexCompaction,
+				preferWebsockets: options?.preferWebsockets,
+			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));
 			if (signal?.aborted) throw error;

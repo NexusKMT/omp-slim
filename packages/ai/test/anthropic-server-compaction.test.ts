@@ -242,6 +242,16 @@ describe("Anthropic on-demand compaction requests", () => {
 		["amazon-bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic", "us.anthropic.claude-opus-5-5"],
 		["bedrock-mantle", "https://bedrock-mantle.us-east-1.api.aws/anthropic", "anthropic.claude-opus-5-5"],
 		["bedrock-mantle", "https://bedrock-mantle.{region}.api.aws/anthropic", "anthropic.claude-opus-5-5"],
+		[
+			"amazon-bedrock",
+			"https://bedrock-runtime-fips.us-east-1.amazonaws.com/anthropic",
+			"us.anthropic.claude-opus-5-5",
+		],
+		[
+			"bedrock-mantle",
+			"https://vpce-0a1b2c3d4e5f67890-abcd1234.bedrock-mantle.us-east-1.vpce.amazonaws.com/anthropic",
+			"anthropic.claude-opus-5-5",
+		],
 	])("sends on-demand compaction for %s at %s", async (provider, baseUrl, id) => {
 		const bedrock = buildModel({ ...spec, id, provider, baseUrl });
 		const response = await captureRequest(bedrock, { anthropicCompaction: {} });

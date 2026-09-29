@@ -1,11 +1,7 @@
 import * as fs from "node:fs";
 import { scheduler } from "node:timers/promises";
 import * as tls from "node:tls";
-import {
-	isAnthropicSigningProxyUrl,
-	isBedrockAnthropicRoute,
-	isOfficialAnthropicApiUrl,
-} from "@oh-my-pi/pi-catalog/compat/anthropic";
+import { isAnthropicSigningProxyUrl, isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
 import { hostMatchesUrl, isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
 import { mapEffortToAnthropicAdaptiveEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost, getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -158,7 +154,6 @@ import {
 	readAnthropicMetadataString,
 	resolveAnthropicMetadataUserId,
 	stripClaudeToolPrefix,
-	toBedrockMetadataUserId,
 } from "./anthropic-identity";
 import {
 	anthropicProviderSessionStateKey,
@@ -537,14 +532,6 @@ function dropAnthropicStrictTools(params: MessageCreateParamsStreaming): void {
 	for (const tool of params.tools) {
 		delete tool.strict;
 	}
-}
-
-/** Bedrock's `/anthropic` routes reject tool `strict`, and runtime rejects metadata outside Bedrock's pattern. */
-function fitBedrockAnthropicParams(params: MessageCreateParamsStreaming): void {
-	dropAnthropicStrictTools(params);
-	const userId = toBedrockMetadataUserId(params.metadata?.user_id ?? undefined);
-	if (userId) params.metadata = { user_id: userId };
-	else delete params.metadata;
 }
 
 function getCacheControl(
@@ -2057,13 +2044,8 @@ const streamAnthropicOnce = (
 				baseUrl,
 				model.id,
 			);
-			const isBedrockAnthropic = isBedrockAnthropicRoute(
-				(options?.client && injectedClientBaseUrl(options.client)) || baseUrl,
-			);
 			let disableStrictTools =
-				(providerSessionState?.strictToolsDisabled ?? false) ||
-				(model.compat?.disableStrictTools ?? false) ||
-				isBedrockAnthropic;
+				(providerSessionState?.strictToolsDisabled ?? false) || (model.compat?.disableStrictTools ?? false);
 			let dropFastMode = providerSessionState?.fastModeDisabled ?? false;
 			let forceDemoteUnsignedThinking = providerSessionState?.replayUnsignedThinkingDisabled ?? false;
 			let droppedAllThinkingForSignature = providerSessionState?.thinkingReplayDisabled ?? false;
@@ -2282,7 +2264,6 @@ const streamAnthropicOnce = (
 					nextParams = replacementPayload as typeof nextParams;
 				}
 				if (nextParams.compaction) stripCompactionIncompatibleParams(nextParams);
-				if (isBedrockAnthropic) fitBedrockAnthropicParams(nextParams);
 				nextParams = toWellFormedDeep(nextParams) as typeof nextParams;
 				rawRequestDump = {
 					provider: model.provider,

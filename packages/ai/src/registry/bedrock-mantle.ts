@@ -3,6 +3,7 @@ import {
 	createBedrockMantleAuthenticatedFetch,
 	prepareBedrockMantleRequest,
 } from "../providers/bedrock-mantle";
+import { withBedrockAnthropicRequestShape } from "../providers/bedrock-anthropic";
 import type { Model } from "../types";
 import { resolveAwsRegion } from "../utils/aws-profile";
 import { resolveAwsBearerToken } from "./aws";
@@ -10,8 +11,10 @@ import type { ProviderTransport } from "./build";
 
 /** Bedrock Mantle request/discovery shaping; auth policy lives in `rules/auth/bedrock-mantle.kdl`. */
 export const bedrockMantleTransport: ProviderTransport = {
-	prepareRequest: (model, options) =>
-		prepareBedrockMantleRequest(model as Model<"openai-responses">, options as BedrockMantleOptions),
+	prepareRequest: (model, options) => {
+		const prepared = prepareBedrockMantleRequest(model as Model<"openai-responses">, options as BedrockMantleOptions);
+		return { model: prepared.model, options: withBedrockAnthropicRequestShape(prepared.model, prepared.options) };
+	},
 	mapSimpleOptions: options => ({ providerOptions: options.providerOptions }),
 	prepareModelDiscovery: config => {
 		const bearerToken = resolveAwsBearerToken(config.apiKey);

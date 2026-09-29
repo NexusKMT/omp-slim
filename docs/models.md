@@ -165,7 +165,8 @@ It supports `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`,
 `v2Endpoint`, and `streamingEndpoint`.
 
 `openai-responses` models on Amazon Bedrock's OpenAI routes (`/openai/…` on
-`bedrock-runtime.<region>.amazonaws.com` or `bedrock-mantle.<region>.api.aws`)
+`bedrock-runtime.<region>.amazonaws.com` or `bedrock-mantle.<region>.api.aws`,
+Mantle's `/v1` base, the runtime FIPS host, and PrivateLink hosts of both endpoints)
 use native OpenAI compaction without an opt-in, for any provider id. Set
 `enabled: false` to turn it off, or `v2StreamingEnabled: false` to keep only
 the V1 `/responses/compact` request. See [compaction](./compaction.md).
@@ -729,6 +730,12 @@ Claude Opus 4.7 and later are served here; Opus 4.6 and earlier stay on Converse
 | bedrock-runtime | `https://bedrock-runtime.<region>.amazonaws.com/anthropic` | `amazon-bedrock` | inference profile, e.g. `us.anthropic.claude-opus-5-5` |
 | bedrock-mantle | `https://bedrock-mantle.<region>.api.aws/anthropic` | `bedrock-mantle` | `anthropic.claude-opus-5-5` |
 
+The FIPS host (`bedrock-runtime-fips.<region>.amazonaws.com`) and AWS PrivateLink endpoint-specific
+hosts (`<vpce-id>[-<az>].bedrock-runtime.<region>.vpce.amazonaws.com`, likewise for
+`bedrock-runtime-fips` and `bedrock-mantle`) are recognized as the same routes. A VPC endpoint with
+private DNS enabled needs no change: it answers on the public hostnames
+([Bedrock VPC endpoints](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html)).
+
 Define the model under the provider shown in the table, with `api: anthropic-messages`. Those two
 provider ids carry the catalog rule that enables Claude's on-demand compaction
 ([Compaction](./compaction.md)). Set `auth: apiKey` so OMP sends plain API-key requests; without
@@ -761,11 +768,14 @@ providers:
         input: [text, image]
 ```
 
-Both routes reject the tool `strict` field, so OMP drops it. OMP also fits `metadata.user_id` to
+For models under the `amazon-bedrock` and `bedrock-mantle` providers, the provider's request hook
+fits each request to these routes after any `onPayload` hook runs. Both routes reject the tool
+`strict` field, so OMP drops it. OMP also fits `metadata.user_id` to
 Bedrock's [request-metadata pattern](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
 which the runtime route enforces: a value that fits is kept, otherwise its session id is sent,
-otherwise it is left out. Both routes verify thinking signatures, so by default OMP does not replay
-unsigned thinking to them.
+otherwise it is left out. The first-party `anthropic` provider pointed at a Bedrock URL (for
+example through `ANTHROPIC_BASE_URL`) gets none of this and no native compaction. Both routes verify
+thinking signatures, so by default OMP does not replay unsigned thinking to them.
 
 ### Strict tool schemas (`disableStrictTools`)
 

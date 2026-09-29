@@ -2742,6 +2742,26 @@ describe("Amazon Bedrock OpenAI routes", () => {
 		],
 		["Bedrock Anthropic route", "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic", false],
 		["Bedrock root", "https://bedrock-runtime.us-east-1.amazonaws.com", false],
+		["bedrock-runtime FIPS", "https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com/openai/v1", true],
+		["bedrock-mantle documented /v1 base", "https://bedrock-mantle.us-east-1.api.aws/v1", true],
+		// Only Mantle serves the OpenAI APIs at `/v1`; runtime keeps them under `/openai`.
+		["bedrock-runtime /v1", "https://bedrock-runtime.us-east-1.amazonaws.com/v1", false],
+		[
+			"bedrock-runtime PrivateLink",
+			"https://vpce-0a1b2c3d4e5f67890-abcd1234.bedrock-runtime.us-east-1.vpce.amazonaws.com/openai/v1",
+			true,
+		],
+		[
+			"bedrock-mantle zonal PrivateLink",
+			"https://vpce-0a1b2c3d4e5f67890-abcd1234-us-east-1a.bedrock-mantle.us-east-1.vpce.amazonaws.com/v1",
+			true,
+		],
+		[
+			"PrivateLink endpoint for another service",
+			"https://vpce-0a1b2c3d4e5f67890-abcd1234.bedrock-agent-runtime.us-east-1.vpce.amazonaws.com/openai/v1",
+			false,
+		],
+		["plain HTTP", "http://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", false],
 	] as const)(
 		"enables native V1 and V2 compaction without opt-in only on OpenAI routes: %s",
 		(_route, baseUrl, expected) => {
@@ -2850,8 +2870,9 @@ describe("Amazon Bedrock OpenAI routes", () => {
 	});
 });
 
-describe("compaction request preparation", () => {
+describe("Amazon Bedrock compaction request preparation", () => {
 	const nativeInput = [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }];
+	const runtimeUrl = "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1";
 
 	function compactionResponse(): Response {
 		return Response.json({ output: [{ type: "compaction", encrypted_content: "enc" }] });
@@ -2866,11 +2887,7 @@ describe("compaction request preparation", () => {
 
 	test("sends lazily resolved configured headers instead of a keyless bearer", async () => {
 		const model: Model<"openai-responses"> = {
-			...makeOpenAiModel({
-				provider: "lazy-headers",
-				baseUrl: "https://compact.example.test/v1",
-				remoteCompaction: { enabled: true, v2StreamingEnabled: true },
-			}),
+			...makeOpenAiModel({ id: "us.openai.gpt-6-astra", provider: "bedrock-lazy-headers", baseUrl: runtimeUrl }),
 			resolveHeaders: async () => ({ Authorization: "Bearer lazy-token" }),
 		};
 		const authorizations: Array<string | null> = [];
@@ -2895,9 +2912,9 @@ describe("compaction request preparation", () => {
 
 	test("routes compaction through the provider proxy", async () => {
 		const model = makeOpenAiModel({
+			id: "us.openai.gpt-6-astra",
 			provider: "compaction-proxy-test",
-			baseUrl: "https://compact.example.test/v1",
-			remoteCompaction: { enabled: true, v2StreamingEnabled: true },
+			baseUrl: runtimeUrl,
 		});
 		const previous = Bun.env.PI_PROXY_COMPACTION_PROXY_TEST;
 		Bun.env.PI_PROXY_COMPACTION_PROXY_TEST = "http://proxy.example.test:8080";
@@ -2925,67 +2942,5 @@ describe("compaction request preparation", () => {
 		}
 
 		expect(proxies).toEqual(["http://proxy.example.test:8080", "http://proxy.example.test:8080"]);
-	});
-
-	test.each([
-		[
-			"repeated trailing slashes",
-			"https://compact.example.test/openai/v1//",
-			"https://compact.example.test/openai/v1/responses/compact",
-		],
-		[
-			"a /responses base",
-			"https://compact.example.test/openai/v1/responses",
-			"https://compact.example.test/openai/v1/responses/compact",
-		],
-	] as const)("derives the V1 compact endpoint from %s", async (_shape, baseUrl, expected) => {
-		let url: string | undefined;
-		const fetchMock: FetchImpl = async input => {
-			url = String(input);
-			return compactionResponse();
-		};
-
-		await requestOpenAiRemoteCompaction(
-			makeOpenAiModel({ provider: "custom-compact", baseUrl, remoteCompaction: { enabled: true } }),
-			"test-key",
-			nativeInput,
-			"instructions",
-			undefined,
-			{ fetch: fetchMock },
-		);
-
-		expect(url).toBe(expected);
-	});
-
-	test("sends the provider-prepared request model id in the V2 body", async () => {
-		const model = makeOpenAiModel({
-			id: "openai/gpt-5.4",
-			provider: "cloudflare-ai-gateway",
-			baseUrl: "https://gateway.ai.cloudflare.com/v1/acct/gw/openai",
-			remoteCompaction: {
-				enabled: true,
-				api: "openai-responses",
-				v2StreamingEnabled: true,
-				v2Endpoint: "https://gateway.ai.cloudflare.com/v1/acct/gw/openai/responses",
-			},
-		});
-		let body: { model?: string } | undefined;
-		let gatewayAuthorization: string | null | undefined;
-		const fetchMock: FetchImpl = async (_input, init) => {
-			body = JSON.parse(String(init?.body)) as { model?: string };
-			gatewayAuthorization = new Headers(init?.headers).get("cf-aig-authorization");
-			return v2Response();
-		};
-
-		await requestCompactionV2Streaming(
-			model,
-			"cf-token",
-			buildCompactionV2Request(model, nativeInput, "instructions"),
-			undefined,
-			{ fetch: fetchMock },
-		);
-
-		expect(body?.model).toBe("gpt-5.4");
-		expect(gatewayAuthorization).toBe("Bearer cf-token");
 	});
 });

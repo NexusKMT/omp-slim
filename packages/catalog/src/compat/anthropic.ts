@@ -5,7 +5,7 @@
  * pi-ai both consume these; URL matching is the one detection surface that
  * stays in code.
  */
-import { hostMatchesUrl } from "../hosts";
+import { hostMatchesUrl, isBedrockRouteUrl } from "../hosts";
 
 const OFFICIAL_ANTHROPIC_URL = "https://api.anthropic.com";
 
@@ -26,24 +26,14 @@ const CLOUDFLARE_ANTHROPIC_GATEWAY_URL_MARKER = /gateway\.ai\.cloudflare\.com\/.
 const VERTEX_ANTHROPIC_URL_MARKER = /aiplatform\.googleapis\.com\/.+\/publishers\/anthropic\//i;
 const BEDROCK_ANTHROPIC_URL_MARKER = /(?:^|\/\/|\.)bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com/i;
 const AZURE_ANTHROPIC_URL_MARKER = /(?:^|\/\/|\.)[a-z0-9-]+\.(?:inference|services)\.ai\.azure\.com/i;
-const BEDROCK_RUNTIME_HOST = /^bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com$/i;
-// Mantle requests fill in a `{region}` template before dispatch.
-const BEDROCK_MANTLE_HOST = /^bedrock-mantle\.(?:[a-z0-9-]+|\{region\})\.api\.aws$/i;
 
 /**
  * Amazon Bedrock's Anthropic Messages API: the `/anthropic` path on the
- * bedrock-runtime or bedrock-mantle endpoint.
+ * bedrock-runtime or bedrock-mantle endpoint. It rejects the tool `strict`
+ * field and enforces Anthropic signatures on replay.
  */
 export function isBedrockAnthropicRoute(baseUrl?: string): boolean {
-	if (!baseUrl) return false;
-	let url: URL;
-	try {
-		url = new URL(baseUrl);
-	} catch {
-		return false;
-	}
-	if (url.pathname !== "/anthropic" && !url.pathname.startsWith("/anthropic/")) return false;
-	return BEDROCK_RUNTIME_HOST.test(url.hostname) || BEDROCK_MANTLE_HOST.test(url.hostname);
+	return isBedrockRouteUrl(baseUrl, "anthropic");
 }
 
 /**

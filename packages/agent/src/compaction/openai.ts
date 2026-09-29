@@ -15,7 +15,6 @@
  *   with `{ summary, shortSummary? }`.
  */
 
-import { NO_AUTH_SENTINEL } from "@oh-my-pi/pi-ai/auth-retry";
 import { attach, create, Flag, ProviderHttpError } from "@oh-my-pi/pi-ai/error";
 import { getCodexAttestationHeader } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { createOpenAICodexCompactionRequestContext } from "@oh-my-pi/pi-ai/providers/openai-codex-compaction";
@@ -55,7 +54,7 @@ import {
 } from "@oh-my-pi/pi-catalog/wire/codex";
 import { $env, isRecord, logger, prompt, stringifyJson, structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import { Tokenizer } from "../tokenizer";
-import { prepareCompactionRequest } from "./provider-request";
+import { prepareBedrockCompactionRequest } from "./bedrock";
 import contextWindowTruncatedOutputPrompt from "./prompts/context-window-truncated-output.md" with { type: "text" };
 
 export * from "./compaction-v2-streaming";
@@ -345,8 +344,7 @@ function resolveOpenAiCompactEndpoint(model: Model): string {
 
 	const defaultBase = "https://api.openai.com/v1";
 	const rawBase = model.baseUrl && model.baseUrl.length > 0 ? model.baseUrl : defaultBase;
-	const normalizedBase = rawBase.replace(/\/+$/, "");
-	if (normalizedBase.endsWith("/responses")) return `${normalizedBase}/compact`;
+	const normalizedBase = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 	if (normalizedBase.endsWith("/v1")) return `${normalizedBase}/responses/compact`;
 	return `${normalizedBase}/v1/responses/compact`;
 }
@@ -811,11 +809,12 @@ export async function requestOpenAiRemoteCompaction(
 		codexCompaction?: CodexCompactionContext;
 	},
 ): Promise<OpenAiRemoteCompactionResponse> {
-	const prepared = await prepareCompactionRequest(model, apiKey, opts?.fetch, signal);
-	const providerModel = prepared.model;
-	const providerApiKey = prepared.apiKey;
-	const endpoint = resolveOpenAiCompactEndpoint(providerModel);
-	const requestModel = resolveOpenAiCompactModel(providerModel);
+	let fetchImpl: FetchImpl = opts?.fetch ?? fetch;
+	if (isBedrockOpenAIUrl(model.baseUrl)) {
+		({ model, apiKey, fetch: fetchImpl } = await prepareBedrockCompactionRequest(model, apiKey, opts?.fetch, signal));
+	}
+	const endpoint = resolveOpenAiCompactEndpoint(model);
+	const requestModel = resolveOpenAiCompactModel(model);
 	const trimmed = trimRemoteCompactionInputToContextWindow(
 		compactInput,
 		new Tokenizer(model),
@@ -847,22 +846,22 @@ export async function requestOpenAiRemoteCompaction(
 	const headers: Record<string, string> = isAzureOpenAiResponses
 		? {
 				"content-type": "application/json",
-				"api-key": providerApiKey,
-				...providerModel.headers,
+				"api-key": apiKey,
+				...model.headers,
 			}
 		: {
 				"content-type": "application/json",
-				...(providerApiKey === NO_AUTH_SENTINEL ? {} : { Authorization: `Bearer ${providerApiKey}` }),
-				...providerModel.headers,
+				Authorization: `Bearer ${apiKey}`,
+				...model.headers,
 			};
 
 	// Codex endpoints require additional auth headers
 	if (isCodexResponses) {
-		const accountId = getCodexAccountId(providerApiKey);
+		const accountId = getCodexAccountId(apiKey);
 		if (accountId) {
 			headers[OPENAI_HEADERS.ACCOUNT_ID] = accountId;
 		}
-		applyCodexResidencyHeader(headers, providerApiKey);
+		applyCodexResidencyHeader(headers, apiKey);
 		const attestation = await getCodexAttestationHeader(accountId);
 		if (attestation) {
 			headers[OPENAI_HEADERS.ATTESTATION] = attestation;
@@ -898,7 +897,7 @@ export async function requestOpenAiRemoteCompaction(
 		}
 	}
 
-	const response = await prepared.fetch(endpoint, {
+	const response = await fetchImpl(endpoint, {
 		method: "POST",
 		headers,
 		body: stringifyJson(request),

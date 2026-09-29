@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { resolveAnthropicMetadataUserId, streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
+import type { AnthropicOptions } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { Context, Model, ModelSpec, TJsonSchema } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
@@ -8,7 +8,6 @@ import { withEnv, withOfficialAnthropicEndpoint } from "./helpers";
 const RUNTIME_URL = "https://bedrock-runtime.us-east-1.amazonaws.com/anthropic";
 const SESSION_ID = "01a0d8ae-cf8c-74ee-b93b-d12f887b3488";
 const JSON_USER_ID = JSON.stringify({ session_id: SESSION_ID });
-const GENERATED_USER_ID = resolveAnthropicMetadataUserId(undefined, true, SESSION_ID, "account-1") ?? "";
 
 const context: Context = {
 	systemPrompt: ["Stay concise."],
@@ -52,10 +51,8 @@ const official = claude("anthropic", "claude-opus-5-5", "https://api.anthropic.c
 
 type WirePayload = { metadata?: { user_id?: string }; tools?: Array<{ name: string; strict?: unknown }> };
 
-async function sentPayload(
-	model: Model<"anthropic-messages">,
-	options: Parameters<typeof streamAnthropic>[2] = {},
-): Promise<WirePayload> {
+/** Send through stream dispatch so the Bedrock providers' request hooks run, as in a live turn. */
+async function sentPayload(model: Model<"anthropic-messages">, options: AnthropicOptions = {}): Promise<WirePayload> {
 	let payload: WirePayload | undefined;
 	const fetchMock: typeof fetch = Object.assign(
 		async (_input: string | URL | Request, init?: RequestInit) => {
@@ -70,27 +67,7 @@ async function sentPayload(
 		},
 		{ preconnect: fetch.preconnect },
 	);
-	await streamAnthropic(model, context, { apiKey: "bedrock-api-key", ...options, fetch: fetchMock }).result();
-	if (!payload) throw new Error("request was not sent");
-	return payload;
-}
-
-async function sentThroughClient(model: Model<"anthropic-messages">, baseURL: string): Promise<WirePayload> {
-	let payload: WirePayload | undefined;
-	const client = {
-		baseURL,
-		messages: {
-			create: (value: object) => {
-				payload = { ...value } as WirePayload;
-				throw new Error("captured");
-			},
-		},
-	};
-	await streamAnthropic(model, context, {
-		apiKey: "bedrock-api-key",
-		metadata: { user_id: JSON_USER_ID },
-		client,
-	}).result();
+	await stream(model, context, { apiKey: "bedrock-api-key", ...options, fetch: fetchMock }).result();
 	if (!payload) throw new Error("request was not sent");
 	return payload;
 }
@@ -105,6 +82,28 @@ function expectBedrockShape(payload: WirePayload): void {
 withOfficialAnthropicEndpoint();
 
 describe("Amazon Bedrock /anthropic requests", () => {
+	it("resolves strict-tool rejection into catalog compat for Bedrock routes only", () => {
+		expect(runtime.compat.disableStrictTools).toBe(true);
+		expect(mantle.compat.disableStrictTools).toBe(true);
+		expect(
+			claude("bedrock-mantle", "anthropic.claude-opus-5-5", "https://bedrock-mantle.{region}.api.aws/anthropic")
+				.compat.disableStrictTools,
+		).toBe(true);
+		// Converse root and a proxy path embedding the Bedrock host are not the `/anthropic` route.
+		expect(
+			claude("amazon-bedrock", "us.anthropic.claude-opus-5-5", "https://bedrock-runtime.us-east-1.amazonaws.com")
+				.compat.disableStrictTools,
+		).toBe(false);
+		expect(
+			claude(
+				"custom",
+				"claude-opus-5-5",
+				"https://proxy.example.com/bedrock-runtime.us-east-1.amazonaws.com/anthropic",
+			).compat.disableStrictTools,
+		).toBe(false);
+		expect(official.compat.disableStrictTools).toBe(false);
+	});
+
 	it("resolves a Mantle region template before sending an Anthropic Messages request", async () => {
 		const templateModel = claude(
 			"bedrock-mantle",
@@ -138,6 +137,30 @@ describe("Amazon Bedrock /anthropic requests", () => {
 	it.each([
 		["bedrock-runtime", runtime],
 		["bedrock-mantle", mantle],
+		[
+			"bedrock-runtime FIPS",
+			claude(
+				"amazon-bedrock",
+				"us.anthropic.claude-opus-5-5",
+				"https://bedrock-runtime-fips.us-east-1.amazonaws.com/anthropic",
+			),
+		],
+		[
+			"bedrock-runtime PrivateLink",
+			claude(
+				"amazon-bedrock",
+				"us.anthropic.claude-opus-5-5",
+				"https://vpce-0a1b2c3d4e5f67890-abcd1234.bedrock-runtime.us-east-1.vpce.amazonaws.com/anthropic",
+			),
+		],
+		[
+			"bedrock-mantle zonal PrivateLink",
+			claude(
+				"bedrock-mantle",
+				"anthropic.claude-opus-5-5",
+				"https://vpce-0a1b2c3d4e5f67890-abcd1234-us-east-1a.bedrock-mantle.us-east-1.vpce.amazonaws.com/anthropic",
+			),
+		],
 	])("drops strict tools and sends the session id from caller metadata on %s", async (_route, model) => {
 		expectBedrockShape(await sentPayload(model, { isOAuth: false, metadata: { user_id: JSON_USER_ID } }));
 	});
@@ -157,14 +180,12 @@ describe("Amazon Bedrock /anthropic requests", () => {
 		expectBedrockShape(payload);
 	});
 
-	it("follows an ANTHROPIC_BASE_URL reroute to a Bedrock route", async () => {
+	it("leaves the first-party Anthropic provider's request unchanged when rerouted to a Bedrock route", async () => {
 		await withEnv({ ANTHROPIC_BASE_URL: RUNTIME_URL }, async () => {
-			expectBedrockShape(await sentPayload(official, { isOAuth: false, metadata: { user_id: GENERATED_USER_ID } }));
+			const payload = await sentPayload(official, { isOAuth: false, metadata: { user_id: JSON_USER_ID } });
+			expect(payload.tools?.find(tool => tool.name === "bash")?.strict).toBe(true);
+			expect(payload.metadata?.user_id).toBe(JSON_USER_ID);
 		});
-	});
-
-	it("follows an injected client pointed at a Bedrock route", async () => {
-		expectBedrockShape(await sentThroughClient(official, RUNTIME_URL));
 	});
 
 	it("omits metadata whose user id cannot fit Bedrock's pattern", async () => {
