@@ -62,10 +62,10 @@ export interface LoadSkillsResult {
 /**
  * Namespace a skill takes when its bare name is already claimed by a different
  * skill. Prefers the provider-supplied plugin identity (`_source.pluginName`,
- * currently `claude-plugins`) when present, since Claude Code's own plugin
- * cache layout (`<marketplace>/<plugin>/<version>/skills/...`) puts a version
- * string, not the plugin name, in the path segment owning `skills/` — path
- * parsing alone would namespace by version and collide across plugin updates.
+ * set by every registry-backed provider) when present, since installed plugin
+ * caches (`<marketplace>/<plugin>/<version>/skills/...`) put a version string,
+ * not the plugin name, in the path segment owning `skills/` — path parsing
+ * alone would namespace by version and change on every plugin update.
  * Otherwise derived from the path so every other provider gets one without
  * plumbing: the directory owning `skills/` (a plugin or package root), else
  * the directory holding the skill (a custom skills root), else the provider.

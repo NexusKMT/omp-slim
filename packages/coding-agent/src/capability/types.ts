@@ -162,13 +162,13 @@ export interface SourceMeta {
 	 */
 	origin?: string;
 	/**
-	 * Plugin name supplying this item, when the provider tracks one (currently
-	 * `claude-plugins`, from `ClaudePluginRoot.plugin`). Preferred by
-	 * `skillNamespace` in `extensibility/skills.ts` over parsing the item's
-	 * path, since Claude Code's own plugin cache
+	 * Plugin or package name supplying this item, for registry-backed providers
+	 * (`claude-plugins` and `agent-plugins` use the plugin name, `omp-plugins`
+	 * the extension package directory name, `skillshare` the package name).
+	 * Preferred by `skillNamespace` in `extensibility/skills.ts` over parsing
+	 * the item's path, since installed plugin caches
 	 * (`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/...`)
-	 * puts the version, not the plugin name, in the path segment a
-	 * marketplace-cache layout would otherwise read.
+	 * put the version, not the plugin name, in the path segment owning `skills/`.
 	 */
 	pluginName?: string;
 }
