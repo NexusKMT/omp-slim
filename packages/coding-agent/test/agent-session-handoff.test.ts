@@ -17,6 +17,7 @@ import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { SessionMaintenance } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
@@ -91,6 +92,7 @@ describe("AgentSession handoff", () => {
 				tools: [],
 				messages: [],
 			},
+			convertToLlm: compactionModule.defaultConvertToLlm,
 		});
 
 		session = new AgentSession({
@@ -166,6 +168,71 @@ describe("AgentSession handoff", () => {
 		expect(session.agent.state.messages.some(message => message.role === "compactionSummary")).toBe(true);
 		expect(events.filter(event => event.type === "auto_compaction_start")).toHaveLength(0);
 		expect(events.filter(event => event.type === "auto_compaction_end")).toHaveLength(0);
+	});
+
+	it("dispatches a prompt only after manual handoff commits its compaction", async () => {
+		const started = Promise.withResolvers<void>();
+		const finish = Promise.withResolvers<string>();
+		const mock = createMockModel({ responses: [{ content: ["post-handoff answer"] }] });
+		session.agent.streamFn = mock.stream;
+		session.agent.getApiKey = () => "test-key";
+		const enteredAdmission = Promise.withResolvers<void>();
+		let admissionSettled = false;
+		const waitForCleanup = SessionMaintenance.prototype.waitForManualMaintenanceCleanup;
+		vi.spyOn(SessionMaintenance.prototype, "waitForManualMaintenanceCleanup").mockImplementation(
+			function (this: SessionMaintenance) {
+				const waiting = waitForCleanup.call(this);
+				enteredAdmission.resolve();
+				void waiting.then(() => {
+					admissionSettled = true;
+				});
+				return waiting;
+			},
+		);
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockImplementation(() => {
+			started.resolve();
+			return finish.promise;
+		});
+
+		const handoff = session.handoff();
+		expect(session.isCompacting).toBe(true);
+		await started.promise;
+		const prompt = session.prompt("next task");
+		await enteredAdmission.promise;
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(admissionSettled).toBe(false);
+		expect(session.isStreaming).toBe(false);
+		expect(mock.calls).toHaveLength(0);
+
+		finish.resolve("## Goal\nContinue from handoff");
+		await handoff;
+		await prompt;
+		expect(mock.calls).toHaveLength(1);
+		expect(JSON.stringify(mock.calls[0]?.context)).toContain("Continue from handoff");
+	});
+
+	it("releases a waiting prompt when manual handoff fails", async () => {
+		const started = Promise.withResolvers<void>();
+		const finish = Promise.withResolvers<string>();
+		const mock = createMockModel({ responses: [{ content: ["resumed answer"] }] });
+		session.agent.streamFn = mock.stream;
+		session.agent.getApiKey = () => "test-key";
+		vi.spyOn(compactionModule, "generateHandoffFromContext").mockImplementation(() => {
+			started.resolve();
+			return finish.promise;
+		});
+
+		const handoff = session.handoff();
+		await started.promise;
+		const prompt = session.prompt("continue after failure");
+		finish.reject(new Error("summary request failed"));
+		await expect(handoff).rejects.toThrow("summary request failed");
+		await prompt;
+
+		expect(session.isCompacting).toBe(false);
+		expect(sessionManager.getBranch().some(entry => entry.type === "compaction")).toBe(false);
+		expect(mock.calls).toHaveLength(1);
 	});
 
 	it("runs handoff generation through the configured side stream function", async () => {
