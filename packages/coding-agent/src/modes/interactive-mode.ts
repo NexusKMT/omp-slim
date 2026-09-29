@@ -984,12 +984,19 @@ function renderSubagentToolPreview(session: ObservableSession, width: number): s
 		elapsed > SUBAGENT_PREVIEW_ELAPSED_MIN_MS
 			? `${theme.sep.dot}${theme.fg("warning", formatDuration(elapsed))}`
 			: "";
-	let line = `${theme.fg("dim", theme.tree.hook)} ${theme.fg(currentTool ? "muted" : "dim", replaceTabs(tool))}`;
-	const detailBudget = width - visibleWidth(line) - visibleWidth(elapsedLabel) - visibleWidth(": ");
+	// The HUD paints through Text with paddingX 1, so the content is two cells narrower.
+	const budget = Math.max(0, width - 2);
+	const elapsedWidth = visibleWidth(elapsedLabel);
+	const hook = `${theme.fg("dim", theme.tree.hook)} `;
+	const hookWidth = visibleWidth(hook);
+	// Reserve the elapsed marker first, then cap the tool name; the detail gets whatever is left.
+	const shortTool = truncateToWidth(replaceTabs(tool), Math.max(0, budget - hookWidth - elapsedWidth), "");
+	let line = `${hook}${theme.fg(currentTool ? "muted" : "dim", shortTool)}`;
+	const detailBudget = budget - hookWidth - visibleWidth(shortTool) - elapsedWidth - visibleWidth(": ");
 	if (detail && detailBudget >= SUBAGENT_PREVIEW_MIN_DETAIL_WIDTH) {
-		line += `: ${theme.fg("dim", previewLine(detail, Math.min(TRUNCATE_LENGTHS.SHORT, detailBudget)))}`;
+		line += `: ${theme.fg("dim", previewLine(shortenEmbeddedPaths(replaceTabs(detail)), Math.min(TRUNCATE_LENGTHS.SHORT, detailBudget)))}`;
 	}
-	return truncateToWidth(`${line}${elapsedLabel}`, width, "");
+	return truncateToWidth(`${line}${elapsedLabel}`, budget, "");
 }
 
 /**

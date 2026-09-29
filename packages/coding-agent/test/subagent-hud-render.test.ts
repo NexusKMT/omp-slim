@@ -5,6 +5,7 @@
  * yields no output once nothing qualifies, so the block self-clears.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import * as os from "node:os";
 import * as path from "node:path";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -565,6 +566,89 @@ describe("subagent HUD lines", () => {
 			expect(out).toContain("read: xxxxxxxx");
 			for (const line of out.split("\n")) {
 				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+		it("shortens home-directory paths in preview details", () => {
+			const homeFile = `${os.homedir()}/.ssh/config`;
+			const out = render(
+				[
+					makeSession({
+						id: "Reader",
+						progress: makeProgress({
+							id: "Reader",
+							currentTool: "read",
+							currentToolArgs: `cat ${homeFile}`,
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("cat ~/.ssh/config");
+			expect(out).not.toContain(os.homedir());
+		});
+
+		it("keeps the elapsed marker with a very long tool name at a narrow width", () => {
+			const columns = 40;
+			const out = render(
+				[
+					makeSession({
+						id: "Mcp",
+						progress: makeProgress({
+							id: "Mcp",
+							currentTool: `mcp__tool_${"x".repeat(120)}`,
+							currentToolArgs: "some detail that cannot fit",
+							currentToolStartMs: Date.now() - 20_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			const toolRow = out.split("\n").find(line => line.includes("mcp__tool_"));
+			expect(toolRow).toBeDefined();
+			expect(toolRow).toMatch(/\d+s$/);
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+
+		it("fits every rendered component row within the viewport without wrapping the elapsed marker", () => {
+			const sessions = [
+				makeSession({
+					id: "Builder",
+					description: "Narrow build",
+					progress: makeProgress({
+						id: "Builder",
+						currentTool: "bash",
+						currentToolArgs: `cat ${os.homedir()}/.ssh/config`,
+						currentToolStartMs: Date.now() - 10_000,
+					}),
+				}),
+				makeSession({
+					id: "Reader",
+					progress: makeProgress({
+						id: "Reader",
+						currentTool: "read",
+						currentToolArgs: "x".repeat(300),
+						currentToolStartMs: Date.now() - 12_000,
+					}),
+				}),
+			];
+			for (const columns of [60, 120]) {
+				const hud = new SubagentHudComponent(
+					renderSubagentHudLines(sessions, columns, false, true),
+					sessions.map(session => session.id),
+				);
+				const rows = hud.render(columns).map(row => Bun.stripANSI(row));
+				for (const row of rows) {
+					expect(Bun.stringWidth(row)).toBeLessThanOrEqual(columns);
+				}
+				const elapsedRows = rows.filter(row => /\d+s/.test(row));
+				expect(elapsedRows.length).toBeGreaterThan(0);
+				for (const row of elapsedRows) {
+					expect(row).toMatch(/bash|read/);
+				}
 			}
 		});
 
