@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- xAI OAuth accounts with active weekly credits no longer switch away solely because an uncertain monthly counter exceeds its limit ([#13806](https://github.com/can1357/oh-my-pi/issues/13806)).
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
