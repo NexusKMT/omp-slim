@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added per-instance `polyphonicRecall` and `enhancedRecall` options to `Mnemopi` and `BeamMemory`, so memories opened side by side can use different recall policies; `configureRecallFeatures` remains the process-wide default and the env vars still win
+
+### Fixed
+
+- Fixed `MNEMOPI_POLYPHONIC_RECALL` / `polyphonicRecall` having no effect: `recallEnhanced` now fuses its ranking with the vector, graph, fact and temporal voices, and extracted subject/predicate/object facts are consolidated so the fact voice has data ([#2323](https://github.com/can1357/oh-my-pi/issues/2323))
+- Fixed `MNEMOPI_ENHANCED_RECALL` / `enhancedRecall` having no effect: `recallEnhanced` now caches results, keyed on every recall option so a different limit, fact inclusion, channel, query time or bank never reuses another call's ranking, and any database write clears it ([#2323](https://github.com/can1357/oh-my-pi/issues/2323))
+
 ## [18.4.1] - 2026-09-28
 
 ### Fixed

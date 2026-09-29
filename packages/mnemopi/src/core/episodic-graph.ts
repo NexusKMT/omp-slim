@@ -19,6 +19,8 @@ export interface Fact {
 	readonly timestamp: string;
 	readonly confidence: number;
 	readonly temporalQualifier?: string | null;
+	/** Memory the fact was extracted from (`facts.source_msg_id`), when stored. */
+	readonly memoryId?: string | null;
 }
 
 export interface GraphEdge {
@@ -155,6 +157,7 @@ function rowToFact(row: FactRow): Fact {
 		timestamp: row.timestamp ?? "",
 		confidence: row.confidence ?? 0.5,
 		temporalQualifier: null,
+		memoryId: row.source_msg_id,
 	};
 }
 
