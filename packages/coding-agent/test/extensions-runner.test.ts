@@ -566,7 +566,10 @@ describe("ExtensionRunner", () => {
 		it("chains text rewrites, ignores in-place edits, and preserves non-text blocks", async () => {
 			const extCode = `
 				export default function(pi) {
-					pi.on("assistant_message", event => { event.message.content[0].text = "ignored"; });
+					pi.on("assistant_message", event => {
+						event.message.content[0].text = "ignored";
+						event.message.usage.output = 999;
+					});
 					pi.on("assistant_message", event => ({
 						content: [{ type: "text", text: event.message.content[0].text + " one" }, event.message.content[1]],
 					}));
@@ -598,6 +601,7 @@ describe("ExtensionRunner", () => {
 			const rewritten = await runner.emitAssistantMessage(message);
 			expect(rewritten).toEqual([{ type: "text", text: "original one two three" }, toolCall]);
 			expect(message.content[0]).toEqual({ type: "text", text: "original" });
+			expect(message.usage.output).not.toBe(999);
 			expect(errors).toHaveLength(1);
 			expect(errors[0]?.event).toBe("assistant_message");
 			expect(errors[0]?.error).toContain("rewrite failed");

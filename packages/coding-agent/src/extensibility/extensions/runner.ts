@@ -1663,11 +1663,10 @@ export class ExtensionRunner {
 			if (!handlers?.length) continue;
 			for (const handler of handlers) {
 				if (signal?.aborted) break extensions;
-				const presented = structuredClone(currentContent());
-				const event: AssistantMessageRewriteEvent = {
-					type: "assistant_message",
-					message: { ...message, content: presented },
-				};
+				// Detach the whole message, not just `content`: in-place edits to `usage`
+				// or other fields must not leak into the finalized message.
+				const presented = structuredClone({ ...message, content: currentContent() });
+				const event: AssistantMessageRewriteEvent = { type: "assistant_message", message: presented };
 				const result = (await this.#runHandlerWithTimeout(
 					handler,
 					event,
