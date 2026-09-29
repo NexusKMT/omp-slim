@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The `computer` tool's `clipboard.write` now sets only the desktop clipboard and no longer also sends the text to your terminal's clipboard over OSC 52.
+
+### Fixed
+
+- Fixed `/copy`, other clipboard copies, Warp agent notifications and terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added

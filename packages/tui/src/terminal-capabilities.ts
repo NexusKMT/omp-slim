@@ -1,5 +1,6 @@
 import { encodeSixel } from "@oh-my-pi/pi-natives";
 import { $env, isBunTestRuntime, isTerminalHeadless, isWsl } from "@oh-my-pi/pi-utils/env";
+import { writeTerminalSequence } from "./active-terminal";
 import { sendDesktopNotification, shouldDeliverDesktopNotification } from "./desktop-notify";
 import {
 	detectKittyUnicodePlaceholdersSupport,
@@ -251,17 +252,17 @@ export class TerminalInfo {
 		// has that the agent finished or is waiting for input. `Bell` protocol
 		// already self-flags via tmux's bell monitoring, so leave it alone.
 		if (this.notifyProtocol !== NotifyProtocol.Bell && isInsideTmux()) {
-			process.stdout.write(`${wrapTmuxPassthrough(formatted)}\x07`);
+			writeTerminalSequence(`${wrapTmuxPassthrough(formatted)}\x07`);
 			return;
 		}
 		// Zellij drops OSC 9/99 and has no DCS passthrough envelope, but raises its
 		// `[!]` bell flag on a bare BEL — the same backgrounded-pane signal tmux
 		// users get. So follow the (Zellij-swallowed) OSC with a plain BEL.
 		if (this.notifyProtocol !== NotifyProtocol.Bell && isInsideZellij()) {
-			process.stdout.write(`${formatted}\x07`);
+			writeTerminalSequence(`${formatted}\x07`);
 			return;
 		}
-		process.stdout.write(formatted);
+		writeTerminalSequence(formatted);
 		// VTE-family terminals (Ptyxis, GNOME Terminal, Tilix, …) plus Alacritty
 		// and bare xterm-on-Wayland have no in-band escape that surfaces an
 		// arbitrary desktop toast (#3685). When the chosen `notifyProtocol` is

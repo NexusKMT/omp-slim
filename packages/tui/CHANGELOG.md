@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `writeTerminalSequence()`, which writes an out-of-band escape sequence (window title, clipboard, notification) through the active terminal's ordered output path, falls back to stdout when no terminal is active, and writes nothing from a worker thread.
+
+### Changed
+
+- `PI_TUI_WRITE_LOG` now records an OSC 52 clipboard write as its payload length instead of the clipboard contents.
+
+### Fixed
+
+- Fixed terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
