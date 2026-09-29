@@ -602,6 +602,168 @@ describe("ExtensionRunner", () => {
 			expect(errors[0]?.error).toContain("rewrite failed");
 		});
 
+		it("normalizes each text signature against its original text across chained rewrites", async () => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "assistant-message-signatures.ts"),
+				`
+				export default function(pi) {
+					pi.on("assistant_message", event => ({
+						content: [
+							{ ...event.message.content[0], textSignature: "original-second" },
+							event.message.content[1],
+							{ ...event.message.content[2], text: "edited second", textSignature: "original-first" },
+						],
+					}));
+					pi.on("assistant_message", event => {
+						if (event.message.content[0].textSignature !== "original-first" ||
+							event.message.content[2].textSignature !== undefined) {
+							throw new Error("replay signatures were not normalized before chaining");
+						}
+					});
+					pi.on("assistant_message", event => ({
+						content: [
+							{ type: "text", text: event.message.content[0].text },
+							event.message.content[1],
+							{ ...event.message.content[2], textSignature: "original-first" },
+						],
+					}));
+					pi.on("assistant_message", event => ({
+						content: [
+							{ ...event.message.content[0], text: "edited first", textSignature: "original-first" },
+							event.message.content[1],
+							{ ...event.message.content[2], text: "second", textSignature: "forged" },
+						],
+					}));
+				}
+				`,
+			);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => errors.push(error));
+			const toolCall = { type: "toolCall" as const, id: "call-1", name: "read", arguments: { path: "x" } };
+			const message = {
+				...createAssistantMessage("first"),
+				content: [
+					{ type: "text" as const, text: "first", textSignature: "original-first" },
+					toolCall,
+					{ type: "text" as const, text: "second", textSignature: "original-second" },
+				],
+			};
+			expect(await runner.emitAssistantMessage(message)).toEqual([
+				{ type: "text", text: "edited first" },
+				toolCall,
+				{ type: "text", text: "second", textSignature: "original-second" },
+			]);
+			expect(message.content[0]).toEqual({ type: "text", text: "first", textSignature: "original-first" });
+			expect(errors).toEqual([]);
+		});
+
+		it.each([
+			[
+				"added text",
+				[
+					{ type: "text", text: "first" },
+					{ type: "text", text: "extra" },
+					{ type: "text", text: "second" },
+				],
+			],
+			["removed text", [{ type: "text", text: "first" }]],
+			[
+				"changed block kind",
+				[
+					{ type: "text", text: "first" },
+					{ type: "thinking", thinking: "second" },
+				],
+			],
+			[
+				"changed text metadata",
+				[
+					{ type: "text", text: "first", providerMetadata: "forged" },
+					{ type: "text", text: "second" },
+				],
+			],
+		] as const)("rejects %s topology or metadata changes", async (_case, content) => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "assistant-message-invalid.ts"),
+				`export default pi => pi.on("assistant_message", () => ({ content: ${JSON.stringify(content)} }));`,
+			);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => errors.push(error));
+			const message = {
+				...createAssistantMessage("first"),
+				content: [
+					{ type: "text" as const, text: "first", textSignature: "original-first" },
+					{ type: "text" as const, text: "second", textSignature: "original-second" },
+				],
+			};
+			expect(await runner.emitAssistantMessage(message)).toBeUndefined();
+			expect(errors).toHaveLength(1);
+			expect(errors[0]?.error).toContain("block positions");
+		});
+
+		it("returns completed rewrites without awaiting or accepting a handler after abort", async () => {
+			const startedPath = path.join(tempDir.path(), "assistant-message-started.txt");
+			const skippedPath = path.join(tempDir.path(), "assistant-message-skipped.txt");
+			fs.writeFileSync(
+				path.join(extensionsDir, "assistant-message-abort.ts"),
+				`
+				import * as fs from "node:fs";
+				export default function(pi) {
+					pi.on("assistant_message", event => ({
+						content: event.message.content.map(block =>
+							block.type === "text" ? { ...block, text: "accepted" } : block
+						),
+					}));
+					pi.on("assistant_message", async () => {
+						fs.writeFileSync(${JSON.stringify(startedPath)}, "started");
+						await Promise.withResolvers().promise;
+					});
+					pi.on("assistant_message", () => {
+						fs.writeFileSync(${JSON.stringify(skippedPath)}, "ran");
+					});
+				}
+				`,
+			);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const controller = new AbortController();
+			const message = createAssistantMessage("original");
+			const started = new Promise<void>(resolve => {
+				const watcher = fs.watch(tempDir.path(), (_eventType, filename) => {
+					if (filename?.toString() !== path.basename(startedPath)) return;
+					watcher.close();
+					resolve();
+				});
+			});
+			const emission = runner.emitAssistantMessage(message, controller.signal);
+			await started;
+			expect(await Bun.file(startedPath).text()).toBe("started");
+			controller.abort(new Error("cancelled"));
+			await expect(emission).resolves.toEqual([{ type: "text", text: "accepted" }]);
+			expect(await Bun.file(skippedPath).exists()).toBe(false);
+		});
+
 		it("rejects attempts to change tool calls", async () => {
 			fs.writeFileSync(
 				path.join(extensionsDir, "assistant-message-invalid.ts"),

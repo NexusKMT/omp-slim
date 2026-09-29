@@ -15,6 +15,7 @@ import type {
 	ImageContent,
 	Model,
 	ProviderResponseMetadata,
+	TextContent,
 } from "@oh-my-pi/pi-ai";
 import {
 	clearContextHistoryIndex,
@@ -1624,9 +1625,9 @@ export class ExtensionRunner {
 	}
 
 	/**
-	 * Run extension rewrites on a detached finalized assistant message. Only text
-	 * blocks may change; preserving all other blocks verbatim protects signatures
-	 * and already-prepared tool calls.
+	 * Run extension rewrites on a detached finalized assistant message. Text may
+	 * change only in its original block position; all other metadata and blocks
+	 * remain unchanged. Text replay signatures are tied to their original text.
 	 */
 	async emitAssistantMessage(
 		message: AssistantMessage,
@@ -1635,12 +1636,16 @@ export class ExtensionRunner {
 		if (!this.hasHandlers("assistant_message")) return undefined;
 		const ctx = this.createContext();
 		let currentContent = structuredClone(message.content);
-		const nonText = (content: typeof currentContent) => content.filter(block => block.type !== "text");
+		const textMetadata = (block: TextContent) => {
+			const { text: _text, textSignature: _textSignature, ...metadata } = block;
+			return metadata;
+		};
 
 		for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("assistant_message");
 			if (!handlers?.length) continue;
 			for (const handler of handlers) {
+				if (signal?.aborted) break;
 				const event: AssistantMessageRewriteEvent = {
 					type: "assistant_message",
 					message: { ...message, content: structuredClone(currentContent) },
@@ -1654,30 +1659,42 @@ export class ExtensionRunner {
 					undefined,
 					signal,
 				)) as AssistantMessageRewriteResult | undefined;
+				if (signal?.aborted) break;
 				if (result?.content === undefined) continue;
 				const replacement = result.content;
 				if (
 					!Array.isArray(replacement) ||
-					replacement.some(
-						block =>
-							!block ||
-							typeof block !== "object" ||
-							typeof block.type !== "string" ||
-							(block.type === "text" && typeof block.text !== "string"),
-					) ||
-					!Bun.deepEquals(nonText(replacement), nonText(currentContent))
+					replacement.length !== currentContent.length ||
+					replacement.some((block, index) => {
+						const previous = currentContent[index];
+						if (!block || typeof block !== "object" || block.type !== previous?.type) return true;
+						if (block.type !== "text") return !Bun.deepEquals(block, previous);
+						return (
+							typeof block.text !== "string" ||
+							previous?.type !== "text" ||
+							!Bun.deepEquals(textMetadata(block), textMetadata(previous))
+						);
+					})
 				) {
 					this.emitError({
 						extensionPath: ext.path,
 						event: "assistant_message",
-						error: "content replacement may only change text blocks; non-text blocks must remain unchanged and in order",
+						error: "content replacement may only change text in existing blocks; block positions, non-text blocks, and other metadata must remain unchanged",
 					});
 					continue;
 				}
 				currentContent = structuredClone(replacement);
+				for (const [index, block] of currentContent.entries()) {
+					const original = message.content[index];
+					if (block.type !== "text" || original?.type !== "text") continue;
+					if (block.text !== original.text || !("textSignature" in original)) {
+						delete block.textSignature;
+					} else {
+						block.textSignature = original.textSignature;
+					}
+				}
 			}
 		}
-		signal?.throwIfAborted();
 		return Bun.deepEquals(currentContent, message.content) ? undefined : currentContent;
 	}
 

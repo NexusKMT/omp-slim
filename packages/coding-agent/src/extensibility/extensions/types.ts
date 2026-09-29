@@ -866,7 +866,9 @@ export interface MessageEndEvent {
  * request. Handlers chain: each sees the previous handler's replacement.
  *
  * `message` is a detached copy — in-place mutation has no effect; return
- * `content` instead. Not fired for streams cut off by an abort.
+ * `content` instead. If cancellation arrives while handlers are pending,
+ * rewrites accepted so far are returned and remaining handlers are skipped.
+ * This event is not fired if the provider stream is cut off before finalizing.
  */
 export interface AssistantMessageRewriteEvent {
 	type: "assistant_message";
@@ -1207,12 +1209,12 @@ export interface ContextEventResult {
  * Result from an `assistant_message` handler. Return `undefined` to leave the
  * message unchanged.
  *
- * Only `text` blocks may be edited, added, removed, or reordered. Every other
- * block (thinking, redacted thinking, tool calls, …) must appear unchanged and
- * in the original relative order: thinking signatures must replay verbatim,
- * and tool calls may already be dispatched speculatively. A replacement that
- * violates this is rejected (reported as an extension error) and the message
- * keeps its previous content.
+ * Text blocks must remain in their original positions: only their `text` may
+ * change. Non-text blocks and all other block metadata must remain unchanged.
+ * A text block with unchanged text keeps its original `textSignature` even if
+ * a handler replaces it; editing text removes its signature because that
+ * provider replay state cannot be reused for different text. Invalid
+ * replacements are reported as extension errors and skipped.
  */
 export interface AssistantMessageRewriteResult {
 	content?: AssistantMessage["content"];
