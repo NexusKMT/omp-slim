@@ -44,6 +44,9 @@ function makeCtx(isStreaming = false, messages: AgentMessage[] = []) {
 			this.pendingImageLinks = [];
 		},
 	};
+	// Mirrors the real contract: a pending submission is recorded as a local
+	// submission until its canonical user `message_start` lands.
+	const locallySubmittedUserSignatures = new Set<string>();
 	const ctx = {
 		editor,
 		session: {
@@ -62,6 +65,7 @@ function makeCtx(isStreaming = false, messages: AgentMessage[] = []) {
 		focusedAgentId: undefined,
 		collabGuest: undefined,
 		shutdown,
+		locallySubmittedUserSignatures,
 		flushPendingBashComponents: vi.fn(),
 		handleHotkeysCommand: vi.fn(),
 		handleMCPCommand,
@@ -74,7 +78,10 @@ function makeCtx(isStreaming = false, messages: AgentMessage[] = []) {
 			customType?: string;
 			display?: boolean;
 			streamingBehavior?: "steer" | "followUp";
-		}) => ({ ...input, cancelled: false, started: false }),
+		}) => {
+			locallySubmittedUserSignatures.add(`${input.text}\u0000${input.images?.length ?? 0}`);
+			return { ...input, cancelled: false, started: false };
+		},
 		ui: { requestRender: vi.fn() },
 		compactionQueuedMessages: [],
 		skillCommands: new Map(),
@@ -210,15 +217,28 @@ describe("input controller — bare exit on empty session (#3850)", () => {
 		resetSettingsForTest();
 	});
 
-	it.each(["exit", "quit", "q", "Exit", "QUIT"])("quits on bare %p before the first message", async word => {
+	it.each(["exit", "quit", "q"])("quits on exactly %p before the first message", async word => {
 		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
 		controllerFor(ctx);
 
-		await editor.onSubmit?.(`  ${word}  `);
+		await editor.onSubmit?.(word);
 
 		expect(shutdown).toHaveBeenCalledTimes(1);
 		expect(onInputCallback).not.toHaveBeenCalled();
 	});
+
+	it.each(["Exit", "QUIT", " exit", "q ", "exit.", "exit the loop"])(
+		"sends %p to the model because the whole input is not exactly the word",
+		async input => {
+			const { ctx, editor, shutdown, onInputCallback } = makeCtx();
+			controllerFor(ctx);
+
+			await editor.onSubmit?.(input);
+
+			expect(shutdown).not.toHaveBeenCalled();
+			expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: input.trim() }));
+		},
+	);
 
 	it("sends bare exit to the model once the session has messages", async () => {
 		const history: AgentMessage[] = [{ role: "user", content: "hi", timestamp: 0 }];
@@ -231,14 +251,40 @@ describe("input controller — bare exit on empty session (#3850)", () => {
 		expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: "exit" }));
 	});
 
-	it("sends a sentence containing exit to the model", async () => {
+	it("does not quit while the first prompt is still in flight before reaching history", async () => {
 		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
 		controllerFor(ctx);
 
-		await editor.onSubmit?.("exit the loop");
+		await editor.onSubmit?.("fix the build");
+		await editor.onSubmit?.("exit");
 
 		expect(shutdown).not.toHaveBeenCalled();
-		expect(onInputCallback).toHaveBeenCalledWith(expect.objectContaining({ text: "exit the loop" }));
+		expect(onInputCallback.mock.calls.map(call => call[0].text)).toEqual(["fix the build", "exit"]);
+	});
+
+	it("steers bare exit into a streaming first turn instead of quitting", async () => {
+		const { ctx, editor, shutdown, prompt } = makeCtx(true);
+		controllerFor(ctx);
+
+		await editor.onSubmit?.("exit");
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(prompt).toHaveBeenCalledWith("exit", expect.objectContaining({ streamingBehavior: "steer" }));
+	});
+
+	it("delivers an image attached to exit instead of quitting", async () => {
+		const image: ImageContent = { type: "image", data: "aGk=", mimeType: "image/png" };
+		const { ctx, editor, shutdown, onInputCallback } = makeCtx();
+		controllerFor(ctx);
+		editor.pendingImages = [image];
+		editor.pendingImageLinks = [undefined];
+
+		await editor.onSubmit?.("exit [Image #1]");
+
+		expect(shutdown).not.toHaveBeenCalled();
+		expect(onInputCallback).toHaveBeenCalledWith(
+			expect.objectContaining({ text: "exit [Image #1]", images: [image] }),
+		);
 	});
 
 	it("sends bare exit to the model when input.bareExitOnEmptySession is off", async () => {

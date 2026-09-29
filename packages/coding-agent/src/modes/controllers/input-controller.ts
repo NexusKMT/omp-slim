@@ -869,6 +869,7 @@ export class InputController {
 
 	setupEditorSubmitHandler(): void {
 		this.ctx.editor.onSubmit = async (text: string) => {
+			const submittedText = text;
 			text = this.#compactDraftImages(text.trim());
 			const hasPendingImages = this.ctx.editor.pendingImages.length > 0;
 			if ((!isSettingsInitialized() || cfgEmojiAutocomplete.get(settings)) && text) text = expandEmoticons(text);
@@ -969,14 +970,21 @@ export class InputController {
 
 			// Bare `exit`/`quit`/`q` on a session with no messages: nobody opens a
 			// fresh session to send that word to the model, so route it to the
-			// slash command (collab-guest gating applies there unchanged).
+			// slash command (collab-guest gating applies there unchanged). The whole
+			// submitted input must be exactly the word — no case folding, surrounding
+			// whitespace, or extension rewrite. A first prompt still in flight
+			// (pending submission, preflight, or streaming) has not reached
+			// `messages` yet, so it must not count as an empty session.
 			if (
-				Object.hasOwn(BARE_EXIT_WORDS, text.toLowerCase()) &&
+				text === submittedText &&
+				Object.hasOwn(BARE_EXIT_WORDS, text) &&
 				!hasInputImages &&
+				!this.ctx.session.isStreaming &&
+				this.ctx.locallySubmittedUserSignatures.size === 0 &&
 				this.ctx.session.messages.length === 0 &&
 				(!isSettingsInitialized() || cfgBareExitOnEmptySession.get(settings))
 			) {
-				text = `/${text.toLowerCase()}`;
+				text = `/${text}`;
 			}
 
 			// Handle built-in slash commands
