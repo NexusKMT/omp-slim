@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed macOS `takeover` and desktop scrolls reaching pixel-forwarding windows such as iPhone Mirroring as nothing or at most about 99 points: every HID scroll now first moves the real pointer onto the point with three mouse moves, then sends the distance as wheel events of at most 30 px about 16 ms apart (at most 40 events; larger steps beyond 1200 px), and a takeover scroll stops if the target loses focus midway ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.4] - 2026-09-29
 
