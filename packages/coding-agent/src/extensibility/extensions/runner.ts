@@ -1641,11 +1641,11 @@ export class ExtensionRunner {
 			return metadata;
 		};
 
-		for (const ext of this.extensions) {
+		extensions: for (const ext of this.extensions) {
 			const handlers = ext.handlers.get("assistant_message");
 			if (!handlers?.length) continue;
 			for (const handler of handlers) {
-				if (signal?.aborted) break;
+				if (signal?.aborted) break extensions;
 				const event: AssistantMessageRewriteEvent = {
 					type: "assistant_message",
 					message: { ...message, content: structuredClone(currentContent) },
@@ -1659,7 +1659,7 @@ export class ExtensionRunner {
 					undefined,
 					signal,
 				)) as AssistantMessageRewriteResult | undefined;
-				if (signal?.aborted) break;
+				if (signal?.aborted) break extensions;
 				if (result?.content === undefined) continue;
 				const replacement = result.content;
 				if (
@@ -1687,7 +1687,7 @@ export class ExtensionRunner {
 				for (const [index, block] of currentContent.entries()) {
 					const original = message.content[index];
 					if (block.type !== "text" || original?.type !== "text") continue;
-					if (block.text !== original.text || !("textSignature" in original)) {
+					if (block.text !== original.text || original.textSignature === undefined) {
 						delete block.textSignature;
 					} else {
 						block.textSignature = original.textSignature;

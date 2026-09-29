@@ -862,8 +862,11 @@ export interface MessageEndEvent {
  * and before the message reaches agent context, `message_end` listeners (TUI,
  * RPC, exporters), session persistence, or tool dispatch. Return
  * {@link AssistantMessageRewriteResult} to replace its content; the replacement
- * is the single source of truth for display, history, and the next provider
- * request. Handlers chain: each sees the previous handler's replacement.
+ * is the single source of truth for history, persistence, `message_end`
+ * consumers, and the next provider request. Text already streamed through
+ * `message_update` is not retracted, so stream-rendering clients may keep
+ * showing the original. Handlers chain: each sees the previous handler's
+ * replacement.
  *
  * `message` is a detached copy — in-place mutation has no effect; return
  * `content` instead. If cancellation arrives while handlers are pending,
