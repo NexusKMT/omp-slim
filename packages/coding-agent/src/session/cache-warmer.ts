@@ -43,12 +43,13 @@ export interface CacheWarmingRefreshStart {
 	model: string;
 }
 
+/** Result of a refresh that {@link CacheWarmingRefreshStart} announced. */
 export interface CacheWarmingRefreshEnd extends CacheWarmingRefreshStart {
 	outcome: "hit" | "miss" | "error" | "aborted";
 	/** Present only when onWarmed recorded this refresh. */
 	usage?: Usage;
 	/** Why warming stopped; absent when warming continues (the refresh rescheduled, or a new request replaced the run). */
-	stopReason?: string;
+	warmingStopReason?: string;
 }
 
 /** Prompt-cache retention tier a request wrote its entry under. */
@@ -233,7 +234,7 @@ interface ActiveRun extends CacheWarmRequest {
 	/** Set while a refresh that an extension forced is in flight. */
 	extensionOverride: boolean;
 	timer?: NodeJS.Timeout;
-	stopReason?: string;
+	warmingStopReason?: string;
 }
 
 /** Everything the warmer needs from its host; injected so the core stays session-agnostic. */
@@ -266,7 +267,9 @@ export class CacheWarmer {
 	readonly #deps: CacheWarmerDeps;
 	/** Called with every paid warm response, including one that missed the cache. */
 	onWarmed?: (message: AssistantMessage, extensionOverride: boolean) => void;
+	/** Called when a refresh is handed to the stream; stop decisions and extension vetoes send nothing and skip it. */
 	onRefreshStart?: (refresh: CacheWarmingRefreshStart) => void;
+	/** Called exactly once after each onRefreshStart, unless the host cleared it (dispose) while the refresh was in flight. */
 	onRefreshEnd?: (refresh: CacheWarmingRefreshEnd) => void;
 
 	constructor(deps: CacheWarmerDeps) {
@@ -402,7 +405,7 @@ export class CacheWarmer {
 	}
 
 	#stop(reason: string, stopped?: Pick<CacheWarmingStatus, "decision" | "extensionOverride">): void {
-		if (this.#run) this.#run.stopReason = reason;
+		if (this.#run) this.#run.warmingStopReason = reason;
 		this.#clearRun();
 		this.#inactive = { state: "inactive", reason, ...stopped };
 	}
@@ -507,7 +510,7 @@ export class CacheWarmer {
 				...refresh,
 				outcome,
 				...(usage ? { usage } : {}),
-				...(run.stopReason ? { stopReason: run.stopReason } : {}),
+				...(run.warmingStopReason ? { warmingStopReason: run.warmingStopReason } : {}),
 			});
 		}
 	}

@@ -6162,14 +6162,9 @@ export class AgentSession implements SettingsScope {
 		await this.#maintenance.runIdleCompaction();
 	}
 
-	/** Set cache warming for this session, or save the preference when persist is true. */
-	setCacheWarmingMode(mode: CacheWarmingMode, persist = false): CacheWarmingMode {
-		if (persist) {
-			cfgProvidersCacheWarming.set(this.settings, mode);
-			cfgProvidersCacheWarming.clearOverride(this.settings);
-		} else {
-			cfgProvidersCacheWarming.override(this.settings, mode);
-		}
+	/** Override cache warming for this session only, never writing config.yml; returns the effective mode. */
+	setCacheWarmingMode(mode: CacheWarmingMode): CacheWarmingMode {
+		cfgProvidersCacheWarming.override(this.settings, mode);
 		return cfgProvidersCacheWarming.get(this.settings);
 	}
 

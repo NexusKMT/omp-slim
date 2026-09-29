@@ -285,7 +285,7 @@ describe("cache warmer lifecycle", () => {
 		expect(h.refreshes[1]).toMatchObject({
 			outcome: "miss",
 			usage: h.warmed[0]?.message.usage,
-			stopReason: "refresh missed the cache",
+			warmingStopReason: "refresh missed the cache",
 		});
 		await advance(SHORT_DELAY_MS * 4);
 		expect(h.replays).toHaveLength(1);
@@ -301,7 +301,7 @@ describe("cache warmer lifecycle", () => {
 		expect(rejected.refreshes[1]).toMatchObject({
 			outcome: "error",
 			usage: rejected.warmed[0]?.message.usage,
-			stopReason: "refresh failed",
+			warmingStopReason: "refresh failed",
 		});
 
 		const thrown = harness({
@@ -320,7 +320,7 @@ describe("cache warmer lifecycle", () => {
 				provider: "anthropic",
 				model: "claude-sonnet-5",
 				outcome: "error",
-				stopReason: "refresh failed",
+				warmingStopReason: "refresh failed",
 			},
 		]);
 		expect(thrown.warmed).toEqual([]);
@@ -461,7 +461,7 @@ describe("cache warmer lifecycle", () => {
 				provider: "anthropic",
 				model: "claude-sonnet-5",
 				outcome: "aborted",
-				stopReason: "cache warming disabled",
+				warmingStopReason: "cache warming disabled",
 			},
 		]);
 		expect(h.warmed).toEqual([]);

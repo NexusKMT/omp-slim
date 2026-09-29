@@ -113,23 +113,18 @@ describe("AgentSession auto-maintenance controls are session-scoped by default",
 	it("persists to global config.yml when persist=true (settings panel path)", async () => {
 		session.setAutoCompactionEnabled(false);
 		session.setAutoRetryEnabled(false);
-		session.setCacheWarmingMode("off");
 		session.setAutoCompactionEnabled(true, true);
 		session.setAutoRetryEnabled(true, true);
-		session.setCacheWarmingMode("streaming", true);
 		await settings.flush();
 
 		expect(cfgCompactionEnabled.get(settings)).toBe(true);
 		expect(cfgRetryEnabled.get(settings)).toBe(true);
-		expect(cfgProvidersCacheWarming.get(settings)).toBe("streaming");
 		expect(settings.getGlobalSettings()).toMatchObject({
 			compaction: { enabled: true },
 			retry: { enabled: true },
-			providers: { cacheWarming: "streaming" },
 		});
 		const onDisk = await Bun.file(configPath).text();
 		expect(onDisk).toContain("enabled: true");
-		expect(Bun.YAML.parse(onDisk)).toMatchObject({ providers: { cacheWarming: "streaming" } });
 	});
 
 	it("disabling cache warming cancels the live timer through the settings override", async () => {

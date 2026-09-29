@@ -656,7 +656,7 @@ is active** to observe complete refresh lifecycles:
   model: string;
   outcome: "hit" | "miss" | "error" | "aborted";
   usage?: Usage;
-  stopReason?: string;
+  warmingStopReason?: string;
 }
 ```
 
@@ -671,12 +671,11 @@ forced it). This includes paid misses and errors; cancelled/replaced refreshes
 are not recorded. Summing `usage.cost.total` attributes the warming costs already
 included in `get_session_stats`, rather than adding another charge.
 
-`stopReason` explains why warming stopped because of or during the refresh, for
-example `"refresh missed the cache"`, `"refresh failed"`, `"cache warming disabled"`,
-or `"conversation context changed"`. It is absent when warming continues: the
-refresh rescheduled, or a new request replaced the run.
-It is not the provider message stop reason: a successful hit may deliberately
-cut off generation without stopping cache warming.
+`warmingStopReason` explains why warming stopped because of or during the
+refresh, for example `"refresh missed the cache"`, `"refresh failed"`,
+`"cache warming disabled"`, or `"conversation context changed"`. It is absent
+when warming continues: the refresh rescheduled, or a new request replaced the
+run.
 
 ### Available commands
 
