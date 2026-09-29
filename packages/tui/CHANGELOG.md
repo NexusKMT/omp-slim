@@ -159,7 +159,7 @@
 - Fixed file links in pending Read and Write cards so they open the correct local targets, including paths in the home directory, archives, and databases.
 ### Fixed
 
-- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line.
+- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line ([#13792](https://github.com/can1357/oh-my-pi/pull/13792) by [@NaC-L](https://github.com/NaC-L)).
 
 ## [18.3.0] - 2026-09-24
 
