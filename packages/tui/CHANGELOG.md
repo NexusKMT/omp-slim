@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Home directories adjoining shell redirections, control operators, or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) are now shortened to `~` in display-only text instead of leaking the full path.
-- Freeform edit path previews recognise the current sloppy `*** Edit File:` payload instead of the retired `<SM:>` markup.
+- Home directories adjoining shell redirections, control operators, or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) are now shortened to `~` in display-only text instead of leaking the full path ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
+- Freeform edit path previews recognise the current sloppy `*** Edit File:` payload instead of the retired `<SM:>` markup ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 
 ## [18.4.3] - 2026-09-28
 

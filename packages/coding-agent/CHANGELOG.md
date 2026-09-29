@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Subagents now show their current activity, and `display.subagentLivePreview` (off by default) adds a width-bounded current-tool row with an elapsed marker once a call runs past five seconds; resolved model labels follow the model badge setting.
+- Subagents now show their current activity, and `display.subagentLivePreview` (off by default) adds a width-bounded current-tool row with an elapsed marker once a call runs past five seconds; resolved model labels follow the model badge setting ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 
 ### Added
 
@@ -12,8 +12,8 @@
 
 ### Fixed
 
-- Fixed fast subagent tool transitions being dropped by progress and HUD update batching.
-- Kept the last completed subagent tool visible with the configured success/error symbol until the next tool starts; edit previews include affected file paths.
+- Fixed fast subagent tool transitions being dropped by progress and HUD update batching ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
+- Kept the last completed subagent tool visible with the configured success/error symbol until the next tool starts; edit previews include affected file paths ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed `computer.window(74)` matching every open window and `computer.window({ id: 74 })` matching none; a numeric id now resolves the same window as `"74"` ([#13649](https://github.com/can1357/oh-my-pi/pull/13649) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.4.3] - 2026-09-28
