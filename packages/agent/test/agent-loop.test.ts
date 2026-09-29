@@ -55,6 +55,25 @@ function toolResultText(result: { content: Array<{ type: string; text?: string }
 	return block.text;
 }
 
+/** Echo tool recording each executed payload — shared by the id-repair tests. */
+function makeEchoTool(executions: string[]) {
+	const toolSchema = type({ value: "string" });
+	const tool: AgentTool<typeof toolSchema, { value: string }> = {
+		name: "echo",
+		label: "Echo",
+		description: "Echo tool",
+		parameters: toolSchema,
+		async execute(_toolCallId, params) {
+			executions.push(params.value);
+			return {
+				content: [{ type: "text", text: `echoed: ${params.value}` }],
+				details: { value: params.value },
+			};
+		},
+	};
+	return tool;
+}
+
 const harmonyMitigationModel = createHarmonyMitigationModel();
 
 describe("agentLoop with AgentMessage", () => {
@@ -1954,6 +1973,165 @@ describe("agentLoop with AgentMessage", () => {
 		} finally {
 			detectSpy.mockRestore();
 		}
+	});
+
+	it("mints never-materialized tool-call ids uniquely across assistant turns of one run", async () => {
+		// Failure mode if this regresses: `ensureUniqueToolCallIds` built its
+		// mint/dup candidate sets from the current message's blocks only, so every
+		// assistant turn with never-materialized ids re-mints `call_1`, `call_2`,
+		// … and `_dup` suffixes re-collide across turns. Session-wide consumers
+		// key on toolCallId and merge the collisions: `formatSessionHistoryMarkdown`
+		// keeps one entry per id (last entry wins), the advisor delta split and
+		// `EventController.#toolTimelineComponents` fold two calls into one card,
+		// and persistence keys collide — one call's result silently replaces its
+		// namesake's from the previous turn.
+		const executions: string[] = [];
+		const tool = makeEchoTool(executions);
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "a1" } },
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "a2" } },
+					],
+				},
+				{
+					content: [
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "b1" } },
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "b2" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		const messages = await stream.result();
+
+		expect(executions.sort()).toEqual(["a1", "a2", "b1", "b2"]);
+		const assistants = messages.filter((m): m is AssistantMessage => m.role === "assistant");
+		const turnIds = assistants
+			.map(assistant => assistant.content.flatMap(block => (block.type === "toolCall" ? [block.id] : [])))
+			.filter(ids => ids.length > 0);
+		expect(turnIds).toHaveLength(2);
+		expect(turnIds[0]).toHaveLength(2);
+		expect(turnIds[1]).toHaveLength(2);
+		// All four calls get DISTINCT ids across turns — not two `call_1`s.
+		const allIds = turnIds.flat();
+		expect(allIds.every(id => id.trim().length > 0)).toBe(true);
+		expect(new Set(allIds).size).toBe(4);
+		// Each turn's siblings stay distinct among themselves too.
+		expect(new Set(turnIds[0]).size).toBe(2);
+		expect(new Set(turnIds[1]).size).toBe(2);
+		// Results pair with their own call under the minted ids.
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results.map(r => r.toolCallId).sort()).toEqual([...allIds].sort());
+	});
+
+	it("keeps reused-id `_dup` re-keys unique across assistant turns", async () => {
+		// Failure mode if this regresses: the `_dup`/`call_<n>` candidate loops only
+		// checked the current message, so a second turn with the same reused-id
+		// shape re-derived `call-1` + `call-1_dup1` — cross-turn collisions again,
+		// this time on the suffixed re-keys.
+		const executions: string[] = [];
+		const tool = makeEchoTool(executions);
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "t1a" } },
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "t1b" } },
+					],
+				},
+				{
+					content: [
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "t2a" } },
+						{ type: "toolCall", id: "call-1", name: "echo", arguments: { value: "t2b" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		const messages = await stream.result();
+
+		expect(executions.sort()).toEqual(["t1a", "t1b", "t2a", "t2b"]);
+		const assistants = messages.filter((m): m is AssistantMessage => m.role === "assistant");
+		const turnIds = assistants
+			.map(assistant => assistant.content.flatMap(block => (block.type === "toolCall" ? [block.id] : [])))
+			.filter(ids => ids.length > 0);
+		expect(turnIds).toHaveLength(2);
+		// Turn 1 keeps the provider id and suffices the in-message reuse.
+		expect(turnIds[0]).toEqual(["call-1", "call-1_dup1"]);
+		// Turn 2 with the same shape gets different ids — no cross-turn re-use of
+		// either `call-1` or its `_dup1` re-key.
+		expect(turnIds[1]).toHaveLength(2);
+		expect(new Set(turnIds[1]).size).toBe(2);
+		const allIds = turnIds.flat();
+		expect(new Set(allIds).size).toBe(4);
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results.map(r => r.toolCallId).sort()).toEqual([...allIds].sort());
+		expect(results.map(toolResultText).sort()).toEqual(["echoed: t1a", "echoed: t1b", "echoed: t2a", "echoed: t2b"]);
+	});
+
+	it("keeps a toolCallId-keyed session-history map collision-free across turns", async () => {
+		// Failure mode if this regresses: `formatSessionHistoryMarkdown` (and every
+		// other session-wide id-keyed consumer) builds a last-entry-wins
+		// `Map<toolCallId, result>`; turns that re-mint the same ids collapse into
+		// fewer map entries and a turn's result silently disappears from the
+		// rendered history.
+		const executions: string[] = [];
+		const tool = makeEchoTool(executions);
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "a1" } },
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "a2" } },
+					],
+				},
+				{
+					content: [
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "b1" } },
+						{ type: "toolCall", id: "", name: "echo", arguments: { value: "b2" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		const messages = await stream.result();
+
+		// Session-history-style merge: one entry per toolCallId, last entry wins.
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		const byToolCallId = new Map<string, ToolResultMessage>();
+		for (const result of results) byToolCallId.set(result.toolCallId, result);
+		// One result per call survives the merge across both turns.
+		expect(results).toHaveLength(4);
+		expect(byToolCallId.size).toBe(4);
+		expect([...byToolCallId.values()].map(toolResultText).sort()).toEqual([
+			"echoed: a1",
+			"echoed: a2",
+			"echoed: b1",
+			"echoed: b2",
+		]);
 	});
 
 	it("resolves function-form concurrency per call", async () => {

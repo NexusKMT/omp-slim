@@ -1485,8 +1485,10 @@ async function runLoopBody(
 					// `message_start`/`message_end` copies below are what persistence and
 					// every consumer retain. Repairing only at executeToolCalls would
 					// leave those copies under a never-materialized id while the result
-					// carries the minted one. The later prepare stays idempotent.
-					ensureUniqueToolCallIds(message.content);
+					// carries the minted one. The later prepare stays idempotent — the
+					// repaired mark rides the snapshot (object spread), and the minted
+					// ids are already claimed at run scope.
+					ensureUniqueToolCallIds(message, toolCallIdsDispatchedUnder(currentContext));
 					message = snapshotAssistantMessage(message);
 					currentContext.messages.push(message);
 					stream.push({ type: "message_start", message: snapshotAssistantMessage(message) });
@@ -2849,22 +2851,60 @@ function formatToolNotFoundMessage(
 
 /**
  * Enforce the invariant every downstream matcher keys on: `toolCall.id` is
- * unique and non-empty within one assistant message. Providers can deliver a
- * reused id (wire length truncation, Responses `callId|itemId` composite
- * collapse) or an id that never materialized (`""`) — the same occurrences the
- * replay pipeline repairs or drops (`deduplicateToolCallIds` /
- * `sanitizeMalformedToolCalls`). Id-keyed per-call state — the prepare map
- * below, every UI and persistence matcher — would otherwise merge sibling
- * calls: the later call's prepared entry overwrites the earlier's, both calls
- * execute the sibling's payload, and colliding result ids merge or drop one
- * sibling's output in every consumer. Never-materialized is the sanitizer's
+ * unique and non-empty across the whole run — not just within one assistant
+ * message. Providers can deliver a reused id (wire length truncation, Responses
+ * `callId|itemId` composite collapse) or an id that never materialized (`""`) —
+ * the same occurrences the replay pipeline repairs or drops
+ * (`deduplicateToolCallIds` / `sanitizeMalformedToolCalls`). Id-keyed per-call
+ * state — the prepare map below, every UI and persistence matcher — would
+ * otherwise merge sibling calls: the later call's prepared entry overwrites the
+ * earlier's, both calls execute the sibling's payload, and colliding result ids
+ * merge or drop one sibling's output in every consumer. Message-scope
+ * uniqueness is not enough for the session-wide consumers
+ * (`formatSessionHistoryMarkdown`'s last-entry-wins map, the advisor delta
+ * split, `EventController.#toolTimelineComponents`, persistence keys): a second
+ * assistant turn whose ids never materialized used to re-mint `call_1`,
+ * `call_2`, … and re-derive the same `_dup` suffixes, so those consumers merged
+ * the cross-turn collisions. Every id kept or minted here is therefore claimed
+ * in the run-scoped registry (`toolCallIdsDispatchedUnder`) and every candidate
+ * is generated until unused at run scope. Never-materialized is the sanitizer's
  * trim test (`isMalformedToolCallId`): a whitespace-only id is minted like an
  * empty one, never kept — it would be dropped from provider replay together
  * with its result, the live/replay divergence this repair exists to close.
- * Cursor server-resolved blocks are skipped: the provider correlates their
- * results out-of-band under its own ids. Idempotent.
+ * Cursor server-resolved blocks are never re-keyed (the provider correlates
+ * their results out-of-band under its own ids) but their ids still join the
+ * registry so no minted candidate collides with one. Idempotent: the message is
+ * marked repaired and re-entry is a no-op, so the Harmony path can repair
+ * before its snapshots while the dispatch-time prepare sees the already-minted
+ * ids and leaves them alone.
  */
-function ensureUniqueToolCallIds(content: AssistantMessage["content"]): void {
+const kToolCallIdsRepaired = Symbol("agent-loop.toolCallIdsRepaired");
+
+/** Assistant message optionally carrying the {@link kToolCallIdsRepaired} mark. */
+type ToolCallIdsRepairedCarrier = AssistantMessage & { [kToolCallIdsRepaired]?: true };
+
+/**
+ * Run-scoped registry of every tool-call id {@link ensureUniqueToolCallIds} has
+ * kept, minted, or seen on a server-resolved block under one
+ * {@link AgentContext}. Keyed by the dispatch context (the same object every
+ * `prepareToolCallDispatch` receives) so the uniqueness window spans every
+ * assistant turn of the run — and any later run sharing the context — rather
+ * than resetting per message.
+ */
+const dispatchedToolCallIdsByContext = new WeakMap<AgentContext, Set<string>>();
+
+function toolCallIdsDispatchedUnder(context: AgentContext): Set<string> {
+	let dispatched = dispatchedToolCallIdsByContext.get(context);
+	if (!dispatched) {
+		dispatched = new Set();
+		dispatchedToolCallIdsByContext.set(context, dispatched);
+	}
+	return dispatched;
+}
+
+function ensureUniqueToolCallIds(message: ToolCallIdsRepairedCarrier, dispatchedIds: Set<string>): void {
+	if (message[kToolCallIdsRepaired] === true) return;
+	const content = message.content;
 	const reserved = new Set<string>();
 	for (const block of content) {
 		if (block.type === "toolCall" && block.id) reserved.add(block.id);
@@ -2872,30 +2912,36 @@ function ensureUniqueToolCallIds(content: AssistantMessage["content"]): void {
 	const seen = new Set<string>();
 	for (const block of content) {
 		if (block.type !== "toolCall") continue;
-		if ((block as CursorExecResolvedCarrier)[kCursorExecResolved] === true) continue;
-		if (block.id?.trim() && !seen.has(block.id)) {
+		if ((block as CursorExecResolvedCarrier)[kCursorExecResolved] === true) {
+			if (block.id?.trim()) dispatchedIds.add(block.id);
+			continue;
+		}
+		if (block.id?.trim() && !seen.has(block.id) && !dispatchedIds.has(block.id)) {
 			seen.add(block.id);
+			dispatchedIds.add(block.id);
 			continue;
 		}
 		let candidate: string;
 		if (block.id?.trim()) {
 			let suffix = 1;
 			candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
-			while (seen.has(candidate) || reserved.has(candidate)) {
+			while (seen.has(candidate) || reserved.has(candidate) || dispatchedIds.has(candidate)) {
 				suffix += 1;
 				candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
 			}
 		} else {
 			let mint = 1;
 			candidate = `call_${mint}`;
-			while (seen.has(candidate) || reserved.has(candidate)) {
+			while (seen.has(candidate) || reserved.has(candidate) || dispatchedIds.has(candidate)) {
 				mint += 1;
 				candidate = `call_${mint}`;
 			}
 		}
 		block.id = candidate;
 		seen.add(candidate);
+		dispatchedIds.add(candidate);
 	}
+	message[kToolCallIdsRepaired] = true;
 }
 
 /**
@@ -2918,7 +2964,7 @@ async function prepareToolCallDispatch(
 	const { resolveFallbackTool, suggestFallbackToolNames, intentTracing, beforeToolCall } = config;
 	// Unique, non-empty ids first: everything below and every consumer of this
 	// message keys per-call state on `toolCall.id`.
-	ensureUniqueToolCallIds(assistantMessage.content);
+	ensureUniqueToolCallIds(assistantMessage, toolCallIdsDispatchedUnder(context));
 	const prepared = new Map<string, PreparedToolCall>();
 	for (const toolCall of assistantMessage.content) {
 		if (toolCall.type !== "toolCall") continue;
