@@ -182,7 +182,10 @@ export interface MentalModelSummary {
 /** Complete mental-model listing; also the wire shape of one list page. */
 export interface MentalModelListResponse {
 	items: MentalModelSummary[];
-	/** Server-reported match count across all pages (Hindsight ≥ 0.9); absent on older servers. */
+	/**
+	 * Match count across all pages. `listMentalModels` always sets it to the complete item count;
+	 * on a single wire page it is server-reported (Hindsight ≥ 0.9) and absent on older servers.
+	 */
 	total?: number;
 	[key: string]: unknown;
 }
@@ -461,7 +464,7 @@ export class HindsightApi {
 			if (pageItems.length < MENTAL_MODEL_PAGE_SIZE) break;
 			if (typeof page.total === "number" && items.length >= page.total) break;
 		}
-		return { items };
+		return { items, total: items.length };
 	}
 
 	/** Fetch a single mental model. Returns `null` on 404. */

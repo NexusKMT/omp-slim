@@ -87,9 +87,10 @@ describe("HindsightApi.listMentalModels pagination", () => {
 		serveMentalModels(2500, { reportTotal: true });
 		const client = new HindsightApi({ baseUrl: "http://hindsight.local" });
 
-		const { items } = await client.listMentalModels("shared", { detail: "metadata" });
+		const { items, total } = await client.listMentalModels("shared", { detail: "metadata" });
 
 		expect(items).toHaveLength(2500);
+		expect(total).toBe(2500);
 		expect(new Set(items.map(m => m.id)).size).toBe(2500);
 		expect(items.at(-1)?.id).toBe("m2499");
 	});
@@ -98,9 +99,10 @@ describe("HindsightApi.listMentalModels pagination", () => {
 		const urls = serveMentalModels(2000, { reportTotal: false });
 		const client = new HindsightApi({ baseUrl: "http://hindsight.local" });
 
-		const { items } = await client.listMentalModels("shared");
+		const { items, total } = await client.listMentalModels("shared");
 
 		expect(items).toHaveLength(2000);
+		expect(total).toBe(2000);
 		expect(urls).toHaveLength(3);
 	});
 });
