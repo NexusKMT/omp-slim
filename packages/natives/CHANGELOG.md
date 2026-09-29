@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed macOS `takeover` clicks and scrolls failing with `AX action 'AXRaise' failed (AXError(-25205))` on covered windows that do not support `AXRaise`, such as iPhone Mirroring, even when activation brings them forward; a window that stays covered still refuses before any input is sent ([#13737](https://github.com/can1357/oh-my-pi/pull/13737) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed
