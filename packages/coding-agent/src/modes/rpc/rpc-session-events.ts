@@ -2,8 +2,22 @@
  * Session-event forwarding for RPC mode: stamps message lifecycle frames with a
  * `messageId` and applies the host's `set_event_filter` selection.
  */
+import type { AssistantMessageEvent } from "@oh-my-pi/pi-ai";
 import type { AgentSessionEvent } from "../../session/agent-session";
-import type { RpcAgentSessionEventFrame, RpcMessageUpdates } from "./rpc-types";
+import type {
+	RpcAgentSessionEventFrame,
+	RpcDeltaMessageUpdateFrame,
+	RpcMessageEventFrame,
+	RpcMessageEventType,
+	RpcMessageUpdates,
+} from "./rpc-types";
+
+/** Drops the accumulated snapshot a streaming event carries; `done` and `error` have none. */
+function withoutPartial(event: AssistantMessageEvent): RpcDeltaMessageUpdateFrame["assistantMessageEvent"] {
+	if (!("partial" in event)) return event;
+	const { partial: _partial, ...increment } = event;
+	return increment;
+}
 
 /**
  * Writes session events to the RPC output. Message ids are assigned whether or
@@ -33,15 +47,17 @@ export class RpcSessionEventForwarder {
 		const frame = this.#stamp(event);
 		if (this.#filter && !this.#filter.has(frame.type)) return;
 		if (frame.type === "message_update" && this.#messageUpdates === "delta") {
-			const { partial: _partial, ...assistantMessageEvent } =
-				frame.assistantMessageEvent as typeof frame.assistantMessageEvent & { partial?: unknown };
-			this.#output({ ...frame, message: { role: frame.message.role }, assistantMessageEvent });
+			this.#output({
+				...frame,
+				message: { role: frame.message.role },
+				assistantMessageEvent: withoutPartial(frame.assistantMessageEvent),
+			});
 			return;
 		}
 		this.#output(frame);
 	}
 
-	#stamp(event: AgentSessionEvent): RpcAgentSessionEventFrame {
+	#stamp(event: AgentSessionEvent): Exclude<AgentSessionEvent, { type: RpcMessageEventType }> | RpcMessageEventFrame {
 		switch (event.type) {
 			case "message_start": {
 				const messageId = this.#mintMessageId();

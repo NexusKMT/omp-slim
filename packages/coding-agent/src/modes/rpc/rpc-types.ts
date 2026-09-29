@@ -21,6 +21,7 @@ import type { RpcMessagesPage } from "./rpc-messages";
 // RPC Commands (stdin)
 // ============================================================================
 
+/** `set_event_filter` projection: `"full"` keeps both accumulated snapshots in `message_update`, `"delta"` sends only the increment. */
 export type RpcMessageUpdates = "full" | "delta";
 
 export type RpcCommand =

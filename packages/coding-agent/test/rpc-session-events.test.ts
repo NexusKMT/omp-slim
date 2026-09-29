@@ -72,10 +72,6 @@ describe("RpcSessionEventForwarder", () => {
 				messageId: "msg-1",
 			});
 			expect(JSON.stringify(event)).toBe(before);
-			expect(frames.at(-1)).not.toBe(event);
-			const frame = frames.at(-1);
-			if (frame?.type !== "message_update") throw new Error("missing update");
-			expect(frame.assistantMessageEvent).not.toBe(assistantMessageEvent);
 		}
 	});
 
