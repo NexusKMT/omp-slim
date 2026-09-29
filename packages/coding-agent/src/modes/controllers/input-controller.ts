@@ -1454,9 +1454,10 @@ export class InputController {
 		const isContinueShortcut = streamingBehavior === "steer" && !images && (text === "." || text === "c");
 		this.ctx.editor.clearDraft(text);
 		try {
-			// prompt() handles idle (new turn) and streaming (queues per streamingBehavior).
+			// Synthetic directives must not use streamingBehavior: AgentSession would
+			// otherwise queue them as visible user messages while the target is busy.
 			if (isContinueShortcut) {
-				await target.prompt(manualContinuePrompt, { streamingBehavior, synthetic: true, userInitiated: true });
+				await target.prompt(manualContinuePrompt, { synthetic: true, userInitiated: true });
 			} else {
 				await this.ctx.withLocalSubmission(text, () => target.prompt(text, { streamingBehavior, images }), {
 					imageCount: images?.length ?? 0,
