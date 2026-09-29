@@ -440,7 +440,7 @@ describe("cache warmer lifecycle", () => {
 		expect(slow.replays).toHaveLength(1);
 	});
 
-	test("mode off aborts an in-flight refresh without recording its partial usage", async () => {
+	test("mode off aborts an in-flight refresh and still records the usage it was billed", async () => {
 		const h = harness();
 		h.script = { kind: "pending", usage: makeUsage({ cacheRead: PROMPT_TOKENS }) };
 		start(h);
@@ -453,6 +453,8 @@ describe("cache warmer lifecycle", () => {
 		h.warmer.onModeChanged();
 		expect(h.replays[0]?.options?.signal?.aborted).toBe(true);
 		await drain();
+		expect(h.warmed).toHaveLength(1);
+		expect(h.warmed[0]?.message.usage.cacheRead).toBe(PROMPT_TOKENS);
 		expect(h.refreshes).toEqual([
 			{ type: "start", phase: "streaming", provider: "anthropic", model: "claude-sonnet-5" },
 			{
@@ -461,12 +463,36 @@ describe("cache warmer lifecycle", () => {
 				provider: "anthropic",
 				model: "claude-sonnet-5",
 				outcome: "aborted",
+				usage: h.warmed[0]?.message.usage,
 				warmingStopReason: "cache warming disabled",
 			},
 		]);
-		expect(h.warmed).toEqual([]);
 		await advance(SHORT_DELAY_MS * 2);
 		expect(h.replays).toHaveLength(1);
+	});
+
+	test("an aborted refresh the provider never accepted records no usage", async () => {
+		const h = harness({
+			stream: (_model, _context, options) => {
+				const rejected = Promise.withResolvers<never>();
+				options?.signal?.addEventListener("abort", () => rejected.reject(new Error("aborted")), { once: true });
+				return rejected.promise;
+			},
+		});
+		start(h);
+		await advance(SHORT_DELAY_MS);
+		h.mode = "off";
+		h.warmer.onModeChanged();
+		await drain();
+		expect(h.warmed).toEqual([]);
+		expect(h.refreshes.at(-1)).toEqual({
+			type: "end",
+			phase: "streaming",
+			provider: "anthropic",
+			model: "claude-sonnet-5",
+			outcome: "aborted",
+			warmingStopReason: "cache warming disabled",
+		});
 	});
 
 	test("a new real request closes the superseded refresh without stopping the replacement", async () => {
@@ -477,6 +503,7 @@ describe("cache warmer lifecycle", () => {
 		start(h);
 		await drain();
 		expect(h.replays[0]?.options?.signal?.aborted).toBe(true);
+		expect(h.warmed).toHaveLength(1);
 		expect(h.refreshes).toEqual([
 			{ type: "start", phase: "streaming", provider: "anthropic", model: "claude-sonnet-5" },
 			{
@@ -485,9 +512,9 @@ describe("cache warmer lifecycle", () => {
 				provider: "anthropic",
 				model: "claude-sonnet-5",
 				outcome: "aborted",
+				usage: h.warmed[0]?.message.usage,
 			},
 		]);
-		expect(h.warmed).toEqual([]);
 		expect(h.warmer.status.state).toBe("scheduled");
 		h.warmer.cancel();
 	});

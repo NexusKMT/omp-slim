@@ -667,9 +667,14 @@ is active** to observe complete refresh lifecycles:
 
 `usage` is present only when the refresh was recorded as a `model_usage` entry
 (`purpose: "cache-warm"`, or `"cache-warm:extension-override"` when an extension
-forced it). This includes paid misses and errors; cancelled/replaced refreshes
-are not recorded. Summing `usage.cost.total` attributes the warming costs already
-included in `get_session_stats`, rather than adding another charge.
+forced it). This includes paid misses, errors, and `aborted` refreshes the
+provider had already accepted (usage reported before the cancellation); an
+abort before the provider responded has no usage. Summing `usage.cost.total`
+attributes the warming costs already included in `get_session_stats`, rather
+than adding another charge.
+
+These events are ordinary session events, so `--mode json` output includes them
+as well.
 
 `warmingStopReason` explains why warming stopped because of or during the
 refresh, for example `"refresh missed the cache"`, `"refresh failed"`,

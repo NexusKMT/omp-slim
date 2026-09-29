@@ -46,7 +46,7 @@ export interface CacheWarmingRefreshStart {
 /** Result of a refresh that {@link CacheWarmingRefreshStart} announced. */
 export interface CacheWarmingRefreshEnd extends CacheWarmingRefreshStart {
 	outcome: "hit" | "miss" | "error" | "aborted";
-	/** Present only when onWarmed recorded this refresh. */
+	/** Present only when onWarmed recorded this refresh, including an aborted one the provider had already accepted. */
 	usage?: Usage;
 	/** Why warming stopped; absent when warming continues (the refresh rescheduled, or a new request replaced the run). */
 	warmingStopReason?: string;
@@ -265,7 +265,7 @@ export class CacheWarmer {
 	#run?: ActiveRun;
 	#inactive: CacheWarmingStatus;
 	readonly #deps: CacheWarmerDeps;
-	/** Called with every paid warm response, including one that missed the cache. */
+	/** Called with every paid warm response, including one that missed the cache or was aborted after acceptance. */
 	onWarmed?: (message: AssistantMessage, extensionOverride: boolean) => void;
 	/** Called when a refresh is handed to the stream; stop decisions and extension vetoes send nothing and skip it. */
 	onRefreshStart?: (refresh: CacheWarmingRefreshStart) => void;
@@ -482,13 +482,15 @@ export class CacheWarmer {
 		let usage: Usage | undefined;
 		try {
 			const message = await this.#replay(run);
-			if (this.#run !== run) {
-				outcome = "aborted";
-				return;
-			}
+			// Record before the abort check: a refresh cancelled or replaced after the
+			// provider accepted it was still billed, and spend tracking must see it.
 			if (message && message.usage.totalTokens > 0 && this.onWarmed) {
 				this.onWarmed(message, extensionOverride);
 				usage = message.usage;
+			}
+			if (this.#run !== run) {
+				outcome = "aborted";
+				return;
 			}
 			if (!message || message.stopReason === "error") {
 				this.#stop("refresh failed");
