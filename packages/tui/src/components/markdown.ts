@@ -12,6 +12,7 @@ import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
+import { getThemeEpoch } from "../theme/theme";
 import type { Component } from "../tui";
 import {
 	applyBackgroundToLine,
@@ -1400,7 +1401,12 @@ interface InlineStyleContext {
 	stylePrefix: string;
 }
 
-type ListToken = Token & { items: Array<{ tokens?: Token[] }>; ordered: boolean; start?: number };
+type ListToken = Token & {
+	items: Array<{ raw: string; tokens?: Token[] }>;
+	ordered: boolean;
+	start?: number;
+	loose: boolean;
+};
 type TableCellToken = { tokens?: Token[] };
 type TableToken = Token & { header: TableCellToken[]; rows: TableCellToken[][]; raw?: string };
 
@@ -1716,6 +1722,17 @@ interface TailRowCache extends RenderSignature {
 	// type of token[i+1] when the rows were produced (blank/spacing gate).
 	nextTypes: (string | undefined)[];
 }
+interface ListItemRowsCache {
+	signature: RenderSignature;
+	width: number;
+	themeEpoch: number;
+	bulletProbe: string;
+	ordered: boolean;
+	start: number | undefined;
+	loose: boolean;
+	raws: string[];
+	rows: RenderedLine[][];
+}
 /**
  * Mutable per-token record collector passed to #renderContentLines while
  * rendering the streaming tail. The render loop fills `raws`/`nextTypes`
@@ -1802,6 +1819,7 @@ export class Markdown implements Component {
 	// the blank-replacement branch of setText and the fallback branch of
 	// #lexTokens.
 	#tailRowCache?: TailRowCache;
+	#listItemRowsCache?: ListItemRowsCache;
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
 	// the finalized render (they render once into the prefix line cache, so
@@ -1892,6 +1910,7 @@ export class Markdown implements Component {
 			// Non-append edit: the previous frame's guard verdict cannot be
 			// reused — the checked region may have changed anywhere.
 			this.#appendOnlySinceLastScan = false;
+			this.#listItemRowsCache = undefined;
 		}
 		this.#text = text;
 		if (!text.trim()) {
@@ -1899,6 +1918,7 @@ export class Markdown implements Component {
 			// the non-append edit, so drop the frozen stream state here or it
 			// outlives the content it indexed.
 			this.#dropStreamPrefix();
+			this.#listItemRowsCache = undefined;
 			// B+: the captured fast-path rows index the replaced content — drop
 			// the recipe so a fresh stream cannot splice onto stale rows.
 			this.#fastTail = undefined;
@@ -1949,6 +1969,7 @@ export class Markdown implements Component {
 			// render consumes it (see #lexTokens / the L2 hit path).
 			this.#streamPrefixLineCache = undefined;
 			this.#tailRowCache = undefined;
+			this.#listItemRowsCache = undefined;
 			this.#streamingHighlightCache = undefined;
 		}
 		this.invalidate();
@@ -2015,6 +2036,7 @@ export class Markdown implements Component {
 		}
 		this.#lastScanLength = text.length;
 		this.#lastScanCanStream = canStream;
+		if (!canStream) this.#listItemRowsCache = undefined;
 		this.#lastScanValid = true;
 		this.#appendOnlySinceLastScan = true;
 		if (canStream && hasPrefix) {
@@ -2363,6 +2385,7 @@ export class Markdown implements Component {
 		signature: RenderSignature,
 		contentWidth: number,
 	): string[] {
+		if (tokens[tokens.length - 1]?.type !== "list") this.#listItemRowsCache = undefined;
 		const stableText = this.#streamPrefixText;
 		const stableTokenCount = this.#streamPrefixTokens?.length ?? 0;
 		if (stableText === undefined || stableTokenCount === 0 || !normalizedText.startsWith(stableText)) {
@@ -3355,6 +3378,39 @@ export class Markdown implements Component {
 		const indent = "  ".repeat(depth);
 		// Use the list's start property (defaults to 1 for ordered lists)
 		const startNumber = token.start ?? 1;
+		const signature =
+			depth === 0 && styleContext === undefined && this.#transientRenderCache && this.#lastScanCanStream
+				? this.#activeRenderSignature
+				: undefined;
+		const themeEpoch = signature === undefined ? undefined : getThemeEpoch();
+		const bulletProbe =
+			signature === undefined ? undefined : this.#theme.listBullet(token.ordered ? `${startNumber}. ` : "- ");
+		const previous = this.#listItemRowsCache;
+		const reusable =
+			signature !== undefined &&
+			themeEpoch !== undefined &&
+			bulletProbe !== undefined &&
+			previous !== undefined &&
+			previous.width === width &&
+			previous.themeEpoch === themeEpoch &&
+			previous.bulletProbe === bulletProbe &&
+			previous.ordered === token.ordered &&
+			previous.start === token.start &&
+			previous.loose === token.loose &&
+			this.#signatureEquals(previous.signature, signature)
+				? previous
+				: undefined;
+		let reusableCount = 0;
+		if (reusable !== undefined) {
+			while (
+				reusableCount < token.items.length &&
+				token.items[reusableCount]?.raw === reusable.raws[reusableCount]
+			) {
+				reusableCount++;
+			}
+		}
+		const raws: string[] | undefined = signature === undefined ? undefined : [];
+		const rows: RenderedLine[][] | undefined = signature === undefined ? undefined : [];
 		const pushWrapped = (line: RenderedLine, firstPrefix: string, continuationPrefix: string): void => {
 			if (line.literalCode) {
 				const wrappedLiteralRows = wrapTextWithAnsi(line.text, Math.max(1, width));
@@ -3390,6 +3446,14 @@ export class Markdown implements Component {
 
 		for (let i = 0; i < token.items.length; i++) {
 			const item = token.items[i];
+			if (i < reusableCount && reusable !== undefined && raws !== undefined && rows !== undefined) {
+				const cached = reusable.rows[i]!;
+				for (const row of cached) lines.push(row);
+				raws.push(item.raw);
+				rows.push(cached);
+				continue;
+			}
+			const rowStart = lines.length;
 			const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
 			const firstPrefix = indent + this.#theme.listBullet(bullet);
 			// Continuation rows align under the item text, so the hang matches the
@@ -3419,6 +3483,29 @@ export class Markdown implements Component {
 			} else {
 				lines.push(renderedLine(firstPrefix));
 			}
+			if (raws !== undefined && rows !== undefined) {
+				raws.push(item.raw);
+				rows.push(lines.slice(rowStart));
+			}
+		}
+		if (
+			signature !== undefined &&
+			themeEpoch !== undefined &&
+			bulletProbe !== undefined &&
+			raws !== undefined &&
+			rows !== undefined
+		) {
+			this.#listItemRowsCache = {
+				signature,
+				width,
+				themeEpoch,
+				bulletProbe,
+				ordered: token.ordered,
+				start: token.start,
+				loose: token.loose,
+				raws,
+				rows,
+			};
 		}
 
 		return lines;

@@ -149,6 +149,94 @@ describe("Markdown incremental streaming lex (E2)", () => {
 		assertIdenticalGrowthTransient(MIXED, 80, 29);
 	});
 
+	it("transient growing lists retain byte-identical rows across item and list-shape changes", () => {
+		const bullets = Array.from(
+			{ length: 18 },
+			(_, index) => `- item ${index} has **styled text** and a long sentence that wraps onto another row`,
+		).join("\n");
+		const lists =
+			`${bullets}\n  - nested child with _emphasis_\n\n` +
+			"1. [ ] ordered task with a long description\n\n" +
+			"2. [x] next task with a `code span`\n\n" +
+			"A paragraph closes the growing list.";
+		assertIdenticalGrowthTransient(lists, 46, 11);
+	});
+
+	it("transient list cache falls back when a reference definition changes earlier links", () => {
+		const list =
+			"- Follow [the guide][guide] when the first item is rendered.\n" +
+			"- Another item wraps at this width and keeps the list growing.\n\n" +
+			"[guide]: https://example.com/guide\n\nClosing text.";
+		assertIdenticalGrowthTransient(list, 42, 7);
+	});
+
+	it("transient list rows rewrap after a width change", () => {
+		const list = Array.from({ length: 12 }, (_, index) => `- item ${index} wraps this long descriptive line`).join(
+			"\n",
+		);
+		const streaming = new Markdown("", 0, 0, THEME);
+		streaming.transientRenderCache = true;
+		streaming.setText(list.slice(0, -12));
+		streaming.render(80);
+		streaming.setText(list);
+		clearRenderCache();
+		expect(streaming.render(36)).toEqual(renderColdTransient(list, 36));
+		clearRenderCache();
+		expect(streaming.render(80)).toEqual(renderColdTransient(list, 80));
+	});
+
+	it("transient list rows update after an earlier item is edited", () => {
+		const original = "- first **bold** item\n- second item\n- third item";
+		const edited = "- first _italic_ item\n- second item\n- third item";
+		const streaming = new Markdown(original, 0, 0, THEME);
+		streaming.transientRenderCache = true;
+		streaming.render(40);
+		streaming.setText(edited);
+		clearRenderCache();
+		expect(streaming.render(40)).toEqual(renderColdTransient(edited, 40));
+		streaming.setText(`${edited}\n- fourth item`);
+		clearRenderCache();
+		expect(streaming.render(40)).toEqual(renderColdTransient(`${edited}\n- fourth item`, 40));
+	});
+
+	it("transient list at the start reuses earlier item styling after an append", () => {
+		let styledBullets = 0;
+		const theme = {
+			...THEME,
+			listBullet: (bullet: string) => {
+				styledBullets++;
+				return THEME.listBullet(bullet);
+			},
+		};
+		const first = Array.from({ length: 20 }, (_, index) => `- item ${index}`).join("\n");
+		const next = `${first}\n- item 20`;
+		const streaming = new Markdown(first, 0, 0, theme);
+		streaming.transientRenderCache = true;
+		streaming.render(60);
+		styledBullets = 0;
+		streaming.setText(next);
+		const rendered = streaming.render(60);
+		expect(styledBullets).toBeLessThan(6);
+		expect(rendered).toEqual(renderColdTransient(next, 60));
+	});
+
+	it("transient list rows restyle when the bullet theme callback changes", () => {
+		let prefix = "A";
+		const theme = { ...THEME, listBullet: (bullet: string) => prefix + bullet };
+		const first = "- one\n- two";
+		const next = `${first}\n- three`;
+		const streaming = new Markdown(first, 0, 0, theme);
+		streaming.transientRenderCache = true;
+		streaming.render(60);
+		prefix = "B";
+		streaming.setText(next);
+		const rendered = streaming.render(60);
+		clearRenderCache();
+		const cold = new Markdown(next, 0, 0, theme);
+		cold.transientRenderCache = true;
+		expect(rendered).toEqual(cold.render(60));
+	});
+
 	it("transient render-prefix cache: table growing in the tail is byte-identical", () => {
 		assertIdenticalGrowthTransient(TABLE, 60, 7);
 	});

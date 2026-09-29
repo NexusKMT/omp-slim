@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Improved rendering speed for long Markdown lists while replies stream in.
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed

@@ -12,6 +12,7 @@
  * Run: bun packages/tui/bench/markdown-stream.ts
  */
 import { clearRenderCache, Markdown } from "../src/components/markdown";
+import { getMarkdownTheme, initTheme } from "../src/theme/theme";
 import { defaultMarkdownTheme } from "../test/test-themes";
 
 const WIDTH = 100;
@@ -54,13 +55,20 @@ function fences(count: number): string {
 	return `${parts.join("\n")}\n`;
 }
 
-const DOC = identifierProse(20) + bulletList(120) + fences(8) + identifierProse(20) + bulletList(80);
+const DOC = process.argv.includes("--list-only")
+	? bulletList(200)
+	: identifierProse(20) + bulletList(120) + fences(8) + identifierProse(20) + bulletList(80);
+let theme = defaultMarkdownTheme;
+if (process.argv.includes("--production-theme")) {
+	await initTheme();
+	theme = getMarkdownTheme();
+}
 
 // --- Bench ----------------------------------------------------------------
 
 function streamOnce(text: string): number {
 	clearRenderCache();
-	const component = new Markdown("", 0, 0, defaultMarkdownTheme);
+	const component = new Markdown("", 0, 0, theme);
 	component.transientRenderCache = true;
 	const start = Bun.nanoseconds();
 	for (let len = DELTA; len < text.length; len += DELTA) {
@@ -75,7 +83,7 @@ function streamOnce(text: string): number {
 function coldOnce(text: string): number {
 	clearRenderCache();
 	const start = Bun.nanoseconds();
-	new Markdown(text, 0, 0, defaultMarkdownTheme).render(WIDTH);
+	new Markdown(text, 0, 0, theme).render(WIDTH);
 	return (Bun.nanoseconds() - start) / 1e6;
 }
 
@@ -83,8 +91,10 @@ console.log(`doc: ${DOC.length} chars, ${Math.ceil(DOC.length / DELTA)} streamin
 // Warmup (JIT + regex compilation)
 streamOnce(DOC.slice(0, 4096));
 
-const cold = coldOnce(DOC);
-console.log(`cold full render: ${cold.toFixed(1)}ms`);
+if (!process.argv.includes("--stream-only")) {
+	const cold = coldOnce(DOC);
+	console.log(`cold full render: ${cold.toFixed(1)}ms`);
+}
 
 const runs: number[] = [];
 for (let i = 0; i < 3; i++) runs.push(streamOnce(DOC));
