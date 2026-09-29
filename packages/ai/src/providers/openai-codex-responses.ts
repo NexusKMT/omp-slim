@@ -1325,6 +1325,8 @@ function getCodexServiceTierCostMultiplier(
 	model: Pick<Model<"openai-codex-responses">, "serviceTierCost">,
 	serviceTier: ServiceTier | "default" | undefined,
 ): number {
+	// `ultrafast` has no published price (API preview, Codex credits), so it is
+	// shown at 1x rather than an invented multiplier.
 	if (serviceTier !== "flex" && serviceTier !== "priority") return 1;
 	return model.serviceTierCost?.[serviceTier] ?? 1;
 }

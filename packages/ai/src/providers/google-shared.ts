@@ -24,6 +24,7 @@ import type {
 	ToolCall,
 	Usage,
 } from "../types";
+import { shouldSendServiceTier } from "../types";
 import { normalizeSystemPrompts } from "../utils";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import type { RawHttpRequestDump } from "../utils/http-inspector";
@@ -826,10 +827,15 @@ export function buildGoogleGenerateContentParams<T extends "google-generative-ai
 	// Gemini API (google-generative-ai) reads the tier from the request body;
 	// Vertex AI ignores a body field and requires the
 	// `X-Vertex-AI-LLM-Shared-Request-Type` header instead (added in
-	// streamGoogleVertex), so only emit the body field for the direct API. The
-	// Gemini API realizes only flex/priority (see `shouldSendServiceTier`).
-	if (model.provider === "google" && (options.serviceTier === "flex" || options.serviceTier === "priority")) {
-		config.serviceTier = options.serviceTier;
+	// streamGoogleVertex), so only emit the body field for the direct API.
+	const serviceTier = options.serviceTier;
+	// `!== "ultrafast"` narrows to the Gemini wire type; `shouldSendServiceTier` already rejects it for Google.
+	if (
+		model.provider === "google" &&
+		serviceTier !== "ultrafast" &&
+		shouldSendServiceTier(serviceTier, model.provider)
+	) {
+		config.serviceTier = serviceTier;
 	}
 
 	if (context.tools && context.tools.length > 0 && options.toolChoice) {
