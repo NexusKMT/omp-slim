@@ -469,6 +469,36 @@ describe("interactive native input ingress", () => {
 		expect(h.prompt).not.toHaveBeenCalled();
 	});
 
+	it("Ctrl+Enter restores an unsubmitted mode command beside a newer draft typed during its hook", async () => {
+		const entered = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const h = await createHarness(pi => {
+			pi.on("input", async () => {
+				entered.resolve();
+				await release.promise;
+			});
+		});
+		// Goal mode is active, so /plan warns and declines without submitting.
+		const handlePlanModeCommand = vi.fn(async (_prompt?: string, _input?: unknown) => false);
+		h.ctx.handlePlanModeCommand = handlePlanModeCommand;
+		h.draftWithImage("/plan fix [Image #1]");
+		const submitting = h.pressSubmit(FOLLOW_UP);
+		await entered.promise;
+		h.draftWithImage("newer [Image #1]", newerImage, "local://newer.jpg");
+		release.resolve();
+		await submitting;
+
+		expect(handlePlanModeCommand).toHaveBeenCalledWith("fix [Image #1]", {
+			images: [originalImage],
+			imageLinks: ["local://original.png"],
+		});
+		expect(h.editor.getExpandedText()).toBe("/plan fix [Image #2]\n\nnewer [Image #1]");
+		expect(h.editor.pendingImages).toEqual([newerImage, originalImage]);
+		expect(h.editor.pendingImageLinks).toEqual(["local://newer.jpg", "local://original.png"]);
+		expect(h.editor.imageLinks).toEqual(["local://newer.jpg", "local://original.png"]);
+		expect(h.prompt).not.toHaveBeenCalled();
+	});
+
 	it.each(["/clear", "/export"])(
 		"Ctrl+Enter preserves newer drafts across delayed %s builtin dispatch",
 		async command => {

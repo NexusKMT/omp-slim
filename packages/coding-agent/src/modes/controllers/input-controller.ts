@@ -40,6 +40,7 @@ import { USER_INTERRUPT_LABEL } from "../../session/messages";
 import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import { pickRecentFocusableAgentId } from "./session-focus-controller";
 import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { restoreDetachedDraft } from "../../slash-commands/helpers/draft";
 import { parseSlashCommand, parseSubcommand } from "../../slash-commands/helpers/parse";
 import { isTinyLocalModelKey } from "../../tiny/models";
 import { tinyTitleClient } from "../../tiny/title-client";
@@ -1031,7 +1032,7 @@ export class InputController {
 					// editor before dispatch — restores the submission and reports
 					// the error, mirroring `handleFollowUp`'s Ctrl+Enter path.
 					if (!draftDetached) throw error;
-					this.#restoreInputDraft(text, inputImages, inputImageLinks);
+					restoreDetachedDraft(this.ctx.editor, text, inputImages, inputImageLinks);
 					this.ctx.showError(error instanceof Error ? error.message : String(error));
 					return;
 				}
@@ -1547,19 +1548,6 @@ export class InputController {
 		return { text: last.text, images: last.images };
 	}
 
-	/** Restore a failed submission without replacing a draft typed while it awaited dispatch. */
-	#restoreInputDraft(text: string, images?: ImageContent[], imageLinks?: (string | undefined)[]): void {
-		const editor = this.ctx.editor;
-		const currentText = editor.getExpandedText();
-		const restoredText = shiftImageMarkers(text, editor.pendingImages.length);
-		if (images?.length) {
-			editor.pendingImages.push(...images);
-			editor.pendingImageLinks.push(...(imageLinks ?? images.map(() => undefined)));
-			editor.imageLinks = editor.pendingImageLinks;
-		}
-		editor.setCollapsedText([restoredText, currentText].filter(part => part.trim()).join("\n\n"));
-	}
-
 	/**
 	 * Dispatch a `/skill:<name> [args]` invocation through `promptCustomMessage`
 	 * using the supplied `streamingBehavior`. Returns false when the text is not
@@ -1579,7 +1567,7 @@ export class InputController {
 		const draftImageLinks = draftImages && imageLinks && imageLinks.length > 0 ? [...imageLinks] : undefined;
 		const restoreDraft = () => {
 			if (preserveDraft) {
-				this.#restoreInputDraft(text, draftImages, draftImageLinks);
+				restoreDetachedDraft(this.ctx.editor, text, draftImages, draftImageLinks);
 			} else {
 				this.ctx.editor.setText(text);
 				if (draftImages && draftImages.length > 0) {
@@ -1730,7 +1718,7 @@ export class InputController {
 		} catch (error) {
 			if (queuedCount === 0) {
 				if (options.detachedText !== undefined) {
-					this.#restoreInputDraft(options.detachedText, images, imageLinks);
+					restoreDetachedDraft(this.ctx.editor, options.detachedText, images, imageLinks);
 				} else {
 					this.ctx.editor.setText(originalDraft);
 					if (images) {
@@ -1747,7 +1735,7 @@ export class InputController {
 						: `=>\n${remaining
 								.map((message, index) => `${index + 1}. ${message.replaceAll("\n", "\n   ")}`)
 								.join("\n")}`;
-				if (options.detachedText !== undefined) this.#restoreInputDraft(restored);
+				if (options.detachedText !== undefined) restoreDetachedDraft(this.ctx.editor, restored);
 				else this.ctx.editor.setText(restored);
 			}
 			this.ctx.showError(error instanceof Error ? error.message : String(error));
@@ -1792,7 +1780,7 @@ export class InputController {
 				if (!input) return;
 				({ text, images, imageLinks } = input);
 			} catch (error) {
-				this.#restoreInputDraft(text, images, imageLinks);
+				restoreDetachedDraft(this.ctx.editor, text, images, imageLinks);
 				this.ctx.showError(error instanceof Error ? error.message : String(error));
 				return;
 			}
@@ -1824,7 +1812,7 @@ export class InputController {
 					text = slashResult;
 				}
 			} catch (error) {
-				this.#restoreInputDraft(text, images, imageLinks);
+				restoreDetachedDraft(this.ctx.editor, text, images, imageLinks);
 				this.ctx.showError(error instanceof Error ? error.message : String(error));
 				return;
 			}
@@ -1841,7 +1829,7 @@ export class InputController {
 		// queue rejection): restore both text AND pending images so an image-only
 		// or text+image draft can be retried, mirroring the main submit error path.
 		const restoreOnError = (error: unknown) => {
-			this.#restoreInputDraft(text, images, imageLinks);
+			restoreDetachedDraft(this.ctx.editor, text, images, imageLinks);
 			this.ctx.showError(error instanceof Error ? error.message : String(error));
 		};
 

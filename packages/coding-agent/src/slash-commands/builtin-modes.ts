@@ -1,4 +1,4 @@
-import { clearSubmittedText } from "./helpers/draft";
+import { clearSubmittedText, restoreDetachedDraft } from "./helpers/draft";
 import * as path from "node:path";
 import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import {
@@ -58,7 +58,14 @@ async function runWithDetachedModeDraft(
 	if (!runtime.draftDetached) editor.clearDraft();
 	try {
 		const submitted = await run();
-		if (!submitted && ((runtime.input?.images?.length ?? 0) > 0 || (runtime.input?.imageLinks?.length ?? 0) > 0)) {
+		const hasAttachments = (runtime.input?.images?.length ?? 0) > 0 || (runtime.input?.imageLinks?.length ?? 0) > 0;
+		if (!submitted && hasAttachments) {
+			if (runtime.draftDetached) {
+				// Newer typing may already sit in the editor: merge the submission
+				// back beside it so each draft's image markers keep their images.
+				restoreDetachedDraft(editor, command.text, runtime.input?.images, runtime.input?.imageLinks);
+				return;
+			}
 			editor.pendingImages = [...(runtime.input?.images ?? []), ...editor.pendingImages];
 			editor.pendingImageLinks = [
 				...(runtime.input?.imageLinks ?? runtime.input?.images?.map(() => undefined) ?? []),
