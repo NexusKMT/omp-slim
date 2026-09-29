@@ -1,6 +1,6 @@
 /**
  * Ratchet: host-side state, statistics, and keep/revert gate for the
- * `ratchetz` eval hillclimb. Everything the model must not be able to argue
+ * `/ratchet` eval hillclimb. Everything the model must not be able to argue
  * with lives here — approval freshness (content hashes), the frozen split,
  * completeness and held-out leakage checks, and the round decision — so the
  * kernel facade only forwards arguments.

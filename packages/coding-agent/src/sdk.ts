@@ -290,6 +290,7 @@ import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 import {
 	cfgAsyncMaxJobs,
 	cfgComputerEnabled,
+	cfgRatchetEnabled,
 	cfgGenerateImageEnabled,
 	cfgSecurityEnabled,
 	cfgSpeechgenEnabled,
@@ -2321,9 +2322,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				computerPrelude ??= createComputerPrelude(toolSession);
 				builtins.push(computerPrelude);
 			}
-			// Owned by the `ratchetz` magic keyword: its toggles gate the prelude via `enabled()`.
-			ratchetPrelude ??= createRatchetPrelude(toolSession);
-			builtins.push(ratchetPrelude);
+			if (cfgRatchetEnabled.get(settings)) {
+				ratchetPrelude ??= createRatchetPrelude(toolSession);
+				builtins.push(ratchetPrelude);
+			}
 			return getEnabledEvalPreludes(builtins);
 		};
 		toolSession.getEvalPreludes = getEvalPreludes;

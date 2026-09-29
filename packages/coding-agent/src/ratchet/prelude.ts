@@ -5,7 +5,7 @@ import type { ExtensionAskDialogResult } from "@oh-my-pi/pi-tui/overlays/ask-dia
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
-import { cfgMagicKeyword, cfgMagicKeywordsEnabled } from "../modes/settings";
+import { cfgRatchetEnabled } from "../tools/settings";
 import ratchetDocumentation from "../prompts/tools/ratchet.md" with { type: "text" };
 import type { ToolSession } from "../tools";
 // @ts-expect-error Bun imports this JavaScript source as text instead of evaluating its module shape.
@@ -275,7 +275,7 @@ async function invokeRatchet(
 	}
 }
 
-/** Create the ratchet eval prelude; enabled with the `ratchetz` magic keyword. */
+/** Create the ratchet eval prelude; `/ratchet` enables it for the session via `ratchet.enabled`. */
 export function createRatchetPrelude(session: ToolSession): EvalPreludeDefinition {
 	const lookup = catalogPriceLookup(session);
 	return {
@@ -285,7 +285,7 @@ export function createRatchetPrelude(session: ToolSession): EvalPreludeDefinitio
 		python: ratchetPython,
 		exports: ["ratchet"],
 		approval: ratchetApproval,
-		enabled: () => cfgMagicKeywordsEnabled.get(session.settings) && cfgMagicKeyword.ratchet.get(session.settings),
+		enabled: () => cfgRatchetEnabled.get(session.settings) === true,
 		invoke: async (parameters, context) => {
 			const parsed = paramsSchema(parameters);
 			if (parsed instanceof type.errors)
