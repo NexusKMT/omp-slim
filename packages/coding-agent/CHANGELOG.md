@@ -48,6 +48,7 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+- RPC hosts can follow each cache-warming refresh through `cache_warming_start` and `cache_warming_end` events, which report the outcome and the recorded usage, and can set the session's warming mode with `set_cache_warming` without changing `config.yml` ([#13717](https://github.com/can1357/oh-my-pi/pull/13717) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.4.3] - 2026-09-28
 
