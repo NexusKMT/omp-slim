@@ -688,6 +688,58 @@ export class PluginManager {
 	}
 
 	/**
+	 * Upgrade an installed npm or git plugin by re-installing it from the source
+	 * recorded in `plugins/package.json`: git plugins re-resolve their recorded
+	 * ref, npm plugins move to the latest published version. The enabled state
+	 * and feature selection survive the upgrade.
+	 *
+	 * @returns The previously installed version and the upgraded plugin.
+	 */
+	async upgrade(name: string): Promise<{ from: string | undefined; plugin: InstalledPlugin }> {
+		validatePackageName(name);
+		const deps = await this.#readDeps(getPluginsPackageJson());
+		const config = await this.#ensureConfigLoaded();
+		const recorded = deps[name];
+		if (recorded === undefined) {
+			if (config.plugins[name]) {
+				throw new Error(`${name} is linked from a local path; there is nothing to upgrade`);
+			}
+			throw new Error(`${name} is not installed`);
+		}
+		if (/^(file|link|workspace|portal):/i.test(recorded)) {
+			throw new Error(`${name} is installed from a local path (${recorded}); there is nothing to upgrade`);
+		}
+
+		const previous = config.plugins[name];
+		let from = previous?.version;
+		try {
+			const pkg: { version?: unknown } = await Bun.file(
+				path.join(getPluginsNodeModules(), name, "package.json"),
+			).json();
+			if (typeof pkg.version === "string") from = pkg.version;
+		} catch (err) {
+			if (!isEnoent(err)) throw err;
+		}
+
+		const source = parseGitUrl(recorded) ? recorded : name;
+		const plugin = await this.install(source);
+
+		if (previous) {
+			const available = plugin.manifest.features;
+			const enabledFeatures =
+				previous.enabledFeatures && available
+					? previous.enabledFeatures.filter(feature => feature in available)
+					: previous.enabledFeatures;
+			const state = { version: plugin.version, enabledFeatures, enabled: previous.enabled };
+			config.plugins[plugin.name] = state;
+			await this.#saveRuntimeConfig();
+			plugin.enabledFeatures = enabledFeatures;
+			plugin.enabled = previous.enabled;
+		}
+		return { from, plugin };
+	}
+
+	/**
 	 * Uninstall a plugin.
 	 */
 	async uninstall(name: string): Promise<void> {
