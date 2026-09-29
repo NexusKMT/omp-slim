@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Home directories adjoining shell redirections, control operators, or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) are now shortened to `~` in display-only text instead of leaking the full path.
+- Freeform edit path previews recognise the current sloppy `*** Edit File:` payload instead of the retired `<SM:>` markup.
+
 ## [18.4.3] - 2026-09-28
 
 ### Changed
