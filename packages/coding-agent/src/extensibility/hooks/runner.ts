@@ -299,18 +299,17 @@ export class HookRunner {
 						}
 					}
 
-					// For tool_result events, capture the override (last one wins) and keep
-					// every handler's passive context in registration order. A context-only
-					// return is not an override: it must not erase an earlier handler's patch.
+					// For tool_result events, merge overrides per field (a later handler's defined
+					// field wins; undefined leaves earlier patches intact, as in ExtensionRunner) and
+					// keep every handler's passive context in registration order. A details-only,
+					// isError-only or context-only return must not erase an earlier content redaction.
 					if (event.type === "tool_result" && handlerResult) {
 						const toolResult = handlerResult as ToolResultEventResult;
-						if (
-							toolResult.content !== undefined ||
-							toolResult.details !== undefined ||
-							toolResult.isError !== undefined
-						) {
-							result = toolResult;
-						}
+						const patch: ToolResultEventResult = { ...(result as ToolResultEventResult | undefined) };
+						if (toolResult.content !== undefined) patch.content = toolResult.content;
+						if (toolResult.details !== undefined) patch.details = toolResult.details;
+						if (toolResult.isError !== undefined) patch.isError = toolResult.isError;
+						if (Object.keys(patch).length > 0) result = patch;
 						if (isNonBlankContext(toolResult.additionalContext))
 							toolResultContexts.push(toolResult.additionalContext);
 					}

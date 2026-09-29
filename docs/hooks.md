@@ -120,7 +120,7 @@ Hook events are strongly typed in `types.ts`.
 ### Tool events (pre/post model)
 
 - `tool_call` (pre-execution) → can return `{ block?: boolean; reason?: string; input?: Record<string, unknown>; additionalContext?: string }`. A non-blocking handler that returns `input` replaces the arguments the tool executes with (the raw execution input, not the normalized `event.input` view); ignored when `block` is true. Distinct non-empty `additionalContext` values from all non-blocking handlers carry trusted handler-authored instructions delivered after the tool results and before the next provider request, with developer/system priority where the transport supports it; raw tool output and other untrusted data must stay in the tool result.
-- `tool_result` (post-execution) → can return `{ content?; details?; isError?; additionalContext?: string }`. Context is delivered outside tool output on both success and failure; check `event.isError` when guidance applies to only one outcome. A context-only return (no `content`/`details`/`isError`) never replaces an earlier handler's override.
+- `tool_result` (post-execution) → can return `{ content?; details?; isError?; additionalContext?: string }`. Context is delivered outside tool output on both success and failure; check `event.isError` when guidance applies to only one outcome. Overrides merge per field across handlers, so a later return that omits a field (including a context-only return) never erases an earlier handler's value for it.
 
 This is the hook subsystem’s core pre/post interception model. Eval prelude invocations such as `browser.open(...)`, direct `BrowserTab` helpers, `tab.run(...)`, direct `computer` helpers, and `computer.run(fnOrCode, options)` are host bridge calls, not AgentTool calls, so they do not emit `tool_call` or `tool_result`.
 
@@ -212,7 +212,7 @@ Inside `HookRunner`, order is deterministic by registration sequence:
 Conflict behavior by event type:
 
 - `tool_call`: every distinct non-empty `additionalContext` is preserved in handler order (a value identical to an earlier handler's on the same call is dropped, as is a call's joined context identical to an earlier call's in the same batch); `input` remains last-wins; first block short-circuits and discards context collected for that call. Handlers do not observe each other's input revisions
-- `tool_result`: last returned override (`content`/`details`/`isError`) wins (no short-circuit); a context-only return never replaces an earlier handler's override. Every distinct non-empty `additionalContext` is preserved in handler order, with the same repeat-dropping as `tool_call`
+- `tool_result`: `content`/`details`/`isError` overrides merge per field across handlers (no short-circuit): a later handler's defined field wins and a field it leaves unset keeps the earlier handler's value, so a details-only, isError-only, or context-only return never erases an earlier redaction. Every distinct non-empty `additionalContext` is preserved in handler order, with the same repeat-dropping as `tool_call`
 - `context`: chained; each handler receives prior handler’s message output
 - `before_agent_start`: first returned message is kept; later messages ignored
 - `session_before_*`: latest returned result is tracked; `cancel: true` short-circuits immediately

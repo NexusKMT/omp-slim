@@ -215,27 +215,27 @@ describe("HookToolWrapper tool_call contract", () => {
 			"tool_result",
 		);
 
-	it.each([true, false])(
-		"keeps a redaction and delivers every hook's context when the redacting hook runs first: %s",
-		async redactFirst => {
-			const contextOnly = makeHook(() => ({ additionalContext: "context-only note" }), "tool_result");
-			const hooks = redactFirst ? [redactHook(), contextOnly] : [contextOnly, redactHook()];
-			const wrapped = new HookToolWrapper(makeSecretTool(false), makeRunner(hooks));
-			const delivered: string[] = [];
+	it.each([
+		["the redacting hook runs first", true],
+		["the context-only hook runs first", false],
+	])("keeps a redaction and delivers every hook's context when %s", async (_name, redactFirst) => {
+		const contextOnly = makeHook(() => ({ additionalContext: "context-only note" }), "tool_result");
+		const hooks = redactFirst ? [redactHook(), contextOnly] : [contextOnly, redactHook()];
+		const wrapped = new HookToolWrapper(makeSecretTool(false), makeRunner(hooks));
+		const delivered: string[] = [];
 
-			const result = await wrapped.execute("call-chained", { command: "cat" } as never, undefined, undefined, {
-				addAdditionalContext: (context: string) => {
-					delivered.push(context);
-				},
-			} as unknown as AgentToolContext);
+		const result = await wrapped.execute("call-chained", { command: "cat" } as never, undefined, undefined, {
+			addAdditionalContext: (context: string) => {
+				delivered.push(context);
+			},
+		} as unknown as AgentToolContext);
 
-			expect(result.content).toEqual([{ type: "text", text: "token [REDACTED]" }]);
-			expect(JSON.stringify(result)).not.toContain("sk-SECRET");
-			expect(delivered).toEqual([
-				redactFirst ? "redaction note\n\ncontext-only note" : "context-only note\n\nredaction note",
-			]);
-		},
-	);
+		expect(result.content).toEqual([{ type: "text", text: "token [REDACTED]" }]);
+		expect(JSON.stringify(result)).not.toContain("sk-SECRET");
+		expect(delivered).toEqual([
+			redactFirst ? "redaction note\n\ncontext-only note" : "context-only note\n\nredaction note",
+		]);
+	});
 
 	it("keeps a details patch when a later hook returns only context", async () => {
 		const runner = makeRunner([
@@ -248,6 +248,62 @@ describe("HookToolWrapper tool_call contract", () => {
 		} as never);
 
 		expect(result.details).toEqual({ patched: true });
+	});
+
+	it.each([
+		["a details patch", { details: { patched: true } }],
+		["isError: false", { isError: false }],
+	])("keeps an earlier redaction when a later hook returns only %s", async (_name, laterPatch) => {
+		const runner = makeRunner([redactHook(), makeHook(() => laterPatch, "tool_result")]);
+		const delivered: string[] = [];
+
+		const result = await new HookToolWrapper(makeSecretTool(false), runner).execute(
+			"call-later-partial",
+			{ command: "cat" } as never,
+			undefined,
+			undefined,
+			{
+				addAdditionalContext: (context: string) => {
+					delivered.push(context);
+				},
+			} as unknown as AgentToolContext,
+		);
+
+		expect(result.content).toEqual([{ type: "text", text: "token [REDACTED]" }]);
+		expect(JSON.stringify(result)).not.toContain("sk-SECRET");
+		expect(result.details).toEqual("details" in laterPatch ? laterPatch.details : undefined);
+		expect(delivered).toEqual(["redaction note"]);
+	});
+
+	it("keeps a redacted non-throwing error result an error when a later hook returns only isError: false", async () => {
+		const runner = makeRunner([redactHook(), makeHook(() => ({ isError: false }), "tool_result")]);
+
+		const result = await new HookToolWrapper(makeSecretTool(true), runner).execute("call-later-iserror", {
+			command: "cat",
+		} as never);
+
+		expect(result.content).toEqual([{ type: "text", text: "token [REDACTED]" }]);
+		expect(JSON.stringify(result)).not.toContain("sk-SECRET");
+		expect(result.isError).toBe(true);
+	});
+
+	it("merges tool_result overrides per field and keeps an explicit isError: false", async () => {
+		const runner = makeRunner([
+			makeHook(() => ({ content: [{ type: "text", text: "a" }], isError: true }), "tool_result"),
+			makeHook(() => ({ details: { b: 1 }, isError: false }), "tool_result"),
+		]);
+
+		const merged = await runner.emit({
+			type: "tool_result",
+			toolName: "bash",
+			toolCallId: "call-merge",
+			input: {},
+			content: [{ type: "text", text: "raw" }],
+			details: undefined,
+			isError: false,
+		} as never);
+
+		expect(merged).toEqual({ content: [{ type: "text", text: "a" }], details: { b: 1 }, isError: false });
 	});
 
 	it("keeps a redacted non-throwing error result an error when a later hook returns only context", async () => {
