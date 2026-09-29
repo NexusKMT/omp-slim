@@ -79,6 +79,8 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+- Fixed hosted OpenAI web search on hosts that accept only string tool_choice values, such as Command Code ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
+- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output, including for Cursor-bridged calls; eval-bridged calls, which have no such channel, still receive the reminder as a leading block in their result ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.4.3] - 2026-09-28
 
@@ -120,11 +122,6 @@
 ### Removed
 
 - Removed the web search provider picker from `omp setup`; set the `web` model role (or keep the free default chain) instead.
-
-### Fixed
-
-- Fixed `tool_call` `additionalContext` being delivered more than once when several extension or hook handlers on the same call returned identical text ([#13633](https://github.com/can1357/oh-my-pi/pull/13633) by [@andrebrait](https://github.com/andrebrait))
-- Per-tool TTSR reminders now use the trusted passive-context channel instead of being prepended to untrusted tool output, including for Cursor-bridged calls; eval-bridged calls, which have no such channel, still receive the reminder as a leading block in their result ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.4.2] - 2026-09-28
 
