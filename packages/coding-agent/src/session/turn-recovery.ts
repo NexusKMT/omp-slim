@@ -1614,11 +1614,13 @@ export class TurnRecovery {
 	 * failure says nothing about model health — retry the same model once before
 	 * consulting the fallback chain. A drop with no streamed content keeps the
 	 * immediate fallback (a different route may genuinely help), as do later
-	 * attempts. Mirrors the stall handler's socket check, extended to turns with
-	 * tool calls.
+	 * attempts. Never applies once the retry budget is spent (e.g.
+	 * `retry.maxRetries: 0`): there is no same-model retry left, so the
+	 * fallback-chain consult is the only recovery. Mirrors the stall handler's
+	 * socket check, extended to turns with tool calls.
 	 */
-	#isFirstAttemptMidStreamSocketDrop(message: AssistantMessage, id: number): boolean {
-		if (this.#retryAttempt !== 1) return false;
+	#isFirstAttemptMidStreamSocketDrop(message: AssistantMessage, id: number, retryBudgetExhausted: boolean): boolean {
+		if (this.#retryAttempt !== 1 || retryBudgetExhausted) return false;
 		if (message.stopReason !== "error" || !AIError.retriable(id)) return false;
 		if (this.#host.streamingEditAbortTriggered()) return false;
 		if (!isUnexpectedSocketCloseMessage(message.errorMessage ?? "")) return false;
@@ -2624,7 +2626,7 @@ export class TurnRecovery {
 				!thinkingLoop &&
 				!waitForSiblingCredential &&
 				!(retryBudgetExhausted && classifierRefusal) &&
-				!this.#isFirstAttemptMidStreamSocketDrop(message, id)
+				!this.#isFirstAttemptMidStreamSocketDrop(message, id, retryBudgetExhausted)
 			) {
 				if (!classifierRefusal) {
 					this.noteRetryFallbackCooldown(currentSelector, parsedRetryAfterMs, errorMessage);
