@@ -2274,6 +2274,13 @@ export class TUI extends Container {
 		if (this.#renderTimer) {
 			this.#renderTimer.cancel();
 			this.#renderTimer = undefined;
+			// The cancelled timer was the only callback owed to a pending ordinary
+			// request. Every caller paints right after (a forced or ordinary request
+			// it issues, or the render already in progress), and that paint serves
+			// the request. Leaving the flag set would turn every later ordinary
+			// request into a no-op: the resize settle's rebuild and all spinner
+			// frames would never paint until some forced render arrived.
+			this.#renderRequested = false;
 		}
 	}
 

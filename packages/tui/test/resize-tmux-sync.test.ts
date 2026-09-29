@@ -139,6 +139,37 @@ describe("tmux synchronized rebuild", () => {
 		}
 	});
 
+	it("still paints the settled rebuild when a throttled frame is pending as the resize settles", async () => {
+		const { terminal, scheduler, provider, tui } = await startRig(1000);
+		try {
+			terminal.resize(100, 30);
+			// A spinner keeps requesting ordinary renders through the drag. They
+			// are throttled to the frame cadence, so when the 120 ms settle fires
+			// the next spinner frame is still waiting on its timer.
+			for (let now = scheduler.now(); now < 100; now = scheduler.now()) {
+				tui.requestRender();
+				await scheduler.settle(terminal, 40);
+			}
+			tui.requestRender();
+			await scheduler.settle(terminal, 0);
+			terminal.written = [];
+			await scheduler.advance(terminal, 200);
+			expect(provider.resetCount).toBe(1);
+			const output = terminal.written.join("");
+			expect(output).toContain("\x1b[3J");
+			expect(output).toContain("editor@100");
+			// Later ordinary renders must keep reaching the terminal.
+			terminal.written = [];
+			tui.requestRender(true);
+			await scheduler.settle(terminal);
+			tui.requestRender();
+			await scheduler.advance(terminal, 100);
+			expect(terminal.getViewport().at(-1)?.trim()).toBe("editor@100");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("publishes the notice as its own synchronized update right before a large replay", async () => {
 		const { terminal, scheduler, provider, tui } = await startLargeRig();
 		try {
