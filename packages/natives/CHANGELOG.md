@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed macOS background scrolls moving twice the requested distance (a 30 px scroll moved 60 px) where `CGEventPostToPid` is the same function as `SLEventPostToPid`, as on macOS 26: background hovers, scrolls and right or middle clicks are now posted once ([#13739](https://github.com/can1357/oh-my-pi/pull/13739) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed macOS 26 background scrolls moving twice the requested distance; background hovers, scrolls and right or middle clicks are now delivered once ([#13739](https://github.com/can1357/oh-my-pi/pull/13739) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.3] - 2026-09-28
 
