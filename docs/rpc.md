@@ -139,7 +139,7 @@ Important edge behavior from runtime:
 - `{ id?, type: "set_host_tools", tools: RpcHostToolDefinition[] }`
 - `{ id?, type: "set_host_uri_schemes", schemes: RpcHostUriSchemeDefinition[] }`
 - `{ id?, type: "set_subagent_subscription", level: "off" | "progress" | "events" }`
-- `{ id?, type: "set_event_filter", events: string[] | null }`
+- `{ id?, type: "set_event_filter", events: string[] | null, messageUpdates?: "full" | "delta" }`
 - `{ id?, type: "get_subagents" }`
 - `{ id?, type: "get_subagent_messages", subagentId?: string, sessionFile?: string, fromByte?: number }`
 
@@ -592,7 +592,11 @@ Extension runner errors are emitted separately as:
 
 `message_start`, `message_update`, and `message_end` carry a `messageId` string assigned by RPC mode. One message keeps the same id from its start through every update to its end; ids are unique within the process. Records injected mid-stream (advisor cards, IRC messages) get their own id and do not disturb the id of the reply streaming around them.
 
-`set_event_filter` restricts which session event frames are written: pass the event `type` strings to forward, or `null` to forward everything (the default). The response echoes the active selection as `{ events }`. The filter applies only to the session events listed above; every other outbound category (responses, `prompt_result`, `session_settled`, extension UI and host tool/URI requests, `extension_error`, `available_commands_update`, subagent frames, builtin slash-command side channels, and session-persistence `notice` frames) is always written. Hosts that fail closed on unknown event kinds can pin the set they understand here instead of breaking when OMP adds an event.
+`set_event_filter` restricts which session event frames are written: pass the event `type` strings to forward, or `null` to forward everything (the default). The response echoes the active selection as `{ events, messageUpdates }`. The filter applies only to the session events listed above; every other outbound category (responses, `prompt_result`, `session_settled`, extension UI and host tool/URI requests, `extension_error`, `available_commands_update`, subagent frames, builtin slash-command side channels, and session-persistence `notice` frames) is always written. Hosts that fail closed on unknown event kinds can pin the set they understand here instead of breaking when OMP adds an event.
+
+The optional `messageUpdates: "delta"` projects only `message_update` frames to `{ type: "message_update", messageId, message: { role }, assistantMessageEvent }`: `assistantMessageEvent.partial` is omitted, while all other event fields (including subtype, `delta`, and `contentIndex`) are preserved. `message_start`, `message_end`, and all other frames are unchanged; `message_end` still carries the full message. Block-ending events such as `text_end`, `thinking_end`, and `toolcall_end` retain their block content or tool call, so hosts must still accept chunked protocol-v2 frames for large blocks and full messages. Switching modes mid-message does not change its `messageId`.
+
+Each command replaces the whole filter state: omitting `messageUpdates` resets it to `"full"`, the default, which retains the original full snapshots. Invalid events or a mode other than `"full"` or `"delta"` return an error without changing either setting. Projection works in protocol v1 and v2, including with `events: null`. Detect support from the echoed `data.messageUpdates` field: older servers ignore the option and do not echo it. This opt-in is raw-protocol only; the TypeScript `RpcClient` and Python client keep their full-message listener contracts.
 
 `agent_end` has this session-level shape (in addition to optional telemetry fields):
 

@@ -1400,7 +1400,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				) {
 					return error(id, "set_event_filter", "events must be null or an array of non-empty event type strings");
 				}
-				return success(id, "set_event_filter", { events: sessionEvents.setFilter(events) });
+				const messageUpdates = command.messageUpdates === undefined ? "full" : command.messageUpdates;
+				if (messageUpdates !== "full" && messageUpdates !== "delta") {
+					return error(id, "set_event_filter", 'messageUpdates must be "full" or "delta"');
+				}
+				return success(id, "set_event_filter", {
+					events: sessionEvents.setFilter(events, messageUpdates),
+					messageUpdates,
+				});
 			}
 
 			case "get_subagents": {

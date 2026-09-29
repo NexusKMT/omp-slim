@@ -3,7 +3,7 @@
  * `messageId` and applies the host's `set_event_filter` selection.
  */
 import type { AgentSessionEvent } from "../../session/agent-session";
-import type { RpcAgentSessionEventFrame } from "./rpc-types";
+import type { RpcAgentSessionEventFrame, RpcMessageUpdates } from "./rpc-types";
 
 /**
  * Writes session events to the RPC output. Message ids are assigned whether or
@@ -12,6 +12,7 @@ import type { RpcAgentSessionEventFrame } from "./rpc-types";
  */
 export class RpcSessionEventForwarder {
 	#filter: Set<string> | undefined;
+	#messageUpdates: RpcMessageUpdates = "full";
 	#messageCount = 0;
 	/** Ids of started, unfinished messages. External records (advisor cards, IRC) nest inside a streaming reply. */
 	#openMessageIds: string[] = [];
@@ -22,14 +23,21 @@ export class RpcSessionEventForwarder {
 	}
 
 	/** Forward only the listed event types; `null` forwards everything. Returns the active selection. */
-	setFilter(events: readonly string[] | null): string[] | null {
+	setFilter(events: readonly string[] | null, messageUpdates: RpcMessageUpdates = "full"): string[] | null {
 		this.#filter = events === null ? undefined : new Set(events);
+		this.#messageUpdates = messageUpdates;
 		return this.#filter ? Array.from(this.#filter) : null;
 	}
 
 	forward(event: AgentSessionEvent): void {
 		const frame = this.#stamp(event);
 		if (this.#filter && !this.#filter.has(frame.type)) return;
+		if (frame.type === "message_update" && this.#messageUpdates === "delta") {
+			const { partial: _partial, ...assistantMessageEvent } =
+				frame.assistantMessageEvent as typeof frame.assistantMessageEvent & { partial?: unknown };
+			this.#output({ ...frame, message: { role: frame.message.role }, assistantMessageEvent });
+			return;
+		}
 		this.#output(frame);
 	}
 

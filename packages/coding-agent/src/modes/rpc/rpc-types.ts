@@ -6,7 +6,7 @@
  */
 import type { AgentMessage, AgentToolResult, ThinkingLevel, ToolLoadMode } from "@oh-my-pi/pi-agent-core";
 import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
-import type { Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
+import type { AssistantMessageEvent, Effort, ImageContent, Model, ToolExample } from "@oh-my-pi/pi-ai";
 import type { BashResult } from "../../exec/bash-executor";
 import type { ContextUsage } from "../../extensibility/extensions/types";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
@@ -20,6 +20,8 @@ import type { RpcMessagesPage } from "./rpc-messages";
 // ============================================================================
 // RPC Commands (stdin)
 // ============================================================================
+
+export type RpcMessageUpdates = "full" | "delta";
 
 export type RpcCommand =
 	// Protocol
@@ -45,7 +47,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_host_tools"; tools: RpcHostToolDefinition[] }
 	| { id?: string; type: "set_host_uri_schemes"; schemes: RpcHostUriSchemeDefinition[] }
 	| { id?: string; type: "set_subagent_subscription"; level: RpcSubagentSubscriptionLevel }
-	| { id?: string; type: "set_event_filter"; events: string[] | null }
+	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
 	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
 
@@ -303,7 +305,13 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "set_todos"; success: true; data: { todoPhases: TodoPhase[] } }
 	| { id?: string; type: "response"; command: "set_host_tools"; success: true; data: { toolNames: string[] } }
 	| { id?: string; type: "response"; command: "set_host_uri_schemes"; success: true; data: { schemes: string[] } }
-	| { id?: string; type: "response"; command: "set_event_filter"; success: true; data: { events: string[] | null } }
+	| {
+			id?: string;
+			type: "response";
+			command: "set_event_filter";
+			success: true;
+			data: { events: string[] | null; messageUpdates: RpcMessageUpdates };
+	  }
 	| {
 			id?: string;
 			type: "response";
@@ -453,10 +461,22 @@ export type RpcMessageEventType = "message_start" | "message_update" | "message_
  */
 export type RpcMessageEventFrame = Extract<AgentSessionEvent, { type: RpcMessageEventType }> & { messageId: string };
 
+type WithoutPartial<T> = T extends unknown ? Omit<T, "partial"> : never;
+
+/** Raw-protocol opt-in projection; terminal subtype fields are preserved. */
+export type RpcDeltaMessageUpdateFrame = Omit<
+	Extract<RpcMessageEventFrame, { type: "message_update" }>,
+	"message" | "assistantMessageEvent"
+> & {
+	message: Pick<AgentMessage, "role">;
+	assistantMessageEvent: WithoutPartial<AssistantMessageEvent>;
+};
+
 /** Session event as written to stdout: message lifecycle events carry a `messageId`. */
 export type RpcAgentSessionEventFrame =
 	| Exclude<AgentSessionEvent, { type: RpcMessageEventType }>
-	| RpcMessageEventFrame;
+	| RpcMessageEventFrame
+	| RpcDeltaMessageUpdateFrame;
 
 export type RpcSessionEventFrame = RpcAgentSessionEventFrame | RpcSubagentFrame;
 
