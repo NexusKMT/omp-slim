@@ -296,6 +296,16 @@ behavior {
 	pricing-peer provider="xai-oauth" peers="xai" {
 		alias "grok-4.20-multi-agent-0309" peer-id="grok-4.20-multi-agent-beta-latest"
 	}
+	// MiniMax meters Token Plan quota and Credits at each model's
+	// pay-as-you-go list price, but the plan catalog reports zero cost. Price
+	// plan rows at their PAYG equivalents. MiniMax-M3.1-Flash-Preview is plan
+	// only and unpriced upstream, so it uses the MiniMax-M3 rate.
+	pricing-peer provider="minimax-code" peers="minimax" {
+		alias "MiniMax-M3.1-Flash-Preview" peer-id="MiniMax-M3"
+	}
+	pricing-peer provider="minimax-code-cn" peers="minimax-cn" "minimax" {
+		alias "MiniMax-M3.1-Flash-Preview" peer-id="MiniMax-M3"
+	}
 	hosted-default provider="zai-search" model="glm-4.7"
 	hosted-default provider="synthetic-search" model="auto"
 }
