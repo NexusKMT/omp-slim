@@ -280,8 +280,6 @@ export interface LoadSkillsOptions extends SkillsSettings {
 	 * extensions all survive outside the construction-time invocation scope.
 	 */
 	extensionRoots?: EffectiveExtensionRoots;
-	/** Provider IDs to exclude from discovery (e.g. `["omp-plugins", "claude-plugins"]`). */
-	excludeProviders?: string[];
 }
 
 /**
@@ -303,7 +301,6 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		ignoredSkills = [],
 		includeSkills = [],
 		disabledExtensions = [],
-		excludeProviders,
 		extensionRoots,
 	} = options;
 
@@ -340,7 +337,6 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		cwd,
 		disabledExtensions,
 		extensionRoots,
-		excludeProviders,
 	});
 
 	const skillMap = new Map<string, Skill>();

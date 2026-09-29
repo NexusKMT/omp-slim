@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,7 +14,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
 import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse";
 import { SkillProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/skill-protocol";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 import { restoreEnvValue } from "./helpers/settings-test-state";
 const fixturesDir = path.resolve(import.meta.dirname, "fixtures/skills");
 const collisionFixturesDir = path.resolve(import.meta.dirname, "fixtures/skills-collision");
@@ -31,12 +31,10 @@ const expectedFixtureSkillOrder: string[] = [
 
 /**
  * Disable every named built-in skill source. Used by `loadSkills` option tests
- * that need to isolate a custom directory or assert "no built-in leakage". Tests
- * MUST spread this in: the discovery surface only ignores `~/.<dir>/skills/*` if
- * every provider toggle resolves to false, otherwise stray skills from the
- * developer's real `$HOME` (e.g. `~/.agents/skills/<name>/SKILL.md`) leak into
- * the assertion. `excludeProviders` additionally drops omp's own plugin
- * installs (`~/.omp/plugins`), which load unconditionally on dev machines.
+ * that need to isolate a custom directory or assert "no built-in leakage".
+ * Plugin providers (`omp-plugins`, `claude-plugins`, `agent-plugins`) have no
+ * toggle; the file-wide isolated home below keeps the developer's real plugin
+ * installs out of every assertion.
  */
 const DISABLE_ALL_BUILTIN_SKILLS = {
 	enableCodexUser: false,
@@ -46,8 +44,41 @@ const DISABLE_ALL_BUILTIN_SKILLS = {
 	enablePiProject: false,
 	enableAgentsUser: false,
 	enableAgentsProject: false,
-	excludeProviders: ["omp-plugins", "claude-plugins"] as string[],
 };
+
+// Every provider resolves user-level roots from `os.homedir()` (HOME on POSIX,
+// USERPROFILE on Windows) and the agent dir; point both at an empty temp home
+// so real `~/.omp/plugins`, `~/.claude/plugins`, and `~/.agents/skills`
+// installs never leak into these tests.
+const isolatedEnvKeys = [
+	"HOME",
+	"USERPROFILE",
+	"CLAUDE_CONFIG_DIR",
+	"PI_CODING_AGENT_DIR",
+	"OMP_PROFILE",
+	"PI_PROFILE",
+] as const;
+const originalEnv: Record<string, string | undefined> = Object.fromEntries(
+	isolatedEnvKeys.map(key => [key, process.env[key]]),
+);
+let isolatedHome = "";
+
+beforeAll(async () => {
+	isolatedHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "pi-skills-home-")));
+	for (const key of ["HOME", "USERPROFILE"] as const) {
+		process.env[key] = isolatedHome;
+		Bun.env[key] = isolatedHome;
+	}
+	delete process.env.CLAUDE_CONFIG_DIR;
+	delete Bun.env.CLAUDE_CONFIG_DIR;
+	setAgentDir(path.join(isolatedHome, ".omp", "agent"));
+});
+
+afterAll(async () => {
+	for (const key of isolatedEnvKeys) restoreEnvValue(key, originalEnv[key]);
+	__resetDirsFromEnvForTests();
+	await removeWithRetries(isolatedHome);
+});
 
 describe("skills", () => {
 	describe("loadSkillsFromDir", () => {
