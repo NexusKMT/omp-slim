@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed ghost and duplicate streamed tool cards in the TUI when a turn's tool-call ids are minted or re-keyed at message end: the streamed card stays with its call and each sibling settles exactly one card ([#13735](https://github.com/can1357/oh-my-pi/pull/13735) by [@yingliang-zhang](https://github.com/yingliang-zhang))
+
 ## [18.4.3] - 2026-09-28
 
 ### Added
