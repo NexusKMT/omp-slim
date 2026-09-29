@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { clearAwsCredentialCache } from "@oh-my-pi/pi-ai/providers/aws-credentials";
 import type { AnthropicOptions } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { Context, Model, ModelSpec, TJsonSchema } from "@oh-my-pi/pi-ai/types";
@@ -223,5 +224,51 @@ describe("Amazon Bedrock /anthropic requests", () => {
 		const payload = await sentPayload(official, { isOAuth: false, metadata: { user_id: JSON_USER_ID } });
 		expect(payload.tools?.find(tool => tool.name === "bash")?.strict).toBe(true);
 		expect(payload.metadata?.user_id).toBe(JSON_USER_ID);
+	});
+
+	it("signs Mantle requests with SigV4 and sends no placeholder x-api-key without a bearer token", async () => {
+		const model = claude(
+			"bedrock-mantle",
+			"anthropic.claude-opus-5-5",
+			"https://bedrock-mantle.{region}.api.aws/anthropic",
+		);
+		let headers: Headers | undefined;
+		let url: string | undefined;
+		const fetchMock: typeof fetch = Object.assign(
+			async (input: string | URL | Request, init?: RequestInit) => {
+				url = String(input instanceof Request ? input.url : input);
+				headers = new Headers(init?.headers);
+				return new Response(
+					JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "x" } }),
+					{ status: 400, headers: { "Content-Type": "application/json" } },
+				);
+			},
+			{ preconnect: fetch.preconnect },
+		);
+		await withEnv(
+			{
+				AWS_REGION: "us-west-2",
+				AWS_ACCESS_KEY_ID: "AKIDEXAMPLE",
+				AWS_SECRET_ACCESS_KEY: "secret",
+				AWS_SESSION_TOKEN: undefined,
+				AWS_PROFILE: undefined,
+				AWS_BEARER_TOKEN_BEDROCK: undefined,
+				AWS_CONFIG_FILE: "/nonexistent/aws-config",
+				AWS_SHARED_CREDENTIALS_FILE: "/nonexistent/aws-credentials",
+				AWS_EC2_METADATA_DISABLED: "true",
+			},
+			async () => {
+				clearAwsCredentialCache();
+				try {
+					// The registry's ambient-credentials sentinel, as a live SigV4 session passes it.
+					await stream(model, context, { apiKey: "<authenticated>", fetch: fetchMock }).result();
+				} finally {
+					clearAwsCredentialCache();
+				}
+			},
+		);
+		expect(url).toBe("https://bedrock-mantle.us-west-2.api.aws/anthropic/v1/messages");
+		expect(headers?.get("authorization")).toContain("/us-west-2/bedrock-mantle/aws4_request");
+		expect(headers?.get("x-api-key")).toBeNull();
 	});
 });
