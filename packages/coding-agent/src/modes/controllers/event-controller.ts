@@ -566,6 +566,30 @@ export class EventController {
 		if (pending) this.#settleHeldCompletionIfPresent(newId, pending);
 	}
 
+	/**
+	 * Reconcile every tool-call block's live card key with the id its content
+	 * block currently carries (see {@link #streamedToolCallIdByIndex}), moving
+	 * the id-keyed card state via {@link #migrateStreamedToolCallId}. A streamed
+	 * id can change across cumulative `message_update`s (#6879), and the final
+	 * snapshot can carry a per-index id change no delta ever showed — agent-loop
+	 * mints never-materialized ids at `done`, after the last `message_update` —
+	 * so the `message_end` path replays the same reconciliation the delta path
+	 * runs. Without it the pre-mint card is never re-keyed:
+	 * `tool_execution_start` mounts a second card under the minted id and the
+	 * streamed one ghosts until sealed.
+	 */
+	#reconcileStreamedToolCallIds(content: AssistantMessage["content"]): void {
+		for (let contentIndex = 0; contentIndex < content.length; contentIndex++) {
+			const block = content[contentIndex]!;
+			if (block.type !== "toolCall") continue;
+			const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
+			if (priorId !== undefined && priorId !== block.id) {
+				this.#migrateStreamedToolCallId(priorId, block.id);
+			}
+			this.#streamedToolCallIdByIndex.set(contentIndex, block.id);
+		}
+	}
+
 	#inlineReadToolImages(
 		toolCallId: string,
 		result: { content: Array<{ type: string; data?: string; mimeType?: string }> },
@@ -1352,17 +1376,13 @@ export class EventController {
 				this.ctx.streamingComponent.setLinkTargets(assistantMessageLinkTargets(timeline.beforeTools, linkTargets));
 				this.ctx.streamingComponent.markTranscriptBlockFinalized();
 			}
+			// Re-key live cards when a provider rewrites a block's id across
+			// deltas, so the changed id reuses the existing card instead of
+			// spawning a duplicate (#6879).
+			this.#reconcileStreamedToolCallIds(this.ctx.streamingMessage.content);
 			for (let contentIndex = 0; contentIndex < this.ctx.streamingMessage.content.length; contentIndex++) {
 				const content = this.ctx.streamingMessage.content[contentIndex]!;
 				if (content.type !== "toolCall") continue;
-				// Re-key the live card when a provider rewrites this block's id
-				// across deltas, so the changed id reuses the existing card
-				// instead of spawning a duplicate (#6879).
-				const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
-				if (priorId !== undefined && priorId !== content.id) {
-					this.#migrateStreamedToolCallId(priorId, content.id);
-				}
-				this.#streamedToolCallIdByIndex.set(contentIndex, content.id);
 				const tool = this.ctx.viewSession.getToolByName(content.name);
 				const renderToolName = toolRenderName(content.name, tool);
 				if (renderToolName === "read") {
@@ -1570,20 +1590,12 @@ export class EventController {
 				);
 			}
 			// The final snapshot can carry a per-index id change no delta ever
-			// showed — agent-loop mints never-materialized ids at `done`, after the
-			// last `message_update` — so replay the same reconciliation
-			// #handleMessageUpdate runs per delta. Without it the pre-mint card is
-			// never re-keyed: tool_execution_start mounts a second card under the
-			// minted id and the streamed one ghosts until sealed.
-			for (let contentIndex = 0; contentIndex < this.ctx.streamingMessage.content.length; contentIndex++) {
-				const content = this.ctx.streamingMessage.content[contentIndex]!;
-				if (content.type !== "toolCall") continue;
-				const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
-				if (priorId !== undefined && priorId !== content.id) {
-					this.#migrateStreamedToolCallId(priorId, content.id);
-				}
-				this.#streamedToolCallIdByIndex.set(contentIndex, content.id);
-			}
+			// showed — agent-loop mints and re-keys tool-call ids at `done`, after
+			// the last `message_update` — so replay the same reconciliation
+			// `#handleMessageUpdate` runs per delta. Without it the pre-mint card
+			// is never re-keyed: tool_execution_start mounts a second card under
+			// the minted id and the streamed one ghosts until sealed.
+			this.#reconcileStreamedToolCallIds(this.ctx.streamingMessage.content);
 			this.ctx.streamingComponent.updateContent(displayTimeline.beforeTools);
 
 			if (this.ctx.streamingMessage.stopReason !== "aborted" && this.ctx.streamingMessage.stopReason !== "error") {
