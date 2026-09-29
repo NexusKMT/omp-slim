@@ -56,17 +56,21 @@ export function summarizeConnectErrorDetails(details: unknown): string | undefin
 	return truncate(parts.join("; "), MAX_EXTRA_DETAIL_CHARS);
 }
 
+/** Connect detail type Cursor uses for its own error envelope. */
+const CURSOR_ERROR_DETAILS_TYPE = "aiserver.v1.ErrorDetails";
+
 /**
- * True when a typed Connect error detail declares the failure retryable.
- * Cursor attaches `aiserver.v1.ErrorDetails` whose JSON `debug` form carries
- * `details.isRetryable` — set on upstream outages such as ERROR_OPENAI
- * ("Unable to reach the model provider") whose bare `code: message` text
- * (`unavailable: Error`) classifies as a hard failure on its own.
+ * True when Cursor's `aiserver.v1.ErrorDetails` entry declares the failure
+ * retryable. Its JSON `debug` form carries `details.isRetryable` — set on
+ * upstream outages such as ERROR_OPENAI ("Unable to reach the model
+ * provider") whose bare `code: message` text (`unavailable: Error`)
+ * classifies as a hard failure on its own. Other detail types are ignored
+ * even when they share the `debug.details` shape.
  */
-export function hasRetryableConnectErrorDetail(details: unknown): boolean {
+export function hasRetryableCursorErrorDetail(details: unknown): boolean {
 	if (!Array.isArray(details)) return false;
 	for (const entry of details) {
-		if (!isRecord(entry) || !isRecord(entry.debug)) continue;
+		if (!isRecord(entry) || entry.type !== CURSOR_ERROR_DETAILS_TYPE || !isRecord(entry.debug)) continue;
 		const inner = entry.debug.details;
 		if (isRecord(inner) && inner.isRetryable === true) return true;
 	}

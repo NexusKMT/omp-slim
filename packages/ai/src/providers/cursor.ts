@@ -212,7 +212,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream";
 import { connectProxiedSocket, getProxyForUrl } from "../utils/proxy";
 import { createRequestDebugSession, isRequestDebugEnabled, type RequestDebugResponseLog } from "../utils/request-debug";
 import { sanitizeSchemaForCursor, toolWireSchema } from "../utils/schema";
-import { formatConnectEndStreamError, hasRetryableConnectErrorDetail } from "./connect-error-detail";
+import { formatConnectEndStreamError, hasRetryableCursorErrorDetail } from "./connect-error-detail";
 import mcpExternalHandoffMessage from "./cursor-external-tool-handoff.md" with { type: "text" };
 import {
 	buildMcpStateResult,
@@ -435,7 +435,7 @@ function parseConnectEndStream(data: Uint8Array): Error | null {
 			const endStreamError = new ConnectEndStreamError(classificationMessage, formatConnectEndStreamError(error));
 			// The classification text drops the typed details, so carry Cursor's
 			// own retry verdict as a structured flag.
-			if (hasRetryableConnectErrorDetail(error.details)) {
+			if (hasRetryableCursorErrorDetail(error.details)) {
 				AIError.attach(endStreamError, AIError.create(AIError.Flag.Transient));
 			}
 			return endStreamError;
