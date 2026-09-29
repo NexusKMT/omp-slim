@@ -572,21 +572,54 @@ export class EventController {
 	 * the id-keyed card state via {@link #migrateStreamedToolCallId}. A streamed
 	 * id can change across cumulative `message_update`s (#6879), and the final
 	 * snapshot can carry a per-index id change no delta ever showed — agent-loop
-	 * mints never-materialized ids at `done`, after the last `message_update` —
-	 * so the `message_end` path replays the same reconciliation the delta path
-	 * runs. Without it the pre-mint card is never re-keyed:
-	 * `tool_execution_start` mounts a second card under the minted id and the
-	 * streamed one ghosts until sealed.
+	 * mints and re-keys tool-call ids at `done`, after the last
+	 * `message_update` — so the `message_end` path replays the same
+	 * reconciliation the delta path runs. Without it the pre-mint card is never
+	 * re-keyed: `tool_execution_start` mounts a second card under the minted id
+	 * and the streamed one ghosts until sealed.
+	 *
+	 * Several indices can share one streamed id (a reused provider id, or
+	 * siblings that all streamed before their ids materialized) and then split
+	 * into distinct ids. The shared card migrates only when the old id is no
+	 * longer referenced by any content index — the last referencer keeps the
+	 * card; the other indices pick up their own card at `tool_execution_start`.
+	 * Migrating unconditionally would move the one shared card to the first
+	 * re-keyed sibling and leave the index that kept the old id with no streamed
+	 * card (a reverse ghost).
 	 */
 	#reconcileStreamedToolCallIds(content: AssistantMessage["content"]): void {
+		const finalIdByIndex = new Map<number, string>();
 		for (let contentIndex = 0; contentIndex < content.length; contentIndex++) {
 			const block = content[contentIndex]!;
-			if (block.type !== "toolCall") continue;
+			if (block.type === "toolCall") finalIdByIndex.set(contentIndex, block.id);
+		}
+		for (const [contentIndex, id] of finalIdByIndex) {
 			const priorId = this.#streamedToolCallIdByIndex.get(contentIndex);
-			if (priorId !== undefined && priorId !== block.id) {
-				this.#migrateStreamedToolCallId(priorId, block.id);
+			if (priorId === undefined || priorId === id) {
+				this.#streamedToolCallIdByIndex.set(contentIndex, id);
+				continue;
 			}
-			this.#streamedToolCallIdByIndex.set(contentIndex, block.id);
+			const oldIdStaysOwned = [...finalIdByIndex].some(([otherIndex, otherId]) => {
+				if (otherIndex === contentIndex) return false;
+				// The other index either already resolved to the old id or still
+				// streams under it and has not been re-keyed yet.
+				return otherId === priorId || this.#streamedToolCallIdByIndex.get(otherIndex) === priorId;
+			});
+			if (oldIdStaysOwned) {
+				// The shared card stays under `priorId` for its remaining
+				// referencer; make it show THAT call's arguments, not the last
+				// cumulative update's (every sibling updated the one shared card
+				// while the id was still shared).
+				const card = this.ctx.pendingTools.get(priorId);
+				for (const [keeperIndex, keeperId] of finalIdByIndex) {
+					if (keeperId !== priorId || keeperIndex === contentIndex) continue;
+					const keeper = content[keeperIndex];
+					if (card && keeper?.type === "toolCall") card.updateArgs(keeper.arguments, priorId);
+				}
+			} else {
+				this.#migrateStreamedToolCallId(priorId, id);
+			}
+			this.#streamedToolCallIdByIndex.set(contentIndex, id);
 		}
 	}
 
