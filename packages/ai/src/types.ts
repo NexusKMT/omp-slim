@@ -231,13 +231,14 @@ export function resolveModelServiceTier(
  * realizes only its Priority serving path. Anthropic is absent because it
  * realizes `priority` via `speed: "fast"`.
  *
- * Codex-backend models (`openai-codex-responses`) follow codex-rs
- * `service_tier_for_request`: once discovery has reported the model's
- * `service_tiers`, every tier except `flex` (always accepted) and `default`
- * is sent only when that list names it. Without a reported list (bundled or
- * custom rows), `priority`/`scale` keep the provider-level answer, but
- * `ultrafast` is never sent. First-party OpenAI takes `ultrafast` as-is. A bare
- * provider string cannot carry the list, so it answers for the provider alone.
+ * Codex-backend models (`openai-codex-responses`): `ultrafast` is sent only
+ * when the model's discovered `service_tiers` lists it. `priority`/`scale`
+ * are dropped only when that list is non-empty and omits them (codex-rs
+ * `service_tier_for_request`); an empty or missing list counts as "not
+ * reported" — accounts whose `/models` lists no tiers keep `/fast` — so the
+ * provider-level answer stands. `flex` and `default` are never gated.
+ * First-party OpenAI takes `ultrafast` as-is. A bare provider string cannot
+ * carry the list, so it answers for the provider alone.
  */
 export function shouldSendServiceTier(
 	serviceTier: ServiceTier | null | undefined,
@@ -252,7 +253,8 @@ export function shouldSendServiceTier(
 		serviceTier !== "default"
 	) {
 		const advertised = target.serviceTiers;
-		if (advertised !== undefined || serviceTier === "ultrafast") return advertised?.includes(serviceTier) === true;
+		if (serviceTier === "ultrafast") return advertised?.includes(serviceTier) === true;
+		if (advertised !== undefined && advertised.length > 0) return advertised.includes(serviceTier);
 	}
 	if (serviceTier === "ultrafast") {
 		return provider === "openai" || (typeof target === "string" && provider === "openai-codex");

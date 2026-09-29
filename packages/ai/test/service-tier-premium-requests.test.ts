@@ -129,16 +129,21 @@ describe("shouldSendServiceTier", () => {
 		expect(realizesPriorityServiceTier("ultrafast", openai)).toBe(false);
 	});
 
-	it("gates Codex tiers on the discovered tier list once it is known", () => {
+	it("gates Codex priority/scale only on a non-empty discovered tier list", () => {
 		const unlisted = { ...codex, serviceTiers: ["ultrafast"] };
 		expect(shouldSendServiceTier("priority", unlisted)).toBe(false);
 		expect(realizesPriorityServiceTier("priority", unlisted)).toBe(false);
 		expect(getPriorityPremiumRequests("priority", unlisted)).toBe(0);
-		expect(shouldSendServiceTier("scale", { ...codex, serviceTiers: [] })).toBe(false);
+		expect(shouldSendServiceTier("scale", unlisted)).toBe(false);
 		expect(shouldSendServiceTier("priority", { ...codex, serviceTiers: ["priority"] })).toBe(true);
+		// An empty list means "not reported" (free-plan accounts list [] for every model): Fast stays available.
+		const unreported = { ...codex, serviceTiers: [] };
+		expect(shouldSendServiceTier("priority", unreported)).toBe(true);
+		expect(realizesPriorityServiceTier("priority", unreported)).toBe(true);
+		expect(shouldSendServiceTier("ultrafast", unreported)).toBe(false);
 		// Flex is always an accepted request option; `default` is out of this gate's scope.
-		expect(shouldSendServiceTier("flex", { ...codex, serviceTiers: [] })).toBe(true);
-		expect(shouldSendServiceTier("default", { ...codex, serviceTiers: [] })).toBe(true);
+		expect(shouldSendServiceTier("flex", unlisted)).toBe(true);
+		expect(shouldSendServiceTier("default", unlisted)).toBe(true);
 		// No discovered list (bundled/custom rows): the provider-level answer stands.
 		expect(shouldSendServiceTier("priority", codex)).toBe(true);
 		expect(shouldSendServiceTier("priority", customCodex)).toBe(true);
