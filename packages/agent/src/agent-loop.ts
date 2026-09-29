@@ -2857,9 +2857,12 @@ function formatToolNotFoundMessage(
  * below, every UI and persistence matcher — would otherwise merge sibling
  * calls: the later call's prepared entry overwrites the earlier's, both calls
  * execute the sibling's payload, and colliding result ids merge or drop one
- * sibling's output in every consumer. Cursor server-resolved blocks are
- * skipped: the provider correlates their results out-of-band under its own
- * ids. Idempotent.
+ * sibling's output in every consumer. Never-materialized is the sanitizer's
+ * trim test (`isMalformedToolCallId`): a whitespace-only id is minted like an
+ * empty one, never kept — it would be dropped from provider replay together
+ * with its result, the live/replay divergence this repair exists to close.
+ * Cursor server-resolved blocks are skipped: the provider correlates their
+ * results out-of-band under its own ids. Idempotent.
  */
 function ensureUniqueToolCallIds(content: AssistantMessage["content"]): void {
 	const reserved = new Set<string>();
@@ -2870,12 +2873,12 @@ function ensureUniqueToolCallIds(content: AssistantMessage["content"]): void {
 	for (const block of content) {
 		if (block.type !== "toolCall") continue;
 		if ((block as CursorExecResolvedCarrier)[kCursorExecResolved] === true) continue;
-		if (block.id && !seen.has(block.id)) {
+		if (block.id?.trim() && !seen.has(block.id)) {
 			seen.add(block.id);
 			continue;
 		}
 		let candidate: string;
-		if (block.id) {
+		if (block.id?.trim()) {
 			let suffix = 1;
 			candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
 			while (seen.has(candidate) || reserved.has(candidate)) {

@@ -22,6 +22,7 @@ import type {
 import { ASIDE_MESSAGE_COMMIT, ASIDE_MESSAGE_DISCARD, SPECULATIVE_STREAM_SESSION } from "@oh-my-pi/pi-agent-core/types";
 import type { AssistantMessage, AssistantMessageEvent, Context, Message, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel, type MockResponse } from "@oh-my-pi/pi-ai/providers/mock";
+import { transformMessages } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { kCursorExecResolved, setStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { HarmonyDetection } from "@oh-my-pi/pi-ai/utils/harmony-leak";
@@ -1786,6 +1787,76 @@ describe("agentLoop with AgentMessage", () => {
 		);
 		expect(ends).toHaveLength(2);
 		expect(ends.map(e => e.toolCallId).sort()).toEqual([...callIds].sort());
+	});
+
+	it("mints whitespace-only tool-call ids like never-materialized ones and keeps them on provider replay", async () => {
+		// Failure mode if this regresses: `ensureUniqueToolCallIds` tested id
+		// emptiness with a falsy check while the replay pipeline's
+		// `isMalformedToolCallId` trims — so `id: " "` survived repair (the first
+		// occurrence kept, a duplicate re-keyed to `" _dup1"` which passes the trim
+		// check) and executed live, while `transformMessages` silently dropped the
+		// whitespace call and its result from every provider replay: the exact
+		// live/replay divergence the repair exists to close.
+		const toolSchema = type({ value: "string" });
+		const executions: string[] = [];
+		const tool: AgentTool<typeof toolSchema, { value: string }> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executions.push(params.value);
+				return {
+					content: [{ type: "text", text: `echoed: ${params.value}` }],
+					details: { value: params.value },
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{
+					content: [
+						{ type: "toolCall", id: " ", name: "echo", arguments: { value: "alpha" } },
+						{ type: "toolCall", id: " ", name: "echo", arguments: { value: "beta" } },
+					],
+				},
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const stream = agentLoop([createUserMessage("start")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		const messages = await stream.result();
+
+		expect(executions.sort()).toEqual(["alpha", "beta"]);
+		const assistant = messages.find((m): m is AssistantMessage => m.role === "assistant");
+		const callIds: string[] = [];
+		for (const block of assistant?.content ?? []) {
+			if (block.type !== "toolCall") continue;
+			callIds.push(block.id);
+		}
+		const results = messages.filter((m): m is ToolResultMessage => m.role === "toolResult");
+		expect(results).toHaveLength(2);
+		// Whitespace-only is never materialized (the trim test matches the replay
+		// sanitizer): minted non-empty and distinct, never kept or `_dup`-suffixed.
+		expect(callIds).toHaveLength(2);
+		expect(callIds.every(id => id.trim().length > 0)).toBe(true);
+		expect(callIds[0]).not.toBe(callIds[1]);
+		expect(results.map(r => r.toolCallId)).toEqual(callIds);
+		expect(results.map(toolResultText)).toEqual(["echoed: alpha", "echoed: beta"]);
+		// Provider replay keeps every call and its paired result; with `" "`
+		// surviving repair, `transformMessages` would drop that call + its result.
+		const replayed = transformMessages(identityConverter(messages), mock.model);
+		const replayCallIds = replayed.flatMap(msg =>
+			msg.role === "assistant" ? msg.content.filter(b => b.type === "toolCall").map(b => b.id) : [],
+		);
+		const replayResultIds = replayed.flatMap(msg => (msg.role === "toolResult" ? [msg.toolCallId] : []));
+		expect(replayCallIds).toEqual(callIds);
+		expect(replayResultIds).toEqual(callIds);
 	});
 
 	it("pairs a Harmony-recovered call with its result under one minted id across message snapshots", async () => {
