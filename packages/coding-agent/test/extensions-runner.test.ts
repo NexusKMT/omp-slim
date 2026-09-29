@@ -33,6 +33,7 @@ import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/ex
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
+import { createAssistantMessage } from "./helpers/agent-session-setup";
 
 describe("ExtensionRunner", () => {
 	let tempDir: TempDir;
@@ -557,6 +558,75 @@ describe("ExtensionRunner", () => {
 			const flags = runner.getFlags();
 
 			expect(flags.has("--my-flag")).toBe(true);
+		});
+	});
+
+	describe("assistant_message", () => {
+		it("chains text rewrites, ignores in-place edits, and preserves non-text blocks", async () => {
+			const extCode = `
+				export default function(pi) {
+					pi.on("assistant_message", event => { event.message.content[0].text = "ignored"; });
+					pi.on("assistant_message", event => ({
+						content: [{ type: "text", text: event.message.content[0].text + " one" }, event.message.content[1]],
+					}));
+					pi.on("assistant_message", event => ({
+						content: [{ type: "text", text: event.message.content[0].text + " two" }, event.message.content[1]],
+					}));
+					pi.on("assistant_message", () => { throw new Error("rewrite failed"); });
+					pi.on("assistant_message", event => ({
+						content: [{ type: "text", text: event.message.content[0].text + " three" }, event.message.content[1]],
+					}));
+				}
+			`;
+			fs.writeFileSync(path.join(extensionsDir, "assistant-message.ts"), extCode);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => errors.push(error));
+			const toolCall = { type: "toolCall" as const, id: "call-1", name: "read", arguments: { path: "x" } };
+			const message = {
+				...createAssistantMessage("original"),
+				content: [{ type: "text" as const, text: "original" }, toolCall],
+			};
+			const rewritten = await runner.emitAssistantMessage(message);
+			expect(rewritten).toEqual([{ type: "text", text: "original one two three" }, toolCall]);
+			expect(message.content[0]).toEqual({ type: "text", text: "original" });
+			expect(errors).toHaveLength(1);
+			expect(errors[0]?.event).toBe("assistant_message");
+			expect(errors[0]?.error).toContain("rewrite failed");
+		});
+
+		it("rejects attempts to change tool calls", async () => {
+			fs.writeFileSync(
+				path.join(extensionsDir, "assistant-message-invalid.ts"),
+				`export default pi => pi.on("assistant_message", () => ({ content: [{ type: "text", text: "lost tool" }] }));`,
+			);
+			const result = await loadTestExtensions();
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+			);
+			const errors: ExtensionError[] = [];
+			runner.onError(error => errors.push(error));
+			const message = {
+				...createAssistantMessage("original"),
+				content: [
+					{ type: "text" as const, text: "original" },
+					{ type: "toolCall" as const, id: "call-1", name: "read", arguments: { path: "x" } },
+				],
+			};
+			expect(await runner.emitAssistantMessage(message)).toBeUndefined();
+			expect(errors).toHaveLength(1);
+			expect(errors[0]?.error).toContain("non-text blocks");
 		});
 	});
 

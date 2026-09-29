@@ -9,7 +9,13 @@ import type {
 	AgentToolResult,
 	AgentToolUpdateCallback,
 } from "@oh-my-pi/pi-agent-core";
-import type { CredentialDisabledEvent, ImageContent, Model, ProviderResponseMetadata } from "@oh-my-pi/pi-ai";
+import type {
+	AssistantMessage,
+	CredentialDisabledEvent,
+	ImageContent,
+	Model,
+	ProviderResponseMetadata,
+} from "@oh-my-pi/pi-ai";
 import {
 	clearContextHistoryIndex,
 	getContextHistoryIndex,
@@ -35,6 +41,8 @@ import { createExtensionModelQuery } from "./model-api";
 import type { ComposerShapeDefinition } from "@oh-my-pi/pi-tui/overlays/composer-shape-registry";
 import type {
 	AfterProviderResponseEvent,
+	AssistantMessageRewriteEvent,
+	AssistantMessageRewriteResult,
 	AssistantThinkingRenderer,
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -1613,6 +1621,64 @@ export class ExtensionRunner {
 		}
 
 		return result as RunnerEmitResult<TEvent>;
+	}
+
+	/**
+	 * Run extension rewrites on a detached finalized assistant message. Only text
+	 * blocks may change; preserving all other blocks verbatim protects signatures
+	 * and already-prepared tool calls.
+	 */
+	async emitAssistantMessage(
+		message: AssistantMessage,
+		signal?: AbortSignal,
+	): Promise<AssistantMessage["content"] | undefined> {
+		if (!this.hasHandlers("assistant_message")) return undefined;
+		const ctx = this.createContext();
+		let currentContent = structuredClone(message.content);
+		const nonText = (content: typeof currentContent) => content.filter(block => block.type !== "text");
+
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("assistant_message");
+			if (!handlers?.length) continue;
+			for (const handler of handlers) {
+				const event: AssistantMessageRewriteEvent = {
+					type: "assistant_message",
+					message: { ...message, content: structuredClone(currentContent) },
+				};
+				const result = (await this.#runHandlerWithTimeout(
+					handler,
+					event,
+					ctx,
+					ext,
+					extensionHandlerTimeoutMs,
+					undefined,
+					signal,
+				)) as AssistantMessageRewriteResult | undefined;
+				if (result?.content === undefined) continue;
+				const replacement = result.content;
+				if (
+					!Array.isArray(replacement) ||
+					replacement.some(
+						block =>
+							!block ||
+							typeof block !== "object" ||
+							typeof block.type !== "string" ||
+							(block.type === "text" && typeof block.text !== "string"),
+					) ||
+					!Bun.deepEquals(nonText(replacement), nonText(currentContent))
+				) {
+					this.emitError({
+						extensionPath: ext.path,
+						event: "assistant_message",
+						error: "content replacement may only change text blocks; non-text blocks must remain unchanged and in order",
+					});
+					continue;
+				}
+				currentContent = structuredClone(replacement);
+			}
+		}
+		signal?.throwIfAborted();
+		return Bun.deepEquals(currentContent, message.content) ? undefined : currentContent;
 	}
 
 	async emitToolResult(event: ToolResultEvent): Promise<ToolResultEventResult | undefined> {

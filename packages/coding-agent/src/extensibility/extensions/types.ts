@@ -39,6 +39,7 @@ import type { CompactionResult } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ContextUsage } from "@oh-my-pi/pi-tui/status-line/types";
 import type {
 	Api,
+	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
@@ -849,10 +850,27 @@ export interface MessageUpdateEvent {
  * Fired when a message ends. Notification-only: the message is a detached
  * snapshot, so in-place changes do not rewrite agent or provider context.
  * Persistence and subscriber delivery do not wait for this handler to finish.
+ * Use `assistant_message` to rewrite a finalized assistant message.
  */
 export interface MessageEndEvent {
 	type: "message_end";
 	message: AgentMessage;
+}
+
+/**
+ * Fired once per finalized assistant message, after the provider stream settles
+ * and before the message reaches agent context, `message_end` listeners (TUI,
+ * RPC, exporters), session persistence, or tool dispatch. Return
+ * {@link AssistantMessageRewriteResult} to replace its content; the replacement
+ * is the single source of truth for display, history, and the next provider
+ * request. Handlers chain: each sees the previous handler's replacement.
+ *
+ * `message` is a detached copy — in-place mutation has no effect; return
+ * `content` instead. Not fired for streams cut off by an abort.
+ */
+export interface AssistantMessageRewriteEvent {
+	type: "assistant_message";
+	message: AssistantMessage;
 }
 
 /** Fired when a tool starts executing */
@@ -1154,6 +1172,7 @@ export type ExtensionEvent =
 	| MessageStartEvent
 	| MessageUpdateEvent
 	| MessageEndEvent
+	| AssistantMessageRewriteEvent
 	| ToolExecutionStartEvent
 	| ToolExecutionUpdateEvent
 	| ToolExecutionEndEvent
@@ -1182,6 +1201,21 @@ export type ExtensionEvent =
 
 export interface ContextEventResult {
 	messages?: AgentMessage[];
+}
+
+/**
+ * Result from an `assistant_message` handler. Return `undefined` to leave the
+ * message unchanged.
+ *
+ * Only `text` blocks may be edited, added, removed, or reordered. Every other
+ * block (thinking, redacted thinking, tool calls, …) must appear unchanged and
+ * in the original relative order: thinking signatures must replay verbatim,
+ * and tool calls may already be dispatched speculatively. A replacement that
+ * violates this is rejected (reported as an extension error) and the message
+ * keeps its previous content.
+ */
+export interface AssistantMessageRewriteResult {
+	content?: AssistantMessage["content"];
 }
 
 export type BeforeProviderRequestEventResult = unknown;
@@ -1342,6 +1376,10 @@ export interface ExtensionAPI {
 	on(event: "message_start", handler: ExtensionHandler<MessageStartEvent>): void;
 	on(event: "message_update", handler: ExtensionHandler<MessageUpdateEvent>): void;
 	on(event: "message_end", handler: ExtensionHandler<MessageEndEvent>): void;
+	on(
+		event: "assistant_message",
+		handler: ExtensionHandler<AssistantMessageRewriteEvent, AssistantMessageRewriteResult>,
+	): void;
 	on(event: "tool_execution_start", handler: ExtensionHandler<ToolExecutionStartEvent>): void;
 	on(event: "tool_execution_update", handler: ExtensionHandler<ToolExecutionUpdateEvent>): void;
 	on(event: "tool_execution_end", handler: ExtensionHandler<ToolExecutionEndEvent>): void;
