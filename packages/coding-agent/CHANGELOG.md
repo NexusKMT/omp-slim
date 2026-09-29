@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed hashline snapshots surviving `/new`: the session-scoped edit store is now cleared on session reset, so stale tags can no longer surface as "issued in this session" in mismatch diagnostics ([#13370](https://github.com/can1357/oh-my-pi/issues/13370))
 - Fixed hosted OpenAI web search on hosts that accept only string tool_choice values, such as Command Code ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ## [18.4.3] - 2026-09-28

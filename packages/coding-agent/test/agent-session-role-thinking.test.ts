@@ -6,6 +6,7 @@ import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as autoThinkingClassifier from "@oh-my-pi/pi-coding-agent/auto-thinking/classifier";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { getEditStore } from "@oh-my-pi/pi-coding-agent/edit/store";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/messages";
@@ -847,5 +848,26 @@ describe("AgentSession role model thinking behavior", () => {
 		expect(session.thinkingLevel).toBe(provisional);
 		expect(session.agent.state.thinkingLevel).toBe(provisional);
 		expect(entries.at(-1)).toMatchObject({ thinkingLevel: provisional, configured: AUTO_THINKING });
+	});
+
+	it("clears the edit store's snapshot history on /new so stale tags don't leak into mismatch diagnostics (#13370)", async () => {
+		const model = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		await createSession({
+			initialModelId: model.id,
+			initialThinkingLevel: Effort.High,
+			modelRoles: { default: `${model.provider}/${model.id}` },
+		});
+		const store = getEditStore(session);
+		// Record a snapshot: the store now holds a tag for this path.
+		const tag = store.recordSnapshot("/tmp/omp-13370/a.rs", "alpha\nbeta\n", undefined);
+		expect(tag).toBeDefined();
+		// Sanity: the tag resolves before /new.
+		expect(store.byHashText("/tmp/omp-13370/a.rs", tag)).toBe("alpha\nbeta\n");
+
+		await session.newSession();
+
+		// After /new the store is empty: the stale tag no longer resolves, so
+		// the mismatch diagnostic can't name it as "issued in this session".
+		expect(store.byHashText("/tmp/omp-13370/a.rs", tag)).toBeNull();
 	});
 });

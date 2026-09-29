@@ -9022,6 +9022,13 @@ export class AgentSession implements SettingsScope {
 			// the previous session's auto-classified effort: auto stays auto but
 			// restarts at the provisional level; a pinned level re-resolves to itself.
 			this.#models.restoreThinkingLevel(this.configuredThinkingLevel());
+			// Drop the hashline snapshot store: it's session-scoped per its doc,
+			// but the lazy `??=` binding on the AgentSession instance survives
+			// `/new`, so snapshots (and their tags) from the previous session
+			// would leak into the new session's mismatch diagnostics — the
+			// origin list could name a tag "issued in this session" when it was
+			// actually issued before the reset (#13370 review).
+			getEditStore(this).clear();
 			// Drop the frozen system-prompt/tool snapshot and synced message bytes
 			// (mirrors freshSession()/resetSessionContext()): without this the first
 			// post-/new turns keep sending the previous session's StablePrefix, and
