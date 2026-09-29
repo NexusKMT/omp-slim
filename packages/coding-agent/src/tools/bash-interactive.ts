@@ -17,7 +17,7 @@ export interface BashInteractiveResult extends OutputSummary {
 }
 
 export async function runInteractiveBashPty(
-	ui: NonNullable<AgentToolContext["ui"]>,
+	ui: Pick<NonNullable<AgentToolContext["ui"]>, "custom">,
 	options: {
 		command: string;
 		cwd: string;

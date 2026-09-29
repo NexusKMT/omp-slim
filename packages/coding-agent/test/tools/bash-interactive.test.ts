@@ -3,24 +3,28 @@ import * as fs from "node:fs";
 import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { runInteractiveBashPty } from "@oh-my-pi/pi-coding-agent/tools/bash-interactive";
+import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
+import { initTheme, type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+import { TUI } from "@oh-my-pi/pi-tui";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { VirtualTerminal } from "../../../tui/test/virtual-terminal";
 
-type InteractiveUi = NonNullable<AgentToolContext["ui"]>;
+type InteractiveUi = Pick<NonNullable<AgentToolContext["ui"]>, "custom">;
 
 /**
- * A UI whose `custom()` mounts the overlay factory against a headless TUI and
- * resolves with the value the overlay reports through `done`. Nothing renders,
- * so the theme and keybindings are never read.
+ * A UI whose `custom()` mounts the overlay factory against a headless TUI over
+ * a virtual terminal and resolves with the value the overlay reports through
+ * `done`. Nothing is rendered to a real terminal.
  */
 function headlessUi(): InteractiveUi {
-	const tui = { terminal: { columns: 100, rows: 30 }, requestRender() {} };
-	return {
-		custom<T>(factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: T) => void) => unknown) {
-			const { promise, resolve } = Promise.withResolvers<T>();
-			factory(tui, {}, {}, resolve);
-			return promise;
-		},
-	} as unknown as InteractiveUi;
+	const custom: InteractiveUi["custom"] = async <T>(
+		factory: (tui: TUI, uiTheme: Theme, keybindings: KeybindingsManager, done: (result: T) => void) => unknown,
+	): Promise<T> => {
+		const { promise, resolve } = Promise.withResolvers<T>();
+		await factory(new TUI(new VirtualTerminal(100, 30)), theme, KeybindingsManager.inMemory(), resolve);
+		return promise;
+	};
+	return { custom };
 }
 
 const ptyUnavailable = process.platform === "win32" || Bun.env.PI_NO_PTY === "1" || !fs.existsSync("/bin/bash");
@@ -29,6 +33,7 @@ describe("runInteractiveBashPty", () => {
 	let tempDir: TempDir;
 
 	beforeEach(async () => {
+		initTheme();
 		tempDir = TempDir.createSync("@omp-bash-pty-env-");
 		resetSettingsForTest();
 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
