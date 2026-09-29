@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed HTTP 4xx errors (other than 408/429) being retried as transient when the response body contains words like `server_error`, `timeout`, or `overloaded` ([#13807](https://github.com/can1357/oh-my-pi/issues/13807))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
