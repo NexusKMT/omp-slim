@@ -3,7 +3,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessageEvent } from "@oh-my-pi/pi-ai";
 import { MAX_RPC_FRAME_BYTES, RpcFrameEncoder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame";
 import { RpcSessionEventForwarder } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-session-events";
-import type { RpcAgentSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
+import type { RpcProjectedSessionEventFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { makeAssistantMessage } from "./session-manager/helpers";
 
@@ -25,7 +25,7 @@ function update(): AgentSessionEvent {
 	} as unknown as AgentSessionEvent;
 }
 
-function idsOf(frames: RpcAgentSessionEventFrame[]): Array<[string, string | undefined]> {
+function idsOf(frames: RpcProjectedSessionEventFrame[]): Array<[string, string | undefined]> {
 	return frames.map(frame => [frame.type, "messageId" in frame ? frame.messageId : undefined]);
 }
 
@@ -53,7 +53,7 @@ describe("RpcSessionEventForwarder", () => {
 			{ type: "done", reason: "stop", message },
 			{ type: "error", reason: "error", error: message },
 		];
-		const frames: RpcAgentSessionEventFrame[] = [];
+		const frames: RpcProjectedSessionEventFrame[] = [];
 		const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
 		forwarder.setFilter(null, "delta");
 		for (const assistantMessageEvent of events) {
@@ -76,7 +76,7 @@ describe("RpcSessionEventForwarder", () => {
 	});
 
 	test("switching projection mid-message keeps identity and omission restores byte-identical full updates", () => {
-		const frames: RpcAgentSessionEventFrame[] = [];
+		const frames: RpcProjectedSessionEventFrame[] = [];
 		const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
 		const event = update();
 		forwarder.forward(messageEvent("message_start", reply));
@@ -132,7 +132,7 @@ describe("RpcSessionEventForwarder", () => {
 		expect(JSON.parse(lines[0]).type).toBe("rpc_chunk");
 	});
 	test("keeps one messageId per message while an external record nests inside a streaming reply", () => {
-		const frames: RpcAgentSessionEventFrame[] = [];
+		const frames: RpcProjectedSessionEventFrame[] = [];
 		const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
 
 		forwarder.forward(messageEvent("message_start", reply));
@@ -155,7 +155,7 @@ describe("RpcSessionEventForwarder", () => {
 	});
 
 	test("filters unlisted event types without shifting message ids, and null restores everything", () => {
-		const frames: RpcAgentSessionEventFrame[] = [];
+		const frames: RpcProjectedSessionEventFrame[] = [];
 		const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
 
 		expect(forwarder.setFilter(["message_end", "agent_end"])).toEqual(["message_end", "agent_end"]);

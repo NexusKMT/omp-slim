@@ -7,9 +7,8 @@ import type { AgentSessionEvent } from "../../session/agent-session";
 import type {
 	RpcAgentSessionEventFrame,
 	RpcDeltaMessageUpdateFrame,
-	RpcMessageEventFrame,
-	RpcMessageEventType,
 	RpcMessageUpdates,
+	RpcProjectedSessionEventFrame,
 } from "./rpc-types";
 
 /** Drops the accumulated snapshot a streaming event carries; `done` and `error` have none. */
@@ -30,9 +29,9 @@ export class RpcSessionEventForwarder {
 	#messageCount = 0;
 	/** Ids of started, unfinished messages. External records (advisor cards, IRC) nest inside a streaming reply. */
 	#openMessageIds: string[] = [];
-	readonly #output: (frame: RpcAgentSessionEventFrame) => void;
+	readonly #output: (frame: RpcProjectedSessionEventFrame) => void;
 
-	constructor(output: (frame: RpcAgentSessionEventFrame) => void) {
+	constructor(output: (frame: RpcProjectedSessionEventFrame) => void) {
 		this.#output = output;
 	}
 
@@ -57,7 +56,7 @@ export class RpcSessionEventForwarder {
 		this.#output(frame);
 	}
 
-	#stamp(event: AgentSessionEvent): Exclude<AgentSessionEvent, { type: RpcMessageEventType }> | RpcMessageEventFrame {
+	#stamp(event: AgentSessionEvent): RpcAgentSessionEventFrame {
 		switch (event.type) {
 			case "message_start": {
 				const messageId = this.#mintMessageId();
