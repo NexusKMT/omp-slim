@@ -387,11 +387,15 @@ async function upgradePackagePlugin(
 		);
 	}
 	try {
-		const { from, plugin } = await manager.upgrade(name);
+		const { from, plugin, changed } = await manager.upgrade(name);
 		if (flags.json) {
-			console.log(JSON.stringify({ upgraded: plugin.name, from: from ?? null, to: plugin.version }, null, 2));
-		} else if (from === plugin.version) {
+			console.log(
+				JSON.stringify({ upgraded: plugin.name, from: from ?? null, to: plugin.version, changed }, null, 2),
+			);
+		} else if (!changed) {
 			console.log(chalk.green(`${plugin.name} is up to date (${plugin.version})`));
+		} else if (from === plugin.version) {
+			console.log(chalk.green(`Upgraded ${plugin.name} to a new revision (${plugin.version})`));
 		} else {
 			console.log(chalk.green(`Upgraded ${plugin.name}${from ? ` from ${from}` : ""} to ${plugin.version}`));
 		}

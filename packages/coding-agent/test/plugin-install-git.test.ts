@@ -578,10 +578,11 @@ describe("PluginManager.install with git sources", () => {
 			return { pid: 1, stdout, stderr: emptyStream(), exited: prepare.then(() => 0) } as Subprocess;
 		}) as typeof Bun.spawn);
 
-		const { from, plugin } = await new PluginManager(tmpRoot).upgrade("ida-mcp");
+		const { from, plugin, changed } = await new PluginManager(tmpRoot).upgrade("ida-mcp");
 
 		expect(from).toBe("1.0.0");
 		expect(plugin.version).toBe("2.0.0");
+		expect(changed).toBe(true);
 		expect(spawnedCommands).toEqual([
 			["bun", "install", "github:HexRaysSA/ida-mcp#latest"],
 			["bun", "pm", "cache"],
@@ -589,6 +590,34 @@ describe("PluginManager.install with git sources", () => {
 		]);
 		const lock = await Bun.file(path.join(tmpRoot, "omp-plugins.lock.json")).json();
 		expect(lock.plugins["ida-mcp"]).toEqual({ version: "2.0.0", enabledFeatures: null, enabled: false });
+	});
+
+	test("reports a git plugin on a moving ref as changed when only the bun.lock pin moves", async () => {
+		await Bun.write(
+			pluginsPkgJson,
+			JSON.stringify({ name: "omp-plugins", private: true, dependencies: { "ida-mcp": "github:foo/ida-mcp#main" } }),
+		);
+		const seedDir = path.join(pluginsNodeModules, "ida-mcp");
+		await fs.mkdir(seedDir, { recursive: true });
+		await Bun.write(path.join(seedDir, "package.json"), JSON.stringify({ name: "ida-mcp", version: "1.0.0" }));
+		const bunLock = path.join(pluginsDir, "bun.lock");
+		const lockAt = (commit: string) =>
+			`{\n  "lockfileVersion": 1,\n  "packages": {\n    "ida-mcp": ["ida-mcp@github:foo/ida-mcp#${commit}", {}, "foo-ida-mcp-${commit}"],\n  },\n}\n`;
+		await Bun.write(bunLock, lockAt("aaaaaaa"));
+		const cacheDir = path.join(tmpRoot, "bun-cache");
+		await fs.mkdir(cacheDir);
+
+		vi.spyOn(Bun, "spawn").mockImplementation(((cmd: string[]) => {
+			const stdout = cmd[1] === "pm" ? textStream(`${cacheDir}\n`) : emptyStream();
+			const prepare = cmd[1] === "update" ? Bun.write(bunLock, lockAt("bbbbbbb")) : Promise.resolve(0);
+			return { pid: 1, stdout, stderr: emptyStream(), exited: prepare.then(() => 0) } as Subprocess;
+		}) as typeof Bun.spawn);
+
+		const result = await new PluginManager(tmpRoot).upgrade("ida-mcp");
+
+		expect(result.from).toBe("1.0.0");
+		expect(result.plugin.version).toBe("1.0.0");
+		expect(result.changed).toBe(true);
 	});
 
 	test("refuses to upgrade a plugin that is not installed", async () => {

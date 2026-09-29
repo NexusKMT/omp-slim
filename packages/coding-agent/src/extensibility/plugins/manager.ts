@@ -11,6 +11,7 @@ import {
 	isEnoent,
 	logger,
 } from "@oh-my-pi/pi-utils";
+import { JSONC } from "bun";
 import { resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import { loadExtensions } from "../extensions/loader";
 import { refreshBunGitCache } from "./bun-git-cache";
@@ -93,6 +94,24 @@ function findGitPackageName(source: GitSource, deps: Record<string, string>): st
 		}
 	}
 	return undefined;
+}
+
+/**
+ * Read a plugin's resolved identity from `plugins/bun.lock` — e.g.
+ * `ida-mcp@github:HexRaysSA/ida-mcp#<commit>` for git sources, `foo@1.2.3` for
+ * npm. Returns `undefined` when the lockfile or the entry is missing.
+ */
+async function readBunLockResolution(name: string): Promise<string | undefined> {
+	let text: string;
+	try {
+		text = await Bun.file(path.join(getPluginsDir(), "bun.lock")).text();
+	} catch (err) {
+		if (isEnoent(err)) return undefined;
+		throw err;
+	}
+	const lock = JSONC.parse(text) as { packages?: Record<string, unknown> } | null;
+	const entry = lock?.packages?.[name];
+	return Array.isArray(entry) && typeof entry[0] === "string" ? entry[0] : undefined;
 }
 
 interface PluginPackageSnapshot {
@@ -647,13 +666,21 @@ export class PluginManager {
 			}
 			// null = use defaults
 
+			let enabled = true;
+			if (options.preserveState) {
+				const available = manifest.features;
+				const preserved = options.preserveState.enabledFeatures;
+				enabledFeatures = preserved && available ? preserved.filter(feature => feature in available) : preserved;
+				enabled = options.preserveState.enabled;
+			}
+
 			const installedPlugin: InstalledPlugin = {
 				name: pkg.name,
 				version: pkg.version,
 				path: path.join(getPluginsNodeModules(), actualName),
 				manifest,
 				enabledFeatures,
-				enabled: true,
+				enabled,
 			};
 
 			await this.#validateInstalledExtensions(installedPlugin);
@@ -663,7 +690,7 @@ export class PluginManager {
 			config.plugins[pkg.name] = {
 				version: pkg.version,
 				enabledFeatures,
-				enabled: true,
+				enabled,
 			};
 			await this.#saveRuntimeConfig();
 
@@ -693,9 +720,12 @@ export class PluginManager {
 	 * ref, npm plugins move to the latest published version. The enabled state
 	 * and feature selection survive the upgrade.
 	 *
-	 * @returns The previously installed version and the upgraded plugin.
+	 * @returns The previously installed version, the upgraded plugin, and whether
+	 * anything changed — a git plugin on a moving ref can pick up new commits
+	 * without bumping its `package.json` version, so this also compares the
+	 * `bun.lock` resolution.
 	 */
-	async upgrade(name: string): Promise<{ from: string | undefined; plugin: InstalledPlugin }> {
+	async upgrade(name: string): Promise<{ from: string | undefined; plugin: InstalledPlugin; changed: boolean }> {
 		validatePackageName(name);
 		const deps = await this.#readDeps(getPluginsPackageJson());
 		const config = await this.#ensureConfigLoaded();
@@ -721,22 +751,15 @@ export class PluginManager {
 			if (!isEnoent(err)) throw err;
 		}
 
+		const resolutionBefore = await readBunLockResolution(name);
 		const source = parseGitUrl(recorded) ? recorded : name;
-		const plugin = await this.install(source);
-
-		if (previous) {
-			const available = plugin.manifest.features;
-			const enabledFeatures =
-				previous.enabledFeatures && available
-					? previous.enabledFeatures.filter(feature => feature in available)
-					: previous.enabledFeatures;
-			const state = { version: plugin.version, enabledFeatures, enabled: previous.enabled };
-			config.plugins[plugin.name] = state;
-			await this.#saveRuntimeConfig();
-			plugin.enabledFeatures = enabledFeatures;
-			plugin.enabled = previous.enabled;
-		}
-		return { from, plugin };
+		const plugin = await this.install(
+			source,
+			previous ? { preserveState: { enabled: previous.enabled, enabledFeatures: previous.enabledFeatures } } : {},
+		);
+		const resolutionAfter = await readBunLockResolution(name);
+		const changed = from !== plugin.version || resolutionBefore !== resolutionAfter;
+		return { from, plugin, changed };
 	}
 
 	/**
