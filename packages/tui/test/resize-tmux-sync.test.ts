@@ -48,11 +48,14 @@ class CursorProvider extends WidthReplayProvider {
 	}
 }
 
-async function startRig(count = 2, supported = true) {
+async function startRig(count = 2, supported = true, padding = 0) {
 	const terminal = new RecordingTerminal(80, 24, count + 100);
 	const scheduler = new VirtualRenderScheduler();
 	const provider = new CursorProvider(
-		Array.from({ length: count }, (_, i) => `ROW${i.toString().padStart(5, "0")} \x1b[32m한글\x1b[0m`),
+		Array.from(
+			{ length: count },
+			(_, i) => `ROW${i.toString().padStart(5, "0")} \x1b[32m한글\x1b[0m${" ".repeat(padding)}`,
+		),
 	);
 	const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
 	tui.setResizeScrollback("rebuild");
@@ -81,19 +84,19 @@ describe("tmux synchronized rebuild", () => {
 			// notice; resizing itself can move both content and the cursor.
 			terminal.write("");
 			terminal.written = [];
-			await scheduler.advance(terminal, 100);
+			await scheduler.settle(terminal, 79);
 			expect(terminal.written).toEqual([]);
 			const cursor = terminal.getCursor();
 			const before = terminal.getViewport();
-			await scheduler.advance(terminal, 100);
+			await scheduler.settle(terminal, 80);
 			expect(terminal.getViewport().at(-1)?.trim()).toBe(REBUILDING);
 			expect(terminal.getViewport().slice(0, -1)).toEqual(before.slice(0, -1));
 			expect(terminal.getCursor()).toEqual(cursor);
 			terminal.resize(90, 26);
-			await scheduler.advance(terminal, 200);
+			await scheduler.settle(terminal, 80);
 			expect(terminal.getViewport().at(-1)?.trim()).toBe(REBUILDING);
 			expect(provider.resetCount).toBe(0);
-			await scheduler.advance(terminal, 240);
+			await scheduler.advance(terminal, 80);
 			const output = terminal.written.join("");
 			expect(output).not.toContain(ALT_ENTER);
 			expect(output).not.toContain(ALT_EXIT);
@@ -114,11 +117,76 @@ describe("tmux synchronized rebuild", () => {
 		}
 	});
 
+	it("replays compact padding with identical cells, colors, links, and scrollback", async () => {
+		const terminal = new RecordingTerminal(40, 6);
+		const scheduler = new VirtualRenderScheduler();
+		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
+		const url = "https://example.test/a        b";
+		const history = [
+			`\x1b]8;;${url}\x07linked        text\x1b]8;;\x07`,
+			"older".padEnd(40),
+			"\x1bPignored        payload\x1b\\older-dcs",
+		];
+		const viewport = [
+			`\x1b[4;48;2;35;40;48m한글${" ".repeat(32)}끝\x1b[0m`,
+			"plain        tail",
+			"combining e\u0301        끝",
+			"",
+			`\x1b[31m${" ".repeat(40)}\x1b[0m`,
+			"editor",
+		];
+		let id = 0;
+		let pending = false;
+		tui.setFrameProvider({
+			beginHistoryReplay() {
+				id++;
+				pending = true;
+			},
+			acknowledgeHistory() {
+				pending = false;
+			},
+			renderFrame() {
+				return {
+					history: pending ? { id, rows: history, kind: "replay" } : undefined,
+					viewport,
+				};
+			},
+		});
+		tui.start();
+		try {
+			await scheduler.settle(terminal);
+			// A prior colored frame must not tint the initial clear or the fresh
+			// rows that scroll into view after replaying past the screen height.
+			terminal.write("\x1b[41m\x1b[2J");
+			terminal.written = [];
+			tui.requestRender(true, { clearScrollback: true });
+			await scheduler.settle(terminal);
+			const expected = new VirtualTerminal(40, 6);
+			expected.write("\x1b[?7l" + [...history, ...viewport].map(row => `${row}\x1b[0m\x1b]8;;\x07\r`).join("\n"));
+			expect(terminal.getScrollBuffer()).toEqual(expected.getScrollBuffer());
+			for (let row = 0; row < 6; row++) {
+				expect(terminal.getViewportRowBackgroundValues(row)).toEqual(expected.getViewportRowBackgroundValues(row));
+				expect(terminal.getViewportRowForegroundColumns(row)).toEqual(
+					expected.getViewportRowForegroundColumns(row),
+				);
+				expect(terminal.getViewportRowUnderlineColumns(row)).toEqual(expected.getViewportRowUnderlineColumns(row));
+			}
+			const output = terminal.written.join("");
+			// Padding text is encoded, while OSC/DCS payload spaces keep their
+			// protocol meaning. Hyperlink targets must never be rewritten as REP.
+			expect(output).toContain(" \x1b[31b");
+			expect(output).toContain(`\x1b]8;;${url}\x07`);
+			expect(output).toContain("\x1bPignored        payload\x1b\\");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("renews tmux's hold across a large UTF-8 replay and releases only after the editor cursor", async () => {
 		const { terminal, scheduler, tui } = await startRig(10000);
 		try {
 			terminal.resize(100, 30);
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			const output = terminal.written.find(data => data.includes("\x1b[3J"))!;
 			const segments = output.split(SYNC_BEGIN);
 			// Bound the transmitted work between renewals. One complete row can
@@ -139,11 +207,11 @@ describe("tmux synchronized rebuild", () => {
 		try {
 			terminal.resize(100, 30);
 			terminal.pendingBytes = Number.MAX_SAFE_INTEGER;
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			expect(terminal.written).toEqual([]);
 			terminal.resize(90, 26);
 			terminal.pendingBytes = 0;
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			const output = terminal.written.join("");
 			expect(output).not.toContain("@100");
 			expect(output).toContain("editor@90");
@@ -160,9 +228,9 @@ describe("tmux synchronized rebuild", () => {
 			// writer drains. This is not an exact outstanding byte count.
 			terminal.pendingBytes = 4096;
 			terminal.resize(100, 30);
-			await scheduler.advance(terminal, 160);
+			await scheduler.settle(terminal, 80);
 			expect(terminal.getViewport().at(-1)?.trim()).toBe(REBUILDING);
-			await scheduler.advance(terminal, 280);
+			await scheduler.advance(terminal, 80);
 			expect(terminal.getViewport().join("\n")).toContain("editor@100");
 			expect(terminal.getScrollBuffer().join("\n")).not.toContain(REBUILDING);
 		} finally {
@@ -171,7 +239,7 @@ describe("tmux synchronized rebuild", () => {
 	});
 
 	it("keeps height-only grows on the short settle without replaying history", async () => {
-		const { terminal, scheduler, provider, tui } = await startRig();
+		const { terminal, scheduler, provider, tui } = await startRig(1000);
 		try {
 			terminal.resize(80, 30);
 			await scheduler.advance(terminal, 160);
@@ -187,6 +255,27 @@ describe("tmux synchronized rebuild", () => {
 		}
 	});
 
+	it("recovers history overwritten by a stale frame before a grow notification", async () => {
+		const { terminal, scheduler, provider, tui } = await startRig(1000);
+		try {
+			terminal.resize(80, 30);
+			// tmux has grown, but a frame queued before SIGWINCH still addresses
+			// the old bottom row. Its erase destroys pulled-down history and its
+			// cursor makes the later CPR look like a valid, low viewport anchor.
+			terminal.write("\x1b[24;1H\x1b[Jstale-editor\x1b[24;1H");
+			terminal.written = [];
+			await scheduler.advance(terminal, 160);
+			expect(provider.resetCount).toBe(1);
+			expect(terminal.getViewport().at(-1)?.trim()).toBe("editor@80");
+			expect(terminal.getScrollBuffer().filter(row => row.includes("ROW"))).toEqual(
+				Array.from({ length: 1000 }, (_, i) => `ROW${i.toString().padStart(5, "0")} 한글@80`),
+			);
+			expect(terminal.getScrollBuffer().join("\n")).not.toContain("stale-editor");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("rebuilds once after a height burst containing a shrink even when it ends taller", async () => {
 		const { terminal, scheduler, provider, tui } = await startRig(1000);
 		try {
@@ -195,7 +284,7 @@ describe("tmux synchronized rebuild", () => {
 				await scheduler.advance(terminal, 35);
 			}
 			expect(provider.resetCount).toBe(0);
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			expect(provider.resetCount).toBe(1);
 			expect(terminal.getViewport().at(-1)?.trim()).toBe("editor@80");
 			expect(terminal.getScrollBuffer().filter(row => row.includes("ROW"))).toEqual(
@@ -210,7 +299,7 @@ describe("tmux synchronized rebuild", () => {
 		const { terminal, scheduler, tui } = await startRig(2, false);
 		try {
 			terminal.resize(100, 30);
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			const output = terminal.written.join("");
 			expect(output).toContain(ALT_ENTER);
 			expect(output).toContain(ALT_EXIT);
@@ -226,7 +315,7 @@ describe("tmux synchronized rebuild", () => {
 		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(100, 30);
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			const output = terminal.written.join("");
 			expect(output).toContain(ALT_ENTER);
 			expect(output).not.toContain(SYNC_BEGIN);
@@ -240,10 +329,10 @@ describe("tmux synchronized rebuild", () => {
 		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(100, 30);
-			await scheduler.advance(terminal, 160);
+			await scheduler.settle(terminal, 80);
 			expect(terminal.getViewport().join("\n")).toContain(REBUILDING);
 			const overlay = tui.showOverlay(new Text("modal"), { fullscreen: true });
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			expect(terminal.getViewport().join("\n")).toContain("modal");
 			overlay.hide();
 			await scheduler.settle(terminal);
@@ -261,7 +350,7 @@ describe("tmux synchronized rebuild", () => {
 		terminal.resize(100, 30);
 		tui.stop();
 		const stopped = terminal.written.join("");
-		await scheduler.advance(terminal, 440);
+		await scheduler.advance(terminal, 160);
 		expect(terminal.written.join("")).toBe(stopped);
 		expect(stopped).not.toContain(ALT_ENTER);
 		expect(stopped).not.toContain(ALT_EXIT);
@@ -271,13 +360,13 @@ describe("tmux synchronized rebuild", () => {
 	it("removes an already visible notice on stop and does not resurrect its timer on restart", async () => {
 		const { terminal, scheduler, tui } = await startRig();
 		terminal.resize(100, 30);
-		await scheduler.advance(terminal, 160);
+		await scheduler.settle(terminal, 80);
 		expect(terminal.getViewport().join("\n")).toContain(REBUILDING);
 		tui.stop();
 		expect(terminal.getScrollBuffer().join("\n")).not.toContain(REBUILDING);
 		tui.start();
 		try {
-			await scheduler.advance(terminal, 440);
+			await scheduler.advance(terminal, 160);
 			expect(terminal.getViewport().join("\n")).toContain("editor@100");
 			expect(terminal.getScrollBuffer().join("\n")).not.toContain(REBUILDING);
 		} finally {
@@ -290,10 +379,10 @@ describe("tmux synchronized rebuild", () => {
 		try {
 			terminal.resize(5, 2);
 			terminal.write("");
-			await scheduler.advance(terminal, 100);
+			await scheduler.settle(terminal, 79);
 			const before = terminal.getScrollBuffer().slice(0, -1);
 			const cursor = terminal.getCursor();
-			await scheduler.advance(terminal, 60);
+			await scheduler.settle(terminal, 80);
 			expect(terminal.getViewport().at(-1)?.trim()).toBe("↻ Reb");
 			expect(terminal.getScrollBuffer().slice(0, -1)).toEqual(before);
 			expect(terminal.getCursor()).toEqual(cursor);
@@ -316,7 +405,7 @@ describe("tmux synchronized rebuild", () => {
 			try {
 				await $`${tmux} ${args} set-option -g history-limit 10000`.quiet();
 				await $`${tmux} ${args} split-window -v -l 30 -t probe:0.0 ${process.execPath} ${path.join(import.meta.dir, "fixtures/tmux-resize-composer.ts")}`.quiet();
-				const verify = async (height: number, resets: number): Promise<void> => {
+				const verify = async (height: number, resets?: number): Promise<void> => {
 					const deadline = performance.now() + 5000;
 					while (true) {
 						const title = await $`${tmux} ${args} display-message -p -t probe:0.1 ${"#{pane_title}"}`
@@ -324,7 +413,7 @@ describe("tmux synchronized rebuild", () => {
 							.text();
 						if (title.startsWith("{")) {
 							const state: { height: number; resets: number } = JSON.parse(title);
-							if (state.height === height && state.resets === resets) break;
+							if (state.height === height && (resets === undefined || state.resets === resets)) break;
 						}
 						if (performance.now() > deadline) throw new Error(`Unsettled height ${height}: ${title}`);
 						await Bun.sleep(20);
@@ -348,13 +437,17 @@ describe("tmux synchronized rebuild", () => {
 				await verify(65, 0);
 				await $`${tmux} ${args} resize-pane -y 20 -t probe:0.1`.quiet();
 				await verify(20, 1);
+				// Grow immediately after the replay: queued retirement frames can
+				// reach the enlarged tmux grid before its throttled SIGWINCH. The
+				// recovery may need a replay; the contract is intact history and a
+				// bottom-anchored editor, independent of signal delivery timing.
 				await $`${tmux} ${args} resize-pane -y 45 -t probe:0.1`.quiet();
-				await verify(45, 1);
+				await verify(45);
 				for (const height of [12, 40, 16, 55]) {
 					await $`${tmux} ${args} resize-pane -y ${height} -t probe:0.1`.quiet();
 					await Bun.sleep(35);
 				}
-				await verify(55, 2);
+				await verify(55);
 			} finally {
 				await $`${tmux} ${args} kill-server`.quiet().nothrow();
 			}
@@ -421,7 +514,7 @@ describe("tmux synchronized rebuild", () => {
 						return performance.now() - started;
 					};
 					for (const count of [1000, 10000]) {
-						const { terminal, scheduler, tui } = await startRig(count);
+						const { terminal, scheduler, tui } = await startRig(count, true, 12);
 						try {
 							for (let toggle = 0; toggle < 2; toggle++) {
 								await $`${tmux} ${args} resize-pane -Z -t probe:0.1`.quiet();
@@ -432,16 +525,16 @@ describe("tmux synchronized rebuild", () => {
 								const [columns, rows] = size.trim().split(",").map(Number) as [number, number];
 								terminal.written = [];
 								terminal.resize(columns, rows);
-								await scheduler.advance(terminal, 160);
+								await scheduler.settle(terminal, 80);
 								// Let tmux finish the native layout redraw before observing
 								// the application's settled replay, as in the real debounce.
-								await Bun.sleep(440);
+								await Bun.sleep(80);
 								output = "";
 								await sendFrame(terminal.written.join(""));
-								await Bun.sleep(100);
+								await Bun.sleep(20);
 								expect(screen.getViewport().join("\n")).toContain(REBUILDING);
 								terminal.written = [];
-								await scheduler.advance(terminal, 280);
+								await scheduler.advance(terminal, 80);
 								output = "";
 								const elapsed = await sendFrame(terminal.written.join(""), count === 10000);
 								if (count === 10000) expect(elapsed).toBeGreaterThan(1000);
@@ -455,7 +548,7 @@ describe("tmux synchronized rebuild", () => {
 								expect(history.trimEnd().split("\n")).toEqual([
 									...Array.from(
 										{ length: count },
-										(_, i) => `ROW${i.toString().padStart(5, "0")} 한글@${columns}`,
+										(_, i) => `ROW${i.toString().padStart(5, "0")} 한글${" ".repeat(12)}@${columns}`,
 									),
 									`editor@${columns}`,
 								]);

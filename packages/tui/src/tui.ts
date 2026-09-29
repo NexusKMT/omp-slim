@@ -852,19 +852,9 @@ export class TUI extends Container {
 	static readonly #RESIZE_VIEWPORT_SETTLE_MS = 120;
 	/** Longest wait for a CPR reply before the settled repaint falls back. */
 	static readonly #RESIZE_PROBE_TIMEOUT_MS = 200;
-	/**
-	 * Quiet window for a resize transaction whose settle refreshes terminal
-	 * history: it re-renders and re-streams the whole ledger, so it must outlast
-	 * the step cadence of a pane/window drag — tmux and window managers deliver
-	 * SIGWINCH per mouse-motion event, tens to a few hundred ms apart. Holding
-	 * the whole transaction (not just the refresh) makes a drag commit once, at
-	 * its final geometry: per-step intermediate clears are what flash, and each
-	 * one also blocks the loop long enough that the next queued SIGWINCH lands
-	 * after the short settle window and starts yet another transaction. The
-	 * borrowed resize frame keeps the pane correct in the meantime.
-	 */
-	static readonly #RESIZE_REFRESH_SETTLE_MS = 400;
-	static readonly #RESIZE_REBUILD_INDICATOR_DELAY_MS = 150;
+	// Publish feedback before the settled replay starts holding synchronized
+	// output. The notice must not extend the resize settle window.
+	static readonly #RESIZE_REBUILD_INDICATOR_DELAY_MS = 80;
 	#inputRenderGraceUntilMs = 0;
 	// A scale-`s` OSC 66 heading reserves `s - 1` rows, and the protocol
 	// caps `s` at 7. This bounds spacer lookups and supplies enough context
@@ -1428,26 +1418,6 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Settle window for the current resize transaction. A settle that refreshes
-	 * terminal history re-renders and re-streams the whole ledger, so it takes
-	 * the drag-end window: every later SIGWINCH re-arms it, and a drag then
-	 * commits once at its final geometry instead of flashing a full
-	 * clear-and-replay per intermediate step. Transactions that never refresh —
-	 * `preserve`, an in-place (Warp) settle, a height-only grow, or a host with
-	 * no replay hook — keep the short window so a single resize commits promptly.
-	 */
-	#resizeSettleDelayMs(): number {
-		const short = TUI.#RESIZE_VIEWPORT_SETTLE_MS;
-		if (this.#resizeScrollbackMode === "preserve" || this.#resizeRepaintsInPlace()) return short;
-		if (this.#frameProvider?.beginHistoryReplay === undefined) return short;
-		// Only a transaction that will run the history refresh holds the drag-end
-		// window: a later qualifying step inside the burst re-arms the timer on
-		// re-entry at the long window.
-		if (!this.#settledResizeRefreshes(this.#resizeBurstWidthChanged)) return short;
-		return TUI.#RESIZE_REFRESH_SETTLE_MS;
-	}
-
-	/**
 	 * Warp-only echo: height-only ±1 SIGWINCH against the pending alt-toggle
 	 * baseline. Single-shot: the first SIGWINCH after the toggle consumes the
 	 * expectation either way, so at most one signal is ever swallowed per toggle.
@@ -1547,7 +1517,7 @@ export class TUI extends Container {
 			this.#resizeProbeWindow = this.#providerWindow;
 			this.#resizeProbeOffset = this.#parkedViewportOffset;
 			this.#beginResizeAnchorProbe();
-		}, this.#resizeSettleDelayMs());
+		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
 	}
 
 	/**
@@ -1660,7 +1630,7 @@ export class TUI extends Container {
 			this.#resizeSettleTimer = undefined;
 			if (this.#stopped || !this.#resizeAltActive) return;
 			this.#settleResizeAltPaint();
-		}, this.#resizeSettleDelayMs());
+		}, TUI.#RESIZE_VIEWPORT_SETTLE_MS);
 		this.requestRender(true);
 	}
 
@@ -1822,6 +1792,23 @@ export class TUI extends Container {
 		let top: number;
 		if (isInsideTerminalMultiplexer()) {
 			if (reportedRow !== undefined) {
+				// tmux can grow its grid before SIGWINCH reaches the app. A queued
+				// retirement frame can then overwrite pulled-down history at the old
+				// coordinates and park the cursor there. If a previously full viewport
+				// no longer reaches the bottom, replay its semantic history instead of
+				// trusting that potentially damaged physical copy. Ordinary grows with
+				// an intact bottom anchor still need no replay or additional wait.
+				if (
+					this.#resizeScrollbackMode === "rebuild" &&
+					classifyTerminalMultiplexer() === "tmux" &&
+					!this.#resizeRepaintsInPlace() &&
+					this.#frameProvider?.beginHistoryReplay &&
+					this.#resizeBurstGrew &&
+					this.#providerViewportTop + probe.window.length >= this.#previousHeight &&
+					reportedTop + staleRows < height
+				) {
+					this.#prepareForcedRender(true);
+				}
 				// The parked cursor's reply is exact under multiplexer clipping:
 				// discards leave the cursor in place, pushes only occur after
 				// everything below it is discarded (the bottom row IS the
@@ -2783,7 +2770,34 @@ export class TUI extends Container {
 	}
 
 	#terminalLine(line: PreparedLine): string {
-		return line.terminalContent + (line.hasOsc8 ? LINE_TERMINATOR : SEGMENT_RESET);
+		if (line.hasOsc8) return line.terminalContent + LINE_TERMINATOR;
+		return line.terminalContent.endsWith(SEGMENT_RESET) ? line.terminalContent : line.terminalContent + SEGMENT_RESET;
+	}
+
+	/** Encode padding with REP, which tmux expands into identical styled cells. */
+	#compactReplaySpaces(line: string): string {
+		let copied = 0;
+		let output = "";
+		for (let offset = 0; offset < line.length;) {
+			const spaces = line.indexOf("        ", offset);
+			if (spaces === -1) break;
+			const escape = line.indexOf("\x1b", offset);
+			if (escape !== -1 && escape < spaces) {
+				// Only inspect text outside CSI/OSC. Unknown control strings (for
+				// example DCS payloads) must remain byte-for-byte unchanged.
+				const introducer = line.charCodeAt(escape + 1);
+				if (introducer !== 0x5b && introducer !== 0x5d) return line;
+				const end = this.#ansiSequenceEnd(line, escape);
+				if (end < 0) break;
+				offset = end;
+				continue;
+			}
+			let end = spaces + 8;
+			while (line.charCodeAt(end) === 0x20) end++;
+			output += `${line.slice(copied, spaces)} \x1b[${end - spaces - 1}b`;
+			copied = offset = end;
+		}
+		return copied === 0 ? line : output + line.slice(copied);
 	}
 
 	#notifyPaint(paint: TuiPaint): void {
@@ -2838,10 +2852,6 @@ export class TUI extends Container {
 	 * retained history and pushed unerased live rows into it. Comparing only
 	 * the settled size against the committed one would skip the refresh and
 	 * leave those stale copies stacked above the repainted viewport.
-	 *
-	 * The refresh itself is what makes a settled resize expensive, so the
-	 * transaction that runs it holds its settle window longer than a plain
-	 * repaint would — see {@link #resizeSettleDelayMs}.
 	 */
 	#prepareResizeReplay(width: number, height: number): void {
 		const size = `${width}x${height}`;
@@ -2869,10 +2879,8 @@ export class TUI extends Container {
 		// A height-only settled resize rewraps nothing — rewrap is a width change
 		// everywhere. A pure height grow pulls committed scrollback down without
 		// polluting a copy, so the rebuild (an ED3 plus a full ledger replay)
-		// would be a destructive repaint that buys nothing: a tmux zoom toggle
-		// waits out the drag-end window and then flashes one full
-		// clear-and-replay for exactly this case. `rebuild` still refreshes on a
-		// burst shrink (the multiplexer pushes live pane rows into its
+		// would be a destructive repaint that buys nothing. `rebuild` still
+		// refreshes on a burst shrink (the multiplexer pushes live pane rows into its
 		// scrollback; the destructive refresh is the only purge) and on a host
 		// that repaints its own grid (ConPTY's stale re-emission is untrusted).
 		if (this.#resizeScrollbackMode === "rebuild") {
@@ -2993,6 +3001,7 @@ export class TUI extends Container {
 		// resize in rebuild mode): erase native history and the viewport,
 		// then repaint from row zero.
 		const destructiveReset = this.#clearScrollbackOnNextRender;
+		const compactReplay = destructiveReset && classifyTerminalMultiplexer() === "tmux";
 		if (destructiveReset) {
 			this.#resizeRebuildIndicatorTimer?.cancel();
 			this.#resizeRebuildIndicatorTimer = undefined;
@@ -3057,7 +3066,7 @@ export class TUI extends Container {
 		// erase reclaim the data, so the replay's placements then referenced an
 		// image the terminal no longer had and every inline image vanished
 		// after a settled width resize.
-		if (destructiveReset) buffer += "\x1b[H\x1b[2J\x1b[3J";
+		if (destructiveReset) buffer += `${LINE_TERMINATOR}\x1b[H\x1b[2J\x1b[3J`;
 		for (const sequence of this.#imageBudget.takeTransmits()) append(sequence);
 		const diffable =
 			geometryStable &&
@@ -3114,6 +3123,7 @@ export class TUI extends Container {
 						-1,
 						-1,
 						this.#osc66SpacerGlyphWidth(preparedHistory.lines, index),
+						compactReplay,
 					),
 				);
 				screenRow++;
@@ -3128,6 +3138,7 @@ export class TUI extends Container {
 						-1,
 						-1,
 						this.#osc66SpacerGlyphWidth(prepared.lines, index),
+						compactReplay,
 					),
 				);
 				screenRow++;
@@ -3737,6 +3748,7 @@ export class TUI extends Container {
 		frameRow = -1,
 		committedTo = -1,
 		spacerGlyphWidth = -1,
+		blankRow = false,
 	): string {
 		// End every rewrite at column zero. ConPTY can materialize a pending
 		// wrap before a following cursor-addressing sequence even while DECAWM is
@@ -3756,7 +3768,14 @@ export class TUI extends Container {
 			rewrite = ERASE_LINE + this.#imageLineSequence(line.line, screenRow, frameRow, committedTo);
 		} else {
 			const terminalLine = this.#terminalLine(line);
-			if (line.asciiWidth !== undefined) {
+			if (blankRow) {
+				// A destructive replay starts on a cleared screen and advances only
+				// into fresh rows. Each line resets its rendition before scrolling,
+				// so those rows already have the default background. Re-erasing every
+				// row only adds terminal parser work; images and OSC 66 spacers keep
+				// their dedicated cleanup above.
+				rewrite = this.#compactReplaySpaces(terminalLine);
+			} else if (line.asciiWidth !== undefined) {
 				// Exact width model: skip the erase only when the row truly fills
 				// the line (an EL there would eat the last cell via pending-wrap).
 				rewrite = line.asciiWidth >= width ? terminalLine : terminalLine + ERASE_TO_END_OF_LINE;

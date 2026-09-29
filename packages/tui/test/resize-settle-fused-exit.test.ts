@@ -14,9 +14,9 @@ const ALT_ENTER = "\x1b[?1049h";
 const ALT_EXIT = "\x1b[?1049l";
 const ERASE_SCREEN_AND_HISTORY = "\x1b[2J\x1b[3J";
 const DSR = "\x1b[6n";
-// Drag-end settle window for a history-refreshing resize (400 ms) plus the
+// Resize settle window (120 ms) plus the
 // virtual scheduler's 40 ms drain horizon for the frames the settle schedules.
-const DRAG_END_ADVANCE_MS = 440;
+const RESIZE_SETTLE_ADVANCE_MS = 160;
 
 /** Records every engine write and reports a settable output backlog. */
 class RecordingTerminal extends VirtualTerminal {
@@ -61,7 +61,7 @@ describe("resize settle fused alt exit", () => {
 		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
+			await scheduler.advance(terminal, RESIZE_SETTLE_ADVANCE_MS);
 
 			// Restoring on a write of its own would expose the reflowed stale screen
 			// until the rebuild lands; the anchor probe that used to fill that gap
@@ -81,14 +81,14 @@ describe("resize settle fused alt exit", () => {
 		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			await scheduler.advance(terminal, 100);
+			await scheduler.advance(terminal, 60);
 			// A previous replay is still draining, so the settled rebuild — and the
 			// alt exit fused into it — is deferred while the pane moves again.
 			terminal.pendingBytes = Number.MAX_SAFE_INTEGER;
-			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
+			await scheduler.advance(terminal, RESIZE_SETTLE_ADVANCE_MS);
 			terminal.resize(34, 4);
 			terminal.pendingBytes = 0;
-			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
+			await scheduler.advance(terminal, RESIZE_SETTLE_ADVANCE_MS);
 
 			// The terminal never left the borrowed buffer, so entering it again
 			// would stack a second switch whose extra exit then lands on the
@@ -106,9 +106,9 @@ describe("resize settle fused alt exit", () => {
 		const { terminal, scheduler, tui } = await startRig();
 		try {
 			terminal.resize(30, 4);
-			await scheduler.advance(terminal, 100);
+			await scheduler.advance(terminal, 60);
 			const overlay = tui.showOverlay(new Text("modal"), { fullscreen: true });
-			await scheduler.advance(terminal, DRAG_END_ADVANCE_MS);
+			await scheduler.advance(terminal, RESIZE_SETTLE_ADVANCE_MS);
 
 			// The overlay's first frame runs while the fused exit is still pending:
 			// it must take over the buffer the terminal is already on.

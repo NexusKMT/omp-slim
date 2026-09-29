@@ -494,10 +494,10 @@ describe("terminal frame plans", () => {
 		expect(plainBuffer(terminal)).toContain("history-one@20");
 
 		terminal.resize(30, 2);
-		// A refresh-capable settle waits out the 400 ms drag-end window plus the
+		// A refresh-capable settle waits out the 120 ms settle window plus the
 		// 40 ms drain horizon and then replays the ledger at the settled width
 		// in the same transaction.
-		await renderScheduler.advance(terminal, 440);
+		await renderScheduler.advance(terminal, 160);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
@@ -528,7 +528,7 @@ describe("terminal frame plans", () => {
 		tui.stop();
 	});
 
-	it("skips the destructive rebuild and drag-end hold on a height-only zoom grow", async () => {
+	it("skips the destructive rebuild on a height-only zoom grow", async () => {
 		const terminal = new CountingTerminal(20, 2);
 		const provider = new WidthReplayProvider();
 		const renderScheduler = new VirtualRenderScheduler();
@@ -542,10 +542,9 @@ describe("terminal frame plans", () => {
 
 		// A tmux zoom toggles the pane height at a constant width: nothing
 		// rewraps, so the settled transaction must not clear and re-stream the
-		// ledger ("one flash, ~0.5 s after the toggle"), and it commits at the
-		// short settle window instead of holding the drag-end one.
+		// ledger, and it commits at the normal settle window.
 		terminal.resize(20, 6);
-		await renderScheduler.advance(terminal, 440);
+		await renderScheduler.advance(terminal, 160);
 
 		expect(provider.resetCount).toBe(0);
 		expect(terminal.writes.join("")).not.toContain("\x1b[3J");
@@ -572,7 +571,7 @@ describe("terminal frame plans", () => {
 			// tmux discards below the cursor first, then pushes above it. A
 			// current-width replay must replace that damaged physical copy.
 			terminal.resize(20, 2);
-			await renderScheduler.advance(terminal, 440);
+			await renderScheduler.advance(terminal, 160);
 
 			expect(provider.resetCount).toBe(1);
 			expect(plainBuffer(terminal)).toEqual(["history-one@20", "history-two@20", "editor@20"]);
@@ -619,10 +618,10 @@ describe("terminal frame plans", () => {
 		await renderScheduler.settle(terminal);
 
 		terminal.resize(30, 2);
-		// A refresh-capable settle waits out the 400 ms drag-end window plus the
+		// A refresh-capable settle waits out the 120 ms settle window plus the
 		// 40 ms drain horizon and then erases and re-streams the ledger at the
 		// settled width in the same transaction.
-		await renderScheduler.advance(terminal, 440);
+		await renderScheduler.advance(terminal, 160);
 
 		const resized = plainBuffer(terminal);
 		expect(provider.resetCount).toBe(1);
@@ -644,22 +643,20 @@ describe("terminal frame plans", () => {
 
 		// A pane drag delivers every step inside one settle window. Each step
 		// repaints the borrowed resize frame at its own geometry, but the
-		// transaction that clears and re-streams the ledger waits for the drag to
-		// end: refreshing per step is what flashes a full clear-and-replay per
-		// mouse move, and each refresh is long enough that the next queued
-		// SIGWINCH lands after the short settle window and starts another one.
+		// transaction that clears and re-streams the ledger waits for 120 ms
+		// without another resize.
 		for (const width of [30, 32, 34]) {
 			terminal.resize(width, 2);
-			await renderScheduler.advance(terminal, 100);
+			await renderScheduler.advance(terminal, 60);
 			expect(provider.resetCount).toBe(0);
 			// The borrowed resize frame tracks the dragged geometry; the ledger
 			// refresh — the clear-and-replay this guard exists for — has not run.
 			expect(plainBuffer(terminal)).toContain(`editor@${width}`);
 		}
 
-		// Drag end: the 400 ms window plus the 40 ms drain horizon elapses and
+		// Drag end: the 120 ms window plus the 40 ms drain horizon elapses and
 		// the burst commits exactly one settled refresh.
-		await renderScheduler.advance(terminal, 440);
+		await renderScheduler.advance(terminal, 160);
 
 		expect(provider.resetCount).toBe(1);
 		expect(plainBuffer(terminal)).toEqual(["history-one@34", "history-two@34", "editor@34"]);
@@ -683,12 +680,12 @@ describe("terminal frame plans", () => {
 			// at the intermediate width. Gating the refresh on the net change left
 			// that reflow's stale rows stacked above the repainted viewport.
 			terminal.resize(30, 2);
-			await renderScheduler.advance(terminal, 100);
+			await renderScheduler.advance(terminal, 60);
 			terminal.resize(20, 2);
-			// The re-armed 400 ms drag-end window plus the 40 ms drain horizon
+			// The re-armed 120 ms settle window plus the 40 ms drain horizon
 			// elapses, and the burst commits one refresh even though its settled
 			// size equals the committed one.
-			await renderScheduler.advance(terminal, 440);
+			await renderScheduler.advance(terminal, 160);
 
 			expect(provider.resetCount).toBe(1);
 			tui.stop();
