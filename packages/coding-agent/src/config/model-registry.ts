@@ -6,7 +6,7 @@ import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProvider
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
-import { isOfficialCodexApiUrl } from "@oh-my-pi/pi-ai/stream";
+import { getEnvApiKey, isOfficialCodexApiUrl } from "@oh-my-pi/pi-ai/stream";
 import type {
 	Api,
 	Context,
@@ -2092,18 +2092,23 @@ export class ModelRegistry {
 				resolveKey: value => value,
 				createOptions: accessToken => {
 					// A custom endpoint (models.yml `baseUrl`) receives only the configured
-					// key: stored ChatGPT OAuth accounts never leave chatgpt.com, and
-					// discovery is skipped when the effective credential is an official one.
+					// key: stored ChatGPT OAuth accounts never leave chatgpt.com. The guard
+					// checks the token actually being sent, not the configured key kinds —
+					// a runtime provider's command key is only a fallback behind a live
+					// OAuth token, which `peek` still returns first.
 					const baseUrl = this.#descriptorBaseUrl("openai-codex");
 					let resolveAccounts: (() => Promise<OpenAICodexAccount[] | null>) | undefined;
 					if (isOfficialCodexApiUrl(baseUrl)) {
 						resolveAccounts = () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken);
-					} else if (this.usesOfficialCredential("openai-codex")) {
+					} else if (
+						accessToken === getEnvApiKey("openai-codex") ||
+						getOAuthCredentialsForProvider(this.authStorage, "openai-codex").some(
+							credential => credential.access === accessToken,
+						)
+					) {
 						logger.warn(
 							"Skipping Codex model discovery: refusing to send official Codex credentials to custom endpoint",
-							{
-								baseUrl,
-							},
+							{ baseUrl },
 						);
 					} else {
 						resolveAccounts = async () => [{ accessToken }];
@@ -2719,17 +2724,6 @@ export class ModelRegistry {
 	hasCommandBackedApiKey(provider: string): boolean {
 		const keyConfig = this.#customProviderApiKeys.get(provider);
 		return isCommandConfigValue(keyConfig);
-	}
-
-	/**
-	 * Whether the provider authenticates with an official OAuth or env
-	 * credential rather than a configured API key. Such credentials belong to
-	 * the official endpoint and MUST NOT be sent to a custom `baseUrl`.
-	 */
-	usesOfficialCredential(provider: string): boolean {
-		if (this.hasCommandBackedApiKey(provider)) return false;
-		const kind = this.authStorage.keys.source(provider)?.kind;
-		return kind === "oauth" || kind === "env";
 	}
 
 	getDiscoverableProviders(): string[] {
