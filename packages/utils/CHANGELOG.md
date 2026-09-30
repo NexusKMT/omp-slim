@@ -14,6 +14,7 @@
 - Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word and no dotted domain, lexing slowly: a 40 KB paragraph of each now lexes in 4-24 ms instead of 2-12 s.
 - Fixed Markdown paragraphs of deeply nested emphasis or links lexing slowly: 32 KB now lexes in about 160 ms instead of 6 s.
 - Fixed Markdown paragraphs of nested brackets, URLs with long trailing punctuation, or unclosed HTML tags or comments lexing slowly: 80 KB of each now lexes in under 40 ms instead of 4-30 s.
+- Fixed deeply nested Markdown links and emphasis overflowing the stack early: links now nest about twice as deep before a stack overflow, and emphasis about a quarter deeper.
 
 ## [18.4.4] - 2026-09-29
 
