@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenRouter decision models that report no context/output limits (`respan/span-01`, `respan/span-01-lite`, `respan/span-01-lite:free`) missing from the judge model list ([#13888](https://github.com/can1357/oh-my-pi/issues/13888))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
