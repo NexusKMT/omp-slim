@@ -91,8 +91,11 @@ The droid CLI's gemini wire (`factory-droid/google-generate`) uses an
 ALLOWLIST copier instead of the shared denylist normalizer — it preserves
 `type`/`title`/`description`/`required`/`format`/`minimum`/`maximum`/
 `minLength`/`maxLength`/`pattern`/`minItems`/`maxItems`/`default`/`example`,
-converts `const` to a stringified single-entry `enum`, merges `allOf`,
-collapses `anyOf`/`oneOf`-with-null to `nullable: true`, and silently drops
+converts `const` to a stringified single-entry `enum`, merges `allOf`
+(branch `required` lists union), collapses `anyOf`/`oneOf` into the parent
+(parent `properties`/`required` kept, branch properties merged in, a branch
+field required only when every non-null branch requires it, a `null` branch
+becomes `nullable: true`), and silently drops
 everything else. It never adds `propertyOrdering`, never edits descriptions,
 and does not spill stripped keywords. Use `normalizeSchemaForFactoryDroid`
 only in `packages/ai/src/providers/factory-droid/gemini.ts`; the shared

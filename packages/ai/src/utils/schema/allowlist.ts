@@ -33,7 +33,19 @@ function typeIncludesNull(node: JsonObject): boolean {
 	return Array.isArray(node.type) && (node.type as unknown[]).includes("null");
 }
 
-function mergeFactoryDroidSchemas(left: JsonObject, right: JsonObject): JsonObject {
+/**
+ * How `required` combines when two schemas merge: `"union"` for conjunctions
+ * (`allOf`, a parent absorbing its collapsed union) where every side's
+ * constraints hold; `"intersection"` for alternatives (`anyOf`/`oneOf`
+ * branches), where a field is only guaranteed when every branch requires it.
+ */
+type RequiredMerge = "union" | "intersection";
+
+function dedupe(values: unknown[]): unknown[] {
+	return values.filter((entry, index, array) => array.indexOf(entry) === index);
+}
+
+function mergeFactoryDroidSchemas(left: JsonObject, right: JsonObject, requiredMerge: RequiredMerge): JsonObject {
 	const merged: JsonObject = { ...left };
 	for (const [key, value] of Object.entries(right)) {
 		if (key === "properties") {
@@ -42,23 +54,31 @@ function mergeFactoryDroidSchemas(left: JsonObject, right: JsonObject): JsonObje
 			const properties: JsonObject = { ...leftProperties };
 			for (const [name, schema] of Object.entries(rightProperties)) {
 				if (isJsonObject(leftProperties[name]) && isJsonObject(schema)) {
-					properties[name] = mergeFactoryDroidSchemas(leftProperties[name] as JsonObject, schema);
+					properties[name] = mergeFactoryDroidSchemas(leftProperties[name] as JsonObject, schema, requiredMerge);
 				} else {
 					properties[name] = schema;
 				}
 			}
 			merged.properties = properties;
-		} else if (key === "required" && Array.isArray(left.required) && Array.isArray(value)) {
-			merged.required = [...(left.required as unknown[]), ...(value as unknown[])].filter(
-				(entry, index, array) => array.indexOf(entry) === index,
-			);
+		} else if (key === "required") {
+			// Combined below: intersection must also see a missing right-hand `required`.
 		} else if (key === "enum" && Array.isArray(left.enum) && Array.isArray(value)) {
-			merged.enum = [...(left.enum as unknown[]), ...(value as unknown[])].filter(
-				(entry, index, array) => array.indexOf(entry) === index,
-			);
+			merged.enum = dedupe([...(left.enum as unknown[]), ...(value as unknown[])]);
 		} else if (!(key in merged)) {
 			merged[key] = value;
 		}
+	}
+
+	const leftRequired = Array.isArray(left.required) ? (left.required as unknown[]) : [];
+	const rightRequired = Array.isArray(right.required) ? (right.required as unknown[]) : [];
+	if (requiredMerge === "union") {
+		if (Array.isArray(left.required) || Array.isArray(right.required)) {
+			merged.required = dedupe([...leftRequired, ...rightRequired]);
+		}
+	} else {
+		const shared = dedupe(leftRequired.filter(entry => rightRequired.includes(entry)));
+		if (shared.length > 0) merged.required = shared;
+		else delete merged.required;
 	}
 	return merged;
 }
@@ -86,8 +106,10 @@ function copyFactoryDroidSchema(node: unknown): JsonObject | undefined {
 		if (copied !== undefined) out.items = copied;
 	}
 
-	// anyOf/oneOf unions: merge the non-null branches, marking the result
-	// nullable when a `type: "null"` branch is present.
+	// anyOf/oneOf unions: merge the non-null branches (a field stays required
+	// only when every branch requires it), marking the result nullable when a
+	// `type: "null"` branch is present, then fold that into this node so its
+	// own properties/required survive.
 	const unionKey = Array.isArray(node.anyOf) ? "anyOf" : Array.isArray(node.oneOf) ? "oneOf" : undefined;
 	if (unionKey) {
 		const branches = (node[unionKey] as unknown[])
@@ -96,11 +118,11 @@ function copyFactoryDroidSchema(node: unknown): JsonObject | undefined {
 		const nonNull = branches.filter(branch => !typeIncludesNull(branch));
 		let collapsed: JsonObject | undefined;
 		for (const branch of nonNull) {
-			collapsed = collapsed ? mergeFactoryDroidSchemas(collapsed, branch) : { ...branch };
+			collapsed = collapsed ? mergeFactoryDroidSchemas(collapsed, branch, "intersection") : { ...branch };
 		}
 		if (collapsed) {
 			collapsed.nullable = nonNull.length < branches.length;
-			Object.assign(out, collapsed);
+			Object.assign(out, mergeFactoryDroidSchemas(out, collapsed, "union"));
 		}
 	}
 
@@ -108,7 +130,7 @@ function copyFactoryDroidSchema(node: unknown): JsonObject | undefined {
 	if (Array.isArray(node.allOf)) {
 		for (const branch of node.allOf) {
 			const copied = copyFactoryDroidSchema(branch);
-			if (copied) Object.assign(out, mergeFactoryDroidSchemas(out, copied));
+			if (copied) Object.assign(out, mergeFactoryDroidSchemas(out, copied, "union"));
 		}
 	}
 
