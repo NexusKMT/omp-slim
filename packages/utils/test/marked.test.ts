@@ -408,6 +408,23 @@ describe("marked compatibility", () => {
 		expect(shape(Lexer.lexInline("*a ***a**"))).toEqual([["em", "*a ***a**", [["text", "a ***a*"]]]]);
 	});
 
+	// Definition labels never hold "]", so only the reference part decides whether a link resolves: a label holding
+	// brackets resolves through a plain reference, and a reference holding "]" resolves to nothing.
+	test("resolves reference links whose label or reference holds brackets", () => {
+		const [, , paragraph] = Lexer.lex("[a]: /u\n\n[[a]] [x [a]][a] [y][x [a]] [a][] [b]");
+		expect(paragraph && "tokens" in paragraph && paragraph.tokens ? shape(paragraph.tokens) : paragraph).toEqual([
+			["text", "["],
+			["link", "[a]", [["text", "a"]]],
+			["text", "] "],
+			["link", "[x [a]][a]", [["text", "x "], ["link", "[a]", [["text", "a"]]]]],
+			["text", " [y][x "],
+			["link", "[a]", [["text", "a"]]],
+			["text", "] "],
+			["link", "[a][]", [["text", "a"]]],
+			["text", " [b]"],
+		]);
+	});
+
 	// Reference labels are user-controlled and index the ref-def map. An
 	// `Object.prototype` member (`constructor`, `__proto__`, `toString`, …) must
 	// not resolve to a fake definition: the link falls back to literal text and
@@ -468,6 +485,8 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		["snake_case prose (800 KB)", "snake_case ".repeat(72_728)],
 		["nested emphasis (32 KB)", `${"*a ".repeat(5_333)}${" b*".repeat(5_333)}`],
 		["nested links (20 KB)", `${"[".repeat(4_000)}a${"](u)".repeat(4_000)}`],
+		["nested brackets (80 KB)", `${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
+		["nested brackets under a definition (80 KB)", `[a]: /u\n\n${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
 	])("lexes a long paragraph of %s in under two seconds", (_name, src) => {
 		const start = performance.now();
 		Lexer.lex(src);

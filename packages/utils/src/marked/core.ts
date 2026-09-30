@@ -456,6 +456,16 @@ function shareClosers(lexer: Lexer, src: string, closers: InlineClosers): void {
 	sharedClosers = { lexer, src, closers };
 }
 
+/**
+ * Whether any label can resolve in `links`. The map every lexer starts with has no prototype, so it resolves none
+ * until a definition is added.
+ */
+function hasDefinitions(links: Links): boolean {
+	if (Object.getPrototypeOf(links) !== null) return true;
+	for (const _label in links) return true;
+	return false;
+}
+
 /** Matches a link or image at the start of `src`, a suffix of `closers`' source. */
 function matchLink(src: string, lexer: Lexer, closers: InlineClosers): Tokens.Link | Tokens.Image | undefined {
 	const image = src.startsWith("![");
@@ -482,14 +492,22 @@ function matchLink(src: string, lexer: Lexer, closers: InlineClosers): Tokens.Li
 			: { type: "link", raw, href, title, text: label, tokens };
 	}
 	let rawEnd = labelEnd + 1;
-	let ref = label;
+	let refStart = labelStart;
+	let refEnd = labelEnd;
 	if (src[rawEnd] === "[") {
-		const refEnd = closers.closeSquare(src, rawEnd + 1);
-		if (refEnd === -1) return undefined;
-		ref = src.slice(rawEnd + 1, refEnd) || label;
-		rawEnd = refEnd + 1;
+		const end = closers.closeSquare(src, rawEnd + 1);
+		if (end === -1) return undefined;
+		if (end > rawEnd + 1) {
+			refStart = rawEnd + 1;
+			refEnd = end;
+		}
+		rawEnd = end + 1;
 	}
-	const def = lexer.tokens.links[ref.replace(/\s+/g, " ").toLowerCase()];
+	// Definition labels come from `[^\]]+`, so a reference holding an unescaped "]" names none. Skip normalizing it,
+	// and every reference while there are no definitions.
+	const links = lexer.tokens.links;
+	if (!hasDefinitions(links) || closers.squareCloserWithin(src, refStart, refEnd)) return undefined;
+	const def = links[src.slice(refStart, refEnd).replace(/\s+/g, " ").toLowerCase()];
 	if (!def) return undefined;
 	const raw = src.slice(0, rawEnd);
 	shareClosers(lexer, label, closers.nested(src, labelEnd));

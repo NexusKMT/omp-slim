@@ -72,6 +72,8 @@ class BracketDepths {
 	// The depth before each offset.
 	readonly #depth: Int32Array;
 	readonly #closers = new ClosersByDepth();
+	// Every unescaped closing bracket, ascending.
+	readonly #all: number[] = [];
 
 	constructor(src: string, open: number, close: number) {
 		const depth = new Int32Array(src.length + 1);
@@ -85,6 +87,7 @@ class BracketDepths {
 				level++;
 			} else if (code === close) {
 				this.#closers.add(level, i);
+				this.#all.push(i);
 				level--;
 			}
 		}
@@ -95,6 +98,12 @@ class BracketDepths {
 	/** The offset of the bracket closing the one just before `start`, or -1. */
 	closeAfter(start: number): number {
 		return this.#closers.first(this.#depth[start]!, start);
+	}
+
+	/** Whether an unescaped closing bracket lies at or after `from`, right after a bracket, and before `to`. */
+	closesWithin(from: number, to: number): boolean {
+		const at = lowerBound(this.#all, from);
+		return at < this.#all.length && this.#all[at]! < to;
 	}
 }
 
@@ -213,6 +222,12 @@ export class InlineClosers {
 	/** Where the "(" just before `start` closes, or -1. */
 	closeRound(rest: string, start: number): number {
 		return this.#close(this.#indexes.round, rest, start);
+	}
+
+	/** Whether `rest.slice(from, to)`, which starts right after a "[", holds an unescaped "]". */
+	squareCloserWithin(rest: string, from: number, to: number): boolean {
+		const pos = this.#end - rest.length;
+		return this.#indexes.square.closesWithin(pos + from, pos + to);
 	}
 
 	/** Where the emphasis opened by the `width` markers at the start of `rest` closes, or -1. */
