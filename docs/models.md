@@ -418,11 +418,20 @@ When requesting a key for a provider, effective order is:
 `models.yml` `apiKey` behavior:
 
 - Value is first treated as an environment variable name.
-- If no env var exists, the literal string is used as the token.
+- If the env var is unset or empty, the literal string is used as the token.
 
 If `authHeader: true` and provider `apiKey` is set, models get:
 
 - `Authorization: Bearer <resolved-key>` header injected.
+
+Resolution does not fail for a missing variable: with `apiKey: MY_PROVIDER_API_KEY`
+and `authHeader: true`, an unset or empty `MY_PROVIDER_API_KEY` produces
+`Authorization: Bearer MY_PROVIDER_API_KEY`. Launchers using env-backed keys must
+check that the variable is set and non-empty before starting OMP.
+
+[Command-resolved secrets](#command-resolved-secrets) do not use this literal
+fallback: a failing command or empty trimmed stdout resolves to no value, so it
+does not add a derived bearer header.
 
 Keyless providers:
 
