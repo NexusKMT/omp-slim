@@ -177,7 +177,7 @@ describe("Factory Droid route policy scoping", () => {
 		expect(serverSideFallbackModels(buildModel(fable))).toEqual([]);
 		// Direct Anthropic keeps its own thinking contract.
 		const direct = resolveModelPolicy({ ...messages, provider: "anthropic" }, { upstream: "snowflake" }).compat;
-		expect(direct?.stripThinkingHistory).toBe(false);
+		expect(direct?.stripThinkingHistory).toBeUndefined();
 		expect(direct?.disabledThinking).toBeUndefined();
 		expect(direct?.effortBeta).toBeUndefined();
 	});

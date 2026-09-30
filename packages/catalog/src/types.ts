@@ -1013,13 +1013,23 @@ export type ResolvedOpenRouterCompat = ResolvedOpenAICompat & ResolvedOpenAIResp
 export type ResolvedAnthropicCompat = Required<
 	Omit<
 		AnthropicCompat,
-		"streamIdleTimeoutMs" | "thinkingLoopGuard" | "bedrockMessagesApi" | "effortBeta" | "disabledThinking"
+		| "streamIdleTimeoutMs"
+		| "thinkingLoopGuard"
+		| "bedrockMessagesApi"
+		| "effortBeta"
+		| "disabledThinking"
+		| "stripThinkingHistory"
+		| "fastMode"
 	>
 > & {
 	/** Effort-beta override; undefined keeps the transport's legacy heuristic. */
 	effortBeta?: AnthropicCompat["effortBeta"];
 	/** Disabled-thinking wire form; undefined keeps the direct-provider behavior. */
 	disabledThinking?: AnthropicCompat["disabledThinking"];
+	/** Strip thinking history on non-thinking-led turns; undefined behaves as false. */
+	stripThinkingHistory?: AnthropicCompat["stripThinkingHistory"];
+	/** Fast-mode SKU; undefined behaves as false. */
+	fastMode?: AnthropicCompat["fastMode"];
 	/** Thinking-loop watchdog guard family applied to streamed reasoning. */
 	thinkingLoopGuard?: AnthropicCompat["thinkingLoopGuard"];
 	/**

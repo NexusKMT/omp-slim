@@ -35,8 +35,6 @@ const NEW_COMPAT_FIELDS = new Set([
 	"claudeThinkingBetaHeader",
 	"antigravityClaudeToolMode",
 	"antigravityUsageLabel",
-	"stripThinkingHistory",
-	"fastMode",
 ]);
 
 /** APIs whose compat record is new with the engine (no baked baseline). */

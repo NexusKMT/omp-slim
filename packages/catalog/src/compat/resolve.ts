@@ -915,8 +915,9 @@ function resolveAnthropicPolicy(
 		injectClaudeCodeInstruction: true,
 		stripImageInput: false,
 		thinkingLoopGuard: undefined,
-		stripThinkingHistory: false,
-		fastMode: false,
+		// Present as keys so models.yml `compat` can set them; unset unless a rule assigns them.
+		stripThinkingHistory: undefined,
+		fastMode: undefined,
 		streamIdleTimeoutMs: spec.compat?.streamIdleTimeoutMs,
 	};
 	applyWireAxes(compat, axes.wire, "anthropic-messages");
