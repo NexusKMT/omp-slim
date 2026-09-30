@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { mathBlockAt, mathBlockMayCloseAt, mathOpenerAt, mathSpanAt, mathStartIndex } from "../src/math-delimiters";
+import {
+	MathBlockScan,
+	mathBlockAt,
+	mathBlockMayCloseAt,
+	mathOpenerAt,
+	mathSpanAt,
+	mathStartIndex,
+} from "../src/math-delimiters";
 
 describe("math span grammar", () => {
 	test("reports opener, display mode, body and end offset for each delimiter form", () => {
@@ -106,6 +113,22 @@ describe("math block grammar", () => {
 		expect(mathBlockAt("$$\n \n$$\n")).toBeUndefined();
 		expect(mathBlockAt("$$ x^2 $$\n")).toBeUndefined();
 		expect(mathBlockAt("    $$\nx\n    $$\n")).toBeUndefined(); // four spaces: indented code
+	});
+});
+
+describe("MathBlockScan", () => {
+	test("finds the blocks mathBlockAt finds at every offset, past unclosed openers", () => {
+		// An unclosed `\[` says nothing about a later `$$`, and a `$$` line that
+		// opens no block (text after it) says nothing about a later `$$` block.
+		const source = "\\[\nno closer for this bracket\n\n$$ x $$ is inline\n\n$$\na = b\n$$\n\n\\[\nstill open\n";
+		const scan = new MathBlockScan(source);
+		const found: number[] = [];
+		for (let from = 0; from < source.length; from++) {
+			const block = scan.at(from);
+			expect(block).toEqual(mathBlockAt(source, from));
+			if (block !== undefined) found.push(from);
+		}
+		expect(found).toEqual([source.indexOf("$$\na")]);
 	});
 });
 

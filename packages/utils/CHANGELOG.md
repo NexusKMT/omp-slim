@@ -5,6 +5,7 @@
 ### Added
 
 - Added `mathBlockMayCloseAt` to `math-delimiters`, which tells whether an own-line display block in a streaming prefix could still close as the text grows ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Added `MathBlockScan` to `math-delimiters`, which finds the own-line display blocks at many offsets of one text in linear time, and an optional `from` offset to `mathBlockAt` ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 
 ### Fixed
 

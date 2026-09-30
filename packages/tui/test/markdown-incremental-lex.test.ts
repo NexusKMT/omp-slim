@@ -531,6 +531,20 @@ describe("Streamed Markdown equals a one-shot render across the frozen prefix", 
 		const frozen = streamAgainstOneShot(doc, 40);
 		expect(frozen).toBeGreaterThan(doc.indexOf("```\n\n") + 3);
 	});
+
+	it("keeps a no-break-space line after a blank line in the blank run", () => {
+		// The lexer's blank line is any whitespace-only line, so the line joins
+		// the blank run above it. A freeze in front of it gave it a blank row of
+		// its own, in every later frame and in the finalized render.
+		streamAgainstOneShot(`Intro.\n\nFirst paragraph.\n\n\u00a0\nAfter.\n\n${paragraphs(3)}\n`, 1);
+	});
+
+	it("finalizes as a one-shot render when the repair drops an orphan fence right after the frozen prefix", () => {
+		// At finalize the orphan `~~~` is deleted (a table and a heading follow
+		// it), so the text after the frozen prefix starts with blank lines that
+		// a one-shot lex joins to the blank line in front of the fence.
+		streamAgainstOneShot("Intro.\n\n~~~\n\n\n| a | b |\n|---|---|\n| 1 | 2 |\n### Heading\n", 7);
+	});
 });
 
 describe("Markdown OSC 8 tail normalization across streaming appends", () => {

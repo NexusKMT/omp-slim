@@ -91,9 +91,50 @@ export function mathSpanAt(source: string, at: number, from = 0): MathSpan | und
 export function mathBlockAt(source: string, from = 0): MathBlock | undefined {
 	MATH_BLOCK_DOLLAR.lastIndex = from;
 	MATH_BLOCK_BRACKET.lastIndex = from;
-	const match = MATH_BLOCK_DOLLAR.exec(source) ?? MATH_BLOCK_BRACKET.exec(source);
-	if (!match || match[1].trim() === "") return undefined;
-	return { raw: match[0], body: match[1] };
+	return blockOf(MATH_BLOCK_DOLLAR.exec(source) ?? MATH_BLOCK_BRACKET.exec(source));
+}
+
+/** The block a match of the block grammar describes; a whitespace-only body is no block. */
+function blockOf(match: RegExpExecArray | null): MathBlock | undefined {
+	return match === null || match[1].trim() === "" ? undefined : { raw: match[0], body: match[1] };
+}
+
+// An own-line display opener line (`$$` or `\[` after up to 3 spaces), captured.
+const MATH_BLOCK_OPENER_LINE_RE = / {0,3}(\$\$|\\\[)[ \t]*\r?\n/y;
+
+/**
+ * {@link mathBlockAt} for many offsets of one `source`. An own-line opener
+ * whose closer line is missing means every later opener of the same kind
+ * misses one too, since its search covers a suffix of that search. The scan
+ * keeps that answer, so asking at every block start takes linear time instead
+ * of a scan to the end of `source` per unclosed opener.
+ */
+export class MathBlockScan {
+	readonly #source: string;
+	// Offset of the first `$$` / `\[` opener line found with no closer line after it.
+	#unclosedDollarFrom = Number.POSITIVE_INFINITY;
+	#unclosedBracketFrom = Number.POSITIVE_INFINITY;
+
+	constructor(source: string) {
+		this.#source = source;
+	}
+
+	/** The own-line display block starting at `from`, or `undefined`. */
+	at(from: number): MathBlock | undefined {
+		MATH_BLOCK_OPENER_LINE_RE.lastIndex = from;
+		const opener = MATH_BLOCK_OPENER_LINE_RE.exec(this.#source)?.[1];
+		if (opener === undefined) return undefined;
+		const dollar = opener === "$$";
+		if (from >= (dollar ? this.#unclosedDollarFrom : this.#unclosedBracketFrom)) return undefined;
+		const grammar = dollar ? MATH_BLOCK_DOLLAR : MATH_BLOCK_BRACKET;
+		grammar.lastIndex = from;
+		const match = grammar.exec(this.#source);
+		if (match === null) {
+			if (dollar) this.#unclosedDollarFrom = from;
+			else this.#unclosedBracketFrom = from;
+		}
+		return blockOf(match);
+	}
 }
 
 /** Closer of `opener`: dollar closers equal their openers; the bracket forms flip the bracket. */

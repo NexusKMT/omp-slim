@@ -8,7 +8,13 @@ import {
 	type Tokens,
 	type TokensList,
 } from "@oh-my-pi/pi-utils/marked";
-import { mathBlockAt, mathBlockMayCloseAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
+import {
+	MathBlockScan,
+	mathBlockAt,
+	mathBlockMayCloseAt,
+	mathSpanAt,
+	mathStartIndex,
+} from "@oh-my-pi/pi-utils/math-delimiters";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -628,7 +634,9 @@ const BARE_ENV_BEGIN = /(?:^|\n)[ \t]{0,3}\\begin\{([A-Za-z]+\*?)\}/;
 function bareMathEnvBlock(src: string): readonly [number, number] | null {
 	const bm = BARE_ENV_BEGIN.exec(src);
 	if (!bm || !isBareMathEnvironment(bm[1])) return null;
-	const beginLineStart = bm.index === 0 ? 0 : bm.index + 1; // skip the matched leading `\n`
+	// Skip a matched leading `\n`, at offset 0 too: a blank line before the block
+	// is a space token of its own, not part of the block.
+	const beginLineStart = src[bm.index] === "\n" ? bm.index + 1 : bm.index;
 	const endToken = `\\end{${bm[1]}}`;
 	const endAt = src.indexOf(endToken, bm.index);
 	if (endAt === -1) return null;
@@ -1142,42 +1150,64 @@ function listMayContinueAt(text: string, tailStart: number, listRaw: string): bo
 	return after === 0x20 /* space */ || after === 0x09 /* tab */ || after === 0x0a; /* \n */
 }
 
-const NO_BLOCK_BOUNDARY = { end: 0, count: 0 } as const;
+/** A probe window: see {@link stableBlockBoundary}. */
+interface ProbeWindow {
+	/** Offset in `text` where the window, and so the lex of `tokens`, ends. */
+	end: number;
+	/** The display-math blocks of the whole of `text`. */
+	mathBlocks: MathBlockScan;
+}
+
+/** The last stable block boundary of a token run: see {@link stableBlockBoundary}. */
+interface BlockBoundary {
+	/** Offset just past the boundary token, or 0 when the run holds none. */
+	end: number;
+	/** Number of tokens up to and including the boundary token, or 0. */
+	count: number;
+	/** End of the display-math block a probe's scan stopped at, which a later window must reach past; 0 when it stopped at none. */
+	blockEnd: number;
+}
+
+// A whitespace-only line, capturing its terminator: "\n", or "" at the end of the text.
+const WHITESPACE_LINE_RE = /[^\S\n]*(\n|$)/y;
 
 /**
  * Offset just past the last token in `tokens` that closes a block on a hard
  * `"\n\n"` break, together with the number of tokens up to and including it.
  * `count === 0` means the run holds no usable boundary.
  *
- * `base` is where `tokens[0]` starts inside `text`, and `tokens` lex
- * `text.slice(base, windowEnd)`. A boundary qualifies only when splitting
- * there is invisible to the lexer, i.e. `lex(head) ++ lex(tail) ===
- * lex(text)`:
- *  - The token must end before `windowEnd` unless the window reaches the end
- *    of `text`. An unclosed fence, HTML block or comment runs to the end of
- *    its input, so a window that ends just after a blank line inside one
- *    hands back a truncated token whose raw ends in `"\n\n"`.
+ * `base` is where `tokens[0]` starts inside `text`. Without `window`, `tokens`
+ * lex the rest of `text`, which appends may still extend: the streaming
+ * freeze. With it, they lex `text.slice(base, window.end)` of a whole
+ * document: a probe. A boundary qualifies only when splitting there is
+ * invisible to the lexer, i.e. `lex(head) ++ lex(tail) === lex(text)`:
+ *  - In a probe, the token must end before `window.end`. An unclosed fence,
+ *    HTML block or comment runs to the end of its input, so a window that
+ *    ends just after a blank line inside one hands back a truncated token
+ *    whose raw ends in `"\n\n"`.
  *  - The break must sit inside `text`. At end-of-text the next character is
  *    unknown (and, while streaming, may still arrive), so the cut is deferred.
- *  - The next character must start real block content. Whitespace means the
- *    block separator straddles the cut — e.g. a fence followed by
- *    `"\n\n\n- list"` — and the two lexes desync.
+ *  - The next line must start real block content. A leading space or newline
+ *    means the block separator straddles the cut — e.g. a fence followed by
+ *    `"\n\n\n- list"` — and the two lexes desync. So does a line of any other
+ *    whitespace, such as a no-break space: the lexer's blank line is
+ *    `/^\s*\n$/`, so it joins the blank run in front of the cut. While
+ *    streaming, a whitespace-only last line may still become one.
  *  - A preceding `list` must be provably closed: CommonMark lets a same-marker
  *    item continue the list across the blank line, and marked merges both into
  *    one renumbered loose list (`listMayContinueAt`).
- *  - No earlier token in the window may open a display-math block that the
+ *  - In a probe, no earlier token may open a display-math block that the
  *    window cut short: a token other than `math` (which is the block itself)
- *    where `mathBlockAt` matches the rest of `text`. The one-pass lex makes
- *    that block one `math` token across its blank lines. An opener with no
- *    closer, or with a whitespace-only body, is no block in either lex, so it
- *    leaves later boundaries alone.
- *  - With `growing` (text that appends may still extend, i.e. the streaming
- *    freeze), the same holds for a block an append could still close, which
- *    `mathBlockMayCloseAt` must also reject for the rest of `text`. A pair
- *    that `mathBlockAt` rejects at a closer line that has already ended (a
- *    whitespace-only body, as in `$$`, ` `, `$$`) is no block whatever
- *    follows, so it leaves later boundaries alone; any later token that
- *    starts with an opener still gets its own check.
+ *    where `window.mathBlocks` finds a block in the whole document. The
+ *    one-pass lex makes that block one `math` token across its blank lines,
+ *    so the scan stops there and reports the block's end as `blockEnd`. An
+ *    opener with no closer, or with a whitespace-only body, is no block in
+ *    either lex, so it leaves later boundaries alone.
+ *  - While streaming, the scan stops at a token whose display-math block an
+ *    append could still close (`mathBlockMayCloseAt`), since the one-pass lex
+ *    of the grown text would make it one `math` token. A pair whose closer
+ *    line has already ended around a whitespace-only body (`$$`, ` `, `$$`)
+ *    is no block whatever follows, so the scan goes on past it.
  *
  * `startIndex` resumes the scan at `tokens[startIndex]` (positions still
  * accumulate from `base`). The streaming freeze passes the frozen-prefix
@@ -1188,20 +1218,28 @@ function stableBlockBoundary(
 	text: string,
 	base: number,
 	tokens: Token[],
-	{ startIndex = 0, windowEnd = text.length, growing = false } = {},
-): { end: number; count: number } {
-	const windowIsWhole = windowEnd === text.length;
+	{ startIndex = 0, window }: { startIndex?: number; window?: ProbeWindow } = {},
+): BlockBoundary {
 	let pos = base;
 	let end = 0;
 	let count = 0;
+	let blockEnd = 0;
 	for (let i = startIndex; i < tokens.length; i++) {
 		const token = tokens[i];
 		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
 		if (token.type !== "math") {
-			if (growing ? mathBlockMayCloseAt(text, pos) : mathBlockAt(text, pos) !== undefined) break;
+			if (window === undefined) {
+				if (mathBlockMayCloseAt(text, pos)) break;
+			} else {
+				const block = window.mathBlocks.at(pos);
+				if (block !== undefined) {
+					blockEnd = pos + block.raw.length;
+					break;
+				}
+			}
 		}
-		if (raw.endsWith("\n\n") && (windowIsWhole || tokenEnd < windowEnd)) {
+		if (raw.endsWith("\n\n") && (window === undefined || tokenEnd < window.end)) {
 			const prev = i > 0 ? tokens[i - 1] : undefined;
 			if (prev === undefined || prev.type !== "list" || !listMayContinueAt(text, tokenEnd, prev.raw)) {
 				end = tokenEnd;
@@ -1210,10 +1248,13 @@ function stableBlockBoundary(
 		}
 		pos = tokenEnd;
 	}
-	if (count === 0 || end >= text.length) return NO_BLOCK_BOUNDARY;
+	if (count === 0 || end >= text.length) return { end: 0, count: 0, blockEnd };
 	const next = text.charCodeAt(end);
-	if (next === 0x20 /* space */ || next === 0x0a /* \n */) return NO_BLOCK_BOUNDARY;
-	return { end, count };
+	if (next === 0x20 /* space */ || next === 0x0a /* \n */) return { end: 0, count: 0, blockEnd };
+	WHITESPACE_LINE_RE.lastIndex = end;
+	const blank = WHITESPACE_LINE_RE.exec(text);
+	if (blank !== null && (blank[1] === "\n" || window === undefined)) return { end: 0, count: 0, blockEnd };
+	return { end, count, blockEnd };
 }
 
 // Bun's regex engine skips the start-anchor optimization for several of marked's
@@ -1236,13 +1277,13 @@ const WINDOWED_LEX_MIN_BYTES = 16 * 1024;
  * Window cuts come from marked itself: a throwaway BLOCK-ONLY probe lex of the
  * window reports its last stable block boundary ({@link stableBlockBoundary})
  * and only that confirmed segment is handed to the real lexer; a window
- * holding no boundary doubles until it finds one or reaches the end. Probes
- * never run inline tokenization (their inlineQueue is discarded) — a boundary
- * is a property of block structure alone, and probe inline passes were the
- * dominant cost of an earlier revision. Block tokenization runs per window
- * while inline tokenization is deferred to the end — mirroring `Lexer.lex` —
- * so a `[label]: dest` definition anywhere in the document still resolves for
- * every inline span.
+ * holding no boundary grows ({@link nextProbeSize}) until it finds one or
+ * reaches the end. Probes never run inline tokenization (their inlineQueue is
+ * discarded) — a boundary is a property of block structure alone, and probe
+ * inline passes were the dominant cost of an earlier revision. Block
+ * tokenization runs per window while inline tokenization is deferred to the
+ * end — mirroring `Lexer.lex` — so a `[label]: dest` definition anywhere in
+ * the document still resolves for every inline span.
  *
  * Each round's first window reaches just past the next blank line
  * ({@link firstProbeSize}); a tail with no blank line left (e.g. one long
@@ -1250,15 +1291,17 @@ const WINDOWED_LEX_MIN_BYTES = 16 * 1024;
  */
 function lexWindowed(text: string): TokensList {
 	const lexer = new Lexer(markdownParser.defaults);
+	const mathBlocks = new MathBlockScan(text);
 	let offset = 0;
 	while (offset < text.length) {
 		let end = text.length;
-		for (let size = firstProbeSize(text, offset); offset + size < text.length; size *= 2) {
-			const boundary = probeBoundary(text, offset, size);
-			if (boundary > 0) {
-				end = boundary;
+		for (let size = firstProbeSize(text, offset); offset + size < text.length;) {
+			const boundary = probeBoundary(text, offset, size, mathBlocks);
+			if (boundary.end > 0) {
+				end = boundary.end;
 				break;
 			}
+			size = nextProbeSize(text, offset, size, boundary.blockEnd);
 		}
 		lexer.blockTokens(text.slice(offset, end), lexer.tokens);
 		offset = end;
@@ -1280,14 +1323,27 @@ function firstProbeSize(text: string, offset: number): number {
 }
 
 /**
- * End of the last stable block boundary ({@link stableBlockBoundary}) in the
- * window `text.slice(offset, offset + size)`, or 0 when it holds none, from a
- * throwaway block-only lex of the window.
+ * Size of the next probe window after the one of `size` at `offset` gave no
+ * usable cut: at least double, and one character past the first blank line
+ * that reaches the window's edge, or `blockEnd` when the probe stopped at a
+ * display-math block ending there, since only such a blank line can end a
+ * later boundary. Doubling toward a far closer would re-lex the block once
+ * per window. With no blank line left, it is the rest of the text.
  */
-function probeBoundary(text: string, offset: number, size: number): number {
+function nextProbeSize(text: string, offset: number, size: number, blockEnd: number): number {
+	const nextBlank = text.indexOf("\n\n", Math.max(offset + size, blockEnd) - 2);
+	return nextBlank === -1 ? text.length - offset : Math.max(2 * size, nextBlank + 3 - offset);
+}
+
+/**
+ * The last stable block boundary ({@link stableBlockBoundary}) in the window
+ * `text.slice(offset, offset + size)`, from a throwaway block-only lex of the
+ * window. `mathBlocks` holds the display-math blocks of all of `text`.
+ */
+function probeBoundary(text: string, offset: number, size: number, mathBlocks: MathBlockScan): BlockBoundary {
 	const probe = new Lexer(markdownParser.defaults);
 	probe.blockTokens(text.slice(offset, offset + size), probe.tokens);
-	return stableBlockBoundary(text, offset, probe.tokens, { windowEnd: offset + size }).end;
+	return stableBlockBoundary(text, offset, probe.tokens, { window: { end: offset + size, mathBlocks } });
 }
 
 /**
@@ -2127,7 +2183,6 @@ export class Markdown implements Component {
 		const skipPrefix = opts.preserveExisting ? (this.#streamPrefixTokens?.length ?? 0) : 0;
 		const frozen = stableBlockBoundary(text, skipPrefix > 0 ? (this.#streamPrefixText?.length ?? 0) : 0, tokens, {
 			startIndex: skipPrefix,
-			growing: true,
 		});
 		if (frozen.count > 0) {
 			this.#streamPrefixText = text.slice(0, frozen.end);
@@ -2300,8 +2355,12 @@ export class Markdown implements Component {
 			// removed): the guard-scan memo's checked region is no longer
 			// byte-identical, and a cached false verdict may have been based
 			// on the very CR/ref-def line that was deleted. Invalidate so the
-			// next #lexTokens re-derives on the repaired buffer.
+			// next #lexTokens re-derives on the repaired buffer. The text past
+			// the frozen prefix is no append of what was frozen against either
+			// (a fence line right after the prefix leaves the tail opening on
+			// blank lines a one-pass lex joins to the ones above), so drop it.
 			this.#lastScanValid = false;
+			this.#dropStreamPrefix();
 		}
 
 		// L2: module-level LRU — survives component disposal/recreation across
