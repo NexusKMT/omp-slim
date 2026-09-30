@@ -635,6 +635,35 @@ describe("ReviewCommand", () => {
 		expect(filteredSelect?.options).toContain("#7  Filtered match  @octocat");
 	});
 
+	it("keeps the picker open when a search request fails", async () => {
+		const dir = await createTempDir();
+		spyOn(gh, "resolveDefaultRepoMemoized").mockResolvedValue("owner/repo");
+		spyOn(github, "json").mockImplementation(async (_cwd: string, args: string[]) => {
+			if (args.includes("--search")) throw new Error("gh: rate limited");
+			return [{ number: 42, title: "Fix login", author: { login: "octocat" } }] as never;
+		});
+		const diffSpy = spyOn(gh, "getOrFetchPrDiff").mockResolvedValue(makePrDiffLookup(SAMPLE_PR_DIFF));
+		const notifications: NotifyCall[] = [];
+		const command = new ReviewCommand({ cwd: dir } as unknown as CustomCommandAPI);
+		const ctx = createContext({
+			selectResults: ["4. Review a specific PR", "Search open pull requests…", "#42  Fix login  @octocat"],
+			inputResults: ["login"],
+			onNotify: call => {
+				notifications.push(call);
+			},
+		});
+
+		const result = await command.execute([], ctx);
+
+		expect(notifications).toContainEqual({
+			message: "Failed to list open pull requests in owner/repo: gh: rate limited",
+			type: "error",
+		});
+		expect(result).toBeDefined();
+		expect(result!).toContain("PR owner/repo#42");
+		expect(diffSpy).toHaveBeenCalledWith({ cwd: dir, repo: "owner/repo", number: 42 });
+	});
+
 	it("resolves a numeric search query directly without a search request", async () => {
 		const dir = await createTempDir();
 		spyOn(gh, "resolveDefaultRepoMemoized").mockResolvedValue("owner/repo");
