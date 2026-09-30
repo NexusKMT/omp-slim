@@ -3,6 +3,12 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel } from "../src/build";
+import {
+	type FactoryDroidModelPolicy,
+	type FactoryDroidRegistryModel,
+	factoryDroidRegistry,
+	resolveFactoryDroidRotation,
+} from "../src/compat/factory-droid";
 import { resolveModelPolicy } from "../src/compat/resolve";
 import { serverSideFallbackModels } from "../src/compat/server-side-fallback";
 import {
@@ -10,36 +16,39 @@ import {
 	type FactoryDroidModelDiscoveryOptions,
 	fetchFactoryDroidModels,
 } from "../src/discovery/factory-droid";
-import {
-	FACTORY_DROID_MODEL_META,
-	FACTORY_DROID_MODELS,
-	type FactoryDroidModelInput,
-	resolveFactoryDroidRotation,
-} from "../src/discovery/factory-droid-models";
 import { Effort } from "../src/effort";
 import { resolveProviderModels } from "../src/model-manager";
 import { getBundledModel } from "../src/models";
 import { resolveModelCacheProviderId } from "../src/provider-models/cache-provider-id";
 import { factoryDroidModelManagerOptions } from "../src/provider-models/special";
-import type { FetchImpl } from "../src/types";
+import type { FetchImpl, ModelSpec } from "../src/types";
 
 const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
 const ALL_FLAGS_ON = Object.fromEntries(
-	FACTORY_DROID_MODELS.flatMap(model => (model.featureFlag ? [[model.featureFlag, true]] : [])),
+	factoryDroidRegistry().flatMap(({ policy }) =>
+		policy.entitlement.featureFlag ? [[policy.entitlement.featureFlag, true]] : [],
+	),
 );
 
+/** A registry model from `rules/providers/factory-droid.kdl`. */
+function registryModel(id: string): FactoryDroidRegistryModel {
+	const found = factoryDroidRegistry().find(model => model.spec.id === id);
+	if (!found) throw new Error(`no registry model ${id}`);
+	return found;
+}
+
 /** Subject ids chosen by registry predicate, so bumps keep the branches covered. */
-function firstModel(predicate: (model: FactoryDroidModelInput) => boolean): string {
-	const found = FACTORY_DROID_MODELS.find(predicate);
+function firstModel(predicate: (gates: FactoryDroidModelPolicy["entitlement"]) => boolean): string {
+	const found = factoryDroidRegistry().find(model => predicate(model.policy.entitlement));
 	if (!found) throw new Error("no registry model matches the predicate");
-	return found.id;
+	return found.spec.id;
 }
 const PLAIN = firstModel(m => !m.featureFlag && !m.requiresExplicitOptIn && !m.deprecationFlag && !m.baseVariant);
 const FLAGGED = firstModel(m => !!m.featureFlag && !m.requiresExplicitOptIn && !m.deprecationFlag && !m.baseVariant);
 const OPT_IN = firstModel(m => !!m.requiresExplicitOptIn && !m.featureFlag);
 const DEPRECATED = firstModel(m => !!m.deprecationFlag);
-const DEPRECATION_FLAG = FACTORY_DROID_MODEL_META[DEPRECATED].deprecationFlag!;
+const DEPRECATION_FLAG = registryModel(DEPRECATED).policy.entitlement.deprecationFlag!;
 
 interface FactoryEndpoints {
 	flags?: Record<string, boolean>;
@@ -76,18 +85,34 @@ function factoryToken(org: string, user: string, exp: number, jti: string): stri
 	return `header.${payload}.signature`;
 }
 
-/** Registry-shaped input for builder branches, independent of the live roster. */
-function meta(overrides: Partial<FactoryDroidModelInput>): FactoryDroidModelInput {
-	return {
+/** A registry-shaped model for builder branches, independent of the live roster. */
+function syntheticModel(policy: Partial<FactoryDroidModelPolicy>): FactoryDroidRegistryModel {
+	const spec: ModelSpec<"factory-droid-agent"> = {
 		id: "test-model",
 		name: "Test model",
-		wire: "openai-completions",
-		billingPool: "core",
-		routingFamily: "factory",
+		api: "factory-droid-agent",
+		provider: "factory-droid",
+		baseUrl: "https://api.factory.ai",
+		reasoning: true,
+		input: ["text", "image"],
+		cost: zeroCost,
 		contextWindow: 100_000,
 		maxTokens: 10_000,
-		apiProviders: ["baseten"],
-		...overrides,
+	};
+	return {
+		spec,
+		policy: {
+			wire: "openai-completions",
+			rotation: ["baseten"],
+			regionUpstreams: { global: ["baseten"], us: ["baseten"], eu: [] },
+			limits: { contextWindow: 100_000, maxTokens: 10_000 },
+			euLimits: {},
+			routingFamily: "factory",
+			policyAliases: [],
+			entitlement: { requiresExplicitOptIn: false },
+			defaultReasoningOff: false,
+			...policy,
+		},
 	};
 }
 
@@ -95,10 +120,7 @@ describe("Factory Droid model builder", () => {
 	it.each([
 		{
 			label: "strips the off rung while preserving a selectable default",
-			input: {
-				supportedReasoningEfforts: ["off", Effort.Low, Effort.High, Effort.Max],
-				defaultReasoningEffort: Effort.High,
-			},
+			id: "kimi-k3",
 			thinking: {
 				mode: "effort",
 				efforts: [Effort.Low, Effort.High, Effort.Max],
@@ -109,52 +131,75 @@ describe("Factory Droid model builder", () => {
 		},
 		{
 			label: "forces effort when off is unsupported and marks text-only models",
-			input: { supportedReasoningEfforts: [Effort.High], defaultReasoningEffort: Effort.High, noImageSupport: true },
-			thinking: { mode: "effort", efforts: [Effort.High], requiresEffort: true, defaultLevel: Effort.High },
+			id: "qwen3.8-max",
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.Medium, Effort.XHigh],
+				requiresEffort: true,
+				defaultLevel: Effort.XHigh,
+			},
 			modalities: ["text"],
 		},
 		{
-			label: "omits thinking for models without a controllable ladder",
-			input: { supportedReasoningEfforts: ["none"], defaultReasoningEffort: "none" },
-			thinking: undefined,
+			label: "leaves an off-by-default model without a selectable default",
+			id: "claude-haiku-4-5-20251001",
+			thinking: {
+				mode: "budget",
+				efforts: [Effort.Low, Effort.Medium, Effort.High],
+				supportsDisplay: false,
+				requiresEffort: false,
+			},
 			modalities: ["text", "image"],
 		},
-	])("$label", ({ input, thinking, modalities }) => {
-		const model = buildFactoryDroidModel(meta(input));
+	])("$label", ({ id, thinking, modalities }) => {
+		const model = buildFactoryDroidModel(registryModel(id));
 		expect(model.thinking).toEqual(thinking);
-		expect(model.reasoning).toBe(thinking !== undefined);
+		expect(model.reasoning).toBe(true);
 		expect(model.input).toEqual([...modalities]);
+	});
+
+	it("omits thinking for models without a reviewed effort ladder", () => {
+		const model = buildFactoryDroidModel(syntheticModel({}));
+		expect(model.thinking).toBeUndefined();
+		expect(model.reasoning).toBe(false);
 	});
 
 	it("prices from the referenced catalog entry and carries the base credit rate", () => {
 		const ref = { provider: "anthropic", modelId: "claude-opus-5" } as const;
-		const referenced = buildFactoryDroidModel(meta({ priceRef: ref, credits: { input: 1.6, output: 5 } }));
+		const referenced = buildFactoryDroidModel(
+			syntheticModel({ listPriceFrom: ref, creditRates: { input: 1.6, output: 5 } }),
+		);
 		expect(referenced.cost).toEqual(getBundledModel(ref.provider, ref.modelId).cost);
 		expect(referenced.factoryDroidCredits).toBe(1.6);
 
 		// Factory-only SKUs have no list price; a zero credit rate survives.
-		const unreferenced = buildFactoryDroidModel(meta({ credits: { input: 0 } }));
+		const unreferenced = buildFactoryDroidModel(syntheticModel({ creditRates: { input: 0 } }));
 		expect(unreferenced.cost).toEqual(zeroCost);
 		expect(unreferenced.factoryDroidCredits).toBe(0);
-		expect(buildFactoryDroidModel(meta({})).factoryDroidCredits).toBeUndefined();
+		expect(buildFactoryDroidModel(syntheticModel({})).factoryDroidCredits).toBeUndefined();
+		// A reference to a provider without bundled rows keeps the zero cost.
+		const unknown = buildFactoryDroidModel(syntheticModel({ listPriceFrom: { provider: "nope", modelId: "x" } }));
+		expect(unknown.cost).toEqual(zeroCost);
 	});
 });
 
 describe("Factory Droid route policy scoping", () => {
 	it("gives every registry completions route a reasoning dialect", () => {
-		const bare = FACTORY_DROID_MODELS.filter(model => model.wire === "openai-completions").flatMap(model =>
-			model.apiProviders.flatMap(upstream => {
-				const spec = { ...buildFactoryDroidModel(model), api: "openai-completions" as const };
-				const mode = resolveModelPolicy(spec, { upstream }).request.completionsReasoningMode;
-				return mode === "none" ? [`${model.id}@${upstream}`] : [];
-			}),
-		);
+		const bare = factoryDroidRegistry()
+			.filter(({ policy }) => policy.wire === "openai-completions")
+			.flatMap(model =>
+				model.policy.rotation.flatMap(upstream => {
+					const spec = { ...buildFactoryDroidModel(model), api: "openai-completions" as const };
+					const mode = resolveModelPolicy(spec, { upstream }).request.completionsReasoningMode;
+					return mode === "none" ? [`${model.spec.id}@${upstream}`] : [];
+				}),
+			);
 		expect(bare).toEqual([]);
 	});
 
 	it("keeps Factory route contracts off missing upstreams, direct hosts and session-level settings", () => {
 		const completions = (id: string, provider = "factory-droid") => ({
-			...buildFactoryDroidModel(FACTORY_DROID_MODEL_META[id]),
+			...buildFactoryDroidModel(registryModel(id)),
 			api: "openai-completions" as const,
 			provider,
 		});
@@ -168,7 +213,7 @@ describe("Factory Droid route policy scoping", () => {
 				.completionsReasoningMode,
 		).toBeUndefined();
 
-		const fable = buildFactoryDroidModel(FACTORY_DROID_MODEL_META["claude-fable-5.1"]);
+		const fable = buildFactoryDroidModel(registryModel("claude-fable-5.1"));
 		const messages = { ...fable, api: "anthropic-messages" as const };
 		// Refusal fallbacks ride only the first-party Anthropic upstream, never the user-facing setting.
 		expect(
@@ -186,8 +231,10 @@ describe("Factory Droid route policy scoping", () => {
 describe("Factory Droid offline seed", () => {
 	it("hides feature-gated and consent-gated models until live flags load", () => {
 		const ids = (factoryDroidModelManagerOptions().staticModels ?? []).map(model => model.id);
-		for (const gated of FACTORY_DROID_MODELS.filter(model => model.featureFlag || model.requiresExplicitOptIn)) {
-			expect(ids).not.toContain(gated.id);
+		for (const gated of factoryDroidRegistry().filter(
+			({ policy }) => policy.entitlement.featureFlag || policy.entitlement.requiresExplicitOptIn,
+		)) {
+			expect(ids).not.toContain(gated.spec.id);
 		}
 		expect(ids).toContain(PLAIN);
 	});
@@ -261,7 +308,9 @@ describe("Factory Droid discovery gates", () => {
 	});
 
 	it("withdraws fast tiers only when the org explicitly disallows them", async () => {
-		const fastIds = FACTORY_DROID_MODELS.filter(model => model.baseVariant !== undefined).map(model => model.id);
+		const fastIds = factoryDroidRegistry()
+			.filter(({ policy }) => policy.entitlement.baseVariant !== undefined)
+			.map(({ spec }) => spec.id);
 		expect(fastIds.length).toBeGreaterThan(0);
 		// Allow-all is the CLI's default kind, and older servers omit the field entirely.
 		const allowed = await discoverIds({ modelPolicy: { allowAllFactoryModels: true, isFastModelsAllowed: true } });
@@ -360,7 +409,7 @@ describe("Factory Droid model cache scope", () => {
 				{
 					...factoryDroidModelManagerOptions({ apiKey: original }),
 					cacheDbPath,
-					fetchDynamicModels: async () => [buildFactoryDroidModel(FACTORY_DROID_MODEL_META["glm-5.3"])],
+					fetchDynamicModels: async () => [buildFactoryDroidModel(registryModel("glm-5.3"))],
 				},
 				"online",
 			);
@@ -402,11 +451,12 @@ describe("Factory Droid EU region", () => {
 		const gpt54 = models!.find(model => model.id === "gpt-5.4")!;
 		expect(gpt54.factoryDroidApiProviders).toEqual(["openai"]);
 		expect(gpt54.baseUrl).toBe("https://api.eu.factory.ai/api/llm/o/v1");
-		const glmMeta = FACTORY_DROID_MODEL_META["glm-5.2"];
+		const glmPolicy = registryModel("glm-5.2").policy;
 		const glm = models!.find(model => model.id === "glm-5.2")!;
 		expect(glm.factoryDroidApiProviders).toEqual(["mistral"]);
-		expect(glm.contextWindow).toBe(glmMeta.euContextWindow!);
-		expect(glm.maxTokens).toBe(glmMeta.euMaxTokens!);
+		expect(glm.contextWindow).toBe(glmPolicy.euLimits.contextWindow!);
+		expect(glm.maxTokens).toBe(glmPolicy.euLimits.maxTokens!);
+		expect(glm.contextWindow).toBeLessThan(glmPolicy.limits.contextWindow!);
 	});
 
 	it("intersects live provider_routing with the EU rotation instead of resurrecting global upstreams", async () => {
@@ -436,14 +486,14 @@ describe("Factory Droid EU region", () => {
 		expect(urls[0]).toBe("https://api.factory.ai/api/feature-flags");
 		const opus5 = models!.find(model => model.id === "claude-opus-5")!;
 		expect(opus5.factoryDroidApiProviders).toEqual([
-			...resolveFactoryDroidRotation(FACTORY_DROID_MODEL_META["claude-opus-5"], "global"),
+			...resolveFactoryDroidRotation(registryModel("claude-opus-5").policy, "global"),
 		]);
 		expect(opus5.baseUrl).toBe("https://api.factory.ai/api/llm/a");
 		expect(models!.find(model => model.id === "kimi-k3")).toBeDefined();
-		const glmMeta = FACTORY_DROID_MODEL_META["glm-5.2"];
+		const glmLimits = registryModel("glm-5.2").policy.limits;
 		const glm = models!.find(model => model.id === "glm-5.2")!;
-		expect(glm.contextWindow).toBe(glmMeta.contextWindow);
-		expect(glm.maxTokens).toBe(glmMeta.maxTokens);
+		expect(glm.contextWindow).toBe(glmLimits.contextWindow);
+		expect(glm.maxTokens).toBe(glmLimits.maxTokens);
 	});
 });
 

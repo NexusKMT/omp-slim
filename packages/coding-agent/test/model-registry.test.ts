@@ -8,7 +8,7 @@ import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-comple
 import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resolveMaxContextWindow } from "@oh-my-pi/pi-catalog/compat/context-window";
-import { FACTORY_DROID_MODEL_META, FACTORY_DROID_MODELS } from "@oh-my-pi/pi-catalog/discovery/factory-droid-models";
+import { factoryDroidRegistry, resolveFactoryDroidPolicy } from "@oh-my-pi/pi-catalog/compat/factory-droid";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { fingerprintStaticModels } from "@oh-my-pi/pi-catalog/model-manager";
 import * as catalogModels from "@oh-my-pi/pi-catalog/models";
@@ -2197,7 +2197,9 @@ describe("ModelRegistry", () => {
 			cfgExtendedContext.set(testSettings, false);
 			authStorage.keys.setRuntime("factory-droid", "factory-token");
 			const flags = Object.fromEntries(
-				FACTORY_DROID_MODELS.flatMap(model => (model.featureFlag ? [[model.featureFlag, true]] : [])),
+				factoryDroidRegistry().flatMap(({ policy }) =>
+					policy.entitlement.featureFlag ? [[policy.entitlement.featureFlag, true]] : [],
+				),
 			);
 			const registry = new ModelRegistry(authStorage, modelsJsonPath, {
 				settings: testSettings,
@@ -2212,7 +2214,9 @@ describe("ModelRegistry", () => {
 			// Reference-price tiers cannot shrink subscription capacity, and
 			// direct-host capacity heuristics cannot inflate the native input limit.
 			for (const id of ["gpt-6-astra", "grok-4.7", "gpt-5.4"]) {
-				expect(registry.find("factory-droid", id)?.contextWindow).toBe(FACTORY_DROID_MODEL_META[id].contextWindow);
+				expect(registry.find("factory-droid", id)?.contextWindow).toBe(
+					resolveFactoryDroidPolicy({ id })?.limits.contextWindow,
+				);
 			}
 		});
 	});

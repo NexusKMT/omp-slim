@@ -22,9 +22,9 @@ const RUNTIME_ONLY_PROVIDERS = new Set([
 	// including its tariff and effort ladder, comes from the live /v1/models
 	// snapshot, so no bundled rows are frozen into models.json.
 	"charm-hyper",
-	// Factory has no public model-listing endpoint. Its CLI snapshot lives in
-	// discovery/factory-droid-models.ts; factoryDroidModelManagerOptions serves
-	// the static roster offline and narrows it by account flags/org policy live.
+	// Factory has no public model-listing endpoint. Its CLI roster is a
+	// `bundle="never"` KDL seed; factoryDroidModelManagerOptions serves it
+	// offline and narrows it by account flags/org policy live.
 	"factory-droid",
 	// Both SingularityAPI rosters are live and credential-scoped (one key sees
 	// only its own product's models — the pay-as-you-go catalog or the reserved

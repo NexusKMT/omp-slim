@@ -12,25 +12,37 @@ import { isRecord } from "../utils";
  */
 export const FACTORY_DROID_CLIENT_VERSION = "0.230.0";
 
-/** Wire protocol used by the Factory proxy for each model. */
-export type FactoryDroidWire = "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generate";
+/** Wire protocols the Factory proxy multiplexes; `api-routes provider="factory-droid"` picks one per model. */
+export const FACTORY_DROID_WIRES = [
+	"openai-completions",
+	"openai-responses",
+	"anthropic-messages",
+	"google-generate",
+] as const;
 
-/** Upstream router the proxy dispatches to; sent as the `x-api-provider` header. */
-export type FactoryDroidUpstream =
-	| "fireworks"
-	| "baseten"
-	| "mistral"
-	| "anthropic"
-	| "azure_anthropic"
-	| "vertex_anthropic"
-	| "bedrock_anthropic"
-	| "openai"
-	| "azure_openai"
-	| "bedrock_openai"
-	| "google"
-	| "xai"
-	| "snowflake"
-	| "databricks";
+/** Wire protocol used by the Factory proxy for each model. */
+export type FactoryDroidWire = (typeof FACTORY_DROID_WIRES)[number];
+
+/**
+ * Upstream routers the proxy dispatches to, sent as the `x-api-provider`
+ * header. The KDL compiler validates the rotation and region axes against it.
+ */
+export const FACTORY_DROID_UPSTREAMS = [
+	"fireworks",
+	"baseten",
+	"mistral",
+	"anthropic",
+	"azure_anthropic",
+	"vertex_anthropic",
+	"bedrock_anthropic",
+	"openai",
+	"azure_openai",
+	"bedrock_openai",
+	"google",
+	"xai",
+	"snowflake",
+	"databricks",
+] as const;
 
 /** Inference serving region; independent from account/API-host residency. */
 export type FactoryDroidRegion = "global" | "us" | "eu";
@@ -45,28 +57,6 @@ export interface AccountScope {
 	inferenceRegion?: FactoryDroidRegion;
 	orgId?: string;
 }
-
-/**
- * Serving regions from the CLI's upstream region table. EU overrides may
- * explicitly select otherwise global-only upstreams; absent overrides filter
- * the default rotation by this table.
- */
-export const FACTORY_DROID_UPSTREAM_REGIONS: Readonly<Record<FactoryDroidUpstream, readonly FactoryDroidRegion[]>> = {
-	fireworks: ["global"],
-	baseten: ["global", "us"],
-	mistral: ["global"],
-	anthropic: ["global", "us"],
-	azure_anthropic: ["global"],
-	vertex_anthropic: ["global", "us", "eu"],
-	bedrock_anthropic: ["global", "us", "eu"],
-	openai: ["global", "us", "eu"],
-	azure_openai: ["global"],
-	bedrock_openai: ["global", "us", "eu"],
-	google: ["global", "us"],
-	xai: ["global", "us"],
-	snowflake: ["global"],
-	databricks: ["global"],
-};
 
 /** Inference region for an account: explicit scope wins, else EU residency infers EU, else global. */
 export function resolveFactoryDroidInferenceRegion(scope: {

@@ -1,12 +1,12 @@
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import {
+	type FactoryDroidModelPolicy,
+	factoryDroidRegionalLimits,
+	resolveFactoryDroidPolicy,
+	resolveFactoryDroidRotation,
+} from "@oh-my-pi/pi-catalog/compat/factory-droid";
 import { resolveModelPolicy } from "@oh-my-pi/pi-catalog/compat/resolve";
 import type { RequestPolicy } from "@oh-my-pi/pi-catalog/compat/types";
-import {
-	FACTORY_DROID_MODEL_META,
-	type FactoryDroidModelInput,
-	factoryDroidRegionalLimits,
-	resolveFactoryDroidRotation,
-} from "@oh-my-pi/pi-catalog/discovery";
 import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import {
 	FACTORY_DROID_CLIENT_VERSION,
@@ -52,7 +52,8 @@ import { streamAnthropic, streamOpenAICompletions, streamOpenAIResponses } from 
  *   prompt without changing its contents. A historical plugin-without-prefix
  *   403 is not evidence that the same gate remains active today.
  * - `x-api-provider` selects the upstream router from the model's registry
- *   rotation list (first entry pinned).
+ *   rotation list (first entry pinned); the registry is KDL
+ *   (`rules/providers/factory-droid.kdl`, read through `compat/factory-droid`).
  */
 
 /** Droid identity sentence prepended to the system channel. */
@@ -84,16 +85,16 @@ export interface FactoryDroidOptions extends StreamOptions {
 }
 
 /**
- * Default upstream from the discovered rotation. Routing comes from the static
- * table or the spec itself, never from `model.headers`: the shared model cache
- * strips headers from persisted specs, so header-carried routing would vanish
- * on cached loads, while `factoryDroidApiProviders` survives.
+ * Default upstream from the discovered rotation. Routing comes from the KDL
+ * registry or the spec itself, never from `model.headers`: the shared model
+ * cache strips headers from persisted specs, so header-carried routing would
+ * vanish on cached loads, while `factoryDroidApiProviders` survives.
  */
 function defaultUpstream(
 	model: Model<"factory-droid-agent">,
-	meta: FactoryDroidModelInput | undefined,
+	registry: FactoryDroidModelPolicy | undefined,
 ): string | undefined {
-	return (model.factoryDroidApiProviders ?? meta?.apiProviders ?? ["fireworks"])[0];
+	return (model.factoryDroidApiProviders ?? registry?.rotation ?? ["fireworks"])[0];
 }
 
 function requireUpstream(upstream: string | undefined): string {
@@ -119,7 +120,7 @@ interface AccountScope {
  */
 function scopeToAccount(
 	model: Model<"factory-droid-agent">,
-	meta: FactoryDroidModelInput | undefined,
+	registry: FactoryDroidModelPolicy | undefined,
 	wire: FactoryDroidWire,
 	identity: OAuthRequestIdentity | undefined,
 	token: string,
@@ -127,7 +128,7 @@ function scopeToAccount(
 	if (!identity) {
 		return {
 			model,
-			upstream: requireUpstream(defaultUpstream(model, meta)),
+			upstream: requireUpstream(defaultUpstream(model, registry)),
 			orgId: factoryDroidOrgIdFromToken(token) ?? model.factoryDroidOrgId,
 			baseUrl: model.baseUrl || factoryDroidWireBaseUrl(wire, undefined),
 		};
@@ -138,15 +139,17 @@ function scopeToAccount(
 		model.baseUrl === factoryDroidWireBaseUrl(wire, "global") ||
 		model.baseUrl === factoryDroidWireBaseUrl(wire, "eu");
 	const baseUrl = defaultEndpoint ? factoryDroidWireBaseUrl(wire, identity.region) : model.baseUrl;
-	if (!meta) return { model, upstream: requireUpstream(defaultUpstream(model, meta)), orgId: identity.orgId, baseUrl };
+	if (!registry) {
+		return { model, upstream: requireUpstream(defaultUpstream(model, registry)), orgId: identity.orgId, baseUrl };
+	}
 
 	const inferenceRegion = resolveFactoryDroidInferenceRegion(identity);
-	const eligible = resolveFactoryDroidRotation(meta, inferenceRegion);
+	const eligible = resolveFactoryDroidRotation(registry, inferenceRegion);
 	const upstream = requireUpstream(
 		(model.factoryDroidApiProviders ?? eligible).find(provider => eligible.some(candidate => candidate === provider)),
 	);
-	const limits = factoryDroidRegionalLimits(meta, inferenceRegion);
-	if (model.contextWindow != null && limits.contextWindow < model.contextWindow) {
+	const limits = factoryDroidRegionalLimits(registry, inferenceRegion);
+	if (model.contextWindow != null && limits.contextWindow != null && limits.contextWindow < model.contextWindow) {
 		// No authoritative count exists for this exact request: prior-turn usage
 		// cannot prove the appended history fits, and tokenization belongs to the
 		// caller's context-management layer.
@@ -159,7 +162,8 @@ function scopeToAccount(
 	// Only native limits change: custom endpoints, policy overrides, routing
 	// constraints and credit metadata remain caller-owned.
 	const contextWindow = model.contextWindow ?? limits.contextWindow;
-	const maxTokens = Math.min(model.maxTokens ?? limits.maxTokens, limits.maxTokens);
+	const maxTokens =
+		limits.maxTokens == null ? model.maxTokens : Math.min(model.maxTokens ?? limits.maxTokens, limits.maxTokens);
 	const scoped =
 		contextWindow === model.contextWindow && maxTokens === model.maxTokens
 			? model
@@ -224,11 +228,14 @@ function resolveRoute(
 /** The attempt's effort: undefined when reasoning is off. */
 function selectEffort(
 	model: Model<"factory-droid-agent">,
-	meta: FactoryDroidModelInput | undefined,
+	registry: FactoryDroidModelPolicy | undefined,
 	options: FactoryDroidOptions | undefined,
 ): { effort: Effort | undefined; disabled: boolean } {
 	if (options?.disableReasoning || options?.forceReasoningOff) return { effort: undefined, disabled: true };
-	const selected = options?.reasoning ?? meta?.defaultReasoningEffort ?? model.thinking?.defaultLevel;
+	// Without a caller effort the native default applies, which can be thinking off.
+	// Untyped callers may still pass the native `off`/`none` rungs.
+	const selected: string | undefined =
+		options?.reasoning ?? (registry?.defaultReasoningOff ? "off" : model.thinking?.defaultLevel);
 	return selected === "none" || selected === "off"
 		? { effort: undefined, disabled: true }
 		: { effort: selected as Effort | undefined, disabled: false };
@@ -536,9 +543,9 @@ export const streamFactoryDroid: StreamFunction<"factory-droid-agent"> = (
 					"No Factory Droid credentials found. Run `/login factory-droid` (WorkOS device code).",
 				);
 			}
-			const meta = FACTORY_DROID_MODEL_META[model.requestModelId ?? model.id];
-			const wire = meta?.wire ?? "openai-completions";
-			const scope = scopeToAccount(model, meta, wire, options?.oauthIdentity, harnessToken);
+			const registry = resolveFactoryDroidPolicy(model);
+			const wire = registry?.wire ?? "openai-completions";
+			const scope = scopeToAccount(model, registry, wire, options?.oauthIdentity, harnessToken);
 			// The proxy expects v4-shaped ids; the OMP session id is a UUIDv7-style
 			// timestamp id, so it maps through a deterministic v4 shape that stays
 			// stable per session.
@@ -550,7 +557,7 @@ export const streamFactoryDroid: StreamFunction<"factory-droid-agent"> = (
 				model: scope.model,
 				route,
 				baseUrl: scope.baseUrl,
-				...selectEffort(scope.model, meta, options),
+				...selectEffort(scope.model, registry, options),
 				sessionUuid,
 				context: {
 					...context,

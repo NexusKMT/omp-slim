@@ -595,8 +595,9 @@ export interface CompiledAuth {
  * - `always`: every regeneration; same-id upstream/discovery rows win dedup.
  * - `fallback`: only when authoritative catalog discovery did not succeed.
  * - `empty`: only when no other source produced a row for the provider.
+ * - `never`: runtime-only; the provider's model manager is the sole consumer.
  */
-export type SeedBundlePolicy = "always" | "fallback" | "empty";
+export type SeedBundlePolicy = "always" | "fallback" | "empty" | "never";
 
 /** Catalog-generation discovery settings (`discovery` node in `providers/<id>.kdl`). */
 export interface CompiledProviderDiscovery {

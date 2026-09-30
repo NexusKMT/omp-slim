@@ -1,7 +1,8 @@
 import { mock } from "bun:test";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { buildFactoryDroidModel, FACTORY_DROID_MODEL_META } from "@oh-my-pi/pi-catalog/discovery";
+import { type FactoryDroidRegistryModel, factoryDroidRegistry } from "@oh-my-pi/pi-catalog/compat/factory-droid";
+import { buildFactoryDroidModel } from "@oh-my-pi/pi-catalog/discovery";
 
 /** One captured request: URL, lowercased headers, and the parsed JSON body. */
 export interface CapturedRequest {
@@ -130,11 +131,16 @@ export function finishChunk(reason: string): string {
 	});
 }
 
+/** A registry model from `rules/providers/factory-droid.kdl`. */
+export function factoryRegistryModel(id: string): FactoryDroidRegistryModel {
+	const entry = factoryDroidRegistry().find(model => model.spec.id === id);
+	if (!entry) throw new Error(`Unknown Factory Droid model: ${id}`);
+	return entry;
+}
+
 /** A Factory model built from its native registry row, optionally pinned to a live rotation. */
 export function factoryModel(id: string, rotation?: readonly string[]): Model<"factory-droid-agent"> {
-	const meta = FACTORY_DROID_MODEL_META[id];
-	if (!meta) throw new Error(`Unknown Factory Droid model: ${id}`);
-	return buildModel(buildFactoryDroidModel(meta, { apiProviders: rotation }));
+	return buildModel(buildFactoryDroidModel(factoryRegistryModel(id), { apiProviders: rotation }));
 }
 
 /** A stored Factory completions assistant turn; tool calls make it a `toolUse` stop. */

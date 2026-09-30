@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { buildFactoryDroidModel, FACTORY_DROID_MODEL_META } from "@oh-my-pi/pi-catalog/discovery";
+import { buildFactoryDroidModel } from "@oh-my-pi/pi-catalog/discovery";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { streamFactoryDroid } from "../src/providers/factory-droid";
 import { streamSimple } from "../src/stream";
@@ -11,6 +11,7 @@ import {
 	captureFetch,
 	completionsChunks,
 	factoryModel,
+	factoryRegistryModel,
 	gemini,
 	geminiChunks,
 	gptTerra,
@@ -24,7 +25,7 @@ import {
 const DROID_IDENTITY = "You are Droid, an AI software engineering agent built by Factory.";
 
 /** GLM-5.2 is the one model whose EU inference limits are narrower than global. */
-const glm52 = FACTORY_DROID_MODEL_META["glm-5.2"]!;
+const glm52 = factoryRegistryModel("glm-5.2");
 
 describe("Factory Droid completions wire (Droid Core)", () => {
 	it.each(["global", "us"] as const)(
@@ -131,11 +132,11 @@ describe("Factory Droid completions wire (Droid Core)", () => {
 			},
 		).result();
 		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toContain(`${glm52.euContextWindow}-token context window`);
+		expect(result.errorMessage).toContain(`${glm52.policy.euLimits.contextWindow}-token context window`);
 		expect(result.errorMessage).toContain("Rediscover and select the regional model");
 		expect(captured.map(request => request.url)).toEqual(["https://api.factory.ai/api/llm/o/v1/chat/completions"]);
-		expect(captured[0].body.max_tokens).toBe(glm52.maxTokens);
-		expect(model.contextWindow).toBe(glm52.contextWindow);
+		expect(captured[0].body.max_tokens).toBe(glm52.policy.limits.maxTokens);
+		expect(model.contextWindow).toBe(glm52.policy.limits.contextWindow);
 	});
 
 	it.each([undefined, 1024])(
@@ -151,7 +152,7 @@ describe("Factory Droid completions wire (Droid Core)", () => {
 			);
 			// The caller already selected a context budget safe for either region;
 			// the global output ceiling must still be resolved per attempt.
-			model.contextWindow = glm52.euContextWindow!;
+			model.contextWindow = glm52.policy.euLimits.contextWindow!;
 			model.baseUrl = "https://gateway.example/factory/v1";
 			const captured: CapturedRequest[] = [];
 			const result = await streamSimple(
@@ -165,9 +166,9 @@ describe("Factory Droid completions wire (Droid Core)", () => {
 				},
 			).result();
 			expect(result.stopReason).toBe("stop");
-			expect(captured[0].body.max_tokens).toBe(maxTokens ?? glm52.euMaxTokens);
+			expect(captured[0].body.max_tokens).toBe(maxTokens ?? glm52.policy.euLimits.maxTokens);
 			expect(captured[0].url).toBe("https://gateway.example/factory/v1/chat/completions");
-			expect(model.maxTokens).toBe(glm52.maxTokens);
+			expect(model.maxTokens).toBe(glm52.policy.limits.maxTokens);
 		},
 	);
 

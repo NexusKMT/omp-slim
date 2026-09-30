@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { FACTORY_DROID_MODELS } from "@oh-my-pi/pi-catalog/discovery";
+import { quotaTierFor } from "@oh-my-pi/pi-catalog/compat/behavior";
+import { factoryDroidRegistry } from "@oh-my-pi/pi-catalog/compat/factory-droid";
 import type { UsageFetchContext } from "../src/usage";
 import {
 	factoryDroidRankingStrategy,
@@ -8,9 +9,9 @@ import {
 } from "../src/usage/factory-droid";
 
 function modelInPool(pool: "core" | "standard"): string {
-	const model = FACTORY_DROID_MODELS.find(candidate => candidate.billingPool === pool);
+	const model = factoryDroidRegistry().find(({ spec }) => quotaTierFor("factory-droid", spec.id) === pool);
 	if (!model) throw new Error(`no ${pool} model in the Factory registry`);
-	return model.id;
+	return model.spec.id;
 }
 
 /** Live shape captured from GET /api/billing/limits (droid 0.189.0 account). */

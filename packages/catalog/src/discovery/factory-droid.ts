@@ -1,36 +1,34 @@
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { resolveModelPolicy } from "../compat/resolve";
+import {
+	type FactoryDroidRegistryModel,
+	factoryDroidRegionalLimits,
+	factoryDroidRegistry,
+	resolveFactoryDroidRotation,
+} from "../compat/factory-droid";
+import { hasModelScopedEffortLadder, resolveModelPolicy } from "../compat/resolve";
 import type { RequestPolicy } from "../compat/types";
-import { type Effort, THINKING_EFFORTS } from "../effort";
-import { getBundledModel } from "../models";
+import { getBundledModel, isGeneratedProvider } from "../models";
 import type { FetchImpl, ModelSpec, ThinkingConfig, ThinkingControlMode } from "../types";
 import {
 	type AccountScope,
+	type FactoryDroidWire,
 	factoryDroidApiBaseUrl,
 	factoryDroidClientHeaders,
 	factoryDroidWireBaseUrl,
 	resolveFactoryDroidInferenceRegion,
 } from "../wire/factory-droid";
-import {
-	FACTORY_DROID_MODELS,
-	type FactoryDroidModelInput,
-	factoryDroidRegionalLimits,
-	resolveFactoryDroidRotation,
-} from "./factory-droid-models";
 
 /**
  * Factory Droid (Droid Core + Standard Credits subscription) — direct HTTP
  * integration.
  *
- * The model registry is bundled statically (see `./factory-droid-models.ts`):
- * Factory has no model-listing endpoint, so first-party clients ship that
- * table and narrow it live with Statsig feature flags and the org model
- * policy. This module holds the discovery logic: policy parsing, availability
- * filtering, routing, and building model specs from the registry.
+ * The model registry is KDL (`rules/providers/factory-droid.kdl`, read through
+ * `compat/factory-droid.ts`): Factory has no model-listing endpoint, so
+ * first-party clients ship the roster and narrow it live with Statsig feature
+ * flags and the org model policy. This module holds the discovery logic:
+ * policy parsing, availability filtering, routing, and building model specs
+ * from the registry.
  */
-
-/** User-facing effort rungs, derived from the shared thinking ladder. */
-const SUPPORTED_EFFORTS = new Set<string>(THINKING_EFFORTS);
 
 /** Org policy subset from `/api/organization/managed-settings` that gates models. */
 interface FactoryModelPolicy {
@@ -48,7 +46,10 @@ interface FactoryModelPolicy {
 }
 
 function canonicalPolicyId(id: string): string {
-	return FACTORY_DROID_MODELS.find(model => model.id === id || model.policyAliases?.includes(id))?.id ?? id;
+	return (
+		factoryDroidRegistry().find(({ spec, policy }) => spec.id === id || policy.policyAliases.includes(id))?.spec.id ??
+		id
+	);
 }
 
 function readModelPolicy(body: unknown): FactoryModelPolicy | null {
@@ -103,22 +104,23 @@ function readProviderRouting(body: Record<string, unknown>): FactoryProviderRout
 
 /** Mirrors the client-side model gating: feature flags first, then org model policy. */
 function isModelAvailable(
-	model: FactoryDroidModelInput,
+	{ spec, policy: registry }: FactoryDroidRegistryModel,
 	flags: Record<string, boolean>,
 	policy: FactoryModelPolicy | null,
 	region: string | undefined,
 ): boolean {
-	if (resolveFactoryDroidRotation(model, region).length === 0) return false;
-	if (model.featureFlag !== undefined && flags[model.featureFlag] !== true) return false;
-	if (model.deprecationFlag !== undefined && flags[model.deprecationFlag] === true) return false;
-	// Fast tiers are withdrawn as a class, not by id: `baseVariant` is what
+	const gates = registry.entitlement;
+	if (resolveFactoryDroidRotation(registry, region).length === 0) return false;
+	if (gates.featureFlag !== undefined && flags[gates.featureFlag] !== true) return false;
+	if (gates.deprecationFlag !== undefined && flags[gates.deprecationFlag] === true) return false;
+	// Fast tiers are withdrawn as a class, not by id: `base-variant` is what
 	// marks an entry as one, and only an explicit `false` hides it.
-	if (model.baseVariant !== undefined && policy?.isFastModelsAllowed === false) return false;
-	if (policy?.requireExplicitOptInModelIds?.includes(model.id) || (!policy && model.requiresExplicitOptIn))
+	if (gates.baseVariant !== undefined && policy?.isFastModelsAllowed === false) return false;
+	if (policy?.requireExplicitOptInModelIds?.includes(spec.id) || (!policy && gates.requiresExplicitOptIn))
 		return false;
 	const allowlist = policy?.allowAllFactoryModels === false || Boolean(policy?.allowedModelIds?.length);
-	if (policy?.blockedModelIds?.includes(model.id)) return false;
-	if (allowlist && !policy?.allowedModelIds?.includes(model.id)) return false;
+	if (policy?.blockedModelIds?.includes(spec.id)) return false;
+	if (allowlist && !policy?.allowedModelIds?.includes(spec.id)) return false;
 	return true;
 }
 
@@ -135,19 +137,21 @@ export interface FactoryDroidModelDiscoveryOptions extends AccountScope {
  */
 export function factoryDroidSeedModels(scope: AccountScope): ModelSpec<"factory-droid-agent">[] {
 	const inferenceRegion = resolveFactoryDroidInferenceRegion(scope);
-	return FACTORY_DROID_MODELS.filter(model => isModelAvailable(model, {}, null, inferenceRegion)).map(model =>
-		buildFactoryDroidModel(model, {
-			region: scope.region,
-			inferenceRegion,
-			orgId: scope.orgId,
-			apiProviders: resolveFactoryDroidRotation(model, inferenceRegion),
-		}),
-	);
+	return factoryDroidRegistry()
+		.filter(model => isModelAvailable(model, {}, null, inferenceRegion))
+		.map(model =>
+			buildFactoryDroidModel(model, {
+				region: scope.region,
+				inferenceRegion,
+				orgId: scope.orgId,
+				apiProviders: resolveFactoryDroidRotation(model.policy, inferenceRegion),
+			}),
+		);
 }
 
 /**
  * Availability filter, not a catalog: Factory has no model-listing endpoint,
- * so the bundled registry is narrowed live with `GET /api/feature-flags`
+ * so the KDL registry is narrowed live with `GET /api/feature-flags`
  * (Statsig gates) and the org model policy in
  * `GET /api/organization/managed-settings`. Returns null when no credential
  * resolves or the flags fetch fails — callers keep an offline snapshot, not
@@ -183,10 +187,12 @@ export async function fetchFactoryDroidModels(
 	} catch {
 		return null;
 	}
-	return FACTORY_DROID_MODELS.flatMap(model => {
+	return factoryDroidRegistry().flatMap(model => {
 		if (!isModelAvailable(model, flags, policy, servingRegion)) return [];
-		const routed = routing?.models?.[model.id] ?? routing?.defaults?.[model.routingFamily];
-		const rotation = resolveRotation(model, routed, servingRegion, routing?.blockedProviders?.[model.id]);
+		const { id } = model.spec;
+		const family = model.policy.routingFamily;
+		const routed = routing?.models?.[id] ?? (family === undefined ? undefined : routing?.defaults?.[family]);
+		const rotation = resolveRotation(model, routed, servingRegion, routing?.blockedProviders?.[id]);
 		if (rotation.length === 0) return [];
 		const spec = buildFactoryDroidModel(model, {
 			region: options.region,
@@ -205,12 +211,12 @@ export async function fetchFactoryDroidModels(
  * An explicitly configured empty/disallowed rotation never widens to defaults.
  */
 function resolveRotation(
-	input: FactoryDroidModelInput,
+	model: FactoryDroidRegistryModel,
 	routed: readonly string[] | undefined,
 	region: string | undefined,
 	blocked: readonly string[] = [],
 ): readonly string[] {
-	const eligible = resolveFactoryDroidRotation(input, region).filter(provider => !blocked.includes(provider));
+	const eligible = resolveFactoryDroidRotation(model.policy, region).filter(provider => !blocked.includes(provider));
 	return routed === undefined
 		? eligible
 		: routed.filter(provider => eligible.some(candidate => candidate === provider));
@@ -222,27 +228,37 @@ export interface FactoryDroidModelBuildOptions extends AccountScope {
 }
 
 export function buildFactoryDroidModel(
-	input: FactoryDroidModelInput,
+	{ spec, policy }: FactoryDroidRegistryModel,
 	options: FactoryDroidModelBuildOptions = {},
 ): ModelSpec<"factory-droid-agent"> {
 	// Runtime-unsafe lookup by design: a models.json regen can drop a referenced
-	// id, and a missing reference must degrade to zero cost, not break discovery.
-	const reference = input.priceRef ? getBundledModel(input.priceRef.provider, input.priceRef.modelId) : undefined;
+	// id, and a missing reference must keep the seed's zero cost, not break discovery.
+	const priceRef = policy.listPriceFrom;
+	const reference =
+		priceRef && isGeneratedProvider(priceRef.provider)
+			? getBundledModel(priceRef.provider, priceRef.modelId)
+			: undefined;
 	const model: ModelSpec<"factory-droid-agent"> = {
-		id: input.id,
-		name: input.name,
+		id: spec.id,
+		name: spec.name,
 		api: "factory-droid-agent",
 		provider: "factory-droid",
-		baseUrl: factoryDroidWireBaseUrl(input.wire, options.region),
+		baseUrl: factoryDroidWireBaseUrl(policy.wire, options.region),
 		reasoning: true,
-		input: input.noImageSupport ? ["text"] : ["text", "image"],
-		cost: reference?.cost ? { ...reference.cost } : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		...factoryDroidRegionalLimits(input, resolveFactoryDroidInferenceRegion(options)),
+		input: [...spec.input],
+		cost: { ...(reference?.cost ?? spec.cost) },
+		...factoryDroidRegionalLimits(policy, resolveFactoryDroidInferenceRegion(options)),
 		...(options.orgId ? { factoryDroidOrgId: options.orgId } : {}),
-		...(input.credits ? { factoryDroidCredits: input.credits.input } : {}),
+		...(policy.creditRates ? { factoryDroidCredits: policy.creditRates.input } : {}),
 		...(options.apiProviders?.length ? { factoryDroidApiProviders: [...options.apiProviders] } : {}),
 	};
-	model.thinking = buildFactoryDroidThinking(input, resolveModelPolicy(model).request.anthropicThinking);
+	const resolved = resolveModelPolicy(model);
+	// Only a reviewed per-model ladder counts: the generic fallback ladder is
+	// not a native effort surface.
+	model.thinking =
+		resolved.thinking && hasModelScopedEffortLadder(model)
+			? buildFactoryDroidThinking(resolved.thinking, policy.wire, resolved.request.anthropicThinking)
+			: undefined;
 	model.reasoning = model.thinking !== undefined;
 	return model;
 }
@@ -251,20 +267,17 @@ export function buildFactoryDroidModel(
  * The thinking control mode rides the wire family, not the model: Anthropic
  * variants use per-model adaptive vs budget thinking, Gemini uses
  * thinkingLevel, and the completions/responses families take the generic
- * effort field.
+ * effort field. The ladder, default and off-rung come from the KDL registry.
  */
 function buildFactoryDroidThinking(
-	input: FactoryDroidModelInput,
+	ladder: ThinkingConfig,
+	wire: FactoryDroidWire,
 	thinkingStyle: RequestPolicy["anthropicThinking"],
-): ThinkingConfig | undefined {
-	const available = input.supportedReasoningEfforts ?? [];
-	const efforts = available.filter((effort): effort is Effort => SUPPORTED_EFFORTS.has(effort));
-	if (efforts.length === 0) return undefined;
-	const supportsOff = available.includes("off") || available.includes("none");
+): ThinkingConfig {
 	const mode: ThinkingControlMode =
-		input.wire === "google-generate"
+		wire === "google-generate"
 			? "google-level"
-			: input.wire === "anthropic-messages"
+			: wire === "anthropic-messages"
 				? thinkingStyle === "budget-interleaved"
 					? "budget"
 					: thinkingStyle === "budget-effort"
@@ -273,13 +286,11 @@ function buildFactoryDroidThinking(
 				: "effort";
 	return {
 		mode,
-		efforts,
+		efforts: ladder.efforts,
 		// Only summarized adaptive thinking carries `display` natively; every other
 		// Messages style must not send it.
-		...(input.wire === "anthropic-messages" ? { supportsDisplay: thinkingStyle === "adaptive-summarized" } : {}),
-		requiresEffort: !supportsOff,
-		...(input.defaultReasoningEffort && SUPPORTED_EFFORTS.has(input.defaultReasoningEffort)
-			? { defaultLevel: input.defaultReasoningEffort as Effort }
-			: undefined),
+		...(wire === "anthropic-messages" ? { supportsDisplay: thinkingStyle === "adaptive-summarized" } : {}),
+		requiresEffort: ladder.requiresEffort === true,
+		...(ladder.defaultLevel ? { defaultLevel: ladder.defaultLevel } : undefined),
 	};
 }

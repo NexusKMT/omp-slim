@@ -1,4 +1,4 @@
-import { factoryDroidPoolForModel } from "@oh-my-pi/pi-catalog/discovery";
+import { quotaTierFor } from "@oh-my-pi/pi-catalog/compat/behavior";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 import { toNumber } from "@oh-my-pi/pi-catalog/utils";
 import { factoryDroidApiBaseUrl, factoryDroidClientHeaders } from "@oh-my-pi/pi-catalog/wire/factory-droid";
@@ -184,7 +184,8 @@ export const factoryDroidUsageProvider: UsageProvider = {
 
 /** Limits a model's pool draws from; unknown models see every quota window. */
 function scopeFactoryDroidLimits(report: UsageReport, context?: CredentialRankingContext): UsageLimit[] {
-	const pool = context?.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+	// The billing pool is the `quota-tiers provider="factory-droid"` KDL rule.
+	const pool = context?.modelId ? quotaTierFor("factory-droid", context.modelId) : undefined;
 	if (!pool) return report.limits.filter(limit => limit.id !== "factory-droid:extra-balance");
 	return report.limits.filter(limit => limit.id.startsWith(`factory-droid:${pool}:`));
 }
@@ -200,12 +201,12 @@ export const factoryDroidRankingStrategy: CredentialRankingStrategy = {
 	},
 	scopeLimits: scopeFactoryDroidLimits,
 	blockScope(context) {
-		const pool = context?.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+		const pool = context?.modelId ? quotaTierFor("factory-droid", context.modelId) : undefined;
 		return pool ? `pool:${pool}` : "pool:unknown";
 	},
 	blockScopes(context) {
 		if (!context) return ["pool:core", "pool:standard", "pool:unknown"];
-		const pool = context.modelId ? factoryDroidPoolForModel(context.modelId) : undefined;
+		const pool = context.modelId ? quotaTierFor("factory-droid", context.modelId) : undefined;
 		return pool ? [`pool:${pool}`] : ["pool:unknown"];
 	},
 	healableBlockScopes(report) {

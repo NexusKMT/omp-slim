@@ -11,6 +11,7 @@
  */
 import type { Effort } from "../effort";
 import { MODEL_KINDS, type ThinkingControlMode } from "../types";
+import { FACTORY_DROID_UPSTREAMS } from "../wire/factory-droid";
 
 /** Value shape a directive accepts (see `rules/README.md`). */
 export type AxisShape = "scalar" | "array" | "object";
@@ -37,6 +38,8 @@ export interface AxisDef {
 	 * that compile to camelCase resolved keys.
 	 */
 	verbatimKeys?: true;
+	/** Array axes only: a bare directive assigns an empty list (an explicit "none"). */
+	emptyArray?: true;
 }
 
 const OAI = ["openai", "openai-responses"] as const;
@@ -419,6 +422,68 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	priority: { key: "priority", set: "catalog", shape: "scalar" },
 	"service-tier-cost": { key: "serviceTierCost", set: "catalog", shape: "object" },
 	"time-based-cost": { key: "timeBased", set: "catalog", shape: "object" },
+
+	// ── catalog: routed-subscription registry ──
+	// A gateway whose proxy fans one model out to several upstreams (Factory
+	// Droid). Consumed through `./factory-droid`; `api-routes` picks the wire
+	// and `quota-tiers` the billing pool.
+	/** Ordered upstream rotation; the first entry is the default `x-api-provider`. */
+	"upstream-rotation": { key: "upstreamRotation", set: "catalog", shape: "array", values: FACTORY_DROID_UPSTREAMS },
+	/**
+	 * Upstreams eligible to serve one inference region. The provider-wide rule
+	 * is the upstream serving table; a model rule replaces it (the native
+	 * region override), and a bare directive means the region never serves it.
+	 */
+	"region-upstreams-global": {
+		key: "regionUpstreamsGlobal",
+		set: "catalog",
+		shape: "array",
+		values: FACTORY_DROID_UPSTREAMS,
+		emptyArray: true,
+	},
+	"region-upstreams-us": {
+		key: "regionUpstreamsUs",
+		set: "catalog",
+		shape: "array",
+		values: FACTORY_DROID_UPSTREAMS,
+		emptyArray: true,
+	},
+	"region-upstreams-eu": {
+		key: "regionUpstreamsEu",
+		set: "catalog",
+		shape: "array",
+		values: FACTORY_DROID_UPSTREAMS,
+		emptyArray: true,
+	},
+	/** EU inference limits (`context-window`, `max-tokens`) where the region narrows the default. */
+	"region-limits-eu": { key: "regionLimitsEu", set: "catalog", shape: "object" },
+	/**
+	 * Subscription credit rates: `input` is the per-token credit weight shown
+	 * as the model's multiplier; `output` and `cache-read` multiply it.
+	 */
+	"credit-rates": { key: "creditRates", set: "catalog", shape: "object" },
+	/**
+	 * List price borrowed from a bundled catalog row: provider id, then the
+	 * row id when it differs from the model's own. Absent means no list price.
+	 */
+	"list-price-from": { key: "listPriceFrom", set: "catalog", shape: "array" },
+	/** Provider family whose live routing defaults apply to the model. */
+	"routing-family": {
+		key: "routingFamily",
+		set: "catalog",
+		shape: "scalar",
+		values: ["anthropic", "openai", "google", "factory", "xai"],
+	},
+	/** Other ids organization policy may use for the model. */
+	"policy-aliases": { key: "policyAliases", set: "catalog", shape: "array" },
+	/**
+	 * Account gates: `feature-flag` must be on to list the model,
+	 * `deprecation-flag` hides it once on, `requires-explicit-opt-in` hides it
+	 * without an org policy, and `base-variant` marks a fast tier of that model.
+	 */
+	entitlement: { key: "entitlement", set: "catalog", shape: "object" },
+	/** The native default when the caller picks no effort is thinking off. */
+	"default-reasoning-off": { key: "defaultReasoningOff", set: "catalog", shape: "scalar", values: [true, false] },
 };
 
 /** Records applicable to each API family; used by `resolve.ts` when applying wire axes. */

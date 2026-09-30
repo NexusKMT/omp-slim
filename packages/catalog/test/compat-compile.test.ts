@@ -61,6 +61,16 @@ describe("compat compiler grammar", () => {
 		});
 	});
 
+	test("a bare empty-array axis compiles to an explicit empty list; other arrays still need values", () => {
+		const compiled = compileCascade([
+			{ file: "providers/test.kdl", text: 'provider "p" {\n\tregion-upstreams-eu\n}' },
+		]);
+		expect(compiled.rules[0]).toMatchObject({ providers: ["p"], catalog: { regionUpstreamsEu: [] } });
+		expect(() =>
+			compileCascade([{ file: "providers/test.kdl", text: 'provider "p" {\n\tupstream-rotation\n}' }]),
+		).toThrow(/directive `upstream-rotation` has a malformed value/);
+	});
+
 	test("root on-api rejects catalog-entry directives it does not own", () => {
 		expect(() =>
 			compileCascade([{ file: "providers/test.kdl", text: 'on-api "cursor-agent" {\n\tdefault-model "m"\n}' }]),
