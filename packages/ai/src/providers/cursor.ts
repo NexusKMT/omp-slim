@@ -1774,8 +1774,6 @@ function markCursorExecResolved(block: CursorExecResolvedCarrier): void {
 
 export interface UsageState {
 	sawTokenDelta: boolean;
-	/** `TurnEndedUpdate` supplied exact final usage, superseding token deltas. */
-	sawAuthoritativeUsage?: boolean;
 }
 
 /** Exported for tests: drives one Cursor server message through the stream (exec waits mark the stream busy). */
@@ -5308,7 +5306,7 @@ export function processInteractionUpdate(
 		}
 	} else if (updateCase === "turnEnded") {
 		output.stopReason = "stop";
-		if (applyTurnEndedUsage(output.usage, update.message.value)) usageState.sawAuthoritativeUsage = true;
+		applyTurnEndedUsage(output.usage, update.message.value);
 		if (
 			classifyModel("cursor", output.model).family === "k3" &&
 			!output.content.some(item => item.type === "thinking" && item.thinking.length > 0)
@@ -5318,7 +5316,7 @@ export function processInteractionUpdate(
 				{ model: output.model, messageTimestamp: output.timestamp },
 			);
 		}
-	} else if (updateCase === "tokenDelta" && !usageState.sawAuthoritativeUsage) {
+	} else if (updateCase === "tokenDelta") {
 		const tokenDelta = update.message.value;
 		usageState.sawTokenDelta = true;
 		output.usage.output += tokenDelta.tokens || 0;
@@ -5334,27 +5332,20 @@ export function processInteractionUpdate(
  * tokens, so every bucket the final frame reports replaces the streamed
  * estimate. Unreported counters decode as `undefined`; a frame that reports
  * nothing at all leaves the streamed totals untouched.
- *
- * `inputTokens` is the whole prompt; cache hits and writes are subsets of it.
- * `usage.input` is fresh input only, so both are subtracted (as the native CLI
- * does) or every cached token is counted and billed twice.
- *
- * Returns whether the frame carried authoritative counters.
  */
-function applyTurnEndedUsage(usage: Usage, update: TurnEndedUpdate): boolean {
+function applyTurnEndedUsage(usage: Usage, update: TurnEndedUpdate): void {
 	const input = Number(update.inputTokens ?? 0n);
 	const output = Number(update.outputTokens ?? 0n);
 	const cacheRead = Number(update.cacheReadTokens ?? 0n);
 	const cacheWrite = Number(update.cacheWriteTokens ?? 0n);
 	const reasoning = Number(update.reasoningTokens ?? 0n);
-	if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0) return false;
-	usage.cacheRead = cacheRead;
-	usage.cacheWrite = cacheWrite;
-	usage.input = Math.max(input - cacheRead - cacheWrite, 0);
+	if (input <= 0 && output <= 0 && cacheRead <= 0 && cacheWrite <= 0) return;
+	if (input > 0) usage.input = input;
 	if (output > 0) usage.output = output;
+	if (cacheRead > 0) usage.cacheRead = cacheRead;
+	if (cacheWrite > 0) usage.cacheWrite = cacheWrite;
 	if (reasoning > 0) usage.reasoningTokens = reasoning;
 	usage.totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
-	return true;
 }
 
 /**
