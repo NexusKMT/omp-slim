@@ -98,9 +98,9 @@ export function resolveModelCacheProviderId(providerId: string, options: ModelCa
 			// Cursor catalogs are entitlement-, admin-policy-, and privacy-mode
 			// scoped. A credential switch must never reuse another account's
 			// authoritative model rows.
-			// v3 invalidates zero-price rows written before discovery joined
-			// Cursor's first-party pricing document; v4 keys the scope on the
-			// token's stable account subject instead of the rotating JWT.
+			// v3 invalidates zero-price rows written before rich lanes were priced
+			// from the KDL rate card; v4 keys the scope on the token's stable
+			// account subject instead of the rotating JWT.
 			const baseUrl = (options.baseUrl ?? CURSOR_DEFAULT_BASE_URL).replace(/\/+$/, "");
 			const apiKey = options.apiKey ?? "";
 			const scope = `${cursorCredentialSubject(apiKey) ?? apiKey}\u0000${baseUrl}`;

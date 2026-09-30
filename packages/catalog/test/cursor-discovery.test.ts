@@ -32,6 +32,7 @@ import { create, fromBinary, toBinary } from "../src/discovery/protobuf";
 import { collapseBuiltVariants } from "../src/compat/collapse";
 import { resolveProviderModels } from "../src/model-manager";
 import { cursorModelManagerOptions } from "../src/provider-models/special";
+import { getModelPricingStatus } from "../src/models";
 import type { ModelSpec } from "../src/types";
 
 const FIXTURE_MODEL_IDS = [
@@ -371,15 +372,9 @@ describe("fetchCursorUsableModels", () => {
 			"/agent.v1.AgentService/GetDefaultModelForCli": toBinary(GetDefaultModelForCliResponseSchema, providerDefault),
 		});
 
-		const pricing = [
-			"| Model | Provider | Input | Cache write | Cache read | Output | Notes |",
-			"| --- | --- | --- | --- | --- | --- | --- |",
-			"| Claude 4.6 Opus | Anthropic | $5 | $6.25 | $0.5 | $25 | - |",
-		].join("\n");
 		const models = await fetchCursorUsableModels({
 			apiKey: "account-token",
 			baseUrl: richBaseUrl,
-			pricingUrl: `data:text/markdown,${encodeURIComponent(pricing)}`,
 			timeoutMs: 1_000,
 		});
 
@@ -471,7 +466,7 @@ describe("fetchCursorUsableModels", () => {
 		expect(rebuiltLane?.isProviderDefault).toBe(true);
 	});
 
-	it("prices rich variants from Cursor's live document and declared multipliers", async () => {
+	it("prices rich lanes from the KDL rate card and leaves uncovered lanes unpriced", async () => {
 		const fastDefinition = create(ModelParameterDefinitionSchema, {
 			id: "fast",
 			name: "Fast",
@@ -496,9 +491,13 @@ describe("fetchCursorUsableModels", () => {
 				parameterValues: [create(ModelParameterValueSchema, { id: "fast", value: String(fast) })],
 			});
 		const usable = create(GetUsableModelsResponseSchema, {
-			models: ["composer-2.5-fast", "composer-2.5", "claude-opus-4-8", "claude-opus-4-8-fast", "gpt-5.1"].map(
-				modelId => create(ModelDetailsSchema, { modelId }),
-			),
+			models: [
+				"composer-2.5-fast",
+				"composer-2.5",
+				"claude-opus-4-8-high",
+				"claude-opus-4-8-high-fast",
+				"gpt-5.1",
+			].map(modelId => create(ModelDetailsSchema, { modelId })),
 		});
 		const available = create(AvailableModelsResponseSchema, {
 			models: [
@@ -514,9 +513,9 @@ describe("fetchCursorUsableModels", () => {
 					name: "claude-opus-4-8",
 					clientDisplayName: "Claude Opus 4.8",
 					supportsAgent: true,
-					legacySlugs: ["claude-opus-4-8", "claude-opus-4-8-fast"],
+					legacySlugs: ["claude-opus-4-8-high", "claude-opus-4-8-high-fast"],
 					parameterDefinitions: [fastDefinition],
-					variants: [fastVariant("claude-opus-4-8", false), fastVariant("claude-opus-4-8-fast", true)],
+					variants: [fastVariant("claude-opus-4-8-high", false), fastVariant("claude-opus-4-8-high-fast", true)],
 				}),
 				create(AvailableModelsResponse_ModelDetailsSchema, {
 					name: "gpt-5.1",
@@ -525,13 +524,6 @@ describe("fetchCursorUsableModels", () => {
 				}),
 			],
 		});
-		const pricing = [
-			"| Notes | Output | Provider | Cache read | Model | Cache write | Input |",
-			"| --- | --- | --- | --- | --- | --- | --- |",
-			"| - | $2.5 | Cursor | $0.2 | Composer 2.5 | - | $0.5 |",
-			"| - | $15 | Cursor | $0.5 | Composer 2.5 (Fast) | - | $3 |",
-			"| - | $25 | Anthropic | $0.5 | [Claude 4.8 Opus](https://cursor.example/opus) | $6.25 | $5 |",
-		].join("\n");
 		const pricingBaseUrl = await startCursorDiscoveryRpcServer({
 			"/agent.v1.AgentService/GetUsableModels": toBinary(GetUsableModelsResponseSchema, usable),
 			"/aiserver.v1.AiService/AvailableModels": toBinary(AvailableModelsResponseSchema, available),
@@ -540,41 +532,33 @@ describe("fetchCursorUsableModels", () => {
 		const models = await fetchCursorUsableModels({
 			apiKey: "account-token",
 			baseUrl: pricingBaseUrl,
-			pricingUrl: `data:text/markdown,${encodeURIComponent(pricing)}`,
 			timeoutMs: 1_000,
 		});
 		const byId = new Map((models ?? []).map(model => [model.id, model]));
+		// Discovery and `buildModel` resolve the same card, so building a lane
+		// never moves its price.
+		const built = (id: string) => {
+			const spec = byId.get(id);
+			if (!spec) throw new Error(`missing lane ${id}`);
+			const model = buildModel(spec);
+			expect(model.cost).toEqual(spec.cost);
+			return model;
+		};
 
 		// The bare id is Standard even though Cursor lists the Fast variant first:
 		// naming lanes by variant order sent `composer-2.5` to the Fast route.
 		expect(byId.get("composer-2.5")?.cursorModelParameters).toEqual([{ id: "fast", value: "false" }]);
-		expect(byId.get("composer-2.5")?.cost).toEqual({
-			input: 0.5,
-			output: 2.5,
-			cacheRead: 0.2,
-			cacheWrite: 0,
-		});
-		expect(byId.get("composer-2.5-fast")?.cost).toEqual({
-			input: 3,
-			output: 15,
-			cacheRead: 0.5,
-			cacheWrite: 0,
-		});
-		expect(byId.get("claude-opus-4-8")?.cost).toEqual({
-			input: 5,
-			output: 25,
-			cacheRead: 0.5,
-			cacheWrite: 6.25,
-		});
-		expect(byId.get("claude-opus-4-8-fast")?.cost).toEqual({
-			input: 10,
-			output: 50,
-			cacheRead: 1,
-			cacheWrite: 12.5,
-		});
-		// Absent from Cursor's document: left unpriced rather than borrowing another
+		expect(built("composer-2.5").cost).toEqual({ input: 0.5, output: 2.5, cacheRead: 0.2, cacheWrite: 0 });
+		expect(built("composer-2.5-fast").cost).toEqual({ input: 3, output: 15, cacheRead: 0.5, cacheWrite: 0 });
+		expect(built("claude-opus-4-8").cost).toEqual({ input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 });
+		// An own-class `cost-patch` is final: the reviewed fast card, not the
+		// base card times the declared 2x.
+		expect(built("claude-opus-4-8-fast").cost).toEqual({ input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 });
+		// Not on the card: left unpriced rather than borrowing another
 		// provider's card, so it reads as pricing unknown instead of a guess.
-		expect(byId.get("gpt-5.1")?.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+		const uncovered = built("gpt-5.1");
+		expect(uncovered.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+		expect(getModelPricingStatus(uncovered)).toBe("unknown");
 	});
 	it("decodes Cursor's length-delimited vendor metadata", () => {
 		const encoded = Uint8Array.from(Buffer.from("0a0766697874757265d202020801", "hex"));
@@ -951,7 +935,7 @@ const richVariant = (
 		),
 	});
 
-/** Discovers only `AvailableModels` (no usable filter, no pricing document). */
+/** Discovers only `AvailableModels` (no usable filter). */
 async function discoverAvailable(
 	models: AvailableModelsResponse_ModelDetails[],
 ): Promise<Map<string, ModelSpec<"cursor-agent">>> {
@@ -1016,9 +1000,9 @@ describe("cursor rich discovery review regressions", () => {
 		}
 	});
 
-	it("prices rich lanes from the KDL rate card when the pricing document is unavailable", async () => {
+	it("prices rich lanes from the KDL rate card by member slug and lane id", async () => {
 		const fast = booleanParameter("fast", "2x more expensive, but significantly faster.");
-		// Neither model has a bundled reference, so only the card can price it.
+		// The card outranks bundled references, so every price here is the card's.
 		const specs = await discoverAvailable([
 			// Own-slug `cost-patch` rows are final, fast ones included: Grok 4.5
 			// Fast bills $4/$18, not the base card doubled.
@@ -1041,16 +1025,32 @@ describe("cursor rich discovery review regressions", () => {
 					richVariant("gpt-5.2-high-fast", { fast: "true" }),
 				],
 			}),
+			// No member slug is on the card, but the `gpt-5.4-fast` lane id carries
+			// a reviewed `cost-patch` ($5/$30) that `buildModel` applies by lane id.
+			// Discovery must price it the same, not as the base card times 3.
+			create(AvailableModelsResponse_ModelDetailsSchema, {
+				name: "gpt-5.4",
+				supportsAgent: true,
+				parameterDefinitions: [booleanParameter("fast", "3x more expensive")],
+				variants: [
+					richVariant("gpt-5.4-high", { fast: "false" }),
+					richVariant("gpt-5.4-high-fast", { fast: "true" }),
+				],
+			}),
 		]);
 		const cost = (id: string) => {
 			const spec = specs.get(id);
 			if (!spec) throw new Error(`missing lane ${id}`);
-			return buildModel(spec).cost;
+			const built = buildModel(spec).cost;
+			expect(built).toEqual(spec.cost);
+			return built;
 		};
 		expect(cost("grok-4.5")).toEqual({ input: 2, output: 6, cacheRead: 0.5, cacheWrite: 0 });
 		expect(cost("grok-4.5-fast")).toEqual({ input: 4, output: 18, cacheRead: 1, cacheWrite: 0 });
 		expect(cost("gpt-5.2")).toEqual({ input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 0 });
 		expect(cost("gpt-5.2-fast")).toEqual({ input: 3.5, output: 28, cacheRead: 0.35, cacheWrite: 0 });
+		expect(cost("gpt-5.4")).toEqual({ input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 });
+		expect(cost("gpt-5.4-fast")).toEqual({ input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 });
 	});
 
 	it.each(["2x more expensive", "2× more expensive"])("reads the declared multiplier from %p", async tooltip => {
