@@ -725,7 +725,7 @@ function renderAgentProgress(
 		if (progress.currentTool) {
 			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("muted", sanitizeText(progress.currentTool))}`;
 			const toolDetail =
-				progress.lastIntent ??
+				progress.currentToolIntent ??
 				shortenToolArgumentPaths(progress.currentToolArgs ?? "", progress.currentToolArgsKey);
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", previewLine(sanitizeText(toolDetail), 40))}`;
@@ -741,7 +741,7 @@ function renderAgentProgress(
 			// Show most recent completed tool when idle between tools
 			const recent = progress.recentTools[0];
 			let toolLine = `${continuePrefix}${theme.tree.hook} ${theme.fg("dim", sanitizeText(recent.tool))}`;
-			const toolDetail = progress.lastIntent ?? shortenToolArgumentPaths(recent.args, recent.argsKey);
+			const toolDetail = recent.intent ?? shortenToolArgumentPaths(recent.args, recent.argsKey);
 			if (toolDetail) {
 				toolLine += `: ${theme.fg("dim", previewLine(sanitizeText(toolDetail), 40))}`;
 			}
@@ -1800,7 +1800,7 @@ function describeProgressAgent(progress: AgentProgress, state: AgentDescribeStat
 					name: plainText(progress.currentTool),
 					intent:
 						plainText(
-							progress.lastIntent ??
+							progress.currentToolIntent ??
 								shortenToolArgumentPaths(progress.currentToolArgs ?? "", progress.currentToolArgsKey),
 						) || undefined,
 					age: progress.currentToolStartMs ? Math.max(0, nowMs - progress.currentToolStartMs) : undefined,
