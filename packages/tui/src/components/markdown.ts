@@ -511,14 +511,15 @@ const LINE_TERMINATOR = /[\n\r\u2028\u2029]/;
  * GFM strikethrough as upstream marked's rule reads it, with `~~` only: an opener not followed by whitespace or `~`,
  * text read in units of one character or a backslash and the character after it (not a line break), and the first
  * `~~` that follows a unit other than whitespace, `~` or a lone `\` and is not followed by another `~`. One scanner
- * serves one inline source. A scan that finds no closer also rules out every opener it passed, so a line of unclosed
- * openers is read once, not once per opener.
+ * serves one inline source and the link labels and emphasis inside it. A scan also answers for every opener it
+ * passed, which meets the same closer or none, so a line of unclosed openers is read once, not once per opener.
  */
 class StrikethroughScanner {
 	readonly #source: string;
-	// The last opener whose scan found no closer, and where that scan stopped.
-	#failedOpen = -1;
-	#failedStop = -1;
+	// The last opener whose scan ran, where that scan stopped, and whether a closer stopped it there.
+	#open = -1;
+	#stop = -1;
+	#closed = false;
 
 	constructor(source: string) {
 		this.#source = source;
@@ -529,9 +530,10 @@ class StrikethroughScanner {
 		const src = this.#source;
 		const first = src[open + 2];
 		if (!src.startsWith("~~", open) || first === undefined || first === "~" || WHITESPACE.test(first)) return -1;
-		// Past the opener's own "~~" its units are the failed scan's, so they meet the same closers and stop.
-		if (this.#failedOpen < open && open < this.#failedStop) return -1;
+		// Past the opener's own "~~" its units are the last scan's, so they meet the same closer or stop.
+		if (this.#open < open && open < this.#stop) return this.#closed ? this.#stop : -1;
 		let at = open + 2;
+		let close = -1;
 		while (at < src.length) {
 			let end: number;
 			let final: boolean;
@@ -543,12 +545,16 @@ class StrikethroughScanner {
 				end = at + 1;
 				final = src[at] !== "~" && !WHITESPACE.test(src[at]!);
 			}
-			if (final && src.startsWith("~~", end) && src[end + 2] !== "~") return end;
+			if (final && src.startsWith("~~", end) && src[end + 2] !== "~") {
+				close = end;
+				break;
+			}
 			at = end;
 		}
-		this.#failedOpen = open;
-		this.#failedStop = at;
-		return -1;
+		this.#open = open;
+		this.#stop = close === -1 ? at : close;
+		this.#closed = close !== -1;
+		return close;
 	}
 }
 
@@ -563,11 +569,14 @@ const strikethroughExtension: TokenizerAndRendererExtension = {
 	tokenizer(src) {
 		if (!src.startsWith("~~")) return undefined;
 		const source = this.source ?? src;
+		// Inside a link label or emphasis the text ends at `end`, before its closer (`]`, `*` or `_`), which is not a
+		// `~`, so a closer that ends there closes as it would at the end of the text.
+		const end = this.end ?? source.length;
 		let scanner = strikethroughScanners.get(this);
 		if (!scanner) strikethroughScanners.set(this, (scanner = new StrikethroughScanner(source)));
-		const open = source.length - src.length;
+		const open = end - src.length;
 		const close = scanner.closeAt(open);
-		if (close === -1) return undefined;
+		if (close === -1 || close + 2 > end) return undefined;
 		const text = source.slice(open + 2, close);
 		return { type: "del", raw: source.slice(open, close + 2), text, tokens: this.lexer.inlineTokens(text) };
 	},

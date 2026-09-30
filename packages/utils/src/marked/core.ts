@@ -248,11 +248,15 @@ export type TokensList = Token[] & { links: Links };
 export interface TokenizerThis {
 	lexer: Lexer;
 	/**
-	 * For an inline tokenizer, the whole inline source; the `src` it receives is the suffix of it that starts at
-	 * `source.length - src.length`. Inline tokenizers get one context object per inline source, the same for every
-	 * call while the lexer works through that source, so a tokenizer can keep state for it in a `WeakMap`.
+	 * For an inline tokenizer, the whole inline source, such as a paragraph's text. The `src` it receives is the part
+	 * of it before `end` that starts at `end - src.length`: inside a link label or the text of emphasis, `end` is where
+	 * that text ends, right before its closer, and a token there must not reach past it. Inline tokenizers get one
+	 * context object per inline source, the same for every call while the lexer works through it and the labels and
+	 * emphasis inside it, so a tokenizer can keep state for it in a `WeakMap`.
 	 */
 	source?: string;
+	/** For an inline tokenizer, where the text the lexer works through ends in `source` (see `source`). */
+	end?: number;
 }
 /** A tokenizer extension callback. */
 export type TokenizerExtensionFunction = (
@@ -443,10 +447,10 @@ export class Tokenizer {
 	}
 }
 
-// A nested inline source (a link label, the text of emphasis) shares the closers and text stops of the source it lies
-// in, which are offered to the next inline lex on that lexer. They are offered right before the nested source is
-// lexed through `lexer.inlineTokens`, which a subclass may override; the lex that call reaches takes them if it lexes
-// exactly that string, or else starts a root source.
+// A nested inline source (a link label, the text of emphasis) shares the closers, text stops and tokenizer context of
+// the source it lies in, which are offered to the next inline lex on that lexer. They are offered right before the
+// nested source is lexed through `lexer.inlineTokens`, which a subclass may override; the lex that call reaches takes
+// them if it lexes exactly that string, or else starts a root source.
 let offered: { lexer: Lexer; nested: NestedMatch; outer: InlineLex } | undefined;
 
 /** Starts the lex of `src` on `lexer`: of the nested source offered for it, else of a root source. Clears the offer. */
@@ -462,7 +466,7 @@ function openInlineSource(src: string, lexer: Lexer, output: Token[]): InlineLex
 		closers,
 		stops: shared ? shared.outer.stops.nested(src, closers.end) : new TextStops(src, lexer),
 		textRun: new TextRun(src),
-		context: { lexer, source: src },
+		context: shared ? shared.outer.context : { lexer, source: src, end: src.length },
 		rest: src,
 	};
 }
@@ -617,6 +621,8 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 /** Lexes `lex.rest` up to the next link, image or emphasis, which it returns with `lex.rest` past it, or to its end. */
 function lexToNested(lex: InlineLex): NestedMatch | undefined {
 	const { src, lexer, output, closers, stops, textRun, context } = lex;
+	// The context is shared with the sources nested in this one, which move its end while they are lexed.
+	context.end = closers.end;
 	let rest = lex.rest;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;

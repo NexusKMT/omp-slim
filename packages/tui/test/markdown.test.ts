@@ -2487,6 +2487,12 @@ describe("Strikethrough", () => {
 	it("still strikes through past an opener whose text a backslash before a line break ends", () => {
 		expect(strike("~~a\\\nb~~ ~~c\nd~~")).toBe("~~ab~~ <S>c\nd</S>");
 	});
+
+	// Inside emphasis or a link label the text ends before its closer: a `~~` past that end closes nothing there.
+	it("strikes through inside emphasis and a link label only up to their end", () => {
+		expect(strike("*a ~~b* c~~ [d ~~e](u) f~~")).toBe("a ~~b c~~ d ~~e f~~");
+		expect(strike("*a ~~b~~* [c ~~d~~](u)")).toBe("a <S>b</S> c <S>d</S>");
+	});
 });
 
 describe("inline rendering stays linear on long paragraphs", () => {
@@ -2508,6 +2514,16 @@ describe("inline rendering stays linear on long paragraphs", () => {
 		[
 			"nested emphasis around a long word (800 KB)",
 			`${"*a ".repeat(4_000)}${"a".repeat(800_000)}${" b*".repeat(4_000)}`,
+		],
+		// Each level's `~~` scan finds no closer before the end of the paragraph.
+		[
+			"nested emphasis with an unclosed ~~ at every level (80 KB)",
+			`${"*a ~~b ".repeat(8_000)}${" b*".repeat(8_000)}`,
+		],
+		// Each level's `~~` closes only past the last level; the long word makes every scan to that closer long.
+		[
+			"nested emphasis with a ~~ at every level closed past it (70 KB)",
+			`${"*a ~~b ".repeat(2_000)}${"a".repeat(50_000)}${" b*".repeat(2_000)} x~~`,
 		],
 	])("lexes a long paragraph of %s in under two seconds", (_name, text) => {
 		extractMarkdownLinks(text.slice(0, 2_000));

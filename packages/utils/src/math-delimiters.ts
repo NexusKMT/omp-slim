@@ -84,45 +84,71 @@ export function mathSpanAt(source: string, at: number, from = 0): MathSpan | und
 
 /**
  * The math spans of one source, found as {@link mathSpanAt} finds them with the escape scan stopping at the opener
- * (the caller has consumed the escapes before it). A closer scan that finds nothing also rules out the openers of
- * its kind that it passed, so asking at every opener of a long run of unclosed ones reads the run once.
+ * (the caller has consumed the escapes before it). A closer scan also answers for the openers of its kind that it
+ * passed, which meet the same closer or none, so asking at every opener of a long run reads the run once.
  */
 export class MathSpans {
 	readonly #source: string;
-	// The last `$` whose closer scan failed and where that scan stopped: a `$` between the two has no closer either.
+	// The last `$` whose closer scan ran, where that scan stopped, and the `$` it closed at (-1 for none): a scan from
+	// a `$` between the two reads what that scan read past it. When it closed, the last offset before its closer that
+	// is not whitespace, which the body of a span needs.
 	#dollarOpen = -1;
 	#dollarStop = -1;
-	// Per opener other than `$`, a body start from which no unescaped closer follows.
-	readonly #unclosedFrom: Record<Exclude<MathOpener, "$">, number> = {
+	#dollarClose = -1;
+	#dollarSolid = -1;
+	// Per opener other than `$`, the last body start whose closer search ran and the closer it found (-1 for none).
+	readonly #searchedFrom: Record<Exclude<MathOpener, "$">, number> = {
 		$$: Infinity,
 		"\\(": Infinity,
 		"\\[": Infinity,
 	};
+	readonly #closer: Record<Exclude<MathOpener, "$">, number> = { $$: -1, "\\(": -1, "\\[": -1 };
 
 	constructor(source: string) {
 		this.#source = source;
 	}
 
-	/** The span opened at `at`, or `undefined`. */
-	spanAt(at: number): MathSpan | undefined {
+	/** The span opened at `at` that ends by `end`, or `undefined`. */
+	spanAt(at: number, end = this.#source.length): MathSpan | undefined {
 		const source = this.#source;
 		const opener = mathOpenerAt(source, at);
 		if (opener === undefined) return undefined;
 		const bodyStart = at + opener.length;
-		if (opener === "$") {
-			if (this.#dollarOpen < at && at < this.#dollarStop) return undefined;
-			const { close, stop } = scanDollar(source, at);
-			if (close === -1) {
-				this.#dollarOpen = at;
-				this.#dollarStop = stop;
-			}
-			return spanOf(source, opener, bodyStart, close);
-		}
-		// A later body start sees the same closers: the opener before it ends a backslash run.
-		if (bodyStart >= this.#unclosedFrom[opener]) return undefined;
-		const close = closerIndex(source, opener, bodyStart);
-		if (close === -1) this.#unclosedFrom[opener] = bodyStart;
+		const close = opener === "$" ? this.#dollarCloser(at) : this.#closerFrom(opener, bodyStart);
+		if (close === -1 || close + opener.length > end) return undefined;
 		return spanOf(source, opener, bodyStart, close);
+	}
+
+	/** The `$` closing the span that the `$` at `open` opens, or -1. */
+	#dollarCloser(open: number): number {
+		const source = this.#source;
+		if (this.#dollarOpen < open && open < this.#dollarStop) {
+			// That scan passed this `$` and went on from the offset after it, where this one's scan starts.
+			if (this.#dollarClose === -1 || !dollarOpens(source, open)) return -1;
+			return this.#dollarSolid > open ? this.#dollarClose : -1;
+		}
+		const { close, stop } = scanDollar(source, open);
+		this.#dollarOpen = open;
+		this.#dollarStop = stop;
+		this.#dollarClose = close;
+		if (close !== -1) {
+			let solid = close - 1;
+			while (WHITESPACE.test(source[solid]!)) solid--;
+			this.#dollarSolid = solid;
+		}
+		return close;
+	}
+
+	/** The closer of `opener` at or after `bodyStart`, the start of its body, or -1. */
+	#closerFrom(opener: Exclude<MathOpener, "$">, bodyStart: number): number {
+		// A body start follows its opener's `$`, `(` or `[`, so the backslashes before a closer after it never reach
+		// back past it: every later body start up to the closer found finds that same closer.
+		const found = this.#closer[opener];
+		if (this.#searchedFrom[opener] <= bodyStart && (found === -1 || bodyStart <= found)) return found;
+		const close = closerIndex(this.#source, opener, bodyStart);
+		this.#searchedFrom[opener] = bodyStart;
+		this.#closer[opener] = close;
+		return close;
 	}
 }
 
@@ -130,15 +156,18 @@ const spansByContext = new WeakMap<object, MathSpans>();
 
 /**
  * The span opened at the start of `src`, with `end` counted from there, for a marked inline tokenizer: `src` is the
- * suffix of `context.source` the tokenizer received, and the scans are remembered per context, which marked keeps
- * for one inline source.
+ * part of `context.source` before `context.end` that the tokenizer received, and the scans are remembered per
+ * context, which marked keeps for one inline source and the link labels and emphasis inside it. Only a span that ends
+ * by `context.end` counts. Inside a label or emphasis, `context.end` holds its closer (`]`, `*` or `_`), which is not
+ * a digit, so a `$` right before it closes there as it would at the end of the text.
  */
-export function mathSpanInContext(context: { source?: string }, src: string): MathSpan | undefined {
+export function mathSpanInContext(context: { source?: string; end?: number }, src: string): MathSpan | undefined {
 	const source = context.source ?? src;
+	const end = context.end ?? source.length;
 	let spans = spansByContext.get(context);
 	if (!spans) spansByContext.set(context, (spans = new MathSpans(source)));
-	const at = source.length - src.length;
-	const span = spans.spanAt(at);
+	const at = end - src.length;
+	const span = spans.spanAt(at, end);
 	return span && { ...span, end: span.end - at };
 }
 
@@ -179,6 +208,15 @@ function escapedAt(source: string, index: number, from: number): boolean {
 	return backslashes % 2 === 1;
 }
 
+/** What `trim` removes: a span's body needs something else. */
+const WHITESPACE = /\s/;
+
+/** Whether the `$` at `open` can open a span: it is followed by something other than a space, tab, line break or `$`. */
+function dollarOpens(source: string, open: number): boolean {
+	const after = source[open + 1];
+	return !(after === undefined || after === " " || after === "\t" || after === "\n" || after === "$");
+}
+
 /**
  * Offset of the `$` that closes an inline span opened at `open`, or -1, and where
  * the scan stopped: at that `$`, or where it ruled a closer out. Pandoc's
@@ -188,10 +226,7 @@ function escapedAt(source: string, index: number, from: number): boolean {
  * prose, not math.
  */
 function scanDollar(source: string, open: number): { close: number; stop: number } {
-	const after = source[open + 1];
-	if (after === undefined || after === " " || after === "\t" || after === "\n" || after === "$") {
-		return { close: -1, stop: open + 1 };
-	}
+	if (!dollarOpens(source, open)) return { close: -1, stop: open + 1 };
 	for (let at = open + 1; at < source.length; at++) {
 		const char = source[at];
 		if (char === "\\") {

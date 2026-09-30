@@ -5,7 +5,7 @@
 ### Added
 
 - Added `startFrom(src, from)` to inline Markdown tokenizer extensions: a start hint that returns the first match at or after `from` (or `undefined`), so long paragraphs stay linear.
-- Added `this.source` for inline Markdown tokenizer extensions: the whole inline source, with one `this` per source, so a tokenizer can remember what it already scanned.
+- Added `this.source` and `this.end` for inline Markdown tokenizer extensions: the whole inline source and where the text being lexed ends in it, with one `this` per source that the link labels and emphasis inside it share, so a tokenizer can remember what it already scanned.
 - Added `mathSpanInContext` and `MathSpans` to `math-delimiters`, which find math spans without rescanning a run of unclosed openers.
 
 ### Fixed

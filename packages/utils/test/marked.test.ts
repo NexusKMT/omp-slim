@@ -374,25 +374,37 @@ describe("marked compatibility", () => {
 	});
 
 	// A tokenizer that scans ahead keeps what it learned for the rest of its source in a WeakMap keyed by the context.
-	test("gives an inline tokenizer one context per inline source, holding that source", () => {
-		const byContext = new Map<TokenizerThis, string[]>();
+	// Emphasis and link labels share their paragraph's context, whose `end` is where the text being lexed ends.
+	test("gives an inline tokenizer one context per inline source, shared with the emphasis and labels inside it", () => {
+		const byContext = new Map<TokenizerThis, [string, number | undefined][]>();
 		const marked = new Marked().use({
 			extensions: [
 				{
 					name: "spy",
 					level: "inline",
 					tokenizer(src) {
-						expect(this.source?.endsWith(src)).toBe(true);
-						byContext.set(this, [...(byContext.get(this) ?? []), src]);
+						const end = this.end ?? -1;
+						expect(this.source?.slice(end - src.length, end)).toBe(src);
+						byContext.set(this, [...(byContext.get(this) ?? []), [src, this.end]]);
 						return undefined;
 					},
 				},
 			],
 		});
-		marked.lexer("a *b* c");
-		expect([...byContext].map(([context, srcs]) => [context.source, srcs])).toEqual([
-			["a *b* c", ["a *b* c", "*b* c", " c"]],
-			["b", ["b"]],
+		marked.lexer("a *b* [c](u)\n\nd");
+		expect([...byContext].map(([context, calls]) => [context.source, calls])).toEqual([
+			[
+				"a *b* [c](u)",
+				[
+					["a *b* [c](u)", 12],
+					["*b* [c](u)", 12],
+					["b", 4],
+					[" [c](u)", 12],
+					["[c](u)", 12],
+					["c", 8],
+				],
+			],
+			["d", [["d", 1]]],
 		]);
 	});
 
