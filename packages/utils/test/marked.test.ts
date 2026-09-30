@@ -443,7 +443,14 @@ describe("marked compatibility", () => {
 			["text", "["],
 			["link", "[a]", [["text", "a"]]],
 			["text", "] "],
-			["link", "[x [a]][a]", [["text", "x "], ["link", "[a]", [["text", "a"]]]]],
+			[
+				"link",
+				"[x [a]][a]",
+				[
+					["text", "x "],
+					["link", "[a]", [["text", "a"]]],
+				],
+			],
 			["text", " [y][x "],
 			["link", "[a]", [["text", "a"]]],
 			["text", "] "],
@@ -475,6 +482,48 @@ describe("marked compatibility", () => {
 			expect(new Marked().parse(`[text][${label}]`)).not.toContain("<a ");
 		});
 	}
+
+	test("keeps an inline extension's rewrite of the text token before it", () => {
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "shout",
+					level: "inline",
+					tokenizer(_src, tokens) {
+						const last = tokens.at(-1);
+						if (last?.type === "text" && "text" in last && typeof last.text === "string") {
+							last.raw = last.raw.toUpperCase();
+							last.text = last.text.toUpperCase();
+						}
+						return undefined;
+					},
+				},
+			],
+		});
+		const [paragraph] = marked.lexer("abc [ def [ ghi");
+		expect(paragraph && "tokens" in paragraph && paragraph.tokens ? shape(paragraph.tokens) : paragraph).toEqual([
+			["text", "ABC [ DEF [ ghi"],
+		]);
+	});
+
+	test("closes bold inside a marker run the lexer entered through an extension's short raw", () => {
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "eatX",
+					level: "inline",
+					// Consumes "x*" but reports raw "xy", so the lexer resumes one marker into the run.
+					tokenizer: src => (src.startsWith("x*") ? { type: "eatX", raw: "xy" } : undefined),
+				},
+			],
+		});
+		const [paragraph] = marked.lexer("x*****a b** c");
+		expect(paragraph && "tokens" in paragraph && paragraph.tokens ? shape(paragraph.tokens) : paragraph).toEqual([
+			["eatX", "xy"],
+			["strong", "****", []],
+			["text", "a b** c"],
+		]);
+	});
 });
 
 describe("inline lexing stays linear on long paragraphs", () => {

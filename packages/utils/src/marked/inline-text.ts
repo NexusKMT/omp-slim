@@ -184,6 +184,7 @@ export class TextRun {
 		if (end <= start) return;
 		const previous = tokens.at(-1);
 		if (previous?.type === "text" && previous.tokens === undefined && previous.escaped === false) {
+			// An extension may have rewritten this token; then append by concatenation as marked does.
 			if (
 				previous === this.#token &&
 				start === this.#end &&

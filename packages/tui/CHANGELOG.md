@@ -6,11 +6,12 @@
 
 - Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms.
 - Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds.
+- Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets, emphasis or links, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s.
 
 ### Removed
 
-- Removed the `urlTokenPossible` export; the Markdown lexer now skips the bare-URL rule itself wherever that rule cannot match.
-- Removed the `autolinkSchemeScanIndex` export; inline text already stops at every URL scheme, so the autolink extension needs no start hint.
+- Removed the internal `urlTokenPossible` export.
+- Removed the internal `autolinkSchemeScanIndex` export.
 
 ## [18.4.4] - 2026-09-29
 

@@ -1640,6 +1640,16 @@ bar`,
 			expect(protoOut.includes("\x1b]8;;")).toBe(false);
 			expect(stripTerminalSequences(protoOut)).toContain("proto");
 		});
+
+		it("autolinks urls and emails end-to-end", () => {
+			const rendered = renderInlineMarkdown("see https://example.com and mail user@example.com now", {
+				...defaultMarkdownTheme,
+				link: (text: string) => `<L>${text}</L>`,
+			});
+			const plain = stripVTControlCharacters(rendered);
+			expect(plain).toContain("<L>https://example.com</L>");
+			expect(plain).toContain("<L>user@example.com</L>");
+		});
 	});
 
 	describe("HTML-like tags in text", () => {
@@ -2493,10 +2503,9 @@ describe("inline rendering stays linear on long paragraphs", () => {
 	});
 });
 
-describe("inline start scanners (perf rewrites)", () => {
-	// mathStartIndex replaced a regex scan as the math extension's start hint;
-	// it must find exactly the offsets the regex found.
-	const OLD_MATH_START = /\$|\\\(|\\\[/;
+describe("math start hint", () => {
+	// mathStartIndex must find the offsets `/\$|\\\(|\\\[/` finds.
+	const MATH_OPENER = /\$|\\\(|\\\[/;
 
 	const fixtures = [
 		"",
@@ -2512,21 +2521,11 @@ describe("inline start scanners (perf rewrites)", () => {
 		"ends with dollar $",
 	];
 
-	it("mathStartIndex matches the old /\\$|\\\\\\(|\\\\\\[/ scan on every fixture", () => {
+	it("mathStartIndex finds the offsets /\\$|\\\\\\(|\\\\\\[/ finds on every fixture", () => {
 		for (const src of fixtures) {
-			const m = OLD_MATH_START.exec(src);
+			const m = MATH_OPENER.exec(src);
 			expect(mathStartIndex(src)).toBe(m ? m.index : undefined);
 		}
-	});
-
-	it("autolinks urls and emails end-to-end", () => {
-		const rendered = renderInlineMarkdown("see https://example.com and mail user@example.com now", {
-			...defaultMarkdownTheme,
-			link: (text: string) => `<L>${text}</L>`,
-		});
-		const plain = stripVTControlCharacters(rendered);
-		expect(plain).toContain("<L>https://example.com</L>");
-		expect(plain).toContain("<L>user@example.com</L>");
 	});
 });
 

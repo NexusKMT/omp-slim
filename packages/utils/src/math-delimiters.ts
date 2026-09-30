@@ -93,7 +93,11 @@ export class MathSpans {
 	#dollarOpen = -1;
 	#dollarStop = -1;
 	// Per opener other than `$`, a body start from which no unescaped closer follows.
-	readonly #unclosedFrom: Record<Exclude<MathOpener, "$">, number> = { $$: Infinity, "\\(": Infinity, "\\[": Infinity };
+	readonly #unclosedFrom: Record<Exclude<MathOpener, "$">, number> = {
+		$$: Infinity,
+		"\\(": Infinity,
+		"\\[": Infinity,
+	};
 
 	constructor(source: string) {
 		this.#source = source;
