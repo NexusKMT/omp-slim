@@ -471,9 +471,7 @@ describe("Streamed Markdown equals a one-shot render across the frozen prefix", 
 
 	const paragraphs = (count: number) =>
 		Array.from({ length: count }, (_, i) => `Body paragraph ${i} keeps the stream going.`).join("\n\n");
-	// No `_`: an intraword `_{` at a partial line trips a separate, older
-	// same-line fast-path divergence at some chunk alignments.
-	const mathBody = Array.from({ length: 6 }, (_, i) => `a${i} + b${i} = c${i}`).join("\n\n");
+	const mathBody = Array.from({ length: 6 }, (_, i) => `a_{${i}} + b_{${i}} = c_{${i}}`).join("\n\n");
 
 	for (const step of [1, 7, 40]) {
 		it(`keeps a display-math block with blank lines whole, streamed in ${step}-character chunks`, () => {

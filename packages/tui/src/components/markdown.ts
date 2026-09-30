@@ -949,12 +949,16 @@ function appendLines(dst: string[], src: readonly string[]): void {
 // delta-edge trailingDelimiterSeamHazard check).
 const FAST_DELTA_RE = /[\n\r\\[`<!*_~$#&@\x1b]/;
 
+// Emphasis delimiters, which can pair across the fast path's seam.
+const FAST_EMPHASIS_DELIMITERS = ["*", "_", "~"] as const;
+
 // Disarm when the captured row's RAW tail ends in trailing whitespace (wrap
-// trims it; appending a char moves the trim boundary), a trailing backslash
-// (it can become an escape once the delta supplies the next char — the `\\`
-// clause covers that escape-completion hazard), or a full/partial hex swatch
-// run (a `#` + 3-8 hex is a swatch glyph; the byte range may shift).
-const FAST_RUN_END_RE = /(?:[ \t\\]|#[0-9a-fA-F]{3,8}|#+)$/i;
+// trims it, a no-break space included; appending a char moves the trim
+// boundary), a trailing backslash (it can become an escape once the delta
+// supplies the next char — the `\\` clause covers that escape-completion
+// hazard), or a full/partial hex swatch run (a `#` + 3-8 hex is a swatch
+// glyph; the byte range may shift).
+const FAST_RUN_END_RE = /(?:[\s\\]|#[0-9a-fA-F]{3,8}|#+)$/i;
 
 // A partial `#` + 1-2 hex digits can grow into a 3-8 digit swatch glyph
 // across the seam (delta hex digits are inert).
@@ -1009,16 +1013,18 @@ const FAST_TABLE_DELIM_ROW_RE = /^\s*(?:\|[\s:]*-+\s*(?:\|[\s:]*-+\s*)*|[\s:]*-+
 
 // A paragraph's LAST line can complete into a different block kind under an
 // inert delta (ATX heading, blockquote, bullet marker, HR, ref-def) — disarm
-// when the grown line starts one (ref-def grammar: REF_DEF_LINE_RE).
+// when the grown line starts one (ref-def grammar: REF_DEF_LINE_RE). A line
+// holding `\end{` can also close a bare math environment the paragraph opened
+// lines above (`\end{al` + `ign}`), making those lines one display block.
 const FAST_LINE_START_HAZARD_RE =
 	// `-` is placed LAST so it is a literal, not a range bound. The other
 	// chars are in ASCENDING code-point order (no reversed ranges that
 	// rely on engine leniency): * + = – — ─ ━ ═ then the literal `-`.
 	/^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|\d{1,9}[.)](?:[ \t]|$)|[*+=–—─━═-](?:[ \t]|$)|(?:[*+=–—─━═-][ \t]*){2,}[ \t]*$)/;
 
-/** @internal exported for tests — the grown-line-start block-kind gate. */
+/** @internal exported for tests — the grown-line block-kind gate. */
 export function fastLineStartHazard(grownLine: string): boolean {
-	return FAST_LINE_START_HAZARD_RE.test(grownLine) || REF_DEF_LINE_RE.test(grownLine);
+	return FAST_LINE_START_HAZARD_RE.test(grownLine) || REF_DEF_LINE_RE.test(grownLine) || grownLine.includes("\\end{");
 }
 
 /** Seam hazards between the captured raw row tail and the delta: the row must
@@ -2343,11 +2349,16 @@ export class Markdown implements Component {
 					(!markerDelta && recipe.rowRaw.endsWith("$") && /^[0-9]/.test(deltaTabs));
 				// A delta opening a pairing char when the captured row ENDS with the
 				// same char can re-pair across the seam: cold lex of the joined run
-				// makes ONE token (x *a**b* → em("a**b")), the splice keeps two.
-				// An image marker (`x!` + `[a](u)`) re-pairs the same way.
+				// makes ONE token (x *a**b* → em("a**b")), the splice keeps two. So
+				// can an emphasis delimiter in the delta and the same char anywhere
+				// in the row, once the joined text makes the row's one flanking
+				// (`a_{3` + `} + b_{` renders `{3} + b` emphasized): the delta lexed
+				// alone has nothing to pair with. An image marker (`x!` + `[a](u)`)
+				// re-pairs the same way.
 				const pairSeamHazard =
 					markerDelta &&
 					((/^[*~`]/.test(deltaTabs) && /[*~`]$/.test(recipe.rowRaw)) ||
+						FAST_EMPHASIS_DELIMITERS.some(c => deltaTabs.includes(c) && recipe.rowRaw.includes(c)) ||
 						// "x!" + "[a](u)": cold lexes text("x") + image(alt); the splice would
 						// keep "x!" + a styled link byte-run.
 						(deltaTabs.startsWith("[") && recipe.rowRaw.endsWith("!")));
