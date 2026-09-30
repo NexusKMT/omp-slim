@@ -676,61 +676,12 @@ const mathEnvBlockExtension: TokenizerAndRendererExtension = {
 // tokenizer at a valid start. Candidates at a legal boundary fall through
 // (return undefined) to marked's own autolink handling unchanged.
 const AUTOLINK_SCHEME_REGEX = /^(?:www\.|https?:\/\/|ftp:\/\/)/i;
-// Case-insensitive scheme scan replacing /www\.|https?:\/\/|ftp:\/\//i in
-// boundedAutolinkExtension's start hint. charCode-only: no allocation, no
-// toLowerCase copies. `| 32` lower-cases ASCII letters; `.`/`:`/`/` are compared
-// exactly, matching the regex's ASCII-only `i` semantics. charCodeAt past the
-// end returns NaN, which fails every comparison, so no explicit bounds checks
-// are needed.
-function isAutolinkSchemeAt(src: string, i: number): boolean {
-	const c = src.charCodeAt(i) | 32;
-	if (c === 119 /* w */) {
-		// www.
-		return (
-			(src.charCodeAt(i + 1) | 32) === 119 &&
-			(src.charCodeAt(i + 2) | 32) === 119 &&
-			src.charCodeAt(i + 3) === 46 /* . */
-		);
-	}
-	if (c === 104 /* h */) {
-		// http:// | https://
-		if (
-			(src.charCodeAt(i + 1) | 32) !== 116 /* t */ ||
-			(src.charCodeAt(i + 2) | 32) !== 116 /* t */ ||
-			(src.charCodeAt(i + 3) | 32) !== 112 /* p */
-		) {
-			return false;
-		}
-		let j = i + 4;
-		if ((src.charCodeAt(j) | 32) === 115 /* s */) j++;
-		return src.charCodeAt(j) === 58 /* : */ && src.charCodeAt(j + 1) === 47 /* / */ && src.charCodeAt(j + 2) === 47;
-	}
-	if (c === 102 /* f */) {
-		// ftp://
-		return (
-			(src.charCodeAt(i + 1) | 32) === 116 /* t */ &&
-			(src.charCodeAt(i + 2) | 32) === 112 /* p */ &&
-			src.charCodeAt(i + 3) === 58 /* : */ &&
-			src.charCodeAt(i + 4) === 47 /* / */ &&
-			src.charCodeAt(i + 5) === 47 /* / */
-		);
-	}
-	return false;
-}
-
-/** @internal exported for tests — must stay index-identical to the old regex scan. */
-export function autolinkSchemeScanIndex(src: string, from = 0): number | undefined {
-	for (let i = from; i < src.length; i++) {
-		const c = src.charCodeAt(i) | 32;
-		if ((c === 119 || c === 104 || c === 102) && isAutolinkSchemeAt(src, i)) return i;
-	}
-	return undefined;
-}
 const VALID_AUTOLINK_LEFT_BOUNDARY = /[\s*_~(]/;
 const boundedAutolinkExtension: TokenizerAndRendererExtension = {
 	name: "boundedAutolink",
 	level: "inline",
-	startFrom: autolinkSchemeScanIndex,
+	// No start hint: inline text already stops at every `www.`, `http://`, `https://` and `ftp://`, the only places
+	// this tokenizer matches.
 	tokenizer(src, tokens) {
 		const match = AUTOLINK_SCHEME_REGEX.exec(src);
 		if (!match) return undefined;

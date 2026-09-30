@@ -177,9 +177,10 @@ describe("marked compatibility", () => {
 
 	// Plain text ends where the next token could start, and the lexer reuses
 	// each such stop until it passes one. Here it walks through the rejected
-	// `foo@bar` (no dotted domain) and must still find the address and URL after it.
-	test("finds bare addresses and URLs after an address-like run that is not a link", () => {
-		const source = "see foo@bar and baz@qux.com or http://x.y";
+	// `foo@bar` (no dotted domain) and must still stop at an address using every
+	// local-part character class, at a two-space hard break, and at a URL.
+	test("plain text stops at bare addresses, URLs and hard breaks after an address-like run that is not a link", () => {
+		const source = "see foo@bar and Ab.c+d-e_9@qux.com or  \nhttp://x.y";
 		expect([...Lexer.lex(source)]).toEqual([
 			{
 				type: "paragraph",
@@ -189,12 +190,13 @@ describe("marked compatibility", () => {
 					{ type: "text", raw: "see foo@bar and ", text: "see foo@bar and ", escaped: false },
 					{
 						type: "link",
-						raw: "baz@qux.com",
-						text: "baz@qux.com",
-						href: "mailto:baz@qux.com",
-						tokens: [{ type: "text", raw: "baz@qux.com", text: "baz@qux.com" }],
+						raw: "Ab.c+d-e_9@qux.com",
+						text: "Ab.c+d-e_9@qux.com",
+						href: "mailto:Ab.c+d-e_9@qux.com",
+						tokens: [{ type: "text", raw: "Ab.c+d-e_9@qux.com", text: "Ab.c+d-e_9@qux.com" }],
 					},
-					{ type: "text", raw: " or ", text: " or ", escaped: false },
+					{ type: "text", raw: " or", text: " or", escaped: false },
+					{ type: "br", raw: "  \n" },
 					{
 						type: "link",
 						raw: "http://x.y",
@@ -226,9 +228,10 @@ describe("marked compatibility", () => {
 					},
 				],
 			});
-		// Two spans, then an opener the tokenizer rejects: a hint at the lexer's
-		// own position is dropped, so the span after it stays text either way.
-		const source = "a $x$ b $y$ c $ 5, then $z$";
+		// Two spans, then an opener right after a span that the tokenizer
+		// rejects. There the lexer asks for a hint at its own position and must
+		// drop it, so the span after it stays text.
+		const source = "a $x$ b $y$$ 5, then $z$";
 		const fromHint = [...latex({ startFrom: dollar }).lexer(source)];
 		expect(fromHint).toEqual([...latex({ start: src => dollar(src, 0) }).lexer(source)]);
 		expect(fromHint).toEqual([
@@ -241,10 +244,26 @@ describe("marked compatibility", () => {
 					{ type: "latex", raw: "$x$", text: "x" },
 					{ type: "text", raw: " b ", text: " b ", escaped: false },
 					{ type: "latex", raw: "$y$", text: "y" },
-					{ type: "text", raw: " c $ 5, then $z$", text: " c $ 5, then $z$", escaped: false },
+					{ type: "text", raw: "$ 5, then $z$", text: "$ 5, then $z$", escaped: false },
 				],
 			},
 		]);
+	});
+
+	test("an inline extension whose startFrom reports none as -1 fails loudly", () => {
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "minusOne",
+					level: "inline",
+					startFrom: (src, from) => src.indexOf("§", from),
+					tokenizer: () => undefined,
+				},
+			],
+		});
+		expect(() => marked.lexer("no section sign here")).toThrow(
+			'inline extension "minusOne": startFrom returned -1 for offset 0',
+		);
 	});
 
 	// Emphasis and link closers come from per-paragraph indexes of delimiters

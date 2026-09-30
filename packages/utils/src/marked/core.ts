@@ -248,8 +248,8 @@ export type TokenizerExtensionFunction = (
 export type TokenizerStartFunction = (this: TokenizerThis, src: string) => number | void;
 /**
  * An offset form of a start hint: the first index at or after `from` in `src` where the extension's tokenizer could
- * match, or undefined when there is none. The test at each index must read `src` only from that index on, so the
- * answer for `from` is also the answer for every later offset up to it.
+ * match, or `undefined` (not -1) when there is none; anything else below `from` throws. The test at each index must
+ * read `src` only from that index on, so the answer for `from` is also the answer for every later offset up to it.
  */
 export type TokenizerStartFromFunction = (this: TokenizerThis, src: string, from: number) => number | undefined;
 /** An inline or block tokenizer extension. */
@@ -813,7 +813,14 @@ class TextStops {
 			if (extension.startFrom) {
 				let start = this.#extensionStarts[i] ?? UNSEARCHED;
 				if (start < pos) {
-					start = extension.startFrom.call({ lexer }, src, pos) ?? Infinity;
+					const found = extension.startFrom.call({ lexer }, src, pos);
+					// A -1 or NaN "none" would be searched for again at every text step.
+					if (found !== undefined && !(found >= pos)) {
+						throw new Error(
+							`inline extension "${extension.name}": startFrom returned ${found} for offset ${pos}`,
+						);
+					}
+					start = found ?? Infinity;
 					this.#extensionStarts[i] = start;
 				}
 				// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.

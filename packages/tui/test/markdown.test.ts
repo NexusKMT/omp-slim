@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
 import {
-	autolinkSchemeScanIndex,
 	clearRenderCache,
 	extractMarkdownLinks,
 	Markdown,
@@ -2467,7 +2466,6 @@ describe("inline start scanners (perf rewrites)", () => {
 	// remaining source at every inline position. They must return exactly what
 	// the old regexes returned for every input.
 	const OLD_MATH_START = /\$|\\\(|\\\[/;
-	const OLD_AUTOLINK_SCAN = /www\.|https?:\/\/|ftp:\/\//i;
 
 	const fixtures = [
 		"",
@@ -2511,13 +2509,6 @@ describe("inline start scanners (perf rewrites)", () => {
 		for (const src of fixtures) {
 			const m = OLD_MATH_START.exec(src);
 			expect(mathStartIndex(src)).toBe(m ? m.index : undefined);
-		}
-	});
-
-	it("autolinkSchemeScanIndex matches the old /www\\.|https?:\\/\\/|ftp:\\/\\//i scan on every fixture", () => {
-		for (const src of fixtures) {
-			const m = OLD_AUTOLINK_SCAN.exec(src);
-			expect(autolinkSchemeScanIndex(src)).toBe(m ? m.index : undefined);
 		}
 	});
 

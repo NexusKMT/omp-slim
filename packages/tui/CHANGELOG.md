@@ -10,6 +10,7 @@
 ### Removed
 
 - Removed the `urlTokenPossible` export; the Markdown lexer now skips the bare-URL rule itself wherever that rule cannot match.
+- Removed the `autolinkSchemeScanIndex` export; inline text already stops at every URL scheme, so the autolink extension needs no start hint.
 
 ## [18.4.4] - 2026-09-29
 
