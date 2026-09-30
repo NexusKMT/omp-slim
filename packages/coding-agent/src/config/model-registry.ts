@@ -393,9 +393,9 @@ export class ModelRegistry {
 		this.#reloadStaticModels();
 	}
 
-	#installProviderApiKey(provider: string, keyConfig: string, fallback = false): void {
+	#installProviderApiKey(provider: string, keyConfig: string, options?: { fallback?: boolean }): void {
 		this.#customProviderApiKeys.set(provider, keyConfig);
-		this.authStorage.keys.setConfig(provider, keyConfig, { fallback });
+		this.authStorage.keys.setConfig(provider, keyConfig, options);
 	}
 
 	/**
@@ -813,7 +813,7 @@ export class ModelRegistry {
 		// Restore runtime API keys before #loadModels — survives because
 		// #loadModels only calls .set() on #customProviderApiKeys, never reassigns it.
 		for (const [provider, { keyConfig, fallback }] of this.#runtimeProviderApiKeys) {
-			this.#installProviderApiKey(provider, keyConfig, fallback);
+			this.#installProviderApiKey(provider, keyConfig, { fallback });
 		}
 		this.#providerOverrides.clear();
 		this.#modelOverrides.clear();
@@ -3092,7 +3092,7 @@ export class ModelRegistry {
 			// and would otherwise be sent (and passed to fetchDynamicModels)
 			// instead of the saved key.
 			const fallback = config.oauth !== undefined;
-			this.#installProviderApiKey(providerName, config.apiKey, fallback);
+			this.#installProviderApiKey(providerName, config.apiKey, { fallback });
 			// Persist runtime API keys so they survive #reloadStaticModels() cycles
 			this.#runtimeProviderApiKeys.set(providerName, { keyConfig: config.apiKey, fallback });
 		}

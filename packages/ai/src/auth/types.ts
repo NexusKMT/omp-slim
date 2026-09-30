@@ -940,7 +940,7 @@ export interface KeysApi {
 	 */
 	setConfig(provider: string, apiKeyConfig: string, options?: { fallback?: boolean }): void;
 	/**
-	 * Remove a single config-sourced API key override.
+	 * Remove a single config-sourced API key (override or fallback).
 	 */
 	removeConfig(provider: string): void;
 	/**

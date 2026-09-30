@@ -103,7 +103,8 @@ describe("runtime provider apiKey vs /login credential", () => {
 	test("providers without a /login flow keep apiKey as an override", async () => {
 		process.env[envName] = "env-key";
 		register({ oauth: false });
-		await authStorage.credentials.set(provider, { type: "api_key", key: "stored-key" });
+		// A /login-sourced key outranks the fallback tier, so env-key wins only as an override.
+		await authStorage.credentials.set(provider, { type: "api_key", key: "stored-key", source: "login" });
 
 		expect(await registry.getApiKeyForProvider(provider)).toBe("env-key");
 	});
