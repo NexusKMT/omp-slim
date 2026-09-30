@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded
+- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded ([#13847](https://github.com/can1357/oh-my-pi/pull/13847) by [@GabrielCoelhoCruz](https://github.com/GabrielCoelhoCruz))
 
 ## [18.4.4] - 2026-09-29
 
