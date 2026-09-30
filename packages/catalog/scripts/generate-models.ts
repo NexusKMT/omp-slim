@@ -555,6 +555,39 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 	return [...models];
 }
 
+/**
+ * Re-bake Bedrock Converse Claude prompt-cache policy from the existing
+ * snapshot without refetching upstream catalogs or changing source metadata.
+ * Run from packages/catalog with `bun run gen:models --refresh-prompt-cache`.
+ */
+async function refreshBedrockPromptCache() {
+	const previousModels = prevModelsJson as unknown as Record<string, Record<string, Model<Api>>>;
+	const bedrockModels = previousModels["amazon-bedrock"];
+	if (!bedrockModels) throw new Error("Bundled Amazon Bedrock models are missing");
+
+	const refreshedBedrockModels = { ...bedrockModels };
+	let changedModels = 0;
+	for (const [id, model] of Object.entries(bedrockModels)) {
+		if (model.api !== "bedrock-converse-stream") continue;
+		const spec = toModelSpec(model);
+		delete spec.promptCache;
+		const refreshed = buildModel(spec);
+		if (refreshed.identity.class !== "anthropic") continue;
+		if (JSON.stringify(model.promptCache) === JSON.stringify(refreshed.promptCache)) continue;
+		if (refreshed.promptCache === undefined) {
+			const { promptCache: _promptCache, ...withoutPromptCache } = model;
+			refreshedBedrockModels[id] = withoutPromptCache;
+		} else {
+			refreshedBedrockModels[id] = { ...model, promptCache: refreshed.promptCache };
+		}
+		changedModels++;
+	}
+
+	const refreshedModels = { ...previousModels, "amazon-bedrock": refreshedBedrockModels };
+	await Bun.write(path.join(packageRoot, "src/models.json"), JSON.stringify(refreshedModels));
+	console.log(`Refreshed prompt-cache policy for ${changedModels} Amazon Bedrock Claude model(s)`);
+}
+
 async function generateModels() {
 	// Fetch models from dynamic sources.
 	const modelsDevModels = await loadModelsDevData();
@@ -772,6 +805,14 @@ function canonicalizeModelCompat(model: ModelSpec<Api>): void {
 	}
 }
 
+const generatorArguments = process.argv.slice(2);
 if (import.meta.main) {
-	generateModels().catch(console.error);
+	if (generatorArguments.length === 0) {
+		generateModels().catch(console.error);
+	} else if (generatorArguments.length === 1 && generatorArguments[0] === "--refresh-prompt-cache") {
+		refreshBedrockPromptCache().catch(console.error);
+	} else {
+		console.error("Usage: bun run gen:models [--refresh-prompt-cache]");
+		process.exitCode = 1;
+	}
 }

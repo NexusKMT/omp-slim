@@ -61,6 +61,38 @@ describe("compat compiler grammar", () => {
 		});
 	});
 
+	test("class provider and API selectors compile as a conjunction", () => {
+		const compiled = compileCascade([
+			{
+				file: "classes/test.kdl",
+				text: [
+					'class "anthropic" {',
+					'\ton "amazon-bedrock" {',
+					'\t\ton-api "anthropic-messages" {',
+					'\t\t\tfamily "sonnet" {',
+					'\t\t\t\trevision ">=4.6" {',
+					"\t\t\t\t\tprompt-cache {",
+					"\t\t\t\t\t\tshort 300",
+					"\t\t\t\t\t}",
+					"\t\t\t\t}",
+					"\t\t\t}",
+					"\t\t}",
+					"\t}",
+					"}",
+				].join("\n"),
+			},
+		]);
+		expect(compiled.rules).toHaveLength(1);
+		expect(compiled.rules[0]).toMatchObject({
+			class: "anthropic",
+			providers: ["amazon-bedrock"],
+			apis: ["anthropic-messages"],
+			family: "sonnet",
+			revision: [{ op: ">=", revision: "4.6.0" }],
+			catalog: { promptCache: { short: 300 } },
+		});
+	});
+
 	test("root on-api rejects catalog-entry directives it does not own", () => {
 		expect(() =>
 			compileCascade([{ file: "providers/test.kdl", text: 'on-api "cursor-agent" {\n\tdefault-model "m"\n}' }]),

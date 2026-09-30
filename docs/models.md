@@ -254,11 +254,16 @@ providers:
         promptCache: { short: 300, long: 3600 }
 ```
 
-The bundled catalog fills this in for direct Anthropic (5 min / 1 h). Other providers, including
-Anthropic-compatible gateways and direct OpenAI, have no built-in lifetime until their cache-expiry
-and replay behavior has been validated for warming. A model without a value for the tier a request
-used is never warmed; custom models and `modelOverrides` can opt in with `promptCache` once the
-backing cache behavior is known. See `providers.cacheWarming` in [Settings](./settings.md).
+Direct Anthropic keeps its existing 5 min / 1 h lifetimes (`short: 300`, `long: 3600`),
+defaulting to 5 min for API keys and 1 h for OAuth subscriber sessions; API keys can
+explicitly select `long`. Claude on native Amazon Bedrock Converse has a 5 min TTL; 1 h is
+available only where both catalog metadata and the request wire support it. Claude on
+Bedrock Runtime or Mantle's Anthropic Messages route has a 5 min lifetime under existing
+request support; an explicit `long` request falls back to `short` when unsupported. Other Amazon Bedrock models,
+including Nova and GPT, are not enabled for warming. A model without a lifetime for the
+retention tier actually used is never warmed; custom models and `modelOverrides` can opt in
+with `promptCache` once the backing cache behavior is known. See `providers.cacheWarming` in
+[Settings](./settings.md).
 
 ## Usage costs and time-based pricing
 

@@ -183,13 +183,15 @@ provider "openrouter" {
 | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `class`    | `class "id" { ... }`                     | Exact class ID. At document root it may contain `on`, `on-api`, `family`, `revision`, and `models`. Under `provider` it may contain `family`, `revision`, and `models`.        |
 | `provider` | `provider "id" { ... }`                  | Exact provider ID. It is root-only and may contain `class` and `models`.                                                                                                       |
-| `on`       | `on "provider-a" "provider-b" { ... }`   | One or more provider IDs, combined as OR. It is allowed only under a root `class`, and may contain `family`, `revision`, and `models`.                                         |
-| `on-api`   | `on-api "adapter-a" "adapter-b" { ... }` | One or more request adapter IDs, combined as OR. At document root it may contain `class` and `models`; under a root `class` it may contain `family`, `revision`, and `models`. |
+| `on`       | `on "provider-a" "provider-b" { ... }`   | One or more provider IDs, combined as OR. It is allowed under a root `class`, and may contain `on-api` to conjoin an API scope plus `family`, `revision`, and `models`. |
+| `on-api`   | `on-api "adapter-a" "adapter-b" { ... }` | One or more request adapter IDs, combined as OR. At document root it may contain `class` and `models`; under a root `class` (directly or nested inside `on`) it may contain `family`, `revision`, and `models`. |
 | `family`   | `family "id" { ... }`                    | Exact classified family ID. It may contain `revision` and `models`. A target with no family does not match.                                                                    |
 | `revision` | `revision ">=2.5 <4" { ... }`            | A non-empty, whitespace-separated conjunction of comparisons. It may contain `models`. A target with no revision does not match.                                               |
 | `models`   | `models "id" "vendor/*" { ... }`         | One or more alternatives, combined as OR. It cannot contain another selector. `token="name"` matches an ASCII-case-insensitive token bounded by non-alphanumerics.             |
 
 Class, provider/`on`, `on-api`, and family selector values are compared exactly and case-sensitively to the structured resolve target. Revision operators are `>=`, `>`, `<=`, `<`, and `=`; operands have one to three dot-separated unsigned 8-bit components, omitted components zero.
+
+An `on-api` nested inside `on` under a class requires both the selected provider and request adapter; values within each selector remain alternatives.
 
 A `models` string without `*` is an exact, case-sensitive match against the provider-relative model identifier. A string containing `*` is an anchored, ASCII-case-insensitive wildcard match. Prefer taxonomy ranks; retain exact/glob lists only when they isolate the census member set exactly, and keep a `// residue:` comment explaining why ranks do not.
 
