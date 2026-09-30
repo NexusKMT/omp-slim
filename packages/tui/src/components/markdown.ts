@@ -3591,6 +3591,9 @@ export class Markdown implements Component {
 			return segments.map((segment: string) => (segment === "" ? "" : applyText(segment))).join("\n");
 		};
 		const swatchGlyph = this.#theme.symbols.colorSwatch || DEFAULT_COLOR_SWATCH_GLYPH;
+		// Set by a line break: the next line's own leading whitespace is dropped.
+		// Every token consumes it, so the space after a styled span that starts
+		// the line stays; a token that renders nothing passes it on.
 		let trimLeadingWhitespace = false;
 		const htmlState = createHtmlNormalizationState();
 		const markHtmlItemWhenContent = (text: string): void => {
@@ -3598,6 +3601,8 @@ export class Markdown implements Component {
 		};
 
 		for (const token of collapseInlineHtml(tokens)) {
+			const lineStart: boolean = trimLeadingWhitespace;
+			trimLeadingWhitespace = false;
 			if (isMathToken(token)) {
 				markHtmlItemWhenContent(token.text);
 				result += applyTextWithNewlines(renderMathToken(token.text));
@@ -3605,9 +3610,8 @@ export class Markdown implements Component {
 			}
 			switch (token.type) {
 				case "text": {
-					const rawText = trimLeadingWhitespace ? token.text.replace(/^\s+/, "") : token.text;
+					const rawText = lineStart ? token.text.replace(/^\s+/, "") : token.text;
 					const text = normalizeHtmlEntitiesForTerminal(rawText);
-					trimLeadingWhitespace = false;
 					markHtmlItemWhenContent(text);
 					if (token.tokens) markHtmlItemWhenContent(plainInlineTokens(token.tokens));
 					// Text tokens in list items can have nested tokens for inline formatting
@@ -3688,8 +3692,8 @@ export class Markdown implements Component {
 						result += applyTextWithNewlines(cleaned);
 						if (cleaned.endsWith("\n")) {
 							trimLeadingWhitespace = true;
-						} else if (cleaned.length > 0) {
-							trimLeadingWhitespace = false;
+						} else if (cleaned.length === 0) {
+							trimLeadingWhitespace = lineStart;
 						}
 					}
 					break;
@@ -3697,11 +3701,12 @@ export class Markdown implements Component {
 				default:
 					// Handle any other inline token types as plain text
 					if ("text" in token && typeof token.text === "string") {
-						const rawText = trimLeadingWhitespace ? token.text.replace(/^\s+/, "") : token.text;
+						const rawText = lineStart ? token.text.replace(/^\s+/, "") : token.text;
 						const text = normalizeHtmlEntitiesForTerminal(rawText);
-						trimLeadingWhitespace = false;
 						markHtmlItemWhenContent(text);
 						result += applyTextWithNewlines(text);
+					} else {
+						trimLeadingWhitespace = lineStart;
 					}
 			}
 		}
