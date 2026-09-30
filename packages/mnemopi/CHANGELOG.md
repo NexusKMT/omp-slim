@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded `fastembed` to `3.0.0`: local embedding models now download from Hugging Face (`Qdrant/*`) into `<cache>/<Qdrant_repo>/` and interrupted downloads resume per file; existing models are fetched once more into the new layout, producing the same vectors ([#13916](https://github.com/can1357/oh-my-pi/issues/13916))
+
+### Fixed
+
+- Fixed local embeddings failing with `TAR_BAD_ARCHIVE` on a fresh model cache once Qdrant's `storage.googleapis.com/qdrant-fastembed` bucket stops serving `fastembed@2` downloads ([#13916](https://github.com/can1357/oh-my-pi/issues/13916))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
