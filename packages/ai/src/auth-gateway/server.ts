@@ -52,6 +52,7 @@ import {
 	captureRequestHeaders,
 	corsHeaders,
 	gatewayResponseHeaders,
+	hasMisplacedBearer,
 	isAuthorized,
 	json,
 	resolveClientIdentity,
@@ -778,10 +779,13 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 	const server = Bun.serve({
 		hostname: bind.hostname,
 		port: bind.port,
-		fetch: async (req): Promise<Response> => {
+		fetch: async (req, server): Promise<Response> => {
 			const url = new URL(req.url);
 			const pathname = url.pathname;
-			const peer = resolvePeer(req);
+			if (hasMisplacedBearer(req, url, tokens)) {
+				return withCors(json(400, { error: "gateway bearer token outside Authorization" }), req);
+			}
+			const peer = resolvePeer(req, server.requestIP(req)?.address ?? "unknown", opts.trustProxyHeaders);
 			// CORS preflight is always answered without auth — browsers send
 			// preflights pre-authentication and a 401 here breaks the actual
 			// request before the bearer is ever attached.

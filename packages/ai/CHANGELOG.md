@@ -6,6 +6,10 @@
 
 - `AuthStorage.keys.setConfig(provider, value, { fallback: true })` registers a key that is used only when no stored OAuth or `/login` credential exists, instead of overriding them; `removeConfig`/`clearConfig` also clear these fallbacks ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
 
+### Fixed
+
+- Auth gateway requests now keep gateway bearer tokens out of URLs and non-authorization headers, and attribute peers to socket addresses unless proxy headers are explicitly trusted.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
