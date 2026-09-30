@@ -493,6 +493,33 @@ describe("marked compatibility", () => {
 		expect(shape(Lexer.lexInline("*a ***a**"))).toEqual([["em", "*a ***a**", [["text", "a ***a*"]]]]);
 	});
 
+	// The text of emphasis is lexed through `lexer.inlineTokens`, with its paragraph's closers and text stops. An
+	// override that returns without lexing it must not leave them to a later lex of an equal string, which lexes that
+	// string on its own.
+	test("lexes a string on its own after an inlineTokens override skipped emphasis text equal to it", () => {
+		const text = "a www.x.y b";
+		class SkipOnce extends Lexer {
+			skipped = false;
+			override inlineTokens(src: string, tokens: Token[] = []): Token[] {
+				if (src !== text || this.skipped) return super.inlineTokens(src, tokens);
+				this.skipped = true;
+				return tokens;
+			}
+		}
+		const lexer = new SkipOnce();
+		expect(shape(lexer.inlineTokens(`*${text}* then www.q.r`))).toEqual([
+			["em", `*${text}*`, []],
+			["text", " then "],
+			["link", "www.q.r", [["text", "www.q.r"]]],
+		]);
+		expect(shape(lexer.inlineTokens(text))).toEqual(shape(Lexer.lexInline(text)));
+		expect(shape(Lexer.lexInline(text))).toEqual([
+			["text", "a "],
+			["link", "www.x.y", [["text", "www.x.y"]]],
+			["text", " b"],
+		]);
+	});
+
 	// An image's text is its label unescaped: also when the label's only escape ends right before its "]", and for an
 	// image in another image's label, whose text keeps the inner image's source.
 	test("gives an image its label unescaped as its text", () => {

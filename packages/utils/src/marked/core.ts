@@ -448,9 +448,9 @@ export class Tokenizer {
 }
 
 // A nested inline source (a link label, the text of emphasis) shares the closers, text stops and tokenizer context of
-// the source it lies in, which are offered to the next inline lex on that lexer. They are offered right before the
-// nested source is lexed through `lexer.inlineTokens`, which a subclass may override; the lex that call reaches takes
-// them if it lexes exactly that string, or else starts a root source.
+// the source it lies in, which are offered to the next inline lex on that lexer. They are offered for the call that
+// lexes the nested source through `lexer.inlineTokens`, which a subclass may override; the first lex that call
+// reaches takes them if it lexes exactly that string, or else starts a root source.
 let offered: { lexer: Lexer; nested: NestedMatch; outer: InlineLex } | undefined;
 
 /** Starts the lex of `src` on `lexer`: of the nested source offered for it, else of a root source. Clears the offer. */
@@ -629,6 +629,8 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 	for (let nested = lexToNested(lex); nested; nested = lexToNested(lex)) {
 		offered = { lexer, nested, outer: lex };
 		nested.token.tokens = lexer.inlineTokens(nested.src);
+		// An override that returned without lexing the text leaves its offer to no later lex of an equal string.
+		offered = undefined;
 		output.push(nested.token);
 	}
 	return output;
