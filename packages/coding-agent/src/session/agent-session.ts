@@ -6777,6 +6777,7 @@ export class AgentSession implements SettingsScope {
 				role: "custom",
 				customType: notice.customType,
 				content: notice.content,
+				details: notice.details,
 				display: false,
 				attribution: "user",
 				timestamp,

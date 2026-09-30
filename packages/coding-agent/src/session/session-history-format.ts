@@ -388,9 +388,13 @@ function executionLine(
  */
 export const PRIMARY_CONTEXT_CUSTOM_TYPES: ReadonlySet<string> = new Set(["plan-mode-context", "plan-mode-reference"]);
 
-/** Hidden non-primary custom messages whose content is needed to understand visible transcript entries. */
+/**
+ * Hidden non-primary custom messages whose content is needed to understand visible transcript entries:
+ * vision descriptions and the source file behind an `[image]` a user pasted or dropped.
+ */
 const CONTEXTUAL_NON_PRIMARY_HIDDEN_CUSTOM_TYPES: Record<string, true> = {
 	"image-attachment-description": true,
+	"image-attachment": true,
 };
 
 /** One-liner for custom/hook messages: `[irc] A → B: body…`. */
@@ -413,6 +417,14 @@ function customOneLiner(msg: CustomMessage | HookMessage): string {
 				})
 				.join(", ");
 			return `[async-result] ${oneLine(labels)}`;
+		}
+		case "image-attachment": {
+			// The notice body is model-facing boilerplate; its path would be cut by `oneLine`.
+			// Emit the full path so a reader of the transcript can `read` the file.
+			const path = str("path");
+			if (path)
+				return `[image-attachment] Image #${typeof details.index === "number" ? details.index : "?"}: ${path}`;
+			return `[${msg.customType}] ${oneLine(contentToText(msg.content))}`;
 		}
 		default:
 			return `[${msg.customType}] ${oneLine(contentToText(msg.content))}`;
