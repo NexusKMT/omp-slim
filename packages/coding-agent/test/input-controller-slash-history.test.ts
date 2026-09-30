@@ -172,7 +172,7 @@ describe("input controller — slash command history (#3148)", () => {
 	// #13925: queue shorthand must not write to a guest's local session/history.
 	it.each([
 		{ input: "-> /new", readOnly: false, compacting: false },
-		{ input: "=> 1. /new", readOnly: true, compacting: false },
+		{ input: "=>\n1. /new\n2. inspect the result", readOnly: true, compacting: false },
 		{ input: "-> inspect the result", readOnly: false, compacting: true },
 	])("refuses guest queue shorthand ($input, readOnly=$readOnly)", async ({ input, readOnly, compacting }) => {
 		const { ctx, editor, addToHistory, followUp, prompt, onInputCallback, showStatus } = makeCtx(true);
@@ -180,7 +180,8 @@ describe("input controller — slash command history (#3148)", () => {
 		Object.assign(ctx, { collabGuest: { readOnly, sendPrompt } });
 		Object.assign(ctx.session, { isCompacting: compacting });
 		controllerFor(ctx);
-		editor.setText(input);
+		// The real editor clears its text before invoking the submit callback.
+		editor.setText("");
 
 		await editor.onSubmit?.(input);
 
