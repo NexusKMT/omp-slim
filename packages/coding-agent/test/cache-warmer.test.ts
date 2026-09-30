@@ -277,7 +277,7 @@ describe("cache warming scheduling math", () => {
 		bedrock.thinking = { mode: "anthropic-adaptive", efforts: [Effort.High], requiresEffort: true };
 		expect(isReplayable(bedrock, { forceReasoningOff: true })).toBe(true);
 		bedrock.thinking = { mode: "effort", efforts: [Effort.High] };
-		expect(isReplayable(bedrock, { reasoning: Effort.High })).toBe(true);
+		expect(isReplayable(bedrock, { reasoning: Effort.High })).toBe(false);
 
 		const openai = buildModel({
 			id: "gpt-5.4",

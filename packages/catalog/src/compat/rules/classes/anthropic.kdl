@@ -108,7 +108,6 @@ class "anthropic" {
 				supports-mid-conversation-tool-changes #true
 				supports-turn-scoped-system #true
 				supports-per-message-effort #true
-				supports-thinking-binding-controls #true
 			}
 		}
 		family "opus" {
@@ -119,6 +118,15 @@ class "anthropic" {
 			}
 			revision ">=5" {
 				supports-per-message-effort #true
+			}
+		}
+	}
+	// Vertex rejects `thinking.block_binding` on Sonnet 5.5 with 400
+	// `thinking.adaptive.block_binding: Extra inputs are not permitted`.
+	on "anthropic" "cloudflare-ai-gateway" {
+		family "sonnet" {
+			revision ">=5.5" {
+				supports-thinking-binding-controls #true
 			}
 		}
 	}
@@ -273,11 +281,25 @@ class "anthropic" {
 			}
 		}
 	}
-	// AWS Bedrock Converse prompt-cache checkpoints, from the AWS model cards
-	// (docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html); cache
-	// pricing is deliberately not used to infer these request shapes. Keep the
-	// provider and adapter conjunctive so this policy stays on Bedrock Runtime.
 	on "amazon-bedrock" {
+		// Model metadata applies to every Bedrock request adapter.
+		// Upstream metadata is stale for cache pricing and context.
+		family "opus" {
+			revision "=4.6" {
+				cost-patch {
+					cache-read 0.5
+					cache-write 6.25
+				}
+				limits-patch {
+					context-window 1000000
+					max-tokens 128000
+				}
+			}
+		}
+		// AWS Bedrock Converse prompt-cache checkpoints, from the AWS model cards
+		// (docs.aws.amazon.com/bedrock/latest/userguide/model-cards.html); cache
+		// pricing is deliberately not used to infer these request shapes. Keep the
+		// provider and adapter conjunctive so this policy stays on Converse.
 		on-api "bedrock-converse-stream" {
 			family "opus" {
 				revision ">=4 <4.5" {
@@ -304,15 +326,6 @@ class "anthropic" {
 					prompt-cache-maximum-checkpoints 4
 					prompt-cache {
 						short 300
-					}
-					// Upstream metadata is stale for cache pricing and context.
-					cost-patch {
-						cache-read 0.5
-						cache-write 6.25
-					}
-					limits-patch {
-						context-window 1000000
-						max-tokens 128000
 					}
 				}
 				revision ">=4.7 <5" {

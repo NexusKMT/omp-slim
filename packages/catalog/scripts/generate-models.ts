@@ -23,7 +23,6 @@ import { providerEntries, providerEntry, seedModels } from "../src/compat/provid
 import type { CompiledProvider } from "../src/compat/types";
 import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
 import { createModelManager } from "../src/model-manager";
-import { getBundledModels } from "../src/models";
 import prevModelsJson from "../src/models.json" with { type: "json" };
 import { toModelSpec } from "../src/provider-models/bundled-references";
 import {
@@ -92,6 +91,7 @@ const CREDENTIAL_SCOPED_PROVIDERS = new Set(["devin"]);
  * - `always`: every regen (same-id upstream/discovery rows still win dedup).
  * - `fallback`: only when the provider's authoritative discovery did not succeed.
  * - `empty`: only when no other source produced a row for the provider.
+ * - `never`: runtime-only rows the provider's model manager serves itself.
  *
  * xai-oauth projects curated chat rows into Responses specs while preserving
  * runner seed transports. The bundle carries both so configured roles resolve
@@ -104,6 +104,7 @@ function bundledSeedRows(
 ): readonly ModelSpec[] {
 	switch (entry.seed?.bundle) {
 		case undefined:
+		case "never":
 			return [];
 		case "fallback":
 			if (authoritativeProviders.has(entry.id)) return [];
@@ -556,40 +557,6 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
 	return [...models];
 }
 
-/**
- * Re-bake Bedrock Converse Claude prompt-cache policy from the existing
- * snapshot without refetching upstream catalogs or changing source metadata.
- * Run from packages/catalog with `bun run gen:models --refresh-prompt-cache`.
- */
-async function refreshBedrockPromptCache() {
-	type SnapshotModelRow = { readonly api: Api; readonly [key: string]: unknown };
-	const previousBedrockModels: Readonly<Record<string, SnapshotModelRow>> = prevModelsJson["amazon-bedrock"];
-	if (!previousBedrockModels) throw new Error("Bundled Amazon Bedrock models are missing");
-
-	const refreshedBedrockModels: Record<string, SnapshotModelRow> = { ...previousBedrockModels };
-	let changedModels = 0;
-	for (const model of getBundledModels("amazon-bedrock")) {
-		if (model.api !== "bedrock-converse-stream") continue;
-		const previousModel = previousBedrockModels[model.id];
-		const spec = toModelSpec(model);
-		delete spec.promptCache;
-		const refreshed = buildModel(spec);
-		if (refreshed.identity.class !== "anthropic") continue;
-		if (JSON.stringify(previousModel.promptCache) === JSON.stringify(refreshed.promptCache)) continue;
-		if (refreshed.promptCache === undefined) {
-			const { promptCache: _promptCache, ...withoutPromptCache } = previousModel;
-			refreshedBedrockModels[model.id] = withoutPromptCache;
-		} else {
-			refreshedBedrockModels[model.id] = { ...previousModel, promptCache: refreshed.promptCache };
-		}
-		changedModels++;
-	}
-
-	const refreshedModels = { ...prevModelsJson, "amazon-bedrock": refreshedBedrockModels };
-	await Bun.write(path.join(packageRoot, "src/models.json"), JSON.stringify(refreshedModels));
-	console.log(`Refreshed prompt-cache policy for ${changedModels} Amazon Bedrock Claude model(s)`);
-}
-
 async function generateModels() {
 	// Fetch models from dynamic sources.
 	const modelsDevModels = await loadModelsDevData();
@@ -807,14 +774,6 @@ function canonicalizeModelCompat(model: ModelSpec<Api>): void {
 	}
 }
 
-const generatorArguments = process.argv.slice(2);
 if (import.meta.main) {
-	if (generatorArguments.length === 0) {
-		generateModels().catch(console.error);
-	} else if (generatorArguments.length === 1 && generatorArguments[0] === "--refresh-prompt-cache") {
-		refreshBedrockPromptCache().catch(console.error);
-	} else {
-		console.error("Usage: bun run gen:models [--refresh-prompt-cache]");
-		process.exitCode = 1;
-	}
+	generateModels().catch(console.error);
 }

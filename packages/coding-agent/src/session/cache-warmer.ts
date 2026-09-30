@@ -159,7 +159,7 @@ export function isReplayable(model: Model<Api>, options: SimpleStreamOptions | u
 			((options?.reasoning !== undefined && !options.disableReasoning && !options.forceReasoningOff) ||
 				(model.thinking?.requiresEffort === true && !model.thinking.suppressWhenOff));
 		if (!reasoningRequested) return true;
-		return model.thinking?.mode === "anthropic-adaptive" || model.thinking?.mode === "effort";
+		return model.thinking?.mode === "anthropic-adaptive";
 	}
 	return true;
 }

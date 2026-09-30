@@ -742,21 +742,17 @@ export class ModelRegistry {
 		const unprojected = resolveProviderModelReference(current.provider, current.id, this.#unprojectedModels);
 		if (unprojected) {
 			const patchedBase = applyModelPatch(unprojected, patch, "merge");
-			this.#unprojectedModels = this.#applyConfiguredPromptCache(
-				this.#unprojectedModels.map(candidate =>
-					candidate.provider === unprojected.provider && candidate.id === unprojected.id ? patchedBase : candidate,
-				),
+			this.#unprojectedModels = this.#unprojectedModels.map(candidate =>
+				candidate.provider === unprojected.provider && candidate.id === unprojected.id ? patchedBase : candidate,
 			);
 			this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			return resolveProviderModelReference(current.provider, current.id, this.#models) ?? patchedBase;
 		}
 		const patched = applyModelPatch(current, patch, "merge");
-		this.#models = this.#applyConfiguredPromptCache(
-			this.#models.map(candidate =>
-				candidate.provider === current.provider && candidate.id === current.id ? patched : candidate,
-			),
+		this.#models = this.#models.map(candidate =>
+			candidate.provider === current.provider && candidate.id === current.id ? patched : candidate,
 		);
-		return resolveProviderModelReference(current.provider, current.id, this.#models) ?? patched;
+		return patched;
 	}
 
 	/**
@@ -971,7 +967,7 @@ export class ModelRegistry {
 	 * `buildModel` so the registry keeps its "every model is built" invariant.
 	 */
 	#applyRuntimeModelModifiers(models: Model<Api>[]): Model<Api>[] {
-		if (this.#runtimeModelModifiers.size === 0) return this.#applyConfiguredPromptCache(models);
+		if (this.#runtimeModelModifiers.size === 0) return models;
 		let projected = models;
 		for (const [providerName, modifyModels] of this.#runtimeModelModifiers) {
 			const credential = this.authStorage.credentials.getOAuth(providerName);
@@ -1021,7 +1017,7 @@ export class ModelRegistry {
 				this.#warnModelModifierFailure(providerName, error instanceof Error ? error.message : String(error));
 			}
 		}
-		return this.#applyConfiguredPromptCache(projected);
+		return projected;
 	}
 
 	/**
@@ -1056,9 +1052,7 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, select(this.#runtimeModelOverlays));
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltVariants(combined), this.#modelOverrides);
 		const withProviderBedrock = this.#applyProviderBedrockOverrides(withModelOverrides);
-		return this.#applyConfiguredPromptCache(
-			this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock)),
-		);
+		return this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock));
 	}
 
 	#composeStaticModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
@@ -1763,9 +1757,7 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltVariants(combined), this.#modelOverrides);
 		const withProviderBedrock = this.#applyProviderBedrockOverrides(withModelOverrides);
-		this.#unprojectedModels = this.#applyConfiguredPromptCache(
-			this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock)),
-		);
+		this.#unprojectedModels = this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock));
 		this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 	}
 
@@ -2153,10 +2145,18 @@ export class ModelRegistry {
 				hasExplicitVllmConfig ||
 				canUseSharedCatalogWithoutAuth
 			) {
+				// Residency belongs to the token selected for discovery, not another
+				// stored account that happens to appear first in the pool.
+				const identity = getOAuthCredentialsForProvider(this.authStorage, descriptor.providerId).find(
+					credential => credential.access === apiKey,
+				);
 				const discoveryConfig = {
 					apiKey: isDiscoveryBearerApiKey(apiKey) ? apiKey : undefined,
 					baseUrl: this.#descriptorBaseUrl(descriptor.providerId),
 					fetch: this.#fetch,
+					region: identity?.region,
+					inferenceRegion: identity?.inferenceRegion,
+					orgId: identity?.orgId,
 				};
 				const preparedConfig =
 					getProviderDefinition(descriptor.providerId)?.prepareModelDiscovery?.(discoveryConfig) ??
@@ -2392,13 +2392,14 @@ export class ModelRegistry {
 			return this.#applyProviderTransportOverrideToModel(model, override);
 		});
 	}
-	#resolveLiveModelOverride(
-		model: Model<Api>,
-		hasLiveModel: (provider: string, id: string) => boolean = (provider, id) => this.find(provider, id) !== undefined,
-	): ModelOverride | undefined {
+	#resolveLiveModelOverride(model: Model<Api>): ModelOverride | undefined {
 		const providerOverrides = this.#modelOverrides.get(model.provider);
 		if (!providerOverrides) return undefined;
-		return resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel);
+		return resolveModelOverrideWithAliases(
+			providerOverrides,
+			model,
+			(provider, id) => this.find(provider, id) !== undefined,
+		);
 	}
 
 	#resolveLiveCustomModelOverlay(model: Model<Api>): CustomModelOverlay | undefined {
@@ -2406,55 +2407,6 @@ export class ModelRegistry {
 			this.#customModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id) ??
 			this.#runtimeModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id)
 		);
-	}
-
-	/**
-	 * A runtime registration replaces a same-key configured model for prompt
-	 * cache lifetime projection. Resolve the overlay before reading `promptCache`,
-	 * so an absent runtime lifetime is rebuilt from the effective model's
-	 * catalog policy rather than a stale YAML value. An empty object remains an
-	 * explicit opt-out. Keep the existing resolver's order for lazy runtime
-	 * metadata, whose precedence is unrelated.
-	 */
-	#resolveLivePromptCacheOverlay(model: Model<Api>): { overlay: CustomModelOverlay; isRuntime: boolean } | undefined {
-		const runtimeOverlay = this.#runtimeModelOverlays.find(
-			overlay => overlay.provider === model.provider && overlay.id === model.id,
-		);
-		if (runtimeOverlay) return { overlay: runtimeOverlay, isRuntime: true };
-		const configuredOverlay = this.#customModelOverlays.find(
-			overlay => overlay.provider === model.provider && overlay.id === model.id,
-		);
-		return configuredOverlay ? { overlay: configuredOverlay, isRuntime: false } : undefined;
-	}
-
-	#applyConfiguredPromptCache(models: Model<Api>[]): Model<Api>[] {
-		let liveKeys: Set<string> | null = null;
-		const hasLiveModel = (provider: string, id: string) => {
-			liveKeys ??= new Set(models.map(model => `${model.provider}\u0000${model.id}`));
-			return liveKeys.has(`${provider}\u0000${id}`);
-		};
-
-		let projected: Model<Api>[] | undefined;
-		for (const [index, model] of models.entries()) {
-			const override = this.#resolveLiveModelOverride(model, hasLiveModel);
-			const customModel = this.#resolveLivePromptCacheOverlay(model);
-			const isRuntimeReplacement = customModel?.isRuntime === true;
-			const promptCache =
-				override?.promptCache !== undefined
-					? override.promptCache
-					: isRuntimeReplacement
-						? (customModel?.overlay.promptCache ??
-							buildModel({ ...toModelSpec(model), promptCache: undefined }).promptCache)
-						: customModel?.overlay.promptCache;
-			const shouldApplyPromptCache =
-				override?.promptCache !== undefined ||
-				isRuntimeReplacement ||
-				customModel?.overlay.promptCache !== undefined;
-			if (!shouldApplyPromptCache || promptCache === model.promptCache) continue;
-			projected ??= models.slice();
-			projected[index] = { ...model, promptCache };
-		}
-		return projected ?? models;
 	}
 
 	#applyModelOverrides(models: Model<Api>[], overrides: Map<string, Map<string, ModelOverride>>): Model<Api>[] {
@@ -2523,50 +2475,58 @@ export class ModelRegistry {
 	#applyHardcodedModelPolicies(models: Model<Api>[]): Model<Api>[] {
 		const extendedContext = isExtendedContextEnabledFromSettings(this.#settings);
 		return models.map(model => {
-			const maximum = resolveMaxContextWindow(model);
-			if (maximum !== undefined && model.contextWindow !== null) {
-				// Only extended-window models need a fresh policy baseline: a
-				// materialized cache row may carry an earlier applied window.
-				// Preserve valid standard capacity when an advertised maximum is
-				// smaller, without retaining an obsolete extended window.
-				const standardWindow = buildModel(toModelSpec(model)).contextWindow ?? model.contextWindow;
-				if (extendedContext) {
-					const window = Math.max(standardWindow, maximum);
-					if (window !== model.contextWindow) {
-						model = applyModelOverride(model, { contextWindow: window });
-					}
-				} else if (standardWindow < model.contextWindow) {
-					model = { ...model, contextWindow: standardWindow };
-				}
-			}
-			// Extended context off: cap models with a premium long-context price
-			// tier (e.g. GPT-5.6 bills 2x input above 272K) at the standard-pricing
-			// threshold so compaction fires before a request crosses into the tier.
-			// xai-oauth carries public xAI prices only for API-equivalent stats;
-			// SuperGrok requests remain subscription-backed, so its estimated tier
-			// must not constrain the runtime context window. Explicit per-model
-			// `contextWindow` overrides reapply later in composition and win over
-			// this cap.
-			if (!extendedContext && model.provider !== "xai-oauth") {
-				const threshold = model.cost.longContext?.inputThreshold;
-				if (threshold !== undefined && model.contextWindow !== null && model.contextWindow > threshold) {
-					model = applyModelOverride(model, { contextWindow: threshold });
-				}
-			}
+			// Hosts whose context window is authoritative (subscription limits that
+			// carry public price tiers only as estimates) skip every inferred
+			// window policy.
+			if (!model.contextWindowAuthoritative) model = this.#applyContextWindowPolicies(model, extendedContext);
 			if (model.provider === "ollama-cloud" && model.omitMaxOutputTokens !== true) {
 				model = applyModelOverride(model, { omitMaxOutputTokens: true });
 			}
-			if (model.id !== "gpt-5.4" || model.provider === "github-copilot") {
-				return model;
+			return model;
+		});
+	}
+
+	#applyContextWindowPolicies(model: Model<Api>, extendedContext: boolean): Model<Api> {
+		const maximum = resolveMaxContextWindow(model);
+		if (maximum !== undefined && model.contextWindow !== null) {
+			// Only extended-window models need a fresh policy baseline: a
+			// materialized cache row may carry an earlier applied window.
+			// Preserve valid standard capacity when an advertised maximum is
+			// smaller, without retaining an obsolete extended window.
+			const standardWindow = buildModel(toModelSpec(model)).contextWindow ?? model.contextWindow;
+			if (extendedContext) {
+				const window = Math.max(standardWindow, maximum);
+				if (window !== model.contextWindow) {
+					model = applyModelOverride(model, { contextWindow: window });
+				}
+			} else if (standardWindow < model.contextWindow) {
+				model = { ...model, contextWindow: standardWindow };
 			}
-			const overrides = this.#modelOverrides.get(model.provider)?.get(model.id);
-			if (!overrides) {
-				return applyModelOverride(model, { contextWindow: 1_000_000 });
+		}
+		// Extended context off: cap models with a premium long-context price
+		// tier (e.g. GPT-5.6 bills 2x input above 272K) at the standard-pricing
+		// threshold so compaction fires before a request crosses into the tier.
+		// xai-oauth carries public xAI prices only for API-equivalent stats;
+		// SuperGrok requests remain subscription-backed, so its estimated tier
+		// must not constrain the runtime context window. Explicit per-model
+		// `contextWindow` overrides reapply later in composition and win over
+		// this cap.
+		if (!extendedContext && model.provider !== "xai-oauth") {
+			const threshold = model.cost.longContext?.inputThreshold;
+			if (threshold !== undefined && model.contextWindow !== null && model.contextWindow > threshold) {
+				model = applyModelOverride(model, { contextWindow: threshold });
 			}
-			return applyModelOverride(model, {
-				contextWindow: overrides.contextWindow ?? 1_000_000,
-				...overrides,
-			});
+		}
+		if (model.id !== "gpt-5.4" || model.provider === "github-copilot") {
+			return model;
+		}
+		const overrides = this.#modelOverrides.get(model.provider)?.get(model.id);
+		if (!overrides) {
+			return applyModelOverride(model, { contextWindow: 1_000_000 });
+		}
+		return applyModelOverride(model, {
+			contextWindow: overrides.contextWindow ?? 1_000_000,
+			...overrides,
 		});
 	}
 
@@ -3217,9 +3177,7 @@ export class ModelRegistry {
 						return this.#applyProviderTransportOverrideToModel(model, runtimeTransportOverride);
 					})
 				: nextModels;
-			this.#unprojectedModels = this.#applyConfiguredPromptCache(
-				this.#applyProviderBedrockOverrides(nextModelsWithTransport),
-			);
+			this.#unprojectedModels = this.#applyProviderBedrockOverrides(nextModelsWithTransport);
 
 			this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			this.#invalidateProviderModelCache(providerName);
@@ -3295,13 +3253,11 @@ export class ModelRegistry {
 			);
 			this.#runtimeProviderOverrides.set(providerName, nextRuntimeOverride);
 			if (this.#hasFullSnapshot) {
-				this.#unprojectedModels = this.#applyConfiguredPromptCache(
-					this.#applyDiscoveryPolicies(
-						this.#unprojectedModels.map(model => {
-							if (model.provider !== providerName) return model;
-							return this.#applyProviderTransportOverrideToModel(model, transportOverride);
-						}),
-					),
+				this.#unprojectedModels = this.#applyDiscoveryPolicies(
+					this.#unprojectedModels.map(model => {
+						if (model.provider !== providerName) return model;
+						return this.#applyProviderTransportOverrideToModel(model, transportOverride);
+					}),
 				);
 				this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			}
