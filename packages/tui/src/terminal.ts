@@ -30,7 +30,7 @@ import { isInsideTmux, wrapTmuxPassthrough } from "./tmux";
 import { setHangulCompatibilityJamoWidth } from "./utils";
 import { translateWindowsAltGrSequence } from "./windows-altgr";
 
-export { writeTerminalSequence } from "./active-terminal";
+export { writeTerminalSequence, writeThroughActiveTerminal } from "./active-terminal";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
