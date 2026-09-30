@@ -1185,6 +1185,23 @@ describe("AgentSession queued steer delivery", () => {
 			expect(session.messages.filter(message => message.role === "user")).toHaveLength(1);
 		});
 
+		it("reports a promotion as one queue_update that never shows the message missing", async () => {
+			const { session } = await createSession([{ content: ["delivered"] }]);
+			await session.followUp("keep me visible");
+			const updates: Array<{ steering: string[]; followUp: string[] }> = [];
+			const unsubscribe = session.subscribe(event => {
+				if (event.type === "queue_update") updates.push({ steering: event.steering, followUp: event.followUp });
+			});
+			try {
+				expect(session.promoteQueuedMessage("keep me visible")).toBe(true);
+				// Synchronous snapshot: the idle drain has not dequeued it yet.
+				expect(updates).toEqual([{ steering: ["keep me visible"], followUp: [] }]);
+			} finally {
+				unsubscribe();
+			}
+			await session.waitForIdle();
+		});
+
 		for (const mode of ["immediate", "wait"] as const) {
 			it(`honors ${mode} interruption when promoting during an interruptible tool`, async () => {
 				const { session } = await createSession([
