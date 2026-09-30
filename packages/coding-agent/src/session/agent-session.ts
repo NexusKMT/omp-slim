@@ -387,10 +387,11 @@ import {
 	type SessionAdvisorsHost,
 } from "./session-advisors";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
-import { getRestorableSessionModels, isTranscriptEntry } from "./session-context";
+import { buildSessionContext, getRestorableSessionModels, isTranscriptEntry } from "./session-context";
 import type { CacheWarmer, CacheWarmingMode, CacheWarmingStatus } from "./cache-warmer";
 import { isUserRequestEntry, transcriptEntryMessage, userTurnDraft } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { formatSessionDumpText } from "./session-dump-format";
+import { collectSubSessions } from "./sub-sessions";
 import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
@@ -12418,9 +12419,21 @@ export class AgentSession implements SettingsScope {
 	 * Format the entire session as plain text for clipboard export: system
 	 * prompt, model/thinking config, tool inventory, and the full transcript
 	 * rendered with markdown role headings (`## User`, `## Assistant`,
-	 * `### Tool Call`/`### Tool Result`).
+	 * `### Tool Call`/`### Tool Result`), followed by every persisted subagent
+	 * transcript stored next to the session file (nested subagents included).
 	 */
-	formatSessionAsText(): string {
+	async formatSessionAsText(): Promise<string> {
+		const sessionFile = this.sessionManager.getSessionFile();
+		const subSessions = sessionFile ? await collectSubSessions(sessionFile) : {};
+		const subagents = Object.entries(subSessions).map(([key, sub]) => {
+			const context = deobfuscateSessionContext(buildSessionContext(sub.entries, sub.leafId), this.#obfuscator);
+			return {
+				key,
+				messages: context.messages,
+				model: context.models.default,
+				thinkingLevel: context.thinkingLevel,
+			};
+		});
 		return formatSessionDumpText({
 			messages: this.messages,
 			systemPrompt: this.agent.state.systemPrompt,
@@ -12428,6 +12441,7 @@ export class AgentSession implements SettingsScope {
 			thinkingLevel: this.thinkingLevel,
 			tools: this.agent.state.tools,
 			inlineToolDescriptors: this.agent.pruneToolDescriptions,
+			subagents,
 		});
 	}
 

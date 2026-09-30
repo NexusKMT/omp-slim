@@ -40,7 +40,7 @@ interface FakeAcpBuiltinSession {
 	setForcedToolChoice(toolName: string): void;
 	fetchUsageReports?: () => Promise<unknown>;
 	getAsyncJobSnapshot: (opts?: { recentLimit?: number }) => { running: unknown[]; recent: unknown[] } | null;
-	formatSessionAsText: () => string;
+	formatSessionAsText: () => Promise<string>;
 	dumpLlmRequestToTmpDir: () => Promise<string | undefined>;
 	getLastAssistantText: () => string | undefined;
 	messages: unknown[];
@@ -158,7 +158,7 @@ function createRuntime() {
 		getHindsightSessionState: () => undefined,
 		async applyMemoryBackend() {},
 		getAsyncJobSnapshot: () => null,
-		formatSessionAsText: () => "",
+		formatSessionAsText: async () => "",
 		dumpLlmRequestToTmpDir: async () => undefined,
 		getLastAssistantText: () => undefined,
 		messages: [],
@@ -565,7 +565,7 @@ describe("ACP builtin slash commands", () => {
 	// /dump
 	it("dump: outputs transcript with LLM request JSON path when sidecar succeeds", async () => {
 		const { output, runtime } = createRuntime();
-		runtime.session.formatSessionAsText = () => "Session content here";
+		runtime.session.formatSessionAsText = async () => "Session content here";
 		runtime.session.dumpLlmRequestToTmpDir = async () => "/tmp/omp-llm-request-test.json";
 
 		const result = await executeAcpBuiltinSlashCommand("/dump", runtime);
@@ -578,7 +578,7 @@ describe("ACP builtin slash commands", () => {
 
 	it("dump: outputs transcript without sidecar when dumpLlmRequestToTmpDir throws", async () => {
 		const { output, runtime } = createRuntime();
-		runtime.session.formatSessionAsText = () => "Session content here";
+		runtime.session.formatSessionAsText = async () => "Session content here";
 		runtime.session.dumpLlmRequestToTmpDir = async () => {
 			throw new Error("convert failed");
 		};

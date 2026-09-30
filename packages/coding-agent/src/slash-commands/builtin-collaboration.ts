@@ -233,7 +233,7 @@ export const BUILTIN_COLLABORATION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpe
 		acpDescription: "Return full transcript as plain text, with LLM request JSON path",
 		allowArgs: true,
 		handle: async (_command, runtime) => {
-			const text = runtime.session.formatSessionAsText();
+			const text = await runtime.session.formatSessionAsText();
 			if (!text) {
 				await runtime.output("No messages to dump yet.");
 				return commandConsumed();

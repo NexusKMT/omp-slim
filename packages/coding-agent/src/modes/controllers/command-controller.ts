@@ -203,7 +203,7 @@ export class CommandController {
 
 	async handleDumpCommand(): Promise<void> {
 		try {
-			const formatted = this.ctx.session.formatSessionAsText();
+			const formatted = await this.ctx.session.formatSessionAsText();
 			if (!formatted) {
 				this.ctx.showError("No messages to dump yet.");
 				return;

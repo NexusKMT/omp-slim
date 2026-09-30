@@ -5,6 +5,7 @@
  * followed by the message history as per-message markdown headings: `## User`,
  * `## Assistant` (with `<thinking>` blocks and `### Tool Call: <name>` + YAML
  * args), `### Tool Result: <name>`, and the execution/summary sections.
+ * Subagent transcripts follow the main one, each under `# Subagent: <path>`.
  */
 import type { AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, Model, ToolExample, TSchema } from "@oh-my-pi/pi-ai";
@@ -32,6 +33,16 @@ export interface SessionDumpToolInfo {
 	examples?: readonly ToolExample[];
 }
 
+/** A subagent transcript appended after the main session transcript. */
+export interface SessionDumpSubagent {
+	/** Slash-joined agent path relative to the main session, e.g. "Explore/Helper". */
+	key: string;
+	messages: readonly AgentMessage[];
+	/** Persisted default-role model string ("provider/id"). */
+	model?: string;
+	thinkingLevel?: string;
+}
+
 export interface FormatSessionDumpTextOptions {
 	messages: readonly AgentMessage[];
 	systemPrompt?: readonly string[] | null;
@@ -39,6 +50,7 @@ export interface FormatSessionDumpTextOptions {
 	thinkingLevel?: ThinkingLevel | string | null;
 	tools?: readonly SessionDumpToolInfo[];
 	inlineToolDescriptors?: boolean;
+	subagents?: readonly SessionDumpSubagent[];
 }
 
 interface InventoryTool {
@@ -245,5 +257,13 @@ export function formatSessionDumpText(options: FormatSessionDumpTextOptions): st
 	const inventoryTools = toInventoryTools(options.tools ?? []);
 	const lines = renderDumpHeader(options, inventoryTools);
 	appendMarkdownTranscript(lines, options.messages);
+	for (const subagent of options.subagents ?? []) {
+		lines.push("---\n");
+		lines.push(`# Subagent: ${subagent.key}\n`);
+		lines.push(`Model: ${subagent.model ?? "(unknown)"}`);
+		lines.push(`Thinking Level: ${subagent.thinkingLevel ?? ""}`);
+		lines.push("\n");
+		appendMarkdownTranscript(lines, subagent.messages);
+	}
 	return lines.join("\n").trim();
 }

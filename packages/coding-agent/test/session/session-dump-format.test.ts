@@ -182,6 +182,32 @@ describe("formatSessionDumpText markdown-headings transcript", () => {
 		expect(out).not.toContain("<|start|>");
 	});
 
+	it("appends each subagent transcript after the main one under its agent path", () => {
+		const out = formatSessionDumpText({
+			messages: [{ role: "user", content: "main prompt", timestamp: 1 }],
+			subagents: [
+				{
+					key: "Explore",
+					model: "anthropic/claude-sonnet",
+					thinkingLevel: "high",
+					messages: [{ role: "user", content: "explore task", timestamp: 2 }],
+				},
+				{ key: "Explore/Helper", messages: [{ role: "user", content: "helper task", timestamp: 3 }] },
+			],
+		});
+
+		const main = out.indexOf("main prompt");
+		const explore = out.indexOf("# Subagent: Explore\n");
+		const helper = out.indexOf("# Subagent: Explore/Helper\n");
+		expect(main).toBeGreaterThan(-1);
+		expect(explore).toBeGreaterThan(main);
+		expect(helper).toBeGreaterThan(explore);
+		expect(out.slice(explore, helper)).toContain("Model: anthropic/claude-sonnet\nThinking Level: high");
+		expect(out.slice(explore, helper)).toContain("explore task");
+		expect(out.slice(helper)).toContain("Model: (unknown)");
+		expect(out.slice(helper)).toContain("helper task");
+	});
+
 	it("fences system notices under a readable title without breaking on nested code fences", () => {
 		const notice = `<system-notice>
 Background job completed with:

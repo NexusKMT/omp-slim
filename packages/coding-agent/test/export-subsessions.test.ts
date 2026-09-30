@@ -3,7 +3,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-import { collectSubSessions, exportFromFile } from "../src/export/html";
+import { exportFromFile } from "../src/export/html";
+import { collectSubSessions } from "../src/session/sub-sessions";
 
 /**
  * Contract: a session at `<dir>/<name>.jsonl` embeds subagent transcripts from
