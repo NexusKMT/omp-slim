@@ -22,6 +22,60 @@ const STREAM_YIELD_BYTES = 1 * 1024 * 1024;
 const STREAM_YIELD_ENTRIES = 8_192;
 const BLOB_READ_CONCURRENCY = 8;
 
+/**
+ * Complete optional accounting fields from persisted/imported assistant turns.
+ * Complete provider usage is left untouched; missing prices never discard reported tokens.
+ */
+export function normalizeAssistantUsage(message: Extract<AgentMessage, { role: "assistant" }>): boolean {
+	const usage = message.usage;
+	if (
+		usage &&
+		usage.input !== undefined &&
+		usage.output !== undefined &&
+		usage.cacheRead !== undefined &&
+		usage.cacheWrite !== undefined &&
+		usage.totalTokens !== undefined &&
+		usage.cost?.input !== undefined &&
+		usage.cost.output !== undefined &&
+		usage.cost.cacheRead !== undefined &&
+		usage.cost.cacheWrite !== undefined &&
+		usage.cost.total !== undefined
+	) {
+		return false;
+	}
+	const input = usage?.input ?? 0;
+	const output = usage?.output ?? 0;
+	const cacheRead = usage?.cacheRead ?? 0;
+	const cacheWrite = usage?.cacheWrite ?? 0;
+	const cost = usage?.cost;
+	message.usage = {
+		...usage,
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		totalTokens:
+			usage?.totalTokens ??
+			input +
+				output +
+				cacheRead +
+				cacheWrite +
+				(usage?.orchestration?.input ?? 0) +
+				(usage?.orchestration?.cacheRead ?? 0) +
+				(usage?.orchestration?.output ?? 0),
+		cost: {
+			...cost,
+			input: cost?.input ?? 0,
+			output: cost?.output ?? 0,
+			cacheRead: cost?.cacheRead ?? 0,
+			cacheWrite: cost?.cacheWrite ?? 0,
+			total:
+				cost?.total ?? (cost?.input ?? 0) + (cost?.output ?? 0) + (cost?.cacheRead ?? 0) + (cost?.cacheWrite ?? 0),
+		},
+	};
+	return true;
+}
+
 export interface VisitEntriesFromFileStreamOptions {
 	/** Stop after the visitor returns `false`. */
 	shouldContinue?: () => boolean;

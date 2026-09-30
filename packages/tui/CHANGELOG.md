@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent Hub transcripts with assistant messages lacking usage or cost now open instead of crashing ([#13844](https://github.com/can1357/oh-my-pi/issues/13844))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
