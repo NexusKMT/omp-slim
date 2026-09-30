@@ -2,7 +2,7 @@
  * The plain-text step of inline lexing over one inline source: where text can end ({@link TextStops}, which also
  * tells the bare-URL rule where it can match) and how it is appended ({@link TextRun}).
  */
-import type { Lexer, Token, TokenizerExtension, Tokens } from "./core";
+import type { Lexer, Token, TokenizerExtension, TokenizerStartFromFunction, Tokens } from "./core";
 
 // Where plain text can end: the characters that start other inline tokens, and
 // the scheme alternatives of the bare-URL rule. Global so a search can resume
@@ -52,7 +52,7 @@ export class TextStops {
 	#hardBreak = UNSEARCHED;
 	// Per inline extension, the offset its `startFrom` last returned. Keyed by the extension itself: `Marked.use`
 	// can add extensions to the live registry during a lex, shifting every index.
-	#extensionStarts: Map<TokenizerExtension, number> | undefined;
+	readonly #extensionStarts = new Map<TokenizerExtension, number>();
 
 	constructor(src: string, lexer: Lexer) {
 		this.#src = src;
@@ -94,30 +94,29 @@ export class TextStops {
 			Math.min(src.length, this.#tokenChar, this.#schemeFrom(from), this.#mailFrom(from), this.#hardBreak) - pos;
 		const lexer = this.#lexer;
 		for (const extension of lexer.extensions.inline) {
-			let at: number | void;
-			if (extension.startFrom) {
-				const starts = (this.#extensionStarts ??= new Map());
-				let start = starts.get(extension) ?? UNSEARCHED;
-				if (start < pos) {
-					const found = extension.startFrom.call({ lexer }, src, pos);
-					// A -1 or NaN "none" would be searched for again at every text step.
-					if (found !== undefined && !(found >= pos)) {
-						throw new Error(
-							`inline extension "${extension.name}": startFrom returned ${found} for offset ${pos}`,
-						);
-					}
-					start = found ?? Infinity;
-					starts.set(extension, start);
-				}
-				// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
-				at = start - pos;
-			} else {
-				at = extension.start?.call({ lexer }, rest);
-			}
+			// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
+			const at = extension.startFrom
+				? this.#startFrom(extension, extension.startFrom, pos) - pos
+				: extension.start?.call({ lexer }, rest);
 			if (typeof at === "number" && at > 0 && at < next) next = at;
 		}
 		// `slice` reads a fractional hint from `start` as its integer part.
 		return Math.trunc(next);
+	}
+
+	/** Where `extension`'s `startFrom` hint points at or after `pos`, asked again only once lexing passes it. */
+	#startFrom(extension: TokenizerExtension, startFrom: TokenizerStartFromFunction, pos: number): number {
+		const cached = this.#extensionStarts.get(extension) ?? UNSEARCHED;
+		if (cached >= pos) return cached;
+		const found = startFrom.call({ lexer: this.#lexer }, this.#src, pos);
+		// Only undefined or a number at or past `pos` answers: a -1 or NaN "none" would be searched for again at
+		// every text step, and `null >= 0` holds only at offset 0.
+		if (found !== undefined && !(typeof found === "number" && found >= pos)) {
+			throw new Error(`inline extension "${extension.name}": startFrom returned ${found} for offset ${pos}`);
+		}
+		const start = found ?? Infinity;
+		this.#extensionStarts.set(extension, start);
+		return start;
 	}
 
 	/** The first bare-URL scheme at or after `from`. */

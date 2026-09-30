@@ -255,20 +255,17 @@ describe("marked compatibility", () => {
 		]);
 	});
 
-	test("an inline extension whose startFrom reports none as -1 fails loudly", () => {
+	// A JavaScript hint can answer anything: only undefined or a number at or past the offset is an answer, and the
+	// first text step (at offset 0 here) already checks it.
+	test.each([
+		["-1", (src: string, from: number) => src.indexOf("§", from)],
+		["null", () => null as unknown as undefined],
+		["false", () => false as unknown as undefined],
+	])("an inline extension whose startFrom reports none as %s fails loudly", (answer, startFrom) => {
 		const marked = new Marked().use({
-			extensions: [
-				{
-					name: "minusOne",
-					level: "inline",
-					startFrom: (src, from) => src.indexOf("§", from),
-					tokenizer: () => undefined,
-				},
-			],
+			extensions: [{ name: "none", level: "inline", startFrom, tokenizer: () => undefined }],
 		});
-		expect(() => marked.lexer("no section sign here")).toThrow(
-			'inline extension "minusOne": startFrom returned -1 for offset 0',
-		);
+		expect(() => marked.lexer("no section sign here")).toThrow(new RegExp(`"none": startFrom returned ${answer}`));
 	});
 
 	test("an inline extension registered during a lex gets its own startFrom hint", () => {
