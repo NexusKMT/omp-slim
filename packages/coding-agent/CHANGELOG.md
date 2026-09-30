@@ -12,6 +12,7 @@
 
 - RPC `prompt` (including a `/skill:` invocation sent through it) now acknowledges only once the message is admitted — queued onto its steer/follow-up/aside queue, an idle turn started for it, or routed to an extension command — so a `promote_queued_message` or `remove_queued_message` sent right after the acknowledgement finds a message queued moments earlier ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - Describing an attached image for a text-only model now gives up after 20 seconds and stops when you abort; the image stays saved and the model is told its description is unavailable ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
+- The status line's cost segment shows the session's own spend followed by subagent spend in parentheses, e.g. `$0.38 (+1.27)`. The subagent figure includes nested subagents, running and background agents, and subagents restored with a resumed session, and it matches the Agent Hub's cost total. The `$` or subscription mark is printed once, so advisor spend billed the same way shows as a bare amount ([#13944](https://github.com/can1357/oh-my-pi/pull/13944) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
@@ -38,7 +39,6 @@
 - `omp auth-gateway serve` now attributes peers to the socket address by default; deployments behind a trusted reverse proxy can restore forwarded peer headers with `--trust-proxy-headers` ([#13827](https://github.com/can1357/oh-my-pi/pull/13827) by [@shawnkoh](https://github.com/shawnkoh))
 - `--no-ui` now also works with `--mode rpc-ui`: extensions run headless while tool UI such as the `ask` tool still reaches the host ([#13718](https://github.com/can1357/oh-my-pi/pull/13718) by [@alphastorm](https://github.com/alphastorm))
 - `omp models --json` reports each model's `pricingStatus` (`fixed`, `free`, `included`, `variable`, or `unknown`) ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
-- The status line's cost segment shows the session's own spend followed by subagent spend in parentheses, e.g. `$0.38 (+1.27)`. The subagent figure includes nested subagents, running and background agents, and subagents restored with a resumed session, and it matches the Agent Hub's cost total. The `$` or subscription mark is printed once, so advisor spend billed the same way shows as a bare amount
 
 ### Fixed
 
