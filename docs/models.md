@@ -647,10 +647,11 @@ request. This keeps the `:off` selector from being clamped to the lowest effort.
 
 For a custom model with the default `thinkingFormat: openai`, `--thinking off`
 has no explicit off payload on `openai-completions`: when `reasoning_effort` is
-sent, it requests the lowest advertised effort, even with `requiresEffort: false`
-(for example, `efforts: [low, medium, high]` sends `reasoning_effort: low`).
-Turning reasoning off requires a request shape the server treats as off; for
-example, `thinkingFormat: qwen-chat-template` sends
+sent, it requests the first effort listed in `efforts`, even with
+`requiresEffort: false` (for example, `efforts: [low, medium, high]` sends
+`reasoning_effort: low`), so list efforts lowest-first. Turning reasoning off
+requires a request shape the server treats as off; for example,
+`thinkingFormat: qwen-chat-template` sends
 `chat_template_kwargs: { enable_thinking: false }`.
 
 - `supportsReasoningEffort` — accept `reasoning_effort`. Default: auto (off for Grok, Z.ai/Zhipu, and Xiaomi MiMo).
