@@ -156,6 +156,10 @@ export function finalizeCustomModel(model: CustomModelOverlay, options: CustomMo
 		built.cost = { ...resolvedModel.cost };
 		delete built.cost.timeBased;
 	}
+	if (resolvedModel.promptCache !== undefined) {
+		// Configured lifetimes outrank provider catalog defaults.
+		built.promptCache = resolvedModel.promptCache;
+	}
 	return built;
 }
 

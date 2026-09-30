@@ -325,6 +325,10 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	// Patches never change model identity. Preserve already-resolved pricing,
 	// including earlier custom prices and the deliberate absence of a schedule.
 	built.cost = result.cost;
+	if (patch.promptCache !== undefined) {
+		// Configured lifetimes outrank provider catalog defaults.
+		built.promptCache = patch.promptCache;
+	}
 	return built;
 }
 

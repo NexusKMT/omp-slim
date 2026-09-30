@@ -742,17 +742,21 @@ export class ModelRegistry {
 		const unprojected = resolveProviderModelReference(current.provider, current.id, this.#unprojectedModels);
 		if (unprojected) {
 			const patchedBase = applyModelPatch(unprojected, patch, "merge");
-			this.#unprojectedModels = this.#unprojectedModels.map(candidate =>
-				candidate.provider === unprojected.provider && candidate.id === unprojected.id ? patchedBase : candidate,
+			this.#unprojectedModels = this.#applyConfiguredPromptCache(
+				this.#unprojectedModels.map(candidate =>
+					candidate.provider === unprojected.provider && candidate.id === unprojected.id ? patchedBase : candidate,
+				),
 			);
 			this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			return resolveProviderModelReference(current.provider, current.id, this.#models) ?? patchedBase;
 		}
 		const patched = applyModelPatch(current, patch, "merge");
-		this.#models = this.#models.map(candidate =>
-			candidate.provider === current.provider && candidate.id === current.id ? patched : candidate,
+		this.#models = this.#applyConfiguredPromptCache(
+			this.#models.map(candidate =>
+				candidate.provider === current.provider && candidate.id === current.id ? patched : candidate,
+			),
 		);
-		return patched;
+		return resolveProviderModelReference(current.provider, current.id, this.#models) ?? patched;
 	}
 
 	/**
@@ -967,7 +971,7 @@ export class ModelRegistry {
 	 * `buildModel` so the registry keeps its "every model is built" invariant.
 	 */
 	#applyRuntimeModelModifiers(models: Model<Api>[]): Model<Api>[] {
-		if (this.#runtimeModelModifiers.size === 0) return models;
+		if (this.#runtimeModelModifiers.size === 0) return this.#applyConfiguredPromptCache(models);
 		let projected = models;
 		for (const [providerName, modifyModels] of this.#runtimeModelModifiers) {
 			const credential = this.authStorage.credentials.getOAuth(providerName);
@@ -1017,7 +1021,7 @@ export class ModelRegistry {
 				this.#warnModelModifierFailure(providerName, error instanceof Error ? error.message : String(error));
 			}
 		}
-		return projected;
+		return this.#applyConfiguredPromptCache(projected);
 	}
 
 	/**
@@ -1052,7 +1056,9 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, select(this.#runtimeModelOverlays));
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltVariants(combined), this.#modelOverrides);
 		const withProviderBedrock = this.#applyProviderBedrockOverrides(withModelOverrides);
-		return this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock));
+		return this.#applyConfiguredPromptCache(
+			this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock)),
+		);
 	}
 
 	#composeStaticModels(providerFilter?: ReadonlySet<string>): Model<Api>[] {
@@ -1757,7 +1763,9 @@ export class ModelRegistry {
 		const combined = this.#mergeCustomModels(withConfigModels, this.#runtimeModelOverlays);
 		const withModelOverrides = this.#applyModelOverrides(collapseBuiltVariants(combined), this.#modelOverrides);
 		const withProviderBedrock = this.#applyProviderBedrockOverrides(withModelOverrides);
-		this.#unprojectedModels = this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock));
+		this.#unprojectedModels = this.#applyConfiguredPromptCache(
+			this.#applyDiscoveryPolicies(this.#applyRuntimeProviderOverrides(withProviderBedrock)),
+		);
 		this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 	}
 
@@ -2384,14 +2392,13 @@ export class ModelRegistry {
 			return this.#applyProviderTransportOverrideToModel(model, override);
 		});
 	}
-	#resolveLiveModelOverride(model: Model<Api>): ModelOverride | undefined {
+	#resolveLiveModelOverride(
+		model: Model<Api>,
+		hasLiveModel: (provider: string, id: string) => boolean = (provider, id) => this.find(provider, id) !== undefined,
+	): ModelOverride | undefined {
 		const providerOverrides = this.#modelOverrides.get(model.provider);
 		if (!providerOverrides) return undefined;
-		return resolveModelOverrideWithAliases(
-			providerOverrides,
-			model,
-			(provider, id) => this.find(provider, id) !== undefined,
-		);
+		return resolveModelOverrideWithAliases(providerOverrides, model, hasLiveModel);
 	}
 
 	#resolveLiveCustomModelOverlay(model: Model<Api>): CustomModelOverlay | undefined {
@@ -2399,6 +2406,24 @@ export class ModelRegistry {
 			this.#customModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id) ??
 			this.#runtimeModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id)
 		);
+	}
+
+	#applyConfiguredPromptCache(models: Model<Api>[]): Model<Api>[] {
+		let liveKeys: Set<string> | null = null;
+		const hasLiveModel = (provider: string, id: string) => {
+			liveKeys ??= new Set(models.map(model => `${model.provider}\u0000${model.id}`));
+			return liveKeys.has(`${provider}\u0000${id}`);
+		};
+		let projected: Model<Api>[] | undefined;
+		for (const [index, model] of models.entries()) {
+			const override = this.#resolveLiveModelOverride(model, hasLiveModel);
+			const customModel = this.#resolveLiveCustomModelOverlay(model);
+			const promptCache = override?.promptCache !== undefined ? override.promptCache : customModel?.promptCache;
+			if (promptCache === undefined || promptCache === model.promptCache) continue;
+			projected ??= models.slice();
+			projected[index] = { ...model, promptCache };
+		}
+		return projected ?? models;
 	}
 
 	#applyModelOverrides(models: Model<Api>[], overrides: Map<string, Map<string, ModelOverride>>): Model<Api>[] {
@@ -3161,7 +3186,9 @@ export class ModelRegistry {
 						return this.#applyProviderTransportOverrideToModel(model, runtimeTransportOverride);
 					})
 				: nextModels;
-			this.#unprojectedModels = this.#applyProviderBedrockOverrides(nextModelsWithTransport);
+			this.#unprojectedModels = this.#applyConfiguredPromptCache(
+				this.#applyProviderBedrockOverrides(nextModelsWithTransport),
+			);
 
 			this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			this.#invalidateProviderModelCache(providerName);
@@ -3237,11 +3264,13 @@ export class ModelRegistry {
 			);
 			this.#runtimeProviderOverrides.set(providerName, nextRuntimeOverride);
 			if (this.#hasFullSnapshot) {
-				this.#unprojectedModels = this.#applyDiscoveryPolicies(
-					this.#unprojectedModels.map(model => {
-						if (model.provider !== providerName) return model;
-						return this.#applyProviderTransportOverrideToModel(model, transportOverride);
-					}),
+				this.#unprojectedModels = this.#applyConfiguredPromptCache(
+					this.#applyDiscoveryPolicies(
+						this.#unprojectedModels.map(model => {
+							if (model.provider !== providerName) return model;
+							return this.#applyProviderTransportOverrideToModel(model, transportOverride);
+						}),
+					),
 				);
 				this.#models = this.#withCatalogMetrics(this.#applyRuntimeModelModifiers(this.#unprojectedModels));
 			}

@@ -254,6 +254,13 @@ providers:
         promptCache: { short: 300, long: 3600 }
 ```
 
+An explicit `promptCache` replaces the model's catalog lifetimes rather than
+merging with them: `promptCache: {}` disables warming for that model, and a
+`short`-only value does not inherit a catalog `long` lifetime. If a matching
+custom model is also defined under `models`, `modelOverrides.promptCache` takes
+precedence over that definition. Without a configured `promptCache`, catalog
+defaults remain in effect.
+
 Direct Anthropic keeps its existing 5 min / 1 h lifetimes (`short: 300`, `long: 3600`),
 defaulting to 5 min for API keys and 1 h for OAuth subscriber sessions; API keys can
 explicitly select `long`. Claude on native Amazon Bedrock Converse has a 5 min TTL; 1 h is
