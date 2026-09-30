@@ -563,6 +563,10 @@ function formatContextTokenCount(value: number): string {
 	return formatNumber(Math.max(0, Math.round(value))).toLowerCase();
 }
 
+function hasAssistantToolCall(message: AgentMessage): boolean {
+	return message.role === "assistant" && message.content.some(block => block.type === "toolCall");
+}
+
 /**
  * Reads a tool-name snapshot out of a persisted `mode_change` payload. Session
  * files are user-editable and survive across versions, so anything that is not
@@ -1373,9 +1377,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	#headerAfter: readonly Component[] = [];
 	#planModePreviousToolPresentation: { enabled: string[]; mounted: string[] } | undefined;
 	#goalModePreviousTools: string[] | undefined;
-	// True from `/guided-goal` kickoff until a goal record appears or the
-	// session switches: the user is answering interview questions, so short
-	// replies like "c" are answers, not continue shortcuts.
+	// True from `/guided-goal` kickoff until the interview ends: a goal record
+	// appears, a turn makes tool calls (the interview itself is tool-free, so
+	// tool use means it was abandoned for real work), the kickoff fails, or the
+	// session switches. While set, short replies like "c" are answers, not
+	// continue shortcuts.
 	#guidedGoalInterviewActive = false;
 	#vibeModePreviousTools: string[] | undefined;
 	#vibeModeOwnerScope: VibeOwnerScope | undefined;
@@ -4357,6 +4363,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (event.type !== "agent_end") {
 			return;
 		}
+		if (this.#guidedGoalInterviewActive && event.messages.some(hasAssistantToolCall)) {
+			this.#guidedGoalInterviewActive = false;
+		}
 		if (this.#pendingGoalContinuationTurns > 0) {
 			this.#pendingGoalContinuationTurns--;
 			const activity = this.#goalContinuationActivity(event.messages);
@@ -5913,6 +5922,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			}
 			return true;
 		} catch (error) {
+			this.#guidedGoalInterviewActive = false;
 			this.showError(error instanceof Error ? error.message : String(error));
 			return false;
 		}
