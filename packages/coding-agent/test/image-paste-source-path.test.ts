@@ -170,6 +170,22 @@ describe("path-pasted image source path (#12244)", () => {
 		expect(advisorView).toContain(`[image-attachment] Image #1: ${imagePath}`);
 	});
 
+	it("names the pasted file for notices persisted before they carried structured details", async () => {
+		if (!session) throw new Error("Session was not initialized");
+		const { editor, imagePath } = await pasteImageFile();
+
+		await session.prompt("What is in [Image #1]?", { images: [...editor.pendingImages] });
+
+		// Sessions written by older builds stored only the rendered notice text.
+		const legacyMessages = session.messages.map(message =>
+			message.role === "custom" && message.customType === "image-attachment"
+				? { ...message, details: undefined }
+				: message,
+		);
+		const advisorView = formatSessionHistoryMarkdown(legacyMessages, ADVISOR_RENDER_OPTIONS);
+		expect(advisorView).toContain(`[image-attachment] Image #1: ${imagePath}`);
+	});
+
 	async function pasteClipboardBitmap(sessionManager: SessionManager): Promise<StubEditor> {
 		const { ctx, editor } = createPasteContext(sessionManager);
 		const controller = new InputController(ctx, {

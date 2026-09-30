@@ -397,6 +397,13 @@ const CONTEXTUAL_NON_PRIMARY_HIDDEN_CUSTOM_TYPES: Record<string, true> = {
 	"image-attachment": true,
 };
 
+/**
+ * Notices persisted before they carried `{ index, path }` details hold only the text rendered
+ * from `prompts/system/image-attachment.md`; these recover both fields from it.
+ */
+const LEGACY_IMAGE_ATTACHMENT_INDEX = /`\[Image #(\d+)\]`/;
+const LEGACY_IMAGE_ATTACHMENT_PATH = /^Source path: `(.+)`$/m;
+
 /** One-liner for custom/hook messages: `[irc] A → B: body…`. */
 function customOneLiner(msg: CustomMessage | HookMessage): string {
 	const details = (msg.details ?? {}) as Record<string, unknown>;
@@ -421,10 +428,12 @@ function customOneLiner(msg: CustomMessage | HookMessage): string {
 		case "image-attachment": {
 			// The notice body is model-facing boilerplate; its path would be cut by `oneLine`.
 			// Emit the full path so a reader of the transcript can `read` the file.
-			const path = str("path");
-			if (path)
-				return `[image-attachment] Image #${typeof details.index === "number" ? details.index : "?"}: ${path}`;
-			return `[${msg.customType}] ${oneLine(contentToText(msg.content))}`;
+			const text = contentToText(msg.content);
+			const path = str("path") || LEGACY_IMAGE_ATTACHMENT_PATH.exec(text)?.[1];
+			if (!path) return `[${msg.customType}] ${oneLine(text)}`;
+			const index =
+				typeof details.index === "number" ? details.index : (LEGACY_IMAGE_ATTACHMENT_INDEX.exec(text)?.[1] ?? "?");
+			return `[image-attachment] Image #${index}: ${path}`;
 		}
 		default:
 			return `[${msg.customType}] ${oneLine(contentToText(msg.content))}`;
