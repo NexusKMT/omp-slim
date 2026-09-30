@@ -164,6 +164,13 @@ Must define at least one of:
 It supports `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`,
 `v2Endpoint`, and `streamingEndpoint`.
 
+`openai-responses` models on Amazon Bedrock's OpenAI routes (`/openai/…` on
+`bedrock-runtime.<region>.amazonaws.com` or `bedrock-mantle.<region>.api.aws`,
+Mantle's `/v1` base, the runtime FIPS host, and PrivateLink hosts of both endpoints)
+use native OpenAI compaction without an opt-in, for any provider id. Set
+`enabled: false` to turn it off, or `v2StreamingEnabled: false` to keep only
+the V1 `/responses/compact` request. See [compaction](./compaction.md).
+
 ### Model value checks
 
 - `id` required
@@ -411,11 +418,20 @@ When requesting a key for a provider, effective order is:
 `models.yml` `apiKey` behavior:
 
 - Value is first treated as an environment variable name.
-- If no env var exists, the literal string is used as the token.
+- If the env var is unset or empty, the literal string is used as the token.
 
 If `authHeader: true` and provider `apiKey` is set, models get:
 
 - `Authorization: Bearer <resolved-key>` header injected.
+
+Resolution does not fail for a missing variable: with `apiKey: MY_PROVIDER_API_KEY`
+and `authHeader: true`, an unset or empty `MY_PROVIDER_API_KEY` produces
+`Authorization: Bearer MY_PROVIDER_API_KEY`. Launchers using env-backed keys must
+check that the variable is set and non-empty before starting OMP.
+
+[Command-resolved secrets](#command-resolved-secrets) do not use this literal
+fallback: a failing command or empty trimmed stdout resolves to no value, so it
+does not add a derived bearer header.
 
 Keyless providers:
 
@@ -494,6 +510,34 @@ Assigning a non-default role in `/models` normally saves its selector without sw
 Role aliases like `@smol` expand through `settings.modelRoles`; `*` selects `@default`. Quote `@` aliases in YAML values (`plan: "@slow"`). Chat-role values can append a thinking selector such as `:minimal`, `:low`, `:medium`, or `:high`; model-kind roles do not use chat thinking suffixes.
 
 If a role points at another role, the target model still inherits normally and any explicit suffix on the referring role wins for that role-specific use.
+
+### Model presets
+
+A model preset is a named snapshot of every role assignment plus `defaultThinkingLevel`, so you can swap a whole setup at once:
+
+```text
+/modelpreset save cheap      # save the current roles and thinking level
+/modelpreset switch deep     # apply a saved preset
+/modelpreset                 # pick one from a list (interactive)
+/modelpreset list | delete <name>
+```
+
+In `/models`, press `s` in the Roles view to save the current setup under a name. Presets live under `modelPresets` in `config.yml`:
+
+```yaml
+modelPresets:
+  deep:
+    modelRoles:
+      default: anthropic/claude-opus-4-5:high
+      smol: anthropic/claude-sonnet-4-5
+    defaultThinkingLevel: high
+```
+
+Switching writes roles the way the model picker does: into the scope chosen by `modelRoleStorage`, clearing roles the preset leaves out and replacing `--model`/`--smol` session overrides. The preset's `defaultThinkingLevel` is written to the global config. It then switches the active model to the resulting `default` (the first available model when the preset has none) and sets the session's thinking level from the `:level` suffix on that selector, or else the preset's `defaultThinkingLevel`; a `:inherit` suffix leaves the level the model switch set. When a preset's `default` model is unavailable, nothing is changed. Roles that another layer still decides — a `--config` file, a project config in `global` storage, or the global config in `project` storage — are listed in the switch message with the layer that wins, instead of being reported as switched. The same goes for a `defaultThinkingLevel` set by a project config or `--config` file: the session still switches to the preset's level, but the message names that layer, whose level returns on the next start.
+
+When several config layers define a preset of the same name, the highest layer (command line, then `--config` file, then project config, then global config) wins whole: entries are never merged across layers, so a project `deep` that only sets `default` applies without the global `deep`'s other roles. A `null` entry in a `--config` file (or a command-line override) hides the preset from lists and switches; a `null` entry in a project config is ignored, so the global preset of that name still applies. Saving always writes the named entry to the global config and reports when a higher layer still takes precedence for that name.
+
+Saving captures the effective assignments — including any `--model` session override — and the configured `defaultThinkingLevel`, not the session's live thinking level.
 
 Related settings:
 
@@ -638,6 +682,15 @@ Custom model entries may define `thinking: { mode, efforts, defaultLevel, requir
 configured backend has been verified to accept an explicit reasoning-off
 request. This keeps the `:off` selector from being clamped to the lowest effort.
 
+For a custom model with the default `thinkingFormat: openai`, `--thinking off`
+has no explicit off payload on `openai-completions`: when `reasoning_effort` is
+sent, it requests the first effort listed in `efforts`, even with
+`requiresEffort: false` (for example, `efforts: [low, medium, high]` sends
+`reasoning_effort: low`), so list efforts lowest-first. Turning reasoning off
+requires a request shape the server treats as off; for example,
+`thinkingFormat: qwen-chat-template` sends
+`chat_template_kwargs: { enable_thinking: false }`.
+
 - `supportsReasoningEffort` — accept `reasoning_effort`. Default: auto (off for Grok, Z.ai/Zhipu, and Xiaomi MiMo).
 - `supportsReasoningParams` — whether request shaping may send reasoning params at all. Default: auto (off for GitHub Copilot chat-completions).
 - `reasoningEffortMap` — partial map from internal effort levels (`minimal|low|medium|high|xhigh|max`) to provider-specific strings (e.g. Fireworks GLM maps `minimal -> "none"`).
@@ -673,7 +726,7 @@ For `anthropic-messages` models the runtime uses a separate `AnthropicCompat` sh
 top-level provider field; inside `compat` it honors every shared key that also names an
 `AnthropicCompat` field: `supportsContextManagement`, `supportsEagerToolInputStreaming`,
 `supportsForcedToolChoice`, `allowAnthropicHeaderOverrides`, `requiresToolResultId`,
-`replayUnsignedThinking`, `stripImageInput`, and `streamIdleTimeoutMs`. Other Anthropic-side knobs
+`replayUnsignedThinking`, `bedrockMessagesApi`, `stripImageInput`, and `streamIdleTimeoutMs`. Other Anthropic-side knobs
 are supplied by built-in catalog metadata and are not configurable here — `applyCompatOverrides`
 drops override keys the resolved shape does not declare.
 
@@ -709,6 +762,80 @@ Region resolution itself is unaffected by `baseUrl`, because SigV4 still signs w
 region — set `AWS_REGION` or use a region-scoped model id/ARN if the endpoint expects a specific
 one. A gateway that accepts a bearer token instead of SigV4 needs no region at all: set the
 provider's `apiKey` (or `AWS_BEARER_TOKEN_BEDROCK`) and signing is skipped.
+
+### Claude on Bedrock's Anthropic Messages API (`/anthropic`)
+
+Amazon Bedrock also serves Claude through the Anthropic Messages API, under `/anthropic` on both of
+its endpoints. AWS recommends `bedrock-runtime` for new applications
+([Inference using Anthropic Messages API](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-messages-api.html)).
+Claude Opus 4.7 and later are served here; Opus 4.6 and earlier stay on Converse
+([Claude in Amazon Bedrock](https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock)).
+
+| Route | Base URL | Provider | Model id |
+| --- | --- | --- | --- |
+| bedrock-runtime | `https://bedrock-runtime.<region>.amazonaws.com/anthropic` | `amazon-bedrock` | inference profile, e.g. `us.anthropic.claude-opus-5-5` |
+| bedrock-mantle | `https://bedrock-mantle.<region>.api.aws/anthropic` | `bedrock-mantle` | `anthropic.claude-opus-5-5` |
+
+The FIPS host (`bedrock-runtime-fips.<region>.amazonaws.com`) and AWS PrivateLink endpoint-specific
+hosts (`<vpce-id>[-<az>].bedrock-runtime.<region>.vpce.amazonaws.com`, likewise for
+`bedrock-runtime-fips` and `bedrock-mantle`) are recognized as the same routes. A VPC endpoint with
+private DNS enabled needs no change: it answers on the public hostnames
+([Bedrock VPC endpoints](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html)).
+
+Define the model under the provider shown in the table, with `api: anthropic-messages`. Those two
+provider ids carry the catalog rule that enables Claude's on-demand compaction
+([Compaction](./compaction.md)). Set `auth: apiKey` so OMP sends plain API-key requests; without
+it, custom `anthropic-messages` models get Claude Code request shaping. The examples authenticate
+with an [Amazon Bedrock API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html);
+OMP does not sign runtime-route requests with SigV4. Write the region into the runtime URL. Mantle
+URLs may keep `{region}`, which OMP fills in from your AWS region settings.
+
+```yaml
+providers:
+  amazon-bedrock:
+    baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com
+    apiKey: AWS_BEARER_TOKEN_BEDROCK
+    auth: apiKey
+    models:
+      - id: us.anthropic.claude-opus-5-5
+        api: anthropic-messages
+        baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com/anthropic
+        reasoning: true
+        input: [text, image]
+  bedrock-mantle:
+    baseUrl: https://bedrock-mantle.{region}.api.aws/openai/v1
+    apiKey: AWS_BEARER_TOKEN_BEDROCK
+    auth: apiKey
+    models:
+      - id: anthropic.claude-opus-5-5
+        api: anthropic-messages
+        baseUrl: https://bedrock-mantle.{region}.api.aws/anthropic
+        reasoning: true
+        input: [text, image]
+```
+
+Requests on these routes are shaped by `compat.bedrockMessagesApi`, which OMP detects from a Bedrock
+`/anthropic` `baseUrl` under any provider id. Both routes reject the tool `strict` field, so OMP drops
+it. OMP also fits `metadata.user_id` to
+Bedrock's [request-metadata pattern](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
+which the runtime route enforces: a value that fits is kept, otherwise its session id is sent,
+otherwise it is left out. Both run after any `onPayload` hook. Both routes verify thinking
+signatures, so by default OMP does not replay unsigned thinking to them.
+
+The URL check cannot see a Bedrock route behind a proxy or an `ANTHROPIC_BASE_URL` reroute of the
+first-party `anthropic` provider; those keep plain Anthropic requests unless you opt in. Set the flag
+in `compat` (provider-wide or under `modelOverrides`) to opt in, or to `false` to opt a Bedrock URL
+out:
+
+```yaml
+providers:
+  anthropic:
+    compat:
+      bedrockMessagesApi: true # ANTHROPIC_BASE_URL points at bedrock-runtime /anthropic
+```
+
+On-demand compaction still needs a model line the catalog grants it to (`amazon-bedrock`,
+`bedrock-mantle`, or `anthropic` provider ids).
 
 ### Strict tool schemas (`disableStrictTools`)
 
