@@ -235,4 +235,61 @@ describe("model presets", () => {
 		expect(deleteModelPreset(settings, "mine")).toBe("deleted");
 		expect(getModelPresetNames(settings)).toEqual(["team"]);
 	});
+
+	it("resolves an alias default against the preset's own roles, not the current ones", async () => {
+		// Current `slow` is broken but the preset redefines it: the switch must pass pre-validation.
+		const settings = Settings.isolated();
+		settings.setModelRole("default", SONNET);
+		settings.setModelRole("slow", "nosuch/gone-model");
+		cfgModelPresets.setEntry(settings, "alias", {
+			modelRoles: { default: "@slow", slow: SONNET_46 },
+		});
+		const session = createSession(settings);
+
+		const result = await applyModelPreset(settings, session, "alias");
+
+		expect(result.kind).toBe("switched");
+		expect(settings.getModelRole("slow")).toBe(SONNET_46);
+		expect(session.model?.id).toBe("claude-sonnet-4-6");
+	});
+
+	it("refuses an alias default the preset itself breaks, leaving settings untouched", async () => {
+		// Current `slow` is fine but the preset redefines it as broken: unavailable, nothing written.
+		const settings = Settings.isolated();
+		settings.setModelRole("default", SONNET);
+		settings.setModelRole("slow", SONNET_46);
+		cfgModelPresets.setEntry(settings, "alias", {
+			modelRoles: { default: "@slow", slow: "nosuch/gone-model" },
+		});
+		const session = createSession(settings);
+
+		const result = await applyModelPreset(settings, session, "alias");
+
+		expect(result.kind).toBe("unavailable");
+		expect(settings.getModelRole("slow")).toBe(SONNET_46);
+		expect(settings.getModelRole("default")).toBe(SONNET);
+	});
+
+	it("reports a same-name project preset instead of a false deletion", async () => {
+		const settings = await projectSettings({
+			project: `modelPresets:\n  team:\n    modelRoles:\n      default: ${SONNET}\n`,
+		});
+		cfgModelPresets.setEntry(settings, "team", { modelRoles: { default: OPUS } });
+
+		expect(deleteModelPreset(settings, "team")).toBe("project");
+		expect(getModelPresetNames(settings)).toEqual(["team"]);
+	});
+
+	it("leaves the session level alone for an :inherit default suffix", async () => {
+		const settings = Settings.isolated();
+		cfgModelPresets.setEntry(settings, "inh", { modelRoles: { default: `${OPUS}:inherit` } });
+		const session = createSession(settings);
+		const thinkingSpy = vi.spyOn(session, "setThinkingLevel");
+
+		const result = await applyModelPreset(settings, session, "inh");
+
+		expect(result.kind).toBe("switched");
+		expect(thinkingSpy).not.toHaveBeenCalled();
+		expect(session.model?.id).toBe("claude-opus-4-5");
+	});
 });

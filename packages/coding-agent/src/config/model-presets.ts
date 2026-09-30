@@ -11,6 +11,7 @@
  * project mode) are reported back instead of being silently kept.
  */
 import type { Model } from "@oh-my-pi/pi-ai";
+import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { AUTO_THINKING, type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { isRecord } from "@oh-my-pi/pi-utils";
@@ -93,12 +94,15 @@ export type ModelPresetDeleteResult = "deleted" | "missing" | "project";
 /**
  * Delete `name` from the global config. A preset only a project (or `--config`)
  * file defines is reported as `project`: it has to be removed from that file.
+ * The same applies when another layer defines the same name: the global entry is
+ * removed but the preset keeps listing, so `project` is reported instead of a
+ * false `deleted`.
  */
 export function deleteModelPreset(settings: Settings, name: string): ModelPresetDeleteResult {
 	const global = settings.getGlobalSettings().modelPresets;
 	if (isRecord(global) && Object.hasOwn(global, name)) {
 		cfgModelPresets.setEntry(settings, name, undefined);
-		return "deleted";
+		return Object.hasOwn(cfgModelPresets.get(settings), name) ? "project" : "deleted";
 	}
 	return Object.hasOwn(cfgModelPresets.get(settings), name) ? "project" : "missing";
 }
@@ -224,7 +228,14 @@ export async function applyModelPreset(
 
 	const presetDefault = Object.hasOwn(preset.modelRoles, "default") ? preset.modelRoles.default : undefined;
 	if (presetDefault) {
-		const resolved = resolveModelRoleValue(presetDefault, candidates, { settings });
+		// Resolve against the preset's own roles overlaid on the current ones:
+		// a default written as an alias (`@slow`) must see the state the write
+		// produces, not the current roles.
+		const roleLookup = {
+			getModelRole: (role: string) =>
+				Object.hasOwn(preset.modelRoles, role) ? preset.modelRoles[role] : settings.getModelRole(role),
+		};
+		const resolved = resolveModelRoleValue(presetDefault, candidates, { settings, roleLookup });
 		if (!resolved.model)
 			return { kind: "unavailable", reason: `default model \`${presetDefault}\` is not available` };
 		if (!session.modelRegistry.hasConfiguredAuth(resolved.model)) {
@@ -246,7 +257,10 @@ export async function applyModelPreset(
 		return { kind: "failed", reason: errorMessage(error), shadowed };
 	}
 	// setModel re-applies the model's default or keeps the current level; the preset decides instead.
-	if (live.thinkingLevel !== undefined) session.setThinkingLevel(live.thinkingLevel);
+	// `:inherit` means "no explicit level": leave what setModel applied rather than clearing the session level.
+	if (live.thinkingLevel !== undefined && live.thinkingLevel !== ThinkingLevel.Inherit) {
+		session.setThinkingLevel(live.thinkingLevel);
+	}
 	return { kind: "switched", model: live.model, thinkingLevel: live.thinkingLevel, shadowed };
 }
 
