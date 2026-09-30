@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Auth gateway requests now keep gateway bearer tokens out of URLs and non-authorization headers, and attribute peers to socket addresses unless proxy headers are explicitly trusted.
+- Auth gateway requests now keep gateway bearer tokens out of URLs and non-authorization headers, and attribute peers to socket addresses unless proxy headers are explicitly trusted ([#13827](https://github.com/can1357/oh-my-pi/pull/13827) by [@shawnkoh](https://github.com/shawnkoh)).
 
 ## [18.4.4] - 2026-09-29
 
