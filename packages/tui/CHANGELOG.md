@@ -6,7 +6,7 @@
 
 - Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms.
 - Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds.
-- Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets, emphasis or links, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s.
+- Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets, emphasis or links, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s. Emphasis nested thousands of levels deep still renders slowly: each level restyles the text inside it.
 
 ### Removed
 
