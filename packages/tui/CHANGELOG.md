@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed home directories next to shell redirections, control operators or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) leaking the full path in display-only text ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
+- Fixed the subagent task card showing full home paths in tool intents and arguments, while keeping search patterns literal ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
+- Fixed Enter doing nothing on a fully typed slash-command argument while its completion popup was open (e.g. `/mcp list`): it now submits instead of re-accepting the identical completion; subcommands that still need a required argument (e.g. `/mcp test`) keep inserting the subcommand so you can type it ([#13885](https://github.com/can1357/oh-my-pi/pull/13885) by [@H4vC](https://github.com/H4vC)).
+
+## [18.4.4] - 2026-09-29
+
 ### Added
 
 - Added Tern Surface Protocol (TSP) integration for native terminal rendering
@@ -10,6 +18,7 @@
 - Added `formatFileMatches` and `FileMatchSection` to `tools/grouped-file-output` for rendering per-file grep/ast-grep matches in grouped or flat mode.
 
 ## [18.4.3] - 2026-09-28
+
 ### Added
 
 - Added the native composer and dock redesign for Tern: the composer carries its attachment chips, a `bash`/`python` mode chip (with an eye-off mark for `!!`/`$$`), a thinking-effort chip that cycles on click, and a send keycap that turns into Stop while a turn runs; the working row shows the intent, elapsed time and an `esc Stop` button (a countdown ring and Cancel while retrying, indeterminate progress while compacting); queued messages are pills with a count and an Edit button; todos and running subagents are HUD pills; the status strip draws context as a ring meter with the auto-compaction tick, splits the path into a dim parent and strong leaf, keeps model, context and git longest, and opens the model picker, `/context`, `/git`, `/usage` or the project folder on click; autocomplete items carry named icons, the matched prefix, the full description, live state as a value, and scroll the selection into view
