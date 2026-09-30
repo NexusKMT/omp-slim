@@ -620,6 +620,12 @@ describe("Editor slash autocomplete acceptance", () => {
 	});
 
 	describe("Enter on a slash-command argument completion", () => {
+		const subcommands = [
+			{ name: "list" },
+			{ name: "login" },
+			{ name: "test", usage: "<name>" },
+			{ name: "export", usage: "[<path>]" },
+		];
 		const mcpCommands = [
 			{
 				name: "mcp",
@@ -627,7 +633,9 @@ describe("Editor slash autocomplete acceptance", () => {
 				getArgumentCompletions: (prefix: string) =>
 					prefix.includes(" ")
 						? null
-						: ["list", "login"].filter(s => s.startsWith(prefix)).map(s => ({ value: `${s} `, label: s })),
+						: subcommands
+								.filter(s => s.name.startsWith(prefix))
+								.map(s => ({ value: `${s.name} `, label: s.name, hint: s.usage })),
 			},
 		];
 
@@ -661,6 +669,37 @@ describe("Editor slash autocomplete acceptance", () => {
 			editor.handleInput("\r");
 			expect(submitted).toEqual([]);
 			expect(editor.getText()).toBe("/mcp list ");
+		});
+
+		it("accepts a fully typed subcommand that still requires an argument", async () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setAutocompleteProvider(new CombinedAutocompleteProvider(mcpCommands, "/tmp"));
+			const submitted: string[] = [];
+			editor.onSubmit = text => {
+				submitted.push(text);
+			};
+			editor.setText("/mcp tes");
+			editor.handleInput("t");
+			await untilAutocompleteShown(editor);
+
+			editor.handleInput("\r");
+			expect(submitted).toEqual([]);
+			expect(editor.getText()).toBe("/mcp test ");
+		});
+
+		it("submits a fully typed subcommand whose argument is optional", async () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setAutocompleteProvider(new CombinedAutocompleteProvider(mcpCommands, "/tmp"));
+			const submitted: string[] = [];
+			editor.onSubmit = text => {
+				submitted.push(text);
+			};
+			editor.setText("/mcp expor");
+			editor.handleInput("t");
+			await untilAutocompleteShown(editor);
+
+			editor.handleInput("\r");
+			expect(submitted).toEqual(["/mcp export"]);
 		});
 	});
 
