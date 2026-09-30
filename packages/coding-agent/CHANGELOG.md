@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed collab guests silently queueing `->` / `=>` prompts locally instead of receiving the host-only refusal ([#13925](https://github.com/can1357/oh-my-pi/issues/13925)).
+
 ## [18.4.5] - 2026-09-30
 
 ### Added
