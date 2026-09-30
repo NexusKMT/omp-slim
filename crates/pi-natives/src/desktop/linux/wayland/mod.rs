@@ -11,7 +11,7 @@ use crate::desktop::{
 	error::{CoreResult, DesktopError},
 	frame::FrameGeometry,
 	keys::KeyName,
-	linux::ax::AtSpiAx,
+	linux::ax::{AtSpiAx, AtSpiWindow},
 	types::{
 		CaptureCaps, DesktopCapabilities, DesktopDisplay, DesktopWindow, DisplaySelector, Target,
 	},
@@ -77,29 +77,49 @@ impl PortalGeometry {
 	}
 
 	/// Convert a window's logical bounds (global compositor coordinates) into a
-	/// pixel crop rectangle within the captured buffer. Returns `None` when the
-	/// window lies outside the captured monitor.
-	fn window_crop(&self, window: &DesktopWindow) -> Option<(u32, u32, u32, u32)> {
+	/// pixel crop rectangle within the captured buffer.
+	///
+	/// # Errors
+	/// `CaptureFailed` when the toolkit could not report the window's global
+	/// position (native Wayland clients answer with window-relative `0,0`, which
+	/// would crop whatever sits at the monitor's top-left), or when the window
+	/// lies outside the captured monitor.
+	fn window_crop(&self, window: &AtSpiWindow) -> CoreResult<(u32, u32, u32, u32)> {
+		let AtSpiWindow { window, position_known } = window;
+		if !position_known {
+			return Err(DesktopError::capture_failed(format!(
+				"Wayland window {} has no known screen position: its toolkit reports window-relative \
+				 AT-SPI coordinates, so it cannot be located in the portal capture; capture the \
+				 desktop instead",
+				window.id
+			)));
+		}
+		let outside = || {
+			DesktopError::capture_failed(format!(
+				"Wayland window {} is outside the selected portal monitor",
+				window.id
+			))
+		};
 		let scale_x = f64::from(self.pixel_width) / f64::from(self.logical_width.max(1));
 		let scale_y = f64::from(self.pixel_height) / f64::from(self.logical_height.max(1));
 		let rel_x = window.x - self.logical_x;
 		let rel_y = window.y - self.logical_y;
 		if rel_x < 0 || rel_y < 0 {
-			return None;
+			return Err(outside());
 		}
 		let px_x = (f64::from(rel_x) * scale_x).round() as u32;
 		let px_y = (f64::from(rel_y) * scale_y).round() as u32;
 		if px_x >= self.pixel_width || px_y >= self.pixel_height {
-			return None;
+			return Err(outside());
 		}
 		let px_width = (f64::from(window.width) * scale_x).round().max(1.0) as u32;
 		let px_height = (f64::from(window.height) * scale_y).round().max(1.0) as u32;
 		let width = px_width.min(self.pixel_width - px_x);
 		let height = px_height.min(self.pixel_height - px_y);
 		if width == 0 || height == 0 {
-			return None;
+			return Err(outside());
 		}
-		Some((px_x, px_y, width, height))
+		Ok((px_x, px_y, width, height))
 	}
 }
 
@@ -166,6 +186,19 @@ impl WaylandBackend {
 			))),
 		}
 	}
+
+	fn atspi_windows(&self) -> CoreResult<Vec<AtSpiWindow>> {
+		self
+			.ax
+			.as_ref()
+			.ok_or_else(|| {
+				self
+					.ax_error
+					.clone()
+					.unwrap_or_else(DesktopError::ax_unsupported)
+			})?
+			.windows()
+	}
 }
 
 impl Backend for WaylandBackend {
@@ -206,16 +239,11 @@ impl Backend for WaylandBackend {
 	}
 
 	fn windows(&mut self) -> CoreResult<Vec<DesktopWindow>> {
-		self
-			.ax
-			.as_mut()
-			.ok_or_else(|| {
-				self
-					.ax_error
-					.clone()
-					.unwrap_or_else(DesktopError::ax_unsupported)
-			})?
-			.windows()
+		Ok(self
+			.atspi_windows()?
+			.into_iter()
+			.map(|entry| entry.window)
+			.collect())
 	}
 
 	fn capture(
@@ -236,20 +264,17 @@ impl Backend for WaylandBackend {
 			match target {
 				Target::Desktop => Ok((image, FrameGeometry::for_displays(&self.displays))),
 				Target::Window(id) => {
-					let window = self
-						.windows()?
+					let entry = self
+						.atspi_windows()?
 						.into_iter()
-						.find(|window| &window.id == id)
+						.find(|entry| &entry.window.id == id)
 						.ok_or_else(|| {
 							DesktopError::window_not_found(format!("Wayland window {id} not found"))
 						})?;
-					let (x, y, width, height) = geometry.window_crop(&window).ok_or_else(|| {
-						DesktopError::capture_failed(format!(
-							"Wayland window {id} is outside the selected portal monitor"
-						))
-					})?;
+					let (x, y, width, height) = geometry.window_crop(&entry)?;
 					let cropped = image::imageops::crop_imm(&image, x, y, width, height).to_image();
-					let frame = FrameGeometry::for_window(&window, cropped.width(), cropped.height());
+					let frame =
+						FrameGeometry::for_window(&entry.window, cropped.width(), cropped.height());
 					Ok((cropped, frame))
 				},
 			}
@@ -434,17 +459,20 @@ mod tests {
 		assert_eq!(err.code.as_str(), "CaptureFailed");
 	}
 
-	fn portal_window(id: &str, x: i32, y: i32, width: u32, height: u32) -> DesktopWindow {
-		DesktopWindow {
-			id: id.into(),
-			title: "T".into(),
-			app: "A".into(),
-			pid: None,
-			x,
-			y,
-			width,
-			height,
-			focused: false,
+	fn portal_window(x: i32, y: i32, width: u32, height: u32, position_known: bool) -> AtSpiWindow {
+		AtSpiWindow {
+			window: DesktopWindow {
+				id: "w".into(),
+				title: "T".into(),
+				app: "A".into(),
+				pid: None,
+				x,
+				y,
+				width,
+				height,
+				focused: false,
+			},
+			position_known,
 		}
 	}
 
@@ -488,7 +516,7 @@ mod tests {
 	fn window_crop_scales_logical_bounds_to_buffer_pixels() {
 		let geometry = PortalGeometry::new(Some((0, 0)), Some((1280, 1440)), 2560, 2880);
 		let crop = geometry
-			.window_crop(&portal_window("w", 100, 200, 300, 400))
+			.window_crop(&portal_window(100, 200, 300, 400, true))
 			.expect("window inside monitor");
 		assert_eq!(crop, (200, 400, 600, 800));
 	}
@@ -496,15 +524,25 @@ mod tests {
 	#[test]
 	fn window_crop_rejects_window_outside_monitor() {
 		let geometry = PortalGeometry::new(Some((0, 0)), Some((1280, 1440)), 2560, 2880);
-		assert!(
-			geometry
-				.window_crop(&portal_window("w", 2000, 0, 100, 100))
-				.is_none()
-		);
-		assert!(
-			geometry
-				.window_crop(&portal_window("w", -10, 0, 100, 100))
-				.is_none()
-		);
+		for window in [portal_window(2000, 0, 100, 100, true), portal_window(-10, 0, 100, 100, true)]
+		{
+			let err = geometry
+				.window_crop(&window)
+				.expect_err("window outside monitor");
+			assert!(err.message.contains("outside the selected portal monitor"), "{err}");
+		}
+	}
+
+	#[test]
+	fn window_crop_refuses_unknown_screen_position() {
+		// Native Wayland clients report AT-SPI Screen extents of 0,0 wherever
+		// the compositor placed them; cropping there captured whatever sat at the
+		// monitor's top-left instead of the window (issue #13854).
+		let geometry = PortalGeometry::new(Some((0, 0)), Some((1920, 1080)), 1920, 1080);
+		let err = geometry
+			.window_crop(&portal_window(0, 0, 1159, 896, false))
+			.expect_err("unknown position must not be cropped");
+		assert_eq!(err.code.as_str(), "CaptureFailed");
+		assert!(err.message.contains("no known screen position"), "{err}");
 	}
 }
