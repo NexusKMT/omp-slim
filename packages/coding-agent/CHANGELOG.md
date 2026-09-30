@@ -33,6 +33,7 @@
 - Fixed compiled OMP extensions importing `@oh-my-pi/pi-catalog` and its provider-model subpaths ([#13731](https://github.com/can1357/oh-my-pi/issues/13731)).
 - Explicit `symbolPreset: unicode` now stays Unicode after a Glyph Protocol handshake instead of switching the status bar to Nerd Font icons ([#13865](https://github.com/can1357/oh-my-pi/issues/13865)).
 - Fixed rewinding (`/rewind`, `/tree`) during a running turn hiding the queued-prompt bar, making the still-pending queue look deleted and uneditable ([#13680](https://github.com/can1357/oh-my-pi/issues/13680))
+- Another agent's message or a background job's output can no longer close the `<irc>` or `<system-notice>` block it is delivered in, or open a forged harness block such as a parent agent's mid-turn message
 
 ## [18.4.4] - 2026-09-29
 

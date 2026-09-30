@@ -5,6 +5,7 @@ import parentIrcSteerTemplate from "../prompts/steering/parent-irc.md" with { ty
 import ircIncomingTemplate from "../prompts/system/irc-incoming.md" with { type: "text" };
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import type { AgentSessionEvent } from "./agent-session-events";
+import { escapeHarnessTags } from "./harness-tags";
 import type { CustomMessage } from "./messages";
 import type { SessionManager } from "./session-manager";
 
@@ -180,12 +181,17 @@ export class IrcBridge {
 		// back to the sender (task executor `relayWakeTurnOutput`); the main
 		// agent and mid-turn asides have no such relay.
 		const relayOnStop = !streaming && !planModeIdle && msg.to !== MAIN_AGENT_ID && msg.wakeRelay !== true;
+		// The body is agent-authored (a peer's message, or a wake relay's
+		// `<task-result>` around a subagent's output), so it must not close the
+		// harness envelope it is rendered into or open a forged one, e.g. a parent
+		// steer. `details.message` keeps the raw body for the transcript card and inbox.
+		const envelopeBody = escapeHarnessTags(msg.body);
 		const record: CustomMessage = {
 			role: "custom",
 			customType: "irc:incoming",
 			content: prompt.render(ircIncomingTemplate, {
 				from: msg.from,
-				message: msg.body,
+				message: envelopeBody,
 				replyTo: msg.replyTo ?? "",
 				interrupting: streaming,
 				relayOnStop,
@@ -207,7 +213,7 @@ export class IrcBridge {
 			if (recipientParentId === msg.from) {
 				this.#host.agent.steer({
 					role: "user",
-					content: prompt.render(parentIrcSteerTemplate, { from: msg.from, message: msg.body }),
+					content: prompt.render(parentIrcSteerTemplate, { from: msg.from, message: envelopeBody }),
 					attribution: "agent",
 					timestamp: msg.ts,
 					steering: true,
