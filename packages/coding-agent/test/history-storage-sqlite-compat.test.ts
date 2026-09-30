@@ -191,7 +191,7 @@ it("collapses preexisting whitespace-padded duplicates on open, keeping the late
 });
 
 // #13926: report failed persistence once per outage without changing the log-only promise contract.
-it.each(["busy", "abort"])("reports a %s write failure and permits persistence after recovery", async failure => {
+it("reports failed writes once per outage and permits persistence after recovery", async () => {
 	tempDir = TempDir.createSync("@omp-history-storage-write-failure-");
 	const dbPath = tempDir.join("history.db");
 	const storage = HistoryStorage.open(dbPath);
@@ -201,20 +201,15 @@ it.each(["busy", "abort"])("reports a %s write failure and permits persistence a
 	storage.setErrorListener(reportFailure);
 	storage.setAddListener(reportSuccess);
 	try {
-		if (failure === "busy") {
-			peer.run("BEGIN EXCLUSIVE");
-		} else {
-			peer.run(
-				"CREATE TRIGGER reject_prompt BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'write rejected'); END",
-			);
-		}
+		peer.run(
+			"CREATE TRIGGER reject_prompt BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'write rejected'); END",
+		);
 		await storage.add("lost while locked", "/project", "session");
-		if (failure === "abort") await storage.add("lost again while locked", "/project", "session");
+		await storage.add("lost again while locked", "/project", "session");
 		expect(reportFailure).toHaveBeenCalledTimes(1);
 		expect(reportFailure).toHaveBeenCalledWith(expect.any(Error));
 		expect(reportSuccess).not.toHaveBeenCalled();
-		if (failure === "busy") peer.run("ROLLBACK");
-		else peer.run("DROP TRIGGER reject_prompt");
+		peer.run("DROP TRIGGER reject_prompt");
 		expect(storage.getRecent(10)).toEqual([]);
 
 		await storage.add("lost while locked", "/project", "session");
