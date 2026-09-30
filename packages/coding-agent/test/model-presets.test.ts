@@ -5,9 +5,12 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import {
+	acquireModelRoleMutation,
 	applyModelPreset,
 	deleteModelPreset,
+	getModelPreset,
 	getModelPresetNames,
+	modelPresetShadowOwner,
 	saveModelPreset,
 } from "@oh-my-pi/pi-coding-agent/config/model-presets";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -291,5 +294,96 @@ describe("model presets", () => {
 		expect(result.kind).toBe("switched");
 		expect(thinkingSpy).not.toHaveBeenCalled();
 		expect(session.model?.id).toBe("claude-opus-4-5");
+	});
+
+	it("resolves a same-name preset whole from the project layer, never merged", async () => {
+		const settings = await projectSettings({
+			project: `modelPresets:\n  deep:\n    modelRoles:\n      default: ${OPUS}\n`,
+		});
+		settings.setModelRole("slow", SONNET_46);
+		cfgModelPresets.setEntry(settings, "deep", {
+			modelRoles: { default: SONNET, smol: SONNET_46 },
+			defaultThinkingLevel: Effort.High,
+		});
+		const session = createSession(settings);
+
+		const result = await applyModelPreset(settings, session, "deep");
+
+		expect(result.kind).toBe("switched");
+		// The project `deep` sets only `default`: the global `deep`'s `smol` must not leak in,
+		// and the stale `slow` role is cleared.
+		expect({ ...settings.getModelRoles() }).toEqual({ default: OPUS });
+		expect(session.model?.id).toBe("claude-opus-4-5");
+	});
+
+	it("refuses a preset with no default and no authed model before writing", async () => {
+		const dir = TempDir.createSync("@pi-model-presets-noauth-");
+		tempDirs.push(dir);
+		const noAuth = await AuthStorage.create(path.join(dir.path(), "auth.db"));
+		const registry = new ModelRegistry(noAuth, path.join(dir.path(), "models.yml"));
+		try {
+			const settings = Settings.isolated();
+			settings.setModelRole("default", SONNET);
+			cfgModelPresets.setEntry(settings, "auto", { modelRoles: {} });
+			const agent = new Agent({
+				initialState: {
+					model: bundled(SONNET),
+					systemPrompt: ["Test"],
+					tools: [],
+					messages: [],
+					thinkingLevel: Effort.High,
+				},
+			});
+			const session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(),
+				settings,
+				modelRegistry: registry,
+			});
+			sessions.push(session);
+
+			const result = await applyModelPreset(settings, session, "auto");
+
+			expect(result.kind).toBe("unavailable");
+			expect(settings.getModelRole("default")).toBe(SONNET);
+		} finally {
+			noAuth.close();
+		}
+	});
+
+	it("reports when a higher layer still defines a just-saved preset name", async () => {
+		const settings = await projectSettings({
+			project: `modelPresets:\n  team:\n    modelRoles:\n      default: ${SONNET}\n`,
+		});
+		settings.setModelRole("default", OPUS);
+
+		saveModelPreset(settings, "team");
+
+		expect(modelPresetShadowOwner(settings, "team")).toBe("project");
+		// The effective preset is still the project's, not the just-saved global entry.
+		expect(settings.getModelRole("default")).toBe(OPUS);
+		const lookup = getModelPreset(settings, "team");
+		expect(lookup).toMatchObject({ kind: "found", preset: { modelRoles: { default: SONNET } } });
+	});
+
+	it("serializes concurrent default-role mutations in acquisition order", async () => {
+		const order: string[] = [];
+		const first = await acquireModelRoleMutation();
+		const secondPromise = acquireModelRoleMutation();
+		let secondResolved = false;
+		void secondPromise.then(release => {
+			secondResolved = true;
+			order.push("second");
+			release();
+		});
+		// The mutex is promise-chaining only (no timers), so draining microtasks
+		// deterministically proves the second acquisition is still parked.
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(secondResolved).toBe(false);
+		order.push("first");
+		first();
+		await secondPromise;
+		expect(order).toEqual(["first", "second"]);
 	});
 });

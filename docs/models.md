@@ -526,6 +526,10 @@ modelPresets:
 
 Switching writes roles the way the model picker does: into the scope chosen by `modelRoleStorage`, clearing roles the preset leaves out and replacing `--model`/`--smol` session overrides. It then switches the active model to the resulting `default` (the first available model when the preset has none) and applies the `:level` suffix on that selector, or else the preset's `defaultThinkingLevel`. When a preset's `default` model is unavailable, nothing is changed. Roles that another layer still decides — a `--config` file, a project config in `global` storage, or the global config in `project` storage — are listed in the switch message instead of being reported as switched.
 
+When several config layers define a preset of the same name, the highest layer (command line, then `--config` file, then project config, then global config) wins whole: entries are never merged across layers, so a project `deep` that only sets `default` applies without the global `deep`'s other roles. Saving always writes the named entry to the global config and reports when a higher layer still takes precedence for that name.
+
+Saving captures the effective assignments — including any `--model` session override — and the configured `defaultThinkingLevel`, not the session's live thinking level.
+
 Related settings:
 
 - `modelRoles` (record)

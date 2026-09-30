@@ -56,11 +56,11 @@ function isDefaultThinkingLevel(
 	return level === AUTO_THINKING || THINKING_EFFORTS.some(effort => effort === level);
 }
 
-/** Look a preset up by its own key only, so `toString` and friends never resolve. */
+/** Look a preset up whole from the highest layer owning its name — same-name entries never merge. */
 export function getModelPreset(settings: Settings, name: string): PresetLookup {
-	const presets = cfgModelPresets.get(settings);
-	if (!Object.hasOwn(presets, name)) return { kind: "missing" };
-	const parsed = parseModelPreset(presets[name]);
+	const owned = settings.getOwnedModelPreset(name);
+	if (!owned) return { kind: "missing" };
+	const parsed = parseModelPreset(owned.entry);
 	return typeof parsed === "string" ? { kind: "invalid", reason: parsed } : { kind: "found", preset: parsed };
 }
 
@@ -102,9 +102,31 @@ export function deleteModelPreset(settings: Settings, name: string): ModelPreset
 	const global = settings.getGlobalSettings().modelPresets;
 	if (isRecord(global) && Object.hasOwn(global, name)) {
 		cfgModelPresets.setEntry(settings, name, undefined);
-		return Object.hasOwn(cfgModelPresets.get(settings), name) ? "project" : "deleted";
+		return settings.getOwnedModelPreset(name) ? "project" : "deleted";
 	}
-	return Object.hasOwn(cfgModelPresets.get(settings), name) ? "project" : "missing";
+	return settings.getOwnedModelPreset(name) ? "project" : "missing";
+}
+
+/**
+ * Layer above global config that still defines preset `name`, if any — so a
+ * global save can warn that the just-saved entry is shadowed and won't apply.
+ */
+export function modelPresetShadowOwner(
+	settings: Settings,
+	name: string,
+): "runtime" | "overlay" | "project" | undefined {
+	const owned = settings.getOwnedModelPreset(name);
+	return owned && owned.source !== "global" ? owned.source : undefined;
+}
+
+/** Serialize default-role mutations with the model hub's assign/unassign paths. */
+let modelRoleMutationTail: Promise<void> = Promise.resolve();
+export async function acquireModelRoleMutation(): Promise<() => void> {
+	const previous = modelRoleMutationTail;
+	const { promise, resolve } = Promise.withResolvers<void>();
+	modelRoleMutationTail = previous.then(() => promise);
+	await previous;
+	return resolve;
 }
 
 /** A role whose effective assignment differs from the preset after applying it. */
@@ -146,6 +168,14 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** First authed model for a preset with no `default`, mirroring startup's automatic pick. */
+function pickAutomaticDefault(session: ModelPresetSession, candidates: Model[]): Model | undefined {
+	return pickDefaultAvailableModel(
+		candidates.filter(candidate => session.modelRegistry.hasConfiguredAuth(candidate)),
+		provider => session.modelRegistry.hasConcreteAuth(provider),
+	);
+}
+
 /** Where `default` lands once the preset is written: its model and thinking selector. */
 function resolveLiveDefault(
 	settings: Settings,
@@ -155,10 +185,7 @@ function resolveLiveDefault(
 	const roleValue = settings.getModelRole("default");
 	const configuredDefault = parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(settings));
 	if (!roleValue) {
-		const model = pickDefaultAvailableModel(
-			candidates.filter(candidate => session.modelRegistry.hasConfiguredAuth(candidate)),
-			provider => session.modelRegistry.hasConcreteAuth(provider),
-		);
+		const model = pickAutomaticDefault(session, candidates);
 		return model ? { model, thinkingLevel: configuredDefault } : "no model with configured credentials is available";
 	}
 	const resolved = resolveModelRoleValue(roleValue, candidates, { settings });
@@ -186,7 +213,16 @@ function writePresetRoles(settings: Settings, preset: ModelPreset): void {
 		}
 	} else {
 		for (const role of roles) {
-			settings.setModelRole(role, Object.hasOwn(preset.modelRoles, role) ? preset.modelRoles[role] : undefined);
+			if (Object.hasOwn(preset.modelRoles, role)) {
+				settings.setModelRole(role, preset.modelRoles[role]);
+				continue;
+			}
+			// Skip roles neither the global layer nor a runtime override owns:
+			// deleting them would dirty the save queue without changing anything.
+			if (settings.getGlobalModelRole(role) === undefined && settings.getModelRoleProvenance(role) !== "runtime") {
+				continue;
+			}
+			settings.setModelRole(role, undefined);
 		}
 	}
 	if (preset.defaultThinkingLevel !== undefined) {
@@ -221,6 +257,19 @@ export async function applyModelPreset(
 	session: ModelPresetSession,
 	name: string,
 ): Promise<ModelPresetSwitchResult> {
+	const release = await acquireModelRoleMutation();
+	try {
+		return await applyModelPresetLocked(settings, session, name);
+	} finally {
+		release();
+	}
+}
+
+async function applyModelPresetLocked(
+	settings: Settings,
+	session: ModelPresetSession,
+	name: string,
+): Promise<ModelPresetSwitchResult> {
 	const lookup = getModelPreset(settings, name);
 	if (lookup.kind !== "found") return lookup;
 	const { preset } = lookup;
@@ -244,6 +293,9 @@ export async function applyModelPreset(
 				reason: `no credentials for ${resolved.model.provider}/${resolved.model.id}`,
 			};
 		}
+	} else if (!pickAutomaticDefault(session, candidates)) {
+		// No `default` to apply and nothing to fall back to: refuse before writing.
+		return { kind: "unavailable", reason: "no model with configured credentials is available" };
 	}
 
 	writePresetRoles(settings, preset);

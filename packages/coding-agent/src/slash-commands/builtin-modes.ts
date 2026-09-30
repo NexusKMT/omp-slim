@@ -16,6 +16,7 @@ import {
 	formatModelPresetSwitch,
 	getModelPresetNames,
 	isValidModelPresetName,
+	modelPresetShadowOwner,
 	type ModelPresetSession,
 	saveModelPreset,
 } from "../config/model-presets";
@@ -894,7 +895,20 @@ async function runPresetsCommand(
 				};
 			}
 			saveModelPreset(settings, name);
-			return { message: `Saved model preset "${name}"`, changedConfig: true };
+			const shadowed = modelPresetShadowOwner(settings, name);
+			const shadowedLabel =
+				shadowed === "project"
+					? "project config"
+					: shadowed === "overlay"
+						? "--config file"
+						: shadowed === "runtime"
+							? "runtime override"
+							: undefined;
+			const message =
+				shadowedLabel === undefined
+					? `Saved model preset "${name}"`
+					: `Saved model preset "${name}" to the global config, but a ${shadowedLabel} preset of the same name still takes precedence`;
+			return { message, changedConfig: true };
 		}
 		case "switch": {
 			if (!name) return { message: "Usage: /presets switch <name>", usage: true };
