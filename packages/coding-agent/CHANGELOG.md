@@ -168,6 +168,7 @@
 - `--no-ui` now also works with `--mode rpc-ui`: extensions run headless while tool UI such as the `ask` tool still reaches the host ([#13718](https://github.com/can1357/oh-my-pi/pull/13718) by [@alphastorm](https://github.com/alphastorm))
 - `omp models --json` reports each model's `pricingStatus` (`fixed`, `free`, `included`, `variable`, or `unknown`) ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
 - `/dump` now also includes every subagent transcript from the session (nested subagents too), each under a `# Subagent: <path>` heading after the main transcript
+- `/dump` now also includes every subagent transcript from the session (nested subagents too), each under a `# Subagent: <path>` heading after the main transcript ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
