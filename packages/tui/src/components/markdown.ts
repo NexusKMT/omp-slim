@@ -2085,10 +2085,12 @@ export class Markdown implements Component {
 		if (text === this.#text) return false;
 		if (!text.startsWith(this.#text)) {
 			// Non-append edit: the previous frame's guard verdict cannot be
-			// reused — the checked region may have changed anywhere — and a
-			// prefix set aside by a rewind no longer has the text after it that
-			// it was frozen against.
+			// reused — the checked region may have changed anywhere. The frozen
+			// prefix, or one a rewind set aside, may still start the new text,
+			// but the line after it was replaced, and a boundary holds only
+			// while that line starts a block of its own.
 			this.#appendOnlySinceLastScan = false;
+			this.#dropStreamPrefix();
 			this.#streamRewound = undefined;
 		}
 		this.#text = text;

@@ -10,6 +10,7 @@
 - Fixed a bare `\begin{align}` math block after a blank line rendering without the blank row above it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed a finished Markdown message showing an extra blank row where an orphan closing fence was removed ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed streamed Markdown showing a just-completed bare `\begin{align}` block, or `_` emphasis that closed in the latest chunk, as raw text until the next line arrived ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed streamed Markdown whose text was replaced rather than extended showing an extra blank row, or merging a new list item into the list above, through the finished message ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.4] - 2026-09-29
 

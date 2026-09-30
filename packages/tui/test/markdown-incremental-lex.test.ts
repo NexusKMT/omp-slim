@@ -258,6 +258,30 @@ describe("Markdown incremental streaming lex (E2)", () => {
 		expect(replaced).toEqual(renderCold("a flat replacement with no double newline at all", 60));
 	});
 
+	it("renders a transient non-append edit that keeps the frozen prefix as a one-shot render does", () => {
+		// The edit keeps the text of the frozen prefix but replaces what follows
+		// it, so the line after the prefix may no longer start a block of its
+		// own: a line of no-break spaces joins the blank run in front of it, and
+		// a same-marker item continues the list above it. Lexing the rest
+		// against that prefix kept the wrong rows through the finished render.
+		for (const [before, after] of [
+			["Para.\n\nnext para here", "Para.\n\n\u00a0\nAfter."],
+			["- a\n\nnext", "- a\n\n- b"],
+		]) {
+			const streaming = new Markdown("", 0, 0, THEME);
+			streaming.transientRenderCache = true;
+			clearRenderCache();
+			streaming.setText(before);
+			streaming.render(60);
+			clearRenderCache();
+			streaming.setText(after);
+			expect(streaming.render(60)).toEqual(renderColdTransient(after, 60));
+			streaming.transientRenderCache = false;
+			clearRenderCache();
+			expect(streaming.render(60)).toEqual(renderCold(after, 60));
+		}
+	});
+
 	it("CRLF text (fallback path) renders identically to a cold lex", () => {
 		const streaming = new Markdown("", 0, 0, THEME);
 		const crlf = "Para one with content.\r\n\r\nPara two with `code`.\r\n\r\nPara three tail.\r\n";
