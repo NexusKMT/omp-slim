@@ -190,7 +190,7 @@ it("collapses preexisting whitespace-padded duplicates on open, keeping the late
 	expect(storage.search("tidy", 10).map(entry => entry.sessionId)).toEqual(["new-session"]);
 });
 
-// #13926: failed writes must not masquerade as durable history submissions.
+// #13926: report failed persistence once per outage without changing the log-only promise contract.
 it.each(["busy", "abort"])("reports a %s write failure and permits persistence after recovery", async failure => {
 	tempDir = TempDir.createSync("@omp-history-storage-write-failure-");
 	const dbPath = tempDir.join("history.db");
@@ -208,7 +208,8 @@ it.each(["busy", "abort"])("reports a %s write failure and permits persistence a
 				"CREATE TRIGGER reject_prompt BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'write rejected'); END",
 			);
 		}
-		await expect(storage.add("lost while locked", "/project", "session")).rejects.toThrow();
+		await storage.add("lost while locked", "/project", "session");
+		if (failure === "abort") await storage.add("lost again while locked", "/project", "session");
 		expect(reportFailure).toHaveBeenCalledTimes(1);
 		expect(reportFailure).toHaveBeenCalledWith(expect.any(Error));
 		expect(reportSuccess).not.toHaveBeenCalled();
@@ -218,6 +219,11 @@ it.each(["busy", "abort"])("reports a %s write failure and permits persistence a
 
 		await storage.add("lost while locked", "/project", "session");
 		expect(reportSuccess).toHaveBeenCalledTimes(1);
+		peer.run("CREATE TRIGGER reject_again BEFORE INSERT ON history BEGIN SELECT RAISE(ABORT, 'write rejected'); END");
+		await storage.add("lost after recovery", "/project", "session");
+		expect(reportFailure).toHaveBeenCalledTimes(2);
+		expect(reportSuccess).toHaveBeenCalledTimes(1);
+		peer.run("DROP TRIGGER reject_again");
 		HistoryStorage.close();
 		const reopened = HistoryStorage.open(dbPath);
 		expect(reopened.search("locked", 10)).toMatchObject([
