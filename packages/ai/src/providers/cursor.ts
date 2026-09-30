@@ -819,10 +819,15 @@ function createHttp1RunTransport(options: CursorHttp1RunTransportOptions): Curso
 			pumpAppends();
 		},
 		close() {
+			// A local close is still the stream's terminal event: `run()` swallows
+			// the abort it causes, so without this the consumer never learns the
+			// stream is over (an end-stream error frame closes the transport and
+			// its turn would wait forever). `closed` makes it fire exactly once.
 			if (closed) return;
 			closed = true;
 			pendingAppends.length = 0;
 			abortController.abort();
+			endListener();
 		},
 		end() {
 			// RunSSE's request body is already complete; appends are separate
@@ -1392,8 +1397,12 @@ function streamCursorWithWireMode(
 			});
 
 			runTransport.onEnd(() => {
+				// The abort listener below closes the transport, which ends it; that
+				// end must settle as the caller's abort, not as a clean or truncated
+				// stream. Read the signal now: an abort after a real end must not win.
+				const abortError = options?.signal?.aborted ? new AIError.AbortError() : undefined;
 				void closeDebugLog()
-					.then(() => settleH2())
+					.then(() => settleH2(abortError))
 					.catch(error => settleH2(error));
 			});
 
