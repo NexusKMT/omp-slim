@@ -4,7 +4,8 @@
  * sync task calls alike — as numbered `N Id: description` jump-list rows and
  * yields no output once nothing qualifies, so the block self-clears.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
+import * as os from "node:os";
 import * as path from "node:path";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -14,12 +15,12 @@ import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import {
 	InteractiveMode,
 	layoutPinnedHud,
+	nextSubagentPreviewTickMs,
 	renderSubagentHudLines,
 	SubagentHudComponent,
 } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
 import { type ObservableSession, SessionObserverRegistry } from "@oh-my-pi/pi-tui/overlays/session-observer-registry";
-import { initTheme, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
-import { loadTheme } from "@oh-my-pi/pi-tui/theme/loader";
+import { initTheme, theme } from "@oh-my-pi/pi-tui/theme";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -33,6 +34,7 @@ import {
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
+import { cfgDisplaySubagentLivePreview } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { cfgTaskShowResolvedModelBadge } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 function makeSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
@@ -94,20 +96,8 @@ function makeProgressPayload(
 	};
 }
 
-function render(sessions: ObservableSession[], columns = 120): string {
-	return Bun.stripANSI(renderSubagentHudLines(sessions, columns).join("\n"));
-}
-
-function expectSameRow(output: string, ...contents: string[]): void {
-	expect(output.split("\n").some(line => contents.every(content => line.includes(content)))).toBe(true);
-}
-
-function expectDescriptionNotEchoed(output: string, id: string, description: string): void {
-	const row = output.split("\n").find(line => line.includes(id));
-	expect(row).toBeDefined();
-	const normalized = row!.toLowerCase();
-	const needle = description.toLowerCase();
-	expect(normalized.split(needle)).toHaveLength(2);
+function render(sessions: ObservableSession[], columns = 120, livePreview = false): string {
+	return Bun.stripANSI(renderSubagentHudLines(sessions, columns, false, livePreview).join("\n"));
 }
 
 describe("subagent HUD lines", () => {
@@ -262,276 +252,8 @@ describe("subagent HUD lines", () => {
 			makeSession({ id: "SchemaMigrator", description: "Migrating the users table" }),
 		]);
 		expect(out).toContain("Subagents");
-		expectSameRow(out, "AuthLoader", "Refactoring the auth flow");
-		expectSameRow(out, "SchemaMigrator", "Migrating the users table");
-	});
-
-	it("keeps the last finished tool visible until the next tool starts", () => {
-		const active = makeSession({
-			id: "Reader",
-			description: "Inspecting renderer behavior",
-			progress: makeProgress({
-				id: "Reader",
-				resolvedModel: "openai/gpt-5.6-sol",
-				lastIntent: "Inspecting renderer behavior",
-				currentTool: "read",
-				currentToolArgs: "packages/coding-agent/src/modes/interactive-mode.ts",
-			}),
-		});
-		const withoutModel = renderSubagentHudLines([active], 40, false).join("\n");
-		expect(withoutModel).not.toContain("openai/gpt-5.6-sol");
-		const activeLines = renderSubagentHudLines([active], 40, true);
-		const activeText = Bun.stripANSI(activeLines.join("\n"));
-		expectSameRow(
-			Bun.stripANSI(renderSubagentHudLines([active], 120, true, true).join("\n")),
-			"Reader",
-			"openai/gpt-5.6-sol",
-			"Inspecting renderer behavior",
-		);
-		expectSameRow(activeText, "read(packages/");
-		for (const line of activeLines) expect(Bun.stringWidth(Bun.stripANSI(line))).toBeLessThanOrEqual(40);
-		const settled = makeSession({
-			...active,
-			progress: makeProgress({
-				id: "Reader",
-				lastIntent: "Inspecting renderer behavior",
-				recentTools: [{ tool: "read", args: "package.json", endMs: Date.now() }],
-			}),
-		});
-		const settledText = Bun.stripANSI(renderSubagentHudLines([settled], 40, true).join("\n"));
-		expectSameRow(settledText, theme.symbol("status.success"), "read(package.json)");
-		const next = makeSession({
-			...settled,
-			progress: makeProgress({
-				id: "Reader",
-				currentTool: "grep",
-				currentToolArgs: "symbol",
-				recentTools: settled.progress!.recentTools,
-			}),
-		});
-		const nextText = render([next]);
-		expect(nextText).toContain("grep(symbol)");
-		expect(nextText).not.toContain("read(");
-	});
-
-	it("retains failure status and path privacy in the completed tool row", () => {
-		const homePath = path.join(process.env.HOME!, "private-project", "missing.ts");
-		const text = render([
-			makeSession({
-				id: "Reader",
-				progress: makeProgress({
-					id: "Reader",
-					recentTools: [{ tool: "read", args: homePath, argsKey: "path", isError: true, endMs: 1 }],
-				}),
-			}),
-		]);
-		expectSameRow(text, theme.symbol("status.error"), "read(~/private-project/missing.ts)");
-		expect(text).not.toContain(homePath);
-	});
-
-	it("formats selected tool arguments by semantic key without changing raw command text", () => {
-		const homePath = path.join(process.env.HOME!, "private-project", "secret.ts");
-		const readOut = render([
-			makeSession({
-				id: "Reader",
-				progress: makeProgress({
-					id: "Reader",
-					currentTool: "ast_grep",
-					currentToolArgs: homePath,
-					currentToolArgsKey: "path",
-				}),
-			}),
-		]);
-		expect(readOut).toContain("ast_grep(~/private-project/secret.ts)");
-		const patternOut = render([
-			makeSession({
-				id: "Searcher",
-				progress: makeProgress({
-					id: "Searcher",
-					currentTool: "grep",
-					currentToolArgs: homePath,
-					currentToolArgsKey: "pattern",
-				}),
-			}),
-		]);
-		expect(patternOut).toContain(`grep(${homePath})`);
-		const command = `MODE=check cat "${homePath}"`;
-		const bashOut = render([
-			makeSession({
-				id: "Runner",
-				progress: makeProgress({
-					id: "Runner",
-					currentTool: "bash",
-					currentToolArgs: command,
-					currentToolArgsKey: "command",
-				}),
-			}),
-		]);
-		expect(bashOut).toContain('bash(MODE=check cat "~/private-project/secret.ts")');
-	});
-
-	it("uses configured status glyphs for completed edits without hiding file locations", async () => {
-		const previousTheme = theme;
-		try {
-			for (const preset of ["ascii", "nerd"] as const) {
-				setThemeInstance(await loadTheme("dark", { symbolPresetOverride: preset }));
-				for (const isError of [false, true]) {
-					const text = render([
-						makeSession({
-							id: "Editor",
-							progress: makeProgress({
-								id: "Editor",
-								recentTools: [
-									{ tool: "edit", args: "src/one.ts, src/two.ts", argsKey: "path", isError, endMs: 1 },
-								],
-							}),
-						}),
-					]);
-					expectSameRow(
-						text,
-						theme.symbol(isError ? "status.error" : "status.success"),
-						"edit(src/one.ts, src/two.ts)",
-					);
-				}
-			}
-		} finally {
-			setThemeInstance(previousTheme);
-		}
-	});
-
-	it("shortens compound path tokens without rewriting unrelated absolute paths", () => {
-		const home = process.env.HOME!;
-		const args = `src/**/*.ts; ${home}/private/*.ts; /mnt${home}/keep.ts`;
-		const text = render(
-			[
-				makeSession({
-					id: "Locator",
-					progress: makeProgress({
-						id: "Locator",
-						currentTool: "glob",
-						currentToolArgs: args,
-						currentToolArgsKey: "path",
-					}),
-				}),
-			],
-			240,
-		);
-		expect(text).toContain(`glob(src/**/*.ts; ~/private/*.ts; /mnt${home}/keep.ts)`);
-	});
-
-	it("shortens a home-directory entry in colon-separated command paths", () => {
-		const text = render([
-			makeSession({
-				id: "Runner",
-				progress: makeProgress({
-					id: "Runner",
-					currentTool: "bash",
-					currentToolArgs: `PYTHONPATH=${process.env.HOME!}:/opt/lib python`,
-					currentToolArgsKey: "command",
-				}),
-			}),
-		]);
-		expect(text).toContain("PYTHONPATH=~:/opt/lib python");
-	});
-
-	it("shortens home paths adjoining shell redirections", () => {
-		const text = render(
-			[
-				makeSession({
-					id: "Runner",
-					progress: makeProgress({
-						id: "Runner",
-						currentTool: "bash",
-						currentToolArgsKey: "command",
-						currentToolArgs: `cat <${process.env.HOME!}/in >>${process.env.HOME!}/out`,
-					}),
-				}),
-			],
-			240,
-		);
-		expect(text).toContain("cat <~/in >>~/out");
-		expect(text).not.toContain(process.env.HOME!);
-	});
-
-	describe("live tool row", () => {
-		const startMs = 1_000_000;
-		const runningSession = (overrides: Partial<AgentProgress> = {}) =>
-			makeSession({
-				id: "Runner",
-				progress: makeProgress({
-					id: "Runner",
-					currentTool: "bash",
-					currentToolArgs: "sleep 40",
-					currentToolArgsKey: "command",
-					currentToolStartMs: startMs,
-					...overrides,
-				}),
-			});
-		const hudText = (sessions: ObservableSession[], showToolRow: boolean, now: number) =>
-			Bun.stripANSI(renderSubagentHudLines(sessions, 120, false, false, showToolRow, now).join("\n"));
-
-		it("hides the tool row when the live preview is off but keeps the agent row", () => {
-			const text = hudText([runningSession()], false, startMs + 30_000);
-			expect(text).toContain("Runner");
-			expect(text).not.toContain("bash(sleep 40)");
-		});
-
-		it("shows the elapsed marker only once a call outlasts five seconds", () => {
-			expect(hudText([runningSession()], true, startMs + 4_000)).not.toContain("4.0s");
-			expect(hudText([runningSession()], true, startMs + 5_000)).not.toContain("5.0s");
-			expect(hudText([runningSession()], true, startMs + 6_000)).toContain("6.0s");
-		});
-
-		it("keeps the elapsed marker when a long tool name would overflow the row", () => {
-			const session = runningSession({ currentTool: `mcp__${"x".repeat(120)}`, currentToolArgs: "query" });
-			const lines = renderSubagentHudLines([session], 60, false, false, true, startMs + 30_000);
-			const rows = new SubagentHudComponent(lines, ["Runner"]).render(60);
-			expect(rows).toHaveLength(lines.join("\n").split("\n").length);
-			for (const row of rows) expect(Bun.stringWidth(Bun.stripANSI(row))).toBeLessThanOrEqual(60);
-			expect(Bun.stripANSI(rows.join("\n"))).toContain("30.0s");
-		});
-
-		it("never wraps a full-width argument row or its elapsed marker at narrow widths", () => {
-			for (const columns of [40, 60, 80]) {
-				const session = runningSession({ currentToolArgs: "argument ".repeat(60) });
-				const lines = renderSubagentHudLines([session], columns, false, false, true, startMs + 30_000);
-				const rows = new SubagentHudComponent(lines, ["Runner"]).render(columns);
-				expect(rows).toHaveLength(lines.join("\n").split("\n").length);
-				for (const row of rows) expect(Bun.stringWidth(Bun.stripANSI(row))).toBeLessThanOrEqual(columns);
-				expect(Bun.stripANSI(rows.join("\n"))).toContain("30.0s");
-			}
-		});
-	});
-
-	it("preserves model revision and effort in a roomy HUD badge", () => {
-		const selector = "anthropic/claude-sonnet-4-20250514:high";
-		const text = Bun.stripANSI(
-			renderSubagentHudLines(
-				[
-					makeSession({
-						id: "Worker",
-						progress: makeProgress({ id: "Worker", resolvedModel: selector }),
-					}),
-				],
-				160,
-				false,
-				true,
-			).join("\n"),
-		);
-		expect(text).toContain("anthropic/");
-		expect(text).toContain("20250514:high");
-	});
-
-	it("shortens home paths in live activity labels", () => {
-		const homePath = path.join(process.env.HOME!, "private-project", "source.ts");
-		const text = render([
-			makeSession({
-				id: "Reader",
-				progress: makeProgress({ id: "Reader", lastIntent: `${homePath} checking imports` }),
-			}),
-		]);
-		expect(text).toContain("~/private-project/source.ts checking imports");
-		expect(text).not.toContain(homePath);
+		expect(out).toContain("AuthLoader: Refactoring the auth flow");
+		expect(out).toContain("SchemaMigrator: Migrating the users table");
 	});
 
 	it("shows a non-default role badge and hides descriptions that only echo the id", () => {
@@ -555,7 +277,7 @@ describe("subagent HUD lines", () => {
 		]);
 		expect(echoed).toContain("AuthLoader");
 		expect(echoed).toMatch(/AuthLoader.*scout/);
-		expectDescriptionNotEchoed(echoed, "AuthLoader", "AuthLoader");
+		expect(echoed).not.toContain("AuthLoader: AuthLoader");
 
 		const collision = render([
 			makeSession({
@@ -566,7 +288,7 @@ describe("subagent HUD lines", () => {
 		]);
 		expect(collision).toContain("AuthLoader-3");
 		expect(collision).toMatch(/AuthLoader-3.*scout/);
-		expectDescriptionNotEchoed(collision, "AuthLoader-3", "AuthLoader");
+		expect(collision).not.toContain("AuthLoader-3: AuthLoader");
 
 		const mixedCase = render([
 			makeSession({
@@ -576,12 +298,12 @@ describe("subagent HUD lines", () => {
 			}),
 		]);
 		expect(mixedCase).toContain("AuthLoader-3");
-		expectDescriptionNotEchoed(mixedCase, "AuthLoader-3", "authloader");
+		expect(mixedCase).not.toContain("AuthLoader-3: authloader");
 
 		const defaultWorker = render([
 			makeSession({ id: "SchemaMigrator", agent: "task", description: "Migrate users" }),
 		]);
-		expectSameRow(defaultWorker, "SchemaMigrator", "Migrate users");
+		expect(defaultWorker).toContain("SchemaMigrator: Migrate users");
 		expect(defaultWorker).not.toMatch(/SchemaMigrator.*task/);
 	});
 
@@ -594,7 +316,7 @@ describe("subagent HUD lines", () => {
 		expect(renderSubagentHudLines(sessions, 120)).toEqual([]);
 
 		const out = render([...sessions, makeSession({ id: "StillRunning", description: "live work" })]);
-		expectSameRow(out, "StillRunning", "live work");
+		expect(out).toContain("StillRunning: live work");
 		expect(out).not.toContain("Done-");
 		expect(out).not.toContain("Main Session");
 	});
@@ -603,42 +325,12 @@ describe("subagent HUD lines", () => {
 		const fromProgressDesc = render([
 			makeSession({ id: "Worker", progress: makeProgress({ id: "Worker", description: "From progress" }) }),
 		]);
-		expectSameRow(fromProgressDesc, "Worker", "From progress");
+		expect(fromProgressDesc).toContain("Worker: From progress");
 
 		const fromTask = render([
 			makeSession({ id: "Worker", progress: makeProgress({ id: "Worker", task: "Investigate flaky CI on macOS" }) }),
 		]);
-		expectSameRow(fromTask, "Worker", "Investigate flaky CI on macOS");
-
-		const generatedOverWrappedTask = render([
-			makeSession({
-				id: "Worker",
-				description: "Generated activity label",
-				progress: makeProgress({
-					id: "Worker",
-					description: "Generated progress label",
-					assignment: "Inspect HUD precedence",
-					task: "Complete assignment thoroughly:\n\n# Target\nHUD",
-				}),
-			}),
-		]);
-		expectSameRow(generatedOverWrappedTask, "Worker", "Generated progress label");
-		expect(generatedOverWrappedTask).not.toContain("Complete assignment thoroughly");
-
-		const assignmentAfterHandleEcho = render([
-			makeSession({
-				id: "Worker",
-				progress: makeProgress({
-					id: "Worker",
-					lastIntent: "Worker",
-					description: "worker",
-					assignment: "Inspect HUD fallback",
-					task: "Complete assignment thoroughly",
-				}),
-			}),
-		]);
-		expectSameRow(assignmentAfterHandleEcho, "Worker", "Inspect HUD fallback");
-		expect(assignmentAfterHandleEcho).not.toContain("Complete assignment thoroughly");
+		expect(fromTask).toContain("Worker Investigate flaky CI on macOS");
 
 		const multiLineTask = render([
 			makeSession({
@@ -652,7 +344,7 @@ describe("subagent HUD lines", () => {
 			}),
 		]);
 		expect(multiLineTask).toContain("ReviewShell");
-		expectSameRow(multiLineTask, "ReviewShell", "Complete assignment thoroughly:", "# Target");
+		expect(multiLineTask).toContain("Complete assignment thoroughly: ↵ # Tar");
 		expect(multiLineTask).not.toContain("\n# Target");
 
 		const multiLineDesc = render([
@@ -663,7 +355,7 @@ describe("subagent HUD lines", () => {
 			}),
 		]);
 		expect(multiLineDesc).toContain("ReviewShell");
-		expectSameRow(multiLineDesc, "ReviewShell", "First line", "Second line");
+		expect(multiLineDesc).toContain("First line ↵ Second line");
 		expect(multiLineDesc).not.toContain("\nSecond line");
 	});
 	it("lists sync and detached spawns alike", () => {
@@ -705,7 +397,7 @@ describe("subagent HUD lines", () => {
 
 	it("renders nested ids as a breadcrumb and truncates long descriptions to the viewport", () => {
 		const out = render([makeSession({ id: "Anna.Bob", description: `start ${"x".repeat(300)} end` })], 60);
-		expectSameRow(out, "Anna>Bob", "start");
+		expect(out).toContain("Anna>Bob:");
 		expect(out).not.toContain("end");
 		for (const line of out.split("\n")) {
 			expect(Bun.stringWidth(line)).toBeLessThanOrEqual(60);
@@ -795,52 +487,310 @@ describe("subagent HUD lines", () => {
 		expect(out).toContain("7 more — expand");
 		expect(out).not.toContain("show less");
 	});
+
+	describe("live preview", () => {
+		it("shows the current tool call only when enabled", () => {
+			const sessions = [
+				makeSession({
+					id: "AuthLoader",
+					description: "Refactoring the auth flow",
+					progress: makeProgress({
+						id: "AuthLoader",
+						currentTool: "read",
+						currentToolArgs: "src/auth.ts:50-100",
+					}),
+				}),
+			];
+			expect(render(sessions)).not.toContain("read: src/auth.ts:50-100");
+			const out = render(sessions, 120, true);
+			expect(out).toContain("AuthLoader: Refactoring the auth flow");
+			expect(out).toContain("read: src/auth.ts:50-100");
+		});
+
+		it("falls back to the most recent tool when idle between calls", () => {
+			const out = render(
+				[
+					makeSession({
+						id: "Worker",
+						progress: makeProgress({
+							id: "Worker",
+							recentTools: [{ tool: "grep", args: "renderSubagentHudLines", endMs: Date.now() }],
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("grep: renderSubagentHudLines");
+		});
+
+		it("adds an elapsed marker to long-running calls and stays within the viewport", () => {
+			const columns = 120;
+			const out = render(
+				[
+					makeSession({
+						id: "Builder",
+						progress: makeProgress({
+							id: "Builder",
+							currentTool: "bash",
+							currentToolArgs: "npm test",
+							currentToolStartMs: Date.now() - 10_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			const toolRow = out.split("\n").find(line => line.includes("bash: npm test"));
+			expect(toolRow).toMatch(/\d+s$/);
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+
+		it("shortens long tool details to the viewport", () => {
+			const columns = 60;
+			const out = render(
+				[
+					makeSession({
+						id: "Reader",
+						progress: makeProgress({
+							id: "Reader",
+							currentTool: "read",
+							currentToolArgs: "x".repeat(300),
+							currentToolStartMs: Date.now() - 10_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			expect(out).toContain("read: xxxxxxxx");
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+		it("shortens home-directory paths in preview details", () => {
+			const homeFile = `${os.homedir()}/.ssh/config`;
+			const out = render(
+				[
+					makeSession({
+						id: "Reader",
+						progress: makeProgress({
+							id: "Reader",
+							currentTool: "read",
+							currentToolArgs: `cat ${homeFile}`,
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("cat ~/.ssh/config");
+			expect(out).not.toContain(os.homedir());
+		});
+
+		it("shortens a path argument by its key but keeps a literal search pattern as written", () => {
+			const homeFile = `${os.homedir()}/.ssh/config`;
+			const preview = (key: string) =>
+				render(
+					[
+						makeSession({
+							id: "Reader",
+							progress: makeProgress({
+								id: "Reader",
+								currentTool: "grep",
+								currentToolArgs: homeFile,
+								currentToolArgsKey: key,
+							}),
+						}),
+					],
+					200,
+					true,
+				);
+			expect(preview("path")).toContain("~/.ssh/config");
+			expect(preview("path")).not.toContain(os.homedir());
+			// A search pattern that names a home path must still show what was searched.
+			expect(preview("pattern")).toContain(homeFile);
+		});
+
+		it("marks the last completed call with how it ended while idle between calls", () => {
+			const rowFor = (isError: boolean) =>
+				render(
+					[
+						makeSession({
+							id: "Worker",
+							progress: makeProgress({
+								id: "Worker",
+								recentTools: [{ tool: "read", args: "a.ts", argsKey: "path", isError, endMs: Date.now() }],
+							}),
+						}),
+					],
+					120,
+					true,
+				)
+					.split("\n")
+					.find(line => line.includes("read: a.ts"));
+			const success = Bun.stripANSI(theme.styledSymbol("status.success", "success"));
+			const error = Bun.stripANSI(theme.styledSymbol("status.error", "error"));
+			expect(rowFor(false)).toContain(`${success} read: a.ts`);
+			expect(rowFor(true)).toContain(`${error} read: a.ts`);
+			expect(rowFor(false)).not.toContain(error);
+		});
+
+		it("keeps the elapsed marker with a very long tool name at a narrow width", () => {
+			const columns = 40;
+			const out = render(
+				[
+					makeSession({
+						id: "Mcp",
+						progress: makeProgress({
+							id: "Mcp",
+							currentTool: `mcp__tool_${"x".repeat(120)}`,
+							currentToolArgs: "some detail that cannot fit",
+							currentToolStartMs: Date.now() - 20_000,
+						}),
+					}),
+				],
+				columns,
+				true,
+			);
+			const toolRow = out.split("\n").find(line => line.includes("mcp__tool_"));
+			expect(toolRow).toBeDefined();
+			expect(toolRow).toMatch(/\d+s$/);
+			for (const line of out.split("\n")) {
+				expect(Bun.stringWidth(line)).toBeLessThanOrEqual(columns);
+			}
+		});
+
+		it("fits every rendered component row within the viewport without wrapping the elapsed marker", () => {
+			const sessions = [
+				makeSession({
+					id: "Builder",
+					description: "Narrow build",
+					progress: makeProgress({
+						id: "Builder",
+						currentTool: "bash",
+						currentToolArgs: `cat ${os.homedir()}/.ssh/config`,
+						currentToolStartMs: Date.now() - 10_000,
+					}),
+				}),
+				makeSession({
+					id: "Reader",
+					progress: makeProgress({
+						id: "Reader",
+						currentTool: "read",
+						currentToolArgs: "x".repeat(300),
+						currentToolStartMs: Date.now() - 12_000,
+					}),
+				}),
+			];
+			for (const columns of [60, 120]) {
+				const hud = new SubagentHudComponent(
+					renderSubagentHudLines(sessions, columns, false, true),
+					sessions.map(session => session.id),
+				);
+				const rows = hud.render(columns).map(row => Bun.stripANSI(row));
+				for (const row of rows) {
+					expect(Bun.stringWidth(row)).toBeLessThanOrEqual(columns);
+				}
+				const elapsedRows = rows.filter(row => /\d+s/.test(row));
+				expect(elapsedRows.length).toBeGreaterThan(0);
+				for (const row of elapsedRows) {
+					expect(row).toMatch(/bash|read/);
+				}
+			}
+		});
+
+		it("routes clicks on a preview row to its agent and keeps later rows and the expander aligned", () => {
+			const sessions = ["Alpha", "Beta", "Gamma", "Delta"].map(id =>
+				makeSession({ id, progress: makeProgress({ id, currentTool: "read", currentToolArgs: `${id}.ts` }) }),
+			);
+			const layout = layoutPinnedHud(sessions.length, false);
+			const hud = new SubagentHudComponent(
+				renderSubagentHudLines(sessions, 120, false, true),
+				sessions.map(session => session.id),
+				layout.toggleRow,
+			);
+			const rows = hud.render(120).map(row => Bun.stripANSI(row));
+			const rowOf = (text: string) => rows.findIndex(row => row.includes(text));
+			expect(hud.getClickAgentAtRow(rowOf("Alpha.ts"))).toBe("Alpha");
+			expect(hud.getClickAgentAtRow(rowOf("Beta"))).toBe("Beta");
+			expect(hud.getClickAgentAtRow(rowOf("Gamma.ts"))).toBe("Gamma");
+			expect(hud.getClickAgentAtRow(rowOf("more — expand"))).toBe(PINNED_HUD_TOGGLE_ID);
+		});
+
+		it("labels a call with its own intent, never an earlier call's", () => {
+			const out = render(
+				[
+					makeSession({
+						id: "Worker",
+						progress: makeProgress({
+							id: "Worker",
+							lastIntent: "Reading auth config",
+							currentTool: "mcp__db_query",
+							currentToolArgs: "SELECT 1",
+							recentTools: [{ tool: "read", args: "auth.ts", intent: "Reading auth config", endMs: 1 }],
+						}),
+					}),
+					makeSession({
+						id: "Between",
+						progress: makeProgress({
+							id: "Between",
+							lastIntent: "Reading auth config",
+							recentTools: [{ tool: "mcp__db_query", args: "SELECT 2", endMs: 2 }],
+						}),
+					}),
+					makeSession({
+						id: "Intentful",
+						progress: makeProgress({
+							id: "Intentful",
+							currentTool: "read",
+							currentToolArgs: "auth.ts",
+							currentToolIntent: "Checking the session cookie",
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("mcp__db_query: SELECT 1");
+			expect(out).toContain("mcp__db_query: SELECT 2");
+			expect(out).toContain("read: Checking the session cookie");
+			expect(out).not.toContain("Reading auth config");
+		});
+
+		it("keeps the header and agent rows within the padded HUD width", () => {
+			const sessions = [
+				makeSession({ id: `Worker${"W".repeat(80)}`, description: "Every available column ".repeat(10) }),
+			];
+			for (const columns of [40, 60]) {
+				const hud = new SubagentHudComponent(renderSubagentHudLines(sessions, columns, false, true), [
+					sessions[0]!.id,
+				]);
+				// No wrapping: exactly the blank row, the header and one agent row.
+				expect(hud.render(columns)).toHaveLength(3);
+			}
+		});
+
+		it("arms the repaint for when the elapsed marker first shows, then every second", () => {
+			const now = 100_000;
+			const midCall = (id: string, startMs: number) =>
+				makeSession({ id, progress: makeProgress({ id, currentTool: "bash", currentToolStartMs: startMs }) });
+			const thinking = makeSession({ id: "Thinking", progress: makeProgress({ id: "Thinking" }) });
+			expect(nextSubagentPreviewTickMs([thinking], now)).toBeUndefined();
+			expect(nextSubagentPreviewTickMs([midCall("Fresh", now - 1_000)], now)).toBe(4_001);
+			expect(nextSubagentPreviewTickMs([midCall("Long", now - 30_000)], now)).toBe(1_000);
+			expect(
+				nextSubagentPreviewTickMs([thinking, midCall("Fresh", now - 4_500), midCall("Long", now - 30_000)], now),
+			).toBe(501);
+		});
+	});
 });
 
 describe("SubagentHudComponent click rows", () => {
 	beforeAll(async () => {
 		await initTheme();
-	});
-
-	it.each([false, true])("maps multiline agent rows and the visible toggle when expanded=%s", expanded => {
-		const sessions = [
-			makeSession({
-				id: "Alpha",
-				progress: makeProgress({
-					id: "Alpha",
-					lastIntent: "Inspecting a deliberately long description that wraps at the text mount",
-					currentTool: "read",
-					currentToolArgs: "first.ts",
-				}),
-			}),
-			makeSession({
-				id: "Beta",
-				progress: makeProgress({
-					id: "Beta",
-					recentTools: [{ tool: "grep", args: "second.ts", endMs: 1 }],
-				}),
-			}),
-			makeSession({ id: "Gamma" }),
-			makeSession({ id: "Delta" }),
-		];
-		const lines = renderSubagentHudLines(sessions, 40, expanded, false);
-		const hud = new SubagentHudComponent(
-			lines,
-			sessions.map(session => session.id),
-		);
-		const rendered = hud.render(40).map(Bun.stripANSI);
-		const alphaRow = rendered.findIndex(line => line.includes("Alpha"));
-		const firstToolRow = rendered.findIndex(line => line.includes("read(first.ts)"));
-		expect(firstToolRow).toBeGreaterThan(alphaRow);
-		for (let row = alphaRow; row <= firstToolRow; row++) expect(hud.getClickAgentAtRow(row)).toBe("Alpha");
-		const betaToolRow = rendered.findIndex(line => line.includes("grep(second.ts)"));
-		expect(betaToolRow).toBeGreaterThan(firstToolRow);
-		expect(hud.getClickAgentAtRow(betaToolRow)).toBe("Beta");
-		const gammaRow = rendered.findIndex(line => line.includes("Gamma"));
-		expect(hud.getClickAgentAtRow(gammaRow)).toBe("Gamma");
-		const toggleRow = rendered.findIndex(line => line.includes(expanded ? "show less" : "more — expand"));
-		expect(toggleRow).toBeGreaterThan(gammaRow);
-		expect(hud.getClickAgentAtRow(toggleRow)).toBe(PINNED_HUD_TOGGLE_ID);
 	});
 
 	it("maps item rows to session ids and chrome rows nowhere", () => {
@@ -953,7 +903,7 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		await Settings.init({
 			inMemory: true,
 			cwd: tempDir.path(),
-			overrides: { "startup.quiet": true, "display.subagentLivePreview": true },
+			overrides: { "startup.quiet": true },
 		});
 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
 		const modelRegistry = new ModelRegistry(authStorage);
@@ -983,34 +933,9 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		authStorage?.close();
 		tempDir?.removeSync();
 		vi.useRealTimers();
+		setSystemTime();
 		vi.restoreAllMocks();
 		resetSettingsForTest();
-	});
-
-	it("renders tool lifecycle changes without waiting for the progress debounce", async () => {
-		await mode.init({ suppressWelcomeIntro: true });
-		vi.useFakeTimers();
-		const payload = makeProgressPayload("FastReader", 0, "Inspecting source", true);
-		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
-			...payload,
-			progress: { ...payload.progress, currentTool: "read", currentToolArgs: "package.json", currentToolStartMs: 1 },
-		});
-		await Promise.resolve();
-		expect(Bun.stripANSI(mode.subagentContainer.render(120).join("\n"))).toContain("read(package.json)");
-		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
-			...payload,
-			progress: { ...payload.progress, currentTool: "read", currentToolArgs: "bun.lock", currentToolStartMs: 1 },
-		});
-		await Promise.resolve();
-		expect(Bun.stripANSI(mode.subagentContainer.render(120).join("\n"))).toContain("read(bun.lock)");
-		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
-			...payload,
-			progress: { ...payload.progress, recentTools: [{ tool: "read", args: "bun.lock", endMs: 2 }] },
-		});
-		await Promise.resolve();
-		const settled = Bun.stripANSI(mode.subagentContainer.render(120).join("\n"));
-		expect(settled).toContain("FastReader");
-		expectSameRow(settled, theme.symbol("status.success"), "read(bun.lock)");
 	});
 
 	it("coalesces a burst of progress observer changes into one HUD rebuild and render request", async () => {
@@ -1039,38 +964,6 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		expect(requestRender).toHaveBeenCalledTimes(1);
 	});
 
-	it("repaints the live tool row once a second only while a listed agent is mid-call", async () => {
-		await mode.init({ suppressWelcomeIntro: true });
-		vi.useFakeTimers();
-		const requestRender = vi.spyOn(mode.ui, "requestRender").mockImplementation(() => {});
-		const rebuildHud = vi.spyOn(mode.subagentContainer, "clear");
-		const payload = makeProgressPayload("QuietSleeper", 0, "Sleeping", true);
-		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
-			...payload,
-			progress: { ...payload.progress, currentTool: "bash", currentToolArgs: "sleep 40", currentToolStartMs: 1 },
-		});
-		await Promise.resolve();
-		vi.advanceTimersByTime(100);
-		rebuildHud.mockClear();
-		requestRender.mockClear();
-
-		vi.advanceTimersByTime(1000);
-		expect(rebuildHud).toHaveBeenCalledTimes(1);
-		expect(requestRender).toHaveBeenCalledTimes(1);
-		vi.advanceTimersByTime(1000);
-		expect(rebuildHud).toHaveBeenCalledTimes(2);
-
-		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
-			...payload,
-			progress: { ...payload.progress, currentTool: undefined, currentToolStartMs: undefined },
-		});
-		await Promise.resolve();
-		vi.advanceTimersByTime(100);
-		rebuildHud.mockClear();
-		vi.advanceTimersByTime(5000);
-		expect(rebuildHud).not.toHaveBeenCalled();
-	});
-
 	it("applies the setting over a clicked expand override", async () => {
 		await mode.init({ suppressWelcomeIntro: true });
 		for (let index = 0; index < 5; index++) {
@@ -1085,5 +978,30 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		mode.applyPinnedAgentsSetting();
 		expect(hudText()).not.toContain("Override4");
 		expect(hudText()).toContain("more — expand");
+	});
+
+	it("advances a quiet call's elapsed marker by repainting the same HUD in place", async () => {
+		cfgDisplaySubagentLivePreview.override(Settings.instance, true);
+		await mode.init({ suppressWelcomeIntro: true });
+		vi.spyOn(mode.ui, "requestRender").mockImplementation(() => {});
+		vi.useFakeTimers();
+		setSystemTime(1_000_000);
+		const payload = makeProgressPayload("Sleeper", 0, "Run sleep", true);
+		payload.progress = {
+			...payload.progress,
+			currentTool: "bash",
+			currentToolArgs: "sleep 40",
+			currentToolStartMs: 1_000_000 - 20_000,
+		};
+		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, payload);
+		await Promise.resolve();
+		vi.advanceTimersByTime(100); // observer UI coalesce window
+		const hudText = () => Bun.stripANSI(mode.subagentContainer.render(120).join("\n"));
+		const hud = mode.subagentContainer.children[0];
+		expect(hudText()).toContain("bash: sleep 40 · 20.1s");
+
+		vi.advanceTimersByTime(1_000);
+		expect(mode.subagentContainer.children[0]).toBe(hud);
+		expect(hudText()).toContain("bash: sleep 40 · 21.1s");
 	});
 });

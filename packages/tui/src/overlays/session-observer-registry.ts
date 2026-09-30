@@ -67,7 +67,7 @@ export interface ObservableSession {
 }
 
 /** Coarse source of an observer change; callers use it to separate lifecycle work from high-frequency progress. */
-export type SessionObserverChangeKind = "main" | "reset" | "lifecycle" | "progress" | "tool";
+export type SessionObserverChangeKind = "main" | "reset" | "lifecycle" | "progress";
 
 const STATUS_MAP: Record<string, ObservableSession["status"]> = {
 	started: "active",
@@ -253,12 +253,6 @@ export class SessionObserverRegistry {
 						const progress = payload.progress;
 						const id = progress.id;
 						const existing = this.#sessions.get(id);
-						const toolChanged =
-							existing?.progress?.currentTool !== progress.currentTool ||
-							existing?.progress?.currentToolStartMs !== progress.currentToolStartMs ||
-							existing?.progress?.currentToolArgs !== progress.currentToolArgs ||
-							existing?.progress?.currentToolArgsKey !== progress.currentToolArgsKey ||
-							existing?.progress?.lastIntent !== progress.lastIntent;
 
 						const sortOrder = this.#ensureSortOrder(id);
 						this.#ensureParentSortOrder(payload.parentToolCallId, sortOrder);
@@ -286,7 +280,7 @@ export class SessionObserverRegistry {
 								progress,
 							});
 						}
-						this.#notifyListeners(toolChanged ? "tool" : "progress");
+						this.#notifyListeners("progress");
 					}),
 				),
 			);

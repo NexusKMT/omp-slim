@@ -433,7 +433,7 @@ export const cfgTaskShowResolvedModelBadge = register({
 		tab: "appearance",
 		group: "Display",
 		label: "Show Resolved Model Badge",
-		description: "Display the actual model ID in task widgets and the Subagents HUD",
+		description: "Display the actual model ID used by each subagent in the task widget status line",
 	},
 });
 effect(cfgTaskShowResolvedModelBadge, setFeedModelBadgeEnabled);

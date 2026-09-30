@@ -88,7 +88,9 @@ interface Observation {
 interface ScenarioResult {
 	observations: Observation[];
 	tools: Array<string | undefined>;
-	toolSnapshots: Array<Pick<AgentProgress, "currentTool" | "currentToolArgs" | "lastIntent" | "recentTools">>;
+	toolSnapshots: Array<
+		Pick<AgentProgress, "currentTool" | "currentToolArgs" | "currentToolIntent" | "lastIntent" | "recentTools">
+	>;
 	/** Snapshot arrays captured by reference + a deep copy taken at observation time. */
 	immutability: Array<{ live: string[]; copy: string[] }>;
 	exitCode: number;
@@ -271,6 +273,7 @@ async function runScenario(
 			toolSnapshots.push({
 				currentTool: progress.currentTool,
 				currentToolArgs: progress.currentToolArgs,
+				currentToolIntent: progress.currentToolIntent,
 				lastIntent: progress.lastIntent,
 				recentTools: progress.recentTools.slice(),
 			});
@@ -440,10 +443,14 @@ describe("recentOutput event-sequence equivalence (deferred reconstruction)", ()
 			const afterFirst = result.toolSnapshots.find(snapshot => snapshot.recentTools[0]?.tool === finishedName);
 			expect(afterFirst?.currentTool).toBe(finishReadFirst ? "grep" : "read");
 			expect(afterFirst?.currentToolArgs).toBe(finishReadFirst ? "needle" : "src/one.ts");
-			expect(afterFirst?.lastIntent).toBe(finishReadFirst ? "Searching for the symbol" : "Reading the first file");
+			// The row shows the surviving call's own intent, not the other call's.
+			expect(afterFirst?.currentToolIntent).toBe(
+				finishReadFirst ? "Searching for the symbol" : "Reading the first file",
+			);
 			expect(afterFirst?.recentTools[0]).toMatchObject({
 				tool: finishedName,
 				args: finishReadFirst ? "src/one.ts" : "needle",
+				intent: finishReadFirst ? "Reading the first file" : "Searching for the symbol",
 				isError: !finishReadFirst,
 			});
 		}

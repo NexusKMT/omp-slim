@@ -9,6 +9,12 @@ import path from "node:path";
 import type { AgentEvent, AgentIdentity, AgentMessage, AgentTelemetryConfig } from "@oh-my-pi/pi-agent-core";
 import { AgentBusyError, EventLoopKeepalive, recordHandoff, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
 import type { Api, Model, ServiceTierByFamily, Usage } from "@oh-my-pi/pi-ai";
+import { isRecord, logger, popLoopPhase, prompt, pushLoopPhase, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
+import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobError, AsyncJobManager, type AsyncJobRunResult } from "../async";
+import type { Rule } from "../capability/rule";
+import type { EffectiveExtensionRoots } from "../capability/types";
+import { ModelRegistry } from "../config/model-registry";
+import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import {
 	previewLine,
 	replaceTabs,
@@ -16,12 +22,6 @@ import {
 	TRUNCATE_LENGTHS,
 } from "@oh-my-pi/pi-tui/render/render-utils";
 import { type EditMode, getEditInputPaths } from "@oh-my-pi/pi-tui/tools/edit";
-import { logger, popLoopPhase, prompt, pushLoopPhase, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
-import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, AsyncJobError, AsyncJobManager, type AsyncJobRunResult } from "../async";
-import type { Rule } from "../capability/rule";
-import type { EffectiveExtensionRoots } from "../capability/types";
-import { ModelRegistry } from "../config/model-registry";
-import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import {
 	formatModelStringWithRouting,
 	resolveAgentAdvisorSelection,
@@ -428,11 +428,6 @@ function withAbortTimeout<T>(
 	});
 
 	return wrappedPromise;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	if (!value || typeof value !== "object") return false;
-	return !Array.isArray(value);
 }
 
 /** Options for subagent execution */
@@ -884,13 +879,16 @@ function formatToolArgsPreview(value: string, key: string): { value: string; key
 }
 
 /**
- * Extract bounded display arguments after path and terminal sanitation.
+ * Extract bounded display arguments after path and terminal sanitation. The key names which argument
+ * was chosen so the renderer can shorten home paths in path-valued arguments without rewriting a
+ * literal search pattern.
  */
 function extractToolArgsPreview(
 	args: Record<string, unknown>,
 	toolName: string,
 	editMode?: EditMode,
 ): { value: string; key: string } | undefined {
+	// Priority order for preview
 	const previewKeys = ["command", "file_path", "path", "pattern", "query", "url", "task", "prompt"];
 	const isEdit = toolName === "edit" || toolName === "apply_patch";
 	if (isEdit && typeof args.input === "string") {
@@ -910,8 +908,7 @@ function extractToolArgsPreview(
 	}
 	for (const key of previewKeys) {
 		if (typeof args[key] === "string" && args[key]) {
-			const value = args[key] as string;
-			return formatToolArgsPreview(value, key);
+			return formatToolArgsPreview(args[key] as string, key);
 		}
 	}
 	return undefined;
@@ -1663,6 +1660,10 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		}
 	};
 
+	/**
+	 * Tool calls in flight, by call id. Sibling calls run concurrently, so one call ending must not
+	 * blank or relabel another that is still running: the live row shows the oldest remaining call.
+	 */
 	const activeTools = new Map<
 		string,
 		{ tool: string; args?: string; argsKey?: string; intent?: string; startMs: number }
@@ -1748,18 +1749,21 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 				progress.currentToolArgs = preview?.value;
 				progress.currentToolArgsKey = preview?.key;
 				progress.currentToolStartMs = now;
+				const intent = event.intent?.trim() || undefined;
+				// Per call: intent-optional tools (e.g. MCP) start without one, and
+				// `lastIntent` would otherwise label them with the previous call's.
+				progress.currentToolIntent = intent;
 				activeTools.set(event.toolCallId, {
 					tool: event.toolName,
 					args: preview?.value,
 					argsKey: preview?.key,
-					intent: event.intent?.trim() || progress.lastIntent,
+					intent,
 					startMs: now,
 				});
 				visibleToolCallId = event.toolCallId;
 				// A fast tool may finish before the coalesced update fires.
 				// Publish both lifecycle edges rather than dropping its start.
 				flushProgress = true;
-				const intent = event.intent?.trim();
 				if (intent) {
 					progress.lastIntent = intent;
 				}
@@ -1782,6 +1786,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 						tool: finished.tool,
 						args: finished.args ?? "",
 						argsKey: finished.argsKey,
+						intent: finished.intent,
 						isError: event.isError,
 						endMs: now,
 					});
@@ -1797,8 +1802,8 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 					progress.currentTool = visible?.tool;
 					progress.currentToolArgs = visible?.args;
 					progress.currentToolArgsKey = visible?.argsKey;
+					progress.currentToolIntent = visible?.intent;
 					progress.currentToolStartMs = visible?.startMs;
-					if (visible) progress.lastIntent = visible.intent;
 				}
 				// The finalized TaskToolDetails will be captured below into
 				// `extractedToolData.task`; drop the in-flight snapshot so the
