@@ -93,6 +93,9 @@ provider "factory-droid" {
 		strip-thinking-history #true
 		disabled-thinking "omit"
 		effort-beta #false
+		// Native declares no strict tools; strict schemas compile into a grammar
+		// that proxied routes can reject as oversized.
+		disable-strict-tools #true
 		// Bedrock/Vertex require the beta alongside any output effort.
 		on-upstream "bedrock_anthropic" "vertex_anthropic" {
 			effort-beta #true

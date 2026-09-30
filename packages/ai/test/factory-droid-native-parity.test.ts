@@ -65,7 +65,11 @@ async function encode(capture: NativeCapture, turn: 0 | 1): Promise<NativeReques
 	const disabled = capture.effort === "off" || capture.effort === "none";
 	const context: Context = {
 		messages: turn === 0 ? opening : followUp(capture, !disabled),
-		tools: [{ name: "Read", description: "Read a file", parameters: type({ path: "string" }) }],
+		// `bash` is one of the tools omp's Anthropic encoder marks strict; native never does.
+		tools: [
+			{ name: "Read", description: "Read a file", parameters: type({ path: "string" }) },
+			{ name: "bash", description: "Run a command", parameters: type({ command: "string" }) },
+		],
 	};
 	let request: NativeRequest | undefined;
 	await streamFactoryDroid(model, context, {
