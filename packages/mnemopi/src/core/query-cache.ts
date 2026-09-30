@@ -52,10 +52,6 @@ function splitEntryKey(key: string): { scope: string; normalized: string } {
 	return { scope: key.slice(0, index), normalized: key.slice(index + 1) };
 }
 
-function distinctWords(normalized: string): Set<string> {
-	return new Set(normalized.split(" ").filter(word => word.length > 0));
-}
-
 export function isEnhancedRecallEnabled(env: Env = process.env, configured?: boolean): boolean {
 	return enhancedRecallEnabled(env, configured);
 }
@@ -133,7 +129,7 @@ export class QueryCache<T = QueryCacheResult> {
 					this.#entries.set(row.normalized, {
 						scope,
 						normalized,
-						words: distinctWords(normalized),
+						words: this.#wordSet(normalized),
 						results,
 						embedding,
 					});
@@ -211,7 +207,7 @@ export class QueryCache<T = QueryCacheResult> {
 		for (const [cachedKey, cached] of this.#entries) {
 			if (cached.scope !== scope) continue;
 			if (this.#isExpired(cachedKey, now)) continue;
-			queryWords ??= distinctWords(normalized);
+			queryWords ??= this.#wordSet(normalized);
 			if (queryWords.size === 0) continue;
 			let shared = 0;
 			for (const word of queryWords) if (cached.words.has(word)) shared += 1;
@@ -239,7 +235,7 @@ export class QueryCache<T = QueryCacheResult> {
 		this.#entries.set(key, {
 			scope,
 			normalized,
-			words: distinctWords(normalized),
+			words: this.#wordSet(normalized),
 			results,
 			embedding: storedEmbedding,
 		});
