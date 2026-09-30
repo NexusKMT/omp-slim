@@ -12,10 +12,11 @@ provider "helmcode" {
 	// Helmcode's own endpoint and docs are the deployment truth: same-id rows on
 	// other hosts carry different output ceilings and effort ladders, so the
 	// generator must not backfill names, limits, or capabilities from them.
-	// Runtime discovery still resolves bare resold frontier ids (Claude, GPT,
-	// Gemini) against the vendor's own bundled row for context, output cap,
-	// modalities, and USD list price; Helmcode bills that list price with no
-	// markup (helmcode.com/docs/models, "Frontier models").
+	// Runtime discovery still resolves resold frontier ids (Claude, GPT,
+	// Gemini) against the first-party vendor's bundled row for context, output
+	// cap, modalities, and list price; Helmcode passes that list price through
+	// with no markup, converted to EUR (helmcode.com/docs/models, "Frontier
+	// models"), so the surfaced USD cost is the vendor's rate card.
 	skip-cross-provider-reference-fills #true
 	discovery label="Helmcode"
 
@@ -54,25 +55,30 @@ provider "helmcode" {
 	// `reasoning_effort` ladders per helmcode.com/docs/models ("Controlling
 	// reasoning"). Provider-scoped rather than seed-only so rows discovered at
 	// runtime resolve the same ladder, and no class-level host ladder (which
-	// sends `xhigh`, a value Helmcode does not document) applies. `none` is the
-	// off state, not an effort tier. Qwen3.6 and Gemma 4 default to a 16,384
-	// token budget, which is the `high` tier. `/v1/models` carries no
-	// capability data, so a discovered id with no bundled row and no ladder
-	// below arrives as non-reasoning.
+	// sends `xhigh`, a value Helmcode does not document) applies. `/v1/models`
+	// carries no capability data, so a discovered id with no bundled row, no
+	// vendor row, and no ladder below arrives as non-reasoning.
 	thinking-mode "effort"
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
+	// `minimal` through `max` only steer this adaptive model; `none` is the
+	// one value that skips reasoning, so thinking-off sends it.
 	models "deepseek-v4-flash" {
 		thinking-upgrade-neutral #true
 		thinking-efforts "minimal" "low" "medium" "high" "max"
+		reasoning-disable-mode "none-effort"
 	}
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
 	// Helmcode serves Qwen3.6 on the OpenAI `reasoning_effort` field, not the
 	// Qwen class's `enable_thinking` toggle, which would drop the chosen tier.
+	// `none` and `minimal` both skip reasoning, so `minimal` is not a tier and
+	// thinking-off sends `none`. With no field both default to a 16,384 token
+	// budget, which is the `high` tier.
 	models "qwen3.6" "gemma4" {
 		thinking-upgrade-neutral #true
-		thinking-efforts "minimal" "low" "medium" "high" "max"
+		thinking-efforts "low" "medium" "high" "max"
 		thinking-default-level "high"
 		thinking-format "openai"
+		reasoning-disable-mode "none-effort"
 	}
 	// residue: taxonomy extracts no revision from Helmcode's dotless ids.
 	models "glm5.3" "glm5.3-flash" "glm5.2" {
@@ -92,9 +98,14 @@ provider "helmcode" {
 		thinking-mode "effort"
 		thinking-efforts "low" "medium" "high"
 	}
+	// Helmcode bills cache writes only for Anthropic models; OpenAI and Google
+	// cache creation is free there, so the inherited OpenAI write rate is zeroed.
 	class "openai" priority=1 {
 		thinking-mode "effort"
 		thinking-efforts "low" "medium" "high"
+		cost-patch {
+			cache-write 0.0
+		}
 	}
 	class "gemini" {
 		family "flash" priority=1 {

@@ -1268,22 +1268,43 @@ export interface HelmcodeModelManagerConfig {
 }
 
 /**
+ * First-party hosts of the models Helmcode resells (helmcode.com/docs/models,
+ * "Frontier models"). Resold ids resolve only against these rows: the global
+ * bare-id index picks whichever gateway row wins a context/output tie, which
+ * can carry a zero or marked-up price instead of the vendor list price.
+ */
+const HELMCODE_RESOLD_VENDORS = ["anthropic", "openai", "google"] as const satisfies readonly GeneratedProvider[];
+
+function createHelmcodeVendorReferenceMap(): Map<string, ModelSpec<"openai-completions">> {
+	const references = new Map<string, ModelSpec<"openai-completions">>();
+	for (const vendor of HELMCODE_RESOLD_VENDORS) {
+		for (const [id, reference] of createBundledReferenceMap<"openai-completions">(vendor)) {
+			if (!references.has(id)) references.set(id, reference);
+		}
+	}
+	return references;
+}
+
+/**
  * Helmcode model manager: OpenAI-compatible chat completions at
  * `api.helmcode.com/v1`. `/v1/models` also lists embedding, rerank, TTS, and
  * STT models; the exclusion policy lives in `runtime/behavior.kdl`
  * (`exclude-models provider="helmcode"`).
  *
- * `/v1/models` carries no capability data. Bare resold frontier ids (Claude,
- * GPT, Gemini) take only capability facts from the vendor's bundled row:
- * reasoning, modalities, context window, output cap, and list price. The rest
- * of that row (thinking shape, compat, native web search, tool dialects,
+ * `/v1/models` carries no capability data. Resold frontier ids (Claude, GPT,
+ * Gemini) take only capability facts from the first-party vendor's bundled
+ * row: reasoning, modalities, context window, output cap, and list price. The
+ * rest of that row (thinking shape, compat, native web search, tool dialects,
  * cache semantics) describes the vendor's own API, not this chat-completions
- * proxy; the host's `reasoning_effort` ladders live in `providers/helmcode.kdl`.
+ * proxy; the host's `reasoning_effort` ladders and cache-write pricing live in
+ * `providers/helmcode.kdl`. Ids with no Helmcode or vendor row (e.g. a new
+ * open-weight model) inherit nothing from other gateways.
  */
 export function helmcodeModelManagerOptions(
 	config?: HelmcodeModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
-	const resolveReference = createReferenceResolver(() => createBundledReferenceMap<"openai-completions">("helmcode"));
+	let vendorReferences: Map<string, ModelSpec<"openai-completions">> | undefined;
+	const resolveVendorReference = (id: string) => (vendorReferences ??= createHelmcodeVendorReferenceMap()).get(id);
 	return createOpenAICompatibleModelManagerOptions({
 		api: "openai-completions",
 		providerId: "helmcode",
@@ -1293,7 +1314,7 @@ export function helmcodeModelManagerOptions(
 		filterModel: (_entry, model) => !isExcludedModel("helmcode", model.id),
 		mapModel: (entry, defaults, helmcodeReference) => {
 			if (helmcodeReference) return mapWithBundledReference(entry, defaults, helmcodeReference);
-			const vendor = resolveReference(defaults.id);
+			const vendor = resolveVendorReference(defaults.id);
 			if (!vendor) return mapWithBundledReference(entry, defaults, undefined);
 			return {
 				...defaults,
