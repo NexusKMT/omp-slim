@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -50,7 +50,8 @@ const DISABLE_ALL_BUILTIN_SKILLS = {
 // Every provider resolves user-level roots from `os.homedir()` (HOME on POSIX,
 // USERPROFILE on Windows) and the agent dir; point both at an empty temp home
 // so real `~/.omp/plugins`, `~/.claude/plugins`, and `~/.agents/skills`
-// installs never leak into these tests.
+// installs never leak into these tests. Bun fixes `os.homedir()` at process
+// start, so setting HOME alone is not enough; spy on it as well.
 const isolatedEnvKeys = [
 	"HOME",
 	"USERPROFILE",
@@ -63,9 +64,13 @@ const originalEnv: Record<string, string | undefined> = Object.fromEntries(
 	isolatedEnvKeys.map(key => [key, process.env[key]]),
 );
 let isolatedHome = "";
+// Re-armed before every test: an inner test's `mockRestore()` on its own
+// `os.homedir` spy restores the real function, not this one.
+const isolateHomedir = () => spyOn(os, "homedir").mockReturnValue(isolatedHome);
 
 beforeAll(async () => {
 	isolatedHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "pi-skills-home-")));
+	isolateHomedir();
 	for (const key of ["HOME", "USERPROFILE"] as const) {
 		process.env[key] = isolatedHome;
 		Bun.env[key] = isolatedHome;
@@ -75,8 +80,13 @@ beforeAll(async () => {
 	setAgentDir(path.join(isolatedHome, ".omp", "agent"));
 });
 
+beforeEach(() => {
+	isolateHomedir();
+});
+
 afterAll(async () => {
 	for (const key of isolatedEnvKeys) restoreEnvValue(key, originalEnv[key]);
+	isolateHomedir().mockRestore();
 	__resetDirsFromEnvForTests();
 	await removeWithRetries(isolatedHome);
 });
