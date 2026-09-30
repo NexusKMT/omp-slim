@@ -5,6 +5,13 @@
 ### Fixed
 
 - Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
+### Added
+
+- `AuthStorage.keys.setConfig(provider, value, { fallback: true })` registers a key that is used only when no stored OAuth or `/login` credential exists, instead of overriding them; `removeConfig`/`clearConfig` also clear these fallbacks ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
+
+### Fixed
+
+- Auth gateway checks for configured bearer tokens in URLs or forwarded/logged headers only after authentication; unauthorized requests use socket peers and redact unknown paths. Authenticated requests with misplaced tokens are rejected before provider dispatch ([#13827](https://github.com/can1357/oh-my-pi/pull/13827) by [@shawnkoh](https://github.com/shawnkoh)).
 
 ## [18.4.4] - 2026-09-29
 
