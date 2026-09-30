@@ -510,9 +510,18 @@ function matchLink(src: string, lexer: Lexer, closers: InlineClosers): NestedMat
 		href = cleanUrl(titleMatch[1]!);
 		title = titleMatch[2] ?? titleMatch[3] ?? titleMatch[4] ?? null;
 		const raw = src.slice(0, destinationEnd + 1);
+		// An image's text is its label unescaped. Nested images each unescape their label, so a label without an escape
+		// is taken as it is instead of read again.
 		return {
 			token: image
-				? { type: "image", raw, href, title, text: unescapeMarkdown(label), tokens: [] }
+				? {
+						type: "image",
+						raw,
+						href,
+						title,
+						text: closers.escapeWithin(src, labelStart, labelEnd) ? unescapeMarkdown(label) : label,
+						tokens: [],
+					}
 				: { type: "link", raw, href, title, text: label, tokens: [] },
 			src: label,
 			closers: closers.nested(src, labelEnd),
@@ -539,7 +548,14 @@ function matchLink(src: string, lexer: Lexer, closers: InlineClosers): NestedMat
 	const raw = src.slice(0, rawEnd);
 	return {
 		token: image
-			? { type: "image", raw, href: def.href, title: def.title ?? null, text: unescapeMarkdown(label), tokens: [] }
+			? {
+					type: "image",
+					raw,
+					href: def.href,
+					title: def.title ?? null,
+					text: closers.escapeWithin(src, labelStart, labelEnd) ? unescapeMarkdown(label) : label,
+					tokens: [],
+				}
 			: { type: "link", raw, href: def.href, title: def.title ?? null, text: label, tokens: [] },
 		src: label,
 		closers: closers.nested(src, labelEnd),

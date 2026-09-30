@@ -176,6 +176,7 @@ export class CloserIndexes {
 	readonly #emphasis = new Map<string, EmphasisDelimiters>();
 	#tagEnds: Int32Array | undefined;
 	#commentEnds: number[] | undefined;
+	#escapes: number[] | undefined;
 
 	constructor(src: string) {
 		this.#src = src;
@@ -232,6 +233,17 @@ export class CloserIndexes {
 		for (let at = src.indexOf("-->"); at !== -1; at = src.indexOf("-->", at + 1)) ends.push(at);
 		return (this.#commentEnds = ends);
 	}
+
+	/** Every offset of a backslash before ASCII punctuation, ascending: where unescaping drops a backslash. */
+	get escapes(): number[] {
+		if (this.#escapes) return this.#escapes;
+		const src = this.#src;
+		const escapes: number[] = [];
+		for (let at = src.indexOf("\\"); at !== -1; at = src.indexOf("\\", at + 1)) {
+			if (PUNCTUATION.test(src[at + 1] ?? "")) escapes.push(at);
+		}
+		return (this.#escapes = escapes);
+	}
 }
 
 /**
@@ -268,6 +280,14 @@ export class InlineClosers {
 	squareCloserWithin(rest: string, from: number, to: number): boolean {
 		const pos = this.end - rest.length;
 		return this.#indexes.square.closesWithin(pos + from, pos + to);
+	}
+
+	/** Whether `rest.slice(from, to)` holds a backslash before ASCII punctuation, which unescaping drops. */
+	escapeWithin(rest: string, from: number, to: number): boolean {
+		const pos = this.end - rest.length;
+		const escapes = this.#indexes.escapes;
+		const at = lowerBound(escapes, pos + from);
+		return at < escapes.length && escapes[at]! + 1 < pos + to;
 	}
 
 	/** Where the emphasis opened by the `width` markers at the start of `rest` closes, or -1. */

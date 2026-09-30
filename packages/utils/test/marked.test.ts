@@ -493,6 +493,30 @@ describe("marked compatibility", () => {
 		expect(shape(Lexer.lexInline("*a ***a**"))).toEqual([["em", "*a ***a**", [["text", "a ***a*"]]]]);
 	});
 
+	// An image's text is its label unescaped: also when the label's only escape ends right before its "]", and for an
+	// image in another image's label, whose text keeps the inner image's source.
+	test("gives an image its label unescaped as its text", () => {
+		type Walked = { type: string; raw: string; text?: string; tokens?: Walked[] };
+		const images = (tokens: readonly Walked[], out: [string, string | undefined][] = []) => {
+			for (const token of tokens) {
+				if (token.type === "image") out.push([token.raw, token.text]);
+				if (token.tokens) images(token.tokens, out);
+			}
+			return out;
+		};
+		const lexImages = (source: string) => images(Lexer.lex(source) as unknown as Walked[]);
+		expect(lexImages("![a\\*](u) ![b](v) ![c \\[![d\\_](w)](x)")).toEqual([
+			["![a\\*](u)", "a*"],
+			["![b](v)", "b"],
+			["![c \\[![d\\_](w)](x)", "c [![d_](w)"],
+			["![d\\_](w)", "d_"],
+		]);
+		expect(lexImages("[r]: /r\n\n![e\\!][r] ![f\\\\][r]")).toEqual([
+			["![e\\!][r]", "e!"],
+			["![f\\\\][r]", "f\\"],
+		]);
+	});
+
 	// Definition labels never hold "]", so only the reference part decides whether a link resolves: a label holding
 	// brackets resolves through a plain reference, and a reference holding "]" resolves to nothing.
 	test("resolves reference links whose label or reference holds brackets", () => {
@@ -629,6 +653,11 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		[
 			"nested links around a long word (3.2 MB)",
 			`${"[a ".repeat(5_000)}${"a".repeat(3_200_000)}${"](u)".repeat(5_000)}`,
+		],
+		// An image's text is its label unescaped, which without an escape in the label is the label itself.
+		[
+			"nested images around a long word (6.4 MB)",
+			`${"![".repeat(5_000)}${"a".repeat(6_400_000)}${"](u)".repeat(5_000)}`,
 		],
 		["nested brackets (80 KB)", `${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
 		["nested brackets under a definition (80 KB)", `[a]: /u\n\n${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
