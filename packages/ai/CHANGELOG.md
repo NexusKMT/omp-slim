@@ -6,6 +6,10 @@
 
 - `AuthStorage.keys.setConfig(provider, value, { fallback: true })` registers a key that is used only when no stored OAuth or `/login` credential exists, instead of overriding them; `removeConfig`/`clearConfig` also clear these fallbacks ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
 
+### Fixed
+
+- Strata's HTTP 400 context-limit errors (`prompt (N tokens) + max tokens (M) exceeds the context (C)` and `prompt (N tokens) leaves no room to answer in the context (C)`) are now recognized as context overflows, so overflow recovery can start even when the response carries no usage ([#13864](https://github.com/can1357/oh-my-pi/pull/13864) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
