@@ -18,6 +18,7 @@
 - Cache-warming refreshes cancelled or superseded after the provider accepted them now count toward session usage and cost instead of being dropped ([#13717](https://github.com/can1357/oh-my-pi/pull/13717))
 - `omp plugin upgrade <name>` now upgrades npm- and git-installed plugins (e.g. `ida-mcp` installed from `github:HexRaysSA/ida-mcp#latest`, which `hcli mcp install` relies on) and resolves a bare marketplace plugin name, instead of failing with "Invalid plugin ID"; the plugin's enabled state and feature selection are kept ([#13812](https://github.com/can1357/oh-my-pi/pull/13812) by [@H4vC](https://github.com/H4vC))
 - Extension providers that offer `/login` and also name an env var as their `apiKey` (e.g. the Nexos provider's `NEXOS_API_KEY`) now use the key saved by `/login` when that env var is unset, instead of sending the env var's name as the key, which made their models fail to load or disappear ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
+- `openai-codex` model discovery now queries the `baseUrl` set in `models.yml` with the configured key, so models listed only by a Codex-compatible gateway (e.g. `gpt-6.1-sol`) appear; the gateway key is no longer sent to chatgpt.com, and stored ChatGPT OAuth credentials are never sent to the gateway ([#13830](https://github.com/can1357/oh-my-pi/issues/13830))
 
 ## [18.4.4] - 2026-09-29
 

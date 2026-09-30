@@ -11,6 +11,7 @@ import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { resolveModelCacheProviderId, resolveOllamaModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import type { ModelKind, ModelSpec, OpenAICompat } from "@oh-my-pi/pi-catalog/types";
+import { CODEX_CLIENT_VERSION } from "@oh-my-pi/pi-catalog/wire/codex";
 import {
 	discoverOllamaModels,
 	discoverOpenAIModelsList,
@@ -515,6 +516,69 @@ describe("ModelRegistry runtime discovery", () => {
 
 		expect(modelListCalls).toBe(1);
 		expect(registry.find("openai-codex", "runtime-codex-model")).toBeDefined();
+	});
+
+	test("Codex discovery follows a configured baseUrl and sends only the configured key there (#13830)", async () => {
+		writeRawModelsJson({
+			"openai-codex": { baseUrl: "https://codex-proxy.example/backend-api/", apiKey: "sk-gateway" },
+		});
+		await authStorage.credentials.set("openai-codex", {
+			type: "oauth",
+			access: "chatgpt-oauth-token",
+			refresh: "chatgpt-refresh",
+			expires: Date.now() + 3_600_000,
+		});
+		const requests: { url: string; authorization: string | null }[] = [];
+		const fetchMock: FetchImpl = async (input, init) => {
+			const url = String(input);
+			requests.push({ url, authorization: new Headers(init?.headers).get("Authorization") });
+			if (url.startsWith("https://codex-proxy.example/backend-api/codex/models")) {
+				return Response.json({
+					models: [
+						{
+							slug: "gpt-6.1-sol",
+							display_name: "GPT-6.1 Sol",
+							context_window: 272_000,
+							supported_in_api: true,
+							input_modalities: ["text", "image"],
+						},
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("openai-codex", "online");
+
+		expect(requests).toEqual([
+			{
+				url: `https://codex-proxy.example/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`,
+				authorization: "Bearer sk-gateway",
+			},
+		]);
+		expect(registry.find("openai-codex", "gpt-6.1-sol")?.baseUrl).toBe("https://codex-proxy.example/backend-api/");
+	});
+
+	test("Codex discovery never sends stored ChatGPT OAuth credentials to a custom baseUrl", async () => {
+		writeRawModelsJson({ "openai-codex": { baseUrl: "https://codex-proxy.example/backend-api" } });
+		await authStorage.credentials.set("openai-codex", {
+			type: "oauth",
+			access: "chatgpt-oauth-token",
+			refresh: "chatgpt-refresh",
+			expires: Date.now() + 3_600_000,
+		});
+		let fetchCalls = 0;
+		const fetchMock: FetchImpl = async input => {
+			fetchCalls++;
+			throw new Error(`Unexpected URL: ${String(input)}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+
+		await registry.refreshProvider("openai-codex", "online");
+
+		expect(fetchCalls).toBe(0);
+		expect(getModelsForProvider(registry, "openai-codex").length).toBeGreaterThan(0);
 	});
 
 	test("Codex discovery aborts (keeps bundled models) when any account credential fails to refresh", async () => {

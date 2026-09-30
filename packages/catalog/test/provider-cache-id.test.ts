@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { PROVIDER_DESCRIPTORS, resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
+import { openaiCodexModelManagerOptions } from "@oh-my-pi/pi-catalog/provider-models/special";
 
 test("lightweight cache resolver matches every descriptor default", () => {
 	for (const descriptor of PROVIDER_DESCRIPTORS) {
@@ -56,4 +57,15 @@ test("ollama cache scope preserves reverse-proxy path prefixes", () => {
 	expect(teamA).toBe(resolveModelCacheProviderId("ollama", { baseUrl: "https://proxy.example/team-a" }));
 	expect(teamA).toBe(resolveModelCacheProviderId("ollama", { baseUrl: "https://proxy.example/team-a/" }));
 	expect(teamA).not.toBe(resolveModelCacheProviderId("ollama", { baseUrl: "https://proxy.example/team-b/v1" }));
+});
+
+test("Codex cache scope follows a gateway baseUrl but keeps the official namespace (#13830)", () => {
+	const official = resolveModelCacheProviderId("openai-codex");
+	// Pre-existing official caches stay readable whether or not the registry passes the bundled baseUrl.
+	expect(resolveModelCacheProviderId("openai-codex", { baseUrl: "https://chatgpt.com/backend-api/" })).toBe(official);
+	const gateway = openaiCodexModelManagerOptions({ baseUrl: "https://codex-proxy.example/backend-api" });
+	expect(gateway.cacheProviderId).toBe(
+		resolveModelCacheProviderId("openai-codex", { baseUrl: "https://codex-proxy.example/backend-api/" }),
+	);
+	expect(gateway.cacheProviderId).not.toBe(official);
 });

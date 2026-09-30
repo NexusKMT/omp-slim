@@ -6,6 +6,7 @@ import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProvider
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
+import { isOfficialCodexApiUrl } from "@oh-my-pi/pi-ai/stream";
 import type {
 	Api,
 	Context,
@@ -39,6 +40,7 @@ import {
 	MODELS_DEV_CATALOG_PROVIDER_IDS,
 	modelsDevCatalogFallback,
 	openaiCodexModelManagerOptions,
+	type OpenAICodexAccount,
 	PROVIDER_DESCRIPTORS,
 	resolveModelCacheProviderId,
 	resolveOllamaModelCacheProviderId,
@@ -2088,11 +2090,26 @@ export class ModelRegistry {
 				providerId: "openai-codex",
 				authoritative: true,
 				resolveKey: value => value,
-				createOptions: accessToken =>
-					openaiCodexModelManagerOptions({
-						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
-						fetch: this.#fetch,
-					}),
+				createOptions: accessToken => {
+					// A custom endpoint (models.yml `baseUrl`) receives only the configured
+					// key: stored ChatGPT OAuth accounts never leave chatgpt.com, and
+					// discovery is skipped when the effective credential is an official one.
+					const baseUrl = this.#descriptorBaseUrl("openai-codex");
+					let resolveAccounts: (() => Promise<OpenAICodexAccount[] | null>) | undefined;
+					if (isOfficialCodexApiUrl(baseUrl)) {
+						resolveAccounts = () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken);
+					} else if (this.usesOfficialCredential("openai-codex")) {
+						logger.warn(
+							"Skipping Codex model discovery: refusing to send official Codex credentials to custom endpoint",
+							{
+								baseUrl,
+							},
+						);
+					} else {
+						resolveAccounts = async () => [{ accessToken }];
+					}
+					return openaiCodexModelManagerOptions({ baseUrl, resolveAccounts, fetch: this.#fetch });
+				},
 			},
 		];
 		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
@@ -2702,6 +2719,17 @@ export class ModelRegistry {
 	hasCommandBackedApiKey(provider: string): boolean {
 		const keyConfig = this.#customProviderApiKeys.get(provider);
 		return isCommandConfigValue(keyConfig);
+	}
+
+	/**
+	 * Whether the provider authenticates with an official OAuth or env
+	 * credential rather than a configured API key. Such credentials belong to
+	 * the official endpoint and MUST NOT be sent to a custom `baseUrl`.
+	 */
+	usesOfficialCredential(provider: string): boolean {
+		if (this.hasCommandBackedApiKey(provider)) return false;
+		const kind = this.authStorage.keys.source(provider)?.kind;
+		return kind === "oauth" || kind === "env";
 	}
 
 	getDiscoverableProviders(): string[] {
