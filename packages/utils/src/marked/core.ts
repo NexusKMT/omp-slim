@@ -1,3 +1,11 @@
+import {
+	CloserIndexes,
+	canCloseDelimiter,
+	canOpenDelimiter,
+	escapedAt,
+	InlineClosers,
+	PUNCTUATION,
+} from "./inline-closers";
 import { TextRun, TextStops } from "./inline-text";
 
 /** Token shapes emitted by the Markdown lexer. */
@@ -355,7 +363,6 @@ const DEFAULTS: MarkedOptions = {
 	walkTokens: null,
 	extensions: null,
 };
-const PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
 
 function tokenList(links: Links = Object.create(null)): TokensList {
 	const list = [] as unknown as TokensList;
@@ -393,193 +400,10 @@ function escapeHtml(value: string, encode = true): string {
 	return out;
 }
 
-/** Index of the first element of the ascending `values` at or above `target`. */
-function lowerBound(values: readonly number[], target: number): number {
-	let low = 0;
-	let high = values.length;
-	while (low < high) {
-		const mid = (low + high) >>> 1;
-		if (values[mid]! < target) low = mid + 1;
-		else high = mid;
-	}
-	return low;
-}
-
-/** Closing-delimiter offsets by the depth before each, every list ascending. */
-class ClosersByDepth {
-	readonly #offsets = new Map<number, number[]>();
-
-	/** Records a closer at `offset`, which lies past every closer recorded before it. */
-	add(depth: number, offset: number): void {
-		let offsets = this.#offsets.get(depth);
-		if (!offsets) this.#offsets.set(depth, (offsets = []));
-		offsets.push(offset);
-	}
-
-	/** The first closer at `depth` at or after `from`, or -1. */
-	first(depth: number, from: number): number {
-		const offsets = this.#offsets.get(depth);
-		if (!offsets) return -1;
-		const at = lowerBound(offsets, from);
-		return at === offsets.length ? -1 : offsets[at]!;
-	}
-}
-
-/**
- * Where a bracket opened in one inline source closes. A search starts right after the opening bracket, and a
- * bracket never begins an escape, so the escape pairing from there is the pairing from the start of the source.
- * The closer is then the first unescaped closing bracket at or after the start whose depth (openers minus closers
- * before it, from the start of the source) equals the depth at the start.
- */
-class BracketDepths {
-	// The depth before each offset.
-	readonly #depth: Int32Array;
-	readonly #closers = new ClosersByDepth();
-
-	constructor(src: string, open: number, close: number) {
-		const depth = new Int32Array(src.length + 1);
-		let level = 0;
-		for (let i = 0; i < src.length; i++) {
-			depth[i] = level;
-			const code = src.charCodeAt(i);
-			if (code === 0x5c /* \ */) {
-				depth[++i] = level;
-			} else if (code === open) {
-				level++;
-			} else if (code === close) {
-				this.#closers.add(level, i);
-				level--;
-			}
-		}
-		depth[src.length] = level;
-		this.#depth = depth;
-	}
-
-	/** The offset of the bracket closing the one just before `start`, or -1. */
-	closeAfter(start: number): number {
-		return this.#closers.first(this.#depth[start]!, start);
-	}
-}
-
-/** The link rule's bracket lookups over one inline source, each built on first use. */
-class LinkBrackets {
-	readonly #src: string;
-	#square: BracketDepths | undefined;
-	#round: BracketDepths | undefined;
-
-	constructor(src: string) {
-		this.#src = src;
-	}
-
-	/** Where the "[" just before `start` in `rest`, a suffix of the source, closes, as an offset into `rest`, or -1. */
-	closeSquare(rest: string, start: number): number {
-		this.#square ??= new BracketDepths(this.#src, 0x5b /* [ */, 0x5d /* ] */);
-		return this.#close(this.#square, rest, start);
-	}
-
-	/** Where the "(" just before `start` in `rest`, a suffix of the source, closes, as an offset into `rest`, or -1. */
-	closeRound(rest: string, start: number): number {
-		this.#round ??= new BracketDepths(this.#src, 0x28 /* ( */, 0x29 /* ) */);
-		return this.#close(this.#round, rest, start);
-	}
-
-	#close(depths: BracketDepths, rest: string, start: number): number {
-		const pos = this.#src.length - rest.length;
-		const close = depths.closeAfter(pos + start);
-		return close === -1 ? -1 : close - pos;
-	}
-}
-
 function findDelimiter(src: string, delimiter: string, from: number): number {
 	let at = src.indexOf(delimiter, from);
-	while (at !== -1) {
-		let escapes = 0;
-		for (let i = at - 1; i >= 0 && src[i] === "\\"; i--) escapes++;
-		if (escapes % 2 === 0) return at;
-		at = src.indexOf(delimiter, at + delimiter.length);
-	}
-	return -1;
-}
-
-function canOpenDelimiter(src: string, index: number, width: number, marker: string, previous = "\n"): boolean {
-	const before = index === 0 ? previous : src[index - 1]!;
-	if (index === 0 && before === marker) return false;
-	const after = src[index + width];
-	if (after === undefined || /\s/.test(after)) return false;
-	if (marker === "_" && /[\p{L}\p{N}]/u.test(before) && /[\p{L}\p{N}]/u.test(after)) return false;
-	return true;
-}
-
-function canCloseDelimiter(src: string, index: number, marker: string): boolean {
-	const before = src[index - 1];
-	const after = src[index + 1] ?? "\n";
-	if (before === undefined || /\s/.test(before)) return false;
-	if (marker === "_" && /[\p{L}\p{N}]/u.test(before) && /[\p{L}\p{N}]/u.test(after)) return false;
-	return !PUNCTUATION.test(before) || /\s/.test(after) || PUNCTUATION.test(after);
-}
-
-/**
- * The delimiters the emphasis rule's closer walk visits for one marker and width in one inline source, typed the way
- * the walk types them: a delimiter that can close is a closer, else one that can open is an opener. For width 1 they
- * are every unescaped marker. For width 2 they are marker pairs taken two at a time from the start of each run of
- * markers (after it when an odd run of backslashes escapes the start), which is where a walk that reaches the run
- * from before it enters. The closer for an opener is then the first closer after it whose depth (openers minus
- * closers before it) equals the depth where its walk begins, the first point where the walk's nesting count would
- * drop below zero.
- */
-class EmphasisDelimiters {
-	readonly #src: string;
-	readonly #marker: string;
-	readonly #width: number;
-	// Delimiter offsets, ascending, and the depth before each.
-	readonly #at: number[] = [];
-	readonly #depth: number[] = [];
-	readonly #closers = new ClosersByDepth();
-
-	constructor(src: string, marker: string, width: number) {
-		this.#src = src;
-		this.#marker = marker;
-		this.#width = width;
-		let level = 0;
-		for (let run = src.indexOf(marker); run !== -1;) {
-			let end = run + 1;
-			while (src[end] === marker) end++;
-			let escapes = 0;
-			for (let i = run - 1; i >= 0 && src[i] === "\\"; i--) escapes++;
-			for (let at = escapes % 2 === 0 ? run : run + width; at + width <= end; at += width) {
-				this.#at.push(at);
-				this.#depth.push(level);
-				if (canCloseDelimiter(src, at, marker)) {
-					this.#closers.add(level, at);
-					level--;
-				} else if (canOpenDelimiter(src, at, width, marker)) {
-					level++;
-				}
-			}
-			run = src.indexOf(marker, end);
-		}
-	}
-
-	/** Where the emphasis opened by the delimiter at `opener` closes, or -1. */
-	closeFor(opener: number): number {
-		const src = this.#src;
-		const marker = this.#marker;
-		let nested = 0;
-		let at = opener + this.#width;
-		let next = lowerBound(this.#at, at);
-		// A width-2 walk that starts an odd offset into a run of markers visits that run's other pairs; walk them as
-		// the rule does until the run ends and the walk reaches the delimiters above.
-		while (this.#width === 2 && this.#at[next] !== at && src[at] === marker && src[at + 1] === marker) {
-			const closes = canCloseDelimiter(src, at, marker);
-			if (!closes && canOpenDelimiter(src, at, 2, marker)) nested++;
-			else if (closes && nested > 0) nested--;
-			else if (closes) return at;
-			at += 2;
-			next = lowerBound(this.#at, at);
-		}
-		if (next === this.#at.length) return -1;
-		return this.#closers.first(this.#depth[next]! - nested, this.#at[next]!);
-	}
+	while (at !== -1 && escapedAt(src, at)) at = src.indexOf(delimiter, at + delimiter.length);
+	return at;
 }
 
 function inlineHtmlPrefix(src: string): string | undefined {
@@ -622,15 +446,26 @@ export class Tokenizer {
 	}
 }
 
-/** Matches a link or image at the start of `src`, which starts with "[" or "![" and is a suffix of `brackets`' source. */
-function matchLink(src: string, lexer: Lexer, brackets: LinkBrackets): Tokens.Link | Tokens.Image | undefined {
+// The closers a nested inline source shares with the source it lies in, offered to the next inline lex on that
+// lexer. A rule offers them right before lexing its content through `lexer.inlineTokens`, which a subclass may
+// override; the lex that call reaches takes them if it lexes exactly that string, or else starts a root source.
+let sharedClosers: { lexer: Lexer; src: string; closers: InlineClosers } | undefined;
+
+/** Offers `closers` to the inline lex of `src` that the next `lexer.inlineTokens(src)` starts. */
+function shareClosers(lexer: Lexer, src: string, closers: InlineClosers): void {
+	sharedClosers = { lexer, src, closers };
+}
+
+/** Matches a link or image at the start of `src`, a suffix of `closers`' source. */
+function matchLink(src: string, lexer: Lexer, closers: InlineClosers): Tokens.Link | Tokens.Image | undefined {
 	const image = src.startsWith("![");
+	if (!(image || src.startsWith("["))) return undefined;
 	const labelStart = image ? 2 : 1;
-	const labelEnd = brackets.closeSquare(src, labelStart);
+	const labelEnd = closers.closeSquare(src, labelStart);
 	if (labelEnd === -1) return undefined;
 	const label = src.slice(labelStart, labelEnd);
 	if (src[labelEnd + 1] === "(") {
-		const destinationEnd = brackets.closeRound(src, labelEnd + 2);
+		const destinationEnd = closers.closeRound(src, labelEnd + 2);
 		if (destinationEnd === -1) return undefined;
 		const inside = src.slice(labelEnd + 2, destinationEnd).trim();
 		let href = inside;
@@ -640,6 +475,7 @@ function matchLink(src: string, lexer: Lexer, brackets: LinkBrackets): Tokens.Li
 		href = cleanUrl(titleMatch[1]!);
 		title = titleMatch[2] ?? titleMatch[3] ?? titleMatch[4] ?? null;
 		const raw = src.slice(0, destinationEnd + 1);
+		shareClosers(lexer, label, closers.nested(src, labelEnd));
 		const tokens = lexer.inlineTokens(label);
 		return image
 			? { type: "image", raw, href, title, text: unescapeMarkdown(label), tokens }
@@ -648,7 +484,7 @@ function matchLink(src: string, lexer: Lexer, brackets: LinkBrackets): Tokens.Li
 	let rawEnd = labelEnd + 1;
 	let ref = label;
 	if (src[rawEnd] === "[") {
-		const refEnd = brackets.closeSquare(src, rawEnd + 1);
+		const refEnd = closers.closeSquare(src, rawEnd + 1);
 		if (refEnd === -1) return undefined;
 		ref = src.slice(rawEnd + 1, refEnd) || label;
 		rawEnd = refEnd + 1;
@@ -656,6 +492,7 @@ function matchLink(src: string, lexer: Lexer, brackets: LinkBrackets): Tokens.Li
 	const def = lexer.tokens.links[ref.replace(/\s+/g, " ").toLowerCase()];
 	if (!def) return undefined;
 	const raw = src.slice(0, rawEnd);
+	shareClosers(lexer, label, closers.nested(src, labelEnd));
 	const tokens = lexer.inlineTokens(label);
 	return image
 		? { type: "image", raw, href: def.href, title: def.title ?? null, text: unescapeMarkdown(label), tokens }
@@ -679,12 +516,15 @@ function trimBareUrl(candidate: string): string {
 }
 
 function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] {
+	const shared = sharedClosers;
+	sharedClosers = undefined;
+	const closers =
+		shared?.lexer === lexer && shared.src === src
+			? shared.closers
+			: new InlineClosers(new CloserIndexes(src), src.length);
+	const stops = new TextStops(src, lexer);
+	const textRun = new TextRun(src);
 	let rest = src;
-	// Lookups over `src`, each built the first time a step needs it.
-	let stops: TextStops | undefined;
-	let brackets: LinkBrackets | undefined;
-	let emphasis: Map<string, EmphasisDelimiters> | undefined;
-	let textRun: TextRun | undefined;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;
 		for (const extension of lexer.extensions.inline) {
@@ -735,10 +575,7 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			rest = rest.slice(html.length);
 			continue;
 		}
-		const link =
-			rest[0] === "[" || rest.startsWith("![")
-				? matchLink(rest, lexer, (brackets ??= new LinkBrackets(src)))
-				: undefined;
+		const link = matchLink(rest, lexer, closers);
 		if (link) {
 			output.push(link);
 			rest = rest.slice(link.raw.length);
@@ -757,8 +594,9 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			const end = findDelimiter(rest, marker.repeat(3), 3);
 			if (end !== -1 && canCloseDelimiter(rest, end, marker)) {
 				const raw = rest.slice(0, end + 3);
-				const inner = rest.slice(3, end);
-				const text = `${marker.repeat(2)}${inner}${marker.repeat(2)}`;
+				// The text between the delimiters inside the outer two markers of each: `**inner**`.
+				const text = rest.slice(1, end + 2);
+				shareClosers(lexer, text, closers.nested(rest, end + 2));
 				output.push({ type: "em", raw, text, tokens: lexer.inlineTokens(text) });
 				rest = rest.slice(raw.length);
 				continue;
@@ -769,15 +607,11 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			canOpenDelimiter(rest, 0, rest[1] === marker ? 2 : 1, marker, previous)
 		) {
 			const width = rest[1] === marker ? 2 : 1;
-			const delimiter = marker.repeat(width);
-			emphasis ??= new Map();
-			let delimiters = emphasis.get(delimiter);
-			if (!delimiters) emphasis.set(delimiter, (delimiters = new EmphasisDelimiters(src, marker, width)));
-			const close = delimiters.closeFor(pos);
-			const end = close === -1 ? -1 : close - pos;
+			const end = closers.closeEmphasis(rest, marker, width);
 			if (end !== -1) {
 				const raw = rest.slice(0, end + width);
 				const text = rest.slice(width, end);
+				shareClosers(lexer, text, closers.nested(rest, end));
 				const tokens = lexer.inlineTokens(text);
 				output.push(width === 2 ? { type: "strong", raw, text, tokens } : { type: "em", raw, text, tokens });
 				rest = rest.slice(raw.length);
@@ -799,7 +633,6 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 		const urlOverride = lexer.tokenizerOverrides.url;
 		if (urlOverride) url = urlOverride.call(lexer.tokenizer, rest);
 		if (!urlOverride || url === false) {
-			stops ??= new TextStops(src, lexer);
 			const match = stops.bareUrlCanStart(pos)
 				? /^(?:(?:https?:\/\/|ftp:\/\/|www\.)[^\s<]+|[A-Za-z0-9._+-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+)/i.exec(
 						rest,
@@ -822,9 +655,7 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			continue;
 		}
 
-		stops ??= new TextStops(src, lexer);
 		const next = stops.textLength(rest);
-		textRun ??= new TextRun(src);
 		textRun.append(output, pos, pos + next);
 		rest = rest.slice(next);
 	}

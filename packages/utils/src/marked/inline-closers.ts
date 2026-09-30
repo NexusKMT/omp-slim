@@ -1,0 +1,230 @@
+/**
+ * Where brackets and emphasis close in inline Markdown. The indexes are built over one root inline source, each on
+ * first use, and shared by every source lexed inside it (a link label, the text of emphasis), so lexing nested
+ * sources builds no index of its own and keeps none alive per nesting level.
+ */
+
+export const PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
+/** Whether an odd run of backslashes right before `index` escapes the character there. */
+export function escapedAt(src: string, index: number): boolean {
+	let at = index - 1;
+	while (at >= 0 && src.charCodeAt(at) === 0x5c /* \ */) at--;
+	return (index - 1 - at) % 2 === 1;
+}
+
+export function canOpenDelimiter(src: string, index: number, width: number, marker: string, previous = "\n"): boolean {
+	const before = index === 0 ? previous : src[index - 1]!;
+	if (index === 0 && before === marker) return false;
+	const after = src[index + width];
+	if (after === undefined || /\s/.test(after)) return false;
+	if (marker === "_" && /[\p{L}\p{N}]/u.test(before) && /[\p{L}\p{N}]/u.test(after)) return false;
+	return true;
+}
+
+export function canCloseDelimiter(src: string, index: number, marker: string): boolean {
+	const before = src[index - 1];
+	const after = src[index + 1] ?? "\n";
+	if (before === undefined || /\s/.test(before)) return false;
+	if (marker === "_" && /[\p{L}\p{N}]/u.test(before) && /[\p{L}\p{N}]/u.test(after)) return false;
+	return !PUNCTUATION.test(before) || /\s/.test(after) || PUNCTUATION.test(after);
+}
+
+/** Index of the first element of the ascending `values` at or above `target`. */
+function lowerBound(values: readonly number[], target: number): number {
+	let low = 0;
+	let high = values.length;
+	while (low < high) {
+		const mid = (low + high) >>> 1;
+		if (values[mid]! < target) low = mid + 1;
+		else high = mid;
+	}
+	return low;
+}
+
+/** Closing-delimiter offsets by the depth before each, every list ascending. */
+class ClosersByDepth {
+	readonly #offsets = new Map<number, number[]>();
+
+	/** Records a closer at `offset`, which lies past every closer recorded before it. */
+	add(depth: number, offset: number): void {
+		let offsets = this.#offsets.get(depth);
+		if (!offsets) this.#offsets.set(depth, (offsets = []));
+		offsets.push(offset);
+	}
+
+	/** The first closer at `depth` at or after `from`, or -1. */
+	first(depth: number, from: number): number {
+		const offsets = this.#offsets.get(depth);
+		if (!offsets) return -1;
+		const at = lowerBound(offsets, from);
+		return at === offsets.length ? -1 : offsets[at]!;
+	}
+}
+
+/**
+ * Where a bracket opened in the root source closes. A search starts right after the opening bracket, and a bracket
+ * never begins an escape, so the escape pairing from there is the pairing from the start of the root source. The
+ * closer is then the first unescaped closing bracket at or after the start whose depth (openers minus closers
+ * before it, from the start of the root source) equals the depth at the start.
+ */
+class BracketDepths {
+	// The depth before each offset.
+	readonly #depth: Int32Array;
+	readonly #closers = new ClosersByDepth();
+
+	constructor(src: string, open: number, close: number) {
+		const depth = new Int32Array(src.length + 1);
+		let level = 0;
+		for (let i = 0; i < src.length; i++) {
+			depth[i] = level;
+			const code = src.charCodeAt(i);
+			if (code === 0x5c /* \ */) {
+				depth[++i] = level;
+			} else if (code === open) {
+				level++;
+			} else if (code === close) {
+				this.#closers.add(level, i);
+				level--;
+			}
+		}
+		depth[src.length] = level;
+		this.#depth = depth;
+	}
+
+	/** The offset of the bracket closing the one just before `start`, or -1. */
+	closeAfter(start: number): number {
+		return this.#closers.first(this.#depth[start]!, start);
+	}
+}
+
+/**
+ * The delimiters the emphasis rule's closer walk visits for one marker and width in the root source, typed the way
+ * the walk types them: a delimiter that can close is a closer, else one that can open is an opener. For width 1 they
+ * are every unescaped marker. For width 2 they are marker pairs taken two at a time from the start of each run of
+ * markers (after it when an odd run of backslashes escapes the start), which is where a walk that reaches the run
+ * from before it enters. The closer for an opener is then the first closer after it whose depth (openers minus
+ * closers before it) equals the depth where its walk begins, the first point where the walk's nesting count would
+ * drop below zero.
+ */
+class EmphasisDelimiters {
+	readonly #src: string;
+	readonly #marker: string;
+	readonly #width: number;
+	// Delimiter offsets, ascending, and the depth before each.
+	readonly #at: number[] = [];
+	readonly #depth: number[] = [];
+	readonly #closers = new ClosersByDepth();
+
+	constructor(src: string, marker: string, width: number) {
+		this.#src = src;
+		this.#marker = marker;
+		this.#width = width;
+		let level = 0;
+		for (let run = src.indexOf(marker); run !== -1;) {
+			let end = run + 1;
+			while (src[end] === marker) end++;
+			for (let at = escapedAt(src, run) ? run + width : run; at + width <= end; at += width) {
+				this.#at.push(at);
+				this.#depth.push(level);
+				if (canCloseDelimiter(src, at, marker)) {
+					this.#closers.add(level, at);
+					level--;
+				} else if (canOpenDelimiter(src, at, width, marker)) {
+					level++;
+				}
+			}
+			run = src.indexOf(marker, end);
+		}
+	}
+
+	/**
+	 * Where the emphasis opened by the delimiter at `opener` closes in a source that ends at `end`, or -1 when the
+	 * closer the walk meets first does not lie wholly before `end`. The walk reads nothing before its start. Past
+	 * `end` it reads only for the source's last delimiter, which cannot open there and closes as it would at the end
+	 * of the source: the sources inline lexing nests end right before a marker or "]", and the closing test reads
+	 * either punctuation there like the end.
+	 */
+	closeFor(opener: number, end: number): number {
+		const src = this.#src;
+		const marker = this.#marker;
+		const width = this.#width;
+		const walk = opener + width;
+		// A pair right after a width-2 opener has markers on both sides, so the walk takes it as the closer.
+		if (width === 2 && src[walk] === marker && src[walk + 1] === marker) return walk + width <= end ? walk : -1;
+		const next = lowerBound(this.#at, walk);
+		if (next === this.#at.length) return -1;
+		const close = this.#closers.first(this.#depth[next]!, this.#at[next]!);
+		return close !== -1 && close + width <= end ? close : -1;
+	}
+}
+
+/** The closer indexes of one root inline source, each built on first use. */
+export class CloserIndexes {
+	readonly #src: string;
+	#square: BracketDepths | undefined;
+	#round: BracketDepths | undefined;
+	readonly #emphasis = new Map<string, EmphasisDelimiters>();
+
+	constructor(src: string) {
+		this.#src = src;
+	}
+
+	get square(): BracketDepths {
+		return (this.#square ??= new BracketDepths(this.#src, 0x5b /* [ */, 0x5d /* ] */));
+	}
+
+	get round(): BracketDepths {
+		return (this.#round ??= new BracketDepths(this.#src, 0x28 /* ( */, 0x29 /* ) */));
+	}
+
+	emphasis(marker: string, width: number): EmphasisDelimiters {
+		const key = marker.repeat(width);
+		let delimiters = this.#emphasis.get(key);
+		if (!delimiters) this.#emphasis.set(key, (delimiters = new EmphasisDelimiters(this.#src, marker, width)));
+		return delimiters;
+	}
+}
+
+/**
+ * The link and emphasis rules' closer lookups for one inline source, which is the root source of `indexes` or a
+ * part of it that ends at `end`. Offsets are relative to `rest`, a suffix of the source. A closer the root source
+ * places at or past `end` does not exist in the source.
+ */
+export class InlineClosers {
+	readonly #indexes: CloserIndexes;
+	readonly #end: number;
+
+	constructor(indexes: CloserIndexes, end: number) {
+		this.#indexes = indexes;
+		this.#end = end;
+	}
+
+	/** The closers of a part of `rest` that ends at `end`, lexed as its own source. */
+	nested(rest: string, end: number): InlineClosers {
+		return new InlineClosers(this.#indexes, this.#end - rest.length + end);
+	}
+
+	/** Where the "[" just before `start` closes, or -1. */
+	closeSquare(rest: string, start: number): number {
+		return this.#close(this.#indexes.square, rest, start);
+	}
+
+	/** Where the "(" just before `start` closes, or -1. */
+	closeRound(rest: string, start: number): number {
+		return this.#close(this.#indexes.round, rest, start);
+	}
+
+	/** Where the emphasis opened by the `width` markers at the start of `rest` closes, or -1. */
+	closeEmphasis(rest: string, marker: string, width: number): number {
+		const pos = this.#end - rest.length;
+		const close = this.#indexes.emphasis(marker, width).closeFor(pos, this.#end);
+		return close === -1 ? -1 : close - pos;
+	}
+
+	#close(depths: BracketDepths, rest: string, start: number): number {
+		const pos = this.#end - rest.length;
+		const close = depths.closeAfter(pos + start);
+		return close === -1 || close >= this.#end ? -1 : close - pos;
+	}
+}

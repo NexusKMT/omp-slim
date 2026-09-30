@@ -389,6 +389,25 @@ describe("marked compatibility", () => {
 		]);
 	});
 
+	// A link label and the text of emphasis are lexed with the closers of the paragraph they lie in. A closer that
+	// paragraph has only past the end of that text closes nothing inside it.
+	test("closes nothing inside a link label or emphasis with a closer past its end", () => {
+		expect(shape(Lexer.lexInline("*[a*](u) [*b](v)*"))).toEqual([
+			["em", "*[a*", [["text", "[a"]]],
+			["text", "](u) "],
+			["link", "[*b](v)", [["text", "*b"]]],
+			["text", "*"],
+		]);
+		expect(shape(Lexer.lexInline("***[a***](u) [**b](v)**"))).toEqual([
+			["em", "***[a***", [["strong", "**[a**", [["text", "[a"]]]]],
+			["text", "](u) "],
+			["link", "[**b](v)", [["text", "**b"]]],
+			["text", "**"],
+		]);
+		// Inside the italic text, the only `**` after the bold opener begins at its last `*` and ends past it.
+		expect(shape(Lexer.lexInline("*a ***a**"))).toEqual([["em", "*a ***a**", [["text", "a ***a*"]]]]);
+	});
+
 	// Reference labels are user-controlled and index the ref-def map. An
 	// `Object.prototype` member (`constructor`, `__proto__`, `toString`, …) must
 	// not resolve to a fake definition: the link falls back to literal text and
@@ -412,4 +431,46 @@ describe("marked compatibility", () => {
 			expect(new Marked().parse(`[text][${label}]`)).not.toContain("<a ");
 		});
 	}
+});
+
+describe("inline lexing stays linear on long paragraphs", () => {
+	test("a startFrom hint is asked again only after lexing passes its answer", () => {
+		const froms: number[] = [];
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "latex",
+					level: "inline",
+					startFrom(src, from) {
+						froms.push(from);
+						const index = src.indexOf("$", from);
+						return index === -1 ? undefined : index;
+					},
+					tokenizer: src => {
+						const match = /^\$(\S[^\n$]*)\$/.exec(src);
+						return match ? { type: "latex", raw: match[0], text: match[1] } : undefined;
+					},
+				},
+			],
+		});
+		// Every `_` ends a text step; the hint at the `$` holds across all of them.
+		marked.lexer("a_b_c $x$ d_e");
+		expect(froms).toEqual([0, 9]);
+	});
+
+	// Generous bound: each shape takes quadratic lexing, or lexing that keeps an index per nesting level, several
+	// seconds; linear lexing takes well under 300 ms.
+	test.each([
+		["unclosed [ (80 KB)", "[x ".repeat(26_667)],
+		["unclosed * (80 KB)", "*x ".repeat(26_667)],
+		["unclosed _ (80 KB)", "_x ".repeat(26_667)],
+		["address-like word without a dotted domain (80 KB)", `${"a".repeat(80_000)}@host`],
+		["snake_case prose (800 KB)", "snake_case ".repeat(72_728)],
+		["nested emphasis (32 KB)", `${"*a ".repeat(5_333)}${" b*".repeat(5_333)}`],
+		["nested links (20 KB)", `${"[".repeat(4_000)}a${"](u)".repeat(4_000)}`],
+	])("lexes a long paragraph of %s in under two seconds", (_name, src) => {
+		const start = performance.now();
+		Lexer.lex(src);
+		expect(performance.now() - start).toBeLessThan(2_000);
+	});
 });
