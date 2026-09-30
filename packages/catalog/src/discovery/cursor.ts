@@ -193,7 +193,7 @@ export async function fetchCursorUsableModels(
 async function fetchCursorUnary(
 	baseUrl: string,
 	path: string,
-	body: Uint8Array,
+	body: Uint8Array<ArrayBuffer>,
 	options: CursorModelDiscoveryOptions,
 	timeoutMs: number,
 ): Promise<Uint8Array | null> {
@@ -208,9 +208,7 @@ async function fetchCursorUnary(
 				"connect-protocol-version": "1",
 				"x-request-id": crypto.randomUUID(),
 			},
-			// `toBinary` always allocates a fresh ArrayBuffer-backed view; the DOM
-			// `BodyInit` typing just cannot see that through its ArrayBufferLike signature.
-			body: body as Uint8Array<ArrayBuffer>,
+			body,
 			signal,
 		});
 	} catch {
