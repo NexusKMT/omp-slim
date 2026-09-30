@@ -105,22 +105,13 @@ function closerOf(opener: MathOpener): string {
 const MATH_BLOCK_OPENER_RE = / {0,3}(\$\$|\\\[)/y;
 
 /**
- * Whether a display-math block could open at `from` (up to 3 leading spaces
- * then `$$` or `\[`). A cheap filter only: {@link mathBlockAt} /
- * {@link mathBlockMayCloseAt} decide whether it is really a closed block.
- */
-export function mathBlockOpenerAt(source: string, from: number): boolean {
-	MATH_BLOCK_OPENER_RE.lastIndex = from;
-	return MATH_BLOCK_OPENER_RE.test(source);
-}
-
-/**
  * Whether the own-line display block opened at `from` in `source` is closed,
  * or could still close once more text is appended: the text from `from`
  * onward is a streaming prefix whose real closer may not have arrived. The
  * closer line is appended after a sentinel character (`x`), so the last line
  * of `source`, which the next append may still extend, is never read as a
- * finished closer line.
+ * finished closer line. With no display opener at `from` it returns false
+ * before copying any text, so a caller can ask at every block start.
  */
 export function mathBlockMayCloseAt(source: string, from = 0): boolean {
 	MATH_BLOCK_OPENER_RE.lastIndex = from;

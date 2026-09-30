@@ -8,13 +8,7 @@ import {
 	type Tokens,
 	type TokensList,
 } from "@oh-my-pi/pi-utils/marked";
-import {
-	mathBlockAt,
-	mathBlockMayCloseAt,
-	mathBlockOpenerAt,
-	mathSpanAt,
-	mathStartIndex,
-} from "@oh-my-pi/pi-utils/math-delimiters";
+import { mathBlockAt, mathBlockMayCloseAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -1204,7 +1198,7 @@ function stableBlockBoundary(
 		const token = tokens[i];
 		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
-		if (token.type !== "math" && mathBlockOpenerAt(text, pos)) {
+		if (token.type !== "math") {
 			if (growing ? mathBlockMayCloseAt(text, pos) : mathBlockAt(text, pos) !== undefined) break;
 		}
 		if (raw.endsWith("\n\n") && (windowIsWhole || tokenEnd < windowEnd)) {
