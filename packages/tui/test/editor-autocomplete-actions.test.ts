@@ -619,6 +619,51 @@ describe("Editor slash autocomplete acceptance", () => {
 		}
 	});
 
+	describe("Enter on a slash-command argument completion", () => {
+		const mcpCommands = [
+			{
+				name: "mcp",
+				description: "Manage MCP servers",
+				getArgumentCompletions: (prefix: string) =>
+					prefix.includes(" ")
+						? null
+						: ["list", "login"].filter(s => s.startsWith(prefix)).map(s => ({ value: `${s} `, label: s })),
+			},
+		];
+
+		it("submits when the typed argument already equals the selection", async () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setAutocompleteProvider(new CombinedAutocompleteProvider(mcpCommands, "/tmp"));
+			const submitted: string[] = [];
+			editor.onSubmit = text => {
+				submitted.push(text);
+			};
+			editor.setText("/mcp lis");
+			editor.handleInput("t");
+			await untilAutocompleteShown(editor);
+
+			editor.handleInput("\r");
+			expect(submitted).toEqual(["/mcp list"]);
+			expect(editor.isShowingAutocomplete()).toBe(false);
+		});
+
+		it("accepts a partial argument without submitting", async () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.setAutocompleteProvider(new CombinedAutocompleteProvider(mcpCommands, "/tmp"));
+			const submitted: string[] = [];
+			editor.onSubmit = text => {
+				submitted.push(text);
+			};
+			editor.setText("/mcp l");
+			editor.handleInput("i");
+			await untilAutocompleteShown(editor);
+
+			editor.handleInput("\r");
+			expect(submitted).toEqual([]);
+			expect(editor.getText()).toBe("/mcp list ");
+		});
+	});
+
 	it("shows a sole forced file suggestion before applying it", async () => {
 		const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "editor-single-file-tab-"));
 		try {

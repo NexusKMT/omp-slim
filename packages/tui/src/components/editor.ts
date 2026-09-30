@@ -1949,8 +1949,14 @@ export class Editor implements Component, Focusable {
 					const currentTextBeforeCursor = currentLine.slice(0, this.#state.cursorCol);
 					// A narrowed `@` list can be empty while its refresh is pending; Enter
 					// then submits instead of waiting on the search.
-					if (!selected || !this.#autocompletePrefixMatchesCursorText(currentTextBeforeCursor, selected)) {
-						// Autocomplete is stale - cancel and fall through to normal submission
+					if (
+						!selected ||
+						!this.#autocompletePrefixMatchesCursorText(currentTextBeforeCursor, selected) ||
+						this.#selectedSlashArgumentIsAlreadyTyped(selected)
+					) {
+						// Stale, or accepting would only append whitespace to an already fully
+						// typed slash-command argument (`/mcp list` + Enter): cancel and fall
+						// through to normal submission instead of swallowing the keypress.
 						this.#cancelAutocomplete();
 					} else {
 						if (selected && this.#autocompleteProvider) {
@@ -4210,6 +4216,19 @@ export class Editor implements Component, Focusable {
 	 */
 	#selectedCompletionIsSkillNamespace(): boolean {
 		return this.#autocompleteList?.getSelectedItem()?.value === SKILL_NAMESPACE;
+	}
+
+	/**
+	 * Whether the selected completion for a submitted slash command's argument
+	 * only restates what the user already typed (e.g. `list ` for `/mcp list`).
+	 * Accepting it would change nothing visible, so Enter should submit.
+	 */
+	#selectedSlashArgumentIsAlreadyTyped(selected: AutocompleteItem): boolean {
+		if (!this.#isInSubmittedSlashCommandContext()) return false;
+		const currentLine = this.#state.lines[this.#state.cursorLine] ?? "";
+		if (this.#state.cursorCol !== currentLine.length) return false;
+		const typed = this.#autocompletePrefix.trimEnd();
+		return typed.length > 0 && selected.value.trimEnd() === typed;
 	}
 
 	#isSlashCommandNameAutocompleteSelection(): boolean {
