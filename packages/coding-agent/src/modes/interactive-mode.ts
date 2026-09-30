@@ -1373,6 +1373,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	#headerAfter: readonly Component[] = [];
 	#planModePreviousToolPresentation: { enabled: string[]; mounted: string[] } | undefined;
 	#goalModePreviousTools: string[] | undefined;
+	// True from `/guided-goal` kickoff until a goal record appears or the
+	// session switches: the user is answering interview questions, so short
+	// replies like "c" are answers, not continue shortcuts.
+	#guidedGoalInterviewActive = false;
 	#vibeModePreviousTools: string[] | undefined;
 	#vibeModeOwnerScope: VibeOwnerScope | undefined;
 	// In-flight #enterVibeMode promise: set before the activateVibeTools await
@@ -4335,6 +4339,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		if (event.type === "goal_updated") {
+			if (event.state) this.#guidedGoalInterviewActive = false;
 			// Handle drop before clearing goalModeEnabled so #exitGoalMode can
 			// still restore the previous tool set while the flag is true.
 			if (event.state?.goal?.status === "dropped") {
@@ -4529,6 +4534,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	async #reconcileModeFromSession(options?: { preserveActiveGoal?: boolean }): Promise<void> {
 		const vibeScopeAlreadySuspended = this.#vibeScopeSuspendedForSwitch;
 		this.#vibeScopeSuspendedForSwitch = false;
+		this.#guidedGoalInterviewActive = false;
 		const sessionContext = this.sessionManager.buildSessionContext();
 		const vibeSession = this.#vibeParentSession();
 		const targetVibeScope = VibeSessionRegistry.global().ownerScope(vibeSession);
@@ -5885,6 +5891,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			if (!enabledTools.includes("goal")) {
 				await this.session.setActiveToolsByName([...enabledTools, "goal"]);
 			}
+			this.#guidedGoalInterviewActive = true;
 
 			// The interview is a normal conversation: the kickoff rides in as a
 			// hidden developer message, the agent asks its questions as regular
@@ -7702,6 +7709,10 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	canCopyBtw(): boolean {
 		return this.#btwController.canCopy();
+	}
+
+	isGuidedGoalInterviewActive(): boolean {
+		return this.#guidedGoalInterviewActive && !this.goalModeEnabled && !this.goalModePaused;
 	}
 
 	handleBtwCopyKey(): Promise<boolean> {
