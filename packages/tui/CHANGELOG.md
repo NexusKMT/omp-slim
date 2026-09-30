@@ -4,8 +4,6 @@
 
 ### Added
 
-- Added Tern Surface Protocol (TSP) integration for native terminal rendering
-- Redesigned transcript, chat, dashboard, and picker UI components for native wire representation
 - Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
 
 ### Fixed
@@ -19,7 +17,17 @@
 - Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
 
+## [18.4.4] - 2026-09-29
+
+### Added
+
+- Added Tern Surface Protocol (TSP) integration for native terminal rendering
+- Redesigned transcript, chat, dashboard, and picker UI components for native wire representation
+- `HookEditorComponent` accepts pasted images when constructed with `acceptImages`; the ask dialog returns them as `customInputImages` / `noteImages` ([#13774](https://github.com/can1357/oh-my-pi/pull/13774) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
+- Added `formatFileMatches` and `FileMatchSection` to `tools/grouped-file-output` for rendering per-file grep/ast-grep matches in grouped or flat mode.
+
 ## [18.4.3] - 2026-09-28
+
 ### Added
 
 - Added the native composer and dock redesign for Tern: the composer carries its attachment chips, a `bash`/`python` mode chip (with an eye-off mark for `!!`/`$$`), a thinking-effort chip that cycles on click, and a send keycap that turns into Stop while a turn runs; the working row shows the intent, elapsed time and an `esc Stop` button (a countdown ring and Cancel while retrying, indeterminate progress while compacting); queued messages are pills with a count and an Edit button; todos and running subagents are HUD pills; the status strip draws context as a ring meter with the auto-compaction tick, splits the path into a dim parent and strong leaf, keeps model, context and git longest, and opens the model picker, `/context`, `/git`, `/usage` or the project folder on click; autocomplete items carry named icons, the matched prefix, the full description, live state as a value, and scroll the selection into view
