@@ -206,7 +206,7 @@ describe("auth-gateway POST /v1/embeddings", () => {
 		expect(harness.upstream).toHaveLength(0);
 	});
 
-	it("confines the gateway bearer to Authorization before credential lookup or provider dispatch", async () => {
+	it("confines the gateway bearer after authorization and before provider dispatch", async () => {
 		harness = await boot();
 		const credentialLookup = vi.spyOn(harness.storage.keys, "get");
 		const request = (url: string, headers: Record<string, string>) =>
@@ -220,54 +220,86 @@ describe("auth-gateway POST /v1/embeddings", () => {
 			...HEADERS,
 			"openai-organization": "org-gw-token",
 		});
+		const inStainlessHeader = await request(`${harness.url}/v1/embeddings`, {
+			...HEADERS,
+			"x-stainless-custom": "gw-token",
+		});
+		const inIdentityHeader = await request(`${harness.url}/v1/embeddings`, {
+			...HEADERS,
+			"x-omp-install-id": "gw-token",
+		});
+		const inForwardedHeader = await request(`${harness.url}/v1/embeddings`, {
+			...HEADERS,
+			forwarded: "for=gw-token",
+		});
 		const inQuery = await request(`${harness.url}/v1/embeddings?client=gw-token`, HEADERS);
 		const encodedQuery = await request(`${harness.url}/v1/embeddings?client=gw%2Dtoken`, HEADERS);
 		const inPath = await request(`${harness.url}/v1/gw-token`, HEADERS);
-		for (const response of [inHeader, inQuery, encodedQuery, inPath]) {
+		for (const response of [
+			inHeader,
+			inStainlessHeader,
+			inIdentityHeader,
+			inForwardedHeader,
+			inQuery,
+			encodedQuery,
+			inPath,
+		]) {
 			expect(response.status).toBe(400);
 			expect(await response.text()).not.toContain("gw-token");
 		}
 		expect(credentialLookup).not.toHaveBeenCalled();
 		expect(harness.upstream).toHaveLength(0);
 
-		const allowed = await request(`${harness.url}/v1/embeddings`, HEADERS);
+		const allowed = await request(`${harness.url}/v1/embeddings`, { ...HEADERS, "user-agent": "gw-token" });
 		expect(allowed.status).toBe(200);
 		expect(harness.upstream).toHaveLength(1);
 	});
 
-	it("attributes an unauthorized request to the socket, never logging a forwarded bearer", async () => {
+	it("logs unauthorized requests without leaked credentials or untrusted paths", async () => {
 		harness = await boot();
 		const events: logger.LogEvent[] = [];
 		const dispose = logger.registerLogSink(event => {
 			if (event.message === "auth-gateway request unauthorized") events.push(event);
 		});
 		try {
-			const response = await fetch(`${harness.url}/v1/embeddings`, {
-				headers: { Authorization: "Bearer wrong", "x-forwarded-for": "gw-token", "x-real-ip": "gw-token" },
-			});
-			expect(response.status).toBe(400);
-			expect(JSON.stringify(events)).not.toContain("gw-token");
-			const unauthorized = await fetch(`${harness.url}/v1/models`, {
-				headers: { Authorization: "Bearer wrong", "x-forwarded-for": "203.0.113.42" },
-			});
-			expect(unauthorized.status).toBe(401);
-			expect(events.at(-1)?.context?.peer).toBe("127.0.0.1");
+			for (const url of [`${harness.url}/v1/gw-token?client=gw-token`, `${harness.url}/v1/models?client=gw-token`]) {
+				const response = await fetch(url, {
+					headers: { Authorization: "Bearer wrong", "x-forwarded-for": "gw-token", "x-real-ip": "gw-token" },
+				});
+				expect(response.status).toBe(401);
+			}
+			expect(events).toHaveLength(2);
+			expect(events[0]?.context?.path).toBe("<unrouted>");
+			expect(events[1]?.context?.path).toBe("/v1/models");
+			for (const event of events) {
+				expect(event.context?.peer).toBe("127.0.0.1");
+				expect(JSON.stringify(event)).not.toContain("gw-token");
+			}
+			expect(harness.upstream).toHaveLength(0);
 		} finally {
 			dispose();
 		}
 	});
 
-	it("uses proxy peer headers only with explicit trust", async () => {
+	it("uses proxy peer headers for authenticated requests only with explicit trust", async () => {
 		harness = await boot(true);
 		const events: logger.LogEvent[] = [];
 		const dispose = logger.registerLogSink(event => {
-			if (event.message === "auth-gateway request unauthorized") events.push(event);
+			if (event.message === "auth-gateway request" || event.message === "auth-gateway request unauthorized")
+				events.push(event);
 		});
 		try {
-			const response = await fetch(`${harness.url}/v1/models`, {
+			const unauthorized = await fetch(`${harness.url}/v1/models`, {
 				headers: { Authorization: "Bearer wrong", "x-forwarded-for": "203.0.113.42, 10.0.0.1" },
 			});
-			expect(response.status).toBe(401);
+			expect(unauthorized.status).toBe(401);
+			expect(events.at(-1)?.context?.peer).toBe("127.0.0.1");
+			const authorized = await fetch(`${harness.url}/v1/embeddings`, {
+				method: "POST",
+				headers: { ...HEADERS, "x-forwarded-for": "203.0.113.42, 10.0.0.1" },
+				body: JSON.stringify({ model: "openai/text-embedding-3-small", input: "hello" }),
+			});
+			expect(authorized.status).toBe(200);
 			expect(events.at(-1)?.context?.peer).toBe("203.0.113.42");
 		} finally {
 			dispose();

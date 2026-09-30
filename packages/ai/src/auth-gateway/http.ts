@@ -59,7 +59,7 @@ export function resolvePeer(req: Request, socketAddress: string, trustProxyHeade
 	return req.headers.get("x-real-ip") ?? socketAddress;
 }
 
-/** Keep gateway credentials out of URL and header fields that may be logged or forwarded. */
+/** Keep configured gateway credentials out of URL and forwarded/logged request fields. */
 export function hasMisplacedBearer(req: Request, url: URL, tokens: ReadonlySet<string>): boolean {
 	if (tokens.size === 0) return false;
 	const location = url.pathname + url.search;
@@ -69,16 +69,21 @@ export function hasMisplacedBearer(req: Request, url: URL, tokens: ReadonlySet<s
 	} catch {
 		// An invalid escape does not prevent checking the raw URL and headers.
 	}
-	const authorization = req.headers.get("authorization");
-	const bearerValue = authorization?.match(/^Bearer\s+(.+)$/i)?.[1].trim();
+	const headers = req.headers;
 	for (const token of tokens) {
 		if (location.includes(token) || decodedLocation.includes(token)) return true;
-		for (const [name, value] of req.headers) {
-			if (name === "authorization" && bearerValue !== undefined && tokens.has(bearerValue)) {
-				// Only an entire configured Bearer value is exempt.
-				continue;
+		for (const [name, value] of headers) {
+			if (
+				(PASSTHROUGH_HEADER_NAMES[name] ||
+					name.startsWith("x-stainless-") ||
+					name.startsWith("x-omp-") ||
+					name === "x-forwarded-for" ||
+					name === "x-real-ip" ||
+					name === "forwarded") &&
+				value.includes(token)
+			) {
+				return true;
 			}
-			if (value.includes(token)) return true;
 		}
 	}
 	return false;
