@@ -57,6 +57,7 @@ pub(super) struct Libei {
 	sequence:       u32,
 	runtime:        &'static tokio::runtime::Runtime,
 	events:         Option<EiConvertEventStream>,
+	disconnected:   bool,
 	portal_session: Option<PortalSession>,
 }
 
@@ -94,6 +95,10 @@ fn close_session(runtime: &tokio::runtime::Runtime, session: &RemoteDesktopSessi
 }
 
 impl Libei {
+	pub(super) const fn disconnected(&self) -> bool {
+		self.disconnected
+	}
+
 	pub(super) fn new() -> CoreResult<Self> {
 		let runtime = super::portal::portal_runtime()?;
 		let (context, portal_session, targets) = match ei::Context::connect_to_env() {
@@ -111,6 +116,7 @@ impl Libei {
 			sequence: 1,
 			runtime,
 			events: None,
+			disconnected: false,
 			portal_session,
 		};
 		let (connection, mut events) = runtime
@@ -316,6 +322,7 @@ impl Libei {
 			},
 			EiEvent::Disconnected(event) => {
 				self.devices.clear();
+				self.disconnected = true;
 				return Err(DesktopError::input_failed(format!(
 					"libei disconnected: {}",
 					event.explanation
@@ -335,10 +342,15 @@ impl Libei {
 		let result = runtime.block_on(async {
 			for _ in 0..256 {
 				match tokio::time::timeout(Duration::from_millis(1), events.next()).await {
-					Ok(Some(event)) => self.handle_event(event.map_err(|err| {
-						DesktopError::input_failed(format!("libei device state: {err}"))
-					})?)?,
-					Ok(None) => return Err(DesktopError::input_failed("libei disconnected")),
+					Ok(Some(Ok(event))) => self.handle_event(event)?,
+					Ok(Some(Err(err))) => {
+						self.disconnected = true;
+						return Err(DesktopError::input_failed(format!("libei device state: {err}")));
+					},
+					Ok(None) => {
+						self.disconnected = true;
+						return Err(DesktopError::input_failed("libei disconnected"));
+					},
 					Err(_) => return Ok(()),
 				}
 			}

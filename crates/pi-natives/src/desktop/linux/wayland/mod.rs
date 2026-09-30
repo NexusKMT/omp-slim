@@ -108,12 +108,11 @@ pub struct WaylandBackend {
 		not(feature = "wayland-pipewire"),
 		expect(dead_code, reason = "only read by the pipewire capture path")
 	)]
-	display:     DisplaySelector,
-	ax:          Option<AtSpiAx>,
-	ax_error:    Option<DesktopError>,
-	input:       Option<libei::Libei>,
-	input_error: Option<DesktopError>,
-	displays:    Vec<DesktopDisplay>,
+	display:  DisplaySelector,
+	ax:       Option<AtSpiAx>,
+	ax_error: Option<DesktopError>,
+	input:    Option<libei::Libei>,
+	displays: Vec<DesktopDisplay>,
 }
 
 impl WaylandBackend {
@@ -125,7 +124,7 @@ impl WaylandBackend {
 			Ok(ax) => (Some(ax), None),
 			Err(err) => (None, Some(err)),
 		};
-		Self { display, ax, ax_error, input: None, input_error: None, displays: Vec::new() }
+		Self { display, ax, ax_error, input: None, displays: Vec::new() }
 	}
 
 	fn window_input_error(target: &Target, kind: &str) -> CoreResult<()> {
@@ -139,22 +138,22 @@ impl WaylandBackend {
 		Ok(())
 	}
 
-	fn prepare_input(&mut self, target: &Target, kind: &str) -> CoreResult<&mut libei::Libei> {
+	fn run_input(
+		&mut self,
+		target: &Target,
+		kind: &str,
+		action: impl FnOnce(&mut libei::Libei) -> CoreResult<()>,
+	) -> CoreResult<()> {
 		Self::window_input_error(target, kind)?;
-		if self.input.is_none() && self.input_error.is_none() {
-			match libei::Libei::new() {
-				Ok(input) => self.input = Some(input),
-				Err(err) => self.input_error = Some(err),
-			}
+		if self.input.is_none() {
+			self.input = Some(libei::Libei::new()?);
 		}
-		if let Some(input) = self.input.as_mut() {
-			return Ok(input);
+		let input = self.input.as_mut().expect("libei was initialized");
+		let result = action(input);
+		if input.disconnected() {
+			self.input = None;
 		}
-		Err(self.input_error.clone().unwrap_or_else(|| {
-			DesktopError::permission_denied(
-				"RemoteDesktop portal or LIBEI_SOCKET is required for Wayland input",
-			)
-		}))
+		result
 	}
 
 	#[cfg(feature = "wayland-pipewire")]
@@ -173,8 +172,6 @@ impl Backend for WaylandBackend {
 	fn capabilities(&mut self) -> DesktopCapabilities {
 		let input_permission = if self.input.is_some() {
 			"granted"
-		} else if self.input_error.is_some() {
-			"unavailable"
 		} else {
 			"prompt-or-granted"
 		};
@@ -185,7 +182,7 @@ impl Backend for WaylandBackend {
 			// wayland-pipewire feature; without it capture() hard-errors, so the
 			// capability report must not advertise a capture the binary cannot do.
 			capture: cfg!(feature = "wayland-pipewire"),
-			input: self.input_error.is_none(),
+			input: true,
 			ax: self.ax.is_some(),
 			background_window_input: false,
 			takeover: false,
@@ -266,13 +263,11 @@ impl Backend for WaylandBackend {
 		_frame: &FrameGeometry,
 		_mode: DeliveryMode,
 	) -> CoreResult<()> {
-		self.prepare_input(target, "pointer input")?.pointer(ev)
+		self.run_input(target, "pointer input", |input| input.pointer(ev))
 	}
 
 	fn type_text(&mut self, target: &Target, text: &str, _mode: DeliveryMode) -> CoreResult<()> {
-		self
-			.prepare_input(target, "keyboard input")?
-			.type_text(text)
+		self.run_input(target, "keyboard input", |input| input.type_text(text))
 	}
 
 	fn key_chord(
@@ -281,9 +276,7 @@ impl Backend for WaylandBackend {
 		keys: &[KeyName],
 		_mode: DeliveryMode,
 	) -> CoreResult<()> {
-		self
-			.prepare_input(target, "keyboard input")?
-			.key_chord(keys)
+		self.run_input(target, "keyboard input", |input| input.key_chord(keys))
 	}
 
 	fn raise_window(&mut self, id: &str) -> CoreResult<()> {
@@ -313,12 +306,11 @@ mod tests {
 
 	fn backend_without_services() -> WaylandBackend {
 		WaylandBackend {
-			display:     DisplaySelector::All,
-			ax:          None,
-			ax_error:    None,
-			input:       None,
-			input_error: None,
-			displays:    Vec::new(),
+			display:  DisplaySelector::All,
+			ax:       None,
+			ax_error: None,
+			input:    None,
+			displays: Vec::new(),
 		}
 	}
 	fn with_fake_libei(action: impl FnOnce(&mut WaylandBackend)) -> bool {
@@ -380,6 +372,29 @@ mod tests {
 	}
 
 	#[test]
+	fn failed_input_request_allows_another_connection_attempt() {
+		let connected = with_fake_libei(|backend| {
+			let socket = std::env::var_os("LIBEI_SOCKET").expect("fake libei socket");
+			unsafe {
+				std::env::set_var(
+					"LIBEI_SOCKET",
+					std::path::Path::new(&socket).with_extension("missing"),
+				)
+			};
+			let first = backend
+				.type_text(&Target::Desktop, "hello", DeliveryMode::Foreground)
+				.expect_err("missing socket must fail");
+			assert_eq!(first.code.as_str(), "PermissionDenied");
+			let caps = backend.capabilities();
+			assert!(caps.input);
+			assert_eq!(caps.input_permission, "prompt-or-granted");
+			unsafe { std::env::set_var("LIBEI_SOCKET", socket) };
+			let _ = backend.type_text(&Target::Desktop, "hello", DeliveryMode::Foreground);
+		});
+		assert!(connected, "a failed input request prevented the next connection attempt");
+	}
+
+	#[test]
 	fn window_foreground_delivery_reports_compositor_constraint() {
 		let mut backend = backend_without_services();
 		let target = Target::Window("w1".to_string());
@@ -402,12 +417,11 @@ mod tests {
 	#[cfg(not(feature = "wayland-pipewire"))]
 	fn capabilities_report_no_capture_without_pipewire_feature() {
 		let mut backend = WaylandBackend {
-			display:     DisplaySelector::All,
-			ax:          None,
-			ax_error:    None,
-			input:       None,
-			input_error: None,
-			displays:    Vec::new(),
+			display:  DisplaySelector::All,
+			ax:       None,
+			ax_error: None,
+			input:    None,
+			displays: Vec::new(),
 		};
 		let caps = backend.capabilities();
 		// Shipped builds compile without wayland-pipewire, so the capture path is
