@@ -126,7 +126,7 @@ describe("MathBlockScan", () => {
 		const found: number[] = [];
 		for (let from = 0; from < source.length; from++) {
 			const block = scan.at(from);
-			expect(block).toEqual(mathBlockAt(source, from));
+			expect(block).toEqual(mathBlockAt(source.slice(from)));
 			if (block !== undefined) found.push(from);
 		}
 		expect(found).toEqual([source.indexOf("$$\na")]);

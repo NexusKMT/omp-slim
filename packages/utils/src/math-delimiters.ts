@@ -90,10 +90,10 @@ export function mathSpanAt(source: string, at: number, from = 0): MathSpan | und
 	return { opener, display: opener === "$$" || opener === "\\[", end: closeAt + opener.length, body };
 }
 
-/** The own-line display block starting at `from`, or `undefined`. */
-export function mathBlockAt(source: string, from = 0): MathBlock | undefined {
-	MATH_BLOCK_DOLLAR.lastIndex = from;
-	MATH_BLOCK_BRACKET.lastIndex = from;
+/** The own-line display block starting at offset 0, or `undefined`. */
+export function mathBlockAt(source: string): MathBlock | undefined {
+	MATH_BLOCK_DOLLAR.lastIndex = 0;
+	MATH_BLOCK_BRACKET.lastIndex = 0;
 	return blockOf(MATH_BLOCK_DOLLAR.exec(source) ?? MATH_BLOCK_BRACKET.exec(source));
 }
 
