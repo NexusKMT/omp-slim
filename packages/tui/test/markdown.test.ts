@@ -2501,6 +2501,20 @@ describe("inline rendering stays linear on long paragraphs", () => {
 		renderInlineMarkdown(text, defaultMarkdownTheme);
 		expect(performance.now() - start).toBeLessThan(2_000);
 	});
+
+	// The same bound on lexing alone: styling nested emphasis costs more than lexing it.
+	it.each([
+		// Every nesting level holds the long word, so a math start hint searched per level reads it once per level.
+		[
+			"nested emphasis around a long word (800 KB)",
+			`${"*a ".repeat(4_000)}${"a".repeat(800_000)}${" b*".repeat(4_000)}`,
+		],
+	])("lexes a long paragraph of %s in under two seconds", (_name, text) => {
+		extractMarkdownLinks(text.slice(0, 2_000));
+		const start = performance.now();
+		extractMarkdownLinks(text);
+		expect(performance.now() - start).toBeLessThan(2_000);
+	});
 });
 
 describe("math start hint", () => {

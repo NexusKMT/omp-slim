@@ -262,6 +262,52 @@ describe("marked compatibility", () => {
 		]);
 	});
 
+	// Inside emphasis and a link label the lexer takes the hint's answer for the paragraph, and keeps a candidate only
+	// if the hint finds it again in that text. "a*" and "a]" are candidates in the paragraph where the closer follows
+	// the "a", and in neither text, which ends before its closer; "[x a* y]" holds one of its own.
+	test("an inline extension's startFrom hint tokenizes like its start hint inside emphasis and link labels", () => {
+		const beforeCloser = (src: string, from: number) => {
+			const pattern = /a[*\]]/g;
+			pattern.lastIndex = from;
+			return pattern.exec(src)?.index;
+		};
+		const lexA = (hint: Pick<TokenizerExtension, "start" | "startFrom">, source: string) => {
+			const marked = new Marked().use({
+				extensions: [
+					{
+						name: "a",
+						level: "inline",
+						...hint,
+						tokenizer: src => (src.startsWith("a") ? { type: "a", raw: "a" } : undefined),
+					},
+				],
+			});
+			const [paragraph] = marked.lexer(source);
+			return paragraph && "tokens" in paragraph && paragraph.tokens ? shape(paragraph.tokens) : paragraph;
+		};
+		const source = "*b a* [c a](u) [x a* y](u) a* d";
+		const fromHint = lexA({ startFrom: beforeCloser }, source);
+		expect(fromHint).toEqual(lexA({ start: src => beforeCloser(src, 0) }, source));
+		expect(fromHint).toEqual([
+			["em", "*b a*", [["text", "b a"]]],
+			["text", " "],
+			["link", "[c a](u)", [["text", "c a"]]],
+			["text", " "],
+			[
+				"link",
+				"[x a* y](u)",
+				[
+					["text", "x "],
+					["a", "a"],
+					["text", "* y"],
+				],
+			],
+			["text", " "],
+			["a", "a"],
+			["text", "* d"],
+		]);
+	});
+
 	// A JavaScript hint can answer anything: only undefined or a number at or past the offset is an answer, and the
 	// first text step (at offset 0 here) already checks it.
 	test.each([
@@ -562,6 +608,16 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		["snake_case prose (800 KB)", "snake_case ".repeat(72_728)],
 		["nested emphasis (32 KB)", `${"*a ".repeat(5_333)}${" b*".repeat(5_333)}`],
 		["nested links (20 KB)", `${"[".repeat(4_000)}a${"](u)".repeat(4_000)}`],
+		// Every nesting level holds the long word, so a search per level for a URL, an "@" or a hard break reads it
+		// once per level.
+		[
+			"nested emphasis around a long word (3.2 MB)",
+			`${"*a ".repeat(5_000)}${"a".repeat(3_200_000)}${" b*".repeat(5_000)}`,
+		],
+		[
+			"nested links around a long word (3.2 MB)",
+			`${"[a ".repeat(5_000)}${"a".repeat(3_200_000)}${"](u)".repeat(5_000)}`,
+		],
 		["nested brackets (80 KB)", `${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
 		["nested brackets under a definition (80 KB)", `[a]: /u\n\n${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
 		["URL with trailing punctuation (80 KB)", `http://x${".".repeat(80_000)}`],

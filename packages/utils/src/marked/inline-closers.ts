@@ -241,16 +241,17 @@ export class CloserIndexes {
  */
 export class InlineClosers {
 	readonly #indexes: CloserIndexes;
-	readonly #end: number;
+	/** Where the source ends in the root source. */
+	readonly end: number;
 
 	constructor(indexes: CloserIndexes, end: number) {
 		this.#indexes = indexes;
-		this.#end = end;
+		this.end = end;
 	}
 
 	/** The closers of a part of `rest` that ends at `end`, lexed as its own source. */
 	nested(rest: string, end: number): InlineClosers {
-		return new InlineClosers(this.#indexes, this.#end - rest.length + end);
+		return new InlineClosers(this.#indexes, this.end - rest.length + end);
 	}
 
 	/** Where the "[" just before `start` closes, or -1. */
@@ -265,35 +266,35 @@ export class InlineClosers {
 
 	/** Whether `rest.slice(from, to)`, which starts right after a "[", holds an unescaped "]". */
 	squareCloserWithin(rest: string, from: number, to: number): boolean {
-		const pos = this.#end - rest.length;
+		const pos = this.end - rest.length;
 		return this.#indexes.square.closesWithin(pos + from, pos + to);
 	}
 
 	/** Where the emphasis opened by the `width` markers at the start of `rest` closes, or -1. */
 	closeEmphasis(rest: string, marker: string, width: number): number {
-		const pos = this.#end - rest.length;
-		const close = this.#indexes.emphasis(marker, width).closeFor(pos, this.#end);
+		const pos = this.end - rest.length;
+		const close = this.#indexes.emphasis(marker, width).closeFor(pos, this.end);
 		return close === -1 ? -1 : close - pos;
 	}
 
 	/** Where the HTML tag opened by the "<" at the start of `rest` ends: the first ">" after it outside quotes, or -1. */
 	closeTag(rest: string): number {
-		const pos = this.#end - rest.length;
+		const pos = this.end - rest.length;
 		const close = this.#indexes.tagEnds[pos + 1]!;
-		return close === -1 || close >= this.#end ? -1 : close - pos;
+		return close === -1 || close >= this.end ? -1 : close - pos;
 	}
 
 	/** Where the first "-->" after the "<!--" at the start of `rest` starts, or -1. */
 	closeComment(rest: string): number {
-		const pos = this.#end - rest.length;
+		const pos = this.end - rest.length;
 		const ends = this.#indexes.commentEnds;
 		const at = lowerBound(ends, pos + 4);
-		return at === ends.length || ends[at]! + 3 > this.#end ? -1 : ends[at]! - pos;
+		return at === ends.length || ends[at]! + 3 > this.end ? -1 : ends[at]! - pos;
 	}
 
 	#close(depths: BracketDepths, rest: string, start: number): number {
-		const pos = this.#end - rest.length;
+		const pos = this.end - rest.length;
 		const close = depths.closeAfter(pos + start);
-		return close === -1 || close >= this.#end ? -1 : close - pos;
+		return close === -1 || close >= this.end ? -1 : close - pos;
 	}
 }

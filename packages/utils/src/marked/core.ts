@@ -265,7 +265,9 @@ export type TokenizerStartFunction = (this: TokenizerThis, src: string) => numbe
 /**
  * An offset form of a start hint: the first index at or after `from` in `src` where the extension's tokenizer could
  * match, or `undefined` (not -1) when there is none; anything else below `from` throws. The test at each index must
- * read `src` only from that index on, so the answer for `from` is also the answer for every later offset up to it.
+ * read `src` only from that index on, so the answer for `from` is also the answer for every later offset up to it,
+ * and must still pass where `src` goes on past its end: for a link label or the text of emphasis, the lexer asks on
+ * the inline source it lies in, then asks again on the label or text at the index it got, if that lies inside.
  */
 export type TokenizerStartFromFunction = (this: TokenizerThis, src: string, from: number) => number | undefined;
 /** An inline or block tokenizer extension. */
@@ -275,8 +277,8 @@ export interface TokenizerExtension {
 	start?: TokenizerStartFunction;
 	/**
 	 * Replaces `start` for inline text when present. Inline lexing calls it on the whole inline source and reuses
-	 * the answer until lexing passes it, instead of calling `start` on the rest of the source at every text step, so
-	 * a hint that stops at its answer keeps a long paragraph linear.
+	 * the answer until lexing passes it, inside link labels and emphasis too, instead of calling `start` on the rest
+	 * of the source at every text step, so a hint that stops at its answer keeps a long paragraph linear.
 	 */
 	startFrom?: TokenizerStartFromFunction;
 	tokenizer: TokenizerExtensionFunction;
@@ -441,23 +443,28 @@ export class Tokenizer {
 	}
 }
 
-// The closers a nested inline source shares with the source it lies in, offered to the next inline lex on that
-// lexer. They are offered right before the nested source is lexed through `lexer.inlineTokens`, which a subclass may
-// override; the lex that call reaches takes them if it lexes exactly that string, or else starts a root source.
-let sharedClosers: { lexer: Lexer; src: string; closers: InlineClosers } | undefined;
+// A nested inline source (a link label, the text of emphasis) shares the closers and text stops of the source it lies
+// in, which are offered to the next inline lex on that lexer. They are offered right before the nested source is
+// lexed through `lexer.inlineTokens`, which a subclass may override; the lex that call reaches takes them if it lexes
+// exactly that string, or else starts a root source.
+let offered: { lexer: Lexer; nested: NestedMatch; outer: InlineLex } | undefined;
 
-/** Offers `closers` to the inline lex of `src` that the next `lexer.inlineTokens(src)` starts. */
-function shareClosers(lexer: Lexer, src: string, closers: InlineClosers): void {
-	sharedClosers = { lexer, src, closers };
-}
-
-/** The closers offered to the lex of `src` on `lexer`, else those of a new root source. Clears the offer. */
-function takeClosers(lexer: Lexer, src: string): InlineClosers {
-	const shared = sharedClosers;
-	sharedClosers = undefined;
-	return shared?.lexer === lexer && shared.src === src
-		? shared.closers
-		: new InlineClosers(new CloserIndexes(src), src.length);
+/** Starts the lex of `src` on `lexer`: of the nested source offered for it, else of a root source. Clears the offer. */
+function openInlineSource(src: string, lexer: Lexer, output: Token[]): InlineLex {
+	const offer = offered;
+	offered = undefined;
+	const shared = offer?.lexer === lexer && offer.nested.src === src ? offer : undefined;
+	const closers = shared ? shared.nested.closers : new InlineClosers(new CloserIndexes(src), src.length);
+	return {
+		src,
+		lexer,
+		output,
+		closers,
+		stops: shared ? shared.outer.stops.nested(src, closers.end) : new TextStops(src, lexer),
+		textRun: new TextRun(src),
+		context: { lexer, source: src },
+		rest: src,
+	};
 }
 
 /**
@@ -598,18 +605,9 @@ interface InlineLex {
 // Each level of nested links or emphasis keeps only this loop's small frame on the stack while the level inside it
 // is lexed: the rules run in `lexToNested`, which returns each link, image or emphasis before its content is lexed.
 function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
-	const lex: InlineLex = {
-		src,
-		lexer,
-		output,
-		closers: takeClosers(lexer, src),
-		stops: new TextStops(src, lexer),
-		textRun: new TextRun(src),
-		context: { lexer, source: src },
-		rest: src,
-	};
+	const lex = openInlineSource(src, lexer, output);
 	for (let nested = lexToNested(lex); nested; nested = lexToNested(lex)) {
-		shareClosers(lexer, nested.src, nested.closers);
+		offered = { lexer, nested, outer: lex };
 		nested.token.tokens = lexer.inlineTokens(nested.src);
 		output.push(nested.token);
 	}
