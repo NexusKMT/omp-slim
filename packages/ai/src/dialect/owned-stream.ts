@@ -13,6 +13,7 @@ import {
 	setStreamingPartialJson,
 } from "../utils/block-symbols";
 import { AssistantMessageEventStream } from "../utils/event-stream";
+import { INVALID_ARGUMENTS_RAW_LIMIT, invalidToolCallArguments } from "../utils/tool-call-arguments";
 import { buildStringArgsResolver } from "./coercion";
 import { createInbandScanner } from "./factory";
 import type { Dialect, InbandScanEvent, InbandScanner, InbandTool } from "./types";
@@ -343,6 +344,23 @@ class InbandStreamProjector {
 			this.#responsePending = "";
 		}
 		this.#apply(this.#scanner.flush());
+		// Scanners discard incomplete envelopes, but their toolStart previews already
+		// live in the message. Refuse those calls instead of executing partial fields.
+		// The unfinished envelope runs to the end of the text, so the diagnostic keeps
+		// the tail rather than any prose before the call.
+		const unfinishedTail = fullText.slice(-INVALID_ARGUMENTS_RAW_LIMIT);
+		for (const entry of this.#toolBlocks.values()) {
+			entry.block.arguments = invalidToolCallArguments(unfinishedTail, "Incomplete in-band tool call");
+			if (this.#emitEvents) {
+				this.#out.push({
+					type: "toolcall_end",
+					contentIndex: entry.index,
+					toolCall: entry.block,
+					partial: this.#partial,
+				});
+			}
+		}
+		this.#toolBlocks.clear();
 		this.#closeText();
 		this.#closeThinking();
 		const hasTools = this.#partial.content.some(block => block.type === "toolCall");

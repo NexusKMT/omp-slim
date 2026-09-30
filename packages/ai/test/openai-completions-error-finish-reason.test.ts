@@ -112,6 +112,7 @@ describe("final tool-call arguments", () => {
 
 		it.each([
 			[JSON.stringify(args), args],
+			["{i:'Writing file',path:'repaired.txt',content:'hello',}", args],
 			["{i:'Writing file',path:'repaired.txt',content:hello,}", args],
 			["", {}],
 			[" \n\t", {}],

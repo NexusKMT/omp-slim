@@ -12,9 +12,12 @@ export function parseToolCallArguments(json: string | undefined): ToolCall["argu
 	}
 }
 
+/** Longest raw argument text kept in the parse-error diagnostic. */
+export const INVALID_ARGUMENTS_RAW_LIMIT = 512;
+
 /** Preserve a bounded diagnostic, never any partially recovered executable keys. */
 export function invalidToolCallArguments(raw: string, error: unknown): ToolCall["arguments"] {
-	const maxLen = 512;
+	const maxLen = INVALID_ARGUMENTS_RAW_LIMIT;
 	return {
 		__parseError: error instanceof Error ? error.message : String(error),
 		__rawJson: raw.length <= maxLen ? raw : `${raw.slice(0, maxLen)}… [truncated ${raw.length - maxLen} chars]`,

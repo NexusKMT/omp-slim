@@ -167,11 +167,11 @@ import {
 	isRecord,
 	logger,
 	parseJsonWithRepair,
-	parseStreamingJson,
 	parseStreamingJsonThrottled,
 	sanitizeText,
 } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
+import { parseToolCallArguments } from "../utils/tool-call-arguments";
 import type {
 	Api,
 	AssistantMessage,
@@ -3818,7 +3818,7 @@ export function flushOpenToolCalls(
 		const idx = output.content.indexOf(block);
 		const partialJson = block[kStreamingPartialJson];
 		if (partialJson !== undefined) {
-			block.arguments = parseStreamingJson(partialJson);
+			block.arguments = parseToolCallArguments(partialJson);
 			clearStreamingPartialJson(block);
 		}
 		const kind = block[kStreamingBlockKind];
@@ -4564,13 +4564,12 @@ export function processInteractionUpdate(
 				// path throttles mid-stream parses, so `arguments` may lag the buffer.
 				const partial = settled[kStreamingPartialJson];
 				if (partial) {
-					settled.arguments = parseStreamingJson(partial);
+					settled.arguments = parseToolCallArguments(partial);
 				}
 				const decodedArgs = decodeMcpArgsMap(selectMcpCall(toolCall)?.args?.args);
-				settled.arguments = mergeCursorMcpToolCallArgs(
-					settled.arguments as Record<string, unknown> | undefined,
-					decodedArgs,
-				);
+				if (!isRecord(settled.arguments) || !("__parseError" in settled.arguments)) {
+					settled.arguments = mergeCursorMcpToolCallArgs(settled.arguments, decodedArgs);
+				}
 			} else if (settled[kStreamingBlockKind] === "connect-scm") {
 				// The authoritative outcome arrives only here, on the completion's
 				// `ConnectScmResult` oneof. The block was stamped resolved at start,
