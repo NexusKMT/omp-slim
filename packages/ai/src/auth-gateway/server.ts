@@ -801,6 +801,9 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 		fetch: async (req, server): Promise<Response> => {
 			const url = new URL(req.url);
 			const pathname = url.pathname;
+			// Only static routes reach logs verbatim; dynamic or unknown paths may carry caller-supplied secrets.
+			const logPath =
+				Object.hasOwn(FORMAT_ROUTES, pathname) || Object.hasOwn(LOGGABLE_PATHS, pathname) ? pathname : "<unrouted>";
 			const socketPeer = server.requestIP(req)?.address ?? "unknown";
 			let peer = socketPeer;
 			// CORS preflight is always answered without auth — browsers send
@@ -816,10 +819,7 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 				if (!isAuthorized(req, tokens)) {
 					logger.info("auth-gateway request unauthorized", {
 						method: req.method,
-						path:
-							Object.hasOwn(FORMAT_ROUTES, pathname) || Object.hasOwn(LOGGABLE_PATHS, pathname)
-								? pathname
-								: "<unrouted>",
+						path: logPath,
 						peer: socketPeer,
 					});
 					return withCors(json(401, { error: "unauthorized" }), req);
@@ -914,7 +914,7 @@ export function startAuthGateway(opts: AuthGatewayBootOptions): AuthGatewayServe
 			} catch (error) {
 				logger.error("auth-gateway handler crashed", {
 					method: req.method,
-					path: pathname,
+					path: logPath,
 					peer,
 					error: String(error),
 				});

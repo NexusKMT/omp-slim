@@ -234,7 +234,12 @@ describe("auth-gateway POST /v1/embeddings", () => {
 		});
 		const inQuery = await request(`${harness.url}/v1/embeddings?client=gw-token`, HEADERS);
 		const encodedQuery = await request(`${harness.url}/v1/embeddings?client=gw%2Dtoken`, HEADERS);
+		const encodedQueryWithMalformedEscape = await request(
+			`${harness.url}/v1/embeddings?client=gw%2Dtoken&junk=%zz`,
+			HEADERS,
+		);
 		const inPath = await request(`${harness.url}/v1/gw-token`, HEADERS);
+		const encodedPathWithMalformedEscape = await request(`${harness.url}/v1/videos/gw%2Dtoken%zz`, HEADERS);
 		for (const response of [
 			inHeader,
 			inStainlessHeader,
@@ -242,7 +247,9 @@ describe("auth-gateway POST /v1/embeddings", () => {
 			inForwardedHeader,
 			inQuery,
 			encodedQuery,
+			encodedQueryWithMalformedEscape,
 			inPath,
+			encodedPathWithMalformedEscape,
 		]) {
 			expect(response.status).toBe(400);
 			expect(await response.text()).not.toContain("gw-token");
