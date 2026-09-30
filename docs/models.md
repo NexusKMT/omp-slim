@@ -8,7 +8,8 @@ Primary implementation files:
 
 - `packages/coding-agent/src/config/model-registry.ts` — loads built-in + custom models, provider overrides, runtime discovery, auth integration
 - `packages/coding-agent/src/config/model-resolver.ts` — parses model patterns and selects initial/smol/slow models
-- `packages/coding-agent/src/config/settings-schema.ts` — model-related settings (`modelRoles`, provider transport preferences)
+- `packages/coding-agent/src/config/model-settings.ts` — model selection settings (`modelRoles`, `enabledModels`, `enabledProviders`/`disabledProviders`, `modelProviderOrder`, `cycleOrder`)
+- `packages/coding-agent/src/session/settings.ts` — provider transport preferences (`providers.*`)
 - `packages/coding-agent/src/session/auth-storage.ts` — re-exports `AuthStorage` from `@oh-my-pi/pi-ai`; API key + OAuth resolution order
 - `packages/catalog/src/models.ts` and `packages/catalog/src/types.ts` — built-in providers/models and public model types
 
@@ -68,6 +69,7 @@ providers:
           cacheRead: 0
           cacheWrite: 0
         contextWindow: 128000
+        maxContextWindow: 256000 # optional extended-context window
         maxTokens: 16384
         headers:
           X-Model: value
@@ -84,6 +86,18 @@ providers:
             gateway: m1-01
             controller: mlx
 ```
+
+`maxContextWindow` is available on both `models` entries and `modelOverrides`.
+Set `contextWindow` to the normal prompt window and `maxContextWindow` to the
+larger prompt window accepted by the provider. `/extended-context on` selects
+the larger window; `off` restores the normal one. An override specifying only
+`contextWindow` remains fixed in both modes, as before. This changes OMP's
+local context budget, not the provider's server-side limit; verify the endpoint
+accepts requests of the configured size.
+Configured maxima do not replace provider-advertised capacity. Models governed
+by a catalog override ceiling (such as Codex Astra) still clamp to that ceiling.
+Per-model overrides, including retired variant aliases, are resolved before
+selecting the extended window.
 
 ### Compaction options
 
@@ -150,10 +164,17 @@ Must define at least one of:
 It supports `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`,
 `v2Endpoint`, and `streamingEndpoint`.
 
+`openai-responses` models on Amazon Bedrock's OpenAI routes (`/openai/…` on
+`bedrock-runtime.<region>.amazonaws.com` or `bedrock-mantle.<region>.api.aws`,
+Mantle's `/v1` base, the runtime FIPS host, and PrivateLink hosts of both endpoints)
+use native OpenAI compaction without an opt-in, for any provider id. Set
+`enabled: false` to turn it off, or `v2StreamingEnabled: false` to keep only
+the V1 `/responses/compact` request. See [compaction](./compaction.md).
+
 ### Model value checks
 
 - `id` required
-- `contextWindow` and `maxTokens` must be positive if provided
+- `contextWindow` and `maxTokens` must be positive if provided; `maxContextWindow` must be a positive integer no smaller than `contextWindow` when both are set
 
 ### Command-resolved secrets
 
@@ -212,11 +233,32 @@ Provider defaults vs per-model overrides:
 - Provider `headers`, `compat`, and `remoteCompaction` are baselines.
 - Model `headers` override provider header keys.
 - `modelOverrides` can override model metadata (`name`, `reasoning`, `thinking`, `input`, `imageInputDecoder`,
-  `tokenizer`, `supportsTools`, `cost`, `premiumMultiplier`, `contextWindow`, `maxTokens`,
+  `tokenizer`, `supportsTools`, `cost`, `promptCache`, `premiumMultiplier`, `contextWindow`, `maxContextWindow`, `maxTokens`,
   `omitMaxOutputTokens`, `headers`, `compat`, `contextPromotionTarget`, `compactionModel`, and
   `remoteCompaction`).
 - `compat` is deep-merged for nested routing blocks (`openRouterRouting`, `vercelGatewayRouting`,
   `extraBody`, and `whenThinking`).
+
+## Prompt cache lifetimes
+
+`promptCache` states how long the provider keeps a prompt cache entry alive for each retention tier
+OMP can request (`short` is the default tier; `long` is used where a 1h entry is supported, e.g.
+`PI_CACHE_RETENTION=long` or `providers.cacheRetention: "long"`). Values are seconds and are
+estimates: providers publish ranges, so pick the conservative end.
+
+```yaml
+providers:
+  my-gateway:
+    models:
+      - id: claude-sonnet-5
+        promptCache: { short: 300, long: 3600 }
+```
+
+The bundled catalog fills this in for direct Anthropic (5 min / 1 h). Other providers, including
+Anthropic-compatible gateways and direct OpenAI, have no built-in lifetime until their cache-expiry
+and replay behavior has been validated for warming. A model without a value for the tier a request
+used is never warmed; custom models and `modelOverrides` can opt in with `promptCache` once the
+backing cache behavior is known. See `providers.cacheWarming` in [Settings](./settings.md).
 
 ## Usage costs and time-based pricing
 
@@ -262,6 +304,8 @@ If `llama.cpp` is not explicitly configured, registry adds an implicit discovera
 - auth mode: keyless (`auth: none` behavior)
 
 Runtime discovery calls llama.cpp model endpoints and synthesizes model entries with local defaults.
+
+The provider `api` is the default for discovered models; catalog rules can override it per model class. Qwen-class models on any `discovery.type: llama.cpp` provider (implicit or explicit) are discovered as `openai-completions`, because the Responses API cannot carry the chat template's thinking controls (`enable_thinking` / `chat_template_kwargs`). The override lives in `packages/catalog/src/compat/rules/providers/llama.cpp.kdl` (`discovery-api`); `omp models find <id> --json` shows the resolved `api`.
 
 ### Implicit LM Studio discovery
 
@@ -374,11 +418,20 @@ When requesting a key for a provider, effective order is:
 `models.yml` `apiKey` behavior:
 
 - Value is first treated as an environment variable name.
-- If no env var exists, the literal string is used as the token.
+- If the env var is unset or empty, the literal string is used as the token.
 
 If `authHeader: true` and provider `apiKey` is set, models get:
 
 - `Authorization: Bearer <resolved-key>` header injected.
+
+Resolution does not fail for a missing variable: with `apiKey: MY_PROVIDER_API_KEY`
+and `authHeader: true`, an unset or empty `MY_PROVIDER_API_KEY` produces
+`Authorization: Bearer MY_PROVIDER_API_KEY`. Launchers using env-backed keys must
+check that the variable is set and non-empty before starting OMP.
+
+[Command-resolved secrets](#command-resolved-secrets) do not use this literal
+fallback: a failing command or empty trimmed stdout resolves to no value, so it
+does not add a derived bearer header.
 
 Keyless providers:
 
@@ -389,7 +442,7 @@ Keyless providers:
 
 When `OMP_AUTH_BROKER_URL` (or `auth.broker.url`) is set, the local SQLite credential store is replaced by `RemoteAuthCredentialStore`. Layers 3, 4, and 6 above (stored OAuth and API-key credentials) are served from a broker-supplied snapshot whose `refresh` tokens are redacted; expiry triggers `POST /v1/credential/:id/refresh` on the broker rather than a local refresh.
 
-`AuthStorage.setConfigApiKey` lets a `models.yml` `apiKey` win over a broker-resolved OAuth token without overriding a runtime `--api-key`. See [`auth-broker-gateway.md`](./auth-broker-gateway.md) for the full broker / gateway design and env surface (`OMP_AUTH_BROKER_URL`, `OMP_AUTH_BROKER_TOKEN`, `auth.broker.url`, `auth.broker.token`).
+`AuthStorage.keys.setConfig` lets a `models.yml` `apiKey` win over a broker-resolved OAuth token without overriding a runtime `--api-key`. See [`auth-broker-gateway.md`](./auth-broker-gateway.md) for the full broker / gateway design and env surface (`OMP_AUTH_BROKER_URL`, `OMP_AUTH_BROKER_TOKEN`, `auth.broker.url`, `auth.broker.token`).
 
 ## Model availability vs all models
 
@@ -441,15 +494,50 @@ When a bare id matches models from multiple providers, preference order is:
 
 ### Role aliases and settings
 
-Supported model roles:
+Model roles assign model selectors to workloads. Configure them under `modelRoles` in `config.yml`, not in `models.yml`; `models.yml` defines providers and model metadata.
 
-- `default`, `smol`, `slow`, `vision`, `plan`, `commit`, `tiny`, `task`, `advisor`
+Built-in roles are grouped in the model picker:
 
-The `tiny` role overrides the online model used for lightweight background tasks (session titles, memory, `auto`-thinking difficulty classification, unexpected-stop detection); when unset, these fall back to `@smol`. Pick one in `/models`.
+- **Chat roles:** `default`, `smol`, `slow`, `vision`, `plan`, `commit`, `tiny`, `memory`, `task`, and `advisor`. The `tiny` and `memory` roles accept both ordinary chat models and `tiny` catalog models.
+- **Model-kind roles:** `image`, `web`, `speech`, `dictation`, and `judge`. These select image generation, search/grounded chat, text-to-speech, speech-to-text, and judgment runners respectively. The `judge` role also accepts tiny and chat models.
 
-Role aliases like `@smol` expand through `settings.modelRoles`; `*` selects `@default`. Quote `@` aliases in YAML values (`fable: "@slow"`). Each role value can also append a thinking selector such as `:minimal`, `:low`, `:medium`, or `:high`.
+`vision` and `image` are different workloads: `vision` selects a chat model for image analysis, such as `read screenshot.png?q=...`; `image` selects a model with catalog kind `image` for `generate_image`. Assigning a model to `vision` does not give it image-input support: image questions additionally check that the model can send image input to its provider.
+
+The `tiny` role selects lightweight models for background work such as session titles; when unset, it resolves through `@smol`. The `memory` role resolves through `@tiny` when unset. See [model settings](./settings.md#models) for configuration and fallback-chain examples.
+
+Assigning a non-default role in `/models` normally saves its selector without switching the active conversation model. A workload uses the role when invoked; assigning `plan` does not itself enter plan mode, and calling `todo` does not itself select the plan model. While plan mode is active, changing the `plan` role reapplies its model. Assigning `default` normally also switches the active model, unless a higher-priority settings layer overrides the edited assignment. The session-only model picker changes the active model without rewriting role assignments.
+
+Role aliases like `@smol` expand through `settings.modelRoles`; `*` selects `@default`. Quote `@` aliases in YAML values (`plan: "@slow"`). Chat-role values can append a thinking selector such as `:minimal`, `:low`, `:medium`, or `:high`; model-kind roles do not use chat thinking suffixes.
 
 If a role points at another role, the target model still inherits normally and any explicit suffix on the referring role wins for that role-specific use.
+
+### Model presets
+
+A model preset is a named snapshot of every role assignment plus `defaultThinkingLevel`, so you can swap a whole setup at once:
+
+```text
+/modelpreset save cheap      # save the current roles and thinking level
+/modelpreset switch deep     # apply a saved preset
+/modelpreset                 # pick one from a list (interactive)
+/modelpreset list | delete <name>
+```
+
+In `/models`, press `s` in the Roles view to save the current setup under a name. Presets live under `modelPresets` in `config.yml`:
+
+```yaml
+modelPresets:
+  deep:
+    modelRoles:
+      default: anthropic/claude-opus-4-5:high
+      smol: anthropic/claude-sonnet-4-5
+    defaultThinkingLevel: high
+```
+
+Switching writes roles the way the model picker does: into the scope chosen by `modelRoleStorage`, clearing roles the preset leaves out and replacing `--model`/`--smol` session overrides. The preset's `defaultThinkingLevel` is written to the global config. It then switches the active model to the resulting `default` (the first available model when the preset has none) and sets the session's thinking level from the `:level` suffix on that selector, or else the preset's `defaultThinkingLevel`; a `:inherit` suffix leaves the level the model switch set. When a preset's `default` model is unavailable, nothing is changed. Roles that another layer still decides — a `--config` file, a project config in `global` storage, or the global config in `project` storage — are listed in the switch message with the layer that wins, instead of being reported as switched. The same goes for a `defaultThinkingLevel` set by a project config or `--config` file: the session still switches to the preset's level, but the message names that layer, whose level returns on the next start.
+
+When several config layers define a preset of the same name, the highest layer (command line, then `--config` file, then project config, then global config) wins whole: entries are never merged across layers, so a project `deep` that only sets `default` applies without the global `deep`'s other roles. A `null` entry in a `--config` file (or a command-line override) hides the preset from lists and switches; a `null` entry in a project config is ignored, so the global preset of that name still applies. Saving always writes the named entry to the global config and reports when a higher layer still takes precedence for that name.
+
+Saving captures the effective assignments — including any `--model` session override — and the configured `defaultThinkingLevel`, not the session's live thinking level.
 
 Related settings:
 
@@ -458,6 +546,7 @@ Related settings:
 - `modelProviderOrder` (provider precedence when equivalent concrete choices share an id)
 - `providers.kimiApiFormat` (`openai` or `anthropic` request format)
 - `providers.openaiWebsockets` (`auto|off|on` websocket preference for OpenAI Codex transport)
+- `providers.openaiLiveSteering` (deliver mid-response user messages into GPT-6 responses over the Codex WebSocket)
 
 `modelRoles` stores model selectors such as `provider/modelId`; `enabledModels` and CLI `--models`
 accept exact selectors, globs, and fuzzy matches.
@@ -571,6 +660,7 @@ Request shaping:
 - `supportsImageDetailOriginal` — allow the Responses API's nonstandard `detail: "original"` image
   mode where the endpoint supports it.
 - `supportsConfigurationUpdate` — let the Responses API change `reasoning.effort` mid-session through a `configuration_update` input item while the request-level effort stays pinned for prompt caching (GPT-6 Astra). Default: auto (`true` for `gpt-6-astra` on every host, `false` otherwise). Set `false` for custom `openai-responses` / `openai-codex-responses` endpoints that reject the item type with HTTP 400; effort changes are then sent as the top-level `reasoning.effort` and no update items are emitted.
+- `supportsSteering` — let the Codex WebSocket transport send `response.steer`, so a message typed while the model responds joins that response instead of waiting for the next request. Default: auto (`true` for the GPT-6 family). Set `false` for proxies that reject the event.
 - `extraBody` — extra top-level fields merged into every request body (gateway hints, controller selectors, etc.).
 
 Image handling:
@@ -591,6 +681,15 @@ Custom model entries may define `thinking: { mode, efforts, defaultLevel, requir
 `requiresEffort` defaults to auto-detection; set it to `false` only when the
 configured backend has been verified to accept an explicit reasoning-off
 request. This keeps the `:off` selector from being clamped to the lowest effort.
+
+For a custom model with the default `thinkingFormat: openai`, `--thinking off`
+has no explicit off payload on `openai-completions`: when `reasoning_effort` is
+sent, it requests the first effort listed in `efforts`, even with
+`requiresEffort: false` (for example, `efforts: [low, medium, high]` sends
+`reasoning_effort: low`), so list efforts lowest-first. Turning reasoning off
+requires a request shape the server treats as off; for example,
+`thinkingFormat: qwen-chat-template` sends
+`chat_template_kwargs: { enable_thinking: false }`.
 
 - `supportsReasoningEffort` — accept `reasoning_effort`. Default: auto (off for Grok, Z.ai/Zhipu, and Xiaomi MiMo).
 - `supportsReasoningParams` — whether request shaping may send reasoning params at all. Default: auto (off for GitHub Copilot chat-completions).
@@ -624,9 +723,12 @@ Provider-level `compat` is the baseline; per-model `compat` is deep-merged on to
 
 For `anthropic-messages` models the runtime uses a separate `AnthropicCompat` shape
 (`packages/catalog/src/types.ts`). The `models.yml` schema exposes the strict-tools opt-out as a
-top-level provider field plus `requiresToolResultId`, `replayUnsignedThinking`,
-`supportsEagerToolInputStreaming`, and `allowAnthropicHeaderOverrides` in `compat`. Other
-Anthropic-side knobs are supplied by built-in catalog metadata and are not configurable here.
+top-level provider field; inside `compat` it honors every shared key that also names an
+`AnthropicCompat` field: `supportsContextManagement`, `supportsEagerToolInputStreaming`,
+`supportsForcedToolChoice`, `allowAnthropicHeaderOverrides`, `requiresToolResultId`,
+`replayUnsignedThinking`, `bedrockMessagesApi`, `stripImageInput`, and `streamIdleTimeoutMs`. Other Anthropic-side knobs
+are supplied by built-in catalog metadata and are not configurable here — `applyCompatOverrides`
+drops override keys the resolved shape does not declare.
 
 ### Bedrock compatibility (`bedrock-converse-stream`)
 
@@ -660,6 +762,80 @@ Region resolution itself is unaffected by `baseUrl`, because SigV4 still signs w
 region — set `AWS_REGION` or use a region-scoped model id/ARN if the endpoint expects a specific
 one. A gateway that accepts a bearer token instead of SigV4 needs no region at all: set the
 provider's `apiKey` (or `AWS_BEARER_TOKEN_BEDROCK`) and signing is skipped.
+
+### Claude on Bedrock's Anthropic Messages API (`/anthropic`)
+
+Amazon Bedrock also serves Claude through the Anthropic Messages API, under `/anthropic` on both of
+its endpoints. AWS recommends `bedrock-runtime` for new applications
+([Inference using Anthropic Messages API](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-messages-api.html)).
+Claude Opus 4.7 and later are served here; Opus 4.6 and earlier stay on Converse
+([Claude in Amazon Bedrock](https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock)).
+
+| Route | Base URL | Provider | Model id |
+| --- | --- | --- | --- |
+| bedrock-runtime | `https://bedrock-runtime.<region>.amazonaws.com/anthropic` | `amazon-bedrock` | inference profile, e.g. `us.anthropic.claude-opus-5-5` |
+| bedrock-mantle | `https://bedrock-mantle.<region>.api.aws/anthropic` | `bedrock-mantle` | `anthropic.claude-opus-5-5` |
+
+The FIPS host (`bedrock-runtime-fips.<region>.amazonaws.com`) and AWS PrivateLink endpoint-specific
+hosts (`<vpce-id>[-<az>].bedrock-runtime.<region>.vpce.amazonaws.com`, likewise for
+`bedrock-runtime-fips` and `bedrock-mantle`) are recognized as the same routes. A VPC endpoint with
+private DNS enabled needs no change: it answers on the public hostnames
+([Bedrock VPC endpoints](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html)).
+
+Define the model under the provider shown in the table, with `api: anthropic-messages`. Those two
+provider ids carry the catalog rule that enables Claude's on-demand compaction
+([Compaction](./compaction.md)). Set `auth: apiKey` so OMP sends plain API-key requests; without
+it, custom `anthropic-messages` models get Claude Code request shaping. The examples authenticate
+with an [Amazon Bedrock API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html);
+OMP does not sign runtime-route requests with SigV4. Write the region into the runtime URL. Mantle
+URLs may keep `{region}`, which OMP fills in from your AWS region settings.
+
+```yaml
+providers:
+  amazon-bedrock:
+    baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com
+    apiKey: AWS_BEARER_TOKEN_BEDROCK
+    auth: apiKey
+    models:
+      - id: us.anthropic.claude-opus-5-5
+        api: anthropic-messages
+        baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com/anthropic
+        reasoning: true
+        input: [text, image]
+  bedrock-mantle:
+    baseUrl: https://bedrock-mantle.{region}.api.aws/openai/v1
+    apiKey: AWS_BEARER_TOKEN_BEDROCK
+    auth: apiKey
+    models:
+      - id: anthropic.claude-opus-5-5
+        api: anthropic-messages
+        baseUrl: https://bedrock-mantle.{region}.api.aws/anthropic
+        reasoning: true
+        input: [text, image]
+```
+
+Requests on these routes are shaped by `compat.bedrockMessagesApi`, which OMP detects from a Bedrock
+`/anthropic` `baseUrl` under any provider id. Both routes reject the tool `strict` field, so OMP drops
+it. OMP also fits `metadata.user_id` to
+Bedrock's [request-metadata pattern](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
+which the runtime route enforces: a value that fits is kept, otherwise its session id is sent,
+otherwise it is left out. Both run after any `onPayload` hook. Both routes verify thinking
+signatures, so by default OMP does not replay unsigned thinking to them.
+
+The URL check cannot see a Bedrock route behind a proxy or an `ANTHROPIC_BASE_URL` reroute of the
+first-party `anthropic` provider; those keep plain Anthropic requests unless you opt in. Set the flag
+in `compat` (provider-wide or under `modelOverrides`) to opt in, or to `false` to opt a Bedrock URL
+out:
+
+```yaml
+providers:
+  anthropic:
+    compat:
+      bedrockMessagesApi: true # ANTHROPIC_BASE_URL points at bedrock-runtime /anthropic
+```
+
+On-demand compaction still needs a model line the catalog grants it to (`amazon-bedrock`,
+`bedrock-mantle`, or `anthropic` provider ids).
 
 ### Strict tool schemas (`disableStrictTools`)
 

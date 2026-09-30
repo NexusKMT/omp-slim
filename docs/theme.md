@@ -93,6 +93,8 @@ Runtime precedence:
 2. theme JSON `symbols.preset`
 3. fallback `"unicode"`
 
+When `symbolPreset` is unset, a successful Glyph Protocol handshake upgrades the session's Unicode fallback to Nerd Font icons without changing the saved setting. An explicit preset, including `unicode`, is not upgraded.
+
 Invalid override keys are ignored and logged (`logger.debug`).
 
 #### Box-drawing borders
@@ -182,7 +184,7 @@ Auto theme slot selection uses terminal appearance in this order:
 3. macOS appearance fallback only for the known-broken macOS/Zellij OSC 11 path
 4. dark slot fallback
 
-Current defaults from settings schema:
+Current defaults (definitions in `packages/coding-agent/src/modes/settings.ts`):
 
 - `theme.dark = "titanium"`
 - `theme.light = "light"`
