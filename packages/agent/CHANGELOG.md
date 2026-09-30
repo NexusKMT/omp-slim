@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
