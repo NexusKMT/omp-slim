@@ -256,10 +256,12 @@ providers:
 
 An explicit `promptCache` replaces the model's catalog lifetimes rather than
 merging with them: `promptCache: {}` disables warming for that model, and a
-`short`-only value does not inherit a catalog `long` lifetime. If a matching
-custom model is also defined under `models`, `modelOverrides.promptCache` takes
-precedence over that definition. Without a configured `promptCache`, catalog
-defaults remain in effect.
+`short`-only value does not inherit a catalog `long` lifetime. For a matching
+model, `modelOverrides.promptCache` has highest priority. A runtime-registered
+model definition replaces the matching YAML `models` definition for lifetime
+selection, even when the runtime `promptCache` is omitted: the actual effective
+model's catalog defaults apply instead of the YAML lifetime. Without a runtime
+replacement, the matching YAML lifetime applies, or catalog defaults if absent.
 
 Direct Anthropic keeps its existing 5 min / 1 h lifetimes (`short: 300`, `long: 3600`),
 defaulting to 5 min for API keys and 1 h for OAuth subscriber sessions; API keys can

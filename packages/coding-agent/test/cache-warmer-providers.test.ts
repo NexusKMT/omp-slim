@@ -4,6 +4,7 @@ import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import { encodeBedrockFrame as encodeBedrockTestFrame } from "../../ai/test/helpers/bedrock-stream";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import { CacheWarmer, type CacheWarmStream, type CacheWarmingRefreshEnd } from "../src/session/cache-warmer";
 
 const PROMPT_TOKENS = 100_000;
@@ -30,7 +31,9 @@ async function captureRequest(capture: WireCapture, input: string | URL | Reques
 			: new Request(input instanceof URL ? input.href : input, init);
 	capture.url = request.url;
 	capture.signal = request.signal;
-	capture.payload = (await request.clone().json()) as Record<string, unknown>;
+	const payload: unknown = await request.clone().json();
+	if (!isRecord(payload)) throw new Error("Expected provider request payload object");
+	capture.payload = payload;
 }
 
 function encodeBedrockFrame(eventType: string, payload: unknown): Uint8Array {
@@ -110,39 +113,37 @@ function makeConverseFetch(capture: WireCapture, terminalGate: PromiseWithResolv
 			},
 		}),
 	];
-	return Object.assign(
-		async (input: string | URL | Request, init?: RequestInit) => {
-			await captureRequest(capture, input, init);
-			capture.signal?.addEventListener(
-				"abort",
-				() => {
-					capture.aborted = true;
-					terminalGate.resolve();
-				},
-				{ once: true },
-			);
-			let tailSent = false;
-			const body = new ReadableStream<Uint8Array>({
-				start(controller) {
-					for (const frame of initial) controller.enqueue(frame);
-				},
-				async pull(controller) {
-					if (tailSent) return;
-					tailSent = true;
-					await terminalGate.promise;
-					if (capture.signal?.aborted) {
-						controller.close();
-						return;
-					}
-					for (const frame of terminal) controller.enqueue(frame);
-					capture.terminalMetadataSent = true;
+	const fetchImpl: FetchImpl = async (input, init) => {
+		await captureRequest(capture, input, init);
+		capture.signal?.addEventListener(
+			"abort",
+			() => {
+				capture.aborted = true;
+				terminalGate.resolve();
+			},
+			{ once: true },
+		);
+		let tailSent = false;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const frame of initial) controller.enqueue(frame);
+			},
+			async pull(controller) {
+				if (tailSent) return;
+				tailSent = true;
+				await terminalGate.promise;
+				if (capture.signal?.aborted) {
 					controller.close();
-				},
-			});
-			return new Response(body, { status: 200, headers: { "content-type": "application/vnd.amazon.eventstream" } });
-		},
-		{ preconnect: globalThis.fetch.preconnect },
-	) as FetchImpl;
+					return;
+				}
+				for (const frame of terminal) controller.enqueue(frame);
+				capture.terminalMetadataSent = true;
+				controller.close();
+			},
+		});
+		return new Response(body, { status: 200, headers: { "content-type": "application/vnd.amazon.eventstream" } });
+	};
+	return fetchImpl;
 }
 
 function createConverseHarness(usage: Usage, deferTerminal = false) {
@@ -225,96 +226,94 @@ function anthropicEvent(type: string, data: unknown): Uint8Array {
 }
 
 function makeMessagesFetch(capture: WireCapture, terminalGate: PromiseWithResolvers<void>): FetchImpl {
-	return Object.assign(
-		async (input: string | URL | Request, init?: RequestInit) => {
-			await captureRequest(capture, input, init);
-			const onAbort = () => {
-				capture.aborted = true;
-				terminalGate.resolve();
-			};
-			capture.signal?.addEventListener("abort", onAbort, { once: true });
-			if (capture.signal?.aborted) onAbort();
-			let stage = 0;
-			let bodyCanceled = false;
-			const body = new ReadableStream<Uint8Array>({
-				start(controller) {
-					controller.enqueue(
-						anthropicEvent("message_start", {
-							type: "message_start",
-							message: {
-								id: "msg_1",
-								type: "message",
-								role: "assistant",
-								content: [],
-								model: "anthropic.claude-opus-5-5",
-								stop_reason: null,
-								stop_sequence: null,
-								usage: {
-									input_tokens: 1,
-									output_tokens: 0,
-									cache_read_input_tokens: PROMPT_TOKENS,
-									cache_creation_input_tokens: 0,
-								},
+	const fetchImpl: FetchImpl = async (input, init) => {
+		await captureRequest(capture, input, init);
+		const onAbort = () => {
+			capture.aborted = true;
+			terminalGate.resolve();
+		};
+		capture.signal?.addEventListener("abort", onAbort, { once: true });
+		if (capture.signal?.aborted) onAbort();
+		let stage = 0;
+		let bodyCanceled = false;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(
+					anthropicEvent("message_start", {
+						type: "message_start",
+						message: {
+							id: "msg_1",
+							type: "message",
+							role: "assistant",
+							content: [],
+							model: "anthropic.claude-opus-5-5",
+							stop_reason: null,
+							stop_sequence: null,
+							usage: {
+								input_tokens: 1,
+								output_tokens: 0,
+								cache_read_input_tokens: PROMPT_TOKENS,
+								cache_creation_input_tokens: 0,
 							},
+						},
+					}),
+				);
+			},
+			async pull(controller) {
+				if (stage === 0) {
+					stage = 1;
+					controller.enqueue(
+						anthropicEvent("content_block_start", {
+							type: "content_block_start",
+							index: 0,
+							content_block: { type: "text", text: "" },
 						}),
 					);
-				},
-				async pull(controller) {
-					if (stage === 0) {
-						stage = 1;
-						controller.enqueue(
-							anthropicEvent("content_block_start", {
-								type: "content_block_start",
-								index: 0,
-								content_block: { type: "text", text: "" },
-							}),
-						);
-						controller.enqueue(
-							anthropicEvent("content_block_delta", {
-								type: "content_block_delta",
-								index: 0,
-								delta: { type: "text_delta", text: "x" },
-							}),
-						);
+					controller.enqueue(
+						anthropicEvent("content_block_delta", {
+							type: "content_block_delta",
+							index: 0,
+							delta: { type: "text_delta", text: "x" },
+						}),
+					);
+					return;
+				}
+				if (stage === 1) {
+					stage = 2;
+					await terminalGate.promise;
+					if (capture.signal?.aborted || bodyCanceled) {
+						if (!bodyCanceled) controller.close();
 						return;
 					}
-					if (stage === 1) {
-						stage = 2;
-						await terminalGate.promise;
-						if (capture.signal?.aborted || bodyCanceled) {
-							if (!bodyCanceled) controller.close();
-							return;
-						}
-						const chunks = [
-							anthropicEvent("content_block_stop", { type: "content_block_stop", index: 0 }),
-							anthropicEvent("message_delta", {
-								type: "message_delta",
-								delta: { stop_reason: "end_turn", stop_sequence: null },
-								usage: { output_tokens: 1 },
-							}),
-							anthropicEvent("message_stop", { type: "message_stop" }),
-						];
-						const joined = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
-						let offset = 0;
-						for (const chunk of chunks) {
-							joined.set(chunk, offset);
-							offset += chunk.length;
-						}
-						controller.enqueue(joined);
-						capture.terminalMetadataSent = true;
-						controller.close();
+					const chunks = [
+						anthropicEvent("content_block_stop", { type: "content_block_stop", index: 0 }),
+						anthropicEvent("message_delta", {
+							type: "message_delta",
+							delta: { stop_reason: "end_turn", stop_sequence: null },
+							usage: { output_tokens: 1 },
+						}),
+						anthropicEvent("message_stop", { type: "message_stop" }),
+					];
+					const joined = new Uint8Array(chunks.reduce((length, chunk) => length + chunk.length, 0));
+					let offset = 0;
+					for (const chunk of chunks) {
+						joined.set(chunk, offset);
+						offset += chunk.length;
 					}
-				},
-				cancel() {
-					bodyCanceled = true;
-					capture.bodyCanceled = true;
-					terminalGate.resolve();
-				},
-			});
-			return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
-		},
-		{ preconnect: globalThis.fetch.preconnect },
-	) as FetchImpl;
+					controller.enqueue(joined);
+					capture.terminalMetadataSent = true;
+					controller.close();
+				}
+			},
+			cancel() {
+				bodyCanceled = true;
+				capture.bodyCanceled = true;
+				terminalGate.resolve();
+			},
+		});
+		return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+	};
+	return fetchImpl;
 }
 
 function createMessagesHarness(provider: "amazon-bedrock" | "bedrock-mantle", baseUrl: string) {

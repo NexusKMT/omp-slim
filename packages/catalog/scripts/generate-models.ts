@@ -23,6 +23,7 @@ import { providerEntries, providerEntry, seedModels } from "../src/compat/provid
 import type { CompiledProvider } from "../src/compat/types";
 import { ANTIGRAVITY_PRIMARY_ENDPOINT, fetchAntigravityDiscoveryModels } from "../src/discovery/antigravity";
 import { createModelManager } from "../src/model-manager";
+import { getBundledModels } from "../src/models";
 import prevModelsJson from "../src/models.json" with { type: "json" };
 import { toModelSpec } from "../src/provider-models/bundled-references";
 import {
@@ -561,29 +562,30 @@ async function fetchCodexDiscoveryModels(): Promise<ModelSpec<"openai-codex-resp
  * Run from packages/catalog with `bun run gen:models --refresh-prompt-cache`.
  */
 async function refreshBedrockPromptCache() {
-	const previousModels = prevModelsJson as unknown as Record<string, Record<string, Model<Api>>>;
-	const bedrockModels = previousModels["amazon-bedrock"];
-	if (!bedrockModels) throw new Error("Bundled Amazon Bedrock models are missing");
+	type SnapshotModelRow = { readonly api: Api; readonly [key: string]: unknown };
+	const previousBedrockModels: Readonly<Record<string, SnapshotModelRow>> = prevModelsJson["amazon-bedrock"];
+	if (!previousBedrockModels) throw new Error("Bundled Amazon Bedrock models are missing");
 
-	const refreshedBedrockModels = { ...bedrockModels };
+	const refreshedBedrockModels: Record<string, SnapshotModelRow> = { ...previousBedrockModels };
 	let changedModels = 0;
-	for (const [id, model] of Object.entries(bedrockModels)) {
+	for (const model of getBundledModels("amazon-bedrock")) {
 		if (model.api !== "bedrock-converse-stream") continue;
+		const previousModel = previousBedrockModels[model.id];
 		const spec = toModelSpec(model);
 		delete spec.promptCache;
 		const refreshed = buildModel(spec);
 		if (refreshed.identity.class !== "anthropic") continue;
-		if (JSON.stringify(model.promptCache) === JSON.stringify(refreshed.promptCache)) continue;
+		if (JSON.stringify(previousModel.promptCache) === JSON.stringify(refreshed.promptCache)) continue;
 		if (refreshed.promptCache === undefined) {
-			const { promptCache: _promptCache, ...withoutPromptCache } = model;
-			refreshedBedrockModels[id] = withoutPromptCache;
+			const { promptCache: _promptCache, ...withoutPromptCache } = previousModel;
+			refreshedBedrockModels[model.id] = withoutPromptCache;
 		} else {
-			refreshedBedrockModels[id] = { ...model, promptCache: refreshed.promptCache };
+			refreshedBedrockModels[model.id] = { ...previousModel, promptCache: refreshed.promptCache };
 		}
 		changedModels++;
 	}
 
-	const refreshedModels = { ...previousModels, "amazon-bedrock": refreshedBedrockModels };
+	const refreshedModels = { ...prevModelsJson, "amazon-bedrock": refreshedBedrockModels };
 	await Bun.write(path.join(packageRoot, "src/models.json"), JSON.stringify(refreshedModels));
 	console.log(`Refreshed prompt-cache policy for ${changedModels} Amazon Bedrock Claude model(s)`);
 }

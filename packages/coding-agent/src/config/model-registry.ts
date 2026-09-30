@@ -2408,18 +2408,49 @@ export class ModelRegistry {
 		);
 	}
 
+	/**
+	 * A runtime registration replaces a same-key configured model for prompt
+	 * cache lifetime projection. Resolve the overlay before reading `promptCache`,
+	 * so an absent runtime lifetime is rebuilt from the effective model's
+	 * catalog policy rather than a stale YAML value. An empty object remains an
+	 * explicit opt-out. Keep the existing resolver's order for lazy runtime
+	 * metadata, whose precedence is unrelated.
+	 */
+	#resolveLivePromptCacheOverlay(model: Model<Api>): { overlay: CustomModelOverlay; isRuntime: boolean } | undefined {
+		const runtimeOverlay = this.#runtimeModelOverlays.find(
+			overlay => overlay.provider === model.provider && overlay.id === model.id,
+		);
+		if (runtimeOverlay) return { overlay: runtimeOverlay, isRuntime: true };
+		const configuredOverlay = this.#customModelOverlays.find(
+			overlay => overlay.provider === model.provider && overlay.id === model.id,
+		);
+		return configuredOverlay ? { overlay: configuredOverlay, isRuntime: false } : undefined;
+	}
+
 	#applyConfiguredPromptCache(models: Model<Api>[]): Model<Api>[] {
 		let liveKeys: Set<string> | null = null;
 		const hasLiveModel = (provider: string, id: string) => {
 			liveKeys ??= new Set(models.map(model => `${model.provider}\u0000${model.id}`));
 			return liveKeys.has(`${provider}\u0000${id}`);
 		};
+
 		let projected: Model<Api>[] | undefined;
 		for (const [index, model] of models.entries()) {
 			const override = this.#resolveLiveModelOverride(model, hasLiveModel);
-			const customModel = this.#resolveLiveCustomModelOverlay(model);
-			const promptCache = override?.promptCache !== undefined ? override.promptCache : customModel?.promptCache;
-			if (promptCache === undefined || promptCache === model.promptCache) continue;
+			const customModel = this.#resolveLivePromptCacheOverlay(model);
+			const isRuntimeReplacement = customModel?.isRuntime === true;
+			const promptCache =
+				override?.promptCache !== undefined
+					? override.promptCache
+					: isRuntimeReplacement
+						? (customModel?.overlay.promptCache ??
+							buildModel({ ...toModelSpec(model), promptCache: undefined }).promptCache)
+						: customModel?.overlay.promptCache;
+			const shouldApplyPromptCache =
+				override?.promptCache !== undefined ||
+				isRuntimeReplacement ||
+				customModel?.overlay.promptCache !== undefined;
+			if (!shouldApplyPromptCache || promptCache === model.promptCache) continue;
 			projected ??= models.slice();
 			projected[index] = { ...model, promptCache };
 		}
@@ -3367,6 +3398,7 @@ export interface ProviderConfigInput {
 		cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 		contextWindow: number;
 		maxTokens: number;
+		promptCache?: Model<Api>["promptCache"];
 		/** Whether Codex requests should prefer WebSocket transport. */
 		preferWebsockets?: boolean;
 		headers?: Record<string, string>;

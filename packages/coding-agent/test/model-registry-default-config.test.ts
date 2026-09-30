@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
+import { ModelRegistry, type ProviderConfigInput } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getAgentDir, setAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
@@ -258,7 +258,86 @@ describe("ModelRegistry default custom models config", () => {
 			}
 		});
 
-		test("model override lifetime replaces the matching custom definition", () => {
+		test("runtime lifetime replacement outranks the matching YAML definition after offline rebuild", async () => {
+			const registry = createPromptCacheRegistry(
+				"prompt-cache-runtime-precedence.yml",
+				[
+					"providers:",
+					"  amazon-bedrock:",
+					"    baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com",
+					"    api: bedrock-converse-stream",
+					"    apiKey: TEST_KEY",
+					"    models:",
+					bedrockModelDefinition({ short: 90 }),
+					"",
+				].join("\n"),
+			);
+			expect(requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL).promptCache).toEqual({
+				short: 90,
+			});
+
+			registry.registerProvider(
+				"amazon-bedrock",
+				runtimeBedrockProvider({ short: 180 }),
+				"ext://runtime-cache-lifetime",
+			);
+			const options: SimpleStreamOptions = { cacheRetention: "short" };
+			const expectRuntimeLifetime = (model: Model) => {
+				expect(model.promptCache).toEqual({ short: 180 });
+				expect(getPromptCacheTtlMs(model, options)).toBe(180_000);
+
+				const scheduledAt = Date.now();
+				const armed = armRegistryModel(model, options);
+				try {
+					expect(armed.warmer.status.state).toBe("scheduled");
+					expect(armed.warmer.status.nextWarmAt).toBe(scheduledAt + 162_000);
+					expect(armed.streamCalls()).toBe(0);
+				} finally {
+					armed.warmer.cancel();
+				}
+			};
+
+			expectRuntimeLifetime(requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL));
+			await registry.refresh("offline");
+			expectRuntimeLifetime(requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL));
+		});
+
+		test("empty runtime lifetime opts out, while absent runtime lifetime uses catalog defaults", () => {
+			const registry = createPromptCacheRegistry(
+				"prompt-cache-runtime-opt-out.yml",
+				[
+					"providers:",
+					"  amazon-bedrock:",
+					"    baseUrl: https://bedrock-runtime.us-east-1.amazonaws.com",
+					"    api: bedrock-converse-stream",
+					"    apiKey: TEST_KEY",
+					"    models:",
+					bedrockModelDefinition({ short: 90 }),
+					"",
+				].join("\n"),
+			);
+			registry.registerProvider("amazon-bedrock", runtimeBedrockProvider({}), "ext://runtime-cache-opt-out");
+
+			const model = requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL);
+			const options: SimpleStreamOptions = { cacheRetention: "short" };
+			expect(model.promptCache).toEqual({});
+			expect(getPromptCacheTtlMs(model, options)).toBeUndefined();
+
+			const armed = armRegistryModel(model, options);
+			try {
+				expect(armed.warmer.status.state).toBe("inactive");
+				expect(armed.streamCalls()).toBe(0);
+			} finally {
+				armed.warmer.cancel();
+			}
+			registry.clearSourceRegistrations("ext://runtime-cache-opt-out");
+			registry.registerProvider("amazon-bedrock", runtimeBedrockProvider(), "ext://runtime-cache-absent");
+			const catalogDefaultModel = requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL);
+			expect(catalogDefaultModel.promptCache).toEqual({ short: 300, long: 3600 });
+			expect(getPromptCacheTtlMs(catalogDefaultModel, options)).toBe(300_000);
+		});
+
+		test("model override lifetime remains highest priority over runtime and YAML definitions", () => {
 			const registry = createPromptCacheRegistry(
 				"prompt-cache-override-precedence.yml",
 				[
@@ -270,24 +349,29 @@ describe("ModelRegistry default custom models config", () => {
 					"    modelOverrides:",
 					`      ${JSON.stringify(BEDROCK_OPUS_MODEL)}:`,
 					"        promptCache:",
-					"          short: 180",
+					"          short: 120",
 					"    models:",
 					bedrockModelDefinition({ short: 90, long: 3600 }),
 					"",
 				].join("\n"),
 			);
+			registry.registerProvider(
+				"amazon-bedrock",
+				runtimeBedrockProvider({ short: 180 }),
+				"ext://runtime-cache-override",
+			);
 			const model = requireRegistryModel(registry, "amazon-bedrock", BEDROCK_OPUS_MODEL);
 			const options: SimpleStreamOptions = { cacheRetention: "short" };
 
-			expect(model.promptCache).toEqual({ short: 180 });
-			expect(getPromptCacheTtlMs(model, options)).toBe(180_000);
+			expect(model.promptCache).toEqual({ short: 120 });
+			expect(getPromptCacheTtlMs(model, options)).toBe(120_000);
 			expect(getPromptCacheTtlMs(model, { cacheRetention: "long" })).toBeUndefined();
 
 			const scheduledAt = Date.now();
 			const armed = armRegistryModel(model, options);
 			try {
 				expect(armed.warmer.status.state).toBe("scheduled");
-				expect(armed.warmer.status.nextWarmAt).toBe(scheduledAt + 162_000);
+				expect(armed.warmer.status.nextWarmAt).toBe(scheduledAt + 108_000);
 				expect(armed.streamCalls()).toBe(0);
 			} finally {
 				armed.warmer.cancel();
@@ -453,6 +537,32 @@ function bedrockModelDefinition(promptCache: { short: number; long?: number }): 
 		"        contextWindow: 200000",
 		"        maxTokens: 8000",
 	].join("\n");
+}
+
+function runtimeBedrockProvider(promptCache?: Model["promptCache"]): ProviderConfigInput {
+	return {
+		baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+		apiKey: "TEST_KEY",
+		api: "bedrock-converse-stream",
+		models: [
+			{
+				id: BEDROCK_OPUS_MODEL,
+				name: "Runtime Claude Opus cache fixture",
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+				contextWindow: 200000,
+				maxTokens: 8000,
+				...(promptCache !== undefined ? { promptCache } : {}),
+				compat: {
+					promptCacheMode: "explicit",
+					supportsLongPromptCacheRetention: true,
+					promptCacheMinimumTokens: 0,
+					promptCacheMaximumCheckpoints: 2,
+				},
+			},
+		],
+	};
 }
 
 function armRegistryModel(
