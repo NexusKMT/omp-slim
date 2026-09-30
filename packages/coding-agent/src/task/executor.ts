@@ -1662,7 +1662,8 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 
 	/**
 	 * Tool calls in flight, by call id. Sibling calls run concurrently, so one call ending must not
-	 * blank or relabel another that is still running: the live row shows the oldest remaining call.
+	 * blank or relabel another that is still running: the live row shows the newest started call, and
+	 * when that call ends it falls back to the oldest one still running.
 	 */
 	const activeTools = new Map<
 		string,
