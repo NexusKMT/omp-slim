@@ -225,7 +225,6 @@ fn structural(role: &str) -> bool {
 	matches!(
 		role,
 		"window"
-			| "group"
 			| "webarea"
 			| "list"
 			| "table"
@@ -241,10 +240,10 @@ fn structural(role: &str) -> bool {
 
 /// Drops unnamed, inactionable nodes that carry nothing, while keeping every
 /// survivor below them: a container with no survivors disappears, one wrapping
-/// a single survivor (a `group`, or any role outside [`structural`]) gives way
-/// to it, and one grouping several survivors stays. A container's role never
-/// decides whether its content is shown; `AXSplitGroup`, which holds the list
-/// and detail panes of Reminders, Contacts and Notes, is on no role list.
+/// a single survivor (any role outside [`structural`], `group` included) gives
+/// way to it, and one grouping several survivors stays. A container's role
+/// never decides whether its content is shown; `AXSplitGroup`, which holds the
+/// list and detail panes of Reminders, Contacts and Notes, is on no role list.
 fn filter_node(mut node: WalkNode, all: bool) -> Option<WalkNode> {
 	node.children = node
 		.children
@@ -256,7 +255,7 @@ fn filter_node(mut node: WalkNode, all: bool) -> Option<WalkNode> {
 	}
 	match node.children.len() {
 		0 => None,
-		1 if node.props.role == "group" || !structural(&node.props.role) => node.children.pop(),
+		1 if !structural(&node.props.role) => node.children.pop(),
 		_ => Some(node),
 	}
 }
