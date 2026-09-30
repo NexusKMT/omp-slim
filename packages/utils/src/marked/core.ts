@@ -471,9 +471,8 @@ function hasDefinitions(links: Links): boolean {
 }
 
 /**
- * A link, image, emphasis or strong emphasis token whose `tokens` are the lex of `src`, a part of the source that
- * shares `closers`. The rule that matched it has returned by then, so only the lexer's own frame stays on the stack
- * for each nesting level.
+ * A link, image, emphasis or strong emphasis token whose `tokens` are still to be lexed from `src`, a part of the
+ * source that shares `closers`. `inlineTokens` lexes it once the rule that matched it has returned.
  */
 interface NestedMatch {
 	token: Tokens.Link | Tokens.Image | Tokens.Em | Tokens.Strong;
@@ -583,14 +582,44 @@ function trimBareUrl(candidate: string): string {
 	return out;
 }
 
-// Each level of nested links or emphasis holds one frame of this function on the stack while the level inside it is
-// lexed. The rules that nest only match, and their content is lexed from this loop, where few locals are live.
+/** The lex of one inline source, carried across the nested sources lexed inside it. */
+interface InlineLex {
+	readonly src: string;
+	readonly lexer: Lexer;
+	readonly output: Token[];
+	readonly closers: InlineClosers;
+	readonly stops: TextStops;
+	readonly textRun: TextRun;
+	readonly context: TokenizerThis;
+	/** The part of `src` not lexed yet, always a suffix of it. */
+	rest: string;
+}
+
+// Each level of nested links or emphasis keeps only this loop's small frame on the stack while the level inside it
+// is lexed: the rules run in `lexToNested`, which returns each link, image or emphasis before its content is lexed.
 function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
-	const closers = takeClosers(lexer, src);
-	const stops = new TextStops(src, lexer);
-	const textRun = new TextRun(src);
-	const context: TokenizerThis = { lexer, source: src };
-	let rest = src;
+	const lex: InlineLex = {
+		src,
+		lexer,
+		output,
+		closers: takeClosers(lexer, src),
+		stops: new TextStops(src, lexer),
+		textRun: new TextRun(src),
+		context: { lexer, source: src },
+		rest: src,
+	};
+	for (let nested = lexToNested(lex); nested; nested = lexToNested(lex)) {
+		shareClosers(lexer, nested.src, nested.closers);
+		nested.token.tokens = lexer.inlineTokens(nested.src);
+		output.push(nested.token);
+	}
+	return output;
+}
+
+/** Lexes `lex.rest` up to the next link, image or emphasis, which it returns with `lex.rest` past it, or to its end. */
+function lexToNested(lex: InlineLex): NestedMatch | undefined {
+	const { src, lexer, output, closers, stops, textRun, context } = lex;
+	let rest = lex.rest;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;
 		for (const extension of lexer.extensions.inline) {
@@ -643,11 +672,8 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 		}
 		const nested = matchLink(rest, lexer, closers) ?? matchEmphasis(rest, output, closers);
 		if (nested) {
-			shareClosers(lexer, nested.src, nested.closers);
-			nested.token.tokens = lexer.inlineTokens(nested.src);
-			output.push(nested.token);
-			rest = rest.slice(nested.token.raw.length);
-			continue;
+			lex.rest = rest.slice(nested.token.raw.length);
+			return nested;
 		}
 		if (rest.startsWith("~~")) {
 			let del: Tokens.Del | undefined | false;
@@ -692,7 +718,8 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[]): Token[] {
 		textRun.append(output, pos, pos + next);
 		rest = rest.slice(next);
 	}
-	return output;
+	lex.rest = rest;
+	return undefined;
 }
 
 function splitTableRow(line: string): string[] {
