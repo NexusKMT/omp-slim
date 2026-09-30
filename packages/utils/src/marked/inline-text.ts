@@ -93,12 +93,17 @@ export class TextStops {
 		let next =
 			Math.min(src.length, this.#tokenChar, this.#schemeFrom(from), this.#mailFrom(from), this.#hardBreak) - pos;
 		const lexer = this.#lexer;
-		for (const extension of lexer.extensions.inline) {
-			// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
-			const at = extension.startFrom
-				? this.#startFrom(extension, extension.startFrom, pos) - pos
-				: extension.start?.call({ lexer }, rest);
-			if (typeof at === "number" && at > 0 && at < next) next = at;
+		const extensions = lexer.extensions.inline;
+		// Only a lexer with inline extensions enters the loop. The JIT can hoist a hint it inlined from another lexer's
+		// extension, such as a search of `rest`, ahead of the loop, where it would run at every text step.
+		if (extensions.length !== 0) {
+			for (const extension of extensions) {
+				// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
+				const at = extension.startFrom
+					? this.#startFrom(extension, extension.startFrom, pos) - pos
+					: extension.start?.call({ lexer }, rest);
+				if (typeof at === "number" && at > 0 && at < next) next = at;
+			}
 		}
 		// `slice` reads a fractional hint from `start` as its integer part.
 		return Math.trunc(next);

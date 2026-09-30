@@ -574,4 +574,27 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		Lexer.lex(src);
 		expect(performance.now() - start).toBeLessThan(2_000);
 	});
+
+	// The JIT inlines the hint below into the text step and can run its search of the rest ahead of the extension
+	// loop, so a lexer with no extension would search at every text step.
+	test("lexes without extensions in linear time once another lexer's start hint is compiled", () => {
+		const hinted = new Marked().use({
+			extensions: [
+				{
+					name: "latex",
+					level: "inline",
+					start(src) {
+						const index = src.indexOf("$");
+						return index === -1 ? undefined : index;
+					},
+					tokenizer: () => undefined,
+				},
+			],
+		});
+		for (let i = 0; i < 20_000; i++) hinted.lexer("a $x$ b_c d_e f_g");
+		const src = `</${"<!--".repeat(80_000)}${"a".repeat(1_600_000)}`;
+		const start = performance.now();
+		Lexer.lex(src);
+		expect(performance.now() - start).toBeLessThan(2_000);
+	});
 });
