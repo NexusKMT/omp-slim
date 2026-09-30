@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `AuthStorage.keys.setConfig(provider, value, { fallback: true })` registers a key that is used only when no stored OAuth or `/login` credential exists, instead of overriding them; `removeConfig`/`clearConfig` also clear these fallbacks ([#13815](https://github.com/can1357/oh-my-pi/pull/13815) by [@H4vC](https://github.com/H4vC))
+
 ### Fixed
 
 - Auth-broker clients no longer restore a logged-out credential, or overwrite a newer login, when a token refresh reply arrives late ([#13770](https://github.com/can1357/oh-my-pi/pull/13770) by [@atyrode](https://github.com/atyrode)).
