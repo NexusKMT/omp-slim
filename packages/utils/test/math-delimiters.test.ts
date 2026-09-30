@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mathBlockAt, mathOpenerAt, mathSpanAt, mathStartIndex } from "../src/math-delimiters";
+import { Marked } from "../src/marked";
+import { mathBlockAt, mathOpenerAt, mathSpanAt, mathSpanInContext, mathStartIndex } from "../src/math-delimiters";
 
 describe("math span grammar", () => {
 	test("reports opener, display mode, body and end offset for each delimiter form", () => {
@@ -106,5 +107,51 @@ describe("math block grammar", () => {
 		expect(mathBlockAt("$$\n \n$$\n")).toBeUndefined();
 		expect(mathBlockAt("$$ x^2 $$\n")).toBeUndefined();
 		expect(mathBlockAt("    $$\nx\n    $$\n")).toBeUndefined(); // four spaces: indented code
+	});
+});
+
+describe("math spans for a marked inline tokenizer", () => {
+	// One context stands for one inline source. A closer scan that fails there rules out the openers it passed, so
+	// every other offset must still find the span `mathSpanAt` finds in the rest of the source.
+	test("finds at every offset of one source the span mathSpanAt finds in the rest of it", () => {
+		const sources = [
+			"$1*$2*$3 x\n$y$ $4 and $z$",
+			"$a $b$ c\\$d$ $\\$ e$",
+			"\\(a \\(b \\[c \\[d $$e $$f",
+			"\\(a\\) \\(b $$c$$ $$ $$ $$d \\\\(e\\)",
+		];
+		for (const source of sources) {
+			const context = { source };
+			for (let at = 0; at < source.length; at++) {
+				const rest = source.slice(at);
+				expect([at, mathSpanInContext(context, rest)]).toEqual([at, mathSpanAt(rest, 0)]);
+			}
+		}
+	});
+
+	// Generous bound: each shape takes a tokenizer that rescans for a closer at every opener several seconds. The
+	// engine runs the `\)` search (`indexOf`), so a long word follows those openers: each search runs to the end.
+	test.each([
+		["$ openers before digits (80 KB)", "$1*".repeat(26_667)],
+		["\\( openers before a long word (1.8 MB)", `${"\\(a ".repeat(40_000)}${"a".repeat(1_600_000)}`],
+	])("lexes a long paragraph of unclosed %s in under two seconds", (_name, src) => {
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "math",
+					level: "inline",
+					startFrom: mathStartIndex,
+					tokenizer(rest) {
+						const span = mathSpanInContext(this, rest);
+						return span ? { type: "math", raw: rest.slice(0, span.end), text: span.body } : undefined;
+					},
+				},
+			],
+		});
+		// Compile the lexing paths first, so the bound measures the lexing.
+		marked.lexer(src.slice(0, 2_000));
+		const start = performance.now();
+		marked.lexer(src);
+		expect(performance.now() - start).toBeLessThan(2_000);
 	});
 });

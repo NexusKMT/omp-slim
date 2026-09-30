@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { Lexer, Marked, type Token, type TokenizerAndRendererExtension, type TokenizerExtension } from "../src/marked";
+import {
+	Lexer,
+	Marked,
+	type Token,
+	type TokenizerAndRendererExtension,
+	type TokenizerExtension,
+	type TokenizerThis,
+} from "../src/marked";
 import goldens from "./fixtures/marked/goldens.json";
 
 describe("marked compatibility", () => {
@@ -320,6 +327,29 @@ describe("marked compatibility", () => {
 		]);
 	});
 
+	// A tokenizer that scans ahead keeps what it learned for the rest of its source in a WeakMap keyed by the context.
+	test("gives an inline tokenizer one context per inline source, holding that source", () => {
+		const byContext = new Map<TokenizerThis, string[]>();
+		const marked = new Marked().use({
+			extensions: [
+				{
+					name: "spy",
+					level: "inline",
+					tokenizer(src) {
+						expect(this.source?.endsWith(src)).toBe(true);
+						byContext.set(this, [...(byContext.get(this) ?? []), src]);
+						return undefined;
+					},
+				},
+			],
+		});
+		marked.lexer("a *b* c");
+		expect([...byContext].map(([context, srcs]) => [context.source, srcs])).toEqual([
+			["a *b* c", ["a *b* c", "*b* c", " c"]],
+			["b", ["b"]],
+		]);
+	});
+
 	// Emphasis and link closers come from per-paragraph indexes of delimiters
 	// and brackets; these shapes pin where each opener closes.
 	test("closes emphasis past nested, unclosed, run-internal and escaped delimiters", () => {
@@ -473,7 +503,8 @@ describe("inline lexing stays linear on long paragraphs", () => {
 	});
 
 	// Generous bound: each shape takes quadratic lexing, or lexing that keeps an index per nesting level, several
-	// seconds; linear lexing takes well under 300 ms.
+	// seconds; linear lexing takes well under 300 ms. Where the engine runs the search (`indexOf`), a long word
+	// follows the openers, so each opener's search runs to the end of the paragraph.
 	test.each([
 		["unclosed [ (80 KB)", "[x ".repeat(26_667)],
 		["unclosed * (80 KB)", "*x ".repeat(26_667)],
@@ -484,7 +515,12 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		["nested links (20 KB)", `${"[".repeat(4_000)}a${"](u)".repeat(4_000)}`],
 		["nested brackets (80 KB)", `${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
 		["nested brackets under a definition (80 KB)", `[a]: /u\n\n${"[".repeat(40_000)}a${"]".repeat(40_000)}`],
+		["URL with trailing punctuation (80 KB)", `http://x${".".repeat(80_000)}`],
+		["unclosed HTML tags (80 KB)", "<a ".repeat(26_667)],
+		["unclosed HTML comments before a long word (1.8 MB)", `</${"<!--".repeat(40_000)}${"a".repeat(1_600_000)}`],
 	])("lexes a long paragraph of %s in under two seconds", (_name, src) => {
+		// Compile the lexing paths first, so the bound measures the lexing.
+		Lexer.lex(src.slice(0, 2_000));
 		const start = performance.now();
 		Lexer.lex(src);
 		expect(performance.now() - start).toBeLessThan(2_000);

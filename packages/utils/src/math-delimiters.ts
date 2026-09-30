@@ -74,10 +74,74 @@ export function mathSpanAt(source: string, at: number, from = 0): MathSpan | und
 	const opener = mathOpenerAt(source, at);
 	if (opener === undefined || escapedAt(source, at, from)) return undefined;
 	const bodyStart = at + opener.length;
-	const closeAt = opener === "$" ? dollarCloserIndex(source, at) : closerIndex(source, opener, bodyStart);
+	return spanOf(
+		source,
+		opener,
+		bodyStart,
+		opener === "$" ? scanDollar(source, at).close : closerIndex(source, opener, bodyStart),
+	);
+}
+
+/**
+ * The math spans of one source, found as {@link mathSpanAt} finds them with the escape scan stopping at the opener
+ * (the caller has consumed the escapes before it). A closer scan that finds nothing also rules out the openers of
+ * its kind that it passed, so asking at every opener of a long run of unclosed ones reads the run once.
+ */
+export class MathSpans {
+	readonly #source: string;
+	// The last `$` whose closer scan failed and where that scan stopped: a `$` between the two has no closer either.
+	#dollarOpen = -1;
+	#dollarStop = -1;
+	// Per opener other than `$`, a body start from which no unescaped closer follows.
+	readonly #unclosedFrom: Record<Exclude<MathOpener, "$">, number> = { $$: Infinity, "\\(": Infinity, "\\[": Infinity };
+
+	constructor(source: string) {
+		this.#source = source;
+	}
+
+	/** The span opened at `at`, or `undefined`. */
+	spanAt(at: number): MathSpan | undefined {
+		const source = this.#source;
+		const opener = mathOpenerAt(source, at);
+		if (opener === undefined) return undefined;
+		const bodyStart = at + opener.length;
+		if (opener === "$") {
+			if (this.#dollarOpen < at && at < this.#dollarStop) return undefined;
+			const { close, stop } = scanDollar(source, at);
+			if (close === -1) {
+				this.#dollarOpen = at;
+				this.#dollarStop = stop;
+			}
+			return spanOf(source, opener, bodyStart, close);
+		}
+		// A later body start sees the same closers: the opener before it ends a backslash run.
+		if (bodyStart >= this.#unclosedFrom[opener]) return undefined;
+		const close = closerIndex(source, opener, bodyStart);
+		if (close === -1) this.#unclosedFrom[opener] = bodyStart;
+		return spanOf(source, opener, bodyStart, close);
+	}
+}
+
+const spansByContext = new WeakMap<object, MathSpans>();
+
+/**
+ * The span opened at the start of `src`, with `end` counted from there, for a marked inline tokenizer: `src` is the
+ * suffix of `context.source` the tokenizer received, and the scans are remembered per context, which marked keeps
+ * for one inline source.
+ */
+export function mathSpanInContext(context: { source?: string }, src: string): MathSpan | undefined {
+	const source = context.source ?? src;
+	let spans = spansByContext.get(context);
+	if (!spans) spansByContext.set(context, (spans = new MathSpans(source)));
+	const at = source.length - src.length;
+	const span = spans.spanAt(at);
+	return span && { ...span, end: span.end - at };
+}
+
+function spanOf(source: string, opener: MathOpener, bodyStart: number, closeAt: number): MathSpan | undefined {
 	if (closeAt === -1) return undefined;
 	const body = source.slice(bodyStart, closeAt);
-	// `dollarCloserIndex` already rejects an all-space `$…$`; `$$ $$` needs the
+	// `scanDollar` already rejects an all-space `$…$`; `$$ $$` needs the
 	// same guard here, while `\(\)` and `\[\]` are unambiguous enough to keep.
 	if (opener === "$$" && body.trim() === "") return undefined;
 	return { opener, display: opener === "$$" || opener === "\\[", end: closeAt + opener.length, body };
@@ -112,28 +176,31 @@ function escapedAt(source: string, index: number, from: number): boolean {
 }
 
 /**
- * Offset of the `$` that closes an inline span opened at `open`, or -1. Pandoc's
+ * Offset of the `$` that closes an inline span opened at `open`, or -1, and where
+ * the scan stopped: at that `$`, or where it ruled a closer out. Pandoc's
  * anti-currency heuristics: the opener must not be followed by whitespace, the
  * closer must not be preceded by whitespace nor followed by a digit, `\$` is a
  * literal dollar, and the span may not cross a newline — so "$5 and $10" is
  * prose, not math.
  */
-function dollarCloserIndex(source: string, open: number): number {
+function scanDollar(source: string, open: number): { close: number; stop: number } {
 	const after = source[open + 1];
-	if (after === undefined || after === " " || after === "\t" || after === "\n" || after === "$") return -1;
+	if (after === undefined || after === " " || after === "\t" || after === "\n" || after === "$") {
+		return { close: -1, stop: open + 1 };
+	}
 	for (let at = open + 1; at < source.length; at++) {
 		const char = source[at];
 		if (char === "\\") {
 			at++;
 			continue;
 		}
-		if (char === "\n") return -1;
+		if (char === "\n") return { close: -1, stop: at };
 		if (char !== "$") continue;
 		const before = source[at - 1];
-		if (before === " " || before === "\t") return -1;
+		if (before === " " || before === "\t") return { close: -1, stop: at };
 		const next = source[at + 1];
 		if (next !== undefined && next >= "0" && next <= "9") continue; // currency: keep scanning
-		return source.slice(open + 1, at).trim().length > 0 ? at : -1;
+		return { close: source.slice(open + 1, at).trim().length > 0 ? at : -1, stop: at };
 	}
-	return -1;
+	return { close: -1, stop: source.length };
 }

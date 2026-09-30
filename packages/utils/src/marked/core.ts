@@ -247,6 +247,12 @@ export type TokensList = Token[] & { links: Links };
 /** Context supplied to extension tokenizers. */
 export interface TokenizerThis {
 	lexer: Lexer;
+	/**
+	 * For an inline tokenizer, the whole inline source; the `src` it receives is the suffix of it that starts at
+	 * `source.length - src.length`. Inline tokenizers get one context object per inline source, the same for every
+	 * call while the lexer works through that source, so a tokenizer can keep state for it in a `WeakMap`.
+	 */
+	source?: string;
 }
 /** A tokenizer extension callback. */
 export type TokenizerExtensionFunction = (
@@ -406,26 +412,15 @@ function findDelimiter(src: string, delimiter: string, from: number): number {
 	return at;
 }
 
-function inlineHtmlPrefix(src: string): string | undefined {
+/** The inline HTML (a tag or a comment) at the start of `src`, a suffix of `closers`' source, or `undefined`. */
+function inlineHtmlPrefix(src: string, closers: InlineClosers): string | undefined {
 	if (src.startsWith("<!--")) {
-		const end = src.indexOf("-->", 4);
+		const end = closers.closeComment(src);
 		return end === -1 ? undefined : src.slice(0, end + 3);
 	}
 	if (!/^<\/?[A-Za-z][A-Za-z0-9-]*(?:\s|\/?>)/.test(src)) return undefined;
-	let quote = "";
-	for (let i = 1; i < src.length; i++) {
-		const char = src[i]!;
-		if (quote !== "") {
-			if (char === quote) quote = "";
-			continue;
-		}
-		if (char === '"' || char === "'") {
-			quote = char;
-			continue;
-		}
-		if (char === ">") return src.slice(0, i + 1);
-	}
-	return undefined;
+	const end = closers.closeTag(src);
+	return end === -1 ? undefined : src.slice(0, end + 1);
 }
 
 /** Tokenizes the built-in inline Markdown surface. */
@@ -518,8 +513,9 @@ function matchLink(src: string, lexer: Lexer, closers: InlineClosers): Tokens.Li
 }
 
 function trimBareUrl(candidate: string): string {
-	let out = candidate;
-	while (/[.,:;!?]$/.test(out)) out = out.slice(0, -1);
+	let end = candidate.length;
+	while (end > 0 && ".,:;!?".includes(candidate[end - 1]!)) end--;
+	let out = candidate.slice(0, end);
 	let opens = 0;
 	let closes = 0;
 	for (const char of out) {
@@ -542,11 +538,12 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			: new InlineClosers(new CloserIndexes(src), src.length);
 	const stops = new TextStops(src, lexer);
 	const textRun = new TextRun(src);
+	const context: TokenizerThis = { lexer, source: src };
 	let rest = src;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;
 		for (const extension of lexer.extensions.inline) {
-			custom = extension.tokenizer.call({ lexer }, rest, output);
+			custom = extension.tokenizer.call(context, rest, output);
 			if (custom?.raw) break;
 		}
 		if (custom?.raw) {
@@ -587,7 +584,7 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			rest = rest.slice(auto[0].length);
 			continue;
 		}
-		const html = inlineHtmlPrefix(rest);
+		const html = inlineHtmlPrefix(rest, closers);
 		if (html) {
 			output.push({ type: "html", raw: html, inLink: false, inRawBlock: false, block: false, text: html });
 			rest = rest.slice(html.length);

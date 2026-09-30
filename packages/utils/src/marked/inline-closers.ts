@@ -1,7 +1,7 @@
 /**
- * Where brackets and emphasis close in inline Markdown. The indexes are built over one root inline source, each on
- * first use, and shared by every source lexed inside it (a link label, the text of emphasis), so lexing nested
- * sources builds no index of its own and keeps none alive per nesting level.
+ * Where brackets, emphasis and inline HTML close in inline Markdown. The indexes are built over one root inline
+ * source, each on first use, and shared by every source lexed inside it (a link label, the text of emphasis), so
+ * lexing nested sources builds no index of its own and keeps none alive per nesting level.
  */
 
 export const PUNCTUATION = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
@@ -174,6 +174,8 @@ export class CloserIndexes {
 	#square: BracketDepths | undefined;
 	#round: BracketDepths | undefined;
 	readonly #emphasis = new Map<string, EmphasisDelimiters>();
+	#tagEnds: Int32Array | undefined;
+	#commentEnds: number[] | undefined;
 
 	constructor(src: string) {
 		this.#src = src;
@@ -193,12 +195,49 @@ export class CloserIndexes {
 		if (!delimiters) this.#emphasis.set(key, (delimiters = new EmphasisDelimiters(this.#src, marker, width)));
 		return delimiters;
 	}
+
+	/**
+	 * For each offset, where the HTML rule's scan for a tag's end from there stops: the first ">" outside quotes,
+	 * where a quote runs to the next quote of its kind, or -1 at the end of the source.
+	 */
+	get tagEnds(): Int32Array {
+		if (this.#tagEnds) return this.#tagEnds;
+		const src = this.#src;
+		const ends = new Int32Array(src.length + 1);
+		ends[src.length] = -1;
+		let nextDouble = -1;
+		let nextSingle = -1;
+		for (let at = src.length - 1; at >= 0; at--) {
+			const code = src.charCodeAt(at);
+			if (code === 0x3e /* > */) {
+				ends[at] = at;
+			} else if (code === 0x22 /* " */) {
+				ends[at] = nextDouble === -1 ? -1 : ends[nextDouble + 1]!;
+				nextDouble = at;
+			} else if (code === 0x27 /* ' */) {
+				ends[at] = nextSingle === -1 ? -1 : ends[nextSingle + 1]!;
+				nextSingle = at;
+			} else {
+				ends[at] = ends[at + 1]!;
+			}
+		}
+		return (this.#tagEnds = ends);
+	}
+
+	/** Every offset where "-->" starts, ascending. */
+	get commentEnds(): number[] {
+		if (this.#commentEnds) return this.#commentEnds;
+		const src = this.#src;
+		const ends: number[] = [];
+		for (let at = src.indexOf("-->"); at !== -1; at = src.indexOf("-->", at + 1)) ends.push(at);
+		return (this.#commentEnds = ends);
+	}
 }
 
 /**
- * The link and emphasis rules' closer lookups for one inline source, which is the root source of `indexes` or a
- * part of it that ends at `end`. Offsets are relative to `rest`, a suffix of the source. A closer the root source
- * places at or past `end` does not exist in the source.
+ * The link, emphasis and inline HTML rules' closer lookups for one inline source, which is the root source of
+ * `indexes` or a part of it that ends at `end`. Offsets are relative to `rest`, a suffix of the source. A closer the
+ * root source places at or past `end` does not exist in the source.
  */
 export class InlineClosers {
 	readonly #indexes: CloserIndexes;
@@ -235,6 +274,21 @@ export class InlineClosers {
 		const pos = this.#end - rest.length;
 		const close = this.#indexes.emphasis(marker, width).closeFor(pos, this.#end);
 		return close === -1 ? -1 : close - pos;
+	}
+
+	/** Where the HTML tag opened by the "<" at the start of `rest` ends: the first ">" after it outside quotes, or -1. */
+	closeTag(rest: string): number {
+		const pos = this.#end - rest.length;
+		const close = this.#indexes.tagEnds[pos + 1]!;
+		return close === -1 || close >= this.#end ? -1 : close - pos;
+	}
+
+	/** Where the first "-->" after the "<!--" at the start of `rest` starts, or -1. */
+	closeComment(rest: string): number {
+		const pos = this.#end - rest.length;
+		const ends = this.#indexes.commentEnds;
+		const at = lowerBound(ends, pos + 4);
+		return at === ends.length || ends[at]! + 3 > this.#end ? -1 : ends[at]! - pos;
 	}
 
 	#close(depths: BracketDepths, rest: string, start: number): number {

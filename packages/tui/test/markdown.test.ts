@@ -2461,6 +2461,38 @@ describe("Math rendering", () => {
 	});
 });
 
+describe("Strikethrough", () => {
+	const strike = (text: string): string =>
+		stripVTControlCharacters(
+			renderInlineMarkdown(text, { ...defaultMarkdownTheme, strikethrough: (inner: string) => `<S>${inner}</S>` }),
+		);
+
+	it("strikes through as GFM's `~~` rule reads it", () => {
+		expect(strike("~~a~~ ~~a ~~b~~ c")).toBe("<S>a</S> <S>a ~~b</S> c");
+		expect(strike("~~a~~~ b~~ ~~ c~~ d~~")).toBe("<S>a~~~ b</S> ~~ c~~ d~~");
+		expect(strike("~~a\\~~ b~~ ~~a \\\\~~")).toBe("<S>a~~ b</S> <S>a \\</S>");
+		expect(strike("x~~y~~z ~~~~ ~~a\\")).toBe("x<S>y</S>z ~~~~ ~~a\\");
+	});
+
+	it("still strikes through past an opener whose text a backslash before a line break ends", () => {
+		expect(strike("~~a\\\nb~~ ~~c\nd~~")).toBe("~~ab~~ <S>c\nd</S>");
+	});
+});
+
+describe("inline rendering stays linear on long paragraphs", () => {
+	// Generous bound: each shape took v18.4.4 several seconds at 40 KB; linear lexing takes well under 300 ms.
+	it.each([
+		["unclosed strikethrough (80 KB)", "~~a ".repeat(20_000)],
+		["unclosed $ before digits (80 KB)", "$1*".repeat(26_667)],
+	])("renders a long paragraph of %s in under two seconds", (_name, text) => {
+		// Compile the rendering paths first, so the bound measures the rendering.
+		renderInlineMarkdown(text.slice(0, 2_000), defaultMarkdownTheme);
+		const start = performance.now();
+		renderInlineMarkdown(text, defaultMarkdownTheme);
+		expect(performance.now() - start).toBeLessThan(2_000);
+	});
+});
+
 describe("inline start scanners (perf rewrites)", () => {
 	// mathStartIndex replaced a regex scan as the math extension's start hint;
 	// it must find exactly the offsets the regex found.

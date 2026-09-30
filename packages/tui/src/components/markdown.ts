@@ -3,11 +3,11 @@ import {
 	Lexer,
 	Marked,
 	type Token,
-	Tokenizer,
 	type TokenizerAndRendererExtension,
+	type TokenizerThis,
 	type Tokens,
 } from "@oh-my-pi/pi-utils/marked";
-import { mathBlockAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
+import { mathBlockAt, mathSpanInContext, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -29,8 +29,6 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../utils";
-
-const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
 // Marked treats the backslash in an ST-terminated OSC 8 sequence (`ESC \\`) as
 // Markdown punctuation when it is immediately followed by markup such as a
@@ -506,27 +504,76 @@ function hangWrapTreeGuideLines(text: string, width: number): string[] | undefin
 	return out;
 }
 
-class StrictStrikethroughTokenizer extends Tokenizer {
-	override del(src: string): Tokens.Del | undefined {
-		const match = STRICT_STRIKETHROUGH_REGEX.exec(src);
-		if (!match) {
-			return undefined;
-		}
+const WHITESPACE = /\s/;
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/;
 
-		const text = match[2];
-		return {
-			type: "del",
-			raw: match[0],
-			text,
-			tokens: this.lexer.inlineTokens(text),
-		};
+/**
+ * GFM strikethrough as upstream marked's rule reads it, with `~~` only: an opener not followed by whitespace or `~`,
+ * text read in units of one character or a backslash and the character after it (not a line break), and the first
+ * `~~` that follows a unit other than whitespace, `~` or a lone `\` and is not followed by another `~`. One scanner
+ * serves one inline source. A scan that finds no closer also rules out every opener it passed, so a line of unclosed
+ * openers is read once, not once per opener.
+ */
+class StrikethroughScanner {
+	readonly #source: string;
+	// The last opener whose scan found no closer, and where that scan stopped.
+	#failedOpen = -1;
+	#failedStop = -1;
+
+	constructor(source: string) {
+		this.#source = source;
+	}
+
+	/** The offset of the `~~` closing the strikethrough opened at `open`, or -1. */
+	closeAt(open: number): number {
+		const src = this.#source;
+		const first = src[open + 2];
+		if (!src.startsWith("~~", open) || first === undefined || first === "~" || WHITESPACE.test(first)) return -1;
+		// Past the opener's own "~~" its units are the failed scan's, so they meet the same closers and stop.
+		if (this.#failedOpen < open && open < this.#failedStop) return -1;
+		let at = open + 2;
+		while (at < src.length) {
+			let end: number;
+			let final: boolean;
+			if (src.charCodeAt(at) === 0x5c /* \ */) {
+				if (at + 1 === src.length || LINE_TERMINATOR.test(src[at + 1]!)) break;
+				end = at + 2;
+				final = true;
+			} else {
+				end = at + 1;
+				final = src[at] !== "~" && !WHITESPACE.test(src[at]!);
+			}
+			if (final && src.startsWith("~~", end) && src[end + 2] !== "~") return end;
+			at = end;
+		}
+		this.#failedOpen = open;
+		this.#failedStop = at;
+		return -1;
 	}
 }
 
+const strikethroughScanners = new WeakMap<TokenizerThis, StrikethroughScanner>();
+
+// Registered after every other inline extension: at a `~~` no built-in rule before marked's `del` can match, so this
+// gives the tokens a `del` override would, and the `del` override below keeps marked's own looser rule out.
+const strikethroughExtension: TokenizerAndRendererExtension = {
+	name: "strictStrikethrough",
+	level: "inline",
+	// No start hint: inline text already stops at every `~`.
+	tokenizer(src) {
+		if (!src.startsWith("~~")) return undefined;
+		const source = this.source ?? src;
+		let scanner = strikethroughScanners.get(this);
+		if (!scanner) strikethroughScanners.set(this, (scanner = new StrikethroughScanner(source)));
+		const open = source.length - src.length;
+		const close = scanner.closeAt(open);
+		if (close === -1) return undefined;
+		const text = source.slice(open + 2, close);
+		return { type: "del", raw: source.slice(open, close + 2), text, tokens: this.lexer.inlineTokens(text) };
+	},
+};
+
 const markdownParser = new Marked();
-markdownParser.setOptions({
-	tokenizer: new StrictStrikethroughTokenizer(),
-});
 
 // Math spans (`$$…$$`, `\[…\]`, `$…$`, `\(…\)`) are tokenized as a dedicated
 // `math` inline token before markdown's escape/emphasis/link rules run, so
@@ -592,7 +639,7 @@ const mathExtension: TokenizerAndRendererExtension = {
 	level: "inline",
 	startFrom: mathStartIndex,
 	tokenizer(src) {
-		const span = mathSpanAt(src, 0);
+		const span = mathSpanInContext(this, src);
 		if (!span) return undefined;
 		return { type: "math", raw: src.slice(0, span.end), text: span.body, display: span.display };
 	},
@@ -695,7 +742,14 @@ const boundedAutolinkExtension: TokenizerAndRendererExtension = {
 	},
 };
 markdownParser.use({
-	extensions: [customHrExtension, mathBlockExtension, mathEnvBlockExtension, mathExtension, boundedAutolinkExtension],
+	extensions: [
+		customHrExtension,
+		mathBlockExtension,
+		mathEnvBlockExtension,
+		mathExtension,
+		boundedAutolinkExtension,
+		strikethroughExtension,
+	],
 });
 
 // Setext-underline pre-gate for marked's `lheading` rule. The rule's lazy body
@@ -727,6 +781,8 @@ markdownParser.use({
 		lheading(src: string): Tokens.Heading | undefined | false {
 			return lheadingPossible(src) ? false : undefined;
 		},
+		// Strikethrough is `strikethroughExtension`'s: marked's own looser rule never runs.
+		del: () => undefined,
 	},
 });
 
