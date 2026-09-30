@@ -502,6 +502,30 @@ Role aliases like `@smol` expand through `settings.modelRoles`; `*` selects `@de
 
 If a role points at another role, the target model still inherits normally and any explicit suffix on the referring role wins for that role-specific use.
 
+### Model presets
+
+A model preset is a named snapshot of every role assignment plus `defaultThinkingLevel`, so you can swap a whole setup at once:
+
+```text
+/presets save cheap          # save the current roles and thinking level
+/presets switch deep         # apply a saved preset
+/presets                     # pick one from a list (interactive)
+/presets list | delete <name>
+```
+
+In `/models`, press `s` in the Roles view to save the current setup under a name. Presets live under `modelPresets` in `config.yml`:
+
+```yaml
+modelPresets:
+  deep:
+    modelRoles:
+      default: anthropic/claude-opus-4-5:high
+      smol: anthropic/claude-sonnet-4-5
+    defaultThinkingLevel: high
+```
+
+Switching writes roles the way the model picker does: into the scope chosen by `modelRoleStorage`, clearing roles the preset leaves out and replacing `--model`/`--smol` session overrides. It then switches the active model to the resulting `default` (the first available model when the preset has none) and applies the `:level` suffix on that selector, or else the preset's `defaultThinkingLevel`. When a preset's `default` model is unavailable, nothing is changed. Roles that another layer still decides — a `--config` file, a project config in `global` storage, or the global config in `project` storage — are listed in the switch message instead of being reported as switched.
+
 Related settings:
 
 - `modelRoles` (record)

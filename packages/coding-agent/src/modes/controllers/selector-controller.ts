@@ -26,6 +26,7 @@ import { reset as resetCapabilities } from "../../capability";
 import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
 import { formatLoginIdentity } from "../../cli/oauth-terminal";
+import { saveModelPreset } from "../../config/model-presets";
 import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { getRoleInfo } from "../../config/model-roles";
@@ -976,6 +977,14 @@ export class SelectorController {
 						this.ctx.showStatus(
 							order.length > 0 ? `Quick-switch cycle: ${order.join(" → ")}` : "Quick-switch cycle cleared",
 						);
+					} catch (error) {
+						this.ctx.showError(error instanceof Error ? error.message : String(error));
+					}
+				},
+				onSavePreset: name => {
+					try {
+						saveModelPreset(this.ctx.settings, name);
+						this.ctx.showStatus(`Saved model preset "${name}"`);
 					} catch (error) {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}
