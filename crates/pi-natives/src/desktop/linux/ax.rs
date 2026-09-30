@@ -13,6 +13,24 @@ pub struct AtSpiAx {
 	connection: atspi::AccessibilityConnection,
 }
 
+/// An AT-SPI top-level frame and whether its reported screen position is real.
+///
+/// Native Wayland clients cannot learn where the compositor placed them, so
+/// their toolkits answer `CoordType::Screen` with window-relative coordinates
+/// (usually `0,0`). Consumers that map `window` bounds onto a desktop capture
+/// (the Wayland window crop) must refuse when `position_known` is false.
+pub struct AtSpiWindow {
+	pub window:         DesktopWindow,
+	/// Screen and window-relative origins differ, so `window.x`/`window.y` are
+	/// global compositor coordinates. False also covers a window genuinely at
+	/// the global origin, which is indistinguishable over AT-SPI.
+	#[cfg_attr(
+		not(any(feature = "wayland-pipewire", test)),
+		expect(dead_code, reason = "only read by the pipewire capture crop")
+	)]
+	pub position_known: bool,
+}
+
 impl AtSpiAx {
 	pub(crate) fn new() -> CoreResult<Self> {
 		let rt = Builder::new_current_thread()
@@ -33,7 +51,7 @@ impl AtSpiAx {
 		}
 	}
 
-	pub(crate) fn windows(&self) -> CoreResult<Vec<DesktopWindow>> {
+	pub(crate) fn windows(&self) -> CoreResult<Vec<AtSpiWindow>> {
 		self.rt.block_on(async {
 			let mut windows = Vec::new();
 			for app in Self::apps(&self.connection)
@@ -80,19 +98,26 @@ impl AtSpiAx {
 					if width < 16 || height < 16 {
 						continue;
 					}
+					let position_known = component
+						.get_extents(CoordType::Window)
+						.await
+						.is_ok_and(|(window_x, window_y, ..)| (window_x, window_y) != (x, y));
 					let id = atspi_window_id(&frame);
-					windows.push(DesktopWindow {
-						id,
-						title,
-						app: app_name.clone(),
-						pid,
-						x,
-						y,
-						width: width as u32,
-						height: height as u32,
-						focused: state.as_ref().is_some_and(|states| {
-							states.contains(State::Focused) || states.contains(State::Active)
-						}),
+					windows.push(AtSpiWindow {
+						window: DesktopWindow {
+							id,
+							title,
+							app: app_name.clone(),
+							pid,
+							x,
+							y,
+							width: width as u32,
+							height: height as u32,
+							focused: state.as_ref().is_some_and(|states| {
+								states.contains(State::Focused) || states.contains(State::Active)
+							}),
+						},
+						position_known,
 					});
 					if windows.len() == 48 {
 						return Ok(windows);
