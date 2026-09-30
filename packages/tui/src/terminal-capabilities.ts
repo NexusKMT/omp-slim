@@ -40,6 +40,7 @@ export type TerminalId =
 	| "otty"
 	| "rio"
 	| "tern"
+	| "monstar"
 	| "base"
 	| "trueColor";
 
@@ -405,6 +406,7 @@ export function shouldEnableSynchronizedOutputByDefault(
 	switch (terminalId) {
 		case "kitty":
 		case "ghostty":
+		case "monstar":
 		case "wezterm":
 		case "iterm2":
 		case "alacritty":
@@ -470,6 +472,7 @@ export function detectStyledUnderlineSupport(terminalId: TerminalId, env: NodeJS
 	switch (terminalId) {
 		case "kitty":
 		case "ghostty":
+		case "monstar":
 		case "wezterm":
 			return true;
 		case "iterm2": {
@@ -704,6 +707,19 @@ const KNOWN_TERMINALS = Object.freeze({
 	// renders natively (Tern Surface Protocol) is decided by the `hello`
 	// handshake alone, never by this identity.
 	tern: new TerminalInfo("tern", ImageProtocol.Kitty, true, true, NotifyProtocol.Osc99),
+	// Monstar (rockorager/monstar) is a Wayland terminal built on libghostty. It
+	// sets TERM=monstar and answers XTVERSION with `monstar <version>`. It
+	// documents Kitty graphics with Unicode placeholders, OSC 8 hyperlinks, and
+	// synchronized output. libghostty reports Hangul Jamo as 2 cells, and the
+	// Monstar renderer draws curly underlines in the SGR 58 underline color, so
+	// the id-keyed allowlists treat Monstar like Ghostty.
+	// Monstar clears OSC 9;4 progress after 15 s without an update, so it also
+	// gets the Ghostty progress keepalive. The Ghostty initial image delay stays
+	// Ghostty-only: it works around a Ghostty app startup race, not libghostty.
+	// Monstar turns OSC 9 into a D-Bus notification with a default action;
+	// activating it focuses the Monstar window. The BEL path uses omp's own
+	// `notify-send` fallback instead, which cannot focus a window.
+	monstar: new TerminalInfo("monstar", ImageProtocol.Kitty, true, true, NotifyProtocol.Osc9, false, false, false, 2),
 });
 
 /** Resolve terminal identity from environment markers used by common emulators. */
@@ -725,6 +741,7 @@ export function detectTerminalId(env: NodeJS.ProcessEnv = Bun.env): TerminalId {
 		if (caseEq(program, "otty")) return "otty";
 		if (caseEq(program, "rio")) return "rio";
 		if (caseEq(program, "tern")) return "tern";
+		if (caseEq(program, "monstar")) return "monstar";
 		return null;
 	}
 
@@ -756,6 +773,7 @@ export function detectTerminalId(env: NodeJS.ProcessEnv = Bun.env): TerminalId {
 	if (clientProgramId) return clientProgramId;
 
 	if (TERM?.toLowerCase().includes("ghostty")) return "ghostty";
+	if (TERM && caseEq(TERM, "monstar")) return "monstar";
 
 	if (COLORTERM) {
 		if (caseEq(COLORTERM, "truecolor") || caseEq(COLORTERM, "24bit")) return "trueColor";

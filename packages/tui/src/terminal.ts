@@ -857,9 +857,9 @@ export class ProcessTerminal implements Terminal {
 	#mode2031DebounceTimer?: Timer;
 	#windowsTerminalAppearancePollTimer?: Timer;
 	#progressActive = false;
-	// Ghostty expires OSC 9;4 state without a heartbeat. Persistent hosts such
+	// Ghostty and Monstar expire OSC 9;4 state without a heartbeat. Persistent hosts such
 	// as Windows Terminal restart their indeterminate animation on every write.
-	readonly #keepProgressAlive = TERMINAL.id === "ghostty";
+	readonly #keepProgressAlive = TERMINAL.id === "ghostty" || TERMINAL.id === "monstar";
 	#bracketedPasteRefreshTimer?: Timer;
 	#progressTimer?: Timer;
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Detected the Monstar terminal (`TERM=monstar`, or `monstar` as the tmux client terminal type) with the Ghostty-level rendering it had before it changed `TERM`: Kitty graphics with Unicode placeholders, OSC 8 hyperlinks, synchronized output, styled underlines, and the OSC 9;4 progress keepalive. Monstar desktop notifications use OSC 9, so they focus the Monstar window when you click them.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
