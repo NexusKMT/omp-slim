@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-	hasMathBlockCloserLine,
 	MathBlockScan,
 	mathBlockAt,
+	mathBlockCloserIndex,
 	mathBlockMayCloseAt,
 	mathOpenerAt,
 	mathSpanAt,
@@ -166,15 +166,14 @@ describe("mathBlockMayCloseAt", () => {
 	});
 });
 
-describe("hasMathBlockCloserLine", () => {
-	test("finds a line holding only the closer of a given opener, the last line unterminated", () => {
+describe("mathBlockCloserIndex", () => {
+	test("finds the first line holding only the closer of a given opener, the last line unterminated", () => {
 		const source = "Intro with $$ inline $$ math.\n  $$  \nmore\n\\]";
-		expect(hasMathBlockCloserLine(source, 0, ["$$"])).toBe(true);
-		expect(hasMathBlockCloserLine(source, 0, ["\\["])).toBe(true);
+		expect(mathBlockCloserIndex(source, 0, "$$")).toBe(source.indexOf("  $$"));
+		expect(mathBlockCloserIndex(source, 0, "\\[")).toBe(source.indexOf("\\]"));
 		// Past the `$$` line only the unterminated `\]` line is left.
 		const more = source.indexOf("more");
-		expect(hasMathBlockCloserLine(source, more, ["$$"])).toBe(false);
-		expect(hasMathBlockCloserLine(source, more, ["\\["])).toBe(true);
-		expect(hasMathBlockCloserLine(source, 0, [])).toBe(false);
+		expect(mathBlockCloserIndex(source, more, "$$")).toBeUndefined();
+		expect(mathBlockCloserIndex(source, more, "\\[")).toBe(source.indexOf("\\]"));
 	});
 });
