@@ -811,9 +811,12 @@ mod tests {
 
 	#[test]
 	fn focused_search_skips_null_child_refs() {
-		use atspi::zbus::{connection::Builder as ConnectionBuilder, interface, zvariant::OwnedObjectPath};
+		use atspi::zbus::{
+			connection::Builder as ConnectionBuilder, interface, zvariant::OwnedObjectPath,
+		};
 
-		/// Minimal `org.a11y.atspi.Accessible` node: a state set plus `(name, path)` children.
+		/// Minimal `org.a11y.atspi.Accessible` node: a state set plus `(name,
+		/// path)` children.
 		struct Node {
 			state:    Vec<u32>,
 			children: Vec<(String, OwnedObjectPath)>,
@@ -844,10 +847,8 @@ mod tests {
 					(PEER.to_owned(), path("/focus")),
 				],
 			};
-			let leaf = Node {
-				state:    vec![focused as u32, (focused >> 32) as u32],
-				children: Vec::new(),
-			};
+			let leaf =
+				Node { state: vec![focused as u32, (focused >> 32) as u32], children: Vec::new() };
 			let guid = atspi::zbus::Guid::generate();
 			let server = ConnectionBuilder::unix_stream(server)
 				.server(guid)
@@ -866,6 +867,11 @@ mod tests {
 			found
 		});
 		let found = found.expect("null child refs must not fail the focused search");
-		assert_eq!(found.map(|object| object.path_as_str().to_owned()).as_deref(), Some("/focus"));
+		assert_eq!(
+			found
+				.map(|object| object.path_as_str().to_owned())
+				.as_deref(),
+			Some("/focus")
+		);
 	}
 }
