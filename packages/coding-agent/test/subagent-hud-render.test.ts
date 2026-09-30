@@ -15,6 +15,7 @@ import { PINNED_HUD_TOGGLE_ID } from "@oh-my-pi/pi-tui/prompt/composer";
 import {
 	InteractiveMode,
 	layoutPinnedHud,
+	nextSubagentPreviewTickMs,
 	renderSubagentHudLines,
 	SubagentHudComponent,
 } from "@oh-my-pi/pi-coding-agent/modes/interactive-mode";
@@ -668,6 +669,72 @@ describe("subagent HUD lines", () => {
 			expect(hud.getClickAgentAtRow(rowOf("Beta"))).toBe("Beta");
 			expect(hud.getClickAgentAtRow(rowOf("Gamma.ts"))).toBe("Gamma");
 			expect(hud.getClickAgentAtRow(rowOf("more — expand"))).toBe(PINNED_HUD_TOGGLE_ID);
+		});
+
+		it("labels a call with its own intent, never an earlier call's", () => {
+			const out = render(
+				[
+					makeSession({
+						id: "Worker",
+						progress: makeProgress({
+							id: "Worker",
+							lastIntent: "Reading auth config",
+							currentTool: "mcp__db_query",
+							currentToolArgs: "SELECT 1",
+							recentTools: [{ tool: "read", args: "auth.ts", intent: "Reading auth config", endMs: 1 }],
+						}),
+					}),
+					makeSession({
+						id: "Between",
+						progress: makeProgress({
+							id: "Between",
+							lastIntent: "Reading auth config",
+							recentTools: [{ tool: "mcp__db_query", args: "SELECT 2", endMs: 2 }],
+						}),
+					}),
+					makeSession({
+						id: "Intentful",
+						progress: makeProgress({
+							id: "Intentful",
+							currentTool: "read",
+							currentToolArgs: "auth.ts",
+							currentToolIntent: "Checking the session cookie",
+						}),
+					}),
+				],
+				120,
+				true,
+			);
+			expect(out).toContain("mcp__db_query: SELECT 1");
+			expect(out).toContain("mcp__db_query: SELECT 2");
+			expect(out).toContain("read: Checking the session cookie");
+			expect(out).not.toContain("Reading auth config");
+		});
+
+		it("keeps the header and agent rows within the padded HUD width", () => {
+			const sessions = [
+				makeSession({ id: `Worker${"W".repeat(80)}`, description: "Every available column ".repeat(10) }),
+			];
+			for (const columns of [40, 60]) {
+				const hud = new SubagentHudComponent(renderSubagentHudLines(sessions, columns, false, true), [
+					sessions[0]!.id,
+				]);
+				// No wrapping: exactly the blank row, the header and one agent row.
+				expect(hud.render(columns)).toHaveLength(3);
+			}
+		});
+
+		it("arms the repaint for when the elapsed marker first shows, then every second", () => {
+			const now = 100_000;
+			const midCall = (id: string, startMs: number) =>
+				makeSession({ id, progress: makeProgress({ id, currentTool: "bash", currentToolStartMs: startMs }) });
+			const thinking = makeSession({ id: "Thinking", progress: makeProgress({ id: "Thinking" }) });
+			expect(nextSubagentPreviewTickMs([thinking], now)).toBeUndefined();
+			expect(nextSubagentPreviewTickMs([midCall("Fresh", now - 1_000)], now)).toBe(4_001);
+			expect(nextSubagentPreviewTickMs([midCall("Long", now - 30_000)], now)).toBe(1_000);
+			expect(
+				nextSubagentPreviewTickMs([thinking, midCall("Fresh", now - 4_500), midCall("Long", now - 30_000)], now),
+			).toBe(501);
 		});
 	});
 });

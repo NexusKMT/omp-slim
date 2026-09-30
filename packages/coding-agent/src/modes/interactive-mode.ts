@@ -8,6 +8,7 @@ import {
 	type Agent,
 	AgentBusyError,
 	type AgentMessage,
+	agentPauseGate,
 	EventLoopKeepalive,
 	ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
@@ -966,10 +967,30 @@ const SUBAGENT_PREVIEW_ELAPSED_MIN_MS = 5000;
 const SUBAGENT_PREVIEW_MIN_DETAIL_WIDTH = 8;
 
 /**
+ * Delay until the live preview next needs a repaint with no progress event to
+ * trigger it: when the first listed in-flight call crosses the elapsed-marker
+ * threshold, then once a second while any marker is showing. Undefined when no
+ * listed agent is mid-call, so an idle or thinking agent never arms a timer.
+ */
+export function nextSubagentPreviewTickMs(sessions: readonly ObservableSession[], now: number): number | undefined {
+	let delay: number | undefined;
+	for (const session of sessions) {
+		const progress = session.progress;
+		if (progress?.status !== "running" || !progress.currentTool || progress.currentToolStartMs === undefined)
+			continue;
+		const untilMarker = progress.currentToolStartMs + SUBAGENT_PREVIEW_ELAPSED_MIN_MS + 1 - now;
+		const next = untilMarker > 0 ? untilMarker : SUBAGENT_PREVIEW_TICK_MS;
+		delay = delay === undefined ? next : Math.min(delay, next);
+	}
+	return delay;
+}
+
+/**
  * Live-preview row for a running subagent: its current (or, between calls,
  * most recent) tool call with a one-line detail and, once the call has run a
- * while, an elapsed marker. Undefined when the agent has not called a tool yet.
- * The detail shrinks to fit `width`; the row never overflows it.
+ * while, an elapsed marker. The detail is that call's own intent, else its
+ * args — never an earlier call's intent. Undefined when the agent has not
+ * called a tool yet. The row never overflows `width`.
  */
 function renderSubagentToolPreview(session: ObservableSession, width: number): string | undefined {
 	const progress = session.progress;
@@ -978,25 +999,25 @@ function renderSubagentToolPreview(session: ObservableSession, width: number): s
 	const recent = progress.recentTools[0];
 	const tool = currentTool ?? recent?.tool;
 	if (!tool) return undefined;
-	const detail = progress.lastIntent ?? (currentTool ? progress.currentToolArgs : recent?.args);
+	const detail = currentTool
+		? (progress.currentToolIntent ?? progress.currentToolArgs)
+		: (recent?.intent ?? recent?.args);
 	const elapsed = currentTool && progress.currentToolStartMs ? Date.now() - progress.currentToolStartMs : 0;
 	const elapsedLabel =
 		elapsed > SUBAGENT_PREVIEW_ELAPSED_MIN_MS
 			? `${theme.sep.dot}${theme.fg("warning", formatDuration(elapsed))}`
 			: "";
-	// The HUD paints through Text with paddingX 1, so the content is two cells narrower.
-	const budget = Math.max(0, width - 2);
 	const elapsedWidth = visibleWidth(elapsedLabel);
 	const hook = `${theme.fg("dim", theme.tree.hook)} `;
 	const hookWidth = visibleWidth(hook);
 	// Reserve the elapsed marker first, then cap the tool name; the detail gets whatever is left.
-	const shortTool = truncateToWidth(replaceTabs(tool), Math.max(0, budget - hookWidth - elapsedWidth), "");
+	const shortTool = truncateToWidth(replaceTabs(tool), Math.max(0, width - hookWidth - elapsedWidth), "");
 	let line = `${hook}${theme.fg(currentTool ? "muted" : "dim", shortTool)}`;
-	const detailBudget = budget - hookWidth - visibleWidth(shortTool) - elapsedWidth - visibleWidth(": ");
+	const detailBudget = width - hookWidth - visibleWidth(shortTool) - elapsedWidth - visibleWidth(": ");
 	if (detail && detailBudget >= SUBAGENT_PREVIEW_MIN_DETAIL_WIDTH) {
 		line += `: ${theme.fg("dim", previewLine(shortenEmbeddedPaths(replaceTabs(detail)), Math.min(TRUNCATE_LENGTHS.SHORT, detailBudget)))}`;
 	}
-	return truncateToWidth(`${line}${elapsedLabel}`, budget, "");
+	return truncateToWidth(`${line}${elapsedLabel}`, width, "");
 }
 
 /**
@@ -1020,6 +1041,9 @@ export function renderSubagentHudLines(
 ): string[] {
 	const running = sessions.filter(isHudSubagent);
 	if (running.length === 0) return [];
+	// `SubagentHudComponent` paints through `Text` with horizontal padding, so
+	// rows budgeted to the full terminal width would wrap.
+	const contentColumns = Math.max(0, columns - getPaddingX(1) * 2);
 	const layout = layoutPinnedHud(running.length, expanded);
 	const dot = theme.styledSymbol("status.done", "accent");
 	const items = running.slice(0, layout.itemRows);
@@ -1031,7 +1055,7 @@ export function renderSubagentHudLines(
 			items,
 			expanded: true,
 			renderItem: (session, context) => {
-				const rowWidth = Math.max(0, columns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
+				const rowWidth = Math.max(0, contentColumns - visibleWidth(outerIndent) - (context.prefixWidth ?? 0));
 				const role = session.agent ?? session.progress?.agent;
 				const displayId = truncateToWidth(
 					formatTaskId(session.id),
@@ -1089,7 +1113,7 @@ export function renderSubagentHudLines(
 							"dim",
 							layout.toggle === "expand" ? `… ${running.length - layout.itemRows} more — expand` : "… show less",
 						)}`,
-						columns,
+						contentColumns,
 						"",
 					),
 				];
@@ -1100,12 +1124,17 @@ export function renderSubagentHudLines(
 		itemLines.push(
 			rows
 				.slice(cursor, cursor + count)
-				.map(row => truncateToWidth(`${outerIndent}${row}`, columns, ""))
+				.map(row => truncateToWidth(`${outerIndent}${row}`, contentColumns, ""))
 				.join("\n"),
 		);
 		cursor += count;
 	}
-	return ["", truncateToWidth(theme.bold(theme.fg("accent", "Subagents")), columns), ...itemLines, ...toggleRow];
+	return [
+		"",
+		truncateToWidth(theme.bold(theme.fg("accent", "Subagents")), contentColumns),
+		...itemLines,
+		...toggleRow,
+	];
 }
 
 const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
@@ -2138,6 +2167,14 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#observerRegistry.onChange(kind => {
 			this.#scheduleObserverUiSync(kind);
 		});
+		// `/pause` stops the live-preview tick (the fullscreen pause screen covers
+		// the HUD); resuming repaints so elapsed markers catch up immediately.
+		this.#eventBusUnsubscribers.push(
+			agentPauseGate.onChange(paused => {
+				this.#renderSubagentList();
+				if (!paused) this.ui.requestRender();
+			}),
+		);
 		// Let the transient todo tool result light up pending todos executed by a
 		// live subagent, matching the sticky HUD's active set (#5873).
 		setActiveTodoDescriptionsProvider(() => this.#getActiveSubagentDescriptions());
@@ -4286,8 +4323,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * editor. Driven entirely by observer-registry change events, so rows appear
 	 * on spawn and the whole block clears itself once the last subagent leaves
 	 * the "active" state. With the live preview on, a tool call running without
-	 * progress events (a long quiet bash) still needs its elapsed marker to tick,
-	 * so a once-a-second repaint stays armed while any listed agent is mid-call.
+	 * progress events (a long quiet bash) still needs its elapsed marker to
+	 * appear and advance, so a repaint is armed for when the marker first shows
+	 * and then once a second while a listed agent stays mid-call.
 	 */
 	#renderSubagentList(): void {
 		this.#cancelSubagentPreviewTick();
@@ -4308,13 +4346,16 @@ export class InteractiveMode implements InteractiveModeContext {
 				onOpen: () => this.showAgentHub(),
 			}),
 		);
-		const listed = running.slice(0, layout.itemRows);
-		if (livePreview && listed.some(session => session.progress?.currentToolStartMs !== undefined)) {
+		const tickMs =
+			livePreview && !agentPauseGate.paused
+				? nextSubagentPreviewTickMs(running.slice(0, layout.itemRows), Date.now())
+				: undefined;
+		if (tickMs !== undefined) {
 			this.#subagentPreviewTickTimer = setTimeout(() => {
 				this.#subagentPreviewTickTimer = undefined;
 				this.#renderSubagentList();
 				this.ui.requestRender();
-			}, SUBAGENT_PREVIEW_TICK_MS);
+			}, tickMs);
 			this.#subagentPreviewTickTimer.unref?.();
 		}
 	}
