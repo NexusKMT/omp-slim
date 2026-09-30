@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed small nonzero error rates appearing as 0.0% in `omp stats` and its summary ([#13903](https://github.com/can1357/oh-my-pi/issues/13903)).
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
