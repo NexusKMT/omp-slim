@@ -629,12 +629,13 @@ function declaredPricingStatus(model: Model): Exclude<ModelPricingStatus, "fixed
 	const status = getModelPricingStatus(model);
 	return status === "fixed" ? undefined : status;
 }
-/** Both token legs at zero cost — the condition {@link formatCostPair} renders as `free`. */
+/** No token price and no subscription-credit charge (unless a pricing state is declared). */
 function isFreeModel(model: Model): boolean {
 	const declared = declaredPricingStatus(model);
 	if (declared !== undefined) return declared === "free";
 	const cost = model.cost;
-	return !cost || (cost.input === 0 && cost.output === 0);
+	const credits = model.factoryDroidCredits;
+	return (!cost || (cost.input === 0 && cost.output === 0)) && (credits === undefined || credits === 0);
 }
 
 /** One per-million price leg: `3`, `0.25`, `12.5`; `?` when unknown. */
@@ -647,6 +648,18 @@ function formatCostLeg(n: number): string {
 	return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
 }
 
+/**
+ * Adds Factory Droid's `N×` base Standard Credits rate to a dollar price,
+ * replacing the price when the model has no dollar reference. Neither the
+ * reference price nor the base credit rate includes live promotions.
+ */
+function withCreditBadge(model: Model, price: string): string {
+	const credits = model.factoryDroidCredits;
+	if (credits === undefined) return price;
+	const badge = `${formatCostLeg(credits)}×`;
+	return model.cost.input !== 0 || model.cost.output !== 0 ? `${price} ${badge}` : badge;
+}
+
 const PRICING_STATUS_LABELS: Record<Exclude<ModelPricingStatus, "fixed">, { short: string; detail: string }> = {
 	free: { short: "free", detail: "free" },
 	included: { short: "included", detail: "included" },
@@ -654,12 +667,12 @@ const PRICING_STATUS_LABELS: Record<Exclude<ModelPricingStatus, "fixed">, { shor
 	unknown: { short: "unknown", detail: "pricing unknown" },
 };
 
-/** `$in/out` per-million cost pair; `free` when both legs are zero; a declared pricing state otherwise. */
+/** `$in/out` per-million cost pair with any credit badge; `free` when nothing is charged; a declared pricing state otherwise. */
 function formatCostPair(model: Model): string {
 	const declared = declaredPricingStatus(model);
 	if (declared !== undefined) return PRICING_STATUS_LABELS[declared].short;
 	if (isFreeModel(model)) return "free";
-	return `$${formatCostLeg(model.cost.input)}/${formatCostLeg(model.cost.output)}`;
+	return withCreditBadge(model, `$${formatCostLeg(model.cost.input)}/${formatCostLeg(model.cost.output)}`);
 }
 
 /** Detail-pane price fact: `$3/15 per M`, or the declared pricing state in words. */
@@ -681,7 +694,7 @@ function pickerPrice(model: Model): string {
 	const declared = declaredPricingStatus(model);
 	if (declared !== undefined) return PRICING_STATUS_LABELS[declared].short;
 	if (isFreeModel(model)) return "free";
-	return `$${formatCostLeg(model.cost.input)}·${formatCostLeg(model.cost.output)}`;
+	return withCreditBadge(model, `$${formatCostLeg(model.cost.input)}·${formatCostLeg(model.cost.output)}`);
 }
 
 /** `$2 in · $10 out · $0.2 cache` for a model preview. */
@@ -691,7 +704,7 @@ function previewPrice(model: Model): string {
 	const cost = model.cost;
 	const parts = [`$${formatCostLeg(cost.input)} in`, `$${formatCostLeg(cost.output)} out`];
 	if (cost.cacheRead > 0) parts.push(`$${formatCostLeg(cost.cacheRead)} cache`);
-	return parts.join(" · ");
+	return withCreditBadge(model, parts.join(" · "));
 }
 
 /** The omp theme token of a thinking level's dot (`thinkingHigh`); none for inherit and auto. */
