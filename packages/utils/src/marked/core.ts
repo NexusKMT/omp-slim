@@ -403,6 +403,26 @@ function lowerBound(values: readonly number[], target: number): number {
 	return low;
 }
 
+/** Closing-delimiter offsets by the depth before each, every list ascending. */
+class ClosersByDepth {
+	readonly #offsets = new Map<number, number[]>();
+
+	/** Records a closer at `offset`, which lies past every closer recorded before it. */
+	add(depth: number, offset: number): void {
+		let offsets = this.#offsets.get(depth);
+		if (!offsets) this.#offsets.set(depth, (offsets = []));
+		offsets.push(offset);
+	}
+
+	/** The first closer at `depth` at or after `from`, or -1. */
+	first(depth: number, from: number): number {
+		const offsets = this.#offsets.get(depth);
+		if (!offsets) return -1;
+		const at = lowerBound(offsets, from);
+		return at === offsets.length ? -1 : offsets[at]!;
+	}
+}
+
 /**
  * Where a bracket opened in one inline source closes. A search starts right after the opening bracket, and a
  * bracket never begins an escape, so the escape pairing from there is the pairing from the start of the source.
@@ -412,8 +432,7 @@ function lowerBound(values: readonly number[], target: number): number {
 class BracketDepths {
 	// The depth before each offset.
 	readonly #depth: Int32Array;
-	// Closing-bracket offsets, ascending, by the depth before them.
-	readonly #closers = new Map<number, number[]>();
+	readonly #closers = new ClosersByDepth();
 
 	constructor(src: string, open: number, close: number) {
 		const depth = new Int32Array(src.length + 1);
@@ -426,9 +445,7 @@ class BracketDepths {
 			} else if (code === open) {
 				level++;
 			} else if (code === close) {
-				let closers = this.#closers.get(level);
-				if (!closers) this.#closers.set(level, (closers = []));
-				closers.push(i);
+				this.#closers.add(level, i);
 				level--;
 			}
 		}
@@ -438,10 +455,7 @@ class BracketDepths {
 
 	/** The offset of the bracket closing the one just before `start`, or -1. */
 	closeAfter(start: number): number {
-		const closers = this.#closers.get(this.#depth[start]!);
-		if (!closers) return -1;
-		const at = lowerBound(closers, start);
-		return at === closers.length ? -1 : closers[at]!;
+		return this.#closers.first(this.#depth[start]!, start);
 	}
 }
 
@@ -455,16 +469,22 @@ class LinkBrackets {
 		this.#src = src;
 	}
 
-	/** Where the "[" just before `start` closes, or -1. */
-	closeSquare(start: number): number {
+	/** Where the "[" just before `start` in `rest`, a suffix of the source, closes, as an offset into `rest`, or -1. */
+	closeSquare(rest: string, start: number): number {
 		this.#square ??= new BracketDepths(this.#src, 0x5b /* [ */, 0x5d /* ] */);
-		return this.#square.closeAfter(start);
+		return this.#close(this.#square, rest, start);
 	}
 
-	/** Where the "(" just before `start` closes, or -1. */
-	closeRound(start: number): number {
+	/** Where the "(" just before `start` in `rest`, a suffix of the source, closes, as an offset into `rest`, or -1. */
+	closeRound(rest: string, start: number): number {
 		this.#round ??= new BracketDepths(this.#src, 0x28 /* ( */, 0x29 /* ) */);
-		return this.#round.closeAfter(start);
+		return this.#close(this.#round, rest, start);
+	}
+
+	#close(depths: BracketDepths, rest: string, start: number): number {
+		const pos = this.#src.length - rest.length;
+		const close = depths.closeAfter(pos + start);
+		return close === -1 ? -1 : close - pos;
 	}
 }
 
@@ -512,8 +532,7 @@ class EmphasisDelimiters {
 	// Delimiter offsets, ascending, and the depth before each.
 	readonly #at: number[] = [];
 	readonly #depth: number[] = [];
-	// Closer offsets, ascending, by the depth before them.
-	readonly #closers = new Map<number, number[]>();
+	readonly #closers = new ClosersByDepth();
 
 	constructor(src: string, marker: string, width: number) {
 		this.#src = src;
@@ -529,9 +548,7 @@ class EmphasisDelimiters {
 				this.#at.push(at);
 				this.#depth.push(level);
 				if (canCloseDelimiter(src, at, marker)) {
-					let closers = this.#closers.get(level);
-					if (!closers) this.#closers.set(level, (closers = []));
-					closers.push(at);
+					this.#closers.add(level, at);
 					level--;
 				} else if (canOpenDelimiter(src, at, width, marker)) {
 					level++;
@@ -559,10 +576,7 @@ class EmphasisDelimiters {
 			next = lowerBound(this.#at, at);
 		}
 		if (next === this.#at.length) return -1;
-		const closers = this.#closers.get(this.#depth[next]! - nested);
-		if (!closers) return -1;
-		const close = lowerBound(closers, this.#at[next]!);
-		return close === closers.length ? -1 : closers[close]!;
+		return this.#closers.first(this.#depth[next]! - nested, this.#at[next]!);
 	}
 }
 
@@ -654,23 +668,16 @@ export class Tokenizer {
 	}
 }
 
-/** Matches a link or image at the start of `src`, which starts with "[" or "![" and lies `pos` into `brackets`' source. */
-function matchLink(
-	src: string,
-	lexer: Lexer,
-	brackets: LinkBrackets,
-	pos: number,
-): Tokens.Link | Tokens.Image | undefined {
+/** Matches a link or image at the start of `src`, which starts with "[" or "![" and is a suffix of `brackets`' source. */
+function matchLink(src: string, lexer: Lexer, brackets: LinkBrackets): Tokens.Link | Tokens.Image | undefined {
 	const image = src.startsWith("![");
 	const labelStart = image ? 2 : 1;
-	const labelClose = brackets.closeSquare(pos + labelStart);
-	if (labelClose === -1) return undefined;
-	const labelEnd = labelClose - pos;
+	const labelEnd = brackets.closeSquare(src, labelStart);
+	if (labelEnd === -1) return undefined;
 	const label = src.slice(labelStart, labelEnd);
 	if (src[labelEnd + 1] === "(") {
-		const destinationClose = brackets.closeRound(pos + labelEnd + 2);
-		if (destinationClose === -1) return undefined;
-		const destinationEnd = destinationClose - pos;
+		const destinationEnd = brackets.closeRound(src, labelEnd + 2);
+		if (destinationEnd === -1) return undefined;
 		const inside = src.slice(labelEnd + 2, destinationEnd).trim();
 		let href = inside;
 		let title: string | null = null;
@@ -687,9 +694,8 @@ function matchLink(
 	let rawEnd = labelEnd + 1;
 	let ref = label;
 	if (src[rawEnd] === "[") {
-		const refClose = brackets.closeSquare(pos + rawEnd + 1);
-		if (refClose === -1) return undefined;
-		const refEnd = refClose - pos;
+		const refEnd = brackets.closeSquare(src, rawEnd + 1);
+		if (refEnd === -1) return undefined;
 		ref = src.slice(rawEnd + 1, refEnd) || label;
 		rawEnd = refEnd + 1;
 	}
@@ -790,11 +796,12 @@ class TextStops {
 	}
 
 	/**
-	 * Length of the plain text at offset `pos`, where `rest` is the source from `pos` on: the distance to the
-	 * nearest later offset where another token could start or an inline extension's start hint points.
+	 * Length of the plain text at the start of `rest`, a suffix of the source: the distance to the nearest later
+	 * offset where another token could start or an inline extension's start hint points.
 	 */
-	textLength(rest: string, pos: number): number {
+	textLength(rest: string): number {
 		const src = this.#src;
+		const pos = src.length - rest.length;
 		const from = pos + 1;
 		if (this.#tokenChar < from) {
 			TOKEN_START_CHAR.lastIndex = from;
@@ -844,27 +851,23 @@ class TextStops {
 
 	/** The first offset at or after `from` that starts a match of `/[A-Za-z0-9._+-]+@/`. */
 	#mailFrom(from: number): number {
-		if (this.#mail < from) {
-			// Every offset in the run before the found "@" starts a match of its own.
-			if (from < this.#mailAt) this.#mail = from;
-			else this.#seekMail(from);
-		}
+		// Every offset in the run before the found "@" starts a match of its own.
+		if (this.#mail < from) this.#mail = from < this.#mailAt ? from : this.#seekMail(from);
 		return this.#mail;
 	}
 
-	/** Searches from `from` for the e-mail stop, recording its offset and its "@". */
-	#seekMail(from: number): void {
+	/** The first offset at or after `from` that starts a match of `/[A-Za-z0-9._+-]+@/`, recording its "@". */
+	#seekMail(from: number): number {
 		const src = this.#src;
 		for (let at = src.indexOf("@", from + 1); at !== -1; at = src.indexOf("@", at + 1)) {
 			let start = at;
 			while (start > from && isMailLocalChar(src.charCodeAt(start - 1))) start--;
 			if (start < at) {
-				this.#mail = start;
 				this.#mailAt = at;
-				return;
+				return start;
 			}
 		}
-		this.#mail = Infinity;
+		return Infinity;
 	}
 
 	/** The first offset at or after `from` that starts a match of `/(?: {2,}|\\)\n/`. */
@@ -937,11 +940,9 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			rest = rest.slice(html.length);
 			continue;
 		}
-		// `rest` is always a suffix of `src`, so its offset follows from the lengths.
-		const pos = src.length - rest.length;
 		const link =
 			rest[0] === "[" || rest.startsWith("![")
-				? matchLink(rest, lexer, (brackets ??= new LinkBrackets(src)), pos)
+				? matchLink(rest, lexer, (brackets ??= new LinkBrackets(src)))
 				: undefined;
 		if (link) {
 			output.push(link);
@@ -949,6 +950,8 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			continue;
 		}
 
+		// `rest` is always a suffix of `src`, so its offset follows from the lengths.
+		const pos = src.length - rest.length;
 		const marker = rest[0];
 		const previous = output.at(-1)?.raw.at(-1) ?? "\n";
 		if (
@@ -1025,7 +1028,7 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 		}
 
 		stops ??= new TextStops(src, lexer);
-		const next = stops.textLength(rest, pos);
+		const next = stops.textLength(rest);
 		textRun ??= new TextRun(src);
 		textRun.append(output, pos, pos + next);
 		rest = rest.slice(next);

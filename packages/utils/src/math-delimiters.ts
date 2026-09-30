@@ -41,17 +41,10 @@ const MATH_BLOCK_BRACKET = /^ {0,3}\\\[[ \t]*\r?\n([\s\S]+?)\r?\n {0,3}\\\][ \t]
  * not a decision: whether that candidate is really math — escaped, currency,
  * unclosed — is decided by {@link mathSpanAt}.
  */
-// One forward pass that stops at the first candidate. Inline lexing calls this
-// as a `startFrom` hint, again from past each answer, so the passes together
-// read each character of a paragraph once.
+// One forward pass that stops at the first candidate.
 export function mathStartIndex(source: string, from = 0): number | undefined {
 	for (let at = from; at < source.length; at++) {
-		const code = source.charCodeAt(at);
-		if (code === 0x24 /* $ */) return at;
-		if (code === 0x5c /* \ */) {
-			const next = source.charCodeAt(at + 1);
-			if (next === 0x28 /* ( */ || next === 0x5b /* [ */) return at;
-		}
+		if (mathOpenerAt(source, at) !== undefined) return at;
 	}
 	return undefined;
 }

@@ -2462,9 +2462,8 @@ describe("Math rendering", () => {
 });
 
 describe("inline start scanners (perf rewrites)", () => {
-	// The hand-rolled scanners replaced regex scans that marked runs on the
-	// remaining source at every inline position. They must return exactly what
-	// the old regexes returned for every input.
+	// mathStartIndex replaced a regex scan as the math extension's start hint;
+	// it must find exactly the offsets the regex found.
 	const OLD_MATH_START = /\$|\\\(|\\\[/;
 
 	const fixtures = [
@@ -2479,30 +2478,6 @@ describe("inline start scanners (perf rewrites)", () => {
 		"backslash only \\ then ( apart",
 		"ends with backslash \\",
 		"ends with dollar $",
-		"www.example.com leading",
-		"see www.example.com mid-string",
-		"see WWW.EXAMPLE.COM upper",
-		"mixed WwW.case.com scan",
-		"http://example.com leading",
-		"prose http://example.com mid",
-		"prose HTTPS://EXAMPLE.COM upper",
-		"HtTpS://mixed.example",
-		"ftp://files.example mid ftp",
-		"prose FTP://FILES.EXAMPLE",
-		"ftps:// is not ftp:// until here ftp://x",
-		"wwww.overlap.example",
-		"hhttp://overlap.example",
-		"http:/ missing slash then https://real.example",
-		"www without dot www. with dot",
-		"w h f teaser chars but no scheme",
-		"user@example.com email",
-		"prose user.name+tag@example.co.uk",
-		"trailing at sign only@ ",
-		"@leading-at no local part",
-		"a".repeat(400), // long identifier run, no @
-		`${"a".repeat(400)}@example.com`, // long local part
-		"short@x",
-		"dots...and+plus_under-score@host.tld",
 	];
 
 	it("mathStartIndex matches the old /\\$|\\\\\\(|\\\\\\[/ scan on every fixture", () => {

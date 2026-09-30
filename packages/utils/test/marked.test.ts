@@ -175,6 +175,11 @@ describe("marked compatibility", () => {
 		expect(marked.parse("before $x_i$\n\n$$\ny^2\n$$\n")).toBe("<p>before <i>x_i</i></p>\n<math>y^2</math>\n");
 	});
 
+	const shape = (tokens: readonly Token[]): unknown[] =>
+		tokens.map(token =>
+			"tokens" in token && token.tokens ? [token.type, token.raw, shape(token.tokens)] : [token.type, token.raw],
+		);
+
 	// Plain text ends where the next token could start, and the lexer reuses
 	// each such stop until it passes one. Here it walks through the rejected
 	// `foo@bar` (no dotted domain) and must still stop at an address using every
@@ -320,11 +325,6 @@ describe("marked compatibility", () => {
 
 	// Emphasis and link closers come from per-paragraph indexes of delimiters
 	// and brackets; these shapes pin where each opener closes.
-	const shape = (tokens: readonly Token[]): unknown[] =>
-		tokens.map(token =>
-			"tokens" in token && token.tokens ? [token.type, token.raw, shape(token.tokens)] : [token.type, token.raw],
-		);
-
 	test("closes emphasis past nested, unclosed, run-internal and escaped delimiters", () => {
 		expect(shape(Lexer.lexInline("*a **b** c* and *d"))).toEqual([
 			[
