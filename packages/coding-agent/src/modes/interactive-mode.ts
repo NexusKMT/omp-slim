@@ -807,7 +807,7 @@ function isHudSubagent(session: ObservableSession): boolean {
  */
 export class SubagentHudComponent implements Component {
 	readonly #text: Text;
-	readonly #lines: readonly string[];
+	#lines: readonly string[];
 	readonly #order: readonly string[];
 	readonly #toggleLine: number | undefined;
 	readonly #native: SubagentHudNative | undefined;
@@ -830,6 +830,20 @@ export class SubagentHudComponent implements Component {
 	/** A click on the pill opens the agent hub, as the hub key does. */
 	handleNativeEvent(event: NativeUiEvent): void {
 		if (event.type === "action" && event.act === "agents.open") this.#native?.onOpen();
+	}
+	/** Same agents and expander row as `order`/`toggleRow`, so `setLines` can repaint in place. */
+	hasLayout(order: readonly string[], toggleRow: number | undefined): boolean {
+		return (
+			this.#toggleLine === toggleRow &&
+			this.#order.length === order.length &&
+			this.#order.every((id, index) => id === order[index])
+		);
+	}
+	/** Repaint rows in place (keeps component identity for the HUD memo); the click map rebuilds lazily. */
+	setLines(lines: readonly string[]): void {
+		if (!this.#text.setText(lines.join("\n"))) return;
+		this.#lines = lines;
+		this.#physicalOwner = undefined;
 	}
 	render(width: number): readonly string[] {
 		const rows = this.#text.render(width);
@@ -2171,6 +2185,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		// the HUD); resuming repaints so elapsed markers catch up immediately.
 		this.#eventBusUnsubscribers.push(
 			agentPauseGate.onChange(paused => {
+				if (!cfgDisplaySubagentLivePreview.get(settings)) return;
 				this.#renderSubagentList();
 				if (!paused) this.ui.requestRender();
 			}),
@@ -4330,34 +4345,67 @@ export class InteractiveMode implements InteractiveModeContext {
 	#renderSubagentList(): void {
 		this.#cancelSubagentPreviewTick();
 		this.subagentContainer.clear();
+		const view = this.#buildSubagentHudView();
+		if (!view) return;
+		this.subagentContainer.addChild(
+			new SubagentHudComponent(view.lines, view.order, view.toggleRow, {
+				node: describeSubagentHud(view.sessions),
+				onOpen: () => this.showAgentHub(),
+			}),
+		);
+		this.#armSubagentPreviewTick(view.tickMs);
+	}
+
+	/** Inputs for one HUD paint; undefined when the HUD is off or nothing is running. */
+	#buildSubagentHudView():
+		| {
+				sessions: ObservableSession[];
+				lines: string[];
+				order: string[];
+				toggleRow: number | undefined;
+				tickMs: number | undefined;
+		  }
+		| undefined {
 		const mode = cfgDisplayPinnedAgents.get(settings);
-		if (mode === "off") return;
+		if (mode === "off") return undefined;
 		const sessions = this.#observerRegistry.getSessions();
 		const running = sessions.filter(isHudSubagent);
 		const expanded = this.#pinnedHudOverride ?? mode === "full";
 		const livePreview = cfgDisplaySubagentLivePreview.get(settings);
 		const lines = renderSubagentHudLines(sessions, this.ui.terminal.columns, expanded, livePreview);
-		if (lines.length === 0) return;
+		if (lines.length === 0) return undefined;
 		const layout = layoutPinnedHud(running.length, expanded);
-		const order = running.map(session => session.id);
-		this.subagentContainer.addChild(
-			new SubagentHudComponent(lines, order, layout.toggleRow, {
-				node: describeSubagentHud(sessions),
-				onOpen: () => this.showAgentHub(),
-			}),
-		);
 		const tickMs =
 			livePreview && !agentPauseGate.paused
 				? nextSubagentPreviewTickMs(running.slice(0, layout.itemRows), Date.now())
 				: undefined;
-		if (tickMs !== undefined) {
-			this.#subagentPreviewTickTimer = setTimeout(() => {
-				this.#subagentPreviewTickTimer = undefined;
-				this.#renderSubagentList();
-				this.ui.requestRender();
-			}, tickMs);
-			this.#subagentPreviewTickTimer.unref?.();
+		return { sessions, lines, order: running.map(session => session.id), toggleRow: layout.toggleRow, tickMs };
+	}
+
+	#armSubagentPreviewTick(tickMs: number | undefined): void {
+		if (tickMs === undefined) return;
+		this.#subagentPreviewTickTimer = setTimeout(() => {
+			this.#subagentPreviewTickTimer = undefined;
+			this.#tickSubagentPreview();
+		}, tickMs);
+		this.#subagentPreviewTickTimer.unref?.();
+	}
+
+	/**
+	 * Elapsed-marker tick: with the same agents listed, repaint the existing HUD
+	 * in place so the native HUD memo and component identity survive; any
+	 * layout change falls back to a full rebuild.
+	 */
+	#tickSubagentPreview(): void {
+		const hud = this.subagentContainer.children[0];
+		const view = this.#buildSubagentHudView();
+		if (view && hud instanceof SubagentHudComponent && hud.hasLayout(view.order, view.toggleRow)) {
+			hud.setLines(view.lines);
+			this.#armSubagentPreviewTick(view.tickMs);
+		} else {
+			this.#renderSubagentList();
 		}
+		this.ui.requestRender();
 	}
 
 	#cancelSubagentPreviewTick(): void {

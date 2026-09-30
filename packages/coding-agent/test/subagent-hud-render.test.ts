@@ -4,7 +4,7 @@
  * sync task calls alike — as numbered `N Id: description` jump-list rows and
  * yields no output once nothing qualifies, so the block self-clears.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
@@ -34,6 +34,7 @@ import {
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
+import { cfgDisplaySubagentLivePreview } from "@oh-my-pi/pi-coding-agent/modes/settings";
 import { cfgTaskShowResolvedModelBadge } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 function makeSession(overrides: Partial<ObservableSession> & { id: string }): ObservableSession {
@@ -884,6 +885,7 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		authStorage?.close();
 		tempDir?.removeSync();
 		vi.useRealTimers();
+		setSystemTime();
 		vi.restoreAllMocks();
 		resetSettingsForTest();
 	});
@@ -928,5 +930,30 @@ describe("InteractiveMode subagent observer UI sync", () => {
 		mode.applyPinnedAgentsSetting();
 		expect(hudText()).not.toContain("Override4");
 		expect(hudText()).toContain("more — expand");
+	});
+
+	it("advances a quiet call's elapsed marker by repainting the same HUD in place", async () => {
+		cfgDisplaySubagentLivePreview.override(Settings.instance, true);
+		await mode.init({ suppressWelcomeIntro: true });
+		vi.spyOn(mode.ui, "requestRender").mockImplementation(() => {});
+		vi.useFakeTimers();
+		setSystemTime(1_000_000);
+		const payload = makeProgressPayload("Sleeper", 0, "Run sleep", true);
+		payload.progress = {
+			...payload.progress,
+			currentTool: "bash",
+			currentToolArgs: "sleep 40",
+			currentToolStartMs: 1_000_000 - 20_000,
+		};
+		eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, payload);
+		await Promise.resolve();
+		vi.advanceTimersByTime(100); // observer UI coalesce window
+		const hudText = () => Bun.stripANSI(mode.subagentContainer.render(120).join("\n"));
+		const hud = mode.subagentContainer.children[0];
+		expect(hudText()).toContain("bash: sleep 40 · 20.1s");
+
+		vi.advanceTimersByTime(1_000);
+		expect(mode.subagentContainer.children[0]).toBe(hud);
+		expect(hudText()).toContain("bash: sleep 40 · 21.1s");
 	});
 });
