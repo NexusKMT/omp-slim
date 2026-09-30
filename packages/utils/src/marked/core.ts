@@ -391,20 +391,81 @@ function escapeHtml(value: string, encode = true): string {
 	return out;
 }
 
-function findClosingBracket(src: string, start: number, open: string, close: string): number {
-	let depth = 0;
-	for (let i = start; i < src.length; i++) {
-		if (src[i] === "\\") {
-			i++;
-			continue;
-		}
-		if (src[i] === open) depth++;
-		else if (src[i] === close) {
-			if (depth === 0) return i;
-			depth--;
-		}
+/** Index of the first element of the ascending `values` at or above `target`. */
+function lowerBound(values: readonly number[], target: number): number {
+	let low = 0;
+	let high = values.length;
+	while (low < high) {
+		const mid = (low + high) >>> 1;
+		if (values[mid]! < target) low = mid + 1;
+		else high = mid;
 	}
-	return -1;
+	return low;
+}
+
+/**
+ * Where a bracket opened in one inline source closes. A search starts right after the opening bracket, and a
+ * bracket never begins an escape, so the escape pairing from there is the pairing from the start of the source.
+ * The closer is then the first unescaped closing bracket at or after the start whose depth (openers minus closers
+ * before it, from the start of the source) equals the depth at the start.
+ */
+class BracketDepths {
+	// The depth before each offset.
+	readonly #depth: Int32Array;
+	// Closing-bracket offsets, ascending, by the depth before them.
+	readonly #closers = new Map<number, number[]>();
+
+	constructor(src: string, open: number, close: number) {
+		const depth = new Int32Array(src.length + 1);
+		let level = 0;
+		for (let i = 0; i < src.length; i++) {
+			depth[i] = level;
+			const code = src.charCodeAt(i);
+			if (code === 0x5c /* \ */) {
+				depth[++i] = level;
+			} else if (code === open) {
+				level++;
+			} else if (code === close) {
+				let closers = this.#closers.get(level);
+				if (!closers) this.#closers.set(level, (closers = []));
+				closers.push(i);
+				level--;
+			}
+		}
+		depth[src.length] = level;
+		this.#depth = depth;
+	}
+
+	/** The offset of the bracket closing the one just before `start`, or -1. */
+	closeAfter(start: number): number {
+		const closers = this.#closers.get(this.#depth[start]!);
+		if (!closers) return -1;
+		const at = lowerBound(closers, start);
+		return at === closers.length ? -1 : closers[at]!;
+	}
+}
+
+/** The link rule's bracket lookups over one inline source, each built on first use. */
+class LinkBrackets {
+	readonly #src: string;
+	#square: BracketDepths | undefined;
+	#round: BracketDepths | undefined;
+
+	constructor(src: string) {
+		this.#src = src;
+	}
+
+	/** Where the "[" just before `start` closes, or -1. */
+	closeSquare(start: number): number {
+		this.#square ??= new BracketDepths(this.#src, 0x5b /* [ */, 0x5d /* ] */);
+		return this.#square.closeAfter(start);
+	}
+
+	/** Where the "(" just before `start` closes, or -1. */
+	closeRound(start: number): number {
+		this.#round ??= new BracketDepths(this.#src, 0x28 /* ( */, 0x29 /* ) */);
+		return this.#round.closeAfter(start);
+	}
 }
 
 function findDelimiter(src: string, delimiter: string, from: number): number {
@@ -434,6 +495,77 @@ function canCloseDelimiter(src: string, index: number, marker: string): boolean 
 	if (marker === "_" && /[\p{L}\p{N}]/u.test(before) && /[\p{L}\p{N}]/u.test(after)) return false;
 	return !PUNCTUATION.test(before) || /\s/.test(after) || PUNCTUATION.test(after);
 }
+
+/**
+ * The delimiters the emphasis rule's closer walk visits for one marker and width in one inline source, typed the way
+ * the walk types them: a delimiter that can close is a closer, else one that can open is an opener. For width 1 they
+ * are every unescaped marker. For width 2 they are marker pairs taken two at a time from the start of each run of
+ * markers (after it when an odd run of backslashes escapes the start), which is where a walk that reaches the run
+ * from before it enters. The closer for an opener is then the first closer after it whose depth (openers minus
+ * closers before it) equals the depth where its walk begins, the first point where the walk's nesting count would
+ * drop below zero.
+ */
+class EmphasisDelimiters {
+	readonly #src: string;
+	readonly #marker: string;
+	readonly #width: number;
+	// Delimiter offsets, ascending, and the depth before each.
+	readonly #at: number[] = [];
+	readonly #depth: number[] = [];
+	// Closer offsets, ascending, by the depth before them.
+	readonly #closers = new Map<number, number[]>();
+
+	constructor(src: string, marker: string, width: number) {
+		this.#src = src;
+		this.#marker = marker;
+		this.#width = width;
+		let level = 0;
+		for (let run = src.indexOf(marker); run !== -1;) {
+			let end = run + 1;
+			while (src[end] === marker) end++;
+			let escapes = 0;
+			for (let i = run - 1; i >= 0 && src[i] === "\\"; i--) escapes++;
+			for (let at = escapes % 2 === 0 ? run : run + width; at + width <= end; at += width) {
+				this.#at.push(at);
+				this.#depth.push(level);
+				if (canCloseDelimiter(src, at, marker)) {
+					let closers = this.#closers.get(level);
+					if (!closers) this.#closers.set(level, (closers = []));
+					closers.push(at);
+					level--;
+				} else if (canOpenDelimiter(src, at, width, marker)) {
+					level++;
+				}
+			}
+			run = src.indexOf(marker, end);
+		}
+	}
+
+	/** Where the emphasis opened by the delimiter at `opener` closes, or -1. */
+	closeFor(opener: number): number {
+		const src = this.#src;
+		const marker = this.#marker;
+		let nested = 0;
+		let at = opener + this.#width;
+		let next = lowerBound(this.#at, at);
+		// A width-2 walk that starts an odd offset into a run of markers visits that run's other pairs; walk them as
+		// the rule does until the run ends and the walk reaches the delimiters above.
+		while (this.#width === 2 && this.#at[next] !== at && src[at] === marker && src[at + 1] === marker) {
+			const closes = canCloseDelimiter(src, at, marker);
+			if (!closes && canOpenDelimiter(src, at, 2, marker)) nested++;
+			else if (closes && nested > 0) nested--;
+			else if (closes) return at;
+			at += 2;
+			next = lowerBound(this.#at, at);
+		}
+		if (next === this.#at.length) return -1;
+		const closers = this.#closers.get(this.#depth[next]! - nested);
+		if (!closers) return -1;
+		const close = lowerBound(closers, this.#at[next]!);
+		return close === closers.length ? -1 : closers[close]!;
+	}
+}
+
 function inlineHtmlPrefix(src: string): string | undefined {
 	if (src.startsWith("<!--")) {
 		const end = src.indexOf("-->", 4);
@@ -456,15 +588,52 @@ function inlineHtmlPrefix(src: string): string | undefined {
 	return undefined;
 }
 
-function appendText(tokens: Token[], raw: string, text = raw, escaped = false): void {
-	if (raw === "") return;
-	const previous = tokens.at(-1);
-	if (previous?.type === "text" && previous.tokens === undefined && previous.escaped === escaped) {
-		previous.raw += raw;
-		previous.text += text;
-		return;
+/**
+ * Appends plain text to one inline source's token list, merging into a text token before it as marked does. A text
+ * token this run created grows by taking a longer slice of the source instead of by concatenation, so its raw stays
+ * a flat string: reading its last character (the emphasis rule's look-behind) does not copy the whole token.
+ */
+class TextRun {
+	readonly #src: string;
+	// The text token this run created, the source range it covers, and the one string held as its raw and text.
+	#token: Tokens.Text | undefined;
+	#start = 0;
+	#end = 0;
+	#value = "";
+
+	constructor(src: string) {
+		this.#src = src;
 	}
-	tokens.push({ type: "text", raw, text, escaped });
+
+	/** Appends the source text from `start` to `end`. */
+	append(tokens: Token[], start: number, end: number): void {
+		if (end <= start) return;
+		const previous = tokens.at(-1);
+		if (previous?.type === "text" && previous.tokens === undefined && previous.escaped === false) {
+			if (
+				previous === this.#token &&
+				start === this.#end &&
+				previous.raw === this.#value &&
+				previous.text === this.#value
+			) {
+				this.#end = end;
+				this.#value = this.#src.slice(this.#start, end);
+				previous.raw = this.#value;
+				previous.text = this.#value;
+				return;
+			}
+			const raw = this.#src.slice(start, end);
+			previous.raw += raw;
+			previous.text += raw;
+			return;
+		}
+		const raw = this.#src.slice(start, end);
+		this.#token = { type: "text", raw, text: raw, escaped: false };
+		this.#start = start;
+		this.#end = end;
+		this.#value = raw;
+		tokens.push(this.#token);
+	}
 }
 
 /** Tokenizes the built-in inline Markdown surface. */
@@ -485,16 +654,23 @@ export class Tokenizer {
 	}
 }
 
-function matchLink(src: string, lexer: Lexer): Tokens.Link | Tokens.Image | undefined {
+/** Matches a link or image at the start of `src`, which starts with "[" or "![" and lies `pos` into `brackets`' source. */
+function matchLink(
+	src: string,
+	lexer: Lexer,
+	brackets: LinkBrackets,
+	pos: number,
+): Tokens.Link | Tokens.Image | undefined {
 	const image = src.startsWith("![");
-	if (!(image || src.startsWith("["))) return undefined;
 	const labelStart = image ? 2 : 1;
-	const labelEnd = findClosingBracket(src, labelStart, "[", "]");
-	if (labelEnd === -1) return undefined;
+	const labelClose = brackets.closeSquare(pos + labelStart);
+	if (labelClose === -1) return undefined;
+	const labelEnd = labelClose - pos;
 	const label = src.slice(labelStart, labelEnd);
 	if (src[labelEnd + 1] === "(") {
-		const destinationEnd = findClosingBracket(src, labelEnd + 2, "(", ")");
-		if (destinationEnd === -1) return undefined;
+		const destinationClose = brackets.closeRound(pos + labelEnd + 2);
+		if (destinationClose === -1) return undefined;
+		const destinationEnd = destinationClose - pos;
 		const inside = src.slice(labelEnd + 2, destinationEnd).trim();
 		let href = inside;
 		let title: string | null = null;
@@ -511,8 +687,9 @@ function matchLink(src: string, lexer: Lexer): Tokens.Link | Tokens.Image | unde
 	let rawEnd = labelEnd + 1;
 	let ref = label;
 	if (src[rawEnd] === "[") {
-		const refEnd = findClosingBracket(src, rawEnd + 1, "[", "]");
-		if (refEnd === -1) return undefined;
+		const refClose = brackets.closeSquare(pos + rawEnd + 1);
+		if (refClose === -1) return undefined;
+		const refEnd = refClose - pos;
 		ref = src.slice(rawEnd + 1, refEnd) || label;
 		rawEnd = refEnd + 1;
 	}
@@ -546,6 +723,8 @@ function trimBareUrl(candidate: string): string {
 // at `lastIndex`.
 const TOKEN_START_CHAR = /[\\`<[!*_~\n]/g;
 const BARE_URL_SCHEME = /https?:\/\/|ftp:\/\/|www\./gi;
+// What the bare-URL rule's e-mail alternative requires after its "@", sticky to test one offset.
+const DOTTED_DOMAIN = /[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+/iy;
 /** A stop not searched for yet lies before every search offset. */
 const UNSEARCHED = -1;
 
@@ -567,7 +746,8 @@ function isMailLocalChar(code: number): boolean {
  * offset at or after a search offset where a test passes, and each test reads the source only from its own offset
  * on, so a found stop stays the answer for every later search offset up to it. A stop is searched for again only
  * after lexing passes it, starting past it, so all the text steps of a paragraph read it a bounded number of times
- * instead of once per step.
+ * instead of once per step. Search offsets never decrease: the lexer asks at its position for the bare-URL rule
+ * and one past it for the text step, and its position only grows.
  */
 class TextStops {
 	readonly #src: string;
@@ -579,6 +759,9 @@ class TextStops {
 	// The next offset in a run of e-mail local characters that ends at "@", and that "@".
 	#mail = UNSEARCHED;
 	#mailAt = UNSEARCHED;
+	// The last "@" whose domain was tested, and whether a dotted domain follows it.
+	#domainAt = UNSEARCHED;
+	#dottedDomain = false;
 	// The next hard break: two or more spaces, or a backslash, before "\n".
 	#hardBreak = UNSEARCHED;
 	// Per inline extension, the offset its `startFrom` last returned.
@@ -588,6 +771,22 @@ class TextStops {
 		this.#src = src;
 		this.#lexer = lexer;
 		this.#extensionStarts = lexer.extensions.inline.map(() => UNSEARCHED);
+	}
+
+	/**
+	 * Whether the bare-URL rule can match at `pos`: its first alternative needs a scheme there, and its second a
+	 * run of e-mail local characters from `pos` to an "@" (the only "@" such a run can reach) with a dotted domain
+	 * right after that "@", which is the same test for every offset of the run.
+	 */
+	bareUrlCanStart(pos: number): boolean {
+		if (this.#schemeFrom(pos) === pos) return true;
+		if (this.#mailFrom(pos) !== pos) return false;
+		if (this.#domainAt !== this.#mailAt) {
+			this.#domainAt = this.#mailAt;
+			DOTTED_DOMAIN.lastIndex = this.#mailAt + 1;
+			this.#dottedDomain = DOTTED_DOMAIN.test(this.#src);
+		}
+		return this.#dottedDomain;
 	}
 
 	/**
@@ -601,19 +800,11 @@ class TextStops {
 			TOKEN_START_CHAR.lastIndex = from;
 			this.#tokenChar = TOKEN_START_CHAR.test(src) ? TOKEN_START_CHAR.lastIndex - 1 : Infinity;
 		}
-		if (this.#scheme < from) {
-			BARE_URL_SCHEME.lastIndex = from;
-			this.#scheme = BARE_URL_SCHEME.exec(src)?.index ?? Infinity;
-		}
-		// Every offset in the run before the found "@" starts a match of its own.
-		if (this.#mail < from) {
-			if (from < this.#mailAt) this.#mail = from;
-			else this.#seekMail(from);
-		}
 		// A text step never starts where a hard break still matches (the `br` rule takes it first), so a search
 		// after passing a found break starts at or past its "\n".
 		if (this.#hardBreak < from) this.#hardBreak = this.#seekHardBreak(from);
-		let next = Math.min(src.length, this.#tokenChar, this.#scheme, this.#mail, this.#hardBreak) - pos;
+		let next =
+			Math.min(src.length, this.#tokenChar, this.#schemeFrom(from), this.#mailFrom(from), this.#hardBreak) - pos;
 		const lexer = this.#lexer;
 		const extensions = lexer.extensions.inline;
 		for (let i = 0; i < extensions.length; i++) {
@@ -632,10 +823,30 @@ class TextStops {
 			}
 			if (typeof at === "number" && at > 0 && at < next) next = at;
 		}
-		return next;
+		// `slice` reads a fractional hint from `start` as its integer part.
+		return Math.trunc(next);
 	}
 
-	/** Finds the first offset at or after `from` that starts a match of `/[A-Za-z0-9._+-]+@/`. */
+	/** The first bare-URL scheme at or after `from`. */
+	#schemeFrom(from: number): number {
+		if (this.#scheme < from) {
+			BARE_URL_SCHEME.lastIndex = from;
+			this.#scheme = BARE_URL_SCHEME.exec(this.#src)?.index ?? Infinity;
+		}
+		return this.#scheme;
+	}
+
+	/** The first offset at or after `from` that starts a match of `/[A-Za-z0-9._+-]+@/`. */
+	#mailFrom(from: number): number {
+		if (this.#mail < from) {
+			// Every offset in the run before the found "@" starts a match of its own.
+			if (from < this.#mailAt) this.#mail = from;
+			else this.#seekMail(from);
+		}
+		return this.#mail;
+	}
+
+	/** Searches from `from` for the e-mail stop, recording its offset and its "@". */
 	#seekMail(from: number): void {
 		const src = this.#src;
 		for (let at = src.indexOf("@", from + 1); at !== -1; at = src.indexOf("@", at + 1)) {
@@ -665,7 +876,11 @@ class TextStops {
 
 function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] {
 	let rest = src;
+	// Lookups over `src`, each built the first time a step needs it.
 	let stops: TextStops | undefined;
+	let brackets: LinkBrackets | undefined;
+	let emphasis: Map<string, EmphasisDelimiters> | undefined;
+	let textRun: TextRun | undefined;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;
 		for (const extension of lexer.extensions.inline) {
@@ -716,7 +931,12 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			rest = rest.slice(html.length);
 			continue;
 		}
-		const link = matchLink(rest, lexer);
+		// `rest` is always a suffix of `src`, so its offset follows from the lengths.
+		const pos = src.length - rest.length;
+		const link =
+			rest[0] === "[" || rest.startsWith("![")
+				? matchLink(rest, lexer, (brackets ??= new LinkBrackets(src)), pos)
+				: undefined;
 		if (link) {
 			output.push(link);
 			rest = rest.slice(link.raw.length);
@@ -746,18 +966,11 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 		) {
 			const width = rest[1] === marker ? 2 : 1;
 			const delimiter = marker.repeat(width);
-			let end = findDelimiter(rest, delimiter, width);
-			let nested = 0;
-			while (end !== -1) {
-				if (!canCloseDelimiter(rest, end, marker) && canOpenDelimiter(rest, end, width, marker)) {
-					nested++;
-				} else if (canCloseDelimiter(rest, end, marker) && nested > 0) {
-					nested--;
-				} else if (canCloseDelimiter(rest, end, marker)) {
-					break;
-				}
-				end = findDelimiter(rest, delimiter, end + width);
-			}
+			emphasis ??= new Map();
+			let delimiters = emphasis.get(delimiter);
+			if (!delimiters) emphasis.set(delimiter, (delimiters = new EmphasisDelimiters(src, marker, width)));
+			const close = delimiters.closeFor(pos);
+			const end = close === -1 ? -1 : close - pos;
 			if (end !== -1) {
 				const raw = rest.slice(0, end + width);
 				const text = rest.slice(width, end);
@@ -782,10 +995,12 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 		const urlOverride = lexer.tokenizerOverrides.url;
 		if (urlOverride) url = urlOverride.call(lexer.tokenizer, rest);
 		if (!urlOverride || url === false) {
-			const match =
-				/^(?:(?:https?:\/\/|ftp:\/\/|www\.)[^\s<]+|[A-Za-z0-9._+-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+)/i.exec(
-					rest,
-				);
+			stops ??= new TextStops(src, lexer);
+			const match = stops.bareUrlCanStart(pos)
+				? /^(?:(?:https?:\/\/|ftp:\/\/|www\.)[^\s<]+|[A-Za-z0-9._+-]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+)/i.exec(
+						rest,
+					)
+				: null;
 			if (match) {
 				const text = trimBareUrl(match[0]);
 				const href =
@@ -803,10 +1018,10 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			continue;
 		}
 
-		// `rest` is always a suffix of `src`, so its offset follows from the lengths.
 		stops ??= new TextStops(src, lexer);
-		const next = stops.textLength(rest, src.length - rest.length);
-		appendText(output, rest.slice(0, next));
+		const next = stops.textLength(rest, pos);
+		textRun ??= new TextRun(src);
+		textRun.append(output, pos, pos + next);
 		rest = rest.slice(next);
 	}
 	return output;

@@ -747,56 +747,6 @@ markdownParser.use({
 	extensions: [customHrExtension, mathBlockExtension, mathEnvBlockExtension, mathExtension, boundedAutolinkExtension],
 });
 
-// ---------------------------------------------------------------------------
-// GFM `url` tokenizer gate
-// ---------------------------------------------------------------------------
-// marked tries the bundled GFM `url` tokenizer at every inline tokenization
-// step, and its regex is expensive to FAIL: the email alternative
-// `^[A-Za-z0-9._+-]+(@)…` linearly consumes an identifier run, then backtracks
-// it one character at a time when no `@` follows. A 71414-sample / 1ms CPU
-// profile of the TUI put 73.3% of total CPU (74.9s of a 102s capture) inside
-// this single regex. The override below runs an O(bounded) charCode gate first
-// and only falls through to the built-in tokenizer — by returning `false`,
-// marked's tokenizer-override fallback contract — when a match is possible.
-//
-// Conservativeness argument. The built-in rule (no flags) is
-//   /^((?:[hH][tT][tT][pP][sS]?|[fF][tT][pP]):\/\/|www\.)(?:[a-zA-Z0-9\-]+\.?)+[^\s<]*
-//    |^[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/
-// Both alternatives are anchored, so any match constrains the head of src:
-//  • Branch 1 requires src to start with `http://`, `https://`, `ftp://`
-//    (scheme letters in any case) or lowercase `www.`. The gate accepts all of
-//    these via isAutolinkSchemeAt(src, 0); it also over-accepts `WWW.`, a
-//    harmless false positive (the built-in regex simply fails to match).
-//  • Branch 2 requires src to start with one-or-more chars from
-//    `[A-Za-z0-9._+-]` immediately followed by `@`. The gate scans that exact
-//    class: if the run ends within URL_GATE_EMAIL_SCAN_LIMIT chars it accepts
-//    iff the terminator is `@`; a run reaching the limit is accepted
-//    unconditionally. Every src branch 2 can match is therefore accepted —
-//    the gate never rejects a src the built-in regex would match.
-const URL_GATE_EMAIL_SCAN_LIMIT = 320;
-
-/** @internal exported for tests — must never return false for a src the built-in url regex matches. */
-export function urlTokenPossible(src: string): boolean {
-	if (isAutolinkSchemeAt(src, 0)) return true;
-	let i = 0;
-	while (i < URL_GATE_EMAIL_SCAN_LIMIT) {
-		const c = src.charCodeAt(i);
-		const isLocalChar =
-			(c >= 97 && c <= 122) /* a-z */ ||
-			(c >= 65 && c <= 90) /* A-Z */ ||
-			(c >= 48 && c <= 57) /* 0-9 */ ||
-			c === 46 /* . */ ||
-			c === 95 /* _ */ ||
-			c === 43 /* + */ ||
-			c === 45; /* - */
-		if (!isLocalChar) break;
-		i++;
-	}
-	if (i === 0) return false;
-	if (i >= URL_GATE_EMAIL_SCAN_LIMIT) return true; // over-long run: give up conservatively
-	return src.charCodeAt(i) === 64; /* @ */
-}
-
 // Setext-underline pre-gate for marked's `lheading` rule. The rule's lazy body
 // `((?:.|\n(?!<block-start>))+?)` re-runs its block-start lookahead while
 // expanding character by character, so even a FAILING attempt at offset 0
@@ -823,9 +773,6 @@ markdownParser.use({
 	tokenizer: {
 		// `false` → marked falls back to the built-in tokenizer;
 		// `undefined` → no token here, built-in never runs.
-		url(src: string): Tokens.Link | undefined | false {
-			return urlTokenPossible(src) ? false : undefined;
-		},
 		lheading(src: string): Tokens.Heading | undefined | false {
 			return lheadingPossible(src) ? false : undefined;
 		},

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Lexer, Marked, type TokenizerAndRendererExtension, type TokenizerExtension } from "../src/marked";
+import { Lexer, Marked, type Token, type TokenizerAndRendererExtension, type TokenizerExtension } from "../src/marked";
 import goldens from "./fixtures/marked/goldens.json";
 
 describe("marked compatibility", () => {
@@ -244,6 +244,77 @@ describe("marked compatibility", () => {
 					{ type: "text", raw: " c $ 5, then $z$", text: " c $ 5, then $z$", escaped: false },
 				],
 			},
+		]);
+	});
+
+	// Emphasis and link closers come from per-paragraph indexes of delimiters
+	// and brackets; these shapes pin where each opener closes.
+	const shape = (tokens: readonly Token[]): unknown[] =>
+		tokens.map(token =>
+			"tokens" in token && token.tokens ? [token.type, token.raw, shape(token.tokens)] : [token.type, token.raw],
+		);
+
+	test("closes emphasis past nested, unclosed, run-internal and escaped delimiters", () => {
+		expect(shape(Lexer.lexInline("*a **b** c* and *d"))).toEqual([
+			[
+				"em",
+				"*a **b** c*",
+				[
+					["text", "a "],
+					["strong", "**b**", [["text", "b"]]],
+					["text", " c"],
+				],
+			],
+			["text", " and *d"],
+		]);
+		expect(shape(Lexer.lexInline("**x *y* z** ****w** \\**v**"))).toEqual([
+			[
+				"strong",
+				"**x *y* z**",
+				[
+					["text", "x "],
+					["em", "*y*", [["text", "y"]]],
+					["text", " z"],
+				],
+			],
+			["text", " "],
+			["strong", "****", []],
+			["text", "w** "],
+			["escape", "\\*"],
+			["text", "*v**"],
+		]);
+		// An escaped `\*` inside bold is not its closer.
+		expect(shape(Lexer.lexInline("**a \\**b** c**"))).toEqual([
+			[
+				"strong",
+				"**a \\**b**",
+				[
+					["text", "a "],
+					["escape", "\\*"],
+					["text", "*b"],
+				],
+			],
+			["text", " c**"],
+		]);
+	});
+
+	test("closes link labels and destinations past unclosed, escaped and nested brackets", () => {
+		expect(shape(Lexer.lexInline("[x [a \\] b](u) [c](v (w)) ![i](j) [k"))).toEqual([
+			["text", "[x "],
+			[
+				"link",
+				"[a \\] b](u)",
+				[
+					["text", "a "],
+					["escape", "\\]"],
+					["text", " b"],
+				],
+			],
+			["text", " "],
+			["link", "[c](v (w))", [["text", "c"]]],
+			["text", " "],
+			["image", "![i](j)", [["text", "i"]]],
+			["text", " [k"],
 		]);
 	});
 

@@ -5,6 +5,11 @@
 ### Fixed
 
 - Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms.
+- Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds.
+
+### Removed
+
+- Removed the `urlTokenPossible` export; the Markdown lexer now skips the bare-URL rule itself wherever that rule cannot match.
 
 ## [18.4.4] - 2026-09-29
 

@@ -6,7 +6,6 @@ import {
 	extractMarkdownLinks,
 	Markdown,
 	renderInlineMarkdown,
-	urlTokenPossible,
 } from "@oh-my-pi/pi-tui/components/markdown";
 import { setTerminalTextSizing, TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
 import { type Component, TUI } from "@oh-my-pi/pi-tui/tui";
@@ -2463,15 +2462,12 @@ describe("Math rendering", () => {
 	});
 });
 
-describe("inline start()/url-gate scanners (perf rewrites)", () => {
+describe("inline start scanners (perf rewrites)", () => {
 	// The hand-rolled scanners replaced regex scans that marked runs on the
 	// remaining source at every inline position. They must return exactly what
 	// the old regexes returned for every input.
 	const OLD_MATH_START = /\$|\\\(|\\\[/;
 	const OLD_AUTOLINK_SCAN = /www\.|https?:\/\/|ftp:\/\//i;
-	// marked's bundled GFM inline url rule (verbatim, no flags).
-	const GFM_URL_REGEX =
-		/^((?:[hH][tT][tT][pP][sS]?|[fF][tT][pP]):\/\/|www\.)(?:[a-zA-Z0-9-]+\.?)+[^\s<]*|^[A-Za-z0-9._+-]+(@)[a-zA-Z0-9-_]+(?:\.[a-zA-Z0-9-_]*[a-zA-Z0-9])+(?![-_])/;
 
 	const fixtures = [
 		"",
@@ -2506,7 +2502,7 @@ describe("inline start()/url-gate scanners (perf rewrites)", () => {
 		"trailing at sign only@ ",
 		"@leading-at no local part",
 		"a".repeat(400), // long identifier run, no @
-		`${"a".repeat(400)}@example.com`, // long local part (past gate scan limit)
+		`${"a".repeat(400)}@example.com`, // long local part
 		"short@x",
 		"dots...and+plus_under-score@host.tld",
 	];
@@ -2525,18 +2521,7 @@ describe("inline start()/url-gate scanners (perf rewrites)", () => {
 		}
 	});
 
-	it("urlTokenPossible is conservative: never false when the GFM url regex matches", () => {
-		for (const src of fixtures) {
-			if (GFM_URL_REGEX.test(src)) {
-				expect(urlTokenPossible(src)).toBeTrue();
-			}
-		}
-		// And it actually gates: plain prose with no scheme/email head is rejected.
-		expect(urlTokenPossible("plain prose, nothing linkable here")).toBeFalse();
-		expect(urlTokenPossible("@leading-at no local part")).toBeFalse();
-	});
-
-	it("gated tokenizer still autolinks urls and emails end-to-end", () => {
+	it("autolinks urls and emails end-to-end", () => {
 		const rendered = renderInlineMarkdown("see https://example.com and mail user@example.com now", {
 			...defaultMarkdownTheme,
 			link: (text: string) => `<L>${text}</L>`,
