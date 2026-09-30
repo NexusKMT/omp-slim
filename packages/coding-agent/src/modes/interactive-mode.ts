@@ -1840,6 +1840,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.historyStorage.setSessionResolver(() => this.sessionManager.getSessionId());
 			// The prediction daemon learns from history.db; nudge it once each prompt is durable.
 			this.historyStorage.setAddListener(syncTextPrediction);
+			this.historyStorage.setErrorListener(() => {
+				this.showWarning("Prompt history could not be saved; this prompt may be unavailable after restart.");
+			});
 		} catch (error) {
 			logger.warn("History storage unavailable", { error: String(error) });
 		}
