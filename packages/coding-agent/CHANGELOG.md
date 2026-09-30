@@ -6,6 +6,7 @@
 
 - Added `promote_queued_message` to RPC, with `promoteQueuedMessage()` on the session and TypeScript RPC client and `promote_queued_message()` on the Python RPC client, so a queued follow-up can become a steering message without duplicating its text or losing attachments ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - The TypeScript RPC client's `prompt()` accepts a `streamingBehavior` (`"steer"` or `"followUp"`) for prompts sent while the agent is busy ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
+- Claude prompt caches can now stay warm on Amazon Bedrock and Bedrock Mantle, respecting configured per-model cache lifetimes as well as cache retention ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Changed
 
@@ -16,10 +17,6 @@
 
 - An `abort` that lands while a prompt's images are still being prepared now drops that prompt instead of starting or queueing it afterward ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - A path-pasted image or video sent as an aside while the agent is busy now reaches the model with its source path ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
-- Claude prompt caches can now stay warm on Amazon Bedrock and Bedrock Mantle, respecting configured per-model cache lifetimes as well as cache retention ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-
-### Fixed
-
 - Extension-registered model prompt-cache settings, including `{}` opt-outs, now take precedence over matching `models.yml` definitions ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Cache warming now follows `providers.cacheRetention`: `none` no longer replays uncached requests, and `long` warms on the 1-hour lifetime the request actually wrote ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
