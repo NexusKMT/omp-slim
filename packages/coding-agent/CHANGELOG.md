@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Subagent MCP calls now honor the parent transport's configured deadline, including `OMP_MCP_TIMEOUT_MS` and `timeout: 0`, instead of discarding long-running results at an independent 60-second proxy timeout.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
