@@ -2,11 +2,13 @@
  * Subagent session discovery shared by `/export` (HTML) and `/dump` (text).
  *
  * A session at `<dir>/<name>.jsonl` keeps its subagent sessions at `<dir>/<name>/<AgentId>.jsonl`;
- * each subagent's own children nest the same way under `<dir>/<name>/<AgentId>/`.
+ * each subagent's own children nest the same way under `<dir>/<name>/<AgentId>/`. Advisor
+ * transcripts (`__advisor*.jsonl`) share those directories and are not subagents.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isAdvisorTranscriptName } from "../advisor/transcript-recorder";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { loadEntriesFromFile } from "./session-loader";
 
@@ -47,7 +49,7 @@ async function collectSubSessionsFromDir(
 		throw err;
 	}
 	for (const name of names.sort()) {
-		if (!name.endsWith(".jsonl") || name.includes(".bak")) continue;
+		if (!name.endsWith(".jsonl") || name.includes(".bak") || isAdvisorTranscriptName(name)) continue;
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
 		const fileEntries = await loadEntriesFromFile(path.join(dir, name));

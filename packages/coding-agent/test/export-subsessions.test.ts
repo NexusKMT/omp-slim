@@ -111,6 +111,17 @@ describe("collectSubSessions", () => {
 		expect(Object.keys(subs)).toEqual(["Good"]);
 	});
 
+	test("skips advisor transcripts stored alongside subagent sessions", async () => {
+		await Bun.write(path.join(root, "main/Scout.jsonl"), sessionJsonl("scout", ["s1"]));
+		await Bun.write(path.join(root, "main/__advisor.jsonl"), sessionJsonl("adv", ["v1"]));
+		await Bun.write(path.join(root, "main/__advisor.reviewer.jsonl"), sessionJsonl("adv2", ["v2"]));
+		await Bun.write(path.join(root, "main/Scout/__advisor.jsonl"), sessionJsonl("adv3", ["v3"]));
+
+		const subs = await collectSubSessions(mainFile);
+
+		expect(Object.keys(subs)).toEqual(["Scout"]);
+	});
+
 	test("returns empty record when no subagent dir exists", async () => {
 		expect(await collectSubSessions(mainFile)).toEqual({});
 		expect(await collectSubSessions(path.join(root, "not-a-session"))).toEqual({});

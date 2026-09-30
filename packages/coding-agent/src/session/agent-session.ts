@@ -391,7 +391,7 @@ import { buildSessionContext, getRestorableSessionModels, isTranscriptEntry } fr
 import type { CacheWarmer, CacheWarmingMode, CacheWarmingStatus } from "./cache-warmer";
 import { isUserRequestEntry, transcriptEntryMessage, userTurnDraft } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { formatSessionDumpText } from "./session-dump-format";
-import { collectSubSessions } from "./sub-sessions";
+import { collectSubSessions, type SubSession } from "./sub-sessions";
 import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
 import { SessionHandoff, type SessionHandoffHost } from "./session-handoff";
 import {
@@ -12421,10 +12421,19 @@ export class AgentSession implements SettingsScope {
 	 * rendered with markdown role headings (`## User`, `## Assistant`,
 	 * `### Tool Call`/`### Tool Result`), followed by every persisted subagent
 	 * transcript stored next to the session file (nested subagents included).
+	 * If the subagent transcripts cannot be read, the main transcript is still
+	 * returned with a note saying why they are missing.
 	 */
 	async formatSessionAsText(): Promise<string> {
 		const sessionFile = this.sessionManager.getSessionFile();
-		const subSessions = sessionFile ? await collectSubSessions(sessionFile) : {};
+		let subSessions: Record<string, SubSession> = {};
+		let subagentError: string | undefined;
+		try {
+			if (sessionFile) subSessions = await collectSubSessions(sessionFile);
+		} catch (error) {
+			subagentError = error instanceof Error ? error.message : String(error);
+			logger.warn("Failed to collect subagent transcripts for dump", { sessionFile, error: subagentError });
+		}
 		const subagents = Object.entries(subSessions).map(([key, sub]) => {
 			const context = deobfuscateSessionContext(buildSessionContext(sub.entries, sub.leafId), this.#obfuscator);
 			return {
@@ -12434,7 +12443,7 @@ export class AgentSession implements SettingsScope {
 				thinkingLevel: context.thinkingLevel,
 			};
 		});
-		return formatSessionDumpText({
+		const text = formatSessionDumpText({
 			messages: this.messages,
 			systemPrompt: this.agent.state.systemPrompt,
 			model: this.agent.state.model,
@@ -12443,6 +12452,7 @@ export class AgentSession implements SettingsScope {
 			inlineToolDescriptors: this.agent.pruneToolDescriptions,
 			subagents,
 		});
+		return subagentError ? `${text}\n\n---\nSubagent transcripts unavailable: ${subagentError}` : text;
 	}
 
 	/**
