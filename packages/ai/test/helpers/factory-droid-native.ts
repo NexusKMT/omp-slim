@@ -63,6 +63,7 @@ export const NATIVE_CASES: readonly NativeCase[] = [
 	{ model: "claude-opus-4-6", upstream: "anthropic", effort: "max" },
 	{ model: "claude-opus-4-8", upstream: "vertex_anthropic", effort: "high" },
 	{ model: "claude-opus-4-8", upstream: "anthropic", effort: "off" },
+	{ model: "claude-opus-4-8", upstream: "azure_anthropic", effort: "high" },
 	{ model: "claude-opus-5", upstream: "snowflake", effort: "off" },
 	{ model: "claude-fable-5", upstream: "anthropic", effort: "high" },
 	{ model: "claude-opus-5-5-fast", upstream: "anthropic", effort: "high" },

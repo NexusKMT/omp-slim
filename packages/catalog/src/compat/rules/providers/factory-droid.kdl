@@ -36,7 +36,7 @@ provider "factory-droid" {
 			completions-reasoning-mode "effort"
 			completions-reasoning-history "preserved"
 		}
-		on-upstream "baseten" {
+		on-upstream "baseten" "databricks" {
 			completions-reasoning-mode "effort"
 		}
 	}

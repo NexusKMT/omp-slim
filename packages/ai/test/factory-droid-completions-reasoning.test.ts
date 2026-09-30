@@ -102,7 +102,7 @@ describe("Factory Droid completions reasoning matrix", () => {
 		expect(events).not.toContain("done");
 	});
 
-	it.each(["baseten", "mistral"])(
+	it.each(["baseten", "mistral", "databricks"])(
 		"emits GLM reasoning_effort verbatim without template or history fields via %s",
 		async upstream => {
 			const captured: CapturedRequest[] = [];

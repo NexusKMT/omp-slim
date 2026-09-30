@@ -404,7 +404,7 @@ describe("Factory Droid EU region", () => {
 		expect(gpt54.baseUrl).toBe("https://api.eu.factory.ai/api/llm/o/v1");
 		const glmMeta = FACTORY_DROID_MODEL_META["glm-5.2"];
 		const glm = models!.find(model => model.id === "glm-5.2")!;
-		expect(glm.factoryDroidApiProviders).toEqual(["baseten", "mistral"]);
+		expect(glm.factoryDroidApiProviders).toEqual(["mistral"]);
 		expect(glm.contextWindow).toBe(glmMeta.euContextWindow!);
 		expect(glm.maxTokens).toBe(glmMeta.euMaxTokens!);
 	});

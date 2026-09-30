@@ -10,7 +10,7 @@ import { isRecord } from "../utils";
  * native request corpus with `packages/ai/scripts/capture-factory-droid-native.ts`
  * against the matching CLI binary and make `factory-droid-native-parity.test.ts` pass.
  */
-export const FACTORY_DROID_CLIENT_VERSION = "0.228.0";
+export const FACTORY_DROID_CLIENT_VERSION = "0.230.0";
 
 /** Wire protocol used by the Factory proxy for each model. */
 export type FactoryDroidWire = "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generate";
@@ -29,7 +29,8 @@ export type FactoryDroidUpstream =
 	| "bedrock_openai"
 	| "google"
 	| "xai"
-	| "snowflake";
+	| "snowflake"
+	| "databricks";
 
 /** Inference serving region; independent from account/API-host residency. */
 export type FactoryDroidRegion = "global" | "us" | "eu";
@@ -46,7 +47,7 @@ export interface AccountScope {
 }
 
 /**
- * Serving regions from the CLI's `_o` upstream table. EU overrides may
+ * Serving regions from the CLI's upstream region table. EU overrides may
  * explicitly select otherwise global-only upstreams; absent overrides filter
  * the default rotation by this table.
  */
@@ -64,6 +65,7 @@ export const FACTORY_DROID_UPSTREAM_REGIONS: Readonly<Record<FactoryDroidUpstrea
 	google: ["global", "us"],
 	xai: ["global", "us"],
 	snowflake: ["global"],
+	databricks: ["global"],
 };
 
 /** Inference region for an account: explicit scope wins, else EU residency infers EU, else global. */

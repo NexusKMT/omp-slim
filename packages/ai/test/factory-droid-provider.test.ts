@@ -107,6 +107,9 @@ describe("Factory Droid completions wire (Droid Core)", () => {
 				orgId: "org-global",
 			}),
 		);
+		// No cached route: each attempt takes its identity's registry rotation
+		// (global Baseten, then EU Mistral), so only the window can refuse it.
+		model.factoryDroidApiProviders = undefined;
 		const captured: CapturedRequest[] = [];
 		const result = await streamSimple(
 			model,
@@ -140,7 +143,7 @@ describe("Factory Droid completions wire (Droid Core)", () => {
 		async maxTokens => {
 			const model = buildModel(
 				buildFactoryDroidModel(glm52, {
-					apiProviders: ["baseten"],
+					apiProviders: ["mistral"],
 					region: "global",
 					inferenceRegion: "global",
 					orgId: "org-global",
