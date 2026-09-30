@@ -1351,7 +1351,11 @@ export class TurnRecovery {
 
 		const id = this.#classifyRetryMessage(message);
 		if (message.stopReason === "aborted" && AIError.is(id, AIError.Flag.Abort)) return true;
-		if (message.errorMessage !== "Request was aborted" && message.errorMessage !== "Request was aborted.") {
+		if (
+			message.errorMessage !== "Request was aborted" &&
+			message.errorMessage !== "Request was aborted." &&
+			message.errorMessage !== "The operation was aborted"
+		) {
 			return false;
 		}
 

@@ -4619,7 +4619,7 @@ describe("AgentSession retry fallback", () => {
 		expect(getLastAssistantMessage(session).stopReason).toBe("error");
 	});
 
-	it("auto-retries a bare Request was aborted error-stop turn (issue #5375)", async () => {
+	it.each(["Request was aborted.", "The operation was aborted"])("auto-retries empty abort errors: %s", async abortMessage => {
 		const model = getBundledModel("openai", "gpt-4o-mini");
 		if (!model) {
 			throw new Error("Expected bundled OpenAI test model to exist");
@@ -4629,7 +4629,7 @@ describe("AgentSession retry fallback", () => {
 		// A stalled/dropped stream that the provider surfaces as stopReason:"error"
 		// carrying the bare abort sentinel, then a clean recovery on the retry.
 		const mock = createMockModel({
-			responses: [{ throw: "Request was aborted." }, { content: ["recovered after bare abort error"] }],
+			responses: [{ throw: abortMessage }, { content: ["recovered after bare abort error"] }],
 		});
 		const agent = new Agent({
 			getApiKey: model => `${model.provider}-test-key`,
