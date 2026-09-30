@@ -266,6 +266,58 @@ describe("marked compatibility", () => {
 		);
 	});
 
+	test("an inline extension registered during a lex gets its own startFrom hint", () => {
+		const at = (mark: string) => (src: string, from: number) => {
+			const index = src.indexOf(mark, from);
+			return index === -1 ? undefined : index;
+		};
+		const marked = new Marked();
+		marked.use({
+			extensions: [
+				{
+					name: "para",
+					level: "inline",
+					startFrom: at("¶"),
+					tokenizer(src) {
+						if (!src.startsWith("¶")) return undefined;
+						// Registering shifts every extension already in the live registry, so
+						// "pct" lands where "sect" and its cached hint (the later "§") were.
+						marked.use({
+							extensions: [
+								{
+									name: "pct",
+									level: "inline",
+									startFrom: at("%%"),
+									tokenizer: rest => {
+										const match = /^%%\w+%%/.exec(rest);
+										return match ? { type: "pct", raw: match[0] } : undefined;
+									},
+								},
+							],
+						});
+						return { type: "para", raw: "¶" };
+					},
+				},
+				{
+					name: "sect",
+					level: "inline",
+					startFrom: at("§"),
+					tokenizer: src => (src.startsWith("§") ? { type: "sect", raw: "§" } : undefined),
+				},
+			],
+		});
+		const [paragraph] = marked.lexer("x ¶ %%p%% § y");
+		expect(paragraph && "tokens" in paragraph && paragraph.tokens ? shape(paragraph.tokens) : paragraph).toEqual([
+			["text", "x "],
+			["para", "¶"],
+			["text", " "],
+			["pct", "%%p%%"],
+			["text", " "],
+			["sect", "§"],
+			["text", " y"],
+		]);
+	});
+
 	// Emphasis and link closers come from per-paragraph indexes of delimiters
 	// and brackets; these shapes pin where each opener closes.
 	const shape = (tokens: readonly Token[]): unknown[] =>

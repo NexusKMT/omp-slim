@@ -764,13 +764,13 @@ class TextStops {
 	#dottedDomain = false;
 	// The next hard break: two or more spaces, or a backslash, before "\n".
 	#hardBreak = UNSEARCHED;
-	// Per inline extension, the offset its `startFrom` last returned.
-	readonly #extensionStarts: number[];
+	// Per inline extension, the offset its `startFrom` last returned. Keyed by the extension itself: `Marked.use`
+	// can add extensions to the live registry during a lex, shifting every index.
+	#extensionStarts: Map<TokenizerExtension, number> | undefined;
 
 	constructor(src: string, lexer: Lexer) {
 		this.#src = src;
 		this.#lexer = lexer;
-		this.#extensionStarts = lexer.extensions.inline.map(() => UNSEARCHED);
 	}
 
 	/**
@@ -806,12 +806,11 @@ class TextStops {
 		let next =
 			Math.min(src.length, this.#tokenChar, this.#schemeFrom(from), this.#mailFrom(from), this.#hardBreak) - pos;
 		const lexer = this.#lexer;
-		const extensions = lexer.extensions.inline;
-		for (let i = 0; i < extensions.length; i++) {
-			const extension = extensions[i]!;
+		for (const extension of lexer.extensions.inline) {
 			let at: number | void;
 			if (extension.startFrom) {
-				let start = this.#extensionStarts[i] ?? UNSEARCHED;
+				const starts = (this.#extensionStarts ??= new Map());
+				let start = starts.get(extension) ?? UNSEARCHED;
 				if (start < pos) {
 					const found = extension.startFrom.call({ lexer }, src, pos);
 					// A -1 or NaN "none" would be searched for again at every text step.
@@ -821,7 +820,7 @@ class TextStops {
 						);
 					}
 					start = found ?? Infinity;
-					this.#extensionStarts[i] = start;
+					starts.set(extension, start);
 				}
 				// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
 				at = start - pos;
