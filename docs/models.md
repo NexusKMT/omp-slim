@@ -507,10 +507,10 @@ If a role points at another role, the target model still inherits normally and a
 A model preset is a named snapshot of every role assignment plus `defaultThinkingLevel`, so you can swap a whole setup at once:
 
 ```text
-/presets save cheap          # save the current roles and thinking level
-/presets switch deep         # apply a saved preset
-/presets                     # pick one from a list (interactive)
-/presets list | delete <name>
+/modelpreset save cheap      # save the current roles and thinking level
+/modelpreset switch deep     # apply a saved preset
+/modelpreset                 # pick one from a list (interactive)
+/modelpreset list | delete <name>
 ```
 
 In `/models`, press `s` in the Roles view to save the current setup under a name. Presets live under `modelPresets` in `config.yml`:

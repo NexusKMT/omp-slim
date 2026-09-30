@@ -19,7 +19,7 @@ export type ModelTagsSettings = Record<string, ModelTagDef>;
 
 /**
  * One saved model preset (`modelPresets.<name>`): the role assignments and default thinking level
- * captured by `/presets save` or the model hub, re-applied as a whole by `/presets switch`.
+ * captured by `/modelpreset save` or the model hub, re-applied as a whole by `/modelpreset switch`.
  */
 export interface ModelPreset {
 	modelRoles: Record<string, string>;
@@ -108,7 +108,7 @@ export const cfgModelRoleStorage = register({
 
 export const cfgModelRoles = register({ id: "modelRoles", type: "record", default: EMPTY_STRING_RECORD });
 
-/** Named model presets; no settings-panel UI — managed by `/presets` and the model hub. */
+/** Named model presets; no settings-panel UI — managed by `/modelpreset` and the model hub. */
 export const cfgModelPresets = register({
 	id: "modelPresets",
 	type: "record",

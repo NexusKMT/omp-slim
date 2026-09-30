@@ -191,7 +191,7 @@ export class SelectorController {
 	}
 
 	/**
-	 * Serialize default-role mutations with `/presets switch`, which holds the
+	 * Serialize default-role mutations with `/modelpreset switch`, which holds the
 	 * same shared tail in `config/model-presets.ts` for its whole apply.
 	 */
 	async #acquireDefaultRoleMutation(): Promise<() => void> {

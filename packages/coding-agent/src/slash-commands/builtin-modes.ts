@@ -811,7 +811,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "presets",
+		name: "modelpreset",
 		icon: "model",
 		description: "Save and switch model presets (role models + thinking level)",
 		acpDescription: "Manage model presets",
@@ -862,8 +862,8 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 	},
 ];
 
-const PRESETS_USAGE = "Usage: /presets [list | save <name> | switch <name> | delete <name>]";
-const NO_PRESETS_MESSAGE = "No model presets saved. Use /presets save <name> to create one.";
+const PRESETS_USAGE = "Usage: /modelpreset [list | save <name> | switch <name> | delete <name>]";
+const NO_PRESETS_MESSAGE = "No model presets saved. Use /modelpreset save <name> to create one.";
 
 interface PresetsCommandOutcome {
 	message: string;
@@ -873,7 +873,7 @@ interface PresetsCommandOutcome {
 	changedConfig?: boolean;
 }
 
-/** Shared by the ACP and TUI handlers of `/presets`; `args` is everything after the command name. */
+/** Shared by the ACP and TUI handlers of `/modelpreset`; `args` is everything after the command name. */
 async function runPresetsCommand(
 	args: string,
 	settings: Settings,
@@ -887,7 +887,7 @@ async function runPresetsCommand(
 			return { message: names.length > 0 ? `Model presets: ${names.join(", ")}` : NO_PRESETS_MESSAGE };
 		}
 		case "save": {
-			if (!name) return { message: "Usage: /presets save <name>", usage: true };
+			if (!name) return { message: "Usage: /modelpreset save <name>", usage: true };
 			if (!isValidModelPresetName(name)) {
 				return {
 					message: `Invalid preset name "${name}": use a letter, then letters, digits, - or _`,
@@ -898,7 +898,7 @@ async function runPresetsCommand(
 			return { message: modelPresetSavedMessage(settings, name), changedConfig: true };
 		}
 		case "switch": {
-			if (!name) return { message: "Usage: /presets switch <name>", usage: true };
+			if (!name) return { message: "Usage: /modelpreset switch <name>", usage: true };
 			const result = await applyModelPreset(settings, session, name);
 			const message = formatModelPresetSwitch(name, result);
 			const wroteRoles = result.kind === "switched" || result.kind === "failed";
@@ -910,7 +910,7 @@ async function runPresetsCommand(
 			};
 		}
 		case "delete": {
-			if (!name) return { message: "Usage: /presets delete <name>", usage: true };
+			if (!name) return { message: "Usage: /modelpreset delete <name>", usage: true };
 			const result = deleteModelPreset(settings, name);
 			if (result === "deleted") return { message: `Deleted model preset "${name}"`, changedConfig: true };
 			if (result === "project") {
