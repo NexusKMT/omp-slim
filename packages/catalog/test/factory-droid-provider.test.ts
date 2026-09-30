@@ -3,13 +3,16 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { buildModel } from "../src/build";
+import { quotaTierFor } from "../src/compat/behavior";
 import {
 	type FactoryDroidModelPolicy,
 	type FactoryDroidRegistryModel,
 	factoryDroidRegistry,
+	resolveFactoryDroidPolicy,
 	resolveFactoryDroidRotation,
 } from "../src/compat/factory-droid";
 import { resolveModelPolicy } from "../src/compat/resolve";
+import rules from "../src/compat/rules.json";
 import { serverSideFallbackModels } from "../src/compat/server-side-fallback";
 import {
 	buildFactoryDroidModel,
@@ -245,6 +248,53 @@ describe("Factory Droid offline seed", () => {
 		const opus = models.find(model => model.id === "claude-opus-5");
 		expect(opus?.baseUrl).toBe("https://api.eu.factory.ai/api/llm/a");
 		expect(opus?.factoryDroidApiProviders).toEqual(["bedrock_anthropic"]);
+	});
+});
+
+describe("Factory Droid registry consistency", () => {
+	// A roster id is authored in three KDL places: the seed row, its per-model
+	// registry block, and the api-routes/quota-tiers behavior rules. A drifted
+	// id silently rides chat completions or bills from an unknown pool.
+	const seedIds = factoryDroidRegistry().map(({ spec }) => spec.id);
+	const routes = rules.behavior.apiRoutes
+		.filter(rule => rule.provider === "factory-droid")
+		.flatMap(rule => rule.routes);
+	const tiers = rules.behavior.quotaTiers
+		.filter(rule => rule.provider === "factory-droid")
+		.flatMap(rule => rule.tiers);
+	const registryBlocks = rules.cascade.rules.filter(
+		rule => rule.providers?.includes("factory-droid") && rule.catalog?.upstreamRotation !== undefined,
+	);
+	const exactIds = (selectors: readonly { kind: string; value: string }[] | undefined) =>
+		(selectors ?? []).flatMap(selector => (selector.kind === "exact" ? [selector.value] : []));
+
+	it("routes, bills and registers every roster model exactly once", () => {
+		for (const id of seedIds) {
+			const routed = routes.filter(route => route.match.exact?.includes(id));
+			expect({ id, routes: routed.length }).toEqual({ id, routes: 1 });
+			const wire: string | undefined = resolveFactoryDroidPolicy({ id })?.wire;
+			expect({ id, wire }).toEqual({ id, wire: routed[0].api });
+			expect({ id, pools: tiers.filter(tier => tier.models.includes(id)).length }).toEqual({ id, pools: 1 });
+			expect({ id, pool: quotaTierFor("factory-droid", id) }).toEqual({
+				id,
+				pool: expect.stringMatching(/^(core|standard)$/),
+			});
+			const blocks = registryBlocks.filter(rule => exactIds(rule.models).includes(id));
+			expect({ id, blocks: blocks.length }).toEqual({ id, blocks: 1 });
+		}
+	});
+
+	it("keeps no routing, billing or registry rule for ids outside the roster", () => {
+		const routed = routes.flatMap(route => route.match.exact ?? []);
+		const pooled = tiers.flatMap(tier => tier.models);
+		const registered = registryBlocks.flatMap(rule => exactIds(rule.models));
+		expect(routed.filter(id => !seedIds.includes(id))).toEqual([]);
+		expect(pooled.filter(id => !seedIds.includes(id))).toEqual([]);
+		expect(registered.filter(id => !seedIds.includes(id))).toEqual([]);
+		// Only exact ids: a prefix, glob or fallback would claim unknown models.
+		expect(routes.every(route => Object.keys(route.match).every(kind => kind === "exact"))).toBe(true);
+		expect(rules.behavior.quotaTiers.find(rule => rule.provider === "factory-droid")?.fallbacks).toEqual([]);
+		expect(registryBlocks.every(rule => rule.models?.every(selector => selector.kind === "exact"))).toBe(true);
 	});
 });
 

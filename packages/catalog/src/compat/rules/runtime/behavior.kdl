@@ -254,8 +254,8 @@ behavior {
 	}
 	// Factory Droid's proxy multiplexes four wires behind one client identity
 	// (packages/ai/src/providers/factory-droid.ts); `google-generate` is its
-	// native Gemini client. The registry names each model's wire, so ids are
-	// exact; unknown ids stay on chat completions.
+	// native Gemini client. The registry names each model's wire, so every
+	// roster id routes exactly; unknown ids fall back to chat completions.
 	api-routes provider="factory-droid" default="openai-completions" {
 		route "anthropic-messages" exact="claude-fable-5.1" exact="claude-fable-5" exact="claude-opus-5-5" \
 			exact="claude-opus-5-5-fast" exact="claude-opus-5" exact="claude-opus-5-fast" \
@@ -271,6 +271,10 @@ behavior {
 		route "google-generate" exact="garnet-07-15" exact="gemini-3.1-pro-preview" exact="gemini-3.8-flash" \
 			exact="gemini-3.7-flash" exact="gemini-3.6-flash" exact="gemini-3.5-flash" \
 			exact="gemini-3-flash-preview"
+		route "openai-completions" exact="inkling" exact="mistral-medium-3.5" exact="glm-5.3-flash" \
+			exact="glm-5.3" exact="glm-5.2" exact="glm-5.2-fast" exact="kimi-k3" exact="qwen3.8-max" \
+			exact="nemotron-3-ultra" exact="deepseek-v4.1-flash" exact="deepseek-v4-flash-0731" \
+			exact="deepseek-v4-pro" exact="minimax-m3"
 	}
 
 	// Copilot serves these models with tighter effective limits than its
