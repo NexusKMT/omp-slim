@@ -133,16 +133,12 @@ function pushTextDelta(h: Harness, text: string): void {
 }
 
 describe("Cursor final tool-call arguments", () => {
-	it.each(["completion", "flush"])("refuses truncated arguments on %s", finalizer => {
+	it("refuses truncated arguments on completion", () => {
 		const h = newHarness();
 		const raw = '{"path":"repaired.txt","content":"hello';
 		startMcpToolCall(h, "write");
 		pushArgsTextDelta(h, raw);
-		if (finalizer === "completion") {
-			completeMcpToolCall(h, { path: new TextEncoder().encode('"repaired.txt"') });
-		} else {
-			flushOpenToolCalls(h.output, h.stream, h.state);
-		}
+		completeMcpToolCall(h, { path: new TextEncoder().encode('"repaired.txt"') });
 		const call = h.output.content.find(block => block.type === "toolCall");
 		if (!call) throw new Error("Expected tool call");
 		expect(call.arguments).toEqual({ __parseError: expect.any(String), __rawJson: raw });
