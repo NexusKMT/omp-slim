@@ -1279,19 +1279,6 @@ export class AgentSession implements SettingsScope {
 					turnError ??= error;
 					logger.warn("IRC wake turn recovery failed", { error: String(error) });
 				}
-				// Owner-scoped background work continues past the wake turn: the
-				// async-result continuation is where the agent may finally yield.
-				// Hold the observer across that pause (settle = jobs → deliveries →
-				// idle) so the monitor still sees the eventual yield — finishing
-				// here would unsubscribe it first and the completion would
-				// dead-letter with no parent-owned job and no refreshed artifact
-				// (#11564). Settles immediately when nothing is pending; an
-				// interrupt cancels the jobs and settles the wait normally.
-				try {
-					await this.settleAsyncWork();
-				} catch (error) {
-					logger.warn("IRC wake async-work settle failed", { error: String(error) });
-				}
 				if (parkedFollowUps.length > 0) {
 					this.agent.replaceQueues(
 						[...this.agent.peekSteeringQueue()],
@@ -1299,13 +1286,29 @@ export class AgentSession implements SettingsScope {
 					);
 					this.#queuedMessageDrainBlocked ||= parkedQueueDrainBlocked;
 				}
-				this.#endInFlight(async () => {
-					try {
-						await finishObservation?.(turnError);
-					} catch (error) {
-						logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
-					}
-				});
+				// Release the in-flight bracket BEFORE settling owned async work:
+				// the bracket holds the prompt-in-flight count up, which withholds
+				// the yield-queue's idle flush, so waiting inside it would deadlock
+				// the very delivery the settle awaits (robomp review on #13703).
+				this.#endInFlight();
+				// Owner-scoped background work continues past the wake turn: the
+				// async-result continuation is where the agent may finally yield.
+				// Keep the observer attached across that pause (settle = jobs →
+				// deliveries → idle) so the monitor still sees the eventual yield —
+				// finishing here would unsubscribe it first and the completion
+				// would dead-letter with no parent-owned job and no refreshed
+				// artifact (#11564). Settles immediately when nothing is pending;
+				// an interrupt cancels the jobs and settles the wait normally.
+				try {
+					await this.settleAsyncWork();
+				} catch (error) {
+					logger.warn("IRC wake async-work settle failed", { error: String(error) });
+				}
+				try {
+					await finishObservation?.(turnError);
+				} catch (error) {
+					logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
+				}
 			});
 	}
 

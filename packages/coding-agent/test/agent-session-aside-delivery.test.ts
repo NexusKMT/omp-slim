@@ -13,7 +13,7 @@ import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { IrcBridge, type IrcBridgeHost } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
+import { IrcBridge, type IrcBridgeHost, type IrcMessage } from "@oh-my-pi/pi-coding-agent/session/irc-bridge";
 import { convertToLlm, USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionAdvisors } from "@oh-my-pi/pi-coding-agent/session/session-advisors";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
@@ -1379,5 +1379,82 @@ describe("AgentSession aside delivery", () => {
 		// The continuation turn received the job result through the delivery
 		// (injected as the background-completion system notice).
 		expect(JSON.stringify(mock.calls[2]!.context.messages)).toContain("build ok");
+	});
+
+	it("a plain idle IRC wake holds its observer through a background job's continuation (#11564)", async () => {
+		const modelRegistry = new ModelRegistry(authStorage);
+		const wakeModelCalled = Promise.withResolvers<void>();
+		const observerFinished = Promise.withResolvers<void>();
+		const gate = Promise.withResolvers<string>();
+		const events: string[] = [];
+		const mock = createMockModel({
+			provider: "openai",
+			id: "gpt-test",
+			responses: [
+				() => {
+					wakeModelCalled.resolve();
+					return { content: ["started the rebuild"] };
+				},
+				() => {
+					events.push("continuation-ran");
+					return { content: ["rebuild finished"] };
+				},
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: mock.model, systemPrompt: ["Test"], tools: [], messages: [] },
+			convertToLlm,
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "todo.enabled": false });
+		settings.setModelRole("default", `${mock.model.provider}/${mock.model.id}`);
+		const manager = new AsyncJobManager({});
+		AsyncJobManager.setInstance(manager);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry,
+			toolRegistry: new Map(),
+			agentId: "SubAgent",
+			ownedAsyncJobManager: manager,
+		});
+
+		session.setIrcWakeTurnObserver(_records => {
+			events.push("observer-start");
+			// The agent auto-backgrounded a build during the plain wake turn.
+			manager.register(
+				"bash",
+				"wake rebuild",
+				({ signal }) => untilAborted(signal, gate.promise).then(() => "build ok"),
+				{ id: "wake-job", ownerId: "SubAgent" },
+			);
+			return async () => {
+				events.push("observer-finish");
+				observerFinished.resolve();
+			};
+		});
+
+		await session.deliverIrcMessage({
+			id: "m1",
+			from: "peer",
+			to: "SubAgent",
+			body: "status?",
+			ts: Date.now(),
+		} as IrcMessage);
+		await wakeModelCalled.promise;
+
+		// The wake turn ended in prose with the gated job still running: the
+		// observer finish must wait for the job's continuation — without
+		// deadlocking the delivery by holding the in-flight bracket.
+		gate.resolve("BUILD GREEN");
+		await observerFinished.promise;
+		await session.waitForIdle();
+
+		expect(events).toContain("observer-start");
+		expect(mock.calls.length).toBe(2);
+		expect(events.indexOf("observer-finish")).toBeGreaterThan(events.indexOf("continuation-ran"));
+		expect(JSON.stringify(mock.calls[1]!.context.messages)).toContain("build ok");
 	});
 });
