@@ -590,7 +590,7 @@ const customHrExtension: TokenizerAndRendererExtension = {
 const mathExtension: TokenizerAndRendererExtension = {
 	name: "math",
 	level: "inline",
-	start: mathStartIndex,
+	startFrom: mathStartIndex,
 	tokenizer(src) {
 		const span = mathSpanAt(src, 0);
 		if (!span) return undefined;
@@ -677,12 +677,11 @@ const mathEnvBlockExtension: TokenizerAndRendererExtension = {
 // (return undefined) to marked's own autolink handling unchanged.
 const AUTOLINK_SCHEME_REGEX = /^(?:www\.|https?:\/\/|ftp:\/\/)/i;
 // Case-insensitive scheme scan replacing /www\.|https?:\/\/|ftp:\/\//i in
-// boundedAutolinkExtension.start — like `mathStartIndex`, this runs on the
-// remaining source at every inline position (part of a ~4.3% CPU start() scan
-// tail in profiles). charCode-only: no allocation, no toLowerCase copies.
-// `| 32` lower-cases ASCII letters; `.`/`:`/`/` are compared exactly, matching
-// the regex's ASCII-only `i` semantics. charCodeAt past the end returns NaN,
-// which fails every comparison, so no explicit bounds checks are needed.
+// boundedAutolinkExtension's start hint. charCode-only: no allocation, no
+// toLowerCase copies. `| 32` lower-cases ASCII letters; `.`/`:`/`/` are compared
+// exactly, matching the regex's ASCII-only `i` semantics. charCodeAt past the
+// end returns NaN, which fails every comparison, so no explicit bounds checks
+// are needed.
 function isAutolinkSchemeAt(src: string, i: number): boolean {
 	const c = src.charCodeAt(i) | 32;
 	if (c === 119 /* w */) {
@@ -720,8 +719,8 @@ function isAutolinkSchemeAt(src: string, i: number): boolean {
 }
 
 /** @internal exported for tests — must stay index-identical to the old regex scan. */
-export function autolinkSchemeScanIndex(src: string): number | undefined {
-	for (let i = 0; i < src.length; i++) {
+export function autolinkSchemeScanIndex(src: string, from = 0): number | undefined {
+	for (let i = from; i < src.length; i++) {
 		const c = src.charCodeAt(i) | 32;
 		if ((c === 119 || c === 104 || c === 102) && isAutolinkSchemeAt(src, i)) return i;
 	}
@@ -731,9 +730,7 @@ const VALID_AUTOLINK_LEFT_BOUNDARY = /[\s*_~(]/;
 const boundedAutolinkExtension: TokenizerAndRendererExtension = {
 	name: "boundedAutolink",
 	level: "inline",
-	start(src) {
-		return autolinkSchemeScanIndex(src);
-	},
+	startFrom: autolinkSchemeScanIndex,
 	tokenizer(src, tokens) {
 		const match = AUTOLINK_SCHEME_REGEX.exec(src);
 		if (!match) return undefined;

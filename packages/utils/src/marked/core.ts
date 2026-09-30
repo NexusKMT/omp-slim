@@ -246,11 +246,23 @@ export type TokenizerExtensionFunction = (
 ) => Tokens.Generic | undefined;
 /** A tokenizer extension start hint. */
 export type TokenizerStartFunction = (this: TokenizerThis, src: string) => number | void;
+/**
+ * An offset form of a start hint: the first index at or after `from` in `src` where the extension's tokenizer could
+ * match, or undefined when there is none. The test at each index must read `src` only from that index on, so the
+ * answer for `from` is also the answer for every later offset up to it.
+ */
+export type TokenizerStartFromFunction = (this: TokenizerThis, src: string, from: number) => number | undefined;
 /** An inline or block tokenizer extension. */
 export interface TokenizerExtension {
 	name: string;
 	level: "block" | "inline";
 	start?: TokenizerStartFunction;
+	/**
+	 * Replaces `start` for inline text when present. Inline lexing calls it on the whole inline source and reuses
+	 * the answer until lexing passes it, instead of calling `start` on the rest of the source at every text step, so
+	 * a hint that stops at its answer keeps a long paragraph linear.
+	 */
+	startFrom?: TokenizerStartFromFunction;
 	tokenizer: TokenizerExtensionFunction;
 	childTokens?: string[];
 }
@@ -529,8 +541,131 @@ function trimBareUrl(candidate: string): string {
 	return out;
 }
 
+// Where plain text can end: the characters that start other inline tokens, and
+// the scheme alternatives of the bare-URL rule. Global so a search can resume
+// at `lastIndex`.
+const TOKEN_START_CHAR = /[\\`<[!*_~\n]/g;
+const BARE_URL_SCHEME = /https?:\/\/|ftp:\/\/|www\./gi;
+/** A stop not searched for yet lies before every search offset. */
+const UNSEARCHED = -1;
+
+/** Whether `code` is in `[A-Za-z0-9._+-]`, the local part of a bare e-mail address. */
+function isMailLocalChar(code: number): boolean {
+	return (
+		(code >= 0x61 && code <= 0x7a) ||
+		(code >= 0x41 && code <= 0x5a) ||
+		(code >= 0x30 && code <= 0x39) ||
+		code === 0x2e ||
+		code === 0x5f ||
+		code === 0x2b ||
+		code === 0x2d
+	);
+}
+
+/**
+ * The places where one inline source's plain text can end, as offsets into that source. Each stop is the first
+ * offset at or after a search offset where a test passes, and each test reads the source only from its own offset
+ * on, so a found stop stays the answer for every later search offset up to it. A stop is searched for again only
+ * after lexing passes it, starting past it, so all the text steps of a paragraph read it a bounded number of times
+ * instead of once per step.
+ */
+class TextStops {
+	readonly #src: string;
+	readonly #lexer: Lexer;
+	// The next character in TOKEN_START_CHAR.
+	#tokenChar = UNSEARCHED;
+	// The next bare-URL scheme.
+	#scheme = UNSEARCHED;
+	// The next offset in a run of e-mail local characters that ends at "@", and that "@".
+	#mail = UNSEARCHED;
+	#mailAt = UNSEARCHED;
+	// The next hard break: two or more spaces, or a backslash, before "\n".
+	#hardBreak = UNSEARCHED;
+	// Per inline extension, the offset its `startFrom` last returned.
+	readonly #extensionStarts: number[];
+
+	constructor(src: string, lexer: Lexer) {
+		this.#src = src;
+		this.#lexer = lexer;
+		this.#extensionStarts = lexer.extensions.inline.map(() => UNSEARCHED);
+	}
+
+	/**
+	 * Length of the plain text at offset `pos`, where `rest` is the source from `pos` on: the distance to the
+	 * nearest later offset where another token could start or an inline extension's start hint points.
+	 */
+	textLength(rest: string, pos: number): number {
+		const src = this.#src;
+		const from = pos + 1;
+		if (this.#tokenChar < from) {
+			TOKEN_START_CHAR.lastIndex = from;
+			this.#tokenChar = TOKEN_START_CHAR.test(src) ? TOKEN_START_CHAR.lastIndex - 1 : Infinity;
+		}
+		if (this.#scheme < from) {
+			BARE_URL_SCHEME.lastIndex = from;
+			this.#scheme = BARE_URL_SCHEME.exec(src)?.index ?? Infinity;
+		}
+		// Every offset in the run before the found "@" starts a match of its own.
+		if (this.#mail < from) {
+			if (from < this.#mailAt) this.#mail = from;
+			else this.#seekMail(from);
+		}
+		// A text step never starts where a hard break still matches (the `br` rule takes it first), so a search
+		// after passing a found break starts at or past its "\n".
+		if (this.#hardBreak < from) this.#hardBreak = this.#seekHardBreak(from);
+		let next = Math.min(src.length, this.#tokenChar, this.#scheme, this.#mail, this.#hardBreak) - pos;
+		const lexer = this.#lexer;
+		const extensions = lexer.extensions.inline;
+		for (let i = 0; i < extensions.length; i++) {
+			const extension = extensions[i]!;
+			let at: number | void;
+			if (extension.startFrom) {
+				let start = this.#extensionStarts[i] ?? UNSEARCHED;
+				if (start < pos) {
+					start = extension.startFrom.call({ lexer }, src, pos) ?? Infinity;
+					this.#extensionStarts[i] = start;
+				}
+				// A hint at `pos` itself yields 0, which is ignored exactly like `start` returning 0.
+				at = start - pos;
+			} else {
+				at = extension.start?.call({ lexer }, rest);
+			}
+			if (typeof at === "number" && at > 0 && at < next) next = at;
+		}
+		return next;
+	}
+
+	/** Finds the first offset at or after `from` that starts a match of `/[A-Za-z0-9._+-]+@/`. */
+	#seekMail(from: number): void {
+		const src = this.#src;
+		for (let at = src.indexOf("@", from + 1); at !== -1; at = src.indexOf("@", at + 1)) {
+			let start = at;
+			while (start > from && isMailLocalChar(src.charCodeAt(start - 1))) start--;
+			if (start < at) {
+				this.#mail = start;
+				this.#mailAt = at;
+				return;
+			}
+		}
+		this.#mail = Infinity;
+	}
+
+	/** The first offset at or after `from` that starts a match of `/(?: {2,}|\\)\n/`. */
+	#seekHardBreak(from: number): number {
+		const src = this.#src;
+		for (let end = src.indexOf("\n", from + 1); end !== -1; end = src.indexOf("\n", end + 1)) {
+			let start = end;
+			while (start > from && src.charCodeAt(start - 1) === 0x20 /* space */) start--;
+			if (end - start >= 2) return start;
+			if (src.charCodeAt(end - 1) === 0x5c /* \ */) return end - 1;
+		}
+		return Infinity;
+	}
+}
+
 function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] {
 	let rest = src;
+	let stops: TextStops | undefined;
 	while (rest !== "") {
 		let custom: Tokens.Generic | undefined;
 		for (const extension of lexer.extensions.inline) {
@@ -668,20 +803,9 @@ function inlineTokens(src: string, lexer: Lexer, output: Token[] = []): Token[] 
 			continue;
 		}
 
-		let next = rest.length;
-		for (const char of ["\\", "`", "<", "[", "!", "*", "_", "~", "\n"]) {
-			const at = rest.indexOf(char, 1);
-			if (at !== -1 && at < next) next = at;
-		}
-		const urlAt = /(?:https?:\/\/|ftp:\/\/|www\.|[A-Za-z0-9._+-]+@)/i.exec(rest.slice(1));
-		if (urlAt && urlAt.index + 1 < next) next = urlAt.index + 1;
-		const hardBreak = /(?: {2,}|\\)\n/.exec(rest.slice(1));
-		if (hardBreak && hardBreak.index + 1 < next) next = hardBreak.index + 1;
-		for (const extension of lexer.extensions.inline) {
-			const at = extension.start?.call({ lexer }, rest);
-			if (typeof at === "number" && at > 0 && at < next) next = at;
-		}
-		if (next === 0) next = 1;
+		// `rest` is always a suffix of `src`, so its offset follows from the lengths.
+		stops ??= new TextStops(src, lexer);
+		const next = stops.textLength(rest, src.length - rest.length);
 		appendText(output, rest.slice(0, next));
 		rest = rest.slice(next);
 	}

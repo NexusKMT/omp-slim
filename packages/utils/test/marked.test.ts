@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Lexer, Marked, type TokenizerAndRendererExtension } from "../src/marked";
+import { Lexer, Marked, type TokenizerAndRendererExtension, type TokenizerExtension } from "../src/marked";
 import goldens from "./fixtures/marked/goldens.json";
 
 describe("marked compatibility", () => {
@@ -173,6 +173,78 @@ describe("marked compatibility", () => {
 			{ type: "latexBlock", raw: "$$\ny^2\n$$\n", text: "y^2" },
 		]);
 		expect(marked.parse("before $x_i$\n\n$$\ny^2\n$$\n")).toBe("<p>before <i>x_i</i></p>\n<math>y^2</math>\n");
+	});
+
+	// Plain text ends where the next token could start, and the lexer reuses
+	// each such stop until it passes one. Here it walks through the rejected
+	// `foo@bar` (no dotted domain) and must still find the address and URL after it.
+	test("finds bare addresses and URLs after an address-like run that is not a link", () => {
+		const source = "see foo@bar and baz@qux.com or http://x.y";
+		expect([...Lexer.lex(source)]).toEqual([
+			{
+				type: "paragraph",
+				raw: source,
+				text: source,
+				tokens: [
+					{ type: "text", raw: "see foo@bar and ", text: "see foo@bar and ", escaped: false },
+					{
+						type: "link",
+						raw: "baz@qux.com",
+						text: "baz@qux.com",
+						href: "mailto:baz@qux.com",
+						tokens: [{ type: "text", raw: "baz@qux.com", text: "baz@qux.com" }],
+					},
+					{ type: "text", raw: " or ", text: " or ", escaped: false },
+					{
+						type: "link",
+						raw: "http://x.y",
+						text: "http://x.y",
+						href: "http://x.y",
+						tokens: [{ type: "text", raw: "http://x.y", text: "http://x.y" }],
+					},
+				],
+			},
+		]);
+	});
+
+	test("an inline extension's startFrom hint tokenizes like its start hint", () => {
+		const dollar = (src: string, from: number) => {
+			const index = src.indexOf("$", from);
+			return index === -1 ? undefined : index;
+		};
+		const latex = (hint: Pick<TokenizerExtension, "start" | "startFrom">) =>
+			new Marked().use({
+				extensions: [
+					{
+						name: "latex",
+						level: "inline",
+						...hint,
+						tokenizer(src) {
+							const match = /^\$(\S[^\n$]*)\$/.exec(src);
+							return match ? { type: "latex", raw: match[0], text: match[1] } : undefined;
+						},
+					},
+				],
+			});
+		// Two spans, then an opener the tokenizer rejects: a hint at the lexer's
+		// own position is dropped, so the span after it stays text either way.
+		const source = "a $x$ b $y$ c $ 5, then $z$";
+		const fromHint = [...latex({ startFrom: dollar }).lexer(source)];
+		expect(fromHint).toEqual([...latex({ start: src => dollar(src, 0) }).lexer(source)]);
+		expect(fromHint).toEqual([
+			{
+				type: "paragraph",
+				raw: source,
+				text: source,
+				tokens: [
+					{ type: "text", raw: "a ", text: "a ", escaped: false },
+					{ type: "latex", raw: "$x$", text: "x" },
+					{ type: "text", raw: " b ", text: " b ", escaped: false },
+					{ type: "latex", raw: "$y$", text: "y" },
+					{ type: "text", raw: " c $ 5, then $z$", text: " c $ 5, then $z$", escaped: false },
+				],
+			},
+		]);
 	});
 
 	// Reference labels are user-controlled and index the ref-def map. An

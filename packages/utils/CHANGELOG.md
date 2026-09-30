@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `startFrom` to inline Markdown tokenizer extensions: an offset-taking start hint the lexer reuses until it passes it, instead of calling `start` on the rest of the paragraph at every text step.
+
+### Fixed
+
+- Fixed long Markdown paragraphs taking time proportional to the square of their length to lex: a 44 KB paragraph with no blank line now parses in about 3 ms instead of 100 ms.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
