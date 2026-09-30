@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	hasMathBlockCloserLine,
 	MathBlockScan,
 	mathBlockAt,
 	mathBlockMayCloseAt,
@@ -148,7 +149,7 @@ describe("mathBlockMayCloseAt", () => {
 	});
 
 	test("reports a block already closed within `source`", () => {
-		// mathBlockAt matches the first closer line, so the appended one is unused.
+		// Its closer line has ended, so no append can move it.
 		expect(mathBlockMayCloseAt("$$\nx\n$$\n")).toBe(true);
 	});
 
@@ -156,5 +157,24 @@ describe("mathBlockMayCloseAt", () => {
 		// The trailing `$$` may yet become `$$ E = mc^2 $$`, which closes
 		// nothing, so the block can still close further down.
 		expect(mathBlockMayCloseAt("$$\n\n\n$$")).toBe(true);
+	});
+
+	test("treats an opener whose own line is still being written as open", () => {
+		expect(mathBlockMayCloseAt("Intro.\n\n$$", 8)).toBe(true);
+		// Text after the opener on its line makes it no opener line at all.
+		expect(mathBlockMayCloseAt("Intro.\n\n$$ E", 8)).toBe(false);
+	});
+});
+
+describe("hasMathBlockCloserLine", () => {
+	test("finds a line holding only the closer of a given opener, the last line unterminated", () => {
+		const source = "Intro with $$ inline $$ math.\n  $$  \nmore\n\\]";
+		expect(hasMathBlockCloserLine(source, 0, ["$$"])).toBe(true);
+		expect(hasMathBlockCloserLine(source, 0, ["\\["])).toBe(true);
+		// Past the `$$` line only the unterminated `\]` line is left.
+		const more = source.indexOf("more");
+		expect(hasMathBlockCloserLine(source, more, ["$$"])).toBe(false);
+		expect(hasMathBlockCloserLine(source, more, ["\\["])).toBe(true);
+		expect(hasMathBlockCloserLine(source, 0, [])).toBe(false);
 	});
 });

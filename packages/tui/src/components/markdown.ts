@@ -9,9 +9,12 @@ import {
 	type TokensList,
 } from "@oh-my-pi/pi-utils/marked";
 import {
+	hasMathBlockCloserLine,
 	MathBlockScan,
+	type MathBlockOpener,
 	mathBlockAt,
 	mathBlockMayCloseAt,
+	mathBlockOpenerAt,
 	mathSpanAt,
 	mathStartIndex,
 } from "@oh-my-pi/pi-utils/math-delimiters";
@@ -1171,6 +1174,8 @@ interface BlockBoundary {
 // A whitespace-only line, capturing its terminator: "\n", or "" at the end of the text.
 const WHITESPACE_LINE_RE = /[^\S\n]*(\n|$)/y;
 
+const NO_OPENERS: readonly MathBlockOpener[] = [];
+
 /**
  * Offset just past the last token in `tokens` that closes a block on a hard
  * `"\n\n"` break, together with the number of tokens up to and including it.
@@ -1203,11 +1208,15 @@ const WHITESPACE_LINE_RE = /[^\S\n]*(\n|$)/y;
  *    so the scan stops there and reports the block's end as `blockEnd`. An
  *    opener with no closer, or with a whitespace-only body, is no block in
  *    either lex, so it leaves later boundaries alone.
- *  - While streaming, the scan stops at a token whose display-math block an
- *    append could still close (`mathBlockMayCloseAt`), since the one-pass lex
- *    of the grown text would make it one `math` token. A pair whose closer
- *    line has already ended around a whitespace-only body (`$$`, ` `, `$$`)
- *    is no block whatever follows, so the scan goes on past it.
+ *  - While streaming, `tokens` are the one-pass lex of `text` as it stands,
+ *    so a block the lex already made is a `math` token, and one that an
+ *    append could still close becomes one only once a closer line arrives,
+ *    which Markdown#lexTokens watches for. With `settle`, the scan instead
+ *    stops at a token whose display-math block an append could still close
+ *    (`mathBlockMayCloseAt`), so no append changes the tokens before the
+ *    boundary it finds. A pair whose closer line has already ended around a
+ *    whitespace-only body (`$$`, ` `, `$$`) is no block whatever follows, so
+ *    that scan goes on past it.
  *
  * `startIndex` resumes the scan at `tokens[startIndex]` (positions still
  * accumulate from `base`). The streaming freeze passes the frozen-prefix
@@ -1218,7 +1227,7 @@ function stableBlockBoundary(
 	text: string,
 	base: number,
 	tokens: Token[],
-	{ startIndex = 0, window }: { startIndex?: number; window?: ProbeWindow } = {},
+	{ startIndex = 0, window, settle = false }: { startIndex?: number; window?: ProbeWindow; settle?: boolean } = {},
 ): BlockBoundary {
 	let pos = base;
 	let end = 0;
@@ -1229,14 +1238,14 @@ function stableBlockBoundary(
 		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
 		if (token.type !== "math") {
-			if (window === undefined) {
-				if (mathBlockMayCloseAt(text, pos)) break;
-			} else {
+			if (window !== undefined) {
 				const block = window.mathBlocks.at(pos);
 				if (block !== undefined) {
 					blockEnd = pos + block.raw.length;
 					break;
 				}
+			} else if (settle && mathBlockMayCloseAt(text, pos)) {
+				break;
 			}
 		}
 		if (raw.endsWith("\n\n") && (window === undefined || tokenEnd < window.end)) {
@@ -1877,6 +1886,15 @@ export class Markdown implements Component {
 	#streamPrefixText?: string;
 	#streamPrefixTokens?: Token[];
 	#streamPrefixLineCache?: StreamPrefixLineCache;
+	// Display-math openers in the frozen prefix whose blocks an append could
+	// still close. The prefix lexes them as the text stands, which stays right
+	// until a tail line could close one of them (hasMathBlockCloserLine); then
+	// the prefix falls back to its settled part and the rest is re-lexed.
+	#streamPrefixOpeners: readonly MathBlockOpener[] = NO_OPENERS;
+	// The frozen prefix's leading run in front of the first of those openers:
+	// no append can change its tokens, so getLastRenderStableText publishes it.
+	#streamSettledText?: string;
+	#streamSettledTokenCount = 0;
 	// Guard-scan memo (PoC C): the ref-def/CR verdict with the exact text
 	// length it was checked on. Reuse is sound only while setText has been
 	// append-only since (tracked via the startsWith that setText performs): a
@@ -2032,11 +2050,13 @@ export class Markdown implements Component {
 
 	/**
 	 * Width-independent source prefix of the last render ending at a frozen
-	 * Markdown block boundary. Only meaningful while streaming (transient
-	 * render cache on); grows monotonically under append-only `setText`.
+	 * Markdown block boundary that no append can move: it stops in front of a
+	 * display-math opener whose block an append could still close. Only
+	 * meaningful while streaming (transient render cache on); grows
+	 * monotonically under append-only `setText`.
 	 */
 	getLastRenderStableText(): string {
-		return this.#transientRenderCache ? (this.#streamPrefixText ?? "") : "";
+		return this.#transientRenderCache ? (this.#streamSettledText ?? "") : "";
 	}
 
 	get transientRenderCache(): boolean {
@@ -2083,10 +2103,19 @@ export class Markdown implements Component {
 		// so the tail starts at a fresh line. The scan below then catches a
 		// top-level definition or CR in the new text and the tail lex's links catch
 		// a nested one, so the grown prefix is never re-scanned (O(n²) → O(n)).
+		const frozenText = this.#streamPrefixText;
+		const grewPastPrefix = frozenText !== undefined && text.length > frozenText.length && text.startsWith(frozenText);
+		// A tail line that could close a display-math block the prefix holds open
+		// makes the text from that block's opener on one `math` token, so the
+		// prefix falls back to its settled part, which ends in front of the
+		// opener, and the rest is lexed again. The check reads only the tail,
+		// which is lexed anyway.
+		if (grewPastPrefix && hasMathBlockCloserLine(text, frozenText.length, this.#streamPrefixOpeners)) {
+			this.#rewindStreamPrefix();
+		}
 		const prefix = this.#streamPrefixText;
 		const prefixTokens = this.#streamPrefixTokens;
-		const hasPrefix =
-			prefix !== undefined && prefixTokens !== undefined && text.length > prefix.length && text.startsWith(prefix);
+		const hasPrefix = grewPastPrefix && prefix !== undefined && prefixTokens !== undefined;
 		const refDefText = hasPrefix ? text.slice(prefix.length) : text;
 		// Guard-scan memo (PoC C): while setText has been append-only and the
 		// grown delta introduces no "[", "]", ":", "\n" or "\r", the previous
@@ -2162,15 +2191,32 @@ export class Markdown implements Component {
 	#dropStreamPrefix(): void {
 		this.#streamPrefixText = undefined;
 		this.#streamPrefixTokens = undefined;
+		this.#streamPrefixOpeners = NO_OPENERS;
+		this.#streamSettledText = undefined;
+		this.#streamSettledTokenCount = 0;
+		this.#streamPrefixLineCache = undefined;
+		this.#tailRowCache = undefined;
+	}
+
+	/** Cut the frozen prefix back to its settled part, dropping the row caches keyed on the rest. */
+	#rewindStreamPrefix(): void {
+		if (this.#streamSettledTokenCount === 0) {
+			this.#dropStreamPrefix();
+			return;
+		}
+		this.#streamPrefixText = this.#streamSettledText;
+		this.#streamPrefixTokens = this.#streamPrefixTokens?.slice(0, this.#streamSettledTokenCount);
+		this.#streamPrefixOpeners = NO_OPENERS;
 		this.#streamPrefixLineCache = undefined;
 		this.#tailRowCache = undefined;
 	}
 
 	// Freeze the largest run of leading blocks that end on a hard "\n\n" boundary
-	// (complete and immutable under append-only growth) so the next streaming
-	// render re-lexes only the unfrozen tail. Caller guarantees no CR / no
-	// reference definitions, so each token's `raw` is a verbatim slice of `text`
-	// and the summed offsets address `text` exactly.
+	// (complete, and immutable under append-only growth until a tail line could
+	// close a display-math block it holds open) so the next streaming render
+	// re-lexes only the unfrozen tail. Caller guarantees no CR / no reference
+	// definitions, so each token's `raw` is a verbatim slice of `text` and the
+	// summed offsets address `text` exactly.
 	#freezeStablePrefix(text: string, tokens: Token[], opts: { preserveExisting: boolean }): void {
 		// On the streaming-concat path (preserveExisting), tokens[0..prefixCount)
 		// ARE the previously frozen prefix and the text above it is byte-
@@ -2181,16 +2227,41 @@ export class Markdown implements Component {
 		// path (preserveExisting: false) re-derives the whole stream, so it
 		// must keep walking from 0.
 		const skipPrefix = opts.preserveExisting ? (this.#streamPrefixTokens?.length ?? 0) : 0;
-		const frozen = stableBlockBoundary(text, skipPrefix > 0 ? (this.#streamPrefixText?.length ?? 0) : 0, tokens, {
-			startIndex: skipPrefix,
-		});
-		if (frozen.count > 0) {
-			this.#streamPrefixText = text.slice(0, frozen.end);
-			this.#streamPrefixTokens = tokens.slice(0, frozen.count);
+		const base = skipPrefix > 0 ? (this.#streamPrefixText?.length ?? 0) : 0;
+		const frozen = stableBlockBoundary(text, base, tokens, { startIndex: skipPrefix });
+		if (frozen.count === 0) {
+			if (!opts.preserveExisting) this.#dropStreamPrefix();
 			return;
 		}
-
-		if (!opts.preserveExisting) this.#dropStreamPrefix();
+		let openers = skipPrefix > 0 ? this.#streamPrefixOpeners : NO_OPENERS;
+		if (openers.length === 0) {
+			// The prefix so far is all settled, so the settled part grows up to the
+			// last boundary in front of the first opener an append could close.
+			const settled = stableBlockBoundary(text, base, tokens, { startIndex: skipPrefix, settle: true });
+			if (settled.count > 0) {
+				this.#streamSettledText = text.slice(0, settled.end);
+				this.#streamSettledTokenCount = settled.count;
+			} else if (skipPrefix === 0) {
+				this.#streamSettledText = undefined;
+				this.#streamSettledTokenCount = 0;
+			}
+		}
+		// Record each kind of opener in the newly frozen tokens that an append
+		// could still close; one open opener of a kind is enough to watch for.
+		let pos = base;
+		for (let i = skipPrefix; i < frozen.count && openers.length < 2; i++) {
+			const token = tokens[i];
+			if (token.type !== "math") {
+				const opener = mathBlockOpenerAt(text, pos);
+				if (opener !== undefined && !openers.includes(opener) && mathBlockMayCloseAt(text, pos)) {
+					openers = [...openers, opener];
+				}
+			}
+			pos += token.raw.length;
+		}
+		this.#streamPrefixText = text.slice(0, frozen.end);
+		this.#streamPrefixTokens = tokens.slice(0, frozen.count);
+		this.#streamPrefixOpeners = openers;
 	}
 
 	render(width: number): readonly string[] {

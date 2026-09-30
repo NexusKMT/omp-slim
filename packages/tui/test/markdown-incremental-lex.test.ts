@@ -545,6 +545,40 @@ describe("Streamed Markdown equals a one-shot render across the frozen prefix", 
 		// a one-shot lex joins to the blank line in front of the fence.
 		streamAgainstOneShot("Intro.\n\n~~~\n\n\n| a | b |\n|---|---|\n| 1 | 2 |\n### Heading\n", 7);
 	});
+
+	it("publishes no text past an own-line $$ that an append could still close", () => {
+		// The stable text feeds append-only transcript publication, so it must
+		// stop in front of the opener: the closer below turns everything from the
+		// opener on into one math block.
+		const open = `Intro.\n\n$$\nx = 1\n\n${paragraphs(40)}\n`;
+		const frozen = streamAgainstOneShot(open, 40);
+		expect(frozen).toBeGreaterThan(0);
+		expect(frozen).toBeLessThanOrEqual(open.indexOf("$$"));
+		streamAgainstOneShot(`${open}$$\n\nAfter the math.\n`, 40);
+	});
+
+	it("streams past an own-line $$ that never closes as fast as without it", () => {
+		// The opener stays open to the end, so a frozen prefix that stopped in
+		// front of it left every frame re-lexing the whole message.
+		const body = paragraphs(750);
+		const stream = (doc: string): number => {
+			const streaming = new Markdown("", 0, 0, THEME);
+			streaming.transientRenderCache = true;
+			const start = Bun.nanoseconds();
+			for (let len = 64; len < doc.length + 64; len += 64) {
+				streaming.setText(doc.slice(0, len));
+				streaming.render(100);
+			}
+			return Bun.nanoseconds() - start;
+		};
+		const withOpener = `Intro.\n\n$$\nx = 1\n\n${body}\n`;
+		const without = `Intro.\n\nx = 1\n\n${body}\n`;
+		clearRenderCache();
+		const baseline = Math.min(stream(without), stream(without));
+		let opened = Number.POSITIVE_INFINITY;
+		for (let run = 0; run < 3 && opened >= 3 * baseline; run++) opened = Math.min(opened, stream(withOpener));
+		expect(opened).toBeLessThan(3 * baseline);
+	});
 });
 
 describe("Markdown OSC 8 tail normalization across streaming appends", () => {
