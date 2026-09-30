@@ -135,10 +135,10 @@ describe("final tool-call arguments", () => {
 		const result = await streamCall(raw, "tool_calls");
 		const call = result.content.find(block => block.type === "toolCall");
 		if (!call) throw new Error("Expected tool call");
-		expect(call.arguments).toEqual({
-			__parseError: expect.any(String),
-			__rawJson: raw.slice(0, 512) + "… [truncated " + (raw.length - 512) + " chars]",
-		});
+		const bounded = raw.slice(0, 512) + "… [truncated " + (raw.length - 512) + " chars]";
+		expect(call.arguments).toEqual({ __parseError: expect.any(String), __rawJson: bounded });
+		// The validation error shows the same bound, not a second truncation of it.
+		expect(() => validateToolArguments(tool, call)).toThrow(`Raw JSON:\n${bounded}`);
 	});
 });
 

@@ -65,6 +65,15 @@ describe("final in-band JSON arguments", () => {
 		if (!call) throw new Error("Expected tool call");
 		expect(call.arguments).toEqual({ __parseError: expect.any(String), __rawJson: text.slice(-512) });
 	});
+
+	it("keeps a fabricated tool response out of the diagnostic", () => {
+		const envelope = '<tool_call>{"name":"write","arguments":' + raw;
+		const text = envelope + "<tool_response>" + "fabricated output ".repeat(40);
+		const parsed = parseInbandToolMessage(assistant([{ type: "text", text }]), "hermes", TOOLS);
+		const call = parsed.content.find(block => block.type === "toolCall");
+		if (!call) throw new Error("Expected tool call");
+		expect(call.arguments).toEqual({ __parseError: expect.any(String), __rawJson: envelope });
+	});
 });
 
 const TOOLS = [

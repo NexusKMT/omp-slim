@@ -181,6 +181,9 @@ class InbandStreamProjector {
 	#fedLen = 0;
 	#stopped = false;
 	#responsePending = "";
+	// Bounded tail of the text actually fed to the scanner: the diagnostic for an
+	// unfinished envelope, which excludes anything cut off after a response token.
+	#scannerTail = "";
 	// Provider-native tool calls forwarded live (e.g. Gemini still returns
 	// `functionCall` parts under owned mode), keyed by the inner stream's
 	// `contentIndex`. `#toolChannel` records which channel produced the turn's
@@ -292,7 +295,7 @@ class InbandStreamProjector {
 		const responseIndex = firstTokenIndex(combined, this.#responseOpenTokens);
 		if (responseIndex !== -1) {
 			this.#responsePending = "";
-			this.#apply(this.#scanner.feed(combined.slice(0, responseIndex)));
+			this.#apply(this.#feedScanner(combined.slice(0, responseIndex)));
 			this.#stopped = true;
 			return true;
 		}
@@ -304,7 +307,7 @@ class InbandStreamProjector {
 
 		const emitLength = combined.length - this.#responseOverlapLength;
 		this.#responsePending = combined.slice(emitLength);
-		this.#apply(this.#scanner.feed(combined.slice(0, emitLength)));
+		this.#apply(this.#feedScanner(combined.slice(0, emitLength)));
 		return false;
 	}
 
@@ -340,17 +343,16 @@ class InbandStreamProjector {
 		for (const block of message.content) if (block.type === "text") fullText += block.text;
 		if (!this.#stopped && fullText.length > this.#fedLen) this.text(fullText.slice(this.#fedLen));
 		if (!this.#stopped && this.#responsePending.length > 0) {
-			this.#apply(this.#scanner.feed(this.#responsePending));
+			this.#apply(this.#feedScanner(this.#responsePending));
 			this.#responsePending = "";
 		}
 		this.#apply(this.#scanner.flush());
 		// Scanners discard incomplete envelopes, but their toolStart previews already
 		// live in the message. Refuse those calls instead of executing partial fields.
-		// The unfinished envelope runs to the end of the text, so the diagnostic keeps
-		// the tail rather than any prose before the call.
-		const unfinishedTail = fullText.slice(-INVALID_ARGUMENTS_RAW_LIMIT);
+		// The unfinished envelope ends the scanner-fed text, so the diagnostic keeps
+		// that tail rather than any prose before the call.
 		for (const entry of this.#toolBlocks.values()) {
-			entry.block.arguments = invalidToolCallArguments(unfinishedTail, "Incomplete in-band tool call");
+			entry.block.arguments = invalidToolCallArguments(this.#scannerTail, "Incomplete in-band tool call");
 			if (this.#emitEvents) {
 				this.#out.push({
 					type: "toolcall_end",
@@ -369,6 +371,11 @@ class InbandStreamProjector {
 		const finalMessage: AssistantMessage = { ...message, content: this.#partial.content, stopReason: reason };
 		if (emitDone) this.#out.push({ type: "done", reason, message: finalMessage });
 		return finalMessage;
+	}
+
+	#feedScanner(text: string): InbandScanEvent[] {
+		this.#scannerTail = (this.#scannerTail + text).slice(-INVALID_ARGUMENTS_RAW_LIMIT);
+		return this.#scanner.feed(text);
 	}
 
 	#apply(events: InbandScanEvent[]): void {

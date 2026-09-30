@@ -150,6 +150,20 @@ describe("Cursor final tool-call arguments", () => {
 			validateToolArguments({ name: "write", description: "", parameters: { type: "object" } }, call),
 		).toThrow("Tool call arguments are not valid JSON");
 	});
+
+	it("uses the completion frame when a rewritten snapshot breaks the buffer without truncating it", () => {
+		const h = newHarness();
+		startMcpToolCall(h, "write");
+		pushArgsTextDelta(h, '{"path":"draft.txt"}');
+		pushArgsTextDelta(h, '{"path":"final.txt","content":"complete"}');
+		completeMcpToolCall(h, {
+			path: new TextEncoder().encode('"final.txt"'),
+			content: new TextEncoder().encode('"complete"'),
+		});
+		const call = h.output.content.find(block => block.type === "toolCall");
+		if (!call) throw new Error("Expected tool call");
+		expect(call.arguments).toEqual({ path: "final.txt", content: "complete" });
+	});
 });
 
 describe("mergeCursorMcpToolCallArgs", () => {
