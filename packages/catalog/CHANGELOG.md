@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `openaiCodexModelManagerOptions` accepts `baseUrl`, so Codex discovery can list a Codex-compatible gateway's models; the discovery cache is kept per endpoint, and the official endpoint keeps its existing cache ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added

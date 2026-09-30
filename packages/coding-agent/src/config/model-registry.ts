@@ -40,7 +40,6 @@ import {
 	MODELS_DEV_CATALOG_PROVIDER_IDS,
 	modelsDevCatalogFallback,
 	openaiCodexModelManagerOptions,
-	type OpenAICodexAccount,
 	PROVIDER_DESCRIPTORS,
 	resolveModelCacheProviderId,
 	resolveOllamaModelCacheProviderId,
@@ -2091,29 +2090,30 @@ export class ModelRegistry {
 				authoritative: true,
 				resolveKey: value => value,
 				createOptions: accessToken => {
-					// A custom endpoint (models.yml `baseUrl`) receives only the configured
-					// key: stored ChatGPT OAuth accounts never leave chatgpt.com. The guard
-					// checks the token actually being sent, not the configured key kinds —
-					// a runtime provider's command key is only a fallback behind a live
-					// OAuth token, which `peek` still returns first.
-					const baseUrl = this.#descriptorBaseUrl("openai-codex");
-					let resolveAccounts: (() => Promise<OpenAICodexAccount[] | null>) | undefined;
-					if (isOfficialCodexApiUrl(baseUrl)) {
-						resolveAccounts = () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken);
-					} else if (
+					// A custom endpoint (models.yml `baseUrl`) receives only a configured,
+					// runtime, or command key. Official credentials (stored ChatGPT OAuth or
+					// the provider env token) keep discovering against chatgpt.com, as on a
+					// relay setup chat still works with them. The check looks at the token
+					// actually being sent: a runtime provider's command key is only a
+					// fallback behind a live OAuth token, which `peek` returns first.
+					const configuredBaseUrl = this.#descriptorBaseUrl("openai-codex");
+					const officialCredential =
 						accessToken === getEnvApiKey("openai-codex") ||
 						getOAuthCredentialsForProvider(this.authStorage, "openai-codex").some(
 							credential => credential.access === accessToken,
-						)
-					) {
-						logger.warn(
-							"Skipping Codex model discovery: refusing to send official Codex credentials to custom endpoint",
-							{ baseUrl },
 						);
-					} else {
-						resolveAccounts = async () => [{ accessToken }];
+					if (officialCredential || isOfficialCodexApiUrl(configuredBaseUrl)) {
+						return openaiCodexModelManagerOptions({
+							baseUrl: officialCredential ? undefined : configuredBaseUrl,
+							resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
+							fetch: this.#fetch,
+						});
 					}
-					return openaiCodexModelManagerOptions({ baseUrl, resolveAccounts, fetch: this.#fetch });
+					return openaiCodexModelManagerOptions({
+						baseUrl: configuredBaseUrl,
+						resolveAccounts: async () => [{ accessToken }],
+						fetch: this.#fetch,
+					});
 				},
 			},
 		];

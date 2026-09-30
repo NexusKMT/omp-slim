@@ -560,7 +560,34 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(registry.find("openai-codex", "gpt-6.1-sol")?.baseUrl).toBe("https://codex-proxy.example/backend-api/");
 	});
 
-	test("Codex discovery never sends stored ChatGPT OAuth credentials to a custom baseUrl", async () => {
+	/** Serve an official Codex roster; any other URL fails the test. */
+	function mockOfficialCodexRoster(requests: { url: string; authorization: string | null }[]): FetchImpl {
+		return async (input, init) => {
+			const url = String(input);
+			requests.push({ url, authorization: new Headers(init?.headers).get("Authorization") });
+			if (url.startsWith("https://chatgpt.com/backend-api/codex/models")) {
+				return Response.json({
+					models: [
+						{
+							slug: "official-live-model",
+							display_name: "Official Live Model",
+							context_window: 272_000,
+							supported_in_api: true,
+							input_modalities: ["text"],
+						},
+					],
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+	}
+
+	const officialOAuthDiscovery = {
+		url: `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`,
+		authorization: "Bearer chatgpt-oauth-token",
+	};
+
+	test("Codex discovery keeps stored ChatGPT OAuth on chatgpt.com when a relay baseUrl is configured", async () => {
 		writeRawModelsJson({ "openai-codex": { baseUrl: "https://codex-proxy.example/backend-api" } });
 		await authStorage.credentials.set("openai-codex", {
 			type: "oauth",
@@ -568,17 +595,13 @@ describe("ModelRegistry runtime discovery", () => {
 			refresh: "chatgpt-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		let fetchCalls = 0;
-		const fetchMock: FetchImpl = async input => {
-			fetchCalls++;
-			throw new Error(`Unexpected URL: ${String(input)}`);
-		};
-		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		const requests: { url: string; authorization: string | null }[] = [];
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: mockOfficialCodexRoster(requests) });
 
 		await registry.refreshProvider("openai-codex", "online");
 
-		expect(fetchCalls).toBe(0);
-		expect(getModelsForProvider(registry, "openai-codex").length).toBeGreaterThan(0);
+		expect(requests).toEqual([officialOAuthDiscovery]);
+		expect(registry.find("openai-codex", "official-live-model")).toBeDefined();
 	});
 
 	test("Codex discovery keeps a live OAuth token off a runtime provider's custom baseUrl despite a command key", async () => {
@@ -590,12 +613,8 @@ describe("ModelRegistry runtime discovery", () => {
 			refresh: "chatgpt-refresh",
 			expires: Date.now() + 3_600_000,
 		});
-		const authorizations: (string | null)[] = [];
-		const fetchMock: FetchImpl = async (input, init) => {
-			authorizations.push(new Headers(init?.headers).get("Authorization"));
-			throw new Error(`Unexpected URL: ${String(input)}`);
-		};
-		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		const requests: { url: string; authorization: string | null }[] = [];
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: mockOfficialCodexRoster(requests) });
 		const sourceId = "ext://codex-proxy";
 		try {
 			registry.registerProvider(
@@ -610,7 +629,7 @@ describe("ModelRegistry runtime discovery", () => {
 
 			await registry.refreshProvider("openai-codex", "online");
 
-			expect(authorizations).toEqual([]);
+			expect(requests).toEqual([officialOAuthDiscovery]);
 		} finally {
 			registry.clearSourceRegistrations(sourceId);
 		}
