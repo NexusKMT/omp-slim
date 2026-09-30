@@ -8,7 +8,13 @@ import {
 	type Tokens,
 	type TokensList,
 } from "@oh-my-pi/pi-utils/marked";
-import { mathBlockAt, mathBlockMayCloseAt, mathSpanAt, mathStartIndex } from "@oh-my-pi/pi-utils/math-delimiters";
+import {
+	mathBlockAt,
+	mathBlockMayCloseAt,
+	mathBlockOpenerAt,
+	mathSpanAt,
+	mathStartIndex,
+} from "@oh-my-pi/pi-utils/math-delimiters";
 import { latexToBlock } from "../latex-block";
 import { isBareMathEnvironment, latexToUnicode } from "../latex-to-unicode";
 import { plainText } from "../native/spans";
@@ -1144,10 +1150,6 @@ function listMayContinueAt(text: string, tailStart: number, listRaw: string): bo
 
 const NO_BLOCK_BOUNDARY = { end: 0, count: 0 } as const;
 
-// Tokens that may open a display-math block start with `$$` or `\[` after up
-// to 3 spaces. A cheap filter only: mathBlockAt/mathBlockMayCloseAt decide.
-const DISPLAY_MATH_START_RE = /^ {0,3}(?:\$\$|\\\[)/;
-
 /**
  * Offset just past the last token in `tokens` that closes a block on a hard
  * `"\n\n"` break, together with the number of tokens up to and including it.
@@ -1202,9 +1204,8 @@ function stableBlockBoundary(
 		const token = tokens[i];
 		const raw = token.raw;
 		const tokenEnd = pos + raw.length;
-		if (token.type !== "math" && DISPLAY_MATH_START_RE.test(raw)) {
-			const rest = text.slice(pos);
-			if (growing ? mathBlockMayCloseAt(rest) : mathBlockAt(rest) !== undefined) break;
+		if (token.type !== "math" && mathBlockOpenerAt(text, pos)) {
+			if (growing ? mathBlockMayCloseAt(text, pos) : mathBlockAt(text, pos) !== undefined) break;
 		}
 		if (raw.endsWith("\n\n") && (windowIsWhole || tokenEnd < windowEnd)) {
 			const prev = i > 0 ? tokens[i - 1] : undefined;
@@ -1228,7 +1229,8 @@ function stableBlockBoundary(
 // document length: an 800 KB message costs ~41 s under Bun where Node/V8 needs
 // ~60 ms, and it runs on the render path, freezing the UI. Bounded windows keep
 // every scan short and restore linear behavior (~0.7 s for that same message).
-const LEX_WINDOW_BYTES = 2 * 1024;
+/** @internal exported for tests — the windowed lexer's first-probe window size. */
+export const LEX_WINDOW_BYTES = 2 * 1024;
 // Under this size a single pass beats probing for window boundaries; the
 // crossover measured on pathological Markdown sits around 16 KB.
 const WINDOWED_LEX_MIN_BYTES = 16 * 1024;
