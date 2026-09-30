@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Warn once when submitted prompts cannot be saved to persistent history until saving recovers ([#13926](https://github.com/can1357/oh-my-pi/issues/13926)).
+- Warn once when submitted prompts cannot be saved to persistent history until saving recovers ([#13934](https://github.com/can1357/oh-my-pi/pull/13934) by [@Dante-dan](https://github.com/Dante-dan)).
 
 ## [18.4.5] - 2026-09-30
 
