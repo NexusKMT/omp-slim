@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `enhancedRecall` answering a short query with the cached results of an unrelated longer query that contained most of its words: a word-overlap cache hit now also needs the shared words to make up at least half of the cached query, and a repeated word counts once ([#13823](https://github.com/can1357/oh-my-pi/pull/13823) by [@sjawhar](https://github.com/sjawhar))
+- Fixed `enhancedRecall` answering a short query with the cached results of an unrelated longer query that contained most of its words ([#13823](https://github.com/can1357/oh-my-pi/pull/13823) by [@sjawhar](https://github.com/sjawhar))
 
 ## [18.4.4] - 2026-09-29
 
