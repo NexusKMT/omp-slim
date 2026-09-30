@@ -493,6 +493,45 @@ describe("marked compatibility", () => {
 		expect(shape(Lexer.lexInline("*a ***a**"))).toEqual([["em", "*a ***a**", [["text", "a ***a*"]]]]);
 	});
 
+	// A code span closes at the first run of as many backticks after its opener that no backslash escapes, and the
+	// search goes on that many backticks past an escaped one. A URL autolink ends at the first " " or ">" after its
+	// scheme, past any "<". Inside emphasis or a link label, a closer past its end closes nothing.
+	test("closes code spans and autolinks past escaped runs and other openers, and not past a nested end", () => {
+		expect(shape(Lexer.lexInline("``a\\```b`` c\\````d``"))).toEqual([
+			["codespan", "``a\\```b``"],
+			["text", " c"],
+			["escape", "\\`"],
+			["text", "`"],
+			["codespan", "``d``"],
+		]);
+		expect(shape(Lexer.lexInline("`a\\``b` c"))).toEqual([
+			["codespan", "`a\\``"],
+			["text", "b` c"],
+		]);
+		expect(shape(Lexer.lexInline("*a `b* c`"))).toEqual([
+			["em", "*a `b*", [["text", "a `b"]]],
+			["text", " c`"],
+		]);
+		expect(shape(Lexer.lexInline("[a `b](u) c`"))).toEqual([
+			["link", "[a `b](u)", [["text", "a `b"]]],
+			["text", " c`"],
+		]);
+		expect(shape(Lexer.lexInline("*<http://a* b> <https://c<http://d> <x@y>"))).toEqual([
+			[
+				"em",
+				"*<http://a*",
+				[
+					["text", "<"],
+					["link", "http://a", [["text", "http://a"]]],
+				],
+			],
+			["text", " b> "],
+			["link", "<https://c<http://d>", [["text", "https://c<http://d"]]],
+			["text", " "],
+			["link", "<x@y>", [["text", "x@y"]]],
+		]);
+	});
+
 	// The text of emphasis is lexed through `lexer.inlineTokens`, with its paragraph's closers and text stops. An
 	// override that returns without lexing it must not leave them to a later lex of an equal string, which lexes that
 	// string on its own.
@@ -691,6 +730,19 @@ describe("inline lexing stays linear on long paragraphs", () => {
 		["URL with trailing punctuation (80 KB)", `http://x${".".repeat(80_000)}`],
 		["unclosed HTML tags (80 KB)", "<a ".repeat(26_667)],
 		["unclosed HTML comments before a long word (1.8 MB)", `</${"<!--".repeat(40_000)}${"a".repeat(1_600_000)}`],
+		// At every backtick of an unclosed run the code span rule reads the rest of the run again.
+		["an unclosed run of backticks (80 KB)", `x ${"`".repeat(80_000)}`],
+		// No later run is as long as an opener, so each opener's closer search reads the rest of the paragraph.
+		[
+			"code spans opened by runs of decreasing length (320 KB)",
+			(() => {
+				let src = "x ";
+				for (let width = 800; width > 0; width--) src += `${"`".repeat(width)}a `;
+				return src;
+			})(),
+		],
+		// Each URL autolink's search for its ">" runs past every "<" after it to the end of the paragraph.
+		['URL autolinks without a space or ">" (120 KB)', "<http://a".repeat(13_334)],
 	])("lexes a long paragraph of %s in under two seconds", (_name, src) => {
 		// Compile the lexing paths first, so the bound measures the lexing.
 		Lexer.lex(src.slice(0, 2_000));

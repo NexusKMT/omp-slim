@@ -418,6 +418,18 @@ function findDelimiter(src: string, delimiter: string, from: number): number {
 	return at;
 }
 
+/**
+ * The autolink at the start of `src`, a suffix of `closers`' source: "<", a URL or an address, ">". A URL runs from its
+ * scheme to the first " " or ">", which must be a ">"; an address holds no " ", "<", ">" or second "@". An address
+ * that matches after a scheme ends where the URL does, so only the URL is tried there.
+ */
+function autolinkPrefix(src: string, closers: InlineClosers): string | undefined {
+	const scheme = /^<(?:https?:\/\/|ftp:\/\/)/i.exec(src);
+	if (!scheme) return /^<[^ <>@]+@[^ <>@]+>/.exec(src)?.[0];
+	const close = closers.closeUrlAutolink(src, scheme[0].length);
+	return close === -1 ? undefined : src.slice(0, close + 1);
+}
+
 /** The inline HTML (a tag or a comment) at the start of `src`, a suffix of `closers`' source, or `undefined`. */
 function inlineHtmlPrefix(src: string, closers: InlineClosers): string | undefined {
 	if (src.startsWith("<!--")) {
@@ -667,23 +679,23 @@ function lexToNested(lex: InlineLex): NestedMatch | undefined {
 			continue;
 		}
 		if (rest[0] === "`") {
-			const opener = /^`+/.exec(rest)![0];
-			const end = findDelimiter(rest, opener, opener.length);
+			const width = closers.codeOpenerWidth(rest);
+			const end = closers.closeCode(rest, width);
 			if (end !== -1) {
-				const raw = rest.slice(0, end + opener.length);
-				let text = rest.slice(opener.length, end).replace(/\n/g, " ");
+				const raw = rest.slice(0, end + width);
+				let text = rest.slice(width, end).replace(/\n/g, " ");
 				if (/^ .* $/.test(text) && text.trim() !== "") text = text.slice(1, -1);
 				output.push({ type: "codespan", raw, text });
 				rest = rest.slice(raw.length);
 				continue;
 			}
 		}
-		const auto = /^<((?:https?:\/\/|ftp:\/\/)[^ >]+|[^ <>@]+@[^ <>@]+)>/i.exec(rest);
+		const auto = autolinkPrefix(rest, closers);
 		if (auto) {
-			const text = auto[1]!;
+			const text = auto.slice(1, -1);
 			const href = text.includes("@") && !/^[a-z][a-z+.-]*:\/\//i.test(text) ? `mailto:${text}` : text;
-			output.push({ type: "link", raw: auto[0], text, href, tokens: [{ type: "text", raw: text, text }] });
-			rest = rest.slice(auto[0].length);
+			output.push({ type: "link", raw: auto, text, href, tokens: [{ type: "text", raw: text, text }] });
+			rest = rest.slice(auto.length);
 			continue;
 		}
 		const html = inlineHtmlPrefix(rest, closers);
