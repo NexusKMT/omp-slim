@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the hand-maintained Factory Droid catalog with account policy and regional discovery, upstream-specific reasoning controls, and base credit rates ([#8577](https://github.com/can1357/oh-my-pi/pull/8577) by [@will-bogusz](https://github.com/will-bogusz), continued in [#13276](https://github.com/can1357/oh-my-pi/pull/13276) by [@DusKing1](https://github.com/DusKing1)).
+
 ### Fixed
 
 - Fixed OpenRouter decision models that report no context/output limits (`respan/span-01`, `respan/span-01-lite`, `respan/span-01-lite:free`) missing from the judge model list ([#13888](https://github.com/can1357/oh-my-pi/issues/13888))
