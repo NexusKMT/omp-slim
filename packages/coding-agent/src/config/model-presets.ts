@@ -64,9 +64,11 @@ export function getModelPreset(settings: Settings, name: string): PresetLookup {
 	return typeof parsed === "string" ? { kind: "invalid", reason: parsed } : { kind: "found", preset: parsed };
 }
 
-/** Saved preset names, sorted. */
+/** Saved preset names, sorted; names a `--config`/runtime `null` tombstone hides are left out. */
 export function getModelPresetNames(settings: Settings): string[] {
-	return Object.keys(cfgModelPresets.get(settings)).sort((a, b) => a.localeCompare(b));
+	return Object.keys(cfgModelPresets.get(settings))
+		.filter(name => settings.getOwnedModelPreset(name) !== undefined)
+		.sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -119,6 +121,22 @@ export function modelPresetShadowOwner(
 	return owned && owned.source !== "global" ? owned.source : undefined;
 }
 
+const SOURCE_LABELS: Record<SettingProvenance, string> = {
+	env: "environment",
+	runtime: "command line",
+	overlay: "--config file",
+	project: "project config",
+	global: "global config",
+	default: "default",
+};
+
+/** Status line after saving `name`, naming the higher layer whose same-name preset still wins, if any. */
+export function modelPresetSavedMessage(settings: Settings, name: string): string {
+	const owner = modelPresetShadowOwner(settings, name);
+	if (owner === undefined) return `Saved model preset "${name}"`;
+	return `Saved model preset "${name}" to the global config, but the ${SOURCE_LABELS[owner]} still defines a preset of the same name, which takes precedence`;
+}
+
 /** Serialize default-role mutations with the model hub's assign/unassign paths. */
 let modelRoleMutationTail: Promise<void> = Promise.resolve();
 export async function acquireModelRoleMutation(): Promise<() => void> {
@@ -139,6 +157,14 @@ export interface ModelPresetShadowedRole {
 	source: SettingProvenance;
 }
 
+/** The preset's `defaultThinkingLevel` when a layer above global config still decides the setting. */
+export interface ModelPresetShadowedThinking {
+	expected: NonNullable<ModelPreset["defaultThinkingLevel"]>;
+	/** The effective setting that won instead; the live session still uses `expected`. */
+	actual: ModelPreset["defaultThinkingLevel"];
+	source: SettingProvenance;
+}
+
 export type ModelPresetSwitchResult =
 	| {
 			kind: "switched";
@@ -146,6 +172,8 @@ export type ModelPresetSwitchResult =
 			thinkingLevel: ConfiguredThinkingLevel | undefined;
 			/** Roles another layer still decides; empty on a clean switch. */
 			shadowed: ModelPresetShadowedRole[];
+			/** Set when another layer still decides `defaultThinkingLevel`, so it returns on reload. */
+			shadowedThinking: ModelPresetShadowedThinking | undefined;
 	  }
 	| { kind: "missing" }
 	| { kind: "invalid"; reason: string }
@@ -176,17 +204,24 @@ function pickAutomaticDefault(session: ModelPresetSession, candidates: Model[]):
 	);
 }
 
-/** Where `default` lands once the preset is written: its model and thinking selector. */
+/**
+ * Where `default` lands once the preset is written: its model and thinking selector.
+ * Without an explicit `:level` on the selector, the preset's own `defaultThinkingLevel`
+ * applies even when a higher layer still decides the setting — the switch is for this
+ * session; the shadowing layer is reported separately.
+ */
 function resolveLiveDefault(
 	settings: Settings,
 	session: ModelPresetSession,
 	candidates: Model[],
+	preset: ModelPreset,
 ): { model: Model; thinkingLevel: ConfiguredThinkingLevel | undefined } | string {
 	const roleValue = settings.getModelRole("default");
-	const configuredDefault = parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(settings));
+	const fallbackLevel =
+		preset.defaultThinkingLevel ?? parseConfiguredThinkingLevel(cfgDefaultThinkingLevel.get(settings));
 	if (!roleValue) {
 		const model = pickAutomaticDefault(session, candidates);
-		return model ? { model, thinkingLevel: configuredDefault } : "no model with configured credentials is available";
+		return model ? { model, thinkingLevel: fallbackLevel } : "no model with configured credentials is available";
 	}
 	const resolved = resolveModelRoleValue(roleValue, candidates, { settings });
 	if (!resolved.model) return `default model \`${roleValue}\` is not available`;
@@ -195,7 +230,7 @@ function resolveLiveDefault(
 	}
 	return {
 		model: resolved.model,
-		thinkingLevel: resolved.explicitThinkingLevel ? resolved.thinkingLevel : configuredDefault,
+		thinkingLevel: resolved.explicitThinkingLevel ? resolved.thinkingLevel : fallbackLevel,
 	};
 }
 
@@ -242,6 +277,14 @@ function shadowedRoles(settings: Settings, preset: ModelPreset): ModelPresetShad
 		}
 	}
 	return shadowed;
+}
+
+function shadowedThinking(settings: Settings, preset: ModelPreset): ModelPresetShadowedThinking | undefined {
+	const expected = preset.defaultThinkingLevel;
+	if (expected === undefined) return undefined;
+	const actual = cfgDefaultThinkingLevel.get(settings);
+	if (actual === expected) return undefined;
+	return { expected, actual, source: cfgDefaultThinkingLevel.provenance(settings) };
 }
 
 /**
@@ -300,8 +343,9 @@ async function applyModelPresetLocked(
 
 	writePresetRoles(settings, preset);
 	const shadowed = shadowedRoles(settings, preset);
+	const thinkingShadow = shadowedThinking(settings, preset);
 
-	const live = resolveLiveDefault(settings, session, candidates);
+	const live = resolveLiveDefault(settings, session, candidates, preset);
 	if (typeof live === "string") return { kind: "failed", reason: live, shadowed };
 	try {
 		await session.setModel(live.model, "default", { persist: false });
@@ -313,28 +357,34 @@ async function applyModelPresetLocked(
 	if (live.thinkingLevel !== undefined && live.thinkingLevel !== ThinkingLevel.Inherit) {
 		session.setThinkingLevel(live.thinkingLevel);
 	}
-	return { kind: "switched", model: live.model, thinkingLevel: live.thinkingLevel, shadowed };
+	return {
+		kind: "switched",
+		model: live.model,
+		thinkingLevel: live.thinkingLevel,
+		shadowed,
+		shadowedThinking: thinkingShadow,
+	};
 }
 
 function describeRoleValue(value: string | undefined): string {
 	return value ?? "(unset)";
 }
 
-const SOURCE_LABELS: Record<SettingProvenance, string> = {
-	env: "environment",
-	runtime: "command line",
-	overlay: "--config file",
-	project: "project config",
-	global: "global config",
-	default: "default",
-};
-
-/** One line per role the preset could not set, for status output. */
-export function describeShadowedRoles(shadowed: readonly ModelPresetShadowedRole[]): string[] {
-	return shadowed.map(
+/** One line per role (and the thinking level) the preset could not set, for status output. */
+export function describeShadowedRoles(
+	shadowed: readonly ModelPresetShadowedRole[],
+	thinking?: ModelPresetShadowedThinking,
+): string[] {
+	const lines = shadowed.map(
 		entry =>
 			`${entry.role}: ${describeRoleValue(entry.actual)} from ${SOURCE_LABELS[entry.source]} (preset: ${describeRoleValue(entry.expected)})`,
 	);
+	if (thinking) {
+		lines.push(
+			`defaultThinkingLevel: ${describeRoleValue(thinking.actual)} from ${SOURCE_LABELS[thinking.source]} (preset: ${thinking.expected})`,
+		);
+	}
+	return lines;
 }
 
 /** Short summary of a switch outcome for status lines and command output. */
@@ -349,13 +399,11 @@ export function formatModelPresetSwitch(name: string, result: ModelPresetSwitchR
 		case "failed":
 			return `Preset "${name}" roles saved, but the model was not switched: ${result.reason}`;
 		case "switched": {
-			const thinking =
-				result.thinkingLevel === undefined || result.thinkingLevel === AUTO_THINKING
-					? (result.thinkingLevel ?? "")
-					: result.thinkingLevel;
-			const model = `${result.model.provider}/${result.model.id}${thinking ? ` · ${thinking}` : ""}`;
-			if (result.shadowed.length === 0) return `Switched to preset "${name}" (${model})`;
-			return `Switched to preset "${name}" (${model}); ${result.shadowed.length} role(s) still set elsewhere: ${describeShadowedRoles(result.shadowed).join("; ")}`;
+			const thinking = result.thinkingLevel ? ` · ${result.thinkingLevel}` : "";
+			const model = `${result.model.provider}/${result.model.id}${thinking}`;
+			const elsewhere = describeShadowedRoles(result.shadowed, result.shadowedThinking);
+			if (elsewhere.length === 0) return `Switched to preset "${name}" (${model})`;
+			return `Switched to preset "${name}" (${model}); still set elsewhere: ${elsewhere.join("; ")}`;
 		}
 	}
 }

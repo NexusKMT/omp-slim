@@ -26,7 +26,7 @@ import { reset as resetCapabilities } from "../../capability";
 import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
 import { formatLoginIdentity } from "../../cli/oauth-terminal";
-import { acquireModelRoleMutation, modelPresetShadowOwner, saveModelPreset } from "../../config/model-presets";
+import { acquireModelRoleMutation, modelPresetSavedMessage, saveModelPreset } from "../../config/model-presets";
 import { resolveAdvisorRoleSelection, resolveModelRoleValue } from "../../config/model-resolver";
 import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
 import { getRoleInfo } from "../../config/model-roles";
@@ -982,18 +982,7 @@ export class SelectorController {
 				onSavePreset: name => {
 					try {
 						saveModelPreset(this.ctx.settings, name);
-						const shadowed = modelPresetShadowOwner(this.ctx.settings, name);
-						const shadowedLabel =
-							shadowed === "project"
-								? "project config"
-								: shadowed === "overlay"
-									? "--config file"
-									: "runtime override";
-						this.ctx.showStatus(
-							shadowed === undefined
-								? `Saved model preset "${name}"`
-								: `Saved model preset "${name}" globally, but a ${shadowedLabel} preset of the same name still takes precedence`,
-						);
+						this.ctx.showStatus(modelPresetSavedMessage(this.ctx.settings, name));
 					} catch (error) {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
 					}

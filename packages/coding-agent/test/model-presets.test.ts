@@ -10,6 +10,8 @@ import {
 	deleteModelPreset,
 	getModelPreset,
 	getModelPresetNames,
+	formatModelPresetSwitch,
+	modelPresetSavedMessage,
 	modelPresetShadowOwner,
 	saveModelPreset,
 } from "@oh-my-pi/pi-coding-agent/config/model-presets";
@@ -364,6 +366,9 @@ describe("model presets", () => {
 		expect(settings.getModelRole("default")).toBe(OPUS);
 		const lookup = getModelPreset(settings, "team");
 		expect(lookup).toMatchObject({ kind: "found", preset: { modelRoles: { default: SONNET } } });
+		expect(modelPresetSavedMessage(settings, "team")).toBe(
+			'Saved model preset "team" to the global config, but the project config still defines a preset of the same name, which takes precedence',
+		);
 	});
 
 	it("serializes concurrent default-role mutations in acquisition order", async () => {
@@ -385,5 +390,52 @@ describe("model presets", () => {
 		first();
 		await secondPromise;
 		expect(order).toEqual(["first", "second"]);
+	});
+
+	it("applies the preset's thinking level live and names the layer that still owns the setting", async () => {
+		const settings = await projectSettings({ project: "defaultThinkingLevel: high\n" });
+		cfgModelPresets.setEntry(settings, "cheap", {
+			modelRoles: { default: OPUS },
+			defaultThinkingLevel: Effort.Low,
+		});
+		const session = createSession(settings, SONNET, Effort.High);
+
+		const result = await applyModelPreset(settings, session, "cheap");
+
+		if (result.kind !== "switched") throw new Error(`expected switched, got ${result.kind}`);
+		expect(session.thinkingLevel).toBe(Effort.Low);
+		expect(result.shadowedThinking).toEqual({ expected: Effort.Low, actual: Effort.High, source: "project" });
+		expect(formatModelPresetSwitch("cheap", result)).toBe(
+			'Switched to preset "cheap" (anthropic/claude-opus-4-5 · low); still set elsewhere: defaultThinkingLevel: high from project config (preset: low)',
+		);
+	});
+
+	it("does not list a preset a --config overlay tombstones, but keeps one a project null falls through", async () => {
+		const tombstoned = await projectSettings({ overlay: "modelPresets:\n  deep: null\n" });
+		cfgModelPresets.setEntry(tombstoned, "deep", { modelRoles: { default: OPUS } });
+		cfgModelPresets.setEntry(tombstoned, "fast", { modelRoles: { default: SONNET } });
+		expect(getModelPresetNames(tombstoned)).toEqual(["fast"]);
+
+		const fallsThrough = await projectSettings({ project: "modelPresets:\n  deep: null\n" });
+		cfgModelPresets.setEntry(fallsThrough, "deep", { modelRoles: { default: OPUS } });
+		expect(getModelPresetNames(fallsThrough)).toEqual(["deep"]);
+	});
+
+	it("holds the model-role mutation lock for the whole apply", async () => {
+		const settings = Settings.isolated();
+		settings.setModelRole("default", SONNET);
+		cfgModelPresets.setEntry(settings, "opus", { modelRoles: { default: OPUS } });
+		const session = createSession(settings);
+
+		const release = await acquireModelRoleMutation();
+		const applying = applyModelPreset(settings, session, "opus");
+		// Promise-chaining mutex, no timers: drained microtasks prove the apply is parked.
+		for (let i = 0; i < 5; i++) await Promise.resolve();
+		expect(settings.getModelRole("default")).toBe(SONNET);
+		expect(session.model?.id).toBe("claude-sonnet-4-5");
+
+		release();
+		expect((await applying).kind).toBe("switched");
+		expect(settings.getModelRole("default")).toBe(OPUS);
 	});
 });

@@ -16,7 +16,7 @@ import {
 	formatModelPresetSwitch,
 	getModelPresetNames,
 	isValidModelPresetName,
-	modelPresetShadowOwner,
+	modelPresetSavedMessage,
 	type ModelPresetSession,
 	saveModelPreset,
 } from "../config/model-presets";
@@ -895,20 +895,7 @@ async function runPresetsCommand(
 				};
 			}
 			saveModelPreset(settings, name);
-			const shadowed = modelPresetShadowOwner(settings, name);
-			const shadowedLabel =
-				shadowed === "project"
-					? "project config"
-					: shadowed === "overlay"
-						? "--config file"
-						: shadowed === "runtime"
-							? "runtime override"
-							: undefined;
-			const message =
-				shadowedLabel === undefined
-					? `Saved model preset "${name}"`
-					: `Saved model preset "${name}" to the global config, but a ${shadowedLabel} preset of the same name still takes precedence`;
-			return { message, changedConfig: true };
+			return { message: modelPresetSavedMessage(settings, name), changedConfig: true };
 		}
 		case "switch": {
 			if (!name) return { message: "Usage: /presets switch <name>", usage: true };
@@ -917,7 +904,7 @@ async function runPresetsCommand(
 			const wroteRoles = result.kind === "switched" || result.kind === "failed";
 			return {
 				message,
-				failed: result.kind !== "switched" || result.shadowed.length > 0,
+				failed: result.kind !== "switched" || result.shadowed.length > 0 || result.shadowedThinking !== undefined,
 				switched: result.kind === "switched",
 				changedConfig: wroteRoles,
 			};
