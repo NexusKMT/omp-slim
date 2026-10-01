@@ -828,10 +828,10 @@ disposed, and the command returns an error response with the write failure.
 
 `steer_subagent` sends a message to a running subagent as its user, the same
 way Agent Hub chat does: a mid-turn subagent is steered at its next step
-boundary, an idle one starts a turn, and a parked one is revived first. The
-message is recorded in the subagent's own transcript; it is not attributed to
-the parent agent, and the parent sees only the subagent's eventual result.
-Isolated (worktree) subagents run in-process and are steered the same way.
+boundary, and one between turns starts its next turn. The message is recorded
+in the subagent's own transcript; it is not attributed to the parent agent,
+and the parent sees only the subagent's eventual result. Isolated (worktree)
+subagents run in-process and are steered the same way.
 
 ```json
 { "id": "req_1", "type": "steer_subagent", "subagentId": "OmpWorker", "message": "Drop the glob, keep the direct path." }
@@ -839,18 +839,22 @@ Isolated (worktree) subagents run in-process and are steered the same way.
 ```
 
 The response arrives once the message is accepted: queued into the running
-turn, or the idle subagent's new turn started. It does not wait for the turn
-to finish. As in Agent Hub chat and RPC `steer`, slash commands and prompt
-templates in the message are handled by the subagent's session.
+turn, or the subagent's new turn started. It does not wait for the turn to
+finish. Like `prompt`, the command starts in queue order but waits for
+acceptance in the background, so later commands (including `abort`) are not
+held behind it. As in Agent Hub chat (not RPC `steer`), the message goes
+through the subagent's `prompt()`: extension, custom and file slash commands
+run and prompt templates expand.
 
 Failure responses:
 
 - missing/empty `subagentId` or blank `message` → validation error
 - `subagentId` not currently listed as running by `get_subagents` (unknown,
-  finished, released, or another session's agent) → `error: "Subagent not running: <id>"`
-- a parked subagent that cannot be revived → `error: "Subagent not reachable: <reason>"`
-- the subagent refuses the message before accepting it (for example a failed
-  preflight) → `error: "Subagent refused the message: <reason>"`
+  finished, already cancelled, another session's agent, or one whose result
+  the parent already accepted) → `error: "Subagent not running: <id>"`
+- the subagent drops or rejects the message before accepting it (for example
+  an abort or a usage-limit preflight denial lands first) →
+  `error: "Subagent refused the message: <reason>"`
 
 ## Prompt/Queue Concurrency and Ordering
 
@@ -858,6 +862,8 @@ Ordinary commands run on a serialized queue. Extension UI responses and host
 tool/URI updates/results bypass that queue, so they can complete a request
 while its command handler is waiting. `bash` also bypasses the serial queue and
 is tracked as background command work; its response may arrive out of order.
+`prompt` and `steer_subagent` start in queue order but await admission in the
+background, so their responses may also arrive after later commands'.
 
 ### Immediate ack vs completion
 

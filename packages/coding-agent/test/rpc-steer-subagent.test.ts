@@ -6,6 +6,7 @@ import { handleRpcSteerSubagent } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-
 import { RpcSubagentRegistry } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { PromptDroppedError } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { type SubagentLifecyclePayload, TASK_SUBAGENT_LIFECYCLE_CHANNEL } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { removeSyncWithRetries } from "@oh-my-pi/pi-utils";
@@ -16,8 +17,12 @@ interface SentMessage {
 	streamingBehavior: unknown;
 }
 
-/** How the fake session answers `prompt`. */
-type Delivery = "queued" | "turn-started" | { refuse: Error };
+/**
+ * How the fake session answers `prompt`. `dropped` mirrors AgentSession: a
+ * prompt dropped before dispatch (abort, disposal, usage preflight denial)
+ * resolves `true` unless `throwOnDrop` asks for a {@link PromptDroppedError}.
+ */
+type Delivery = "queued" | "turn-started" | "dropped";
 
 describe("handleRpcSteerSubagent", () => {
 	let registry: RpcSubagentRegistry;
@@ -58,7 +63,7 @@ describe("handleRpcSteerSubagent", () => {
 	/**
 	 * Register a live subagent whose session records `prompt` calls.
 	 * `queued` resolves as a mid-turn steer does; `turn-started` emits
-	 * `agent_start` and never settles, like an idle subagent's whole turn.
+	 * `agent_start` and never settles, like a whole new turn.
 	 */
 	function registerLiveAgent(id: string, sessionFile = ownSessionFile, delivery: Delivery = "queued"): void {
 		const listeners: Array<(event: { type: string }) => void> = [];
@@ -71,15 +76,14 @@ describe("handleRpcSteerSubagent", () => {
 					listeners.push(listener);
 					return () => listeners.splice(listeners.indexOf(listener), 1);
 				},
-				prompt: async (text: unknown, options: { streamingBehavior?: unknown }) => {
+				prompt: async (text: unknown, options: { streamingBehavior?: unknown; throwOnDrop?: boolean }) => {
 					sent.push({ id, text, streamingBehavior: options.streamingBehavior });
-					if (delivery === "queued") return;
 					if (delivery === "turn-started") {
-						for (const listener of [...listeners]) listener({ type: "agent_start" });
+						for (const listener of listeners) listener({ type: "agent_start" });
 						await Promise.withResolvers<void>().promise;
-						return;
 					}
-					throw delivery.refuse;
+					if (delivery === "dropped" && options.throwOnDrop) throw new PromptDroppedError();
+					return true;
 				},
 			} as never,
 			sessionFile,
@@ -97,19 +101,19 @@ describe("handleRpcSteerSubagent", () => {
 		expect(sent).toEqual([{ id: "SubagentA", text: message, streamingBehavior: "steer" }]);
 	});
 
-	test("accepts once an idle subagent's turn starts, without waiting for the turn", async () => {
+	test("accepts once a new turn starts, without waiting for the turn", async () => {
 		emitLifecycle("SubagentA", "started");
 		registerLiveAgent("SubagentA", ownSessionFile, "turn-started");
 
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", "go")).resolves.toBeUndefined();
 	});
 
-	test("reports a message the subagent refuses before accepting it", async () => {
+	test("reports a prompt the subagent dropped before dispatch as refused", async () => {
 		emitLifecycle("SubagentA", "started");
-		registerLiveAgent("SubagentA", ownSessionFile, { refuse: new Error("usage limit reached") });
+		registerLiveAgent("SubagentA", ownSessionFile, "dropped");
 
 		await expect(handleRpcSteerSubagent(registry, "SubagentA", "go")).resolves.toBe(
-			"Subagent refused the message: usage limit reached",
+			`Subagent refused the message: ${new PromptDroppedError().message}`,
 		);
 	});
 
@@ -157,20 +161,15 @@ describe("handleRpcSteerSubagent", () => {
 		expect(sent).toEqual([]);
 	});
 
-	test("reports a subagent the lifecycle cannot bring back", async () => {
+	test("does not start a turn on a subagent whose result was accepted before its terminal frame", async () => {
 		emitLifecycle("SubagentA", "started");
-		// Parked (no live session) and no reviver registered.
-		AgentRegistry.global().register({
-			id: "SubagentA",
-			displayName: "SubagentA",
-			kind: "sub",
-			session: null,
-			sessionFile: ownSessionFile,
-			status: "parked",
-		});
+		registerLiveAgent("SubagentA");
+		// Yield acceptance flips the ref to idle while the roster still lists it.
+		AgentRegistry.global().markResultAccepted("SubagentA");
 
-		await expect(handleRpcSteerSubagent(registry, "SubagentA", "hello")).resolves.toStartWith(
-			"Subagent not reachable:",
+		await expect(handleRpcSteerSubagent(registry, "SubagentA", "hello")).resolves.toBe(
+			"Subagent not running: SubagentA",
 		);
+		expect(sent).toEqual([]);
 	});
 });
