@@ -728,7 +728,12 @@ describe("runGcCommand history checkpoint", () => {
 		expect(result.wal?.checkpointed).toBe(true);
 		expect(result.wal?.walBytes).toBe(0);
 		// gc holds the last connection, so closing it after the TRUNCATE checkpoint deletes the WAL.
-		expect(await Bun.file(`${dbPath}-wal`).exists()).toBe(false);
+		// Bun on macOS uses Apple's system SQLite, which persists the (truncated) WAL file instead.
+		if (process.platform === "darwin") {
+			expect((await fs.stat(`${dbPath}-wal`)).size).toBe(0);
+		} else {
+			expect(await Bun.file(`${dbPath}-wal`).exists()).toBe(false);
+		}
 	});
 
 	test("--apply propagates WAL checkpoint failures and releases the gc lock", async () => {
