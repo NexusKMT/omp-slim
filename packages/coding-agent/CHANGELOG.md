@@ -9,6 +9,7 @@
 - Added `predict_word` and `predict_word_feedback` RPC commands so hosts with their own composer (web and IDE clients) can show the same ghost-text word completion as the terminal editor, using the `spelling.autocomplete` engine and its prose gates ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
 - Added an opt-in RPC ask dialog: after `set_ask_dialog` enables it, the `ask` tool sends all its questions in one `ask` extension UI request and takes the answers back in one `answers` response, so hosts can render every question with checkboxes or radio buttons and submit them together; hosts that don't opt in keep the one-`select`-per-choice prompts ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
 - Added `SessionManager.onPersistenceNotice()` for SDK hosts: it reports a session moving to a new file (with the old and new paths) without going through the `onPersistenceError` failure channel ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
+- Added `AgentSession.inspectAsyncJob()` (command, cwd, live pids, exit code, output tail, full-output artifact of one async job) and `AgentSession.cancelAsyncJob()`; the Background jobs sheet uses them to inspect and cancel jobs
 
 ### Changed
 

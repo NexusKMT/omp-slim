@@ -5,6 +5,7 @@
 ### Added
 
 - Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose gates as ghost-text word completion ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
+- The native Background jobs sheet now lists every job selectably (↑/↓ or click) and inspects the selected one: status with live elapsed, working directory, live pids, exit code, full command, and a tail-following output pane; X cancels a running job
 
 ### Changed
 
@@ -14,6 +15,7 @@
 
 - Reduced composer startup-cache disk writes: identical status, welcome, UI, recent-session, and LSP payloads no longer start a SQLite write, and closing the cache releases the database file on Windows ([#14008](https://github.com/can1357/oh-my-pi/pull/14008) by [@H4vC](https://github.com/H4vC))
 - Fixed Shift+Enter submitting the prompt and Ctrl+Enter inserting a newline in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, as on other platforms ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
+- Fixed Background jobs rows wrapping a multi-line label (heredoc commands) over several lines and breaking the job type mid-word (`bas`/`h`); labels now collapse to one truncated line and the type and elapsed never shrink
 ### Fixed
 
 - Fixed the composer being unreachable while `/settings` is docked beside the transcript in Tern: clicking the composer now moves the keys there (the sheet stays open) and clicking the settings sheet brings them back, through the terminal's new `focus` event.
