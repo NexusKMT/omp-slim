@@ -15,7 +15,6 @@
 ### Fixed
 
 - Fixed `openai-models-list` discovery to honor nested OpenAI model-list input/output token limits while preserving explicit top-level context precedence ([#13988](https://github.com/can1357/oh-my-pi/pull/13988) by [@github-nicolas-stadler](https://github.com/github-nicolas-stadler))
-- Fixed `/wt` on filesystems without copy-on-write cloning (e.g. NTFS): the new worktree no longer lists unchanged files as modified under `core.autocrlf`, and staged-only edits, additions, and deletions now carry over with the right file contents instead of reverting to `HEAD` ([#13987](https://github.com/can1357/oh-my-pi/pull/13987) by [@H4vC](https://github.com/H4vC))
 - Fixed test suite failures on non-FHS hosts and under ambient terminal and Git configuration ([#12358](https://github.com/can1357/oh-my-pi/pull/12358) by [@olegpulatov](https://github.com/olegpulatov)).
 
 ## [18.4.9] - 2026-10-01
