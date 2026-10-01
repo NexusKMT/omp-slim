@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `tryAcquireFileLock`, a non-blocking `acquireFileLock` that returns `null` while another holder owns the lock
+- Added `tryAcquireFileLock`, a non-blocking `acquireFileLock` that returns `null` while another holder owns the lock ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
 
 ## [18.4.4] - 2026-09-29
 

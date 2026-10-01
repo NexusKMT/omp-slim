@@ -22,6 +22,9 @@
 - Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images
 - Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; the session now continues in a new file next to the original, leaves the other process's file untouched, and shows you the new path
 - Fixed resuming a session that another running omp process already has open giving no sign that both would write to the same file; omp now warns at resume time
+- Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
+- Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; the session now continues in a new file next to the original, leaves the other process's file untouched, and shows you the new path ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
+- Fixed resuming a session that another running omp process already has open giving no sign that both would write to the same file; omp now warns at resume time ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
 
 ## [18.4.6] - 2026-10-01
 
