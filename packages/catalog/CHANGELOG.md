@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Fixed Claude Opus 5.5 and Sonnet 5.5 on Amazon Bedrock (Converse) failing forced tool calls with 400 `tool_choice: type "tool" and "any" are not supported for this model`: Bedrock models now resolve `compat.supportsForcedToolChoice`, so the existing Opus/Sonnet 5.5 rule applies on Bedrock too ([#13948](https://github.com/can1357/oh-my-pi/pull/13948) by [@H4vC](https://github.com/H4vC)).
 - Fixed thinking "off" still producing reasoning on Command Code models served on `/responses` (DeepSeek, GLM, Kimi, Gemini, MiniMax, Grok, StepFun, Muse Spark, and GPT-5.6) ([#13949](https://github.com/can1357/oh-my-pi/pull/13949) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.4.5] - 2026-09-30
