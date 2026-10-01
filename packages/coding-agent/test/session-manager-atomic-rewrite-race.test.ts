@@ -488,6 +488,26 @@ describe("SessionManager cross-process rewrite freshness", () => {
 		await moved.close();
 	});
 
+	it("recreates a deleted session file in place on the memory backend instead of moving", async () => {
+		const storage = new MemorySessionStorage();
+		const manager = SessionManager.create("/cwd", "/sessions", storage);
+		manager.appendMessage(userTurn("before the delete"));
+		await manager.ensureOnDisk();
+		await manager.flush();
+		const sessionFile = manager.getSessionFile();
+		if (!sessionFile) throw new Error("Expected session file");
+		const notices: SessionPersistenceNotice[] = [];
+		manager.onPersistenceNotice(notice => notices.push(notice));
+
+		await storage.unlink(sessionFile);
+		await manager.rewriteEntries();
+
+		expect(manager.getSessionFile()).toBe(sessionFile);
+		expect(notices).toEqual([]);
+		expect(await storage.readText(sessionFile)).toContain("before the delete");
+		await manager.close();
+	});
+
 	it.each([
 		{
 			path: "an append",
@@ -510,13 +530,17 @@ describe("SessionManager cross-process rewrite freshness", () => {
 
 			const storage = new OwnedElsewhereStorage(owned);
 			const ours = await SessionManager.open(owned, tempDir.path(), storage, { suppressBreadcrumb: true });
+			const ownedSessionId = ours.getSessionId();
 			const notices: SessionPersistenceNotice[] = [];
 			const errors: Error[] = [];
 			ours.onPersistenceNotice(notice => notices.push(notice));
 			ours.onPersistenceError(error => errors.push(error));
 			const fullRewrites = [vi.spyOn(storage, "writeTextSync"), vi.spyOn(storage, "writeTextAtomic")];
+			let laterArtifactId: string | undefined;
 			try {
 				await firstWrite(ours);
+				// Saved right after the move, while the background artifact copy may still run.
+				laterArtifactId = await ours.saveArtifact("output after the move", "bash");
 				for (const turn of ourTurnsAfter) ours.appendMessage(userTurn(turn));
 				// The whole transcript is published to the sibling once; later appends go incremental.
 				expect(fullRewrites.reduce((calls, spy) => calls + spy.mock.calls.length, 0)).toBe(1);
@@ -535,9 +559,19 @@ describe("SessionManager cross-process rewrite freshness", () => {
 			const lateNotices: SessionPersistenceNotice[] = [];
 			ours.onPersistenceNotice(notice => lateNotices.push(notice));
 			expect(lateNotices).toEqual(notices);
-			// Recorded `artifact://` references keep resolving after the move.
+			// Recorded `artifact://` references keep resolving after the move, and the
+			// artifact saved during the copy got a fresh id instead of overwriting one.
 			const artifactPath = await ours.getArtifactPath(artifactId);
 			expect(artifactPath && path.dirname(artifactPath)).toBe(sibling.slice(0, -".jsonl".length));
+			expect(artifactPath && (await Bun.file(artifactPath).text())).toBe("tool output");
+			expect(laterArtifactId).toBeDefined();
+			expect(laterArtifactId).not.toBe(artifactId);
+			const laterArtifactPath = laterArtifactId && (await ours.getArtifactPath(laterArtifactId));
+			expect(laterArtifactPath && (await Bun.file(laterArtifactPath).text())).toBe("output after the move");
+			// The sibling is a new session pointing back, so one id never names two files.
+			const movedSessionId = ours.getSessionId();
+			expect(movedSessionId).not.toBe(ownedSessionId);
+			expect(path.basename(sibling)).toEndWith(`_${movedSessionId}.jsonl`);
 			await ours.close();
 
 			const reopened = await SessionManager.open(sibling, tempDir.path(), new FileSessionStorage(), {
@@ -548,6 +582,8 @@ describe("SessionManager cross-process rewrite freshness", () => {
 				...firstTurns,
 				...ourTurnsAfter,
 			]);
+			expect(reopened.getSessionId()).toBe(movedSessionId);
+			expect(reopened.getHeader()?.parentSession).toBe(ownedSessionId);
 			await reopened.close();
 		},
 	);

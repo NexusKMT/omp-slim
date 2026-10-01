@@ -138,50 +138,33 @@ function artifactsDirectoryFor(sessionFile: string | undefined): string | null {
 	return sessionFile.slice(0, -JSONL_SUFFIX_LENGTH);
 }
 
-/** The artifact directories a session copy moves between. */
-interface ArtifactCopy {
-	sourceArtifactsDir: string;
-	destinationArtifactsDir: string;
-}
-
-/** The directories to copy, or null when either session has none or both name the same one. */
-function artifactCopyFor(sourceSessionFile: string, destinationSessionFile: string): ArtifactCopy | null {
+/**
+ * Copy a session's artifact directory to another session, matching interactive
+ * `/fork`. Never overwrites: a destination file written while the copy runs
+ * (a session that already moved and kept working) wins over the source's copy.
+ * Failures are logged, never thrown.
+ */
+export async function copySessionArtifacts(sourceSessionFile: string, destinationSessionFile: string): Promise<void> {
 	const sourceArtifactsDir = artifactsDirectoryFor(sourceSessionFile);
 	const destinationArtifactsDir = artifactsDirectoryFor(destinationSessionFile);
-	if (!sourceArtifactsDir || !destinationArtifactsDir) return null;
-	if (path.resolve(sourceArtifactsDir) === path.resolve(destinationArtifactsDir)) return null;
-	return { sourceArtifactsDir, destinationArtifactsDir };
-}
-
-/** A session without artifacts has nothing to copy; any other failure is logged, never thrown. */
-function warnArtifactCopyFailed(copy: ArtifactCopy, error: unknown): void {
-	if (isEnoent(error)) return;
-	logger.warn("Failed to copy session artifacts", { ...copy, error: toError(error).message });
-}
-
-/** Copy a session's artifact directory to another session, matching interactive `/fork`. */
-export async function copySessionArtifacts(sourceSessionFile: string, destinationSessionFile: string): Promise<void> {
-	const copy = artifactCopyFor(sourceSessionFile, destinationSessionFile);
-	if (!copy) return;
+	if (!sourceArtifactsDir || !destinationArtifactsDir) return;
+	if (path.resolve(sourceArtifactsDir) === path.resolve(destinationArtifactsDir)) return;
 	try {
-		if ((await fs.promises.stat(copy.sourceArtifactsDir)).isDirectory()) {
-			await fs.promises.cp(copy.sourceArtifactsDir, copy.destinationArtifactsDir, { recursive: true });
+		if ((await fs.promises.stat(sourceArtifactsDir)).isDirectory()) {
+			await fs.promises.cp(sourceArtifactsDir, destinationArtifactsDir, {
+				recursive: true,
+				force: false,
+				errorOnExist: false,
+			});
 		}
 	} catch (error) {
-		warnArtifactCopyFailed(copy, error);
-	}
-}
-
-/** Synchronous {@link copySessionArtifacts}, for a move inside a synchronous rewrite. */
-function copySessionArtifactsSync(sourceSessionFile: string, destinationSessionFile: string): void {
-	const copy = artifactCopyFor(sourceSessionFile, destinationSessionFile);
-	if (!copy) return;
-	try {
-		if (fs.statSync(copy.sourceArtifactsDir).isDirectory()) {
-			fs.cpSync(copy.sourceArtifactsDir, copy.destinationArtifactsDir, { recursive: true });
+		if (!isEnoent(error)) {
+			logger.warn("Failed to copy session artifacts", {
+				sourceArtifactsDir,
+				destinationArtifactsDir,
+				error: toError(error).message,
+			});
 		}
-	} catch (error) {
-		warnArtifactCopyFailed(copy, error);
 	}
 }
 
@@ -743,7 +726,7 @@ export interface SessionPersistenceNotice {
 	reason: "open-elsewhere" | "replaced" | "contested";
 	/** The session file this session was saving to. */
 	from: string;
-	/** The fresh sibling (same directory and session id) it saves to from now on. */
+	/** The fresh sibling it saves to from now on: same directory, a new session id whose `parentSession` is the old one. */
 	to: string;
 }
 
@@ -900,10 +883,10 @@ export class SessionManager {
 	 */
 	#sessionFileClaim: { sessionFile: string; release: (() => void) | undefined } | undefined;
 	/**
-	 * The sibling a move off `from` lands on, reserved while an asynchronous
-	 * move copies artifacts so a synchronous rewrite racing it moves to the same file.
+	 * The background artifact copy a move to `sessionFile` started (see
+	 * {@link #moveOffSessionFile}). Never rejects.
 	 */
-	#moveTarget: { from: string; to: string } | undefined;
+	#pendingArtifactCopy: { sessionFile: string; done: Promise<void> } | undefined;
 
 	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
 		this.#cwd = cwd;
@@ -1083,18 +1066,18 @@ export class SessionManager {
 	#recoverFromWriteConflictSync(error: unknown, recoveries: number): string | undefined {
 		const contested = this.#conflictedSessionFile(error);
 		if (!contested) return undefined;
-		if (recoveries >= MAX_WRITE_CONFLICT_RECOVERIES) return this.#moveOffSessionFileSync("contested");
+		if (recoveries >= MAX_WRITE_CONFLICT_RECOVERIES) return this.#moveOffSessionFile("contested");
 		if (!this.#storage.readTextSync) return undefined;
 		let content: string;
 		try {
 			content = this.#storage.readTextSync(contested);
 		} catch (readError) {
-			if (!isEnoent(readError)) return this.#moveOffSessionFileSync("replaced");
+			if (!isEnoent(readError)) return this.#moveOffSessionFile("replaced");
 			this.#expectedDiskSize = null;
 			return contested;
 		}
 		const foreign = this.#foreignEntriesIn(content);
-		if (!foreign) return this.#moveOffSessionFileSync("replaced");
+		if (!foreign) return this.#moveOffSessionFile("replaced");
 		resolveBlobRefsInEntriesSync(foreign, this.#blobs);
 		this.#adoptForeignEntries(foreign, Buffer.byteLength(content, "utf8"));
 		return contested;
@@ -1125,60 +1108,44 @@ export class SessionManager {
 		return contested;
 	}
 
-	/** The sibling a move off `from` lands on: same directory and session id, a fresh timestamp. */
-	#siblingFor(from: string): string {
-		if (this.#moveTarget?.from === from) return this.#moveTarget.to;
-		// Same naming as a new session (`<timestamp>_<id>.jsonl`), stepping the
-		// timestamp past any path that is already taken.
-		let stamp = Date.now();
-		let to: string;
-		do {
-			to = path.join(
-				path.dirname(from),
-				`${fileSafeTimestamp(new Date(stamp++).toISOString())}_${this.#sessionId}.jsonl`,
-			);
-		} while (path.resolve(to) === path.resolve(from) || this.#storage.existsSync(to));
-		this.#moveTarget = { from, to };
-		return to;
-	}
-
-	/** Synchronous {@link #moveOffSessionFile}, for {@link #rewriteSynchronously}. */
-	#moveOffSessionFileSync(reason: SessionPersistenceNotice["reason"]): string {
-		const from = this.#sessionFile as string;
-		const to = this.#siblingFor(from);
-		copySessionArtifactsSync(from, to);
-		this.#repointToSibling(from, to, reason);
-		return to;
-	}
-
 	/**
-	 * Leave `#sessionFile` untouched and continue in a fresh sibling: copy the
-	 * artifacts so recorded `artifact://` references keep resolving, then
-	 * repoint this session with nothing durable yet, so the caller publishes the
-	 * whole transcript there once and appends incrementally after that.
-	 * Returns the sibling.
+	 * Leave `#sessionFile` untouched and continue as a fresh session in a
+	 * sibling file. It gets a new session id whose header points back through
+	 * `parentSession` and keeps the provider prompt-cache key, as {@link fork}
+	 * does, so resume-by-id, the title index, and the picker never see two
+	 * files for one id. Nothing durable exists there yet: the caller publishes
+	 * the whole transcript once and appends incrementally after that.
+	 *
+	 * The artifact copy runs in the background so a move never blocks the turn
+	 * loop on a large artifacts directory; the sibling's artifact manager waits
+	 * for it before scanning ids or resolving `artifact://`, and flush/close
+	 * await it. Returns the sibling.
 	 */
-	async #moveOffSessionFile(reason: SessionPersistenceNotice["reason"]): Promise<string> {
+	#moveOffSessionFile(reason: SessionPersistenceNotice["reason"]): string {
 		const from = this.#sessionFile as string;
-		const to = this.#siblingFor(from);
-		await copySessionArtifacts(from, to);
-		// A synchronous rewrite during the copy may already have moved this session to `to`.
-		if (this.#sessionFile === from) this.#repointToSibling(from, to, reason);
-		return to;
-	}
-
-	#repointToSibling(from: string, to: string, reason: SessionPersistenceNotice["reason"]): void {
+		const previousSessionId = this.#sessionId;
+		const timestamp = nowIso();
+		this.#sessionId = mintSessionId();
+		const to = path.join(path.dirname(from), `${fileSafeTimestamp(timestamp)}_${this.#sessionId}.jsonl`);
+		this.#header = {
+			...this.#header,
+			id: this.#sessionId,
+			timestamp,
+			parentSession: previousSessionId,
+			providerPromptCacheKey: this.#header.providerPromptCacheKey ?? previousSessionId,
+		};
 		this.#closeWriterEventually();
 		this.#sessionFile = to;
-		this.#moveTarget = undefined;
 		this.#expectedDiskSize = null;
 		this.#fileIsCurrent = false;
 		this.#rewriteRequired = true;
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
+		this.#pendingArtifactCopy = { sessionFile: to, done: copySessionArtifacts(from, to) };
 		this.#rememberBreadcrumb(this.#cwd, to);
 		this.#claimSessionFile();
 		this.#notifyPersistenceNotice({ reason, from, to });
+		return to;
 	}
 
 	#scheduleDiskWork(work: () => Promise<void>, options: DiskQueueOptions = {}): Promise<void> {
@@ -1356,7 +1323,7 @@ export class SessionManager {
 	): Promise<void> {
 		const target =
 			sessionFile === this.#sessionFile && this.#sessionFileOwnedElsewhere()
-				? await this.#moveOffSessionFile("open-elsewhere")
+				? this.#moveOffSessionFile("open-elsewhere")
 				: sessionFile;
 		const body = this.#fileBody();
 		try {
@@ -1501,7 +1468,7 @@ export class SessionManager {
 		if (!targetPath) return;
 
 		try {
-			if (this.#sessionFileOwnedElsewhere()) targetPath = this.#moveOffSessionFileSync("open-elsewhere");
+			if (this.#sessionFileOwnedElsewhere()) targetPath = this.#moveOffSessionFile("open-elsewhere");
 			let body = this.#fileBody();
 			this.#diskEpoch++;
 			this.#diskTail = Promise.resolve();
@@ -1621,7 +1588,7 @@ export class SessionManager {
 			do {
 				this.#atomicRewriteDirty = false;
 				await this.#closeWriterHandle();
-				if (this.#sessionFileOwnedElsewhere()) await this.#moveOffSessionFile("open-elsewhere");
+				if (this.#sessionFileOwnedElsewhere()) this.#moveOffSessionFile("open-elsewhere");
 				const sessionFile = this.#sessionFile;
 				if (!sessionFile) return false;
 				if (this.#diskEpoch !== epoch) return false;
@@ -2008,7 +1975,11 @@ export class SessionManager {
 
 		if (this.#artifactManager && this.#artifactManagerSessionFile === sessionFile) return this.#artifactManager;
 
-		this.#artifactManager = new ArtifactManager(sessionFile.slice(0, -JSONL_SUFFIX_LENGTH));
+		const pendingCopy = this.#pendingArtifactCopy;
+		this.#artifactManager = new ArtifactManager(
+			sessionFile.slice(0, -JSONL_SUFFIX_LENGTH),
+			pendingCopy?.sessionFile === sessionFile ? pendingCopy.done : undefined,
+		);
 		this.#artifactManagerSessionFile = sessionFile;
 		return this.#artifactManager;
 	}
@@ -2603,6 +2574,7 @@ export class SessionManager {
 		await this.#scheduleDiskWork(async () => {
 			await this.#storage.drain();
 		});
+		await this.#pendingArtifactCopy?.done;
 		if (this.#diskFailure) throw this.#diskFailure;
 	}
 
@@ -2693,6 +2665,7 @@ export class SessionManager {
 			},
 			{ ignorePriorError: true },
 		);
+		await this.#pendingArtifactCopy?.done;
 		await this.#dropIfEmptyAndNoDraft();
 		// Wait for any queued backing writes (IndexedSessionStorage per-path
 		// tail) to become durable so a graceful shutdown does not exit while
