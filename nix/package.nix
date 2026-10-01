@@ -315,9 +315,12 @@ stdenv.mkDerivation {
       # The smoke test above can pass in the build sandbox because
       # darwin.libiconv is present there, while a Mac after GC is not. Fail
       # the build if the embedded addon references any /nix/store path.
-      if otool -L "packages/natives/native/${platform.addon}" | grep -q "/nix/store/"; then
+      # Capture, don't pipe: under `set -o pipefail` a failing otool would
+      # take the false branch and the check would silently pass.
+      addonDeps="$(otool -L "packages/natives/native/${platform.addon}")"
+      if grep -q "/nix/store/" <<<"$addonDeps"; then
         echo "embedded addon references /nix/store paths:" >&2
-        otool -L "packages/natives/native/${platform.addon}" >&2
+        echo "$addonDeps" >&2
         exit 1
       fi
     ''}
