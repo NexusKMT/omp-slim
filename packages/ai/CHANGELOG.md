@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.9] - 2026-10-01
+
 ### Fixed
 
 - Fixed rejected HTTP 400 requests from consuming unbounded disk space by automatically cleaning up old request logs and enforcing a size limit.

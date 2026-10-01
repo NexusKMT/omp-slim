@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.9] - 2026-10-01
+
 ### Added
 
 - Added `readTextFromClipboard()` for reading plain text from the system clipboard without starting a subprocess.

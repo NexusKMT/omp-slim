@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.9] - 2026-10-01
+
 ### Added
 
 - Added `tryAcquireFileLock`, a non-blocking file-lock helper that returns `null` when the lock is already held.
