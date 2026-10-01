@@ -2715,9 +2715,12 @@ mod tests {
 		assert_eq!(fs::read_to_string(&out).expect("probe output"), "unset|kept");
 	}
 
+	/// Waits until `pid` runs as `expected`. Each poll walks the whole process
+	/// table, which takes seconds on a loaded host, so the bound is generous;
+	/// it stays below the 30 s lifetime of the process-test children.
 	#[cfg(unix)]
 	async fn wait_for_process_name(pid: i32, expected: &str) {
-		time::timeout(Duration::from_secs(2), async {
+		time::timeout(Duration::from_secs(20), async {
 			loop {
 				if pi_builtins::ProcInfo::all().into_iter().any(|process| {
 					process.pid() == pid
@@ -3028,20 +3031,65 @@ mod tests {
 	#[tokio::test(flavor = "multi_thread")]
 	async fn pidwait_returns_after_the_matching_process_exits() {
 		let (_dir, command, name) = process_test_command("opw");
-		let mut child = process_test_child(&command, Duration::from_millis(250))
-			.spawn()
-			.expect("waited process");
+		let mut command = process_test_child(&command, Duration::from_secs(30));
+		command.kill_on_drop(true);
+		let mut child = command.spawn().expect("waited process");
 		let pid = i32::try_from(child.id().expect("child pid")).expect("pid fits i32");
 		wait_for_process_name(pid, &name).await;
 
-		let (result, output) = execute_captured(format!("pidwait -x -p {pid} {name}")).await;
-		let status = child.try_wait().expect("waited child status");
+		// `-e` reports selection before pidwait starts its exit wait. Seeing this
+		// line proves it selected the still-live child, so the test can release
+		// the child without a wall-clock race.
+		let (tx, rx) = flume::unbounded();
+		let waiting_for = format!("waiting for {name} (pid {pid})\n");
+		let pidwait_command = format!("pidwait -e -x -p {pid} {name}");
+		let mut pidwait = tokio::spawn(async move {
+			execute_shell(
+				ShellExecuteOptions { command: pidwait_command, ..Default::default() },
+				Some(tx),
+				CancelToken::default(),
+			)
+			.await
+			.expect("pidwait execution")
+		});
+		let mut output = String::new();
+		time::timeout(Duration::from_secs(30), async {
+			while !output.contains(&waiting_for) {
+				output.push_str(
+					&rx.recv_async()
+						.await
+						.expect("pidwait output closed before it selected the child"),
+				);
+			}
+		})
+		.await
+		.expect("pidwait did not select the child");
+		tokio::task::yield_now().await;
+		assert!(
+			!pidwait.is_finished(),
+			"pidwait returned while its matching process was still running"
+		);
+		assert!(
+			child.try_wait().expect("waited child status").is_none(),
+			"pidwait selected a child that already exited"
+		);
+
+		let _ = child.start_kill();
+		let result = time::timeout(Duration::from_secs(30), &mut pidwait)
+			.await
+			.expect("pidwait did not return after its matching process exited")
+			.expect("pidwait task");
+		while let Ok(chunk) = rx.recv_async().await {
+			output.push_str(&chunk);
+		}
+		let mut status = child.try_wait().expect("waited child status");
 		if status.is_none() {
 			let _ = child.start_kill();
 			let _ = child.wait().await;
+			status = child.try_wait().expect("reaped child status");
 		}
 		assert_eq!(result.exit_code, Some(0));
-		assert_eq!(output, "");
+		assert_eq!(output, waiting_for);
 		assert!(status.is_some(), "pidwait returned while its matching process was still running");
 	}
 
@@ -3202,7 +3250,10 @@ mod tests {
 		let command = "top -s 0 | head -n 1";
 		#[cfg(not(target_os = "macos"))]
 		let command = "top -d 0 | head -n 1";
-		let execution = time::timeout(Duration::from_secs(2), execute_captured(command.to_string()))
+		// top observes head's closed pipe on its next write, after completing a
+		// full synchronous process snapshot. Under host load that scan takes
+		// seconds; this is only a bound against a broken pipe-close loop.
+		let execution = time::timeout(Duration::from_secs(30), execute_captured(command.to_string()))
 			.await
 			.expect("top kept sampling after its output pipe closed");
 		assert_eq!(execution.0.exit_code, Some(0));
