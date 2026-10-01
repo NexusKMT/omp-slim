@@ -7,6 +7,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { withStatsSyncLock } from "@oh-my-pi/omp-stats/aggregator";
 import { type GcResult, runGcCommand } from "@oh-my-pi/pi-coding-agent/cli/gc-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	getAgentDir,
 	getBlobsDir,
@@ -265,6 +266,45 @@ describe("runGcCommand blob sweep", () => {
 		expect(result.blobs?.deleted).toBe(1);
 		expect(await Bun.file(referenced).exists()).toBe(true);
 		expect(await Bun.file(orphan).exists()).toBe(false);
+	});
+
+	test("--apply keeps a blob referenced only by a session under another agent dir's managed root", async () => {
+		const referencedHash = hashFor("other-agent-dir-reference");
+		const referenced = await writeBlob(root, referencedHash, "referenced");
+		await agePath(referenced);
+		const cwd = path.join(root, "project");
+		await fs.mkdir(cwd, { recursive: true });
+		const originalAgentDir = getAgentDir();
+		setAgentDir(root);
+		try {
+			// An SDK manager rooted in another agent dir's sessions still writes its
+			// blobs to this agent dir's store, whose gc never scans that root.
+			const manager = SessionManager.create(
+				cwd,
+				SessionManager.getDefaultSessionDir(cwd, path.join(root, "other-agent")),
+			);
+			const sessionFile = manager.getSessionFile();
+			await manager.close();
+			if (!sessionFile) throw new Error("Expected a persisted session file");
+			await Bun.write(
+				sessionFile,
+				[
+					JSON.stringify({ type: "session", version: 3, id: "other", timestamp: "2026-01-01T00:00:00.000Z" }),
+					JSON.stringify({ type: "message", message: { role: "user", content: `blob:sha256:${referencedHash}` } }),
+					"",
+				].join("\n"),
+			);
+			// The terminal has since moved on to another session.
+			await fs.rm(getTerminalSessionsDir(root), { recursive: true, force: true });
+
+			const result = await runGcCommand({ flags: { agentDir: root, blobs: true, apply: true } });
+
+			expect(result.blobs?.referenced).toBe(1);
+			expect(result.blobs?.deleted).toBe(0);
+			expect(await Bun.file(referenced).exists()).toBe(true);
+		} finally {
+			setAgentDir(originalAgentDir);
+		}
 	});
 
 	test("keeps raw blob references split across chunks in journals, archives, and backups", async () => {
