@@ -14,6 +14,8 @@ import { parseInternalUrl } from "@oh-my-pi/pi-coding-agent/internal-urls/parse"
 import { SkillProtocolHandler } from "@oh-my-pi/pi-coding-agent/internal-urls/skill-protocol";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import { getThemeByName, initTheme } from "@oh-my-pi/pi-tui/theme";
+import { readToolRenderer } from "@oh-my-pi/pi-tui/tools/read";
 
 function makeSkillMd(name: string, dir: string) {
 	return `---\nname: ${name}\ndescription: ${name} skill.\n---\n\n# ${name} from ${dir}\n`;
@@ -113,6 +115,26 @@ describe("skill:// resolution honors skills.customDirectories (#7190)", () => {
 		expect(exitCode).toBe(0);
 		expect(output).toBe("helper from plugin-b");
 		expect(result.details?.meta?.source).toEqual({ type: "internal", value: "skill://helper-skill" });
+
+		// Out-of-range selectors have no displayContent; the TUI uses the first text block.
+		const outOfRangeArgs = { path: "skill://helper-skill:9999" };
+		const outOfRange = await new ReadTool(session).execute("read-cross-plugin-helper-out-of-range", outOfRangeArgs);
+		expect(outOfRange.details?.displayContent).toBeUndefined();
+		const firstText = outOfRange.content.find(block => block.type === "text")?.text;
+		expect(firstText).toContain(`[Skill file: ${helper.filePath}]`);
+		expect(firstText).toContain("Line 9999 is beyond end of file");
+		await initTheme(false, undefined, undefined, "dark", "light");
+		const uiTheme = await getThemeByName("dark");
+		if (!uiTheme) throw new Error("Failed to load dark theme");
+		for (const expanded of [false, true]) {
+			const rendered = readToolRenderer
+				.renderResult(outOfRange, { expanded, isPartial: false }, uiTheme, outOfRangeArgs)
+				.render(120)
+				.map(line => Bun.stripANSI(line))
+				.join("\n");
+			expect(rendered).toContain("Line 9999 is beyond end of file");
+		}
+
 		// Raw reads remain verbatim for consumers using the skill URI as a file resource.
 		const raw = await new ReadTool(session).execute("read-cross-plugin-helper-raw", {
 			path: "skill://helper-skill:raw",

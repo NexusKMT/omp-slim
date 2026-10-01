@@ -1615,7 +1615,11 @@ export class ReadTool implements AgentTool<typeof readSchema, ReadToolDetails> {
 		details.meta = { ...details.meta, source: { type: "internal", value: located.url } };
 		// Nested skill reads need their own provenance: the outer invocation may belong to another plugin.
 		if (extractUriScheme(located.url) === "skill" && !isRawSelector(parseSel(located.sel))) {
-			result.content.unshift({ type: "text", text: `[Skill file: ${located.path}]` });
+			const provenance = `[Skill file: ${located.path}]`;
+			const firstText = result.content.find((block): block is TextContent => block.type === "text");
+			// The TUI falls back to this block when no structured display content exists.
+			if (firstText) firstText.text = `${provenance}\n${firstText.text}`;
+			else result.content.unshift({ type: "text", text: provenance });
 		}
 		return { ...result, details };
 	}
