@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models.
+
 ## [18.4.6] - 2026-10-01
 
 ### Added
