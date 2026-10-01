@@ -3730,7 +3730,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		});
 	}
 
-	/** What the TSP composer shows: the draft's shell mode, the effort chip, and send vs Stop. */
+	/**
+	 * What the TSP composer shows: the draft's shell mode, the effort chip
+	 * (the viewed agent's, like the model chip beside it), and send vs Stop.
+	 */
 	#composerNativeState(): ComposerNativeState {
 		const draft = this.editor.getText().trimStart();
 		return {
@@ -3739,7 +3742,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				: this.isPythonMode
 					? { kind: "python", excluded: draft.startsWith("$$") }
 					: undefined,
-			thinking: thinkingLevelWord(this.session),
+			thinking: thinkingLevelWord(this.viewSession),
 			running: this.loadingAnimation !== undefined || this.session.isStreaming,
 			viewing: this.#viewingLineage(),
 		};
