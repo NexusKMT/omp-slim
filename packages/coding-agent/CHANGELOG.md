@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Fixed `enabledModels`/`--models` entries naming a judge, search, image, or speech model logging `No models match pattern` on every startup ([#14016](https://github.com/can1357/oh-my-pi/issues/14016))
 - Fixed session transcript appends creating and deleting a `.jsonl.lock` file beside the session for every recorded entry, cutting disk writes during long sessions ([#14003](https://github.com/can1357/oh-my-pi/pull/14003) by [@H4vC](https://github.com/H4vC))
 - Fixed an interrupted image blob write leaving a partial image under its final name, image copies being rewritten on every save on filesystems without hardlinks, and `omp gc` possibly deleting a long-stored image that a session had just started referencing again ([#14004](https://github.com/can1357/oh-my-pi/pull/14004) by [@H4vC](https://github.com/H4vC))
 - Fixed terminal breadcrumbs and custom-session markers being rewritten when unchanged, and sessions on a non-file session store leaving dangling markers in `~/.omp/agent/custom-session-files` ([#14005](https://github.com/can1357/oh-my-pi/pull/14005) by [@H4vC](https://github.com/H4vC))

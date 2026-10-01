@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- Fixed `/model` under an `enabledModels`/`--models` scope hiding every judge, search, image, and speech model and dropping their configured role assignments (JUDGE, WEB, IMAGE, …) ([#14016](https://github.com/can1357/oh-my-pi/issues/14016))
 - Reduced composer startup-cache disk writes: identical status, welcome, UI, recent-session, and LSP payloads no longer start a SQLite write, and closing the cache releases the database file on Windows ([#14008](https://github.com/can1357/oh-my-pi/pull/14008) by [@H4vC](https://github.com/H4vC))
 - Fixed Shift+Enter submitting the prompt and Ctrl+Enter inserting a newline in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, as on other platforms ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
 - Fixed Background jobs rows wrapping a multi-line label (heredoc commands) over several lines and breaking the job type mid-word (`bas`/`h`); labels now collapse to one truncated line and the type and elapsed never shrink
