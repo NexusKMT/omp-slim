@@ -128,6 +128,19 @@ fn read_raw_cf_dib() -> Option<Vec<u8>> {
 	(!dib.is_empty()).then_some(dib)
 }
 
+/// Whether the Windows clipboard advertises any bitmap-family format.
+///
+/// `CF_DIB`/`CF_DIBV5`/`CF_BITMAP` synthesize from one another, so a clipboard
+/// holding an image the native decoders cannot read still answers here — the
+/// signal that a slower bridge (`Clipboard.GetImage()`) is worth starting.
+#[cfg(windows)]
+fn clipboard_has_bitmap() -> bool {
+	use clipboard_win::{formats, is_format_avail};
+	[formats::CF_DIB, formats::CF_DIBV5, formats::CF_BITMAP]
+		.into_iter()
+		.any(is_format_avail)
+}
+
 /// Copy plain text to the system clipboard.
 ///
 /// # Parameters
@@ -229,7 +242,26 @@ pub fn read_image_from_clipboard() -> task::Promise<Option<ClipboardImage>> {
 					mime_type: "image/png".to_string(),
 				}))
 			},
-			Err(ClipboardError::ContentNotAvailable) => Ok(None),
+			Err(ClipboardError::ContentNotAvailable) => {
+				// arboard only probes `PNG` and `CF_DIBV5`. When it finds neither,
+				// still try the raw `CF_DIB`; if a bitmap format is advertised but
+				// nothing here decodes it, surface an error so the caller can
+				// fall back to `Clipboard.GetImage()` (#2430). A clipboard with no
+				// bitmap at all stays `None`, keeping text-only pastes in-process.
+				#[cfg(windows)]
+				if clipboard_has_bitmap() {
+					if let Some(bytes) = read_raw_cf_dib().and_then(|dib| dib_to_png(&dib).ok()) {
+						return Ok(Some(ClipboardImage {
+							data:      Uint8Array::from(bytes),
+							mime_type: "image/png".to_string(),
+						}));
+					}
+					return Err(Error::from_reason(
+						"Clipboard advertises a bitmap the native reader cannot decode",
+					));
+				}
+				Ok(None)
+			},
 			Err(err) => {
 				// arboard rejects the CF_DIBV5 payloads Qt-based screenshot
 				// tools (PixPin, Snipaste, ...) produce; decode the raw CF_DIB

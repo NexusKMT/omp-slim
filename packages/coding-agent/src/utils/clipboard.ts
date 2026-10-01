@@ -324,10 +324,11 @@ async function readTextFromX11Clipboard(): Promise<string> {
  *
  * Returns null on Termux (no image clipboard support) or when no display
  * server is available (headless/SSH without forwarding). Native Windows trusts
- * the native reader's "no image" answer — it already decodes the CF_DIB
- * payloads arboard rejects — and only falls back to `powershell.exe` when the
- * native read throws, so a text-only clipboard never waits on a cold
- * PowerShell start. WSL reaches the host clipboard through `powershell.exe`.
+ * the native reader's "no image" answer — it returns null only when no bitmap
+ * format is on the clipboard, and throws when one is present but undecodable —
+ * so `powershell.exe` starts only after a throw and a text-only clipboard never
+ * waits on a cold PowerShell start. WSL reaches the host clipboard through
+ * `powershell.exe`.
  *
  * @returns A supported image payload or null when no image is available.
  */
