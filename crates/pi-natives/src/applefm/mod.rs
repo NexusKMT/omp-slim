@@ -4,7 +4,7 @@
 //! (from `build.rs` and the Bazel `applefm_bridge` genrule) and embedded in the
 //! addon as bytes. It is never linked: on first use, and only on macOS 27+,
 //! the bytes are written to `$TMPDIR` and `dlopen`ed, so older systems never
-//! load the Swift runtime or FoundationModels (linking them crashed the addon
+//! load the Swift runtime or `FoundationModels` (linking them crashed the addon
 //! on load there). It exposes a small C ABI; this module wraps it for
 //! JavaScript. Hosts without a suitable Swift toolchain embed an empty file,
 //! which reports the bridge as not built.
@@ -74,7 +74,8 @@ mod platform {
 
 	/// The bridge dylib; empty when the build host could not compile it.
 	const DYLIB: &[u8] = include_bytes!(env!("OMP_APPLEFM_BRIDGE"));
-	/// First macOS release shipping FoundationModels with the APIs the bridge uses.
+	/// First macOS release shipping `FoundationModels` with the APIs the bridge
+	/// uses.
 	const MIN_MACOS_MAJOR: u32 = 27;
 
 	/// The bridge's C ABI, resolved from the `dlopen`ed dylib.
@@ -161,7 +162,8 @@ mod platform {
 	fn macos_major() -> Option<u32> {
 		let mut buffer = [0u8; 32];
 		let mut length = buffer.len();
-		// SAFETY: `buffer`/`length` describe a writable buffer; the name is NUL-terminated.
+		// SAFETY: `buffer`/`length` describe a writable buffer; the name is
+		// NUL-terminated.
 		let status = unsafe {
 			libc::sysctlbyname(
 				c"kern.osproductversion".as_ptr(),
@@ -199,7 +201,8 @@ mod platform {
 	}
 
 	fn availability_json(reason: &str) -> String {
-		serde_json::json!({ "type": "availability", "available": false, "reason": reason }).to_string()
+		serde_json::json!({ "type": "availability", "available": false, "reason": reason })
+			.to_string()
 	}
 
 	pub(super) fn availability() -> String {
