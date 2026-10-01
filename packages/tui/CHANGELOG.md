@@ -11,6 +11,7 @@
 - Added `Component.describeScreen` for customized native screen surface layouts
 - Added `reveal` property to native nodes to support programmatic scrolling
 - Added `edit` event protocol for native text manipulation
+- `ErrorBannerComponent` takes an optional `onDismiss`; native strips then show a Dismiss button
 
 ### Changed
 
@@ -18,6 +19,7 @@
 - Streaming file operations now keep their output card expanded automatically until execution settles
 - Refactored effort chip to use terminal-native effort glyphs where supported, falling back to block meters
 - Status line brand ('pi') is now excluded from the composer's homed segment set
+- The native composer's context line spans the whole window with the speculation and compaction symbols on it, the share past the speculation point in accent, and the share and window as its label and total; the bar's usage text shows only the session cost (a click opens `/usage`, a click on the line `/context`)
 - The status-line cost segment renders subagent spend after the session's own spend as `(+1.27)`, and billing summaries print the `$` or subscription mark once, so a later amount billed the same way (such as advisor spend) shows bare ([#13944](https://github.com/can1357/oh-my-pi/pull/13944) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed

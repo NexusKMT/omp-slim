@@ -22,6 +22,12 @@
 
 ### Fixed
 
+- In Tern, a command run while the agent works (`/context`, `/usage`, …) now lands in the transcript right away instead of in a clipped preview pinned above the prompt until the turn ends
+- In Tern, the error strip pinned above the prompt has a Dismiss button; before, it stayed until the next message even though the transcript already shows the full error
+- Typing `$` (or `$$`) no longer flips the prompt into Python mode until a space follows; before, the mode chip appeared and hid the sigil, then a letter typed next (`$a`) dropped back to prose and the `$` reappeared
+- A turn whose post-turn maintenance fails (e.g. the session file cannot be rewritten) now still ends: the session reports idle and the working indicator stops, with a warning naming the failure, instead of spinning forever after the answer
+- A per-turn tool-output prune whose rewrite fails is undone, so the live context keeps matching the saved history
+- Images too wide or tall to reach the 200px minimum edge without exceeding the 1568px cap (e.g. a pasted toolbar screenshot) are no longer stretched out of proportion; they scale up uniformly as far as the cap allows.
 - An `abort` that lands while a prompt's images are still being prepared now drops that prompt instead of starting or queueing it afterward ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - A path-pasted image or video sent as an aside while the agent is busy now reaches the model with its source path ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - Extension-registered model prompt-cache settings, including `{}` opt-outs, now take precedence over matching `models.yml` definitions ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).

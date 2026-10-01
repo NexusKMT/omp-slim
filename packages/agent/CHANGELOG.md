@@ -5,6 +5,7 @@
 ### Added
 
 - Added `Agent.moveFollowUpsToSteering()` to move queued follow-ups into steering with a single queue-change notification ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
+- Added `PruneResult.undo()` to restore the tool results a `pruneToolOutputs()` / `pruneSupersededToolResults()` pass blanked, for callers whose persistence of the pruned history fails
 - Added `additionalContext` to `afterToolCall` results, allowing trusted post-tool guidance to reach the next provider request outside tool output, including after failed results ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.4.4] - 2026-09-29

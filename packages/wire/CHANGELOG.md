@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `TspMeterMark` with an `icon` a bar draws on its track, and a meter `total` naming the whole the track spans
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
