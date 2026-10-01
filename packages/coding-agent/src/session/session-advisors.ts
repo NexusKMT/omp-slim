@@ -432,8 +432,9 @@ export interface SessionAdvisorsOptions {
 	mcpResources?: CursorMcpResourceAdapter;
 	watchdogPrompt?: string;
 	sharedInstructions?: string;
-	contextPrompt?: string;
 	sharedMaxNotesPerUpdate?: number;
+	contextPrompt?: string;
+	/** Active memory backend's developer instructions, wrapped for advisors. */
 	memoryPrompt?: string;
 	configs?: AdvisorConfig[];
 	/** WATCHDOG.yml problems found during discovery; surfaced once as a warning. */
@@ -697,7 +698,12 @@ export class SessionAdvisors {
 			// Window closed: deliver everything buffered during flush + catch-up
 			// wait as one merged message (one steer at most, else one card).
 			this.#flushAdvisorBoundaryNotes();
-			// Keep terminal unwind active until the next real agent start.
+			// The merge window covers only this callback. With advisor.syncBacklog
+			// off the review drain can still emit after it returns; those late notes
+			// deliver individually through #routeAdvice, and `#terminalUnwindActive`
+			// (held until the next real agent start), not the merge window, is what
+			// keeps them from steering finished work — only a blocker or an
+			// agent-end reviewer's concern may still request a continuation.
 			if (!terminalBoundary) this.#terminalUnwindActive = false;
 		}
 	}
