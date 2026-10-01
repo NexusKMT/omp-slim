@@ -167,7 +167,7 @@ afterEach(() => {
 });
 
 describe("LiteLLM provider discovery", () => {
-	test("recovers the Sol catalog name without changing its namespaced selector", async () => {
+	test("recovers a bare catalog name without changing its namespaced selector", async () => {
 		const options = litellmModelManagerOptions({
 			apiKey: "sk-rich",
 			baseUrl: "http://primary:4000/v1",
@@ -178,8 +178,8 @@ describe("LiteLLM provider discovery", () => {
 					return Response.json({
 						data: [
 							{
-								model_group: "openai/gpt-6.1-sol",
-								model_name: "openai/gpt-6.1-sol",
+								model_group: "team/gpt-6-sol",
+								model_name: "team/gpt-6-sol",
 								providers: ["openai"],
 								supports_vision: true,
 								max_input_tokens: 196_000,
@@ -193,12 +193,12 @@ describe("LiteLLM provider discovery", () => {
 		});
 
 		const specs = await options.fetchDynamicModels?.();
-		const spec = specs?.find(model => model.id === "openai/gpt-6.1-sol");
+		const spec = specs?.find(model => model.id === "team/gpt-6-sol");
 		if (!spec) throw new Error("expected the namespaced Sol selector");
 		if (spec.api !== "openai-responses") throw new Error("expected the OpenAI Responses transport");
 		const model = buildModel({ ...spec, api: spec.api });
-		expect(model.name).toBe("GPT-6.1 Sol");
-		expect(`${model.provider}/${model.id}`).toBe("litellm/openai/gpt-6.1-sol");
+		expect(model.name).toBe("GPT-6 Sol");
+		expect(`${model.provider}/${model.id}`).toBe("litellm/team/gpt-6-sol");
 		expect(model.compat).toMatchObject({ wireModelIdMode: "raw" });
 		expect(spec.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 		expect(spec.contextWindow).toBe(196_000);

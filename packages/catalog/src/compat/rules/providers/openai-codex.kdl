@@ -9,16 +9,6 @@ provider "openai-codex" {
 	web-search "codex"
 
 	seed api="openai-codex-responses" base-url="https://chatgpt.com/backend-api" bundle="always" {
-		// Keep a first-party Codex fallback reference before credentialed
-		// discovery updates the bundle. Custom-provider discovery can inherit
-		// its missing names, pricing, limits and reasoning metadata; the policy
-		// below also supplies Codex extended-context behavior.
-		model "gpt-6.1-sol" name="GPT-6.1 Sol" {
-			reasoning #true
-			input "text" "image"
-			cost input=2 output=10 cache-read=0.1 cache-write=0
-			limits context=272000 max-tokens=128000
-		}
 		// Label only: the Codex backend ignores `tool.model` and runs gpt-image-2-codex.
 		model "gpt-image-2" name="GPT Image 2" {
 			reasoning #false
