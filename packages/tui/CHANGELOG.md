@@ -59,10 +59,13 @@
 - Fixed home directories next to shell redirections, control operators or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) leaking the full path in display-only text ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed the subagent task card showing full home paths in tool intents and arguments, while keeping search patterns literal ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed Enter doing nothing on a fully typed slash-command argument while its completion popup was open (e.g. `/mcp list`): it now submits instead of re-accepting the identical completion; subcommands that still need a required argument (e.g. `/mcp test`) keep inserting the subcommand so you can type it ([#13885](https://github.com/can1357/oh-my-pi/pull/13885) by [@H4vC](https://github.com/H4vC)).
+### Changed
+
+- Changed Ctrl+Enter to always insert a newline in Windows Terminal; use Ctrl+Q to send a follow-up ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
+
 ### Fixed
 
-- Fixed Shift+Enter submitting instead of inserting a newline in Windows Terminal builds without the kitty keyboard protocol (1.24 and earlier): omp now asks the Windows console for win32-input-mode key records there, so Shift+Enter, Ctrl+Enter and other modified keys arrive distinctly ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
-- Fixed Ctrl+Enter flipping between newline and follow-up across Windows Terminal builds: under Windows Terminal it now always inserts a newline, and Ctrl+Q sends a follow-up (binding `app.message.followUp` to `ctrl+enter` explicitly restores the old behavior) ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
+- Fixed Shift+Enter submitting the prompt instead of inserting a newline in Windows Terminal 1.24 and earlier ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
 
 ## [18.4.4] - 2026-09-29
 
