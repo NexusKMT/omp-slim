@@ -64,7 +64,6 @@ function printSession(manager: MCPManager, refreshGate?: Promise<void>, onRefres
 			getHeader: () => undefined,
 			getEntries: () => [],
 			onPersistenceError: () => () => {},
-			onPersistenceNotice: () => () => {},
 		},
 		refreshMCPTools: async (tools: Array<{ name: string }>) => {
 			onRefreshStarted?.();

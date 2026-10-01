@@ -139,7 +139,7 @@ import { modelMentionDisplayName } from "@oh-my-pi/pi-tui/prompt/model-mention-s
 import { modelMentionChipLabel, shiftImageMarkers } from "@oh-my-pi/pi-tui/prompt/composer-attachments";
 import type { SessionContext } from "../session/session-context";
 import { getRecentSessions } from "../session/session-listing";
-import type { SessionManager } from "../session/session-manager";
+import { type SessionManager, SessionPersistenceNotice } from "../session/session-manager";
 import type { ShakeMode } from "../session/shake-types";
 import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
 import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
@@ -2261,8 +2261,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		// before initHooksAndCustomTools/#reconcileModeFromSession/#enterPlanMode —
 		// all of which can reach setSessionName during init.
 		this.#eventBusUnsubscribers.push(
-			this.sessionManager.onPersistenceNotice(notice => this.showWarning(formatPersistenceNotice(notice))),
 			this.sessionManager.onPersistenceError(error => {
+				if (error instanceof SessionPersistenceNotice) {
+					this.showWarning(formatPersistenceNotice(error.message));
+					return;
+				}
 				const detail = truncateToWidth(
 					replaceTabs(sanitizeText(error.message)).replace(/[\r\n]+/g, " "),
 					TRUNCATE_LENGTHS.LINE,

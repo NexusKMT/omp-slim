@@ -197,7 +197,6 @@ describe("headless persistence-failure surface", () => {
 					notifyPersistenceError = callback;
 					return () => {};
 				},
-				onPersistenceNotice: () => () => {},
 			},
 			getLastAssistantMessage: () => assistant(""),
 			prepareForHeadlessAdvisorDrain: () => {},
