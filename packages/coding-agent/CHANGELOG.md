@@ -4,12 +4,15 @@
 
 ### Added
 
+- Added JobsSheet overlay for viewing live background jobs without transcript interruption
+- Added agent lineage tracking, enabling navigation between subagents and the main session via a native composer header
 - Added `promote_queued_message` to RPC, with `promoteQueuedMessage()` on the session and TypeScript RPC client and `promote_queued_message()` on the Python RPC client, so a queued follow-up can become a steering message without duplicating its text or losing attachments ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - The TypeScript RPC client's `prompt()` accepts a `streamingBehavior` (`"steer"` or `"followUp"`) for prompts sent while the agent is busy ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - Claude prompt caches can now stay warm on Amazon Bedrock and Bedrock Mantle, respecting configured per-model cache lifetimes as well as cache retention ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Changed
 
+- Updated subagent HUD to support in-place updates, preserving component identity and preventing layout flickering
 - Native Tern terminals now receive OSC 9;4 indeterminate progress updates regardless of user settings
 - Idle recaps are now presented as a structured notice in the transcript instead of a status line message
 - RPC `prompt` (including a `/skill:` invocation sent through it) now acknowledges only once the message is admitted — queued onto its steer/follow-up/aside queue, an idle turn started for it, or routed to an extension command — so a `promote_queued_message` or `remove_queued_message` sent right after the acknowledgement finds a message queued moments earlier ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).

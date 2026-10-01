@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added agent lineage tracking, providing a navigation header when viewing subagents
+- Added JobsSheet overlay for viewing background jobs
 - Added support for OSC 877 protocol framing to enable Tern in Windows ConPTY environments
 - Added `Component.describeScreen` for customized native screen surface layouts
 - Added `reveal` property to native nodes to support programmatic scrolling
@@ -11,6 +13,7 @@
 
 ### Changed
 
+- Refactored effort chip to use terminal-native effort glyphs where supported, falling back to block meters
 - Status line brand ('pi') is now excluded from the composer's homed segment set
 - The status-line cost segment renders subagent spend after the session's own spend as `(+1.27)`, and billing summaries print the `$` or subscription mark once, so a later amount billed the same way (such as advisor spend) shows bare ([#13944](https://github.com/can1357/oh-my-pi/pull/13944) by [@H4vC](https://github.com/H4vC))
 
