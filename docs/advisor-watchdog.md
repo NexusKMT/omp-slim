@@ -220,7 +220,7 @@ Practical interpretation:
 
 `strict` with an `agent-end` advisor provides synchronous final review: the primary reaches its final boundary, the advisor reviews the accumulated run, then the primary can finish. Notes delivered at that boundary merge into one message, ordered newest turn first, then severity (`blocker` → `concern` → `nit`). Notes about earlier turns carry a `turns_ago` attribute and a dim `T-N` transcript marker between severity and advisor name. The first merged delivery, then at most once every 50 primary turns, includes guidance that findings may be outdated or wrong and may be ignored.
 
-A batch containing a blocker or an `agent-end` concern can request at most one permitted continuation, even when several advisors report findings together. Stop/abort suppression, concern cooldown, plan-mode policy, and client preservation constraints apply to both buffered and live delivery. Otherwise the notes remain visible without restarting the primary. Advisor-driven continuations do not schedule another review or advance cadence; genuine user input wakes scheduling and preserves accumulated primary deltas without feeding advisor notes back into them.
+A batch containing a blocker or an `agent-end` concern can request at most one permitted continuation, even when several advisors report findings together. Stop/abort suppression, concern cooldown, plan-mode policy, and client preservation constraints apply to both buffered and live delivery. Otherwise the notes remain visible without restarting the primary. A continuation an advisor delivery starts does not schedule another review or advance cadence; its updates are captured and sent with the next review, without feeding advisor notes back into them.
 
 Keep turn reviews asynchronous while waiting for final reviews:
 
@@ -367,7 +367,7 @@ Fields:
 - `maxNotesPerUpdate` (top level or per advisor): accepted non-blocker notes per prompt update, default `4`. A per-advisor value overrides the top-level value, which overrides the `advisor.maxNotesPerUpdate` setting.
 - `advisors[].instructions`: this advisor's specialization, appended after the shared baseline. Both instruction fields expand `@path` imports like `WATCHDOG.md`.
 
-After the primary's first final boundary for a user message, review scheduling sleeps until the next genuine user message. Advisor-triggered continuation turns neither schedule reviews nor advance interval counters, so advisor deliveries cannot re-wake reviewers into an advisor→primary→advisor cascade. Delivery itself never sleeps: advice already produced still steers, flushes, or rides asides to the primary. Sleeping advisors do not advance their transcript cursors, so the first review after wake-up covers everything that happened in between.
+A continuation an advisor delivery itself starts — a steer while the primary is idle or past its final boundary — neither schedules reviews nor advances interval counters through its own final boundary, so advisor deliveries cannot re-wake reviewers into an advisor→primary→advisor cascade. Its updates are still captured and reach the next scheduled review. Continuations started by anything else (todo reminders, async job wakes, live delegations, user input) are reviewed under the normal cadence, so an `agent-end` reviewer also reviews the run a todo reminder resumes. Delivery itself never pauses: advice already produced still steers, flushes, or rides asides to the primary.
 
 ### Discovery locations
 

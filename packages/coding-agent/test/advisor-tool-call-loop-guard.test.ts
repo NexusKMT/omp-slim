@@ -281,7 +281,7 @@ describe("advisor tool-call loop guard", () => {
 		expect(cards).toHaveLength(1);
 	});
 
-	it("lets a terminal blocker steer once but schedules no reviews while asleep", async () => {
+	it("lets a terminal blocker steer one continuation that schedules no review of its own", async () => {
 		const { reviewStarts } = createAdvisor(
 			{ "advisor.syncBacklog": "1" },
 			0,
@@ -307,10 +307,42 @@ describe("advisor tool-call loop guard", () => {
 		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
 		expect(reviewStarts).toHaveLength(2);
 		const delivered = JSON.stringify(reviewStarts[1]!.messages);
-		// The wake-up review receives the delta accumulated during the sleep:
-		// the blocker-triggered continuation turn and the fresh input.
+		// The next review receives the advisor continuation's captured delta and
+		// the fresh input.
 		expect(delivered).toContain("primary complete");
 		expect(delivered).toContain("second update");
+	});
+
+	it("reviews a todo-reminder continuation after a final review", async () => {
+		const { reviewStarts } = createAdvisor(
+			{
+				"advisor.syncBacklog": "1",
+				"todo.enabled": true,
+				"todo.reminders": true,
+				"todo.remindersMax": 1,
+			},
+			0,
+			{ name: "Final reviewer", reviewMode: "agent-end" },
+		);
+		if (!session) throw new Error("Expected live session");
+		const live = session;
+		live.setTodoPhases([{ name: "Work", tasks: [{ content: "Finish the migration", status: "in_progress" }] }]);
+		const reminderRunEnded = Promise.withResolvers<void>();
+		let reminded = false;
+		live.subscribe(event => {
+			if (event.type === "todo_reminder") reminded = true;
+			if (event.type === "agent_end" && reminded) reminderRunEnded.resolve();
+		});
+
+		await live.prompt("migrate the schema");
+		await reminderRunEnded.promise;
+		expect(await live.waitForAdvisorCatchup(2_000)).toBe(true);
+
+		// The first final yield was reviewed; the reminder resumed the run, and
+		// its own final yield is reviewed too rather than treated like an
+		// advisor-started continuation.
+		expect(reviewStarts).toHaveLength(2);
+		expect(JSON.stringify(reviewStarts[1]!.messages)).toContain("incomplete todo");
 	});
 
 	it("merges simultaneous terminal blockers into one continuation turn", async () => {
@@ -655,30 +687,6 @@ describe("advisor tool-call loop guard", () => {
 		expect(cards).toHaveLength(1);
 		// A preserved nit never steers a continuation turn.
 		expect(primaryMock.calls).toHaveLength(1);
-	});
-
-	it("wakes review scheduling on a user-attributed custom turn initiator, not only plain user messages", async () => {
-		const { reviewStarts } = createAdvisor({ "advisor.syncBacklog": "1" }, 0, undefined, 0, "looks fine");
-		if (!session) throw new Error("Expected live session");
-
-		await session.prompt("first update");
-		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
-		expect(reviewStarts).toHaveLength(1);
-		// Review scheduling is asleep now: advisor/agent-attributed deliveries
-		// (like the continuation above's own cards) never wake it.
-
-		const started = await session.promptCustomMessage({
-			customType: "collab-prompt",
-			content: "peer asks for a review pass",
-			display: false,
-			attribution: "user",
-		});
-		expect(started).toBe(true);
-		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
-
-		// A user-attributed custom turn initiator is genuine user input: the
-		// sleep latch wakes and the reviewer sees the accumulated delta.
-		expect(reviewStarts).toHaveLength(2);
 	});
 
 	/**

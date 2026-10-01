@@ -243,14 +243,14 @@ const ADVISOR_BOUNDARY_GUIDANCE_TURNS = 50;
 
 /**
  * Last genuine user-turn initiator in the transcript. Agent-attributed
- * injections (steers, asides, internal notices) never count: the advisor review
- * sleep latch wakes only on fresh user input, not on deliveries the advisor
- * system itself caused. Besides plain `user` messages, user-attributed custom
- * turn initiators count too — a directly invoked `/skill:` prompt or a writable
- * collab peer's prompt starts a genuine user turn without the `user` role.
- * Compared by object identity: transcript snapshots share message instances
- * across callbacks, while a new prompt or a rewind+resubmit always introduces a
- * new object — even within the same millisecond.
+ * injections (steers, asides, internal notices) never count, so an advisor
+ * continuation stays attributed to the advisor until fresh user input arrives.
+ * Besides plain `user` messages, user-attributed custom turn initiators count
+ * too — a directly invoked `/skill:` prompt or a writable collab peer's prompt
+ * starts a genuine user turn without the `user` role. Compared by object
+ * identity: transcript snapshots share message instances across callbacks,
+ * while a new prompt or a rewind+resubmit always introduces a new object —
+ * even within the same millisecond.
  */
 function lastPrimaryUserMessage(messages: readonly AgentMessage[]): AgentMessage | undefined {
 	for (let index = messages.length - 1; index >= 0; index--) {
@@ -560,19 +560,16 @@ export class SessionAdvisors {
 	#advisorPrimaryTurnsCompleted = 0;
 	#advisorPrimaryWillContinue = false;
 	/**
-	 * Sleep latch: after the first terminal boundary (`willContinue` not true)
-	 * following user input, stop SCHEDULING new reviews until a fresh
-	 * user-attributed message arrives. Advisor deliveries keep running — deferred
-	 * flushes, asides, and steers often extend the run with advisor-triggered
-	 * turns, and each such turn is again a terminal boundary; without the latch
-	 * every boundary re-schedules reviewers and the session cascades
-	 * advisor→primary→advisor until reviewers happen to fall silent. Skipped
-	 * callbacks never advance runtime cursors, so the first review after wake-up
-	 * receives the whole accumulated delta in one batch.
+	 * Set when an advisor delivery itself starts a continuation of a finished
+	 * run (a steer while idle or unwinding past a terminal boundary), stamped with
+	 * the last genuine user message at that moment. Every boundary of that
+	 * continuation, through its terminal one, captures without scheduling a
+	 * review or advancing cadence: otherwise each advisor-triggered turn
+	 * re-schedules reviewers and the session cascades advisor→primary→advisor.
+	 * Continuations started by anything else (todo reminders, async wakes, live
+	 * delegations) are reviewed normally. Fresh user input voids the mark.
 	 */
-	#advisorReviewSleeping = false;
-	/** Last user message seen when reviews went to sleep; identity change wakes. */
-	#advisorSleepingLastUserMessage: AgentMessage | undefined;
+	#advisorContinuation: { userMessage: AgentMessage | undefined } | undefined;
 	/**
 	 * True while a terminal-boundary {@link onPrimaryTurnEnd} callback runs
 	 * (deferred flush + catch-up wait). The agent loop still reports
@@ -637,16 +634,16 @@ export class SessionAdvisors {
 			this.#retuneAutoThinkingAdvisors();
 			if (!this.#advisorPrimaryWillContinue) {
 				// Flush notes deferred during tool-loop steps at every terminal boundary.
-				// Delivery never sleeps: advice already produced against work the
-				// reviewers saw still reaches the primary while review scheduling rests.
+				// Delivery never pauses: advice already produced against work the
+				// reviewers saw still reaches the primary during an advisor continuation.
 				for (const advisor of this.#advisors) advisor.adviseTool.flushDeferredNotes();
 			}
-			if (this.#advisorReviewSleeping && lastPrimaryUserMessage(messages) !== this.#advisorSleepingLastUserMessage) {
-				// Fresh user input ends the sleep: scheduling resumes under normal
-				// cadence rules, and the first scheduled review sees the whole delta
-				// accumulated while reviewers slept.
-				this.#advisorReviewSleeping = false;
-			}
+			// A boundary of a continuation the advisor itself started is captured but
+			// never schedules a review: the next genuinely started boundary reviews it.
+			const continuation = this.#advisorContinuation;
+			const advisorContinuation =
+				continuation !== undefined && lastPrimaryUserMessage(messages) === continuation.userMessage;
+			if (!advisorContinuation || !this.#advisorPrimaryWillContinue) this.#advisorContinuation = undefined;
 			// The roster-less default advisor follows the cadence settings live.
 			const defaultReviewMode = cfgAdvisorReviewMode.get(this.#host.settings);
 			const configuredInterval = cfgAdvisorReviewInterval.get(this.#host.settings);
@@ -658,10 +655,10 @@ export class SessionAdvisors {
 				// Every advisor captures this boundary's delta now, while it matches
 				// what the primary saw: the per-turn prune that runs right after this
 				// callback may elide its tool results before a later review renders
-				// them. Cadence only decides whether the capture is sent or held; while
-				// review scheduling sleeps it is held without advancing cadence.
+				// them. Cadence only decides whether the capture is sent or held; an
+				// advisor continuation holds it without advancing cadence.
 				const reviewMode = advisor.reviewMode ?? defaultReviewMode;
-				const eligible = !this.#advisorReviewSleeping && !(reviewMode === "agent-end" && willContinue === true);
+				const eligible = !advisorContinuation && !(reviewMode === "agent-end" && willContinue === true);
 				if (eligible) advisor.eligibleUpdates++;
 				const scheduled =
 					eligible && advisor.eligibleUpdates % (advisor.reviewInterval ?? defaultReviewInterval) === 0;
@@ -675,10 +672,6 @@ export class SessionAdvisors {
 				} catch (error) {
 					logger.warn("advisor onTurnEnd threw; delta dropped", { advisor: advisor.name, err: String(error) });
 				}
-			}
-			if (!this.#advisorPrimaryWillContinue) {
-				this.#advisorReviewSleeping = true;
-				this.#advisorSleepingLastUserMessage = lastPrimaryUserMessage(messages);
 			}
 			if (!scheduledAdvisors) return;
 			// Catch-up policy resolves per advisor at each boundary: a roster
@@ -1048,8 +1041,7 @@ export class SessionAdvisors {
 		}
 		this.#advisorPrimaryTurnsCompleted = 0;
 		this.#advisorPrimaryWillContinue = false;
-		this.#advisorReviewSleeping = false;
-		this.#advisorSleepingLastUserMessage = undefined;
+		this.#advisorContinuation = undefined;
 		this.#advisorInterruptImmuneTurnStart = undefined;
 		this.#advisorAutoResumeSuppressed = false;
 		this.#advisorBoundaryNotes = [];
@@ -1834,6 +1826,12 @@ export class SessionAdvisors {
 				// arming earlier would downgrade the next `advisor.immuneTurns` worth of
 				// real concerns/blockers to skip-idle-flush asides (#5628 review).
 				this.#recordAdvisorInterruptDelivered();
+				// A steer into a run still working only redirects it; one delivered
+				// while idle or past a terminal boundary starts the continuation
+				// that must not schedule another review.
+				if (!this.#host.agent.state.isStreaming || this.#terminalUnwindActive) {
+					this.#advisorContinuation = { userMessage: lastPrimaryUserMessage(this.#host.agent.state.messages) };
+				}
 				void this.#host
 					.sendCustomMessage(
 						{ customType: "advisor", content, display: true, attribution: "agent", details },
