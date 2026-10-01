@@ -1,20 +1,36 @@
-import { padding, truncateToWidth, visibleWidth } from "../../utils";
-import { gradientLogo, PI_LOGO } from "../../prompt/welcome";
+import { centerLine } from "../../utils";
+import { padToWidth } from "../../render/utils";
+import { gradientLogo, logoNode, PI_LOGO } from "../../prompt/welcome";
 import { theme } from "../../theme/theme";
+import { col, node, span, text } from "../../native/describe";
+import type { NativeNode } from "../../native/node";
+import { Memo } from "../../native/memo";
 import { renderStarfield, SETUP_TICK_MS } from "./splash";
 
 export const SETUP_OUTRO_MS = 1200;
 
-function centerLine(line: string, width: number): string {
-	const lineWidth = visibleWidth(line);
-	if (lineWidth >= width) return truncateToWidth(line, width);
-	const left = Math.floor((width - lineWidth) / 2);
-	return padding(left) + line + padding(width - left - lineWidth);
-}
+const outroMemo = new Memo();
 
-function clampLine(line: string, width: number): string {
-	const truncated = truncateToWidth(line, width);
-	return truncated + padding(Math.max(0, width - visibleWidth(truncated)));
+/**
+ * Native outro: the shimmering mark, the saved confirmation, and an
+ * indeterminate progress bar standing in for the timed sweep. A click sends
+ * the `continue` action.
+ */
+export function describeSetupOutro(): NativeNode {
+	const saved = `${theme.status.success} Setup saved`;
+	return outroMemo.get([saved], () =>
+		col(
+			[
+				node("spacer", { grow: 1 }),
+				logoNode(PI_LOGO, true),
+				text([span(saved, "success strong")], { wrap: "none" }),
+				text([span("Handing off to the normal CLI…", "muted")], { wrap: "none" }),
+				node("progress", { value: null, max: { w: "48ch" } }),
+				node("spacer", { grow: 1 }),
+			],
+			{ align: "center", gap: "sm", grow: 1, role: "omp.setup.outro", actions: { click: "continue" } },
+		),
+	);
 }
 
 export function renderSetupOutro(width: number, height: number, elapsedMs: number): string[] {
@@ -31,5 +47,5 @@ export function renderSetupOutro(width: number, height: number, elapsedMs: numbe
 	for (let i = 0; i < content.length && start + i < lines.length; i++) {
 		lines[start + i] = centerLine(content[i] ?? "", width);
 	}
-	return lines.map(line => clampLine(line, width));
+	return lines.map(line => (width > 0 ? padToWidth(line, width) : ""));
 }

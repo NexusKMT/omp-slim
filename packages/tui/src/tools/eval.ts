@@ -1,8 +1,19 @@
 import type { Component } from "../index";
-import { Markdown, Text, visibleWidth } from "../index";
-import { formatNumber, sanitizeText } from "@oh-my-pi/pi-utils";
-import type { RenderResultOptions, ToolRenderer } from "./renderer";
-import { formatContextUsage } from "../chrome/context-thresholds";
+import { Markdown, Text } from "../index";
+import { sanitizeText } from "@oh-my-pi/pi-utils";
+import type {
+	NativeToolHead,
+	NativeToolView,
+	RenderResultContextOptions,
+	RenderResultOptions,
+	ToolRenderer,
+} from "./renderer";
+import type { TspSpan } from "@oh-my-pi/pi-wire";
+import { ansi, code as codeNode, compact, keyed, md, node, span, text } from "../native/describe";
+import type { NativeChild, NativeNode } from "../native/node";
+import { plainText } from "../native/spans";
+import { footnoteText, resultText } from "./native-view";
+import { renderAgentTreeRow } from "./agent-tree";
 import { truncateToVisualLines } from "../chrome/visual-truncate";
 import { getMarkdownTheme, type Theme } from "../theme/theme";
 import { markFramedBlockComponent, outputBlockContentWidth, renderCodeCell } from "../render/index";
@@ -15,17 +26,14 @@ import {
 	JSON_TREE_MAX_LINES_EXPANDED,
 	JSON_TREE_SCALAR_LEN_COLLAPSED,
 	JSON_TREE_SCALAR_LEN_EXPANDED,
+	describeJsonTree,
 	renderJsonTreeLines,
 } from "./json-tree";
 import { formatStyledTruncationWarning, stripOutputNotice } from "./output-meta";
 import {
-	FEED_MODEL_BADGE_WIDTH,
-	formatBadge,
-	formatDuration,
-	formatFeedModelBadge,
-	formatStatusIcon,
+	DEFAULT_TERMINAL_PREVIEW_LINES,
+	cappedHeadLines,
 	formatTitle,
-	isFeedModelBadgeEnabled,
 	previewWindowRows,
 	replaceTabs,
 	shortenPath,
@@ -34,7 +42,7 @@ import {
 } from "../render/render-utils";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import type { OutputMeta } from "./output-meta";
-import type { ConfiguredThinkingLevel } from "../render/render-utils";
+import { type ConfiguredThinkingLevel, expandKeyHint } from "../render/render-utils";
 
 /** Runtime backend that an eval cell dispatches to. */
 export type EvalLanguage = "python" | "js";
@@ -83,8 +91,8 @@ export interface EvalToolDetails {
 	};
 }
 
-/** Default collapsed eval output preview height. */
-export const EVAL_DEFAULT_PREVIEW_LINES = 10;
+/** Default collapsed eval output preview height; kept as a named alias (consumed by chat/tool-execution). */
+export const EVAL_DEFAULT_PREVIEW_LINES: number = DEFAULT_TERMINAL_PREVIEW_LINES;
 
 function languageForHighlighter(language: EvalLanguage | undefined): "python" | "javascript" {
 	if (language === "js") return "javascript";
@@ -97,10 +105,7 @@ interface EvalRenderCellArg {
 	title?: string;
 }
 
-interface EvalRenderArgs {
-	language?: string;
-	code?: string;
-	title?: string;
+interface EvalRenderArgs extends EvalRenderCellArg {
 	cells?: EvalRenderCellArg[];
 	__partialJson?: string;
 }
@@ -130,10 +135,9 @@ function getRenderCells(args: EvalRenderArgs | undefined): EvalRenderCell[] {
 	for (const cell of raw) {
 		if (!cell || typeof cell !== "object") continue;
 		const language = normalizeRenderLanguage(typeof cell.language === "string" ? cell.language : undefined);
-		const code = typeof cell.code === "string" ? cell.code : "";
 		out.push({
 			language,
-			code: formatEvalCodeForDisplay(code, language),
+			code: formatEvalCodeForDisplay(cell.code ?? "", language),
 			title: typeof cell.title === "string" ? cell.title : undefined,
 		});
 	}
@@ -143,15 +147,28 @@ function getRenderCells(args: EvalRenderArgs | undefined): EvalRenderCell[] {
 type AgentEventStatus = "pending" | "running" | "completed" | "failed" | "aborted";
 
 /**
- * Append or replace a status event. `agent` events are progress snapshots keyed
- * by `id`, so they coalesce in place (preserving first-seen order); every other
- * op is a discrete action and simply appends. Keeps the persisted event list
- * bounded even when a subagent emits hundreds of throttled progress ticks.
+ * Coalescing key of a progress-snapshot event: `agent` and `judge_batch`
+ * events keyed by `id`, where only the newest snapshot matters. Discrete
+ * actions (everything else) have no key. Shared by {@link upsertStatusEvent}
+ * and the executors' display collectors so both coalesce identically.
+ */
+export function statusEventKey(event: { op: string; [key: string]: unknown }): string | undefined {
+	if ((event.op === "agent" || event.op === "judge_batch") && typeof event.id === "string") {
+		return `${event.op}\0${event.id}`;
+	}
+	return undefined;
+}
+
+/**
+ * Append or replace a status event. Progress snapshots (see
+ * {@link statusEventKey}) coalesce in place, preserving first-seen order; every
+ * other op is a discrete action and simply appends. Keeps the persisted event
+ * list bounded even when a subagent or batch emits hundreds of progress ticks.
  */
 export function upsertStatusEvent(events: EvalStatusEvent[], event: EvalStatusEvent): void {
-	if (event.op === "agent" && typeof event.id === "string") {
-		const id = event.id;
-		const idx = events.findIndex(e => e.op === "agent" && e.id === id);
+	const key = statusEventKey(event);
+	if (key !== undefined) {
+		const idx = events.findIndex(e => statusEventKey(e) === key);
 		if (idx >= 0) {
 			events[idx] = event;
 			return;
@@ -181,29 +198,6 @@ function agentEventStatus(value: unknown): AgentEventStatus {
 	}
 }
 
-/** Append the toolCount · context · cost stat run, mirroring the task tool. */
-function formatAgentStats(event: EvalStatusEvent, theme: Theme): string {
-	let line = "";
-	const toolCount = eventNumber(event.toolCount);
-	if (toolCount > 0) {
-		line += `${theme.sep.dot}${theme.fg("dim", `${formatNumber(toolCount)} ${theme.icon.extensionTool}`)}`;
-	}
-	const contextTokens = eventNumber(event.contextTokens);
-	if (contextTokens > 0) {
-		const contextWindow = eventNumber(event.contextWindow);
-		const ctx =
-			contextWindow > 0
-				? formatContextUsage((contextTokens / contextWindow) * 100, contextWindow)
-				: formatNumber(contextTokens);
-		line += `${theme.sep.dot}${theme.fg("dim", ctx)}`;
-	}
-	const cost = eventNumber(event.cost);
-	if (cost > 0) {
-		line += `${theme.sep.dot}${theme.fg("statusLineCost", `$${cost.toFixed(2)}`)}`;
-	}
-	return line;
-}
-
 /**
  * Render coalesced `agent()` progress as a Task-tool-style tree, one entry per
  * subagent: a status line (icon · id · stats) plus, while running, the current
@@ -223,62 +217,37 @@ function renderAgentProgressEvents(
 		const cont = isLast ? "   " : `${theme.fg("dim", theme.tree.vertical)}  `;
 
 		const status = agentEventStatus(event.status);
-		const iconStatus =
-			status === "completed"
-				? "done"
-				: status === "failed"
-					? "error"
-					: status === "aborted"
-						? "aborted"
-						: status === "pending"
-							? "pending"
-							: "running";
-		const iconColor =
-			status === "completed" ? "success" : status === "failed" || status === "aborted" ? "error" : "accent";
-		const icon =
-			status === "completed"
-				? theme.styledSymbol("tool.eval", "accent")
-				: theme.fg(iconColor, formatStatusIcon(iconStatus, theme, status === "running" ? spinnerFrame : undefined));
-
-		const lead = `${prefix} ${icon} `;
-		const statusSuffix =
-			status === "failed" || status === "aborted" ? ` ${formatBadge(status, iconColor, theme)}` : "";
-		const id = truncateToWidth(
-			sanitizeText(eventString(event.id) ?? "agent").replace(/\s+/g, " "),
-			Math.max(0, width - visibleWidth(lead) - visibleWidth(statusSuffix)),
-		);
-		const model = eventString(event.resolvedModelIdentity ?? event.model ?? event.resolvedModel);
-		const thinkingLevel = event.resolvedThinkingLevel;
-		const modelPrefix =
-			model && isFeedModelBadgeEnabled()
-				? formatFeedModelBadge(
-						model,
-						thinkingLevel,
-						event.advisor === true,
-						theme,
-						Math.min(
-							FEED_MODEL_BADGE_WIDTH,
-							width - visibleWidth(lead) - visibleWidth(id) - visibleWidth(statusSuffix) - 1,
-						),
-					)
-				: "";
-		const modelLead = modelPrefix ? `${modelPrefix} ` : "";
-		let line = `${lead}${modelLead}${theme.fg("accent", theme.bold(id))}${statusSuffix}`;
-
 		const currentTool = eventString(event.currentTool);
 		const lastIntent = eventString(event.lastIntent);
-		if (status === "running" && !currentTool && !lastIntent) {
-			const preview = eventString(event.taskPreview);
-			if (preview) line += ` ${theme.fg("muted", truncateToWidth(replaceTabs(preview), 48))}`;
-		}
-
-		line += formatAgentStats(event, theme);
-		if (status === "completed" || status === "failed" || status === "aborted") {
-			const durationMs = eventNumber(event.durationMs);
-			if (durationMs > 0) line += `${theme.sep.dot}${theme.fg("dim", formatDuration(durationMs))}`;
-		}
-		// Do not let optional stats replace the end of the reserved failure status with an ellipsis.
-		lines.push(truncateToWidth(line, width, ""));
+		const preview = status === "running" && !currentTool && !lastIntent ? eventString(event.taskPreview) : undefined;
+		const toolCount = eventNumber(event.toolCount);
+		lines.push(
+			renderAgentTreeRow(
+				{
+					presentation: "eval",
+					status,
+					prefix,
+					id: sanitizeText(eventString(event.id) ?? "agent").replace(/\s+/g, " "),
+					width,
+					model: eventString(event.resolvedModelIdentity ?? event.model ?? event.resolvedModel),
+					thinkingLevel: event.resolvedThinkingLevel,
+					advisor: event.advisor === true,
+					spinnerFrame,
+					preview: preview ? ` ${theme.fg("muted", truncateToWidth(replaceTabs(preview), 48))}` : undefined,
+					stats: {
+						toolCount: toolCount > 0 ? toolCount : 0,
+						contextTokens: eventNumber(event.contextTokens),
+						contextWindow: eventNumber(event.contextWindow),
+						cost: eventNumber(event.cost),
+					},
+					durationMs:
+						status === "completed" || status === "failed" || status === "aborted"
+							? eventNumber(event.durationMs)
+							: undefined,
+				},
+				theme,
+			).line,
+		);
 
 		if (status === "running") {
 			if (currentTool) {
@@ -403,6 +372,12 @@ function formatStatusEvent(event: EvalStatusEvent, theme: Theme): string {
 				parts.push(data.action === "create" ? `${data.count} agent(s)` : `${data.count} item(s)`);
 			}
 			break;
+		case "judge_batch":
+			parts.push(`${data.action} ${data.id}`);
+			parts.push(`${data.done ?? 0}/${data.total ?? 0}`);
+			if (data.failed) parts.push(`${data.failed} failed`);
+			if (data.model) parts.push(String(data.model));
+			break;
 		case "wc":
 			parts.push(`${data.lines}L ${data.words}W ${data.chars}C`);
 			break;
@@ -452,13 +427,12 @@ function formatStatusEventExpanded(event: EvalStatusEvent, theme: Theme): string
 	};
 
 	const addPreview = (preview: string, maxLines = 3) => {
-		const previewLines = String(preview).split("\n").slice(0, maxLines);
-		for (const line of previewLines) {
+		const previewLines = cappedHeadLines(String(preview).split("\n"), maxLines);
+		for (const line of previewLines.lines) {
 			lines.push(`   ${theme.fg("toolOutput", truncateToWidth(replaceTabs(line), 80))}`);
 		}
-		const totalLines = String(preview).split("\n").length;
-		if (totalLines > maxLines) {
-			lines.push(`   ${theme.fg("dim", `… ${totalLines - maxLines} more lines`)}`);
+		if (previewLines.hidden > 0) {
+			lines.push(`   ${theme.fg("dim", `… ${previewLines.hidden} more lines`)}`);
 		}
 	};
 
@@ -582,6 +556,183 @@ function formatCellOutputLines(
 		theme,
 	);
 	return { lines: formatted.lines, hiddenCount: formatted.hiddenCount };
+}
+
+/** Plain one-line summary of a status event: op plus its scalar fields. */
+function describeStatusEvent(event: EvalStatusEvent): NativeNode {
+	const spans: TspSpan[] = [span(event.op, "accent")];
+	for (const key in event) {
+		if (key === "op" || key === "resolvedThinkingLevel") continue;
+		const value = event[key];
+		if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+			spans.push(span(` ${key}=`, "muted"), span(sanitizeText(String(value))));
+		}
+	}
+	return text(spans, { truncate: "end", role: "omp.tool.eval.status" });
+}
+
+/**
+ * The eval head (§7.3): a single cell's title as the verb (else "Eval"; with
+ * several cells each section carries its own title), a badge per language in
+ * first-use order, a `background` badge for a backgrounded job, and the cell
+ * count when there are several.
+ */
+function evalToolHead(
+	title: string | undefined,
+	languages: readonly EvalLanguage[],
+	cellCount: number,
+	details?: EvalToolDetails,
+): NativeToolHead {
+	const badges: { text: string; title?: string }[] = [...new Set(languages)].map(language => ({ text: language }));
+	if (details?.async?.state === "running") {
+		badges.push({ text: "background", title: `Backgrounded as job ${details.async.jobId}` });
+	}
+	return {
+		title: (cellCount > 1 ? "" : plainText(title ?? "").trim()) || "Eval",
+		badges: badges.length > 0 ? badges : undefined,
+		meta: cellCount > 1 ? [`${cellCount} cells`] : undefined,
+	};
+}
+
+/** Box-drawing `console.table` output split out of plain text: `text` runs and parsed tables, in order. */
+type EvalOutputPart =
+	| { readonly kind: "text"; readonly text: string }
+	| { readonly kind: "table"; readonly head: readonly string[]; readonly rows: readonly string[][] };
+
+/** The cells of a `│ a │ b │` row, trimmed; undefined when the line is not a table row. */
+function tableRowCells(line: string): string[] | undefined {
+	const plain = plainText(line).trim();
+	if (plain.length < 2 || !plain.startsWith("│") || !plain.endsWith("│")) return undefined;
+	return plain
+		.slice(1, -1)
+		.split("│")
+		.map(cell => cell.trim());
+}
+
+/**
+ * Split `console.table` blocks (`┌…┐` header `├…┤` rows `└…┘`, as Node/Bun
+ * print them) out of cell output so they render as a `table`; anything that
+ * does not parse as one stays text.
+ */
+function splitConsoleTables(output: string): EvalOutputPart[] {
+	const lines = output.split("\n");
+	const parts: EvalOutputPart[] = [];
+	let textStart = 0;
+	const flushText = (end: number): void => {
+		const chunk = lines
+			.slice(textStart, end)
+			.join("\n")
+			.replace(/^\n+|\s+$/g, "");
+		if (chunk.length > 0) parts.push({ kind: "text", text: chunk });
+	};
+	for (let i = 0; i < lines.length; i++) {
+		if (!plainText(lines[i]!).trimStart().startsWith("┌")) continue;
+		const head = tableRowCells(lines[i + 1] ?? "");
+		if (
+			!head ||
+			!plainText(lines[i + 2] ?? "")
+				.trimStart()
+				.startsWith("├")
+		)
+			continue;
+		const rows: string[][] = [];
+		let end = i + 3;
+		for (; end < lines.length; end++) {
+			const cells = tableRowCells(lines[end]!);
+			if (!cells) break;
+			rows.push(cells);
+		}
+		if (
+			!plainText(lines[end] ?? "")
+				.trimStart()
+				.startsWith("└")
+		)
+			continue;
+		if (rows.some(row => row.length !== head.length)) continue;
+		flushText(i);
+		parts.push({ kind: "table", head, rows });
+		i = end;
+		textStart = end + 1;
+	}
+	flushText(lines.length);
+	return parts;
+}
+
+/** One cell's output: markdown, else terminal text with any `console.table` blocks as tables. */
+function evalOutputNodes(output: string, markdown: boolean, running: boolean, error: boolean): NativeNode[] {
+	if (output.trim().length === 0) return [];
+	if (markdown && !error) return [md(output)];
+	const tone = error ? "error" : undefined;
+	return splitConsoleTables(output).map(part =>
+		part.kind === "text"
+			? ansi(part.text, { follow: running, tone, role: "omp.tool.eval.output" })
+			: node("table", {
+					// Node's index column header is noise in a real table.
+					cols: part.head.map((head, i) => ({ id: `c${i}`, head: head === "(index)" ? "" : head })),
+					rows: part.rows.map((cells, r) => ({
+						id: `r${r}`,
+						cells: Object.fromEntries(cells.map((cell, i) => [`c${i}`, cell])),
+					})),
+					role: "omp.tool.eval.table",
+				}),
+	);
+}
+
+/** Inputs of one eval cell section. */
+interface EvalCellSection {
+	readonly language: EvalLanguage;
+	readonly code: string;
+	readonly title?: string;
+	readonly status?: EvalCellResult["status"];
+	readonly durationMs?: number;
+	readonly output?: readonly NativeChild[];
+}
+
+/**
+ * A notebook cell with separate input and output gutters. Only multi-cell
+ * calls repeat titles; prompts show execution state, never invented counts.
+ */
+function evalCellSection(cell: EvalCellSection, index: number, total: number): NativeNode {
+	let head: TspSpan[] | undefined;
+	if (total > 1) {
+		head = [span(`${index + 1}/${total}`, "muted")];
+		const title = plainText(cell.title ?? "").trim();
+		if (title) head.push(span(` ${title}`, "toolTitle"));
+		if (cell.status === "error") head.push(span(" · failed", "error"));
+		if (cell.durationMs !== undefined) head.push(span(` · ${(cell.durationMs / 1000).toFixed(2)}s`, "muted"));
+	}
+	const prompt = cell.status === "running" ? "In [*]:" : !cell.status || cell.status === "pending" ? "In [ ]:" : "In:";
+	return node(
+		"col",
+		{
+			role: "omp.tool.eval.cell",
+			tone: cell.status === "error" ? "error" : cell.status === "running" ? "pending" : undefined,
+		},
+		compact<NativeChild>([
+			head ? text(head, { role: "omp.tool.eval.caption" }) : undefined,
+			node(
+				"row",
+				{ role: "omp.tool.eval.input", align: "start" },
+				[
+					text(prompt, { role: "omp.tool.eval.prompt", wrap: "none" }),
+					keyed(codeNode(cell.code, { lang: languageForHighlighter(cell.language), numbers: false }), "code"),
+				],
+				"input",
+			),
+			cell.output?.length
+				? node(
+						"row",
+						{ role: "omp.tool.eval.result", align: "start" },
+						[
+							text("Out:", { role: "omp.tool.eval.prompt", wrap: "none" }),
+							node("col", { role: "omp.tool.eval.outputs" }, cell.output),
+						],
+						"output",
+					)
+				: undefined,
+		]),
+		`cell-${index}`,
+	);
 }
 
 /** Render eval code cells, structured display output, and progress events. */
@@ -715,7 +866,7 @@ export const evalToolRenderer = {
 						const outputLines = [...outputContent.lines];
 						if (!expanded && outputContent.hiddenCount > 0) {
 							outputLines.push(
-								uiTheme.fg("dim", `… ${outputContent.hiddenCount} more lines (ctrl+o to expand)`),
+								uiTheme.fg("dim", `… ${outputContent.hiddenCount} more lines (${expandKeyHint()} to expand)`),
 							);
 						}
 						if (statusLines.length > 0) {
@@ -755,12 +906,7 @@ export const evalToolRenderer = {
 							lines.push("");
 						}
 					}
-					if (jsonLines.length > 0) {
-						if (lines.length > 0) {
-							lines.push("");
-						}
-						lines.push(...jsonLines);
-					}
+					lines.push(...jsonLines);
 					if (timeoutLine) {
 						lines.push(timeoutLine);
 					}
@@ -854,7 +1000,7 @@ export const evalToolRenderer = {
 					outputLines.push("");
 					const skippedLine = uiTheme.fg(
 						"dim",
-						`… (${cachedSkipped} earlier lines, showing ${cachedLines.length} of ${cachedSkipped + cachedLines.length}) (ctrl+o to expand)`,
+						`… (${cachedSkipped} earlier lines, showing ${cachedLines.length} of ${cachedSkipped + cachedLines.length}) (${expandKeyHint()} to expand)`,
 					);
 					outputLines.push(truncateToWidth(skippedLine, width));
 				}
@@ -885,6 +1031,105 @@ export const evalToolRenderer = {
 				cachedSkipped = undefined;
 				cachedPreviewLines = undefined;
 			},
+		};
+	},
+
+	describeCall(args: EvalRenderArgs, _options: RenderResultOptions): NativeToolView {
+		const cells = getRenderCells(args);
+		return {
+			tool: evalToolHead(
+				cells[0]?.title,
+				cells.map(cell => cell.language),
+				cells.length,
+			),
+			body: cells.map((cell, i) => evalCellSection(cell, i, cells.length)),
+			preview: { lines: EVAL_DEFAULT_PREVIEW_LINES },
+		};
+	},
+
+	describeResult(
+		result: { content: Array<{ type: string; text?: string }>; details?: EvalToolDetails; isError?: boolean },
+		options: RenderResultContextOptions & { renderContext?: EvalRenderContext },
+		args?: EvalRenderArgs,
+	): NativeToolView {
+		const details = result.details;
+		const isPartial = options.isPartial === true;
+		const previewLines = options.renderContext?.previewLines ?? EVAL_DEFAULT_PREVIEW_LINES;
+		const jsonNodes = (details?.jsonOutputs ?? []).map((value, index) =>
+			keyed(describeJsonTree(value, { hiddenRootKeys: [] }), `display-${index}`),
+		);
+		// A notice and truncation go to one quiet final line (a background job is a head badge).
+		const footer = footnoteText(compact([details?.notice]), details?.meta);
+		const cellResults = details?.cells;
+		let cells: NativeNode[];
+		let head: NativeToolHead;
+		if (cellResults && cellResults.length > 0) {
+			const languages = cellResults.map(cell => cell.language ?? details?.language ?? "python");
+			head = evalToolHead(cellResults[0]!.title, languages, cellResults.length, details);
+			cells = cellResults.map((cell, i) => {
+				const language = languages[i]!;
+				return evalCellSection(
+					{
+						language,
+						code: formatEvalCodeForDisplay(cell.code, language),
+						title: cell.title,
+						status: cell.status,
+						durationMs: cell.durationMs,
+						output: [
+							...evalOutputNodes(
+								cell.output,
+								cell.hasMarkdown === true,
+								cell.status === "running",
+								cell.status === "error",
+							),
+							...(cell.statusEvents ?? []).map(describeStatusEvent),
+							...(i === cellResults.length - 1 ? jsonNodes : []),
+						],
+					},
+					i,
+					cellResults.length,
+				);
+			});
+		} else {
+			// No per-cell results (older details): the call's cells, with the whole output under the last.
+			const argCells = getRenderCells(args);
+			const languages = details?.languages ?? (details?.language ? [details.language] : []);
+			head = evalToolHead(
+				argCells[0]?.title,
+				argCells.length > 0 ? argCells.map(cell => cell.language) : languages,
+				argCells.length,
+				details,
+			);
+			const rawOutput = options.renderContext?.output ?? resultText(result).trimEnd();
+			const output = [
+				...evalOutputNodes(
+					stripOutputNotice(rawOutput, details?.meta).trimEnd(),
+					false,
+					isPartial,
+					result.isError === true,
+				),
+				...(details?.statusEvents ?? []).map(describeStatusEvent),
+				...jsonNodes,
+			];
+			cells =
+				argCells.length > 0
+					? argCells.map((cell, i) =>
+							evalCellSection(
+								{
+									...cell,
+									status: isPartial ? "running" : result.isError ? "error" : "complete",
+									output: i === argCells.length - 1 ? output : undefined,
+								},
+								i,
+								argCells.length,
+							),
+						)
+					: output;
+		}
+		return {
+			tool: head,
+			body: compact<NativeChild>([...cells, footer]),
+			preview: { lines: previewLines },
 		};
 	},
 

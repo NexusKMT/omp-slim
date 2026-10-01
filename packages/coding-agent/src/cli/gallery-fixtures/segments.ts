@@ -49,6 +49,8 @@ export function createGallerySegmentContext(sessionOptions?: GallerySessionOptio
 		vibeMode: null,
 		vim: null,
 		collab: { role: "host", participantCount: 3 },
+		stream: null,
+		recording: false,
 		usageStats: {
 			input: 12_400,
 			output: 3_600,
@@ -178,6 +180,11 @@ function variantsFor(id: StatusLineSegmentId): readonly SegmentVariantSpec[] {
 				{
 					label: "subscription",
 					session: { usingSubscription: true, cost: 0, premiumRequests: 0, advisorCost: 0 },
+				},
+				{
+					label: "subscription + subagents",
+					session: { usingSubscription: true, cost: 0.38, premiumRequests: 0, advisorCost: 0 },
+					context: { subagentTreeCost: 1.27 },
 				},
 				{
 					label: "premium requests",

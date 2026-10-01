@@ -8,7 +8,6 @@ import type { Loader } from "../components/loader";
 import { Text } from "../components/text";
 import { getImageDimensions, imageFallback, ImageProtocol, TERMINAL } from "../terminal-capabilities";
 import { Container, type TUI } from "../tui";
-import { Ellipsis, truncateToWidth, visibleWidth } from "../utils";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import type { Terminal as XtermTerminalType } from "@oh-my-pi/pi-utils/vterm";
 import { theme } from "../theme/theme";
@@ -21,14 +20,20 @@ import { getSixelLineMask, isSixelPassthroughEnabled, sanitizeWithOptionalSixelP
 import {
 	buildExecutionFrame,
 	buildStatusFooter,
+	clampDisplayLine,
+	describeExecutionCard,
+	describeExecutionTool,
+	type ExecutionColorKey,
 	type ExecutionStatus,
+	PREVIEW_LINES,
 	resolveExecutionStatus,
 } from "./execution-shared";
+import { span, text } from "../native/describe";
+import { type DescribeContext, type NativeNode, type NativeUiEvent, rootToggleExpanded } from "../native/node";
+import { NativeImageCache } from "../native/blobs";
+import { Memo } from "../native/memo";
 
-// Preview line limit when not expanded (matches tool execution behavior)
-const PREVIEW_LINES = 20;
 const STREAMING_LINE_CAP = PREVIEW_LINES * 5;
-const MAX_DISPLAY_LINE_CHARS = 4000;
 // Minimum interval between processing incoming chunks for display (ms).
 // Chunks arriving faster than this are accumulated and processed in one batch.
 const CHUNK_THROTTLE_MS = 50;
@@ -80,6 +85,13 @@ export class BashExecutionComponent extends Container {
 	#showImages = true;
 	readonly #instanceId = nextBashExecutionId++;
 	readonly #command: string;
+	readonly #colorKey: ExecutionColorKey;
+	readonly #startedAt = performance.now();
+	#endedAt: number | undefined;
+	// Bumped whenever the displayed output lines change.
+	#outputVersion = 0;
+	readonly #native = new Memo();
+	readonly #nativeImages = new NativeImageCache();
 
 	constructor(command: string, ui: TUI, excludeFromContext = false) {
 		super();
@@ -88,6 +100,7 @@ export class BashExecutionComponent extends Container {
 
 		// Use dim border for excluded-from-context commands (!! prefix)
 		const colorKey = excludeFromContext ? "dim" : "bashMode";
+		this.#colorKey = colorKey;
 		const { contentContainer, loader } = buildExecutionFrame(this, ui, colorKey);
 		this.#contentContainer = contentContainer;
 		this.#loader = loader;
@@ -138,6 +151,68 @@ export class BashExecutionComponent extends Container {
 		this.#updateDisplay();
 	}
 
+	handleNativeEvent(event: NativeUiEvent): void {
+		const expanded = rootToggleExpanded(event);
+		if (expanded !== undefined) this.setExpanded(expanded);
+	}
+
+	/**
+	 * The agent's bash `tool` frame (role `omp.bash`) with a `you` badge: the
+	 * command in the head, the output as an `ansi` mini terminal following its
+	 * tail. Terminals without the `tool` kind get a `card` headed by the
+	 * command.
+	 */
+	override describe(cx?: DescribeContext): NativeNode {
+		const dataFirst = cx?.supports("tool") === true;
+		const key = [
+			dataFirst,
+			this.#outputVersion,
+			this.#blockVersion,
+			this.#status,
+			this.#expanded,
+			this.#showImages,
+			this.#images.length,
+		];
+		return this.#native.get(key, () => {
+			const images = this.#images.map((image, index) =>
+				this.#showImages
+					? this.#nativeImages.get(`img${index}`, image.data, image.mimeType)
+					: text([
+							span(
+								imageFallback(image.mimeType, getImageDimensions(image.data, image.mimeType) ?? undefined),
+								"muted",
+							),
+						]),
+			);
+			const common = {
+				role: "omp.bash",
+				status: this.#status,
+				startedAt: this.#startedAt,
+				expanded: this.#expanded,
+				output: this.#outputLines.join("\n"),
+				images,
+				exitCode: this.#exitCode,
+				truncation: this.#truncation,
+				artifactError: this.#artifactError,
+			};
+			return dataFirst
+				? describeExecutionTool({
+						...common,
+						name: "bash",
+						title: "Bash",
+						command: this.#command,
+						lang: "bash",
+						excluded: this.#colorKey === "dim",
+						endedAt: this.#endedAt,
+					})
+				: describeExecutionCard({
+						...common,
+						head: [span(`$ ${this.#command}`, `${this.#colorKey} strong`)],
+						muted: this.#colorKey === "dim",
+					});
+		});
+	}
+
 	appendOutput(chunk: string): void {
 		if (this.#ptyMode) return;
 		// During high-throughput output (e.g. seq 1 500M), processing every
@@ -167,6 +242,7 @@ export class BashExecutionComponent extends Container {
 		}
 
 		this.#displayDirty = true;
+		this.#outputVersion++;
 	}
 
 	/** Switch to PTY rendering and feed raw terminal bytes through the vterm replay. */
@@ -242,6 +318,7 @@ export class BashExecutionComponent extends Container {
 		const base = theme.getFgAnsi("muted");
 		this.#outputLines = rows.map(row => (row ? styleTerminalRow(row, base) : ""));
 		this.#displayDirty = true;
+		this.#outputVersion++;
 	}
 
 	/** Final full-scrollback read; the terminal is disposed once lines are snapshotted. */
@@ -270,6 +347,7 @@ export class BashExecutionComponent extends Container {
 	): void {
 		this.#exitCode = exitCode;
 		this.#status = resolveExecutionStatus(exitCode, cancelled);
+		this.#endedAt ??= performance.now();
 		this.#truncation = options?.truncation;
 		this.#artifactError = options?.artifactError;
 		this.#images = options?.images ?? [];
@@ -366,27 +444,19 @@ export class BashExecutionComponent extends Container {
 		return this.#ptyMode ? line : theme.fg("muted", line);
 	}
 
-	#clampDisplayLine(line: string): string {
-		const visible = visibleWidth(line);
-		if (visible <= MAX_DISPLAY_LINE_CHARS) {
-			return line;
-		}
-		const omitted = visible - MAX_DISPLAY_LINE_CHARS;
-		return `${truncateToWidth(line, MAX_DISPLAY_LINE_CHARS, Ellipsis.Omit)}… [${omitted} visible columns omitted]`;
-	}
-
 	#clampLinesPreservingSixel(lines: string[]): string[] {
 		if (lines.length === 0) return [];
 		const sixelLineMask = getSixelLineMask(lines);
 		if (!sixelLineMask.some(Boolean)) {
-			return lines.map(line => this.#clampDisplayLine(line));
+			return lines.map(clampDisplayLine);
 		}
-		return lines.map((line, index) => (sixelLineMask[index] ? line : this.#clampDisplayLine(line)));
+		return lines.map((line, index) => (sixelLineMask[index] ? line : clampDisplayLine(line)));
 	}
 
 	#setOutput(output: string): void {
 		const clean = sanitizeWithOptionalSixelPassthrough(output, sanitizeText);
 		this.#outputLines = clean ? this.#clampLinesPreservingSixel(clean.split("\n")) : [];
+		this.#outputVersion++;
 	}
 
 	/**

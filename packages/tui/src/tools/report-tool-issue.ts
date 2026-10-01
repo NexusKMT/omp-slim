@@ -1,20 +1,16 @@
-import { type Component, Text } from "../index";
+import type { Component } from "../index";
 import type { Theme } from "../theme/theme";
-import { renderStatusLine, truncateToWidth } from "../render/index";
-import { replaceTabs } from "../render/render-utils";
+import type { NativeToolView } from "./renderer";
+import { describeDeviceCallPreview, renderDeviceCallPreview } from "./resolve";
 
 /** Call preview for an `xd://report_issue` write. */
 export function renderReportIssueDeviceCall(content: unknown, uiTheme: Theme): Component {
-	const body = typeof content === "string" ? replaceTabs(content.trim().split("\n")[0] ?? "") : "";
-	const text = renderStatusLine(
-		{
-			icon: "pending",
-			title: "Report Tool Issue",
-			description: body ? truncateToWidth(body, 72) : undefined,
-		},
-		uiTheme,
-	);
-	return new Text(text, 0, 0);
+	return renderDeviceCallPreview("Report Tool Issue", content, uiTheme);
+}
+
+/** Native call preview for an `xd://report_issue` write. */
+export function describeReportIssueDeviceCall(content: unknown): NativeToolView {
+	return describeDeviceCallPreview("Report Tool Issue", content);
 }
 
 /** Device name for automatic tool issue reports. */

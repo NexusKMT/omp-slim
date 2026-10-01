@@ -1,6 +1,8 @@
 import { renderProgressBar } from "../components/progress-bar";
 import { shimmerText } from "../theme/shimmer";
 import { theme as currentTheme, type Theme } from "../theme/theme";
+import type { NativeNode } from "../native/node";
+import { node } from "../native/describe";
 
 /** Title-case a provider id for display (`openai-codex` → `Openai Codex`). */
 export function formatProviderName(provider: string): string {
@@ -11,7 +13,7 @@ export function formatProviderName(provider: string): string {
 }
 
 /** Format a millisecond duration as a coarse-grained human label. */
-export function formatDuration(ms: number): string {
+export function formatCoarseDuration(ms: number): string {
 	const seconds = Math.max(0, Math.round(ms / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.round(seconds / 60);
@@ -38,6 +40,16 @@ const unstyledProgressBarTheme: ProgressBarTheme = {
 
 function resolveProgressBarTheme(uiTheme: ProgressBarTheme | undefined): ProgressBarTheme {
 	return uiTheme ?? currentTheme ?? unstyledProgressBarTheme;
+}
+
+/**
+ * Native {@link renderAsciiBar}: a terminal-drawn progress bar with the same
+ * percent label; `undefined` is indeterminate.
+ */
+export function describeAsciiBar(fraction: number | undefined): NativeNode {
+	if (fraction === undefined) return node("progress", { value: null });
+	const value = Math.min(1, Math.max(0, fraction));
+	return node("progress", { value, label: `${Math.round(value * 100)}%` });
 }
 
 /**

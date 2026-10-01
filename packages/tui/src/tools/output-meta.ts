@@ -25,6 +25,8 @@ export interface TruncationMeta {
 	elidedLines?: number;
 	/** Artifact ID if full output was saved */
 	artifactId?: string;
+	/** Bytes the artifact cap dropped from the saved file's middle; the artifact is then a head/tail sample. */
+	artifactElidedBytes?: number;
 	/** Next offset for pagination (head truncation only) */
 	nextOffset?: number;
 	/**
@@ -58,10 +60,11 @@ export interface DiagnosticMeta {
  */
 export interface LimitsMeta {
 	matchLimit?: { reached: number; suggestion: number };
-	resultLimit?: { reached: number; suggestion: number };
+	/** `suggestion` is omitted when the tool is already at its hard cap, so no larger usable limit exists to advise. */
+	resultLimit?: { reached: number; suggestion?: number };
 	headLimit?: { reached: number; suggestion: number };
 	/** `unit` may be absent in sessions persisted before it was recorded. */
-	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars"; artifactId?: string };
+	columnTruncated?: { maxColumn: number; unit?: "bytes" | "chars"; artifactId?: string; artifactElidedBytes?: number };
 }
 
 /**
@@ -72,6 +75,8 @@ export interface OutputMeta {
 	/** Capture failure of this output itself; aggregate reports keep source failures on their entries. */
 	artifactError?: OutputArtifactError;
 	source?: SourceMeta;
+	/** The output is a bounded page of session artifact storage its `source` re-reads with line selectors; spill-to-artifact skips it. */
+	pagedSource?: true;
 	diagnostics?: DiagnosticMeta;
 	limits?: LimitsMeta;
 }
@@ -127,9 +132,39 @@ export function formatGroupedDiagnosticMessages(messages: string[]): string {
 	return lines.join("\n");
 }
 
-/** Format a recoverable output artifact link. */
-export function formatFullOutputReference(artifactId: string): string {
+/**
+ * Format a recoverable output artifact link. An artifact the size cap cut
+ * (`artifactElidedBytes > 0`) is labeled as the head/tail sample it holds.
+ */
+export function formatFullOutputReference(artifactId: string, artifactElidedBytes?: number): string {
+	if (artifactElidedBytes !== undefined && artifactElidedBytes > 0) {
+		return `Read artifact://${artifactId} for a head/tail sample of the output; ${formatBytes(artifactElidedBytes)} from its middle was not saved`;
+	}
 	return `Read artifact://${artifactId} for full output`;
+}
+
+/** Strip the last literal notice or a matching final line; optionally preserve surrounding whitespace. */
+export function stripTrailingNotice(
+	text: string,
+	notice: string | ((line: string) => boolean),
+	trimResult = true,
+): string {
+	let start: number;
+	let end: number;
+	if (typeof notice === "string") {
+		start = text.lastIndexOf(notice);
+		if (start === -1) return text;
+		end = start + notice.length;
+	} else {
+		const trimmed = text.trimEnd();
+		start = trimmed.lastIndexOf("\n") + 1;
+		if (!notice(trimmed.slice(start))) return text;
+		end = text.length;
+	}
+	if (trimResult && text[start - 1] === "\n") start -= 1;
+	if (trimResult && text[end] === "\n") end += 1;
+	const stripped = text.slice(0, start) + text.slice(end);
+	return trimResult ? stripped.trimEnd() : stripped;
 }
 
 const RAW_OUTPUT_ARTIFACT_PREFIX = "[raw output: artifact://";
@@ -137,29 +172,22 @@ const RAW_OUTPUT_ARTIFACT_SUFFIX = "]";
 
 /** Remove the trailing bash raw-output artifact footer while preserving its artifact id. */
 export function stripRawOutputArtifactNotice(text: string): { text: string; artifactId?: string } {
-	const trimmed = text.trimEnd();
-	const lineStart = trimmed.lastIndexOf("\n");
-	const candidateStart = lineStart === -1 ? 0 : lineStart + 1;
-	if (
-		!trimmed.startsWith(RAW_OUTPUT_ARTIFACT_PREFIX, candidateStart) ||
-		!trimmed.endsWith(RAW_OUTPUT_ARTIFACT_SUFFIX)
-	) {
-		return { text };
-	}
-
-	const idStart = candidateStart + RAW_OUTPUT_ARTIFACT_PREFIX.length;
-	const idEnd = trimmed.length - RAW_OUTPUT_ARTIFACT_SUFFIX.length;
-	if (idStart === idEnd) return { text };
-	for (let i = idStart; i < idEnd; i++) {
-		const code = trimmed.charCodeAt(i);
-		if (code < 48 || code > 57) return { text };
-	}
-
-	const artifactId = trimmed.slice(idStart, idEnd);
-	return {
-		text: trimmed.slice(0, lineStart === -1 ? 0 : lineStart).trimEnd(),
-		artifactId,
-	};
+	let artifactId: string | undefined;
+	const stripped = stripTrailingNotice(text, line => {
+		if (!line.startsWith(RAW_OUTPUT_ARTIFACT_PREFIX) || !line.endsWith(RAW_OUTPUT_ARTIFACT_SUFFIX)) {
+			return false;
+		}
+		const idStart = RAW_OUTPUT_ARTIFACT_PREFIX.length;
+		const idEnd = line.length - RAW_OUTPUT_ARTIFACT_SUFFIX.length;
+		if (idStart === idEnd) return false;
+		for (let i = idStart; i < idEnd; i++) {
+			const code = line.charCodeAt(i);
+			if (code < 48 || code > 57) return false;
+		}
+		artifactId = line.slice(idStart, idEnd);
+		return true;
+	});
+	return artifactId === undefined ? { text } : { text: stripped, artifactId };
 }
 
 function isGeneratedOutputNoticeLine(line: string): boolean {
@@ -168,18 +196,14 @@ function isGeneratedOutputNoticeLine(line: string): boolean {
 	return (
 		body.startsWith("Showing ") ||
 		/^\d+ matches limit reached\. Use limit=\d+ for more/u.test(body) ||
-		/^\d+ results limit reached\. Use limit=\d+ for more/u.test(body) ||
+		/^\d+ results limit reached(?:\.|$)/u.test(body) ||
 		body.startsWith("Some lines truncated to ")
 	);
 }
 
 /** Remove a trailing generated output notice when metadata is unavailable. */
 export function stripGeneratedOutputNotice(text: string): string {
-	const trimmed = text.trimEnd();
-	const lineStart = trimmed.lastIndexOf("\n");
-	const candidateStart = lineStart === -1 ? 0 : lineStart + 1;
-	if (!isGeneratedOutputNoticeLine(trimmed.slice(candidateStart))) return text;
-	return trimmed.slice(0, lineStart === -1 ? 0 : lineStart).trimEnd();
+	return stripTrailingNotice(text, isGeneratedOutputNoticeLine);
 }
 
 /** Format truncation ranges and recovery hints. */
@@ -190,7 +214,7 @@ export function formatTruncationMetaNotice(truncation: TruncationMeta, source?: 
 			? undefined
 			: source?.type === "report"
 				? `Read artifact://${truncation.artifactId} for full report (${source.value})`
-				: formatFullOutputReference(truncation.artifactId);
+				: formatFullOutputReference(truncation.artifactId, truncation.artifactElidedBytes);
 
 	if (truncation.direction === "middle") {
 		const head = truncation.headRange;
@@ -285,7 +309,14 @@ export function formatOutputNotice(meta: OutputMeta | undefined): string {
 	}
 	if (meta.limits?.resultLimit) {
 		const l = meta.limits.resultLimit;
-		parts.push(`${l.reached} results limit reached. Use limit=${l.suggestion} for more`);
+		// At the tool's hard cap there is no larger usable limit, so the
+		// "Use limit=" advice would name a value that gets clamped right
+		// back — emit the bare reached notice instead (#13263).
+		parts.push(
+			l.suggestion === undefined
+				? `${l.reached} results limit reached`
+				: `${l.reached} results limit reached. Use limit=${l.suggestion} for more`,
+		);
 	}
 	if (meta.limits?.headLimit) {
 		const l = meta.limits.headLimit;
@@ -299,7 +330,7 @@ export function formatOutputNotice(meta: OutputMeta | undefined): string {
 		// stops matching the persisted "… 768 chars" text.
 		let columnNotice = `Some lines truncated to ${c.maxColumn} ${c.unit ?? "chars"}`;
 		if (c.artifactId != null) {
-			columnNotice += `. ${formatFullOutputReference(c.artifactId)}`;
+			columnNotice += `. ${formatFullOutputReference(c.artifactId, c.artifactElidedBytes)}`;
 		}
 		parts.push(columnNotice);
 	}
@@ -348,7 +379,7 @@ export function stripOutputNotice(text: string, meta: OutputMeta | undefined): s
 	const trimmedText = text.trimEnd();
 	const trimmedNotice = notice.trimEnd();
 	if (trimmedText.endsWith(trimmedNotice)) {
-		return trimmedText.slice(0, -trimmedNotice.length);
+		return stripTrailingNotice(trimmedText, trimmedNotice, false);
 	}
 	return text;
 }

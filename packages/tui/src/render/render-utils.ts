@@ -9,8 +9,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Ellipsis } from "@oh-my-pi/pi-natives";
+import { expandWindowsLongPath, getWindowsShortPath } from "@oh-my-pi/pi-natives/path";
 import { pluralize, sanitizeText } from "@oh-my-pi/pi-utils";
-import { formatKeyHints, type KeyId } from "../app-keybindings";
+import { formatKeyHint, type KeyId } from "../app-keybindings";
 import { getKeybindings } from "../keybindings";
 import type { Theme } from "../theme/theme";
 import type { Component } from "../tui";
@@ -117,6 +118,12 @@ export const PREVIEW_LIMITS = {
 /** Default number of terminal output rows shown before expansion. */
 export const DEFAULT_TERMINAL_PREVIEW_LINES = 10;
 
+/** Match a Markdown fenced-code opener and capture its indentation and marker. */
+export const FENCE_RE = /^( {0,3})([`~]{3,})/;
+
+/** Shared empty link-target lookup for renderers without interactive links. */
+export const EMPTY_LINK_TARGETS: ReadonlyMap<string, string> = new Map();
+
 /** Default display width reserved for a resolved model badge. */
 export const FEED_MODEL_BADGE_WIDTH = 30;
 
@@ -195,17 +202,17 @@ const EXPAND_ACTION = "app.tools.expand";
 /** Fallback key when no binding is resolvable (e.g. outside an interactive session). */
 const DEFAULT_EXPAND_KEY: KeyId = "ctrl+o";
 
-/** Human-readable key currently bound to tool-output expansion, e.g. `Ctrl+O`. */
+/** Human-readable primary key bound to tool-output expansion, e.g. `Ctrl+O`. */
 export function expandKeyHint(): string {
-	const keys = getKeybindings().getKeys(EXPAND_ACTION);
-	return formatKeyHints(keys.length > 0 ? keys : [DEFAULT_EXPAND_KEY]);
+	const [key = DEFAULT_EXPAND_KEY] = getKeybindings().getKeys(EXPAND_ACTION);
+	return formatKeyHint(key);
 }
 
 // =============================================================================
 // Text Truncation Utilities
 // =============================================================================
 /** Keep both ends of a single-line label without splitting wide characters. */
-function truncateMiddleToWidth(text: string, maxWidth: number): string {
+export function truncateMiddleToWidth(text: string, maxWidth: number): string {
 	const width = visibleWidth(text);
 	if (width <= maxWidth) return text;
 	if (maxWidth <= 1) return maxWidth === 1 ? "…" : "";
@@ -214,9 +221,13 @@ function truncateMiddleToWidth(text: string, maxWidth: number): string {
 	return `${sliceByColumn(text, 0, headWidth, true)}…${sliceByColumn(text, width - tailWidth, tailWidth, true)}`;
 }
 
-/**
- * Get first N lines of text as preview, with each line truncated.
- */
+/** Select a leading line window and count the lines hidden after it. */
+export function cappedHeadLines(lines: readonly string[], max: number): { lines: readonly string[]; hidden: number } {
+	const count = Math.max(0, Math.min(lines.length, Math.floor(max)));
+	return { lines: count === lines.length ? lines : lines.slice(0, count), hidden: lines.length - count };
+}
+
+/** Get the first nonblank preview lines, trimmed and width-capped. */
 export function getPreviewLines(text: string, maxLines: number, maxLineLen: number, ellipsis?: Ellipsis): string[] {
 	const lines = text.split("\n").filter(l => l.trim());
 	return lines.slice(0, maxLines).map(l => truncateToWidth(l.trim(), maxLineLen, ellipsis));
@@ -253,7 +264,7 @@ export function getDomain(url: string): string {
 // Formatting Utilities
 // =============================================================================
 
-export { formatAge, formatBytes, formatCount, formatDuration, pluralize } from "@oh-my-pi/pi-utils";
+export { formatAge, formatBytes, formatCount, formatDuration, formatNumber, pluralize } from "@oh-my-pi/pi-utils";
 
 // =============================================================================
 // Theme Helper Utilities
@@ -383,7 +394,7 @@ function sanitizeErrorText(message: string | undefined): string {
 export function sanitizeDisplayLines(text: string): string[] {
 	return text.split(/\r?\n/).map(line => {
 		const idx = line.lastIndexOf("\r");
-		return replaceTabs(idx < 0 ? line : line.slice(idx + 1));
+		return replaceTabs(sanitizeText(idx < 0 ? line : line.slice(idx + 1)));
 	});
 }
 
@@ -452,7 +463,8 @@ export function formatTitle(label: string, theme: Theme, options?: ToolUITitleOp
 // Diagnostic Formatting
 // =============================================================================
 
-interface ParsedDiagnostic {
+/** Parsed diagnostic location, severity, and optional source and code metadata. */
+export interface ParsedDiagnostic {
 	filePath: string;
 	line: number;
 	col: number;
@@ -462,7 +474,8 @@ interface ParsedDiagnostic {
 	code?: string;
 }
 
-function sanitizeDiagnosticDisplayText(text: string): string {
+/** Expand tabs in diagnostic text for terminal display. */
+export function sanitizeDiagnosticDisplayText(text: string): string {
 	return replaceTabs(text);
 }
 
@@ -479,7 +492,8 @@ function getSeverityRank(severity: ParsedDiagnostic["severity"]): number {
 	}
 }
 
-function parseDiagnosticMessage(msg: string): ParsedDiagnostic | null {
+/** Parse a diagnostic location and message, including optional source and code. */
+export function parseDiagnosticMessage(msg: string): ParsedDiagnostic | null {
 	const match = msg.match(/^(.+?):(\d+):(\d+)\s+\[(\w+)\]\s+(?:\[([^\]]+)\]\s+)?(.+?)(?:\s+\(([^)]+)\))?$/);
 	if (!match) return null;
 	return {
@@ -863,16 +877,51 @@ function defaultHomeDir(): string {
 	return cachedHomeDir;
 }
 
-const homePatternCache = new Map<string, RegExp>();
-function homePatternFor(homeDir: string, windowsStyle: boolean): RegExp {
+interface HomePattern {
+	leading: RegExp;
+	embedded: RegExp;
+}
+
+const homePatternCache = new Map<string, HomePattern>();
+function homePatternFor(homeDir: string, windowsStyle: boolean): HomePattern {
 	const key = `${windowsStyle ? 1 : 0} ${homeDir}`;
 	let pattern = homePatternCache.get(key);
 	if (pattern === undefined) {
-		const escapedHome = homeDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		pattern = new RegExp(
-			`(?<=^|[\\s("'\`\\[])${escapedHome}(?:[\\\\/]|(?=$|[\\s"'(),.;:\\[\\]]))`,
-			windowsStyle ? "gi" : "g",
-		);
+		// A trailing separator (`C:\Users\me\`, `/home/me/`) must still match `<home>/child`;
+		// roots such as `/` and `C:\` keep theirs.
+		const home = homeDir.replace(/(?<=[^\\/:])[\\/]+$/, "");
+		let escapedHome = RegExp.escape(home);
+		if (windowsStyle) {
+			// Query only home, once per cached pattern: descendants need not exist,
+			// and rendering must neither resolve junctions nor probe output paths.
+			const parts = home.replaceAll("/", "\\").split("\\");
+			const longHome = expandWindowsLongPath(home);
+			const aliases = [longHome, getWindowsShortPath(longHome)]
+				.map(alias => alias.replaceAll("/", "\\").split("\\"))
+				.filter(alias => alias.length === parts.length);
+			escapedHome = parts
+				.map((part, index) => {
+					// Each component may independently use its long or short spelling.
+					const names = [...new Set([part, ...aliases.map(alias => alias[index]!)])].map(name =>
+						RegExp.escape(name),
+					);
+					return names.length === 1 ? names[0]! : `(?:${names.join("|")})`;
+				})
+				.join("[\\\\/]");
+		}
+		// `*` and `_` are also identifier and glob characters (`/home/me_old`, `src/**/home/me/**`), so they
+		// bound the home directory only as Markdown emphasis: opened at start or after whitespace, and
+		// closed before end, whitespace, or punctuation.
+		const end = `[\\\\/\\s"'\\x60)\\]},;:<>&|]`;
+		pattern = {
+			leading: new RegExp(`^${escapedHome}(?=$|[\\\\/])`, windowsStyle ? "i" : ""),
+			embedded: new RegExp(
+				`[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s"'<>]+` +
+					`|(^|[\\s"'\\x60([{=,:<>&|])(${escapedHome})(?=$|${end})` +
+					`|((?:^|\\s)[*_]{1,3})(${escapedHome})(?=$|${end}|[*_]{1,3}(?=$|[\\s.,;:!?)\\]}"'\\x60]))`,
+				windowsStyle ? "gi" : "g",
+			),
+		};
 		if (homePatternCache.size >= 16) homePatternCache.clear();
 		homePatternCache.set(key, pattern);
 	}
@@ -885,28 +934,33 @@ export function shortenPath(filePath: unknown, homeDir?: string): string {
 		return "";
 	}
 	const home = homeDir ?? defaultHomeDir();
+	if (!home) return filePath;
 	const windowsStyle = /^[A-Za-z]:[\\/]/.test(home) || home.startsWith("\\\\");
-	const hasHomePrefix = windowsStyle
-		? filePath.toLowerCase().startsWith(home.toLowerCase())
-		: filePath.startsWith(home);
-	if (home && hasHomePrefix) {
-		const suffix = filePath.slice(home.length);
-		if (suffix === "" || suffix.startsWith(path.posix.sep) || suffix.startsWith(path.win32.sep)) {
-			return `~${suffix.replaceAll(path.win32.sep, path.posix.sep)}`;
-		}
+	const match = homePatternFor(home, windowsStyle).leading.exec(filePath);
+	if (match) {
+		const suffix = filePath.slice(match[0].length);
+		return `~${suffix.replaceAll(path.win32.sep, path.posix.sep)}`;
 	}
 	return filePath;
 }
 
-/** Shorten home-prefixed paths inside free text, preserving surrounding
- * punctuation so error strings with embedded paths stay readable. */
-export function shortenEmbeddedPaths(text: string, homeDir?: string): string {
+/** Shorten embedded home paths; normalize Windows separators unless the caller preserves native error text. */
+export function shortenEmbeddedPaths(text: string, homeDir?: string, preserveSeparators = false): string {
 	const resolvedHome = homeDir ?? defaultHomeDir();
-	const shortenedHome = resolvedHome.length > 1 ? shortenPath(resolvedHome, resolvedHome) : resolvedHome;
+	if (!resolvedHome || resolvedHome.length <= 1) return text;
 	const windowsStyle = /^[A-Za-z]:[\\/]/.test(resolvedHome) || resolvedHome.startsWith("\\\\");
 	const homePattern = homePatternFor(resolvedHome, windowsStyle);
-	const textWithShortenedHome =
-		shortenedHome !== resolvedHome ? text.replace(homePattern, match => shortenPath(match, resolvedHome)) : text;
+	const textWithShortenedHome = text.replace(
+		homePattern.embedded,
+		(
+			match,
+			boundary: string | undefined,
+			candidate: string | undefined,
+			emphasis: string | undefined,
+			emphasized: string | undefined,
+		) => (candidate !== undefined ? `${boundary}~` : emphasized !== undefined ? `${emphasis}~` : match),
+	);
+	if (preserveSeparators) return textWithShortenedHome;
 	return textWithShortenedHome
 		.split(" ")
 		.map(segment => {
@@ -921,6 +975,43 @@ export function shortenEmbeddedPaths(text: string, homeDir?: string): string {
 			return `${leading}${normalized}${trailing}`;
 		})
 		.join(" ");
+}
+
+/**
+ * Shorten filesystem and command arguments without rewriting literal search patterns. A producer that
+ * names no argument key gets the general embedded-path shortening.
+ */
+export function shortenToolArgumentPaths(text: string, key: string | undefined, homeDir?: string): string {
+	if (key === "url") {
+		try {
+			const url = new URL(text);
+			if (url.protocol === "file:") {
+				let decodedPath = url.pathname;
+				try {
+					decodedPath = decodeURIComponent(decodedPath);
+				} catch {
+					/* Retain malformed percent escapes as literal path bytes. */
+				}
+				const filePath = url.hostname
+					? `//${url.hostname}${decodedPath}`
+					: /^[A-Za-z]:$/.test(decodedPath.slice(1, 3))
+						? decodedPath.slice(1)
+						: decodedPath;
+				return shortenEmbeddedPaths(filePath, homeDir);
+			}
+		} catch {
+			// Preserve malformed and non-file URL arguments verbatim.
+		}
+		return text;
+	}
+	return key === undefined ||
+		key === "path" ||
+		key === "file_path" ||
+		key === "command" ||
+		key === "task" ||
+		key === "prompt"
+		? shortenEmbeddedPaths(text, homeDir)
+		: text;
 }
 
 /** Sanitize warning text before showing it in TUI, including embedded home paths. */

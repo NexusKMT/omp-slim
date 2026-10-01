@@ -9,12 +9,12 @@
  * the ctrl+p role-cycle status so both surfaces read identically.
  */
 import { type ThemeColor, theme } from "../theme/index";
+import { BG_RESET, FG_RESET } from "../theme/color";
+import type { NativeNode } from "../native/node";
+import { node, row } from "../native/describe";
 export interface TrackSegment {
 	label: string;
 }
-
-const FG_RESET = "\x1b[39m";
-const BG_RESET = "\x1b[49m";
 
 /** Vivid theme colors for position-based segment coloring, in preference
  *  order. Themes alias many of these to the same value (titanium maps most of
@@ -52,6 +52,30 @@ export function resolveSegmentPalette(count: number): ThemeColor[] {
 		if (palette.length >= count) break;
 	}
 	return palette;
+}
+
+/**
+ * Native {@link renderSegmentTrack}: a row of position-colored labels, the
+ * active one roled `omp.track.active` so the terminal fills it as a chip in
+ * its own color. No caps or separators travel; the terminal draws them.
+ */
+export function describeSegmentTrack(segments: readonly TrackSegment[], activeIndex: number): NativeNode {
+	const palette = resolveSegmentPalette(segments.length);
+	return row(
+		segments.map((segment, index) =>
+			node(
+				"text",
+				{
+					spans: [{ t: segment.label, s: palette[index % palette.length] }],
+					wrap: "none",
+					role: index === activeIndex ? "omp.track.active" : "omp.track.item",
+				},
+				undefined,
+				`${index}`,
+			),
+		),
+		{ gap: "sm", align: "center", role: "omp.track" },
+	);
 }
 
 /**
