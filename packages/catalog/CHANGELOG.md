@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a bundled GPT-6.1 Sol Codex reference; existing custom-provider discovery can now use its name, Codex-reference pricing, limits and reasoning metadata when the proxy omits them.
+
+### Fixed
+
+- Fixed namespaced LiteLLM models such as `openai/gpt-6.1-sol` showing raw IDs instead of catalog display names when the proxy supplies no friendly name.
+
 ## [18.4.6] - 2026-10-01
 
 ### Added

@@ -25,6 +25,7 @@ import {
 import { Effort, THINKING_EFFORTS } from "../effort";
 import { FIREWORKS_FAST_SUFFIX, toFireworksPublicModelId } from "../fireworks-model-id";
 import { getBundledModelReferenceIndex } from "../identity/bundled";
+import { bareModelId } from "../identity/id";
 import { resolveModelReference } from "../identity/reference";
 import type { ModelManagerOptions, ModelsDevFallback } from "../model-manager";
 import { type GeneratedProvider, getBundledModels } from "../models";
@@ -5947,8 +5948,9 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 	const baseUrl = config?.baseUrl ?? getDefaultModelDiscoveryBaseUrl("litellm")!;
 	return {
 		providerId: "litellm",
-		// rich-v11 invalidates rows that inherited ClinePass gateway metadata
-		// through generic models.dev bare-id enrichment (issue #10932). rich-v10
+		// rich-v12 invalidates namespaced proxy ids that missed bare catalog
+		// references. rich-v11 excluded ClinePass gateway metadata (issue #10932).
+		// rich-v10
 		// filtered known non-conversational LiteLLM modes, keyed the deployment's
 		// `supports_vision` declaration into cached compat, and unioned compat
 		// across management endpoints instead of letting a later endpoint retract
@@ -5977,17 +5979,23 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 				resolveApi: resolveLiteLLMApi,
 				timeoutMs: 10_000,
 			});
-			if (richModels !== null) {
-				return richModels;
-			}
-			return fetchOpenAICompatibleModels<Api>({
-				api: "openai-completions",
-				provider: "litellm",
-				baseUrl,
-				apiKey,
-				mapModel: (entry, defaults) =>
-					mapLiteLLMOpenAICompatibleModel(entry, defaults, resolveReference(defaults.id)),
-				fetch: config?.fetch,
+			const models =
+				richModels ??
+				(await fetchOpenAICompatibleModels<Api>({
+					api: "openai-completions",
+					provider: "litellm",
+					baseUrl,
+					apiKey,
+					mapModel: (entry, defaults) =>
+						mapLiteLLMOpenAICompatibleModel(entry, defaults, resolveReference(defaults.id)),
+					fetch: config?.fetch,
+				}));
+			// Bare catalog names can label proxy namespaces, but their pricing,
+			// limits and request routing must never enrich a different deployment.
+			if (models === null) return null;
+			return models.map(model => {
+				const name = toLiteLLMDisplayName(model.name, resolveReference(bareModelId(model.id))?.name, model.id);
+				return name === model.name ? model : { ...model, name };
 			});
 		},
 	};
