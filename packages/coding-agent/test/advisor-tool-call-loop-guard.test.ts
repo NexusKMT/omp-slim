@@ -495,6 +495,48 @@ describe("advisor tool-call loop guard", () => {
 		).toBe(true);
 	});
 
+	it("reviews a cadence-skipped final yield in the headless drain, past the drain budget when strict", async () => {
+		const primaryMock = createMockModel({ provider: "anthropic", responses: [{ content: ["primary complete"] }] });
+		const advisorMock = createMockModel({
+			provider: "anthropic",
+			responses: [{ content: ["Reviewed."], delayMs: 200 }],
+		});
+		const reviews: Context[] = [];
+		const advisorStreamFn: StreamFn = (streamModel, context, options) => {
+			reviews.push(context);
+			return advisorMock.stream(streamModel, context, options);
+		};
+		const settings = Settings.isolated({
+			"advisor.syncBacklog": "strict",
+			"compaction.enabled": false,
+			"todo.enabled": false,
+		});
+		session = new AgentSession({
+			agent: new Agent({
+				getApiKey: () => "test-key",
+				initialState: { model: primaryMock, systemPrompt: [], tools: [] },
+				streamFn: primaryMock.stream,
+			}),
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+			advisorTools: [],
+			advisorStreamFn,
+			advisorConfigs: [{ name: "Final reviewer", reviewMode: "agent-end", reviewInterval: 2 }],
+		});
+		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		expect(session.setAdvisorEnabled(true)).toBe(true);
+
+		// `omp -p` runs one prompt: its only final yield is the first of two.
+		await session.prompt("ship the retry change");
+		expect(reviews).toHaveLength(0);
+
+		session.prepareForHeadlessAdvisorDrain();
+		expect(await session.waitForAdvisorCatchup(50)).toBe(true);
+		expect(reviews).toHaveLength(1);
+		expect(JSON.stringify(reviews[0]!.messages)).toContain("ship the retry change");
+	});
+
 	it("leaves the advisor unbounded when the shared loop guard is disabled", async () => {
 		const { advisor, contexts } = createAdvisor({ "model.toolCallLoopGuard.enabled": false });
 

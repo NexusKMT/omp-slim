@@ -435,6 +435,16 @@ export class AdvisorRuntime {
 	}
 
 	/**
+	 * Send every held delta as one review without capturing a new boundary.
+	 * Headless callers flush before draining, so a final yield the review
+	 * cadence skipped is still reviewed before disposal.
+	 */
+	flushHeld(): void {
+		if (this.disposed || this.#quotaExhausted || this.#halted) return;
+		this.#dispatch(undefined);
+	}
+
+	/**
 	 * Detach captured-but-unsent updates so a replacement runtime reviews them
 	 * ({@link adoptHeld}); `undefined` when the cadence holds nothing.
 	 */
