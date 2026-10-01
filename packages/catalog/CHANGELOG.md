@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.6] - 2026-10-01
+
 ### Added
 
 - Added configurable catalog cache-warming lifetimes for cache-capable Claude models on Amazon Bedrock Converse, Bedrock Runtime, and Mantle, with 5-minute defaults and a 1-hour Converse option where supported.

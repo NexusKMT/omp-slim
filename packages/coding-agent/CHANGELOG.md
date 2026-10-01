@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.6] - 2026-10-01
+
 ### Added
 
 - Added a live Background Jobs view that lets you monitor running background jobs without interrupting the transcript.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.6] - 2026-10-01
+
 ### Added
 
 - Added a full-page transcript replay experience for Rewind in native terminals, with branching navigation through the conversation.
