@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.7] - 2026-10-01
+
 ### Added
 
 - Added an optional `terminal` section to theme JSON (`background`, `foreground`, `chrome`, `widget`, 16 `ansi` colors) naming the terminal a theme was made for, for hosts that paint the terminal themselves; the built-in themes ported from known schemes (GitHub, Nord, Dracula, Catppuccin, Solarized, Gruvbox, Tokyo Night, One, Monokai, Rosé Pine, Poimandres, Celestial) carry their scheme's.
