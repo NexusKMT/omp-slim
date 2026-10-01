@@ -5950,17 +5950,16 @@ export function litellmModelManagerOptions(config?: LiteLLMModelManagerConfig): 
 		providerId: "litellm",
 		// rich-v12 invalidates namespaced proxy ids that missed bare catalog
 		// references. rich-v11 excluded ClinePass gateway metadata (issue #10932).
-		// rich-v10
-		// filtered known non-conversational LiteLLM modes, keyed the deployment's
-		// `supports_vision` declaration into cached compat, and unioned compat
-		// across management endpoints instead of letting a later endpoint retract
-		// what an earlier one reported (issue #11982). Earlier versions fixed
-		// provider-specific transport leakage, added bundled reference fallback,
-		// moved OpenAI models to Responses, continued past incomplete vision/API
-		// metadata and endpoints omitting cache pricing, stripped reseller usage
-		// suffixes, filtered placeholder rows, and mapped rich pricing. Bump the
-		// version whenever these mappers change, or warm authoritative caches keep
-		// serving pre-change rows for the full TTL.
+		// rich-v10 filtered known non-conversational LiteLLM modes, keyed the
+		// deployment's `supports_vision` declaration into cached compat, and
+		// unioned compat across management endpoints instead of letting a later
+		// endpoint retract what an earlier one reported (issue #11982). Earlier
+		// versions fixed provider-specific transport leakage, added bundled
+		// reference fallback, moved OpenAI models to Responses, continued past
+		// incomplete vision/API metadata and endpoints omitting cache pricing,
+		// stripped reseller usage suffixes, filtered placeholder rows, and mapped
+		// rich pricing. Bump the version whenever these mappers change, or warm
+		// authoritative caches keep serving pre-change rows for the full TTL.
 		cacheProviderId: resolveModelCacheProviderId("litellm", { baseUrl }),
 		// litellm is a local-only proxy and is never bundled in models.json (that
 		// would leak the machine's localhost catalog). Prefer the proxy's richer
