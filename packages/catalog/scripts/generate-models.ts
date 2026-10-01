@@ -733,16 +733,9 @@ async function generateModels() {
 
 	const modelSpecs: Record<string, Record<string, ModelSpec>> = sortObj(providers);
 	const MODELS: Record<string, Record<string, Model<Api>>> = {};
-	// Treat prompt-cache lifetimes as rule-owned output, not snapshot input.
-	// buildModel reapplies the current KDL policy below.
 	for (const [provider, models] of Object.entries(modelSpecs)) {
 		MODELS[provider] = Object.fromEntries(
-			Object.entries(sortObj(models)).map(([id, model]) => {
-				const spec = { ...model };
-				delete spec.promptCache;
-				delete spec.promptCacheConfig;
-				return [id, buildModel(spec)];
-			}),
+			Object.entries(sortObj(models)).map(([id, model]) => [id, buildGeneratedModel(model)]),
 		);
 	}
 
@@ -779,6 +772,19 @@ function canonicalizeModelCompat(model: ModelSpec<Api>): void {
 	if (!hasKeys) {
 		delete model.compat;
 	}
+}
+
+/**
+ * Materialize one bundled row. Prompt-cache lifetimes are rule-owned output,
+ * not snapshot input: stale lifetimes and configuration provenance from a
+ * previous snapshot (or a copied reference row) are dropped so `buildModel`
+ * reapplies only the current KDL policy.
+ */
+export function buildGeneratedModel(model: ModelSpec<Api>): Model<Api> {
+	const spec = { ...model };
+	delete spec.promptCache;
+	delete spec.promptCacheConfig;
+	return buildModel(spec);
 }
 
 if (import.meta.main) {
