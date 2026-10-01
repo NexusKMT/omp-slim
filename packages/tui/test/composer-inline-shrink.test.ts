@@ -71,6 +71,24 @@ beforeAll(async () => {
 });
 
 describe("composer inline shrink (#11007)", () => {
+	it("keeps settled transcript rows reachable while an inline ask panel is expanded (#12398)", async () => {
+		const h = makeHarness();
+		await h.scheduler.settle(h.terminal);
+		h.widget.rows = 24;
+		h.composer.ui.requestRender();
+		await h.scheduler.settle(h.terminal);
+
+		const indices = h.terminal
+			.getScrollBuffer()
+			.map(row => Bun.stripANSI(row).trimEnd())
+			.filter(row => row.startsWith(TRANSCRIPT_PREFIX))
+			.map(row => Number(row.slice(TRANSCRIPT_PREFIX.length)));
+		// The ask panel can remain open indefinitely. Its growth must not hide
+		// settled response rows from both the live screen and native scrollback.
+		expect(indices).toEqual(Array.from({ length: TRANSCRIPT_ROWS }, (_, i) => i));
+		h.composer.stop();
+	});
+
 	it("keeps the editor pinned to the bottom after transient below-transcript chrome shrinks", async () => {
 		const h = makeHarness();
 		await h.scheduler.settle(h.terminal);
