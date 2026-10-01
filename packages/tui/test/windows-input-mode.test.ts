@@ -197,4 +197,12 @@ describe("app.message.followUp under Windows Terminal", () => {
 		);
 		expect(manager.getKeys("app.message.followUp")).toEqual(["ctrl+q", "ctrl+enter"]);
 	});
+
+	it("matches neither chord once another action claims Ctrl+Q under Windows Terminal", () => {
+		const manager = KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }, { ctrlEnterIsNewline: true });
+		setKeybindings(manager);
+		expect(manager.getKeys("app.message.followUp")).toEqual([]);
+		expect(matchesAppFollowUp("\x1b[13;5u")).toBe(false);
+		expect(matchesAppFollowUp("\x11")).toBe(false);
+	});
 });

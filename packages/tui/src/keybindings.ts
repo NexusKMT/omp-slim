@@ -310,7 +310,7 @@ export class KeybindingsManager {
 		return [...(this.#keysById.get(keybinding) ?? [])];
 	}
 
-	getDefinition(keybinding: Keybinding): KeybindingDefinition {
+	getDefinition(keybinding: Keybinding): KeybindingDefinition | undefined {
 		return this.#definitions[keybinding];
 	}
 
