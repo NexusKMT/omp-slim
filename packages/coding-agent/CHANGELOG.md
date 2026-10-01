@@ -13,6 +13,10 @@
 
 - RPC mode now sends a `cancel` extension UI request (with `targetId`) when omp's own dialog timeout elapses, for `select`, `confirm`, `input`, and `ask` dialogs, so hosts can close stale dialogs ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
 
+### Fixed
+
+- Fixed `/wt` on filesystems without copy-on-write cloning (e.g. NTFS): the new worktree no longer lists unchanged files as modified under `core.autocrlf`, and staged-only edits, additions, and deletions now carry over with the right file contents instead of reverting to `HEAD` ([#13987](https://github.com/can1357/oh-my-pi/pull/13987) by [@H4vC](https://github.com/H4vC))
+
 ## [18.4.6] - 2026-10-01
 
 ### Added
