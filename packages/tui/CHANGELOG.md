@@ -4,6 +4,7 @@
 
 ### Added
 
+- Implemented a full-page transcript-replay surface for `Rewind` in native terminals, replacing the dotted-outline picker with a `pick`/`drop` marked page that allows branching navigation
 - Added agent lineage tracking, providing a navigation header when viewing subagents
 - Added JobsSheet overlay for viewing background jobs
 - Added support for OSC 877 protocol framing to enable Tern in Windows ConPTY environments
