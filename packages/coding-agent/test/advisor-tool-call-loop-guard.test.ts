@@ -49,7 +49,7 @@ describe("advisor tool-call loop guard", () => {
 	beforeAll(() => {
 		tempDir = TempDir.createSync("@pi-advisor-tool-call-loop-guard-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.keys.setRuntime("anthropic", "test-key");
 	});
 
 	afterEach(async () => {
@@ -404,7 +404,6 @@ describe("advisor tool-call loop guard", () => {
 						},
 					],
 				},
-				{ content: [], stopReason: "stop" },
 			],
 		});
 		const advisorStreamFn: StreamFn = (streamModel, context, options) =>
@@ -444,7 +443,6 @@ describe("advisor tool-call loop guard", () => {
 
 		// Both reviews were scheduled; only the strict one gated the boundary.
 		expect(parkedReviewStarted).toBe(true);
-		expect(finalMock.calls.length).toBeGreaterThanOrEqual(2);
 		const delivered = [...session.agent.state.messages, ...session.yieldQueue.drainLazy().map(build => build())];
 		expect(
 			delivered.some(

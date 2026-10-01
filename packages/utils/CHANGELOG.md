@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `tryAcquireFileLock`, a non-blocking `acquireFileLock` that returns `null` while another holder owns the lock ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
+- Added an `unref` option to `AsyncDrain` so long batch windows do not keep the process alive ([#14001](https://github.com/can1357/oh-my-pi/pull/14001) by [@H4vC](https://github.com/H4vC))
+
+### Changed
+
+- Reduced log disk writes: the log file still records every level, but records are now written in batches (at most one write per second or per 64 KiB) instead of one write per line, while `warn` and `error` records are written immediately and exit, signal, and fatal-error paths flush the rest; `logger.flush()` writes pending records on demand and `OMP_LOG_LEVEL` optionally limits the levels written to the file. A process creates its log file only when it first logs, no longer writes a `.omp.<pid>-audit.json`, and legacy `omp.<date>.log[.gz]` files and hash-named audits older than five days are pruned ([#14011](https://github.com/can1357/oh-my-pi/pull/14011) by [@H4vC](https://github.com/H4vC))
+
+## [18.4.4] - 2026-09-29
+
+### Added
+
+- Added `normalizePremiumRequests` (also still exported from `@oh-my-pi/pi-tui`).
+
+## [18.4.3] - 2026-09-28
+
+### Added
+
+- Added an optional `onDone` callback to `readSseJsonOrText` that reports the `[DONE]` sentinel without attaching a raw-event observer ([#13650](https://github.com/can1357/oh-my-pi/pull/13650) by [@H4vC](https://github.com/H4vC)).
+
+### Changed
+
+- SSE events read without raw capture now share one frozen empty `raw` array instead of allocating one per event ([#13650](https://github.com/can1357/oh-my-pi/pull/13650) by [@H4vC](https://github.com/H4vC)).
+
+### Fixed
+
+- Fixed the unsettled-command report overriding an explicit non-zero exit code with 1 and printing a spurious "ended before completing" line ([#13623](https://github.com/can1357/oh-my-pi/pull/13623) by [@H4vC](https://github.com/H4vC))
+
+## [18.4.2] - 2026-09-28
+
+### Added
+
+- Added cloneJsonTree to provide a high-performance deep copy utility for JSON-shaped object trees
+
+## [18.4.1] - 2026-09-28
+
+### Fixed
+
+- Fixed SQLite stores opened with `recoverCorruption` crashing on a corrupt file instead of being preserved and recreated when the corruption surfaced as a different initialization error such as `no such table` ([#13530](https://github.com/can1357/oh-my-pi/pull/13530) by [@Hunter-124](https://github.com/Hunter-124))
+- Fixed raw stderr output staying on the previous day's log file after the log sink rotates at local midnight ([#13003](https://github.com/can1357/oh-my-pi/issues/13003)).
+
+## [18.3.1] - 2026-09-25
+
+### Fixed
+
+- Fixed log rotation near local-day boundaries so dated log files are consistently assigned to the correct local date.
+
 ## [18.2.7] - 2026-09-21
 
 ### Changed
