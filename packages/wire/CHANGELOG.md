@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added `TspMeterMark` with an `icon` a bar draws on its track, and a meter `total` naming the whole the track spans
+- Added the `TspMeterMark` component for marking a position on a meter track with a custom icon and a total value that defines the full span of the track.
 
 ## [18.4.4] - 2026-09-29
 

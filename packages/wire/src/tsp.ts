@@ -483,8 +483,11 @@ export interface TspPickerGroup {
  * selected item's preview. A picker under `layer` is itself the modal sheet.
  */
 export interface TspPickerProps {
-	/** What is being picked, e.g. "Models" (plain: it is also the common `title` prop, which a picker does not use as a tooltip). */
-	title: string;
+	/**
+	 * What is being picked, e.g. "Models" (plain: it is also the common `title` prop, which a picker does not use as a
+	 * tooltip). Absent: the head is the icon and the search, and the placeholder names the sheet.
+	 */
+	title?: string;
 	subtitle?: TspText;
 	icon?: string;
 	/** Plural noun for counts and empty copy ("models", "sessions"). */
