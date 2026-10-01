@@ -5,6 +5,11 @@
 ### Fixed
 
 - Fixed `google-antigravity/gemini-3.1-flash-image` being treated as a chat model, so it now works in the `image` role and image fallback chains instead of warning that the chain does not resolve to a compatible model ([#13883](https://github.com/can1357/oh-my-pi/pull/13883) by [@eggpeat](https://github.com/eggpeat)).
+## [18.4.9] - 2026-10-01
+
+### Fixed
+
+- Fixed model catalog caching so unchanged catalogs refresh without unnecessary rewrites, and offline snapshots for endpoint-less models (such as Azure models) are now handled correctly across startups.
 
 ## [18.4.6] - 2026-10-01
 
