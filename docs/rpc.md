@@ -816,9 +816,12 @@ When `set_subagent_subscription` is `"progress"` or `"events"`, a
 { "id": "req_1", "type": "response", "command": "cancel_subagent", "success": true, "data": { "cancelled": true } }
 ```
 
-`cancelled` is `false` when the id is not in that roster (unknown, finished —
-including idle keep-alive subagents after their terminal lifecycle frame — or
-already cancelled), so hosts can treat it as idempotent.
+`cancelled` is `false` when the id is not a running subagent of this session:
+unknown, another session's same-name agent, finished (including a subagent
+whose result the parent already accepted, even before its terminal lifecycle
+frame), or already cancelled, so hosts can treat it as idempotent. If the
+`aborted` tombstone cannot be persisted, the subagent is still aborted and
+disposed, and the command returns an error response with the write failure.
 
 ## Prompt/Queue Concurrency and Ordering
 

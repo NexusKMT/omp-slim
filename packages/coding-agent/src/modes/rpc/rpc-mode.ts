@@ -33,7 +33,6 @@ import {
 } from "../../extensibility/skills";
 import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
 import { AgentLifecycleManager } from "../../registry/agent-lifecycle";
-import { AgentRegistry } from "../../registry/agent-registry";
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
@@ -60,7 +59,7 @@ import {
 } from "./rpc-prompt-results";
 import { RpcSessionEventForwarder } from "./rpc-session-events";
 import { isRpcSessionSettled, RpcSessionSettleWatcher } from "./rpc-session-settle";
-import { RpcSubagentRegistry, readRpcSubagentTranscript } from "./rpc-subagents";
+import { RpcSubagentRegistry, readRpcSubagentTranscript, resolveOwnedLiveSubagent } from "./rpc-subagents";
 import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
@@ -472,35 +471,30 @@ export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
  * tombstone settles the owning `task` call (foreground or background) with an
  * aborted result, and disposing the session cancels its nested children.
  *
- * Only ids this session reported as running are reachable. Returns `false`
- * (a no-op) for unknown, finished, or already-cancelled subagents so hosts can
- * treat cancelling a vanished subagent as success.
- *
- * Agent ids are unique only within one parent session's artifacts scope, and
- * the process-global registry keeps the latest ref per id. The ref must
- * therefore carry the transcript file this session's roster recorded
- * (`<artifactsDir>/<id>.jsonl`, unique per parent session) before it is
- * released; an id match alone could kill another session's same-name agent.
+ * Only ids this session reported as running are reachable (see
+ * {@link resolveOwnedLiveSubagent}). Returns `false` (a no-op) for unknown,
+ * finished, or already-cancelled subagents so hosts can treat cancelling a
+ * vanished subagent as success. Rejects when the tombstone cannot be persisted
+ * or the abort fails; the subagent is still detached and disposed.
  */
 export async function handleRpcCancelSubagent(
 	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
 	subagentId: string,
 ): Promise<boolean> {
-	const sessionFile = subagentRegistry.getSubagents().find(snapshot => snapshot.id === subagentId)?.sessionFile;
-	if (!sessionFile) return false;
-	const ref = AgentRegistry.global().get(subagentId);
-	// A ref goes idle once its result is accepted, before the terminal lifecycle
-	// frame prunes the roster; a finished subagent must not be tombstoned.
-	if (ref?.kind !== "sub" || ref.status !== "running" || !ref.session || ref.sessionFile !== sessionFile) {
-		return false;
-	}
+	const owned = resolveOwnedLiveSubagent(subagentRegistry, subagentId);
+	if (!owned) return false;
 	// Start the release first: it publishes the `aborted` tombstone synchronously,
 	// so the executor cannot accept the run's result (flipping the ref to idle)
-	// while the abort below is still settling.
-	const session = ref.session;
-	const released = AgentLifecycleManager.global().release(subagentId, ref, { tombstone: true });
-	await session.abort({ reason: USER_INTERRUPT_LABEL });
-	return released;
+	// while the abort below is still settling. Settle both together so a failed
+	// tombstone write is reported here instead of escaping as an unhandled
+	// rejection while the abort is pending.
+	const [released, aborted] = await Promise.allSettled([
+		AgentLifecycleManager.global().release(subagentId, owned.ref, { tombstone: true }),
+		owned.session.abort({ reason: USER_INTERRUPT_LABEL }),
+	]);
+	if (released.status === "rejected") throw released.reason;
+	if (aborted.status === "rejected") throw aborted.reason;
+	return released.value;
 }
 
 export async function handleRpcSessionChange(

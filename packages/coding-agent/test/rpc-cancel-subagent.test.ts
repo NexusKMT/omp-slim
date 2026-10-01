@@ -126,6 +126,48 @@ describe("handleRpcCancelSubagent", () => {
 		expect(AgentRegistry.global().get("SubagentA")?.status).toBe("aborted");
 	});
 
+	test("reports a failed tombstone write as an error while the abort is still settling", async () => {
+		// The tombstone sidecar lands next to the transcript; a missing directory
+		// makes the write fail with ENOENT. release() disposes the session after
+		// that failure and then rejects, so the abort stays pending until dispose
+		// ran plus one macrotask hop: the release rejection lands mid-abort.
+		const missingDirSessionFile = path.join(sessionDir, "missing", "SubagentA.jsonl");
+		emitLifecycle("SubagentA", "started", missingDirSessionFile);
+		const disposed = Promise.withResolvers<void>();
+		const nextMacrotask = () => new Promise<void>(resolve => setImmediate(resolve));
+		AgentRegistry.global().register({
+			id: "SubagentA",
+			displayName: "SubagentA",
+			kind: "sub",
+			session: {
+				abort: async () => {
+					await disposed.promise;
+					await nextMacrotask();
+					calls.push("abort:SubagentA");
+				},
+				dispose: async () => {
+					calls.push("dispose:SubagentA");
+					disposed.resolve();
+				},
+			} as never,
+			sessionFile: missingDirSessionFile,
+			status: "running",
+		});
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await expect(handleRpcCancelSubagent(registry, "SubagentA")).rejects.toMatchObject({ code: "ENOENT" });
+			await nextMacrotask();
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+
+		expect(unhandled).toEqual([]);
+		expect(calls).toEqual(["dispose:SubagentA", "abort:SubagentA"]);
+		expect(AgentRegistry.global().get("SubagentA")?.status).toBe("aborted");
+	});
+
 	test("is a no-op for a second cancel of the same subagent", async () => {
 		emitLifecycle("SubagentA", "started");
 		registerLiveAgent("SubagentA");
