@@ -220,7 +220,8 @@ behavior {
 	// thinking-off actually disables reasoning instead of clamping to the
 	// lowest effort. Ladder ids without `/responses` (deepseek-v4-flash-fast,
 	// gemini-3.7-flash, Qwen3.8-Flash, Qwen3.8-Max-0902, hy4-preview,
-	// space-bunny-alpha) and non-reasoning ids stay on chat completions.
+	// space-bunny-alpha), the Qwen3.8 ids (chat already disables them through
+	// `enable_thinking: false`), and non-reasoning ids stay on chat completions.
 	api-routes provider="commandcode" default="openai-completions" {
 		route "anthropic-messages" prefix="claude-"
 		route "openai-responses" exact="gpt-5.3-codex" exact="gpt-5.4" exact="gpt-5.4-mini" exact="gpt-5.5" \
@@ -235,8 +236,7 @@ behavior {
 			exact="google/gemini-3.8-flash" exact="MiniMaxAI/MiniMax-M3" exact="stepfun/Step-5-Preview" \
 			exact="xai/grok-4.5" exact="xai/grok-4.6" exact="xai/grok-4.7" exact="meta/muse-spark-1.1" \
 			exact="meta/muse-spark-1.2" exact="meta/muse-spark-1.2-contributor" exact="meta/muse-spark-1.3" \
-			exact="meta/muse-spark-1.3-contributor" exact="Qwen/Qwen3.8-27B" exact="Qwen/Qwen3.8-Max" \
-			exact="Qwen/Qwen3.8-Omni-Flash" exact="stealth/pixel-canary" exact="sakana/fugu-ultra"
+			exact="meta/muse-spark-1.3-contributor" exact="stealth/pixel-canary" exact="sakana/fugu-ultra"
 	}
 	// ZenMux fronts Anthropic ids on a dedicated Messages endpoint; every
 	// other namespace stays on chat completions.

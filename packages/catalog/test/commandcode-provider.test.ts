@@ -327,32 +327,45 @@ describe("Command Code provider support", () => {
 		for (const { body } of chatBodies) expect(body.reasoning_effort).not.toBe("none");
 	});
 
-	test("routes every effort-ladder id that Command Code serves on Responses there", async () => {
+	test("routes effort-ladder ids to Responses with the right off switch", async () => {
 		// supported_endpoints on 2026-10-01: these ladder ids lack /responses.
-		const chatOnlyLadderIds = new Set([
-			"deepseek/deepseek-v4-flash-fast",
-			"google/gemini-3.7-flash",
-			"Qwen/Qwen3.8-Flash",
-			"Qwen/Qwen3.8-Max-0902",
-			"stealth/space-bunny-alpha",
-			"tencent/hy4-preview",
-		]);
+		// Qwen3.8 stays on chat because `enable_thinking: false` already disables it there.
+		const chatLadderIds: Record<string, true> = {
+			"deepseek/deepseek-v4-flash-fast": true,
+			"google/gemini-3.7-flash": true,
+			"Qwen/Qwen3.8-27B": true,
+			"Qwen/Qwen3.8-Flash": true,
+			"Qwen/Qwen3.8-Max": true,
+			"Qwen/Qwen3.8-Max-0902": true,
+			"Qwen/Qwen3.8-Omni-Flash": true,
+			"stealth/space-bunny-alpha": true,
+			"tencent/hy4-preview": true,
+		};
+		// First-party OpenAI accepts `none` only on GPT-5.6; other GPT ids keep the lowest effort.
+		const lowestEffortGptIds: Record<string, true> = {
+			"gpt-5.3-codex": true,
+			"gpt-5.4": true,
+			"gpt-5.4-mini": true,
+			"gpt-5.5": true,
+			"gpt-6-astra": true,
+			"gpt-6-luna": true,
+			"gpt-6-sol": true,
+		};
 		const models = await discoverModels(servedIds);
 		for (const model of models) {
 			if (model.api === "anthropic-messages" || !model.thinking?.efforts?.length) continue;
-			const onResponses = !chatOnlyLadderIds.has(model.id);
-			expect({ id: model.id, api: model.api }).toEqual({
+			const onResponses = !chatLadderIds[model.id];
+			const compat = model.compat;
+			const disableMode =
+				compat !== undefined && "reasoningDisableMode" in compat ? compat.reasoningDisableMode : undefined;
+			expect({ id: model.id, api: model.api, none: disableMode === "none-effort" }).toEqual({
 				id: model.id,
 				api: onResponses ? "openai-responses" : "openai-completions",
+				// `none-effort` on chat completions would 400; on Responses it is the off switch.
+				none: onResponses && !lowestEffortGptIds[model.id],
 			});
-			// `none-effort` on chat completions would 400; on Responses it is the off switch.
-			const compat = model.compat;
-			const noneEffort =
-				compat !== undefined && "reasoningDisableMode" in compat && compat.reasoningDisableMode === "none-effort";
-			expect({ id: model.id, none: noneEffort }).toEqual({
-				id: model.id,
-				none: onResponses,
-			});
+			if (lowestEffortGptIds[model.id]) expect(disableMode).toBe("lowest-effort");
+			if (model.id.startsWith("Qwen/")) expect(disableMode).toBe("qwen-enable-thinking-false");
 		}
 	});
 
