@@ -21,7 +21,7 @@
 - Per-tool TTSR reminders now reach the model as a separate developer message instead of being prepended to tool output, including for Cursor-bridged calls; calls made from eval still receive the reminder as a leading block in their result ([#13266](https://github.com/can1357/oh-my-pi/pull/13266) by [@andrebrait](https://github.com/andrebrait)).
 
 ### Fixed
-
+- Interrupted tool calls now stay visible to the model after resuming a stopped session, so pending `ask` questions can be re-posed instead of disappearing ([#13950](https://github.com/can1357/oh-my-pi/issues/13950)).
 - An `abort` that lands while a prompt's images are still being prepared now drops that prompt instead of starting or queueing it afterward ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - A path-pasted image or video sent as an aside while the agent is busy now reaches the model with its source path ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
 - Extension-registered model prompt-cache settings, including `{}` opt-outs, now take precedence over matching `models.yml` definitions ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).

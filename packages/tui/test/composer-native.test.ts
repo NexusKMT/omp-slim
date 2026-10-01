@@ -164,7 +164,11 @@ describe("native composer", () => {
 		const chipFor = (thinking: string) =>
 			byRole(composer({ running: false, thinking }).describe(legacy), "omp.composer.effort")!;
 		expect(nodes(chipFor("high")).some(n => n.k === "effort")).toBe(false);
-		expect(nodes(chipFor("high")).find(n => n.k === "meter")?.p).toMatchObject({ value: 0.75, style: "blocks", steps: 4 });
+		expect(nodes(chipFor("high")).find(n => n.k === "meter")?.p).toMatchObject({
+			value: 0.75,
+			style: "blocks",
+			steps: 4,
+		});
 		expect(nodes(chipFor("off")).find(n => n.k === "meter")?.p).toMatchObject({ value: 0 });
 		expect(nodes(chipFor("auto")).find(n => n.k === "meter")?.p).toMatchObject({ value: null });
 	});
