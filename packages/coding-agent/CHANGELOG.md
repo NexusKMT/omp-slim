@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed test suite failures on non-FHS hosts and under ambient terminal and Git configuration ([#12358](https://github.com/can1357/oh-my-pi/pull/12358) by [@olegpulatov](https://github.com/olegpulatov)).
+
 ## [18.4.9] - 2026-10-01
 
 ### Added
@@ -22,27 +26,6 @@
 
 ### Fixed
 
-- Fixed test suite failures on non-FHS hosts and under ambient terminal and Git configuration ([#12358](https://github.com/can1357/oh-my-pi/pull/12358) by [@olegpulatov](https://github.com/olegpulatov)).
-- Fixed session transcript appends creating and deleting a `.jsonl.lock` file beside the session for every recorded entry, cutting disk writes during long sessions ([#14003](https://github.com/can1357/oh-my-pi/pull/14003) by [@H4vC](https://github.com/H4vC))
-- Fixed an interrupted image blob write leaving a partial image under its final name, image copies being rewritten on every save on filesystems without hardlinks, and `omp gc` possibly deleting a long-stored image that a session had just started referencing again ([#14004](https://github.com/can1357/oh-my-pi/pull/14004) by [@H4vC](https://github.com/H4vC))
-- Fixed terminal breadcrumbs and custom-session markers being rewritten when unchanged, and sessions on a non-file session store leaving dangling markers in `~/.omp/agent/custom-session-files` ([#14005](https://github.com/can1357/oh-my-pi/pull/14005) by [@H4vC](https://github.com/H4vC))
-- Reduced disk writes from ghost-text word completion: the prediction daemon now saves its learned model after 5 quiet minutes (at most every 15 minutes while typing, and on exit) instead of rewriting the ~1 MB snapshot within 30 seconds of every keystroke burst ([#14009](https://github.com/can1357/oh-my-pi/pull/14009) by [@H4vC](https://github.com/H4vC))
-- Fixed agent.db write churn: model performance samples are batched once a minute (and flushed on exit or when `/models` reads them), session account stickiness is persisted only when it changes or drifts, the schema version and file permissions are no longer rewritten on every start, and resuming a session advances a stale same-account sticky to the session's last turn ([#14001](https://github.com/can1357/oh-my-pi/pull/14001) by [@H4vC](https://github.com/H4vC))
-- Fixed setting an option, record entry, or model role to the value it already has rewriting `config.yml`; saves that would reproduce the file byte-for-byte now leave it untouched ([#14002](https://github.com/can1357/oh-my-pi/pull/14002) by [@H4vC](https://github.com/H4vC))
-- Reduced disk writes from model discovery: refreshes whose provider catalogs are unchanged no longer rewrite `models.db`, and a refresh that does rewrite more than five provider rows is noted in the debug log ([#14007](https://github.com/can1357/oh-my-pi/pull/14007) by [@H4vC](https://github.com/H4vC))
-- Reduced startup disk churn: the skill description cache keeps one database handle per process instead of reopening (and recreating its WAL files) on every prompt render and write, and the startup status-bar cache is written once after startup settles instead of on every early change ([#14008](https://github.com/can1357/oh-my-pi/pull/14008) by [@H4vC](https://github.com/H4vC))
-- Reduced disk writes from background daemons: the launch spec (including its full environment) is saved once to `spec.json` instead of being rewritten into `meta.json` on every start, ready, and exit transition, unchanged metadata is no longer rewritten, and Windows skips a pointless `chmod` per session; existing `meta.json` files are migrated on recovery, and `omp ps` reads both layouts ([#14010](https://github.com/can1357/oh-my-pi/pull/14010) by [@H4vC](https://github.com/H4vC))
-- Fixed `/wt` on filesystems without copy-on-write cloning (e.g. NTFS): the new worktree no longer lists unchanged files as modified under `core.autocrlf`, and staged-only edits, additions, and deletions now carry over with the right file contents instead of reverting to `HEAD` ([#13987](https://github.com/can1357/oh-my-pi/pull/13987) by [@H4vC](https://github.com/H4vC))
-- Fixed Ctrl+V on Windows taking about a second to paste text: omp no longer starts PowerShell to check for an image or read the text, and only uses it when the built-in clipboard read fails ([#13991](https://github.com/can1357/oh-my-pi/pull/13991) by [@H4vC](https://github.com/H4vC))
-- Fixed `local://` paths written with the working directory in front (`/repo/local://notes.md`) creating a literal `local:` directory in the project; `read`, `write`, and search tools now treat them as the `local://` URL ([#13977](https://github.com/can1357/oh-my-pi/pull/13977) by [@radkawar](https://github.com/radkawar))
-- Fixed `read` with a `;` list that mixes URLs and local paths (`https://…;src/a.ts:1-20`, `omp://;Makefile:1-3`) or starts with an extensionless file and a selector (`Makefile:1-3;docs/x.md`): it was fetched as one URL or sent to MCP; each entry is now read separately ([#13979](https://github.com/can1357/oh-my-pi/pull/13979) by [@radkawar](https://github.com/radkawar))
-- Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-- Fixed omp freezing for seconds at a time and silently no longer saving the session after another process wrote to the same session file; omp now keeps that process's entries and saves normally, and if that process keeps writing through every retry, omp leaves the file to it and continues in a new file next to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-- Fixed two omp processes writing the same session (for example after resuming it while an orphaned omp still had it open) mixing their turns into one file; the process that wrote it first keeps it, and the other continues in a new file next to it and shows you the new path ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-### Fixed
-
-- Fixed the native composer's effort chip showing the main session's thinking level while viewing a subagent
-- Fixed `omp predict`'s compare view and the MCP authorization link prompt drawing as pre-rendered `rows` fallback grids in Tern; both now describe themselves natively (the link opens or copies on click)
 - Fixed `/wt` on filesystems without copy-on-write cloning, including NTFS, so unchanged files are not incorrectly marked modified and staged edits, additions, and deletions retain the correct contents.
 - Fixed Windows Ctrl+V taking about a second to paste by avoiding unnecessary PowerShell clipboard checks.
 - Fixed `local://` paths being misinterpreted as local filesystem paths by the `read`, `write`, and search tools.
