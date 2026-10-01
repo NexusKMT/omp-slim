@@ -13,12 +13,15 @@
 
 ### Changed
 
+- Notebook evaluation cells now render with dedicated input/output gutters and improved status tone signaling
+- Streaming file operations now keep their output card expanded automatically until execution settles
 - Refactored effort chip to use terminal-native effort glyphs where supported, falling back to block meters
 - Status line brand ('pi') is now excluded from the composer's homed segment set
 - The status-line cost segment renders subagent spend after the session's own spend as `(+1.27)`, and billing summaries print the `$` or subscription mark once, so a later amount billed the same way (such as advisor spend) shows bare ([#13944](https://github.com/can1357/oh-my-pi/pull/13944) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
+- Fixed search result rendering to correctly display gaps between non-adjacent context runs
 - Fixed the ask tool's Custom answer and note prompts in native terminals (Tern): the question now shows whole as markdown under a `Custom answer` / `Note for …` title, instead of being wrapped at the terminal's width, cut to three rows and split between the title and an accent-coloured block. `AskDialogCallbacks.onPrompt`/`onImagePrompt` take `{ title, question }`; `HookEditorOptions.question` carries the question and `boundPromptTitle` moved to `overlays/hook-editor`. A cut terminal title now ends in `…`.
 - Fixed text fields in native dialogs (the ask's custom answer and notes, plan review, annotations, the agent hub) being drawn as the prompt composer with a doubled `❯ >` prompt: a plain `Editor` now describes itself as `omp.field` (only the composer claims `omp.editor`) and no longer sends its terminal prompt gutter (`> `) as the native `prompt`.
 
