@@ -6,6 +6,10 @@
 
 - Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose gates as ghost-text word completion ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
 
+### Changed
+
+- `OutputSink` now caps artifact files at 16 MiB by default (first 3 MiB, at most half the cap, plus a rolling tail around an `[ARTIFACT TRUNCATED: …]` notice); pass `artifactMaxBytes: 0` for unbounded files. `dump()` reports the bytes the cap dropped as `artifactElidedBytes`, and `formatFullOutputReference()` then labels the artifact as a head/tail sample. The rolling tail is trimmed in amortized linear time ([#14012](https://github.com/can1357/oh-my-pi/pull/14012) by [@H4vC](https://github.com/H4vC))
+
 ### Fixed
 
 - Reduced composer startup-cache disk writes: identical status, welcome, UI, recent-session, and LSP payloads no longer start a SQLite write, and closing the cache releases the database file on Windows ([#14008](https://github.com/can1357/oh-my-pi/pull/14008) by [@H4vC](https://github.com/H4vC))
