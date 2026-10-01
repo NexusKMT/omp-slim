@@ -75,6 +75,10 @@ interface RegisteredUrl {
 }
 
 const SINGLE_SLASH_ALIAS_RE = /^([a-z][a-z0-9+.-]*):\/(?!\/)/i;
+// `/home/me/repo/local://x.md`: a filesystem path glued in front of a URL. The
+// prefix must not itself start with a scheme, and only the `://` form counts,
+// since `dir/local:/x` (single slash) can be a real directory named `local:`.
+const PATH_PREFIXED_URL_RE = /^(?![a-z][a-z0-9+.-]*:)[^?#]*\/([a-z][a-z0-9+.-]*):\/\/(?=[^/])/i;
 const GLOB_CHARS_RE = /[*?[{]/;
 // A `?` opening `key=value` pairs starts a URL query (`?op=search`, `?state=closed`); any other `?` is a glob.
 const QUERY_START_RE = /\?[\w.-]*=/;
@@ -186,8 +190,17 @@ export class InternalUrlRouter {
 		return specs;
 	}
 
-	/** Rewrite a registered scheme's single-slash alias (`local:/x`, {@link SchemeSpec.singleSlashAlias}) to `scheme://x`; other inputs pass through. */
+	/**
+	 * Rewrite mistyped spellings of a scheme that declares
+	 * {@link SchemeSpec.singleSlashAlias} to `scheme://x`: the single-slash alias
+	 * (`local:/x`) and a filesystem path prefixed onto the URL
+	 * (`/home/me/repo/local://x`). Other inputs pass through.
+	 */
 	normalize(input: string): string {
+		const prefixed = PATH_PREFIXED_URL_RE.exec(input);
+		if (prefixed && this.#handlers.get(prefixed[1].toLowerCase())?.spec.singleSlashAlias) {
+			return input.slice(prefixed[0].length - prefixed[1].length - 3);
+		}
 		const match = SINGLE_SLASH_ALIAS_RE.exec(input);
 		if (!match || !this.#handlers.get(match[1].toLowerCase())?.spec.singleSlashAlias) return input;
 		return `${match[1]}://${input.slice(match[0].length)}`;
