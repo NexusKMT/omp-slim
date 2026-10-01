@@ -53,6 +53,7 @@ export type RpcCommand =
 	| { id?: string; type: "set_event_filter"; events: string[] | null; messageUpdates?: RpcMessageUpdates }
 	| { id?: string; type: "get_subagents" }
 	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
+	| { id?: string; type: "cancel_subagent"; subagentId: string }
 
 	// Model
 	| { id?: string; type: "set_model"; provider: string; modelId: string }
@@ -339,6 +340,13 @@ export type RpcResponse =
 			command: "get_subagent_messages";
 			success: true;
 			data: RpcSubagentMessagesResult;
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "cancel_subagent";
+			success: true;
+			data: { cancelled: boolean };
 	  }
 
 	// Model
