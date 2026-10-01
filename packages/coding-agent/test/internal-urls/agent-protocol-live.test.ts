@@ -11,6 +11,7 @@ import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { resetRegisteredArtifactDirsForTests } from "@oh-my-pi/pi-coding-agent/internal-urls/registry-helpers";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { CURRENT_SESSION_VERSION } from "@oh-my-pi/pi-coding-agent/session/session-entries";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -132,6 +133,37 @@ describe("agent:// for agents without a published output", () => {
 		expect(text).toContain('"src/b.ts"');
 		expect(text).toContain("findings");
 		expect(text).toContain('"missing export"');
+	});
+
+	it("reads a parked agent's progress from its retained session file", async () => {
+		const timestamp = new Date().toISOString();
+		const entry = (id: string, parentId: string | null, message: unknown) =>
+			JSON.stringify({ type: "message", id, parentId, timestamp, message });
+		const transcript = path.join(artifactsDir, "Parked.jsonl");
+		await Bun.write(
+			transcript,
+			[
+				JSON.stringify({ type: "session", version: CURRENT_SESSION_VERSION, id: "parked", timestamp, cwd: "/tmp" }),
+				entry("m1", null, { role: "user", content: "go", timestamp: 1 }),
+				entry("m2", "m1", yieldResult(["code-ready"], { files: ["src/parked.ts"] })),
+				entry("m3", "m2", { ...(assistantText("parked mid-run") as object), stopReason: "stop" }),
+			].join("\n"),
+		);
+		AgentRegistry.global().register({
+			id: "Parked",
+			displayName: "Parked",
+			kind: "sub",
+			parentId: "Main",
+			session: null,
+			sessionFile: transcript,
+			status: "parked",
+		});
+
+		const text = await readText("agent://Parked");
+
+		expect(text).toContain("Parked (parked)");
+		expect(text).toContain('"src/parked.ts"');
+		expect(text).toContain("parked mid-run");
 	});
 
 	it("serves the published output over progress once <id>.md exists", async () => {
