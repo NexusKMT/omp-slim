@@ -84,18 +84,12 @@ class "anthropic" {
 				supports-mid-conversation-tool-changes #true
 				supports-turn-scoped-system #true
 			}
-			revision ">=5.1" {
-				supports-per-message-effort #true
-			}
 		}
 		family "mythos" {
 			revision ">=5" {
 				supports-mid-conversation-system #true
 				supports-mid-conversation-tool-changes #true
 				supports-turn-scoped-system #true
-			}
-			revision ">=5.1" {
-				supports-per-message-effort #true
 			}
 		}
 		family "fable" {
@@ -108,7 +102,6 @@ class "anthropic" {
 				supports-mid-conversation-system #true
 				supports-mid-conversation-tool-changes #true
 				supports-turn-scoped-system #true
-				supports-per-message-effort #true
 			}
 		}
 		family "opus" {
@@ -117,17 +110,33 @@ class "anthropic" {
 				supports-mid-conversation-tool-changes #true
 				supports-turn-scoped-system #true
 			}
-			revision ">=5" {
-				supports-per-message-effort #true
-			}
 		}
 	}
 	// Vertex rejects `thinking.block_binding` on Sonnet 5.5 with 400
-	// `thinking.adaptive.block_binding: Extra inputs are not permitted`.
+	// `thinking.adaptive.block_binding: Extra inputs are not permitted`, and
+	// per-message `output_config` with 400 `messages.N.output_config: Extra
+	// inputs are not permitted` (it takes no `output_config.effort` at all; see
+	// `supports-output-effort` in providers/google-vertex.kdl).
 	on "anthropic" "cloudflare-ai-gateway" {
+		family "fable" {
+			revision ">=5.1" {
+				supports-per-message-effort #true
+			}
+		}
+		family "mythos" {
+			revision ">=5.1" {
+				supports-per-message-effort #true
+			}
+		}
 		family "sonnet" {
 			revision ">=5.5" {
 				supports-thinking-binding-controls #true
+				supports-per-message-effort #true
+			}
+		}
+		family "opus" {
+			revision ">=5" {
+				supports-per-message-effort #true
 			}
 		}
 	}

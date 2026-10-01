@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
+
 ## [18.4.6] - 2026-10-01
 
 ### Added
