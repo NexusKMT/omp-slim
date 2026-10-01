@@ -6,7 +6,7 @@
 
 - Fixed `logs/http-400-requests` growing without bound: rejected-request dumps older than seven days are deleted, and the oldest are removed once the directory exceeds 64 MiB ([#14011](https://github.com/can1357/oh-my-pi/pull/14011) by [@H4vC](https://github.com/H4vC))
 - Fixed every request rewriting unchanged credentials and session stickiness in agent.db, which bumped the cross-process auth revision and made other omp processes reload credentials for nothing ([#14001](https://github.com/can1357/oh-my-pi/pull/14001) by [@H4vC](https://github.com/H4vC))
-- Bedrock retries once without replayed reasoning when a signed thinking block no longer matches the conversation prefix.
+- Fixed Bedrock Converse requests failing with a "bound to a different conversation" 400 after the system prompt changed under signed thinking: the request is retried once without replayed reasoning ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
 
 ## [18.4.6] - 2026-10-01
 
