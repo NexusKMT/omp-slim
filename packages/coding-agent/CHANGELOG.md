@@ -22,6 +22,7 @@
 ### Fixed
 
 - Fixed session transcript appends creating and deleting a `.jsonl.lock` file beside the session for every recorded entry, cutting disk writes during long sessions ([#14003](https://github.com/can1357/oh-my-pi/pull/14003) by [@H4vC](https://github.com/H4vC))
+- Fixed startup consolidation from changing the memory prompt after an assistant message, preserving the active conversation's signed thinking blocks.
 - Fixed an interrupted image blob write leaving a partial image under its final name, image copies being rewritten on every save on filesystems without hardlinks, and `omp gc` possibly deleting a long-stored image that a session had just started referencing again ([#14004](https://github.com/can1357/oh-my-pi/pull/14004) by [@H4vC](https://github.com/H4vC))
 - Fixed terminal breadcrumbs and custom-session markers being rewritten when unchanged, and sessions on a non-file session store leaving dangling markers in `~/.omp/agent/custom-session-files` ([#14005](https://github.com/can1357/oh-my-pi/pull/14005) by [@H4vC](https://github.com/H4vC))
 - Reduced disk writes from ghost-text word completion: the prediction daemon now saves its learned model after 5 quiet minutes (at most every 15 minutes while typing, and on exit) instead of rewriting the ~1 MB snapshot within 30 seconds of every keystroke burst ([#14009](https://github.com/can1357/oh-my-pi/pull/14009) by [@H4vC](https://github.com/H4vC))
