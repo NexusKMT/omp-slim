@@ -529,6 +529,61 @@ describe("buildOpenAiNativeHistory call-id tracking", () => {
 			["function_call_output", "call_ok"],
 		]);
 	});
+
+	test("pairs a reused call id positionally and keeps a different-kind output", () => {
+		const shared = "call_reused";
+		const history = {
+			role: "user",
+			content: "",
+			timestamp: Date.now(),
+			providerPayload: {
+				type: "openaiResponsesHistory",
+				provider: "openai-codex",
+				items: [
+					{ type: "function_call", call_id: shared, name: "bad invocation", arguments: "{}" },
+					{ type: "custom_tool_call_output", call_id: shared, output: "unrelated custom orphan" },
+					{ type: "function_call_output", call_id: shared, output: "Tool not found" },
+					{ type: "function_call", call_id: shared, name: "read", arguments: "{}" },
+					{ type: "function_call_output", call_id: shared, output: "file contents" },
+				],
+			},
+		} as unknown as UserMessage;
+		const items = buildOpenAiNativeHistory([history], CODEX_MODEL);
+		expect(
+			items.flatMap(item =>
+				typeof item.call_id === "string" ? [[item.type, item.call_id, item.output ?? item.name]] : [],
+			),
+		).toEqual([
+			["custom_tool_call_output", shared, "unrelated custom orphan"],
+			["function_call", shared, "read"],
+			["function_call_output", shared, "file contents"],
+		]);
+	});
+
+	test("does not let a malformed call without an output consume a reused id after a client message", () => {
+		const shared = "call_reused";
+		const history = {
+			role: "user",
+			content: "",
+			timestamp: Date.now(),
+			providerPayload: {
+				type: "openaiResponsesHistory",
+				provider: "openai-codex",
+				items: [
+					{ type: "function_call", call_id: shared, name: "bad invocation", arguments: "{}" },
+					{ type: "message", role: "developer", content: [{ type: "input_text", text: "boundary" }] },
+					{ type: "function_call", call_id: shared, name: "read", arguments: "{}" },
+					{ type: "function_call_output", call_id: shared, output: "file contents" },
+				],
+			},
+		} as unknown as UserMessage;
+		const items = buildOpenAiNativeHistory([history], CODEX_MODEL);
+		expect(items.map(item => [item.type, item.role, item.call_id, item.name ?? item.output])).toEqual([
+			["message", "developer", undefined, undefined],
+			["function_call", undefined, shared, "read"],
+			["function_call_output", undefined, shared, "file contents"],
+		]);
+	});
 });
 
 describe("buildOpenAiNativeHistory computer calls", () => {

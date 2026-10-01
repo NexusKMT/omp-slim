@@ -1888,6 +1888,96 @@ describe("OpenAI responses history payload", () => {
 		]);
 	});
 
+	it("drops a same-model snapshot's paired malformed output and still notes a genuine orphan", () => {
+		const malformedName = "bad invocation text";
+		const assistantMessage = {
+			...makeAssistantMessage(
+				[
+					{ type: "reasoning", id: "rs_keep", summary: [], encrypted_content: "enc_keep" },
+					{ type: "function_call", call_id: "call_shared", name: malformedName, arguments: "{}" },
+					{ type: "function_call_output", call_id: "call_shared", output: "Tool not found" },
+					{
+						type: "function_call",
+						call_id: "call_shared",
+						name: "read",
+						arguments: '{"path":"README.md"}',
+					},
+					{ type: "function_call_output", call_id: "call_shared", output: "file contents" },
+					{ type: "function_call_output", call_id: "call_genuine_orphan", output: "unrelated orphan" },
+				],
+				true,
+			),
+			stopReason: "toolUse" as const,
+		};
+		const input = buildResponsesInput({
+			model: getOpenAIReasoningModel("openai", "gpt-5-mini"),
+			context: {
+				messages: [
+					{ role: "user", content: "List the repo", timestamp: 1 },
+					assistantMessage,
+					{ role: "user", content: "continue", timestamp: 2 },
+				],
+			},
+			strictResponsesPairing: true,
+			supportsImageDetailOriginal: true,
+			nativeHistory: { replay: true, filterReasoning: false },
+			repairOrphanOutputs: true,
+		});
+		const wire = JSON.stringify(input);
+		expect(wire).not.toContain(malformedName);
+		expect(wire).not.toContain("Tool not found");
+		expect(wire).not.toContain("[Orphan tool result; call_id=call_shared]");
+		expect(wire).toContain("[Orphan tool result; call_id=call_genuine_orphan]: unrelated orphan");
+		expect(containsEncryptedReasoning(input)).toBe(true);
+		expect(listResponsesToolItems(input)).toEqual([
+			["function_call", "call_shared", "read"],
+			["function_call_output", "call_shared", undefined],
+		]);
+		expect(findResponsesInputItemByCallId(input, "function_call_output", "call_shared")?.output).toBe(
+			"file contents",
+		);
+	});
+
+	it("drops malformed names from Codex user and developer providerPayload replay", () => {
+		const malformedName = "bad invocation text";
+		const items = [
+			{ type: "reasoning", id: "rs_user", summary: [], encrypted_content: "enc_user" },
+			{ type: "function_call", call_id: "call_bad", name: malformedName, arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_bad", output: "Tool not found" },
+			{ type: "function_call", call_id: "call_ok", name: "read", arguments: "{}" },
+			{ type: "function_call_output", call_id: "call_ok", output: "ok" },
+		];
+		const codexModel = getBundledModel<"openai-codex-responses">("openai-codex", "gpt-5.5");
+		if (!codexModel) throw new Error("expected bundled Codex model");
+		for (const role of ["user", "developer"] as const) {
+			const replay = convertCodexResponsesMessages(codexModel, {
+				messages: [
+					{
+						role,
+						content: "continue",
+						timestamp: 1,
+						providerPayload: createOpenAIResponsesHistoryPayload("openai-codex", items, false),
+					},
+				],
+			});
+			const wire = JSON.stringify(replay);
+			expect(wire).not.toContain(malformedName);
+			expect(wire).not.toContain("Tool not found");
+			expect(replay).toContainEqual(
+				expect.objectContaining({ type: "function_call", call_id: "call_ok", name: "read" }),
+			);
+			expect(replay).toContainEqual(
+				expect.objectContaining({ type: "function_call_output", call_id: "call_ok", output: "ok" }),
+			);
+			expect(
+				replay.some(
+					item =>
+						item.type === "reasoning" && "encrypted_content" in item && item.encrypted_content === "enc_user",
+				),
+			).toBe(true);
+		}
+	});
+
 	it("converts orphan function_call_output replayed from providerPayload into an assistant note (issue #1351)", async () => {
 		// Reproduces the symptom: a previous turn's snapshot carries a
 		// `function_call_output` whose matching `function_call` was wiped by an

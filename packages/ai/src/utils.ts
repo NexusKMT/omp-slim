@@ -219,12 +219,13 @@ export function sanitizeOpenAIResponsesHistoryItemsForReplay(
 	items: Array<Record<string, unknown>>,
 	options: OpenAIResponsesReplaySanitizeOptions = {},
 ): ResponseInput {
+	const replayItems = dropMalformedOpenAIResponsesToolCalls(items);
 	const supportsImageDetailOriginal = options.supportsImageDetailOriginal !== false;
 	const computerLinkedReasoningItems =
 		options.supportsComputerUse === false
 			? undefined
-			: collectOpenAIResponsesComputerLinkedReasoningItems(items, false);
-	const sanitized = items.flatMap(item => {
+			: collectOpenAIResponsesComputerLinkedReasoningItems(replayItems, false);
+	const sanitized = replayItems.flatMap(item => {
 		const preserveForComputer = computerLinkedReasoningItems?.has(item) === true;
 		const sanitizedItem = sanitizeOpenAIResponsesHistoryItemForReplay(
 			item,
@@ -442,31 +443,106 @@ export function sanitizeOpenAIResponsesAssistantFallbackItemsForReplay(items: Re
 }
 
 /** Native tool call whose name {@link isMalformedToolCallName} rejects. */
-function isMalformedOpenAIResponsesToolCall(item: Record<string, unknown>): boolean {
+function isMalformedOpenAIResponsesToolCall(item: { type?: unknown; name?: unknown }): boolean {
 	return (item.type === "function_call" || item.type === "custom_tool_call") && isMalformedToolCallName(item.name);
 }
 
-/**
- * Drop native tool calls with a malformed name, plus any output in the same
- * list that answers them, for replay paths without orphan-output repair
- * (remote compaction). Returns `items` itself when nothing is malformed.
- */
-export function dropMalformedOpenAIResponsesToolCalls(
-	items: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> {
-	const droppedCallIds = new Set<unknown>();
-	for (const item of items) {
-		if (isMalformedOpenAIResponsesToolCall(item)) droppedCallIds.add(item.call_id);
-	}
-	if (droppedCallIds.size === 0) return items;
-	return items.filter(
-		item =>
-			!isMalformedOpenAIResponsesToolCall(item) &&
-			!(
-				(item.type === "function_call_output" || item.type === "custom_tool_call_output") &&
-				droppedCallIds.has(item.call_id)
-			),
+type MalformedResponsesCallKind = "function" | "custom";
+
+function malformedResponsesCallKind(type: unknown): MalformedResponsesCallKind | undefined {
+	if (type === "function_call") return "function";
+	if (type === "custom_tool_call") return "custom";
+	return undefined;
+}
+
+function malformedResponsesOutputKind(type: unknown): MalformedResponsesCallKind | undefined {
+	if (type === "function_call_output") return "function";
+	if (type === "custom_tool_call_output") return "custom";
+	return undefined;
+}
+
+/** Tool results stay inside the pairing window; other client input starts a new one. */
+function isResponsesToolResultItem(type: unknown): boolean {
+	return (
+		type === "function_call_output" ||
+		type === "custom_tool_call_output" ||
+		type === "computer_call_output" ||
+		type === "local_shell_call_output" ||
+		type === "shell_call_output" ||
+		type === "apply_patch_call_output"
 	);
+}
+
+/**
+ * User/developer messages and other non-result client input end the current
+ * call/output window. A malformed call whose output never arrived must not
+ * consume a later valid call that reuses the same `call_id`.
+ */
+function breaksMalformedResponsesPairingWindow(item: { type?: unknown; role?: unknown; execution?: unknown }): boolean {
+	if (isResponsesToolResultItem(item.type)) return false;
+	return isOpenAIResponsesClientInputBoundary(item as unknown as Record<string, unknown>);
+}
+
+/**
+ * Drop each native tool call with a malformed name and only the matching
+ * `function_call_output` / `custom_tool_call_output` in the same window.
+ *
+ * `call_id` is not unique across a snapshot. Pair the same way
+ * `sanitizeMalformedToolCalls` does for transcript messages: a per-id FIFO of
+ * malformed-ness, keyed by function vs custom, cleared at user/developer and
+ * other non-result client boundaries so a missing result cannot eat the next
+ * window's output. Returns `items` itself when nothing is malformed.
+ */
+export function dropMalformedOpenAIResponsesToolCalls<
+	T extends { type?: unknown; call_id?: unknown; name?: unknown; role?: unknown },
+>(items: readonly T[]): T[] {
+	let hasMalformed = false;
+	for (const item of items) {
+		if (isMalformedOpenAIResponsesToolCall(item)) {
+			hasMalformed = true;
+			break;
+		}
+	}
+	if (!hasMalformed) return items as T[];
+
+	const dropQueues = new Map<string, boolean[]>();
+	const kept: T[] = [];
+	for (const item of items) {
+		const callKind = malformedResponsesCallKind(item.type);
+		if (callKind) {
+			const malformed = isMalformedOpenAIResponsesToolCall(item);
+			const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+			if (callId !== undefined) {
+				const key = `${callKind}\0${callId}`;
+				const queue = dropQueues.get(key);
+				if (queue) queue.push(malformed);
+				else dropQueues.set(key, [malformed]);
+			}
+			if (malformed) continue;
+			kept.push(item);
+			continue;
+		}
+
+		const outputKind = malformedResponsesOutputKind(item.type);
+		if (outputKind) {
+			const callId = typeof item.call_id === "string" ? item.call_id : undefined;
+			if (callId !== undefined) {
+				const key = `${outputKind}\0${callId}`;
+				const queue = dropQueues.get(key);
+				if (queue && queue.length > 0) {
+					const drop = queue.shift() === true;
+					if (queue.length === 0) dropQueues.delete(key);
+					if (drop) continue;
+				}
+			}
+			kept.push(item);
+			continue;
+		}
+
+		if (breaksMalformedResponsesPairingWindow(item)) dropQueues.clear();
+		kept.push(item);
+	}
+	return kept;
 }
 
 function sanitizeOpenAIResponsesHistoryItemForReplay(
@@ -474,9 +550,9 @@ function sanitizeOpenAIResponsesHistoryItemForReplay(
 	supportsImageDetailOriginal: boolean,
 	preserveReasoningItemIds: boolean,
 ): OpenAIResponsesReplayItem | undefined {
-	// Native replay sends these items instead of the assistant content that
-	// `transformMessages` already stripped of malformed calls (and their paired
-	// results), so apply the same name check here.
+	// Pair filtering already removed malformed calls and the outputs that answer
+	// them. This remains so a malformed name cannot be replayed if it reaches
+	// per-item sanitization without that pass.
 	if (isMalformedOpenAIResponsesToolCall(item)) {
 		return undefined;
 	}
