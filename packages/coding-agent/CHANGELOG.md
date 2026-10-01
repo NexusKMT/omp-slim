@@ -2,19 +2,19 @@
 
 ## [Unreleased]
 
-## [18.4.9] - 2026-10-01
-
 ### Added
 
 - Added global and per-advisor review cadence, including final-yield reviews and intervals that accumulate skipped transcript updates ([#12385](https://github.com/can1357/oh-my-pi/pull/12385) by [@olegpulatov](https://github.com/olegpulatov)).
 - Added per-advisor catch-up policy and cancellable `strict` waiting, so asynchronous turn reviewers can run beside synchronous final reviewers ([#12385](https://github.com/can1357/oh-my-pi/pull/12385) by [@olegpulatov](https://github.com/olegpulatov)).
-- Added an opt-in `omp gc --stale` phase (or setting `gc.stale`) that prunes custom-session markers and terminal breadcrumbs whose session file is gone, and expires old debug reports and collab replicas beyond `gc.staleRetainNewest` (20) and `gc.staleRetainDays` (30) ([#14006](https://github.com/can1357/oh-my-pi/pull/14006) by [@H4vC](https://github.com/H4vC))
-- Added the RPC `cancel_subagent` command (and `RpcClient.cancelSubagent()`) to hard-kill one running subagent, foreground or background, without aborting the session ([#13481](https://github.com/can1357/oh-my-pi/pull/13481) by [@andrebrait](https://github.com/andrebrait)); supersedes [#8666](https://github.com/can1357/oh-my-pi/pull/8666) by [@13kparkin](https://github.com/13kparkin)
-- Added the RPC `steer_subagent` command (and `RpcClient.steerSubagent()`) to message a running subagent as its user, like Agent Hub chat ([#13482](https://github.com/can1357/oh-my-pi/pull/13482) by [@andrebrait](https://github.com/andrebrait)); ported from [#10427](https://github.com/can1357/oh-my-pi/pull/10427) by [@agenticfreedom](https://github.com/agenticfreedom)
-- Added `predict_word` and `predict_word_feedback` RPC commands so hosts with their own composer (web and IDE clients) can show the same ghost-text word completion as the terminal editor, using the `spelling.autocomplete` engine and its prose gates ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
-- Added an opt-in RPC ask dialog: after `set_ask_dialog` enables it, the `ask` tool sends all its questions in one `ask` extension UI request and takes the answers back in one `answers` response, so hosts can render every question with checkboxes or radio buttons and submit them together; hosts that don't opt in keep the one-`select`-per-choice prompts ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
-- Added `SessionManager.onPersistenceNotice()` for SDK hosts: it reports a session moving to a new file (with the old and new paths) without going through the `onPersistenceError` failure channel ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
-- Added `AgentSession.inspectAsyncJob()` (command, cwd, live pids, exit code, output tail, full-output artifact of one async job) and `AgentSession.cancelAsyncJob()`; the Background jobs sheet uses them to inspect and cancel jobs
+
+### Changed
+
+- Advisor notes merge at final boundaries with age markers and at most one permitted continuation per batch; advisor continuations no longer trigger recursive reviews ([#12387](https://github.com/can1357/oh-my-pi/pull/12387) by [@olegpulatov](https://github.com/olegpulatov)).
+
+## [18.4.9] - 2026-10-01
+
+### Added
+
 - Added opt-in stale-session garbage collection with `omp gc --stale` or `gc.stale`, removing orphaned session markers and terminal breadcrumbs and expiring old debug reports and collaboration replicas according to configurable retention limits.
 - Added RPC controls to cancel or steer individual foreground and background subagents without aborting the session.
 - Added RPC word-completion commands so web and IDE hosts can provide the same ghost-text completion available in the terminal editor.
@@ -24,12 +24,6 @@
 
 ### Changed
 
-- Advisor notes merge at final boundaries with age markers and at most one permitted continuation per batch; advisor continuations no longer trigger recursive reviews ([#12387](https://github.com/can1357/oh-my-pi/pull/12387) by [@olegpulatov](https://github.com/olegpulatov)).
-- Migrated `omp predict` compare view to a native UI component featuring interactive table rows, an action bar, and improved status visualization
-- Enhanced MCP authorization prompts with clickable links, native context menus for copying/opening, and improved URL layout
-- `/debug` report bundles and the `/debug` log view write this process's batched log records to disk before reading the log files, so the latest lines are included; the per-rule TTSR registration debug line was removed ([#14011](https://github.com/can1357/oh-my-pi/pull/14011) by [@H4vC](https://github.com/H4vC))
-- RPC mode now sends a `cancel` extension UI request (with `targetId`) when omp's own dialog timeout elapses, for `select`, `confirm`, `input`, and `ask` dialogs, so hosts can close stale dialogs ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
-- Saved output of bash, python, and js eval tool calls is now capped at 16 MB per artifact file (the beginning and the most recent output around a truncation notice) instead of growing without limit, and the output notice for a capped file says it holds a head/tail sample instead of offering it as full output; set `tools.artifactMaxBytes` (MB) to raise the cap, or `0` for unlimited ([#14012](https://github.com/can1357/oh-my-pi/pull/14012) by [@H4vC](https://github.com/H4vC))
 - Improved the `omp predict` comparison view with an interactive native interface, table rows, action controls, and clearer status information.
 - Improved MCP authorization prompts with clickable links, native copy/open context menus, and a clearer URL layout.
 - RPC hosts are now notified when omp cancels an expired `select`, `confirm`, `input`, or `ask` dialog, allowing stale UI prompts to be closed.
