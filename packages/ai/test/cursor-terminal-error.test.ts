@@ -7,6 +7,9 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	AgentServerMessageSchema,
 	ExecServerMessageSchema,
+	CustomErrorDetailsSchema,
+	CursorError,
+	ErrorDetailsSchema,
 	InteractionUpdateSchema,
 	ReadArgsSchema,
 	TextDeltaUpdateSchema,
@@ -26,6 +29,7 @@ type Scenario =
 	| { kind: "connect-detailed-error-after-turn" }
 	| { kind: "connect-classification-detail-after-turn" }
 	| { kind: "connect-cursor-error-details-after-turn"; isRetryable: boolean }
+	| { kind: "connect-structured-error-after-turn" }
 	| { kind: "grpc-trailer-after-turn" }
 	| { kind: "end-before-turn" }
 	| { kind: "hang-after-turn" }
@@ -285,6 +289,27 @@ async function startServer(): Promise<string> {
 			return;
 		}
 
+		if (scenario.kind === "connect-structured-error-after-turn") {
+			const details = create(ErrorDetailsSchema, {
+				error: CursorError.ERROR_RATE_LIMITED,
+				details: create(CustomErrorDetailsSchema, {
+					title: "Capacity reached",
+					detail: "Retry this request shortly",
+					isRetryable: true,
+				}),
+			});
+			stream.write(
+				connectEndErrorFrame("invalid_argument", "Error", [
+					{
+						type: "type.googleapis.com/aiserver.v1.ErrorDetails",
+						value: Buffer.from(toBinary(ErrorDetailsSchema, details)).toString("base64"),
+					},
+				]),
+			);
+			stream.end();
+			return;
+		}
+
 		if (scenario.kind === "hang-after-turn") {
 			return;
 		}
@@ -426,6 +451,15 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("Unable to reach the model provider");
 		expect(AIError.is(result.errorId, AIError.Flag.Transient)).toBe(isRetryable);
+	});
+
+	it("maps Cursor ErrorDetails into retryable provider status and message", async () => {
+		scenario = { kind: "connect-structured-error-after-turn" };
+		const baseUrl = await startServer();
+		const { result } = await collectStream(makeModel(baseUrl));
+		expect(result.stopReason).toBe("error");
+		expect(result.errorStatus).toBe(429);
+		expect(result.errorMessage).toContain("Cursor RATE_LIMITED: Capacity reached: Retry this request shortly");
 	});
 
 	it("surfaces nonzero gRPC trailers that arrive after turnEnded", async () => {
