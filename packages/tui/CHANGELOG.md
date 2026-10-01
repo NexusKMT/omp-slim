@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Fixed tmux pane zoom and unzoom freezing for seconds on large transcripts; the settled rebuild re-lexes every tool result, and the Markdown lexer no longer rescans the paragraph per text run ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
 - Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported

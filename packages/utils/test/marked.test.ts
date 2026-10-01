@@ -175,6 +175,37 @@ describe("marked compatibility", () => {
 		expect(marked.parse("before $x_i$\n\n$$\ny^2\n$$\n")).toBe("<p>before <i>x_i</i></p>\n<math>y^2</math>\n");
 	});
 
+	// A settled tmux resize replays the whole transcript at the new width, so
+	// every tool result is re-lexed inside one frame. The inline run walk probed
+	// urls and hard breaks against the remainder of the paragraph on every run —
+	// and nine stop-character `indexOf` calls each scanned to the end when their
+	// character was absent — which turned that replay into seconds of blocked UI
+	// on multi-megabyte sessions (a 35 KB tool result took ~2 s to lex under
+	// Bun's regex engine; this input took ~3.7 s).
+	test("keeps the inline text-run walk linear on marker-dense text", () => {
+		const dense = Array.from(
+			{ length: 2000 },
+			(_, i) => `row ${i} prefix *em* [ref] \`code\` _und_ tail more text and some words`,
+		).join("\n");
+		// Warm the walk so the measurement is not first-call JIT.
+		new Marked().lexer(dense.slice(0, 4096));
+		const started = performance.now();
+		const tokens = new Marked().lexer(dense);
+		const elapsed = performance.now() - started;
+		// Each line contributes one codespan; a walk that skipped runs to stay
+		// fast would drop them.
+		let codespans = 0;
+		const walk = (list: readonly { type: string; tokens?: readonly unknown[] }[]): void => {
+			for (const token of list) {
+				if (token.type === "codespan") codespans++;
+				if (Array.isArray(token.tokens)) walk(token.tokens as { type: string; tokens?: readonly unknown[] }[]);
+			}
+		};
+		walk(tokens as { type: string; tokens?: readonly unknown[] }[]);
+		expect(codespans).toBe(2000);
+		expect(elapsed).toBeLessThan(1000);
+	});
+
 	// Reference labels are user-controlled and index the ref-def map. An
 	// `Object.prototype` member (`constructor`, `__proto__`, `toString`, …) must
 	// not resolve to a fake definition: the link falls back to literal text and
