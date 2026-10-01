@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed thinking "off" still producing reasoning on Command Code's DeepSeek, GLM, Kimi, Qwen, Gemini, MiniMax, Grok, StepFun, Muse Spark, and GPT models: chat completions has no off value, so "off" was sent as the lowest effort. Every effort-capable id that Command Code serves on `/responses` now uses that endpoint and sends `reasoning.effort: "none"`.
+- Fixed thinking "off" still producing reasoning on Command Code's DeepSeek, GLM, Kimi, Qwen, Gemini, MiniMax, Grok, StepFun, Muse Spark, and GPT models: chat completions has no off value, so "off" was sent as the lowest effort. Every effort-capable id that Command Code serves on `/responses` now uses that endpoint and sends `reasoning.effort: "none"` ([#13949](https://github.com/can1357/oh-my-pi/pull/13949) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.4.5] - 2026-09-30
 
