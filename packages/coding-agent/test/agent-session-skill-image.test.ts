@@ -166,3 +166,23 @@ it("queues an image-bearing skill when another turn starts during vision preproc
 	expect(JSON.stringify(skillRequest?.context.messages)).toContain("other turn");
 	expectDescriptionBeforeSkill(skillRequest?.context.messages ?? []);
 });
+
+it("drops an image-bearing skill when aborted during vision preprocessing", async () => {
+	const visionStarted = Promise.withResolvers<void>();
+	const releaseVision = Promise.withResolvers<void>();
+	const { session, mock, visionCalls } = setup({
+		beforeVisionReply: async () => {
+			visionStarted.resolve();
+			await releaseVision.promise;
+		},
+	});
+	const skillDispatch = session.promptCustomMessage(skill);
+	await visionStarted.promise;
+	await session.abort();
+	releaseVision.resolve();
+	await skillDispatch;
+	await session.waitForIdle();
+	expect(visionCalls()).toBe(1);
+	expect(mock.calls.length).toBe(0);
+	expect(session.messages.length).toBe(0);
+});

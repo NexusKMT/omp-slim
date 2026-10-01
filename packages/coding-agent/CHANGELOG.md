@@ -22,6 +22,7 @@
 - Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
 - Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; omp now stops retrying, leaves the other process's file untouched, and tells you this session's further changes are not being saved to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
 - Fixed writing to a session that another running omp process already has open giving no sign that both write to the same file; omp now warns once when it first writes to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
+- RPC `prompt`, `steer`, and `follow_up` run native `input` handlers in submission order and acknowledge `prompt` only after admission, so a later prompt cannot overtake an idle image skill during vision description, an abort accepted during an earlier hook cancels that frame instead of letting it start a new turn, and a skill failure after the acknowledgement rejects `RpcClient.promptAndWait` instead of being dropped ([#13027](https://github.com/can1357/oh-my-pi/pull/13027) by [@andrebrait](https://github.com/andrebrait)).
 
 ## [18.4.6] - 2026-10-01
 
