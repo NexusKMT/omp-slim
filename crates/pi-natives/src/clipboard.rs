@@ -1,7 +1,8 @@
 //! Clipboard utilities backed by arboard.
 //!
-//! Provides text copy and image read support across Linux, macOS, and Windows.
-//! Performs text copy synchronously so macOS writes run on the caller thread.
+//! Provides text copy, text read, and image read support across Linux, macOS,
+//! and Windows. Performs text copy synchronously so macOS writes run on the
+//! caller thread.
 //! This avoids worker-thread `AppKit` pasteboard warnings in CLI contexts.
 
 use std::io::Cursor;
@@ -187,6 +188,26 @@ fn set_clipboard_text(text: &str) -> Result<()> {
 		.set_text(text)
 		.map_err(|err| Error::from_reason(format!("Failed to copy to clipboard: {err}")))?;
 	Ok(())
+}
+
+/// Read plain text from the system clipboard.
+///
+/// Returns `Ok(None)` when the clipboard holds no text, so callers can tell
+/// "empty" from "unreadable" without spawning a shell bridge.
+///
+/// # Errors
+/// Returns an error if clipboard access fails.
+#[napi]
+pub fn read_text_from_clipboard() -> task::Promise<Option<String>> {
+	task::blocking("clipboard.read_text", (), move |_| -> Result<Option<String>> {
+		let mut clipboard = Clipboard::new()
+			.map_err(|err| Error::from_reason(format!("Failed to access clipboard: {err}")))?;
+		match clipboard.get_text() {
+			Ok(text) => Ok(Some(text)),
+			Err(ClipboardError::ContentNotAvailable) => Ok(None),
+			Err(err) => Err(Error::from_reason(format!("Failed to read clipboard text: {err}"))),
+		}
+	})
 }
 
 /// Read an image from the system clipboard.

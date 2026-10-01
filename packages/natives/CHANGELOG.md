@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `readTextFromClipboard()` to read plain clipboard text without starting a subprocess
+
 ## [18.4.7] - 2026-10-01
 
 ### Fixed
