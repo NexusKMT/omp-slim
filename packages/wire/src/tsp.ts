@@ -99,7 +99,9 @@ export type TspEffect = "shimmer" | "pulse" | "none";
  * One styled run of text. `s` holds space-separated semantic tokens
  * (`muted`, `dim`, `strong`, `em`, `accent`, `success`, `warning`, `error`,
  * `info`, `code`, `mono`, `path`, `key`, `link`, `num`, `ins`, `del`, `mark`,
- * `icon`, `hide`) or omp theme token names (`thinkingText`, `toolTitle`, …).
+ * `typo`, `icon`, `hide`) or omp theme token names (`thinkingText`,
+ * `toolTitle`, …). `mark` highlights (a match, the selected row); `typo` is a
+ * misspelled word, which the terminal underlines as its own spell checker does.
  * `icon` marks a run of icon glyphs (Nerd Font / Private Use Area codepoints):
  * the terminal draws it in its icon face and spaces it from neighbouring text
  * itself, so senders omit padding spaces around icons. `hide` takes the run
@@ -718,6 +720,18 @@ export interface TspEffortProps {
 	level: string;
 }
 
+/**
+ * A tick on a meter's track (compaction threshold, speculation point). A bar mark's `icon`
+ * (a symbol name, e.g. `context.compaction`) sits on the track, which breaks for it.
+ */
+export interface TspMeterMark {
+	/** Position, 0–1. */
+	at: number;
+	tone?: TspTone;
+	title?: string;
+	icon?: string;
+}
+
 /** A value drawn as a bar, ring or block grid (§8.2): context %, usage windows, agent context. */
 export interface TspMeterProps {
 	/** 0–1, or null for unknown. */
@@ -727,11 +741,13 @@ export interface TspMeterProps {
 	steps?: number;
 	/** Stacked parts instead of one fill (context breakdown); values sum to ≤ 1. */
 	parts?: readonly { value: number; token?: string; label?: string; hatch?: boolean }[];
-	/** Tick marks on the track (compaction threshold, speculation point). */
-	marks?: readonly { at: number; tone?: TspTone; title?: string }[];
+	marks?: readonly TspMeterMark[];
 	/** Tone switches: at or above `warn` → warning, `bad` → error. */
 	thresholds?: { warn?: number; bad?: number };
+	/** The value as text (`74%`). */
 	label?: TspText;
+	/** The whole the track spans as text (a context window's `200K`). */
+	total?: TspText;
 	size?: "sm" | "md" | "lg";
 }
 /** Series data drawn natively: the usage heatmap, app dashboards (§9.2). */
