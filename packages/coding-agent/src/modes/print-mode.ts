@@ -13,8 +13,13 @@ import { resolveMCPTimeoutMs } from "../mcp/timeout";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { CREDENTIAL_DISABLED_NOTICE_SOURCE } from "../session/credential-disabled-notice";
 import { isSilentAbort } from "../session/messages";
+import { SessionPersistenceNotice } from "../session/session-manager";
 import { flushTelemetryExport } from "../telemetry-export";
-import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "./persistence-failure";
+import {
+	formatPersistenceDurabilityFailure,
+	formatPersistenceFailure,
+	formatPersistenceNotice,
+} from "./persistence-failure";
 import { initializeExtensions } from "./runtime-init";
 
 import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
@@ -217,6 +222,10 @@ async function runPrintModeCore(
 	// Discriminates a store failure from any other dispose rejection below.
 	let persistenceFailure: Error | undefined;
 	session.sessionManager.onPersistenceError(error => {
+		if (error instanceof SessionPersistenceNotice) {
+			writeStderrLine(`Warning: ${formatPersistenceNotice(error.message)}`);
+			return;
+		}
 		persistenceFailure = error;
 		writeStderrLine(formatPersistenceFailure(error.message));
 	});

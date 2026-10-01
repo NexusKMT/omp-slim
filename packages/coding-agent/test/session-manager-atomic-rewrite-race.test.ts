@@ -1,4 +1,6 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
+import * as path from "node:path";
+import * as fs from "node:fs/promises";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import {
 	IndexedSessionStorage,
@@ -7,12 +9,12 @@ import {
 import {
 	SessionManager,
 	SessionPersistenceIndeterminateError,
+	SessionPersistenceNotice,
 } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	FileSessionStorage,
 	MemorySessionStorage,
 	type SessionStorageWriter,
-	SessionWriteConflictError,
 	type WriteTextAtomicOptions,
 } from "@oh-my-pi/pi-coding-agent/session/session-storage";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -328,40 +330,82 @@ describe("SessionManager atomic rewrite race", () => {
 	});
 });
 describe("SessionManager cross-process rewrite freshness", () => {
-	it("refuses to erase a durable turn appended by another manager", async () => {
-		const tempDir = TempDir.createSync("@omp-session-rewrite-conflict-");
-		try {
-			const first = SessionManager.create(tempDir.path(), tempDir.path(), new FileSessionStorage());
-			await first.ensureOnDisk();
-			const sessionFile = first.getSessionFile();
-			if (!sessionFile) throw new Error("Expected session file");
+	const userTurn = (content: string) => ({ role: "user" as const, content, timestamp: Date.now() });
+	const ourTurnsAfter = Array.from({ length: 5 }, (_, turn) => `our turn ${turn} after the conflict`);
 
-			const second = await SessionManager.open(sessionFile, tempDir.path(), new FileSessionStorage(), {
+	// Each row meets the other writer's append through a different full-rewrite path.
+	it.each([
+		{
+			path: "an atomic rewrite (compaction, branch, entry discard)",
+			tornTail: false,
+			rewrite: (ours: SessionManager) => ours.rewriteEntries(),
+		},
+		{
+			path: "the synchronous rewrite an append runs on a session that needs repair",
+			tornTail: true,
+			rewrite: undefined,
+		},
+	])(
+		"leaves another writer's appends intact and moves to a sibling file after $path",
+		async ({ tornTail, rewrite }) => {
+			using tempDir = TempDir.createSync("@omp-session-rewrite-conflict-");
+			const creator = SessionManager.create(tempDir.path(), tempDir.path(), new FileSessionStorage());
+			await creator.ensureOnDisk();
+			const contested = creator.getSessionFile();
+			if (!contested) throw new Error("Expected session file");
+			creator.appendMessage(userTurn("our turn before the conflict"));
+			await creator.close();
+			// A torn line makes the next append replace the whole file.
+			if (tornTail) await fs.appendFile(contested, '{"type":"message"\n');
+
+			const storage = new FileSessionStorage();
+			const ours = await SessionManager.open(contested, tempDir.path(), storage, { suppressBreadcrumb: true });
+			// A second process resumes the same file and appends its own turn.
+			const theirs = await SessionManager.open(contested, tempDir.path(), new FileSessionStorage(), {
 				suppressBreadcrumb: true,
 			});
-			second.appendMessage({ role: "user", content: "durable second-writer turn", timestamp: Date.now() });
-			await second.close();
+			theirs.appendMessage(userTurn("durable second-writer turn"));
+			await theirs.close();
+			const theirBytes = await Bun.file(contested).text();
 
-			await expect(first.rewriteEntries()).rejects.toBeInstanceOf(SessionWriteConflictError);
+			const notices: Error[] = [];
+			ours.onPersistenceError(error => notices.push(error));
+			const fullRewrites = [vi.spyOn(storage, "writeTextSync"), vi.spyOn(storage, "writeTextAtomic")];
+			try {
+				await rewrite?.(ours);
+				for (const turn of ourTurnsAfter) ours.appendMessage(userTurn(turn));
+				// One attempt meets the foreign append and one publishes the sibling;
+				// later appends go incremental instead of re-serializing the transcript.
+				expect(fullRewrites.reduce((calls, spy) => calls + spy.mock.calls.length, 0)).toBe(2);
+				await ours.flush();
+			} finally {
+				for (const spy of fullRewrites) spy.mockRestore();
+			}
 
-			const reopened = await SessionManager.open(sessionFile, tempDir.path(), new FileSessionStorage(), {
+			// The other writer's file is never clobbered.
+			expect(await Bun.file(contested).text()).toBe(theirBytes);
+			// Our whole transcript lands in a fresh sibling, and the user is told where.
+			const sibling = ours.getSessionFile();
+			if (!sibling) throw new Error("Expected session file");
+			expect(sibling).not.toBe(contested);
+			expect(path.dirname(sibling)).toBe(path.dirname(contested));
+			expect(notices).toHaveLength(1);
+			expect(notices[0]).toBeInstanceOf(SessionPersistenceNotice);
+			expect(notices[0]?.message).toContain(sibling);
+			await ours.close();
+
+			const reopened = await SessionManager.open(sibling, tempDir.path(), new FileSessionStorage(), {
 				suppressBreadcrumb: true,
 			});
-			expect(
-				reopened
-					.getEntries()
-					.some(
-						entry =>
-							entry.type === "message" &&
-							entry.message.role === "user" &&
-							entry.message.content === "durable second-writer turn",
-					),
-			).toBe(true);
+			const userContents = reopened
+				.getEntries()
+				.flatMap(entry =>
+					entry.type === "message" && entry.message.role === "user" ? [entry.message.content] : [],
+				);
+			expect(userContents).toEqual(["our turn before the conflict", ...ourTurnsAfter]);
 			await reopened.close();
-		} finally {
-			await tempDir.remove();
-		}
-	});
+		},
+	);
 });
 
 describe("SessionManager atomic rewrite fence spans writer.close()", () => {

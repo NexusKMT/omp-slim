@@ -22,3 +22,12 @@ export function formatPersistenceDurabilityFailure(message: string): string {
 	const detail = truncateToWidth(replaceTabs(sanitizeText(message)).replace(/[\r\n]+/g, " "), TRUNCATE_LENGTHS.LINE);
 	return `Session persistence is still failing at shutdown: ${detail}. The session transcript is not durable; unsaved entries are lost.`;
 }
+
+/**
+ * A {@link SessionPersistenceNotice}: saving continues, so this claims no
+ * failure. Not truncated, because the notice names the session file the user
+ * may need to find.
+ */
+export function formatPersistenceNotice(message: string): string {
+	return replaceTabs(sanitizeText(message)).replace(/[\r\n]+/g, " ");
+}

@@ -47,6 +47,7 @@ import { requestTextPrediction, textPredictionBackend } from "../../predict/clie
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
+import { SessionPersistenceNotice } from "../../session/session-manager";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
@@ -54,7 +55,11 @@ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
 import { selectRpcEntries } from "./rpc-compat";
 import { calculateTokensPerSecond } from "../../utils/token-rate";
-import { formatPersistenceDurabilityFailure, formatPersistenceFailure } from "../persistence-failure";
+import {
+	formatPersistenceDurabilityFailure,
+	formatPersistenceFailure,
+	formatPersistenceNotice,
+} from "../persistence-failure";
 import { initializeExtensions } from "../runtime-init";
 import { cfgSpellingAutocomplete } from "../settings";
 import { isRpcHostToolResult, isRpcHostToolUpdate, RpcHostToolBridge } from "./host-tools";
@@ -1065,6 +1070,12 @@ export function registerRpcPersistenceSurface(
 	onFailure?: (error: Error) => void,
 ): () => void {
 	return session.sessionManager.onPersistenceError(error => {
+		if (error instanceof SessionPersistenceNotice) {
+			const message = formatPersistenceNotice(error.message);
+			output({ type: "notice", level: "warning", message, source: "session-persistence" });
+			process.stderr.write(`${message}\n`);
+			return;
+		}
 		onFailure?.(error);
 		const message = formatPersistenceFailure(error.message);
 		output({ type: "notice", level: "error", message, source: "session-persistence" });

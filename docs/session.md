@@ -530,12 +530,14 @@ Ordinary completed appends update memory and local file storage synchronously on
 - `flush()` drains async disk/storage queues and the open writer (no `fsync`); `flushSync()` drains synchronously supported work or rewrites a non-current file. It cannot confirm queued remote publication; those backends still require awaited `flush()`/drain.
 - Atomic full rewrites use storage `writeTextAtomic` with a commit guard and expected byte-size precondition; file storage stages then renames over the target, including an EPERM-safe move-aside fallback.
 - Local appends and publication share a cross-process publish lock. A changed byte size raises `SessionWriteConflictError`; lock contention raises `SessionLockError` without publishing the staged rewrite. This is not a content-hash comparison and cannot protect against non-cooperating external writers.
+- On the file and memory backends, a `SessionWriteConflictError` on durable bytes means another writer (usually a second omp process on the same session) appended since this manager last wrote. Retrying could never succeed, so the manager leaves that file to the other writer, repoints the session at a fresh sibling `<timestamp>_<session-id>.jsonl` in the same directory (copying the artifacts directory), publishes the whole in-memory transcript there once, and continues appending incrementally. Indexed backends keep reporting the conflict, since there it can be the manager racing its own unconfirmed publish.
 - `appendEntriesAtomically()` groups a synchronous callback's appends into one atomic publication. Failure rolls back staged entries and repairs retained concurrent work.
 - Rewrites serve renames, entry rewrites, migrations/sanitization, move/fork, and recovery. Session-title changes normally update the fixed-width title slot and append a `title_change` audit entry instead of rewriting the body.
 
 ### Error behavior
 
 - Ordinary append failures are latched and logged once with session-file context rather than thrown into the turn loop. Later appends may retry the complete in-memory journal; `flush()`/`flushSync()` and close surface unresolved failures.
+- `onPersistenceError` observers also receive `SessionPersistenceNotice`s, which latch nothing: the session moving to a sibling file after a write conflict. Notices raised before any observer subscribed go to the first subscriber. Interactive mode shows them as warnings, print mode on stderr, RPC as `warning` notice frames.
 - Atomic batch and recovery paths attempt authoritative repair. If publication may have happened and repair cannot be proven durable, `SessionPersistenceIndeterminateError` fails closed with the original and recovery errors.
 - Writer close propagates the first meaningful error. Final disposal seals the manager, making late appends/rewrites no-ops, then releases retained entries so a disposed manager cannot overwrite a revived transcript.
 
