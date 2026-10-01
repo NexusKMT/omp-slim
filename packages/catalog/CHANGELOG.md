@@ -6,6 +6,10 @@
 
 - Added catalog cache-warming lifetimes for cache-capable Claude models on Amazon Bedrock Converse and supported Claude Messages families on Bedrock Runtime and Mantle: 5 minutes by default, with a 1-hour Converse tier only where the wire supports it ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
+### Fixed
+
+- Fixed thinking "off" still producing reasoning on Command Code models served on `/responses` (DeepSeek, GLM, Kimi, Gemini, MiniMax, Grok, StepFun, Muse Spark, and GPT-5.6) ([#13949](https://github.com/can1357/oh-my-pi/pull/13949) by [@H4vC](https://github.com/H4vC)).
+
 ## [18.4.5] - 2026-09-30
 
 ### Added
