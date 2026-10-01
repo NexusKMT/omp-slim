@@ -347,6 +347,14 @@ interface AdvisorCarry {
 	eligibleUpdates: number;
 }
 
+/** Options for the headless advisor drain ({@link SessionAdvisors.waitForAdvisorCatchup}). */
+export interface AdvisorCatchupOptions {
+	/** Keep waiting while a failed review retries or switches to its fallback model. */
+	waitThroughRecovery?: boolean;
+	/** Wait on `strict` advisors without the deadline (top-level headless runs only). */
+	strictWithoutDeadline?: boolean;
+}
+
 /** Inputs that configure the advisor roster owned by a session. */
 export interface SessionAdvisorsOptions {
 	enabled: boolean;
@@ -2397,14 +2405,18 @@ export class SessionAdvisors {
 	 * will abandon when the shared deadline expires or an advisor stops for good
 	 * (halt, quota pause). A failing advisor releases the drain at once unless
 	 * `waitThroughRecovery` is set: then its retry and fallback-chain recovery is
-	 * waited through instead of being abandoned mid-switch. An advisor whose
-	 * catch-up policy is `strict` is waited on without the deadline, as at every
-	 * primary boundary; its card events then get a full `timeoutMs` of their own.
+	 * waited through instead of being abandoned mid-switch. With
+	 * `strictWithoutDeadline`, an advisor whose catch-up policy is `strict` is
+	 * waited on without the deadline, as at every primary boundary, and its card
+	 * events then get a full `timeoutMs` of their own. Callers bound by a hard
+	 * teardown deadline (subagent cleanup) leave it unset.
 	 */
-	async waitForAdvisorCatchup(timeoutMs: number, options?: { waitThroughRecovery?: boolean }): Promise<boolean> {
+	async waitForAdvisorCatchup(timeoutMs: number, options?: AdvisorCatchupOptions): Promise<boolean> {
 		let deadline = Date.now() + timeoutMs;
 		const globalSyncBacklog = cfgAdvisorSyncBacklog.get(this.#host.settings);
-		const strict = this.#advisors.map(advisor => (advisor.syncBacklog ?? globalSyncBacklog) === "strict");
+		const strict = this.#advisors.map(
+			advisor => options?.strictWithoutDeadline === true && (advisor.syncBacklog ?? globalSyncBacklog) === "strict",
+		);
 		const results = await Promise.all(
 			this.#advisors.map((advisor, index) =>
 				advisor.runtime.waitForCatchup(strict[index] ? undefined : timeoutMs, 1, undefined, options),

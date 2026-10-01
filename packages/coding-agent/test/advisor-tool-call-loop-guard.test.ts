@@ -15,6 +15,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { finalizeSubagentLifecycle } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { AdvisorLoopGuard } from "../src/advisor/loop-guard";
@@ -495,11 +496,18 @@ describe("advisor tool-call loop guard", () => {
 		).toBe(true);
 	});
 
-	it("reviews a cadence-skipped final yield in the headless drain, past the drain budget when strict", async () => {
+	/**
+	 * Session with one strict `agent-end` reviewer at interval 2 whose review
+	 * takes `reviewDelayMs`, after one primary prompt: its only final yield is
+	 * held, as in a one-prompt headless run.
+	 */
+	async function promptStrictFinalReviewer(
+		reviewDelayMs: number,
+	): Promise<{ live: AgentSession; reviews: Context[] }> {
 		const primaryMock = createMockModel({ provider: "anthropic", responses: [{ content: ["primary complete"] }] });
 		const advisorMock = createMockModel({
 			provider: "anthropic",
-			responses: [{ content: ["Reviewed."], delayMs: 200 }],
+			responses: [{ content: ["Reviewed."], delayMs: reviewDelayMs }],
 		});
 		const reviews: Context[] = [];
 		const advisorStreamFn: StreamFn = (streamModel, context, options) => {
@@ -511,7 +519,7 @@ describe("advisor tool-call loop guard", () => {
 			"compaction.enabled": false,
 			"todo.enabled": false,
 		});
-		session = new AgentSession({
+		const live = new AgentSession({
 			agent: new Agent({
 				getApiKey: () => "test-key",
 				initialState: { model: primaryMock, systemPrompt: [], tools: [] },
@@ -524,17 +532,44 @@ describe("advisor tool-call loop guard", () => {
 			advisorStreamFn,
 			advisorConfigs: [{ name: "Final reviewer", reviewMode: "agent-end", reviewInterval: 2 }],
 		});
+		session = live;
 		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-
-		// `omp -p` runs one prompt: its only final yield is the first of two.
-		await session.prompt("ship the retry change");
+		expect(live.setAdvisorEnabled(true)).toBe(true);
+		await live.prompt("ship the retry change");
 		expect(reviews).toHaveLength(0);
+		return { live, reviews };
+	}
 
-		session.prepareForHeadlessAdvisorDrain();
-		expect(await session.waitForAdvisorCatchup(50)).toBe(true);
+	it("reviews a cadence-skipped final yield in the print-mode drain, past the drain budget when strict", async () => {
+		const { live, reviews } = await promptStrictFinalReviewer(200);
+
+		live.prepareForHeadlessAdvisorDrain();
+		expect(await live.waitForAdvisorCatchup(50, { waitThroughRecovery: true, strictWithoutDeadline: true })).toBe(
+			true,
+		);
 		expect(reviews).toHaveLength(1);
 		expect(JSON.stringify(reviews[0]!.messages)).toContain("ship the retry change");
+	});
+
+	it("finishes subagent teardown within its cleanup deadline despite a strict reviewer", async () => {
+		const { live, reviews } = await promptStrictFinalReviewer(10_000);
+
+		const started = performance.now();
+		await finalizeSubagentLifecycle({
+			id: "strict-reviewer-subagent",
+			session: live,
+			aborted: false,
+			keepAlive: false,
+			isolated: false,
+			agentIdleTtlMs: 0,
+			reviveSession: null,
+			cleanupDeadlineAt: Date.now() + 200,
+		});
+		session = undefined;
+
+		// The held final yield was still sent for review before disposal.
+		expect(reviews).toHaveLength(1);
+		expect(performance.now() - started).toBeLessThan(2_000);
 	});
 
 	it("leaves the advisor unbounded when the shared loop guard is disabled", async () => {
