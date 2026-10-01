@@ -81,10 +81,12 @@ const PINNED_NATIVE_PRIORITY = 1000;
 /**
  * Segments a TSP terminal shows outside the composer's facts: the model chip,
  * the context hairline and usage text (context, cost), Tern's pane header
- * (path, git), the tab title (session name, PR), the HUD pills (subagents)
- * and the editor (vim). The brand (`pi`) stays only while focus-proxied.
+ * (path, git), the tab title (session name, PR), the HUD pills (subagents),
+ * the editor (vim) and the brand (`pi`; while focus-proxied, the viewed agent
+ * is the composer's viewing header).
  */
 const COMPOSER_HOMED_SEGMENTS: Partial<Record<StatusLineSegmentId, true>> = {
+	pi: true,
 	model: true,
 	context_pct: true,
 	context_total: true,
@@ -3379,7 +3381,7 @@ export class StatusLineComponent<TSession extends StatusLineSession = StatusLine
 		const facts: NativeNode[] = [];
 		const collect = (side: "left" | "right", ids: readonly StatusLineSegmentId[]): void => {
 			ids.forEach((id, index) => {
-				if (COMPOSER_HOMED_SEGMENTS[id] || (id === "pi" && ctx.focusedAgentId === undefined)) return;
+				if (COMPOSER_HOMED_SEGMENTS[id]) return;
 				const view = describeSegment(id, ctx);
 				if (!view) return;
 				const props: TspProps<"seg"> = {
