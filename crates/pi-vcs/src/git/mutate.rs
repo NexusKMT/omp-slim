@@ -619,29 +619,26 @@ impl GitRepo {
 	) -> Result<()> {
 		let repo = self.gix()?;
 		let (dirty_tracked, untracked) = collect_clone_reconciliation_paths(&repo)?;
+		// One snapshot of the source index decides which paths to copy and is
+		// what gets installed, so a concurrent `git add` in the source cannot
+		// split the two.
+		let source_index = if self.info().git_dir.join("index").is_file() {
+			Some(load_index_or_empty(&repo, "git worktree add")?)
+		} else {
+			None
+		};
 		// The checkout wrote `HEAD` content, so paths whose index entry differs
 		// from `HEAD` (staged edits, additions, and deletions) need the source
 		// bytes too, even when the source worktree matches its index.
-		let source_index = load_index_or_empty(&repo, "git worktree add")?;
-		let head_index = repo
-			.index_from_tree(&commit_tree(&repo, &head_commit)?)
-			.map_err(|err| Error::backend("git worktree add", err))?;
-		let mut staged = BTreeSet::new();
-		for entry in source_index.entries() {
-			let entry_path = entry.path(&source_index);
-			if head_index
-				.entry_by_path(entry_path)
-				.is_none_or(|head| head.id != entry.id || head.mode != entry.mode)
-			{
-				staged.insert(entry_path.to_owned());
-			}
-		}
-		for entry in head_index.entries() {
-			let entry_path = entry.path(&head_index);
-			if source_index.entry_by_path(entry_path).is_none() {
-				staged.insert(entry_path.to_owned());
-			}
-		}
+		let staged = match &source_index {
+			Some(source_index) => {
+				let head_index = repo
+					.index_from_tree(&commit_tree(&repo, &head_commit)?)
+					.map_err(|err| Error::backend("git worktree add", err))?;
+				index_diff_paths(source_index, &head_index)
+			},
+			None => BTreeSet::new(),
+		};
 
 		for relative in dirty_tracked.iter().chain(&untracked).chain(&staged) {
 			let relative = relative.to_path_lossy();
@@ -670,17 +667,14 @@ impl GitRepo {
 				Err(err) => return Err(err.into()),
 			}
 		}
-		let source_index_path = self.info().git_dir.join("index");
-		if !source_index_path.is_file() {
+		let Some(mut index) = source_index else {
 			return Ok(());
-		}
-		fs::copy(source_index_path, admin.join("index"))?;
-		// The copied stat cache describes the source files. Checkout filters
+		};
+		// The source stat cache describes the source files. Checkout filters
 		// (e.g. `core.autocrlf`) can write clean files at a different size, and
 		// git reports a size mismatch as modified without hashing the content.
-		let linked_repo = Self::require(path)?.gix()?;
-		let mut index = load_index_or_empty(&linked_repo, "git worktree add")?;
 		refresh_clean_index_stats(&mut index, path, &dirty_tracked)?;
+		index.set_path(admin.join("index"));
 		index
 			.write(INDEX_WRITE)
 			.map_err(|err| Error::backend("git worktree add", err))
@@ -732,34 +726,26 @@ impl GitRepo {
 			.index_from_tree(&tree)
 			.map_err(|err| Error::backend("git worktree add", err))?;
 
-		let current_paths: BTreeSet<BString> = current
-			.entries()
-			.iter()
-			.map(|entry| entry.path(&current).to_owned())
-			.collect();
-		let target_paths: BTreeSet<BString> = target
-			.entries()
-			.iter()
-			.map(|entry| entry.path(&target).to_owned())
-			.collect();
-		let mut delete = current_paths
-			.difference(&target_paths)
-			.cloned()
-			.collect::<BTreeSet<_>>();
+		let differing = index_diff_paths(&current, &target);
+		let (write_paths, removed): (BTreeSet<BString>, BTreeSet<BString>) = differing
+			.into_iter()
+			.partition(|entry_path| target.entry_by_path(entry_path.as_bstr()).is_some());
+		let mut delete = removed;
 		delete.extend(untracked);
-		delete.extend(dirty_tracked.difference(&target_paths).cloned());
+		delete.extend(
+			dirty_tracked
+				.iter()
+				.filter(|entry_path| target.entry_by_path(entry_path.as_bstr()).is_none())
+				.cloned(),
+		);
 
-		let mut write = BTreeSet::new();
-		for entry in target.entries() {
-			let path = entry.path(&target);
-			if current
-				.entry_by_path(path)
-				.is_none_or(|old| old.id != entry.id || old.mode != entry.mode)
-				|| dirty_tracked.contains(path)
-			{
-				write.insert(path.to_owned());
-			}
-		}
+		let mut write = write_paths;
+		write.extend(
+			dirty_tracked
+				.iter()
+				.filter(|entry_path| target.entry_by_path(entry_path.as_bstr()).is_some())
+				.cloned(),
+		);
 
 		for relative in &delete {
 			let full = path.join(relative.to_path_lossy());
@@ -1554,6 +1540,28 @@ fn set_config_file(path: &Path, key: &str, value: &str) -> Result<()> {
 	config.write_to(&mut bytes)?;
 	fs::write(path, bytes)?;
 	Ok(())
+}
+
+/// Paths whose entry differs between `left` and `right` (blob id or mode), or
+/// that exist on only one side.
+fn index_diff_paths(left: &gix::index::File, right: &gix::index::File) -> BTreeSet<BString> {
+	let mut paths = BTreeSet::new();
+	for entry in left.entries() {
+		let entry_path = entry.path(left);
+		if right
+			.entry_by_path(entry_path)
+			.is_none_or(|other| other.id != entry.id || other.mode != entry.mode)
+		{
+			paths.insert(entry_path.to_owned());
+		}
+	}
+	for entry in right.entries() {
+		let entry_path = entry.path(right);
+		if left.entry_by_path(entry_path).is_none() {
+			paths.insert(entry_path.to_owned());
+		}
+	}
+	paths
 }
 
 /// Point the stat cache of every index entry outside `dirty` at the file now
