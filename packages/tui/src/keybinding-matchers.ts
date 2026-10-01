@@ -83,20 +83,17 @@ function matchesEffectiveKeys(data: string, keys: readonly KeyId[]): boolean {
  * Used by forms where plain Enter inserts a newline and a modified-Enter chord
  * submits — the main editor's follow-up handler, the agent dashboard's new-agent
  * description, and the hook editor's hook-style mode. The keybinding defaults to
- * `["ctrl+q", "ctrl+enter"]` (Ctrl+Q alone under Windows Terminal, where
- * Ctrl+Enter inserts a newline; #1903).
- *
- * The built-in chords apply only when the active manager does not define the
- * action (plain TUI keybindings). An app manager whose effective binding is
- * empty — the user or a collision rule claimed every chord — matches nothing.
+ * `["ctrl+q", "ctrl+enter"]` so Windows Terminal (which can't deliver a distinct
+ * Ctrl+Enter event; #1903) still has a working chord without user remapping.
  *
  * Also recognizes modifier-tagged LF as Ctrl+Enter only when Ctrl+Enter is an
  * effective follow-up binding.
  */
 export function matchesAppFollowUp(data: string): boolean {
 	const keybindings = getKeybindings();
-	if (keybindings.getDefinition("app.message.followUp") === undefined) {
-		return matchesEffectiveKeys(data, ["ctrl+enter", "ctrl+q"]);
+	const keys = keybindings.getKeys("app.message.followUp");
+	if (keys.length > 0) {
+		return matchesEffectiveKeys(data, keys);
 	}
-	return matchesEffectiveKeys(data, keybindings.getKeys("app.message.followUp"));
+	return matchesEffectiveKeys(data, ["ctrl+enter", "ctrl+q"]);
 }

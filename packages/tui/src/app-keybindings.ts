@@ -18,7 +18,6 @@ import {
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
 } from "./keybindings";
-import { isInsideTerminalMultiplexer, isWindowsTerminalSession } from "./terminal-multiplexer";
 
 /**
  * Application-level keybindings (coding agent specific).
@@ -143,9 +142,9 @@ export const KEYBINDINGS = {
 		description: "Open external editor",
 	},
 	"app.message.followUp": {
-		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty).
-		// Ctrl+Q is listed first so the binding works everywhere; Windows Terminal
-		// drops the Ctrl+Enter default so it inserts a newline there (see getKeys).
+		// Ctrl+Enter is preserved for terminals that deliver it (Kitty/iTerm2/WezTerm/Ghostty),
+		// but Windows Terminal does not emit a distinct event for Ctrl+Enter — Ctrl+Q is listed
+		// first so the default binding works there without remapping (#1903).
 		defaultKeys: ["ctrl+q", "ctrl+enter"],
 		description: "Send follow-up message",
 	},
@@ -405,18 +404,6 @@ export interface KeybindingsCreateOptions {
 	inheritedAgentDir?: string;
 }
 
-/** Host-terminal adjustments to the default bindings. */
-export interface KeybindingsHostOptions {
-	/**
-	 * Leave Ctrl+Enter to the editor's newline instead of the follow-up default.
-	 * Windows Terminal builds without the kitty keyboard protocol deliver
-	 * Ctrl+Enter as a bare LF the editor inserts as a newline; dropping the
-	 * default keeps the chord a newline on every build. {@link KeybindingsManager.create}
-	 * sets it for direct Windows Terminal sessions.
-	 */
-	ctrlEnterIsNewline?: boolean;
-}
-
 /**
  * Load raw config from a file synchronously.
  * Returns parsed JSON/YAML or null if file doesn't exist or is invalid.
@@ -593,19 +580,12 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	#configPath: string | undefined;
 	#inheritedConfigPath: string | undefined;
 	#userBindings: KeybindingsConfig;
-	#ctrlEnterIsNewline: boolean;
 
-	constructor(
-		userBindings: KeybindingsConfig = {},
-		configPath?: string,
-		inheritedConfigPath?: string,
-		options: KeybindingsHostOptions = {},
-	) {
+	constructor(userBindings: KeybindingsConfig = {}, configPath?: string, inheritedConfigPath?: string) {
 		super(KEYBINDINGS, userBindings);
 		this.#configPath = configPath;
 		this.#inheritedConfigPath = inheritedConfigPath;
 		this.#userBindings = userBindings;
-		this.#ctrlEnterIsNewline = options.ctrlEnterIsNewline ?? false;
 	}
 
 	/**
@@ -614,9 +594,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	 */
 	static create(agentDir: string = getAgentDir(), options: KeybindingsCreateOptions = {}): KeybindingsManager {
 		const { config: userBindings, profilePath, inheritedPath } = loadMergedKeybindingsConfig(agentDir, options);
-		const manager = new KeybindingsManager(userBindings, profilePath, inheritedPath, {
-			ctrlEnterIsNewline: isWindowsTerminalSession() && !isInsideTerminalMultiplexer(),
-		});
+		const manager = new KeybindingsManager(userBindings, profilePath, inheritedPath);
 		// Set globally so getKeybindings() returns this manager
 		setKeybindings(manager);
 		return manager;
@@ -625,8 +603,8 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	/**
 	 * Create an in-memory keybindings manager without file persistence.
 	 */
-	static inMemory(userBindings: KeybindingsConfig = {}, options: KeybindingsHostOptions = {}): KeybindingsManager {
-		return new KeybindingsManager(userBindings, undefined, undefined, options);
+	static inMemory(userBindings: KeybindingsConfig = {}): KeybindingsManager {
+		return new KeybindingsManager(userBindings);
 	}
 
 	/**
@@ -647,14 +625,7 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	}
 
 	override getKeys(keybinding: Keybinding): KeyId[] {
-		let keys = super.getKeys(keybinding);
-		if (
-			this.#ctrlEnterIsNewline &&
-			keybinding === FOLLOW_UP_KEYBINDING &&
-			this.#userBindings[keybinding] === undefined
-		) {
-			keys = removeKey(keys, "ctrl+enter");
-		}
+		const keys = super.getKeys(keybinding);
 		const fallbackKey = getFallbackKey(keybinding);
 		if (fallbackKey === undefined || this.#userBindings[keybinding] !== undefined) return keys;
 		if (!userBindingClaimsKey(this.#userBindings, fallbackKey, keybinding)) return keys;

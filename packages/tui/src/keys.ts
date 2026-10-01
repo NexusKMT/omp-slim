@@ -24,7 +24,18 @@ import {
 	parseKey as parseKeyNative,
 	parseKittySequence as parseKittySequenceNative,
 } from "@oh-my-pi/pi-natives";
-import { isInsideTerminalMultiplexer, isWindowsTerminalSession } from "./terminal-capabilities";
+import { isInsideTerminalMultiplexer } from "./terminal-capabilities";
+
+// =============================================================================
+// Platform Detection
+// =============================================================================
+
+/** Whether the local process is running directly under Windows Terminal. */
+export function isWindowsTerminalSession(): boolean {
+	return (
+		Boolean(process.env.WT_SESSION) && !process.env.SSH_CONNECTION && !process.env.SSH_CLIENT && !process.env.SSH_TTY
+	);
+}
 
 /**
  * Match ambiguous legacy Backspace bytes against an expected modifier mask.

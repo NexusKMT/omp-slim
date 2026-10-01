@@ -1,7 +1,4 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { Component } from "@oh-my-pi/pi-tui";
 import { KeybindingsManager } from "@oh-my-pi/pi-tui/app-keybindings";
 import { matchesAppFollowUp } from "@oh-my-pi/pi-tui/keybinding-matchers";
@@ -146,63 +143,14 @@ describe("ProcessTerminal win32-input-mode fallback", () => {
 	});
 });
 
-describe("app.message.followUp under Windows Terminal", () => {
-	const envKeys = ["WT_SESSION", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "TMUX", "STY", "ZELLIJ"] as const;
-	const saved = new Map<string, string | undefined>();
-
-	function enterEnv(overrides: Partial<Record<(typeof envKeys)[number], string>>): void {
-		for (const key of envKeys) {
-			if (!saved.has(key)) saved.set(key, process.env[key]);
-			delete process.env[key];
-		}
-		Object.assign(process.env, overrides);
-	}
-
+describe("decoded Enter chords under the default keybindings", () => {
 	afterEach(() => {
-		for (const [key, value] of saved) {
-			if (value === undefined) delete process.env[key];
-			else process.env[key] = value;
-		}
-		saved.clear();
 		setKeybindings(KeybindingsManager.inMemory());
 	});
 
-	it("creates managers that leave Ctrl+Enter to the editor's newline under Windows Terminal", async () => {
-		enterEnv({ WT_SESSION: "1" });
-		const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-wt-keybindings-"));
-		try {
-			const manager = KeybindingsManager.create(agentDir);
-			expect(manager.getKeys("app.message.followUp")).toEqual(["ctrl+q"]);
-			expect(matchesAppFollowUp("\x1b[13;5u")).toBe(false);
-			expect(matchesAppFollowUp("\x11")).toBe(true);
-		} finally {
-			await fs.rm(agentDir, { recursive: true, force: true });
-		}
-	});
-
-	it("keeps Ctrl+Enter as follow-up outside Windows Terminal", async () => {
-		enterEnv({});
-		const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-wt-keybindings-"));
-		try {
-			expect(KeybindingsManager.create(agentDir).getKeys("app.message.followUp")).toEqual(["ctrl+q", "ctrl+enter"]);
-		} finally {
-			await fs.rm(agentDir, { recursive: true, force: true });
-		}
-	});
-
-	it("honors an explicit Ctrl+Enter follow-up binding under Windows Terminal", () => {
-		const manager = KeybindingsManager.inMemory(
-			{ "app.message.followUp": ["ctrl+q", "ctrl+enter"] },
-			{ ctrlEnterIsNewline: true },
-		);
-		expect(manager.getKeys("app.message.followUp")).toEqual(["ctrl+q", "ctrl+enter"]);
-	});
-
-	it("matches neither chord once another action claims Ctrl+Q under Windows Terminal", () => {
-		const manager = KeybindingsManager.inMemory({ "app.interrupt": "ctrl+q" }, { ctrlEnterIsNewline: true });
-		setKeybindings(manager);
-		expect(manager.getKeys("app.message.followUp")).toEqual([]);
-		expect(matchesAppFollowUp("\x1b[13;5u")).toBe(false);
-		expect(matchesAppFollowUp("\x11")).toBe(false);
+	it("sends a follow-up on Ctrl+Enter and leaves Shift+Enter to the editor's newline", () => {
+		setKeybindings(KeybindingsManager.inMemory());
+		expect(matchesAppFollowUp(decodeOne(CTRL_ENTER))).toBe(true);
+		expect(matchesAppFollowUp(decodeOne(SHIFT_ENTER))).toBe(false);
 	});
 });
