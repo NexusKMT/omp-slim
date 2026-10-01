@@ -209,8 +209,9 @@ describe("Command Code provider support", () => {
 			},
 		});
 		expect(models.find(model => model.id === "deepseek/deepseek-v4-flash")).toMatchObject({
-			api: "openai-completions",
+			api: "openai-responses",
 			baseUrl: "https://api.commandcode.ai/provider/v1",
+			compat: { reasoningDisableMode: "none-effort", supportsNamedToolChoice: false },
 		});
 	});
 
@@ -284,7 +285,7 @@ describe("Command Code provider support", () => {
 		const models = (specs ?? []).map(spec => buildModel(spec));
 
 		expect(models.find(model => model.id === "deepseek/deepseek-v4.1-flash")).toMatchObject({
-			api: "openai-completions",
+			api: "openai-responses",
 			baseUrl: "https://api.commandcode.ai/provider/v1",
 			reasoning: true,
 			input: ["text", "image"],
@@ -298,6 +299,61 @@ describe("Command Code provider support", () => {
 				allowsSyntheticReasoningContentForToolCalls: false,
 			},
 		});
+	});
+
+	test("thinking off sends a real Responses off switch, never a chat-completions `none`", async () => {
+		// Chat completions only accepts low|medium|high|xhigh|max, so the old
+		// chat route clamped "off" to `reasoning_effort: "low"` and the model
+		// kept thinking. Responses accepts `reasoning.effort: "none"`.
+		const models = await discoverModels(["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-v4-flash-fast"]);
+		const responses = models.find(model => model.id === "deepseek/deepseek-v4.1-flash");
+		const chatOnly = models.find(model => model.id === "deepseek/deepseek-v4-flash-fast");
+		if (!responses || !chatOnly) throw new Error("Expected Command Code reasoning fixtures");
+		expect(responses.api).toBe("openai-responses");
+		expect(chatOnly.api).toBe("openai-completions");
+		const bodies: { url: string; body: Record<string, unknown> }[] = [];
+		const fetchMock: FetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			bodies.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+			return new Response("stop", { status: 400 });
+		});
+		const context = { messages: [{ role: "user" as const, content: "hi", timestamp: 0 }] };
+		for (const model of [responses, chatOnly]) {
+			await streamSimple(model, context, { apiKey: "user_test", fetch: fetchMock, disableReasoning: true }).result();
+		}
+		const responsesBody = bodies.find(entry => entry.url.endsWith("/provider/v1/responses"))?.body;
+		expect(responsesBody?.reasoning).toEqual({ effort: "none" });
+		const chatBodies = bodies.filter(entry => entry.url.endsWith("/chat/completions"));
+		expect(chatBodies.length).toBeGreaterThan(0);
+		for (const { body } of chatBodies) expect(body.reasoning_effort).not.toBe("none");
+	});
+
+	test("routes every effort-ladder id that Command Code serves on Responses there", async () => {
+		// supported_endpoints on 2026-10-01: these ladder ids lack /responses.
+		const chatOnlyLadderIds = new Set([
+			"deepseek/deepseek-v4-flash-fast",
+			"google/gemini-3.7-flash",
+			"Qwen/Qwen3.8-Flash",
+			"Qwen/Qwen3.8-Max-0902",
+			"stealth/space-bunny-alpha",
+			"tencent/hy4-preview",
+		]);
+		const models = await discoverModels(servedIds);
+		for (const model of models) {
+			if (model.api === "anthropic-messages" || !model.thinking?.efforts?.length) continue;
+			const onResponses = !chatOnlyLadderIds.has(model.id);
+			expect({ id: model.id, api: model.api }).toEqual({
+				id: model.id,
+				api: onResponses ? "openai-responses" : "openai-completions",
+			});
+			// `none-effort` on chat completions would 400; on Responses it is the off switch.
+			const compat = model.compat;
+			const noneEffort =
+				compat !== undefined && "reasoningDisableMode" in compat && compat.reasoningDisableMode === "none-effort";
+			expect({ id: model.id, none: noneEffort }).toEqual({
+				id: model.id,
+				none: onResponses,
+			});
+		}
 	});
 
 	test("discovers the public catalog without credentials", async () => {

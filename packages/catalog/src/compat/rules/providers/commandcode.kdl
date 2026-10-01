@@ -54,6 +54,28 @@ provider "commandcode" {
 		supports-eager-tool-input-streaming #false
 		supports-long-cache-retention #false
 	}
+	// Endpoint contract for every id `api-routes provider="commandcode"` sends to
+	// Responses. Responses accepts `reasoning.effort: "none"` while chat
+	// completions rejects it (low|medium|high|xhigh|max only), so thinking-off
+	// disables reasoning instead of clamping to the lowest effort. The Responses
+	// endpoint also rejects an object `tool_choice` (verified 2026-09-29), so
+	// named choices degrade to `"required"`.
+	// residue: provider blocks cannot scope by `on-api`, and the Responses set
+	// follows per-id `supported_endpoints`, not a class or family.
+	models "gpt-5.3-codex" "gpt-5.4" "gpt-5.4-mini" "gpt-5.5" "gpt-5.6-luna" "gpt-5.6-sol" \
+		"gpt-5.6-terra" "gpt-6-astra" "gpt-6-luna" "gpt-6-sol" \
+		"deepseek/deepseek-v4-flash" "deepseek/deepseek-v4-flash-vision-exp" \
+		"deepseek/deepseek-v4-pro" "deepseek/deepseek-v4.1-flash" "deepseek/deepseek-v4.1-flash-fast" \
+		"moonshotai/Kimi-K3" "z-ai/glm-5.3-flash" "z-ai/glm-5.3-flashx" "zai-org/GLM-5.2" \
+		"zai-org/GLM-5.3" "google/gemini-3.1-flash-lite" "google/gemini-3.5-flash" \
+		"google/gemini-3.5-flash-lite" "google/gemini-3.6-flash" "google/gemini-3.8-flash" \
+		"MiniMaxAI/MiniMax-M3" "stepfun/Step-5-Preview" "xai/grok-4.5" "xai/grok-4.6" "xai/grok-4.7" \
+		"meta/muse-spark-1.1" "meta/muse-spark-1.2" "meta/muse-spark-1.2-contributor" \
+		"meta/muse-spark-1.3" "meta/muse-spark-1.3-contributor" "Qwen/Qwen3.8-27B" \
+		"Qwen/Qwen3.8-Max" "Qwen/Qwen3.8-Omni-Flash" "stealth/pixel-canary" "sakana/fugu-ultra" {
+		reasoning-disable-mode "none-effort"
+		supports-named-tool-choice #false
+	}
 	models "typesafe/jev" {
 		kind "judge"
 	}
@@ -154,15 +176,13 @@ provider "commandcode" {
 			max-tokens 65536
 		}
 	}
-	// Command Code's Responses endpoint rejects an object `tool_choice` and returns
-	// no bytes from `image_generation` (verified 2026-09-29), so the openai
-	// class's hosted-image and image-model grants do not apply and named choices
-	// degrade to `"required"`. Hosted web search still works with a string `tool_choice`.
+	// Command Code's Responses endpoint returns no bytes from `image_generation`
+	// (verified 2026-09-29), so the openai class's hosted-image and image-model
+	// grants do not apply. Hosted web search still works with a string `tool_choice`.
 	models "gpt-5.3-codex" "gpt-5.4" "gpt-5.4-mini" "gpt-5.5" "gpt-5.6-luna" "gpt-5.6-sol" \
 		"gpt-5.6-terra" "gpt-6-astra" "gpt-6-luna" "gpt-6-sol" {
 		hosted-image #false
 		image-model #false
-		supports-named-tool-choice #false
 	}
 	// ---------------------------------------------------------------------------
 	// This table prices every model id that GET /provider/v1/models serves.
