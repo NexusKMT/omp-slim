@@ -61,6 +61,9 @@ describe("startup timing after a headless runner starts", () => {
 			dispose: () => manager.close(),
 		} as unknown as AgentSession;
 		const quitSpy = spyOn(postmortem, "quit").mockImplementation(async () => {});
+		// Print mode intentionally keeps recording under PI_TIMING; this case covers the default.
+		const savedTiming = process.env.PI_TIMING;
+		delete process.env.PI_TIMING;
 		try {
 			await runRootCommand(headlessArgs(["--print", "hello"], dir.path()), ["--print", "hello"], {
 				discoverAuthStorage: async () => authStorage,
@@ -68,6 +71,8 @@ describe("startup timing after a headless runner starts", () => {
 				createAgentSession: async () => ({ session }) as unknown as CreateAgentSessionResult,
 			});
 		} finally {
+			if (savedTiming !== undefined) process.env.PI_TIMING = savedTiming;
+			logger.endTiming();
 			quitSpy.mockRestore();
 			authStorage.close();
 			await manager.close().catch(() => undefined);
@@ -94,6 +99,7 @@ describe("startup timing after a headless runner starts", () => {
 		} catch (error) {
 			if (error !== stopServing) throw error;
 		} finally {
+			logger.endTiming();
 			authStorage.close();
 		}
 		expect(recordedWhileServing).toBe(false);
