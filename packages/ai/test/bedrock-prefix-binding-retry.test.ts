@@ -20,6 +20,13 @@ const target: Model<"bedrock-converse-stream"> = bedrockTestModel({
 	thinking: { mode: "anthropic-adaptive", efforts: [Effort.Medium], prefixBinding: false },
 });
 
+const boundTarget: Model<"bedrock-converse-stream"> = bedrockTestModel({
+	id: "global.anthropic.claude-opus-5-5",
+	name: "Claude Opus 5.5",
+	reasoning: true,
+	thinking: { mode: "anthropic-adaptive", efforts: [Effort.Medium], prefixBinding: true },
+});
+
 const tools: Tool[] = [{ name: "read", description: "Read a file", parameters: type({ path: "string" }) }];
 
 const context: Context = {
@@ -170,6 +177,27 @@ describe("Bedrock signed-thinking prefix mismatch recovery", () => {
 		});
 
 		expect(requests).toHaveLength(2);
+		expect(result?.stopReason).toBe("error");
+		expect(result?.errorMessage).toContain("bound to a different conversation");
+	});
+
+	it("keeps the prefix-binding 400 when the caller asked mismatches to fail", async () => {
+		const { fetch, requests } = mockedFetch(() => new Response(PREFIX_BINDING_ERROR, { status: 400 }));
+		let result: AssistantMessage | undefined;
+
+		await withSkippedBedrockAuth(async () => {
+			result = await streamBedrock(boundTarget, context, {
+				fetch,
+				maxTokens: 64,
+				reasoning: Effort.Medium,
+				anthropicPrefixMismatchBehavior: "error",
+			}).result();
+		});
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.additionalModelRequestFields?.thinking?.block_binding).toEqual({
+			prefix_mismatch_behavior: "error",
+		});
 		expect(result?.stopReason).toBe("error");
 		expect(result?.errorMessage).toContain("bound to a different conversation");
 	});

@@ -630,7 +630,6 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream"> = (
 				if (
 					!prefixBindingRetryAttempted &&
 					options.anthropicPrefixMismatchBehavior !== "error" &&
-					firstTokenTime === undefined &&
 					isThinkingPrefixBindingError(errorMessage)
 				) {
 					prefixBindingRetryAttempted = true;
