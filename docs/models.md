@@ -404,10 +404,14 @@ If every metadata route is unavailable, discovery falls back to the OpenAI-compa
 
 `openai-models-list` reads `{baseUrl}/v1/models` by default (without adding a second `/v1`).
 `discovery.injectV1: false` treats the configured URL as the complete API root. Reported
-`max_model_len` wins over `context_length`; silent endpoints can inherit bundled-reference limits,
-reasoning, and input modalities, with 128,000 context and 32,768 output as generic chat defaults.
-Output caps are bounded by the discovered context; Anthropic-routed models use an 8,192-token
-fallback output cap.
+`max_model_len` wins over `context_length`. If both are absent, nested
+`limits.max_input_tokens` and `limits.max_output_tokens` supply their sum as context only when both
+are positive safe integers and the sum is safe. A valid `max_output_tokens` independently sets the
+chat output cap, clamped to the resolved context; an incomplete or invalid context pair does not
+discard a valid output limit. Otherwise, context follows the existing native/reference/default fallback.
+Silent endpoints can inherit bundled-reference limits, reasoning, and input modalities; unknown models
+use 128,000 context and 32,768 output as generic chat defaults. Output caps are bounded by the resolved context;
+Anthropic-routed models use an 8,192-token fallback output cap.
 
 A row advertising only image output becomes an image-generation runner; embedding-only output
 becomes an embedding runner. Mixed outputs remain chat models. These runners are visible with
