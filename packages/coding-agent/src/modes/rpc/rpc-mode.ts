@@ -292,22 +292,25 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 /**
  * Dispatch a single parsed frame from the RPC input stream.
  *
- * `bash` and `prompt` are dispatched in the background so the caller can keep
- * reading subsequent frames while either is still settling: a `bash` command
- * can run for a long time, and a `prompt` command's response is held until the
- * message is admitted, which can span real wall-clock time (image
- * normalization, a vision-model description call). Backgrounding both lets a
- * client send `abort_bash` while a shell command runs, or `abort` (and
- * `steer`/`follow_up`/`get_state`) while a `prompt` is still admitting.
+ * `bash`, `prompt` and `steer_subagent` are dispatched in the background so
+ * the caller can keep reading subsequent frames while one is still settling: a
+ * `bash` command can run for a long time, and a `prompt` command's response is
+ * held until the message is admitted, which can span real wall-clock time
+ * (image normalization, a vision-model description call). `steer_subagent`
+ * likewise holds its response until the subagent accepts the message, which
+ * for a subagent between turns includes its whole pre-`agent_start` setup.
+ * Backgrounding them lets a client send `abort_bash` while a shell command
+ * runs, or `abort` (and `steer`/`follow_up`/`get_state`) while a `prompt` or
+ * `steer_subagent` is still admitting.
  * Response correlation is preserved via each command's `id`; ordering across
  * concurrent commands is not guaranteed and clients MUST match on `id`.
  *
  * @returns `undefined` when the frame was routed to a side-channel handler
  *   (extension UI response, host tool/URI frames) or dispatched in the
- *   background (`bash`, `prompt`). Otherwise a promise that resolves once the
- *   response for the command has been emitted via `output`. Errors from
- *   `handleCommand` on a command dispatched inline propagate; the caller is
- *   expected to wrap them.
+ *   background (`bash`, `prompt`, `steer_subagent`). Otherwise a promise that
+ *   resolves once the response for the command has been emitted via `output`.
+ *   Errors from `handleCommand` on a command dispatched inline propagate; the
+ *   caller is expected to wrap them.
  */
 export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps): Promise<void> | undefined {
 	if (dispatchRpcControlFrame(parsed, deps)) return undefined;
@@ -319,12 +322,13 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 
 	// `bash` can run for a long time, and `prompt`'s response is held until
 	// admission (see PromptOptions.onPromptAdmitted), which can likewise span
-	// real wall-clock time. Dispatch both in the background so a subsequent
-	// frame — `abort_bash` for a running `bash`, or `abort`/`steer`/`follow_up`/
-	// `get_state` for an admitting `prompt` — can be read and handled without
-	// waiting for the earlier command to finish on its own. The response is
-	// emitted when `handleCommand` resolves; clients correlate via `command.id`.
-	if (command.type === "bash" || command.type === "prompt") {
+	// real wall-clock time; `steer_subagent` waits for the subagent to accept.
+	// Dispatch them in the background so a subsequent frame — `abort_bash` for
+	// a running `bash`, or `abort`/`steer`/`follow_up`/`get_state` for an
+	// admitting `prompt` — can be read and handled without waiting for the
+	// earlier command to finish on its own. The response is emitted when
+	// `handleCommand` resolves; clients correlate via `command.id`.
+	if (command.type === "bash" || command.type === "prompt" || command.type === "steer_subagent") {
 		const task = (async () => {
 			try {
 				deps.output(await deps.handleCommand(command));
@@ -342,8 +346,9 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
 	})();
 }
 
-/** Starts prompts after earlier ordinary commands, without awaiting admission.
- * Control frames and `bash` dispatch immediately (see dispatchRpcInputFrame). */
+/** Starts prompts and `steer_subagent` after earlier ordinary commands, without
+ * awaiting admission. Control frames and `bash` dispatch immediately (see
+ * dispatchRpcInputFrame). */
 export class RpcInputDispatcher {
 	#tail: Promise<void> = Promise.resolve();
 	#tasks = new Set<Promise<void>>();
@@ -407,7 +412,7 @@ export class RpcInputDispatcher {
  * Coordinates deferred shutdown with in-flight background input tasks.
  *
  * `pi.shutdown()` from an extension only *requests* shutdown; the process must
- * not exit while a background-dispatched command (`bash` or `prompt`, see
+ * not exit while a background-dispatched command (`bash`, `prompt` or `steer_subagent`, see
  * {@link dispatchRpcInputFrame}) still owes the client a response frame. The
  * coordinator tracks those tasks, re-checks the shutdown request whenever one
  * settles (covering a shutdown requested mid-command with no follow-up client
@@ -495,6 +500,67 @@ export async function handleRpcCancelSubagent(
 	if (released.status === "rejected") throw released.reason;
 	if (aborted.status === "rejected") throw aborted.reason;
 	return released.value;
+}
+
+/**
+ * Handle RPC `steer_subagent`: send the host's message to a running subagent
+ * as its user, the same way Agent Hub chat does: `AgentLifecycleManager.ensureLive`,
+ * then `prompt(message, { streamingBehavior: "steer" })` on the subagent's own
+ * session. A mid-turn subagent is steered at its next step boundary; one
+ * between turns starts its next turn. Because this is `prompt()`, extension,
+ * custom and file slash commands run and prompt templates expand as in Agent
+ * Hub chat (unlike RPC `steer`, which rejects extension commands). The message
+ * is recorded in the subagent's transcript, never attributed to the parent.
+ *
+ * Only running subagents this session lists in `get_subagents` are reachable
+ * (see {@link resolveOwnedLiveSubagent}); one whose result the parent already
+ * accepted is refused. A running ref always holds a live session, so
+ * `ensureLive` never revives here; it only cancels an in-flight idle park.
+ *
+ * Resolves once the message is accepted: queued into a running turn, or the
+ * subagent's new turn started (`agent_start`). A refusal before that —
+ * including a prompt dropped by an abort, disposal or usage preflight — is
+ * returned as the error; the rest of the turn is not awaited and later
+ * failures are logged. Returns an error message, or `undefined` once accepted.
+ */
+export async function handleRpcSteerSubagent(
+	subagentRegistry: Pick<RpcSubagentRegistry, "getSubagents">,
+	subagentId: string,
+	message: string,
+): Promise<string | undefined> {
+	const notRunning = `Subagent not running: ${subagentId}`;
+	const owned = resolveOwnedLiveSubagent(subagentRegistry, subagentId);
+	if (!owned) return notRunning;
+	let session: AgentSession;
+	try {
+		session = await AgentLifecycleManager.global().ensureLive(subagentId);
+	} catch {
+		return notRunning;
+	}
+	// ensureLive awaits; the id may now belong to a different (same-name) agent,
+	// or the subagent may have finished in the meantime.
+	const current = resolveOwnedLiveSubagent(subagentRegistry, subagentId);
+	if (current?.ref !== owned.ref || current.session !== session) return notRunning;
+
+	const accepted = Promise.withResolvers<void>();
+	const unsubscribe = session.subscribe(event => {
+		if (event.type === "agent_start") accepted.resolve();
+	});
+	session.prompt(message, { streamingBehavior: "steer", throwOnDrop: true }).then(
+		() => accepted.resolve(),
+		err => {
+			accepted.reject(err);
+			logger.warn("steer_subagent message failed", { subagentId, error: String(err) });
+		},
+	);
+	try {
+		await accepted.promise;
+		return undefined;
+	} catch (err) {
+		return `Subagent refused the message: ${err instanceof Error ? err.message : String(err)}`;
+	} finally {
+		unsubscribe();
+	}
 }
 
 export async function handleRpcSessionChange(
@@ -1512,6 +1578,20 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				} catch (err) {
 					return error(id, "cancel_subagent", err instanceof Error ? err.message : String(err));
 				}
+			}
+
+			case "steer_subagent": {
+				if (!subagentRegistry) {
+					return error(id, "steer_subagent", "Subagent event bus is unavailable");
+				}
+				if (typeof command.subagentId !== "string" || command.subagentId.length === 0) {
+					return error(id, "steer_subagent", "`subagentId` must be a non-empty string.");
+				}
+				if (typeof command.message !== "string" || !command.message.trim()) {
+					return error(id, "steer_subagent", "`message` is required for steer_subagent.");
+				}
+				const failure = await handleRpcSteerSubagent(subagentRegistry, command.subagentId, command.message);
+				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
 			}
 
 			// =================================================================
