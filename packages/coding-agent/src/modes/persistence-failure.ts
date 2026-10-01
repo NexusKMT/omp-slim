@@ -1,5 +1,6 @@
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import type { SessionPersistenceNotice } from "../session/session-manager";
 
 /**
  * First-failure notice. The store keeps the unlanded entries in memory and
@@ -25,9 +26,10 @@ export function formatPersistenceDurabilityFailure(message: string): string {
 
 /**
  * A {@link SessionPersistenceNotice}: saving continues, so this claims no
- * failure. Not truncated, because the notice names the session file the user
- * may need to find.
+ * failure. Not truncated, because it names the session file the user may need
+ * to find.
  */
-export function formatPersistenceNotice(message: string): string {
-	return replaceTabs(sanitizeText(message)).replace(/[\r\n]+/g, " ");
+export function formatPersistenceNotice(notice: SessionPersistenceNotice): string {
+	const sessionFile = replaceTabs(sanitizeText(shortenPath(notice.sessionFile))).replace(/[\r\n]+/g, " ");
+	return `Session ${sessionFile} is already open in another omp process. Both append to it; if either later rewrites the whole file (e.g. on compaction), that one stops saving this session.`;
 }

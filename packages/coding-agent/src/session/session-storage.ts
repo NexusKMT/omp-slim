@@ -68,10 +68,12 @@ export class SessionWriteConflictError extends Error {
 	readonly expectedSize: number | null;
 	readonly actualSize: number | null;
 
-	constructor(path: string, expectedSize: number | null, actualSize: number | null) {
+	/** `summary` leads the message, e.g. what the conflict means for the session. */
+	constructor(path: string, expectedSize: number | null, actualSize: number | null, summary?: string) {
 		const expected = expectedSize === null ? "missing" : `${expectedSize} bytes`;
 		const actual = actualSize === null ? "missing" : `${actualSize} bytes`;
-		super(`Session file changed before rewrite: ${path} (expected ${expected}, found ${actual}).`);
+		const detail = `Session file changed before rewrite: ${path} (expected ${expected}, found ${actual}).`;
+		super(summary ? `${summary} ${detail}` : detail);
 		this.name = "SessionWriteConflictError";
 		this.path = path;
 		this.expectedSize = expectedSize;
