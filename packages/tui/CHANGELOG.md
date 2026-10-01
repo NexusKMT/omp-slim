@@ -5,6 +5,7 @@
 ### Added
 
 - Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
+- Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose gates as ghost-text word completion ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
 
 ### Fixed
 
@@ -17,6 +18,7 @@
 - Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
+- Fixed Shift+Enter submitting the prompt and Ctrl+Enter inserting a newline in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, as on other platforms ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
 
 ## [18.4.8] - 2026-10-01
 
