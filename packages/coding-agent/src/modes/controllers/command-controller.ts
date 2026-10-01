@@ -10,7 +10,7 @@ import {
 	type UsageLimit,
 	type UsageReport,
 } from "@oh-my-pi/pi-ai";
-import { Loader, Markdown, padding, Spacer, Text, visibleWidth } from "@oh-my-pi/pi-tui";
+import { Loader, Markdown, padding, Spacer, Text, visibleWidth, wrapTextWithAnsi } from "@oh-my-pi/pi-tui";
 import { formatDuration, logger, Snowflake, sanitizeText } from "@oh-my-pi/pi-utils";
 import { shouldEnableAppendOnlyContext } from "../../config/append-only-context-mode";
 import { type BashResult, isPersistentShellCdCommand } from "../../exec/bash-executor";
@@ -617,14 +617,22 @@ export class CommandController {
 			return;
 		}
 
-		const describe = (job: AsyncJobSnapshotItem): string =>
-			full ? replaceTabs(sanitizeText(job.command ?? job.label)) : truncateJobLabel(job.label, lineWidth);
+		// Full mode wraps here so every line, including heredoc lines and wrap
+		// continuations, keeps the two-column indent under its job row.
+		const commandWidth = Math.max(1, (this.ctx.ui.terminal.columns ?? 100) - 4);
+		const describe = (job: AsyncJobSnapshotItem): string => {
+			if (!full) return `  ${theme.fg("dim", truncateJobLabel(job.label, lineWidth))}`;
+			const command = replaceTabs(sanitizeText(job.command ?? job.label));
+			return wrapTextWithAnsi(command, commandWidth)
+				.map(line => `  ${theme.fg("dim", line)}`)
+				.join("\n");
+		};
 
 		if (snapshot.running.length > 0) {
 			info += `\n${theme.bold("Running Jobs")}\n`;
 			for (const job of snapshot.running) {
 				info += `${renderJobLine(job, now)}\n`;
-				info += `  ${theme.fg("dim", describe(job))}\n`;
+				info += `${describe(job)}\n`;
 			}
 		}
 
@@ -632,7 +640,7 @@ export class CommandController {
 			info += `\n${theme.bold("Recent Jobs")}\n`;
 			for (const job of snapshot.recent) {
 				info += `${renderJobLine(job, now)}\n`;
-				info += `  ${theme.fg("dim", describe(job))}\n`;
+				info += `${describe(job)}\n`;
 			}
 		}
 
