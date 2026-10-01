@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `tryAcquireFileLock`, a non-blocking `acquireFileLock` that returns `null` while another holder owns the lock
+
 ## [18.4.4] - 2026-09-29
 
 ### Added

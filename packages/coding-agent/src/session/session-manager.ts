@@ -872,6 +872,11 @@ export class SessionManager {
 	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
 	/** Notices raised before any persistence observer subscribed; the first subscriber receives them. */
 	#pendingPersistenceNotices: SessionPersistenceNotice[] = [];
+	/**
+	 * This process's ownership claim on `#sessionFile` (file storage only).
+	 * `release` is unset while another live process holds the session open.
+	 */
+	#sessionFileClaim: { sessionFile: string; release: (() => void) | undefined } | undefined;
 
 	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
 		this.#cwd = cwd;
@@ -944,6 +949,30 @@ export class SessionManager {
 	}
 
 	/**
+	 * Hold this process's ownership claim on `#sessionFile`, moving it off a
+	 * previous path. When another live process already has the session open,
+	 * warn once per path: both now append to one file, and the first full
+	 * rewrite that meets the other's bytes diverts this session to a sibling
+	 * (see {@link #divertFromWriteConflict}). A non-owner retries the claim on
+	 * later writer opens, so it takes over once the other process exits.
+	 */
+	#claimSessionFile(): void {
+		const sessionFile = this.#sessionFile;
+		if (!this.#persist || !sessionFile || !this.#storage.claimSessionFile) return;
+		const current = this.#sessionFileClaim;
+		if (current?.sessionFile === sessionFile && current.release) return;
+		if (current && current.sessionFile !== sessionFile) current.release?.();
+		const release = this.#storage.claimSessionFile(sessionFile) ?? undefined;
+		this.#sessionFileClaim = { sessionFile, release };
+		if (release || current?.sessionFile === sessionFile) return;
+		this.#notifyPersistenceNotice(
+			new SessionPersistenceNotice(
+				`Session ${sessionFile} is already open in another omp process. Both will write to it; if their writes collide, this session continues in a new file instead of overwriting the other's entries.`,
+			),
+		);
+	}
+
+	/**
 	 * Another writer changed `#sessionFile` since this manager last wrote it
 	 * (typically a second omp process on the same session), so replacing it
 	 * would erase their entries. Retrying can never succeed and re-serializes
@@ -991,6 +1020,7 @@ export class SessionManager {
 		this.#artifactManager = null;
 		this.#artifactManagerSessionFile = null;
 		this.#rememberBreadcrumb(this.#cwd, sibling);
+		this.#claimSessionFile();
 		this.#notifyPersistenceNotice(
 			new SessionPersistenceNotice(
 				`${error.message} That file was left to the other writer; this session now saves to ${sibling}.`,
@@ -1203,6 +1233,7 @@ export class SessionManager {
 
 		if (this.#writer?.isOpen()) return this.#writer;
 
+		this.#claimSessionFile();
 		this.#writer = this.#storage.openWriter(this.#sessionFile, {
 			flags: "a",
 			onError: err => this.#noteDiskFailure(err),
@@ -1310,6 +1341,7 @@ export class SessionManager {
 	#rewriteSynchronously(): void {
 		if (this.#released) return;
 		if (!this.#persist || !this.#shouldHaveSessionFile()) return;
+		this.#claimSessionFile();
 		let targetPath = this.#liveRelocationWritePath() ?? this.#sessionFile;
 		if (!targetPath) return;
 
@@ -1425,6 +1457,7 @@ export class SessionManager {
 	async #runFencedAtomicRewrite(epoch: number): Promise<boolean> {
 		if (this.#released) return false;
 		this.#atomicRewriteFenceEpoch = epoch;
+		this.#claimSessionFile();
 		try {
 			do {
 				this.#atomicRewriteDirty = false;
@@ -2042,6 +2075,8 @@ export class SessionManager {
 		this.#artifactManagerSessionFile = null;
 
 		if (this.sanitizeLoadedOpenAIResponsesReplayMetadata()) this.#rewriteRequired = true;
+		// Resume time: warn now if another omp process already has this session open.
+		this.#claimSessionFile();
 	}
 
 	/**
@@ -2477,6 +2512,10 @@ export class SessionManager {
 	/** Flush, then close the append writer. */
 	async close(): Promise<void> {
 		if (!this.#persist) return;
+		// Closing gives up this process's ownership claim; a later write reclaims it.
+		const claim = this.#sessionFileClaim;
+		claim?.release?.();
+		if (claim) claim.release = undefined;
 		// A prior `flushSync` can self-conflict with this manager's own
 		// unconfirmed deferred publish; drain despite the latch so that
 		// publish can still confirm before we give up on the transcript.
@@ -2861,8 +2900,9 @@ export class SessionManager {
 	/**
 	 * Subscribe to persistence failures so hosts can surface lost-durability state.
 	 * The same observer receives {@link SessionPersistenceNotice}s: conditions the
-	 * user must hear about while saving continues (this session moved to a
-	 * sibling file after another writer changed it).
+	 * user must hear about while saving continues (the session file is open in
+	 * another process, or this session moved to a sibling file after another
+	 * writer changed it).
 	 *
 	 * A failure latched before this call — a store that failed on its first write,
 	 * before the host wired its observer — is replayed to the new subscriber.
