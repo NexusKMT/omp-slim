@@ -15,6 +15,7 @@
 ### Fixed
 
 - Fixed test suite failures on non-FHS hosts and under ambient terminal and Git configuration ([#12358](https://github.com/can1357/oh-my-pi/pull/12358) by [@olegpulatov](https://github.com/olegpulatov)).
+- Fixed OTLP export reporting no chat cost: chat spans, the chat cost metric, and the run-completed log now carry each request's computed cost, and models without known pricing report `model_price_unavailable` instead of zero ([#TODO](https://github.com/can1357/oh-my-pi/pull/TODO) by [@xaviergmail](https://github.com/xaviergmail)).
 
 ## [18.4.9] - 2026-10-01
 

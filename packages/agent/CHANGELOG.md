@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#TODO](https://github.com/can1357/oh-my-pi/pull/TODO) by [@xaviergmail](https://github.com/xaviergmail))
+
 ### Fixed
 
 - `streamProxy` no longer finalizes a cut-off tool-call argument buffer into an executable auto-closed preview; such a call gets the parse-error arguments, so the tool is not run and the model receives the parse error ([#13868](https://github.com/can1357/oh-my-pi/pull/13868) by [@alphastorm](https://github.com/alphastorm))

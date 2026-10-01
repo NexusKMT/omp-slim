@@ -2031,6 +2031,7 @@ async function streamAssistantResponse(
 	const finishChat = async (message: AssistantMessage): Promise<void> => {
 		await finishChatSpan(telemetry, chatSpan, message, {
 			stepNumber: chatStepNumber,
+			modelId: model.id,
 			serviceTier: effectiveServiceTier,
 			responseHeaders: capturedHeaders,
 			baseUrl: model.baseUrl,
