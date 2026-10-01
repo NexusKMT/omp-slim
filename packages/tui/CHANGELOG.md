@@ -13,6 +13,30 @@
 - Removed the internal `urlTokenPossible` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Removed the internal `autolinkSchemeScanIndex` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 
+## [18.4.9] - 2026-10-01
+
+### Added
+
+- Exported `wordCompletionQuery()` so hosts outside the editor can apply the same prose eligibility rules used by ghost-text word completion.
+- Added a full-featured Background jobs view with selectable jobs, live status and elapsed time, working directory, process IDs, exit code, command, tailing output, and cancellation for running jobs.
+
+### Changed
+
+- `OutputSink` now limits artifact files to 16 MiB by default while preserving the beginning and end of oversized output and marking the omitted bytes. Set `artifactMaxBytes: 0` to keep artifacts unbounded; `dump()` reports omitted bytes and full-output references identify sampled artifacts.
+
+### Fixed
+
+- Reduced unnecessary composer startup-cache writes and ensured the cache database is released when it closes on Windows.
+- Fixed Shift+Enter and Ctrl+Enter prompt behavior in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, matching other platforms.
+- Improved the Tern native terminal experience across background jobs, settings, debugging, logs, extension management, interactive shell, and provider streams: views remain usable and navigable, preserve output and selection behavior, support keyboard scrolling, and keep key actions accessible.
+- Fixed multi-line labels in Background jobs and multi-line titles in native-terminal prompts so their formatting remains readable.
+
+## [18.4.8] - 2026-10-01
+
+### Fixed
+
+- Fixed native-terminal (TSP) frames held back by unacknowledged credits waiting for an unrelated render after the 5-second stall fallback expired; a credit-blocked change now renders as soon as the oldest frame counts as stalled.
+
 ## [18.4.7] - 2026-10-01
 
 ### Added

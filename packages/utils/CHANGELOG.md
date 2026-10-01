@@ -17,6 +17,17 @@
 - Fixed Markdown paragraphs of nested brackets, URLs with long trailing punctuation, or unclosed HTML tags or comments lexing slowly: 80 KB of each now lexes in under 40 ms instead of 4-30 s ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed deeply nested Markdown links and emphasis overflowing the stack early: in a fresh process links now nest about three times as deep before a stack overflow, and emphasis twice as deep ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 
+## [18.4.9] - 2026-10-01
+
+### Added
+
+- Added `tryAcquireFileLock`, a non-blocking file-lock helper that returns `null` when the lock is already held.
+- Added an `unref` option to `AsyncDrain`, allowing applications to use long batch windows without keeping the process alive.
+
+### Changed
+
+- Improved logging efficiency and configurability by batching routine file writes, flushing urgent records promptly, adding on-demand `logger.flush()` support, and allowing file log levels to be limited with `OMP_LOG_LEVEL`. Log files are created only when needed, and obsolete log and audit files are cleaned up automatically.
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
