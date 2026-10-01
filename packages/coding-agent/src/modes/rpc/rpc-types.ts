@@ -43,6 +43,7 @@ export type RpcCommand =
 	// State
 	| { id?: string; type: "get_state" }
 	| { id?: string; type: "set_fast_mode"; enabled: boolean }
+	| { id?: string; type: "set_ask_dialog"; enabled: boolean }
 	| { id?: string; type: "get_available_commands" }
 	| { id?: string; type: "get_entries"; since?: string }
 	| { id?: string; type: "get_tree" }
@@ -301,6 +302,7 @@ export type RpcResponse =
 			success: true;
 			data: { enabled: boolean; active: boolean };
 	  }
+	| { id?: string; type: "response"; command: "set_ask_dialog"; success: true; data: { enabled: boolean } }
 	| {
 			id?: string;
 			type: "response";
@@ -525,6 +527,17 @@ export interface RpcExtensionUISelectOptionDetail {
 	description?: string;
 }
 
+/** One question of an RPC `ask` dialog. Options never include "Other"; hosts always offer free text. */
+export interface RpcAskDialogQuestion {
+	id: string;
+	question: string;
+	header?: string;
+	options: Array<{ label: string; description?: string; preview?: string }>;
+	multi?: boolean;
+	/** Index of the recommended option. */
+	recommended?: number;
+}
+
 /** Emitted when an extension needs user input */
 export type RpcExtensionUIRequest =
 	| {
@@ -552,6 +565,14 @@ export type RpcExtensionUIRequest =
 			title: string;
 			prefill?: string;
 			promptStyle?: boolean;
+	  }
+	/** Emitted only after the host opts in with `set_ask_dialog`. */
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "ask";
+			questions: RpcAskDialogQuestion[];
+			timeout?: number;
 	  }
 	| { type: "extension_ui_request"; id: string; method: "cancel"; targetId: string }
 	| {
@@ -702,7 +723,13 @@ export interface RpcHostUriResult {
 export type RpcExtensionUIResponse =
 	| { type: "extension_ui_response"; id: string; value: string }
 	| { type: "extension_ui_response"; id: string; confirmed: boolean }
-	| { type: "extension_ui_response"; id: string; cancelled: true; timedOut?: boolean };
+	| { type: "extension_ui_response"; id: string; cancelled: true; timedOut?: boolean }
+	/** Answers to an `ask` request, one per question in request order. */
+	| {
+			type: "extension_ui_response";
+			id: string;
+			answers: Array<{ id: string; selectedOptions: string[]; customInput?: string }>;
+	  };
 
 // ============================================================================
 // Helper type for extracting command types

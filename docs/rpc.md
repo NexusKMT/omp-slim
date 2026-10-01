@@ -141,6 +141,7 @@ Important edge behavior from runtime:
 
 - `{ id?, type: "get_state" }`
 - `{ id?, type: "set_fast_mode", enabled: boolean }`
+- `{ id?, type: "set_ask_dialog", enabled: boolean }`
 - `{ id?, type: "get_available_commands" }`
 - `{ id?, type: "get_entries", since?: string }`
 - `{ id?, type: "get_tree" }`
@@ -514,6 +515,29 @@ The corresponding `get_state` result reports the same computed state:
 {
   "fastModeEnabled": false,
   "fastModeActive": true
+}
+```
+
+### `set_ask_dialog` payload
+
+`set_ask_dialog` opts the host in to the `ask` extension UI request (see
+[Extension UI Sub-Protocol](#extension-ui-sub-protocol)). It is off by default
+for every process; until a host enables it, the `ask` tool keeps prompting with
+one `select` (plus `editor` for free text) per choice. Builds without the
+command answer with a failed `response`, so hosts should keep the `select`
+fallback when enabling fails.
+
+```json
+{ "id": "req_ask", "type": "set_ask_dialog", "enabled": true }
+```
+
+```json
+{
+  "id": "req_ask",
+  "type": "response",
+  "command": "set_ask_dialog",
+  "success": true,
+  "data": { "enabled": true }
 }
 ```
 
@@ -963,11 +987,16 @@ Use `--mode rpc --no-ui` for a host without a tool UI surface; use `--mode rpc-u
 
 `RpcExtensionUIRequest` (`type: "extension_ui_request"`) methods:
 
-- `select`, `confirm`, `input`, `editor`, `cancel`
+- `select`, `confirm`, `input`, `editor`, `ask`, `cancel`
   - `select` keeps labels in `options: string[]` and, when any option has a
     description, emits a positionally aligned
     `optionDetails: Array<{ description?: string }>` array. Hosts that do not
     render descriptions can continue using `options` alone.
+  - `ask` is emitted only after `set_ask_dialog` enables it. It carries every
+    question of one `ask` tool call:
+    `questions: Array<{ id: string, question: string, header?: string, options: Array<{ label: string, description?: string, preview?: string }>, multi?: boolean, recommended?: number }>`
+    plus `timeout?: number`. `options` never include an "Other" entry; hosts
+    always offer free text.
 - `notify`, `setStatus`, `setWidget`, `setTitle`, `set_editor_text`
 - `open_url` (emitted by RPC login flows): includes `url`, optional `launchUrl`, and optional `instructions`. When present, `launchUrl` is a short loopback redirect and is the recommended copy target so terminal truncation cannot corrupt OAuth query parameters.
 
@@ -998,12 +1027,45 @@ Example:
 - `{ type: "extension_ui_response", id: string, value: string }`
 - `{ type: "extension_ui_response", id: string, confirmed: boolean }`
 - `{ type: "extension_ui_response", id: string, cancelled: true, timedOut?: boolean }`
+- `{ type: "extension_ui_response", id: string, answers: Array<{ id: string, selectedOptions: string[], customInput?: string }> }` (answers an `ask` request)
 
 `select` and `input` resolve to `undefined`, and `confirm` to `false`, on
 cancellation, timeout, or signal abort. Signal abort emits a `cancel` request
-with `targetId`; the server's timeout resolves locally without emitting that
-request. `editor` supports cancellation and signal abort but has no wire timeout.
+with `targetId`. `editor` supports cancellation and signal abort but has no wire timeout.
 Presentation methods and `open_url` are fire-and-forget and require no response.
+
+If a dialog has a timeout, RPC mode resolves to a default value when timeout/abort fires, and emits
+`{ method: "cancel", targetId }` so the host closes the dialog; a later answer to it is ignored. For `ask`, a timeout
+(omp's timer or a host `cancelled: true, timedOut: true` reply) answers every question with its recommended
+option, else its first.
+
+`answers` must list one entry per question in request order, with each `id` equal to that question's `id`.
+`selectedOptions` holds exact option labels without duplicates; a multi-select may be empty. A single-select
+(`multi` absent or false) takes at most one option and not both an option and `customInput`. `customInput`
+is trimmed and ignored when empty. Any other shape fails the `ask` tool call instead of guessing.
+
+```json
+{
+  "type": "extension_ui_request",
+  "id": "ui_9",
+  "method": "ask",
+  "questions": [
+    { "id": "db", "question": "Which database?", "options": [{ "label": "Postgres" }, { "label": "SQLite" }], "recommended": 1 },
+    { "id": "features", "question": "Which features?", "options": [{ "label": "Auth" }, { "label": "Billing" }, { "label": "Search" }], "multi": true }
+  ]
+}
+```
+
+```json
+{
+  "type": "extension_ui_response",
+  "id": "ui_9",
+  "answers": [
+    { "id": "db", "selectedOptions": [], "customInput": "DuckDB" },
+    { "id": "features", "selectedOptions": ["Auth", "Search"] }
+  ]
+}
+```
 
 Terminal-only UI features are unsupported: component factories, custom
 headers/footers/editors, raw terminal input, autocomplete composition, theme
