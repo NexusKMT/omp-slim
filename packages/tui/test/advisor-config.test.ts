@@ -142,6 +142,25 @@ describe("advisor sync backlog picker", () => {
 		expect(saved?.advisors).toEqual([{ name: "default", syncBacklog: "strict" }]);
 	});
 
+	it("edits cadence from the native prefs page, saving defaults and inherit as omitted fields", async () => {
+		let saved: WatchdogConfigDoc | undefined;
+		const overlay = buildOverlay({ advisors: [{ name: "Reviewer", syncBacklog: "off" }] }, doc => {
+			saved = structuredClone(doc);
+		});
+		const change = (item: string, value: string | number | null) =>
+			overlay.handleNativeEvent({ type: "change", key: "", item, value });
+
+		overlay.handleNativeEvent({ type: "action", key: "", act: "page", value: "advisor:0", mods: [] });
+		change("reviewMode", "agent-end");
+		change("reviewInterval", 3);
+		change("reviewInterval", null); // Reset to the default interval.
+		change("syncBacklog", "inherit");
+		overlay.handleNativeEvent({ type: "action", key: "", act: "save", mods: [] });
+		await Promise.resolve();
+
+		expect(saved?.advisors).toEqual([{ name: "Reviewer", reviewMode: "agent-end" }]);
+	});
+
 	it("docks as a side sheet like /settings only where the terminal draws prefs with aside", () => {
 		const overlay = buildOverlay({ advisors: [] }, () => {});
 		const cx: DescribeContext = {
