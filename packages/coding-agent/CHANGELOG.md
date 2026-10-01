@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Clarified how agents request line ranges in `read` calls with complete examples.
+- Clarified how agents request line ranges in `read` calls with complete examples ([#13956](https://github.com/can1357/oh-my-pi/pull/13956) by [@Dante-dan](https://github.com/Dante-dan)).
 
 ## [18.4.6] - 2026-10-01
 
