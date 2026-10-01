@@ -861,6 +861,26 @@ async fn wait_for_pipeline_processes_and_update_status(
 	// Clear our the pipeline status so we can start filling it out.
 	shell.last_pipeline_statuses_mut().clear();
 
+	// Use the exact external member set as the stop scope for a multi-process
+	// pipeline. A process group remains an additional scope because a detached
+	// pipe-input stage can leave the recorded group while still belonging to
+	// the pipeline.
+	let pipeline_pids: Arc<[_]> = process_spawn_results
+		.iter()
+		.filter_map(|result| match result {
+			ExecutionSpawnResult::StartedProcess(child) => child.pid(),
+			ExecutionSpawnResult::Completed(_) | ExecutionSpawnResult::StartedTask(_) => None,
+		})
+		.collect::<Vec<_>>()
+		.into();
+	if pipeline_pids.len() > 1 {
+		for result in &mut process_spawn_results {
+			if let ExecutionSpawnResult::StartedProcess(child) = result {
+				child.set_stop_pids(Arc::clone(&pipeline_pids));
+			}
+		}
+	}
+
 	while let Some(child) = process_spawn_results.pop_front() {
 		ensure_not_cancelled(params)?;
 		let wait_result = if !stopped_children.is_empty() {
