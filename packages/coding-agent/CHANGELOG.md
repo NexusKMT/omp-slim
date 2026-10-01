@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed same-ID runtime API replacements carrying a prior route's prompt-cache lifetime into a route without a cache policy.
+- Fixed same-ID runtime API replacements carrying a prior route's prompt-cache lifetime into a route without a cache policy ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.4.6] - 2026-10-01
 

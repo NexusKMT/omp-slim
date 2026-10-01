@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models.
+- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.4.6] - 2026-10-01
 
