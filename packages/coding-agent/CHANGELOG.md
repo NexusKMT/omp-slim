@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified how agents request line ranges in `read` calls with complete examples.
+
 ## [18.4.6] - 2026-10-01
 
 ### Added
