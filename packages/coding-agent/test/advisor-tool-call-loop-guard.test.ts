@@ -647,7 +647,8 @@ describe("advisor tool-call loop guard", () => {
 
 		// Both reviews were scheduled; only the strict one gated the boundary.
 		expect(parkedReviewStarted).toBe(true);
-		expect(finalMock.calls.length).toBeGreaterThanOrEqual(2);
+		// An advise-only turn ends the review: one request, no wrap-up call.
+		expect(finalMock.calls).toHaveLength(1);
 		const cards = session.agent.state.messages.filter(
 			message => message.role === "custom" && JSON.stringify(message).includes("stale fixture"),
 		);
