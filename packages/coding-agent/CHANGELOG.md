@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed flickering, duplicated transcript rows, and blank space below the input when resizing or zooming tmux panes in Rebuild mode ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+
 ## [18.4.6] - 2026-10-01
 
 ### Added
