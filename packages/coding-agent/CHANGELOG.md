@@ -24,7 +24,7 @@
 
 ### Fixed
 
-- Skill URI reads now expose the selected skill file path so nested skills can locate their sibling helpers ([#8740](https://github.com/can1357/oh-my-pi/issues/8740)).
+- Skill URI reads now expose the selected skill file path so nested skills can locate their sibling helpers ([#13957](https://github.com/can1357/oh-my-pi/pull/13957) by [@Dante-dan](https://github.com/Dante-dan)).
 
 - Fixed Tern commands issued while the agent is working so they appear immediately in the transcript instead of being clipped above the prompt.
 - Added a dismiss action for Tern's prompt-area error notifications.
