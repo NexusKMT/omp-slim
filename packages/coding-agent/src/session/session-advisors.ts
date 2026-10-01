@@ -1703,7 +1703,15 @@ export class SessionAdvisors {
 		}
 		const interrupting = isInterruptingSeverity(severity);
 		const terminalAnswerNoQueuedWork = this.#hasTerminalTextAnswerWithoutQueuedWork();
-		const terminalUnwindPreserve = this.#terminalUnwindActive && severity !== "blocker" && terminalAnswerNoQueuedWork;
+		// A final-review concern that lands after the boundary window closed
+		// (catch-up off, or a review slower than its wait) keeps the one
+		// continuation the merged boundary flush would have granted it.
+		const finalReviewConcern =
+			severity === "concern" &&
+			this.#terminalUnwindActive &&
+			(advisor.reviewMode ?? cfgAdvisorReviewMode.get(this.#host.settings)) === "agent-end";
+		const terminalUnwindPreserve =
+			this.#terminalUnwindActive && severity !== "blocker" && !finalReviewConcern && terminalAnswerNoQueuedWork;
 		const channel = resolveAdvisorDeliveryChannel({
 			severity,
 			autoResumeSuppressed: this.#advisorAutoResumeSuppressed,
@@ -1714,6 +1722,7 @@ export class SessionAdvisors {
 			streaming: this.#host.agent.state.isStreaming && !this.#preserveTerminalYieldAdvice && !terminalUnwindPreserve,
 			aborting: this.#host.abortInProgress(),
 			terminalAnswerNoQueuedWork,
+			allowTerminalConcernSteering: finalReviewConcern,
 			interruptImmuneTurnActive: interrupting && this.#isAdvisorInterruptImmuneTurnActive(),
 		});
 		const notes: AdvisorNote[] = [{ note, severity, advisor: source }];

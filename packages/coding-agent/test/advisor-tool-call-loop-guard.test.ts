@@ -384,8 +384,8 @@ describe("advisor tool-call loop guard", () => {
 	it("steers one continuation turn when an agent-end advisor raises a concern at a terminal boundary", async () => {
 		// An agent-end advisor reviews the complete run at the final boundary.
 		// A concern means a material issue in finished work — it deserves one
-		// steering turn, not a silent preserved card. The sleep latch prevents
-		// cascade after that. A turn-mode concern at the same boundary preserves
+		// steering turn, not a silent preserved card; that continuation schedules
+		// no review of its own. A turn-mode concern at the same boundary preserves
 		// as a card instead (work was reviewed per-turn).
 		createAdvisor(
 			{ "advisor.syncBacklog": "1" },
@@ -402,6 +402,36 @@ describe("advisor tool-call loop guard", () => {
 
 		// The agent-end concern steered exactly one continuation turn.
 		const completions = session.agent.state.messages.filter(
+			message => message.role === "assistant" && JSON.stringify(message.content).includes("primary complete"),
+		);
+		expect(completions).toHaveLength(2);
+	});
+
+	it("steers one continuation for an agent-end concern that lands after the boundary with catch-up off", async () => {
+		createAdvisor(
+			{ "advisor.syncBacklog": "off" },
+			0,
+			{ name: "Final reviewer", reviewMode: "agent-end" },
+			0,
+			"finished work has a null deref",
+			"concern",
+		);
+		if (!session) throw new Error("Expected live session");
+		const live = session;
+		const continuationEnded = Promise.withResolvers<void>();
+		let agentEnds = 0;
+		live.subscribe(event => {
+			if (event.type === "agent_end" && ++agentEnds === 2) continuationEnded.resolve();
+		});
+
+		// The boundary does not wait for the review, so its concern arrives
+		// after the primary already finished and the merge window closed.
+		await live.prompt("only update");
+		expect(await live.waitForAdvisorCatchup(2_000)).toBe(true);
+		// Without the steer the concern is preserved as a card and no second run starts.
+		await continuationEnded.promise;
+
+		const completions = live.agent.state.messages.filter(
 			message => message.role === "assistant" && JSON.stringify(message.content).includes("primary complete"),
 		);
 		expect(completions).toHaveLength(2);
