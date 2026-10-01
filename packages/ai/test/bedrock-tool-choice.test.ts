@@ -22,18 +22,26 @@ interface ToolChoicePayload {
 	additionalModelRequestFields?: { thinking?: unknown };
 }
 
+/** Every Converse request carries `messages`; tools in context imply a `toolConfig` object. */
+function isToolChoicePayload(payload: unknown): payload is ToolChoicePayload {
+	if (typeof payload !== "object" || payload === null) return false;
+	if (!("messages" in payload) || !Array.isArray(payload.messages)) return false;
+	return "toolConfig" in payload && typeof payload.toolConfig === "object" && payload.toolConfig !== null;
+}
+
 async function capture(
 	model: Model<"bedrock-converse-stream">,
 	options: SimpleStreamOptions,
 ): Promise<ToolChoicePayload> {
 	const controller = new AbortController();
-	const { promise, resolve } = Promise.withResolvers<ToolChoicePayload>();
+	const { promise, resolve, reject } = Promise.withResolvers<ToolChoicePayload>();
 	void streamSimple(model, context, {
 		apiKey: "test-key",
 		signal: controller.signal,
 		...options,
 		onPayload: payload => {
-			resolve(payload as ToolChoicePayload);
+			if (isToolChoicePayload(payload)) resolve(payload);
+			else reject(new Error("expected a Bedrock request payload with toolConfig"));
 			controller.abort();
 			return undefined;
 		},
@@ -48,17 +56,25 @@ function bedrockModel(id: string): Model<"bedrock-converse-stream"> {
 }
 
 describe("Bedrock forced tool choice", () => {
-	// Opus 5.5 rejects `toolChoice: {any}` / `{tool}` with 400 "tool_choice: type
-	// \"tool\" and \"any\" are not supported for this model" regardless of thinking.
-	test("downgrades forced choice to auto for Opus 5.5 and keeps thinking", async () => {
-		const model = bedrockModel("us.anthropic.claude-opus-5-5");
-		const anyPayload = await capture(model, { toolChoice: "any", reasoning: Effort.Low });
-		expect(anyPayload.toolConfig?.toolChoice).toEqual({ auto: {} });
-		expect(anyPayload.additionalModelRequestFields?.thinking).toBeDefined();
+	// Opus/Sonnet 5.5 reject `toolChoice: {any}` / `{tool}` with 400 "tool_choice:
+	// type \"tool\" and \"any\" are not supported for this model" regardless of thinking.
+	for (const id of ["us.anthropic.claude-opus-5-5", "global.anthropic.claude-sonnet-5-5"]) {
+		test(`downgrades forced choice to auto for ${id} and keeps thinking`, async () => {
+			const model = bedrockModel(id);
+			expect(model.compat.supportsForcedToolChoice).toBe(false);
 
-		const namedPayload = await capture(model, { toolChoice: { type: "tool", name: "echo" }, reasoning: Effort.Low });
-		expect(namedPayload.toolConfig?.toolChoice).toEqual({ auto: {} });
-	});
+			const anyPayload = await capture(model, { toolChoice: "any", reasoning: Effort.Low });
+			expect(anyPayload.toolConfig?.toolChoice).toEqual({ auto: {} });
+			expect(anyPayload.additionalModelRequestFields?.thinking).toBeDefined();
+
+			const namedPayload = await capture(model, {
+				toolChoice: { type: "tool", name: "echo" },
+				reasoning: Effort.Low,
+			});
+			expect(namedPayload.toolConfig?.toolChoice).toEqual({ auto: {} });
+			expect(namedPayload.additionalModelRequestFields?.thinking).toBeDefined();
+		});
+	}
 
 	test("still forces the tool on Opus 5, dropping thinking instead", async () => {
 		const payload = await capture(bedrockModel("us.anthropic.claude-opus-5"), {
