@@ -2684,7 +2684,6 @@ export class SessionAdvisors {
 		sharedInstructions: string | undefined,
 		sharedMaxNotesPerUpdate?: number,
 	): number {
-		if (!this.#advisorEnabled) return 0;
 		this.#advisorConfigs = advisors;
 		this.#advisorSharedInstructions = sharedInstructions;
 		this.#advisorSharedMaxNotesPerUpdate = sharedMaxNotesPerUpdate;
