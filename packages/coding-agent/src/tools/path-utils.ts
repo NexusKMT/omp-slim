@@ -713,6 +713,31 @@ export async function splitDelimitedPathEntry(
 	);
 }
 
+/**
+ * Split a `;` list that names URLs alongside local paths
+ * (`https://x;src/a.ts:1-20`, `omp://;Makefile:1-3`). URL detection would
+ * otherwise claim the whole string before the local-path split runs. Every
+ * part must be a URL (per `isUrl`) or an existing path, so a URL that merely
+ * contains `;` (`https://a/x;v=1`) and a literal file named with `;` stay whole.
+ */
+export async function splitMixedUrlPathList(
+	entry: string,
+	cwd: string,
+	isUrl: (part: string) => boolean,
+): Promise<string[] | null> {
+	const normalizedEntry = normalizePathLikeInput(entry);
+	if (!normalizedEntry.includes(";")) return null;
+	if (!isInternalUrlPath(normalizedEntry) && (await probeLiteralPathExists(normalizedEntry, cwd)) !== "missing") {
+		return null;
+	}
+	const parts = await tryDelimitedPathSplit(normalizedEntry, cwd, parseSearchPath, "semicolon", "none");
+	if (!parts) return null;
+	for (const part of parts) {
+		if (!isUrl(part) && !(await delimitedPathPartResolves(part, cwd, parseSearchPath))) return null;
+	}
+	return parts;
+}
+
 /** Expand delimited entries in-place while preserving unsplit entries. */
 export async function expandDelimitedPathEntries(
 	entries: readonly string[],
