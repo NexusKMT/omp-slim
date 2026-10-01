@@ -15,9 +15,11 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { finalizeSubagentLifecycle } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { AdvisorLoopGuard } from "../src/advisor/loop-guard";
+import { cfgAdvisorReviewInterval } from "../src/advisor/settings";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const zeroUsage = {
@@ -49,7 +51,7 @@ describe("advisor tool-call loop guard", () => {
 	beforeAll(() => {
 		tempDir = TempDir.createSync("@pi-advisor-tool-call-loop-guard-");
 		authStorage = createInMemoryAuthStorage();
-		authStorage.setRuntimeApiKey("anthropic", "test-key");
+		authStorage.keys.setRuntime("anthropic", "test-key");
 	});
 
 	afterEach(async () => {
@@ -390,6 +392,46 @@ describe("advisor tool-call loop guard", () => {
 		expect(delivered).toContain("second update");
 	});
 
+	it("applies an advisor.reviewInterval edit to the running default advisor", async () => {
+		const { reviewStarts } = createAdvisor({ "advisor.syncBacklog": "1" }, 0);
+		if (!session) throw new Error("Expected live session");
+		cfgAdvisorReviewInterval.set(session.settings, 2);
+
+		await session.prompt("first update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(0);
+
+		await session.prompt("second update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(1);
+		const delivered = JSON.stringify(reviewStarts[0]!.messages);
+		expect(delivered).toContain("first update");
+		expect(delivered).toContain("second update");
+	});
+
+	it("keeps a cadence-skipped update across an advisor roster rebuild", async () => {
+		const { reviewStarts } = createAdvisor({ "advisor.syncBacklog": "1" }, 0, {
+			name: "Interval reviewer",
+			reviewInterval: 2,
+		});
+		if (!session) throw new Error("Expected live session");
+
+		await session.prompt("first update");
+		expect(reviewStarts).toHaveLength(0);
+		// Saving an edited roster replaces every live runtime.
+		session.applyAdvisorConfigs(
+			[{ name: "Interval reviewer", reviewInterval: 2, instructions: "Check retry limits." }],
+			undefined,
+		);
+
+		await session.prompt("second update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(1);
+		const delivered = JSON.stringify(reviewStarts[0]!.messages);
+		expect(delivered).toContain("first update");
+		expect(delivered).toContain("second update");
+	});
+
 	it("defers agent-end review across tool-loop continuation", async () => {
 		const { contexts } = createAdvisor(
 			{ "advisor.syncBacklog": "1" },
@@ -566,7 +608,6 @@ describe("advisor tool-call loop guard", () => {
 						},
 					],
 				},
-				{ content: [], stopReason: "stop" },
 			],
 		});
 		const advisorStreamFn: StreamFn = (streamModel, context, options) =>
@@ -637,6 +678,82 @@ describe("advisor tool-call loop guard", () => {
 		// A user-attributed custom turn initiator is genuine user input: the
 		// sleep latch wakes and the reviewer sees the accumulated delta.
 		expect(reviewStarts).toHaveLength(2);
+	});
+
+	/**
+	 * Session with one strict `agent-end` reviewer at interval 2 whose review
+	 * takes `reviewDelayMs`, after one primary prompt: its only final yield is
+	 * held, as in a one-prompt headless run.
+	 */
+	async function promptStrictFinalReviewer(
+		reviewDelayMs: number,
+	): Promise<{ live: AgentSession; reviews: Context[] }> {
+		const primaryMock = createMockModel({ provider: "anthropic", responses: [{ content: ["primary complete"] }] });
+		const advisorMock = createMockModel({
+			provider: "anthropic",
+			responses: [{ content: ["Reviewed."], delayMs: reviewDelayMs }],
+		});
+		const reviews: Context[] = [];
+		const advisorStreamFn: StreamFn = (streamModel, context, options) => {
+			reviews.push(context);
+			return advisorMock.stream(streamModel, context, options);
+		};
+		const settings = Settings.isolated({
+			"advisor.syncBacklog": "strict",
+			"compaction.enabled": false,
+			"todo.enabled": false,
+		});
+		const live = new AgentSession({
+			agent: new Agent({
+				getApiKey: () => "test-key",
+				initialState: { model: primaryMock, systemPrompt: [], tools: [] },
+				streamFn: primaryMock.stream,
+			}),
+			sessionManager: SessionManager.inMemory(tempDir.path()),
+			settings,
+			modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+			advisorTools: [],
+			advisorStreamFn,
+			advisorConfigs: [{ name: "Final reviewer", reviewMode: "agent-end", reviewInterval: 2 }],
+		});
+		session = live;
+		settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+		expect(live.setAdvisorEnabled(true)).toBe(true);
+		await live.prompt("ship the retry change");
+		expect(reviews).toHaveLength(0);
+		return { live, reviews };
+	}
+
+	it("reviews a cadence-skipped final yield in the print-mode drain, past the drain budget when strict", async () => {
+		const { live, reviews } = await promptStrictFinalReviewer(200);
+
+		live.prepareForHeadlessAdvisorDrain();
+		expect(await live.waitForAdvisorCatchup(50, { waitThroughRecovery: true, strictWithoutDeadline: true })).toBe(
+			true,
+		);
+		expect(reviews).toHaveLength(1);
+		expect(JSON.stringify(reviews[0]!.messages)).toContain("ship the retry change");
+	});
+
+	it("finishes subagent teardown within its cleanup deadline despite a strict reviewer", async () => {
+		const { live, reviews } = await promptStrictFinalReviewer(10_000);
+
+		const started = performance.now();
+		await finalizeSubagentLifecycle({
+			id: "strict-reviewer-subagent",
+			session: live,
+			aborted: false,
+			keepAlive: false,
+			isolated: false,
+			agentIdleTtlMs: 0,
+			reviveSession: null,
+			cleanupDeadlineAt: Date.now() + 200,
+		});
+		session = undefined;
+
+		// The held final yield was still sent for review before disposal.
+		expect(reviews).toHaveLength(1);
+		expect(performance.now() - started).toBeLessThan(2_000);
 	});
 
 	it("leaves the advisor unbounded when the shared loop guard is disabled", async () => {

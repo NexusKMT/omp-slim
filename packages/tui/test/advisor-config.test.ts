@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { TUI } from "../src/index";
+import type { DescribeContext } from "../src/native/node";
 import {
 	AdvisorConfigOverlayComponent,
 	type AdvisorConfigDeps,
@@ -12,6 +13,7 @@ import { getThemeByName, setThemeInstance } from "../src/theme";
 const deps: AdvisorConfigDeps = {
 	getAvailableModels: () => [],
 	browserSource: {
+		revision: 0,
 		defaultThinkingLevel: "high",
 		modelProviderOrder: [],
 		knownRoleIds: [],
@@ -138,6 +140,39 @@ describe("advisor sync backlog picker", () => {
 		// A real edit must survive: the seeded row is no longer synthetic, so the
 		// save must not collapse the roster to empty (which would delete the file).
 		expect(saved?.advisors).toEqual([{ name: "default", syncBacklog: "strict" }]);
+	});
+
+	it("edits cadence from the native prefs page, saving defaults and inherit as omitted fields", async () => {
+		let saved: WatchdogConfigDoc | undefined;
+		const overlay = buildOverlay({ advisors: [{ name: "Reviewer", syncBacklog: "off" }] }, doc => {
+			saved = structuredClone(doc);
+		});
+		const change = (item: string, value: string | number | null) =>
+			overlay.handleNativeEvent({ type: "change", key: "", item, value });
+
+		overlay.handleNativeEvent({ type: "action", key: "", act: "page", value: "advisor:0", mods: [] });
+		change("reviewMode", "agent-end");
+		change("reviewInterval", 3);
+		change("reviewInterval", null); // Reset to the default interval.
+		change("syncBacklog", "inherit");
+		overlay.handleNativeEvent({ type: "action", key: "", act: "save", mods: [] });
+		await Promise.resolve();
+
+		expect(saved?.advisors).toEqual([{ name: "Reviewer", reviewMode: "agent-end" }]);
+	});
+
+	it("docks as a side sheet like /settings only where the terminal draws prefs with aside", () => {
+		const overlay = buildOverlay({ advisors: [] }, () => {});
+		const cx: DescribeContext = {
+			cols: 120,
+			reduceMotion: false,
+			dark: true,
+			supports: () => true,
+			feature: () => true,
+		};
+		expect(overlay.nativeSheet(cx)).toBe(true);
+		expect(overlay.nativeSheet({ ...cx, feature: name => name !== "aside" })).toBe(false);
+		expect(overlay.nativeSheet({ ...cx, supports: kind => kind !== "prefs" })).toBe(false);
 	});
 
 	it("still drops the untouched seeded default row on save", async () => {
