@@ -152,6 +152,7 @@ Important edge behavior from runtime:
 - `{ id?, type: "get_subagents" }`
 - `{ id?, type: "get_subagent_messages", subagentId?: string, sessionFile?: string, fromByte?: number }`
 - `{ id?, type: "cancel_subagent", subagentId: string }`
+- `{ id?, type: "steer_subagent", subagentId: string, message: string }`
 
 ### Model
 
@@ -822,6 +823,34 @@ whose result the parent already accepted, even before its terminal lifecycle
 frame), or already cancelled, so hosts can treat it as idempotent. If the
 `aborted` tombstone cannot be persisted, the subagent is still aborted and
 disposed, and the command returns an error response with the write failure.
+
+### Steering subagents
+
+`steer_subagent` sends a message to a running subagent as its user, the same
+way Agent Hub chat does: a mid-turn subagent is steered at its next step
+boundary, an idle one starts a turn, and a parked one is revived first. The
+message is recorded in the subagent's own transcript; it is not attributed to
+the parent agent, and the parent sees only the subagent's eventual result.
+Isolated (worktree) subagents run in-process and are steered the same way.
+
+```json
+{ "id": "req_1", "type": "steer_subagent", "subagentId": "OmpWorker", "message": "Drop the glob, keep the direct path." }
+{ "id": "req_1", "type": "response", "command": "steer_subagent", "success": true }
+```
+
+The response arrives once the message is accepted: queued into the running
+turn, or the idle subagent's new turn started. It does not wait for the turn
+to finish. As in Agent Hub chat and RPC `steer`, slash commands and prompt
+templates in the message are handled by the subagent's session.
+
+Failure responses:
+
+- missing/empty `subagentId` or blank `message` → validation error
+- `subagentId` not currently listed as running by `get_subagents` (unknown,
+  finished, released, or another session's agent) → `error: "Subagent not running: <id>"`
+- a parked subagent that cannot be revived → `error: "Subagent not reachable: <reason>"`
+- the subagent refuses the message before accepting it (for example a failed
+  preflight) → `error: "Subagent refused the message: <reason>"`
 
 ## Prompt/Queue Concurrency and Ordering
 
