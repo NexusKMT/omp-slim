@@ -994,6 +994,26 @@ export class RpcClient {
 	}
 
 	/**
+	 * Ghost-text suffix for the prose word ending at `cursor` (a UTF-16 offset
+	 * into `text`), from the `spelling.autocomplete` engine; `null` when none applies.
+	 */
+	async predictWord(text: string, cursor: number): Promise<string | null> {
+		// The server runs one prediction at a time per session and holds at most one
+		// more behind it, so this request may wait out an in-flight cold request
+		// (up to 3 daemon-start rounds of 30s plus a 30s first completion) before
+		// its own 30s completion: ~150s. Outlast that so the server's answer, not
+		// our timeout, decides.
+		const response = await this.#send({ type: "predict_word", text, cursor }, 155_000);
+		return this.#getData<{ suffix: string | null }>(response).suffix;
+	}
+
+	/** Report a shown suggestion the user accepted or typed past, with the text and cursor it was shown at. */
+	async predictWordFeedback(text: string, cursor: number, suggestion: string, accepted: boolean): Promise<void> {
+		const response = await this.#send({ type: "predict_word_feedback", text, cursor, suggestion, accepted });
+		this.#getData(response);
+	}
+
+	/**
 	 * Get one stable, byte-bounded message page.
 	 */
 	async getMessagesPage(options: RpcMessagesPageOptions = {}): Promise<RpcMessagesPage> {

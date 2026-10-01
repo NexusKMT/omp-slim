@@ -102,7 +102,18 @@ export type RpcCommand =
 
 	// Login
 	| { id?: string; type: "get_login_providers" }
-	| { id?: string; type: "login"; providerId: string };
+	| { id?: string; type: "login"; providerId: string }
+
+	// Word prediction (composer ghost text); `cursor` is a UTF-16 offset into `text`
+	| { id?: string; type: "predict_word"; text: string; cursor: number }
+	| {
+			id?: string;
+			type: "predict_word_feedback";
+			text: string;
+			cursor: number;
+			suggestion: string;
+			accepted: boolean;
+	  };
 
 // ============================================================================
 // RPC State
@@ -446,6 +457,10 @@ export type RpcResponse =
 			data: { providers: Array<{ id: string; name: string; available: boolean; authenticated: boolean }> };
 	  }
 	| { id?: string; type: "response"; command: "login"; success: true; data: { providerId: string } }
+
+	// Word prediction
+	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }
+	| { id?: string; type: "response"; command: "predict_word_feedback"; success: true }
 
 	// Error response (any command can fail); `code` is an optional machine-readable reason.
 	| { id?: string; type: "response"; command: string; success: false; error: string; code?: string };
