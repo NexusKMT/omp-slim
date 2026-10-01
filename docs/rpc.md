@@ -931,7 +931,7 @@ That means:
 - command acceptance != run completion
 - a prompt completes via `data.agentInvoked: false` on its response or via its own `prompt_result`
 - a run completes on an `agent_end` frame where `isTerminal !== false`; that frame carries no prompt identity, so correlate prompts through `prompt_result`
-- native `input` handlers run once, in submission order, before command, skill, or queue dispatch. Later input waits until the earlier submission is admitted, including an idle skill's vision description, and does not wait for its model turn. An abort accepted while an earlier frame is still in a hook cancels that frame; the generation is the one captured when the frame was accepted.
+- native `input` handlers run once, in submission order, before command, skill, or queue dispatch. Later input waits until the earlier submission is admitted, including an idle skill's vision description, and does not wait for its model turn. An `abort` cancels input received before it that is not yet admitted, even if that input is still in a hook. A successful `new_session`, `switch_session`, `branch` or `open_session` does the same for input received before it; a vetoed one cancels nothing, and input sent after the session change runs in the new session.
 - the session is done only at `session_settled`: background jobs can wake the agent after it yields
 
 ### While streaming

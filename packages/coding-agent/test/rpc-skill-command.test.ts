@@ -447,10 +447,7 @@ describe("dispatchRpcSkillPrompt", () => {
 
 			expect(result).toEqual({ agentInvoked: true });
 			expect(Array.isArray(message?.content)).toBe(true);
-			expect(message?.content).toEqual([
-				{ type: "text", text: expect.stringContaining("Body.") },
-				image,
-			]);
+			expect(message?.content).toEqual([{ type: "text", text: expect.stringContaining("Body.") }, image]);
 		} finally {
 			await removeWithRetries(dir);
 		}

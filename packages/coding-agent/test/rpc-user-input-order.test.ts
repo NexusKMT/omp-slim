@@ -135,7 +135,7 @@ test("abort starts immediately and is not stuck behind steer waiting on an admit
 	expect(executionOrder).toEqual(["prompt-start", "abort", "prompt-admitted", "steer"]);
 });
 
-test("untrusted command types like constructor do not bump epoch or generation", () => {
+test("untrusted command types like constructor do not invalidate accepted input", () => {
 	const gate = new RpcUserInputGate();
 	const prompt = { id: "p", type: "prompt", message: "test" } as const;
 	gate.accept(prompt);
@@ -146,109 +146,34 @@ test("untrusted command types like constructor do not bump epoch or generation",
 	expect(gate.isCurrent({ type: "constructor" } as unknown as RpcCommand)).toBe(false);
 });
 
-test("vetoed session transition keeps accepted prompt current while successful transition invalidates it", () => {
+test("a session change invalidates earlier input only once it commits, never input pipelined after it", () => {
 	const gate = new RpcUserInputGate();
-	const prompt = { id: "p", type: "prompt", message: "test" } as const;
-	gate.accept(prompt);
-	expect(gate.isCurrent(prompt)).toBe(true);
+	const before = { id: "before", type: "prompt", message: "before" } as const;
+	const change = { id: "change", type: "new_session" } as const;
+	const after = { id: "after", type: "prompt", message: "after" } as const;
+	gate.accept(before);
+	gate.accept(change);
+	gate.accept(after);
+	// Accepted but not yet committed (or vetoed): nothing is invalidated.
+	expect(gate.isCurrent(before)).toBe(true);
+	expect(gate.isCurrent(after)).toBe(true);
 
-	// Vetoed transition: bumpEpoch is NOT called.
-	expect(gate.isCurrent(prompt)).toBe(true);
-
-	// Successful transition: bumpEpoch() is called.
-	gate.bumpEpoch();
-	expect(gate.isCurrent(prompt)).toBe(false);
+	gate.commitSessionChange(change);
+	expect(gate.isCurrent(before)).toBe(false);
+	expect(gate.isCurrent(after)).toBe(true);
 });
 
-test("RPC input handler can consume a prompt or transform text without trimming", async () => {
+test("an abort accepted after a session change keeps its own boundary when the change commits", () => {
 	const gate = new RpcUserInputGate();
+	const change = { id: "change", type: "switch_session", sessionPath: "/tmp/other.jsonl" } as const;
+	const between = { id: "between", type: "steer", message: "between" } as const;
+	gate.accept(change);
+	gate.accept(between);
+	gate.accept({ id: "abort", type: "abort" });
+	const after = { id: "after", type: "prompt", message: "after" } as const;
+	gate.accept(after);
 
-	// Case 1: Handler consumes the prompt (handled: true)
-	{
-		let promptAdmitted = false;
-		const runner = {
-			hasHandlers: (event: string) => event === "input",
-			emitInput: async () => ({ handled: true }),
-		};
-
-		const command = { id: "p1", type: "prompt" as const, message: "consume me" };
-		gate.accept(command);
-
-		const outcome = await gate.enqueue(async () => {
-			if (!gate.isCurrent(command)) return "cancelled";
-			let text = command.message;
-			if (runner.hasHandlers("input")) {
-				const result = await runner.emitInput();
-				if (!gate.isCurrent(command)) return "cancelled";
-				if (result.handled) return "local";
-			}
-			promptAdmitted = true;
-			return "admitted";
-		});
-
-		expect(outcome).toBe("local");
-		expect(promptAdmitted).toBe(false);
-	}
-
-	// Case 2: Handler transforms the prompt (text changed, untrimmed whitespace preserved)
-	{
-		const untrimmed = "  indented code block\n";
-		const runner = {
-			hasHandlers: (event: string) => event === "input",
-			emitInput: async () => ({ text: untrimmed, handled: false }),
-		};
-
-		const command = { id: "p2", type: "prompt" as const, message: "raw" };
-		gate.accept(command);
-
-		let admittedText = "";
-		const outcome = await gate.enqueue(async () => {
-			if (!gate.isCurrent(command)) return "cancelled";
-			let text = command.message;
-			if (runner.hasHandlers("input")) {
-				const result = await runner.emitInput();
-				if (!gate.isCurrent(command)) return "cancelled";
-				if (result.handled) return "local";
-				if (result.text !== undefined) text = result.text;
-			}
-			admittedText = text;
-			return "admitted";
-		});
-
-		expect(outcome).toBe("admitted");
-		expect(admittedText).toBe(untrimmed);
-	}
-});
-
-test("a later prompt cannot overtake an idle image skill during preparation", async () => {
-	const gate = new RpcUserInputGate();
-	const imagePreparation = Promise.withResolvers<void>();
-	const events: string[] = [];
-
-	// Simulate skill prompt with image: admission is gated by image preparation
-	const skillCommand = { id: "skill-1", type: "prompt" as const, message: "/skill:reviewer" };
-	gate.accept(skillCommand);
-	const skillTask = gate.enqueue(async () => {
-		events.push("skill-started");
-		await imagePreparation.promise;
-		events.push("skill-admitted");
-		return "admitted";
-	});
-
-	// Later plain prompt submitted while image preparation is still ongoing
-	const plainPrompt = { id: "plain-2", type: "prompt" as const, message: "later prompt" };
-	gate.accept(plainPrompt);
-	const plainTask = gate.enqueue(async () => {
-		events.push("plain-admitted");
-		return "admitted";
-	});
-
-	await flush();
-	expect(events).toEqual(["skill-started"]);
-
-	// Release image preparation
-	imagePreparation.resolve();
-	await Promise.all([skillTask, plainTask]);
-
-	expect(events).toEqual(["skill-started", "skill-admitted", "plain-admitted"]);
+	gate.commitSessionChange(change);
+	expect(gate.isCurrent(between)).toBe(false);
+	expect(gate.isCurrent(after)).toBe(true);
 });

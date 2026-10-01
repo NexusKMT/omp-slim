@@ -291,6 +291,9 @@ export async function runRpcSkillCommand(
  * dispatch pipeline — building the skill prompt and running it (usage
  * preflight, compaction, provider calls) can outlast any client's prompt
  * timeout under provider stress; only queue admission gates the response.
+ *
+ * @returns `null` for a non-skill message, `"cancelled"` when `isCurrent`
+ *   reports the submission was invalidated while the skill file was read.
  */
 export async function dispatchRpcSkillPrompt(input: {
 	ticket: RpcPromptTicket;
@@ -301,7 +304,8 @@ export async function dispatchRpcSkillPrompt(input: {
 	onError: (error: Error) => void;
 	extensionUserMessageTracker: RpcExtensionUserMessageTracker;
 	images?: ImageContent[];
-}): Promise<RpcSkillCommandResult | null> {
+	isCurrent?: () => boolean;
+}): Promise<RpcSkillCommandResult | "cancelled" | null> {
 	const invocation = resolveRpcSkillInvocation(input.session, input.message);
 	if (!invocation) return null;
 	// buildSkillPromptMessage is cheap file I/O and covers the failure the old
@@ -310,6 +314,7 @@ export async function dispatchRpcSkillPrompt(input: {
 	// promptCustomMessage pipeline (usage preflight, compaction, provider
 	// calls) is what moves behind the acknowledgement.
 	const built = await buildSkillPromptMessage(invocation.skill, invocation, "user");
+	if (input.isCurrent && !input.isCurrent()) return "cancelled";
 	// A failure before admission still resolves this wait (without rejecting this
 	// call) — reportPromptResult already routed it to onError and a failed prompt_result.
 	await watchAndReportPromptResult({
@@ -476,35 +481,53 @@ const USER_INPUT_TYPES: Record<string, true> = {
 	abort_and_prompt: true,
 };
 
+const SESSION_CHANGE_TYPES: Record<string, true> = {
+	new_session: true,
+	switch_session: true,
+	branch: true,
+	open_session: true,
+};
+
 /**
- * Generation captured when a user-input frame is accepted, not when its handler runs.
- * An abort or session change accepted later invalidates frames accepted before it.
+ * Orders user input and decides whether an accepted frame is still wanted.
+ *
+ * Every user-input, abort and session-change frame gets a sequence number when it
+ * is accepted (read from stdin), not when its handler runs. An abort invalidates
+ * input accepted before it immediately. A session change invalidates input accepted
+ * before the change frame, and only once the change succeeds: a vetoed change keeps
+ * that input, and input pipelined after the change still runs in the new session.
  */
 export class RpcUserInputGate {
 	#tail: Promise<void> = Promise.resolve();
-	#generation = 0;
-	#epoch = 0;
-	#generationAtAccept = new WeakMap<object, number>();
-	#epochAtAccept = new WeakMap<object, number>();
+	#sequence = 0;
+	#validFrom = 0;
+	#acceptedAt = new WeakMap<object, number>();
 
 	/** Call from {@link RpcInputDispatcher.dispatch} before the handler is queued. */
 	accept(command: RpcCommand): void {
-		if (command.type === "abort" || command.type === "abort_and_prompt") this.#generation++;
-		if (!Object.hasOwn(USER_INPUT_TYPES, command.type)) return;
-		this.#generationAtAccept.set(command, this.#generation);
-		this.#epochAtAccept.set(command, this.#epoch);
+		const isAbort = command.type === "abort" || command.type === "abort_and_prompt";
+		if (
+			!isAbort &&
+			!Object.hasOwn(USER_INPUT_TYPES, command.type) &&
+			!Object.hasOwn(SESSION_CHANGE_TYPES, command.type)
+		) {
+			return;
+		}
+		const sequence = ++this.#sequence;
+		this.#acceptedAt.set(command, sequence);
+		if (isAbort) this.#validFrom = sequence;
 	}
 
-	/** Invalidate accepted input when a session transition actually occurs. */
-	bumpEpoch(): void {
-		this.#epoch++;
+	/** A session change succeeded: invalidate input accepted before its frame. */
+	commitSessionChange(command: RpcCommand): void {
+		const sequence = this.#acceptedAt.get(command);
+		if (sequence !== undefined && sequence > this.#validFrom) this.#validFrom = sequence;
 	}
 
-	/** False when a later abort or session change invalidated this accepted frame. */
+	/** False when an abort, or a successful session change, accepted after this frame invalidated it. */
 	isCurrent(command: RpcCommand): boolean {
-		return (
-			this.#generationAtAccept.get(command) === this.#generation && this.#epochAtAccept.get(command) === this.#epoch
-		);
+		const sequence = this.#acceptedAt.get(command);
+		return sequence !== undefined && sequence >= this.#validFrom;
 	}
 
 	/** Run user-input work in accept order. The tail releases when `work` settles, not when a model turn ends. */
@@ -1562,27 +1585,20 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				return "admitted";
 			}
 			if (command.type === "prompt") {
-				const invocation = resolveRpcSkillInvocation(session, text);
-				if (invocation) {
-					const built = await buildSkillPromptMessage(invocation.skill, invocation, "user");
-					if (!isCurrent() || !ticket) return "cancelled";
-					await watchAndReportPromptResult({
-						ticket,
-						startPrompt: onPromptAdmitted =>
-							runRpcSkillCommand(
-								session,
-								invocation,
-								command.streamingBehavior ?? "steer",
-								built,
-								onPromptAdmitted,
-								images,
-							),
-						results: promptResults,
-						onError: onPromptError(command.id, "prompt"),
-						extensionUserMessageTracker,
-					});
-					return "admitted";
-				}
+				if (!ticket) return "cancelled";
+				const skillResult = await dispatchRpcSkillPrompt({
+					ticket,
+					session,
+					message: text,
+					streamingBehavior: command.streamingBehavior,
+					results: promptResults,
+					onError: onPromptError(command.id, "prompt"),
+					extensionUserMessageTracker,
+					images,
+					isCurrent,
+				});
+				if (skillResult === "cancelled") return "cancelled";
+				if (skillResult) return "admitted";
 				const builtinResult = await executeAcpBuiltinSlashCommand(text, {
 					session,
 					sessionManager: session.sessionManager,
@@ -1712,8 +1728,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 						else if (outcome === "local") promptResults.completeLocal(ticket);
 					},
 					(cause: unknown) => {
-						promptResults.discard(ticket);
-						output(error(id, "abort_and_prompt", cause instanceof Error ? cause.message : String(cause)));
+						// Already acknowledged: owe the late same-id error and a failed prompt_result.
+						const promptError = cause instanceof Error ? cause : new Error(String(cause));
+						onPromptError(id, "abort_and_prompt")(promptError);
+						promptResults.fail(ticket, promptError.message);
 					},
 				);
 				return success(id, "abort_and_prompt");
@@ -1724,7 +1742,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "branch": {
 				const result = await handleRpcSessionChange(session, command, subagentRegistry);
 				if (!result.data.cancelled) {
-					inputGate.bumpEpoch();
+					inputGate.commitSessionChange(command);
 					promptResults.abortOpen();
 					// The detached run publishes no terminal agent_end to settle on.
 					void settleWatcher.check();
@@ -1736,7 +1754,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "open_session": {
 				const result = await openRpcSession(session, command.sessionDir, subagentRegistry);
 				if (!result.cancelled) {
-					inputGate.bumpEpoch();
+					inputGate.commitSessionChange(command);
 					promptResults.abortOpen();
 					void settleWatcher.check();
 					await emitAvailableCommandsUpdate();
