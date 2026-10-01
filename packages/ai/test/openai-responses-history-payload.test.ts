@@ -345,6 +345,17 @@ function findResponsesInputItemByCallId(
 	return undefined;
 }
 
+function listResponsesToolItems(input: unknown[] | undefined): Array<[unknown, unknown, unknown]> {
+	const tools: Array<[unknown, unknown, unknown]> = [];
+	for (const item of input ?? []) {
+		if (!isIssue5002Record(item)) continue;
+		if (item.type === "function_call" || item.type === "function_call_output") {
+			tools.push([item.type, item.call_id, item.name]);
+		}
+	}
+	return tools;
+}
+
 function collectResponsesInputImageDetails(input: unknown): string[] {
 	const details: string[] = [];
 	const visit = (node: unknown): void => {
@@ -1759,6 +1770,122 @@ describe("OpenAI responses history payload", () => {
 			call_id: callId,
 			output: "Tool execution was aborted.",
 		});
+	});
+
+	it("keeps an invocation-text tool name from another API out of the Responses request", async () => {
+		// Shape of a GLM-5.3 (openai-completions) turn whose gateway returned the
+		// whole tool invocation as the name; OpenAI rejected the replay with
+		// `Invalid 'input[401].name': string too long ... length 9654`.
+		const invocationName = "eval>\n<code>\n".padEnd(9654, "print('step')\n");
+		const usage = {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const context: Context = {
+			messages: [
+				{ role: "user", content: "Run the script", timestamp: 1 },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Running the script." },
+						{ type: "toolCall", id: "chatcmpl-tool-invocation", name: invocationName, arguments: {} },
+						{ type: "toolCall", id: "chatcmpl-tool-read", name: "read", arguments: { path: "README.md" } },
+					],
+					api: "openai-completions",
+					provider: "zai",
+					model: "glm-5.3",
+					usage,
+					stopReason: "toolUse",
+					timestamp: 2,
+				},
+				{
+					role: "toolResult",
+					toolCallId: "chatcmpl-tool-invocation",
+					toolName: invocationName,
+					content: [{ type: "text", text: "Tool not found" }],
+					isError: true,
+					timestamp: 3,
+				},
+				{
+					role: "toolResult",
+					toolCallId: "chatcmpl-tool-read",
+					toolName: "read",
+					content: [{ type: "text", text: "file contents" }],
+					isError: false,
+					timestamp: 4,
+				},
+				{ role: "user", content: "continue", timestamp: 5 },
+			],
+		};
+		const model = getOpenAIReasoningModel("openai", "gpt-5-mini");
+		const payload = (await captureResponsesPayload(model, context)) as { input?: unknown[] };
+		expect(listResponsesToolItems(payload.input)).toEqual([
+			["function_call", "chatcmpl-tool-read", "read"],
+			["function_call_output", "chatcmpl-tool-read", undefined],
+		]);
+		expect(containsAssistantOutputText(payload.input, "Running the script.")).toBe(true);
+	});
+
+	it("drops malformed tool names from same-model native history replay", async () => {
+		const malformedName = 'bash\0arg_key="command"\0arg_value="ls -la"';
+		const assistantMessage = {
+			...makeAssistantMessage(
+				[
+					{ type: "reasoning", id: "rs_1", summary: [], encrypted_content: "enc_tools" },
+					{ type: "function_call", id: "fc_bad", call_id: "call_bad", name: malformedName, arguments: "{}" },
+					{
+						type: "function_call",
+						id: "fc_read",
+						call_id: "call_read",
+						name: "read",
+						arguments: '{"path":"README.md"}',
+					},
+				],
+				true,
+			),
+			content: [
+				{ type: "toolCall" as const, id: "call_bad|fc_bad", name: malformedName, arguments: {} },
+				{ type: "toolCall" as const, id: "call_read|fc_read", name: "read", arguments: { path: "README.md" } },
+			],
+			stopReason: "toolUse" as const,
+		};
+		const context: Context = {
+			messages: [
+				{ role: "user", content: "List the repo", timestamp: Date.now() },
+				assistantMessage,
+				{
+					role: "toolResult",
+					toolCallId: "call_bad|fc_bad",
+					toolName: malformedName,
+					content: [{ type: "text", text: "Tool not found" }],
+					isError: true,
+					timestamp: Date.now(),
+				},
+				{
+					role: "toolResult",
+					toolCallId: "call_read|fc_read",
+					toolName: "read",
+					content: [{ type: "text", text: "file contents" }],
+					isError: false,
+					timestamp: Date.now(),
+				},
+				{ role: "user", content: "continue", timestamp: Date.now() },
+			],
+		};
+		const model = getOpenAIReasoningModel("openai", "gpt-5-mini");
+		const providerSessionState = new Map<string, ProviderSessionState>();
+		await captureResponsesPayload(model, context, providerSessionState);
+		markResponsesProviderSessionStateWarmed(providerSessionState);
+		const payload = (await captureResponsesPayload(model, context, providerSessionState)) as { input?: unknown[] };
+		expect(containsEncryptedReasoning(payload.input)).toBe(true);
+		expect(listResponsesToolItems(payload.input)).toEqual([
+			["function_call", "call_read", "read"],
+			["function_call_output", "call_read", undefined],
+		]);
 	});
 
 	it("converts orphan function_call_output replayed from providerPayload into an assistant note (issue #1351)", async () => {

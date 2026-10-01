@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Sessions no longer get stuck on `400 string_above_max_length` after a model writes its whole tool invocation into the tool name. Tool calls with blank names, names longer than 128 characters, or names containing whitespace or control characters are dropped from replayed history, together with their tool results. This also applies when OpenAI Responses replays its stored native history.
+
 ## [18.4.6] - 2026-10-01
 
 ### Fixed

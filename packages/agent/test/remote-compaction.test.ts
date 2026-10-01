@@ -493,6 +493,42 @@ describe("buildOpenAiNativeHistory call-id tracking", () => {
 		expect(items.some(item => item.type === "function_call_output" && item.call_id === "call_old")).toBe(false);
 		expect(items.some(item => item.type === "function_call_output" && item.call_id === "call_new")).toBe(true);
 	});
+
+	test("drops stored native calls with malformed names and the outputs that answer them", () => {
+		const invocationName = 'bash\0arg_key="command"\0arg_value="ls"';
+		const assistant = codexAssistant([{ callId: "call_bad" }, { callId: "call_ok" }], true);
+		const badBlock = assistant.content[0];
+		if (badBlock?.type !== "toolCall") throw new Error("expected tool call");
+		badBlock.name = invocationName;
+		const payload = assistant.providerPayload;
+		if (payload?.type !== "openaiResponsesHistory") throw new Error("expected native history");
+		payload.items[0]!.name = invocationName;
+		const replacementHistory = {
+			role: "user",
+			content: "",
+			timestamp: Date.now(),
+			providerPayload: {
+				type: "openaiResponsesHistory",
+				provider: "openai-codex",
+				items: [
+					{ type: "function_call", call_id: "call_prev", name: "t".repeat(129), arguments: "{}" },
+					{ type: "function_call", call_id: "call_prev_ok", name: "read", arguments: "{}" },
+					{ type: "function_call_output", call_id: "call_prev", output: "prev result" },
+					{ type: "function_call_output", call_id: "call_prev_ok", output: "prev ok result" },
+				],
+			},
+		} as unknown as UserMessage;
+		const items = buildOpenAiNativeHistory(
+			[replacementHistory, assistant, toolResultFor("call_bad"), toolResultFor("call_ok")],
+			CODEX_MODEL,
+		);
+		expect(items.flatMap(item => (typeof item.call_id === "string" ? [[item.type, item.call_id]] : []))).toEqual([
+			["function_call", "call_prev_ok"],
+			["function_call_output", "call_prev_ok"],
+			["function_call", "call_ok"],
+			["function_call_output", "call_ok"],
+		]);
+	});
 });
 
 describe("buildOpenAiNativeHistory computer calls", () => {

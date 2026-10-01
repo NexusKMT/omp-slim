@@ -1,6 +1,6 @@
 import { $env } from "@oh-my-pi/pi-utils";
 import type { ResponseInput, ResponseInputItem } from "./providers/openai-responses-wire";
-import { redactSensitiveCredentials } from "./providers/transform-messages";
+import { isMalformedToolCallName, redactSensitiveCredentials } from "./providers/transform-messages";
 import type { CacheRetention, OpenAIResponsesHistoryPayload, ProviderPayload } from "./types";
 
 type OpenAIResponsesReplayItem = ResponseInput[number];
@@ -441,11 +441,45 @@ export function sanitizeOpenAIResponsesAssistantFallbackItemsForReplay(items: Re
 	return sanitized;
 }
 
+/** Native tool call whose name {@link isMalformedToolCallName} rejects. */
+function isMalformedOpenAIResponsesToolCall(item: Record<string, unknown>): boolean {
+	return (item.type === "function_call" || item.type === "custom_tool_call") && isMalformedToolCallName(item.name);
+}
+
+/**
+ * Drop native tool calls with a malformed name, plus any output in the same
+ * list that answers them, for replay paths without orphan-output repair
+ * (remote compaction). Returns `items` itself when nothing is malformed.
+ */
+export function dropMalformedOpenAIResponsesToolCalls(
+	items: Array<Record<string, unknown>>,
+): Array<Record<string, unknown>> {
+	const droppedCallIds = new Set<unknown>();
+	for (const item of items) {
+		if (isMalformedOpenAIResponsesToolCall(item)) droppedCallIds.add(item.call_id);
+	}
+	if (droppedCallIds.size === 0) return items;
+	return items.filter(
+		item =>
+			!isMalformedOpenAIResponsesToolCall(item) &&
+			!(
+				(item.type === "function_call_output" || item.type === "custom_tool_call_output") &&
+				droppedCallIds.has(item.call_id)
+			),
+	);
+}
+
 function sanitizeOpenAIResponsesHistoryItemForReplay(
 	item: Record<string, unknown>,
 	supportsImageDetailOriginal: boolean,
 	preserveReasoningItemIds: boolean,
 ): OpenAIResponsesReplayItem | undefined {
+	// Native replay sends these items instead of the assistant content that
+	// `transformMessages` already stripped of malformed calls (and their paired
+	// results), so apply the same name check here.
+	if (isMalformedOpenAIResponsesToolCall(item)) {
+		return undefined;
+	}
 	if (item.type === "function_call") {
 		if (typeof item.arguments !== "string" || item.arguments.trim().length === 0) return undefined;
 		try {
