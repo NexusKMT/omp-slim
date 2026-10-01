@@ -32,6 +32,10 @@
 - Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
 - Fixed omp freezing for seconds at a time and silently no longer saving the session after another process wrote to the same session file; omp now keeps that process's entries and saves normally, and if that process keeps writing through every retry, omp leaves the file to it and continues in a new file next to it ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
 - Fixed two omp processes writing the same session (for example after resuming it while an orphaned omp still had it open) mixing their turns into one file; the process that wrote it first keeps it, and the other continues in a new file next to it and shows you the new path ([#13989](https://github.com/can1357/oh-my-pi/pull/13989) by [@radkawar](https://github.com/radkawar))
+### Fixed
+
+- Fixed the native composer's effort chip showing the main session's thinking level while viewing a subagent
+- Fixed `omp predict`'s compare view and the MCP authorization link prompt drawing as pre-rendered `rows` fallback grids in Tern; both now describe themselves natively (the link opens or copies on click)
 
 ## [18.4.6] - 2026-10-01
 
