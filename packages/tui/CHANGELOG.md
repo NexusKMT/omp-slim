@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added support for OSC 877 protocol framing to enable Tern in Windows ConPTY environments
+- Added `Component.describeScreen` for customized native screen surface layouts
+- Added `reveal` property to native nodes to support programmatic scrolling
+- Added `edit` event protocol for native text manipulation
+
 ### Changed
 
 - Status line brand ('pi') is now excluded from the composer's homed segment set
