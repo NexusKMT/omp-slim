@@ -8,6 +8,7 @@
 - Added the RPC `steer_subagent` command (and `RpcClient.steerSubagent()`) to message a running subagent as its user, like Agent Hub chat ([#13482](https://github.com/can1357/oh-my-pi/pull/13482) by [@andrebrait](https://github.com/andrebrait)); ported from [#10427](https://github.com/can1357/oh-my-pi/pull/10427) by [@agenticfreedom](https://github.com/agenticfreedom)
 - Added `predict_word` and `predict_word_feedback` RPC commands so hosts with their own composer (web and IDE clients) can show the same ghost-text word completion as the terminal editor, using the `spelling.autocomplete` engine and its prose gates ([#13517](https://github.com/can1357/oh-my-pi/pull/13517) by [@andrebrait](https://github.com/andrebrait))
 - Added an opt-in RPC ask dialog: after `set_ask_dialog` enables it, the `ask` tool sends all its questions in one `ask` extension UI request and takes the answers back in one `answers` response, so hosts can render every question with checkboxes or radio buttons and submit them together; hosts that don't opt in keep the one-`select`-per-choice prompts ([#13551](https://github.com/can1357/oh-my-pi/pull/13551) by [@andrebrait](https://github.com/andrebrait))
+- Added `SessionManager.onPersistenceNotice()` for SDK hosts: it reports a session moving to a new file (with the old and new paths) without going through the `onPersistenceError` failure channel ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
 
 ### Changed
 
@@ -23,8 +24,8 @@
 - Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; the session now continues in a new file next to the original, leaves the other process's file untouched, and shows you the new path
 - Fixed resuming a session that another running omp process already has open giving no sign that both would write to the same file; omp now warns at resume time
 - Fixed session saves rewriting every already-stored image blob on each save, which multiplied disk writes on sessions with many images ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
-- Fixed omp freezing for seconds at a time and silently no longer saving the session after another omp process wrote to the same session file; the session now continues in a new file next to the original, leaves the other process's file untouched, and shows you the new path ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
-- Fixed resuming a session that another running omp process already has open giving no sign that both would write to the same file; omp now warns at resume time ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
+- Fixed omp freezing for seconds at a time and silently no longer saving the session after another process wrote to the same session file; omp now keeps that process's entries and saves normally ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
+- Fixed two omp processes writing the same session (for example after resuming it while an orphaned omp still had it open) mixing their turns into one file; the process that wrote it first keeps it, and the other continues in a new file next to it and shows you the new path ([#13989](https://github.com/can1357/oh-my-pi/pull/13989))
 
 ## [18.4.6] - 2026-10-01
 

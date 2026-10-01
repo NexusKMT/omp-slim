@@ -142,6 +142,12 @@ export interface SessionStorage {
 
 	exists(path: string): Promise<boolean>;
 	readText(path: string): Promise<string>;
+	/**
+	 * Synchronous {@link readText}. Optional: `SessionManager` reads the file
+	 * back to keep another writer's entries when a synchronous rewrite meets
+	 * them, and reports the conflict instead on backends without it.
+	 */
+	readTextSync?(path: string): string;
 	/** Read the requested UTF-8 byte windows from the head and tail of the file. */
 	readTextSlices(path: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]>;
 	/**
@@ -164,10 +170,11 @@ export interface SessionStorage {
 	 */
 	withSessionFileLockSync?<T>(sessionPath: string, operation: () => T): T;
 	/**
-	 * Claim this process's ownership of a session file for as long as it has
-	 * the session open. Returns the release callback, or `null` while another
-	 * live process holds the claim. Optional because only backends with a
-	 * process-owned lock can tell that another process has a session open.
+	 * Claim this process's ownership of a session file it writes, until the
+	 * returned release callback runs. Returns `null` while another live process
+	 * holds the claim; `SessionManager` then moves its session to a sibling
+	 * instead of writing that file. Optional because only backends with a
+	 * process-owned lock can tell that another process writes a session.
 	 */
 	claimSessionFile?(sessionPath: string): (() => void) | null;
 	/**
@@ -723,6 +730,10 @@ export class FileSessionStorage implements SessionStorage {
 		return Bun.file(path).text();
 	}
 
+	readTextSync(path: string): string {
+		return fs.readFileSync(path, "utf8");
+	}
+
 	async readTextSlices(path: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]> {
 		return peekFileEnds(path, prefixBytes, suffixBytes, (head, tail) => [
 			utf8Decoder.decode(head),
@@ -907,8 +918,8 @@ export class FileSessionStorage implements SessionStorage {
 	/**
 	 * The lease is an OS lock (`flock` sidecar, abstract socket, or named mutex)
 	 * beside the session file, so the kernel drops a dead owner's claim. Never
-	 * throws: ownership only drives a warning, so a lock that cannot be taken
-	 * for another reason counts as owned rather than blocking the session.
+	 * throws: a lock that cannot be taken for another reason counts as owned,
+	 * so it never moves a session off its file.
 	 */
 	claimSessionFile(sessionPath: string): (() => void) | null {
 		const key = path.resolve(sessionPath);
@@ -1285,6 +1296,12 @@ export class MemorySessionStorage implements SessionStorage {
 		const entry = this.#files.get(path);
 		if (!entry) return Promise.reject(new Error(`File not found: ${path}`));
 		return Promise.resolve(materializeMemoryEntry(entry));
+	}
+
+	readTextSync(path: string): string {
+		const entry = this.#files.get(path);
+		if (!entry) throw new Error(`File not found: ${path}`);
+		return materializeMemoryEntry(entry);
 	}
 
 	readTextSlices(path: string, prefixBytes: number, suffixBytes: number): Promise<[string, string]> {

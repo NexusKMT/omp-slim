@@ -1,5 +1,6 @@
 import { sanitizeText } from "@oh-my-pi/pi-utils";
-import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import { replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
+import type { SessionPersistenceNotice } from "../session/session-manager";
 
 /**
  * First-failure notice. The store keeps the unlanded entries in memory and
@@ -25,9 +26,15 @@ export function formatPersistenceDurabilityFailure(message: string): string {
 
 /**
  * A {@link SessionPersistenceNotice}: saving continues, so this claims no
- * failure. Not truncated, because the notice names the session file the user
+ * failure. Not truncated, because the notice names the session files the user
  * may need to find.
  */
-export function formatPersistenceNotice(message: string): string {
+export function formatPersistenceNotice(notice: SessionPersistenceNotice): string {
+	const from = shortenPath(notice.from);
+	const to = shortenPath(notice.to);
+	const message =
+		notice.reason === "open-elsewhere"
+			? `Session ${from} is open for writing in another omp process, so this session now saves to ${to} instead of mixing its entries into that file.`
+			: `Session ${from} changed on disk and no longer reads as this session; it is left untouched and this session now saves to ${to}.`;
 	return replaceTabs(sanitizeText(message)).replace(/[\r\n]+/g, " ");
 }

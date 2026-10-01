@@ -47,7 +47,6 @@ import { requestTextPrediction, textPredictionBackend } from "../../predict/clie
 import type { AgentSession } from "../../session/agent-session";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
-import { SessionPersistenceNotice } from "../../session/session-manager";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
@@ -1055,32 +1054,36 @@ export function applyRpcQueueModeCommand(session: AgentSession, command: RpcQueu
 }
 
 /**
- * Report a store failure as a `notice` frame (plus a stderr mirror) — issue
- * #11493. The frame goes straight through the mode's `output` rather than
- * `session.emitNotice`: dispose clears the session's event listeners before it
- * closes the store (agent-session.ts `#doDispose`), so a failure latched during
- * `close()` would have no subscriber left to forward it and the client would
- * see a nonzero exit with no notice at all. `onFailure` records the failure for
- * the mode's own teardown attribution: a failure still latched at dispose is
- * what makes `session.dispose()` reject.
+ * Report a store failure as an error `notice` frame and a session move as a
+ * warning one (each with a stderr mirror) — issue #11493. Frames go straight
+ * through the mode's `output` rather than `session.emitNotice`: dispose clears
+ * the session's event listeners before it closes the store (agent-session.ts
+ * `#doDispose`), so a failure latched during `close()` would have no subscriber
+ * left to forward it and the client would see a nonzero exit with no notice at
+ * all. `onFailure` records the failure for the mode's own teardown
+ * attribution: a failure still latched at dispose is what makes
+ * `session.dispose()` reject.
  */
 export function registerRpcPersistenceSurface(
 	session: Pick<AgentSession, "sessionManager">,
 	output: (frame: object) => void,
 	onFailure?: (error: Error) => void,
 ): () => void {
-	return session.sessionManager.onPersistenceError(error => {
-		if (error instanceof SessionPersistenceNotice) {
-			const message = formatPersistenceNotice(error.message);
-			output({ type: "notice", level: "warning", message, source: "session-persistence" });
-			process.stderr.write(`${message}\n`);
-			return;
-		}
+	const unsubscribeFailures = session.sessionManager.onPersistenceError(error => {
 		onFailure?.(error);
 		const message = formatPersistenceFailure(error.message);
 		output({ type: "notice", level: "error", message, source: "session-persistence" });
 		process.stderr.write(`${message}\n`);
 	});
+	const unsubscribeNotices = session.sessionManager.onPersistenceNotice(notice => {
+		const message = formatPersistenceNotice(notice);
+		output({ type: "notice", level: "warning", message, source: "session-persistence" });
+		process.stderr.write(`${message}\n`);
+	});
+	return () => {
+		unsubscribeFailures();
+		unsubscribeNotices();
+	};
 }
 
 /** Startup options for {@link runRpcMode}. */
