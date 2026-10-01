@@ -545,12 +545,17 @@ export class SessionAdvisors {
 			}
 			const scheduledAdvisors: ActiveAdvisor[] = [];
 			for (const advisor of this.#advisors) {
-				if (advisor.runtime.disposed || (advisor.reviewMode === "agent-end" && willContinue === true)) continue;
-				advisor.eligibleUpdates++;
-				if (advisor.eligibleUpdates % advisor.reviewInterval !== 0) continue;
-				scheduledAdvisors.push(advisor);
+				if (advisor.runtime.disposed) continue;
+				// Every advisor captures this boundary's delta now, while it matches
+				// what the primary saw: the per-turn prune that runs right after this
+				// callback may elide its tool results before a later review renders
+				// them. Cadence only decides whether the capture is sent or held.
+				const eligible = !(advisor.reviewMode === "agent-end" && willContinue === true);
+				if (eligible) advisor.eligibleUpdates++;
+				const scheduled = eligible && advisor.eligibleUpdates % advisor.reviewInterval === 0;
+				if (scheduled) scheduledAdvisors.push(advisor);
 				try {
-					advisor.runtime.onTurnEnd(messages, { willContinue });
+					advisor.runtime.onTurnEnd(messages, { willContinue, dispatch: scheduled });
 				} catch (error) {
 					logger.warn("advisor onTurnEnd threw; delta dropped", { advisor: advisor.name, err: String(error) });
 				}

@@ -277,6 +277,12 @@ export class AdvisorRuntime {
 	/** Regex secret values observed in primary deltas and retained until advisor context resets. */
 	#advisorRegexSecretValues = new Set<string>();
 	#pending: PendingDelta[] = [];
+	/**
+	 * Deltas captured at boundaries the review cadence skipped. Their cursor
+	 * span already counts as delivered (so in-place prunes realign instead of
+	 * resetting); the next dispatch sends them ahead of its own delta.
+	 */
+	#held: PendingDelta[] = [];
 	#busy = false;
 	#sessionTransitionPaused = false;
 	#promptInFlight: Promise<void> | undefined;
@@ -379,8 +385,11 @@ export class AdvisorRuntime {
 	 *   steps will follow). The rendered heading is tagged `[in progress]` so the
 	 *   advisor knows to withhold critique on partial work. The flag is carried on
 	 *   the delta and forwarded to the reprime path so it is never silently dropped.
+	 * @param opts.dispatch - `false` when review cadence skips this boundary: the
+	 *   delta is still captured now, as the primary saw it, and held until the
+	 *   next dispatching boundary sends every held delta as one review.
 	 */
-	onTurnEnd(messages?: AgentMessage[], opts?: { willContinue?: boolean }): void {
+	onTurnEnd(messages?: AgentMessage[], opts?: { willContinue?: boolean; dispatch?: boolean }): void {
 		if (this.disposed || this.#quotaExhausted || this.#halted) return;
 		const all = messages ?? this.host.snapshotMessages();
 		this.#latestMessages = all;
@@ -407,12 +416,39 @@ export class AdvisorRuntime {
 			this.#releaseFailureWaiters();
 			logger.warn("advisor delta render failed", { err: String(err) });
 		}
-		if (rendered) {
-			this.#pending.push({ ...rendered, turns: 1 });
-			this.#backlog++;
-			this.#notifyWaiters();
-			void this.#drain();
+		if (opts?.dispatch === false) {
+			if (!rendered) return;
+			// The batch renders from `rawMessages` only when a later boundary
+			// dispatches it, after the primary's per-turn prune may have elided
+			// these tool results in place. Detach the held copies so the review
+			// sees what the primary saw at this boundary.
+			this.#held.push({ ...rendered, rawMessages: rendered.rawMessages.map(message => ({ ...message })), turns: 1 });
+			return;
 		}
+		this.#dispatch(rendered ? { ...rendered, turns: 1 } : undefined);
+	}
+
+	/** Queue held deltas plus `latest` as ONE review: one backlog unit, however many updates it carries. */
+	#dispatch(latest: PendingDelta | undefined): void {
+		const parts = latest ? [...this.#held, latest] : this.#held;
+		this.#held = [];
+		if (parts.length === 0) return;
+		const last = parts[parts.length - 1]!;
+		this.#pending.push(
+			parts.length === 1
+				? last
+				: {
+						text: parts.map(part => part.text).join("\n\n"),
+						rawMessages: parts.flatMap(part => part.rawMessages),
+						// Revisions only grow; the oldest part decides whether the drain re-renders.
+						renderRevision: Math.min(...parts.map(part => part.renderRevision)),
+						turns: 1,
+						wip: last.wip,
+					},
+		);
+		this.#backlog++;
+		this.#notifyWaiters();
+		void this.#drain();
 	}
 
 	/**
@@ -479,6 +515,7 @@ export class AdvisorRuntime {
 		this.disposed = true;
 		this.#epoch++;
 		this.#pending = [];
+		this.#held = [];
 		this.#backlog = 0;
 		this.#consecutiveFailures = 0;
 		this.#failureNotified = false;
@@ -519,6 +556,7 @@ export class AdvisorRuntime {
 		this.#lastCount = 0;
 		this.#deliveredPrefix = [];
 		this.#pending = [];
+		this.#held = [];
 		this.#clearAdvisorContextAtCurrentCursor();
 		if (clearBacklog) {
 			this.#backlog = 0;
@@ -540,6 +578,7 @@ export class AdvisorRuntime {
 		if (this.#droppedBacklogs < 3 && !isPermanentAdvisorError(error)) return;
 		this.#halted = true;
 		this.#pending = [];
+		this.#held = [];
 		this.#wakeAllWaiters();
 		logger.warn("advisor halted after repeated failures; use /advisor or reload config to re-enable", {
 			droppedBacklogs: this.#droppedBacklogs,
@@ -614,6 +653,7 @@ export class AdvisorRuntime {
 			fingerprint: fingerprintMessage(message),
 		}));
 		this.#pending = [];
+		this.#held = [];
 		this.#backlog = 0;
 		this.#consecutiveFailures = 0;
 		this.#failing = false;
@@ -730,10 +770,12 @@ export class AdvisorRuntime {
 	}
 
 	#refreshPendingSecretPrefixes(obfuscator: SecretObfuscator): void {
-		this.#pending = this.#pending.map(delta => ({
+		const strip = (delta: PendingDelta): PendingDelta => ({
 			...delta,
 			text: obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(delta.text, this.#advisorRegexSecretValues),
-		}));
+		});
+		this.#pending = this.#pending.map(strip);
+		this.#held = this.#held.map(strip);
 	}
 
 	/**
