@@ -35,7 +35,7 @@ interface Harness {
 	editor: Container;
 }
 
-function makeHarness(columns = COLUMNS, rows = ROWS): Harness {
+function makeHarness(columns = COLUMNS, rows = ROWS, transcriptRows = TRANSCRIPT_ROWS): Harness {
 	const terminal = new VirtualTerminal(columns, rows);
 	const scheduler = new VirtualRenderScheduler();
 	const composer = new Composer({
@@ -44,7 +44,7 @@ function makeHarness(columns = COLUMNS, rows = ROWS): Harness {
 		preferences: { ...COMPOSER_DEFAULTS, quiet: true },
 	});
 	const transcript = new TranscriptContainer();
-	for (let i = 0; i < TRANSCRIPT_ROWS; i++) {
+	for (let i = 0; i < transcriptRows; i++) {
 		const row = i;
 		transcript.addChild({ render: () => [`${TRANSCRIPT_PREFIX}${row}`] });
 	}
@@ -114,6 +114,25 @@ describe("composer inline shrink (#11007)", () => {
 		expect(visibleRows()).toEqual(Array.from({ length: TRANSCRIPT_ROWS }, (_, i) => i));
 		expect(h.terminal.getViewport().findIndex(row => row.includes("EDITOR"))).toBe(53);
 		dialog.dispose();
+		h.composer.stop();
+	});
+
+	it("leaves a short transcript top-anchored when an ask panel retires nothing", async () => {
+		const h = makeHarness(COLUMNS, ROWS, 3);
+		await h.scheduler.settle(h.terminal);
+		h.widget.retireDisplacedTranscript = true;
+		h.widget.rows = 6;
+		h.composer.ui.requestRender();
+		await h.scheduler.settle(h.terminal);
+		const row = (needle: string): number =>
+			h.terminal.getViewport().findIndex(line => Bun.stripANSI(line).trimEnd().startsWith(needle));
+		expect(row(`${TRANSCRIPT_PREFIX}0`)).toBe(0);
+		h.widget.rows = 0;
+		h.widget.retireDisplacedTranscript = false;
+		h.composer.ui.requestRender();
+		await h.scheduler.settle(h.terminal);
+		expect(row(`${TRANSCRIPT_PREFIX}0`)).toBe(0);
+		expect(row("EDITOR")).toBeLessThan(ROWS - 1);
 		h.composer.stop();
 	});
 

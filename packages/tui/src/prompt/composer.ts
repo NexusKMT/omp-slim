@@ -372,6 +372,7 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 		const afterSpans: ViewportClickSpan[] = [];
 		let transientRows = 0;
 		let displacingRows = 0;
+		let decisionPanelOpen = false;
 		for (const root of afterRoots) {
 			const chrome: Component = root;
 			const start = after.length;
@@ -382,7 +383,7 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 				(root instanceof Container && root.children.some(child => child.retireDisplacedTranscript))
 			) {
 				if (this.#transientChrome.has(root)) displacingRows += after.length - start;
-				this.#anchorAfterInlineRetirement = true;
+				decisionPanelOpen = true;
 			}
 		}
 		// Offer history under capacity pressure only: blocks stay live (and keep
@@ -406,6 +407,7 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 		// one open frame renders each of them once for both.
 		transcript.beginFrame(frame);
 		const history = this.#offerHistory(transcript, width, rows, preRoots.length + belowFloor);
+		if (decisionPanelOpen && history !== undefined) this.#anchorAfterInlineRetirement = true;
 		const headerVisible = !this.#headerRetired && this.#offeredHistory?.source !== "header";
 		const headerRows = headerVisible ? this.#header.render(width) : [];
 		const before = [...headerRows, ...preRoots];
@@ -423,6 +425,8 @@ export class Composer implements TerminalFrameProvider, NativeSurfaceProvider {
 		}
 		const drop = Math.max(0, before.length + active.length + after.length - rows);
 		const mutable = [...before, ...active, ...after].slice(drop);
+		// Once live rows fill the screen again, the retired gap is gone.
+		if (!decisionPanelOpen && mutable.length >= rows) this.#anchorAfterInlineRetirement = false;
 		// Rows retired during a decision panel cannot be pulled back from native
 		// history when it closes. Keep the input pinned to the bottom without
 		// replaying those rows (which would duplicate them) or clearing history.
