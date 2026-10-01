@@ -51,6 +51,7 @@ import {
 	type AdvisorAgent,
 	type AdvisorReviewMode,
 	AdvisorEmissionGuard,
+	type AdvisorHeldUpdates,
 	AdvisorLoopGuard,
 	type AdvisorMessageDetails,
 	type AdvisorNote,
@@ -286,11 +287,15 @@ interface ActiveAdvisor {
 	 */
 	autoThinking: boolean;
 	providerSessionId: string | undefined;
-	reviewMode: AdvisorReviewMode;
-	reviewInterval: number;
+	/** Cadence overrides resolved at each boundary; `undefined` (only the
+	 *  roster-less default advisor) follows `advisor.reviewMode` /
+	 *  `advisor.reviewInterval` live, so editing them needs no rebuild. */
+	reviewMode: AdvisorReviewMode | undefined;
+	reviewInterval: number | undefined;
 	/** Per-advisor catch-up policy override; `undefined` inherits the global
 	 *  `advisor.syncBacklog` setting dynamically at each boundary. */
 	syncBacklog: AdvisorSyncBacklog | undefined;
+	/** Eligible updates since the last reset; a review is scheduled at each multiple of the interval. */
 	eligibleUpdates: number;
 	retryFallback?: AdvisorRetryFallbackState;
 	retryFallbackPendingSuccess: boolean;
@@ -329,11 +334,17 @@ interface AdvisorRuntimeDescriptor {
 	slug: string;
 	model: Model;
 	thinkingLevel: ThinkingLevel;
-	reviewMode: AdvisorReviewMode;
-	reviewInterval: number;
+	reviewMode: AdvisorReviewMode | undefined;
+	reviewInterval: number | undefined;
 	syncBacklog: AdvisorSyncBacklog | undefined;
 	autoThinking: boolean;
 	signature: string;
+}
+
+/** What a rebuilt advisor inherits from the runtime it replaces (keyed by slug). */
+interface AdvisorCarry {
+	held: AdvisorHeldUpdates | undefined;
+	eligibleUpdates: number;
 }
 
 /** Inputs that configure the advisor roster owned by a session. */
@@ -543,6 +554,11 @@ export class SessionAdvisors {
 				// advisor update starts here.
 				for (const advisor of this.#advisors) advisor.adviseTool.flushDeferredNotes();
 			}
+			// The roster-less default advisor follows the cadence settings live.
+			const defaultReviewMode = cfgAdvisorReviewMode.get(this.#host.settings);
+			const configuredInterval = cfgAdvisorReviewInterval.get(this.#host.settings);
+			const defaultReviewInterval =
+				Number.isFinite(configuredInterval) && configuredInterval >= 1 ? Math.trunc(configuredInterval) : 1;
 			const scheduledAdvisors: ActiveAdvisor[] = [];
 			for (const advisor of this.#advisors) {
 				if (advisor.runtime.disposed) continue;
@@ -550,9 +566,11 @@ export class SessionAdvisors {
 				// what the primary saw: the per-turn prune that runs right after this
 				// callback may elide its tool results before a later review renders
 				// them. Cadence only decides whether the capture is sent or held.
-				const eligible = !(advisor.reviewMode === "agent-end" && willContinue === true);
+				const reviewMode = advisor.reviewMode ?? defaultReviewMode;
+				const eligible = !(reviewMode === "agent-end" && willContinue === true);
 				if (eligible) advisor.eligibleUpdates++;
-				const scheduled = eligible && advisor.eligibleUpdates % advisor.reviewInterval === 0;
+				const scheduled =
+					eligible && advisor.eligibleUpdates % (advisor.reviewInterval ?? defaultReviewInterval) === 0;
 				if (scheduled) scheduledAdvisors.push(advisor);
 				try {
 					advisor.runtime.onTurnEnd(messages, { willContinue, dispatch: scheduled });
@@ -589,8 +607,8 @@ export class SessionAdvisors {
 	/** Rebuilds live advisors when role assignments alter their resolved runtime inputs. */
 	reconcileModelRoles(): void {
 		if (!this.#advisorEnabled || this.#host.isDisposed()) return;
-		if (this.#advisors.length > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#stopAdvisorRuntime();
-		this.#buildAdvisorRuntime(true);
+		if (this.#advisors.length > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#rebuildAdvisorRuntime();
+		else this.#buildAdvisorRuntime(true);
 	}
 
 	/**
@@ -620,8 +638,8 @@ export class SessionAdvisors {
 	retryAfterModelDiscovery(): boolean {
 		if (this.#host.isDisposed() || !this.hasInactiveNoModelAdvisor()) return false;
 		const before = this.#advisors.length;
-		if (before > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#stopAdvisorRuntime();
-		this.#buildAdvisorRuntime(true, false);
+		if (before > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#rebuildAdvisorRuntime(false);
+		else this.#buildAdvisorRuntime(true, false);
 		return this.#advisors.length > before;
 	}
 
@@ -932,18 +950,7 @@ export class SessionAdvisors {
 
 	#resolveAdvisorRuntimeDescriptors(emitWarnings: boolean): AdvisorRuntimeDescriptor[] {
 		const legacy = !this.#advisorConfigs?.length;
-		const roster: AdvisorConfig[] = legacy
-			? [
-					{
-						name: "default",
-						reviewMode: cfgAdvisorReviewMode.get(this.#host.settings),
-						reviewInterval: (() => {
-							const v = cfgAdvisorReviewInterval.get(this.#host.settings);
-							return Number.isFinite(v) && v >= 1 ? Math.trunc(v) : 1;
-						})(),
-					},
-				]
-			: this.#advisorConfigs!;
+		const roster: AdvisorConfig[] = legacy ? [{ name: "default" }] : this.#advisorConfigs!;
 		const descriptors: AdvisorRuntimeDescriptor[] = [];
 		const usedSlugs = new Set<string>();
 		for (const config of roster) {
@@ -961,12 +968,19 @@ export class SessionAdvisors {
 				this.#advisorStatuses.set(slug, { name: config.name, status: "paused" });
 				continue;
 			}
-			const reviewMode: AdvisorReviewMode = config.reviewMode === "agent-end" ? "agent-end" : "turn";
+			// Roster entries default to every-turn review; the roster-less default
+			// advisor leaves both unset and follows the cadence settings live.
+			const reviewMode: AdvisorReviewMode | undefined = legacy
+				? undefined
+				: config.reviewMode === "agent-end"
+					? "agent-end"
+					: "turn";
 			const configuredReviewInterval = config.reviewInterval;
-			const reviewInterval =
-				typeof configuredReviewInterval === "number" &&
-				Number.isSafeInteger(configuredReviewInterval) &&
-				configuredReviewInterval >= 1
+			const reviewInterval = legacy
+				? undefined
+				: typeof configuredReviewInterval === "number" &&
+					  Number.isSafeInteger(configuredReviewInterval) &&
+					  configuredReviewInterval >= 1
 					? configuredReviewInterval
 					: 1;
 			// Catch-up override: schema-validated for WATCHDOG.yml entries, clamped
@@ -1051,14 +1065,13 @@ export class SessionAdvisors {
 				// An `auto` advisor's concrete level changes every turn; signing the
 				// resolved level would make each change look like a config edit and
 				// rebuild the advisor, losing its context. Sign the selector instead.
+				// Cadence and catch-up resolve at each boundary rather than at build
+				// time, so they stay out of the signature.
 				signature: this.#advisorRuntimeSignature(
 					config,
 					slug,
 					model,
 					autoThinking ? AUTO_THINKING : advisorThinkingLevel,
-					reviewMode,
-					reviewInterval,
-					syncBacklog,
 				),
 			});
 		}
@@ -1070,18 +1083,12 @@ export class SessionAdvisors {
 		slug: string,
 		model: Model,
 		thinkingLevel: ThinkingLevel | typeof AUTO_THINKING,
-		reviewMode: AdvisorReviewMode,
-		reviewInterval: number,
-		syncBacklog: AdvisorSyncBacklog | undefined,
 	): string {
 		const tools = config.tools?.length ? config.tools.join("\u001e") : "";
 		const instructions = config.instructions?.trim() ?? "";
 		const budget = this.#advisorMaxNotesPerUpdate(config);
 		// The service tier is bound at build time, so a `tier.advisor` edit must rebuild.
 		const tier = cfgTierAdvisor.get(this.#host.settings);
-		// Only the per-advisor OVERRIDE enters the signature: the global
-		// `advisor.syncBacklog` setting resolves live at each boundary, so changing
-		// it must not tear down the runtime.
 		return [
 			config.name,
 			slug,
@@ -1089,9 +1096,6 @@ export class SessionAdvisors {
 			thinkingLevel,
 			tools,
 			instructions,
-			reviewMode,
-			reviewInterval,
-			syncBacklog ?? "",
 			budget,
 			tier,
 		].join("\u001f");
@@ -1106,7 +1110,25 @@ export class SessionAdvisors {
 		return true;
 	}
 
-	#buildAdvisorRuntime(seedToCurrent = false, emitWarnings = true): boolean {
+	/**
+	 * Replace the live advisors in place. Each successor keeps its predecessor's
+	 * cadence phase and resumes at its cursor with the captured-but-unreviewed
+	 * updates, so a rebuild never drops turns the cadence skipped.
+	 */
+	#rebuildAdvisorRuntime(emitWarnings = true): boolean {
+		const carried = new Map<string, AdvisorCarry>();
+		for (const advisor of this.#advisors) {
+			carried.set(advisor.slug, { held: advisor.runtime.releaseHeld(), eligibleUpdates: advisor.eligibleUpdates });
+		}
+		this.#stopAdvisorRuntime();
+		return this.#buildAdvisorRuntime(true, emitWarnings, carried);
+	}
+
+	#buildAdvisorRuntime(
+		seedToCurrent = false,
+		emitWarnings = true,
+		carried?: ReadonlyMap<string, AdvisorCarry>,
+	): boolean {
 		if (this.#host.isDisposed()) return false;
 		if (this.#advisors.length > 0) return true;
 		if (!this.#advisorEnabled) return false;
@@ -1487,14 +1509,16 @@ export class SessionAdvisors {
 				reviewMode: descriptor.reviewMode,
 				reviewInterval: descriptor.reviewInterval,
 				syncBacklog: descriptor.syncBacklog,
-				eligibleUpdates: 0,
+				eligibleUpdates: carried?.get(slug)?.eligibleUpdates ?? 0,
 				retryFallbackPendingSuccess: false,
 				usageLimitRetries: 0,
 				signature,
 			};
 			this.#refreshAdvisorProviderIdentity(advisorRef);
 			this.#attachAdvisorRecorderFeed(advisorRef);
-			if (seedToCurrent) runtime.seedTo(this.#host.agent.state.messages.length);
+			const held = carried?.get(slug)?.held;
+			if (held) runtime.adoptHeld(held);
+			else if (seedToCurrent) runtime.seedTo(this.#host.agent.state.messages.length);
 			this.#advisorStatuses.set(slug, { name: advisorName, status: "running" });
 			this.#advisors.push(advisorRef);
 		}
@@ -2400,7 +2424,9 @@ export class SessionAdvisors {
 	setAdvisorEnabled(enabled: boolean): boolean {
 		this.#advisorEnabled = enabled;
 		if (enabled) {
-			if (this.#advisors.length > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) this.#stopAdvisorRuntime();
+			if (this.#advisors.length > 0 && !this.#advisorRuntimeMatchesCurrentConfig()) {
+				return this.#rebuildAdvisorRuntime();
+			}
 			return this.#buildAdvisorRuntime(true);
 		}
 		this.#stopAdvisorRuntime();
@@ -2442,8 +2468,7 @@ export class SessionAdvisors {
 		this.#advisorConfigs = advisors;
 		this.#advisorSharedInstructions = sharedInstructions;
 		this.#advisorSharedMaxNotesPerUpdate = sharedMaxNotesPerUpdate;
-		this.#stopAdvisorRuntime();
-		this.#buildAdvisorRuntime(true);
+		this.#rebuildAdvisorRuntime();
 		return this.#advisors.length;
 	}
 
@@ -2457,8 +2482,7 @@ export class SessionAdvisors {
 		if (contextPrompt === this.#advisorContextPrompt) return;
 		this.#advisorContextPrompt = contextPrompt;
 		if (!this.#advisorEnabled || this.#advisors.length === 0) return;
-		this.#stopAdvisorRuntime();
-		this.#buildAdvisorRuntime(true);
+		this.#rebuildAdvisorRuntime();
 	}
 
 	/**

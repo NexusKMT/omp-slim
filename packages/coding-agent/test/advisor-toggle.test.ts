@@ -28,12 +28,7 @@ function restoreEnv(key: string, value: string | undefined): void {
 import * as advisorModule from "../src/advisor";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
-import {
-	cfgAdvisorEnabled,
-	cfgAdvisorMaxNotesPerUpdate,
-	cfgAdvisorReviewInterval,
-	cfgAdvisorReviewMode,
-} from "@oh-my-pi/pi-coding-agent/advisor/settings";
+import { cfgAdvisorEnabled, cfgAdvisorMaxNotesPerUpdate } from "@oh-my-pi/pi-coding-agent/advisor/settings";
 import { cfgCompactionKeepRecentTokens } from "@oh-my-pi/pi-coding-agent/session/context-settings";
 
 describe("AgentSession advisor toggle", () => {
@@ -602,34 +597,6 @@ describe("AgentSession advisor toggle", () => {
 		const advisorPrompt = advisor.state.systemPrompt.join("\n");
 		expect(advisorPrompt).toContain("Keep advice concrete.");
 		expect(advisorPrompt).toContain("Review module boundaries.");
-	});
-	it("rebuilds the default advisor after advisor.reviewMode setting change", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
-		cfgAdvisorReviewMode.set(session.settings, "turn");
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-		const turnAgent = session.getAdvisorAgent();
-		expect(turnAgent).toBeDefined();
-
-		// Change reviewMode and re-enable — simulates selector-controller rebuild.
-		cfgAdvisorReviewMode.set(session.settings, "agent-end");
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-		const agentEndAgent = session.getAdvisorAgent();
-		expect(agentEndAgent).toBeDefined();
-		expect(agentEndAgent).not.toBe(turnAgent);
-	});
-	it("rebuilds the default advisor after advisor.reviewInterval setting change", () => {
-		session.settings.setModelRole("advisor", `${model.provider}/${model.id}`);
-		cfgAdvisorReviewInterval.set(session.settings, 1);
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-		const interval1Agent = session.getAdvisorAgent();
-		expect(interval1Agent).toBeDefined();
-
-		// Change reviewInterval and re-enable.
-		cfgAdvisorReviewInterval.set(session.settings, 3);
-		expect(session.setAdvisorEnabled(true)).toBe(true);
-		const interval3Agent = session.getAdvisorAgent();
-		expect(interval3Agent).toBeDefined();
-		expect(interval3Agent).not.toBe(interval1Agent);
 	});
 	it("retains cumulative advisor cost after an in-session history rewrite", async () => {
 		const advisor = enableAdvisor();

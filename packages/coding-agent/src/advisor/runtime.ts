@@ -230,6 +230,12 @@ interface PendingDelta {
 	overflowRecovery?: boolean;
 }
 
+/** Updates a review cadence captured but has not sent, and the primary cursor they end at. */
+export interface AdvisorHeldUpdates {
+	readonly cursor: number;
+	readonly deltas: readonly PendingDelta[];
+}
+
 interface CatchupWaiter {
 	threshold: number;
 	/** Stay parked while a failed turn is retried or recovered via the host's fallback chain. */
@@ -426,6 +432,26 @@ export class AdvisorRuntime {
 			return;
 		}
 		this.#dispatch(rendered ? { ...rendered, turns: 1 } : undefined);
+	}
+
+	/**
+	 * Detach captured-but-unsent updates so a replacement runtime reviews them
+	 * ({@link adoptHeld}); `undefined` when the cadence holds nothing.
+	 */
+	releaseHeld(): AdvisorHeldUpdates | undefined {
+		if (this.#held.length === 0) return undefined;
+		const held: AdvisorHeldUpdates = { cursor: this.#lastCount, deltas: this.#held };
+		this.#held = [];
+		return held;
+	}
+
+	/**
+	 * Resume at a replaced runtime's cursor with its held updates queued ahead
+	 * of this runtime's next dispatch, instead of seeding past them.
+	 */
+	adoptHeld(held: AdvisorHeldUpdates): void {
+		this.seedTo(held.cursor);
+		this.#held = [...held.deltas];
 	}
 
 	/** Queue held deltas plus `latest` as ONE review: one backlog unit, however many updates it carries. */

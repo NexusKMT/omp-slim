@@ -18,6 +18,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { AdvisorLoopGuard } from "../src/advisor/loop-guard";
+import { cfgAdvisorReviewInterval } from "../src/advisor/settings";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const zeroUsage = {
@@ -270,6 +271,46 @@ describe("advisor tool-call loop guard", () => {
 		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
 		expect(contexts).toHaveLength(1);
 		const delivered = JSON.stringify(contexts[0]!.messages);
+		expect(delivered).toContain("first update");
+		expect(delivered).toContain("second update");
+	});
+
+	it("applies an advisor.reviewInterval edit to the running default advisor", async () => {
+		const { reviewStarts } = createAdvisor({ "advisor.syncBacklog": "1" }, 0);
+		if (!session) throw new Error("Expected live session");
+		cfgAdvisorReviewInterval.set(session.settings, 2);
+
+		await session.prompt("first update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(0);
+
+		await session.prompt("second update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(1);
+		const delivered = JSON.stringify(reviewStarts[0]!.messages);
+		expect(delivered).toContain("first update");
+		expect(delivered).toContain("second update");
+	});
+
+	it("keeps a cadence-skipped update across an advisor roster rebuild", async () => {
+		const { reviewStarts } = createAdvisor({ "advisor.syncBacklog": "1" }, 0, {
+			name: "Interval reviewer",
+			reviewInterval: 2,
+		});
+		if (!session) throw new Error("Expected live session");
+
+		await session.prompt("first update");
+		expect(reviewStarts).toHaveLength(0);
+		// Saving an edited roster replaces every live runtime.
+		session.applyAdvisorConfigs(
+			[{ name: "Interval reviewer", reviewInterval: 2, instructions: "Check retry limits." }],
+			undefined,
+		);
+
+		await session.prompt("second update");
+		expect(await session.waitForAdvisorCatchup(2_000)).toBe(true);
+		expect(reviewStarts).toHaveLength(1);
+		const delivered = JSON.stringify(reviewStarts[0]!.messages);
 		expect(delivered).toContain("first update");
 		expect(delivered).toContain("second update");
 	});
