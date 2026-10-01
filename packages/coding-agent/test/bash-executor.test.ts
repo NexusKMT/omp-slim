@@ -1403,7 +1403,8 @@ describe("executeBash :async: background retention", () => {
 		"keeps a nohup-detached background process alive across turns (reparenting)",
 		async () => {
 			const pidFile = path.join(tmp, "nohup-pid");
-			const sleepBin = fs.existsSync("/bin/sleep") ? "/bin/sleep" : "sleep";
+			const sleepBin = $which("sleep");
+			if (!sleepBin) throw new Error("sleep executable not found");
 			let pid: number | undefined;
 			try {
 				// `nohup cmd &` is a transparent background wrapper: brush unwraps it and
@@ -1412,7 +1413,7 @@ describe("executeBash :async: background retention", () => {
 				// short-lived intermediate fork, so `$!` is NOT the surviving process —
 				// the operand writes its own pid before `exec`ing the long sleep, and
 				// that pid (unchanged across exec) is the one we assert stays alive.
-				const operand = `echo $$ > ${pidFile}; exec ${sleepBin} 30`;
+				const operand = `echo $$ > ${shellQuote(pidFile)}; exec ${shellQuote(sleepBin)} 30`;
 				const res = await executeBash(`nohup sh -c ${shellQuote(operand)} >/dev/null 2>&1 &`, {
 					sessionKey: "reparent-probe:async:job1",
 					cwd: tmp,
