@@ -416,6 +416,78 @@ describe("SessionManager cross-process rewrite freshness", () => {
 		await reopened.close();
 	});
 
+	/** Runs `race` just before each atomic publish to `raced`, as a writer without the lease appending inside every window. */
+	class RacedStorage extends FileSessionStorage {
+		race: (() => void) | undefined;
+		raced: string | undefined;
+
+		override writeTextAtomic(fpath: string, content: string, options?: WriteTextAtomicOptions): Promise<void> {
+			if (this.raced !== undefined && path.resolve(fpath) === path.resolve(this.raced)) this.race?.();
+			return super.writeTextAtomic(fpath, content, options);
+		}
+	}
+
+	it("moves to a sibling instead of re-serializing forever when a writer without the lease races every retry", async () => {
+		using tempDir = TempDir.createSync("@omp-session-rewrite-raced-");
+		const creator = SessionManager.create(tempDir.path(), tempDir.path(), new FileSessionStorage());
+		await creator.ensureOnDisk();
+		const contested = creator.getSessionFile();
+		if (!contested) throw new Error("Expected session file");
+		creator.appendMessage(userTurn("our turn before the conflict"));
+		await creator.close();
+
+		const storage = new RacedStorage();
+		const ours = await SessionManager.open(contested, tempDir.path(), storage, { suppressBreadcrumb: true });
+		const theirs = await SessionManager.open(contested, tempDir.path(), new FileSessionStorage(), {
+			suppressBreadcrumb: true,
+		});
+		const racingTurns: string[] = [];
+		storage.raced = contested;
+		storage.race = () => {
+			const turn = `racing turn ${racingTurns.length}`;
+			racingTurns.push(turn);
+			theirs.appendMessage(userTurn(turn));
+		};
+
+		const notices: SessionPersistenceNotice[] = [];
+		const errors: Error[] = [];
+		ours.onPersistenceNotice(notice => notices.push(notice));
+		ours.onPersistenceError(error => errors.push(error));
+		const fullRewrites = [vi.spyOn(storage, "writeTextSync"), vi.spyOn(storage, "writeTextAtomic")];
+		try {
+			await ours.rewriteEntries();
+			for (const turn of ourTurnsAfter) ours.appendMessage(userTurn(turn));
+			// The first attempt and every read-back retry meet a fresh racing turn;
+			// one more publishes the sibling, and later appends go incremental.
+			expect(racingTurns).toHaveLength(4);
+			expect(fullRewrites.reduce((calls, spy) => calls + spy.mock.calls.length, 0)).toBe(5);
+			await ours.flush();
+		} finally {
+			for (const spy of fullRewrites) spy.mockRestore();
+		}
+
+		const sibling = ours.getSessionFile();
+		if (!sibling) throw new Error("Expected session file");
+		expect(sibling).not.toBe(contested);
+		expect(notices).toEqual([{ reason: "contested", from: contested, to: sibling }]);
+		expect(errors).toEqual([]);
+		await ours.close();
+		await theirs.close();
+
+		// The racing writer's file is left to it, intact.
+		const left = await SessionManager.open(contested, tempDir.path(), new FileSessionStorage(), {
+			suppressBreadcrumb: true,
+		});
+		expect(userTurnsOf(left.getEntries())).toEqual(["our turn before the conflict", ...racingTurns]);
+		await left.close();
+		// Our conversation lands whole in the sibling, active branch unchanged.
+		const moved = await SessionManager.open(sibling, tempDir.path(), new FileSessionStorage(), {
+			suppressBreadcrumb: true,
+		});
+		expect(userTurnsOf(moved.getBranch())).toEqual(["our turn before the conflict", ...ourTurnsAfter]);
+		await moved.close();
+	});
+
 	it.each([
 		{
 			path: "an append",

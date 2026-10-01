@@ -736,9 +736,11 @@ export interface SessionPersistenceNotice {
 	 * `"open-elsewhere"`: another live omp process wrote `from` first and still
 	 * has it open, so this process saves its entries elsewhere instead of mixing
 	 * them into that file. `"replaced"`: `from` changed on disk and no longer
-	 * reads as this session's journal, so it is left untouched.
+	 * reads as this session's journal, so it is left untouched. `"contested"`:
+	 * a writer without the ownership lease kept changing `from` through every
+	 * read-back-and-retry pass, so this session stops racing it.
 	 */
-	reason: "open-elsewhere" | "replaced";
+	reason: "open-elsewhere" | "replaced" | "contested";
 	/** The session file this session was saving to. */
 	from: string;
 	/** The fresh sibling (same directory and session id) it saves to from now on. */
@@ -1072,11 +1074,17 @@ export class SessionManager {
 	 * A deleted file is recreated; a file that no longer reads as this session
 	 * is left untouched and the session moves to a sibling.
 	 *
+	 * After {@link MAX_WRITE_CONFLICT_RECOVERIES} passes (`recoveries`) the
+	 * other writer is still racing every read-to-publish window: leave the file
+	 * to it and move to a sibling rather than re-serializing on every write.
+	 *
 	 * Returns the path to retry, or `undefined` to report the conflict as before.
 	 */
-	#recoverFromWriteConflictSync(error: unknown): string | undefined {
+	#recoverFromWriteConflictSync(error: unknown, recoveries: number): string | undefined {
 		const contested = this.#conflictedSessionFile(error);
-		if (!contested || !this.#storage.readTextSync) return undefined;
+		if (!contested) return undefined;
+		if (recoveries >= MAX_WRITE_CONFLICT_RECOVERIES) return this.#moveOffSessionFileSync("contested");
+		if (!this.#storage.readTextSync) return undefined;
 		let content: string;
 		try {
 			content = this.#storage.readTextSync(contested);
@@ -1093,9 +1101,10 @@ export class SessionManager {
 	}
 
 	/** Asynchronous {@link #recoverFromWriteConflictSync}. */
-	async #recoverFromWriteConflict(error: unknown): Promise<string | undefined> {
+	async #recoverFromWriteConflict(error: unknown, recoveries: number): Promise<string | undefined> {
 		const contested = this.#conflictedSessionFile(error);
 		if (!contested) return undefined;
+		if (recoveries >= MAX_WRITE_CONFLICT_RECOVERIES) return this.#moveOffSessionFile("contested");
 		const epoch = this.#diskEpoch;
 		let content: string;
 		try {
@@ -1353,8 +1362,7 @@ export class SessionManager {
 		try {
 			await this.#storage.writeTextAtomic(target, body, { expectedSize: this.#expectedDiskSize, commitGuard });
 		} catch (error) {
-			const retryPath =
-				recoveries < MAX_WRITE_CONFLICT_RECOVERIES ? await this.#recoverFromWriteConflict(error) : undefined;
+			const retryPath = await this.#recoverFromWriteConflict(error, recoveries);
 			if (retryPath) return this.#publishAuthoritativeBody(retryPath, operationError, commitGuard, recoveries + 1);
 			const recoveryErrors = [toError(error)];
 			try {
@@ -1503,8 +1511,7 @@ export class SessionManager {
 					this.#storage.writeTextSync(targetPath, body, { expectedSize: this.#expectedDiskSize });
 					break;
 				} catch (err) {
-					const retryPath =
-						recoveries < MAX_WRITE_CONFLICT_RECOVERIES ? this.#recoverFromWriteConflictSync(err) : undefined;
+					const retryPath = this.#recoverFromWriteConflictSync(err, recoveries);
 					if (!retryPath) throw err;
 					targetPath = retryPath;
 					body = this.#fileBody();
@@ -1625,7 +1632,7 @@ export class SessionManager {
 						commitGuard: () => !this.#released && this.#diskEpoch === epoch,
 					});
 				} catch (error) {
-					if (recoveries < MAX_WRITE_CONFLICT_RECOVERIES && (await this.#recoverFromWriteConflict(error))) {
+					if (await this.#recoverFromWriteConflict(error, recoveries)) {
 						recoveries++;
 						// Publish the whole transcript against what the recovery found on the next pass.
 						this.#atomicRewriteDirty = true;
