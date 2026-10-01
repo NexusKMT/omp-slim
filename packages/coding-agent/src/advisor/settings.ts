@@ -91,7 +91,7 @@ export const cfgAdvisorReviewInterval = register({
 		group: "Advisor",
 		label: "Advisor Review Interval",
 		description:
-			"Review every Nth eligible primary update. 1 = every update. Skipped updates accumulate into the next scheduled review.",
+			"Default advisor cadence when no WATCHDOG.yml roster is present: review every Nth eligible primary update. 1 = every update. Skipped updates are sent with the next scheduled review.",
 		options: [
 			{ value: "1", label: "Every eligible update", description: "Default." },
 			{ value: "2", label: "Every 2nd" },

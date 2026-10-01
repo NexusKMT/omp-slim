@@ -465,8 +465,8 @@ Advisors review primary turns on a configurable cadence and can inject advice. E
 | `task.agentAdvisor`   | record  | `{}`    | Per-agent subagent advisor: agent name → `"on"` / `"off"` / advisor model pattern. Overrides agent frontmatter `advisor`; configured from the `/agents` hub. |
 | `advisor.syncBacklog` | enum    | `off`   | Default catch-up policy. `off` never waits; `1`, `3`, or `5` wait up to 30 seconds at that backlog threshold; `strict` waits for scheduled reviews without a wall-clock cap. Abort, failure, quota pause, transition, and disposal release waits. Optional `WATCHDOG.yml` per-advisor `syncBacklog` overrides this policy; omission inherits it. |
 | `advisor.immuneTurns` | number  | `3`     | After a `concern`/`blocker` interrupts, route further concerns/blockers as non-interrupting asides for this many completed primary turns.            |
-| `advisor.reviewMode` | enum | `turn` | Review every primary turn, or only final yields with `agent-end`. Per-advisor `reviewMode` overrides this default. |
-| `advisor.reviewInterval` | number | `1` | Review every Nth eligible update. Skipped deltas accumulate; pending delivery never depends on cadence. |
+| `advisor.reviewMode` | enum | `turn` | Default advisor cadence when no `WATCHDOG.yml` roster exists: review every primary turn, or only final yields with `agent-end`. Roster entries set their own `reviewMode` (default `turn`). Applies live. |
+| `advisor.reviewInterval` | number | `1` | Default advisor only: review every Nth eligible update. Skipped updates are sent with the next scheduled review; pending advice delivery never depends on cadence. Applies live. |
 | `advisor.maxNotesPerUpdate` | number | `4` | Non-blocker notes accepted per advisor review, from 1–32. Higher-severity notes can replace only pending notes from the same review. `WATCHDOG.yml` top-level or per-advisor values override this default. |
 | `advisor.evictStaleResults` | boolean | `true` | Before each review, replace the advisor's `read`/`grep`/`glob` output from older reviews with a short placeholder. The latest review is kept. |
 

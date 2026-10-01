@@ -71,11 +71,15 @@ This follows the same rules as the primary's fallback: `retry.enabled` and `retr
 When no `WATCHDOG.yml` roster is present, the default advisor uses these settings from the Model tab:
 
 - `advisor.reviewMode` — review cadence: `turn` (default) reviews every primary turn; `agent-end` reviews only final yields.
-- `advisor.reviewInterval` — review every Nth eligible update (default `1`). Skipped updates accumulate into the next scheduled review.
+- `advisor.reviewInterval` — review every Nth eligible update (default `1`). Skipped updates are captured as the primary saw them and sent with the next scheduled review.
 - `advisor.maxNotesPerUpdate` — maximum non-blocker advice notes accepted per advisor update (default `4`, range 1–32). Blockers are exempt.
 - `advisor.syncBacklog` — catch-up policy (default `off`); numeric thresholds are bounded, while `strict` waits without a wall-clock cap.
 
-Roster entries can override these settings with `reviewMode`, `reviewInterval`, `maxNotesPerUpdate`, and `syncBacklog`. Omitted cadence and catch-up fields inherit session settings; note budgets can also inherit a shared `WATCHDOG.yml` top-level value. An explicit `syncBacklog: off` overrides a global `strict`.
+Edits to these settings apply to the running advisor at its next primary boundary without rebuilding it.
+
+Roster entries set their own cadence: an omitted `reviewMode` means `turn` and an omitted `reviewInterval` means `1`, regardless of the settings above. An omitted `syncBacklog` inherits `advisor.syncBacklog`, and an omitted `maxNotesPerUpdate` inherits the shared `WATCHDOG.yml` top-level value, then `advisor.maxNotesPerUpdate`. An explicit `syncBacklog: off` overrides a global `strict`.
+
+Rebuilding advisors (saving `/advisor configure`, model-role or context changes) keeps updates the cadence skipped: each rebuilt advisor receives them with its next scheduled review.
 
 ### Headless runs
 
@@ -86,7 +90,7 @@ persisting `advisor.enabled`:
 omp -p --advisor "Review this task."
 ```
 
-While a primary prompt is running, eligible advisor notes can steer that run. After the final prompt settles, print mode preserves late advisor notes without starting hidden primary turns, then waits up to ten minutes for final reviews before disposing the session. That wait covers a failing advisor's retries and [backup reviewer](#backup-reviewer) switch, so a review that fails on the advisor's model finishes on its fallback instead of being abandoned. Error exits use a 30-second drain budget so failed automation can terminate. If either deadline expires, or the advisor stops for good (halted or quota-paused), OMP logs the reviews that disposal will abandon; completed reviews retain their transcript and token/cost usage.
+While a primary prompt is running, eligible advisor notes can steer that run. After the final prompt settles, print mode preserves late advisor notes without starting hidden primary turns, sends updates the review cadence skipped (so an `agent-end` or interval reviewer still reviews the final answer), then waits up to ten minutes for final reviews before disposing the session. That wait covers a failing advisor's retries and [backup reviewer](#backup-reviewer) switch, so a review that fails on the advisor's model finishes on its fallback instead of being abandoned. Error exits use a 30-second drain budget so failed automation can terminate. An advisor whose catch-up policy is `strict` is waited on without either budget; aborts, halts, and quota pauses still end its wait. If a budget expires, or the advisor stops for good (halted or quota-paused), OMP logs the reviews that disposal will abandon; completed reviews retain their transcript and token/cost usage.
 
 Slash commands:
 
@@ -201,7 +205,7 @@ Allowed values:
 
 On primary turn end:
 
-1. a scheduled primary delta is queued for the advisor
+1. every advisor captures the primary delta; an advisor whose review is scheduled queues it together with any updates its cadence held since its last review
 2. the advisor drain loop starts or continues in the background
 3. each scheduled advisor resolves its own override or the global policy; unless it is `off`, the primary waits while that advisor's backlog is at or above its threshold
 4. bounded values cap the wait at 30 seconds; `strict` waits without a wall-clock cap
