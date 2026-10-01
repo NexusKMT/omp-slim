@@ -99,6 +99,7 @@ export class ArtifactManager {
 	}
 
 	async #ensureDir(): Promise<void> {
+		await this.#ready;
 		if (!this.#dirCreated) {
 			await fs.mkdir(this.#dir, { recursive: true });
 			this.#dirCreated = true;

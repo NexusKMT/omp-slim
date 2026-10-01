@@ -151,6 +151,10 @@ export async function copySessionArtifacts(sourceSessionFile: string, destinatio
 	if (path.resolve(sourceArtifactsDir) === path.resolve(destinationArtifactsDir)) return;
 	try {
 		if ((await fs.promises.stat(sourceArtifactsDir)).isDirectory()) {
+			// Create the destination first and merge into it: Bun's `cp` fails with
+			// EEXIST when another writer (the moved session's artifact manager,
+			// `local://`) creates the directory while the copy is starting.
+			await fs.promises.mkdir(destinationArtifactsDir, { recursive: true });
 			await fs.promises.cp(sourceArtifactsDir, destinationArtifactsDir, {
 				recursive: true,
 				force: false,
