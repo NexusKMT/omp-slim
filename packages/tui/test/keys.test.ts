@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
 	extractPrintableText,
-	isWindowsTerminalSession,
 	matchesKey,
 	matchesRawBackspace,
 	parseKey,
 	setKittyProtocolActive,
 } from "@oh-my-pi/pi-tui/keys";
+import { isWindowsTerminalSession } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 
 describe("matchesKey", () => {
 	it("matches ctrl+letter sequences", () => {

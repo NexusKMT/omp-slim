@@ -31,11 +31,17 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 	}
 }
 describe("KeybindingsManager.create", () => {
+	// Windows Terminal drops the Ctrl+Enter follow-up default; these contracts
+	// cover the generic defaults, so they must not depend on the host terminal.
+	const originalWtSession = process.env.WT_SESSION;
+
 	beforeEach(() => {
+		delete process.env.WT_SESSION;
 		setKeybindings(KeybindingsManager.inMemory());
 	});
 
 	afterEach(() => {
+		restoreEnvValue("WT_SESSION", originalWtSession);
 		setKeybindings(KeybindingsManager.inMemory());
 	});
 
