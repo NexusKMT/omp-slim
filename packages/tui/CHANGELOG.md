@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added display of subagent completion percent in agent tree, task, and wait views
+
 ## [18.4.10] - 2026-10-02
 
 ### Added

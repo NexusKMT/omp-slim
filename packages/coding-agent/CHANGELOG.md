@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added periodic completion estimates for running subagents: every 2 minutes each working subagent is asked, through a cached `/btw`-style side request, how far along it is, and the `XY%` shows next to it in wait and task views. Set the interval or turn it off with `task.completionProbeMs`.
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
