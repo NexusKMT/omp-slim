@@ -1198,7 +1198,7 @@ describe("resolveAgentModelPatterns", () => {
 					settings,
 					activeModelPattern: "zai/glm-5.2:high",
 				}),
-			).toEqual({ patterns: ["zai/glm-5.2:high"], role: undefined });
+			).toEqual({ patterns: ["zai/glm-5.2:high"], role: undefined, inheritsLiveThinkingLevel: true });
 		}
 
 		// Without an active model the configured default is still the tail.

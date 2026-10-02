@@ -1307,6 +1307,8 @@ export interface AgentModelPatternResolutionOptions {
 interface EffectiveAgentModelSelection {
 	source?: string | string[];
 	patterns: string[];
+	/** Set when every pattern is the parent's live selector, so its `:level` is inherited rather than requested. */
+	inheritsLiveThinkingLevel?: true;
 }
 
 /** Point an inherited selector at an explicitly requested thinking level. */
@@ -1319,24 +1321,33 @@ function resolveEffectiveAgentModelSelection(
 ): EffectiveAgentModelSelection {
 	const { requestModel, settingsOverride, agentModel, settings, activeModelPattern, fallbackModelPattern } = options;
 	const inheritSessionModel = (requested?: SessionModelInheritance): EffectiveAgentModelSelection => {
-		const fallback =
-			activeModelPattern?.trim() || fallbackModelPattern?.trim() || settings?.getModelRole("default")?.trim() || "";
+		const active = activeModelPattern?.trim();
+		const fallback = active || fallbackModelPattern?.trim() || settings?.getModelRole("default")?.trim() || "";
 		const patterns = resolveConfiguredModelPatterns(fallback, settings);
 		const level = requested?.level;
-		return { patterns: level ? patterns.map(pattern => applyRequestedThinkingLevel(pattern, level)) : patterns };
+		if (level) return { patterns: patterns.map(pattern => applyRequestedThinkingLevel(pattern, level)) };
+		return active ? { patterns, inheritsLiveThinkingLevel: true } : { patterns };
 	};
 
 	let requestSource = requestModel;
 	let requestedInheritance = false;
+	let everyRequestPatternInheritsLiveLevel = true;
 	const requestPatterns = normalizeModelPatternList(requestModel).flatMap((pattern, index, patterns) => {
 		const inheritance = matchSessionInheritedPattern(pattern);
-		if (!inheritance) return resolveConfiguredModelPatterns(pattern, settings);
+		if (!inheritance) {
+			everyRequestPatternInheritsLiveLevel = false;
+			return resolveConfiguredModelPatterns(pattern, settings);
+		}
 		if (!requestedInheritance) requestSource = index === 0 ? undefined : patterns.slice(0, index);
 		requestedInheritance = true;
-		return inheritSessionModel(inheritance).patterns;
+		const inherited = inheritSessionModel(inheritance);
+		if (!inherited.inheritsLiveThinkingLevel) everyRequestPatternInheritsLiveLevel = false;
+		return inherited.patterns;
 	});
 	if (requestPatterns.length > 0 || requestedInheritance) {
-		return { source: requestSource, patterns: requestPatterns };
+		return requestedInheritance && everyRequestPatternInheritsLiveLevel
+			? { source: requestSource, patterns: requestPatterns, inheritsLiveThinkingLevel: true }
+			: { source: requestSource, patterns: requestPatterns };
 	}
 
 	const overridePatterns = resolveConfiguredModelPatterns(settingsOverride, settings);
@@ -1365,6 +1376,12 @@ export interface AgentModelSelection {
 	patterns: string[];
 	/** Role alias the patterns came from (`@task` -> `task`), when the source named one. */
 	role: string | undefined;
+	/**
+	 * Set when the patterns are the parent's live selector without a requested
+	 * level: its `:level` is inherited effort, which an agent definition's own
+	 * `thinking-level` outranks, not a level the caller asked for.
+	 */
+	inheritsLiveThinkingLevel?: true;
 }
 
 /**
@@ -1374,8 +1391,9 @@ export interface AgentModelSelection {
  * discards, and deriving the two halves separately is how they drift apart.
  */
 export function resolveAgentModelSelection(options: AgentModelPatternResolutionOptions): AgentModelSelection {
-	const { source, patterns } = resolveEffectiveAgentModelSelection(options);
-	return { patterns, role: resolveExplicitModelRole(source, options.settings) };
+	const { source, patterns, inheritsLiveThinkingLevel } = resolveEffectiveAgentModelSelection(options);
+	const role = resolveExplicitModelRole(source, options.settings);
+	return inheritsLiveThinkingLevel ? { patterns, role, inheritsLiveThinkingLevel } : { patterns, role };
 }
 
 /** Effective agent model patterns alone, for callers with no interest in role identity. */

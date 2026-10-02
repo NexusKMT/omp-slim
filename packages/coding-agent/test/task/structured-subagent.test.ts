@@ -505,6 +505,40 @@ describe("structured subagent primitive", () => {
 		expect(policy.modelRole).toBeUndefined();
 	});
 
+	it("withholds the parent credential fallback from an explicit per-call model and marks inherited effort", async () => {
+		mockDiscovery();
+		const parent = "anthropic/claude-sonnet-4-5:high";
+		const childSession = { ...session(), getActiveModelString: () => parent } as ToolSession;
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		for (const model of [
+			"openai/gpt-4o",
+			["openai/gpt-4o", "openai/gpt-4o-mini"],
+			"@default",
+			"@default:low",
+			undefined,
+		]) {
+			await runStructuredSubagent(request({ session: childSession, model }));
+		}
+
+		expect(
+			dispatched.map(options => [options.parentActiveModelPattern, options.modelInheritsLiveThinkingLevel ?? false]),
+		).toEqual([
+			// A requested model that cannot authenticate fails rather than running on the parent's.
+			[undefined, false],
+			[undefined, false],
+			// `@default` names the parent; its live `:high` is inherited, not requested.
+			[parent, true],
+			[parent, false],
+			// No selector: the agent inherits the session model and the #985 fallback stays.
+			[parent, true],
+		]);
+	});
+
 	it("admits mixed inherited requests when configured role candidates are unavailable", async () => {
 		mockDiscovery({ ...AGENT, model: ["@definition"] });
 		const childSession = {

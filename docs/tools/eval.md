@@ -228,7 +228,7 @@ review = agent("Review the change", model=["@slow", "@default"])
 pool = workpool("scout", name="research", model=["@smol", "@default"])
 ```
 
-The shared resolver retains role identity and tries the requested candidates before parent-auth fallback. Empty arrays, blank elements, comma-only selectors and invalid thinking suffixes fail preflight. Literal model IDs with colon suffixes retain their identity. These selectors are ordered preferences, not a closed model allowlist: configured runtime fallbacks still apply.
+The shared resolver retains role identity and tries the requested candidates in order for working credentials. If none has them, the call fails instead of running on the parent's model, unless the selection includes `@default`. Empty arrays, blank elements, comma-only selectors and invalid thinking suffixes fail preflight. Literal model IDs with colon suffixes retain their identity. These selectors are ordered preferences, not a closed model allowlist: configured runtime fallbacks still apply.
 
 A workpool applies its raw selector to each worker's **first turn**. Follow-up turns reuse that worker's existing session and do not receive a new selector. With `eval.workpool.freshAgents=true`, every new worker receives the pool selector. Different pools keep independent selections.
 

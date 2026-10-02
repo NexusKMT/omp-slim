@@ -52,7 +52,9 @@ The wire schema is shape-swapped by `task.batch` (default on). One unit of work 
 
 A supplied `model` may be one selector or an ordered, non-empty array. Every array element must contain a non-empty selector. Blank/comma-only values and invalid thinking suffixes are rejected; registered literal IDs ending in `:max` or other suffixes remain model IDs. A batch-container `model` is rejected rather than dropped: put it on each `tasks[]` item.
 
-Model selection is an ordered **preference**, not a closed allowlist. Requested candidates (including role-expanded alternatives) are tried for working credentials before falling back to the parent. Existing configured runtime fallback behavior remains in effect; supplying an array does not guarantee execution stays within that array.
+Model selection is an ordered **preference**, not a closed allowlist. Requested candidates (including role-expanded alternatives) are tried in order for working credentials. If none has working credentials, the spawn fails; it does not fall back to the parent's model (agent-definition and `task.agentModelOverrides` models keep the parent fallback, and so does a selection containing `@default`). Existing configured runtime fallback behavior (`retry.fallbackChains`) remains in effect; supplying an array does not guarantee execution stays within that array.
+
+`@default` without a `:level` carries the parent's live effort. An agent definition's own `thinking-level` outranks that inherited effort; a requested `@default:<level>` or caller `effort` outranks the agent's level.
 
 There is no wire label field: the one-line UI label shown in the TUI/registry is generated automatically from the `task` text by the tiny/title model (fire-and-forget), so callers never provide it.
 

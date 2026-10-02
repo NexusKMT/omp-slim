@@ -170,7 +170,15 @@ export interface EffectiveSubagentPolicy {
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	/** Exact-name entry normalized to both child compaction threshold fields. */
 	compactionThresholdOverride?: CompactionThresholdPair;
+	/**
+	 * Parent model the child falls back to when its own candidates have no
+	 * working credentials. Absent for an explicit per-call `model` (other than
+	 * `@default`): a requested model that cannot run fails instead of being
+	 * replaced by the parent's.
+	 */
 	parentActiveModelPattern?: string;
+	/** The selected patterns carry the parent's live effort, which the agent's own `thinking-level` outranks. */
+	modelInheritsLiveThinkingLevel?: boolean;
 	schema: StructuredSubagentSchemaResolution;
 	planMode: boolean;
 	isIsolated: boolean;
@@ -396,7 +404,11 @@ export async function resolveEffectiveSubagentPolicy(
 	// Role identity and patterns come from one call so they cannot be derived
 	// from different sources: the expansion below discards the alias, and the
 	// child's inherited retry-fallback chain is keyed off the role.
-	const { patterns: modelOverride, role: modelRole } = resolveAgentModelSelection(modelResolution);
+	const {
+		patterns: modelOverride,
+		role: modelRole,
+		inheritsLiveThinkingLevel: modelInheritsLiveThinkingLevel,
+	} = resolveAgentModelSelection(modelResolution);
 	// A per-call `model` is chosen by a model mid-turn, not read from a config
 	// file the user can re-check: reject an ambiguous or unmatchable selector
 	// here instead of letting the spawn die downstream on the generic
@@ -472,7 +484,11 @@ export async function resolveEffectiveSubagentPolicy(
 		modelRole,
 		serviceTierOverride,
 		compactionThresholdOverride,
-		parentActiveModelPattern,
+		parentActiveModelPattern:
+			requestPatterns.length > 0 && !modelSelectionInheritsSessionModel(request.model)
+				? undefined
+				: parentActiveModelPattern,
+		modelInheritsLiveThinkingLevel,
 		schema,
 		planMode,
 		isIsolated,
@@ -524,7 +540,12 @@ async function applySpawnHook(
 	if (spawnResult?.model === undefined) return policy;
 	const replacement = resolveConfiguredModelPatterns(spawnResult.model, request.session.settings);
 	if (replacement.length === 0) return policy;
-	return { ...policy, modelOverride: replacement, modelRoute: spawnResult.note };
+	return {
+		...policy,
+		modelOverride: replacement,
+		modelRoute: spawnResult.note,
+		modelInheritsLiveThinkingLevel: undefined,
+	};
 }
 
 /** Reserve a session-global agent id only after preflight has succeeded. */
@@ -608,6 +629,7 @@ function buildExecutorOptions(
 		serviceTierOverride: policy.serviceTierOverride,
 		compactionThresholdOverride: policy.compactionThresholdOverride,
 		parentActiveModelPattern: policy.parentActiveModelPattern,
+		modelInheritsLiveThinkingLevel: policy.modelInheritsLiveThinkingLevel,
 		thinkingLevel: policy.effectiveAgent.thinkingLevel,
 		effort: request.effort,
 		solutionSpace: request.solutionSpace?.trim() || undefined,
