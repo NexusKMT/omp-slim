@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Fixed disposed SDK sessions retaining spilled tool output in memory and accepting new artifact writes.
+- Fixed disposed SDK sessions retaining spilled tool output in memory and accepting new artifact writes ([#14107](https://github.com/can1357/oh-my-pi/pull/14107) by [@iliaal](https://github.com/iliaal)).
 
 ## [18.4.10] - 2026-10-02
 
