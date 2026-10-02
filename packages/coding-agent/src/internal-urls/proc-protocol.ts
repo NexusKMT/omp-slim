@@ -1,9 +1,15 @@
 import { formatDuration } from "@oh-my-pi/pi-tui/render/render-utils";
 import type { AsyncJob } from "../async";
-import { cancelAgentRegistration, executeCancel, runningAgentsOutsideJobs, snapshotJobs } from "../async/job-control";
+import {
+	agentStaleNote,
+	cancelAgentRegistration,
+	executeCancel,
+	runningAgentsOutsideJobs,
+	snapshotJobs,
+} from "../async/job-control";
 import {
 	findService,
-	listServices,
+	listServicesTolerant,
 	modeService,
 	sendService,
 	serviceLogPath,
@@ -101,7 +107,10 @@ export class ProcProtocolHandler implements ProtocolHandler {
 		const { id, action } = target(url);
 		if (action !== "stdin") throw new Error(`proc://<id>/${action} is writable only`);
 		const jobs = ownerJobs(session);
-		const services = cfgLaunchEnabled.get(session.settings) ? await listServices(session, context?.signal) : [];
+		// Jobs and agents are in-process; a hung broker must not hide them.
+		const { services, error: servicesError } = cfgLaunchEnabled.get(session.settings)
+			? await listServicesTolerant(session, context?.signal)
+			: { services: [], error: undefined };
 		if (!id) {
 			const now = Date.now();
 			const rows = [
@@ -113,9 +122,11 @@ export class ProcProtocolHandler implements ProtocolHandler {
 					return `${job.id} [${job.type}] ${job.status} ${duration} — ${job.label.replace(/\s+/g, " ")}`;
 				}),
 				...runningAgentsOutsideJobs(session).map(
-					agent => `${agent.id} [task] running up ${formatDuration(agent.ageMs)} — ${agent.activity ?? "agent"}`,
+					agent =>
+						`${agent.id} [task] running up ${formatDuration(agent.ageMs)} — ${agent.activity ?? "agent"}${agentStaleNote(agent)}`,
 				),
 				...services.map(service => serviceStatus(service)),
+				...(servicesError ? [`Services unavailable (daemon broker): ${servicesError}`] : []),
 			];
 			return textResource(url, rows.join("\n") || "No background jobs or services.", undefined, true, {
 				jobs: snapshotJobs(session, jobs, { includeResults: true }),
@@ -158,11 +169,13 @@ export class ProcProtocolHandler implements ProtocolHandler {
 		if (agent)
 			return textResource(
 				url,
-				`${agent.id} [task] — running — ${agent.activity ?? "agent"}\nhistory://${agent.id}`,
+				`${agent.id} [task] — running — ${agent.activity ?? "agent"}${agentStaleNote(agent)}\nhistory://${agent.id}`,
 				undefined,
 				false,
 				{ agents: [agent] },
 			);
+		if (servicesError)
+			throw new Error(`Background job or service not found: ${id} (services unavailable: ${servicesError})`);
 		throw new Error(`Background job or service not found: ${id}`);
 	}
 

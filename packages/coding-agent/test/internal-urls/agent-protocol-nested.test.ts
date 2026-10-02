@@ -185,3 +185,44 @@ it("agent:// path extraction prefers the <id>.json sidecar over the markdown bod
 	await fs.writeFile(path.join(rootArtifactsDir, "Worker.json"), "{not json");
 	await expect(handler.resolve(new URL("agent://Worker/count") as never)).rejects.toThrow(/Worker is not valid JSON/);
 });
+
+it("agent:// marks a published output as the previous run while the agent streams a newer turn", async () => {
+	const root = tempDir.path();
+	const rootSessionFile = path.join(root, "superseded-session.jsonl");
+	const rootArtifactsDir = rootSessionFile.slice(0, -6);
+	await fs.mkdir(rootArtifactsDir, { recursive: true });
+	const sharedArtifactManager = new ArtifactManager(rootArtifactsDir);
+	const published = JSON.stringify({ status: "partial", summary: "run budget ran out" });
+	await fs.writeFile(path.join(rootArtifactsDir, "Visuals.md"), published);
+
+	const mainSession = {
+		sessionManager: { getArtifactsDir: () => sharedArtifactManager.dir },
+	} as unknown as AgentSession;
+	const wokenSession = {
+		sessionManager: { getArtifactsDir: () => sharedArtifactManager.dir },
+		isStreaming: true,
+	} as unknown as AgentSession;
+	const registry = AgentRegistry.global();
+	registry.register({
+		id: "Main",
+		displayName: "main",
+		kind: "main",
+		session: mainSession,
+		sessionFile: rootSessionFile,
+	});
+	registry.register({ id: "Visuals", displayName: "sub", kind: "sub", parentId: "Main", session: wokenSession });
+
+	const handler = new AgentProtocolHandler();
+	const whileRunning = await handler.resolve(new URL("agent://Visuals") as never);
+	expect(whileRunning.content).toStartWith("> `Visuals` is running a newer turn.");
+	expect(whileRunning.content).toContain("PREVIOUS run");
+	expect(whileRunning.content.endsWith(published)).toBe(true);
+	// JSON-path reads stay machine-parseable.
+	const field = await handler.resolve(new URL("agent://Visuals/status") as never);
+	expect(field.content).toBe("partial");
+
+	// Once the turn ends, the file is the current result again.
+	registry.setStatus("Visuals", "idle");
+	const settled = await handler.resolve(new URL("agent://Visuals") as never);
+	expect(settled.content).toBe(published);
+});

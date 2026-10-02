@@ -22,12 +22,13 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { fuzzyFilter } from "@oh-my-pi/pi-tui/fuzzy";
-import { isEnoent, prompt } from "@oh-my-pi/pi-utils";
+import { formatDuration, isEnoent, prompt } from "@oh-my-pi/pi-utils";
 import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
 import { ensurePersistedRoster } from "../registry/persisted-agents";
 import { executeSend, isIrcEnabled } from "../irc/messaging";
 import agentPromptDoc from "../prompts/internal-urls/agent.md" with { type: "text" };
 import agentProgressTemplate from "../prompts/tools/agent-url-progress.md" with { type: "text" };
+import agentSupersededTemplate from "../prompts/tools/agent-url-superseded.md" with { type: "text" };
 import { loadSessionMessagesReadOnly } from "../session/session-loader";
 import { artifactsDirsFromRegistry } from "./registry-helpers";
 import type {
@@ -205,11 +206,11 @@ export class AgentProtocolHandler implements ProtocolHandler {
 
 		const dirs = await this.#outputDirs(context);
 		const scan = dirs.length > 0 ? await this.#findOutput(dirs, outputId) : undefined;
+		const registry = context?.agentRegistry ?? AgentRegistry.global();
 		if (!scan?.foundPath) {
 			// No published output yet. A registered agent (running, idle after a
 			// non-terminal yield, or parked before publishing) is the same
 			// registry `write agent://<id>` delivers to: answer with its progress.
-			const registry = context?.agentRegistry ?? AgentRegistry.global();
 			const ref = registry.get(outputId);
 			if (ref && ref.kind !== "advisor") return this.#resolveProgress(url, ref, extraction);
 			if (!scan) throw new Error("No session - agent outputs unavailable");
@@ -233,6 +234,18 @@ export class AgentProtocolHandler implements ProtocolHandler {
 		const rawContent = await Bun.file(scan.foundPath).text();
 		const notes: string[] = [];
 		let content = rawContent;
+		// A published file belongs to a finished run. If the agent is streaming
+		// again (follow-up or IRC wake), the file is the previous run's result;
+		// unmarked, a reader takes it as the current state.
+		const liveRef = registry.get(outputId);
+		if (!extraction && liveRef && liveRef.kind !== "advisor" && registry.isRunning(liveRef)) {
+			const publishedAt = (await fs.stat(scan.foundPath)).mtimeMs;
+			content = `${prompt.render(agentSupersededTemplate, {
+				id: outputId,
+				age: formatDuration(Math.max(0, Date.now() - publishedAt)),
+			})}${rawContent}`;
+			notes.push(`Superseded: ${outputId} is running a newer turn`);
+		}
 		let contentType: InternalResource["contentType"] = "text/markdown";
 
 		let extractedFrom = scan.foundPath;
