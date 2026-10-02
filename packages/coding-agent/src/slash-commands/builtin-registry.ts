@@ -83,12 +83,12 @@ function materializeTuiBuiltinSlashCommand(
 	const materialized: TuiBuiltinSlashCommand = { ...cmd };
 	if (cmd.subcommands) {
 		const subcommands = cmd.subcommands;
-		// `/mcp` and `/thinking` narrow their declarative lists to live session
+		// `/mcp` and `/effort` narrow their declarative lists to live session
 		// state so the dropdown never offers a value the handler would reject.
 		if (runtime && cmd.name === "mcp") {
 			materialized.getArgumentCompletions = buildMcpArgumentCompletions(subcommands, runtime);
 			materialized.getInlineHint = buildSubcommandInlineHint(subcommands);
-		} else if (runtime && cmd.name === "thinking") {
+		} else if (runtime && cmd.name === "effort") {
 			materialized.getArgumentCompletions = buildEffortArgumentCompletions(runtime);
 			materialized.getInlineHint = buildEffortInlineHint(runtime);
 		} else {

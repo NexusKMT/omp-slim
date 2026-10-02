@@ -16,7 +16,7 @@ import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-com
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
-const command = lookupBuiltinSlashCommand("thinking");
+const command = lookupBuiltinSlashCommand("effort");
 
 interface Harness {
 	outputs: string[];
@@ -82,22 +82,25 @@ function harness(options: { reasoning?: boolean; efforts?: readonly Effort[]; ce
 }
 
 async function run(h: Harness, args: string): Promise<void> {
-	await command!.handle!({ name: "thinking", args, text: `/thinking ${args}`.trim() }, h.runtime);
+	await command!.handle!({ name: "effort", args, text: `/effort ${args}`.trim() }, h.runtime);
 }
 
-describe("/thinking slash command", () => {
-	it("is found by the effort and intelligence vocabulary", async () => {
+describe("/effort slash command", () => {
+	it("is found by thinking and intelligence without registering a thinking alias", async () => {
 		const provider = new CombinedAutocompleteProvider([...BUILTIN_SLASH_COMMANDS], process.cwd());
-		for (const query of ["/effort", "/intelligence"]) {
+		for (const query of ["/thinking", "/intelligence"]) {
 			const suggestions = await provider.getSuggestions([query], 0, query.length);
 			const resolved = suggestions?.items.map(item => lookupBuiltinSlashCommand(item.value)?.name);
-			expect(resolved).toContain("thinking");
+			expect(resolved).toContain("effort");
 		}
+		const h = harness();
+		expect(await executeBuiltinSlashCommand("/thinking high", { ...h.tuiRuntime, draftDetached: true })).toBe(false);
+		expect(h.level()).toBeUndefined();
 	});
 
 	it("completes only effort levels exposed by the active model", async () => {
 		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
-		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
 		const completions = await Promise.resolve(effort?.getArgumentCompletions?.(""));
 		expect(completions?.map(item => item.label)).toEqual(["off", "auto", "low", "medium"]);
 		expect(completions?.map(item => item.label)).not.toContain("xhigh");
@@ -109,7 +112,7 @@ describe("/thinking slash command", () => {
 
 	it("rejects levels above the session ceiling and keeps cycling within it", async () => {
 		const h = harness({ ceiling: Effort.Low });
-		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
 		const choices = await thinking?.getArgumentCompletions?.("");
 		expect(choices?.map(item => item.label)).toEqual(["off", "auto", "low"]);
 		expect(thinking?.getInlineHint?.("hi")).toBeNull();
@@ -123,7 +126,7 @@ describe("/thinking slash command", () => {
 
 	it("offers exactly the selectors the cycle walks", async () => {
 		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
-		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
 		const completions = await Promise.resolve(effort?.getArgumentCompletions?.(""));
 		const controls = h.controls;
 		const cycled: ConfiguredThinkingLevel[] = [];
@@ -154,7 +157,7 @@ describe("/thinking slash command", () => {
 		await run(h, "");
 		expect(h.outputs[1]).toContain("Thinking: high");
 
-		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
 		const narrowed = await Promise.resolve(thinking?.getArgumentCompletions?.("hi"));
 		expect(narrowed?.map(item => [item.label, item.description])).toEqual([
 			["high", expect.stringContaining("(current)")],
@@ -209,9 +212,9 @@ describe("/thinking slash command", () => {
 			showError: (message: string) => events.push(`error:${message}`),
 		} as unknown as InteractiveModeContext;
 
-		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/effort", { ctx, draftDetached: true });
 		await executeBuiltinSlashCommand("/effort med", { ctx, draftDetached: true });
-		await executeBuiltinSlashCommand("/thinking xhigh", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/effort xhigh", { ctx, draftDetached: true });
 
 		expect(h.level()).toBe(ThinkingLevel.Medium);
 		expect(events).toEqual([
@@ -231,8 +234,8 @@ describe("/thinking slash command", () => {
 			showError: (message: string) => events.push(`error:${message}`),
 		} as unknown as InteractiveModeContext;
 
-		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
-		await executeBuiltinSlashCommand("/thinking high", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/effort", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/effort high", { ctx, draftDetached: true });
 		expect(events).toEqual([
 			"status:test/test-model has no adjustable thinking level.",
 			"error:test/test-model has no adjustable thinking level.",

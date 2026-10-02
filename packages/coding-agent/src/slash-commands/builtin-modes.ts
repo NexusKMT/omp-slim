@@ -863,13 +863,12 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "thinking",
-		aliases: ["effort"],
+		name: "effort",
 		icon: "gauge",
 		get description() {
-			return `Set thinking level (reasoning effort, intelligence) for this session; ${formatKeyHint("shift+tab")} cycles levels`;
+			return `Set reasoning effort (thinking level, intelligence) for this session; ${formatKeyHint("shift+tab")} cycles levels`;
 		},
-		acpDescription: "Set or show thinking level (reasoning effort)",
+		acpDescription: "Set or show reasoning effort (thinking level, intelligence)",
 		acpInputHint: "[level]",
 		inlineHint: "[level]",
 		allowArgs: true,

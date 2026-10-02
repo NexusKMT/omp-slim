@@ -8,7 +8,7 @@ export function noThinkingMessage(session: AgentSession): string {
 }
 
 /**
- * Resolve a `/thinking <level>` argument to a selector the active model
+ * Resolve an `/effort <level>` argument to a selector the active model
  * accepts, or the message explaining why it cannot be applied. Shared by the
  * text/ACP handler and the TUI handler.
  */

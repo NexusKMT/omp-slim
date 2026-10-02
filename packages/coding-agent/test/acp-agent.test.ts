@@ -1016,8 +1016,8 @@ describe("ACP agent", () => {
 		await Bun.sleep(0);
 	});
 
-	it("emits a single config_option_update per /thinking change", async () => {
-		// `/thinking <level>` calls AgentSession.setThinkingLevel, which fires
+	it("emits a single config_option_update per /effort change", async () => {
+		// `/effort <level>` calls AgentSession.setThinkingLevel, which fires
 		// `thinking_level_changed`; the lifetime subscription turns that into a
 		// `config_option_update`. The command's explicit notifyConfigChanged
 		// must not add a second identical push, or clients redraw their config
@@ -1031,7 +1031,7 @@ describe("ACP agent", () => {
 		const updatesBefore = harness.updates.length;
 		await harness.agent.prompt({
 			sessionId: created.sessionId,
-			prompt: [{ type: "text", text: "/thinking high" }],
+			prompt: [{ type: "text", text: "/effort high" }],
 		});
 
 		const configUpdates = harness.updates
@@ -1078,7 +1078,7 @@ describe("ACP agent", () => {
 		const baseline = harness.updates.length;
 		const prompt = harness.agent.prompt({
 			sessionId: created.sessionId,
-			prompt: [{ type: "text", text: "/thinking high" }],
+			prompt: [{ type: "text", text: "/effort high" }],
 		});
 		await blocked.promise;
 		try {
@@ -1098,7 +1098,7 @@ describe("ACP agent", () => {
 		}
 	});
 
-	it("still pushes config_option_update for /thinking before the lifetime subscription exists", async () => {
+	it("still pushes config_option_update for /effort before the lifetime subscription exists", async () => {
 		// Pre-bootstrap there is no lifetime subscription, so the explicit
 		// notifyConfigChanged is the only path that tells the client — same
 		// contract as `setSessionConfigOption`'s pre-bootstrap push.
@@ -1111,7 +1111,7 @@ describe("ACP agent", () => {
 		const updatesBefore = harness.updates.length;
 		await harness.agent.prompt({
 			sessionId: created.sessionId,
-			prompt: [{ type: "text", text: "/thinking high" }],
+			prompt: [{ type: "text", text: "/effort high" }],
 		});
 
 		const configUpdates = harness.updates

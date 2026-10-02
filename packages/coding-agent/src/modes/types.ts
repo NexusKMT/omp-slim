@@ -491,7 +491,7 @@ export interface InteractiveModeContext {
 	showUserMessageSelector(): void;
 	showCopySelector(): void;
 	showTreeSelector(): void;
-	/** Open the `/thinking` picker over the levels the current model accepts. */
+	/** Open the `/effort` picker over the levels the current model accepts. */
 	showThinkingSelector(): void;
 	showSessionSelector(source?: ForeignSessionSource): void;
 	/** Settle side requests before replacing the session or deleting its artifacts. */
