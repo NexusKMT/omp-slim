@@ -2,11 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- In a focused subagent view, submitting `.` or `c` now sends the same hidden continue directive to that subagent as it does in the main session ([#13801](https://github.com/can1357/oh-my-pi/pull/13801) by [@Dante-dan](https://github.com/Dante-dan); [issue #13790](https://github.com/can1357/oh-my-pi/issues/13790)).
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
 
-- In a focused subagent view, submitting `.` or `c` now sends the same hidden continue directive to that subagent as it does in the main session ([#13801](https://github.com/can1357/oh-my-pi/pull/13801) by [@Dante-dan](https://github.com/Dante-dan); [issue #13790](https://github.com/can1357/oh-my-pi/issues/13790)).
 - Added global and per-advisor review cadence, including final-yield reviews and intervals that accumulate skipped transcript updates ([#12385](https://github.com/can1357/oh-my-pi/pull/12385) by [@olegpulatov](https://github.com/olegpulatov)).
 - Added per-advisor catch-up policy and cancellable `strict` waiting, so asynchronous turn reviewers can run beside synchronous final reviewers ([#12385](https://github.com/can1357/oh-my-pi/pull/12385) by [@olegpulatov](https://github.com/olegpulatov)).
 - Added `/jobs full` to show each background bash job's full command line; plain `/jobs` still shortens it to fit the terminal ([#13980](https://github.com/can1357/oh-my-pi/pull/13980) by [@rickythefox](https://github.com/rickythefox))
