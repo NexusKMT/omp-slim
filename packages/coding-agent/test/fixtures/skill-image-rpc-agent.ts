@@ -9,42 +9,23 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { VISION_DESCRIPTION_SSE, waitForFile } from "../helpers/skill-image-vision";
 
 // Real RPC dispatch with a `/skill:look` command on a text-only main model, so an image
-// attached to the skill is described by the vision role first. The vision request writes
-// this process's pid to `vision-started` in the cwd and holds until it receives SIGUSR1.
+// attached to the skill is described by the vision role first. The vision request creates
+// `vision-started` in the cwd and holds until the test creates `vision-release` there.
 const cwd = process.cwd();
 const skillPath = path.join(cwd, "look", "SKILL.md");
 await Bun.write(skillPath, "---\nname: look\ndescription: Look at an image\n---\n\nDescribe the attached image.\n");
 
-const chunk = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`;
-const visionBody =
-	chunk({
-		id: "x",
-		object: "chat.completion.chunk",
-		created: 1,
-		model: "glm-5.3-flash",
-		choices: [{ index: 0, delta: { role: "assistant", content: "A red square." }, finish_reason: null }],
-	}) +
-	chunk({
-		id: "x",
-		object: "chat.completion.chunk",
-		created: 1,
-		model: "glm-5.3-flash",
-		choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-		usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-	}) +
-	"data: [DONE]\n\n";
 const realFetch = globalThis.fetch;
 globalThis.fetch = Object.assign(
 	async (input: string | URL | Request, init?: RequestInit) => {
 		const url = input instanceof Request ? input.url : String(input);
 		if (!url.endsWith("/chat/completions")) return realFetch(input, init);
-		const released = Promise.withResolvers<void>();
-		process.once("SIGUSR1", () => released.resolve());
-		await Bun.write(path.join(cwd, "vision-started"), String(process.pid));
-		await released.promise;
-		return new Response(visionBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+		await Bun.write(path.join(cwd, "vision-started"), "");
+		await waitForFile(path.join(cwd, "vision-release"));
+		return new Response(VISION_DESCRIPTION_SSE, { status: 200, headers: { "content-type": "text/event-stream" } });
 	},
 	{ preconnect: realFetch.preconnect },
 );

@@ -6,8 +6,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import type { RpcPromptResultFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
-
-const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+import { ONE_PIXEL_PNG as PNG, waitForFile } from "./helpers/skill-image-vision";
 
 function submissionOrder(messages: AgentMessage[]): string[] {
 	return messages.flatMap(message => {
@@ -19,24 +18,6 @@ function submissionOrder(messages: AgentMessage[]): string[] {
 				: message.content.map(part => (part.type === "text" ? part.text : "")).join("");
 		return [text];
 	});
-}
-
-/** Resolve with `file`'s text once it is non-empty, driven by directory change events rather than a polling timer. */
-async function waitForFileText(file: string): Promise<string> {
-	const read = async () => ((await Bun.file(file).exists()) ? await Bun.file(file).text() : "");
-	const controller = new AbortController();
-	const events = fs.watch(path.dirname(file), { signal: controller.signal });
-	try {
-		let text = await read();
-		if (text) return text;
-		for await (const _ of events) {
-			text = await read();
-			if (text) return text;
-		}
-		throw new Error(`watch on ${file} ended before it was written`);
-	} finally {
-		controller.abort();
-	}
 }
 
 let client: RpcClient;
@@ -66,11 +47,21 @@ test("a later prompt does not overtake an idle image skill while its image is de
 	});
 	try {
 		const skill = client.prompt("/skill:look what is this?", [{ type: "image", data: PNG, mimeType: "image/png" }]);
-		const fixturePid = Number(await waitForFileText(path.join(directory, "vision-started")));
+		// The skill is acknowledged only after admission, which waits for the held vision request.
+		// An acknowledgement first means the vision path never ran, so fail now instead of at the test timeout.
+		let visionStarted = false;
+		await Promise.race([
+			waitForFile(path.join(directory, "vision-started")).then(() => {
+				visionStarted = true;
+			}),
+			skill.then(() => {
+				if (!visionStarted) throw new Error("skill was admitted without starting a vision description request");
+			}),
+		]);
 		const second = client.prompt("second", undefined, "followUp");
 		// get_state runs on the serial queue after the second prompt was accepted and handed to the input gate.
 		await client.getState();
-		process.kill(fixturePid, "SIGUSR1");
+		await Bun.write(path.join(directory, "vision-release"), "");
 		await Promise.all([skill, second]);
 		await bothSettled.promise;
 	} finally {
