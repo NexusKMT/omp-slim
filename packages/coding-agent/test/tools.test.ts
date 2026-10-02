@@ -2537,7 +2537,9 @@ function b() {
 
 			expect(result.details?.async?.state).toBe("running");
 			expect(result.details?.async?.type).toBe("bash");
+			// The model is told the job's deadline before it waits on the result.
 			expect(getTextOutput(result)).toContain("Backgrounded as job");
+			expect(getTextOutput(result)).toContain("(killed after 3600s; `timeout: 0` disables the deadline)");
 
 			const jobId = result.details?.async?.jobId;
 			if (!jobId) {

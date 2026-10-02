@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Claude dropping `timeout` from bash calls that set `async: true`, so background watchers and long jobs were killed at the default 300 s deadline: Anthropic strict tool decoding fixes property order, and `async` comes after `timeout` in the bash schema. `bash` is no longer sent with `strict: true` ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
+
 ## [18.4.12] - 2026-10-02
 
 ### Added
