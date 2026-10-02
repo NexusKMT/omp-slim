@@ -9,6 +9,16 @@
 ### Fixed
 
 - Hidden thinking blocks no longer leave a faint "Thought for Ns" row in Tern's native transcript; only the live "Thinking…" indicator shows while the model reasons.
+### Fixed
+
+- Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets or emphasis, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s. Emphasis or links nested a thousand levels deep still render slowly, for seconds per few KB: each level restyles the text inside it ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+
+### Removed
+
+- Removed the internal `urlTokenPossible` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Removed the internal `autolinkSchemeScanIndex` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.9] - 2026-10-01
 
