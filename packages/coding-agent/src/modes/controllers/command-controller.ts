@@ -127,9 +127,14 @@ export class CommandController {
 		return true;
 	}
 
-	/** Drop the report above the editor without pinning anything (the transcript under it was reset). */
+	/**
+	 * Drop any report — the one above the editor, or a focused sheet/page —
+	 * without pinning anything: the transcript or session under it was reset,
+	 * and its contents describe what is gone.
+	 */
 	clearCommandReport(): void {
 		this.#clearReport();
+		this.#closeReportSheet();
 		this.#reportOpenedAtBottom = false;
 	}
 
@@ -177,10 +182,12 @@ export class CommandController {
 			maxRows: () => (fullScreen ? terminal.rows : this.ctx.commandReportRows()),
 		});
 		if (isNativeRendering()) {
+			report.holdFocus();
 			this.#reportSheet = this.ctx.ui.showOverlay(report, { anchor: "center", width: "90%", maxHeight: "90%" });
 			this.ctx.ui.setFocus(report);
 		} else if (report.heightAt(terminal.columns) > inline) {
 			fullScreen = true;
+			report.holdFocus();
 			this.#reportSheet = this.ctx.ui.showOverlay(report, {
 				anchor: "bottom-center",
 				width: "100%",

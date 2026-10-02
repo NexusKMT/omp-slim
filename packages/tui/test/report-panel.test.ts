@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { Container, Text } from "@oh-my-pi/pi-tui";
 import { TranscriptContainer } from "@oh-my-pi/pi-tui/chrome/transcript-container";
 import { ReportPanel } from "@oh-my-pi/pi-tui/overlays/report-panel";
+import { editorKey } from "@oh-my-pi/pi-tui/chrome/keybinding-hints";
 import { COMPOSER_DEFAULTS, Composer } from "@oh-my-pi/pi-tui/prompt/composer";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import { withoutTerminalMultiplexer } from "./terminal-multiplexer-environment";
@@ -158,5 +159,35 @@ describe("ReportPanel in text mode", () => {
 		expect(editorRow()).toBe(ROWS - 1);
 		expect(terminal.getViewport().some(row => row.includes("Transcript 14"))).toBe(true);
 		composer.stop();
+	});
+
+	it("never renders past its row cap, even when a resize leaves fewer rows than its chrome", () => {
+		const body = new Text(Array.from({ length: 20 }, (_, i) => `Entry ${i}`).join("\n"), 0, 0);
+		let cap = 12;
+		const panel = new ReportPanel({ title: "Report", body, closeKey: "Esc", onClose: () => {}, maxRows: () => cap });
+		expect(panel.render(60)).toHaveLength(12);
+		cap = 4;
+		const shrunk = panel.render(60);
+		expect(shrunk).toHaveLength(4);
+		expect(Bun.stripANSI(shrunk[0]!)).toContain("Report");
+	});
+
+	it("names the key that closes it: the editor's while docked, its own once it holds focus", () => {
+		let closed = 0;
+		const panel = new ReportPanel({
+			title: "Report",
+			body: new Text("body", 0, 0),
+			// The editor's interrupt key, rebound away from Esc.
+			closeKey: "Ctrl+Q",
+			onClose: () => closed++,
+		});
+		const footer = () => Bun.stripANSI(panel.render(60).join("\n"));
+		expect(footer()).toContain("Ctrl+Q to close");
+
+		panel.holdFocus();
+		expect(footer()).not.toContain("Ctrl+Q");
+		expect(footer()).toContain(`${editorKey("tui.select.cancel")} to close`);
+		panel.handleInput("\x1b");
+		expect(closed).toBe(1);
 	});
 });

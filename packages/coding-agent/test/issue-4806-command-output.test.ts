@@ -118,6 +118,22 @@ describe("issue #4806 command output during streaming", () => {
 		}
 	});
 
+	it("closes an open native report sheet when the transcript is reset for another session", () => {
+		setNativeRendering(true);
+		try {
+			streaming = false;
+			mode.handleContextCommand();
+			expect(mode.ui.hasOverlay()).toBe(true);
+
+			mode.resetTranscript();
+
+			expect(mode.ui.hasOverlay()).toBe(false);
+			expect(mode.ui.getFocused()).toBe(mode.editor);
+		} finally {
+			setNativeRendering(false);
+		}
+	});
+
 	it("mounts deferred command output once after the active turn ends", async () => {
 		const streamedReply = new Text("agent is streaming", 0, 0);
 		mode.chatContainer.addChild(streamedReply);

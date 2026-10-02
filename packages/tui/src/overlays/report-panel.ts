@@ -28,9 +28,14 @@ export interface ReportPanelOptions {
 	readonly head?: TspText;
 	/** The read-only report; it draws no frame or title of its own. */
 	readonly body: Component;
-	/** Display form of the key that dismisses the report (the editor's Esc). */
+	/**
+	 * Display form of the key that dismisses the report while it sits above the
+	 * editor (the editor's interrupt key, which routes to it). Once the panel
+	 * holds focus ({@link ReportPanel.holdFocus}) the hint shows the key its own
+	 * input closes on instead.
+	 */
 	readonly closeKey: string;
-	/** Natively the sheet holds focus: Esc and its Close button run this. */
+	/** The focused panel (native sheet, text-mode full-screen page) closes on Esc / its Close button: this runs. */
 	readonly onClose: () => void;
 	/**
 	 * Most rows the text-mode panel may take, borders included (the screen rows
@@ -61,7 +66,7 @@ export class ReportPanel extends OverlayPanel {
 	readonly #maxRows: (() => number | undefined) | undefined;
 	readonly #view: ScrollView;
 	readonly #footer: Text;
-	readonly #closeHint: string;
+	#closeHint: string;
 	#bodyRows = 0;
 	#scroll: NativeScroll | undefined;
 	#native: { scroll: NativeScroll | undefined; node: NativeNode } | undefined;
@@ -91,18 +96,32 @@ export class ReportPanel extends OverlayPanel {
 		this.addChild(this.#footer);
 	}
 
-	/** Text mode: cap the body to {@link ReportPanelOptions.maxRows}, scrolling a taller report. */
+	/**
+	 * The panel is shown with focus (native sheet, text-mode full-screen page):
+	 * its own {@link handleInput} closes it, so the hint names that key.
+	 */
+	holdFocus(): void {
+		this.#closeHint = `${editorKey("tui.select.cancel")} to close`;
+	}
+
+	/**
+	 * Text mode: cap the box to {@link ReportPanelOptions.maxRows}, scrolling a
+	 * taller body. The cap is a hard limit: when a resize leaves fewer rows than
+	 * the box's chrome needs, its bottom (the hint and closing border) is cut
+	 * rather than spilling over the editor.
+	 */
 	override render(width: number): readonly string[] {
 		const innerWidth = Math.max(1, width - 4);
 		const rows = this.#body.render(innerWidth).length;
 		const cap = this.#maxRows?.();
-		const bodyMax = cap === undefined ? rows : Math.max(3, cap - TEXT_CHROME_ROWS);
+		const bodyMax = cap === undefined ? rows : Math.max(1, cap - TEXT_CHROME_ROWS);
 		const overflows = rows > bodyMax;
 		this.#bodyRows = Math.min(rows, bodyMax);
 		this.#view.setHeight(this.#bodyRows);
 		const scrollHint = `${editorKey("tui.select.pageUp")}/${editorKey("tui.select.pageDown")} scroll · `;
 		this.#footer.setText(theme.fg("muted", overflows ? scrollHint + this.#closeHint : this.#closeHint));
-		return super.render(width);
+		const lines = super.render(width);
+		return cap !== undefined && lines.length > cap ? lines.slice(0, Math.max(0, cap)) : lines;
 	}
 
 	/** Text mode: rows the whole box takes at `width` when nothing caps it. */
