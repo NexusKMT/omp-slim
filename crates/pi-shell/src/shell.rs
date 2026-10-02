@@ -2447,8 +2447,8 @@ mod tests {
 				&mut master,
 				&mut slave,
 				std::ptr::null_mut(),
-				std::ptr::null(),
-				std::ptr::null(),
+				std::ptr::null_mut(),
+				std::ptr::null_mut(),
 			)
 		};
 		assert_eq!(opened, 0, "openpty");
@@ -2462,9 +2462,11 @@ mod tests {
 		// SAFETY: slave is a live pseudo-terminal descriptor owned by this
 		// process; fd 0 is deliberately replaced only in this isolated test.
 		assert_eq!(unsafe { libc::dup2(slave.as_raw_fd(), libc::STDIN_FILENO) }, 0, "dup2 stdin");
+		// The ioctl request parameter's integer type differs between platforms.
+		let tiocsctty = libc::TIOCSCTTY as _;
 		// SAFETY: this session has no controlling terminal and fd 0 is the
 		// pseudo-terminal slave, so TIOCSCTTY establishes it as controlling.
-		assert_eq!(unsafe { libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY, 0) }, 0, "TIOCSCTTY");
+		assert_eq!(unsafe { libc::ioctl(libc::STDIN_FILENO, tiocsctty, 0) }, 0, "TIOCSCTTY");
 		for signal in [libc::SIGTTOU, libc::SIGHUP] {
 			// SAFETY: this isolated test process deliberately ignores terminal
 			// background-write stops and hangups while fg hands the
@@ -3040,8 +3042,15 @@ mod tests {
 		// `-e` reports selection before pidwait starts its exit wait. Seeing this
 		// line proves it selected the still-live child, so the test can release
 		// the child without a wall-clock race.
+		// `-e` prints the kernel command name, which on macOS is the resolved
+		// executable rather than the symlink name `-x` matches.
+		let command_name = pi_builtins::ProcInfo::all()
+			.into_iter()
+			.find(|process| process.pid() == pid)
+			.expect("waited process info")
+			.command_name();
 		let (tx, rx) = flume::unbounded();
-		let waiting_for = format!("waiting for {name} (pid {pid})\n");
+		let waiting_for = format!("waiting for {command_name} (pid {pid})\n");
 		let pidwait_command = format!("pidwait -e -x -p {pid} {name}");
 		let mut pidwait = tokio::spawn(async move {
 			execute_shell(
