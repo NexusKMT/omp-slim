@@ -27,6 +27,7 @@
 - Fixed late TTSR matches on short tool calls ending a run before the rule interrupt reaches the model ([#14018](https://github.com/can1357/oh-my-pi/issues/14018)).
 - Fixed `omp gc --apply` holding `history.db` and `stats.db` open until exit, which left an empty `history.db-wal` behind after a WAL checkpoint ([#14043](https://github.com/can1357/oh-my-pi/issues/14043)).
 - Fixed coding-agent session and gc tests failing on Windows ([#14043](https://github.com/can1357/oh-my-pi/issues/14043)).
+- Fixed background skill-description compression requests emitting no OTLP telemetry; like other one-shot model calls, each request now emits its own chat span (`omp.gen_ai.oneshot.kind` `skill_description`) and reports its token usage to the OTLP metrics, but it is not included in the run-completed summary ([#TODO](https://github.com/can1357/oh-my-pi/pull/TODO) by [@xaviergmail](https://github.com/xaviergmail)).
 
 ## [18.4.9] - 2026-10-01
 
