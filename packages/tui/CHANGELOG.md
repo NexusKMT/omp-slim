@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added ContextUsageView.setBreakdown to refresh usage card without recreating it
 - Added support for change events with flexible values in native TUI
 
 ### Fixed
