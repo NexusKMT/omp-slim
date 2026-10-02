@@ -211,6 +211,41 @@ describe("Fireworks control-plane serverless discovery", () => {
 		});
 	});
 
+	it("keeps a published free Fireworks price and falls back only when Fireworks publishes none", async () => {
+		const { models } = await discover({
+			deepseek: {
+				models: {
+					"deepseek-v4-flash": {
+						name: "DeepSeek V4 Flash",
+						tool_call: true,
+						cost: { input: 0.14, output: 0.28 },
+						limit: { context: 1048576, output: 393216 },
+					},
+				},
+			},
+			"fireworks-ai": {
+				models: {
+					"accounts/fireworks/models/deepseek-v4-flash": {
+						name: "DeepSeek V4 Flash",
+						tool_call: true,
+						cost: { input: 0, output: 0, cache_read: 0 },
+					},
+					"accounts/fireworks/models/kimi-k2p7-code": { name: "Kimi K2.7 Code", tool_call: true },
+				},
+			},
+		});
+		expect(models.find(m => m.id === "deepseek-v4-flash")?.cost).toEqual({
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+		// A Fireworks row without a price leaves the bundled reference price in place.
+		expect(models.find(m => m.id === "kimi-k2.7-code")?.cost).toEqual(
+			getBundledModel("fireworks", "kimi-k2.7-code")?.cost,
+		);
+	});
+
 	it("returns null on a control-plane transport failure so the manager keeps its cache", async () => {
 		const fetch = (async (input: string | URL | Request): Promise<Response> => {
 			const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

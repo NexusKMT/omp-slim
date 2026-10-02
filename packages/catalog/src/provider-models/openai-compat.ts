@@ -2459,12 +2459,15 @@ async function loadModelsDevReferences<TApi extends Api>(fetchImpl?: FetchImpl):
  * the largest window, so its price is often another host's, and Fireworks-only
  * models have none. models.dev keys these rows by wire id
  * (`accounts/fireworks/models/glm-5p3`), so they are re-keyed to public ids.
- * Absent from `MODELS_DEV_PROVIDER_DESCRIPTORS`: the control plane alone
- * decides which models exist.
+ * Rows that publish no price are skipped so the reference price stays; a
+ * published zero is Fireworks' price and wins. Absent from
+ * `MODELS_DEV_PROVIDER_DESCRIPTORS`: the control plane alone decides which
+ * models exist.
  */
 const FIREWORKS_MODELS_DEV_DESCRIPTORS: readonly ModelsDevProviderDescriptor[] = [
 	openAiCompletionsDescriptor("fireworks-ai", "fireworks", "https://api.fireworks.ai/inference/v1", {
-		filterModel: () => true,
+		// `mapModelsDevToModels` maps an absent price to zeros, so tell them apart on the raw row.
+		filterModel: (_id, raw) => typeof raw.cost?.input === "number" || typeof raw.cost?.output === "number",
 	}),
 ];
 
@@ -2475,7 +2478,7 @@ async function loadFireworksModelsDevCosts(
 	try {
 		const payload = await fetchWellKnownModels(fetchImpl);
 		for (const model of mapModelsDevToModels(payload as Record<string, unknown>, FIREWORKS_MODELS_DEV_DESCRIPTORS)) {
-			if (model.cost.input > 0 || model.cost.output > 0) costs.set(toFireworksPublicModelId(model.id), model.cost);
+			costs.set(toFireworksPublicModelId(model.id), model.cost);
 		}
 	} catch {
 		// Optional enrichment: without it, discovered rows keep their reference price.
