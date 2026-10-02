@@ -124,6 +124,8 @@ export interface InteractiveModeContext {
 	errorBannerContainer: Container;
 	modelCycleContainer: Container;
 	deferredCommandContainer: Container;
+	/** The docked `/changelog`-style command report, just above the editor; Esc clears it. */
+	reportContainer: Container;
 	editor: CustomEditor;
 	editorContainer: Container;
 	hookWidgetContainerAbove: Container;
@@ -431,6 +433,7 @@ export interface InteractiveModeContext {
 	handleToolsCommand(): void;
 	handleContextCommand(): void;
 	handleDumpCommand(): Promise<void>;
+	handleDumpAllCommand(): Promise<void>;
 	handleAdvisorDumpCommand(isRaw?: boolean): void;
 	handleDebugTranscriptCommand(): Promise<void>;
 	handleClearCommand(): Promise<void>;
@@ -546,6 +549,14 @@ export interface InteractiveModeContext {
 	handleCleanseCommand(args: string): Promise<void>;
 	hasActiveCleanse(): boolean;
 	handleCleanseEscape(): boolean;
+	/** Clear the docked command report; false when none was shown (Esc falls through). */
+	dismissCommandReport(): boolean;
+	/** Screen rows a report above the editor may take (all of them but the editor and the chrome under it). */
+	commandReportRows(): number | undefined;
+	/** Whether the last frame put the editor on the bottom row of the screen. */
+	composerInputAtBottom(): boolean;
+	/** Keep the editor on the bottom row while the live rows cannot fill the screen (after a tall report closed). */
+	pinComposerToBottom(): void;
 	cycleThinkingLevel(): void;
 	cycleRoleModel(direction?: "forward" | "backward"): Promise<void>;
 	toggleToolOutputExpansion(): void;
