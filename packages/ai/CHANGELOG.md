@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `createAuthGatewayRouter`, the auth-gateway's routes without the HTTP listener, and `serveAuthGatewayStdio`, which serves them as JSON lines (`{"id", "path", "body"}` in, `{"id", "status", "body"}` out) for a parent process.
+
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
