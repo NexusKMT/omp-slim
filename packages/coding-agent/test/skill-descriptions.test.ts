@@ -1,7 +1,18 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, vi } from "bun:test";
 import * as fs from "node:fs";
+import { GenAIAttr, OmpGenAIAttr, resolveTelemetry } from "@oh-my-pi/pi-agent-core";
+import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import * as ai from "@oh-my-pi/pi-ai";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { SkillDescriptionCatalog, SkillDescriptionStore } from "../src/extensibility/skill-descriptions";
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import type { ModelRegistry } from "../src/config/model-registry";
+import { Settings } from "../src/config/settings";
+import {
+	createSkillDescriptionCompressor,
+	SkillDescriptionCatalog,
+	SkillDescriptionStore,
+} from "../src/extensibility/skill-descriptions";
 import type { Skill } from "../src/extensibility/skills";
 import { buildSystemPrompt } from "../src/system-prompt";
 
@@ -135,5 +146,58 @@ describe("system prompt skill descriptions", () => {
 		expect(new SkillDescriptionCatalog({ store: reopened }).render([original])[0]?.description).toBe(
 			"Use for interactive sites.",
 		);
+	});
+
+	it("traces each compression request as a skill_description chat span", async () => {
+		const model = getBundledModel("anthropic", "claude-haiku-4-5");
+		if (!model) throw new Error("Expected the bundled anthropic/claude-haiku-4-5 model");
+		const registry = {
+			getAvailable: () => [model],
+			getApiKey: async () => "test-key",
+			resolver: () => "test-key",
+		} as unknown as ModelRegistry;
+		const response: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "text", text: "Use for interactive sites." }],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 12,
+				output: 8,
+				cacheRead: 3,
+				cacheWrite: 2,
+				totalTokens: 25,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
+		};
+		vi.spyOn(ai, "completeSimple").mockResolvedValue(response);
+		const exporter = new InMemorySpanExporter();
+		const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+		try {
+			const telemetry = resolveTelemetry({ tracer: provider.getTracer("skill-descriptions-test") }, "skill-session");
+			const compress = createSkillDescriptionCompressor(
+				registry,
+				Settings.isolated({ modelRoles: { smol: `${model.provider}/${model.id}` } }),
+				undefined,
+				() => telemetry,
+			);
+
+			expect(await compress(original.name, original.description, "request")).toBe("Use for interactive sites.");
+			const spans = exporter.getFinishedSpans();
+			expect(spans.map(span => span.name)).toEqual([`chat ${model.id}`]);
+			expect(spans[0]?.attributes).toMatchObject({
+				[OmpGenAIAttr.OneshotKind]: "skill_description",
+				[GenAIAttr.UsageInputTokens]: 17,
+				[GenAIAttr.UsageOutputTokens]: 8,
+				[GenAIAttr.UsageCacheReadInputTokens]: 3,
+				[GenAIAttr.UsageCacheCreationInputTokens]: 2,
+			});
+		} finally {
+			vi.restoreAllMocks();
+			await provider.shutdown();
+		}
 	});
 });
