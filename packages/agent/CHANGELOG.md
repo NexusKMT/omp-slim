@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#TODO](https://github.com/can1357/oh-my-pi/pull/TODO) by [@xaviergmail](https://github.com/xaviergmail))
+- Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail))
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
