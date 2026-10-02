@@ -330,14 +330,15 @@ describe("collab guest extension lifecycle mirror", () => {
 		const harness = await makeHarness("lifecycle-mirror-room-6");
 		try {
 			const gate = Promise.withResolvers<void>();
-			const completionOrder: string[] = [];
-			let sawAgentEnd = false;
+			const agentEndDelivered = Promise.withResolvers<void>();
+			// Order in which handler delivery begins (runner.emit is invoked).
+			const deliveryOrder: string[] = [];
 			harness.runner.emit = (event: MappedExtensionEvent) => {
-				completionOrder.push(event.type);
+				deliveryOrder.push(event.type);
 				if (event.type === "agent_start") {
 					return gate.promise as Promise<undefined>;
 				}
-				sawAgentEnd = true;
+				if (event.type === "agent_end") agentEndDelivered.resolve();
 				return Promise.resolve(undefined);
 			};
 			harness.hostSocket.send({ t: "event", event: { type: "agent_start" } } as CollabFrame);
@@ -349,11 +350,10 @@ describe("collab guest extension lifecycle mirror", () => {
 
 			// The gated agent_start must hold agent_end back: emission is
 			// chained, so agent_end's handler has not even started yet.
-			expect(completionOrder).toEqual(["agent_start"]);
-			expect(sawAgentEnd).toBe(false);
+			expect(deliveryOrder).toEqual(["agent_start"]);
 			gate.resolve();
-			await Bun.sleep(10);
-			expect(completionOrder).toEqual(["agent_start", "agent_end"]);
+			await agentEndDelivered.promise;
+			expect(deliveryOrder).toEqual(["agent_start", "agent_end"]);
 		} finally {
 			writeSpy.mockRestore();
 			await harness.cleanup();

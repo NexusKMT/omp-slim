@@ -656,7 +656,10 @@ export class CollabGuestLink {
 	 * must not assume the wire's first event after (re)sync carries the boundary;
 	 * a host that reports `isStreaming === false` may equally have settled before
 	 * the guest ever saw a start. Synthesize the missing edge so extension
-	 * handlers observe the same transitions a local session emits.
+	 * handlers never miss a working/idle transition. This is not an exact replay
+	 * of a local session: a `state` frame landing during host prompt setup
+	 * synthesizes an `agent_start` that the real one then repeats, and the
+	 * host's intermediate `willContinue` settles never reach the wire.
 	 */
 	#reconcileLifecycle(isStreaming: boolean): void {
 		const runner = this.#ctx.session.extensionRunner;

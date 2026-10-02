@@ -138,7 +138,7 @@ export function extensionEventFromSessionEvent(
 			return { type: "message_start", message: event.message };
 		case "message_update":
 			return { type: "message_update", message: event.message, assistantMessageEvent: event.assistantMessageEvent };
-		case "message_end":
+		case "message_end": {
 			// `message_end` is a notification, not a context-rewrite hook. Detach its
 			// payload so an async observer that mutates the event after an `await`
 			// cannot race the owner's use of the same reference — locally that is
@@ -149,6 +149,7 @@ export function extensionEventFromSessionEvent(
 				message: cloneMessageNotification(event.message),
 			};
 			return messageEnd;
+		}
 		case "tool_execution_start": {
 			const extensionEvent: ToolExecutionStartEvent = {
 				type: "tool_execution_start",
