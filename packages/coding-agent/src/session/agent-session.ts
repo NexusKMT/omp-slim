@@ -103,6 +103,7 @@ import {
 	prompt,
 	Snowflake,
 	stringProperty,
+	toError,
 	withTimeout,
 	withFileLock,
 } from "@oh-my-pi/pi-utils";
@@ -132,7 +133,7 @@ import type { EvalPreludeDefinition } from "../eval/preludes";
 import type { PythonResult } from "../eval/py/executor";
 import { formatEvalStateContext } from "../eval/state";
 import { WorkPoolRegistry } from "../task/workpool";
-import type { BashPtyOptions, BashResult } from "../exec/bash-executor";
+import { type BashPtyOptions, type BashResult, releaseShellSessions } from "../exec/bash-executor";
 import type { TtsrManager } from "../export/ttsr";
 import type { LoadedCustomCommand } from "../extensibility/custom-commands";
 import type { CustomTool } from "../extensibility/custom-tools/types";
@@ -260,6 +261,7 @@ import type { AgentSessionEvent, AgentSessionEventListener } from "./agent-sessi
 import type {
 	AgentSessionConfig,
 	AgentSessionDisposeOptions,
+	AsyncJobInspection,
 	AsyncJobSnapshot,
 	CommandMetadataChangedListener,
 	ContextUsageBreakdown,
@@ -385,6 +387,7 @@ import {
 } from "./queued-messages";
 import type { ServingModel } from "./retry-fallback-chains";
 import {
+	type AdvisorCatchupOptions,
 	type AdvisorStats,
 	type AdvisorStatusOverviewEntry,
 	SessionAdvisors,
@@ -392,7 +395,7 @@ import {
 } from "./session-advisors";
 import type { BuildSessionContextOptions, SessionContext } from "./session-context";
 import { getRestorableSessionModels, isTranscriptEntry } from "./session-context";
-import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer";
+import type { CacheWarmer, CacheWarmingMode, CacheWarmingStatus } from "./cache-warmer";
 import { isUserRequestEntry, transcriptEntryMessage, userTurnDraft } from "@oh-my-pi/pi-tui/chat/transcript-entry";
 import { formatSessionDumpText } from "./session-dump-format";
 import type { BranchSummaryEntry, NewSessionOptions } from "./session-entries";
@@ -475,6 +478,7 @@ import {
 import { cfgTitleRefreshOnReplan } from "../goals/settings";
 import {
 	cfgComputerEnabled,
+	cfgRatchetEnabled,
 	cfgDevAutoqa,
 	cfgDevAutoqaConsent,
 	cfgTodoEnabled,
@@ -498,6 +502,8 @@ const cfgWorkspacePromptInputs = combine({
 const PLAN_MODE_REMINDER_MAX = 3;
 const POST_PROMPT_DRAIN_TIMEOUT_MS = 5_000;
 const AGENT_START_POLICY_MAX_ATTEMPTS = 3;
+/** Vision descriptions gate admission; stay under the RPC clients' 30 s request timeout. */
+const IMAGE_DESCRIPTION_ADMISSION_TIMEOUT_MS = 20_000;
 
 /** A failed preparation, not a provider failure: the ordinary input can still be restored. */
 class AgentStartPolicyChangedError extends Error {
@@ -517,6 +523,18 @@ export class PromptDroppedError extends Error {
 	constructor() {
 		super("Prompt dropped before provider dispatch.");
 		this.name = "PromptDroppedError";
+	}
+}
+
+/**
+ * A transcript snapshot ({@link AgentSession.fork} at an entry, a /btw branch) was
+ * refused because a turn, user command, or maintenance pass could still write into
+ * the transcript. RPC maps it to the `session_busy` error code.
+ */
+export class SessionBusyError extends Error {
+	constructor(action: string) {
+		super(`Cannot ${action} while session maintenance or user work is still running`);
+		this.name = "SessionBusyError";
 	}
 }
 
@@ -564,6 +582,11 @@ const noOpUIContext: ExtensionUIContext = {
 // ============================================================================
 // AgentSession Class
 // ============================================================================
+
+type AgentEndEvent = Extract<AgentEvent, { type: "agent_end" }>;
+
+/** How a settle describes what happens next; see {@link AgentSession} `#settleAgentEnd`. */
+type AgentEndSettleOptions = { willContinue?: boolean; awaitingAsyncWork?: boolean };
 
 type PostPromptSkipReason = "aborted" | "stale-generation";
 
@@ -755,6 +778,10 @@ export class AgentSession implements SettingsScope {
 	#eventListeners: AgentSessionEventListener[] = [];
 	#activeToolExecutionUpdates = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_update" }>>();
 	#runStateListeners = new Set<(state: "running" | "idle") => void>();
+	/** Epoch ms the current run went `running`; undefined while idle. */
+	#runStartedAt: number | undefined;
+	/** The last `agent_end` that {@link #settleAgentEnd} published; a failed maintenance pass settles any other. */
+	#settledAgentEnd: AgentEndEvent | undefined;
 	#commandMetadataChangedListeners: CommandMetadataChangedListener[] = [];
 	#sessionChangeCallbacks = new Set<() => void>();
 	#observedSessionId: string | undefined;
@@ -895,6 +922,8 @@ export class AgentSession implements SettingsScope {
 	#modelRegistry: ModelRegistry;
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
+	/** In-flight vision descriptions that gate prompt admission; abort() cancels them. */
+	#imageDescriptionAbortControllers = new Set<AbortController>();
 	#queuedMessageDrainBlocked = false;
 	#modeExitDrainSuppressionDepth = 0;
 	#usagePreflightReadyForNextModelCall = false;
@@ -1580,6 +1609,8 @@ export class AgentSession implements SettingsScope {
 		if (config.cacheWarmer) {
 			const warmer = config.cacheWarmer;
 			warmer.onWarmed = (message, extensionOverride) => this.#recordCacheWarmUsage(message, extensionOverride);
+			warmer.onRefreshStart = refresh => void this.#emitSessionEvent({ type: "cache_warming_start", ...refresh });
+			warmer.onRefreshEnd = refresh => void this.#emitSessionEvent({ type: "cache_warming_end", ...refresh });
 			this.subscribeRunState(state => {
 				if (state === "idle") warmer.onAgentSettled();
 			});
@@ -1885,7 +1916,7 @@ export class AgentSession implements SettingsScope {
 		this.#ttsr = new TtsrCoordinator(ttsrHost, config.ttsrManager);
 		this.#extensionRunner?.setToolCallPreflight?.({
 			before: (toolCallId, tool, args) => this.#ttsr.beforeBridgedToolCall(toolCallId, tool, args),
-			after: (toolCallId, result) => this.#ttsr.afterBridgedToolCall(toolCallId, result),
+			after: (toolCallId, result, context) => this.#ttsr.afterBridgedToolCall(toolCallId, result, context),
 			cancel: toolCallId => this.#ttsr.cancelBridgedToolCall(toolCallId),
 		});
 		this.agent.setOnBeforeYield(() => this.#ttsr.settleJudgments());
@@ -2204,6 +2235,7 @@ export class AgentSession implements SettingsScope {
 		cfgExtendedContext.listen(this, () => this.#reapplyExtendedContextPolicy());
 		cfgBrowserEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("browser.enabled", enabled));
 		cfgComputerEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("computer.enabled", enabled));
+		cfgRatchetEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("ratchet.enabled", enabled));
 		cfgBrowserIdleCloseSec.listen(this, seconds => {
 			const ownerId = this.sessionManager.getSessionId() ?? "";
 			// Any change invalidates the armed deadline: cancel first (its
@@ -2243,13 +2275,16 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
-	 * `browser.enabled` / `computer.enabled` change the live eval preludes; the browser toggle also
+	 * `browser.enabled` / `computer.enabled` / `ratchet.enabled` change the live eval preludes; the browser toggle also
 	 * re-filters its MCP tools first. An empty transcript rebuilds the system prompt to advertise
 	 * them; mid-session the cached prompt stays byte-stable and the next user prompt carries a
 	 * hidden prelude notice instead (see {@link SessionTools.takeEvalPreludeNotice}).
 	 * A failed browser switch-on reverts to off.
 	 */
-	async #reconcileEvalPreludeSetting(path: "browser.enabled" | "computer.enabled", enabled: boolean): Promise<void> {
+	async #reconcileEvalPreludeSetting(
+		path: "browser.enabled" | "computer.enabled" | "ratchet.enabled",
+		enabled: boolean,
+	): Promise<void> {
 		try {
 			if (path === "browser.enabled" && this.#reconcileBrowserMcpFilter) {
 				const tools = await this.#reconcileBrowserMcpFilter(enabled);
@@ -2601,6 +2636,7 @@ export class AgentSession implements SettingsScope {
 			type: job.type,
 			status: job.status,
 			label: job.label,
+			command: job.process?.command,
 			startTime: job.startTime,
 			agentId: job.agentId,
 		}));
@@ -2609,12 +2645,50 @@ export class AgentSession implements SettingsScope {
 			type: job.type,
 			status: job.status,
 			label: job.label,
+			command: job.process?.command,
 			startTime: job.startTime,
 			endTime: job.endTime,
 			agentId: job.agentId,
 		}));
 		const delivery = manager.getDeliveryState(ownerFilter);
 		return { running, recent, delivery };
+	}
+
+	/**
+	 * Inspect one async job this session owns: its command, live pids, exit
+	 * status and output. Undefined when the job is unknown, owned by another
+	 * agent, or evicted.
+	 */
+	inspectAsyncJob(id: string): AsyncJobInspection | undefined {
+		const job = this.#ownedAsyncJob(id);
+		if (!job) return undefined;
+		const details = job.latestDetails;
+		const reported = typeof details?.exitCode === "number" ? details.exitCode : undefined;
+		// Bash reports only non-zero exits; a completed command exited 0.
+		const exitCode = reported ?? (job.type === "bash" && job.status === "completed" ? 0 : undefined);
+		const output =
+			job.status === "running" ? job.progressText : (job.resultText ?? job.errorText ?? job.progressText);
+		return {
+			command: job.process?.command,
+			cwd: job.process?.cwd,
+			pids: job.status === "running" ? (job.process?.pids() ?? []) : [],
+			exitCode,
+			output,
+			artifactId: details?.meta?.truncation?.artifactId,
+		};
+	}
+
+	/** Cancel a running async job this session owns; false when there is none by that id. */
+	cancelAsyncJob(id: string): boolean {
+		const job = this.#ownedAsyncJob(id);
+		return job !== undefined && this.#asyncJobManager?.cancel(id, { ownerId: job.ownerId }) === true;
+	}
+
+	/** A listed job by id, under the same owner scope as {@link getAsyncJobSnapshot}. */
+	#ownedAsyncJob(id: string): AsyncJob | undefined {
+		const job = this.#asyncJobManager?.getJob(id);
+		if (!job || job.foreground) return undefined;
+		return !this.#agentId || job.ownerId === this.#agentId ? job : undefined;
 	}
 
 	/**
@@ -2854,6 +2928,8 @@ export class AgentSession implements SettingsScope {
 	}
 
 	#emitRunState(state: "running" | "idle"): void {
+		if (state === "idle") this.#runStartedAt = undefined;
+		else this.#runStartedAt ??= Date.now();
 		for (const listener of this.#runStateListeners) {
 			try {
 				listener(state);
@@ -3081,6 +3157,14 @@ export class AgentSession implements SettingsScope {
 		this.#trackPostPromptTask(promise);
 		try {
 			await this.#processAgentEvent(event);
+		} catch (error) {
+			// Post-turn maintenance (compaction, pruning rewrites, hooks) threw before
+			// publishing the settle. Without it the run never reports idle and every
+			// surface keeps showing a working turn that will never finish.
+			const message = toError(error).message;
+			logger.error("agent_end maintenance failed", { error: message });
+			this.emitNotice("warning", `Post-turn maintenance failed: ${message}`, "agent-end");
+			if (this.#settledAgentEnd !== event) await this.#settleAgentEnd(event, [...this.agent.state.messages]);
 		} finally {
 			resolve();
 		}
@@ -3783,27 +3867,8 @@ export class AgentSession implements SettingsScope {
 			// TTSR retry work runs concurrently and clears the live flag before
 			// maintenance can emit agent_end, so preserve the state at settle entry.
 			const ttsrAbortPendingAtAgentEnd = this.#ttsr.abortPending;
-			const emitAgentEndNotification = async (options?: { willContinue?: boolean; awaitingAsyncWork?: boolean }) => {
-				this.#emitRunState("idle");
-				// Public agent_end is held out of the eager display pass and emitted
-				// here after maintenance routing, tagged isTerminal so subscribers can
-				// tell final settles from scheduled continuations, and `yielded` so
-				// they can tell the agent's own follow-up work (retries, reminders,
-				// compaction) from a finished turn that only background work resumes.
-				// `awaitingAsyncWork` singles out that last case: `yielded` alone also
-				// covers queued steer/follow-up and IRC continuations, which
-				// `#flushPendingAgentEnd` re-tags non-terminal.
-				const awaitingAsyncWork = options?.willContinue === true && options.awaitingAsyncWork === true;
-				await this.#emitSessionEvent({
-					...event,
-					isTerminal: !options?.willContinue,
-					yielded: !options?.willContinue || awaitingAsyncWork,
-					...(awaitingAsyncWork ? { awaitingAsyncWork } : {}),
-				});
-				void this.#emitAgentEndNotification([...activeMessages], options).catch(err => {
-					logger.error("Agent end extension notification failed", { err });
-				});
-			};
+			const emitAgentEndNotification = (options?: AgentEndSettleOptions) =>
+				this.#settleAgentEnd(event, activeMessages, options);
 			const usage = this.getSessionStats().tokens;
 			await this.#goalRuntime.onAgentEnd({
 				currentUsage: {
@@ -4625,6 +4690,37 @@ export class AgentSession implements SettingsScope {
 		return undefined;
 	}
 
+	/**
+	 * Publish a run's settle: report idle, emit the public `agent_end` (held out
+	 * of the eager display pass until maintenance routing decides whether the
+	 * agent continues), then notify extensions. Every `agent_end` MUST reach this
+	 * exactly once; `#dispatchAgentEvent` calls it when maintenance throws first.
+	 */
+	async #settleAgentEnd(
+		event: AgentEndEvent,
+		activeMessages: AgentMessage[],
+		options?: AgentEndSettleOptions,
+	): Promise<void> {
+		this.#settledAgentEnd = event;
+		this.#emitRunState("idle");
+		// Tagged isTerminal so subscribers can tell final settles from scheduled
+		// continuations, and `yielded` so they can tell the agent's own follow-up
+		// work (retries, reminders, compaction) from a finished turn that only
+		// background work resumes. `awaitingAsyncWork` singles out that last case:
+		// `yielded` alone also covers queued steer/follow-up and IRC continuations,
+		// which `#flushPendingAgentEnd` re-tags non-terminal.
+		const awaitingAsyncWork = options?.willContinue === true && options.awaitingAsyncWork === true;
+		await this.#emitSessionEvent({
+			...event,
+			isTerminal: !options?.willContinue,
+			yielded: !options?.willContinue || awaitingAsyncWork,
+			...(awaitingAsyncWork ? { awaitingAsyncWork } : {}),
+		});
+		void this.#emitAgentEndNotification([...activeMessages], options).catch(err => {
+			logger.error("Agent end extension notification failed", { err });
+		});
+	}
+
 	async #emitAgentEndNotification(messages: AgentMessage[], options?: { willContinue?: boolean }): Promise<void> {
 		await this.#extensionRunner?.emit({
 			type: "agent_end",
@@ -4872,6 +4968,14 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
+	 * Epoch ms the current run started, stable across retries within the run and
+	 * across UI focus switches; undefined while idle.
+	 */
+	get runStartedAt(): number | undefined {
+		return this.#runStartedAt;
+	}
+
+	/**
 	 * Current prompt-cache warming state, for hosts that surface it. Undefined
 	 * when the session has no warmer (side-channels, subagents, older hosts).
 	 */
@@ -4881,15 +4985,21 @@ export class AgentSession implements SettingsScope {
 
 	/**
 	 * Arms the prompt-cache warmer for a main-loop request. Called from the
-	 * session's streamFn after the request's options are finalized; a no-op
-	 * when the session has no warmer.
+	 * session streamFn with its raw request options; retention settings are
+	 * resolved here to match the settings-aware stream wrapper.
+	 * A no-op when the session has no warmer.
 	 */
 	startCacheWarming(model: Model, context: Context, options: SimpleStreamOptions): void {
 		const warmer = this.#cacheWarmer;
 		if (!warmer) return;
 		const armMessages = this.messages;
+		const retentionSetting = cfgProvidersCacheRetention.get(this.settings);
+		const warmingOptions = {
+			...options,
+			cacheRetention: options.cacheRetention ?? (retentionSetting === "auto" ? undefined : retentionSetting),
+		};
 		const armShape = this.#cacheWarmingShape(model);
-		warmer.start({ model, context, options }, () => {
+		warmer.start({ model, context, options: warmingOptions }, () => {
 			// The armed request must still be a prefix of the live messages by
 			// entry identity: appends are fine (tool results mid-run), but a
 			// rewrite, shallow array copy with new objects, compaction, branch,
@@ -5327,6 +5437,8 @@ export class AgentSession implements SettingsScope {
 		// closing session writer.
 		if (this.#cacheWarmer) {
 			this.#cacheWarmer.onWarmed = undefined;
+			this.#cacheWarmer.onRefreshStart = undefined;
+			this.#cacheWarmer.onRefreshEnd = undefined;
 			this.#cacheWarmer.cancel();
 		}
 		this.#recordSessionExit(options.reason ?? "dispose");
@@ -5369,6 +5481,7 @@ export class AgentSession implements SettingsScope {
 			logger.warn("Session dispose: Sharpshooter release failed", { error: String(error) });
 		}
 		const advisorRecorderClosed = this.#advisors.recorderClosed();
+		releaseShellSessions(this.sessionManager.getSessionId());
 		const results = await Promise.allSettled([
 			this.#disposeOwnedAsyncJobs(),
 			this.#eval.disposeKernels(),
@@ -5814,9 +5927,10 @@ export class AgentSession implements SettingsScope {
 	 * Wait for active advisor reviews and their emitted card events before a
 	 * headless caller disposes the session. Returns `false` and logs work disposal
 	 * will abandon when the shared deadline expires or an advisor fails;
-	 * `waitThroughRecovery` waits through a failing advisor's fallback recovery.
+	 * `waitThroughRecovery` waits through a failing advisor's fallback recovery and
+	 * `strictWithoutDeadline` waits on `strict` advisors past the deadline.
 	 */
-	waitForAdvisorCatchup(timeoutMs: number, options?: { waitThroughRecovery?: boolean }): Promise<boolean> {
+	waitForAdvisorCatchup(timeoutMs: number, options?: AdvisorCatchupOptions): Promise<boolean> {
 		return this.#advisors.waitForAdvisorCatchup(timeoutMs, options);
 	}
 
@@ -6158,6 +6272,12 @@ export class AgentSession implements SettingsScope {
 		await this.#maintenance.runIdleCompaction();
 	}
 
+	/** Override cache warming for this session only, never writing config.yml; returns the effective mode. */
+	setCacheWarmingMode(mode: CacheWarmingMode): CacheWarmingMode {
+		cfgProvidersCacheWarming.override(this.settings, mode);
+		return cfgProvidersCacheWarming.get(this.settings);
+	}
+
 	/** Toggle automatic compaction. `persist` saves it to global config; the default applies a session-scoped override. */
 	setAutoCompactionEnabled(enabled: boolean, persist = false): void {
 		this.#maintenance.setAutoCompactionEnabled(enabled, persist);
@@ -6386,6 +6506,25 @@ export class AgentSession implements SettingsScope {
 		if (this.#vibeModeState?.enabled) {
 			throw new Error(`Cannot ${action} while vibe mode is active. Exit vibe mode first.`);
 		}
+	}
+
+	/**
+	 * True while a turn, user bash/eval, compaction, handoff, or retry could still write
+	 * into the transcript, so a snapshot of it would miss or split that work.
+	 */
+	get isBusyForSnapshot(): boolean {
+		return (
+			this.isStreaming ||
+			this.isBashRunning ||
+			this.isEvalRunning ||
+			this.isCompacting ||
+			this.isGeneratingHandoff ||
+			this.isRetrying
+		);
+	}
+
+	#assertIdleForSnapshot(action: string): void {
+		if (this.isBusyForSnapshot) throw new SessionBusyError(action);
 	}
 
 	get goalRuntime(): GoalRuntime {
@@ -6770,11 +6909,24 @@ export class AgentSession implements SettingsScope {
 		return notices;
 	}
 
-	#buildImageDescriptionNotice(
-		normalizedImages: ImageContent[],
-		signal?: AbortSignal,
-	): Promise<CustomMessage | undefined> {
-		return this.#providerBoundary.buildImageDescriptionNotice(normalizedImages, signal);
+	/**
+	 * Every caller runs this before its message is admitted (queued or dispatched), and
+	 * RPC acknowledges `prompt` only after admission. Bound the vision call so a slow
+	 * provider cannot hold admission past the bundled clients' 30 s request timeout, and
+	 * let abort() cancel it. Either way the image stays saved and the notice says the
+	 * description is unavailable.
+	 */
+	async #buildImageDescriptionNotice(normalizedImages: ImageContent[]): Promise<CustomMessage | undefined> {
+		const controller = new AbortController();
+		this.#imageDescriptionAbortControllers.add(controller);
+		try {
+			return await this.#providerBoundary.buildImageDescriptionNotice(
+				normalizedImages,
+				AbortSignal.any([controller.signal, AbortSignal.timeout(IMAGE_DESCRIPTION_ADMISSION_TIMEOUT_MS)]),
+			);
+		} finally {
+			this.#imageDescriptionAbortControllers.delete(controller);
+		}
 	}
 
 	#normalizeAgentMessageImages<T extends AgentMessage>(message: T): Promise<T> {
@@ -6877,7 +7029,7 @@ export class AgentSession implements SettingsScope {
 		// Handle extension commands first (execute immediately, even during streaming)
 		if (expandPromptTemplates && text.startsWith("/")) {
 			if (options?.runCommands !== false) {
-				const handled = await this.#tryExecuteExtensionCommand(text);
+				const handled = await this.#tryExecuteExtensionCommand(text, options?.onPromptAdmitted);
 				if (handled) {
 					return false;
 				}
@@ -6933,16 +7085,28 @@ export class AgentSession implements SettingsScope {
 				throw new AgentBusyError();
 			}
 
-			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
+			// abort() can land while the images are prepared; the message is then
+			// dropped instead of queued (same contract as the idle drop below).
+			const queueGeneration = this.#promptGeneration;
+			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
 				timestamp: submittedAt,
 				attribution: promptAttribution,
 				prependMessages: keywordNotices,
 				rawText: typedText,
+				onPromptAdmitted: options?.onPromptAdmitted,
+				promptGeneration: queueGeneration,
 			});
-			outcome.sessionClaimed = true;
+			outcome.sessionClaimed = queued;
+			if (!queued && this.#promptGeneration !== queueGeneration && !options?.synthetic) {
+				this.#promptDropped?.({ text: typedText, images: options?.images });
+			}
 			return true;
 		}
 
+		// Captured before the normalization/vision-description awaits below so an
+		// abort() landing during either can be told apart from a fresh submission —
+		// see the drop check right after those awaits.
+		const preflightGeneration = this.#promptGeneration;
 		// Skip eager preludes when the user has already queued a directive
 		const hasPendingUserDirective = this.#toolChoiceQueue.inspect().includes("user-force");
 		const activeModel = this.agent.state.model;
@@ -6971,6 +7135,20 @@ export class AgentSession implements SettingsScope {
 			? await this.#buildImageDescriptionNotice(normalizedImages)
 			: undefined;
 
+		// abort() bumps #promptGeneration and can land while normalization and the
+		// vision-description call above are still in flight. #promptWithMessage below
+		// captures its own generation fresh at entry, so it cannot see this race and
+		// would dispatch a brand-new turn as if the abort never happened. Drop the
+		// prompt here instead — same contract as #promptWithMessage's own
+		// generation-race checks further down.
+		if (this.#promptGeneration !== preflightGeneration) {
+			outcome.sessionClaimed = false;
+			if (!options?.synthetic) {
+				this.#promptDropped?.({ text: typedText, images: options?.images });
+			}
+			return true;
+		}
+
 		// A concurrent prompt() can start a turn during the awaits above: image
 		// normalization and the vision-description call suspend after the
 		// isStreaming check at the top, so two callers — the CLI initial message
@@ -6994,6 +7172,7 @@ export class AgentSession implements SettingsScope {
 					images: normalizedImages,
 					descriptionNotice: imageDescriptionNotice,
 				},
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7079,7 +7258,7 @@ export class AgentSession implements SettingsScope {
 	 */
 	async promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
@@ -7089,7 +7268,7 @@ export class AgentSession implements SettingsScope {
 
 	async #promptCustomMessage<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
-		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+		options?: Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 			queueChipText?: string;
 			queueOnly?: boolean;
 		},
@@ -7111,7 +7290,7 @@ export class AgentSession implements SettingsScope {
 	async #dispatchCustomPrompt<T = unknown>(
 		message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "attribution">,
 		options:
-			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice"> & {
+			| (Pick<PromptOptions, "streamingBehavior" | "toolChoice" | "onPromptAdmitted"> & {
 					queueChipText?: string;
 					queueOnly?: boolean;
 			  })
@@ -7158,6 +7337,7 @@ export class AgentSession implements SettingsScope {
 			await this.#queueCustomMessage(message, streamingBehavior, {
 				queueChipText: options?.queueChipText,
 				prependMessages: keywordNotices,
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7176,10 +7356,17 @@ export class AgentSession implements SettingsScope {
 			isUserInvokedSkillPrompt(customMessage) &&
 			Array.isArray(customMessage.content) &&
 			customMessage.content.some(part => part.type === "image");
+		const preparationGeneration = this.#promptGeneration;
 		const preparedMessage = hasSkillImages ? await this.#normalizeAgentMessageImages(customMessage) : customMessage;
 		const descriptionNotice = hasSkillImages
 			? await this.#buildSkillImageDescriptionNotice(preparedMessage)
 			: undefined;
+		// Same drop as #dispatchPrompt: abort() during normalization or the vision
+		// description must not publish the skill or start a turn afterwards.
+		if (hasSkillImages && (this.#promptGeneration !== preparationGeneration || this.#isDisposed)) {
+			outcome.sessionClaimed = false;
+			return true;
+		}
 
 		// Image normalization and the vision-description call suspend after the
 		// isStreaming check above, so a concurrent submission can start a turn in
@@ -7196,6 +7383,7 @@ export class AgentSession implements SettingsScope {
 				queueChipText: options?.queueChipText,
 				preprocessed: { content: preparedMessage.content, descriptionNotice },
 				prependMessages: keywordNotices,
+				onPromptAdmitted: options?.onPromptAdmitted,
 			});
 			outcome.sessionClaimed = true;
 			return true;
@@ -7346,7 +7534,10 @@ export class AgentSession implements SettingsScope {
 	async #promptWithMessage(
 		message: AgentMessage,
 		expandedText: string,
-		options?: Pick<PromptOptions, "toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace"> & {
+		options?: Pick<
+			PromptOptions,
+			"toolChoice" | "images" | "skipCompactionCheck" | "solutionSpace" | "onPromptAdmitted"
+		> & {
 			prependMessages?: AgentMessage[];
 			skipPostPromptRecoveryWait?: boolean;
 			acceptTerminalEmptyStop?: boolean;
@@ -7362,6 +7553,7 @@ export class AgentSession implements SettingsScope {
 		const setupAbort = new AbortController();
 		this.#promptSetupAbortController = setupAbort;
 		try {
+			options?.onPromptAdmitted?.();
 			await this.#recovery.maybeRestoreRetryFallbackPrimary();
 			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
 			// Flush any pending bash messages before the new prompt
@@ -7580,8 +7772,9 @@ export class AgentSession implements SettingsScope {
 
 	/**
 	 * Try to execute an extension command. Returns true if command was found and executed.
+	 * `onRouted` fires once the command is found, before its handler runs.
 	 */
-	async #tryExecuteExtensionCommand(text: string): Promise<boolean> {
+	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
 		if (!this.#extensionRunner) return false;
 
 		// Parse command name and args
@@ -7591,6 +7784,7 @@ export class AgentSession implements SettingsScope {
 
 		const command = this.#extensionRunner.getCommand(commandName);
 		if (!command) return false;
+		onRouted?.();
 
 		// Get command context from extension runner (includes session control methods)
 		const ctx = this.#extensionRunner.createCommandContext();
@@ -7859,8 +8053,16 @@ export class AgentSession implements SettingsScope {
 				images?: ImageContent[];
 				descriptionNotice?: CustomMessage;
 			};
+			/** Called synchronously once the message is pushed onto its queue. See {@link PromptOptions.onPromptAdmitted}. */
+			onPromptAdmitted?: () => void;
+			/**
+			 * `#promptGeneration` captured when prompt() took this submission. abort() (or a
+			 * history rewrite) bumps it; if that lands while images are being prepared, the
+			 * message is not queued, matching prompt()'s idle drop.
+			 */
+			promptGeneration?: number;
 		},
-	): Promise<void> {
+	): Promise<boolean> {
 		const attribution = options?.attribution ?? "user";
 		const timestamp = options?.timestamp;
 		const rawText = options?.rawText ?? text;
@@ -7895,20 +8097,24 @@ export class AgentSession implements SettingsScope {
 			: normalizedImages?.length
 				? await this.#buildImageDescriptionNotice(normalizedImages)
 				: undefined;
+		if (options?.promptGeneration !== undefined && this.#promptGeneration !== options.promptGeneration) {
+			return false;
+		}
 		if (mode === "aside") {
-			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
-			const records: AgentMessage[] = [...prependMessages];
+			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
+			const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
 			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
 			this.#queuedMessageRawText.set(userMessage, rawText);
 			records.push(userMessage);
 			this.#irc.queueAside(records);
+			options?.onPromptAdmitted?.();
 			// The awaits above (image normalization / vision description) can span the run's
 			// settle, so the run may already be idle by the time the record lands in the aside
 			// queue with no loop left to drain it. Resuming here is a no-op while streaming and
 			// wakes/folds correctly once idle (see #resumeStrandedIrcAsides).
 			this.#resumeStrandedIrcAsides();
-			return;
+			return true;
 		}
 		this.#allowQueuedMessageDrainRetry();
 		// Publish the complete group without yielding: removal owns contiguous companions.
@@ -7938,7 +8144,9 @@ export class AgentSession implements SettingsScope {
 			this.#queuedMessageRawText.set(userMessage, rawText);
 			this.agent.steer(userMessage);
 		}
+		options?.onPromptAdmitted?.();
 		this.#scheduleIdleQueueDrain();
+		return true;
 	}
 
 	#scheduleIdleQueueDrain(): void {
@@ -8138,6 +8346,8 @@ export class AgentSession implements SettingsScope {
 			preprocessed?: { content: CustomMessage<T>["content"]; descriptionNotice?: CustomMessage };
 			/** Hidden notices published immediately before this message, in the same synchronous group. */
 			prependMessages?: readonly CustomMessage[];
+			/** Called synchronously once the message is pushed onto its queue. See {@link PromptOptions.onPromptAdmitted}. */
+			onPromptAdmitted?: () => void;
 		},
 	): Promise<void> {
 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
@@ -8163,6 +8373,7 @@ export class AgentSession implements SettingsScope {
 		};
 		const preprocessed = options?.preprocessed;
 		const prependMessages = options?.prependMessages ?? [];
+		const onPromptAdmitted = options?.onPromptAdmitted;
 		const normalizedAppMessage = preprocessed
 			? { ...appMessage, content: preprocessed.content }
 			: await this.#normalizeAgentMessageImages(appMessage);
@@ -8179,6 +8390,7 @@ export class AgentSession implements SettingsScope {
 				...(descriptionNotice ? [descriptionNotice] : []),
 				normalizedAppMessage,
 			]);
+			onPromptAdmitted?.();
 			// The image-normalization await above can span the run's settle, so the run may
 			// already be idle by the time the record lands in the aside queue with no loop
 			// left to drain it. Resuming here is a no-op while streaming and wakes/folds
@@ -8197,6 +8409,7 @@ export class AgentSession implements SettingsScope {
 			if (descriptionNotice) this.agent.steer(descriptionNotice);
 			this.agent.steer(normalizedAppMessage);
 		}
+		onPromptAdmitted?.();
 		this.#scheduleIdleQueueDrain();
 	}
 
@@ -8563,12 +8776,7 @@ export class AgentSession implements SettingsScope {
 	 */
 	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
-		let index = selected.findIndex(
-			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
-		);
-		if (index < 0) {
-			index = selected.findIndex(message => isUserAuthoredQueuedMessage(message) && queueChipText(message) === text);
-		}
+		const index = this.#findQueuedUserMessage(selected, text);
 		if (index < 0) return false;
 
 		this.agent.replaceQueue(queue, this.#withoutQueuedUserMessage(selected, index));
@@ -8576,10 +8784,58 @@ export class AgentSession implements SettingsScope {
 		return true;
 	}
 
-	/** Companions are inserted contiguously before their user; preserve every other group. */
-	#withoutQueuedUserMessage(queue: readonly AgentMessage[], userIndex: number): AgentMessage[] {
+	/**
+	 * Move the first matching user follow-up and its hidden companions to the end of the
+	 * steering queue without preprocessing them again. Matches exactly like
+	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
+	 * or already delivered target changes nothing; repeated calls may promote duplicates.
+	 */
+	promoteQueuedMessage(text: string): boolean {
+		const followUp = this.agent.peekFollowUpQueue();
+		const index = this.#findQueuedUserMessage(followUp, text);
+		if (index < 0) return false;
+
+		const promoted = followUp.slice(this.#queuedUserGroupStart(followUp, index), index + 1);
+		const message = promoted[promoted.length - 1];
+		// Plain user turns opt into model-side emphasis. Collab prompts are already
+		// recognized by customType in wrapSteeringForModel; other custom types keep
+		// their existing rendering semantics. Queue membership controls interruption.
+		if (message.role === "user") message.steering = true;
+		// One agent-core mutation edits the follow-up queue and appends to steering, so a
+		// live steering claim is left alone, queue listeners (and `queue_update`) see a
+		// single transition — never the group in both queues or in neither — and the
+		// agent's in-flight steering watchers wake.
+		this.agent.moveFollowUpsToSteering(this.#withoutQueuedUserMessage(followUp, index), promoted);
+		this.#allowQueuedMessageDrainRetry();
+		this.#scheduleIdleQueueDrain();
+		return true;
+	}
+
+	/**
+	 * Queue-editing matcher shared by removal and promotion (see {@link removeQueuedMessage});
+	 * matches the raw text the caller originally submitted first, then the queued chip text
+	 * itself (exact); -1 when nothing matches.
+	 */
+	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string): number {
+		let index = queue.findIndex(
+			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
+		);
+		if (index < 0) {
+			index = queue.findIndex(message => isUserAuthoredQueuedMessage(message) && queueChipText(message) === text);
+		}
+		return index;
+	}
+
+	/** Companions are inserted contiguously before their user; this is where that group starts. */
+	#queuedUserGroupStart(queue: readonly AgentMessage[], userIndex: number): number {
 		let start = userIndex;
 		while (start > 0 && isHiddenUserCompanion(queue[start - 1])) start--;
+		return start;
+	}
+
+	/** Drop one user message together with its companions; preserve every other group. */
+	#withoutQueuedUserMessage(queue: readonly AgentMessage[], userIndex: number): AgentMessage[] {
+		const start = this.#queuedUserGroupStart(queue, userIndex);
 		const remaining = queue.slice();
 		remaining.splice(start, userIndex - start + 1);
 		return remaining;
@@ -8973,6 +9229,7 @@ export class AgentSession implements SettingsScope {
 			if (!this.#isDisposed) this.#titleGenerationAbortController = new AbortController();
 			this.#abortAutolearnCapture();
 			for (const controller of this.#usagePreflightAbortControllers) controller.abort();
+			for (const controller of this.#imageDescriptionAbortControllers) controller.abort(options?.reason);
 			this.abortRetry();
 			this.#promptGeneration++;
 			// Cancel any awaited pre-dispatch setup (e.g. Hindsight auto-recall) so the
@@ -9179,11 +9436,34 @@ export class AgentSession implements SettingsScope {
 	 * Fork the current session, creating a new session file with the exact same state.
 	 * Copies all entries and artifacts to the new session.
 	 * Unlike newSession(), this preserves all messages in the agent state.
+	 *
+	 * With `entryId`, the new file instead holds only the root-to-entry path through that
+	 * transcript message, inclusive, plus the artifacts, and the transition runs like
+	 * {@link branch} (`session_before_branch`/`session_branch` hooks with reason `"fork"`,
+	 * agent messages rebuilt from the cut). A cut inside an assistant tool-call batch is
+	 * extended through the batch's recorded tool results (see {@link #resolveForkLeaf}), and
+	 * the hook's `entryId` is that last kept entry. An entry fork always requires an idle
+	 * session; `options.requireIdle` applies the same rule to the whole-session fork.
+	 * Either refusal throws {@link SessionBusyError} before any session state is discarded.
 	 * @returns true if completed, false if cancelled by hook or not persisting
 	 */
-	async fork(): Promise<boolean> {
+	async fork(entryId?: string, options?: { requireIdle?: boolean }): Promise<boolean> {
 		using _transition = this.#beginSessionTransition();
 		this.#assertVibeSessionTransitionAllowed("fork the session");
+		const requireIdleFor = entryId !== undefined || options?.requireIdle ? "fork the session" : undefined;
+		if (entryId !== undefined) {
+			if (this.sessionManager.getEntry(entryId)?.type !== "message") {
+				throw new Error(`Invalid entry ID for forking: ${entryId}`);
+			}
+			const leafId = this.#resolveForkLeaf(entryId);
+			// Await inside the `using` scope so the transition stays open until it settles.
+			// Kept tool results may cite `artifact://N`, so the fork carries the artifacts too.
+			return await this.#branchIntoNewSession("fork", leafId, leafId, {
+				copyArtifacts: true,
+				requireIdleFor,
+			});
+		}
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		const previousSessionFile = this.sessionFile;
 		const previousSessionId = this.sessionManager.getSessionId();
 
@@ -9202,6 +9482,8 @@ export class AgentSession implements SettingsScope {
 		await this.#bash.flushPending();
 		// Flush current session to ensure all entries are written
 		await this.sessionManager.flush();
+		// Work admitted during the hook or flush awaits would be copied mid-flight.
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		let advisorRecordersDetached = false;
 		try {
 			advisorRecordersDetached = true;
@@ -9255,6 +9537,51 @@ export class AgentSession implements SettingsScope {
 		} finally {
 			if (advisorRecordersDetached) this.#advisors.reattachRecorderFeeds();
 		}
+	}
+
+	/**
+	 * The last entry an entry fork keeps: `entryId`, extended through the recorded tool
+	 * results that answer the assistant tool-call batch it sits in, so a fork never ends on
+	 * tool calls whose results exist in the source session. Non-message entries between
+	 * results (labels, custom entries) are kept only when a later result follows them.
+	 */
+	#resolveForkLeaf(entryId: string): string {
+		const answered = new Set<string>();
+		let batch: AssistantMessage | undefined;
+		const path = this.sessionManager.getBranch(entryId);
+		for (let index = path.length - 1; index >= 0; index--) {
+			const entry = path[index];
+			if (entry.type !== "message") continue;
+			if (entry.message.role === "toolResult") {
+				answered.add(entry.message.toolCallId);
+				continue;
+			}
+			if (entry.message.role === "assistant") batch = entry.message;
+			break;
+		}
+		const pending = new Set<string>();
+		for (const block of batch?.content ?? []) {
+			if (block.type === "toolCall" && !answered.has(block.id)) pending.add(block.id);
+		}
+
+		let leafId = entryId;
+		let cursor = entryId;
+		while (pending.size > 0) {
+			const children = this.sessionManager.getChildren(cursor);
+			const result = children.findLast(
+				child =>
+					child.type === "message" && child.message.role === "toolResult" && pending.has(child.message.toolCallId),
+			);
+			if (result?.type === "message" && result.message.role === "toolResult") {
+				pending.delete(result.message.toolCallId);
+				leafId = cursor = result.id;
+				continue;
+			}
+			// Step over a lone bookkeeping entry; any message or fork in the tree ends the batch.
+			if (children.length !== 1 || children[0].type === "message") break;
+			cursor = children[0].id;
+		}
+		return leafId;
 	}
 
 	/** Move the active session and artifacts after enforcing mode transition invariants. */
@@ -9411,6 +9738,16 @@ export class AgentSession implements SettingsScope {
 	/** Toggles priority service for the active model family. */
 	toggleFastMode(): boolean {
 		return this.#models.toggleFastMode();
+	}
+
+	/** Reports whether `/fast ultra` (the OpenAI `ultrafast` tier) is selected for the active model. */
+	isUltrafastModeEnabled(): boolean {
+		return this.#models.isUltrafastModeEnabled();
+	}
+
+	/** Enables or disables the OpenAI `ultrafast` tier; `false` when the active model does not offer it. */
+	setUltrafastMode(enabled: boolean): boolean {
+		return this.#models.setUltrafastMode(enabled);
 	}
 
 	/**
@@ -10804,7 +11141,6 @@ export class AgentSession implements SettingsScope {
 		cancelled: boolean;
 	}> {
 		using _transition = this.#beginSessionTransition();
-		const previousSessionFile = this.sessionFile;
 		const selectedEntry = this.sessionManager.getEntry(entryId);
 
 		if (selectedEntry?.type !== "message" || selectedEntry.message.role !== "user") {
@@ -10813,21 +11149,52 @@ export class AgentSession implements SettingsScope {
 
 		const selectedText = this.#extractUserMessageText(selectedEntry.message.content);
 		const selectedImages = this.#extractUserMessageImages(selectedEntry.message.content);
+		const completed = await this.#branchIntoNewSession("branch", entryId, selectedEntry.parentId);
+		return { selectedText, selectedImages, cancelled: !completed };
+	}
 
+	/**
+	 * Shared {@link branch}/{@link fork}(entryId) transition: moves the live session onto a
+	 * new session file holding the root-to-`leafId` path (an empty one when `leafId` is
+	 * null), emitting `session_before_branch`/`session_branch` with `reason` for `entryId`.
+	 * `copyArtifacts` goes to {@link SessionManager.createBranchedSession}; `requireIdleFor`
+	 * refuses with {@link SessionBusyError} naming that action unless the session is idle.
+	 * @returns false when a `session_before_branch` hook cancelled
+	 */
+	async #branchIntoNewSession(
+		reason: "branch" | "fork",
+		entryId: string,
+		leafId: string | null,
+		options?: { copyArtifacts?: boolean; requireIdleFor?: string },
+	): Promise<boolean> {
+		const previousSessionFile = this.sessionFile;
+		const requireIdleFor = options?.requireIdleFor;
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		let skipConversationRestore = false;
 
 		// Emit session_before_branch event (can be cancelled)
 		if (this.#extensionRunner?.hasHandlers("session_before_branch")) {
 			const result = (await this.#extensionRunner.emit({
 				type: "session_before_branch",
+				reason,
 				entryId,
 			})) as SessionBeforeBranchResult | undefined;
 
 			if (result?.cancel) {
-				return { selectedText, selectedImages, cancelled: true };
+				return false;
 			}
 			skipConversationRestore = result?.skipConversationRestore ?? false;
+			// A turn or user command may have started while the hook awaited.
+			if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		}
+
+		await this.#bash.flushPending();
+		// Flush pending writes before branching
+		await this.sessionManager.flush();
+		// Last refusal point. Nothing below is rolled back when the transition stops, so an
+		// idle-only snapshot refuses here, after the flush awaits but before any state of the
+		// old session (pending messages, async jobs, auto-learn capture) is discarded.
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 
 		// Clear pending messages (bound to old session state)
 		this.#pendingNextTurnMessages = [];
@@ -10835,9 +11202,6 @@ export class AgentSession implements SettingsScope {
 		this.#queuedMessageDrainBlocked = false;
 		this.#usagePreflightReadyForNextModelCall = false;
 
-		await this.#bash.flushPending();
-		// Flush pending writes before branching
-		await this.sessionManager.flush();
 		const bashTransition = this.#bash.beginSessionTransition();
 		this.#cancelOwnAsyncJobs();
 		this.#abortAutolearnCapture();
@@ -10849,15 +11213,16 @@ export class AgentSession implements SettingsScope {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
-				// Pending prompt setup belongs to the history being replaced.
+				// A prompt admitted during the drain awaits above belongs to the history
+				// being replaced; the generation bump drops its pending setup.
 				this.#promptGeneration++;
-				if (!selectedEntry.parentId) {
+				if (!leafId) {
 					const title = this.sessionManager.getSessionName();
 					const titleSource = this.sessionManager.titleSource;
 					await this.sessionManager.newSession({ parentSession: previousSessionFile });
 					if (title) await this.sessionManager.setSessionName(title, titleSource);
 				} else {
-					this.sessionManager.createBranchedSession(selectedEntry.parentId);
+					this.sessionManager.createBranchedSession(leafId, { copyArtifacts: options?.copyArtifacts });
 				}
 				this.#bash.markSessionTransition(bashTransition);
 				this.#advisors.clearCost();
@@ -10882,6 +11247,7 @@ export class AgentSession implements SettingsScope {
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
 					type: "session_branch",
+					reason,
 					previousSessionFile,
 				});
 			}
@@ -10895,7 +11261,7 @@ export class AgentSession implements SettingsScope {
 			this.#advisors.reattachRecorderFeeds();
 			advisorRecordersDetached = false;
 			await this.#reconcileModeAfterBranch();
-			return { selectedText, selectedImages, cancelled: false };
+			return true;
 		} finally {
 			if (advisorRecordersDetached) {
 				if (sessionTransitioned) this.#advisors.resetSessionState();
@@ -10921,20 +11287,12 @@ export class AgentSession implements SettingsScope {
 			throw new Error("Cannot branch /btw: session changed since /btw started");
 		}
 
-		if (
-			this.isStreaming ||
-			this.isBashRunning ||
-			this.isEvalRunning ||
-			this.isCompacting ||
-			this.isGeneratingHandoff ||
-			this.isRetrying
-		) {
-			throw new Error("Cannot branch /btw while session maintenance or user work is still running");
-		}
+		this.#assertIdleForSnapshot("branch /btw");
 
 		if (this.#extensionRunner?.hasHandlers("session_before_branch")) {
 			const result = (await this.#extensionRunner.emit({
 				type: "session_before_branch",
+				reason: "btw",
 				entryId: leafId,
 			})) as SessionBeforeBranchResult | undefined;
 
@@ -10952,16 +11310,7 @@ export class AgentSession implements SettingsScope {
 			POST_PROMPT_DRAIN_TIMEOUT_MS,
 			"Timed out draining post-prompt tasks before /btw branch",
 		);
-		if (
-			this.isStreaming ||
-			this.isBashRunning ||
-			this.isEvalRunning ||
-			this.isCompacting ||
-			this.isGeneratingHandoff ||
-			this.isRetrying
-		) {
-			throw new Error("Cannot branch /btw while session maintenance or user work is still running");
-		}
+		this.#assertIdleForSnapshot("branch /btw");
 
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
@@ -11018,6 +11367,7 @@ export class AgentSession implements SettingsScope {
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
 					type: "session_branch",
+					reason: "btw",
 					previousSessionFile,
 				});
 			}

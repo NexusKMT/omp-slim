@@ -8,6 +8,7 @@ import {
 	type AgentTool,
 	AppendOnlyContextManager,
 	filterProviderReplayMessages,
+	resolveTelemetry,
 	type StreamFn,
 	type ThinkingLevel,
 } from "@oh-my-pi/pi-agent-core";
@@ -118,7 +119,11 @@ import {
 	type ToolDefinition,
 	wrapRegisteredTools,
 } from "./extensibility/extensions";
-import { createSkillDescriptionCompressor, SkillDescriptionCatalog } from "./extensibility/skill-descriptions";
+import {
+	createSkillDescriptionCompressor,
+	openSessionSkillDescriptionStore,
+	SkillDescriptionCatalog,
+} from "./extensibility/skill-descriptions";
 import { resolvePath } from "./extensibility/utils";
 import {
 	type LoadSkillsOptions,
@@ -174,7 +179,7 @@ import {
 	formatCredentialDisabledNotice,
 } from "./session/credential-disabled-notice";
 import { DateCwdReminderInjector } from "./session/date-cwd-reminder";
-import { createInterruptedTurnAbortMessage } from "./session/exit-diagnostics";
+import { createInterruptedToolResults, createInterruptedTurnAbortMessage } from "./session/exit-diagnostics";
 import { recoverInlineSloppyEdit } from "./session/inline-edit-recovery";
 import {
 	type CustomMessage,
@@ -188,6 +193,7 @@ import { clampProviderContextImages, dropUnreadableContextImages } from "./sessi
 import {
 	expandDefaultRetryFallbackChains,
 	findRetryFallbackCandidates,
+	installRetryFallbackRole,
 	type RetryFallbackResolutionContext,
 	resolveRetryFallbackChainKey,
 } from "./session/retry-fallback-chains";
@@ -267,6 +273,7 @@ import { resolveYieldReportText } from "./tools/yield";
 import { createBrowserPrelude } from "./tools/browser";
 import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 import { createComputerPrelude } from "./tools/computer";
+import { createRatchetPrelude } from "./ratchet/prelude-definition";
 import { ToolContextStore } from "./tools/context";
 import { isIrcEnabled } from "./irc/messaging";
 import { imageGenTool } from "./tools/image-gen";
@@ -289,6 +296,7 @@ import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 import {
 	cfgAsyncMaxJobs,
 	cfgComputerEnabled,
+	cfgRatchetEnabled,
 	cfgGenerateImageEnabled,
 	cfgSecurityEnabled,
 	cfgSpeechgenEnabled,
@@ -1836,6 +1844,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	let existingBranch = logger.time("getSessionBranch", () => sessionManager.getBranch());
 	const interruptedTurnAbort = createInterruptedTurnAbortMessage(existingBranch);
 	if (interruptedTurnAbort) {
+		for (const result of createInterruptedToolResults(existingBranch)) sessionManager.appendMessage(result);
 		sessionManager.appendMessage(interruptedTurnAbort);
 		existingBranch = logger.time("getRecoveredSessionBranch", () => sessionManager.getBranch());
 	}
@@ -1991,6 +2000,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// (interactive, print, rpc, acp).
 		preconnectModelHost(model.baseUrl);
 	}
+
+	// Re-derives the thinking level whenever startup settles on a different
+	// model than the one (possibly none) the level above was resolved against,
+	// so the settings default is clamped to the model's actual effort ladder.
+	const adoptThinkingForModel = (selectedModel: Model): void => {
+		thinkingLevel = pickInitialThinkingLevel(selectedModel);
+		autoThinking = thinkingLevel === AUTO_THINKING;
+		const concreteLevel = concreteThinkingLevel(thinkingLevel);
+		effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
+			autoThinking
+				? resolveProvisionalAutoLevel(selectedModel)
+				: resolveThinkingLevelForModel(selectedModel, concreteLevel),
+		);
+	};
 
 	let skills: Skill[];
 	let skillWarnings: SkillWarning[];
@@ -2308,6 +2331,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		};
 		let browserPrelude: EvalPreludeDefinition | undefined;
 		let computerPrelude: EvalPreludeDefinition | undefined;
+		let ratchetPrelude: EvalPreludeDefinition | undefined;
 		const getEvalPreludes = (): readonly EvalPreludeDefinition[] => {
 			if (restrictToolNames || !toolRegistry.has("eval") || !activeToolNames.has("eval")) return [];
 			const builtins: EvalPreludeDefinition[] = [];
@@ -2318,6 +2342,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			if (cfgComputerEnabled.get(settings)) {
 				computerPrelude ??= createComputerPrelude(toolSession);
 				builtins.push(computerPrelude);
+			}
+			if (cfgRatchetEnabled.get(settings)) {
+				ratchetPrelude ??= createRatchetPrelude(toolSession);
+				builtins.push(ratchetPrelude);
 			}
 			return getEnabledEvalPreludes(builtins);
 		};
@@ -2672,14 +2700,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						// Recompute thinking-level from scratch against the reclaimed
 						// model: any value derived from the earlier fallback model's
 						// `thinking.defaultLevel` must not become sticky.
-						thinkingLevel = pickInitialThinkingLevel(restoredModel);
-						autoThinking = thinkingLevel === AUTO_THINKING;
-						effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-						effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-							autoThinking
-								? resolveProvisionalAutoLevel(restoredModel)
-								: resolveThinkingLevelForModel(restoredModel, effectiveThinkingLevel),
-						);
+						adoptThinkingForModel(restoredModel);
 						preconnectModelHost(restoredModel.baseUrl);
 						return true;
 					}
@@ -2993,26 +3014,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						}
 					}
 					if (fallbackSelectors.length > 0) {
-						const modelRoles: Record<string, string> = {};
-						const existingRoles = settings.getModelRoles();
-						for (const role in existingRoles) {
-							const selector = existingRoles[role];
-							if (selector) {
-								modelRoles[role] = selector;
-							}
-						}
-						modelRoles[options.modelPatternFallbackRole] = primarySelector;
-						cfgModelRoles.override(settings, modelRoles);
-						const fallbackChains: Record<string, string[]> = {
-							[options.modelPatternFallbackRole]: fallbackSelectors,
-						};
-						const existingFallbackChains = cfgRetryFallbackChains.get(settings);
-						for (const role in existingFallbackChains) {
-							if (role !== options.modelPatternFallbackRole) {
-								fallbackChains[role] = existingFallbackChains[role];
-							}
-						}
-						cfgRetryFallbackChains.override(settings, fallbackChains);
+						installRetryFallbackRole(settings, options.modelPatternFallbackRole, {
+							primary: primarySelector,
+							chain: fallbackSelectors,
+						});
 					}
 				}
 				model = selectedModel;
@@ -3022,14 +3027,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				if (selectedExplicitThinkingLevel) {
 					restoredSessionThinkingLevel = selectedThinkingLevel;
 				}
-				thinkingLevel = pickInitialThinkingLevel(selectedModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(selectedModel)
-						: resolveThinkingLevelForModel(selectedModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(selectedModel);
 				if (usageFallbackReason) {
 					const target = formatModelSelectorValue(
 						formatModelStringWithRouting(selectedModel),
@@ -3081,14 +3079,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				// Recompute the thinking level against the now-real model.
 				// `pickInitialThinkingLevel` closes over `defaultRoleSpec`,
 				// so the role's explicit selector (e.g. `:max`) now applies.
-				thinkingLevel = pickInitialThinkingLevel(resolvedDefaultModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(resolvedDefaultModel)
-						: resolveThinkingLevelForModel(resolvedDefaultModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(resolvedDefaultModel);
 				preconnectModelHost(resolvedDefaultModel.baseUrl);
 				return true;
 			};
@@ -3135,6 +3126,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 				if (!model && pick) {
 					model = pick;
+					adoptThinkingForModel(pick);
 				}
 			}
 			if (model) {
@@ -3176,14 +3168,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			);
 			if (refreshedModel !== selectedModel) {
 				model = refreshedModel;
-				thinkingLevel = pickInitialThinkingLevel(refreshedModel);
-				autoThinking = thinkingLevel === AUTO_THINKING;
-				effectiveThinkingLevel = concreteThinkingLevel(thinkingLevel);
-				effectiveThinkingLevel = logger.time("resolveThinkingLevelForModel", () =>
-					autoThinking
-						? resolveProvisionalAutoLevel(refreshedModel)
-						: resolveThinkingLevelForModel(refreshedModel, effectiveThinkingLevel),
-				);
+				adoptThinkingForModel(refreshedModel);
 			}
 		}
 
@@ -3197,6 +3182,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				model: model.id,
 			});
 			if (selectedModelAbort) {
+				for (const result of createInterruptedToolResults(existingBranch)) sessionManager.appendMessage(result);
 				sessionManager.appendMessage(selectedModelAbort);
 				existingBranch = logger.time("getRecoveredUserTailBranch", () => sessionManager.getBranch());
 				existingSession = logger.time("loadRecoveredUserTailContext", () =>
@@ -3649,9 +3635,23 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// constructed) and refreshed on every later rebuild via
 		// `setAdvisorMemoryPrompt`.
 		let advisorMemoryPrompt: string | undefined;
+		// The process agent dir uses the process-wide store; a session rooted in
+		// another agent dir keeps its own, closed when the session is disposed.
+		const ownedSkillDescriptionStore =
+			path.resolve(agentDir) === path.resolve(getAgentDir())
+				? undefined
+				: openSessionSkillDescriptionStore(agentDir);
 		const skillDescriptions = new SkillDescriptionCatalog({
-			dbPath: path.join(agentDir, "skill-descriptions.db"),
-			compress: createSkillDescriptionCompressor(modelRegistry, settings),
+			store: ownedSkillDescriptionStore,
+			// Like the other one-shot model calls, each compression request resolves
+			// its own telemetry handle, so its usage stays out of the run summary.
+			// The first requests can start before `agent` is constructed; they use
+			// the telemetry config and session id the agent is constructed with.
+			compress: createSkillDescriptionCompressor(modelRegistry, settings, undefined, () =>
+				agent
+					? resolveTelemetry(agent.telemetry, agent.sessionId)
+					: resolveTelemetry(options.telemetry, providerSessionId),
+			),
 		});
 		const rebuildSystemPrompt = async (
 			toolNames: string[],
@@ -4561,6 +4561,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		});
 		hasSession = true;
 		credentialNoticeSession = session;
+		if (ownedSkillDescriptionStore) {
+			// Let in-flight compressions land before releasing the file.
+			session.addDisposer(
+				() => void skillDescriptions.waitForPending().finally(() => ownedSkillDescriptionStore.close()),
+			);
+		}
 		// A caller-supplied store belongs to the caller (the CLI keeps it in sync itself).
 		if (ownsAuthStorage) createAuthStorageSettingsSync(session, authStorage);
 		// One coalesced prompt rebuild for every prompt input (rule bucketing, the
