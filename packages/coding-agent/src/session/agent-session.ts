@@ -7312,10 +7312,17 @@ export class AgentSession implements SettingsScope {
 			isUserInvokedSkillPrompt(customMessage) &&
 			Array.isArray(customMessage.content) &&
 			customMessage.content.some(part => part.type === "image");
+		const preparationGeneration = this.#promptGeneration;
 		const preparedMessage = hasSkillImages ? await this.#normalizeAgentMessageImages(customMessage) : customMessage;
 		const descriptionNotice = hasSkillImages
 			? await this.#buildSkillImageDescriptionNotice(preparedMessage)
 			: undefined;
+		// Same drop as #dispatchPrompt: abort() during normalization or the vision
+		// description must not publish the skill or start a turn afterwards.
+		if (hasSkillImages && (this.#promptGeneration !== preparationGeneration || this.#isDisposed)) {
+			outcome.sessionClaimed = false;
+			return true;
+		}
 
 		// Image normalization and the vision-description call suspend after the
 		// isStreaming check above, so a concurrent submission can start a turn in
