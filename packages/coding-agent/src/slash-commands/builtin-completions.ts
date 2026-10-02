@@ -66,10 +66,10 @@ export function buildEffortArgumentCompletions(
  */
 export function buildEffortInlineHint(runtime: TuiSlashCommandRuntime): (argumentText: string) => string | null {
 	return (argumentText: string) => {
-		const prefix = argumentText.trim().toLowerCase();
+		const prefix = argumentText.trimStart().toLowerCase();
 		if (prefix.length === 0 || prefix.includes(" ")) return null;
 		const match = availableEffortSelectors(runtime.ctx.session).find(level => level.startsWith(prefix));
-		return match ? match.slice(prefix.length) : null;
+		return match && match !== prefix ? match.slice(prefix.length) : null;
 	};
 }
 

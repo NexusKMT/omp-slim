@@ -100,9 +100,11 @@ describe("/thinking slash command", () => {
 		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
 		const completions = await Promise.resolve(effort?.getArgumentCompletions?.(""));
 		expect(completions?.map(item => item.label)).toEqual(["off", "auto", "low", "medium"]);
-		expect(completions?.map(item => item.label)).toEqual(h.tuiRuntime.ctx.session.getAvailableEffortSelectors());
 		expect(completions?.map(item => item.label)).not.toContain("xhigh");
 		expect(effort?.getInlineHint?.("x")).toBeNull();
+		expect(effort?.getInlineHint?.("me")).toBe("dium");
+		expect(effort?.getInlineHint?.("me ")).toBeNull();
+		expect(effort?.getInlineHint?.("low")).toBeNull();
 	});
 
 	it("offers exactly the selectors the cycle walks", async () => {
@@ -194,7 +196,7 @@ describe("/thinking slash command", () => {
 		} as unknown as InteractiveModeContext;
 
 		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
-		await executeBuiltinSlashCommand("/thinking med", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/effort med", { ctx, draftDetached: true });
 		await executeBuiltinSlashCommand("/thinking xhigh", { ctx, draftDetached: true });
 
 		expect(h.level()).toBe(ThinkingLevel.Medium);
@@ -205,16 +207,22 @@ describe("/thinking slash command", () => {
 		]);
 	});
 
-	it("tells a non-reasoning TUI session there is nothing to pick instead of opening the picker", async () => {
+	it("tells a non-reasoning TUI session there is nothing to pick, and errors on a level", async () => {
 		const h = harness({ reasoning: false });
 		const events: string[] = [];
 		const ctx = {
 			...h.tuiRuntime.ctx,
 			showThinkingSelector: () => events.push("picker"),
 			showStatus: (message: string) => events.push(`status:${message}`),
+			showError: (message: string) => events.push(`error:${message}`),
 		} as unknown as InteractiveModeContext;
 
 		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
-		expect(events).toEqual(["status:test/test-model has no adjustable thinking level."]);
+		await executeBuiltinSlashCommand("/thinking high", { ctx, draftDetached: true });
+		expect(events).toEqual([
+			"status:test/test-model has no adjustable thinking level.",
+			"error:test/test-model has no adjustable thinking level.",
+		]);
+		expect(h.level()).toBeUndefined();
 	});
 });

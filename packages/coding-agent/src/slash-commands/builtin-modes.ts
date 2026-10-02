@@ -871,7 +871,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		aliases: ["effort"],
 		icon: "gauge",
 		get description() {
-			return `Set thinking level (reasoning effort, intelligence) for this session (same as ${formatKeyHint("shift+tab")})`;
+			return `Set thinking level (reasoning effort, intelligence) for this session; ${formatKeyHint("shift+tab")} cycles levels`;
 		},
 		acpDescription: "Set or show thinking level (reasoning effort)",
 		acpInputHint: "[level]",
@@ -905,12 +905,9 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		handleTui: (command, runtime) => {
 			clearSubmittedText(runtime);
 			const { ctx } = runtime;
-			if (!ctx.session.model?.reasoning) {
-				ctx.showStatus(noThinkingMessage(ctx.session));
-				return;
-			}
 			if (!command.args.trim()) {
-				ctx.showThinkingSelector();
+				if (ctx.session.model?.reasoning) ctx.showThinkingSelector();
+				else ctx.showStatus(noThinkingMessage(ctx.session));
 				return;
 			}
 			const resolved = resolveThinkingArgument(ctx.session, command.args);

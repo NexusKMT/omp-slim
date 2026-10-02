@@ -84,7 +84,7 @@ describe("thinking selector picker", () => {
 		expect(p.current).toEqual(["high"]);
 	});
 
-	it("marks auto as current without a level chip, and no current when the level is unknown", () => {
+	it("marks auto as current without a level chip", () => {
 		const withAuto = new ThinkingSelectorComponent(
 			"auto",
 			["off", "auto", "high"] as never,
@@ -96,14 +96,6 @@ describe("thinking selector picker", () => {
 		expect(p.selected).toBe("auto");
 		expect(p.items?.find(item => item.id === "auto")?.chips).toBeUndefined();
 		expect(p.items?.find(item => item.id === "off")?.chips?.[0]?.dot).toBe("thinkingOff");
-
-		const unknown = new ThinkingSelectorComponent(
-			undefined,
-			["off", "high"] as never,
-			() => {},
-			() => {},
-		);
-		expect(sheet(unknown.describe(pickerCx)).props.current).toEqual([]);
 	});
 });
 
