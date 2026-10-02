@@ -8,6 +8,10 @@
 - Added a `goal` command for RPC hosts (`--mode rpc` and `rpc-ui`) to create, read, pause, resume and drop goals, the current goal in `get_state`, and opt-in automatic goal continuation with `goal.continuationModes: ["rpc"]` ([#13952](https://github.com/can1357/oh-my-pi/pull/13952) by [@shawnkoh](https://github.com/shawnkoh))
 - Added `--goal <objective>` for interactive launches: it starts a fresh session in goal mode and begins working on the objective immediately, without typing `/goal` ([#13879](https://github.com/can1357/oh-my-pi/pull/13879) by [@shawnkoh](https://github.com/shawnkoh))
 
+### Fixed
+
+- Fixed the skill descriptions database and text-predict engine state ignoring XDG directories; with XDG enabled they now live under `$XDG_DATA_HOME/omp`, and an existing cache and learned prediction state are carried over on first use ([#13648](https://github.com/can1357/oh-my-pi/pull/13648) by [@Parsifa1](https://github.com/Parsifa1))
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
