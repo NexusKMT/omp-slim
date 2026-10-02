@@ -511,12 +511,16 @@ function blobRefSites(values: readonly unknown[]): BlobRefSite[] {
 	return sites;
 }
 
+function blobSiteKey(site: BlobRefSite): string {
+	return `${site.asDataUrl ? "url" : "base64"}:${site.ref}`;
+}
+
 async function resolveBlobRefs(values: readonly unknown[], blobStore: BlobStore): Promise<void> {
 	const semaphore = new Semaphore(BLOB_READ_CONCURRENCY);
 	const resolved = new Map<string, Promise<string>>();
 	await Promise.all(
 		blobRefSites(values).map(async site => {
-			const key = `${site.asDataUrl ? "url" : "base64"}:${site.ref}`;
+			const key = blobSiteKey(site);
 			let data = resolved.get(key);
 			if (!data) {
 				data = (async () => {
@@ -552,7 +556,7 @@ export async function resolveBlobRefsInEntries(entries: FileEntry[], blobStore: 
 export function resolveBlobRefsInEntriesSync(entries: FileEntry[], blobStore: BlobStore): void {
 	const resolved = new Map<string, string>();
 	for (const site of blobRefSites(entriesForBlobResolution(entries))) {
-		const key = `${site.asDataUrl ? "url" : "base64"}:${site.ref}`;
+		const key = blobSiteKey(site);
 		let data = resolved.get(key);
 		if (data === undefined) {
 			data = site.asDataUrl
