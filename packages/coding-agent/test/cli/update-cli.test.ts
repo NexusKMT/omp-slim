@@ -164,6 +164,51 @@ describe("getLatestRelease configured registry", () => {
 		expect(release.dist).toBe("binary");
 	});
 
+	it("resolves the tagged version when the feed answers the dist-tag shortcut with the full packument", async () => {
+		const urls: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			Object.assign(
+				async (input: FetchInput) => {
+					urls.push(String(input));
+					return Response.json({
+						"dist-tags": { latest: "999.3.0" },
+						versions: { "999.3.0": { version: "999.3.0", omp: { dist: "binary" } } },
+					});
+				},
+				{ preconnect: globalThis.fetch.preconnect },
+			),
+		);
+
+		const release = await getLatestRelease({ registries: feed });
+
+		expect(urls).toEqual(["https://npm.corp.example/api/npm/feed/@oh-my-pi%2fpi-coding-agent/latest"]);
+		expect(release.version).toBe("999.3.0");
+		expect(release.dist).toBe("binary");
+	});
+
+	it("falls back to the full packument when the shortcut returns 200 without a version", async () => {
+		const urls: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			Object.assign(
+				async (input: FetchInput) => {
+					const url = String(input);
+					urls.push(url);
+					if (url.endsWith("/latest")) return Response.json({ success: false, error: "not found" });
+					return Response.json({
+						"dist-tags": { latest: "999.4.0" },
+						versions: { "999.4.0": { version: "999.4.0" } },
+					});
+				},
+				{ preconnect: globalThis.fetch.preconnect },
+			),
+		);
+
+		const release = await getLatestRelease({ registries: feed });
+
+		expect(urls).toHaveLength(2);
+		expect(release.version).toBe("999.4.0");
+	});
+
 	it("reports a missing canary dist-tag on the feed as no canary release", async () => {
 		vi.spyOn(globalThis, "fetch").mockImplementation(
 			Object.assign(
