@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.11] - 2026-10-02
+
 ### Added
 
 - Added subagent completion percentages to the agent tree, task, and wait views.

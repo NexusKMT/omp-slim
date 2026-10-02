@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.11] - 2026-10-02
+
 ### Added
 
 - Added goal management for RPC hosts and optional automatic goal continuation via `goal.continuationModes: ["rpc"]`. RPC clients can create, inspect, pause, resume, and remove goals, and view the current goal in `get_state`.

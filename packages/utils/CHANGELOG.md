@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.11] - 2026-10-02
+
 ### Added
 
 - Added XDG-aware utility paths for skill descriptions and prediction state, with automatic adoption of legacy data when XDG locations are first resolved.

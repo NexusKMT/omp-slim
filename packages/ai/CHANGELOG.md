@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.11] - 2026-10-02
+
 ### Fixed
 
 - Fixed Cursor cached prompt token accounting to prevent duplicate input-token and cost reporting on cached turns.
