@@ -5,7 +5,7 @@
 ### Fixed
 
 - Fixed new sessions on Fireworks failing with HTTP 404 on the first turn: the Fireworks default model is now `kimi-k3`, because Fireworks no longer serves `kimi-k2.7-code` ([#14068](https://github.com/can1357/oh-my-pi/pull/14068) by [@alphastorm](https://github.com/alphastorm))
-- Recognized bare and provider-qualified `k3` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides.
+- Recognized bare and provider-qualified `k3` and `k3-256k` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides ([#14098](https://github.com/can1357/oh-my-pi/pull/14098) by [@NaC-L](https://github.com/NaC-L)).
 
 ## [18.4.10] - 2026-10-02
 

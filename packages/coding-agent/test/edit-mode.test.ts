@@ -51,24 +51,36 @@ describe("resolveEditMode", () => {
 		expect(resolveEditMode(createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct" }))).toBe("replace");
 	});
 
-	test("falls back for K3 selectors without changing ordinary model edit mode", () => {
-		for (const activeModel of ["k3", "kimi-code/k3", "kimi-coding/k3"]) {
+	test("falls back for K3 SKUs without changing ordinary or near-miss model edit mode", () => {
+		for (const activeModel of [
+			"k3",
+			"kimi-code/k3",
+			"kimi-coding/K3",
+			"k3-256k",
+			"K3-256K",
+			"kimi-code/k3-256k",
+			"kimi-coding/K3-256K",
+		]) {
 			expect(resolveEditMode(createSession({ activeModel }))).toBe("replace");
 		}
-		expect(resolveEditMode(createSession({ activeModel: "openai/gpt-5.5" }))).toBe("hashline");
+		for (const activeModel of ["openai/gpt-5.5", "k30", "k3-custom", "k3-256kb", "kimi-code/k3-256k-custom"]) {
+			expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+		}
 	});
 
 	test("keeps explicit K3 edit-mode overrides ahead of the fallback", () => {
-		const activeModel = "kimi-code/k3";
-		expect(resolveEditMode(createSession({ activeModel, modelVariant: "hashline" }))).toBe("hashline");
-		expect(resolveEditMode(createSession({ activeModel, settingsMode: "apply_patch" }))).toBe("apply_patch");
+		for (const activeModel of ["kimi-code/k3", "kimi-coding/K3-256K"]) {
+			expect(resolveEditMode(createSession({ activeModel, modelVariant: "hashline" }))).toBe("hashline");
+			expect(resolveEditMode(createSession({ activeModel, settingsMode: "apply_patch" }))).toBe("apply_patch");
 
-		Bun.env.PI_EDIT_VARIANT = "hashline";
-		expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
-		delete Bun.env.PI_EDIT_VARIANT;
+			Bun.env.PI_EDIT_VARIANT = "hashline";
+			expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+			delete Bun.env.PI_EDIT_VARIANT;
 
-		Bun.env.PI_STRICT_EDIT_MODE = "1";
-		expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+			Bun.env.PI_STRICT_EDIT_MODE = "1";
+			expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+			delete Bun.env.PI_STRICT_EDIT_MODE;
+		}
 	});
 
 	test("falls back from hashline to replace for MiMo models", () => {
