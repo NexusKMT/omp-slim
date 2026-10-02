@@ -20,7 +20,7 @@
 - Fixed HTML export hanging when a session's subagent directory held a transcript named `..jsonl`; discovery now only descends into real child directories ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 - Fixed resuming a session through a symlink or hard link to a file another omp process is writing: the resumed session no longer mixes its turns into that file and continues in a new file next to it ([#14095](https://github.com/can1357/oh-my-pi/pull/14095) by [@andrebrait](https://github.com/andrebrait))
 - Fixed moving a session to another directory replacing a session file there that another omp process is writing, or moving a session another process is writing; the move now stops with an error and leaves both files untouched ([#14095](https://github.com/can1357/oh-my-pi/pull/14095) by [@andrebrait](https://github.com/andrebrait))
-- Fixed OTLP export reporting no chat cost: chat spans, the chat cost metric, and the run-completed log now carry each request's computed cost, and models without known pricing report `model_price_unavailable` instead of zero ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail)).
+- Fixed OTLP export reporting no chat cost: chat spans, the chat cost metric, and the run-completed log now carry each request's computed cost, and an unpriced model reports the provider's charge when there is one and `model_price_unavailable` otherwise ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail)).
 
 ## [18.4.12] - 2026-10-02
 
