@@ -1566,11 +1566,16 @@ fn write_worktree_map(
 }
 
 fn overwrite_error(paths: &BTreeSet<String>) -> Error {
-	let list = paths.iter().map(String::as_str).collect::<Vec<_>>().join("\n\t");
+	let list = paths
+		.iter()
+		.map(String::as_str)
+		.collect::<Vec<_>>()
+		.join("\n\t");
 	Error::backend(
 		"git cherry-pick",
 		format!(
-			"your local changes to the following files would be overwritten by the cherry-pick:\n\t{list}\nCommit or discard them, then retry."
+			"your local changes to the following files would be overwritten by the \
+			 cherry-pick:\n\t{list}\nCommit or discard them, then retry."
 		),
 	)
 }
@@ -1645,7 +1650,11 @@ fn unstaged_changed_paths(
 			}
 		}
 	}
-	if blocked.is_empty() { Ok(unstaged) } else { Err(overwrite_error(&blocked)) }
+	if blocked.is_empty() {
+		Ok(unstaged)
+	} else {
+		Err(overwrite_error(&blocked))
+	}
 }
 
 /// Materialize `changed` paths into the worktree (from `worktree`) and index
@@ -1678,7 +1687,13 @@ fn checkout_changed_paths(
 			let metadata = gix::index::fs::Metadata::from_path_no_follow(&repo.root().join(path))?;
 			Stat::from_fs(&metadata).map_err(|err| Error::backend("git cherry-pick index", err))?
 		};
-		index.dangerously_push_entry(stat, entry.id, Flags::empty(), entry.mode, BStr::new(path.as_bytes()));
+		index.dangerously_push_entry(
+			stat,
+			entry.id,
+			Flags::empty(),
+			entry.mode,
+			BStr::new(path.as_bytes()),
+		);
 	}
 	index.sort_entries();
 	index.remove_tree();

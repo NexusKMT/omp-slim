@@ -1073,7 +1073,9 @@ pub fn detach_git_dir(
 /// Author signature for an explicit [`CommitAuthor`]; a missing date means now.
 fn signature_for(author: &CommitAuthor) -> Result<gix::actor::Signature> {
 	let time = match &author.date {
-		Some(date) => gix::date::parse(date, None).map_err(|err| Error::backend("git commit", err))?,
+		Some(date) => {
+			gix::date::parse(date, None).map_err(|err| Error::backend("git commit", err))?
+		},
 		None => gix::date::Time::now_local_or_utc(),
 	};
 	Ok(gix::actor::Signature {

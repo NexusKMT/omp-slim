@@ -721,7 +721,9 @@ async function patchTree(
 		// WIP-only files are untouched by the delta, so their post-delta state
 		// is the WIP state; diffing it back to the parent rewinds them.
 		const rewind =
-			wipOnly.size > 0 ? filterPatchFiles(await diffTreeOrEmpty(vcs.requireGit(repoDir), withWip, parentSha), wipOnly) : "";
+			wipOnly.size > 0
+				? filterPatchFiles(await diffTreeOrEmpty(vcs.requireGit(repoDir), withWip, parentSha), wipOnly)
+				: "";
 		return await writeSyntheticTree(repoDir, parentSha, [...wipPatches, patchText, rewind]);
 	} catch (wipErr) {
 		if (!vcs.isVcsError(wipErr)) throw wipErr;
