@@ -6,6 +6,7 @@
 
 - Factory Droid login now reports the account's organization error instead of accepting a credential that every request rejects ([#14032](https://github.com/can1357/oh-my-pi/issues/14032)).
 - Tool calls whose final argument JSON is cut off or followed by trailing text are no longer executed from an auto-closed preview. OpenAI Completions, Anthropic, Bedrock, Responses, Codex, Devin, Ollama, Apple, Cursor, GitLab Duo, and the in-band JSON dialects now give such a call the existing parse-error arguments, so the tool is not run and the model receives the parse error and can resend the call ([#13868](https://github.com/can1357/oh-my-pi/pull/13868) by [@alphastorm](https://github.com/alphastorm))
+- Fixed Cursor "prepaid balance is used up" (`USAGE_PRICING_REQUIRED`) failures repeating on the same account instead of rotating to a sibling Cursor credential ([#14053](https://github.com/can1357/oh-my-pi/issues/14053))
 
 ## [18.4.9] - 2026-10-01
 
