@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed HTTP 400 "This model doesn't support the image field for user messages" when an OpenAI model on a custom Bedrock Converse provider reads an image through a tool
+
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
