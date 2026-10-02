@@ -2,15 +2,21 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import type { AsyncJobSnapshotItem } from "@oh-my-pi/pi-coding-agent/session/agent-session";
-import type { Component } from "@oh-my-pi/pi-tui";
+import { Container } from "@oh-my-pi/pi-tui";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
+import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 
 const WIDTH = 60;
 
+/** `/jobs full` in text mode, as the report box above the editor shows it: its content rows, borders stripped. */
 async function renderFullJobs(running: AsyncJobSnapshotItem[]): Promise<string[]> {
-	let presented: Component[] = [];
+	const reportContainer = new Container();
 	const ctx = {
-		ui: { terminal: { columns: WIDTH } },
+		ui: { terminal: { columns: WIDTH, rows: 200 }, requestRender: () => {} },
+		keybindings: { getKeys: () => ["escape"] },
+		reportContainer,
+		commandReportRows: () => 200,
+		composerInputAtBottom: () => false,
 		session: {
 			getAsyncJobSnapshot: () => ({
 				running,
@@ -18,12 +24,13 @@ async function renderFullJobs(running: AsyncJobSnapshotItem[]): Promise<string[]
 				delivery: { queued: 0, delivering: false, pendingJobIds: [] },
 			}),
 		},
-		presentCommandOutput: (output: Component | Component[]) => {
-			presented = Array.isArray(output) ? output : [output];
-		},
 	} as unknown as InteractiveModeContext;
 	await new CommandController(ctx).handleJobsCommand({ full: true });
-	return presented.flatMap(component => component.render(WIDTH)).map(line => Bun.stripANSI(line).trimEnd());
+	return reportContainer
+		.render(WIDTH)
+		.map(line => Bun.stripANSI(line))
+		.filter(line => line.startsWith("│"))
+		.map(line => line.slice(2, -2).trimEnd());
 }
 
 describe("CommandController /jobs full", () => {
@@ -43,12 +50,38 @@ describe("CommandController /jobs full", () => {
 		const first = lines.findIndex(line => line.includes("bash-1"));
 		const second = lines.findIndex(line => line.includes("bash-2"));
 		const commandLines = lines.slice(first + 1, second);
-		// Header rows sit at the text padding; command lines sit two columns deeper.
-		expect(lines[first]).toMatch(/^ \S/);
+		// Job rows start the report body; command lines sit two columns deeper.
+		expect(lines[first]).toMatch(/^\S/);
 		expect(commandLines.length).toBeGreaterThan(4);
-		for (const line of commandLines) expect(line).toMatch(/^ {3}\S/);
+		for (const line of commandLines) expect(line).toMatch(/^ {2}\S/);
 		expect(commandLines.map(line => line.trim()).join(" ")).toContain("import sys EOF python /tmp/x.py --flag");
 		expect(commandLines.at(-1)).toEndWith("END");
-		expect(lines[second + 1]).toBe("   sleep 5");
+		expect(lines[second + 1]).toBe("  sleep 5");
+	});
+});
+
+describe("CommandController /jobs natively", () => {
+	it("opens the live jobs sheet instead of writing a block into the transcript", async () => {
+		let sheets = 0;
+		const ctx = {
+			session: {
+				getAsyncJobSnapshot: () => ({
+					running: [],
+					recent: [],
+					delivery: { queued: 0, delivering: false, pendingJobIds: [] },
+				}),
+			},
+			showJobsSheet: () => sheets++,
+			presentCommandOutput: () => {
+				throw new Error("/jobs must not write into the transcript");
+			},
+		} as unknown as InteractiveModeContext;
+		setNativeRendering(true);
+		try {
+			await new CommandController(ctx).handleJobsCommand();
+		} finally {
+			setNativeRendering(false);
+		}
+		expect(sheets).toBe(1);
 	});
 });
