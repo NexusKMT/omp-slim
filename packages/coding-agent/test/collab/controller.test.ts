@@ -1487,6 +1487,72 @@ describe("CollabController", () => {
 		expect(await registry.listCollabHosts({ dir: tmp })).toMatchObject([{ generation: 3 }]);
 	});
 
+	describe("while the relay refuses the host's connection", () => {
+		/** Host connections fail the way Bun reports a refused TCP connect; guests are unaffected. */
+		let refusals = 0;
+		let hostAttempts = 0;
+		class Refusing extends FakeWebSocket {
+			constructor(url: string) {
+				super(url);
+				if (this.role !== "host") return;
+				hostAttempts++;
+				if (refusals <= 0) return;
+				refusals--;
+				// The base class opens on a microtask unless the socket already left CONNECTING.
+				this.readyState = FakeWebSocket.CLOSED;
+				queueMicrotask(() => this.onclose?.({ code: 1006, reason: "Failed to connect" }));
+			}
+		}
+
+		beforeEach(() => {
+			refusals = 0;
+			hostAttempts = 0;
+			globalThis.WebSocket = Refusing as unknown as typeof WebSocket;
+		});
+
+		it("retries the auto-start and publishes generation 1 once the relay answers", async () => {
+			refusals = 1;
+			const { ctx, state } = makeControllerContext({ autoStart: "control" });
+			controller = new CollabController(ctx);
+			controller.autoStart();
+
+			expect(await state.firstStatus.promise).toMatch(/auto-start failed: Failed to connect/);
+			await settled(publishSpy, 1);
+			await controller.idle();
+
+			expect(hostAttempts).toBe(2);
+			expect(controller.host).toBe(ctx.collabHost);
+			expect(await registry.listCollabHosts({ dir: tmp })).toMatchObject([
+				{ instanceId: controller.instanceId, generation: 1, sessionId: state.sessionId, access: "control" },
+			]);
+		});
+
+		it("backs off instead of reconnecting in a loop while the relay stays down", async () => {
+			vi.useFakeTimers();
+			try {
+				refusals = Number.POSITIVE_INFINITY;
+				const { ctx } = makeControllerContext({ autoStart: "control" });
+				controller = new CollabController(ctx);
+				controller.autoStart();
+				// The first failure relaunches at once; the second waits for the backoff.
+				await controller.idle();
+				await controller.idle();
+				expect(hostAttempts).toBe(2);
+				expect(ctx.collabHost).toBeUndefined();
+
+				vi.advanceTimersByTime(999);
+				await controller.idle();
+				expect(hostAttempts).toBe(2);
+				vi.advanceTimersByTime(1);
+				await controller.idle();
+				expect(hostAttempts).toBe(3);
+				expect(publishSpy).not.toHaveBeenCalled();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+	});
+
 	it("leaves a manual room ended on its own unhosted while auto-start is off", async () => {
 		const { ctx } = makeControllerContext({ autoStart: "off" });
 		controller = new CollabController(ctx);
