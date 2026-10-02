@@ -10,19 +10,16 @@
 
 - Keep settled responses reachable in scrollback while an ask panel is open, and keep the editor at the bottom after answering ([#12398](https://github.com/can1357/oh-my-pi/issues/12398), [#13993](https://github.com/can1357/oh-my-pi/pull/13993) by [@Dante-dan](https://github.com/Dante-dan)).
 - Hidden thinking blocks no longer leave a faint "Thought for Ns" row in Tern's native transcript; only the live "Thinking…" indicator shows while the model reasons.
-### Fixed
-
 - Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets or emphasis, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s. Emphasis or links nested a thousand levels deep still render slowly, for seconds per few KB: each level restyles the text inside it ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed arrow keys acting as Escape and terminal query replies appearing as typed text when running omp on Windows over SSH ([#14034](https://github.com/can1357/oh-my-pi/issues/14034)).
+- Fixed `/model` under an `enabledModels`/`--models` scope hiding every judge, search, image, and speech model and dropping their configured role assignments (JUDGE, WEB, IMAGE, …) ([#14016](https://github.com/can1357/oh-my-pi/issues/14016))
 
 ### Removed
 
 - Removed the internal `urlTokenPossible` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Removed the internal `autolinkSchemeScanIndex` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
-### Fixed
-
-- Fixed arrow keys acting as Escape and terminal query replies appearing as typed text when running omp on Windows over SSH ([#14034](https://github.com/can1357/oh-my-pi/issues/14034)).
 
 ## [18.4.9] - 2026-10-01
 
@@ -41,17 +38,6 @@
 - Fixed Shift+Enter and Ctrl+Enter prompt behavior in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, matching other platforms.
 - Improved the Tern native terminal experience across background jobs, settings, debugging, logs, extension management, interactive shell, and provider streams: views remain usable and navigable, preserve output and selection behavior, support keyboard scrolling, and keep key actions accessible.
 - Fixed multi-line labels in Background jobs and multi-line titles in native-terminal prompts so their formatting remains readable.
-- Fixed `/model` under an `enabledModels`/`--models` scope hiding every judge, search, image, and speech model and dropping their configured role assignments (JUDGE, WEB, IMAGE, …) ([#14016](https://github.com/can1357/oh-my-pi/issues/14016))
-- Reduced composer startup-cache disk writes: identical status, welcome, UI, recent-session, and LSP payloads no longer start a SQLite write, and closing the cache releases the database file on Windows ([#14008](https://github.com/can1357/oh-my-pi/pull/14008) by [@H4vC](https://github.com/H4vC))
-- Fixed Shift+Enter submitting the prompt and Ctrl+Enter inserting a newline in Windows Terminal 1.24 and earlier; Shift+Enter now inserts a newline and Ctrl+Enter sends a follow-up, as on other platforms ([#13975](https://github.com/can1357/oh-my-pi/pull/13975) by [@H4vC](https://github.com/H4vC))
-- Fixed Background jobs rows wrapping a multi-line label (heredoc commands) over several lines and breaking the job type mid-word (`bas`/`h`); labels now collapse to one truncated line and the type and elapsed never shrink
-### Fixed
-
-- Fixed the composer being unreachable while `/settings` is docked beside the transcript in Tern: clicking the composer now moves the keys there (the sheet stays open) and clicking the settings sheet brings them back, through the terminal's new `focus` event.
-- Fixed the key after Ctrl+A / ⌘A in Tern's composer only clearing the selection instead of replacing or deleting it, as with omp versions that dropped Tern's `edit` events: the TSP `hello` now announces `features: ["edit"]`, and Tern keeps a native selection only for programs that do.
-- Fixed `/debug`'s raw provider stream, recent logs and protocol test, the extension dashboard and the interactive bash console drawing as pre-rendered `rows` fallback grids in Tern: the stream is now a native page whose output follows its tail until you scroll away, with Copy raw / Close docked under it so they never scroll off, the logs a picker sheet (filter, level dots, time and pid columns, the entry under the cursor pretty-printed below, Copy / Select all / This process / Load older buttons), the dashboard a picker with providers as scopes and the inspector as its preview, and the console a sheet with its terminal screen, state and Force kill button.
-- Fixed PgUp/PgDn/Home/End (and ↑/↓ in the raw provider stream) doing nothing in Tern's native views, where the terminal owns scrolling: described nodes can carry a `scroll` request that omp sends as the new TSP `scroll` op to terminals advertising the `scroll` feature, so the stream page, the extension dashboard's inspector and Recent logs (whose page and Home/End keys now move the cursor) scroll from the keyboard; End follows the stream again.
-- Fixed native-terminal (TSP) hook selectors with a multi-line title (the `report_tool_issue` consent, `cfg://` change approvals, confirmations) losing their question's line breaks: the picker `subtitle` now keeps each extra title line on its own line.
 
 ## [18.4.8] - 2026-10-01
 

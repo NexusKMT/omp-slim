@@ -2,26 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed namespaced LiteLLM models such as `azure/gpt-5.6-sol-pro` showing raw IDs instead of catalog display names when the proxy supplies no friendly name ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
+- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
+- Fixed Claude Opus 5.5 conversations failing with a "bound to a different conversation" 400 after the system prompt changed. Opus 5.5 now gets Sonnet 5.5's prefix-bound thinking handling on every provider, and Bedrock asks the server to drop stale signed thinking instead of rejecting the request ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
+
 ## [18.4.9] - 2026-10-01
 
 ### Fixed
 
 - Fixed model catalog caching so unchanged catalogs refresh without unnecessary rewrites, and offline snapshots for endpoint-less models (such as Azure models) are now handled correctly across startups.
-### Added
-
-- Added a bundled GPT-6.1 Sol Codex reference; existing custom-provider discovery can now use its name, Codex-reference pricing, limits and reasoning metadata when the proxy omits them ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
-
-### Fixed
-
-- Fixed namespaced LiteLLM models such as `azure/gpt-5.6-sol-pro` showing raw IDs instead of catalog display names when the proxy supplies no friendly name ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
-### Fixed
-
-- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-### Fixed
-
-- Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
-- Fixed Claude Opus 5.5 conversations failing with a "bound to a different conversation" 400 after the system prompt changed. Opus 5.5 now gets Sonnet 5.5's prefix-bound thinking handling on every provider, and Bedrock asks the server to drop stale signed thinking instead of rejecting the request ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
-- Fixed the model cache rewriting multi-MB provider rows on every refresh: unchanged catalogs now only advance a small freshness record, routine replacements no longer zero-fill freed pages (secure delete stays on for the purge of possibly credential-bearing pre-v11 rows), rows from another app version or an older header-free schema (v11/v12) are ignored and replaced lazily instead of wiping the whole cache, and offline snapshots with endpoint-less models (e.g. Azure) are no longer written, rejected, and deleted on every startup ([#14007](https://github.com/can1357/oh-my-pi/pull/14007) by [@H4vC](https://github.com/H4vC))
 
 ## [18.4.6] - 2026-10-01
 
