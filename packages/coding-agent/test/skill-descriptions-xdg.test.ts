@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import * as fs from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, spyOn, vi } from "bun:test";
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { __resetProfileSnapshotForTests, getAgentDir, Snowflake, setAgentDir } from "@oh-my-pi/pi-utils";
@@ -26,22 +26,23 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
 			configDir = `.omp-skill-xdg-${Snowflake.next()}`;
 			agentDir = path.join(os.homedir(), configDir, "agent");
 			xdgData = path.join(tempRoot, "data");
-			await fs.mkdir(path.join(xdgData, "omp"), { recursive: true });
-			await fs.mkdir(agentDir, { recursive: true });
+			await fs.promises.mkdir(path.join(xdgData, "omp"), { recursive: true });
+			await fs.promises.mkdir(agentDir, { recursive: true });
 			process.env.PI_CONFIG_DIR = configDir;
 			delete process.env.PI_CODING_AGENT_DIR;
 			__resetProfileSnapshotForTests();
 		});
 
 		afterEach(async () => {
+			vi.restoreAllMocks();
 			for (const key of ENV_KEYS) {
 				const value = originalEnv[key];
 				if (value === undefined) delete process.env[key];
 				else process.env[key] = value;
 			}
 			setAgentDir(originalAgentDir);
-			await fs.rm(tempRoot, { recursive: true, force: true });
-			await fs.rm(path.join(os.homedir(), configDir), { recursive: true, force: true });
+			await fs.promises.rm(tempRoot, { recursive: true, force: true });
+			await fs.promises.rm(path.join(os.homedir(), configDir), { recursive: true, force: true });
 		});
 
 		it("adopts a legacy database, including uncheckpointed WAL rows, when XDG relocates it", () => {
@@ -54,6 +55,21 @@ describe.skipIf(process.platform !== "linux" && process.platform !== "darwin")(
 			using store = SkillDescriptionStore.open();
 
 			expect(store.path).toBe(path.join(xdgData, "omp", "skill-descriptions.db"));
+			expect(store.get("k")).toBe("compressed description");
+		});
+
+		it("still adopts the legacy database on filesystems without hard links", () => {
+			using legacy = SkillDescriptionStore.open(path.join(agentDir, "skill-descriptions.db"));
+			legacy.put("k", "compressed description");
+			const link = spyOn(fs, "linkSync").mockImplementation(() => {
+				throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+			});
+
+			process.env.XDG_DATA_HOME = xdgData;
+			setAgentDir(agentDir);
+			using store = SkillDescriptionStore.open();
+
+			expect(link).toHaveBeenCalled();
 			expect(store.get("k")).toBe("compressed description");
 		});
 

@@ -7,6 +7,7 @@ import {
 	getAgentDir,
 	getSkillDescriptionsDbPath,
 	isBunTestRuntime,
+	isEexist,
 	logger,
 	postmortem,
 	prompt,
@@ -165,9 +166,11 @@ function resolveSkillDescriptionsDbPath(agentDir?: string): string {
 /**
  * Best-effort one-time copy of a legacy SQLite database. `VACUUM INTO` takes a
  * consistent snapshot including uncheckpointed WAL frames, which a plain file
- * copy would drop; hard-linking the staged file into place never clobbers a
- * database another process adopted or created first. The legacy file stays for
- * older omp versions sharing the profile.
+ * copy would drop; hard-linking the staged file into place publishes it
+ * atomically and never clobbers a database another process adopted or created
+ * first. Where hard links are unsupported (some FUSE, exFAT, or network
+ * mounts) an exclusive copy keeps the no-clobber guarantee. The legacy file
+ * stays for older omp versions sharing the profile.
  */
 function adoptLegacyDatabase(legacyPath: string, dbPath: string): void {
 	if (legacyPath === dbPath || fs.existsSync(dbPath) || !fs.existsSync(legacyPath)) return;
@@ -181,7 +184,12 @@ function adoptLegacyDatabase(legacyPath: string, dbPath: string): void {
 		} finally {
 			legacy.close();
 		}
-		fs.linkSync(staging, dbPath);
+		try {
+			fs.linkSync(staging, dbPath);
+		} catch (error) {
+			if (isEexist(error)) return;
+			fs.copyFileSync(staging, dbPath, fs.constants.COPYFILE_EXCL);
+		}
 	} catch (error) {
 		logger.debug("Skill description cache not adopted", { legacyPath, dbPath, error: String(error) });
 	} finally {
