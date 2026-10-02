@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- Fixed `await completion(...)`, `await agent(...)` and `asyncio.gather(*handles)` in Python eval cells failing with `Missing session/run/name` ([#13999](https://github.com/can1357/oh-my-pi/pull/13999))
 - Fixed isolated tasks picking up edits that other agents or merges made in the parent checkout while the task was starting, which put unrelated changes on task branches
 - Fixed releasing a kept-alive isolated agent creating a duplicate `omp/task/*` branch for work that had already been merged
 - Fixed isolated task branch capture leaving full-checkout temporary worktrees and empty `omp/task/*` branches behind when interrupted
