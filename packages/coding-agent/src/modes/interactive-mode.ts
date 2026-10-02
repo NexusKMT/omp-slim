@@ -7229,6 +7229,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.transcriptMessageComponents = new WeakMap<AgentMessage, Component>();
 		this.chatContainer.dispose();
 		this.chatContainer.clear();
+		this.#commandController.resetContextView();
 	}
 
 	showStatus(message: string, options?: { dim?: boolean }): void {
