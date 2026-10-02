@@ -7,6 +7,13 @@
 ### Fixed
 
 - Fixed model catalog caching so unchanged catalogs refresh without unnecessary rewrites, and offline snapshots for endpoint-less models (such as Azure models) are now handled correctly across startups.
+### Added
+
+- Added a bundled GPT-6.1 Sol Codex reference; existing custom-provider discovery can now use its name, Codex-reference pricing, limits and reasoning metadata when the proxy omits them ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
+
+### Fixed
+
+- Fixed namespaced LiteLLM models such as `openai/gpt-6.1-sol` showing raw IDs instead of catalog display names when the proxy supplies no friendly name ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
 
 ## [18.4.6] - 2026-10-01
 
