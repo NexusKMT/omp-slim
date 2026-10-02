@@ -217,8 +217,8 @@ if (!globalThis.__omp_js_prelude_loaded__) {
 			return (await this._promise).done();
 		}
 
-		async wait(options) {
-			return (await this._promise).wait(options);
+		async wait(...args) {
+			return (await this._promise).wait(...args);
 		}
 
 		async cancel() {
