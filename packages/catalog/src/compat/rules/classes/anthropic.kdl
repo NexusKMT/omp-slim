@@ -59,6 +59,13 @@ class "anthropic" {
 	// to be re-verified against the API before it inherits the restriction.
 	family "opus" {
 		revision ">=5.5 <6" {
+			// Opus 5.5 binds signed thinking to the exact preceding conversation, so a
+			// replay fails once the system prompt, tools or earlier messages change.
+			// Like the Sonnet 5.5 rule, this one spans every provider, so it changes
+			// pruning, implicit prompt refreshes and thinking replay everywhere. On
+			// Bedrock Converse it also sends `block_binding` with its beta.
+			// https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+			thinking-prefix-binding #true
 			supports-forced-tool-choice #false
 		}
 	}
