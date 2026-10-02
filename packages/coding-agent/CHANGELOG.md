@@ -179,7 +179,7 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
-- Fixed the jevify magic-keyword notice still teaching the removed `judge()` handle/wait API — agents following its example failed on the first judge cell; the workflow and examples now use `judge_batch()` with `drain()` across cells ([#13588](https://github.com/can1357/oh-my-pi/issues/13588))
+- Fixed the jevify magic-keyword notice still teaching the removed `judge()` handle/wait API — agents following its example failed on the first judge cell; the workflow and examples now use `judge_batch()` with `drain()` across cells ([#13588](https://github.com/can1357/oh-my-pi/issues/13588), [#13698](https://github.com/can1357/oh-my-pi/pull/13698) by [@holny](https://github.com/holny))
 - Fixed hosted OpenAI web search on hosts that accept only string tool_choice values, such as Command Code ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
 ## [18.4.3] - 2026-09-28
