@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Fireworks model prices taken from other hosts or missing: discovered and bundled Fireworks models now use Fireworks' own models.dev prices, so `ember-1`, `nemotron-3-ultra-nvfp4`, `nemotron-lightning-3.5-30b-a3b`, and `qwen3.8-2.4t-a95b` no longer show as free and the costs of `deepseek-v4.1-flash`, `gpt-oss-120b`, `inkling`, and `qwen3.8-max` are corrected ([#14069](https://github.com/can1357/oh-my-pi/pull/14069) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.4.10] - 2026-10-02
 
 ### Fixed
