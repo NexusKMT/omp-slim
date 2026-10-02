@@ -9439,26 +9439,31 @@ export class AgentSession implements SettingsScope {
 	 *
 	 * With `entryId`, the new file instead holds only the root-to-entry path through that
 	 * transcript message, inclusive, plus the artifacts, and the transition runs like
-	 * {@link branch} (`session_before_branch`/`session_branch` hooks with `entryId` as the
-	 * last kept entry, agent messages rebuilt from the cut). That path throws
-	 * {@link SessionBusyError} while {@link isBusyForSnapshot} holds, checked before and
-	 * after the `session_before_branch` hook and again right before the cut.
+	 * {@link branch} (`session_before_branch`/`session_branch` hooks with reason `"fork"`,
+	 * agent messages rebuilt from the cut). A cut inside an assistant tool-call batch is
+	 * extended through the batch's recorded tool results (see {@link #resolveForkLeaf}), and
+	 * the hook's `entryId` is that last kept entry. An entry fork always requires an idle
+	 * session; `options.requireIdle` applies the same rule to the whole-session fork.
+	 * Either refusal throws {@link SessionBusyError} before any session state is discarded.
 	 * @returns true if completed, false if cancelled by hook or not persisting
 	 */
-	async fork(entryId?: string): Promise<boolean> {
+	async fork(entryId?: string, options?: { requireIdle?: boolean }): Promise<boolean> {
 		using _transition = this.#beginSessionTransition();
 		this.#assertVibeSessionTransitionAllowed("fork the session");
+		const requireIdleFor = entryId !== undefined || options?.requireIdle ? "fork the session" : undefined;
 		if (entryId !== undefined) {
 			if (this.sessionManager.getEntry(entryId)?.type !== "message") {
 				throw new Error(`Invalid entry ID for forking: ${entryId}`);
 			}
+			const leafId = this.#resolveForkLeaf(entryId);
 			// Await inside the `using` scope so the transition stays open until it settles.
 			// Kept tool results may cite `artifact://N`, so the fork carries the artifacts too.
-			return await this.#branchIntoNewSession(entryId, entryId, {
+			return await this.#branchIntoNewSession("fork", leafId, leafId, {
 				copyArtifacts: true,
-				requireIdleFor: "fork the session",
+				requireIdleFor,
 			});
 		}
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		const previousSessionFile = this.sessionFile;
 		const previousSessionId = this.sessionManager.getSessionId();
 
@@ -9477,6 +9482,8 @@ export class AgentSession implements SettingsScope {
 		await this.#bash.flushPending();
 		// Flush current session to ensure all entries are written
 		await this.sessionManager.flush();
+		// Work admitted during the hook or flush awaits would be copied mid-flight.
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		let advisorRecordersDetached = false;
 		try {
 			advisorRecordersDetached = true;
@@ -9530,6 +9537,51 @@ export class AgentSession implements SettingsScope {
 		} finally {
 			if (advisorRecordersDetached) this.#advisors.reattachRecorderFeeds();
 		}
+	}
+
+	/**
+	 * The last entry an entry fork keeps: `entryId`, extended through the recorded tool
+	 * results that answer the assistant tool-call batch it sits in, so a fork never ends on
+	 * tool calls whose results exist in the source session. Non-message entries between
+	 * results (labels, custom entries) are kept only when a later result follows them.
+	 */
+	#resolveForkLeaf(entryId: string): string {
+		const answered = new Set<string>();
+		let batch: AssistantMessage | undefined;
+		const path = this.sessionManager.getBranch(entryId);
+		for (let index = path.length - 1; index >= 0; index--) {
+			const entry = path[index];
+			if (entry.type !== "message") continue;
+			if (entry.message.role === "toolResult") {
+				answered.add(entry.message.toolCallId);
+				continue;
+			}
+			if (entry.message.role === "assistant") batch = entry.message;
+			break;
+		}
+		const pending = new Set<string>();
+		for (const block of batch?.content ?? []) {
+			if (block.type === "toolCall" && !answered.has(block.id)) pending.add(block.id);
+		}
+
+		let leafId = entryId;
+		let cursor = entryId;
+		while (pending.size > 0) {
+			const children = this.sessionManager.getChildren(cursor);
+			const result = children.findLast(
+				child =>
+					child.type === "message" && child.message.role === "toolResult" && pending.has(child.message.toolCallId),
+			);
+			if (result?.type === "message" && result.message.role === "toolResult") {
+				pending.delete(result.message.toolCallId);
+				leafId = cursor = result.id;
+				continue;
+			}
+			// Step over a lone bookkeeping entry; any message or fork in the tree ends the batch.
+			if (children.length !== 1 || children[0].type === "message") break;
+			cursor = children[0].id;
+		}
+		return leafId;
 	}
 
 	/** Move the active session and artifacts after enforcing mode transition invariants. */
@@ -11097,19 +11149,20 @@ export class AgentSession implements SettingsScope {
 
 		const selectedText = this.#extractUserMessageText(selectedEntry.message.content);
 		const selectedImages = this.#extractUserMessageImages(selectedEntry.message.content);
-		const completed = await this.#branchIntoNewSession(entryId, selectedEntry.parentId);
+		const completed = await this.#branchIntoNewSession("branch", entryId, selectedEntry.parentId);
 		return { selectedText, selectedImages, cancelled: !completed };
 	}
 
 	/**
 	 * Shared {@link branch}/{@link fork}(entryId) transition: moves the live session onto a
 	 * new session file holding the root-to-`leafId` path (an empty one when `leafId` is
-	 * null), emitting `session_before_branch`/`session_branch` for `entryId`.
+	 * null), emitting `session_before_branch`/`session_branch` with `reason` for `entryId`.
 	 * `copyArtifacts` goes to {@link SessionManager.createBranchedSession}; `requireIdleFor`
 	 * refuses with {@link SessionBusyError} naming that action unless the session is idle.
 	 * @returns false when a `session_before_branch` hook cancelled
 	 */
 	async #branchIntoNewSession(
+		reason: "branch" | "fork",
 		entryId: string,
 		leafId: string | null,
 		options?: { copyArtifacts?: boolean; requireIdleFor?: string },
@@ -11123,6 +11176,7 @@ export class AgentSession implements SettingsScope {
 		if (this.#extensionRunner?.hasHandlers("session_before_branch")) {
 			const result = (await this.#extensionRunner.emit({
 				type: "session_before_branch",
+				reason,
 				entryId,
 			})) as SessionBeforeBranchResult | undefined;
 
@@ -11134,15 +11188,20 @@ export class AgentSession implements SettingsScope {
 			if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		}
 
+		await this.#bash.flushPending();
+		// Flush pending writes before branching
+		await this.sessionManager.flush();
+		// Last refusal point. Nothing below is rolled back when the transition stops, so an
+		// idle-only snapshot refuses here, after the flush awaits but before any state of the
+		// old session (pending messages, async jobs, auto-learn capture) is discarded.
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
+
 		// Clear pending messages (bound to old session state)
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
 		this.#queuedMessageDrainBlocked = false;
 		this.#usagePreflightReadyForNextModelCall = false;
 
-		await this.#bash.flushPending();
-		// Flush pending writes before branching
-		await this.sessionManager.flush();
 		const bashTransition = this.#bash.beginSessionTransition();
 		this.#cancelOwnAsyncJobs();
 		this.#abortAutolearnCapture();
@@ -11154,9 +11213,8 @@ export class AgentSession implements SettingsScope {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
-				// Work admitted during the flush/drain awaits above would miss the snapshot.
-				if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
-				// Pending prompt setup belongs to the history being replaced.
+				// A prompt admitted during the drain awaits above belongs to the history
+				// being replaced; the generation bump drops its pending setup.
 				this.#promptGeneration++;
 				if (!leafId) {
 					const title = this.sessionManager.getSessionName();
@@ -11189,6 +11247,7 @@ export class AgentSession implements SettingsScope {
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
 					type: "session_branch",
+					reason,
 					previousSessionFile,
 				});
 			}
@@ -11233,6 +11292,7 @@ export class AgentSession implements SettingsScope {
 		if (this.#extensionRunner?.hasHandlers("session_before_branch")) {
 			const result = (await this.#extensionRunner.emit({
 				type: "session_before_branch",
+				reason: "btw",
 				entryId: leafId,
 			})) as SessionBeforeBranchResult | undefined;
 
@@ -11307,6 +11367,7 @@ export class AgentSession implements SettingsScope {
 			if (this.#extensionRunner) {
 				await this.#extensionRunner.emit({
 					type: "session_branch",
+					reason: "btw",
 					previousSessionFile,
 				});
 			}

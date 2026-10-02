@@ -97,7 +97,7 @@ describe("AgentSession.fork(entryId)", () => {
 
 		expect(await session.fork(forkAt)).toBe(false);
 
-		expect(emit).toHaveBeenCalledWith({ type: "session_before_branch", entryId: forkAt });
+		expect(emit).toHaveBeenCalledWith({ type: "session_before_branch", reason: "fork", entryId: forkAt });
 		expect(session.sessionFile).toBe(sourceFile);
 		expect(session.messages).toEqual(sourceMessages);
 		expect(await Bun.file(sourceFile).text()).toBe(sourceRaw);
@@ -142,9 +142,16 @@ describe("AgentSession.fork(entryId)", () => {
 		userEval.abort();
 	});
 
-	it("refuses when user work starts while the pre-cut flush awaits", async () => {
+	it("refuses when user work starts while the pre-cut flush awaits, keeping the old session's state", async () => {
 		const { session: seeded, forkAt } = await createSeededSession();
 		const sourceFile = seeded.sessionFile!;
+		// A running auto-learn capture is old-session state the transition would abort.
+		const capture = Promise.withResolvers<void>();
+		let captureSignal: AbortSignal | undefined;
+		const captureRun = seeded.runAutolearnCapture(async signal => {
+			captureSignal = signal;
+			await capture.promise;
+		});
 		const userEval = new AbortController();
 		const flush = seeded.sessionManager.flush.bind(seeded.sessionManager);
 		vi.spyOn(seeded.sessionManager, "flush").mockImplementation(async () => {
@@ -156,9 +163,75 @@ describe("AgentSession.fork(entryId)", () => {
 		await expect(seeded.fork(forkAt)).rejects.toBeInstanceOf(SessionBusyError);
 
 		expect(seeded.sessionFile).toBe(sourceFile);
+		expect(captureSignal?.aborted).toBe(false);
 		expect((await fs.readdir(path.dirname(sourceFile))).filter(name => name.endsWith(".jsonl"))).toEqual([
 			path.basename(sourceFile),
 		]);
 		userEval.abort();
+		capture.resolve();
+		await captureRun;
+	});
+
+	it("refuses a whole-session fork that requires idle when user work starts while the flush awaits", async () => {
+		const { session: seeded } = await createSeededSession();
+		const sourceFile = seeded.sessionFile!;
+		const userEval = new AbortController();
+		const flush = seeded.sessionManager.flush.bind(seeded.sessionManager);
+		vi.spyOn(seeded.sessionManager, "flush").mockImplementation(async () => {
+			seeded.trackEvalExecution(Promise.withResolvers<void>().promise, userEval).catch(() => undefined);
+			await flush();
+		});
+
+		await expect(seeded.fork(undefined, { requireIdle: true })).rejects.toBeInstanceOf(SessionBusyError);
+
+		expect(seeded.sessionFile).toBe(sourceFile);
+		expect((await fs.readdir(path.dirname(sourceFile))).filter(name => name.endsWith(".jsonl"))).toEqual([
+			path.basename(sourceFile),
+		]);
+		userEval.abort();
+	});
+
+	it.each([
+		["the assistant tool-call message", "batch"],
+		["a mid-batch tool result", "firstResult"],
+	] as const)("extends a cut at %s through the batch's recorded results", async (_label, cutAt) => {
+		const emit = vi.fn(async (_event: { type: string }) => undefined);
+		const extensionRunner = {
+			hasHandlers: (eventType: string) => eventType === "session_before_branch",
+			emit,
+		} as unknown as ExtensionRunner;
+		const { session } = await createSeededSession(extensionRunner);
+		const manager = session.sessionManager;
+		const toolResult = (toolCallId: string) => ({
+			role: "toolResult" as const,
+			toolCallId,
+			toolName: "read",
+			content: [{ type: "text" as const, text: `result ${toolCallId}` }],
+			isError: false,
+			timestamp: Date.now(),
+		});
+		const ids = {
+			batch: manager.appendMessage({
+				...assistantMsg("reading"),
+				content: [
+					{ type: "toolCall", id: "call-a", name: "read", arguments: { path: "a" } },
+					{ type: "toolCall", id: "call-b", name: "read", arguments: { path: "b" } },
+				],
+				stopReason: "toolUse",
+			}),
+			firstResult: manager.appendMessage(toolResult("call-a")),
+		};
+		// A label between results is a non-message entry the cut steps over.
+		manager.appendLabelChange(ids.firstResult, "checked");
+		const lastResult = manager.appendMessage(toolResult("call-b"));
+		manager.appendMessage({ role: "user", content: "after the batch", timestamp: Date.now() });
+		session.agent.replaceMessages(manager.buildSessionContext().messages);
+
+		expect(await session.fork(ids[cutAt])).toBe(true);
+
+		const kept = session.sessionManager.getBranch().filter(entry => entry.type === "message");
+		expect(kept.at(-1)?.id).toBe(lastResult);
+		expect(session.messages.at(-1)).toMatchObject({ role: "toolResult", toolCallId: "call-b" });
+		expect(emit).toHaveBeenCalledWith({ type: "session_before_branch", reason: "fork", entryId: lastResult });
 	});
 });

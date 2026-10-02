@@ -127,7 +127,7 @@ Hook events are strongly typed in `types.ts`.
 - `session_tree`
 - `session_shutdown`
 
-`session_before_branch.entryId` depends on the caller. For `branch(entryId)` it is the user message being rewound: it and everything after it are dropped. For `AgentSession.fork(entryId)` (RPC `fork` with an `entryId`) and `/btw` branches it is the last entry kept in the new session.
+`session_before_branch` and `session_branch` carry `reason`, which decides what `session_before_branch.entryId` means. For `"branch"` (`branch(entryId)`, `/branch`) it is the user message being rewound: it and everything after it are dropped. For `"fork"` (`AgentSession.fork(entryId)`, RPC `fork` with an `entryId`) and `"btw"` (`/btw` promotion) it is the last entry kept in the new session.
 
 ### Agent/context events
 

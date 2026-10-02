@@ -796,7 +796,9 @@ export async function handleRpcSessionChange(
 		}
 
 		case "fork": {
-			const cancelled = !(await session.fork(command.entryId));
+			// RPC forks are snapshots: refuse while work could still write into the transcript.
+			// fork() rechecks after its awaits; interactive /fork keeps carrying running bash across.
+			const cancelled = !(await session.fork(command.entryId, { requireIdle: true }));
 			if (!cancelled) subagentRegistry?.clear();
 			return { type: "fork", data: { cancelled } };
 		}
@@ -1788,8 +1790,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "switch_session":
 			case "branch":
 			case "fork": {
-				// A fork snapshots the transcript. The whole-session fork() carries running
-				// work across for /fork, so RPC applies the snapshot idle check to both variants.
+				// Fast refusal before the goal controller voids a waiting continuation;
+				// fork() repeats the check after each of its own awaits.
 				if (command.type === "fork" && session.isBusyForSnapshot) {
 					return error(id, "fork", new SessionBusyError("fork the session").message, "session_busy");
 				}
@@ -1798,7 +1800,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				try {
 					result = await handleRpcSessionChange(session, command, subagentRegistry);
 				} catch (err) {
-					// Also raised by fork(entryId) when work starts while its transition awaits.
+					// fork() refuses when work started while its transition awaited.
 					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
 					throw err;
 				} finally {

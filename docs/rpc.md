@@ -231,7 +231,7 @@ correlate it via `id`. Ordering across concurrent commands is not guaranteed
 
 `handoff` fails while a response is streaming. On success, its payload is `{ savedPath? }` or `null` when no handoff was produced. Session transitions (`new_session`, `switch_session`, `branch`, `fork`, `open_session`) report cancellation when an extension prevents the transition.
 
-`fork` moves the process onto a new session file and returns `{ cancelled }`; read the new `sessionFile`/`sessionId` with `get_state`. With `entryId` (any `message` entry from `get_entries`, such as a user or assistant message), the new file holds the root-to-entry path including that entry plus the session's artifacts, so kept `artifact://` references still resolve, and its header's `parentSession` is the old session file; this runs `session_before_branch`/`session_branch` hooks, with `entryId` as the last kept entry. Without `entryId` it copies the whole session and its artifacts (`/fork`), records the old session id as `parentSession`, runs `session_before_switch`/`session_switch` with reason `"fork"`, and reports `cancelled: true` when the session is not persisted. A non-message `entryId` fails, and `fork` fails with `code: "session_busy"` while a response is streaming or bash, eval, compaction, handoff, or retry work is running. The Python client exposes `fork(entry_id=None) -> CancellationResult`.
+`fork` moves the process onto a new session file and returns `{ cancelled }`; read the new `sessionFile`/`sessionId` with `get_state`. With `entryId` (any `message` entry from `get_entries`, such as a user or assistant message), the new file holds the root-to-entry path including that entry plus the session's artifacts, so kept `artifact://` references still resolve, and its header's `parentSession` is the old session file. When `entryId` sits inside an assistant tool-call batch (the assistant message itself, or one of its tool results), the cut extends through the batch's recorded tool results so the fork never ends on tool calls whose results were dropped. This runs `session_before_branch`/`session_branch` hooks with reason `"fork"`, and the hook's `entryId` is the last kept entry. Without `entryId` it copies the whole session and its artifacts (`/fork`), records the old session id as `parentSession`, runs `session_before_switch`/`session_switch` with reason `"fork"`, and reports `cancelled: true` when the session is not persisted. A non-message `entryId` fails. Both variants fail with `code: "session_busy"` while a response is streaming or bash, eval, compaction, handoff, or retry work is running, including work that starts while the fork's hooks or flushes are awaited; a refused fork keeps the current session, its transcript, and its queued next-turn messages and background jobs. The Python client exposes `fork(entry_id=None) -> CancellationResult`.
 
 ### Messages
 
@@ -490,7 +490,7 @@ turn, sent as a hidden `goal-continuation` message.
   for example) re-arms it.
 - A session change leaves the previous goal and its tool behind and restores a goal
   journaled in the target session. This covers `new_session`, `switch_session`,
-  `branch` and `open_session`, and the same changes made by extension commands. As
+  `branch`, `fork` and `open_session`, and the same changes made by extension commands. As
   in the TUI, an active goal stays active across such a change and continues; a goal
   restored when the process starts is paused until `goal resume`. A change is
   detected by the transcript id, so a host-pinned `--provider-session-id` does not
