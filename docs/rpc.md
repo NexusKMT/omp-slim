@@ -436,7 +436,8 @@ is re-armed.
     "tokens": 1100,
     "contextWindow": 200000,
     "percent": 0.55
-  }
+  },
+  "goal": null
 }
 ```
 
@@ -478,17 +479,22 @@ turn, sent as a hidden `goal-continuation` message.
 - While the turn is decided but not yet started, `get_state.isSettled`,
   `prompt_result.sessionSettled` and `session_settled` treat the session as busy.
   `session_settled` follows if the continuation is abandoned.
-- `abort` stops continuation before the abort takes effect; the interrupted goal is
-  paused. Continuation also stops after a goal turn with no new tool activity.
-  Either way, the next host prompt, steer or follow-up (or `goal resume`) re-arms it.
+- `abort` stops continuation before the abort takes effect and pauses the
+  interrupted goal, so a later prompt does not restart it; only `goal resume` does
+  (or `drop` and a new `create`).
+- Continuation also stops after a goal turn with no new tool activity. The next
+  turn that is not itself a goal continuation (a host prompt, steer or follow-up,
+  for example) re-arms it.
 - A session change leaves the previous goal and its tool behind and restores a goal
   journaled in the target session. This covers `new_session`, `switch_session`,
-  `branch` and `open_session`, and the same changes made by extension commands. A
-  change is detected by the transcript id, so a host-pinned `--provider-session-id`
-  does not hide it. A goal turn that is waiting or becomes due while a change is in
-  progress is held. If the change is cancelled, or leaves the session unchanged
-  (tree navigation, reopening the open session), the goal continues. While such a
-  turn is held, the session is not reported as settled.
+  `branch` and `open_session`, and the same changes made by extension commands. As
+  in the TUI, an active goal stays active across such a change and continues; a goal
+  restored when the process starts is paused until `goal resume`. A change is
+  detected by the transcript id, so a host-pinned `--provider-session-id` does not
+  hide it. A goal turn that is waiting or becomes due while a change is in progress
+  is held. If the change is cancelled, or leaves the session unchanged (tree
+  navigation, reopening the open session), the goal continues. While such a turn is
+  held, the session is not reported as settled.
 
 When the agent completes the goal, the goal tool is removed again and
 `get_state.goal` becomes `null`.

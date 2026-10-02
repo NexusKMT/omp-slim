@@ -188,18 +188,19 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 					},
 					{ detachesRun: true },
 				),
-			// Reload reopens the session file (switchSession), detaching a live run; it throws
-			// when cancelled, and the wrapper's cleanup still runs.
+			// Reload reopens the session file (as `session.reload()` does), detaching a live run;
+			// it throws when cancelled, after the wrapper has seen the change as cancelled.
 			reload: async () => {
-				await wrapSessionChange(
+				const result = await wrapSessionChange(
 					async () => {
 						// Without a session file reload is a no-op and nothing is detached.
-						if (!session.sessionFile) return { cancelled: true };
-						await session.reload();
-						return { cancelled: false };
+						const sessionFile = session.sessionFile;
+						if (!sessionFile) return { cancelled: true };
+						return { cancelled: !(await session.switchSession(sessionFile)) };
 					},
 					{ detachesRun: true },
 				);
+				if (result.cancelled && session.sessionFile) throw new Error("Session reload cancelled");
 			},
 			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 		},

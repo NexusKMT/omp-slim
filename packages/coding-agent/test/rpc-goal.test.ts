@@ -22,6 +22,18 @@ function nextMacrotask(): Promise<void> {
 	return promise;
 }
 
+/**
+ * The rejection of a request to the RPC child. Settled before `expect` sees it:
+ * `expect(pending).rejects` against a live child-process request can stall until the
+ * request times out (observed with Bun 1.4.2 on Windows).
+ */
+async function rejectionOf(request: Promise<unknown>): Promise<unknown> {
+	return await request.then(
+		() => new Error("expected the request to fail"),
+		(error: unknown) => error,
+	);
+}
+
 describe("RPC goal command", () => {
 	let client: RpcClient | undefined;
 	let directory: string | undefined;
@@ -75,9 +87,8 @@ describe("RPC goal command", () => {
 
 	test("plan mode refuses create and resume", async () => {
 		const rpc = await start({ continuation: true, plan: true });
-		await expect(rpc.goal("create", { objective: "not while planning" })).rejects.toThrow(
-			"Exit plan mode before starting a goal.",
-		);
+		const refused = await rejectionOf(rpc.goal("create", { objective: "not while planning" }));
+		expect(refused).toMatchObject({ command: "goal", message: "Exit plan mode before starting a goal." });
 		const state = await rpc.getState();
 		expect(state.goal).toBeNull();
 		expect(state.messageCount).toBe(0);
@@ -104,19 +115,20 @@ describe("RPC goal command", () => {
 
 	test("create refuses a second goal, a paused goal, and invalid input; pause/resume/drop restore tools", async () => {
 		const rpc = await start({ continuation: false });
-		await expect(rpc.goal("create", { objective: "   " })).rejects.toMatchObject({ command: "goal" });
-		await expect(rpc.goal("create", { objective: "x", tokenBudget: 0 })).rejects.toMatchObject({ command: "goal" });
-		await expect(rpc.goal("resume")).rejects.toMatchObject({ command: "goal" });
+		const refused = { command: "goal" };
+		expect(await rejectionOf(rpc.goal("create", { objective: "   " }))).toMatchObject(refused);
+		expect(await rejectionOf(rpc.goal("create", { objective: "x", tokenBudget: 0 }))).toMatchObject(refused);
+		expect(await rejectionOf(rpc.goal("resume"))).toMatchObject(refused);
 
 		const toolsBefore = (await rpc.getState()).dumpTools?.map(tool => tool.name) ?? [];
 		expect(toolsBefore).not.toContain("goal");
 		await rpc.goal("create", { objective: "first" });
-		await expect(rpc.goal("create", { objective: "second" })).rejects.toMatchObject({ command: "goal" });
+		expect(await rejectionOf(rpc.goal("create", { objective: "second" }))).toMatchObject(refused);
 
 		const paused = await rpc.goal("pause");
 		expect(paused.goal?.status).toBe("paused");
 		expect((await rpc.getState()).dumpTools?.map(tool => tool.name)).toEqual(toolsBefore);
-		await expect(rpc.goal("create", { objective: "second" })).rejects.toMatchObject({ command: "goal" });
+		expect(await rejectionOf(rpc.goal("create", { objective: "second" }))).toMatchObject(refused);
 
 		const resumed = await rpc.goal("resume");
 		expect(resumed.goal).toMatchObject({ objective: "first", status: "active" });
@@ -231,6 +243,58 @@ describe("RPC goal command", () => {
 		const fresh = await rpc.getState();
 		expect(fresh.goal).toBeNull();
 		expect(fresh.dumpTools?.map(tool => tool.name)).not.toContain("goal");
+	}, 30_000);
+
+	async function branchAt(rpc: RpcClient, text: string): Promise<void> {
+		const entry = (await rpc.getBranchMessages()).find(message => message.text === text);
+		if (!entry) throw new Error(`No branch message "${text}"`);
+		expect((await rpc.branch(entry.entryId)).cancelled).toBe(false);
+	}
+
+	async function untilSettled(rpc: RpcClient, label: string, action: () => Promise<unknown>): Promise<void> {
+		const settled = Promise.withResolvers<void>();
+		const unsubscribe = rpc.onSessionSettled(() => settled.resolve());
+		try {
+			await action();
+			await withTimeout(settled.promise, 15_000, `${label} never settled`);
+		} finally {
+			unsubscribe();
+		}
+	}
+
+	test("branching within the process keeps an active goal active", async () => {
+		const rpc = await start({ continuation: false, script: "idle", persist: true });
+		await rpc.promptAndWait("first");
+		await rpc.goal("create", { objective: "survives a branch" });
+		await rpc.promptAndWait("second");
+		await rpc.promptAndWait("third");
+		await branchAt(rpc, "third");
+
+		const state = await rpc.getState();
+		expect(state.goal?.goal).toMatchObject({ objective: "survives a branch", status: "active" });
+		expect(state.goal?.enabled).toBe(true);
+		expect(state.dumpTools?.map(tool => tool.name)).toContain("goal");
+		const { entries } = await rpc.getEntries();
+		// The branch journaled no pause.
+		expect(entries.flatMap(entry => (entry.type === "mode_change" ? [entry.mode] : []))).toEqual(["goal"]);
+	}, 30_000);
+
+	test("with rpc continuation opted in, the goal continues in the branch", async () => {
+		const rpc = await start({ continuation: true, script: "idle", persist: true });
+		await untilSettled(rpc, "First prompt", () => rpc.promptAndWait("first"));
+		// Each goal turn makes no progress, so one continuation follows create and each host prompt.
+		await untilSettled(rpc, "Goal create", () => rpc.goal("create", { objective: "continues in the branch" }));
+		await untilSettled(rpc, "Second prompt", () => rpc.promptAndWait("second"));
+		// The branch keeps "first" and the create's continuation, and drops "second" and its continuation.
+		await untilSettled(rpc, "Branch", () => branchAt(rpc, "second"));
+
+		const state = await rpc.getState();
+		expect(state.goal?.goal.status).toBe("active");
+		expect(state.isSettled).toBe(true);
+		const continuations = (await rpc.getMessages()).filter(
+			message => message.role === "custom" && message.customType === "goal-continuation",
+		);
+		expect(continuations).toHaveLength(2);
 	}, 30_000);
 
 	test("an extension session change aborts the detached run's prompt; the command's own result is unaffected", async () => {
@@ -375,6 +439,7 @@ describe("RpcGoalController continuation gate", () => {
 		let resumed = Promise.withResolvers<void>();
 		resumed.resolve();
 		let threadResumes = 0;
+		const preservedActive: boolean[] = [];
 		const transcript = { id: "t1" };
 		const session = {
 			settings: Settings.isolated({ "goal.continuationModes": ["rpc"] }),
@@ -422,8 +487,9 @@ describe("RpcGoalController continuation gate", () => {
 			goalRuntime: {
 				buildContinuationPrompt: () => "continue",
 				clearAccounting: () => {},
-				onThreadResumed: async () => {
+				onThreadResumed: async (options?: { preserveActiveGoal?: boolean }) => {
 					threadResumes++;
+					preservedActive.push(options?.preserveActiveGoal === true);
 					await resumed.promise;
 					return goalState;
 				},
@@ -454,6 +520,8 @@ describe("RpcGoalController continuation gate", () => {
 			goalState: () => goalState,
 			tools: () => tools,
 			threadResumes: () => threadResumes,
+			/** `preserveActiveGoal` of each `onThreadResumed` call, in order. */
+			preservedActive: () => preservedActive,
 			journalGoal: () => {
 				journaledGoal = true;
 			},
@@ -781,5 +849,44 @@ describe("RpcGoalController continuation gate", () => {
 		await endExtension;
 		await done;
 		expect(f.threadResumes()).toBe(2);
+	});
+
+	test("the startup reattach lets the runtime pause an active goal; an in-process change preserves it", async () => {
+		const f = fakeSession(async () => true);
+		f.journalGoal();
+		await f.controller.reconcile();
+		await f.controller.beginSessionChange();
+		f.transcript.id = "t2";
+		await f.controller.endSessionChange();
+		await f.controller.settled();
+		expect(f.preservedActive()).toEqual([false, true]);
+	});
+
+	test("a change that detached a continuation turn does not count the next turn as a continuation", async () => {
+		const admitted: string[] = [];
+		const { controller } = fakeSession(async customType => {
+			admitted.push(customType);
+			return true;
+		});
+		// A yield admits continuation #1.
+		controller.observe(agentEnd);
+		await nextMacrotask();
+		expect(admitted).toEqual(["goal-continuation"]);
+
+		// A reload reopens the same transcript and detaches that turn: its terminal agent_end never comes.
+		await controller.beginSessionChange();
+		await controller.endSessionChange({ detachedRun: true });
+		await nextMacrotask();
+		// The goal resumes with continuation #2, which makes no progress, so continuation stops.
+		expect(admitted).toEqual(["goal-continuation", "goal-continuation"]);
+		controller.observe(agentEnd);
+		await nextMacrotask();
+		expect(admitted).toHaveLength(2);
+
+		// A turn nobody prompted ends. It is not a continuation (#1 was detached), so as after
+		// any no-progress stop the goal continues.
+		controller.observe(agentEnd);
+		await nextMacrotask();
+		expect(admitted).toEqual(["goal-continuation", "goal-continuation", "goal-continuation"]);
 	});
 });

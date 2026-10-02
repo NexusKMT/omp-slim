@@ -111,9 +111,9 @@ export class RpcGoalController {
 
 	/**
 	 * The host interrupted the session (`abort`). Stop automatic continuation until
-	 * the host acts again (a prompt, steer, follow-up, or `goal resume`/`create`).
-	 * Called before the abort starts, so the aborted run's own `agent_end` cannot
-	 * schedule another goal turn. The runtime separately pauses the interrupted goal.
+	 * the host acts again. Called before the abort starts, so the aborted run's own
+	 * `agent_end` cannot schedule another goal turn. The runtime separately pauses the
+	 * interrupted goal, so in practice only `goal resume`/`create` restarts it.
 	 */
 	stopForHostAbort(): void {
 		this.#hostStopped = true;
@@ -161,12 +161,20 @@ export class RpcGoalController {
 
 	/**
 	 * Call after the change resolves, is cancelled, or throws. Only a change that
-	 * actually switched the transcript adopts the target session's goal. A cancelled
-	 * or no-op change (same session, for example tree navigation or reopening the
-	 * open session) leaves the running goal untouched and resumes continuation.
-	 * Never throws; settlement is re-checked afterwards.
+	 * actually switched the transcript adopts the target session's goal; an active
+	 * goal stays active across it, as in the TUI. A cancelled or no-op change (same
+	 * session, for example tree navigation or reopening the open session) leaves the
+	 * running goal untouched and resumes continuation.
+	 *
+	 * `detachedRun`: the change stopped the running agent (new, switch, reload). A
+	 * detached continuation turn never reaches its terminal `agent_end`, so it no
+	 * longer counts as pending. Never throws; settlement is re-checked afterwards.
 	 */
-	async endSessionChange(): Promise<void> {
+	async endSessionChange(options?: { detachedRun?: boolean }): Promise<void> {
+		if (options?.detachedRun) {
+			this.#pendingContinuationTurns = 0;
+			this.#previousContinuationActivity = undefined;
+		}
 		if (--this.#sessionChanges > 0) return;
 		const switched =
 			this.#changeOverlappedReconcile || this.#session.sessionManager.getSessionId() !== this.#sessionBeforeChange;
@@ -178,13 +186,14 @@ export class RpcGoalController {
 				// A reconcile is running, possibly the one whose extension notification
 				// started this change: queue behind it without waiting, or the two would
 				// wait on each other. Settlement is re-checked once it has run.
-				void this.reconcile()
+				void this.reconcile({ preserveActiveGoal: true })
+					.then(() => this.#scheduleContinuation())
 					.catch(reportControllerError)
 					.finally(() => this.#onContinuationDropped?.());
 				return;
 			}
-			if (switched) await this.reconcile();
-			else this.#scheduleContinuation();
+			if (switched) await this.reconcile({ preserveActiveGoal: true });
+			this.#scheduleContinuation();
 		} catch (error) {
 			reportControllerError(error);
 		}
@@ -303,20 +312,22 @@ export class RpcGoalController {
 	/**
 	 * Leave the previous session's goal behind and restore a goal journaled in the
 	 * current session (startup, new/switch/branch/open), mirroring the TUI's reattach.
+	 * `preserveActiveGoal` keeps an active goal active (in-process session changes);
+	 * without it an active goal is paused (startup, a resumed process).
 	 * Queued behind any reconcile already running; resolves when this one has run.
 	 * Never awaited from {@link beginSessionChange}: `onThreadResumed` notifies
 	 * extensions, which may start another change.
 	 */
-	async reconcile(): Promise<void> {
+	async reconcile(options?: { preserveActiveGoal?: boolean }): Promise<void> {
 		this.#reconcilesPending++;
-		const run = this.#reconcileTask.then(() => this.#reconcileOnce());
+		const run = this.#reconcileTask.then(() => this.#reconcileOnce(options));
 		this.#reconcileTask = run.catch(reportControllerError).finally(() => {
 			this.#reconcilesPending--;
 		});
 		await run;
 	}
 
-	async #reconcileOnce(): Promise<void> {
+	async #reconcileOnce(options: { preserveActiveGoal?: boolean } | undefined): Promise<void> {
 		// Goal state and the goal tool belong to the session that set them; the
 		// session itself keeps both across a switch, so clear them here first.
 		this.#continuationScheduled = false;
@@ -337,7 +348,7 @@ export class RpcGoalController {
 			return;
 		}
 		this.#session.setGoalModeState({ enabled: context.mode === "goal", mode: "active", goal });
-		const restored = await runtime.onThreadResumed();
+		const restored = await runtime.onThreadResumed({ preserveActiveGoal: options?.preserveActiveGoal });
 		if (!restored?.goal) return;
 		const previousTools = this.#session.getEnabledToolNames();
 		this.#previousTools = previousTools;

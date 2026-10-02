@@ -1481,7 +1481,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				return result;
 			} finally {
 				// Reattaches only if the session actually changed, then re-checks settlement.
-				await goalController.endSessionChange();
+				// A change that throws may already have detached the run: count it as detached.
+				await goalController.endSessionChange({ detachedRun: detachesRun && result?.cancelled !== true });
 				if (result && !result.cancelled) {
 					// As for the host's new/switch commands: a detached run never yields, so
 					// close the prompts it was answering. Branch and navigation leave a live
@@ -1783,7 +1784,9 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				try {
 					result = await handleRpcSessionChange(session, command, subagentRegistry);
 				} finally {
-					await goalController.endSessionChange();
+					await goalController.endSessionChange({
+						detachedRun: command.type !== "branch" && result?.data.cancelled !== true,
+					});
 					// Respond only once this change's reattach (and any queued ahead of it) has run.
 					await goalController.settled();
 				}
@@ -1805,7 +1808,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				try {
 					result = await openRpcSession(session, command.sessionDir, subagentRegistry);
 				} finally {
-					await goalController.endSessionChange();
+					// Opening the session that is already open leaves a live run going (see below).
+					await goalController.endSessionChange({ detachedRun: session.sessionFile !== fileBeforeOpen });
 					// Respond only once this change's reattach (and any queued ahead of it) has run.
 					await goalController.settled();
 				}
