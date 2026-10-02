@@ -51,6 +51,26 @@ describe("resolveEditMode", () => {
 		expect(resolveEditMode(createSession({ activeModel: "openrouter/moonshotai/Kimi-K2-Instruct" }))).toBe("replace");
 	});
 
+	test("falls back for K3 selectors without changing ordinary model edit mode", () => {
+		for (const activeModel of ["k3", "kimi-code/k3", "kimi-coding/k3"]) {
+			expect(resolveEditMode(createSession({ activeModel }))).toBe("replace");
+		}
+		expect(resolveEditMode(createSession({ activeModel: "openai/gpt-5.5" }))).toBe("hashline");
+	});
+
+	test("keeps explicit K3 edit-mode overrides ahead of the fallback", () => {
+		const activeModel = "kimi-code/k3";
+		expect(resolveEditMode(createSession({ activeModel, modelVariant: "hashline" }))).toBe("hashline");
+		expect(resolveEditMode(createSession({ activeModel, settingsMode: "apply_patch" }))).toBe("apply_patch");
+
+		Bun.env.PI_EDIT_VARIANT = "hashline";
+		expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+		delete Bun.env.PI_EDIT_VARIANT;
+
+		Bun.env.PI_STRICT_EDIT_MODE = "1";
+		expect(resolveEditMode(createSession({ activeModel }))).toBe("hashline");
+	});
+
 	test("falls back from hashline to replace for MiMo models", () => {
 		delete Bun.env.PI_EDIT_VARIANT;
 
