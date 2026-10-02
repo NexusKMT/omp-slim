@@ -114,7 +114,28 @@ export interface Args {
 	invalidFlagValues: string[];
 }
 
-/** Reject conflicting startup inputs before constructing an interactive session. */
+/**
+ * Reject a `--goal` launch whose mode or session shape cannot host a fresh
+ * interactive goal. Judged on the startup parse, before session resolution:
+ * resume, fork, and import act on these same flags as they resolve, opening
+ * pickers and persisting forked or imported transcripts, so a rejection after
+ * them would leave those side effects behind.
+ */
+export function validateGoalLaunch(args: Args, interactive: boolean): void {
+	if (args.goal === undefined) return;
+	if (!interactive) {
+		throw new CliUsageError("--goal requires an interactive terminal (not --print or --mode).");
+	}
+	if (args.continue || args.resume || args.fork || args.fromClaude || args.fromCodex) {
+		throw new CliUsageError("--goal requires a fresh session (no resume, continue, fork, or import).");
+	}
+}
+
+/**
+ * Reject conflicting startup inputs before constructing an interactive goal
+ * session. Runs on the extension-aware reparse: an extension flag's value can
+ * look like a positional prompt to the startup parse.
+ */
 export function validateGoalStartup(
 	args: Args,
 	goalEnabled: boolean,
@@ -130,9 +151,6 @@ export function validateGoalStartup(
 	}
 	if (planStartsOnStartup) {
 		throw new CliUsageError("--goal cannot be combined with plan.defaultOnStartup; disable startup plan mode first.");
-	}
-	if (args.continue || args.resume || args.fork || args.fromClaude || args.fromCodex) {
-		throw new CliUsageError("--goal requires a fresh session (no resume, continue, fork, or import).");
 	}
 	if (!goalEnabled) {
 		throw new CliUsageError("--goal requires goal.enabled to be enabled.");

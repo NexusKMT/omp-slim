@@ -28,6 +28,7 @@ import {
 	type Args,
 	reportInvalidFlagValues,
 	reportUnrecognizedFlags,
+	validateGoalLaunch,
 	validateGoalStartup,
 	validateToolNames,
 } from "./cli/args";
@@ -1788,9 +1789,10 @@ export async function runRootCommand(
 		const autoPrint =
 			(pipedInput !== undefined || !stdinIsTerminal) && !parsedArgs.print && parsedArgs.mode === undefined;
 		const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
-		if (parsedArgs.goal !== undefined && mode === "acp") {
-			throw new CliUsageError("--goal requires an interactive terminal (not --print or --mode).");
-		}
+		// Before session resolution: resume, fork, and import act on these same
+		// startup-parse flags, so rejecting later would leave forked or imported
+		// transcripts (or an opened picker) behind a usage error.
+		validateGoalLaunch(parsedArgs, isInteractive);
 		// Without piped text the prompt must come from argv, which only the
 		// post-extension reparse can settle: an extension string flag's value
 		// (`--spawn-peer reviewer`) looks like a prompt here, and a boolean flag
@@ -2301,9 +2303,6 @@ export async function runRootCommand(
 				process.exit(2);
 			}
 			rejectNoUiWithoutRpc(parsedArgs);
-			if (initialArgs.goal !== undefined && !isInteractive) {
-				throw new CliUsageError("--goal requires an interactive terminal (not --print or --mode).");
-			}
 			if (initialArgs.goal !== undefined) {
 				validateGoalStartup(
 					initialArgs,
