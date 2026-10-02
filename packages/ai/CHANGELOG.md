@@ -13,6 +13,7 @@
 - Fixed rejected HTTP 400 requests from consuming unbounded disk space by automatically cleaning up old request logs and enforcing a size limit.
 - Fixed unnecessary credential and session updates that could trigger needless authentication reloads in other running processes.
 - Fixed context-overflow recovery for Strata requests that exceed the model context limit but return no usage information.
+- Sessions no longer get stuck on `400 string_above_max_length` after a model writes its whole tool invocation into the tool name. Tool calls with blank names, names longer than 128 characters, or names containing whitespace or control characters are dropped from replayed history, together with their tool results. This also applies when OpenAI Responses replays its stored native history.
 
 ## [18.4.6] - 2026-10-01
 
