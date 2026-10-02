@@ -15,6 +15,10 @@
 - Fixed a fresh setup with no model configured failing its first turn with "Thinking effort high is not supported" when the auto-picked provider default has no effort levels (e.g. Devin's `swe-1-6`); the default thinking level is now fitted to the picked model ([#13657](https://github.com/can1357/oh-my-pi/pull/13657) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed the `read` tool hanging, and the TUI ignoring every keystroke, when reading `/dev/stdin`, a FIFO, or another non-regular file; such paths are now rejected ([#13585](https://github.com/can1357/oh-my-pi/pull/13585) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
 
+### Fixed
+
+- Fixed `~/.omp` being loaded as a project config directory for any non-repository cwd under home (including Windows `%TEMP%` workdirs), which applied the user's `SYSTEM.md`, `RULES.md` and `AGENTS.md` as project config and bypassed `PI_CODING_AGENT_DIR` and profiles ([#14084](https://github.com/can1357/oh-my-pi/pull/14084) by [@NaC-L](https://github.com/NaC-L)).
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
