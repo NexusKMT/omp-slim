@@ -11,17 +11,19 @@ import * as path from "node:path";
 import { getCapability } from "@oh-my-pi/pi-coding-agent/capability";
 import { type ContextFile, contextFileCapability } from "@oh-my-pi/pi-coding-agent/capability/context-file";
 import { clearCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
+import { type Skill, skillCapability } from "@oh-my-pi/pi-coding-agent/capability/skill";
 import { type Rule, ruleCapability } from "@oh-my-pi/pi-coding-agent/capability/rule";
 import { type SystemPrompt, systemPromptCapability } from "@oh-my-pi/pi-coding-agent/capability/system-prompt";
 import type { LoadContext } from "@oh-my-pi/pi-coding-agent/capability/types";
 // Importing discovery registers all providers as a side effect.
 import "@oh-my-pi/pi-coding-agent/discovery";
-import { getConfigRootDir, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
+import { __resetDirsFromEnvForTests, removeSyncWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
 let tempDir: string;
 let home: string;
-const originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
-const fallbackAgentDir = path.join(getConfigRootDir(), "agent");
+// setAgentDir() rewrites these; restore them all so later test files see the original resolver.
+const ENV_KEYS = ["PI_CODING_AGENT_DIR", "OMP_PROFILE", "PI_PROFILE"] as const;
+let savedEnv: Record<(typeof ENV_KEYS)[number], string | undefined>;
 
 function writeFile(filePath: string, content: string): void {
 	fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -36,6 +38,7 @@ async function loadNative<T>(capabilityId: string, ctx: LoadContext): Promise<T[
 }
 
 beforeEach(() => {
+	savedEnv = Object.fromEntries(ENV_KEYS.map(key => [key, process.env[key]])) as typeof savedEnv;
 	clearCache();
 	tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-home-walkup-"));
 	home = path.join(tempDir, "home");
@@ -43,17 +46,20 @@ beforeEach(() => {
 	writeFile(path.join(home, ".omp", "SYSTEM.md"), "operator system prompt\n");
 	writeFile(path.join(home, ".omp", "RULES.md"), "operator rule\n");
 	writeFile(path.join(home, ".omp", "AGENTS.md"), "operator agents\n");
+	writeFile(
+		path.join(home, ".omp", "skills", "operator", "SKILL.md"),
+		"---\nname: operator\ndescription: operator skill\n---\nbody\n",
+	);
 	setAgentDir(path.join(tempDir, "isolated-agent"));
 });
 
 afterEach(() => {
 	clearCache();
-	if (originalAgentDirEnv) {
-		setAgentDir(originalAgentDirEnv);
-	} else {
-		setAgentDir(fallbackAgentDir);
-		delete process.env.PI_CODING_AGENT_DIR;
+	for (const key of ENV_KEYS) {
+		if (savedEnv[key] === undefined) delete process.env[key];
+		else process.env[key] = savedEnv[key];
 	}
+	__resetDirsFromEnvForTests();
 	removeSyncWithRetries(tempDir);
 });
 
@@ -65,11 +71,13 @@ test("a cwd under home without a repo does not load ~/.omp files as project conf
 	const prompts = await loadNative<SystemPrompt>(systemPromptCapability.id, ctx);
 	const rules = await loadNative<Rule>(ruleCapability.id, ctx);
 	const contexts = await loadNative<ContextFile>(contextFileCapability.id, ctx);
+	const skills = await loadNative<Skill>(skillCapability.id, ctx);
 
 	const fromHome = (p: string) => p.startsWith(path.join(home, ".omp") + path.sep);
 	expect(prompts.filter(p => fromHome(p.path))).toEqual([]);
 	expect(rules.filter(r => fromHome(r.path))).toEqual([]);
 	expect(contexts.filter(c => fromHome(c.path))).toEqual([]);
+	expect(skills.filter(s => fromHome(s.path))).toEqual([]);
 });
 
 test("a project .omp between cwd and home is still found", async () => {
