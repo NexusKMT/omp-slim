@@ -1214,7 +1214,7 @@ describe("update-cli release binary integrity", () => {
 					name: binaryName,
 					state: "uploaded",
 					size: Buffer.byteLength(body),
-					digest: `sha256:${createHash("sha256").update(body).digest("hex")}`,
+					digest: `sha256:${Bun.SHA256.hash(body, "hex")}`,
 					browser_download_url: `https://github.com/can1357/oh-my-pi/releases/download/v${version}/${binaryName}`,
 				},
 			],
