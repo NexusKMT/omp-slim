@@ -29,7 +29,7 @@ import {
 import { isInsideTmux, wrapTmuxPassthrough } from "./tmux";
 import { setHangulCompatibilityJamoWidth } from "./utils";
 import { translateWindowsAltGrSequence } from "./windows-altgr";
-import { Win32InputModeDecoder } from "./windows-input-mode";
+import { Win32InputModeDecoder, Win32PasteMarkerNormalizer } from "./windows-input-mode";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
@@ -786,6 +786,7 @@ export class ProcessTerminal implements Terminal {
 	// Windows console fallback when kitty is unavailable: key records arrive as
 	// win32-input-mode sequences and are decoded before reaching the handler.
 	#win32InputDecoder?: Win32InputModeDecoder;
+	#win32PasteNormalizer?: Win32PasteMarkerNormalizer;
 	#stdinBuffer?: StdinBuffer;
 	#stdinDataHandler?: (data: string) => void;
 	#disconnectHandler?: () => void;
@@ -1626,7 +1627,8 @@ export class ProcessTerminal implements Terminal {
 
 		// Handler that pipes stdin data through the buffer
 		this.#stdinDataHandler = (data: string) => {
-			this.#stdinBuffer!.process(data);
+			if (this.#win32PasteNormalizer) this.#win32PasteNormalizer.process(data);
+			else this.#stdinBuffer!.process(data);
 		};
 	}
 
@@ -1892,6 +1894,7 @@ export class ProcessTerminal implements Terminal {
 			// and the mode splits arrow keys into Escape plus literal text (#14034).
 			this.#safeWrite("\x1b[?9001h");
 			this.#win32InputDecoder = new Win32InputModeDecoder();
+			this.#win32PasteNormalizer = new Win32PasteMarkerNormalizer(data => this.#stdinBuffer?.process(data));
 			return;
 		}
 		// A remote terminal with no identifying env may not understand the request.
@@ -1902,6 +1905,8 @@ export class ProcessTerminal implements Terminal {
 
 	#disableWin32InputMode(): void {
 		if (!this.#win32InputDecoder) return;
+		this.#win32PasteNormalizer?.flush();
+		this.#win32PasteNormalizer = undefined;
 		this.#safeWrite("\x1b[?9001l");
 		this.#win32InputDecoder = undefined;
 	}
