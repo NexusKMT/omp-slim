@@ -7884,6 +7884,10 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#selectorController.showTreeSelector();
 	}
 
+	showThinkingSelector(): void {
+		this.#selectorController.showThinkingSelector();
+	}
+
 	showSessionSelector(source?: ForeignSessionSource): void {
 		void this.#selectorController.showSessionSelector(source);
 	}

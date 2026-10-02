@@ -29,9 +29,8 @@ import {
 	CLI_THINKING_LEVELS,
 	type ConfiguredThinkingLevel,
 	getConfiguredThinkingLevelMetadata,
-	parseCliThinkingLevel,
 } from "@oh-my-pi/pi-tui/thinking";
-import { availableEffortSelectors } from "./helpers/effort";
+import { availableEffortSelectors, noThinkingMessage, resolveThinkingArgument } from "./helpers/effort";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSecurityCommand } from "./helpers/security";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
@@ -868,10 +867,13 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		},
 	},
 	{
-		name: "effort",
+		name: "thinking",
+		aliases: ["effort"],
 		icon: "gauge",
-		description: "Set reasoning effort for this session (off, auto, minimal…max)",
-		acpDescription: "Set or show reasoning effort",
+		get description() {
+			return `Set thinking level (reasoning effort, intelligence) for this session (same as ${formatKeyHint("shift+tab")})`;
+		},
+		acpDescription: "Set or show thinking level (reasoning effort)",
 		acpInputHint: "[level]",
 		inlineHint: "[level]",
 		allowArgs: true,
@@ -880,34 +882,45 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			description: getConfiguredThinkingLevelMetadata(level as ConfiguredThinkingLevel).description,
 		})),
 		getTuiAutocompleteDescription: runtime =>
-			`Effort: ${runtime.ctx.session.configuredThinkingLevel() ?? "model default"}`,
+			`Thinking: ${runtime.ctx.session.configuredThinkingLevel() ?? "model default"}`,
 		handle: async (command, runtime) => {
 			const session = runtime.session;
-			const model = session.model;
-			if (!model?.reasoning) {
+			if (!command.args.trim()) {
 				await runtime.output(
-					`${model ? `${model.provider}/${model.id}` : "The current model"} has no adjustable reasoning effort.`,
+					session.model?.reasoning
+						? `Thinking: ${session.configuredThinkingLevel() ?? "model default"}\nAvailable: ${availableEffortSelectors(session).join(", ")}`
+						: noThinkingMessage(session),
 				);
 				return commandConsumed();
 			}
-			const choices = availableEffortSelectors(session);
-			const selector = command.args.trim().toLowerCase();
-			if (!selector) {
-				await runtime.output(
-					`Reasoning effort: ${session.configuredThinkingLevel() ?? "model default"}\nAvailable: ${choices.join(", ")}`,
-				);
-				return commandConsumed();
-			}
-			const parsed = parseCliThinkingLevel(selector);
-			if (parsed === undefined || !choices.includes(parsed)) {
-				return usage(`Unknown effort: ${selector}. Available: ${choices.join(", ")}`, runtime);
-			}
-			session.setThinkingLevel(parsed);
-			await runtime.output(`Reasoning effort set to ${parsed}.`);
+			const resolved = resolveThinkingArgument(session, command.args);
+			if ("error" in resolved) return usage(resolved.error, runtime);
+			session.setThinkingLevel(resolved.level);
+			await runtime.output(`Thinking set to ${resolved.level}.`);
 			// `setThinkingLevel` emits `thinking_level_changed`, which hosts with a
 			// session-lifetime subscription (ACP) already turn into a config push.
 			await runtime.notifyConfigChanged?.({ handledBySessionEvent: true });
 			return commandConsumed();
+		},
+		handleTui: (command, runtime) => {
+			clearSubmittedText(runtime);
+			const { ctx } = runtime;
+			if (!ctx.session.model?.reasoning) {
+				ctx.showStatus(noThinkingMessage(ctx.session));
+				return;
+			}
+			if (!command.args.trim()) {
+				ctx.showThinkingSelector();
+				return;
+			}
+			const resolved = resolveThinkingArgument(ctx.session, command.args);
+			if ("error" in resolved) {
+				ctx.showError(resolved.error);
+				return;
+			}
+			// thinking_level_changed refreshes the status line and editor border.
+			ctx.session.setThinkingLevel(resolved.level);
+			ctx.showStatus(`Thinking set to ${resolved.level}.`);
 		},
 	},
 ];

@@ -83,6 +83,28 @@ describe("thinking selector picker", () => {
 		expect(p.items?.find(item => item.id === "high")?.chips?.[0]?.dot).toBe("thinkingHigh");
 		expect(p.current).toEqual(["high"]);
 	});
+
+	it("marks auto as current without a level chip, and no current when the level is unknown", () => {
+		const withAuto = new ThinkingSelectorComponent(
+			"auto",
+			["off", "auto", "high"] as never,
+			() => {},
+			() => {},
+		);
+		const p = sheet(withAuto.describe(pickerCx)).props;
+		expect(p.current).toEqual(["auto"]);
+		expect(p.selected).toBe("auto");
+		expect(p.items?.find(item => item.id === "auto")?.chips).toBeUndefined();
+		expect(p.items?.find(item => item.id === "off")?.chips?.[0]?.dot).toBe("thinkingOff");
+
+		const unknown = new ThinkingSelectorComponent(
+			undefined,
+			["off", "high"] as never,
+			() => {},
+			() => {},
+		);
+		expect(sheet(unknown.describe(pickerCx)).props.current).toEqual([]);
+	});
 });
 
 describe("hook selector picker", () => {

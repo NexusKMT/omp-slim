@@ -32,12 +32,12 @@ export function buildArgumentCompletions(subcommands: SubcommandDef[]): (prefix:
 }
 
 /**
- * Build getArgumentCompletions for `/effort <level>`. The static `subcommands`
+ * Build getArgumentCompletions for `/thinking <level>`. The static `subcommands`
  * list documents the full vocabulary for ACP clients, but the dropdown must
  * offer only what the active model exposes: suggesting a tier the model lacks
  * (e.g. `xhigh` on a model capped at `high`) would make the handler answer the
- * accepted completion with `Unknown effort`. Returns null for a model with no
- * reasoning dial — there is nothing to pick.
+ * accepted completion with `Unknown thinking level`. Returns null for a model
+ * with no reasoning dial — there is nothing to pick.
  */
 export function buildEffortArgumentCompletions(
 	runtime: TuiSlashCommandRuntime,
@@ -45,19 +45,23 @@ export function buildEffortArgumentCompletions(
 	return (argumentPrefix: string) => {
 		if (argumentPrefix.includes(" ")) return null;
 		const lower = argumentPrefix.toLowerCase();
+		const current = runtime.ctx.session.configuredThinkingLevel();
 		const matches = availableEffortSelectors(runtime.ctx.session)
 			.filter(level => level.startsWith(lower))
-			.map(level => ({
-				value: `${level} `,
-				label: level,
-				description: getConfiguredThinkingLevelMetadata(level).description,
-			}));
+			.map(level => {
+				const { description } = getConfiguredThinkingLevelMetadata(level);
+				return {
+					value: `${level} `,
+					label: level,
+					description: level === current ? `${description} (current)` : description,
+				};
+			});
 		return matches.length > 0 ? matches : null;
 	};
 }
 
 /**
- * Build getInlineHint for `/effort <level>` from the same live list as the
+ * Build getInlineHint for `/thinking <level>` from the same live list as the
  * dropdown, so the ghost text never completes a tier the active model lacks.
  */
 export function buildEffortInlineHint(runtime: TuiSlashCommandRuntime): (argumentText: string) => string | null {

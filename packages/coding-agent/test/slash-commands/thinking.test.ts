@@ -4,15 +4,19 @@ import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { ModelControls, type ModelControlsHost } from "@oh-my-pi/pi-coding-agent/session/model-controls";
+import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import {
+	BUILTIN_SLASH_COMMANDS,
 	buildTuiBuiltinSlashCommands,
+	executeBuiltinSlashCommand,
 	lookupBuiltinSlashCommand,
 	type SlashCommandRuntime,
 } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
+import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
 import { AUTO_THINKING, type ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
-const command = lookupBuiltinSlashCommand("effort");
+const command = lookupBuiltinSlashCommand("thinking");
 
 interface Harness {
 	outputs: string[];
@@ -78,13 +82,22 @@ function harness(options: { reasoning?: boolean; efforts?: readonly Effort[] } =
 }
 
 async function run(h: Harness, args: string): Promise<void> {
-	await command!.handle!({ name: "effort", args, text: `/effort ${args}`.trim() }, h.runtime);
+	await command!.handle!({ name: "thinking", args, text: `/thinking ${args}`.trim() }, h.runtime);
 }
 
-describe("/effort slash command", () => {
+describe("/thinking slash command", () => {
+	it("is found by the effort and intelligence vocabulary", async () => {
+		const provider = new CombinedAutocompleteProvider([...BUILTIN_SLASH_COMMANDS], process.cwd());
+		for (const query of ["/effort", "/intelligence"]) {
+			const suggestions = await provider.getSuggestions([query], 0, query.length);
+			const resolved = suggestions?.items.map(item => lookupBuiltinSlashCommand(item.value)?.name);
+			expect(resolved).toContain("thinking");
+		}
+	});
+
 	it("completes only effort levels exposed by the active model", async () => {
 		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
-		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
+		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
 		const completions = await Promise.resolve(effort?.getArgumentCompletions?.(""));
 		expect(completions?.map(item => item.label)).toEqual(["off", "auto", "low", "medium"]);
 		expect(completions?.map(item => item.label)).toEqual(h.tuiRuntime.ctx.session.getAvailableEffortSelectors());
@@ -94,7 +107,7 @@ describe("/effort slash command", () => {
 
 	it("offers exactly the selectors the cycle walks", async () => {
 		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
-		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "effort");
+		const effort = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
 		const completions = await Promise.resolve(effort?.getArgumentCompletions?.(""));
 		const controls = h.controls;
 		const cycled: ConfiguredThinkingLevel[] = [];
@@ -123,7 +136,13 @@ describe("/effort slash command", () => {
 		expect(h.configChanges()).toBe(1);
 
 		await run(h, "");
-		expect(h.outputs[1]).toContain("Reasoning effort: high");
+		expect(h.outputs[1]).toContain("Thinking: high");
+
+		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const narrowed = await Promise.resolve(thinking?.getArgumentCompletions?.("hi"));
+		expect(narrowed?.map(item => [item.label, item.description])).toEqual([
+			["high", expect.stringContaining("(current)")],
+		]);
 	});
 
 	it("accepts off and auto", async () => {
@@ -144,7 +163,7 @@ describe("/effort slash command", () => {
 		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
 		await run(h, "xhigh");
 		expect(h.level()).toBeUndefined();
-		expect(h.outputs[0]).toContain("Unknown effort: xhigh");
+		expect(h.outputs[0]).toContain("Unknown thinking level: xhigh");
 		expect(h.configChanges()).toBe(0);
 	});
 
@@ -154,13 +173,48 @@ describe("/effort slash command", () => {
 		await run(h, "turbo");
 		expect(h.level()).toBeUndefined();
 		expect(h.outputs).toHaveLength(2);
-		for (const output of h.outputs) expect(output).toContain("Unknown effort");
+		for (const output of h.outputs) expect(output).toContain("Unknown thinking level");
 	});
 
-	it("explains that a non-reasoning model has no effort dial", async () => {
+	it("explains that a non-reasoning model has no thinking dial", async () => {
 		const h = harness({ reasoning: false });
 		await run(h, "high");
 		expect(h.level()).toBeUndefined();
-		expect(h.outputs[0]).toContain("test/test-model has no adjustable reasoning effort.");
+		expect(h.outputs[0]).toContain("test/test-model has no adjustable thinking level.");
+	});
+
+	it("opens the picker bare, sets a level by name, and reports bad levels in the TUI", async () => {
+		const h = harness({ efforts: [Effort.Low, Effort.Medium] });
+		const events: string[] = [];
+		const ctx = {
+			...h.tuiRuntime.ctx,
+			showThinkingSelector: () => events.push("picker"),
+			showStatus: (message: string) => events.push(`status:${message}`),
+			showError: (message: string) => events.push(`error:${message}`),
+		} as unknown as InteractiveModeContext;
+
+		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/thinking med", { ctx, draftDetached: true });
+		await executeBuiltinSlashCommand("/thinking xhigh", { ctx, draftDetached: true });
+
+		expect(h.level()).toBe(ThinkingLevel.Medium);
+		expect(events).toEqual([
+			"picker",
+			"status:Thinking set to medium.",
+			expect.stringContaining("error:Unknown thinking level: xhigh"),
+		]);
+	});
+
+	it("tells a non-reasoning TUI session there is nothing to pick instead of opening the picker", async () => {
+		const h = harness({ reasoning: false });
+		const events: string[] = [];
+		const ctx = {
+			...h.tuiRuntime.ctx,
+			showThinkingSelector: () => events.push("picker"),
+			showStatus: (message: string) => events.push(`status:${message}`),
+		} as unknown as InteractiveModeContext;
+
+		await executeBuiltinSlashCommand("/thinking", { ctx, draftDetached: true });
+		expect(events).toEqual(["status:test/test-model has no adjustable thinking level."]);
 	});
 });
