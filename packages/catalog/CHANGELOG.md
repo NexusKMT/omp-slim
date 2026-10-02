@@ -14,6 +14,9 @@
 ### Fixed
 
 - Fixed namespaced LiteLLM models such as `azure/gpt-5.6-sol-pro` showing raw IDs instead of catalog display names when the proxy supplies no friendly name ([#13964](https://github.com/can1357/oh-my-pi/pull/13964) by [@gabrielrinaldi](https://github.com/gabrielrinaldi)).
+### Fixed
+
+- Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.4.6] - 2026-10-01
 

@@ -296,6 +296,10 @@ selection, even when the runtime `promptCache` is omitted: the actual effective
 model's catalog defaults apply instead of the YAML lifetime. Without a runtime
 replacement, the matching YAML lifetime applies, or catalog defaults if absent.
 
+The ordinary `bun run gen:models` command recomputes bundled prompt-cache
+lifetimes from current catalog policy; there is no separate cache-regeneration
+command.
+
 Direct Anthropic keeps its existing 5 min / 1 h lifetimes (`short: 300`, `long: 3600`),
 defaulting to 5 min for API keys and 1 h for OAuth subscriber sessions; API keys can
 explicitly select `long`. Claude on native Amazon Bedrock Converse has a 5 min TTL; 1 h is
