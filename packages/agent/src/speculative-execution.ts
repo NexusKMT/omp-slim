@@ -720,6 +720,7 @@ export class SpeculativeOperationCoordinator {
 				return undefined;
 			}
 			validatedArgs = { ...toolCall.arguments };
+			delete validatedArgs.__rawJson;
 		}
 		let executionArgs: Record<string, unknown>;
 		try {

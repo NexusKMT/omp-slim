@@ -2909,7 +2909,11 @@ async function prepareToolCallDispatch(
 			} catch (validationError) {
 				// Lenience covers schema mismatches; a parse failure has no args to hand over.
 				const parseFailed = "__parseError" in args;
-				if (tool?.lenientArgValidation && !parseFailed) return { ...args };
+				if (tool?.lenientArgValidation && !parseFailed) {
+					const fallback = { ...args };
+					delete fallback.__rawJson;
+					return fallback;
+				}
 				entry.args = parseFailed ? { __parseError: args.__parseError } : args;
 				entry.validationErrorMessage =
 					validationError instanceof Error ? validationError.message : String(validationError);
