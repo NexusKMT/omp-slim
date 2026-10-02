@@ -1,4 +1,6 @@
 import { formatDuration } from "@oh-my-pi/pi-tui/render/render-utils";
+import type { DaemonSnapshot } from "@oh-my-pi/pi-tui/tools/daemon";
+import { logger } from "@oh-my-pi/pi-utils";
 import type { AsyncJob } from "../async";
 import {
 	agentStaleNote,
@@ -187,9 +189,21 @@ export class ProcProtocolHandler implements ProtocolHandler {
 		const ownerId = session.getAgentId?.() ?? undefined;
 		const job = ownerJobs(session).find(item => item.id === id);
 		const agent = runningAgentsOutsideJobs(session).find(item => item.id === id);
-		const service = cfgLaunchEnabled.get(session.settings)
-			? await findService(session, id, context?.signal)
-			: undefined;
+		let service: DaemonSnapshot | undefined;
+		if (cfgLaunchEnabled.get(session.settings)) {
+			try {
+				service = await findService(session, id, context?.signal);
+			} catch (error) {
+				// Killing an in-process job or agent needs no broker. Skipping the
+				// lookup only loses the job/service collision check, which cannot be
+				// answered while the broker is down anyway.
+				if (context?.signal?.aborted || action !== "kill" || !(job || agent)) throw error;
+				logger.warn("Daemon broker lookup failed; cancelling in-process target", {
+					id,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
 		if ((job || agent) && service)
 			throw new Error(`proc://${id} is ambiguous: both job ${id} and service ${id} exist.`);
 		if (action === "mode") {

@@ -127,6 +127,12 @@ function lastAssistantText(messages: readonly AgentMessage[]): string | undefine
 	return undefined;
 }
 
+/** Whether `<id>`'s published output predates a turn the agent is streaming now. */
+function isSuperseded(registry: AgentRegistry, outputId: string): boolean {
+	const ref = registry.get(outputId);
+	return ref !== undefined && ref.kind !== "advisor" && registry.isRunning(ref);
+}
+
 /**
  * Handler for agent:// URLs.
  *
@@ -149,12 +155,15 @@ export class AgentProtocolHandler implements ProtocolHandler {
 
 	/**
 	 * The `<id>.md` output file. JSON-path URLs (`/<json-path>`) render a value
-	 * rather than the file, so they locate to null, as do missing ids.
+	 * rather than the file, so they locate to null, as do missing ids. So does an
+	 * output superseded by a running turn: a located file is read directly by
+	 * `read`, which would skip the previous-run banner {@link resolve} adds.
 	 */
 	async locate(url: InternalUrl, context?: ResolveContext): Promise<string | null> {
 		const outputId = url.rawHost || url.hostname;
 		if (!outputId) throw new Error("agent:// URL requires an output ID: agent://<id>");
 		if (outputId === "all" || hasPathExtraction(url)) return null;
+		if (isSuperseded(context?.agentRegistry ?? AgentRegistry.global(), outputId)) return null;
 		const dirs = await this.#outputDirs(context);
 		if (dirs.length === 0) return null;
 		return (await this.#findOutput(dirs, outputId)).foundPath ?? null;
@@ -237,8 +246,7 @@ export class AgentProtocolHandler implements ProtocolHandler {
 		// A published file belongs to a finished run. If the agent is streaming
 		// again (follow-up or IRC wake), the file is the previous run's result;
 		// unmarked, a reader takes it as the current state.
-		const liveRef = registry.get(outputId);
-		if (!extraction && liveRef && liveRef.kind !== "advisor" && registry.isRunning(liveRef)) {
+		if (!extraction && isSuperseded(registry, outputId)) {
 			const publishedAt = (await fs.stat(scan.foundPath)).mtimeMs;
 			content = `${prompt.render(agentSupersededTemplate, {
 				id: outputId,

@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { AgentProtocolHandler } from "../../src/internal-urls/agent-protocol";
+import { InternalUrlRouter } from "../../src/internal-urls/router";
 import { resetRegisteredArtifactDirsForTests } from "../../src/internal-urls/registry-helpers";
 import { AgentRegistry } from "../../src/registry/agent-registry";
 import type { AgentSession } from "../../src/session/agent-session";
@@ -217,6 +218,10 @@ it("agent:// marks a published output as the previous run while the agent stream
 	expect(whileRunning.content).toStartWith("> `Visuals` is running a newer turn.");
 	expect(whileRunning.content).toContain("PREVIOUS run");
 	expect(whileRunning.content.endsWith(published)).toBe(true);
+	// `read` reads a located file directly, skipping resolve(): a superseded
+	// output must route as a resource so the banner reaches the reader.
+	const router = InternalUrlRouter.instance();
+	expect((await router.target("agent://Visuals"))?.kind).toBe("resource");
 	// JSON-path reads stay machine-parseable.
 	const field = await handler.resolve(new URL("agent://Visuals/status") as never);
 	expect(field.content).toBe("partial");
@@ -225,4 +230,5 @@ it("agent:// marks a published output as the previous run while the agent stream
 	registry.setStatus("Visuals", "idle");
 	const settled = await handler.resolve(new URL("agent://Visuals") as never);
 	expect(settled.content).toBe(published);
+	expect((await router.target("agent://Visuals"))?.kind).toBe("file");
 });

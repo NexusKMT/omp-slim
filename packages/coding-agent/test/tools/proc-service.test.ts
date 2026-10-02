@@ -295,6 +295,15 @@ describe("proc:// background jobs", () => {
 			await expect(proc.resolve(parseInternalUrl("proc://web"), { session })).rejects.toThrow(
 				"services unavailable: Daemon list request timed out",
 			);
+			// The suggested kill works without the broker; service-only actions still surface its error.
+			const killed = await proc.write(parseInternalUrl("proc://Visuals/kill"), "", { session });
+			expect(killed.details?.proc).toMatchObject({ cancelled: [{ id: "Visuals", status: "cancelled" }] });
+			expect(registry.get("Visuals")).toBeUndefined();
+			const killedJob = await proc.write(parseInternalUrl("proc://build-job/kill"), "", { session });
+			expect(killedJob.details?.proc).toMatchObject({ cancelled: [{ id: "build-job", status: "cancelled" }] });
+			await expect(proc.write(parseInternalUrl("proc://web"), "go\n", { session })).rejects.toThrow(
+				"Daemon list request timed out",
+			);
 		} finally {
 			broker.mockRestore();
 			await manager.dispose();
