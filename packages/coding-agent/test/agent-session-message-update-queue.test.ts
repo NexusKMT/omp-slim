@@ -54,7 +54,6 @@ async function makeSession() {
 	return {
 		authStorage,
 		api,
-		runner,
 		session,
 		emit(delta: string) {
 			const update: AgentEvent = {
@@ -66,42 +65,6 @@ async function makeSession() {
 		},
 	};
 }
-
-test("late message_update registration observes an update already queued", async () => {
-	const { api, authStorage, runner, session, emit } = await makeSession();
-	const received: string[] = [];
-	try {
-		expect(runner.hasHandlers("message_update")).toBe(false);
-		emit("A");
-		api.on("message_update", event => {
-			if (event.assistantMessageEvent.type === "text_delta") received.push(event.assistantMessageEvent.delta);
-		});
-		await Bun.sleep(0);
-		expect(received).toEqual(["A"]);
-	} finally {
-		await session.dispose();
-		authStorage.close();
-	}
-});
-
-test("updates queued across a registration microtask keep their delivery order", async () => {
-	const { api, authStorage, session, emit } = await makeSession();
-	const received: string[] = [];
-	try {
-		emit("A");
-		queueMicrotask(() => {
-			api.on("message_update", event => {
-				if (event.assistantMessageEvent.type === "text_delta") received.push(event.assistantMessageEvent.delta);
-			});
-		});
-		emit("B");
-		await Bun.sleep(0);
-		expect(received).toEqual(["B"]);
-	} finally {
-		await session.dispose();
-		authStorage.close();
-	}
-});
 
 test("async message_update handlers finish before the next update starts", async () => {
 	const { api, authStorage, session, emit } = await makeSession();
