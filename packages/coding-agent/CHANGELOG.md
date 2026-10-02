@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the default advisor staying at `no model` when its model appears after background discovery starts ([#14116](https://github.com/can1357/oh-my-pi/issues/14116)).
+
 ## [18.4.11] - 2026-10-02
 
 ### Added
