@@ -14,6 +14,14 @@ use napi_derive::napi;
 
 use crate::{js, task};
 
+/// Serializes every native clipboard operation in the process.
+///
+/// Paste reads text and image concurrently. On Windows two threads touching
+/// the clipboard at once corrupt the text read: units at fixed offsets come
+/// back overwritten (`https://` reads as `՞ttp缀難//`) and the damaged text
+/// stays on the clipboard. Holding one lock per operation keeps them serial.
+static CLIPBOARD_ACCESS: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Clipboard image payload encoded as PNG bytes.
 #[napi(object)]
 pub struct ClipboardImage {
@@ -150,7 +158,9 @@ fn clipboard_has_bitmap() -> bool {
 /// Returns an error if clipboard access fails.
 #[napi]
 pub fn copy_to_clipboard(text: JsString) -> Result<()> {
-	set_clipboard_text(&js::utf8(text)?)
+	let text = js::utf8(text)?;
+	let _access = CLIPBOARD_ACCESS.lock();
+	set_clipboard_text(&text)
 }
 
 /// Linux: keep a single `arboard::Clipboard` alive for the whole process.
@@ -213,6 +223,7 @@ fn set_clipboard_text(text: &str) -> Result<()> {
 #[napi]
 pub fn read_text_from_clipboard() -> task::Promise<Option<String>> {
 	task::blocking("clipboard.read_text", (), move |_| -> Result<Option<String>> {
+		let _access = CLIPBOARD_ACCESS.lock();
 		let mut clipboard = Clipboard::new()
 			.map_err(|err| Error::from_reason(format!("Failed to access clipboard: {err}")))?;
 		match clipboard.get_text() {
@@ -232,6 +243,7 @@ pub fn read_text_from_clipboard() -> task::Promise<Option<String>> {
 #[napi]
 pub fn read_image_from_clipboard() -> task::Promise<Option<ClipboardImage>> {
 	task::blocking("clipboard.read_image", (), move |_| -> Result<Option<ClipboardImage>> {
+		let _access = CLIPBOARD_ACCESS.lock();
 		let mut clipboard = Clipboard::new()
 			.map_err(|err| Error::from_reason(format!("Failed to access clipboard: {err}")))?;
 		match clipboard.get_image() {
