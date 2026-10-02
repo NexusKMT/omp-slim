@@ -630,7 +630,7 @@ describe("Perplexity anonymous fallback", () => {
 				fetch: fetchMock,
 				explicit: true,
 			}),
-		).rejects.toThrow(/anonymous quota is exhausted/);
+		).rejects.toThrow(/anonymous ask returned no sources \(likely signup wall or exhausted anonymous quota\)/);
 	});
 
 	it("rejects an automatic authless request before using the anonymous transport", async () => {
