@@ -305,6 +305,18 @@ Interactive `/fork` creates a new session from the current one and switches the 
 - `AgentSession.fork()` returns `false`.
 - UI reports `Fork failed (session not persisted or cancelled)`.
 
+### Fork at an entry (`AgentSession.fork(entryId)`, RPC `fork`)
+
+`AgentSession.fork(entryId)` forks from a transcript point instead of the whole session. The RPC `fork` command calls it when `entryId` is given and plain `fork()` otherwise.
+
+- Like the whole-session fork, it is rejected while vibe mode is active.
+- `entryId` must be a `message` entry (user, assistant, or any other message role); anything else throws `Invalid entry ID for forking`.
+- It throws `SessionBusyError` while `AgentSession.isBusyForSnapshot` is true (a response is streaming, or user bash/eval, compaction, handoff, or retry work is running). The check runs before `session_before_branch`, again after it, and once more right before the cut (after pending writes flush), so work admitted during any of those awaits cannot be split across the cut. `/btw` branches use the same check.
+- The transition is the one `AgentSession.branch()` uses, cut at `entryId` itself rather than before it: `session_before_branch` (cancellable; `entryId` is the last kept entry, not a dropped one as for `branch()`), `SessionManager.createBranchedSession(entryId, { copyArtifacts: true })`, rebuilt agent messages, then `session_branch`.
+- The new file keeps the root-to-entry path including `entryId`, carries labels for kept entries, keeps the title, and sets `parentSession` to the previous session file. The artifact directory is copied in the background, and the new session's artifact manager waits for the copy before allocating ids or resolving `artifact://`, so kept `artifact://N` references still resolve and new artifacts get fresh ids. Unlike the whole-session fork, the provider prompt-cache key is not inherited (same as `branch()`).
+- Works in non-persistent mode (in-memory replacement), unlike the whole-session fork.
+- RPC `fork` rejects both variants with `code: "session_busy"` while `isBusyForSnapshot` is true. The whole-session `AgentSession.fork()` does not check it itself, so interactive `/fork` can still carry a running bash command into the new session.
+
 ### CLI `--fork <id|path>`
 
 Startup `--fork` is resolved before normal session creation:

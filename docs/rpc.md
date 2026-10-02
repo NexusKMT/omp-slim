@@ -223,12 +223,15 @@ correlate it via `id`. Ordering across concurrent commands is not guaranteed
 - `{ id?, type: "export_html", outputPath?: string }`
 - `{ id?, type: "switch_session", sessionPath: string }`
 - `{ id?, type: "branch", entryId: string }`
+- `{ id?, type: "fork", entryId?: string }`
 - `{ id?, type: "get_branch_messages" }`
 - `{ id?, type: "get_last_assistant_text" }`
 - `{ id?, type: "set_session_name", name: string }`
 - `{ id?, type: "handoff", customInstructions?: string }`
 
-`handoff` fails while a response is streaming. On success, its payload is `{ savedPath? }` or `null` when no handoff was produced. Session transitions (`new_session`, `switch_session`, `branch`, `open_session`) report cancellation when an extension prevents the transition.
+`handoff` fails while a response is streaming. On success, its payload is `{ savedPath? }` or `null` when no handoff was produced. Session transitions (`new_session`, `switch_session`, `branch`, `fork`, `open_session`) report cancellation when an extension prevents the transition.
+
+`fork` moves the process onto a new session file and returns `{ cancelled }`; read the new `sessionFile`/`sessionId` with `get_state`. With `entryId` (any `message` entry from `get_entries`, such as a user or assistant message), the new file holds the root-to-entry path including that entry plus the session's artifacts, so kept `artifact://` references still resolve, and its header's `parentSession` is the old session file; this runs `session_before_branch`/`session_branch` hooks, with `entryId` as the last kept entry. Without `entryId` it copies the whole session and its artifacts (`/fork`), records the old session id as `parentSession`, runs `session_before_switch`/`session_switch` with reason `"fork"`, and reports `cancelled: true` when the session is not persisted. A non-message `entryId` fails, and `fork` fails with `code: "session_busy"` while a response is streaming or bash, eval, compaction, handoff, or retry work is running. The Python client exposes `fork(entry_id=None) -> CancellationResult`.
 
 ### Messages
 
@@ -979,7 +982,7 @@ That means:
 - command acceptance != run completion
 - a prompt completes via `data.agentInvoked: false` on its response or via its own `prompt_result`
 - a run completes on an `agent_end` frame where `isTerminal !== false`; that frame carries no prompt identity, so correlate prompts through `prompt_result`
-- native `input` handlers run once, in submission order, before command, skill, or queue dispatch. Later input waits until the earlier submission is admitted, including an idle skill's vision description, and does not wait for its model turn. An `abort` cancels input received before it that is not yet admitted, even if that input is still in a hook. A successful `new_session`, `switch_session`, `branch` or `open_session` does the same for input received before it; a vetoed one cancels nothing, and input sent after the session change runs in the new session.
+- native `input` handlers run once, in submission order, before command, skill, or queue dispatch. Later input waits until the earlier submission is admitted, including an idle skill's vision description, and does not wait for its model turn. An `abort` cancels input received before it that is not yet admitted, even if that input is still in a hook. A successful `new_session`, `switch_session`, `branch`, `fork` or `open_session` does the same for input received before it; a vetoed one cancels nothing, and input sent after the session change runs in the new session.
 - the session is done only at `session_settled`: background jobs can wake the agent after it yields
 
 ### While streaming

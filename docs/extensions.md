@@ -399,6 +399,8 @@ Cancelable pre-events:
 - `session_before_compact` → `{ cancel?: boolean; compaction?: CompactionResult }`
 - `session_before_tree` → `{ cancel?: boolean; summary?: { summary: string; details?: unknown } }`
 
+`session_before_branch.entryId` depends on the caller. For `branch(entryId)` it is the user message being rewound: it and everything after it are dropped. For `AgentSession.fork(entryId)` (RPC `fork` with an `entryId`) and `/btw` branches it is the last entry kept in the new session.
+
 ### Prompt and turn lifecycle
 
 - `input`

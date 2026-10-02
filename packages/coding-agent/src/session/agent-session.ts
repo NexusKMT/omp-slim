@@ -526,6 +526,18 @@ export class PromptDroppedError extends Error {
 	}
 }
 
+/**
+ * A transcript snapshot ({@link AgentSession.fork} at an entry, a /btw branch) was
+ * refused because a turn, user command, or maintenance pass could still write into
+ * the transcript. RPC maps it to the `session_busy` error code.
+ */
+export class SessionBusyError extends Error {
+	constructor(action: string) {
+		super(`Cannot ${action} while session maintenance or user work is still running`);
+		this.name = "SessionBusyError";
+	}
+}
+
 const EXPERIMENTAL_CONTEXT_REQUIRED_TOOLS: Record<string, true> = {
 	context_notes: true,
 	new_context: true,
@@ -6496,6 +6508,25 @@ export class AgentSession implements SettingsScope {
 		}
 	}
 
+	/**
+	 * True while a turn, user bash/eval, compaction, handoff, or retry could still write
+	 * into the transcript, so a snapshot of it would miss or split that work.
+	 */
+	get isBusyForSnapshot(): boolean {
+		return (
+			this.isStreaming ||
+			this.isBashRunning ||
+			this.isEvalRunning ||
+			this.isCompacting ||
+			this.isGeneratingHandoff ||
+			this.isRetrying
+		);
+	}
+
+	#assertIdleForSnapshot(action: string): void {
+		if (this.isBusyForSnapshot) throw new SessionBusyError(action);
+	}
+
 	get goalRuntime(): GoalRuntime {
 		return this.#goalRuntime;
 	}
@@ -9405,11 +9436,29 @@ export class AgentSession implements SettingsScope {
 	 * Fork the current session, creating a new session file with the exact same state.
 	 * Copies all entries and artifacts to the new session.
 	 * Unlike newSession(), this preserves all messages in the agent state.
+	 *
+	 * With `entryId`, the new file instead holds only the root-to-entry path through that
+	 * transcript message, inclusive, plus the artifacts, and the transition runs like
+	 * {@link branch} (`session_before_branch`/`session_branch` hooks with `entryId` as the
+	 * last kept entry, agent messages rebuilt from the cut). That path throws
+	 * {@link SessionBusyError} while {@link isBusyForSnapshot} holds, checked before and
+	 * after the `session_before_branch` hook and again right before the cut.
 	 * @returns true if completed, false if cancelled by hook or not persisting
 	 */
-	async fork(): Promise<boolean> {
+	async fork(entryId?: string): Promise<boolean> {
 		using _transition = this.#beginSessionTransition();
 		this.#assertVibeSessionTransitionAllowed("fork the session");
+		if (entryId !== undefined) {
+			if (this.sessionManager.getEntry(entryId)?.type !== "message") {
+				throw new Error(`Invalid entry ID for forking: ${entryId}`);
+			}
+			// Await inside the `using` scope so the transition stays open until it settles.
+			// Kept tool results may cite `artifact://N`, so the fork carries the artifacts too.
+			return await this.#branchIntoNewSession(entryId, entryId, {
+				copyArtifacts: true,
+				requireIdleFor: "fork the session",
+			});
+		}
 		const previousSessionFile = this.sessionFile;
 		const previousSessionId = this.sessionManager.getSessionId();
 
@@ -11040,7 +11089,6 @@ export class AgentSession implements SettingsScope {
 		cancelled: boolean;
 	}> {
 		using _transition = this.#beginSessionTransition();
-		const previousSessionFile = this.sessionFile;
 		const selectedEntry = this.sessionManager.getEntry(entryId);
 
 		if (selectedEntry?.type !== "message" || selectedEntry.message.role !== "user") {
@@ -11049,7 +11097,26 @@ export class AgentSession implements SettingsScope {
 
 		const selectedText = this.#extractUserMessageText(selectedEntry.message.content);
 		const selectedImages = this.#extractUserMessageImages(selectedEntry.message.content);
+		const completed = await this.#branchIntoNewSession(entryId, selectedEntry.parentId);
+		return { selectedText, selectedImages, cancelled: !completed };
+	}
 
+	/**
+	 * Shared {@link branch}/{@link fork}(entryId) transition: moves the live session onto a
+	 * new session file holding the root-to-`leafId` path (an empty one when `leafId` is
+	 * null), emitting `session_before_branch`/`session_branch` for `entryId`.
+	 * `copyArtifacts` goes to {@link SessionManager.createBranchedSession}; `requireIdleFor`
+	 * refuses with {@link SessionBusyError} naming that action unless the session is idle.
+	 * @returns false when a `session_before_branch` hook cancelled
+	 */
+	async #branchIntoNewSession(
+		entryId: string,
+		leafId: string | null,
+		options?: { copyArtifacts?: boolean; requireIdleFor?: string },
+	): Promise<boolean> {
+		const previousSessionFile = this.sessionFile;
+		const requireIdleFor = options?.requireIdleFor;
+		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		let skipConversationRestore = false;
 
 		// Emit session_before_branch event (can be cancelled)
@@ -11060,9 +11127,11 @@ export class AgentSession implements SettingsScope {
 			})) as SessionBeforeBranchResult | undefined;
 
 			if (result?.cancel) {
-				return { selectedText, selectedImages, cancelled: true };
+				return false;
 			}
 			skipConversationRestore = result?.skipConversationRestore ?? false;
+			// A turn or user command may have started while the hook awaited.
+			if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		}
 
 		// Clear pending messages (bound to old session state)
@@ -11085,15 +11154,17 @@ export class AgentSession implements SettingsScope {
 			advisorRecordersDetached = true;
 			await this.#advisors.drainAndDetachRecorders();
 			try {
+				// Work admitted during the flush/drain awaits above would miss the snapshot.
+				if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 				// Pending prompt setup belongs to the history being replaced.
 				this.#promptGeneration++;
-				if (!selectedEntry.parentId) {
+				if (!leafId) {
 					const title = this.sessionManager.getSessionName();
 					const titleSource = this.sessionManager.titleSource;
 					await this.sessionManager.newSession({ parentSession: previousSessionFile });
 					if (title) await this.sessionManager.setSessionName(title, titleSource);
 				} else {
-					this.sessionManager.createBranchedSession(selectedEntry.parentId);
+					this.sessionManager.createBranchedSession(leafId, { copyArtifacts: options?.copyArtifacts });
 				}
 				this.#bash.markSessionTransition(bashTransition);
 				this.#advisors.clearCost();
@@ -11131,7 +11202,7 @@ export class AgentSession implements SettingsScope {
 			this.#advisors.reattachRecorderFeeds();
 			advisorRecordersDetached = false;
 			await this.#reconcileModeAfterBranch();
-			return { selectedText, selectedImages, cancelled: false };
+			return true;
 		} finally {
 			if (advisorRecordersDetached) {
 				if (sessionTransitioned) this.#advisors.resetSessionState();
@@ -11157,16 +11228,7 @@ export class AgentSession implements SettingsScope {
 			throw new Error("Cannot branch /btw: session changed since /btw started");
 		}
 
-		if (
-			this.isStreaming ||
-			this.isBashRunning ||
-			this.isEvalRunning ||
-			this.isCompacting ||
-			this.isGeneratingHandoff ||
-			this.isRetrying
-		) {
-			throw new Error("Cannot branch /btw while session maintenance or user work is still running");
-		}
+		this.#assertIdleForSnapshot("branch /btw");
 
 		if (this.#extensionRunner?.hasHandlers("session_before_branch")) {
 			const result = (await this.#extensionRunner.emit({
@@ -11188,16 +11250,7 @@ export class AgentSession implements SettingsScope {
 			POST_PROMPT_DRAIN_TIMEOUT_MS,
 			"Timed out draining post-prompt tasks before /btw branch",
 		);
-		if (
-			this.isStreaming ||
-			this.isBashRunning ||
-			this.isEvalRunning ||
-			this.isCompacting ||
-			this.isGeneratingHandoff ||
-			this.isRetrying
-		) {
-			throw new Error("Cannot branch /btw while session maintenance or user work is still running");
-		}
+		this.#assertIdleForSnapshot("branch /btw");
 
 		this.#pendingNextTurnMessages = [];
 		this.#scheduledHiddenNextTurnGeneration = undefined;
