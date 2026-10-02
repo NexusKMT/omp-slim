@@ -611,11 +611,17 @@ function mergeDynamicModel<TApi extends Api>(existingModel: Model<TApi>, dynamic
 	// there: without this carve-out a model that dropped those tags would keep
 	// the bundled reference's image support and the agent would go on sending
 	// images to a now text-only route.
+	// CoralBricks is the same shape: `supports_image_input` on a `/v1/models` row
+	// is the deployment's whole truth for modality (Coral documents the
+	// capability fields as authoritative and answers unsupported content with
+	// `400 unsupported_content_type`), so a live text-only row must strip the
+	// bundled row's image support.
 	const endpointChanged = existingModel.baseUrl !== dynamicModel.baseUrl;
 	const dynamicInputAuthoritative =
 		endpointChanged ||
 		(existingModel.provider === "github-copilot" && dynamicModel.provider === "github-copilot") ||
-		(existingModel.provider === "deepinfra" && dynamicModel.provider === "deepinfra");
+		(existingModel.provider === "deepinfra" && dynamicModel.provider === "deepinfra") ||
+		(existingModel.provider === "coralbricks" && dynamicModel.provider === "coralbricks");
 	const supportsImage = dynamicInputAuthoritative
 		? dynamicModel.input.includes("image")
 		: existingModel.input.includes("image") || dynamicModel.input.includes("image");

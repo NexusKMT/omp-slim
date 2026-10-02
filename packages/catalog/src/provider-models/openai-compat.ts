@@ -1622,6 +1622,150 @@ export function deepinfraModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
+// CoralBricks
+// ---------------------------------------------------------------------------
+
+export const CORALBRICKS_BASE_URL = "https://inference.coralbricks.ai/v1";
+
+/** CoralBricks OpenAI-compatible discovery configuration. */
+export interface CoralbricksModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * A `GET /v1/models` row as CoralBricks returns it: standard OpenAI list
+ * fields plus per-million USD pricing and the capability flags Coral
+ * documents as authoritative (https://www.coralbricks.ai/docs.md).
+ */
+interface CoralbricksModelEntry {
+	id?: unknown;
+	context_length?: unknown;
+	pricing?: unknown;
+	supports_chat?: unknown;
+	supports_image_input?: unknown;
+	supports_tools?: unknown;
+}
+
+/**
+ * Map one CoralBricks catalog row to a chat model spec. Rows without an id
+ * and non-chat rows (`supports_chat: false`) are dropped. Pricing arrives
+ * in Coral's own per-million field names; `cached_input_per_m` is $0 on
+ * every model and a missing `cache_write_per_m` means no cache-write rate.
+ * The endpoint publishes no output cap and no reasoning flag, so `maxTokens`
+ * and `reasoning` keep their bundled-reference values (KDL lineage rules own
+ * the thinking ladders) rather than being invented from the row.
+ */
+function mapCoralbricksModel(
+	entry: CoralbricksModelEntry,
+	baseUrl: string,
+	reference: ModelSpec<"openai-completions"> | undefined,
+): ModelSpec<"openai-completions"> | null {
+	const id = typeof entry.id === "string" ? entry.id.trim() : "";
+	if (!id || entry.supports_chat === false) {
+		return null;
+	}
+	const pricing = isRecord(entry.pricing) ? entry.pricing : {};
+	// A bundled reference may lend metadata, but its runner kind is not
+	// evidence the chat roster advertised it.
+	const { kind: _inheritedKind, ...chatReference } = reference ?? {};
+	const input: ("text" | "image")[] =
+		entry.supports_image_input === true
+			? ["text", "image"]
+			: entry.supports_image_input === false
+				? ["text"]
+				: (reference?.input ?? ["text"]);
+	return {
+		...chatReference,
+		id,
+		name: reference?.name ?? id,
+		api: "openai-completions",
+		provider: "coralbricks",
+		baseUrl,
+		reasoning: reference?.reasoning ?? false,
+		input,
+		...(typeof entry.supports_tools === "boolean" ? { supportsTools: entry.supports_tools } : {}),
+		cost: {
+			input: toPositiveNumber(pricing.input_per_m, reference?.cost.input ?? 0),
+			output: toPositiveNumber(pricing.output_per_m, reference?.cost.output ?? 0),
+			cacheRead: toPositiveNumber(pricing.cached_input_per_m, reference?.cost.cacheRead ?? 0),
+			cacheWrite: toPositiveNumber(pricing.cache_write_per_m, reference?.cost.cacheWrite ?? 0),
+		},
+		contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? null),
+		maxTokens: reference?.maxTokens ?? null,
+	};
+}
+
+/**
+ * `GET /v1/models` is key-protected (401 without a bearer key), so discovery
+ * only runs with credentials. The response is the OpenAI `{ data: [...] }`
+ * list shape; a bare array is tolerated the same way the reference Coral
+ * provider extension does.
+ */
+async function fetchCoralbricksModels(options: {
+	baseUrl: string;
+	apiKey: string;
+	fetch?: FetchImpl;
+	references: Map<string, ModelSpec<"openai-completions">>;
+}): Promise<ModelSpec<"openai-completions">[] | null> {
+	const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${options.apiKey}` };
+	const fetchImpl = discoveryFetch(options.fetch);
+	let payload: unknown;
+	try {
+		const response = await withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, signal =>
+			fetchImpl(`${options.baseUrl}/models`, { method: "GET", headers, signal }),
+		);
+		if (!response.ok) {
+			return null;
+		}
+		payload = await response.json();
+	} catch {
+		return null;
+	}
+	const rows = Array.isArray(payload)
+		? payload
+		: isRecord(payload) && Array.isArray(payload.data)
+			? payload.data
+			: null;
+	if (!rows) {
+		return null;
+	}
+	const models: ModelSpec<"openai-completions">[] = [];
+	const seen = new Set<string>();
+	for (const entry of rows) {
+		if (!isRecord(entry)) continue;
+		const reference = typeof entry.id === "string" ? options.references.get(entry.id) : undefined;
+		const mapped = mapCoralbricksModel(entry as CoralbricksModelEntry, options.baseUrl, reference);
+		if (mapped && !seen.has(mapped.id)) {
+			seen.add(mapped.id);
+			models.push(mapped);
+		}
+	}
+	return models;
+}
+
+/**
+ * Builds CoralBricks' model-discovery manager. `/v1/models` needs the API
+ * key, so a keyless config serves only the bundled reviewed seed rows; with
+ * a key, live rows are authoritative over the bundle.
+ */
+export function coralbricksModelManagerOptions(
+	config?: CoralbricksModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = (config?.baseUrl ?? CORALBRICKS_BASE_URL).replace(/\/$/, "");
+	const references = createBundledReferenceMap<"openai-completions">("coralbricks");
+	return {
+		providerId: "coralbricks",
+		dynamicModelsAuthoritative: true,
+		...(apiKey && {
+			fetchDynamicModels: () => fetchCoralbricksModels({ baseUrl, apiKey, fetch: config?.fetch, references }),
+		}),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // 6. xAI
 // ---------------------------------------------------------------------------
 
