@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Tools with `lenientArgValidation` (such as `yield`) no longer run with empty arguments when the model sends malformed tool-call JSON; the model receives the JSON parse error instead ([#14090](https://github.com/can1357/oh-my-pi/issues/14090))
+- Fixed lenient argument validation for tools such as `yield`: malformed tool-call JSON is now reported to the model instead of causing the tool to run with empty arguments.
 
 ## [18.4.10] - 2026-10-02
 
