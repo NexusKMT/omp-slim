@@ -5,6 +5,11 @@
 ### Added
 
 - Added display of subagent completion percent in agent tree, task, and wait views
+
+### Changed
+
+- Notebook evaluation cells in native hosts now mark their gutters with arrows (← beside the input, → beside the output, and omp's thinking starburst while a cell runs) instead of `In:`/`Out:` prompts
+
 ### Fixed
 
 - Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
