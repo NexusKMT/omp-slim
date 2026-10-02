@@ -6,6 +6,10 @@
 
 - Added periodic completion estimates for running subagents: every 2 minutes each working subagent is asked, through a cached `/btw`-style side request, how far along it is, and the `XY%` shows next to it in wait and task views. Each check sees the subagent's previous estimate and any tool call it is still writing, so long file writes no longer read as 0%. Set the interval or turn it off with `task.completionProbeMs`.
 
+### Fixed
+
+- Fixed Python Eval corrupting quoted source text containing shell or magic syntax, including multiline strings with Python tokens after the closing delimiter ([#14088](https://github.com/can1357/oh-my-pi/pull/14088) by [@Binoui](https://github.com/Binoui)).
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
