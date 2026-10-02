@@ -45,6 +45,7 @@ const chatModel = model("litellm", "chat-only");
 
 function createSource(): ModelHubSource {
 	return {
+		revision: 0,
 		disabledProviders: [],
 		fallbackChains: {},
 		modelRoleStorage: "global",
@@ -71,7 +72,7 @@ const registryStub: ModelHubRegistry = {
 	getError: () => undefined,
 	getAvailable: () => [],
 	getAll: () => [],
-	authStorage: { hasAuth: () => false },
+	authStorage: { keys: { source: () => undefined } },
 	getDiscoverableProviders: () => [],
 	getProviderDiscoveryState: () => undefined,
 	find: () => undefined,
@@ -118,9 +119,8 @@ describe("model hub assign mode scope filtering (#12692)", () => {
 		const { body, key } = createHub();
 		startWebAssign(key);
 
-		// Sidebar order: Roles, All models, google, litellm. Hop to the litellm
-		// provider (two Downs: Roles → All → google → … actually Roles → All,
-		// All → google, google → litellm).
+		// Sidebar order: Roles, All models, google, litellm. Three Downs hop
+		// from Roles to the litellm provider scope.
 		key(DOWN); // Roles → All models
 		key(DOWN); // All models → google
 		key(DOWN); // google → litellm
