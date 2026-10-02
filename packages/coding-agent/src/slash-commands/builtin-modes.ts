@@ -25,12 +25,8 @@ import { describeLoopLimitRuntime } from "../modes/loop-limit";
 import type { InteractiveModeContext } from "../modes/types";
 import ratchetKickoffPrompt from "../prompts/ratchet-kickoff.md" with { type: "text" };
 import type { AgentSession } from "../session/agent-session";
-import {
-	CLI_THINKING_LEVELS,
-	type ConfiguredThinkingLevel,
-	getConfiguredThinkingLevelMetadata,
-} from "@oh-my-pi/pi-tui/thinking";
-import { availableEffortSelectors, noThinkingMessage, resolveThinkingArgument } from "./helpers/effort";
+import { CLI_THINKING_LEVELS, getConfiguredThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
+import { noThinkingMessage, resolveThinkingArgument } from "./helpers/effort";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSecurityCommand } from "./helpers/security";
 import type { ParsedSlashCommand, SlashCommandSpec, TuiSlashCommandRuntime } from "./types";
@@ -879,7 +875,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		allowArgs: true,
 		subcommands: CLI_THINKING_LEVELS.map(level => ({
 			name: level,
-			description: getConfiguredThinkingLevelMetadata(level as ConfiguredThinkingLevel).description,
+			description: getConfiguredThinkingLevelMetadata(level).description,
 		})),
 		getTuiAutocompleteDescription: runtime =>
 			`Thinking: ${runtime.ctx.session.configuredThinkingLevel() ?? "model default"}`,
@@ -888,7 +884,7 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			if (!command.args.trim()) {
 				await runtime.output(
 					session.model?.reasoning
-						? `Thinking: ${session.configuredThinkingLevel() ?? "model default"}\nAvailable: ${availableEffortSelectors(session).join(", ")}`
+						? `Thinking: ${session.configuredThinkingLevel() ?? "model default"}\nAvailable: ${session.getAvailableEffortSelectors().join(", ")}`
 						: noThinkingMessage(session),
 				);
 				return commandConsumed();

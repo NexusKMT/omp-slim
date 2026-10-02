@@ -27,7 +27,7 @@ interface Harness {
 	controls: ModelControls;
 }
 
-function harness(options: { reasoning?: boolean; efforts?: readonly Effort[] } = {}): Harness {
+function harness(options: { reasoning?: boolean; efforts?: readonly Effort[]; ceiling?: Effort } = {}): Harness {
 	const outputs: string[] = [];
 	let configured: ConfiguredThinkingLevel | undefined;
 	let configChanges = 0;
@@ -51,7 +51,7 @@ function harness(options: { reasoning?: boolean; efforts?: readonly Effort[] } =
 			emit: () => {},
 			emitNotice: () => {},
 		} as unknown as ModelControlsHost,
-		{},
+		{ thinkingLevelCeiling: options.ceiling },
 	);
 	const session = {
 		model,
@@ -105,6 +105,20 @@ describe("/thinking slash command", () => {
 		expect(effort?.getInlineHint?.("me")).toBe("dium");
 		expect(effort?.getInlineHint?.("me ")).toBeNull();
 		expect(effort?.getInlineHint?.("low")).toBeNull();
+	});
+
+	it("rejects levels above the session ceiling and keeps cycling within it", async () => {
+		const h = harness({ ceiling: Effort.Low });
+		const thinking = buildTuiBuiltinSlashCommands(h.tuiRuntime).find(item => item.name === "thinking");
+		const choices = await thinking?.getArgumentCompletions?.("");
+		expect(choices?.map(item => item.label)).toEqual(["off", "auto", "low"]);
+		expect(thinking?.getInlineHint?.("hi")).toBeNull();
+		await run(h, "high");
+		expect(h.level()).toBeUndefined();
+		expect(h.outputs[0]).toContain("Unknown thinking level: high");
+		expect(h.configChanges()).toBe(0);
+		const cycled = Array.from({ length: 4 }, () => h.controls.cycleThinkingLevel());
+		expect(cycled).toEqual([ThinkingLevel.Off, AUTO_THINKING, ThinkingLevel.Low, ThinkingLevel.Off]);
 	});
 
 	it("offers exactly the selectors the cycle walks", async () => {

@@ -1058,6 +1058,46 @@ describe("ACP agent", () => {
 		await Bun.sleep(0);
 	});
 
+	it("delivers the thinking config update before resolving the command", async () => {
+		const blocked = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		let holdConfig = false;
+		const harness = await createHarness({
+			sessionUpdateHook: async notification => {
+				if (holdConfig && notification.update.sessionUpdate === "config_option_update") {
+					blocked.resolve();
+					await release.promise;
+				}
+			},
+		});
+		vi.useFakeTimers();
+		const created = await harness.agent.newSession({ cwd: harness.cwdA, mcpServers: [] });
+		await advanceBootstrapGuard();
+		vi.useRealTimers();
+		holdConfig = true;
+		const baseline = harness.updates.length;
+		const prompt = harness.agent.prompt({
+			sessionId: created.sessionId,
+			prompt: [{ type: "text", text: "/thinking high" }],
+		});
+		await blocked.promise;
+		try {
+			expect(await Promise.race([prompt.then(() => true), Bun.sleep(0).then(() => false)])).toBe(false);
+			release.resolve();
+			expect((await prompt).stopReason).toBe("end_turn");
+			const updates = harness.updates.slice(baseline).filter(n => n.update.sessionUpdate === "config_option_update");
+			expect(updates).toHaveLength(1);
+			const update = updates[0]!.update;
+			if (update.sessionUpdate !== "config_option_update") throw new Error("Expected config update");
+			expect(update.configOptions.find(option => option.id === "thinking")?.currentValue).toBe("high");
+		} finally {
+			release.resolve();
+			await prompt;
+			harness.abortController.abort();
+			await Bun.sleep(0);
+		}
+	});
+
 	it("still pushes config_option_update for /thinking before the lifetime subscription exists", async () => {
 		// Pre-bootstrap there is no lifetime subscription, so the explicit
 		// notifyConfigChanged is the only path that tells the client — same

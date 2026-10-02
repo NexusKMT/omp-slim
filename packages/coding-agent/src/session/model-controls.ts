@@ -12,6 +12,7 @@ import {
 	isAnthropicFastModeFallbackDisabled,
 } from "@oh-my-pi/pi-ai/providers/anthropic-state";
 import { isFireworksFastModelId } from "@oh-my-pi/pi-catalog/fireworks-model-id";
+import { THINKING_EFFORTS } from "@oh-my-pi/pi-catalog/effort";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -575,7 +576,13 @@ export class ModelControls {
 	/** All selectable effort selectors for the active model, in cycle order. */
 	getAvailableEffortSelectors(): ConfiguredThinkingLevel[] {
 		if (!this.#model?.reasoning) return [];
-		return [ThinkingLevel.Off, AUTO_THINKING, ...this.getAvailableThinkingLevels()];
+		const efforts = this.getAvailableThinkingLevels();
+		const ceiling = this.#thinkingLevelCeiling;
+		const selectable =
+			ceiling === undefined
+				? efforts
+				: efforts.filter(level => THINKING_EFFORTS.indexOf(level) <= THINKING_EFFORTS.indexOf(ceiling));
+		return [ThinkingLevel.Off, AUTO_THINKING, ...selectable];
 	}
 
 	/**

@@ -8,7 +8,6 @@ import { readMCPConfigFile } from "../mcp/config-writer";
 import { collectMcpServerNames } from "../modes/controllers/mcp-command-controller";
 import { getConfiguredThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 import { expandTilde } from "../tools/path-utils";
-import { availableEffortSelectors } from "./helpers/effort";
 import type { SubcommandDef, TuiSlashCommandRuntime } from "./types";
 
 /**
@@ -46,7 +45,8 @@ export function buildEffortArgumentCompletions(
 		if (argumentPrefix.includes(" ")) return null;
 		const lower = argumentPrefix.toLowerCase();
 		const current = runtime.ctx.session.configuredThinkingLevel();
-		const matches = availableEffortSelectors(runtime.ctx.session)
+		const matches = runtime.ctx.session
+			.getAvailableEffortSelectors()
 			.filter(level => level.startsWith(lower))
 			.map(level => {
 				const { description } = getConfiguredThinkingLevelMetadata(level);
@@ -68,7 +68,7 @@ export function buildEffortInlineHint(runtime: TuiSlashCommandRuntime): (argumen
 	return (argumentText: string) => {
 		const prefix = argumentText.trimStart().toLowerCase();
 		if (prefix.length === 0 || prefix.includes(" ")) return null;
-		const match = availableEffortSelectors(runtime.ctx.session).find(level => level.startsWith(prefix));
+		const match = runtime.ctx.session.getAvailableEffortSelectors().find(level => level.startsWith(prefix));
 		return match && match !== prefix ? match.slice(prefix.length) : null;
 	};
 }

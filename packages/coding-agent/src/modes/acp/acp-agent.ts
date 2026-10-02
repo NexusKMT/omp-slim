@@ -987,6 +987,7 @@ export class AcpAgent implements Agent {
 				// `config_option_update`. Pushing again here would make clients
 				// redraw their config UI twice for a single change.
 				if (options?.handledBySessionEvent && record.lifetimeUnsubscribe !== undefined) {
+					await this.#waitForPromptEventHandlers(record);
 					return;
 				}
 				await this.#pushConfigOptionUpdate(record);
@@ -1357,14 +1358,20 @@ export class AcpAgent implements Agent {
 		if (event.type !== "thinking_level_changed" && event.type !== "model_changed") {
 			return;
 		}
+		// Config delivery is part of command completion, even though the
+		// subscription lives beyond an individual prompt turn.
+		const delivery = this.#pushConfigOptionUpdate(record);
+		record.promptEventHandlers.add(delivery);
 		try {
-			await this.#pushConfigOptionUpdate(record);
+			await delivery;
 		} catch (error) {
 			logger.warn("Failed to push config_option_update after a lifetime event", {
 				sessionId: record.session.sessionId,
 				eventType: event.type,
 				error,
 			});
+		} finally {
+			record.promptEventHandlers.delete(delivery);
 		}
 	}
 
