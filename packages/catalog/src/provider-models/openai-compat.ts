@@ -2181,13 +2181,14 @@ export function clampKimiK27CodeMaxTokens(modelId: string, candidate: number | n
 /**
  * Fireworks Fast variants we surface: the Fast table on
  * https://docs.fireworks.ai/serverless/serverless-modes, minus the US-only
- * router (it needs the `us.api.fireworks.ai` host). Retired Fast routers answer
- * 404, so drop them here when Fireworks drops them there. Each inherits the base
- * model's limits/modalities/thinking and overrides only the cost with the Fast
- * prices from the Serverless pricing table; `cacheWrite` stays 0 (Fireworks
- * bills no cache-write). Derived from the bundled base entries so metadata stays
- * in lockstep, and the runtime auto-falls back to the base id on a failed fast
- * request. See https://docs.fireworks.ai/serverless/pricing.
+ * router (it needs the `us.api.fireworks.ai` host). That table, not a request
+ * outcome, decides membership: add or drop a row when Fireworks changes it.
+ * Each inherits the base model's limits/modalities/thinking and overrides
+ * only the cost with the Fast prices from the Serverless pricing table;
+ * `cacheWrite` stays 0 (Fireworks bills no cache-write). Derived from the
+ * bundled base entries so metadata stays in lockstep, and the runtime
+ * auto-falls back to the base id on a failed fast request.
+ * See https://docs.fireworks.ai/serverless/pricing.
  */
 const FIREWORKS_FAST_VARIANT_SPECS: ReadonlyArray<{
 	base: string;
