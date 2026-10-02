@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Fixed user plugins showing as project plugins and requiring `--scope` when `HOME` has a trailing slash or points through a symlink ([#14111](https://github.com/can1357/oh-my-pi/issues/14111)).
 - Fixed `omp update` failing on standalone-binary installs when npm advertised a version whose GitHub release was never published; the updater now installs the newest published release instead ([#12913](https://github.com/can1357/oh-my-pi/issues/12913)).
 
 ## [18.4.11] - 2026-10-02
