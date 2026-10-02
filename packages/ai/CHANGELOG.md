@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.10] - 2026-10-02
+
 ### Fixed
 
 - Factory Droid login now reports the account's organization error instead of accepting a credential that every request rejects ([#14032](https://github.com/can1357/oh-my-pi/issues/14032)).

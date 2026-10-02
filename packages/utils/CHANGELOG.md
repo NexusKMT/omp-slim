@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.10] - 2026-10-02
+
 ### Added
 
 - Added `startFrom(src, from)` to inline Markdown tokenizer extensions: a start hint that returns the first match at or after `from` (or `undefined`), so long paragraphs stay linear ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).

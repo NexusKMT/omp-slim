@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.10] - 2026-10-02
+
 ### Added
 
 - Added global and per-advisor review cadence, including final-yield reviews and intervals that accumulate skipped transcript updates ([#12385](https://github.com/can1357/oh-my-pi/pull/12385) by [@olegpulatov](https://github.com/olegpulatov)).

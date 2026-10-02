@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.4.10] - 2026-10-02
+
 ### Added
 
 - Added ContextUsageView.setBreakdown to refresh usage card without recreating it
