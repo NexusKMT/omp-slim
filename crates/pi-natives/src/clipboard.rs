@@ -65,14 +65,6 @@ fn rgba_to_png(buffer: RgbaImage) -> Result<Vec<u8>> {
 /// skips 12 trailing mask bytes that those headers embed instead), which is
 /// why Qt-based screenshot tools (`PixPin`, `Snipaste`, ...) fail through
 /// arboard in the first place (#3426).
-#[cfg_attr(
-	not(windows),
-	allow(
-		dead_code,
-		reason = "reached only by the Windows clipboard fallback; kept target-independent so unit \
-		          tests cover it on every host"
-	)
-)]
 fn dib_to_png(dib: &[u8]) -> Result<Vec<u8>> {
 	const FILE_HEADER_SIZE: u64 = 14;
 	const INFO_HEADER_SIZE: u64 = 40;
@@ -234,6 +226,28 @@ pub fn read_text_from_clipboard() -> task::Promise<Option<String>> {
 	})
 }
 
+/// What the locked OS read of the image clipboard found. PNG encoding and DIB
+/// decoding run after [`CLIPBOARD_ACCESS`] is released: they only touch owned
+/// buffers, and holding the lock through them would stall a synchronous copy
+/// on the JS thread for the length of a large encode.
+enum ImageRead {
+	Image(ImageData<'static>),
+	/// arboard found no image, but a bitmap format is advertised; carries the
+	/// raw `CF_DIB` when it could be read.
+	#[cfg_attr(
+		not(windows),
+		allow(dead_code, reason = "only the Windows bitmap probe produces it")
+	)]
+	Bitmap(Option<Vec<u8>>),
+	Missing,
+	/// arboard failed; carries the raw `CF_DIB` fallback when it could be read.
+	Failed(ClipboardError, Option<Vec<u8>>),
+}
+
+fn png_image(bytes: Vec<u8>) -> ClipboardImage {
+	ClipboardImage { data: Uint8Array::from(bytes), mime_type: "image/png".to_string() }
+}
+
 /// Read an image from the system clipboard.
 ///
 /// Returns `Ok(None)` when no image data is available.
@@ -243,50 +257,47 @@ pub fn read_text_from_clipboard() -> task::Promise<Option<String>> {
 #[napi]
 pub fn read_image_from_clipboard() -> task::Promise<Option<ClipboardImage>> {
 	task::blocking("clipboard.read_image", (), move |_| -> Result<Option<ClipboardImage>> {
-		let _access = CLIPBOARD_ACCESS.lock();
-		let mut clipboard = Clipboard::new()
-			.map_err(|err| Error::from_reason(format!("Failed to access clipboard: {err}")))?;
-		match clipboard.get_image() {
-			Ok(image) => {
-				let bytes = encode_png(image)?;
-				Ok(Some(ClipboardImage {
-					data:      Uint8Array::from(bytes),
-					mime_type: "image/png".to_string(),
-				}))
-			},
-			Err(ClipboardError::ContentNotAvailable) => {
-				// arboard only probes `PNG` and `CF_DIBV5`. When it finds neither,
-				// still try the raw `CF_DIB`; if a bitmap format is advertised but
-				// nothing here decodes it, surface an error so the caller can
-				// fall back to `Clipboard.GetImage()` (#2430). A clipboard with no
-				// bitmap at all stays `None`, keeping text-only pastes in-process.
+		let read = {
+			let _access = CLIPBOARD_ACCESS.lock();
+			let mut clipboard = Clipboard::new()
+				.map_err(|err| Error::from_reason(format!("Failed to access clipboard: {err}")))?;
+			match clipboard.get_image() {
+				Ok(image) => ImageRead::Image(image),
+				// arboard only probes `PNG` and `CF_DIBV5`. When it finds neither
+				// but a bitmap format is advertised, still try the raw `CF_DIB`.
 				#[cfg(windows)]
-				if clipboard_has_bitmap() {
-					if let Some(bytes) = read_raw_cf_dib().and_then(|dib| dib_to_png(&dib).ok()) {
-						return Ok(Some(ClipboardImage {
-							data:      Uint8Array::from(bytes),
-							mime_type: "image/png".to_string(),
-						}));
-					}
-					return Err(Error::from_reason(
-						"Clipboard advertises a bitmap the native reader cannot decode",
-					));
-				}
-				Ok(None)
+				Err(ClipboardError::ContentNotAvailable) if clipboard_has_bitmap() => {
+					ImageRead::Bitmap(read_raw_cf_dib())
+				},
+				Err(ClipboardError::ContentNotAvailable) => ImageRead::Missing,
+				// arboard rejects the CF_DIBV5 payloads Qt-based screenshot tools
+				// (PixPin, Snipaste, ...) produce; read the raw CF_DIB to decode
+				// ourselves (#3426).
+				Err(err) => {
+					#[cfg(windows)]
+					let dib = read_raw_cf_dib();
+					#[cfg(not(windows))]
+					let dib = None;
+					ImageRead::Failed(err, dib)
+				},
+			}
+		};
+		match read {
+			ImageRead::Image(image) => Ok(Some(png_image(encode_png(image)?))),
+			// A bitmap nothing here decodes surfaces an error so the caller can
+			// fall back to `Clipboard.GetImage()` (#2430). A clipboard with no
+			// bitmap at all stays `None`, keeping text-only pastes in-process.
+			ImageRead::Bitmap(dib) => match dib.and_then(|dib| dib_to_png(&dib).ok()) {
+				Some(bytes) => Ok(Some(png_image(bytes))),
+				None => Err(Error::from_reason(
+					"Clipboard advertises a bitmap the native reader cannot decode",
+				)),
 			},
-			Err(err) => {
-				// arboard rejects the CF_DIBV5 payloads Qt-based screenshot
-				// tools (PixPin, Snipaste, ...) produce; decode the raw CF_DIB
-				// ourselves before surfacing the error (#3426). A fallback
-				// decode failure keeps the original arboard error.
-				#[cfg(windows)]
-				if let Some(bytes) = read_raw_cf_dib().and_then(|dib| dib_to_png(&dib).ok()) {
-					return Ok(Some(ClipboardImage {
-						data:      Uint8Array::from(bytes),
-						mime_type: "image/png".to_string(),
-					}));
-				}
-				Err(Error::from_reason(format!("Failed to read clipboard image: {err}")))
+			ImageRead::Missing => Ok(None),
+			// A fallback decode failure keeps the original arboard error.
+			ImageRead::Failed(err, dib) => match dib.and_then(|dib| dib_to_png(&dib).ok()) {
+				Some(bytes) => Ok(Some(png_image(bytes))),
+				None => Err(Error::from_reason(format!("Failed to read clipboard image: {err}"))),
 			},
 		}
 	})
