@@ -5,10 +5,9 @@
 ### Added
 
 - Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
-
+- Added display of subagent completion percent in agent tree, task, and wait views
 ### Fixed
 
-- Fixed tmux pane zoom and unzoom freezing for seconds on large transcripts; the settled rebuild re-lexes every tool result, and the Markdown lexer no longer rescans the paragraph per text run ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
 - Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported
@@ -17,7 +16,30 @@
 - Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
 - Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
+- Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
+
+## [18.4.10] - 2026-10-02
+
+### Added
+
+- Added ContextUsageView.setBreakdown to refresh usage card without recreating it
+- Added support for change events with flexible values in native TUI
+
+### Fixed
+
+- Keep settled responses reachable in scrollback while an ask panel is open, and keep the editor at the bottom after answering ([#12398](https://github.com/can1357/oh-my-pi/issues/12398), [#13993](https://github.com/can1357/oh-my-pi/pull/13993) by [@Dante-dan](https://github.com/Dante-dan)).
+- Fixed a finished `wait` whose jobs were all still running going blank, and the next `wait` removing it while its turn's usage row stayed; the card now keeps its job snapshot ([#12248](https://github.com/can1357/oh-my-pi/issues/12248), [#13978](https://github.com/can1357/oh-my-pi/pull/13978) by [@Dante-dan](https://github.com/Dante-dan)).
 - Hidden thinking blocks no longer leave a faint "Thought for Ns" row in Tern's native transcript; only the live "Thinking…" indicator shows while the model reasons.
+- Fixed long Markdown paragraphs, such as a read preview of a file with no blank line, stalling rendering: a 44 KB paragraph now renders in about 8 ms instead of 95 ms ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed Markdown paragraphs with many unclosed `[`, `*` or `_`, or with a long address-like word, stalling rendering for seconds ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed Markdown paragraphs with many unclosed `~~`, `$`, `\(` or `\[`, nested brackets or emphasis, or unclosed HTML, stalling rendering for seconds: 40 KB of unclosed `~~` took 85 s. Emphasis or links nested a thousand levels deep still render slowly, for seconds per few KB: each level restyles the text inside it ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed arrow keys acting as Escape and terminal query replies appearing as typed text when running omp on Windows over SSH ([#14034](https://github.com/can1357/oh-my-pi/issues/14034)).
+- Fixed `/model` under an `enabledModels`/`--models` scope hiding every judge, search, image, and speech model and dropping their configured role assignments (JUDGE, WEB, IMAGE, …) ([#14016](https://github.com/can1357/oh-my-pi/issues/14016))
+
+### Removed
+
+- Removed the internal `urlTokenPossible` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
+- Removed the internal `autolinkSchemeScanIndex` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.9] - 2026-10-01
 
