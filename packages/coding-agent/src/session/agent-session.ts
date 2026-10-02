@@ -766,6 +766,8 @@ export class AgentSession implements SettingsScope {
 	#eventListeners: AgentSessionEventListener[] = [];
 	#activeToolExecutionUpdates = new Map<string, Extract<AgentSessionEvent, { type: "tool_execution_update" }>>();
 	#runStateListeners = new Set<(state: "running" | "idle") => void>();
+	/** Epoch ms the current run went `running`; undefined while idle. */
+	#runStartedAt: number | undefined;
 	/** The last `agent_end` that {@link #settleAgentEnd} published; a failed maintenance pass settles any other. */
 	#settledAgentEnd: AgentEndEvent | undefined;
 	#commandMetadataChangedListeners: CommandMetadataChangedListener[] = [];
@@ -2914,6 +2916,8 @@ export class AgentSession implements SettingsScope {
 	}
 
 	#emitRunState(state: "running" | "idle"): void {
+		if (state === "idle") this.#runStartedAt = undefined;
+		else this.#runStartedAt ??= Date.now();
 		for (const listener of this.#runStateListeners) {
 			try {
 				listener(state);
@@ -4949,6 +4953,14 @@ export class AgentSession implements SettingsScope {
 	subscribeRunState(listener: (state: "running" | "idle") => void): () => void {
 		this.#runStateListeners.add(listener);
 		return () => this.#runStateListeners.delete(listener);
+	}
+
+	/**
+	 * Epoch ms the current run started, stable across retries within the run and
+	 * across UI focus switches; undefined while idle.
+	 */
+	get runStartedAt(): number | undefined {
+		return this.#runStartedAt;
 	}
 
 	/**
