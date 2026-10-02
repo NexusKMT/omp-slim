@@ -9,6 +9,12 @@ const EXTRA_SYNTAXES: &[(&str, &str)] = &[
 	("Astro", include_str!("Astro.sublime-syntax")),
 ];
 
+/// Builds the serialized artifact's syntax set from newline-aware defaults and
+/// vendored grammars.
+///
+/// # Panics
+///
+/// Panics if a vendored grammar cannot be parsed.
 pub fn build_syntax_set() -> SyntaxSet {
 	let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
 	for (name, source) in EXTRA_SYNTAXES {
