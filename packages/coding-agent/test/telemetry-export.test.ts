@@ -184,8 +184,26 @@ describe("estimateProviderCost", () => {
 
 		expect(result).toEqual({ usd: 1.1, inputUsd: 0.2, outputUsd: 0.8 });
 	});
+	it("preserves a provider-reported charge while distinguishing unpriced zero from a free priced request", () => {
+		const providerReported: CostEstimatorContext = {
+			...context,
+			usageCost: { input: 0.42, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.42 },
+		};
+		expect(estimateProviderCost(providerReported, () => false)).toEqual({
+			usd: 0.42,
+			inputUsd: 0.42,
+			outputUsd: 0,
+		});
 
-	it("reports an unavailable reason instead of a zero cost when pricing is unknown", () => {
-		expect(estimateProviderCost(context, () => false)).toEqual({ unavailable: "model_price_unavailable" });
+		const unpricedZero: CostEstimatorContext = {
+			...context,
+			usageCost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		expect(estimateProviderCost(unpricedZero, () => false)).toEqual({ unavailable: "model_price_unavailable" });
+		expect(estimateProviderCost(unpricedZero, () => true)).toEqual({
+			usd: 0,
+			inputUsd: 0,
+			outputUsd: 0,
+		});
 	});
 });

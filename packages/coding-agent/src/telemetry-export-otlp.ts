@@ -98,7 +98,9 @@ export function estimateProviderCost(
 ): CostEstimate {
 	const providerId = context.providerId ?? context.provider;
 	const modelId = context.modelId ?? context.model;
-	if (!modelPricingResolver(providerId, modelId)) return { unavailable: "model_price_unavailable" };
+	if (!modelPricingResolver(providerId, modelId) && context.usageCost.total === 0) {
+		return { unavailable: "model_price_unavailable" };
+	}
 	return {
 		usd: context.usageCost.total,
 		inputUsd: context.usageCost.input,
