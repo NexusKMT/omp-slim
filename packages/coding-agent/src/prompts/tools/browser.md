@@ -35,7 +35,7 @@ Drive real Chromium tabs from JavaScript or Python Eval with the global `browser
 - Navigation and re-renders invalidate observed ids and refs. Re-observe, then act in the same cell. Use `pushState(url)` for SPA navigation without a document load.
 - Use `tab.select` for `<select>` elements; `tab.fill` does not support them.
 - Raw `page.setRequestInterception` and `page.on("request")` inside `tab.run` coexist with persistent `tab.route` handlers and are cleaned up after that run; `tab.route` persists until `tab.unroute` or tab close.
-- `browser.open({ allowed_domains: [...] })` allows exact hosts and `*.example.com` patterns (including the bare domain), aborting other navigation, subresource, fetch, and WebSocket requests.
+- `browser.open({ allowed_domains: […] })` allows exact hosts and `*.example.com` patterns (including the bare domain), aborting other navigation, subresource, fetch, and WebSocket requests.
 
 Application modes:
 
@@ -45,6 +45,8 @@ Application modes:
 - `app.cdp_url`: attach to an existing CDP endpoint.
 - `app.relay: true`: drive the user's Chrome through the omp relay. `app.target` selects a tab by URL/title substring; without it, the visible tab is adopted. Opening with `url` navigates that adopted tab.
 - Relay sessions are the user's real logged-in browser. Sites attribute actions to the user. Name a target or create a dedicated tab; NEVER navigate the visible tab without authorization.
+- Inside a Tern pane, tabs open by default as browser picture-in-pictures over this pane (native WKWebView, visible to the user, not Chromium); the open result names the backend. Explicit `app` options, the relay, and a configured CDP URL win; `headed: false` or `app.tern: false` opens Chromium instead; `app.tern: true` requires Tern. When no Tern window can host the page, the open falls back to Chromium and says so.
+- Tern tabs: input is trusted native mouse/keyboard events at element centres; `tab.evaluate` runs in the page world. Console, `requests`, `route`, and HAR cover the page's `fetch`/XHR plus navigation responses only (no images/scripts/styles; `route` accepts only `resourceType` `fetch`/`xhr`); request bodies exist only for the current document. Frames inside CSS-scaled/rotated elements cannot be driven. `emulate` supports viewport/device, userAgent, colorScheme, credentials, geolocation, locale, offline (JS-visible); timezone, headers, any reducedMotion, CPU and network throttling throw. Clipboard helpers use the system clipboard. `pdf` supports only `path`. `a11y`, `webmcp*` cover the main frame; `loadState` restores storage for the current origin only. `traceStart`/`traceStop`/`profileStart`/`profileStop` are unsupported; raw `page`/`browser` in `tab.run` are a Puppeteer-like subset (`goto`, `evaluate`, `content`, `$`, `$$`, `locator`, waits, `screenshot`, `keyboard`, `mouse`, `cookies`).
 - Closing releases the managed tab. It never closes relay/CDP-attached pages. `kill: true` terminates only applications spawned by this process, never reused browser processes.
 - Idle tabs auto-freeze at turn settle (animated pages stop burning CPU/GPU) and unfreeze on next use; tabs idle past the idle-close timeout are closed. Pass `persist: true` on `open` to keep a tab live across turns (e.g. multi-step login); `browser.close` still releases explicitly.
  </instruction>
@@ -65,7 +67,6 @@ await tab.id(observed["elements"][0]["id"]).click()
 title = await tab.run("return await tab.title();", timeout=30)
 await tab.close()
 ```
-
 </examples>
 
 <critical>
