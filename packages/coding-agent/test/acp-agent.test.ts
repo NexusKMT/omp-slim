@@ -178,6 +178,10 @@ class FakeAgentSession {
 		return this.models;
 	}
 
+	getAvailableEffortSelectors(): ReadonlyArray<string> {
+		return ["off", "auto", ...this.getAvailableThinkingLevels()];
+	}
+
 	getAvailableThinkingLevels(): ReadonlyArray<string> {
 		return ["low", "medium", "high"];
 	}
