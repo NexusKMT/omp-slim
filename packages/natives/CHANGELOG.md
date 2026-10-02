@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced syntax-highlighting startup work by bundling the complete precompiled grammar set.
+
 ## [18.4.10] - 2026-10-02
 
 ### Fixed
