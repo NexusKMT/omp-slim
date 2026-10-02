@@ -8,7 +8,7 @@
 
 ### Changed
 
-- Reduced temporary memory usage and copying when forking a session.
+- Reduced temporary memory usage and copying when forking a session ([#14105](https://github.com/can1357/oh-my-pi/pull/14105) by [@iliaal](https://github.com/iliaal)).
 
 ## [18.4.10] - 2026-10-02
 
