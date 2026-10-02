@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added first-class JSON and JSONL querying to the `read` tool via `?q=<jq-filter>`, supporting in-process jaq evaluation, raw/compact formatting, and offset/limit pagination ([#14141](https://github.com/can1357/oh-my-pi/pull/14141) by [@asuffield](https://github.com/asuffield)).
 - `/dump all` writes a zip to the temp directory with the main transcript, the LLM request JSON, and one file per subagent transcript (nested subagents included, killed ones marked aborted); the TUI copies the archive path to the clipboard. Plain `/dump` is unchanged ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
