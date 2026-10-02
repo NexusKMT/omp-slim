@@ -10,6 +10,7 @@
 ### Fixed
 
 - Fixed `omp update` failing on standalone-binary installs when npm advertised a version whose GitHub release was never published; the updater now installs the newest published release instead ([#12913](https://github.com/can1357/oh-my-pi/issues/12913)).
+- Fixed `collab.autoStart` leaving a session unhosted and missing from `omp collab list` after one failed relay connection; a room the relay never opened is now retried on the relaunch backoff (immediately, then 1 s up to 60 s), and the room that finally opens still publishes generation 1 ([#14112](https://github.com/can1357/oh-my-pi/pull/14112) by [@alphastorm](https://github.com/alphastorm)).
 
 ## [18.4.11] - 2026-10-02
 
