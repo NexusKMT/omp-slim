@@ -660,7 +660,9 @@ Related settings:
 - `providers.openaiLiveSteering` (deliver mid-response user messages into GPT-6 responses over the Codex WebSocket)
 
 `modelRoles` stores model selectors such as `provider/modelId`; `enabledModels` and CLI `--models`
-accept exact selectors, globs, and fuzzy matches.
+accept exact selectors, globs, and fuzzy matches. The resulting scope restricts chat models only
+(Ctrl+P cycling, the startup model, chat roles in `/model`); judge, search, image, and speech
+models stay available for their roles, so entries naming them are accepted but have no effect.
 
 `enabledModels`, `enabledProviders`, and `disabledProviders` entries may also be scoped to a path prefix:
 
