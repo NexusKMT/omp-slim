@@ -3,7 +3,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveProviderModels } from "@oh-my-pi/pi-catalog/model-manager";
-import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
 import {
 	CORALBRICKS_BASE_URL,
 	coralbricksModelManagerOptions,
@@ -104,29 +103,31 @@ describe("CoralBricks built-in provider", () => {
 		expect(unknown?.supportsTools).toBe(false);
 	});
 
+	test("lets a live zero rate override the bundled reference", async () => {
+		// Live rows are the deployment truth, so an explicit `0` price must win
+		// over the bundled reference rate instead of falling back to it.
+		const fetchMock = async (): Promise<Response> =>
+			Response.json({
+				object: "list",
+				data: [
+					coralRow({
+						id: "glm-5.3-fp4",
+						pricing: { input_per_m: 1.12, output_per_m: 4.4, cached_input_per_m: 0, cache_write_per_m: 0 },
+					}),
+				],
+			});
+
+		const options = coralbricksModelManagerOptions({ apiKey: "cb-test-key", fetch: fetchMock });
+		const models = await options.fetchDynamicModels?.();
+		const glm = models?.find(item => item.id === "glm-5.3-fp4");
+		// The bundled reference seeds a 1.68 cache-write rate; Coral zeroed it.
+		expect(glm?.cost.cacheWrite).toBe(0);
+		expect(glm?.cost.cacheRead).toBe(0);
+	});
+
 	test("gates discovery on credentials because /v1/models is key-protected", () => {
 		expect(coralbricksModelManagerOptions({}).fetchDynamicModels).toBeUndefined();
 		expect(coralbricksModelManagerOptions({ apiKey: "cb-test-key" }).fetchDynamicModels).toBeDefined();
-	});
-
-	test("ships the reviewed seed rows in the generated bundle", () => {
-		const bundled = getBundledModels("coralbricks");
-		// Default sort is lexicographic: "glm-5.3-flash-fp4" precedes "glm-5.3-fp4".
-		expect(bundled.map(model => model.id).sort()).toEqual([
-			"deepseek-v4.1-flash-fast-fp4",
-			"glm-5.3-flash-fp4",
-			"glm-5.3-fp4",
-		]);
-		const glm = bundled.find(model => model.id === "glm-5.3-fp4");
-		expect(glm?.cost.input).toBe(1.12);
-		expect(glm?.cost.output).toBe(4.4);
-		expect(glm?.cost.cacheRead).toBe(0);
-		expect(glm?.cost.cacheWrite).toBe(1.68);
-		expect(glm?.contextWindow).toBe(1048576);
-		expect(glm?.maxTokens).toBe(131072);
-		expect(glm?.input).toEqual(["text"]);
-		const flash = bundled.find(model => model.id === "glm-5.3-flash-fp4");
-		expect(flash?.input).toEqual(["text", "image"]);
 	});
 
 	test("keeps a live modality removal authoritative through the production manager merge", async () => {

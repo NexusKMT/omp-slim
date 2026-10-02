@@ -1617,6 +1617,8 @@ export function deepinfraModelManagerOptions(
 	return {
 		providerId: "deepinfra",
 		dynamicModelsAuthoritative: true,
+		// `vision`/`vlm` tags are the whole truth for modality on this host.
+		dynamicInputAuthoritative: true,
 		fetchDynamicModels: () => fetchDeepinfraModels({ baseUrl, apiKey, fetch: config?.fetch, references }),
 	};
 }
@@ -1649,10 +1651,21 @@ interface CoralbricksModelEntry {
 }
 
 /**
+ * Read one live per-million price. An explicit `0` is a real rate and wins
+ * over the bundled reference (live rows are the deployment truth); only a
+ * missing or negative field falls back.
+ */
+function coralRate(value: unknown, fallback: number): number {
+	const parsed = toNumber(value);
+	return parsed !== undefined && parsed >= 0 ? parsed : fallback;
+}
+
+/**
  * Map one CoralBricks catalog row to a chat model spec. Rows without an id
  * and non-chat rows (`supports_chat: false`) are dropped. Pricing arrives
  * in Coral's own per-million field names; `cached_input_per_m` is $0 on
- * every model and a missing `cache_write_per_m` means no cache-write rate.
+ * every model, an explicit `0` rate wins over the bundled reference, and
+ * only a missing field falls back.
  * The endpoint publishes no output cap and no reasoning flag, so `maxTokens`
  * and `reasoning` keep their bundled-reference values (KDL lineage rules own
  * the thinking ladders) rather than being invented from the row.
@@ -1687,10 +1700,10 @@ function mapCoralbricksModel(
 		input,
 		...(typeof entry.supports_tools === "boolean" ? { supportsTools: entry.supports_tools } : {}),
 		cost: {
-			input: toPositiveNumber(pricing.input_per_m, reference?.cost.input ?? 0),
-			output: toPositiveNumber(pricing.output_per_m, reference?.cost.output ?? 0),
-			cacheRead: toPositiveNumber(pricing.cached_input_per_m, reference?.cost.cacheRead ?? 0),
-			cacheWrite: toPositiveNumber(pricing.cache_write_per_m, reference?.cost.cacheWrite ?? 0),
+			input: coralRate(pricing.input_per_m, reference?.cost.input ?? 0),
+			output: coralRate(pricing.output_per_m, reference?.cost.output ?? 0),
+			cacheRead: coralRate(pricing.cached_input_per_m, reference?.cost.cacheRead ?? 0),
+			cacheWrite: coralRate(pricing.cache_write_per_m, reference?.cost.cacheWrite ?? 0),
 		},
 		contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? null),
 		maxTokens: reference?.maxTokens ?? null,
@@ -1759,6 +1772,9 @@ export function coralbricksModelManagerOptions(
 	return {
 		providerId: "coralbricks",
 		dynamicModelsAuthoritative: true,
+		// `supports_image_input` is the row's whole truth for modality (Coral
+		// answers unsupported content with `400 unsupported_content_type`).
+		dynamicInputAuthoritative: true,
 		...(apiKey && {
 			fetchDynamicModels: () => fetchCoralbricksModels({ baseUrl, apiKey, fetch: config?.fetch, references }),
 		}),
@@ -6401,6 +6417,9 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 	return {
 		providerId: "github-copilot",
 		cacheProviderId: resolveModelCacheProviderId("github-copilot", { apiKey: rawApiKey, baseUrl }),
+		// Copilot discovery pre-applies the correct image fallback for omitted
+		// `supports.vision`; the live row's modality is authoritative.
+		dynamicInputAuthoritative: true,
 		dropCachedModelIdsOnStaticMismatch: COPILOT_CACHE_INVALIDATED_MODEL_IDS,
 		// COPILOT_API_HEADERS are compile-time wire identity constants, not
 		// credentials. The cache omits all request headers for
