@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Fireworks Fast models failing with HTTP 404: the retired `kimi-k2.6-fast`, `kimi-k2.7-code-fast`, and `glm-5.1-fast` are replaced by `glm-5.3-fast` and `kimi-k3-fast`, and GLM-5.3 Fast on Fireworks, Baseten, and Vercel AI Gateway now offers GLM-5.3's `low`/`high`/`max` thinking levels ([#14067](https://github.com/can1357/oh-my-pi/pull/14067) by [@alphastorm](https://github.com/alphastorm))
+
 ## [18.4.10] - 2026-10-02
 
 ### Fixed
