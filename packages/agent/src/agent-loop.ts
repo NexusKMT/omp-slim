@@ -51,7 +51,7 @@ import {
 	recoverHarmonyToolCall,
 	signalListLabel,
 } from "@oh-my-pi/pi-ai/utils/harmony-leak";
-import { logger, sanitizeText, structuredCloneJSON } from "@oh-my-pi/pi-utils";
+import { cloneJsonTree, logger, sanitizeText, structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { LiveSteeringChannel } from "./live-steering";
 import { agentPauseGate } from "./pause";
@@ -377,13 +377,17 @@ function snapshotAssistantContentBlock(block: AssistantContentBlock): AssistantC
 		case "redactedThinking":
 			return { ...block };
 		case "anthropicServerTool":
-			return { ...block, block: structuredCloneJSON(block.block) };
+			return { ...block, block: cloneJsonTree(block.block) };
 		case "fallback":
 			return { ...block, from: { ...block.from }, to: { ...block.to } };
 		case "toolCall": {
 			const snap = {
 				...block,
-				arguments: structuredCloneJSON(block.arguments),
+				// Providers mutate streaming arguments in place (owned-stream, GLM)
+				// as well as replacing them, so containers are always copied; the
+				// strings inside are immutable and shared, keeping the per-delta
+				// cost independent of the argument payload size.
+				arguments: cloneJsonTree(block.arguments),
 				providerMetadata: snapshotToolCallProviderMetadata(block.providerMetadata),
 			};
 			// Object spread copies enumerable symbols in Bun, but the Cursor
@@ -2094,6 +2098,8 @@ async function streamAssistantResponse(
 						signal: requestSignal,
 					})
 				: undefined;
+			const speculationPlansFromStream =
+				!config.transformAssistantMessage || config.transformAssistantMessagePreservesToolCalls === true;
 
 			let providerStreamSettled = false;
 			let speculationSettled = false;
@@ -2323,15 +2329,11 @@ async function streamAssistantResponse(
 						case "toolcall_delta":
 						case "toolcall_end":
 							if (partialMessage) {
-								if (
-									event.type === "toolcall_start" &&
-									speculationCoordinator &&
-									!config.transformAssistantMessage
-								) {
+								if (event.type === "toolcall_start" && speculationCoordinator && speculationPlansFromStream) {
 									// Stream sessions plan from pre-transform arguments, exactly like
 									// direct candidates (see admitFinalized below): with a transformer
-									// installed the authoritative call may differ, so any speculative
-									// work started from the original would be phantom I/O.
+									// that may rewrite calls, the authoritative call may differ, so any
+									// speculative work started from the original would be phantom I/O.
 									speculationCoordinator.register(event.contentIndex);
 									const toolCall = event.partial.content[event.contentIndex];
 									if (toolCall?.type === "toolCall") {
@@ -2428,7 +2430,7 @@ async function streamAssistantResponse(
 								event.type === "toolcall_end" &&
 								speculationCoordinator &&
 								speculationConfig &&
-								!config.transformAssistantMessage
+								speculationPlansFromStream
 							) {
 								speculationCoordinator.admitFinalized(context, event.toolCall, config, requestSignal);
 							}
@@ -2905,13 +2907,14 @@ async function prepareToolCallDispatch(
 				}
 				return validateToolArguments(tool, { ...toolCall, arguments: args });
 			} catch (validationError) {
-				if (tool?.lenientArgValidation) {
+				// Lenience covers schema mismatches; a parse failure has no args to hand over.
+				const parseFailed = "__parseError" in args;
+				if (tool?.lenientArgValidation && !parseFailed) {
 					const fallback = { ...args };
-					delete fallback.__parseError;
 					delete fallback.__rawJson;
 					return fallback;
 				}
-				entry.args = "__parseError" in args ? { __parseError: args.__parseError } : args;
+				entry.args = parseFailed ? { __parseError: args.__parseError } : args;
 				entry.validationErrorMessage =
 					validationError instanceof Error ? validationError.message : String(validationError);
 				return undefined;
@@ -3027,6 +3030,11 @@ async function speculativeFinalCalls(
 /**
  * Execute tool calls from an assistant message. Returns model-visible context
  * only after every result has settled, preserving assistant call order.
+ *
+ * `tool_execution_end` fires as each call settles so live UI updates promptly;
+ * result `message_start`/`message_end` events (which append to agent state and
+ * the persisted session) are held until every earlier call has a result, so
+ * history always pairs results in call order regardless of completion order.
  */
 async function executeToolCalls(
 	currentContext: AgentContext,
@@ -3213,6 +3221,18 @@ async function executeToolCalls(
 		await checkAsideInterrupts();
 	};
 
+	// Index of the first record whose result message has not been emitted yet.
+	let nextResultIndex = 0;
+	const flushResultMessages = (): void => {
+		for (; nextResultIndex < records.length; nextResultIndex++) {
+			const message = records[nextResultIndex].toolResultMessage;
+			if (!message) return;
+			emittedToolResults.push(message);
+			stream.push({ type: "message_start", message });
+			stream.push({ type: "message_end", message });
+		}
+	};
+
 	const emitToolResult = (record: (typeof records)[number], result: AgentToolResult<any>, isError: boolean): void => {
 		if (record.resultEmitted) return;
 		const { toolCall } = record;
@@ -3248,10 +3268,7 @@ async function executeToolCalls(
 		record.isError = isError;
 		record.toolResultMessage = toolResultMessage;
 		record.resultEmitted = true;
-		emittedToolResults.push(toolResultMessage);
-
-		stream.push({ type: "message_start", message: toolResultMessage });
-		stream.push({ type: "message_end", message: toolResultMessage });
+		flushResultMessages();
 	};
 
 	const runTool = async (record: (typeof records)[number], index: number): Promise<void> => {
@@ -3454,6 +3471,9 @@ async function executeToolCalls(
 						});
 						result = coerced.result;
 						isError = coerced.malformed || (after.isError ?? isError);
+						if (isNonBlankContext(after.additionalContext)) {
+							record.reportedContext.push(after.additionalContext);
+						}
 					}
 				} catch (e) {
 					caughtError = e;
