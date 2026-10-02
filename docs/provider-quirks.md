@@ -218,6 +218,7 @@ Provider-specific overrides in `packages/catalog/src/compat/rules/providers/goog
 ### Catalog model handling
 - **Provider entry (`google`)**: `packages/catalog/src/compat/rules/providers/google.kdl` declares default model `gemini-3.1-pro-preview`. Environment keys: `GEMINI_API_KEY`.
 
+
 ## Google Vertex AI
 
 The Google Vertex AI provider enables streaming generation for Gemini models hosted on Google Cloud Vertex AI as well as third-party models (such as Anthropic Claude) served via Vertex endpoints. Entry points include `streamGoogleVertex` in `packages/ai/src/providers/google-vertex.ts` for Gemini models (API type `"google-vertex"`), `streamAnthropic` via `createVertexAuthenticatedFetch` in `packages/ai/src/stream.ts` for Claude models (API type `"anthropic-messages"`), and ADC authentication in `packages/ai/src/providers/google-auth.ts`. Transport uses HTTPS REST / SSE with either Application Default Credentials (ADC OAuth Bearer tokens) or Vertex Express Mode API key (`x-goog-api-key`).
@@ -1042,7 +1043,6 @@ The Google Antigravity provider (`google-antigravity`) routes requests to Google
 - **Authored seeds**: `gemini-3-pro-image`; bundle policy `always`. Limits, capabilities, and prices are authored alongside these rows.
 - **Claude & GPT-OSS Model Availability**: Exposes Anthropic Claude models (`claude-opus-4-5`, `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-sonnet-4-6`) and `gpt-oss-120b` alongside Gemini 3.x/2.5 models in `models.json` (`packages/catalog/src/models.json`).
 
-
 ## Google Gemini CLI (`google-gemini-cli`)
 Google Cloud Code Assist (Gemini CLI) (`google-gemini-cli`) is Google's OAuth-authenticated developer free and workspace tier providing direct access to Gemini models over the Cloud Code Assist API endpoint (`https://cloudcode-pa.googleapis.com`). Rides the shared **Google Gemini CLI / Antigravity** transport section (`packages/ai/src/providers/google-gemini-cli.ts`).
 
@@ -1270,7 +1270,7 @@ The MiniMax Token Plan provider (`minimax-code`, alongside its mainland China re
 ### Catalog model handling
 - **Provider entry (`minimax-code`)**: `packages/catalog/src/compat/rules/providers/minimax-code.kdl` declares default model `MiniMax-M3`. Environment keys: `MINIMAX_CODE_API_KEY`.
 - **1M Context Tier Override**: Policy generation (`packages/catalog/scripts/generated-policies.ts`) explicitly overrides `MiniMax-M3` context windows for `minimax-code` and `minimax-code-cn` to report the documented 1,000,000-token tier instead of the upstream 512,000-token pricing boundary.
-- **Pay-as-you-go equivalent pricing**: Upstream reports $0 for every Token Plan model. The `minimax-code` / `minimax-code-cn` `pricing-peer` rules in `runtime/behavior.kdl` price rows at their `minimax` / `minimax-cn` list prices at build time (Credits overflow is billed at the PAYG list price), so usage and `omp stats` show PAYG-equivalent cost. `MiniMax-M3.1-Flash-Preview` has no published price and borrows the `MiniMax-M3` rate as an estimate.
+- **Pay-as-you-go equivalent pricing**: Upstream reports $0 for every Token Plan model. The `minimax-code` / `minimax-code-cn` `pricing-peer` rules in `runtime/behavior.kdl` price rows at their `minimax` / `minimax-cn` list prices at build time (Credits overflow is billed at the PAYG list price), so usage and `omp stats` show PAYG-equivalent cost. `MiniMax-M3.1-Flash-Preview` has no published price and borrows the `MiniMax-M3` rate as an estimate. `applyPricingPeerFallback` (`packages/catalog/scripts/generated-policies.ts`) fills only zero-cost rows and tries a rule's alias `peer-id` before the row's own id, across peers in declared order.
 - **Host Matching**: Provider host mapping in `packages/catalog/src/hosts.ts` associates `urlMarkers` `api.minimax.io` and `api.minimaxi.com` with `minimax`, `minimax-code`, and `minimax-code-cn`.
 
 ## MiniMax Token Plan (China) (`minimax-code-cn`)

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed MiniMax Token Plan (`minimax-code`, `minimax-code-cn`) usage showing as free; turns now show the pay-as-you-go equivalent cost, with MiniMax-M3.1-Flash-Preview estimated at the MiniMax-M3 rate since it has no published price ([#13695](https://github.com/can1357/oh-my-pi/pull/13695) by [@eggpeat](https://github.com/eggpeat))
+
 ## [18.4.9] - 2026-10-01
 
 ### Fixed
