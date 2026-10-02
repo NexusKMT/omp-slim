@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed Ctrl+Z in Tern's native composer to undo the last edit (TSP `undo` event) instead of suspending
+
 ## [18.4.11] - 2026-10-02
 
 ### Added
