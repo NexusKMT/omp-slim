@@ -122,6 +122,27 @@ describe("collectSubSessions", () => {
 		expect(Object.keys(subs)).toEqual(["Scout"]);
 	});
 
+	test("terminates when a transcript stem names the directory itself", async () => {
+		// "..jsonl" has the stem "."; descending into `<dir>/.` used to rescan the same directory forever.
+		await Bun.write(path.join(root, "main/..jsonl"), sessionJsonl("dot", ["d1"]));
+		await Bun.write(path.join(root, "main/Scout.jsonl"), sessionJsonl("scout", ["s1"]));
+
+		const subs = await collectSubSessions(mainFile);
+
+		expect(Object.keys(subs).sort()).toEqual([".", "Scout"]);
+	});
+
+	test("flags subagents killed with a tombstone sidecar as aborted", async () => {
+		await Bun.write(path.join(root, "main/Killed.jsonl"), sessionJsonl("killed", ["k1"]));
+		await Bun.write(path.join(root, "main/Killed.jsonl.tombstone"), "");
+		await Bun.write(path.join(root, "main/Live.jsonl"), sessionJsonl("live", ["l1"]));
+
+		const subs = await collectSubSessions(mainFile);
+
+		expect(subs.Killed.aborted).toBe(true);
+		expect(subs.Live.aborted).toBe(false);
+	});
+
 	test("returns empty record when no subagent dir exists", async () => {
 		expect(await collectSubSessions(mainFile)).toEqual({});
 		expect(await collectSubSessions(path.join(root, "not-a-session"))).toEqual({});

@@ -1,5 +1,5 @@
 /**
- * Subagent session discovery shared by `/export` (HTML) and `/dump` (text).
+ * Subagent session discovery shared by `/export` (HTML) and `/dump all` (zip of text dumps).
  *
  * A session at `<dir>/<name>.jsonl` keeps its subagent sessions at `<dir>/<name>/<AgentId>.jsonl`;
  * each subagent's own children nest the same way under `<dir>/<name>/<AgentId>/`. Advisor
@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { isAdvisorTranscriptName } from "../advisor/transcript-recorder";
+import { getAgentTombstonePath } from "../registry/agent-registry";
 import type { SessionEntry, SessionHeader } from "./session-entries";
 import { loadEntriesFromFile } from "./session-loader";
 
@@ -21,6 +22,8 @@ export interface SubSession {
 	header: SessionHeader | null;
 	entries: SessionEntry[];
 	leafId: string | null;
+	/** The subagent was explicitly killed (a tombstone sidecar sits next to its transcript). */
+	aborted: boolean;
 }
 
 /**
@@ -41,14 +44,20 @@ async function collectSubSessionsFromDir(
 	parentKey: string | null,
 	out: Record<string, SubSession>,
 ): Promise<void> {
-	let names: string[];
+	let dirents: fs.Dirent[];
 	try {
-		names = await fs.promises.readdir(dir);
+		dirents = await fs.promises.readdir(dir, { withFileTypes: true });
 	} catch (err) {
-		if (isEnoent(err)) return;
+		if (isEnoent(err) || (err as NodeJS.ErrnoException).code === "ENOTDIR") return;
 		throw err;
 	}
-	for (const name of names.sort()) {
+	const fileNames = new Set<string>();
+	const childDirectories = new Set<string>();
+	for (const dirent of dirents) {
+		if (dirent.isFile()) fileNames.add(dirent.name);
+		else if (dirent.isDirectory()) childDirectories.add(dirent.name);
+	}
+	for (const name of [...fileNames].sort()) {
 		if (!name.endsWith(".jsonl") || name.includes(".bak") || isAdvisorTranscriptName(name)) continue;
 		const agentId = name.slice(0, -6);
 		const key = parentKey ? `${parentKey}/${agentId}` : agentId;
@@ -63,8 +72,11 @@ async function collectSubSessionsFromDir(
 				header,
 				entries,
 				leafId: entries.length > 0 ? entries[entries.length - 1].id : null,
+				aborted: fileNames.has(getAgentTombstonePath(name)),
 			};
 		}
-		await collectSubSessionsFromDir(path.join(dir, agentId), key, out);
+		// Only descend into real child directories: a transcript stem such as "." or ".."
+		// would revisit an ancestor, and symlinked directories can loop back into the tree.
+		if (childDirectories.has(agentId)) await collectSubSessionsFromDir(path.join(dir, agentId), key, out);
 	}
 }
