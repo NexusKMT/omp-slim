@@ -452,7 +452,8 @@ fn recorded_view(file: &StagedFile, written: &str) -> String {
 /// every unchanged run the edit did not shift (the leading run, plus runs below
 /// line-neutral hunks), filtered by what `prior` displayed. A missing or
 /// unrestricted prior snapshot let the edit anchor anywhere, so every such run
-/// carries over. Shifted lines never carry: their old numbers name other content.
+/// carries over. Shifted lines never carry: their old numbers name other
+/// content.
 fn carried_seen_lines(before: &str, after: &str, prior: Option<&Snapshot>) -> Vec<u32> {
 	let seen = prior
 		.and_then(|snapshot| snapshot.seen_lines.as_ref())
