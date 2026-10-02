@@ -2179,9 +2179,12 @@ export function clampKimiK27CodeMaxTokens(modelId: string, candidate: number | n
 }
 
 /**
- * Fireworks Fast variants we surface. Each inherits the base model's
- * limits/modalities/thinking and overrides only the cost with the Standard-column
- * Fast prices from the Serverless pricing table; `cacheWrite` stays 0 (Fireworks
+ * Fireworks Fast variants we surface: the Fast table on
+ * https://docs.fireworks.ai/serverless/serverless-modes, minus the US-only
+ * router (it needs the `us.api.fireworks.ai` host). Retired Fast routers answer
+ * 404, so drop them here when Fireworks drops them there. Each inherits the base
+ * model's limits/modalities/thinking and overrides only the cost with the Fast
+ * prices from the Serverless pricing table; `cacheWrite` stays 0 (Fireworks
  * bills no cache-write). Derived from the bundled base entries so metadata stays
  * in lockstep, and the runtime auto-falls back to the base id on a failed fast
  * request. See https://docs.fireworks.ai/serverless/pricing.
@@ -2191,9 +2194,8 @@ const FIREWORKS_FAST_VARIANT_SPECS: ReadonlyArray<{
 	name: string;
 	cost: { input: number; output: number; cacheRead: number };
 }> = [
-	{ base: "kimi-k2.7-code", name: "Kimi K2.7 Code Fast", cost: { input: 1.9, output: 8, cacheRead: 0.38 } },
-	{ base: "kimi-k2.6", name: "Kimi K2.6 Fast", cost: { input: 2, output: 8, cacheRead: 0.3 } },
-	{ base: "glm-5.1", name: "GLM-5.1 Fast", cost: { input: 2.8, output: 8.8, cacheRead: 0.52 } },
+	{ base: "kimi-k3", name: "Kimi K3 Fast", cost: { input: 4.5, output: 22.5, cacheRead: 0.45 } },
+	{ base: "glm-5.3", name: "GLM-5.3 Fast", cost: { input: 2.1, output: 6.6, cacheRead: 0.39 } },
 	{ base: "glm-5.2", name: "GLM-5.2 Fast", cost: { input: 2.1, output: 6.6, cacheRead: 0.21 } },
 ];
 
