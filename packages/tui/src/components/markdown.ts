@@ -15,6 +15,8 @@ import { md } from "../native/describe";
 import type { DescribeContext, NativeNode } from "../native/node";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
+import { getThemeEpoch } from "../theme/theme";
+import { canCacheMarkdownListItems } from "../theme/tui-adapters";
 import type { Component } from "../tui";
 import {
 	applyBackgroundToLine,
@@ -957,7 +959,7 @@ const FAST_TABLE_DELIM_ROW_RE = /^\s*(?:\|[\s:]*-+\s*(?:\|[\s:]*-+\s*)*|[\s:]*-+
 
 // A paragraph's LAST line can complete into a different block kind under an
 // inert delta (ATX heading, blockquote, bullet marker, HR, ref-def) — disarm
-// when the grown line starts one (ref-def grammar: REF_DEF_LINE_RE).
+// when the grown line starts one or could contain a reference definition.
 const FAST_LINE_START_HAZARD_RE =
 	// `-` is placed LAST so it is a literal, not a range bound. The other
 	// chars are in ASCENDING code-point order (no reversed ranges that
@@ -966,7 +968,7 @@ const FAST_LINE_START_HAZARD_RE =
 
 /** @internal exported for tests — the grown-line-start block-kind gate. */
 export function fastLineStartHazard(grownLine: string): boolean {
-	return FAST_LINE_START_HAZARD_RE.test(grownLine) || REF_DEF_LINE_RE.test(grownLine);
+	return FAST_LINE_START_HAZARD_RE.test(grownLine) || HAS_REF_DEF.test(grownLine);
 }
 
 /** Seam hazards between the captured raw row tail and the delta: the row must
@@ -1030,13 +1032,11 @@ function lexInlineTokens(text: string): Token[] {
 	return new Lexer(markdownParser.defaults).inlineTokens(text);
 }
 
-// A reference-link definition (`[label]: dest`) resolves across the whole
-// document, so a split lex cannot reproduce it — disable the streaming fast path
-// when one is present (rare in streamed output). The label may contain
-// backslash-escaped characters (`[a\]b]: x`), so escapes are matched explicitly;
-// over-matching is safe (it only costs the fast path), under-matching is not.
-const REF_DEF_LINE_RE = /^ {0,3}\[(?:\\.|[^\]\\])+\]:/;
-const HAS_REF_DEF = new RegExp(REF_DEF_LINE_RE.source, "m");
+// Definitions share links across the whole document after list, task, and
+// quote prefixes are stripped. Every definition requires `]:`; matching those
+// bytes conservatively also rejects literals, without duplicating container
+// grammar or rescanning overlapping labels.
+const HAS_REF_DEF = /\]:/;
 
 // marked's list tokenizer (Tokenizer.list, marked v18) continues a list across
 // blank lines only when the remaining source matches
@@ -1363,7 +1363,12 @@ interface InlineStyleContext {
 	stylePrefix: string;
 }
 
-type ListToken = Token & { items: Array<{ tokens?: Token[] }>; ordered: boolean; start?: number };
+type ListToken = Token & {
+	items: Array<{ raw: string; tokens?: Token[] }>;
+	ordered: boolean;
+	start?: number;
+	loose: boolean;
+};
 type TableCellToken = { tokens?: Token[] };
 type TableToken = Token & { header: TableCellToken[]; rows: TableCellToken[][]; raw?: string };
 
@@ -1679,6 +1684,25 @@ interface TailRowCache extends RenderSignature {
 	// type of token[i+1] when the rows were produced (blank/spacing gate).
 	nextTypes: (string | undefined)[];
 }
+interface ListItemRowsCache {
+	signature: RenderSignature;
+	width: number;
+	themeEpoch: number;
+	ordered: boolean;
+	start: number | undefined;
+	loose: boolean;
+	raws: string[];
+	rows: RenderedLine[][];
+}
+
+interface StreamingListCache {
+	text: string;
+	before: Token[];
+	start: number;
+	tailStart: number;
+	stableCount: number;
+	list: Tokens.List;
+}
 /**
  * Mutable per-token record collector passed to #renderContentLines while
  * rendering the streaming tail. The render loop fills `raws`/`nextTypes`
@@ -1765,6 +1789,8 @@ export class Markdown implements Component {
 	// the blank-replacement branch of setText and the fallback branch of
 	// #lexTokens.
 	#tailRowCache?: TailRowCache;
+	#listItemRowsCache?: ListItemRowsCache;
+	#streamingListCache?: StreamingListCache;
 	// True while #renderStreamingContentLines renders the frozen token range:
 	// frozen code blocks highlight even in transient mode so their bytes match
 	// the finalized render (they render once into the prefix line cache, so
@@ -1856,6 +1882,8 @@ export class Markdown implements Component {
 			// Non-append edit: the previous frame's guard verdict cannot be
 			// reused — the checked region may have changed anywhere.
 			this.#appendOnlySinceLastScan = false;
+			this.#listItemRowsCache = undefined;
+			this.#streamingListCache = undefined;
 		}
 		this.#text = text;
 		if (!text.trim()) {
@@ -1863,6 +1891,7 @@ export class Markdown implements Component {
 			// the non-append edit, so drop the frozen stream state here or it
 			// outlives the content it indexed.
 			this.#dropStreamPrefix();
+			this.#listItemRowsCache = undefined;
 			// B+: the captured fast-path rows index the replaced content — drop
 			// the recipe so a fresh stream cannot splice onto stale rows.
 			this.#fastTail = undefined;
@@ -1930,7 +1959,9 @@ export class Markdown implements Component {
 			// render consumes it (see #lexTokens / the L2 hit path).
 			this.#streamPrefixLineCache = undefined;
 			this.#tailRowCache = undefined;
+			this.#listItemRowsCache = undefined;
 			this.#streamingHighlightCache = undefined;
+			this.#streamingListCache = undefined;
 		}
 		this.invalidate();
 	}
@@ -1996,22 +2027,106 @@ export class Markdown implements Component {
 		}
 		this.#lastScanLength = text.length;
 		this.#lastScanCanStream = canStream;
+		if (!canStream) this.#listItemRowsCache = undefined;
 		this.#lastScanValid = true;
 		this.#appendOnlySinceLastScan = true;
+		if (canStream && retainPrefix) {
+			const tokens = this.#resumeStreamingList(text);
+			if (tokens !== undefined) {
+				this.#freezeStablePrefix(text, tokens, { preserveExisting: true });
+				this.#checkpointStreamingList(text, tokens);
+				return tokens;
+			}
+		}
 		if (canStream && hasPrefix) {
 			const tailTokens = lexDocument(refDefText);
 			const tokens = [...prefixTokens, ...tailTokens];
 			if (retainPrefix) this.#freezeStablePrefix(text, tokens, { preserveExisting: true });
 			else this.#dropStreamPrefix();
+			if (retainPrefix) this.#checkpointStreamingList(text, tokens);
 			return tokens;
 		}
 		const tokens = lexDocument(text);
 		if (canStream && retainPrefix) {
 			this.#freezeStablePrefix(text, tokens, { preserveExisting: false });
+			this.#checkpointStreamingList(text, tokens);
 		} else {
 			this.#dropStreamPrefix();
 		}
 		return tokens;
+	}
+
+	#resumeStreamingList(text: string): Token[] | undefined {
+		const cached = this.#streamingListCache;
+		if (cached === undefined || text.length <= cached.text.length || !text.startsWith(cached.text)) return undefined;
+		const tail = lexDocument(text.slice(cached.tailStart));
+		const first = tail[0];
+		if (first?.type !== "list") return undefined;
+		const list = first as Tokens.List;
+		const oldMarker = LIST_MARKER_RE.exec(cached.list.raw);
+		const newMarker = LIST_MARKER_RE.exec(list.raw);
+		if (oldMarker?.[1] !== newMarker?.[1] || oldMarker?.[2] !== newMarker?.[2]) return undefined;
+		const loose = cached.list.loose || list.loose;
+		let completed = cached.list.items.slice(0, cached.stableCount);
+		if (loose !== cached.list.loose) {
+			completed = completed.map(item => ({
+				...item,
+				loose,
+				tokens: item.tokens.map(token =>
+					token.type === "text" ? ({ ...token, type: "paragraph" } as Tokens.Paragraph) : token,
+				),
+			}));
+		}
+		const growing = list.items.map(item => {
+			if (item.loose === loose) return item;
+			return {
+				...item,
+				loose,
+				tokens: item.tokens.map(token =>
+					token.type === "text" ? ({ ...token, type: "paragraph" } as Tokens.Paragraph) : token,
+				),
+			};
+		});
+		const merged: Tokens.List = {
+			...cached.list,
+			raw: text.slice(cached.start, cached.tailStart + list.raw.length),
+			loose,
+			items: [...completed, ...growing],
+		};
+		return [...cached.before, merged, ...tail.slice(1)];
+	}
+
+	#checkpointStreamingList(text: string, tokens: Token[]): void {
+		const previous = this.#streamingListCache;
+		this.#streamingListCache = undefined;
+		let index = tokens.length - 1;
+		while (tokens[index]?.type === "space") index--;
+		const token = tokens[index];
+		if (token?.type !== "list") return;
+		const list = token as Tokens.List;
+		let start = 0;
+		for (let i = 0; i < index; i++) start += tokens[i]!.raw.length;
+		// Late block delimiters can absorb an unfrozen preceding region. Bare
+		// environments can also absorb list items through an equation prefix.
+		if (start !== (this.#streamPrefixText?.length ?? 0) || BARE_ENV_BEGIN.test(list.raw)) return;
+		const canResume = previous !== undefined && previous.start === start && text.startsWith(previous.text);
+		let cursor = canResume ? previous.tailStart : start;
+		let tailStart = start;
+		let stableCount = 0;
+		const indent = /^ */.exec(list.raw)![0].length;
+		for (let i = canResume ? previous.stableCount : 0; i < list.items.length; i++) {
+			const item = list.items[i]!;
+			const position = text.indexOf(item.raw, cursor);
+			if (position < cursor || position >= start + list.raw.length) return;
+			// List continuation uses the first item's indentation. Resume only at
+			// an item with that same indentation so the lexer sees the same context.
+			if (/^ */.exec(item.raw)![0].length === indent) {
+				tailStart = position;
+				stableCount = i;
+			}
+			cursor = position + item.raw.length;
+		}
+		this.#streamingListCache = { text, before: tokens.slice(0, index), start, tailStart, stableCount, list };
 	}
 
 	/** Drop the frozen lex prefix and the transient row caches keyed on it. */
@@ -2020,6 +2135,8 @@ export class Markdown implements Component {
 		this.#streamPrefixTokens = undefined;
 		this.#streamPrefixLineCache = undefined;
 		this.#tailRowCache = undefined;
+		this.#listItemRowsCache = undefined;
+		this.#streamingListCache = undefined;
 	}
 
 	// Freeze the largest run of leading blocks that end on a hard "\n\n" boundary
@@ -2344,6 +2461,7 @@ export class Markdown implements Component {
 		signature: RenderSignature,
 		contentWidth: number,
 	): string[] {
+		if (tokens[tokens.length - 1]?.type !== "list") this.#listItemRowsCache = undefined;
 		const stableText = this.#streamPrefixText;
 		const stableTokenCount = this.#streamPrefixTokens?.length ?? 0;
 		if (stableText === undefined || stableTokenCount === 0 || !normalizedText.startsWith(stableText)) {
@@ -3336,6 +3454,41 @@ export class Markdown implements Component {
 		const indent = "  ".repeat(depth);
 		// Use the list's start property (defaults to 1 for ordered lists)
 		const startNumber = token.start ?? 1;
+		const signature =
+			depth === 0 &&
+			styleContext === undefined &&
+			this.#defaultTextStyle === undefined &&
+			this.#transientRenderCache &&
+			!this.#renderingStablePrefix &&
+			this.#lastScanCanStream &&
+			canCacheMarkdownListItems(this.#theme)
+				? this.#activeRenderSignature
+				: undefined;
+		const themeEpoch = signature === undefined ? undefined : getThemeEpoch();
+		const previous = this.#listItemRowsCache;
+		const reusable =
+			signature !== undefined &&
+			themeEpoch !== undefined &&
+			previous !== undefined &&
+			previous.width === width &&
+			previous.themeEpoch === themeEpoch &&
+			previous.ordered === token.ordered &&
+			previous.start === token.start &&
+			previous.loose === token.loose &&
+			this.#signatureEquals(previous.signature, signature)
+				? previous
+				: undefined;
+		let reusableCount = 0;
+		if (reusable !== undefined) {
+			while (
+				reusableCount < token.items.length &&
+				token.items[reusableCount]?.raw === reusable.raws[reusableCount]
+			) {
+				reusableCount++;
+			}
+		}
+		const raws: string[] | undefined = signature === undefined ? undefined : [];
+		const rows: RenderedLine[][] | undefined = signature === undefined ? undefined : [];
 		const pushWrapped = (line: RenderedLine, firstPrefix: string, continuationPrefix: string): void => {
 			if (line.literalCode) {
 				const wrappedLiteralRows = wrapTextWithAnsi(line.text, Math.max(1, width));
@@ -3371,6 +3524,14 @@ export class Markdown implements Component {
 
 		for (let i = 0; i < token.items.length; i++) {
 			const item = token.items[i];
+			if (i < reusableCount && reusable !== undefined && raws !== undefined && rows !== undefined) {
+				const cached = reusable.rows[i]!;
+				for (const row of cached) lines.push(row);
+				raws.push(item.raw);
+				rows.push(cached);
+				continue;
+			}
+			const rowStart = lines.length;
 			const bullet = token.ordered ? `${startNumber + i}. ` : "- ";
 			const firstPrefix = indent + this.#theme.listBullet(bullet);
 			// Continuation rows align under the item text, so the hang matches the
@@ -3400,6 +3561,22 @@ export class Markdown implements Component {
 			} else {
 				lines.push(renderedLine(firstPrefix));
 			}
+			if (raws !== undefined && rows !== undefined) {
+				raws.push(item.raw);
+				rows.push(lines.slice(rowStart));
+			}
+		}
+		if (signature !== undefined && themeEpoch !== undefined && raws !== undefined && rows !== undefined) {
+			this.#listItemRowsCache = {
+				signature,
+				width,
+				themeEpoch,
+				ordered: token.ordered,
+				start: token.start,
+				loose: token.loose,
+				raws,
+				rows,
+			};
 		}
 
 		return lines;
