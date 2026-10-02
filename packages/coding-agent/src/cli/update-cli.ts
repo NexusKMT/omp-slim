@@ -936,7 +936,8 @@ async function fetchLatestManifest(
 		try {
 			data = await response.json();
 		} catch (err) {
-			if (!origin) throw err;
+			// Only a malformed body falls back; body-read timeouts and resets must surface.
+			if (!origin || !(err instanceof SyntaxError)) throw err;
 			useFullPackument = true;
 		}
 		if (isPackument(data)) {

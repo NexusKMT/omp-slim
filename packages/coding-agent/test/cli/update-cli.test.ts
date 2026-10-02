@@ -209,6 +209,50 @@ describe("getLatestRelease configured registry", () => {
 		expect(release.version).toBe("999.4.0");
 	});
 
+	it("falls back to the full packument when the shortcut returns 200 with a non-JSON body", async () => {
+		const urls: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			Object.assign(
+				async (input: FetchInput) => {
+					const url = String(input);
+					urls.push(url);
+					if (url.endsWith("/latest")) return new Response("<html>Nexus</html>", { status: 200 });
+					return Response.json({
+						"dist-tags": { latest: "999.5.0" },
+						versions: { "999.5.0": { version: "999.5.0" } },
+					});
+				},
+				{ preconnect: globalThis.fetch.preconnect },
+			),
+		);
+
+		const release = await getLatestRelease({ registries: feed });
+
+		expect(urls).toHaveLength(2);
+		expect(release.version).toBe("999.5.0");
+	});
+
+	it("surfaces a body-read failure on the shortcut instead of retrying the packument", async () => {
+		const urls: string[] = [];
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			Object.assign(
+				async (input: FetchInput) => {
+					urls.push(String(input));
+					const body = new ReadableStream({
+						start(controller) {
+							controller.error(new Error("connection reset mid-body"));
+						},
+					});
+					return new Response(body, { status: 200 });
+				},
+				{ preconnect: globalThis.fetch.preconnect },
+			),
+		);
+
+		await expect(getLatestRelease({ registries: feed })).rejects.toThrow("connection reset mid-body");
+		expect(urls).toHaveLength(1);
+	});
+
 	it("reports a missing canary dist-tag on the feed as no canary release", async () => {
 		vi.spyOn(globalThis, "fetch").mockImplementation(
 			Object.assign(
