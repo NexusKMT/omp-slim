@@ -188,7 +188,7 @@ describe("bashToolRenderer", () => {
 			// Shared by every notice form, so a row whose notice is not stripped fails here.
 			expect(rendered, label).not.toContain("injected into the conversation");
 			expect(rendered, label).not.toContain("Do NOT poll");
-			expect(rendered, label).not.toContain("killed after");
+			expect(rendered, label).not.toContain("deadline");
 		}
 	});
 

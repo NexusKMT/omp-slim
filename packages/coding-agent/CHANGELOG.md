@@ -9,7 +9,7 @@
 ### Fixed
 
 - Fixed HTML export hanging when a session's subagent directory held a transcript named `..jsonl`; discovery now only descends into real child directories ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
-- Fixed background bash jobs and auto-backgrounded eval cells being killed at their default deadline (300 s for bash, 30 s for eval) with no warning: the bash tool description again says `async` keeps the deadline and that `timeout: 0` removes it, and the background-start notice now states the job's deadline (`killed after 300s`, or `no deadline`) ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
+- Fixed background bash jobs and auto-backgrounded eval cells being killed at their default deadline (300 s for bash, 30 s for eval) with no warning: the bash tool description again says `async` keeps the deadline and that `timeout: 0` removes it, and the background-start notice now states the job's deadline (`killed once it has run 300s in total`, or `no deadline`) ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
 
 ## [18.4.12] - 2026-10-02
 
