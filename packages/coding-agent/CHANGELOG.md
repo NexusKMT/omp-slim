@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bash commands reuse unchanged direnv environments, refresh after same-second edits to watched files, and skip denied `.envrc` files ([#14310](https://github.com/can1357/oh-my-pi/pull/14310) by [@n3oney](https://github.com/n3oney)).
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed

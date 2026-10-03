@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { $which, logger } from "@oh-my-pi/pi-utils";
+import { inflateSync } from "node:zlib";
+import { $which, isEnoent, logger } from "@oh-my-pi/pi-utils";
 
 /** Default cap on a single `direnv` invocation. The first export for a devenv
  *  `.envrc` can build a shell; callers may raise this via `bash.direnvLoadTimeoutMs`. */
@@ -60,11 +61,72 @@ function direnvBinary(): string | null {
 // without `.envrc` pays the throwing-stat walk once per TTL window instead
 // of once per bash call. Entries are keyed on the resolved start dir with a
 // short TTL, so a created/deleted/moved `.envrc` is discovered within
-// seconds — the same staleness class as the export diff below, and far
-// cheaper than re-walking to the filesystem root on every call.
+// seconds without re-walking to the filesystem root on every call.
 const envrcCache = new Map<string, { found: string | null; atMs: number }>();
 const ENVRC_CACHE_MAX = 512;
 const ENVRC_CACHE_TTL_MS = 5_000;
+
+interface DirenvWatch {
+	path: string;
+	mtimeNs: bigint | null;
+	size: bigint | null;
+}
+
+// Retain direnv's state so subsequent exports check its watch list instead of
+// rebuilding devenv. The diff remains relative to the clean process env.
+const exportCache = new Map<
+	string,
+	{
+		base: Record<string, string>;
+		loaded: Record<string, string>;
+		diff: DirenvExportDiff;
+		mtimeNs: bigint;
+		size: bigint;
+		watches: DirenvWatch[];
+	}
+>();
+
+async function statDirenvWatch(watchedPath: string): Promise<DirenvWatch> {
+	try {
+		const stat = await fs.stat(watchedPath, { bigint: true });
+		return { path: watchedPath, mtimeNs: stat.mtimeNs, size: stat.size };
+	} catch (err) {
+		if (!isEnoent(err)) throw err;
+		return { path: watchedPath, mtimeNs: null, size: null };
+	}
+}
+
+async function snapshotDirenvWatches(encoded: string, envrcPath: string): Promise<DirenvWatch[] | null> {
+	try {
+		// direnv's gzenv format is base64url-encoded zlib JSON.
+		const decoded: unknown = JSON.parse(inflateSync(Buffer.from(encoded, "base64url")).toString("utf8"));
+		if (!Array.isArray(decoded) || decoded.length === 0) return null;
+		const watches: DirenvWatch[] = [];
+		for (const watch of decoded) {
+			if (!watch || typeof watch !== "object" || typeof watch.path !== "string" || !path.isAbsolute(watch.path)) {
+				return null;
+			}
+			// The caller captures .envrc before the export.
+			if (watch.path !== envrcPath) watches.push(await statDirenvWatch(watch.path));
+		}
+		return watches;
+	} catch {
+		// Without a readable watch list, the next export must start cold.
+		return null;
+	}
+}
+
+async function direnvWatchesUnchanged(watches: DirenvWatch[]): Promise<boolean> {
+	try {
+		for (const previous of watches) {
+			const current = await statDirenvWatch(previous.path);
+			if (current.mtimeNs !== previous.mtimeNs || current.size !== previous.size) return false;
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /** Test-only: filtered parent-env baseline (versioned against live Bun.env). */
 export function cleanSpawnEnvForTests(): Record<string, string> {
@@ -73,6 +135,7 @@ export function cleanSpawnEnvForTests(): Record<string, string> {
 
 export function clearDirenvCachesForTests(): void {
 	envrcCache.clear();
+	exportCache.clear();
 	cleanSpawnEnvCache = undefined;
 }
 
@@ -157,6 +220,24 @@ async function runDirenv(
 	return { exitCode, stdout, stderr };
 }
 
+function applyExportDiff(env: Record<string, string>, diff: DirenvExportDiff): Record<string, string> {
+	const loaded = { ...env, ...diff.set };
+	for (const name of diff.unset) delete loaded[name];
+	return loaded;
+}
+
+function diffFromBaseline(base: Record<string, string>, loaded: Record<string, string>): DirenvExportDiff {
+	const set: Record<string, string> = {};
+	const unset: string[] = [];
+	for (const [name, value] of Object.entries(loaded)) {
+		if (base[name] !== value) set[name] = value;
+	}
+	for (const name of Object.keys(base)) {
+		if (!Object.hasOwn(loaded, name)) unset.push(name);
+	}
+	return { set, unset };
+}
+
 /**
  * Resolve the nearest `.envrc` from `cwd` and return its `direnv export` diff
  * (variables to set, and variables direnv removes). Returns `null` when there
@@ -168,10 +249,11 @@ async function runDirenv(
  * boundary identical to the user's own shell: cloning a repo with a poisoned
  * `.envrc` grants it nothing until the user explicitly allows it.
  *
- * Always re-invokes `direnv export json` rather than serving a cached diff:
- * direnv is fast once warm, and its own watch/mtime invalidation is the
- * authoritative freshness signal (a content-hash cache here would go stale when
- * a `watch_file` target changes without the `.envrc` text changing).
+ * Re-invokes `direnv export json` with its previous DIRENV_* state.
+ * Direnv reuses the loaded environment until a watched input changes.
+ * High-resolution timestamps for `.envrc` and all watched paths catch
+ * same-second edits that direnv's whole-second timestamps miss.
+ * The returned diff remains relative to the clean process environment.
  */
 export async function loadDirenvEnv(
 	cwd: string,
@@ -184,21 +266,73 @@ export async function loadDirenvEnv(
 
 	const dir = path.dirname(envrcPath);
 	const timeoutMs = opts?.timeoutMs ?? DEFAULT_DIRENV_TIMEOUT_MS;
-	const env = cleanSpawnEnv();
+	const base = cleanSpawnEnv();
+	// Supplement direnv's whole-second timestamps with high-resolution stats.
+	const envrcStat = await fs.stat(envrcPath, { bigint: true }).catch(() => null);
+	const cached = exportCache.get(dir);
+	const previous =
+		cached?.base === base &&
+		envrcStat &&
+		cached.mtimeNs === envrcStat.mtimeNs &&
+		cached.size === envrcStat.size &&
+		(await direnvWatchesUnchanged(cached.watches))
+			? cached
+			: undefined;
 	try {
-		const { exitCode, stdout, stderr } = await runDirenv(bin, ["export", "json"], dir, timeoutMs, env, opts?.signal);
-		if (exitCode !== 0) {
+		const { exitCode, stdout, stderr } = await runDirenv(
+			bin,
+			["export", "json"],
+			dir,
+			timeoutMs,
+			previous?.loaded ?? base,
+			opts?.signal,
+		);
+		const blocked = stderr.includes("is blocked");
+		if (exitCode !== 0 || blocked) {
+			exportCache.delete(dir);
 			// A not-yet-allowed .envrc is an expected steady state (the user opted
 			// out by never running `direnv allow`), not an error worth warning on.
-			if (stderr.includes("is blocked")) {
+			if (blocked) {
 				logger.debug("direnv .envrc not allowed; skipping", { dir });
 			} else {
 				logger.warn("direnv export failed", { dir, exitCode });
 			}
 			return null;
 		}
-		return parseDirenvExport(stdout);
+		const delta = parseDirenvExport(stdout);
+		if (previous && Object.keys(delta.set).length === 0 && delta.unset.length === 0) return previous.diff;
+
+		// Explicit denial can return a successful export without stderr.
+		const statusResult = await runDirenv(bin, ["status", "--json"], dir, timeoutMs, base, opts?.signal);
+		if (statusResult.exitCode !== 0) {
+			exportCache.delete(dir);
+			logger.warn("direnv status failed", { dir, exitCode: statusResult.exitCode });
+			return null;
+		}
+		const status: { state?: { foundRC?: { allowed?: number } | null } } = JSON.parse(statusResult.stdout);
+		// direnv's AllowStatus uses 0 for allowed, 1 for unapproved, and 2 for denied.
+		if (status.state?.foundRC?.allowed !== 0) {
+			exportCache.delete(dir);
+			logger.debug("direnv .envrc not allowed; skipping", { dir });
+			return null;
+		}
+
+		const loaded = applyExportDiff(previous?.loaded ?? base, delta);
+		const diff = previous ? diffFromBaseline(base, loaded) : delta;
+		const watches =
+			envrcStat && Object.hasOwn(loaded, "DIRENV_DIFF") && Object.hasOwn(loaded, "DIRENV_WATCHES")
+				? await snapshotDirenvWatches(loaded.DIRENV_WATCHES, envrcPath)
+				: null;
+		// Retain state only when every watched path can be tracked.
+		if (envrcStat && watches) {
+			if (exportCache.size >= ENVRC_CACHE_MAX) exportCache.clear();
+			exportCache.set(dir, { base, loaded, diff, mtimeNs: envrcStat.mtimeNs, size: envrcStat.size, watches });
+		} else {
+			exportCache.delete(dir);
+		}
+		return diff;
 	} catch (err) {
+		exportCache.delete(dir);
 		logger.warn("direnv load failed", { dir, error: err instanceof Error ? err.message : String(err) });
 		return null;
 	}
