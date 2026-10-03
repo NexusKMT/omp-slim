@@ -266,6 +266,11 @@
 ### Fixed
 
 - Fixed collab guests silently queueing `->` / `=>` prompts locally instead of receiving the host-only refusal ([#13933](https://github.com/can1357/oh-my-pi/pull/13933) by [@Dante-dan](https://github.com/Dante-dan)); fixes [#13925](https://github.com/can1357/oh-my-pi/issues/13925).
+- `git worktree add` through the Bash tool and `omp worktree add` now run the new worktree's `post-checkout` hook, including when checkout cloning falls back to a plain checkout ([#13943](https://github.com/can1357/oh-my-pi/issues/13943)).
+- An `abort` that lands while a prompt's images are still being prepared now drops that prompt instead of starting or queueing it afterward ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
+- A path-pasted image or video sent as an aside while the agent is busy now reaches the model with its source path ([#11618](https://github.com/can1357/oh-my-pi/pull/11618) by [@andrebrait](https://github.com/andrebrait)).
+- Extension-registered model prompt-cache settings, including `{}` opt-outs, now take precedence over matching `models.yml` definitions ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Cache warming now follows `providers.cacheRetention`: `none` no longer replays uncached requests, and `long` warms on the 1-hour lifetime the request actually wrote ([#13871](https://github.com/can1357/oh-my-pi/pull/13871) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.4.5] - 2026-09-30
 
