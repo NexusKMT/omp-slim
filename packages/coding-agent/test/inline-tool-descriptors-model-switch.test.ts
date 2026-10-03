@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AuthStorage } from "@oh-my-pi/pi-ai";
@@ -9,7 +9,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { removeWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 
 // `inlineToolDescriptors: auto` inlines descriptors (and strips them from the
 // provider schemas) only for Gemini. Switching away mid-session must restore
@@ -24,7 +24,7 @@ describe("inline tool descriptors across model switches", () => {
 
 	beforeAll(async () => {
 		dir = path.join(os.tmpdir(), `pi-inline-descriptors-switch-${Snowflake.next()}`);
-		fs.mkdirSync(dir, { recursive: true });
+		await fs.mkdir(dir, { recursive: true });
 		authStorage = await AuthStorage.create(path.join(dir, "auth.db"));
 		authStorage.keys.setRuntime("google", "test-key");
 		authStorage.keys.setRuntime("opencode-go", "test-key");
@@ -34,7 +34,7 @@ describe("inline tool descriptors across model switches", () => {
 	afterAll(async () => {
 		for (const session of sessions) await session.dispose().catch(() => {});
 		authStorage.close();
-		if (fs.existsSync(dir)) removeSyncWithRetries(dir);
+		await removeWithRetries(dir);
 	});
 
 	async function providerView(session: AgentSession) {
