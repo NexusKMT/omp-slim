@@ -363,6 +363,9 @@
 ### Fixed
 
 - Fixed session usage and cost totals omitting Mnemopi memory completions, including billed failures before a fallback succeeds. ([#13631](https://github.com/can1357/oh-my-pi/pull/13631) by [@sm0keyyy](https://github.com/sm0keyyy))
+### Fixed
+
+- Fixed Hindsight banks with more than 100 mental models losing models past the first page: session context omitted visible models, seed setup re-created existing ones, and `/mental-models` listings were truncated ([#13744](https://github.com/can1357/oh-my-pi/issues/13744))
 
 ## [18.4.3] - 2026-09-28
 
