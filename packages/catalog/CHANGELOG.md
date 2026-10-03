@@ -121,6 +121,10 @@
 
 - Fixed missing thinking levels, image input, and prices for Command Code models ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
+### Fixed
+
+- Fixed OpenAI GPT-5+/o-series and Claude Opus 4.7+, Sonnet/Fable/Mythos 5+ being marked as accepting sampling parameters when served over Amazon Bedrock, Google, Devin, or an OpenAI-compatible gateway such as OpenRouter: the `supports-sampling-params` axis now applies to every compat record, and the `openai` and `anthropic` class rules set it to `false` for those lines on every provider. An explicit `compat.supportsSamplingParams` override still wins ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
+
 ## [18.4.2] - 2026-09-28
 
 ### Changed
