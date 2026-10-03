@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
+import { CmuxTab } from "@oh-my-pi/pi-coding-agent/tools/browser/cmux/cmux-tab";
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
@@ -198,6 +199,27 @@ return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, fi
 				handleNoMatch: [],
 				multiple: ["cheese", "olives"],
 			});
+
+			// cmux tabs run the same rules in their injected page script; replay it in this page.
+			const cmux = new CmuxTab({
+				client: {
+					request: async (method: string, params: { script?: string }) => {
+						expect(method).toBe("browser.eval");
+						const evaluated = await prelude.invoke(
+							{ action: "call", name: SELECT_TAB_NAME, chain: [{ method: "evaluate", args: [params.script] }] },
+							context,
+						);
+						return { value: valueFrom<unknown>(evaluated) };
+					},
+				} as never,
+				surfaceId: "select",
+			});
+			expect({
+				byLabel: await cmux.select("#country", "United States"),
+				firstOnSingle: await cmux.select("#country", "Canada", "us"),
+				noMatch: await cmux.select("#country", "Mexico"),
+				multiple: await cmux.select("#extras", "Ham", "olives"),
+			}).toEqual({ byLabel: ["us"], firstOnSingle: ["ca"], noMatch: [], multiple: ["ham", "olives"] });
 		} finally {
 			await prelude.invoke({ action: "close", name: SELECT_TAB_NAME, kill: true }, context).catch(() => undefined);
 		}
