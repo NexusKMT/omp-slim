@@ -68,6 +68,8 @@ describe("BaseKernel stdin failures", () => {
 		try {
 			// No timeoutMs: before the fix this execution never settled.
 			const result = await kernel.execute("print(1)");
+			// Same mapping as a kernel exit: consumers read `error` only when status is "error".
+			expect(result.status).toBe("error");
 			expect(result.cancelled).toBe(true);
 			// Callers warn that completion is uncertain only for kernel-killed results.
 			expect(result.kernelKilled).toBe(true);

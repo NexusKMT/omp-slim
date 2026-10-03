@@ -360,6 +360,7 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 		requestWritten = true;
 		const transportFailed = (err: unknown) => {
 			if (!pending.settled) {
+				pending.status = "error";
 				pending.cancelled = true;
 				// The kernel is retired below and a partial write may have run code: completion is uncertain.
 				pending.kernelKilled = true;
