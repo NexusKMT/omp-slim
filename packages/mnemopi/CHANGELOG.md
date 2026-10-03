@@ -12,6 +12,7 @@
 ### Fixed
 
 - Fixed local embeddings failing with `TAR_BAD_ARCHIVE` on a fresh model cache once Qdrant's `storage.googleapis.com/qdrant-fastembed` bucket stops serving `fastembed@2` downloads ([#13916](https://github.com/can1357/oh-my-pi/issues/13916))
+- Fixed local embeddings failing on Linux ARM64 with `Cannot find module '@anush008/tokenizers-linux-arm64-gnu'`; the on-demand fastembed runtime now installs a tokenizers build with ARM64 bindings and reinstalls existing broken runtimes ([#14083](https://github.com/can1357/oh-my-pi/issues/14083))
 
 ## [18.4.4] - 2026-09-29
 
