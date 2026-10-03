@@ -1,15 +1,16 @@
-// OpenRouter BYOK turns run on the account's own provider key: the response's
-// `usage.cost` is the credits charge ($0) while the real provider spend arrives
-// in `usage.cost_details.upstream_inference_cost` (verified live 2026-10-02 on
-// openrouter/openai/gpt-6.1-sol: cost=0, is_byok=true, upstream=6.6e-05).
-// `applyProviderReportedCost` must record the upstream number, not $0, or BYOK
-// usage silently disappears from session cost tracking (the same failure the
-// Claude Code statusline fixed by preferring upstream_inference_cost).
+// OpenRouter BYOK turns run on the account's own provider key: `usage.cost`
+// carries only the credits charge (the 5% BYOK fee once past the plan
+// allowance, $0 inside it) and `usage.cost_details.upstream_inference_cost`
+// carries the provider spend. Both are real charges, so
+// `applyProviderReportedCost` records their sum; reading `cost` alone used to
+// drop the spend (verified live 2026-10-02 on openrouter/openai/gpt-6.1-sol,
+// inside the allowance: cost=0, is_byok=true, upstream=6.6e-05).
 import { describe, expect, it } from "bun:test";
 import { applyProviderReportedCost } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import type { Model, Usage } from "@oh-my-pi/pi-ai/types";
 
-const openRouterModel = { provider: "openrouter" } as Pick<Model, "provider">;
+const openRouterModel: Pick<Model, "provider"> = { provider: "openrouter" };
+const openAiModel: Pick<Model, "provider"> = { provider: "openai" };
 
 /** Local estimate for one gpt-6.1-sol turn (3 in / 382 out / 47326 cache-write). */
 function usageEstimate(): Usage {
@@ -41,6 +42,16 @@ describe("applyProviderReportedCost (OpenRouter BYOK)", () => {
 		expect(usage.cost.cacheWrite).toBeCloseTo(0.118315 * scale, 10);
 	});
 
+	it("adds the credits charge (BYOK fee) on top of the upstream cost", () => {
+		const usage = usageEstimate();
+		applyProviderReportedCost(openRouterModel, usage, {
+			cost: 0.025,
+			is_byok: true,
+			cost_details: { upstream_inference_cost: 0.5 },
+		});
+		expect(usage.cost.total).toBe(0.525);
+	});
+
 	it("keeps the account charge for non-BYOK turns", () => {
 		const usage = usageEstimate();
 		applyProviderReportedCost(openRouterModel, usage, { cost: 0.2, is_byok: false });
@@ -49,8 +60,8 @@ describe("applyProviderReportedCost (OpenRouter BYOK)", () => {
 
 	it("falls back to cost when a BYOK turn omits cost_details", () => {
 		const usage = usageEstimate();
-		applyProviderReportedCost(openRouterModel, usage, { cost: 0, is_byok: true });
-		expect(usage.cost.total).toBe(0);
+		applyProviderReportedCost(openRouterModel, usage, { cost: 0.02, is_byok: true });
+		expect(usage.cost.total).toBe(0.02);
 	});
 
 	it("fills component-only usage from the upstream cost when no estimate exists", () => {
@@ -73,7 +84,7 @@ describe("applyProviderReportedCost (OpenRouter BYOK)", () => {
 
 	it("leaves non-gateway providers untouched", () => {
 		const usage = usageEstimate();
-		applyProviderReportedCost({ provider: "openai" } as Pick<Model, "provider">, usage, {
+		applyProviderReportedCost(openAiModel, usage, {
 			cost: 0,
 			is_byok: true,
 			cost_details: { upstream_inference_cost: 0.5 },

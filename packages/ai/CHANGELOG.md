@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenRouter BYOK generations being priced at $0: turns now record the provider spend from `cost_details.upstream_inference_cost` plus any BYOK fee from `cost`, so bring-your-own-key usage shows up in session and status-line costs ([#14149](https://github.com/can1357/oh-my-pi/pull/14149) by [@Krontx](https://github.com/Krontx)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Fixed
