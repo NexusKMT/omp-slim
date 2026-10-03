@@ -110,6 +110,18 @@ const PREMATURE_STREAM_CLOSE_ERROR_RE =
 const IMMUTABLE_ANTHROPIC_THINKING_ERROR_PATTERN =
 	/messages\.\d+\.content\.\d+.*\b(?:thinking|redacted_thinking)\b.*\blatest assistant message cannot be modified\b/is;
 
+/**
+ * Bare abort sentinels with no provider reason: our own `"Request was aborted"`
+ * plus Node/Bun `AbortError`s (`"The operation was aborted"`) surfaced by
+ * transports when an internal (non-caller) abort fires.
+ */
+const GENERIC_ABORT_MESSAGES: Record<string, true> = {
+	"Request was aborted": true,
+	"Request was aborted.": true,
+	"The operation was aborted": true,
+	"The operation was aborted.": true,
+};
+
 function hasNonWhitespace(value: string): boolean {
 	return NON_WHITESPACE_RE.test(value);
 }
@@ -1347,11 +1359,7 @@ export class TurnRecovery {
 
 		const id = this.#classifyRetryMessage(message);
 		if (message.stopReason === "aborted" && AIError.is(id, AIError.Flag.Abort)) return true;
-		if (
-			message.errorMessage !== "Request was aborted" &&
-			message.errorMessage !== "Request was aborted." &&
-			message.errorMessage !== "The operation was aborted"
-		) {
+		if (message.errorMessage === undefined || !Object.hasOwn(GENERIC_ABORT_MESSAGES, message.errorMessage)) {
 			return false;
 		}
 
@@ -1505,7 +1513,7 @@ export class TurnRecovery {
 	classifyResolvedInterruptedToolTurn(message: AssistantMessage): "reasonless-abort" | "stream-stall" | undefined {
 		const id = this.#classifyRetryMessage(message);
 		const genericAbort =
-			message.errorMessage === "Request was aborted" || message.errorMessage === "Request was aborted.";
+			message.errorMessage !== undefined && Object.hasOwn(GENERIC_ABORT_MESSAGES, message.errorMessage);
 		const reasonlessAbort =
 			(message.stopReason === "aborted" || message.stopReason === "error") &&
 			!this.#host.abortInProgress() &&

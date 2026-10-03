@@ -875,6 +875,18 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 			);
 		});
 
+		it.each([
+			"Request was aborted",
+			"Request was aborted.",
+			"The operation was aborted",
+			"The operation was aborted.",
+		])("resumes a generic %s abort after resolved tool calls", errorMessage => {
+			const message = cursorMessage([execToolCall("call-1")], errorMessage);
+			expect(recoveryForReset(message, [realResult("call-1")]).classifyResolvedInterruptedToolTurn(message)).toBe(
+				"reasonless-abort",
+			);
+		});
+
 		it("continues a Cursor HTTP/2 reset after an unmarked MCP result", () => {
 			const message = cursorMessage([mcpToolCall("mcp-1")], nghttp2Internal);
 			const recovery = recoveryForReset(message, [realResult("mcp-1", "mcp__databricks_production_execute_sql")]);

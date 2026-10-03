@@ -352,7 +352,7 @@
 
 ### Fixed
 
-- Empty turns that end with "The operation was aborted" now retry when the user did not interrupt the session ([#13863](https://github.com/can1357/oh-my-pi/pull/13863) by [@n3oney](https://github.com/n3oney)).
+- Turns that end with "The operation was aborted" (empty, or after resolved tool calls) now retry when the user did not interrupt the session ([#13863](https://github.com/can1357/oh-my-pi/pull/13863) by [@n3oney](https://github.com/n3oney)).
 - Fixed alt+p and `/switch` model picker latency by avoiding unnecessary catalog rebuilds
 - Fixed `--tools` with an unknown name printing a stack trace and listing only the tools left after filtering; it now prints a clean error naming unknown tools, built-in tools unavailable in the session, and the built-in and registered tools ([#13623](https://github.com/can1357/oh-my-pi/pull/13623) by [@H4vC](https://github.com/H4vC))
 - Fixed unknown CLI flags exiting 1 with an extra "ended before completing" line instead of exiting 2 ([#13623](https://github.com/can1357/oh-my-pi/pull/13623) by [@H4vC](https://github.com/H4vC))

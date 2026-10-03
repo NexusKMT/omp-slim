@@ -4619,7 +4619,7 @@ describe("AgentSession retry fallback", () => {
 		expect(getLastAssistantMessage(session).stopReason).toBe("error");
 	});
 
-	it.each(["Request was aborted.", "The operation was aborted"])(
+	it.each(["Request was aborted.", "The operation was aborted", "The operation was aborted."])(
 		"auto-retries empty abort errors: %s",
 		async abortMessage => {
 			const model = getBundledModel("openai", "gpt-4o-mini");
