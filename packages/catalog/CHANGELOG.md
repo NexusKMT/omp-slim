@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced memory retained after loading the model catalog cache.
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed

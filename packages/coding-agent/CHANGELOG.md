@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reduced idle memory use in standalone binaries and after refreshing the model catalog.
+
 ## [18.6.0] - 2026-10-03
 
 ### Added
