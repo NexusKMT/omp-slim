@@ -419,6 +419,9 @@
 ### Fixed
 
 - Fixed notes-backed context rollover restoring an older parent assignment after a subagent is revived instead of its latest idle parent request ([#13553](https://github.com/can1357/oh-my-pi/issues/13553), [#13615](https://github.com/can1357/oh-my-pi/pull/13615) by [@acfrazier](https://github.com/acfrazier)).
+### Fixed
+
+- Fixed the `ida` tool's worker exiting with `AttributeError: module 'signal' has no attribute 'pthread_sigmask'` on every request on Windows ([#13619](https://github.com/can1357/oh-my-pi/issues/13619)).
 
 ## [18.4.2] - 2026-09-28
 

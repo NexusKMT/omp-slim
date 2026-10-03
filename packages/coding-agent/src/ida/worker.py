@@ -658,14 +658,23 @@ def _error(e):
 
 def _send(frame):
     data = json.dumps(frame, ensure_ascii=False, default=str) + "\n"
+    # Windows has no signal masks, and the supervisor's SIGINT terminates the process there
+    # rather than raising KeyboardInterrupt, so there is no late interrupt to defer.
+    if not hasattr(signal, "pthread_sigmask"):
+        _write_frame(data)
+        return
     # Defer SIGINT while writing so a late interrupt cannot truncate a frame; it is
     # delivered after unblocking and swallowed by the idle loop.
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
     try:
-        _proto.write(data)
-        _proto.flush()
+        _write_frame(data)
     finally:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+
+
+def _write_frame(data):
+    _proto.write(data)
+    _proto.flush()
 
 
 def _close_and_exit(save):
