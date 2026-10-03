@@ -6374,9 +6374,19 @@ export function githubCopilotModelManagerOptions(config?: GithubCopilotModelMana
 						// With COPILOT_API_HEADERS the served window is the long-context
 						// ceiling; the default tier ends at token_prices.default.context_max
 						// prompt tokens. Cap the base entry to the default tier — the long
-						// tier is the opt-in `-1m` sibling below.
+						// tier is the opt-in `-1m` sibling below. On tiered rows
+						// max_prompt_tokens is the default lane's prompt budget, and the
+						// billed default ceiling can overlap the long lane (#13912), so the
+						// tighter of the two bounds the base entry.
 						const tokenPrices = extractCopilotTokenPrices(entry);
-						const defaultContextMax = tokenPrices.defaultTier?.contextMax;
+						const billedDefaultMax = tokenPrices.defaultTier?.contextMax;
+						const tieredPromptBudget =
+							(tokenPrices.longContext?.contextMax ?? 0) > 0 ? (copilotLimits.maxPromptTokens ?? 0) : 0;
+						const defaultContextMax =
+							tieredPromptBudget > 0 &&
+							(billedDefaultMax === undefined || billedDefaultMax <= 0 || tieredPromptBudget < billedDefaultMax)
+								? tieredPromptBudget
+								: billedDefaultMax;
 						const defaultTierWindow =
 							defaultContextMax !== undefined &&
 							defaultContextMax > 0 &&
