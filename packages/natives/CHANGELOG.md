@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed `setValue` failing on macOS date and time controls such as Calendar's date pickers: an ISO-8601 date or date-time is now written as a date and read back, and any other text is refused naming the accepted forms ([#13660](https://github.com/can1357/oh-my-pi/pull/13660) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed computer use `setValue` refusing macOS popup buttons (such as a Save sheet's File Format): it now chooses the option with that title in one call and confirms it, or throws listing the available options ([#13658](https://github.com/can1357/oh-my-pi/pull/13658) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed macOS `win.ax()`, element snapshots, and `attributes()` showing checkbox and radio values as `<CFNumber 0x…>` debug text and radio-group values as changing `<AXUIElement 0x…>` pointers; numbers now read as numbers and element values as the referenced element's title ([#13652](https://github.com/can1357/oh-my-pi/issues/13652)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Fixed
@@ -39,15 +46,6 @@
 - Fixed Wayland computer input staying unavailable after a cancelled RemoteDesktop permission prompt or a disconnected input session ([#13857](https://github.com/can1357/oh-my-pi/issues/13857)).
 - Fixed Wayland `win.screenshot()` returning the top-left of the monitor for native Wayland windows whose position AT-SPI cannot report (Discord, Teams, Chromium); it now fails with `CaptureFailed` instead of capturing the wrong region ([#13854](https://github.com/can1357/oh-my-pi/issues/13854)).
 - Fixed `computer.focusedElement()` failing with `AxFailed: atspi: null reference` on Linux while a Chromium or Electron app (Spotify, Discord, Steam, …) is running ([#13855](https://github.com/can1357/oh-my-pi/issues/13855)).
-### Fixed
-
-- Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
-### Fixed
-
-- Fixed `setValue` failing on macOS date and time controls such as Calendar's date pickers: an ISO-8601 date or date-time is now written as a date and read back, and any other text is refused naming the accepted forms ([#13660](https://github.com/can1357/oh-my-pi/pull/13660) by [@will-bogusz](https://github.com/will-bogusz)).
-### Fixed
-
-- Fixed computer use `setValue` refusing macOS popup buttons (such as a Save sheet's File Format): it now chooses the option with that title in one call and confirms it, or throws listing the available options ([#13658](https://github.com/can1357/oh-my-pi/pull/13658) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.4.4] - 2026-09-29
 
@@ -71,7 +69,6 @@
 
 - Fixed released Darwin arm64 addons omitting Apple Foundation Models support ([#13610](https://github.com/can1357/oh-my-pi/issues/13610)).
 - Fixed the edit tool's `replace block`/`delete block` operations in indentation-based languages such as Python extending a statement's block over every following statement in its body when a comment line at a different indentation came right after it ([#13358](https://github.com/can1357/oh-my-pi/pull/13358) by [@jchanghong023](https://github.com/jchanghong023)).
-- Fixed macOS `win.ax()`, element snapshots, and `attributes()` showing checkbox and radio values as `<CFNumber 0x…>` debug text and radio-group values as changing `<AXUIElement 0x…>` pointers; numbers now read as numbers and element values as the referenced element's title ([#13652](https://github.com/can1357/oh-my-pi/issues/13652)).
 
 ## [18.4.2] - 2026-09-28
 

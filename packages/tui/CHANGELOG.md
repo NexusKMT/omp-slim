@@ -6,10 +6,44 @@
 
 - Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
 - Added display of subagent completion percent in agent tree, task, and wait views
+- Added `writeTerminalSequence()`, which writes an out-of-band escape sequence (window title, clipboard, notification) through the active terminal's ordered output path, falls back to stdout when no terminal is active, and writes nothing from a worker thread.
+
+### Changed
+
+- `PI_TUI_WRITE_LOG` now records an OSC 52 clipboard write as its payload length instead of the clipboard contents.
+
 ### Fixed
 
 - Narrow `/models` layouts retain the scope sidebar while model rows drop metadata and truncate names as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
 - Fixed `Markdown` crashing on themes without `symbols`, such as the upstream pi-tui `MarkdownTheme` that legacy extensions build; missing symbols now fall back to the active theme's set ([#14161](https://github.com/can1357/oh-my-pi/pull/14161) by [@jaredlyon](https://github.com/jaredlyon))
+- Fixed model hub role assignment offering models the role can't use after switching providers ([#12692](https://github.com/can1357/oh-my-pi/issues/12692)).
+- Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
+- Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported
+- Fixed rapid pane and window resize events repeatedly clearing and replaying the transcript; changes within the settle window now share one repaint ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
+- Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
+- Fixed bracketed-paste markers appearing in the composer when Windows sends paste delimiters as key records ([#14100](https://github.com/can1357/oh-my-pi/issues/14100)).
+- Fixed terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
+- Detected the Monstar terminal (`TERM=monstar`, or `monstar` as the tmux client terminal type) with the Ghostty-level rendering it had before it changed `TERM`: Kitty graphics with Unicode placeholders, OSC 8 hyperlinks, synchronized output, styled underlines, and the OSC 9;4 progress keepalive. Monstar desktop notifications use OSC 9, so they focus the Monstar window when you click them.
+- Agent Hub transcripts with assistant messages lacking usage or cost now open instead of crashing ([#13844](https://github.com/can1357/oh-my-pi/issues/13844))
+- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
+- Fixed fenced diff blocks in ask questions losing their block layout; added and removed lines now render separately with diff highlighting ([#13817](https://github.com/can1357/oh-my-pi/pull/13817) by [@jasonharrison](https://github.com/jasonharrison)).
+- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line ([#13792](https://github.com/can1357/oh-my-pi/pull/13792) by [@NaC-L](https://github.com/NaC-L)).
+
+### Removed
+
+- Fixed long Markdown messages sometimes showing raw display math, a visible HTML comment, or a code block split in two ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed streamed Markdown keeping raw `$$` math or an unresolved reference link after the message finished, when a display-math block contained blank lines or a link definition sat inside a quote or list ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed long Markdown messages restarting a numbered list, or showing an extra blank row, at a line of no-break spaces ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed a bare `\begin{align}` math block after a blank line rendering without the blank row above it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed a finished Markdown message showing an extra blank row where an orphan closing fence was removed ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed streamed Markdown showing a just-completed bare `\begin{align}` block, or `_` emphasis that closed in the latest chunk, as raw text until the next line arrived ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed streamed Markdown whose text was replaced rather than extended showing an extra blank row, or merging a new list item into the list above, through the finished message ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed the space after inline code, emphasis or math that starts a line after a hard line break disappearing, so `` `c` b`` rendered as `cb` ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.5.0] - 2026-10-03
 
@@ -47,9 +81,6 @@
 ### Changed
 
 - Changed Ctrl+Z in Tern's native composer to undo the last edit (TSP `undo` event) instead of suspending
-### Fixed
-
-- Fixed model hub role assignment offering models the role can't use after switching providers ([#12692](https://github.com/can1357/oh-my-pi/issues/12692)).
 
 ## [18.4.11] - 2026-10-02
 
@@ -64,16 +95,6 @@
 ### Fixed
 
 - Fixed multiline paste on Windows so pasted line breaks are inserted correctly instead of terminal escape sequences.
-- Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
-- Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported
-- Fixed rapid pane and window resize events repeatedly clearing and replaying the transcript; changes within the settle window now share one repaint ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
-- Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
-- Fixed bracketed-paste markers appearing in the composer when Windows sends paste delimiters as key records ([#14100](https://github.com/can1357/oh-my-pi/issues/14100)).
 
 ## [18.4.10] - 2026-10-02
 
@@ -97,25 +118,6 @@
 
 - Removed the internal `urlTokenPossible` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Removed the internal `autolinkSchemeScanIndex` export ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed long Markdown messages sometimes showing raw display math, a visible HTML comment, or a code block split in two ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown keeping raw `$$` math or an unresolved reference link after the message finished, when a display-math block contained blank lines or a link definition sat inside a quote or list ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed long Markdown messages restarting a numbered list, or showing an extra blank row, at a line of no-break spaces ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed a bare `\begin{align}` math block after a blank line rendering without the blank row above it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed a finished Markdown message showing an extra blank row where an orphan closing fence was removed ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown showing a just-completed bare `\begin{align}` block, or `_` emphasis that closed in the latest chunk, as raw text until the next line arrived ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown whose text was replaced rather than extended showing an extra blank row, or merging a new list item into the list above, through the finished message ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed the space after inline code, emphasis or math that starts a line after a hard line break disappearing, so `` `c` b`` rendered as `cb` ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-### Added
-
-- Added `writeTerminalSequence()`, which writes an out-of-band escape sequence (window title, clipboard, notification) through the active terminal's ordered output path, falls back to stdout when no terminal is active, and writes nothing from a worker thread.
-
-### Changed
-
-- `PI_TUI_WRITE_LOG` now records an OSC 52 clipboard write as its payload length instead of the clipboard contents.
-
-### Fixed
-
-- Fixed terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
 
 ## [18.4.9] - 2026-10-01
 
@@ -188,13 +190,6 @@
 - Fixed home directories next to shell redirections, control operators or Markdown emphasis (`<`, `>`, `&`, `|`, `*`, `_`) leaking the full path in display-only text ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed the subagent task card showing full home paths in tool intents and arguments, while keeping search patterns literal ([#11210](https://github.com/can1357/oh-my-pi/pull/11210) by [@DarkPhilosophy](https://github.com/DarkPhilosophy)).
 - Fixed Enter doing nothing on a fully typed slash-command argument while its completion popup was open (e.g. `/mcp list`): it now submits instead of re-accepting the identical completion; subcommands that still need a required argument (e.g. `/mcp test`) keep inserting the subcommand so you can type it ([#13885](https://github.com/can1357/oh-my-pi/pull/13885) by [@H4vC](https://github.com/H4vC)).
-- Detected the Monstar terminal (`TERM=monstar`, or `monstar` as the tmux client terminal type) with the Ghostty-level rendering it had before it changed `TERM`: Kitty graphics with Unicode placeholders, OSC 8 hyperlinks, synchronized output, styled underlines, and the OSC 9;4 progress keepalive. Monstar desktop notifications use OSC 9, so they focus the Monstar window when you click them.
-### Fixed
-
-- Agent Hub transcripts with assistant messages lacking usage or cost now open instead of crashing ([#13844](https://github.com/can1357/oh-my-pi/issues/13844))
-### Fixed
-
-- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
 
 ## [18.4.4] - 2026-09-29
 
@@ -251,7 +246,6 @@
 - Fixed the welcome card's logo in Tern not matching omp's terminal mark: the bar now overhangs both legs equally, the legs and gap have the terminal proportions, and the left leg ends in the same faded tail
 - Fixed the `@` completion popup showing a `Searching…` placeholder while a refreshed file search is pending; the popup now stays hidden until results arrive, and Escape is no longer swallowed by it
 - Fixed multi-line IME and dictation input (for example, voice input in Ghostty or cmux) being sent as one message per line; it now lands in the prompt as a single multi-line draft, while Enter typed during a UI freeze still submits ([#13378](https://github.com/can1357/oh-my-pi/pull/13378) by [@goransh-walia](https://github.com/goransh-walia))
-- Fixed fenced diff blocks in ask questions losing their block layout; added and removed lines now render separately with diff highlighting ([#13817](https://github.com/can1357/oh-my-pi/pull/13817) by [@jasonharrison](https://github.com/jasonharrison)).
 
 ### Removed
 
@@ -356,9 +350,6 @@
 - Fixed dimmed blockquote styling after inline code spans.
 - Fixed rendering of tool calls and results for top-level extension and MCP tools invoked through `xd://` links.
 - Fixed file links in pending Read and Write cards so they open the correct local targets, including paths in the home directory, archives, and databases.
-### Fixed
-
-- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line ([#13792](https://github.com/can1357/oh-my-pi/pull/13792) by [@NaC-L](https://github.com/NaC-L)).
 
 ## [18.3.0] - 2026-09-24
 

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Fixed HTTP 400 "This model doesn't support the image field for user messages" when an OpenAI model on a custom Bedrock Converse provider reads an image through a tool ([#14122](https://github.com/can1357/oh-my-pi/pull/14122) by [@nick-maderight](https://github.com/nick-maderight))
+- `openaiCodexModelManagerOptions` accepts `baseUrl`, so Codex discovery can list a Codex-compatible gateway's models; the discovery cache is kept per endpoint, and the official endpoint keeps its existing cache ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
+- Exposed the `max` reasoning effort tier for Muse Spark 1.3 contributor models on the Meta and Muse Code providers.
+
 ### Fixed
 
 - Fixed local Ollama thinking models (e.g. Gemma 4) still reasoning when thinking is turned off, which made session titles take 10+ seconds
@@ -9,23 +15,24 @@
 - Fixed Claude Opus 5.5 on the Anthropic API and Cloudflare AI Gateway failing with `Invalid 'signature' in 'thinking' block ... bound to a different conversation` after tools or the system prompt changed mid-session; requests now send `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` like Fable 5.1 and Sonnet 5.5 ([#14167](https://github.com/can1357/oh-my-pi/issues/14167))
 - Fixed Cursor Grok 4.5/4.6 model ids flipping between `cursor-grok-4.6` and `grok-4.6` across runs, which made fallback chains and role settings intermittently reference an unknown model; saved `cursor/grok-4.5`/`cursor/grok-4.6` (and `-fast`) selectors and `modelOverrides` entries now apply to the stable ids ([#14164](https://github.com/can1357/oh-my-pi/issues/14164))
 - Added full reasoning effort ladders to ClinePass DeepSeek V4.1 Flash Free and Muse Spark 1.3 Contributor Free models so thinking levels can be configured ([#14132](https://github.com/can1357/oh-my-pi/pull/14132) by [@hanumanji198586](https://github.com/hanumanji198586)).
+- Recognized bare and provider-qualified `k3` and `k3-256k` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides ([#14098](https://github.com/can1357/oh-my-pi/pull/14098) by [@NaC-L](https://github.com/NaC-L)).
+- Fixed Fireworks model prices taken from other hosts or missing: discovered and bundled Fireworks models now use Fireworks' own models.dev prices, so `ember-1`, `nemotron-3-ultra-nvfp4`, `nemotron-lightning-3.5-30b-a3b`, and `qwen3.8-2.4t-a95b` no longer show as free and the costs of `deepseek-v4.1-flash`, `gpt-oss-120b`, `inkling`, and `qwen3.8-max` are corrected ([#14069](https://github.com/can1357/oh-my-pi/pull/14069) by [@alphastorm](https://github.com/alphastorm))
+- Fixed Fireworks Fast models failing with HTTP 404: the retired `kimi-k2.6-fast`, `kimi-k2.7-code-fast`, and `glm-5.1-fast` are replaced by `glm-5.3-fast` and `kimi-k3-fast`, and GLM-5.3 Fast on Fireworks, Baseten, and Vercel AI Gateway now offers GLM-5.3's `low`/`high`/`max` thinking levels ([#14067](https://github.com/can1357/oh-my-pi/pull/14067) by [@alphastorm](https://github.com/alphastorm))
+- Fixed `google-antigravity/gemini-3.1-flash-image` being treated as a chat model, so it now works in the `image` role and image fallback chains instead of warning that the chain does not resolve to a compatible model ([#13883](https://github.com/can1357/oh-my-pi/pull/13883) by [@eggpeat](https://github.com/eggpeat)).
+- Fixed GitHub Copilot base models showing a ~1M context window alongside their `-1m` sibling when Copilot's billed default tier overlaps the long-context tier; the base model now uses Copilot's reported default prompt budget ([#13912](https://github.com/can1357/oh-my-pi/issues/13912))
+- Fixed OpenAI GPT-5+/o-series and Claude Opus 4.7+, Sonnet/Fable/Mythos 5+ being marked as accepting sampling parameters when served over Amazon Bedrock, Google, Devin, or an OpenAI-compatible gateway such as OpenRouter: the `supports-sampling-params` axis now applies to every compat record, and the `openai` and `anthropic` class rules set it to `false` for those lines on every provider. An explicit `compat.supportsSamplingParams` override still wins ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
 
 ## [18.5.0] - 2026-10-03
 
 ### Added
 
 - Added `closeModelCache()` (`@oh-my-pi/pi-catalog/model-cache`) to release the shared default `models.db` handle so an agent directory can be deleted on Windows; the next cache access reopens it
-- Fixed HTTP 400 "This model doesn't support the image field for user messages" when an OpenAI model on a custom Bedrock Converse provider reads an image through a tool ([#14122](https://github.com/can1357/oh-my-pi/pull/14122) by [@nick-maderight](https://github.com/nick-maderight))
 
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
 
 - Fixed new Fireworks sessions failing on the first turn by updating the default model to `kimi-k3`, which is currently supported by Fireworks.
-- Fixed new sessions on Fireworks failing with HTTP 404 on the first turn: the Fireworks default model is now `kimi-k3`, because Fireworks no longer serves `kimi-k2.7-code` ([#14068](https://github.com/can1357/oh-my-pi/pull/14068) by [@alphastorm](https://github.com/alphastorm))
-- Recognized bare and provider-qualified `k3` and `k3-256k` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides ([#14098](https://github.com/can1357/oh-my-pi/pull/14098) by [@NaC-L](https://github.com/NaC-L)).
-- Fixed Fireworks model prices taken from other hosts or missing: discovered and bundled Fireworks models now use Fireworks' own models.dev prices, so `ember-1`, `nemotron-3-ultra-nvfp4`, `nemotron-lightning-3.5-30b-a3b`, and `qwen3.8-2.4t-a95b` no longer show as free and the costs of `deepseek-v4.1-flash`, `gpt-oss-120b`, `inkling`, and `qwen3.8-max` are corrected ([#14069](https://github.com/can1357/oh-my-pi/pull/14069) by [@alphastorm](https://github.com/alphastorm))
-- Fixed Fireworks Fast models failing with HTTP 404: the retired `kimi-k2.6-fast`, `kimi-k2.7-code-fast`, and `glm-5.1-fast` are replaced by `glm-5.3-fast` and `kimi-k3-fast`, and GLM-5.3 Fast on Fireworks, Baseten, and Vercel AI Gateway now offers GLM-5.3's `low`/`high`/`max` thinking levels ([#14067](https://github.com/can1357/oh-my-pi/pull/14067) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.4.10] - 2026-10-02
 
@@ -37,7 +44,6 @@
 - Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
 - Fixed Claude Opus 5.5 conversations failing with a "bound to a different conversation" 400 after the system prompt changed. Opus 5.5 now gets Sonnet 5.5's prefix-bound thinking handling on every provider, and Bedrock asks the server to drop stale signed thinking instead of rejecting the request ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
 
-- Fixed `google-antigravity/gemini-3.1-flash-image` being treated as a chat model, so it now works in the `image` role and image fallback chains instead of warning that the chain does not resolve to a compatible model ([#13883](https://github.com/can1357/oh-my-pi/pull/13883) by [@eggpeat](https://github.com/eggpeat)).
 ## [18.4.9] - 2026-10-01
 
 ### Fixed
@@ -67,16 +73,12 @@
 
 ### Fixed
 
-- Fixed GitHub Copilot base models showing a ~1M context window alongside their `-1m` sibling when Copilot's billed default tier overlaps the long-context tier; the base model now uses Copilot's reported default prompt budget ([#13912](https://github.com/can1357/oh-my-pi/issues/13912))
 - Fixed OpenRouter decision models that report no context/output limits (`respan/span-01`, `respan/span-01-lite`, `respan/span-01-lite:free`) missing from the judge model list ([#13888](https://github.com/can1357/oh-my-pi/issues/13888))
 - Fixed every `google-vertex/claude-sonnet-5-5` request failing with 400 `thinking.adaptive.block_binding: Extra inputs are not permitted` ([#13795](https://github.com/can1357/oh-my-pi/issues/13795))
 - Fixed Cursor Grok 4.7 appearing as separate `grok-4.7-{low,medium,high,xhigh}` and `-fast` models that each also offered an effort selector; they now show as `grok-4.7` and `grok-4.7-fast` with effort picked separately ([#12773](https://github.com/can1357/oh-my-pi/issues/12773))
 - Cursor fast lanes whose bundled rate card lists only the base rate now bill at Cursor's declared fast multiplier instead of the base rate ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
 - Cursor's `default` (Auto) router is marked as variably priced instead of free ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
 - Switching Cursor accounts no longer shows the previous account's cached model list ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
-### Added
-
-- `openaiCodexModelManagerOptions` accepts `baseUrl`, so Codex discovery can list a Codex-compatible gateway's models; the discovery cache is kept per endpoint, and the official endpoint keeps its existing cache ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
 
 ## [18.4.4] - 2026-09-29
 
@@ -122,10 +124,6 @@
 
 - Fixed missing thinking levels, image input, and prices for Command Code models ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 
-### Fixed
-
-- Fixed OpenAI GPT-5+/o-series and Claude Opus 4.7+, Sonnet/Fable/Mythos 5+ being marked as accepting sampling parameters when served over Amazon Bedrock, Google, Devin, or an OpenAI-compatible gateway such as OpenRouter: the `supports-sampling-params` axis now applies to every compat record, and the `openai` and `anthropic` class rules set it to `false` for those lines on every provider. An explicit `compat.supportsSamplingParams` override still wins ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
-
 ## [18.4.2] - 2026-09-28
 
 ### Changed
@@ -159,9 +157,6 @@
 
 - Added the `openai` web-search grounding for OpenAI API models that support Responses web search (`gpt-5.5`, `gpt-5.6-luna`, `gpt-6-astra`, `gpt-6-luna`) ([#13467](https://github.com/can1357/oh-my-pi/pull/13467) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Added `Model.promptCache`, per-retention-tier prompt-cache entry lifetimes in seconds (`short` / `long`), declared per provider through the `prompt-cache` KDL rule (bundled: direct Anthropic, 5 min / 1 h). Custom models and `modelOverrides` opt in with the models.yml `promptCache` key ([#12699](https://github.com/can1357/oh-my-pi/pull/12699) by [@KamijoToma](https://github.com/KamijoToma)).
-### Added
-
-- Exposed the `max` reasoning effort tier for Muse Spark 1.3 contributor models on the Meta and Muse Code providers.
 
 ## [18.3.1] - 2026-09-25
 

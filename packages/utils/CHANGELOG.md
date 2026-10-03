@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `mathBlockMayCloseAt`, `mathBlockOpenerAt` and `mathBlockCloserIndex` to `math-delimiters`, which tell whether an own-line display block in a growing text could still close, which display opener a line starts, and the first later line that could close it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Added `MathBlockScan` to `math-delimiters`, which finds the own-line display blocks at many offsets of one text in linear time ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Added a `cursorPosition` option to `TerminalQueryResponder` so callers can leave cursor-position reports to a PTY host that answers them itself. ([#13663](https://github.com/can1357/oh-my-pi/pull/13663) by [@Runnin4ik](https://github.com/Runnin4ik))
+- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
+
+### Fixed
+
+- Fixed the in-house `marked` lexer dropping the text in front of a U+2028 or U+2029 separator on its line ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Added
@@ -45,14 +56,6 @@
 - Fixed Markdown paragraphs with long or many unclosed runs of backticks, or `<http://` autolinks with no space or `>` after them, lexing slowly: 80 KB of each now lexes in about 50-60 ms instead of seconds (40 KB of one unclosed run took 10 s) ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed Markdown paragraphs of nested brackets, URLs with long trailing punctuation, or unclosed HTML tags or comments lexing slowly: 80 KB of each now lexes in under 40 ms instead of 4-30 s ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed deeply nested Markdown links and emphasis overflowing the stack early: in a fresh process links now nest about three times as deep before a stack overflow, and emphasis twice as deep ([#13961](https://github.com/can1357/oh-my-pi/pull/13961) by [@sjawhar](https://github.com/sjawhar)).
-### Added
-
-- Added `mathBlockMayCloseAt`, `mathBlockOpenerAt` and `mathBlockCloserIndex` to `math-delimiters`, which tell whether an own-line display block in a growing text could still close, which display opener a line starts, and the first later line that could close it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Added `MathBlockScan` to `math-delimiters`, which finds the own-line display blocks at many offsets of one text in linear time ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-
-### Fixed
-
-- Fixed the in-house `marked` lexer dropping the text in front of a U+2028 or U+2029 separator on its line ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.9] - 2026-10-01
 
@@ -80,16 +83,10 @@
 ### Changed
 
 - SSE events read without raw capture now share one frozen empty `raw` array instead of allocating one per event ([#13650](https://github.com/can1357/oh-my-pi/pull/13650) by [@H4vC](https://github.com/H4vC)).
-### Added
-
-- Added a `cursorPosition` option to `TerminalQueryResponder` so callers can leave cursor-position reports to a PTY host that answers them itself. ([#13663](https://github.com/can1357/oh-my-pi/pull/13663) by [@Runnin4ik](https://github.com/Runnin4ik))
 
 ### Fixed
 
 - Fixed the unsettled-command report overriding an explicit non-zero exit code with 1 and printing a spurious "ended before completing" line ([#13623](https://github.com/can1357/oh-my-pi/pull/13623) by [@H4vC](https://github.com/H4vC))
-### Added
-
-- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.2] - 2026-09-28
 

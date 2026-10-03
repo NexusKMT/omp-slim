@@ -8,13 +8,18 @@
 - Fixed requests to models that reject sampling parameters failing with HTTP 400 when served through a provider other than their native API, such as `global.openai.gpt-6-luna` and `global.anthropic.claude-opus-5-5` on Bedrock (`This model doesn't support the temperature field`, `` `temperature` is deprecated for this model``) or Claude Opus 4.7+ on OpenRouter. `stream` and `streamSimple` now drop `temperature`, `topP`, `topK`, `minP`, and the presence, repetition, and frequency penalties whenever the model's resolved `compat.supportsSamplingParams` is `false`, before any provider or custom API builds its request. This also fixes the chat judge, title generation, skill descriptions, and memory extraction, which all send `temperature: 0` ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
 - Fixed OpenAI Responses sessions (e.g. OpenRouter + Claude) getting stuck in a `400` retry loop after a tool call whose streamed arguments were invalid JSON but repairable: the next request now replays the call with the arguments that were executed instead of dropping it and ending the input on an orphan tool-result note ([#14155](https://github.com/can1357/oh-my-pi/issues/14155)).
 - Fixed OpenRouter BYOK generations being priced at $0: turns now record the provider spend from `cost_details.upstream_inference_cost` plus any credits charge from `cost`, so bring-your-own-key usage shows up in session and status-line costs ([#14149](https://github.com/can1357/oh-my-pi/pull/14149) by [@Krontx](https://github.com/Krontx)).
+- Fixed Claude dropping `timeout` from bash calls that set `async: true`, so background watchers and long jobs were killed at the default 300 s deadline: Anthropic strict tool decoding fixes property order, and `async` comes after `timeout` in the bash schema. `bash` is no longer sent with `strict: true` ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
+- A cleared credential cooldown is no longer restored by another running session when a shorter block was recorded before that session rechecked the store ([#14101](https://github.com/can1357/oh-my-pi/issues/14101)).
+- Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
+- Fixed the first request of a resumed `openai-responses` session omitting earlier turns' plaintext reasoning, which made servers that cache rendered reasoning (self-hosted Responses servers) prefill the whole context again after every restart ([#13751](https://github.com/can1357/oh-my-pi/pull/13751) by [@alphastorm](https://github.com/alphastorm))
+- Fixed HTTP 4xx errors (other than 408/429) being retried as transient when the response body contains words like `server_error`, `timeout`, or `overloaded` ([#13807](https://github.com/can1357/oh-my-pi/issues/13807))
+- Cursor models now see earlier multi-step tool work in the order it happened, instead of as one batch of simultaneous calls ([#13725](https://github.com/can1357/oh-my-pi/pull/13725) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.5.0] - 2026-10-03
 
 ### Fixed
 
 - Fixed AWS `credential_process` on Windows stripping backslashes from unquoted paths such as `C:\Users\me\helper.exe`; commands are now split with Windows command-line rules there, matching the AWS CLI.
-- Fixed Claude dropping `timeout` from bash calls that set `async: true`, so background watchers and long jobs were killed at the default 300 s deadline: Anthropic strict tool decoding fixes property order, and `async` comes after `timeout` in the bash schema. `bash` is no longer sent with `strict: true` ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
 
 ## [18.4.12] - 2026-10-02
 
@@ -28,18 +33,13 @@
 
 - Fixed Cursor cached prompt token accounting to prevent duplicate input-token and cost reporting on cached turns.
 - Fixed auth-broker credential handling so late token-refresh responses cannot restore logged-out credentials or overwrite a newer login.
-- Cursor usage no longer counts cached prompt tokens twice, which had inflated input tokens and cost on every cached turn ([#13723](https://github.com/can1357/oh-my-pi/pull/13723) by [@will-bogusz](https://github.com/will-bogusz)).
-- Auth-broker clients no longer restore a logged-out credential, or overwrite a newer login, when a token refresh reply arrives late ([#13770](https://github.com/can1357/oh-my-pi/pull/13770) by [@atyrode](https://github.com/atyrode)).
-- A cleared credential cooldown is no longer restored by another running session when a shorter block was recorded before that session rechecked the store ([#14101](https://github.com/can1357/oh-my-pi/issues/14101)).
 
 ## [18.4.10] - 2026-10-02
 
 ### Fixed
 
-- Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
 - Factory Droid login now reports the account's organization error instead of accepting a credential that every request rejects ([#14032](https://github.com/can1357/oh-my-pi/issues/14032)).
 - Fixed Cursor turns being aborted with "Provider stream stalled while waiting for the next event" right after a long local tool finished; the provider now gets a full idle window once local tool work completes ([#13682](https://github.com/can1357/oh-my-pi/pull/13682) by [@eggpeat](https://github.com/eggpeat))
-- Fixed the first request of a resumed `openai-responses` session omitting earlier turns' plaintext reasoning, which made servers that cache rendered reasoning (self-hosted Responses servers) prefill the whole context again after every restart ([#13751](https://github.com/can1357/oh-my-pi/pull/13751) by [@alphastorm](https://github.com/alphastorm))
 - Tool calls whose final argument JSON is cut off or followed by trailing text are no longer executed from an auto-closed preview. OpenAI Completions, Anthropic, Bedrock, Responses, Codex, Devin, Ollama, Apple, Cursor, GitLab Duo, and the in-band JSON dialects now give such a call the existing parse-error arguments, so the tool is not run and the model receives the parse error and can resend the call ([#13868](https://github.com/can1357/oh-my-pi/pull/13868) by [@alphastorm](https://github.com/alphastorm))
 - Fixed Cursor "prepaid balance is used up" (`USAGE_PRICING_REQUIRED`) failures repeating on the same account instead of rotating to a sibling Cursor credential ([#14053](https://github.com/can1357/oh-my-pi/issues/14053))
 - Sessions no longer get stuck on `400 string_above_max_length` after a model writes its whole tool invocation into the tool name. Tool calls with blank names, names longer than 128 characters, or names containing whitespace or control characters are dropped from replayed history, together with their tool results. This also applies when OpenAI Responses replays its stored native history ([#13985](https://github.com/can1357/oh-my-pi/pull/13985) by [@Xytronix](https://github.com/Xytronix)).
@@ -74,7 +74,6 @@
 - Runtime usage providers (`usage.setProvider`, extension `registerProvider({ usage })`) now key cached reports by their own `cacheVersion`, so reports written by processes without the override are no longer served to it ([#13814](https://github.com/can1357/oh-my-pi/issues/13814)).
 - xAI OAuth accounts with active weekly credits no longer switch away solely because an uncertain monthly counter exceeds its limit ([#13806](https://github.com/can1357/oh-my-pi/issues/13806)).
 - Cursor retries after a rejected conversation now keep the tool calls and results already completed in the turn, instead of re-sending the last message and redoing that work ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
-- Fixed HTTP 4xx errors (other than 408/429) being retried as transient when the response body contains words like `server_error`, `timeout`, or `overloaded` ([#13807](https://github.com/can1357/oh-my-pi/issues/13807))
 
 ## [18.4.4] - 2026-09-29
 
@@ -94,19 +93,12 @@
 - Cursor turns routed through an HTTP proxy now finish instead of hanging after the response completes ([#13724](https://github.com/can1357/oh-my-pi/pull/13724) by [@will-bogusz](https://github.com/will-bogusz)).
 - Fixed Codex requests sending `priority` (and `scale`) to models whose discovered service tiers list other tiers but not that one, matching the Codex CLI; an empty or missing list is treated as not reported, so `priority` is still sent and `/fast` keeps working on accounts whose `/models` lists no tiers (`flex` is always allowed) ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
 - Fixed Codex priority cost: a turn the backend reports as served at `default` is no longer billed at the priority multiplier ([#13782](https://github.com/can1357/oh-my-pi/pull/13782) by [@H4vC](https://github.com/H4vC)).
-- Cursor models now see earlier multi-step tool work in the order it happened, instead of as one batch of simultaneous calls ([#13725](https://github.com/can1357/oh-my-pi/pull/13725) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.3] - 2026-09-28
 
 ### Added
 
 - Added Command Code usage limits (5-hour, weekly, and credit balance) to /usage and the status line ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
-
-### Fixed
-
-- Fixed Codex turns failing with "The experimental native turn lane cannot accept stateful WebSocket messages" when a message was sent mid-response; a turn that has not streamed output yet now retries, the message is delivered with the next request, and the session stops steering so later turns no longer hit it ([#13705](https://github.com/can1357/oh-my-pi/pull/13705) by [@will-bogusz](https://github.com/will-bogusz))
-
-## [18.4.3] - 2026-09-28
 
 ### Changed
 

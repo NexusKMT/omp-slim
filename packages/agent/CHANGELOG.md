@@ -6,9 +6,18 @@
 
 - Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail))
 
+### Changed
+
+- `readToolSupersedeKey()` now keys `:raw` and `:conflicts` reads as `path\u0001selector`, so a bare-path read no longer supersedes them; a failed result now supersedes only older failed results of its key ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
 ### Fixed
 
 - Fixed parallel tool calls that arrive under a reused or empty tool-call id running their sibling's arguments and merging results — each call now executes and reports its own payload ([#13735](https://github.com/can1357/oh-my-pi/pull/13735) by [@yingliang-zhang](https://github.com/yingliang-zhang))
+- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded ([#13847](https://github.com/can1357/oh-my-pi/pull/13847) by [@GabrielCoelhoCruz](https://github.com/GabrielCoelhoCruz))
+- Added the optional `supersedeComplete` hook (`SupersedeCompleteFn`) to `PruneConfig` and `SupersedePruneConfig`: a selector-free result supersedes selector-carrying results of its key only when the hook reports it complete ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+- Fixed code the agent had already read disappearing from context when a later read of the same file returned only a summary, a truncated page, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+- Fixed intent tracing stripping a tool's own `i` argument and reordering its schema for tools that declare `i` as a real parameter ([#13762](https://github.com/can1357/oh-my-pi/pull/13762) by [@jchanghong023](https://github.com/jchanghong023)).
+
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
@@ -28,9 +37,6 @@
 
 - Added APIs for improving agent follow-up and steering workflow management, including moving queued follow-ups into steering with a single queue-change notification.
 - Added support for trusted post-tool guidance via `afterToolCall` results, allowing additional context to be included in the next provider request, including after tool failures.
-### Fixed
-
-- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded ([#13847](https://github.com/can1357/oh-my-pi/pull/13847) by [@GabrielCoelhoCruz](https://github.com/GabrielCoelhoCruz))
 
 ## [18.4.4] - 2026-09-29
 
@@ -44,15 +50,6 @@
 
 - Fixed GPT models on Amazon Bedrock's OpenAI routes (bedrock-runtime and bedrock-mantle `/openai/...`) falling back to a local summary instead of OpenAI's native remote compaction; set `remoteCompaction.enabled: false` to opt out ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Fixed native compaction on Amazon Bedrock's OpenAI routes skipping the provider's request setup, which sent Bedrock Mantle compaction to an unresolved `{region}` host and skipped configured headers and proxies; other providers' compaction requests are unchanged ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
-- Added the optional `supersedeComplete` hook (`SupersedeCompleteFn`) to `PruneConfig` and `SupersedePruneConfig`: a selector-free result supersedes selector-carrying results of its key only when the hook reports it complete ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
-
-### Changed
-
-- `readToolSupersedeKey()` now keys `:raw` and `:conflicts` reads as `path\u0001selector`, so a bare-path read no longer supersedes them; a failed result now supersedes only older failed results of its key ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
-
-### Fixed
-
-- Fixed code the agent had already read disappearing from context when a later read of the same file returned only a summary, a truncated page, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
 
 ## [18.4.3] - 2026-09-28
 
@@ -63,7 +60,6 @@
 
 ### Fixed
 
-- Fixed intent tracing stripping a tool's own `i` argument and reordering its schema for tools that declare `i` as a real parameter ([#13762](https://github.com/can1357/oh-my-pi/pull/13762) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed auto-compaction with the `remote` method failing on long Codex/OpenAI sessions with "Remote compaction input exceeds the context window" ([#13611](https://github.com/can1357/oh-my-pi/issues/13611))
 - Fixed passive tool-call context being repeated when several calls in one batch returned the same text; identical per-call context is now delivered once, at its first position ([#13633](https://github.com/can1357/oh-my-pi/pull/13633) by [@andrebrait](https://github.com/andrebrait))
 
