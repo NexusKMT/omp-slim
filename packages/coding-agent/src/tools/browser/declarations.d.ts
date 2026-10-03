@@ -1315,7 +1315,7 @@ interface BrowserTabHelpers {
 	type(selector: string, text: string): Promise<void>;
 	/** Replace the value of the element matching `selector`. */
 	fill(selector: string, value: string): Promise<void>;
-	/** Press a keyboard key, optionally on a matching element. */
+	/** Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Control+a`), optionally on a matching element. */
 	press(key: string, options?: BrowserPressOptions): Promise<void>;
 	/** Scroll by page-relative or matching-element deltas. */
 	scroll(deltaX: number, deltaY: number, options?: BrowserScrollOptions): Promise<void>;

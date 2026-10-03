@@ -3,6 +3,7 @@ import { untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { ElementHandle, KeyInput, MouseButton, Page } from "puppeteer-core";
 import { throwIfAborted } from "../tool-errors";
+import { splitKeyCombo } from "./tern/keys";
 
 /** Options accepted by coordinate-based mouse clicks. */
 export interface ClickAtOptions {
@@ -482,6 +483,48 @@ export async function keyDown(page: Page, key: KeyInput, signal?: AbortSignal): 
 /** Release a keyboard key previously pressed with keyDown. */
 export async function keyUp(page: Page, key: KeyInput, signal?: AbortSignal): Promise<void> {
 	await untilAborted(signal, () => page.keyboard.up(key));
+}
+
+/**
+ * macOS runs its editing shortcuts as app-menu commands, which a CDP key event
+ * never reaches: the page sees Meta+V and nothing is pasted. There the key-down
+ * names Chrome's editor command, which runs as the key's default action, so a
+ * page that cancels the key still cancels the edit. Elsewhere Chrome binds these
+ * shortcuts in the renderer and the plain key event already edits.
+ * Keyed by the sorted held modifiers and the lower-cased key.
+ */
+const EDITING_COMMANDS: Readonly<Record<string, string>> =
+	process.platform === "darwin"
+		? {
+				"Meta+a": "selectAll",
+				"Meta+c": "copy",
+				"Meta+v": "paste",
+				"Meta+x": "cut",
+				"Meta+z": "undo",
+				"Meta+Shift+z": "redo",
+			}
+		: {};
+
+/**
+ * Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Meta+a`): the leading
+ * keys go down in order, the last key is pressed, then the leading keys are released
+ * in reverse.
+ */
+export async function pressKey(page: Page, combo: string): Promise<void> {
+	const keys = splitKeyCombo(combo) as KeyInput[];
+	const key = keys[keys.length - 1]!;
+	const held = keys.slice(0, -1);
+	const command = EDITING_COMMANDS[`${[...held].sort().join("+")}+${key.toLowerCase()}`];
+	const pressed: KeyInput[] = [];
+	try {
+		for (const modifier of held) {
+			await page.keyboard.down(modifier);
+			pressed.push(modifier);
+		}
+		await page.keyboard.press(key, command ? { commands: [command] } : undefined);
+	} finally {
+		for (const modifier of pressed.reverse()) await page.keyboard.up(modifier);
+	}
 }
 
 /** Move the page pointer to viewport coordinates. */
