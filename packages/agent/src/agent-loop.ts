@@ -53,7 +53,7 @@ import {
 	recoverHarmonyToolCall,
 	signalListLabel,
 } from "@oh-my-pi/pi-ai/utils/harmony-leak";
-import { removeDsmlToolMarkupLeak } from "@oh-my-pi/pi-ai/utils/dsml-leak";
+import { isDsmlLeakRecoveryTarget, removeDsmlToolMarkupLeak } from "@oh-my-pi/pi-ai/utils/dsml-leak";
 import { cloneJsonTree, logger, sanitizeText, structuredCloneJSON } from "@oh-my-pi/pi-utils";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
 import { LiveSteeringChannel } from "./live-steering";
@@ -1998,6 +1998,7 @@ async function streamAssistantResponse(
 	// per model without touching the shared session `serviceTier`.
 	const effectiveServiceTier = config.getServiceTier ? config.getServiceTier(model) : config.serviceTier;
 	const harmonyMitigationEnabled = isHarmonyLeakMitigationTarget(model);
+	const dsmlLeakRecoveryEnabled = isDsmlLeakRecoveryTarget(model);
 	const harmonyAbortController = harmonyMitigationEnabled ? new AbortController() : undefined;
 	const requestSignal = harmonyAbortController
 		? signal
@@ -2230,7 +2231,9 @@ async function streamAssistantResponse(
 						// Unhealed DSML tool-call markup must never reach history: replaying
 						// it teaches the model to keep writing calls as text (#10556). Strip
 						// it before the context, the UI, and the session see the message.
+						// Only DSML-speaking models qualify; from others it is prose.
 						if (
+							dsmlLeakRecoveryEnabled &&
 							finalMessage.stopReason === "stop" &&
 							!finalMessage.content.some(block => block.type === "toolCall") &&
 							removeDsmlToolMarkupLeak(finalMessage)

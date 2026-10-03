@@ -10,7 +10,7 @@
  * strip it before the message is committed and tell the model its call failed.
  */
 
-import type { AssistantMessage } from "../types";
+import type { AssistantMessage, Model } from "../types";
 
 // Structural DSML tags in either pipe spelling (fullwidth `｜` U+FF5C or ASCII),
 // tolerating stray whitespace inside the delimiter run.
@@ -22,13 +22,14 @@ const QUOTED_CODE_PATTERN = /(```|~~~)[\s\S]*?(?:\1|$)|`[^`\n]*`/g;
 // broken call, so it goes with the markup.
 const TRAILING_TOOL_NAME_LINE = /(^|\n)[ \t]*[A-Za-z_][\w.-]*[ \t]*\r?\n[ \t]*$/;
 const CLOSING_TAG_PATTERN = /^<\s*\//;
+const BLANK_LINE_PATTERN = /\r?\n[ \t]*\r?\n/;
 
 /**
  * Remove the broken tool call from one stretch of unquoted text: everything from
  * the first DSML tag (or the tool-name line just before it) through the last.
- * When the last tag is an opener, its argument value has no surviving closer
- * (the stream healer strips orphan closers), so the call runs to the end of
- * the stretch.
+ * The DSML scanner keeps a malformed call's closers, so its last closer marks
+ * the end. When the closers never arrived, the dangling argument value runs to
+ * the next blank line (or the end of the stretch); prose after that survives.
  */
 function stripUnquoted(text: string): string {
 	const tags = [...text.matchAll(DSML_TAG_PATTERN)];
@@ -38,10 +39,29 @@ function stripUnquoted(text: string): string {
 	let start = first.index;
 	const nameLine = TRAILING_TOOL_NAME_LINE.exec(text.slice(0, start));
 	if (nameLine) start = nameLine.index + nameLine[1]!.length;
-	const end = CLOSING_TAG_PATTERN.test(last[0]) ? last.index + last[0].length : text.length;
+	const lastEnd = last.index + last[0].length;
+	let end = lastEnd;
+	if (!CLOSING_TAG_PATTERN.test(last[0])) {
+		const blankLine = text.slice(lastEnd).search(BLANK_LINE_PATTERN);
+		end = blankLine === -1 ? text.length : lastEnd + blankLine;
+	}
 	const before = text.slice(0, start).trimEnd();
 	const after = text.slice(end).trimStart();
 	return before.length > 0 && after.length > 0 ? `${before}\n\n${after}` : before + after;
+}
+
+/**
+ * Whether DSML leak recovery applies to `model`: a DeepSeek-class model, or one
+ * explicitly configured with the `dsml` stream healer (e.g. a `models.yml` entry
+ * whose id the classifier cannot place). Other models never write DSML tool
+ * calls, so DSML text from them is prose and is left alone.
+ */
+export function isDsmlLeakRecoveryTarget(model: Model): boolean {
+	if (model.identity?.class === "deepseek") return true;
+	const compat = model.compat;
+	return (
+		compat !== undefined && "streamMarkupHealingPattern" in compat && compat.streamMarkupHealingPattern === "dsml"
+	);
 }
 
 /**

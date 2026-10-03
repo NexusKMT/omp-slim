@@ -211,11 +211,14 @@ describe("agentLoop with AgentMessage", () => {
 	// call, so the turn ends as plain text with no tool call.
 	const strayDsml =
 		'bash\n<｜DSML｜parameter name="command" string="true">moon check --target native</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>';
+	// DSML leak recovery applies only to DSML-speaking (DeepSeek-class) models.
+	const deepseekId = "deepseek-v4-flash";
 
 	it("tells the model its tool call failed when a turn ends with leaked DSML markup", async () => {
 		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
 		let retryContext: Message[] = [];
 		const mock = createMockModel({
+			id: deepseekId,
 			responses: [
 				{ content: [`Checking the build.\n${strayDsml}`] },
 				context => {
@@ -234,8 +237,7 @@ describe("agentLoop with AgentMessage", () => {
 		expect(mock.calls).toHaveLength(2);
 		expect(messages.map(m => m.role)).toEqual(["user", "assistant", "developer", "assistant"]);
 		expect(retryContext.map(m => m.role)).toEqual(["user", "assistant", "developer"]);
-		// The broken call (tool-name line included) never reaches history; the
-		// surrounding prose survives.
+		// The broken call (tool-name line included) never reaches history.
 		expect((messages[1] as AssistantMessage).content).toEqual([{ type: "text", text: "Checking the build." }]);
 		expect(JSON.stringify(retryContext[1])).not.toContain("DSML");
 		const nudge = retryContext.at(-1);
@@ -245,18 +247,33 @@ describe("agentLoop with AgentMessage", () => {
 		expect(nudgeText).toContain('<｜DSML｜invoke name=\\"TOOL_NAME\\">');
 	});
 
-	it("removes the argument value of a leaked call whose closers the healer already stripped", async () => {
-		// What the DSML stream healer leaves of the broken call: orphan closers are
-		// gone, so the parameter opener is the last tag and its value runs to the end.
-		const healed =
-			'Checking the build.\nbash\n<｜DSML｜parameter name="command" string="true">moon check --target native\n\n';
+	it("keeps prose that follows a removed DSML call", async () => {
 		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
-		const mock = createMockModel({ responses: [{ content: [healed] }, { content: ["All done."] }] });
+		const mock = createMockModel({
+			id: deepseekId,
+			responses: [{ content: [`Checking the build.\n${strayDsml}\nThe build passed.`] }, { content: ["Done."] }],
+		});
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
 
 		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
 
-		expect((messages[1] as AssistantMessage).content).toEqual([{ type: "text", text: "Checking the build." }]);
+		expect((messages[1] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "Checking the build.\n\nThe build passed." },
+		]);
+	});
+
+	it("ends a leaked call whose closers never arrived at the next blank line", async () => {
+		const truncated =
+			'Checking the build.\nbash\n<｜DSML｜parameter name="command" string="true">moon check --target native\n\nThe build passed.';
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		const mock = createMockModel({ id: deepseekId, responses: [{ content: [truncated] }, { content: ["Done."] }] });
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		expect((messages[1] as AssistantMessage).content).toEqual([
+			{ type: "text", text: "Checking the build.\n\nThe build passed." },
+		]);
 		expect(mock.calls).toHaveLength(2);
 	});
 
@@ -265,7 +282,7 @@ describe("agentLoop with AgentMessage", () => {
 		function* leakForever(): Generator<MockResponse> {
 			while (true) yield { content: [strayDsml] };
 		}
-		const mock = createMockModel({ responses: leakForever() });
+		const mock = createMockModel({ id: deepseekId, responses: leakForever() });
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
 
 		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
@@ -280,6 +297,7 @@ describe("agentLoop with AgentMessage", () => {
 	it("does not treat DSML quoted in a code fence as a leaked tool call", async () => {
 		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
 		const mock = createMockModel({
+			id: deepseekId,
 			responses: [{ content: [`The envelope looks like:\n\`\`\`text\n${strayDsml}\n\`\`\``] }],
 		});
 		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
@@ -288,6 +306,18 @@ describe("agentLoop with AgentMessage", () => {
 
 		expect(mock.calls).toHaveLength(1);
 		expect(JSON.stringify(messages.at(-1))).toContain("DSML");
+	});
+
+	it("leaves DSML in a non-DeepSeek model's prose untouched", async () => {
+		const prose = 'The literal token <｜DSML｜parameter name="x"> is part of the specification.';
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		const mock = createMockModel({ id: "claude-sonnet-4-6", responses: [{ content: [prose] }] });
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		expect(mock.calls).toHaveLength(1);
+		expect((messages.at(-1) as AssistantMessage).content).toEqual([{ type: "text", text: prose }]);
 	});
 
 	it("retries when harmony leakage reaches the committed assistant message (openai-codex)", async () => {
