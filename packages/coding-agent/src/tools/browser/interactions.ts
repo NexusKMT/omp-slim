@@ -420,6 +420,57 @@ export async function highlightElement(
 	}
 }
 
+/**
+ * Select `<select>` options by value, then by visible label, and return the selected values.
+ * An exact value match always wins over a label, so value-based calls keep their meaning.
+ */
+export async function selectElementOptions(
+	handle: ElementHandle,
+	values: string[],
+	label: string,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	const selected = (await untilAborted(signal, () =>
+		handle.evaluate((el, vals) => {
+			interface SelectOption {
+				value: string;
+				label: string;
+				text: string;
+				selected: boolean;
+			}
+			interface SelectLike {
+				tagName: string;
+				options: ArrayLike<SelectOption>;
+				dispatchEvent: (event: unknown) => boolean;
+			}
+			const select = el as unknown as SelectLike;
+			if (select?.tagName !== "SELECT") return null;
+			const page = globalThis as unknown as PageGlobals;
+			const options = Array.from(select.options);
+			const wanted = new Set<SelectOption>();
+			for (const value of vals as string[]) {
+				const option =
+					options.find(candidate => candidate.value === value) ??
+					options.find(
+						candidate => candidate.label === value || candidate.text.replace(/\s+/g, " ").trim() === value,
+					);
+				if (option) wanted.add(option);
+			}
+			// Assign the full selection first, then read back: on a single
+			// <select>, un-selecting the current option mid-loop leaves the
+			// browser reporting it selected until another option takes over,
+			// which double-counted the old value in the returned list.
+			for (const option of options) option.selected = wanted.has(option);
+			const result = options.filter(option => option.selected).map(option => option.value);
+			select.dispatchEvent(new page.Event("input", { bubbles: true }));
+			select.dispatchEvent(new page.Event("change", { bubbles: true }));
+			return result;
+		}, values),
+	)) as string[] | null;
+	if (!selected) throw new ToolError(`${label} requires a <select> element`);
+	return selected;
+}
+
 /** Upload files through an input, native chooser trigger, or synthetic drop-zone event sequence. */
 export async function uploadFilesToElement(
 	page: Page,

@@ -12,6 +12,7 @@ import { chromiumAvailable } from "./chromium-probe";
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const TAB_NAME = `interactions-${crypto.randomUUID()}`;
 const STARVED_TAB_NAME = `starved-${crypto.randomUUID()}`;
+const SELECT_TAB_NAME = `select-${crypto.randomUUID()}`;
 let tempDir = "";
 let uploadPath = "";
 
@@ -145,6 +146,47 @@ return { during, after };`,
 			});
 		} finally {
 			await invoke({ action: "close", name: TAB_NAME, kill: true }).catch(() => undefined);
+		}
+	}, 30_000);
+
+	test("selects options by value, then by visible label, from tabs and element handles", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const context = { session, toolCallId: "browser-select" };
+		const selectHtml = `<!doctype html>
+<select id="country"><option value="">Choose…</option><option value="us">United States</option><option value="ca">Canada</option></select>
+<select id="size"><option value="m">Large</option><option value="Large">Extra large</option></select>`;
+		await prelude.invoke(
+			{ action: "open", name: SELECT_TAB_NAME, url: `data:text/html,${encodeURIComponent(selectHtml)}` },
+			context,
+		);
+		try {
+			const result = await prelude.invoke(
+				{
+					action: "run",
+					name: SELECT_TAB_NAME,
+					code: `const byLabel = await tab.select("#country", "United States");
+const afterLabel = await tab.value("#country");
+const byValue = await tab.select("#country", "ca");
+const handle = await tab.waitFor("#country");
+const handleByLabel = await handle.select("United States");
+const afterHandle = await tab.value("#country");
+const valueWins = await tab.select("#size", "Large");
+return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins };`,
+					timeout: 20,
+				},
+				context,
+			);
+			expect(valueFrom<Record<string, unknown>>(result)).toEqual({
+				byLabel: ["us"],
+				afterLabel: "us",
+				byValue: ["ca"],
+				handleByLabel: ["us"],
+				afterHandle: "us",
+				valueWins: ["Large"],
+			});
+		} finally {
+			await prelude.invoke({ action: "close", name: SELECT_TAB_NAME, kill: true }, context).catch(() => undefined);
 		}
 	}, 30_000);
 
