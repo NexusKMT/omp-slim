@@ -43,7 +43,7 @@
 - Fixed an `EPIPE: broken pipe` unhandled rejection crashing the session when a debug adapter, eval kernel, IDA worker, or RPC server exits mid-write (seen on Windows) ([#14196](https://github.com/can1357/oh-my-pi/pull/14196) by [@andrebrait](https://github.com/andrebrait))
 ### Fixed
 
-- Symlinked routing configs now reload when an intermediate file or profile directory link is replaced, and continue following edits to the new target without restarting the session.
+- Symlinked routing configs now reload when an intermediate file or profile directory link is replaced, and continue following edits to the new target without restarting the session ([#14192](https://github.com/can1357/oh-my-pi/pull/14192) by [@schickling-assistant](https://github.com/schickling-assistant)).
 
 ## [18.5.1] - 2026-10-03
 
