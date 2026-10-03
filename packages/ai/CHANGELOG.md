@@ -31,6 +31,7 @@
 
 ### Fixed
 
+- Fixed Cursor errors that Cursor itself marks retryable, such as "Unable to reach the model provider", ending the turn instead of being retried ([#13683](https://github.com/can1357/oh-my-pi/pull/13683) by [@eggpeat](https://github.com/eggpeat))
 - Factory Droid login now reports the account's organization error instead of accepting a credential that every request rejects ([#14032](https://github.com/can1357/oh-my-pi/issues/14032)).
 - Fixed Cursor turns being aborted with "Provider stream stalled while waiting for the next event" right after a long local tool finished; the provider now gets a full idle window once local tool work completes ([#13682](https://github.com/can1357/oh-my-pi/pull/13682) by [@eggpeat](https://github.com/eggpeat))
 - Fixed the first request of a resumed `openai-responses` session omitting earlier turns' plaintext reasoning, which made servers that cache rendered reasoning (self-hosted Responses servers) prefill the whole context again after every restart ([#13751](https://github.com/can1357/oh-my-pi/pull/13751) by [@alphastorm](https://github.com/alphastorm))

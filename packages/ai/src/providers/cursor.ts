@@ -226,7 +226,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream";
 import { connectProxiedSocket, getProxyForUrl, wrapFetchForProxy } from "../utils/proxy";
 import { createRequestDebugSession, isRequestDebugEnabled, type RequestDebugResponseLog } from "../utils/request-debug";
 import { sanitizeSchemaForCursor, toolWireSchema } from "../utils/schema";
-import { formatConnectEndStreamError } from "./connect-error-detail";
+import { formatConnectEndStreamError, hasRetryableCursorErrorDetail } from "./connect-error-detail";
 import mcpExternalHandoffMessage from "./cursor-external-tool-handoff.md" with { type: "text" };
 import {
 	buildMcpStateResult,
@@ -613,7 +613,17 @@ function classifyConnectError(error: Record<string, unknown>): Error {
 	if (structured) return classifyCursorStructuredError(structured);
 	const code = typeof error.code === "string" ? error.code : "unknown";
 	const message = typeof error.message === "string" ? error.message : "Unknown error";
-	return new ConnectEndStreamError(`Connect error ${code}: ${message}`, formatConnectEndStreamError(error));
+	const endStreamError = new ConnectEndStreamError(
+		`Connect error ${code}: ${message}`,
+		formatConnectEndStreamError(error),
+	);
+	// Without a decodable binary detail, Cursor's retry verdict survives only in
+	// the detail's debug JSON; the classification text drops it, so carry it as
+	// a structured flag.
+	if (hasRetryableCursorErrorDetail(error.details)) {
+		AIError.attach(endStreamError, AIError.create(AIError.Flag.Transient));
+	}
+	return endStreamError;
 }
 
 function parseConnectEndStream(data: Uint8Array): Error | null {
