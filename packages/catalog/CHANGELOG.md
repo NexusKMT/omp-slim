@@ -6,6 +6,7 @@
 
 - Fixed local Ollama thinking models (e.g. Gemma 4) still reasoning when thinking is turned off, which made session titles take 10+ seconds
 - OpenCode Go's LongCat 2.5 Preview offers no unsupported effort levels and can turn reasoning off; Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
+- Fixed Claude Opus 5.5 on the Anthropic API and Cloudflare AI Gateway failing with `Invalid 'signature' in 'thinking' block ... bound to a different conversation` after tools or the system prompt changed mid-session; requests now send `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` like Fable 5.1 and Sonnet 5.5 ([#14167](https://github.com/can1357/oh-my-pi/issues/14167))
 
 ## [18.5.0] - 2026-10-03
 
