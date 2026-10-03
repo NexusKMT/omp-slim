@@ -3197,7 +3197,11 @@ export class TUI extends Container {
 		// scrollback; the destructive refresh is the only purge) and on a host
 		// that repaints its own grid (ConPTY's stale re-emission is untrusted).
 		if (this.#resizeScrollbackMode === "rebuild") {
-			if (!this.#settledResizeRefreshes(widthChanged)) return;
+			// Every destructive cause warrants a rebuild: a burst shrink can push
+			// live rows into history (tmux discards rows below the cursor, then
+			// pushes rows above it; a later grow cannot undo that clipping or the
+			// provider's retirement), and ConPTY can repaint its own stale grid.
+			if (!widthChanged && this.terminal.hostOwnsGridOnResize !== true && !this.#resizeBurstShrank) return;
 			this.#prepareForcedRender(true);
 			return;
 		}
@@ -3207,16 +3211,6 @@ export class TUI extends Container {
 	}
 
 	/**
-	 * Whether a settle that has reached {@link #prepareResizeReplay} will run
-	 * the history refresh. `widthChanged` is the caller's already-computed whole-
-	 * burst width verdict. `append` refreshes only width-shredded copies; in
-	 * rebuild every destructive cause warrants it: a burst shrink can push live
-	 * rows into history, and ConPTY can repaint its own stale grid. tmux first
-	 * discards rows below the cursor, then pushes rows above it into history.
-	 * A later grow cannot undo that clipping or the provider's retirement, so
-	 * even a height-only shrink/grow burst needs a complete settled rebuild.
-	 */
-	/**
 	 * Bottom-row `Rebuilding…` notice, closed as its own synchronized update so
 	 * tmux forwards it before the replay that follows starts a new hold. Cursor
 	 * save/restore and no newline keep the row out of native scrollback; the
@@ -3225,13 +3219,6 @@ export class TUI extends Container {
 	#rebuildNoticeSequence(width: number, height: number): string {
 		const label = truncateToWidth("↻ Rebuilding…", width, Ellipsis.Omit);
 		return `${this.#paintBeginSequence}\x1b7\x1b[${height};1H${SEGMENT_RESET}${ERASE_LINE}${label}${LINE_TERMINATOR}\x1b8${this.#paintEndSequence}`;
-	}
-
-	#settledResizeRefreshes(widthChanged: boolean): boolean {
-		if (this.#resizeScrollbackMode === "rebuild") {
-			return widthChanged || this.terminal.hostOwnsGridOnResize === true || this.#resizeBurstShrank;
-		}
-		return widthChanged;
 	}
 
 	/**
@@ -3444,7 +3431,7 @@ export class TUI extends Container {
 						-1,
 						-1,
 						this.#osc66SpacerGlyphWidth(preparedHistory.lines, index),
-						compactReplay,
+						{ blankRow: compactReplay },
 					),
 				);
 				screenRow++;
@@ -3459,7 +3446,7 @@ export class TUI extends Container {
 						-1,
 						-1,
 						this.#osc66SpacerGlyphWidth(prepared.lines, index),
-						compactReplay,
+						{ blankRow: compactReplay },
 					),
 				);
 				screenRow++;
@@ -4083,7 +4070,7 @@ export class TUI extends Container {
 		frameRow = -1,
 		committedTo = -1,
 		spacerGlyphWidth = -1,
-		blankRow = false,
+		options?: { blankRow?: boolean },
 	): string {
 		// End every rewrite at column zero. ConPTY can materialize a pending
 		// wrap before a following cursor-addressing sequence even while DECAWM is
@@ -4103,7 +4090,7 @@ export class TUI extends Container {
 			rewrite = ERASE_LINE + this.#imageLineSequence(line.line, screenRow, frameRow, committedTo);
 		} else {
 			const terminalLine = this.#terminalLine(line);
-			if (blankRow) {
+			if (options?.blankRow) {
 				// A destructive replay starts on a cleared screen and advances only
 				// into fresh rows. Each line resets its rendition before scrolling,
 				// so those rows already have the default background. Re-erasing every
