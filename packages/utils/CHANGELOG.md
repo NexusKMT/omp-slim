@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.0] - 2026-10-03
+
 ### Added
 
 - Added the public `getSessionOwnersDir()` utility, which returns the profile-independent `~/.omp/run/session-owners` directory that names session ownership leases ([#14095](https://github.com/can1357/oh-my-pi/pull/14095) by [@andrebrait](https://github.com/andrebrait))

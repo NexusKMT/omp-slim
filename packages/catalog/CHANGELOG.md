@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.0] - 2026-10-03
+
 ### Added
 
 - Added `closeModelCache()` (`@oh-my-pi/pi-catalog/model-cache`) to release the shared default `models.db` handle so an agent directory can be deleted on Windows; the next cache access reopens it
