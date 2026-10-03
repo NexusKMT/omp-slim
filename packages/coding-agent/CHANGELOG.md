@@ -282,6 +282,7 @@
 - Explicit `symbolPreset: unicode` now stays Unicode after a Glyph Protocol handshake instead of switching the status bar to Nerd Font icons ([#13865](https://github.com/can1357/oh-my-pi/issues/13865)).
 - Fixed rewinding (`/rewind`, `/tree`) during a running turn hiding the queued-prompt bar, making the still-pending queue look deleted and uneditable ([#13680](https://github.com/can1357/oh-my-pi/issues/13680))
 - Another agent's message or a background job's output can no longer close the `<irc>` or `<system-notice>` block it is delivered in, or open a forged harness block such as a parent agent's mid-turn message
+- `openai-codex` model discovery now queries the `baseUrl` set in `models.yml` with the configured key, so models listed only by a Codex-compatible gateway (e.g. `gpt-6.1-sol`) appear; the gateway key is no longer sent to chatgpt.com, and stored ChatGPT OAuth credentials are never sent to the gateway ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
 
 ## [18.4.4] - 2026-09-29
 
