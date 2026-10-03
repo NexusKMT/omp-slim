@@ -80,4 +80,28 @@ describe("browser readable extraction", () => {
 		expect(result?.markdown).not.toContain("Use apt.");
 		expect(result?.markdown).not.toContain("Read logs.");
 	});
+
+	it("keeps block boundaries as line breaks in Readability text", async () => {
+		const paragraph = (n: number) =>
+			`<p>Paragraph ${n} explains the fare rules in enough words that Readability scores this block as article prose rather than page chrome.</p>`;
+		const html = `<!doctype html><html><head><title>Fares</title></head><body><nav>Home</nav><article><h1>Fares</h1>${paragraph(1)}${paragraph(2)}${paragraph(3)}<ul><li>Adult</li><li>Senior</li></ul><p>Transfers are <em>free</em>.<br>Passes are not.</p><pre>zone  price\n1     $2.40</pre></article></body></html>`;
+
+		const result = await extractReadableFromHtml(html, "https://example.com/fares", "text");
+		const lines = result?.text?.split("\n");
+
+		expect(lines).toContain(paragraph(1).replace(/<\/?p>/g, ""));
+		expect(lines).toContain("Adult");
+		expect(lines).toContain("Senior");
+		expect(lines).toContain("Transfers are free.");
+		expect(lines).toContain("Passes are not.");
+		expect(result?.text).toContain("zone  price\n1     $2.40");
+	});
+
+	it("keeps block boundaries as line breaks in fallback text and drops scripts and styles", async () => {
+		const html = `<main><style>p { color: red }</style><h1>Fares</h1><p>One way.</p><table><tr><td>Zone 1</td><td>$2.40</td></tr></table><script>track()</script></main>`;
+
+		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "main" });
+
+		expect(result?.text).toBe("Fares\n\nOne way.\n\nZone 1\n\n$2.40");
+	});
 });
