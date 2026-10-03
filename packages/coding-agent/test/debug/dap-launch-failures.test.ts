@@ -454,8 +454,9 @@ describe("DAP launch failure handling", () => {
 	});
 
 	it("rejects the request instead of emitting an unhandled rejection when a pending stdin write fails", async () => {
+		const exited = Promise.withResolvers<number>();
 		const proc = {
-			exited: new Promise<number>(() => {}),
+			exited: exited.promise,
 			exitCode: null,
 			stdin: { write: () => 0, flush: () => undefined },
 			stdout: new ReadableStream<Uint8Array>(),
