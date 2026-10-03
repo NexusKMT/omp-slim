@@ -367,7 +367,13 @@ describe("RelayBridge tab grouping", () => {
 });
 
 describe("RelayBridge child targets", () => {
-	async function armAutoAttach(bridge: RelayBridge, ext: FakeExtSocket, connId: number, sessionId: string) {
+	async function armAutoAttach(
+		bridge: RelayBridge,
+		ext: FakeExtSocket,
+		connId: number,
+		sessionId: string,
+		outcome: "ok" | "fail" = "ok",
+	): Promise<void> {
 		bridge.cdpMessage(
 			connId,
 			JSON.stringify({
@@ -377,16 +383,20 @@ describe("RelayBridge child targets", () => {
 				params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
 			}),
 		);
-		ack(bridge, ext, "send");
+		if (outcome === "ok") ack(bridge, ext, "send");
+		else nack(bridge, ext, "send", "Target.setAutoAttach failed");
 		await flush();
 	}
 
-	function announceChild(bridge: RelayBridge, ext: FakeExtSocket): void {
+	function attachChild(bridge: RelayBridge, ext: FakeExtSocket): void {
 		const child = { sessionId: "CHILD1", targetInfo: { targetId: "FRAME1", type: "iframe" } };
 		bridge.extMessage(
 			ext,
 			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Target.attachedToTarget", params: child }),
 		);
+	}
+
+	function navigateAndDetachChild(bridge: RelayBridge, ext: FakeExtSocket): void {
 		bridge.extMessage(
 			ext,
 			JSON.stringify({ t: "cdpEvent", tabId: 1, sessionId: "CHILD1", method: "Page.frameNavigated", params: {} }),
@@ -400,6 +410,11 @@ describe("RelayBridge child targets", () => {
 				params: { sessionId: "CHILD1" },
 			}),
 		);
+	}
+
+	function announceChild(bridge: RelayBridge, ext: FakeExtSocket): void {
+		attachChild(bridge, ext);
+		navigateAndDetachChild(bridge, ext);
 	}
 
 	function childTraffic(socket: FakeCdpSocket): Array<[unknown, unknown]> {
@@ -456,6 +471,57 @@ describe("RelayBridge child targets", () => {
 			["Target.attachedToTarget", first],
 			["Page.frameNavigated", "CHILD1"],
 			["Target.detachedFromTarget", first],
+		]);
+	});
+
+	it("keeps a child's detach on the session it was announced on after that session is released", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const first = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, first);
+		const second = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, second);
+
+		attachChild(bridge, ext);
+		bridge.cdpMessage(
+			conn,
+			JSON.stringify({ id: ++msgSeq, method: "Target.detachFromTarget", params: { sessionId: first } }),
+		);
+		await flush();
+		navigateAndDetachChild(bridge, ext);
+
+		// The second session never owned the child; moving its detach there would orphan the first announcement.
+		expect(childTraffic(cdp)).toEqual([
+			["Target.attachedToTarget", first],
+			["Page.frameNavigated", "CHILD1"],
+			["Target.detachedFromTarget", first],
+		]);
+	});
+
+	it("does not report children to a session whose Target.setAutoAttach failed", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		// Another connection already armed the tab, so Chrome will report children.
+		const otherCdp = new FakeCdpSocket();
+		const other = bridge.cdpConnected(otherCdp);
+		const otherSession = await attachPage(bridge, ext, otherCdp, other, 1);
+		await armAutoAttach(bridge, ext, other, otherSession);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const failed = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, failed, "fail");
+
+		announceChild(bridge, ext);
+
+		expect(childTraffic(cdp)).toEqual([]);
+		expect(childTraffic(otherCdp)).toEqual([
+			["Target.attachedToTarget", otherSession],
+			["Page.frameNavigated", "CHILD1"],
+			["Target.detachedFromTarget", otherSession],
 		]);
 	});
 });
