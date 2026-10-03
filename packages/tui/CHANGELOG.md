@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
+- Added display of subagent completion percent in agent tree, task, and wait views
 ### Fixed
 
 - Narrow `/models` layouts retain the scope sidebar while model rows drop metadata and truncate names as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
@@ -57,6 +61,15 @@
 ### Fixed
 
 - Fixed multiline paste on Windows so pasted line breaks are inserted correctly instead of terminal escape sequences.
+- Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
+- Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported
+- Fixed rapid pane and window resize events repeatedly clearing and replaying the transcript; changes within the settle window now share one repaint ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
+- Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
+- Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
 
 ## [18.4.10] - 2026-10-02
 
