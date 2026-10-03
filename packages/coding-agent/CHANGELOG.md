@@ -149,6 +149,10 @@
 
 - Fixed Python Eval corrupting quoted source text containing shell or magic syntax, including multiline strings with Python tokens after the closing delimiter ([#14088](https://github.com/can1357/oh-my-pi/pull/14088) by [@Binoui](https://github.com/Binoui)).
 
+### Fixed
+
+- Fixed `--model github-copilot/<id>` and `enabledModels` silently selecting a similarly named bundled Copilot model when the requested model is known only from the cached Copilot catalog ([#14075](https://github.com/can1357/oh-my-pi/issues/14075))
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
