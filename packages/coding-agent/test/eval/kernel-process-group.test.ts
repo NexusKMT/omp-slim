@@ -77,6 +77,35 @@ describe("BaseKernel stdin failures", () => {
 			await kernel.shutdown({ timeoutMs: 50 });
 		}
 	});
+
+	test("retires the kernel when a write fails after its request was already aborted", async () => {
+		const exited = Promise.withResolvers<number>();
+		const write = Promise.withResolvers<number>();
+		const proc = {
+			pid: undefined,
+			stdin: { write: () => write.promise, flush: () => undefined, end: () => {} },
+			stdout: new ReadableStream<Uint8Array>(),
+			stderr: new ReadableStream<Uint8Array>(),
+			exited: exited.promise,
+			kill: () => exited.resolve(0),
+		};
+		const kernel = new TestKernel();
+		kernel.setProcess(proc as unknown as Parameters<TestKernel["setProcess"]>[0]);
+		try {
+			const controller = new AbortController();
+			const request = kernel.submitRequest("tool-call", "payload", { signal: controller.signal });
+			controller.abort();
+			expect((await request).cancelled).toBe(true);
+			expect(kernel.isAlive()).toBe(true);
+
+			// The pipe breaks after the caller has gone: the kernel must still be retired.
+			write.reject(new Error("EPIPE: broken pipe, write"));
+			expect(await exited.promise).toBe(0);
+			expect(kernel.isAlive()).toBe(false);
+		} finally {
+			await kernel.shutdown({ timeoutMs: 50 });
+		}
+	});
 });
 
 describe("killProcessGroup", () => {

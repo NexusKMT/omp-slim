@@ -359,15 +359,17 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 
 		requestWritten = true;
 		const transportFailed = (err: unknown) => {
-			if (pending.settled) return;
-			pending.cancelled = true;
-			pending.error = {
-				name: "TransportError",
-				value: err instanceof Error ? err.message : String(err),
-				traceback: [],
-			};
-			finalize();
-			// A broken stdin pipe is terminal: retire the kernel so the session starts a fresh one.
+			if (!pending.settled) {
+				pending.cancelled = true;
+				pending.error = {
+					name: "TransportError",
+					value: err instanceof Error ? err.message : String(err),
+					traceback: [],
+				};
+				finalize();
+			}
+			// A broken stdin pipe is terminal even if this request already settled (e.g. aborted first):
+			// retire the kernel so the session starts a fresh one.
 			void this.shutdown();
 		};
 		try {
