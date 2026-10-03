@@ -17,6 +17,9 @@
 
 - Fixed RPC hosts waiting forever for a prompt's `prompt_result` when an automatic handoff ran after a turn crossed the compaction threshold; threshold handoffs now finish before the turn settles, like other compaction methods
 - Fixed the "F5 to retry" row after an interrupted tool call hugging the error above it; it now sits where the working row stood, with the key styled like other key hints
+### Fixed
+
+- Fixed `eval` `tool.*` calls to extension and custom tools with strict schemas (e.g. `ida_list_databases`) failing with `unexpected parameters: ['i']`; bridged calls now receive the same arguments as direct tool calls ([#14174](https://github.com/can1357/oh-my-pi/pull/14174) by [@wondercrash](https://github.com/wondercrash))
 
 ## [18.5.0] - 2026-10-03
 
