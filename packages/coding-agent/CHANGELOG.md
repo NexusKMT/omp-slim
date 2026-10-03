@@ -127,6 +127,10 @@
 - Fixed `~/.omp` being loaded as a project config directory for any non-repository cwd under home (including Windows `%TEMP%` workdirs), which applied the user's `SYSTEM.md`, `RULES.md` and `AGENTS.md` as project config and bypassed `PI_CODING_AGENT_DIR` and profiles ([#14084](https://github.com/can1357/oh-my-pi/pull/14084) by [@NaC-L](https://github.com/NaC-L)).
 - Fixed advisor concerns and nits being preserved instead of reaching an active same-run continuation after a terminal answer ([#14097](https://github.com/can1357/oh-my-pi/pull/14097) by [@xiangnan0811](https://github.com/xiangnan0811)).
 
+### Fixed
+
+- Fixed Python Eval corrupting quoted source text containing shell or magic syntax, including multiline strings with Python tokens after the closing delimiter ([#14088](https://github.com/can1357/oh-my-pi/pull/14088) by [@Binoui](https://github.com/Binoui)).
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
