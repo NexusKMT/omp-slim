@@ -74,6 +74,8 @@ import {
 } from "./hub-frame";
 import { renderSegmentTrack } from "../chrome/segment-track";
 
+const MODEL_HUB_BODY_MIN_WIDTH = 28;
+
 /**
  * A row of the Roles view: a role, a model/wildcard chain-key header, one of a
  * chain's fallback entries, or the trailing "+ New role…". Fallback rows under
@@ -376,7 +378,7 @@ export class ModelHubComponent implements Component {
 		{ min: 18, max: 26 },
 		(width, rows) => this.#renderSidebar(width, rows),
 		this.#renderBodyPane,
-		{ preserveSidebar: true },
+		{ bodyMinWidth: MODEL_HUB_BODY_MIN_WIDTH, preserveSidebar: true },
 	);
 	#lockedLoginLine: number | null = null;
 	#rolesRowStart = 1;

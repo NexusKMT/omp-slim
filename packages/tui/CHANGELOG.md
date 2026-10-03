@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Narrow `/models` and Agents hubs reserve room for body content; `/models` keeps its scope sidebar and drops row metadata as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
+- Narrow `/models` layouts retain the scope sidebar while model rows drop metadata and truncate names as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
 
 ## [18.5.0] - 2026-10-03
 
