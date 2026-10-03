@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- RPC mode can run a GPT live voice session bound to the RPC session, so delegated work uses the host's tools: `live_start` (optional `voice`, and `instructions` replacing the bundled live prompt), `live_stop`, and `live_mute`, with unsolicited `live_phase`, `live_levels` (at most every 100 ms), `live_transcript`, and `live_end` frames that `set_event_filter` never drops. `RpcClient` adds `liveStart()`, `liveStop()`, `liveMute()`, and `onLive()`. Closing stdin stops an active live session.
+
 ### Changed
 
 - Improved auto-generated session titles: requests that only point at an image ("fix [Image #1]") are titled from the assistant's first ~40 words instead of a guess, placeholders are no longer echoed, and mid-session title refreshes keep the session's opening request so they name the goal instead of a file or symbol

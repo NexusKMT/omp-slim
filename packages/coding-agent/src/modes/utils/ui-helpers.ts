@@ -46,6 +46,7 @@ import { materializeImageReferenceLinksSync } from "@oh-my-pi/pi-tui/prompt/imag
 import { imageAttachmentSource } from "@oh-my-pi/pi-tui/prompt/image-source";
 import { theme } from "@oh-my-pi/pi-tui/theme";
 import type { CompactionQueuedMessage, InteractiveModeContext, RenderSessionContextOptions } from "../../modes/types";
+import { extractVisibleAssistantText } from "../rpc/rpc-live";
 import { LAUNCH_COMPLETION_MESSAGE_TYPE } from "../../session/launch-completion";
 import {
 	BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE,
@@ -1309,12 +1310,6 @@ export class UiHelpers {
 	}
 
 	extractAssistantText(message: AssistantMessage): string {
-		let text = "";
-		for (const content of message.content) {
-			if (content.type === "text") {
-				text += content.text;
-			}
-		}
-		return text.trim();
+		return extractVisibleAssistantText(message);
 	}
 }
