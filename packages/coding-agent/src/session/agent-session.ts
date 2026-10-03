@@ -210,7 +210,7 @@ import {
 	shouldDisableReasoning,
 	toReasoningEffort,
 } from "@oh-my-pi/pi-tui/thinking";
-import { isLowSignalTitleInput } from "../tiny/text";
+import { isAttachmentOnlyTitleInput, isLowSignalTitleInput } from "../tiny/text";
 import { shutdownTinyTitleClient } from "../tiny/title-client";
 import type { ImageAttachmentEntry, ToolSession } from "../tools";
 import { resolveApproval } from "../tools/approval";
@@ -351,7 +351,7 @@ import {
 	INTERRUPTED_THINKING_MESSAGE_TYPE,
 	type InterruptedThinkingDetails,
 	isEmptyErrorTurn,
-	isTitleContextReply,
+	titleContextWordCount,
 	isUserInterruptAbort,
 	isUserInvokedSkillPrompt,
 	logProviderTurnError,
@@ -420,6 +420,8 @@ export * from "./agent-session-types";
 export type { AdvisorStats, AdvisorStatusOverviewEntry, PerAdvisorStat } from "./session-advisors";
 
 const SESSION_STOP_CONTINUATION_CAP = 8;
+/** Assistant thinking+reply words a deferred auto-title waits for before retitling from context. */
+const DEFERRED_TITLE_MIN_WORDS = 40;
 
 import { LoopGuards, type StreamGuardsHost, StreamingEditGuard } from "./stream-guards";
 import { TodoTracker, type TodoTrackerHost } from "./todo-tracker";
@@ -806,7 +808,7 @@ export class AgentSession implements SettingsScope {
 	 *  Once the title model declines the message (greeting-like or too ambiguous,
 	 *  e.g. a pasted image plus "help") AND the assistant has replied, the title is
 	 *  regenerated once from the recent user/assistant/thinking turns. */
-	#deferredTitle: { sessionId: string; declined: boolean; replied: boolean } | undefined;
+	#deferredTitle: { sessionId: string; declined: boolean; replied: boolean; words: number } | undefined;
 	#titleProviderSessionId: string | undefined;
 	#titleProviderParentSessionId: string | undefined;
 	/** Host hook invoked when a typed user prompt is dropped before dispatch;
@@ -3513,7 +3515,11 @@ export class AgentSession implements SettingsScope {
 		if (event.type === "message_end" && event.message.role === "assistant") {
 			this.#lastAssistantMessage = event.message;
 			this.#cacheWarmer?.onResponse(event.message);
-			if (this.#deferredTitle && isTitleContextReply(event.message)) this.#advanceDeferredTitle("replied");
+			const deferred = this.#deferredTitle;
+			if (deferred && !deferred.replied) {
+				deferred.words += titleContextWordCount(event.message);
+				if (deferred.words >= DEFERRED_TITLE_MIN_WORDS) this.#advanceDeferredTitle("replied");
+			}
 		}
 		// Expected internal transitions stamp a structural suppression flag on the
 		// persisted message BEFORE the obfuscator's display-side copy below, so the
@@ -8906,7 +8912,14 @@ export class AgentSession implements SettingsScope {
 		) {
 			return;
 		}
-		this.#deferredTitle = { sessionId, declined: false, replied: false };
+		// A request that only points at an attachment ("fix [Image #1]") names no
+		// task the text-only title model can see; skip straight to retitling from
+		// the assistant's own description of it.
+		if (isAttachmentOnlyTitleInput(firstMessage)) {
+			this.#deferredTitle = { sessionId, declined: true, replied: false, words: 0 };
+			return;
+		}
+		this.#deferredTitle = { sessionId, declined: false, replied: false, words: 0 };
 		this.#startAutoTitle(firstMessage, sessionId);
 	}
 
