@@ -27,6 +27,12 @@ describe("fastembed runtime version pins", () => {
 		expect(plan.versionKey).not.toContain("forced-ort");
 	});
 
+	test("runtime install overrides tokenizers to a release with linux-arm64 bindings", () => {
+		const plan = fastembedRuntimeInstallPlan();
+		expect(plan.install.overrides).toEqual({ "@anush008/tokenizers": "0.6.0" });
+		expect(plan.versionKey).toContain("tokenizers-0.6.0");
+	});
+
 	test("Windows preload selects fastembed's ORT DLL before inherited paths", async () => {
 		const requireTest = createRequire(import.meta.url);
 		const fastembedManifest = requireTest.resolve("fastembed/package.json");
