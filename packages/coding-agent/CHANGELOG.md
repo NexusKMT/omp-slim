@@ -10,6 +10,7 @@
 
 ### Changed
 
+- `wait` now blocks only on background jobs and services the calling agent (main or subagent) started and errors when none are running, instead of waiting for peer messages; a message still ends a wait on such work
 - Improved auto-generated session titles: requests that only point at an image ("fix [Image #1]") are titled from the assistant's first ~40 words instead of a guess, placeholders are no longer echoed, and mid-session title refreshes keep the session's opening request so they name the goal instead of a file or symbol
 
 ### Fixed
