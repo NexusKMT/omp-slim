@@ -390,6 +390,9 @@
 ### Fixed
 
 - Bash commands now see environment variables an extension sets in the main session's `session_start`, `session_switch` or `session_branch` handler, and after a session switch they no longer keep the previous session's values ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
+### Fixed
+
+- Fixed notes-backed context rollover restoring an older parent assignment after a subagent is revived instead of its latest idle parent request ([#13553](https://github.com/can1357/oh-my-pi/issues/13553), [#13615](https://github.com/can1357/oh-my-pi/pull/13615) by [@acfrazier](https://github.com/acfrazier)).
 
 ## [18.4.2] - 2026-09-28
 

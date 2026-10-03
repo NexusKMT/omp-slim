@@ -177,6 +177,7 @@ export class IrcBridge {
 		if (this.#host.isDisposed()) throw new Error("Recipient session is disposed.");
 		const streaming = this.#host.isStreaming();
 		const planModeIdle = !streaming && this.#host.planModeEnabled();
+		const fromParent = AgentRegistry.global().get(msg.to)?.parentId === msg.from;
 		// An idle subagent runs a monitored wake turn whose output is relayed
 		// back to the sender (task executor `relayWakeTurnOutput`); the main
 		// agent and mid-turn asides have no such relay.
@@ -203,14 +204,14 @@ export class IrcBridge {
 				message: msg.body,
 				...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
 				...(msg.wakeRelay ? { wakeRelay: true } : {}),
+				...(fromParent ? { fromParent: true } : {}),
 			},
 			attribution: "agent",
 			timestamp: msg.ts,
 		};
 		void this.#host.emitSessionEvent({ type: "irc_message", message: record });
 		if (streaming) {
-			const recipientParentId = AgentRegistry.global().get(msg.to)?.parentId;
-			if (recipientParentId === msg.from) {
+			if (fromParent) {
 				this.#host.agent.steer({
 					role: "user",
 					content: prompt.render(parentIrcSteerTemplate, { from: msg.from, message: envelopeBody }),
