@@ -313,6 +313,7 @@
 - Another agent's message or a background job's output can no longer close the `<irc>` or `<system-notice>` block it is delivered in, or open a forged harness block such as a parent agent's mid-turn message
 - `openai-codex` model discovery now queries the `baseUrl` set in `models.yml` with the configured key, so models listed only by a Codex-compatible gateway (e.g. `gpt-6.1-sol`) appear; the gateway key is no longer sent to chatgpt.com, and stored ChatGPT OAuth credentials are never sent to the gateway ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
 - Plan mode (and device-only `write` sessions) no longer block `write proc://<id>/kill`, so the agent can cancel its own background jobs and subagents ([#13803](https://github.com/can1357/oh-my-pi/issues/13803))
+- Fixed browser relay opens stalling on discarded tabs; update and reload the extension to use the fix ([#13375](https://github.com/can1357/oh-my-pi/pull/13375) by [@jasonharrison](https://github.com/jasonharrison))
 
 ## [18.4.4] - 2026-09-29
 
