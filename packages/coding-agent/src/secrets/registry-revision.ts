@@ -20,9 +20,15 @@ export class RegistryRevision {
 export class TrackedMap<K, V> implements ReadonlyMap<K, V> {
 	readonly #map = new Map<K, V>();
 	readonly #revision: RegistryRevision;
+	#version = 0;
 
 	constructor(revision: RegistryRevision) {
 		this.#revision = revision;
+	}
+
+	/** Number of effective writes to this map alone; lets derived data follow just this map. */
+	get version(): number {
+		return this.#version;
 	}
 
 	get size(): number {
@@ -40,6 +46,7 @@ export class TrackedMap<K, V> implements ReadonlyMap<K, V> {
 	set(key: K, value: V): this {
 		if (this.#map.has(key) && this.#map.get(key) === value) return this;
 		this.#map.set(key, value);
+		this.#version++;
 		this.#revision.bump();
 		return this;
 	}

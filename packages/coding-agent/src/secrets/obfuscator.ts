@@ -78,6 +78,7 @@ export type JsonRecord = { [key: string]: JsonValue | undefined };
 
 const EMPTY_SECRET_VALUES: ReadonlySet<string> = new Set();
 const NO_VALUES: readonly string[] = [];
+const NON_ASCII_RE = /[^\x00-\x7F]/;
 
 /** Distinct placeholder prefixes whose regex verdict is memoized; forged prefixes beyond this are just re-tested. */
 const MAX_PREFIX_REGEX_MEMO = 4096;
@@ -110,10 +111,10 @@ interface RegexScanMemo {
  * exactly when some literal occurs, in a single scan instead of one
  * `includes` per literal. Undefined when there is nothing to detect.
  */
-function buildLiteralDetector(literals: readonly string[]): RegExp | undefined {
+function buildLiteralDetector(literals: readonly string[], flags?: string): RegExp | undefined {
 	if (literals.length === 0) return undefined;
 	const sorted = [...new Set(literals)].sort((a, b) => b.length - a.length);
-	return new RegExp(sorted.map(literal => RegExp.escape(literal)).join("|"));
+	return new RegExp(sorted.map(literal => RegExp.escape(literal)).join("|"), flags);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -183,15 +184,24 @@ export class SecretObfuscator {
 	/** Placeholder prefix → whether a configured regex matches it. Regex entries are fixed after construction. */
 	#prefixRegexMatches = new Map<string, boolean>();
 
-	/** Mapping entries sorted longest-secret-first and the literal detector, valid for `#literalCacheRevision`. */
+	/** Literal-derived data (sorted mappings and detectors), valid for the recorded mapping versions. */
 	#sortedReplaceEntries: [string, string][] | undefined;
 	#sortedPlainEntries: [string, number][] | undefined;
 	#literalDetector: RegExp | undefined;
-	#literalCacheRevision = -1;
+	/** Literals, `$$` and case-sensitive probes in one regex; see {@link #mayNeedRedaction}. */
+	#cleanDetector: RegExp | undefined;
+	/** Configured literals only (no `$$`); `null` when there are none. See {@link #isRedactionIdentity}. */
+	#configuredLiteralDetector: RegExp | null | undefined;
+	#literalCachePlainVersion = -1;
+	#literalCacheReplaceVersion = -1;
 
+	/** Probes of case-sensitive probed regex entries. */
+	readonly #rawProbes: readonly string[];
 	/** Matches any probe of a case-sensitive / case-insensitive (folded) probed regex entry; undefined when there are none. */
 	#rawProbeDetector: RegExp | undefined;
 	#foldedProbeDetector: RegExp | undefined;
+	/** `i`-flag form of the folded probes, set only when every folded probe is ASCII; see {@link #foldedProbeHit}. */
+	#asciiFoldedProbeDetector: RegExp | undefined;
 
 	/** Per-string scan results of the {@link batch} in progress, if any; dropped when it ends. */
 	#batchScans: Map<string, TextScan> | undefined;
@@ -278,12 +288,13 @@ export class SecretObfuscator {
 			}
 		}
 		this.#regexEntries = regexEntries;
-		this.#rawProbeDetector = buildLiteralDetector(
-			regexEntries.flatMap(entry => (entry.ignoreCase ? [] : (entry.probes ?? []))),
-		);
-		this.#foldedProbeDetector = buildLiteralDetector(
-			regexEntries.flatMap(entry => (entry.ignoreCase ? (entry.probes ?? []) : [])),
-		);
+		this.#rawProbes = regexEntries.flatMap(entry => (entry.ignoreCase ? [] : (entry.probes ?? [])));
+		this.#rawProbeDetector = buildLiteralDetector(this.#rawProbes);
+		const foldedProbes = regexEntries.flatMap(entry => (entry.ignoreCase ? (entry.probes ?? []) : []));
+		this.#foldedProbeDetector = buildLiteralDetector(foldedProbes);
+		if (!foldedProbes.some(probe => NON_ASCII_RE.test(probe))) {
+			this.#asciiFoldedProbeDetector = buildLiteralDetector(foldedProbes, "i");
+		}
 		let index = 0;
 		let hasRealSec = regexEntries.length > 0;
 		for (const entry of entries) {
@@ -343,13 +354,23 @@ export class SecretObfuscator {
 		if (!this.#obfuscateIndexBySecret.has(secret)) this.#obfuscateIndexBySecret.set(secret, index);
 	}
 
-	/** Drop literal-derived caches built under an older registry revision. */
+	/** Drop literal-derived caches built for older literal mappings. */
 	#syncLiteralCaches(): void {
-		if (this.#literalCacheRevision === this.#revision.value) return;
+		const plainVersion = this.#plainMappings.version;
+		const replaceVersion = this.#replaceMappings.version;
+		if (this.#literalCachePlainVersion === plainVersion && this.#literalCacheReplaceVersion === replaceVersion)
+			return;
 		this.#sortedReplaceEntries = undefined;
 		this.#sortedPlainEntries = undefined;
 		this.#literalDetector = undefined;
-		this.#literalCacheRevision = this.#revision.value;
+		this.#cleanDetector = undefined;
+		this.#configuredLiteralDetector = undefined;
+		this.#literalCachePlainVersion = plainVersion;
+		this.#literalCacheReplaceVersion = replaceVersion;
+	}
+
+	get #configuredLiterals(): string[] {
+		return [...[...this.#replaceMappings.keys()].filter(secret => secret.length > 0), ...this.#plainMappings.keys()];
 	}
 
 	get #replaceEntries(): [string, string][] {
@@ -372,12 +393,34 @@ export class SecretObfuscator {
 	 */
 	#isLiteralFree(text: string): boolean {
 		this.#syncLiteralCaches();
-		this.#literalDetector ??= buildLiteralDetector([
-			"$$",
-			...[...this.#replaceMappings.keys()].filter(secret => secret.length > 0),
-			...this.#plainMappings.keys(),
-		])!;
+		this.#literalDetector ??= buildLiteralDetector(["$$", ...this.#configuredLiterals])!;
 		return !this.#literalDetector.test(text);
+	}
+
+	/**
+	 * One pass ruling out, at once, every configured literal, `$$`, and every
+	 * case-sensitive regex probe. `false` means the text is literal-free and no
+	 * case-sensitive probed entry can match; only on a hit do the separate
+	 * detectors say which.
+	 */
+	#mayNeedRedaction(text: string): boolean {
+		this.#syncLiteralCaches();
+		this.#cleanDetector ??= buildLiteralDetector(["$$", ...this.#configuredLiterals, ...this.#rawProbes])!;
+		return this.#cleanDetector.test(text);
+	}
+
+	/**
+	 * Whether any case-insensitive probe occurs in the lower-cased text. On
+	 * ASCII text with ASCII probes an `i`-flag regex gives the same answer
+	 * without copying the text; anything else (where `toLowerCase` and regex
+	 * case-insensitivity can disagree, e.g. `K` U+212A) folds as before.
+	 */
+	#foldedProbeHit(text: string, folded: () => string): boolean {
+		if (this.#foldedProbeDetector === undefined) return false;
+		if (this.#asciiFoldedProbeDetector !== undefined && !NON_ASCII_RE.test(text)) {
+			return this.#asciiFoldedProbeDetector.test(text);
+		}
+		return this.#foldedProbeDetector.test(folded());
 	}
 
 	/** Whether this pass will mint a keyed placeholder from a regex match. */
@@ -436,11 +479,64 @@ export class SecretObfuscator {
 		this.#currentRegexSecretValues = new SecretValueSet(currentValues);
 		this.#sharedRegexSecretValues = sharedValues;
 		try {
+			if (this.#isRedactionIdentity(text)) return text;
 			return this.#obfuscateDirtyText(text);
 		} finally {
 			this.#currentRegexSecretValues = previousCurrent;
 			this.#sharedRegexSecretValues = previousShared;
 		}
+	}
+
+	/**
+	 * Whether `#obfuscateDirtyText(text)` would return `text` unchanged, decided
+	 * without running it. This is the common shape of already-redacted history:
+	 * text whose only redaction-relevant content is placeholders. Must run with
+	 * the same current/shared values `#obfuscateDirtyText` would see. It holds
+	 * exactly when:
+	 * 1. no configured literal occurs, so both literal phases are no-ops and
+	 *    the text and its all-"I" origin reach the regex phase unchanged;
+	 * 2. no placeholder candidate, at any start position, carries a friendly
+	 *    prefix that is secret-shaped now. Prefix stripping is then a no-op,
+	 *    and since that check is monotone in the known values, placeholder
+	 *    recognition is the same in every context the dirty path scans with —
+	 *    so the values it would collect are the ones already collected; and
+	 * 3. every regex entry that passes its probe gate finds no match to act
+	 *    on (`#collectRegexMatches` is empty), so the regex phase and the
+	 *    replace-spillover stabilization rewrite nothing.
+	 */
+	#isRedactionIdentity(text: string): boolean {
+		this.#syncLiteralCaches();
+		// `null`: no configured literals at all.
+		this.#configuredLiteralDetector ??= buildLiteralDetector(this.#configuredLiterals) ?? null;
+		if (this.#configuredLiteralDetector?.test(text)) return false;
+
+		PLACEHOLDER_RE.lastIndex = 0;
+		for (;;) {
+			const match = PLACEHOLDER_RE.exec(text);
+			if (match === null) break;
+			// Every start position, so this covers whichever candidates the
+			// strip and recognition scans (each with its own resume rule) visit.
+			PLACEHOLDER_RE.lastIndex = match.index + 1;
+			if (placeholderWithoutFriendlyName(match[0]) === undefined) continue;
+			const prefix = /^([A-Z0-9]+)_/.exec(match[0].slice(2, -2))?.[1];
+			if (prefix !== undefined && this.#prefixIsSecretShaped(prefix)) {
+				PLACEHOLDER_RE.lastIndex = 0;
+				return false;
+			}
+		}
+		PLACEHOLDER_RE.lastIndex = 0;
+
+		const folded = this.#foldedOnce(text);
+		let origin: string | undefined;
+		for (const entry of this.#regexEntries) {
+			if (!this.#entryMayMatch(entry, text, folded)) continue;
+			origin ??= "I".repeat(text.length);
+			entry.regex.lastIndex = 0;
+			const matches = this.#collectRegexMatches(text, entry.regex, entry.mode, origin, entry.replacement);
+			entry.regex.lastIndex = 0;
+			if (matches.length > 0) return false;
+		}
+		return true;
 	}
 
 	/**
@@ -1074,15 +1170,16 @@ export class SecretObfuscator {
 	// `"TOKABC123"` could never match against that same case-sensitive
 	// pattern). Any of these means the text is meant to be redacted, not
 	// stamped unredacted onto every use of this secret.
-	#collectRegexSecretValues(text: string): Set<string> {
+	/** `rawProbeHit`, when the caller already knows no case-sensitive probe occurs, skips that detector. */
+	#collectRegexSecretValues(text: string, rawProbeHit?: boolean): Set<string> {
 		const values = new Set<string>();
 		const folded = this.#foldedOnce(text);
 		// One combined scan per haystack rules out every probed entry at once;
 		// only when some probe occurs do entries check their own probes.
-		const rawProbeHit = this.#rawProbeDetector?.test(text) ?? false;
-		const foldedProbeHit = this.#foldedProbeDetector?.test(folded()) ?? false;
+		const rawHit = rawProbeHit ?? this.#rawProbeDetector?.test(text) ?? false;
+		const foldedProbeHit = this.#foldedProbeHit(text, folded);
 		for (const entry of this.#regexEntries) {
-			if (entry.probes !== null && !(entry.ignoreCase ? foldedProbeHit : rawProbeHit)) continue;
+			if (entry.probes !== null && !(entry.ignoreCase ? foldedProbeHit : rawHit)) continue;
 			if (!this.#entryMayMatch(entry, text, folded)) continue;
 			entry.regex.lastIndex = 0;
 			for (;;) {
@@ -1111,11 +1208,13 @@ export class SecretObfuscator {
 		const scans = this.#batchScans;
 		const cached = scans?.get(text);
 		if (cached !== undefined && cached.revision === this.#revision.value) return cached;
-		const rawValues = this.#collectRegexSecretValues(text);
+		// Clean text (the common case) is ruled out in one combined pass.
+		const mayNeedRedaction = this.#mayNeedRedaction(text);
+		const rawValues = this.#collectRegexSecretValues(text, mayNeedRedaction ? undefined : false);
 		const scan: TextScan = {
 			revision: this.#revision.value,
 			initialValues: rawValues.size === 0 ? NO_VALUES : [...rawValues],
-			literalFree: this.#isLiteralFree(text),
+			literalFree: !mayNeedRedaction || this.#isLiteralFree(text),
 			collectedValues: undefined,
 		};
 		scans?.set(text, scan);
