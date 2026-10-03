@@ -33,6 +33,7 @@
 - Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
 - Fixed Claude Opus 5.5 conversations failing with a "bound to a different conversation" 400 after the system prompt changed. Opus 5.5 now gets Sonnet 5.5's prefix-bound thinking handling on every provider, and Bedrock asks the server to drop stale signed thinking instead of rejecting the request ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
 
+- Fixed `google-antigravity/gemini-3.1-flash-image` being treated as a chat model, so it now works in the `image` role and image fallback chains instead of warning that the chain does not resolve to a compatible model ([#13883](https://github.com/can1357/oh-my-pi/pull/13883) by [@eggpeat](https://github.com/eggpeat)).
 ## [18.4.9] - 2026-10-01
 
 ### Fixed
