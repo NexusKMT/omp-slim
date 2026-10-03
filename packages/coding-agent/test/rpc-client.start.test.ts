@@ -136,4 +136,58 @@ describe("RpcClient stdin failures", () => {
 			process.off("unhandledRejection", onUnhandled);
 		}
 	});
+
+	test("drops a manual login code that arrives after the client stopped", async () => {
+		const exited = Promise.withResolvers<number>();
+		const encoder = new TextEncoder();
+		let stdout!: ReadableStreamDefaultController<Uint8Array>;
+		const written: string[] = [];
+		const proc: RpcAgentProcess = {
+			stdin: { write: (data: string) => written.push(data) },
+			stdout: new ReadableStream<Uint8Array>({
+				start(controller) {
+					stdout = controller;
+					controller.enqueue(encoder.encode(`${JSON.stringify({ type: "ready" })}\n`));
+				},
+			}),
+			peekStderr: () => "",
+			kill: () => exited.resolve(0),
+			exited: exited.promise,
+		};
+		using client = new RpcClient({ spawn: () => proc });
+		await client.start();
+
+		const code = Promise.withResolvers<string>();
+		const prompted = Promise.withResolvers<void>();
+		const login = client.login("test-provider", {
+			onManualCodeInput: () => {
+				prompted.resolve();
+				return code.promise;
+			},
+		});
+		stdout.enqueue(
+			encoder.encode(
+				`${JSON.stringify({ type: "extension_ui_request", id: "ui_1", method: "input", title: "Paste code" })}\n`,
+			),
+		);
+		await prompted.promise;
+
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			// The client stops (as it does on a broken stdin pipe) while the user is still typing the code.
+			await client.stop();
+			await expect(login).rejects.toThrow("Client stopped");
+			const writesBefore = written.length;
+			code.resolve("pasted-code");
+			const turn = Promise.withResolvers<void>();
+			setImmediate(turn.resolve);
+			await turn.promise;
+			expect(unhandled).toEqual([]);
+			expect(written.length).toBe(writesBefore);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
 });
