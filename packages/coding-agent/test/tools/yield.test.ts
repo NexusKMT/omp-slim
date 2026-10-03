@@ -932,6 +932,52 @@ describe("YieldTool", () => {
 		).rejects.toThrow(/status: expected string, received null/);
 	});
 
+	it("omits optional nulls in strict prefixItems and trailing items without changing required fields", async () => {
+		const tool = new YieldTool(
+			createSession({
+				outputSchema: {
+					type: "object",
+					properties: {
+						tuple: {
+							type: "array",
+							prefixItems: [
+								{
+									type: "object",
+									properties: { id: { type: "string" }, note: { type: "string" } },
+									required: ["id"],
+									additionalProperties: false,
+								},
+							],
+							items: {
+								type: "object",
+								properties: { label: { type: "string" }, note: { type: "string" } },
+								required: ["label"],
+								additionalProperties: false,
+							},
+							minItems: 2,
+							maxItems: 2,
+						},
+					},
+					required: ["tuple"],
+					additionalProperties: false,
+				},
+			}),
+		);
+		expect(tool.strict).toBe(true);
+		const result = await tool.execute("call-tuple", {
+			data: {
+				tuple: [
+					{ id: "done", note: null },
+					{ label: "next", note: null },
+				],
+			},
+		});
+		expect(result.details?.data).toEqual({ tuple: [{ id: "done" }, { label: "next" }] });
+		await expect(
+			tool.execute("call-tuple-required", { data: { tuple: [{ id: null }, { label: "next" }] } }),
+		).rejects.toThrow(/tuple\/0\/id: expected string, received null/);
+	});
+
 	it("normalizes optional nulls inside JTD discriminator variants", async () => {
 		const tool = new YieldTool(
 			createSession({

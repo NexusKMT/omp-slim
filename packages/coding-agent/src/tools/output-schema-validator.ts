@@ -156,10 +156,12 @@ function normalizeStrictOutput(value: unknown, schema: unknown): unknown {
 			if (candidate !== value && validateJsonSchemaValue(schema, candidate).success) return candidate;
 		}
 	}
-	if (Array.isArray(value) && schema.items !== undefined) {
+	const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : undefined;
+	if (Array.isArray(value) && (prefixItems !== undefined || schema.items !== undefined)) {
 		let normalized: unknown[] | undefined;
 		for (let index = 0; index < value.length; index++) {
-			const item = normalizeStrictOutput(value[index], schema.items);
+			const itemSchema = prefixItems && index < prefixItems.length ? prefixItems[index] : schema.items;
+			const item = normalizeStrictOutput(value[index], itemSchema);
 			if (item === value[index]) continue;
 			normalized ??= value.slice();
 			normalized[index] = item;
