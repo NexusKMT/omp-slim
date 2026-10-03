@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Narrow `/models` layouts keep model names visible by shrinking the sidebar and dropping row metadata as needed.
+
 ## [18.5.0] - 2026-10-03
 
 ### Breaking Changes

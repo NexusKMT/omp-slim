@@ -135,6 +135,9 @@ export function describeHubFrame(
 	]);
 }
 
+/** Minimum body width retained by a hub when its sidebar must shrink. */
+const HUB_BODY_MIN_WIDTH = 28;
+
 /** Persistent fullscreen split frame, sidebar viewport, and footer chip renderer. */
 export class HubFrame {
 	/** Current sidebar viewport offset, shared with the hub's navigation. */
@@ -167,6 +170,7 @@ export class HubFrame {
 				return lines.slice(0, rows);
 			},
 			right: renderBody,
+			rightMinWidth: HUB_BODY_MIN_WIDTH,
 			prefix: () => `${theme.fg("border", theme.boxRound.vertical)} `,
 			divider: () => ` ${theme.fg("border", theme.boxRound.vertical)} `,
 			suffix: () => ` ${theme.fg("border", theme.boxRound.vertical)}`,
