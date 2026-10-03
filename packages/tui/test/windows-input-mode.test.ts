@@ -99,6 +99,25 @@ describe("Win32InputModeDecoder", () => {
 		// Record-shaped text without ESC is ordinary pasted content.
 		expect(decoder.decodePaste("see [13;28;13;1;0;1_ here")).toBe("see [13;28;13;1;0;1_ here");
 	});
+
+	it("reassembles escape sequences a VT host relays as one text record per byte", () => {
+		// Captured from ConPTY when the host terminal writes `ESC [ 1 ; 3 A` (Alt+Up).
+		const relay = (text: string) => [...text].map(ch => `\x1b[0;0;${ch.charCodeAt(0)};1;0;1_`);
+		const decoder = new Win32InputModeDecoder();
+		const keys = relay("\x1b[1;3A").flatMap(record => decoder.decode(record)!);
+		expect(keys).toEqual(["\x1b[1;3A"]);
+		expect(matchesKey(keys[0]!, "alt+up")).toBe(true);
+		expect(relay("\x1b\x1b[A").flatMap(record => decoder.decode(record)!)).toEqual(["\x1b\x1b[A"]);
+		expect(decoder.hasPendingSequence).toBe(false);
+
+		// A lone relayed ESC is held, then released as Escape; plain text is not held.
+		expect(decoder.decode(relay("\x1b")[0]!)).toEqual([]);
+		expect(decoder.flushPendingSequence()).toEqual(["\x1b"]);
+		expect(decoder.decode(relay("x")[0]!)).toEqual(["x"]);
+		// A real key record ends a held ESC instead of being swallowed into it.
+		decoder.decode(relay("\x1b")[0]!);
+		expect(decoder.decode(ENTER)).toEqual(["\x1b", "\r"]);
+	});
 });
 
 class InputRecorder implements Component {
