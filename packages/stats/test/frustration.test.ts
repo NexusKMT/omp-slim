@@ -222,6 +222,34 @@ describe("frustration dashboard", () => {
 		expect(byModel.at(-1)).toMatchObject({ key: "weird-model", modelClass: "unknown", revision: null });
 	});
 
+	it("groups DeepSeek V4 Flash across provider variants without merging Pro or V4.1", async () => {
+		await initDb();
+		const t = Date.now() - 60_000;
+		insertUserMessageStats([
+			userMessage("flash free", "deepseek-v4-flash-free", "opencode-zen", {}, t),
+			userMessage("flash openrouter", "deepseek/deepseek-v4-flash-0731", "openrouter", {}, t + 1),
+			userMessage("flash cline", "deepseek-v4-flash", "cline-pass", {}, t + 2),
+			userMessage("flash crofai", "deepseek-v4-flash-0731", "crofai", {}, t + 3),
+			userMessage("flash prefixed", "cline-free/deepseek-v4-flash", "cline-pass", {}, t + 4),
+			userMessage("pro", "deepseek-v4-pro", "cline-pass", {}, t + 5),
+			userMessage("flash v4.1", "deepseek-v4.1-flash", "cline-pass", {}, t + 6),
+		]);
+
+		const { byModel } = await getFrustrationDashboardStats("all");
+		expect(byModel.map(row => [row.key, row.label, row.messages])).toEqual([
+			["deepseek/flash/4.0.0", "flash 4", 5],
+			["deepseek/pro/4.0.0", "pro 4", 1],
+			["deepseek/flash/4.1.0", "flash 4.1", 1],
+		]);
+		expect(byModel[0].models.toSorted()).toEqual([
+			"cline-free/deepseek-v4-flash",
+			"deepseek-v4-flash",
+			"deepseek-v4-flash-0731",
+			"deepseek-v4-flash-free",
+			"deepseek/deepseek-v4-flash-0731",
+		]);
+	});
+
 	it("quotes and runs the judge once per unique unjudged prose, streaming verdicts into the dashboard", async () => {
 		await initDb();
 		const repeated = "why did you do that again";

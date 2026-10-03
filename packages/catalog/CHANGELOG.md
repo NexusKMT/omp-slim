@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed DeepSeek V4 model IDs lacking version information in model identity and versioned dashboards ([#14194](https://github.com/can1357/oh-my-pi/issues/14194)).
+
 ## [18.5.1] - 2026-10-03
 
 ### Added

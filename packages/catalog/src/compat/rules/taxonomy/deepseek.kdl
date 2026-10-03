@@ -15,6 +15,8 @@ class "deepseek" {
     family "v4" glob="*deepseek-v4*"
     family "v3" glob="*deepseek-v3*"
 
+    revision prefix="deepseek-v" anywhere=#true
+
     override id="vercel-deepseek-v3-2-thinking-product" provider="vercel-ai-gateway" model="deepseek-v3.2-thinking" logical="deepseek/deepseek-v3.2-thinking" class="deepseek" rationale="Oracle exposes this independently priced product rather than an effort route" provenance="fixtures/llm-oracle/catalog/models.normalized.json"
     override id="opencode-zen-big-pickle-family" provider="opencode-zen" model="big-pickle" class="deepseek" rationale="OpenCode Zen's big-pickle is a DeepSeek reasoning alias whose upstream 400s require exact reasoning_content replay" provenance="models.json census"
     override id="umans-deepseek-v4-flash-family" provider="umans" model="umans-deepseek-v4-flash-0731" logical="umans-deepseek-v4-flash-0731" class="deepseek" rationale="The opaque Umans product identifier is backed by the reviewed DeepSeek V4 Flash family" provenance="fixtures/llm-oracle/catalog-policy/compat-profiles.json:compat-04"
