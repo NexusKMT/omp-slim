@@ -71,6 +71,7 @@
 
 - Fixed released Darwin arm64 addons omitting Apple Foundation Models support ([#13610](https://github.com/can1357/oh-my-pi/issues/13610)).
 - Fixed the edit tool's `replace block`/`delete block` operations in indentation-based languages such as Python extending a statement's block over every following statement in its body when a comment line at a different indentation came right after it ([#13358](https://github.com/can1357/oh-my-pi/pull/13358) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed macOS `win.ax()`, element snapshots, and `attributes()` showing checkbox and radio values as `<CFNumber 0x…>` debug text and radio-group values as changing `<AXUIElement 0x…>` pointers; numbers now read as numbers and element values as the referenced element's title ([#13652](https://github.com/can1357/oh-my-pi/issues/13652)).
 
 ## [18.4.2] - 2026-09-28
 
