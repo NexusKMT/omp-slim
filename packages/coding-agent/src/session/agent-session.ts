@@ -6112,7 +6112,7 @@ export class AgentSession implements SettingsScope {
 		return this.#tools.refreshRpcHostTools(rpcTools);
 	}
 
-	/** Whether auto-compaction is currently running */
+	/** Whether compaction or manual handoff is active, for prompt admission and UI queuing. */
 	get isCompacting(): boolean {
 		return this.#maintenance.isCompacting;
 	}
@@ -6878,18 +6878,12 @@ export class AgentSession implements SettingsScope {
 		// command execution, image normalization, vision-model description — so the
 		// prompt→yield delta includes the whole wait, whatever path the prompt takes.
 		const submittedAt = Date.now();
-		// A manual `/compact` runs with the agent subscription disconnected until its
-		// cleanup finally re-drains the preserved queues. Starting a turn before then
-		// would neither persist nor forward its events and could race the in-flight
-		// history rewrite. `abort` still overtakes compaction; ordinary prompts wait
-		// here, and a waiting prompt supersedes the interrupted-turn resume the
-		// compaction would otherwise schedule — but only once it actually claims the
-		// session (a turn dispatched or queued, or one already running). A locally
-		// handled command, a pre-dispatch throw, or a prompt dropped by the
-		// abort/preflight race hands the resume back via `release(false)`. A prompt
-		// arriving after the cleanup while an earlier parked prompt is still settling
-		// takes part in the same decision. No-op otherwise.
-		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		// A manual `/compact` disconnects the agent until its cleanup re-drains
+		// preserved queues; `/handoff` commits a new history after its side request.
+		// Neither may overlap an ordinary turn. A prompt parked by `/compact`
+		// supersedes its interrupted-turn resume only if it claims the session;
+		// locally handled commands and failed dispatches release that claim.
+		const release = await this.#maintenance.waitForManualMaintenanceCleanup();
 		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
 		if (!release) return this.#dispatchPrompt(text, options, submittedAt, outcome);
 		try {
@@ -7157,10 +7151,9 @@ export class AgentSession implements SettingsScope {
 		},
 	): Promise<boolean> {
 		// Same barrier/claim protocol as prompt(): skill invocations, collab peer
-		// prompts and the CLI initial message arrive here and must neither start a
-		// turn against the disconnected session nor lose the session to the
-		// interrupted-turn resume once compaction ends.
-		const release = await this.#maintenance.waitForManualCompactionCleanup();
+		// prompts and the CLI initial message must not start during manual
+		// compaction or before a handoff commits its history.
+		const release = await this.#maintenance.waitForManualMaintenanceCleanup();
 		const outcome: PromptDispatchOutcome = { sessionClaimed: false };
 		if (!release) return this.#dispatchCustomPrompt(message, options, outcome);
 		try {

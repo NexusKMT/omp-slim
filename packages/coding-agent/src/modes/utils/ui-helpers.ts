@@ -57,6 +57,8 @@ import {
 	type SkillPromptDetails,
 } from "../../session/messages";
 import type { SessionContext, StrippedToolCallsMarker } from "../../session/session-context";
+import { executeBuiltinSlashCommand, lookupBuiltinSlashCommand } from "../../slash-commands/builtin-registry";
+import { parseSlashCommand } from "../../slash-commands/helpers/parse";
 import { buildSkillCommandPrompt, invokeSkillCommandFromText, isKnownSkillCommand } from "../skill-command";
 import {
 	createAssistantMessageComponent,
@@ -1142,6 +1144,22 @@ export class UiHelpers {
 	}
 
 	async #deliverQueuedMessage(message: CompactionQueuedMessage): Promise<void> {
+		const builtin = await executeBuiltinSlashCommand(message.text, {
+			ctx: this.ctx,
+			input: message.images ? { images: message.images } : undefined,
+		});
+		if (builtin === true) {
+			this.#parkLoopOnLocalConsume(message.text, false);
+			return;
+		}
+		if (typeof builtin === "string") {
+			const forwarded = await this.ctx.session.prompt(builtin, {
+				streamingBehavior: message.mode,
+				images: message.images,
+			});
+			this.#parkLoopOnLocalConsume(message.text, forwarded);
+			return;
+		}
 		if (
 			await invokeSkillCommandFromText(this.ctx, message.text, message.mode, {
 				propagateErrors: true,
@@ -1168,6 +1186,9 @@ export class UiHelpers {
 
 	isKnownSlashCommand(text: string): boolean {
 		if (!text.startsWith("/")) return false;
+		const parsed = parseSlashCommand(text);
+		const builtin = parsed && lookupBuiltinSlashCommand(parsed.name);
+		if (builtin && (builtin.allowArgs || !parsed.args)) return true;
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
 		if (!commandName) return false;
@@ -1223,8 +1244,7 @@ export class UiHelpers {
 			}
 			if (firstPromptIndex === -1) {
 				for (const message of queuedMessages) {
-					const forwarded = await this.ctx.session.prompt(message.text);
-					this.#parkLoopOnLocalConsume(message.text, forwarded);
+					await this.#deliverQueuedMessage(message);
 				}
 				return;
 			}

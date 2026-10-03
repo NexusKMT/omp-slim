@@ -501,7 +501,9 @@ export class SessionMaintenance {
 	#compactionAbortController: AbortController | undefined;
 	/** Resolves after an active manual compaction has reconnected the agent subscription. */
 	#manualCompactionCleanup: Promise<void> | undefined;
-	/** Dispatches holding an unreleased claim from {@link waitForManualCompactionCleanup}/{@link claimPendingResume}; any one may supersede the interrupted-turn resume. */
+	/** Resolves after a manual handoff commits or fails; blocks prompts while its history snapshot is pending. */
+	#handoffCleanup: Promise<void> | undefined;
+	/** Dispatches holding an unreleased claim from {@link waitForManualMaintenanceCleanup}/{@link claimPendingResume}; any one may supersede the interrupted-turn resume. */
 	#promptsAwaitingCleanup = 0;
 	/** Interrupted-turn resume withheld from a compaction `finally` because a claim was open; consumed by `release(false)`, {@link noteTurnStarted}, or the next manual pass. */
 	#deferredResumeGeneration: number | undefined;
@@ -592,9 +594,13 @@ export class SessionMaintenance {
 		this.#incompleteRecoveryAttempts = 0;
 	}
 
-	/** Whether manual or automatic context maintenance is active. */
+	/** Whether compaction or a manual handoff is active. */
 	get isCompacting(): boolean {
-		return this.#autoCompactionAbortController !== undefined || this.#compactionAbortController !== undefined;
+		return (
+			this.#autoCompactionAbortController !== undefined ||
+			this.#compactionAbortController !== undefined ||
+			this.#handoffCleanup !== undefined
+		);
 	}
 
 	/** Background speculative-compaction state, for UI indicators. */
@@ -1058,7 +1064,10 @@ export class SessionMaintenance {
 		onCommitted?: () => void,
 	): Promise<CompactionResult> {
 		const ownsCompactionController = retryController === undefined;
-		if (this.#compactionAbortController && this.#compactionAbortController !== retryController) {
+		if (
+			this.#handoffCleanup ||
+			(this.#compactionAbortController && this.#compactionAbortController !== retryController)
+		) {
 			throw new Error("Compaction already in progress");
 		}
 		// Resolve the `/compact <mode>` subcommand up front so input validation
@@ -1883,7 +1892,7 @@ export class SessionMaintenance {
 	 * cleanup barrier. The barrier resolves only after its agent subscription reconnects.
 	 */
 	abortCompaction(reason?: unknown): Promise<void> | undefined {
-		const manualCompactionCleanup = this.#manualCompactionCleanup;
+		const manualCompactionCleanup = this.#manualCompactionCleanup ?? this.#handoffCleanup;
 		this.#compactionAbortController?.abort(reason);
 		this.#autoCompactionAbortController?.abort(reason);
 		this.#host.abortHandoff();
@@ -1906,19 +1915,16 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Park an ordinary prompt until an in-flight manual compaction has reconnected
-	 * the agent subscription and re-drained its preserved queues. A prompt waiting
-	 * here is the user's next intent, so it supersedes the interrupted-turn
-	 * resume: the cleanup `finally` defers the synthetic continuation while any
-	 * waiter is parked, otherwise the nudge claims the session first and the
-	 * prompt lands on `AgentBusyError`.
+	 * Park a prompt until manual compaction reconnects the agent or manual handoff
+	 * finishes committing its history. A parked prompt supersedes the interrupted
+	 * turn's synthetic resume after compaction; local commands and failed dispatches
+	 * release that claim so the interrupted turn is not stranded.
 	 *
-	 * Returns `undefined` at once when no manual compaction is active and no
-	 * resume decision is open. Otherwise the caller MUST invoke the returned
-	 * `release` once the prompt settles — see {@link claimPendingResume}.
+	 * Returns `undefined` when neither maintenance pass nor a resume decision is
+	 * open. Otherwise the caller MUST invoke the returned `release` after dispatch.
 	 */
-	async waitForManualCompactionCleanup(): Promise<((startedTurn: boolean) => void) | undefined> {
-		const cleanup = this.#manualCompactionCleanup;
+	async waitForManualMaintenanceCleanup(): Promise<((startedTurn: boolean) => void) | undefined> {
+		const cleanup = this.#manualCompactionCleanup ?? this.#handoffCleanup;
 		// No compaction to wait for, but an earlier parked prompt is still settling:
 		// this prompt competes for the same session, so it takes part in the
 		// resume decision (a turn it starts must not be followed by the stale nudge).
@@ -1930,7 +1936,7 @@ export class SessionMaintenance {
 
 	/**
 	 * Register a dispatch that may start a turn while an interrupted-turn resume
-	 * decision is open (a prompt parked by {@link waitForManualCompactionCleanup}
+	 * decision is open (a prompt parked by {@link waitForManualMaintenanceCleanup}
 	 * has not released yet). `undefined` when no decision is open.
 	 *
 	 * The caller MUST invoke the returned `release` once the dispatch settles.
@@ -1986,7 +1992,8 @@ export class SessionMaintenance {
 	 * entry on the current session — the document becomes the summary and recent
 	 * history is kept per `compaction.keepRecentTokens`. Unlike `/compact`, the
 	 * live agent is not aborted; generation reads a snapshot of the live
-	 * messages through the cache-friendly side-request pipeline.
+	 * messages through the cache-friendly side-request pipeline. Prompts wait
+	 * until the commit or failure completes.
 	 */
 	async handoff(customInstructions?: string, options?: SessionHandoffOptions): Promise<HandoffResult | undefined> {
 		if (this.isCompacting) throw new Error("Compaction already in progress");
@@ -2004,22 +2011,29 @@ export class SessionMaintenance {
 			this.#tokenizer,
 		);
 		if (!preparation) throw new Error("Nothing to hand off (already compacted)");
-		const result = await this.#host.generateHandoffDocument(customInstructions, options);
-		if (!result) return undefined;
-		const { summary, details } = handoffSummaryFromDocument(result.document, preparation);
-		await this.#commitCompactionEntry({
-			summary,
-			shortSummary: undefined,
-			firstKeptEntryId: preparation.firstKeptEntryId,
-			tokensBefore: preparation.tokensBefore,
-			details,
-			fromExtension: false,
-			preserveData: undefined,
-			method: "handoff",
-			codexCompaction: undefined,
-			advisorResetReason: "handoff",
-		});
-		return result;
+		const cleanup = Promise.withResolvers<void>();
+		this.#handoffCleanup = cleanup.promise;
+		try {
+			const result = await this.#host.generateHandoffDocument(customInstructions, options);
+			if (!result) return undefined;
+			const { summary, details } = handoffSummaryFromDocument(result.document, preparation);
+			await this.#commitCompactionEntry({
+				summary,
+				shortSummary: undefined,
+				firstKeptEntryId: preparation.firstKeptEntryId,
+				tokensBefore: preparation.tokensBefore,
+				details,
+				fromExtension: false,
+				preserveData: undefined,
+				method: "handoff",
+				codexCompaction: undefined,
+				advisorResetReason: "handoff",
+			});
+			return result;
+		} finally {
+			this.#handoffCleanup = undefined;
+			cleanup.resolve();
+		}
 	}
 
 	/**
