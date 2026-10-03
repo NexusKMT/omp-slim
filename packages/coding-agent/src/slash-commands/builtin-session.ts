@@ -13,6 +13,7 @@ import {
 import { formatTokenCount, refreshStatusLine } from "./builtin-modes";
 import { buildContextReportText } from "./helpers/context-report";
 import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
+import { truncateToWidth } from "@oh-my-pi/pi-tui/render/render-utils";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { handleMcpAcp } from "./helpers/mcp";
 import { markdownFenceFor } from "../utils/markdown-fence";
@@ -150,7 +151,7 @@ async function handleJobsKillCommand(
 		);
 		return;
 	}
-	const safeTarget = sanitizeText(target);
+	const safeTarget = truncateToWidth(sanitizeText(target).replace(/\s+/g, " ").trim(), 60);
 	if (!snapshot.running.some(job => job.id === target)) {
 		await output(`No running background job with id "${safeTarget}".`);
 		return;
@@ -370,7 +371,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		icon: "jobs",
 		description: "Show async background jobs status",
 		acpDescription: "Show background jobs",
-		acpInputHint: "[full|kill <id>|all]",
+		acpInputHint: "[full|kill <id>|kill all]",
 		subcommands: [
 			{ name: "full", description: "Show full, untruncated command lines" },
 			{ name: "kill", description: "Cancel a running background job", usage: "<id>|all" },
@@ -387,7 +388,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 				await handleJobsKillCommand(rest, runtime.session, runtime.output);
 				return commandConsumed();
 			}
-			if (rest || (verb && verb !== "full")) return usage("Usage: /jobs [full|kill <id>|all]", runtime);
+			if (rest || (verb && verb !== "full")) return usage("Usage: /jobs [full|kill <id>|kill all]", runtime);
 			const full = verb === "full";
 			const snapshot = runtime.session.getAsyncJobSnapshot({ recentLimit: 5 });
 			if (!snapshot || (snapshot.running.length === 0 && snapshot.recent.length === 0)) {
@@ -428,7 +429,7 @@ export const BUILTIN_SESSION_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			if (verb === "kill") {
 				await handleJobsKillCommand(rest, runtime.ctx.session, text => runtime.ctx.showStatus(text));
 			} else if (rest || (verb && verb !== "full")) {
-				runtime.ctx.showStatus("Usage: /jobs [full|kill <id>|all]");
+				runtime.ctx.showStatus("Usage: /jobs [full|kill <id>|kill all]");
 			} else {
 				await runtime.ctx.handleJobsCommand({ full: verb === "full" });
 			}
