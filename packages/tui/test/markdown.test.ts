@@ -7,6 +7,8 @@ import {
 	renderInlineMarkdown,
 } from "@oh-my-pi/pi-tui/components/markdown";
 import { setTerminalTextSizing, TERMINAL } from "@oh-my-pi/pi-tui/terminal-capabilities";
+import { loadTheme } from "@oh-my-pi/pi-tui/theme/loader";
+import { getSymbolTheme, setThemeInstance } from "@oh-my-pi/pi-tui/theme/theme";
 import { type Component, TUI } from "@oh-my-pi/pi-tui/tui";
 import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import { Chalk } from "@oh-my-pi/pi-utils/chalk";
@@ -1836,6 +1838,42 @@ describe("Inline color swatches", () => {
 		// for the surrounding prose after the chip's fg/bg resets.
 		expect(out.includes(paintedFor("C5FFD6", BLACK_FG))).toBeTruthy();
 		expect(out.includes("\x1b[90m for accent")).toBeTruthy();
+	});
+});
+
+describe("themes without symbols (upstream pi-tui MarkdownTheme shape)", () => {
+	// Legacy extensions build the upstream interface, which has no `symbols` map (#12311).
+	const { symbols: _, ...upstreamTheme } = defaultMarkdownTheme;
+	const activeSymbolsTheme = { ...upstreamTheme, symbols: getSymbolTheme() };
+
+	it.each([
+		["paragraph with inline code and a swatch", "text with `inline code` and #C5FFD6"],
+		["horizontal rule", "above\n\n---\n\nbelow"],
+		["blockquote", "> quoted line"],
+		["table", "| a | b |\n|---|---|\n| 1 | 2 |"],
+	])("renders a %s with the active theme's symbols", (_label, text) => {
+		const out = new Markdown(text, 0, 0, upstreamTheme).render(40);
+		expect(out).toEqual(new Markdown(text, 0, 0, activeSymbolsTheme).render(40));
+	});
+
+	it("renders streamed appends with the active theme's symbols", () => {
+		const streamed = new Markdown("Accent", 0, 0, upstreamTheme);
+		streamed.render(40);
+		streamed.setText("Accent is #C5FFD6");
+		const reference = new Markdown("Accent", 0, 0, activeSymbolsTheme);
+		reference.render(40);
+		reference.setText("Accent is #C5FFD6");
+		expect(streamed.render(40)).toEqual(reference.render(40));
+	});
+
+	it("does not reuse cached fallback glyphs after a symbol-preset switch", async () => {
+		const text = "> quoted across a preset switch";
+		setThemeInstance(await loadTheme("dark", { symbolPresetOverride: "unicode" }));
+		const before = new Markdown(text, 0, 0, upstreamTheme).render(40);
+		setThemeInstance(await loadTheme("dark", { symbolPresetOverride: "ascii" }));
+		const after = new Markdown(text, 0, 0, upstreamTheme).render(40);
+		expect(after).not.toEqual(before);
+		expect(after).toEqual(new Markdown(text, 0, 0, { ...upstreamTheme, symbols: getSymbolTheme() }).render(40));
 	});
 });
 

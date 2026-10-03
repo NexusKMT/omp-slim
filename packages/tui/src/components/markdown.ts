@@ -15,6 +15,7 @@ import { md } from "../native/describe";
 import type { DescribeContext, NativeNode } from "../native/node";
 import type { SymbolTheme } from "../symbols";
 import { TERMINAL } from "../terminal-capabilities";
+import { getSymbolTheme } from "../theme/theme";
 import type { Component } from "../tui";
 import {
 	applyBackgroundToLine,
@@ -1355,7 +1356,12 @@ export interface MarkdownTheme {
 	 * Return null to fall back to fenced code rendering.
 	 */
 	resolveMermaidAscii?: (source: string, maxWidth?: number) => string | null;
-	symbols: SymbolTheme;
+	/**
+	 * Glyphs for quote borders, rules, tables and color swatches. Optional so themes
+	 * built to the upstream pi-tui `MarkdownTheme` shape (which has no `symbols`)
+	 * still render; omitted symbols fall back to the active theme's set.
+	 */
+	symbols?: SymbolTheme;
 }
 
 interface InlineStyleContext {
@@ -1631,6 +1637,8 @@ interface RenderSignature {
 	textSizing: boolean;
 	bgColorProbe: string;
 	headingProbe: string;
+	/** Fallback glyphs for themes without `symbols`; their identity alone cannot tell presets apart. */
+	symbolsProbe: string;
 }
 
 interface StreamPrefixLineCache extends RenderSignature {
@@ -1719,6 +1727,8 @@ export class Markdown implements Component {
 	#paddingY: number; // Top/bottom padding
 	#defaultTextStyle?: DefaultTextStyle;
 	#theme: MarkdownTheme;
+	#symbols: SymbolTheme;
+	#symbolsProbe: string;
 	#defaultStylePrefix?: string;
 	/** Number of spaces used to indent code block content. */
 	#codeBlockIndent: number;
@@ -1800,6 +1810,9 @@ export class Markdown implements Component {
 		this.#paddingX = paddingX;
 		this.#paddingY = paddingY;
 		this.#theme = theme;
+		this.#symbols = theme.symbols ?? getSymbolTheme();
+		const { quoteBorder, hrChar, colorSwatch, table } = this.#symbols;
+		this.#symbolsProbe = theme.symbols ? "" : [quoteBorder, hrChar, colorSwatch, ...Object.values(table)].join("");
 		this.#defaultTextStyle = defaultTextStyle;
 		this.#codeBlockIndent = Math.max(0, Math.floor(codeBlockIndent));
 	}
@@ -2161,7 +2174,7 @@ export class Markdown implements Component {
 							: renderTextWithSwatches(
 									normalizeHtmlEntitiesForTerminal(deltaTabs),
 									applyText,
-									this.#theme.symbols.colorSwatch || DEFAULT_COLOR_SWATCH_GLYPH,
+									this.#symbols.colorSwatch || DEFAULT_COLOR_SWATCH_GLYPH,
 								));
 					const wrapped = wrapTextWithAnsi(grown, contentWidth);
 					const fastPaddingX = this.#ignoreTight ? this.#paddingX : getPaddingX(this.#paddingX);
@@ -2327,6 +2340,7 @@ export class Markdown implements Component {
 			textSizing: TERMINAL.textSizing,
 			bgColorProbe,
 			headingProbe,
+			symbolsProbe: this.#symbolsProbe,
 		};
 	}
 	// All-primitive signature — compare via the canonical render-cache encoding.
@@ -2335,7 +2349,7 @@ export class Markdown implements Component {
 	}
 
 	#renderCacheKey(normalizedText: string, signature: RenderSignature): string {
-		return `${normalizedText}\x00${signature.width}\x00${signature.paddingX}\x00${signature.paddingY}\x00${signature.codeBlockIndent}\x00${signature.themeId}\x00${signature.defaultTextStyleId}\x00${signature.imageProtocol}\x00${signature.hyperlinks ? 1 : 0}\x00${signature.textSizing ? 1 : 0}\x00${signature.bgColorProbe}\x00${signature.headingProbe}`;
+		return `${normalizedText}\x00${signature.width}\x00${signature.paddingX}\x00${signature.paddingY}\x00${signature.codeBlockIndent}\x00${signature.themeId}\x00${signature.defaultTextStyleId}\x00${signature.imageProtocol}\x00${signature.hyperlinks ? 1 : 0}\x00${signature.textSizing ? 1 : 0}\x00${signature.bgColorProbe}\x00${signature.headingProbe}\x00${signature.symbolsProbe}`;
 	}
 
 	#renderStreamingContentLines(
@@ -3108,7 +3122,7 @@ export class Markdown implements Component {
 
 	/** Render a horizontal rule line themed to `width`, matching `sourceChar` when given. */
 	#renderHrLine(width: number, sourceChar = ""): string {
-		const fillChar = getHrChar(sourceChar, this.#theme.symbols.hrChar);
+		const fillChar = getHrChar(sourceChar, this.#symbols.hrChar);
 		return this.#theme.hr(fillChar.repeat(Math.min(width, 80)));
 	}
 
@@ -3140,7 +3154,7 @@ export class Markdown implements Component {
 			} else {
 				const styledLine = applyQuoteStyle(quoteLine.text);
 				for (const wrappedLine of wrapTextWithAnsi(styledLine, quoteContentWidth)) {
-					lines.push(renderedLine(this.#theme.quoteBorder(`${this.#theme.symbols.quoteBorder} `) + wrappedLine));
+					lines.push(renderedLine(this.#theme.quoteBorder(`${this.#symbols.quoteBorder} `) + wrappedLine));
 				}
 			}
 		}
@@ -3201,7 +3215,7 @@ export class Markdown implements Component {
 			const segments: string[] = text.split("\n");
 			return segments.map((segment: string) => (segment === "" ? "" : applyText(segment))).join("\n");
 		};
-		const swatchGlyph = this.#theme.symbols.colorSwatch || DEFAULT_COLOR_SWATCH_GLYPH;
+		const swatchGlyph = this.#symbols.colorSwatch || DEFAULT_COLOR_SWATCH_GLYPH;
 		let trimLeadingWhitespace = false;
 		const htmlState = createHtmlNormalizationState();
 		const markHtmlItemWhenContent = (text: string): void => {
@@ -3642,7 +3656,7 @@ export class Markdown implements Component {
 			}
 		}
 
-		const t = this.#theme.symbols.table;
+		const t = this.#symbols.table;
 		const h = t.horizontal;
 		const v = t.vertical;
 
