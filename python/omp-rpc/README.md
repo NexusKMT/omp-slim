@@ -15,6 +15,8 @@ provides:
 - helpers for collecting prompt runs (correlated by each prompt's `prompt_result`)
   and handling extension UI requests in manual or headless mode
 - session binding (`open_session`) and server-side event filtering (`set_event_filter`)
+- goal mode, session history/tree reads, slash-command discovery, subagent
+  observation and control, live voice, OAuth login, handoff, and composer word prediction
 - typed host-tool helpers so Python RPC owners can expose custom tools with JSON Schema metadata
 
 ## Basic Usage
@@ -157,6 +159,8 @@ Each `AgentEndEvent` also reports `yielded`: `True` when the agent finished its
 turn (it resumes only for queued input or background-job results), `False`
 while it continues its own work (retry, compaction, stop-time reminders).
 Older servers omit it (`None`); fall back to `is_terminal is not False`.
+`awaiting_async_work` is `True` on a non-terminal end whose only possible resume
+is a background-job result, which a cancelled job never delivers.
 
 `message_start`, `message_update`, and `message_end` events expose
 `message_id`, shared across one message's lifecycle and unique per process.
@@ -211,6 +215,78 @@ means no matching follow-up was still queued. Never fall back to `steer()`,
 which would enqueue a duplicate. Unsupported servers raise `RpcCommandError`,
 and missing or non-boolean `promoted` values raise `ValueError`.
 
+## Goal Mode
+
+`goal(op, ...)` drives the same goal lifecycle as the interactive `/goal`
+command. Every op returns a `GoalResult` (`goal` and `state` are `None` when the
+session has no goal), `get_state().goal` carries the current `GoalModeState`, and
+`on_goal_updated()` reports every change, including ones made by the agent's
+`goal` tool:
+
+```python
+result = client.goal("create", objective="Ship the parser rewrite", token_budget=200_000)
+print(result.goal.status if result.goal else None)  # "active"
+client.goal("pause")
+client.goal("resume")
+client.goal("drop")
+```
+
+Goal turns continue on their own only when the server's `goal.continuationModes`
+setting contains `"rpc"`. Refusals (plan mode, an existing goal, `goal.enabled`
+off) raise `RpcCommandError`.
+
+## History, Commands, and Thinking Levels
+
+- `get_entries(since=None)` returns `SessionEntries`: OMP-native `SessionEntry`
+  objects (raw dicts) in append order plus `leaf_id`. With `since`, only entries
+  strictly after that entry id; an unknown id raises `RpcCommandError` with
+  `code == "unknown_since"`.
+- `get_tree()` returns the raw session tree as `SessionTree`.
+- `get_available_commands()` returns typed `AvailableSlashCommand`s;
+  `on_available_commands_update()` receives the same catalog at startup and
+  whenever it changes.
+- `get_available_thinking_levels()` returns the live model's selectable levels,
+  `"off"` first.
+
+## Subagents
+
+Subagent frames are off by default. Select a level, then subscribe:
+
+```python
+client.set_subagent_subscription("progress")  # or "events" for full session events
+client.on_subagent_lifecycle(lambda e: print(e.id, e.status))
+client.on_subagent_progress(lambda e: print(e.agent, e.progress.get("toolCount")))
+
+for snapshot in client.get_subagents():
+    page = client.get_subagent_messages(subagent_id=snapshot.id)
+    more = client.get_subagent_messages(subagent_id=snapshot.id, from_byte=page.next_byte)
+
+client.steer_subagent("OmpWorker", "Drop the glob, keep the direct path.")
+cancelled = client.cancel_subagent("OmpWorker")  # False when not running
+```
+
+At `"events"`, `on_subagent_event()` delivers each subagent's own session
+events as `SubagentEvent.event` (an `UnknownNotification` when it cannot be
+parsed).
+
+## Live Voice, Login, Handoff, and Word Prediction
+
+- `live_start(voice=None, instructions=None)` starts a GPT live voice session
+  bound to this session and returns the voice in use; `live_mute(muted=None)`
+  sets or toggles the microphone; `live_stop()` ends it. `on_live()` receives
+  `LivePhaseEvent`, `LiveLevelsEvent`, `LiveTranscriptEvent`, and `LiveEndEvent`.
+- `get_login_providers()` lists OAuth providers; `login(provider_id)` blocks
+  (up to 10 minutes) until credentials are stored. The flow arrives as UI
+  requests: an `open_url` request (prefer `launch_url` as the copy target) and,
+  for pasted-code providers, an `input` request answered with `send_ui_value()`.
+- `handoff(custom_instructions=None)` returns a `HandoffResult`, or `None` when
+  no handoff was produced.
+- `predict_word(text, cursor)` returns ghost text for a host-rendered composer
+  (`cursor` is a UTF-16 offset) or `None`; report shown suggestions with
+  `predict_word_feedback(text, cursor, suggestion, accepted=...)`. It waits up to
+  155 seconds regardless of `request_timeout`, since a cold prediction daemon can
+  take that long; treat `RpcCommandError` as "no suggestion".
+
 ## Host-Owned Custom Tools
 
 RPC hosts can expose custom tools to the agent with JSON Schema metadata. The
@@ -254,6 +330,11 @@ with RpcClient(
 If you want runtime conversion into a richer Python type, pass `decode=` to
 `host_tool(...)`. That lets you keep the JSON Schema contract on the wire while
 parsing the incoming argument object into a dataclass or model in the handler.
+
+`host_tool(...)` also accepts `hidden=True` (register without enabling),
+`load_mode="essential" | "discoverable"` (how an enabled tool is presented;
+non-builtin names default to `"discoverable"`), and `reads_skill_uris=True` for
+tools that can read `skill://` content.
 
 ## Host-Owned URI Schemes
 
@@ -316,6 +397,25 @@ elif request.method in {"input", "editor"}:
     client.send_ui_value(request.id, "approved")
 ```
 
+After `client.set_ask_dialog(True)`, the agent's `ask` tool sends one `ask`
+request carrying every question (`request.questions`) instead of one `select`
+per question. Answer with one `AskAnswer` per question, in order; hosts always
+offer free text, sent as `custom_input`:
+
+```python
+from omp_rpc import AskAnswer
+
+if request.method == "ask":
+    client.send_ui_answers(
+        request.id,
+        [AskAnswer(id=question.id, selected_options=(question.options[0].label,))
+         for question in request.questions or ()],
+    )
+```
+
+Servers without the command raise `RpcCommandError` from `set_ask_dialog`, so
+keep handling `select` as the fallback.
+
 For non-interactive scripts, you can install a default headless policy instead of
 handling every request manually:
 
@@ -327,8 +427,9 @@ with RpcClient(model="anthropic/claude-sonnet-4-5") as client:
 ```
 
 That helper ignores passive UI notifications (`notify`, `setStatus`, `setWidget`,
-`setTitle`, `set_editor_text`), answers `confirm` with `False`, and cancels
-`select`/`input`/`editor` requests unless you provide explicit values.
+`setTitle`, `set_editor_text`), answers `confirm` with `False`, cancels
+`select`/`input`/`editor` requests unless you provide explicit values, and
+cancels `ask` requests.
 
 To keep extensions from issuing dialogs at all, start the client with
 `no_ui=True` (`--no-ui`).

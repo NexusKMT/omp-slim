@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Callable, Generic, TypeAlias, TypeVar, TypedDict, cast
+from typing import Callable, Generic, Literal, TypeAlias, TypeVar, TypedDict, cast
 
 from .protocol import ImageContent, JsonObject, JsonValue, TextContent
 
@@ -16,6 +16,8 @@ class HostToolResultPayload(TypedDict, total=False):
 
 
 HostToolResultValue: TypeAlias = HostToolResultPayload | str
+ToolLoadMode: TypeAlias = Literal["essential", "discoverable"]
+"""How an enabled host tool is presented; the server defaults non-builtin names to `"discoverable"`."""
 
 
 def _normalize_result(result: HostToolResultValue) -> JsonObject:
@@ -49,6 +51,9 @@ class HostTool(Generic[TParams, TDetails]):
     label: str | None = None
     hidden: bool = False
     decode: Callable[[JsonObject], TParams] | None = None
+    load_mode: ToolLoadMode | None = None
+    reads_skill_uris: bool = False
+    """The tool can read `skill://` instruction content, so prompts include skill guidance."""
 
     def parse_params(self, payload: JsonObject) -> TParams:
         if self.decode is not None:
@@ -68,6 +73,8 @@ def host_tool(
     label: str | None = None,
     hidden: bool = False,
     decode: Callable[[JsonObject], TParams] | None = None,
+    load_mode: ToolLoadMode | None = None,
+    reads_skill_uris: bool = False,
 ) -> HostTool[TParams, TDetails]:
     return HostTool(
         name=name,
@@ -77,4 +84,6 @@ def host_tool(
         label=label,
         hidden=hidden,
         decode=decode,
+        load_mode=load_mode,
+        reads_skill_uris=reads_skill_uris,
     )

@@ -4,17 +4,27 @@ import unittest
 
 from omp_rpc import (
     AgentEndEvent,
+    AskOption,
     AutoCompactionEndEvent,
     AutoCompactionStartEvent,
+    CacheWarmingEndEvent,
     ExtensionUiRequest,
+    GoalUpdatedEvent,
+    IrcMessageEvent,
+    LiveTranscriptEvent,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
     PromptError,
     PromptResultEvent,
+    NoticeEvent,
     SessionSettledEvent,
     SessionState,
+    SubagentEvent,
+    ThinkingLevelChangedEvent,
     TodoReminderEvent,
+    ToolStreamUpdateEvent,
+    UnknownNotification,
     assistant_text,
     assistant_text_with_thinking,
     parse_notification,
@@ -22,7 +32,175 @@ from omp_rpc import (
 )
 
 
+GOAL = {
+    "id": "goal-1",
+    "objective": "Ship the parser",
+    "status": "paused",
+    "tokenBudget": 5000,
+    "tokensUsed": 1200,
+    "timeUsedSeconds": 42.5,
+    "createdAt": 1,
+    "updatedAt": 2,
+}
+
+
 class ProtocolParsingTests(unittest.TestCase):
+    def test_parse_session_state_goal(self) -> None:
+        base = {"sessionId": "s", "goal": None}
+        self.assertIsNone(parse_session_state(base).goal)
+
+        state = parse_session_state(
+            {**base, "goal": {"enabled": False, "mode": "active", "goal": GOAL}}
+        )
+        assert state.goal is not None
+        self.assertEqual(
+            (state.goal.enabled, state.goal.goal.status, state.goal.goal.token_budget),
+            (False, "paused", 5000),
+        )
+        self.assertEqual(state.goal.goal.time_used_seconds, 42.5)
+
+    def test_parse_ask_request_questions(self) -> None:
+        request = parse_notification(
+            {
+                "type": "extension_ui_request",
+                "id": "ui-9",
+                "method": "ask",
+                "timeout": 30000,
+                "questions": [
+                    {
+                        "id": "db",
+                        "question": "Which database?",
+                        "header": "Storage",
+                        "options": [
+                            {"label": "Postgres", "description": "server"},
+                            {"label": "SQLite"},
+                        ],
+                        "recommended": 1,
+                    },
+                    {
+                        "id": "features",
+                        "question": "Which features?",
+                        "options": [{"label": "Auth"}],
+                        "multi": True,
+                    },
+                ],
+            }
+        )
+
+        assert isinstance(request, ExtensionUiRequest)
+        self.assertTrue(request.requires_response())
+        self.assertFalse(request.accepts_text())
+        questions = request.questions or ()
+        self.assertEqual(
+            questions[0].options,
+            (AskOption(label="Postgres", description="server"), AskOption(label="SQLite")),
+        )
+        self.assertEqual(
+            [(q.id, q.multi, q.recommended) for q in questions],
+            [("db", False, 1), ("features", True, None)],
+        )
+
+    def test_parse_session_events_added_to_the_protocol(self) -> None:
+        # Each of these used to degrade to UnknownNotification (or, for the
+        # `remote` compaction action, fail to parse).
+        cases = [
+            (
+                {"type": "auto_compaction_start", "reason": "overflow", "action": "remote"},
+                AutoCompactionStartEvent,
+                lambda e: e.action,
+                "remote",
+            ),
+            (
+                {"type": "goal_updated", "goal": GOAL},
+                GoalUpdatedEvent,
+                lambda e: (e.goal.status, e.state),
+                ("paused", None),
+            ),
+            (
+                {"type": "notice", "level": "warning", "message": "disk full", "source": "session"},
+                NoticeEvent,
+                lambda e: (e.level, e.source),
+                ("warning", "session"),
+            ),
+            (
+                {
+                    "type": "cache_warming_end",
+                    "phase": "idle",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-5",
+                    "outcome": "miss",
+                    "usage": {"input": 3, "output": 1},
+                    "warmingStopReason": "refresh missed the cache",
+                },
+                CacheWarmingEndEvent,
+                lambda e: (e.outcome, e.usage["input"], e.warming_stop_reason),
+                ("miss", 3, "refresh missed the cache"),
+            ),
+            (
+                {"type": "thinking_level_changed", "thinkingLevel": "high", "configured": "auto", "resolved": "high"},
+                ThinkingLevelChangedEvent,
+                lambda e: (e.thinking_level, e.configured, e.resolved),
+                ("high", "auto", "high"),
+            ),
+            (
+                {"type": "tool_stream_update", "toolCallId": "t1", "toolName": "bash", "update": {"chunk": "ok"}},
+                ToolStreamUpdateEvent,
+                lambda e: (e.tool_call_id, e.update),
+                ("t1", {"chunk": "ok"}),
+            ),
+            (
+                {
+                    "type": "irc_message",
+                    "message": {"role": "custom", "customType": "irc", "content": "hi", "display": True, "timestamp": 1},
+                },
+                IrcMessageEvent,
+                lambda e: e.message["customType"],
+                "irc",
+            ),
+        ]
+        for payload, event_class, project, expected in cases:
+            with self.subTest(event_type=payload["type"]):
+                event = parse_notification(payload)
+                self.assertIsInstance(event, event_class)
+                self.assertEqual(project(event), expected)
+
+    def test_parse_subagent_event_degrades_malformed_nested_event(self) -> None:
+        malformed = parse_notification(
+            {
+                "type": "subagent_event",
+                "payload": {
+                    "id": "Worker",
+                    "event": {"type": "message_end", "message": {"role": "martian"}},
+                },
+            }
+        )
+        assert isinstance(malformed, SubagentEvent)
+        self.assertIsInstance(malformed.event, UnknownNotification)
+        assert isinstance(malformed.event, UnknownNotification)
+        self.assertIsNotNone(malformed.event.parse_error)
+
+        valid = parse_notification(
+            {
+                "type": "subagent_event",
+                "payload": {
+                    "id": "Worker",
+                    "event": {"type": "message_end", "message": {"role": "assistant"}},
+                },
+            }
+        )
+        assert isinstance(valid, SubagentEvent)
+        self.assertIsInstance(valid.event, MessageEndEvent)
+
+    def test_parse_live_frames(self) -> None:
+        self.assertEqual(
+            parse_notification(
+                {"type": "live_transcript", "role": "user", "turn": 3, "text": "hello", "final": False}
+            ),
+            LiveTranscriptEvent(role="user", turn=3, text="hello", final=False),
+        )
+        with self.assertRaises(ValueError):
+            parse_notification({"type": "live_phase", "phase": "dozing"})
+
     def test_parse_message_update_preserves_assistant_event_type(self) -> None:
         assistant = {"role": "assistant"}
         common = {"contentIndex": 0, "partial": assistant}

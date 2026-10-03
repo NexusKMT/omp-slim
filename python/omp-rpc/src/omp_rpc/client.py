@@ -16,10 +16,18 @@ from typing import Any, Callable, Generic, Mapping, Sequence, TypeVar, cast
 from .host_tools import HostTool, HostToolContext
 from .host_uris import HostUri, HostUriContext, normalize_read_result
 from .protocol import (
+    _TODO_STATUS_VALUES,
+    _require_bool,
+    _require_literal,
+    _require_str,
+    _SUBAGENT_SUBSCRIPTION_LEVEL_VALUES,
     AgentStartEvent,
     AgentEndEvent,
     AgentMessage,
+    AskAnswer,
     AssistantMessage,
+    AvailableCommandsUpdateEvent,
+    AvailableSlashCommand,
     AutoCompactionEndEvent,
     AutoCompactionStartEvent,
     AutoRetryEndEvent,
@@ -29,20 +37,31 @@ from .protocol import (
     BranchMessage,
     CacheWarmingMode,
     BranchResult,
+    CacheWarmingEndEvent,
+    CacheWarmingStartEvent,
     CancellationResult,
     CompactionResult,
     ExtensionError,
     ExtensionUiRequest,
+    GoalOp,
+    GoalResult,
+    GoalUpdatedEvent,
+    HandoffResult,
     ImageContent,
     InterruptMode,
+    IrcMessageEvent,
     JsonObject,
     JsonValue,
+    LiveEvent,
+    LoginProvider,
     MessageEndEvent,
     MessagesPage,
     MessageStartEvent,
     MessageUpdateEvent,
+    ModelChangedEvent,
     ModelCycleResult,
     ModelInfo,
+    NoticeEvent,
     OpenSessionResult,
     PromoteQueuedMessageResult,
     PromptResultEvent,
@@ -54,12 +73,21 @@ from .protocol import (
     RetryFallbackSucceededEvent,
     RpcAgentEvent,
     RpcNotification,
+    SessionEntries,
     SessionSettledEvent,
     SessionState,
     SessionStats,
+    SessionTree,
     SteeringMode,
     StreamingBehavior,
+    SubagentEvent,
+    SubagentLifecycleEvent,
+    SubagentMessages,
+    SubagentProgressEvent,
+    SubagentSnapshot,
+    SubagentSubscriptionLevel,
     ThinkingLevel,
+    ThinkingLevelChangedEvent,
     ThinkingLevelCycleResult,
     TodoItem,
     TodoPhase,
@@ -69,12 +97,14 @@ from .protocol import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
+    ToolStreamUpdateEvent,
     TtsrTriggeredEvent,
     TurnEndEvent,
     TurnStartEvent,
     UnknownNotification,
     assistant_text,
     parse_agent_messages,
+    parse_available_slash_commands,
     parse_bash_result,
     parse_cache_warming_mode,
     parse_fast_mode_result,
@@ -82,15 +112,23 @@ from .protocol import (
     parse_branch_result,
     parse_cancellation_result,
     parse_compaction_result,
+    parse_goal_result,
+    parse_handoff_result,
+    parse_login_providers,
     parse_model_cycle_result,
     parse_model_info,
     parse_notification,
     parse_open_session_result,
     parse_promote_queued_message_result,
     parse_remove_queued_message_result,
+    parse_session_entries,
     parse_session_state,
     parse_session_stats,
+    parse_session_tree,
+    parse_subagent_messages,
+    parse_subagent_snapshots,
     parse_thinking_level_cycle_result,
+    parse_thinking_levels,
     parse_todo_phases,
 )
 
@@ -122,6 +160,19 @@ TtsrTriggeredListener = Callable[[TtsrTriggeredEvent], None]
 TodoReminderListener = Callable[[TodoReminderEvent], None]
 TodoAutoClearListener = Callable[[TodoAutoClearEvent], None]
 QueueUpdateListener = Callable[[QueueUpdateEvent], None]
+ToolStreamUpdateListener = Callable[[ToolStreamUpdateEvent], None]
+CacheWarmingStartListener = Callable[[CacheWarmingStartEvent], None]
+CacheWarmingEndListener = Callable[[CacheWarmingEndEvent], None]
+IrcMessageListener = Callable[[IrcMessageEvent], None]
+NoticeListener = Callable[[NoticeEvent], None]
+ThinkingLevelChangedListener = Callable[[ThinkingLevelChangedEvent], None]
+ModelChangedListener = Callable[[ModelChangedEvent], None]
+GoalUpdatedListener = Callable[[GoalUpdatedEvent], None]
+AvailableCommandsUpdateListener = Callable[[AvailableCommandsUpdateEvent], None]
+SubagentLifecycleListener = Callable[[SubagentLifecycleEvent], None]
+SubagentProgressListener = Callable[[SubagentProgressEvent], None]
+SubagentEventListener = Callable[[SubagentEvent], None]
+LiveListener = Callable[[LiveEvent], None]
 ProtocolErrorListener = Callable[["RpcProtocolError"], None]
 ListenerErrorListener = Callable[["ListenerErrorEvent"], None]
 TListener = TypeVar("TListener")
@@ -130,7 +181,10 @@ THistoryItem = TypeVar("THistoryItem")
 
 _ASYNC_COMMANDS = frozenset({"prompt", "abort_and_prompt"})
 _DEFAULT_ERROR_HISTORY_LIMIT = 128
-_TODO_STATUS_VALUES = frozenset({"pending", "in_progress", "completed", "abandoned"})
+# The server runs one word prediction per session and holds one more behind it,
+# so a request may wait out a cold daemon start (~150 s) before its own answer.
+_PREDICT_WORD_TIMEOUT = 155.0
+_LOGIN_TIMEOUT = 600.0
 _MAX_RPC_FRAME_BYTES = 1024 * 1024
 _MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024
 _RPC_CHUNK_PAYLOAD_BYTES = 256 * 1024
@@ -617,6 +671,11 @@ class RpcClient:
         self._extension_error_listeners: list[ExtensionErrorListener] = []
         self._prompt_result_listeners: list[PromptResultListener] = []
         self._session_settled_listeners: list[SessionSettledListener] = []
+        self._available_commands_listeners: list[AvailableCommandsUpdateListener] = []
+        self._subagent_lifecycle_listeners: list[SubagentLifecycleListener] = []
+        self._subagent_progress_listeners: list[SubagentProgressListener] = []
+        self._subagent_event_listeners: list[SubagentEventListener] = []
+        self._live_listeners: list[LiveListener] = []
         self._protocol_error_listeners: list[ProtocolErrorListener] = []
         self._listener_error_listeners: list[ListenerErrorListener] = []
 
@@ -944,6 +1003,76 @@ class RpcClient:
     def on_queue_update(self, listener: QueueUpdateListener) -> Callable[[], None]:
         return self._add_typed_event_listener("queue_update", listener)
 
+    def on_tool_stream_update(
+        self, listener: ToolStreamUpdateListener
+    ) -> Callable[[], None]:
+        return self._add_typed_event_listener("tool_stream_update", listener)
+
+    def on_cache_warming_start(
+        self, listener: CacheWarmingStartListener
+    ) -> Callable[[], None]:
+        return self._add_typed_event_listener("cache_warming_start", listener)
+
+    def on_cache_warming_end(
+        self, listener: CacheWarmingEndListener
+    ) -> Callable[[], None]:
+        return self._add_typed_event_listener("cache_warming_end", listener)
+
+    def on_irc_message(self, listener: IrcMessageListener) -> Callable[[], None]:
+        return self._add_typed_event_listener("irc_message", listener)
+
+    def on_notice(self, listener: NoticeListener) -> Callable[[], None]:
+        return self._add_typed_event_listener("notice", listener)
+
+    def on_thinking_level_changed(
+        self, listener: ThinkingLevelChangedListener
+    ) -> Callable[[], None]:
+        return self._add_typed_event_listener("thinking_level_changed", listener)
+
+    def on_model_changed(self, listener: ModelChangedListener) -> Callable[[], None]:
+        return self._add_typed_event_listener("model_changed", listener)
+
+    def on_goal_updated(self, listener: GoalUpdatedListener) -> Callable[[], None]:
+        """Subscribe to goal mode changes, including those made by the agent's `goal` tool."""
+        return self._add_typed_event_listener("goal_updated", listener)
+
+    def on_available_commands_update(
+        self, listener: AvailableCommandsUpdateListener
+    ) -> Callable[[], None]:
+        """Subscribe to the slash-command catalog, pushed at startup and on every change."""
+        self._available_commands_listeners.append(listener)
+        return lambda: self._remove_listener(
+            self._available_commands_listeners, listener
+        )
+
+    def on_subagent_lifecycle(
+        self, listener: SubagentLifecycleListener
+    ) -> Callable[[], None]:
+        """Subscribe to subagent start/end frames; requires `set_subagent_subscription("progress")` or higher."""
+        self._subagent_lifecycle_listeners.append(listener)
+        return lambda: self._remove_listener(
+            self._subagent_lifecycle_listeners, listener
+        )
+
+    def on_subagent_progress(
+        self, listener: SubagentProgressListener
+    ) -> Callable[[], None]:
+        """Subscribe to subagent progress frames; requires `set_subagent_subscription("progress")` or higher."""
+        self._subagent_progress_listeners.append(listener)
+        return lambda: self._remove_listener(
+            self._subagent_progress_listeners, listener
+        )
+
+    def on_subagent_event(self, listener: SubagentEventListener) -> Callable[[], None]:
+        """Subscribe to subagents' own session events; requires `set_subagent_subscription("events")`."""
+        self._subagent_event_listeners.append(listener)
+        return lambda: self._remove_listener(self._subagent_event_listeners, listener)
+
+    def on_live(self, listener: LiveListener) -> Callable[[], None]:
+        """Subscribe to live voice frames: phase, levels, transcript, and end."""
+        self._live_listeners.append(listener)
+        return lambda: self._remove_listener(self._live_listeners, listener)
+
     def on_ui_request(self, listener: UiRequestListener) -> Callable[[], None]:
         self._ui_request_listeners.append(listener)
         return lambda: self._remove_listener(self._ui_request_listeners, listener)
@@ -1000,7 +1129,8 @@ class RpcClient:
 
         Passive UI methods such as notifications and status updates are ignored.
         Confirm dialogs default to `False`. Select, input, and editor requests
-        are cancelled unless an explicit value is provided.
+        are cancelled unless an explicit value is provided; `ask` requests are
+        always cancelled.
         """
 
         def handle(request: ExtensionUiRequest) -> None:
@@ -1039,6 +1169,9 @@ class RpcClient:
                     self.send_ui_value(request.id, editor_value)
                 else:
                     self.cancel_ui_request(request.id)
+                return
+            if request.method == "ask":
+                self.cancel_ui_request(request.id)
 
         return self.on_ui_request(handle)
 
@@ -1060,6 +1193,21 @@ class RpcClient:
             {"type": "extension_ui_response", "id": request_id, "confirmed": confirmed}
         )
 
+    def send_ui_answers(self, request_id: str, answers: Sequence[AskAnswer]) -> None:
+        """Answer an `ask` request with one `AskAnswer` per question, in question order."""
+        wire_answers: list[JsonValue] = []
+        for answer in answers:
+            entry: JsonObject = {
+                "id": answer.id,
+                "selectedOptions": list(answer.selected_options),
+            }
+            if answer.custom_input is not None:
+                entry["customInput"] = answer.custom_input
+            wire_answers.append(entry)
+        self._send_notification(
+            {"type": "extension_ui_response", "id": request_id, "answers": wire_answers}
+        )
+
     def cancel_ui_request(self, request_id: str, *, timed_out: bool = False) -> None:
         payload: JsonObject = {
             "type": "extension_ui_response",
@@ -1077,6 +1225,129 @@ class RpcClient:
     def set_fast_mode(self, enabled: bool) -> FastModeResult:
         return parse_fast_mode_result(self._request("set_fast_mode", enabled=enabled))
 
+    def goal(
+        self,
+        op: GoalOp,
+        *,
+        objective: str | None = None,
+        token_budget: int | None = None,
+    ) -> GoalResult:
+        """Read or change goal mode with the lifecycle of the interactive `/goal` command.
+
+        `get` only reads. `create` needs `objective` (and accepts a positive
+        `token_budget`); `resume`, `pause`, and `drop` act on the current goal.
+        Goal turns continue on their own only when the server's
+        `goal.continuationModes` contains `"rpc"`. Refusals raise `RpcCommandError`.
+        """
+        return parse_goal_result(
+            self._request(
+                "goal", op=op, objective=objective, token_budget=token_budget
+            )
+        )
+
+    def set_ask_dialog(self, enabled: bool) -> bool:
+        """Opt in to `ask` UI requests, answered with `send_ui_answers`; returns the applied setting.
+
+        Until enabled, the `ask` tool prompts with one `select` (plus `editor`)
+        per question. Older servers raise `RpcCommandError`; keep the `select`
+        handling as the fallback.
+        """
+        return _require_bool(
+            self._request("set_ask_dialog", enabled=enabled), "enabled"
+        )
+
+    def get_available_commands(self) -> tuple[AvailableSlashCommand, ...]:
+        return parse_available_slash_commands(
+            self._request("get_available_commands").get("commands")
+        )
+
+    def get_entries(self, since: str | None = None) -> SessionEntries:
+        """Read the append-history; with `since`, only entries strictly after that durable entry id.
+
+        An unknown `since` raises `RpcCommandError` with code `"unknown_since"`.
+        """
+        return parse_session_entries(self._request("get_entries", since=since))
+
+    def get_tree(self) -> SessionTree:
+        return parse_session_tree(self._request("get_tree"))
+
+    def set_subagent_subscription(
+        self, level: SubagentSubscriptionLevel
+    ) -> SubagentSubscriptionLevel:
+        """Select forwarded subagent frames: `"off"` (default), `"progress"`, or `"events"`."""
+        payload = self._request("set_subagent_subscription", level=level)
+        return cast(
+            SubagentSubscriptionLevel,
+            _require_literal(
+                payload.get("level"),
+                _SUBAGENT_SUBSCRIPTION_LEVEL_VALUES,
+                field="set_subagent_subscription.level",
+            ),
+        )
+
+    def get_subagents(self) -> tuple[SubagentSnapshot, ...]:
+        return parse_subagent_snapshots(self._request("get_subagents").get("subagents"))
+
+    def get_subagent_messages(
+        self,
+        *,
+        subagent_id: str | None = None,
+        session_file: str | None = None,
+        from_byte: int | None = None,
+    ) -> SubagentMessages:
+        """Read a subagent transcript by id or registered session file (`subagent_id` wins).
+
+        Pass the previous result's `next_byte` as `from_byte` to read incrementally.
+        """
+        return parse_subagent_messages(
+            self._request(
+                "get_subagent_messages",
+                subagentId=subagent_id,
+                sessionFile=session_file,
+                fromByte=from_byte,
+            )
+        )
+
+    def cancel_subagent(self, subagent_id: str) -> bool:
+        """Hard-kill one running subagent without aborting the parent turn.
+
+        Returns False when the id is not a running subagent of this session, so
+        repeated calls are safe.
+        """
+        return _require_bool(
+            self._request("cancel_subagent", subagentId=subagent_id), "cancelled"
+        )
+
+    def steer_subagent(self, subagent_id: str, message: str) -> None:
+        """Send `message` to a running subagent as its user.
+
+        Returns once the message is queued into its turn or its next turn starts;
+        raises `RpcCommandError` when the subagent is not running or refuses it.
+        """
+        self._request("steer_subagent", subagentId=subagent_id, message=message)
+
+    def live_start(
+        self, *, voice: str | None = None, instructions: str | None = None
+    ) -> str:
+        """Start a live voice session bound to this session; returns the voice in use.
+
+        Returns once connected and recording. `instructions` replaces the bundled
+        live prompt (a Handlebars template with `{{username}}` and `{{firstName}}`).
+        Frames arrive through `on_live`.
+        """
+        return _require_str(
+            self._request("live_start", voice=voice, instructions=instructions),
+            "voice",
+        )
+
+    def live_stop(self) -> None:
+        """Stop the live voice session, if any; returns once it has stopped."""
+        self._request("live_stop")
+
+    def live_mute(self, muted: bool | None = None) -> bool:
+        """Set microphone mute, or toggle it when `muted` is None; returns the new state."""
+        return _require_bool(self._request("live_mute", muted=muted), "muted")
+
     def set_model(self, provider: str, model_id: str) -> ModelInfo:
         payload = self._request("set_model", provider=provider, modelId=model_id)
         model = parse_model_info(payload)
@@ -1085,7 +1356,10 @@ class RpcClient:
         return model
 
     def cycle_model(self) -> ModelCycleResult | None:
-        return parse_model_cycle_result(self._request("cycle_model"))
+        """Cycle to the next model; None when there is no other model to cycle to."""
+        return parse_model_cycle_result(
+            self._request_data("cycle_model", self._next_request_id(), {})
+        )
 
     def get_available_models(self) -> tuple[ModelInfo, ...]:
         payload = self._request("get_available_models")
@@ -1097,6 +1371,12 @@ class RpcClient:
 
     def cycle_thinking_level(self) -> ThinkingLevelCycleResult | None:
         return parse_thinking_level_cycle_result(self._request("cycle_thinking_level"))
+
+    def get_available_thinking_levels(self) -> tuple[ThinkingLevel, ...]:
+        """Selectable levels for the live model, `"off"` first (never `"auto"` or `"inherit"`)."""
+        return parse_thinking_levels(
+            self._request("get_available_thinking_levels").get("levels")
+        )
 
     def set_steering_mode(self, mode: SteeringMode) -> None:
         self._request("set_steering_mode", mode=mode)
@@ -1200,6 +1480,72 @@ class RpcClient:
     def set_session_name(self, name: str) -> None:
         self._request("set_session_name", name=name)
 
+    def handoff(self, custom_instructions: str | None = None) -> HandoffResult | None:
+        """Hand the conversation off to a fresh session; None when no handoff was produced.
+
+        Raises `RpcCommandError` while a response is streaming.
+        """
+        return parse_handoff_result(
+            self._request_data(
+                "handoff",
+                self._next_request_id(),
+                {"customInstructions": custom_instructions},
+            )
+        )
+
+    def get_login_providers(self) -> tuple[LoginProvider, ...]:
+        return parse_login_providers(
+            self._request("get_login_providers").get("providers")
+        )
+
+    def login(self, provider_id: str, *, timeout: float = _LOGIN_TIMEOUT) -> str:
+        """Run OAuth login for `provider_id`; returns the provider id once credentials are stored.
+
+        The server drives the flow through UI requests delivered to
+        `on_ui_request` / `next_ui_request`: an `open_url` request carries the
+        authorization URL (`launch_url`, when set, is the truncation-safe copy
+        target), and providers that need a pasted code follow with an `input`
+        request. Providers that need secret input fail with `RpcCommandError`.
+        """
+        payload = self._request_with_id(
+            "login",
+            self._next_request_id(),
+            {"providerId": provider_id},
+            timeout=timeout,
+        )
+        return _require_str(payload, "providerId")
+
+    def predict_word(self, text: str, cursor: int) -> str | None:
+        """Ghost-text suffix for the prose word ending at `cursor`; None when none applies.
+
+        `cursor` is a UTF-16 code-unit offset into `text`. The server keeps one
+        prediction in flight per session and answers a superseded request None.
+        Failures (prediction daemon unavailable) raise `RpcCommandError`; treat
+        them as "no suggestion".
+        """
+        payload = self._request_with_id(
+            "predict_word",
+            self._next_request_id(),
+            {"text": text, "cursor": cursor},
+            timeout=_PREDICT_WORD_TIMEOUT,
+        )
+        suffix = payload.get("suffix")
+        if suffix is not None and not isinstance(suffix, str):
+            raise ValueError("suffix must be a string")
+        return suffix
+
+    def predict_word_feedback(
+        self, text: str, cursor: int, suggestion: str, *, accepted: bool
+    ) -> None:
+        """Report a shown suggestion as accepted or typed past, with the text and cursor it was shown at."""
+        self._request(
+            "predict_word_feedback",
+            text=text,
+            cursor=cursor,
+            suggestion=suggestion,
+            accepted=accepted,
+        )
+
     def get_todos(self) -> tuple[TodoPhase, ...]:
         return self.get_state().todo_phases
 
@@ -1293,6 +1639,8 @@ class RpcClient:
                         "description": tool.description,
                         "parameters": tool.parameters,
                         "hidden": tool.hidden,
+                        "loadMode": tool.load_mode,
+                        "readsSkillUris": tool.reads_skill_uris,
                     }
                     for tool in self._custom_tools
                 ],
@@ -1714,7 +2062,27 @@ class RpcClient:
         payload: Mapping[str, JsonValue],
         *,
         drop_none: bool = True,
+        timeout: float | None = None,
     ) -> JsonObject:
+        """Send one command and return its `data` (`{}` when absent or null)."""
+        data = self._request_data(
+            command_type, request_id, payload, drop_none=drop_none, timeout=timeout
+        )
+        return data if data is not None else {}
+
+    def _request_data(
+        self,
+        command_type: str,
+        request_id: str,
+        payload: Mapping[str, JsonValue],
+        *,
+        drop_none: bool = True,
+        timeout: float | None = None,
+    ) -> JsonObject | None:
+        """Send one command and return its `data`, None when absent or null.
+
+        `timeout` overrides the client's `request_timeout` for this command.
+        """
         process = self._require_process()
         envelope: JsonObject = {"id": request_id, "type": command_type}
         for key, value in payload.items():
@@ -1735,7 +2103,9 @@ class RpcClient:
             raise
 
         try:
-            response = response_queue.get(timeout=self._request_timeout)
+            response = response_queue.get(
+                timeout=self._request_timeout if timeout is None else timeout
+            )
         except queue.Empty as exc:
             with self._state_lock:
                 self._pending.pop(request_id, None)
@@ -1756,7 +2126,7 @@ class RpcClient:
 
         data = response.get("data")
         if data is None:
-            return {}
+            return None
         return _clone_json_object(data)
 
     def _send_notification(self, payload: JsonObject) -> None:
@@ -2313,6 +2683,48 @@ class RpcClient:
                         notification.type,
                         self._prompt_result_listeners,
                         notification,
+                    )
+                    continue
+
+                if isinstance(notification, AvailableCommandsUpdateEvent):
+                    self._dispatch_listeners(
+                        "available_commands_update",
+                        notification.type,
+                        self._available_commands_listeners,
+                        notification,
+                    )
+                    continue
+
+                if isinstance(notification, SubagentLifecycleEvent):
+                    self._dispatch_listeners(
+                        "subagent_lifecycle",
+                        notification.type,
+                        self._subagent_lifecycle_listeners,
+                        notification,
+                    )
+                    continue
+
+                if isinstance(notification, SubagentProgressEvent):
+                    self._dispatch_listeners(
+                        "subagent_progress",
+                        notification.type,
+                        self._subagent_progress_listeners,
+                        notification,
+                    )
+                    continue
+
+                if isinstance(notification, SubagentEvent):
+                    self._dispatch_listeners(
+                        "subagent_event",
+                        notification.type,
+                        self._subagent_event_listeners,
+                        notification,
+                    )
+                    continue
+
+                if isinstance(notification, LiveEvent):
+                    self._dispatch_listeners(
+                        "live", notification.type, self._live_listeners, notification
                     )
                     continue
 

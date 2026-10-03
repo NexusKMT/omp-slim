@@ -13,7 +13,10 @@ JsonObject: TypeAlias = dict[str, JsonValue]
 Attribution: TypeAlias = Literal["user", "agent"]
 Effort: TypeAlias = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 ThinkingLevel: TypeAlias = Literal[
-    "off", "minimal", "low", "medium", "high", "xhigh", "max"
+    "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"
+]
+ConfiguredThinkingLevel: TypeAlias = Literal[
+    "auto", "inherit", "off", "minimal", "low", "medium", "high", "xhigh", "max"
 ]
 StreamingBehavior: TypeAlias = Literal["steer", "followUp"]
 QueuedMessageQueue: TypeAlias = Literal["steering", "followUp"]
@@ -27,11 +30,36 @@ WidgetPlacement: TypeAlias = Literal["aboveEditor", "belowEditor"]
 TodoStatus: TypeAlias = Literal[
     "pending", "in_progress", "completed", "abandoned", "blocked"
 ]
+GoalOp: TypeAlias = Literal["get", "create", "resume", "pause", "drop"]
+GoalStatus: TypeAlias = Literal[
+    "active", "paused", "budget-limited", "complete", "dropped"
+]
+SlashCommandSource: TypeAlias = Literal[
+    "builtin", "skill", "extension", "custom", "mcp_prompt", "file"
+]
+SubagentSubscriptionLevel: TypeAlias = Literal["off", "progress", "events"]
+AgentSource: TypeAlias = Literal["bundled", "user", "project"]
+SubagentStatus: TypeAlias = Literal[
+    "pending", "running", "completed", "failed", "aborted"
+]
+SubagentLifecycleStatus: TypeAlias = Literal[
+    "started", "completed", "failed", "aborted"
+]
+LivePhase: TypeAlias = Literal[
+    "connecting", "listening", "working", "speaking", "muted", "error"
+]
+LiveRole: TypeAlias = Literal["user", "assistant"]
+CacheWarmingPhase: TypeAlias = Literal["streaming", "idle"]
+CacheWarmingOutcome: TypeAlias = Literal["hit", "miss", "error", "aborted"]
+AutoCompactionAction: TypeAlias = Literal[
+    "context-full", "remote", "handoff", "shake", "snapcompact"
+]
 ExtensionUiMethod: TypeAlias = Literal[
     "select",
     "confirm",
     "input",
     "editor",
+    "ask",
     "cancel",
     "notify",
     "setStatus",
@@ -41,7 +69,7 @@ ExtensionUiMethod: TypeAlias = Literal[
     "open_url",
 ]
 InteractiveExtensionUiMethod: TypeAlias = Literal[
-    "select", "confirm", "input", "editor"
+    "select", "confirm", "input", "editor", "ask"
 ]
 PassiveExtensionUiMethod: TypeAlias = Literal[
     "notify",
@@ -64,7 +92,7 @@ PASSIVE_EXTENSION_UI_METHODS: Final[frozenset[PassiveExtensionUiMethod]] = froze
     }
 )
 INTERACTIVE_EXTENSION_UI_METHODS: Final[frozenset[InteractiveExtensionUiMethod]] = (
-    frozenset({"select", "confirm", "input", "editor"})
+    frozenset({"select", "confirm", "input", "editor", "ask"})
 )
 VALUE_EXTENSION_UI_METHODS: Final[frozenset[ValueExtensionUiMethod]] = frozenset(
     {"select", "input", "editor"}
@@ -72,7 +100,12 @@ VALUE_EXTENSION_UI_METHODS: Final[frozenset[ValueExtensionUiMethod]] = frozenset
 _EFFORT_VALUES: Final[frozenset[str]] = frozenset(
     {"minimal", "low", "medium", "high", "xhigh", "max"}
 )
-_THINKING_LEVEL_VALUES: Final[frozenset[str]] = _EFFORT_VALUES | frozenset({"off"})
+_THINKING_LEVEL_VALUES: Final[frozenset[str]] = _EFFORT_VALUES | frozenset(
+    {"inherit", "off"}
+)
+_CONFIGURED_THINKING_LEVEL_VALUES: Final[frozenset[str]] = (
+    _THINKING_LEVEL_VALUES | frozenset({"auto"})
+)
 _STEERING_MODE_VALUES: Final[frozenset[str]] = frozenset({"all", "one-at-a-time"})
 _INTERRUPT_MODE_VALUES: Final[frozenset[str]] = frozenset({"immediate", "wait"})
 _CACHE_WARMING_MODE_VALUES: Final[frozenset[str]] = frozenset({"off", "streaming", "idle"})
@@ -89,12 +122,39 @@ _WIDGET_PLACEMENT_VALUES: Final[frozenset[str]] = frozenset(
 _TODO_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"pending", "in_progress", "completed", "abandoned", "blocked"}
 )
+_GOAL_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"active", "paused", "budget-limited", "complete", "dropped"}
+)
+_GOAL_MODE_VALUES: Final[frozenset[str]] = frozenset({"active", "exiting"})
+_GOAL_REASON_VALUES: Final[frozenset[str]] = frozenset({"completed"})
+_SLASH_COMMAND_SOURCE_VALUES: Final[frozenset[str]] = frozenset(
+    {"builtin", "skill", "extension", "custom", "mcp_prompt", "file"}
+)
+_SUBAGENT_SUBSCRIPTION_LEVEL_VALUES: Final[frozenset[str]] = frozenset(
+    {"off", "progress", "events"}
+)
+_AGENT_SOURCE_VALUES: Final[frozenset[str]] = frozenset({"bundled", "user", "project"})
+_SUBAGENT_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"pending", "running", "completed", "failed", "aborted"}
+)
+_SUBAGENT_LIFECYCLE_STATUS_VALUES: Final[frozenset[str]] = frozenset(
+    {"started", "completed", "failed", "aborted"}
+)
+_LIVE_PHASE_VALUES: Final[frozenset[str]] = frozenset(
+    {"connecting", "listening", "working", "speaking", "muted", "error"}
+)
+_LIVE_ROLE_VALUES: Final[frozenset[str]] = frozenset({"user", "assistant"})
+_CACHE_WARMING_PHASE_VALUES: Final[frozenset[str]] = frozenset({"streaming", "idle"})
+_CACHE_WARMING_OUTCOME_VALUES: Final[frozenset[str]] = frozenset(
+    {"hit", "miss", "error", "aborted"}
+)
 _EXTENSION_UI_METHOD_VALUES: Final[frozenset[str]] = frozenset(
     {
         "select",
         "confirm",
         "input",
         "editor",
+        "ask",
         "cancel",
         "notify",
         "setStatus",
@@ -143,7 +203,7 @@ _AUTO_COMPACTION_REASON_VALUES: Final[frozenset[str]] = frozenset(
     {"threshold", "overflow", "idle", "incomplete"}
 )
 _AUTO_COMPACTION_ACTION_VALUES: Final[frozenset[str]] = frozenset(
-    {"context-full", "handoff", "shake", "snapcompact"}
+    {"context-full", "remote", "handoff", "shake", "snapcompact"}
 )
 
 
@@ -278,6 +338,27 @@ def _optional_float(payload: JsonObject, field: str) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field} must be a number")
     return float(value)
+
+
+def _require_int(payload: JsonObject, field: str) -> int:
+    value = _optional_int(payload, field)
+    if value is None:
+        raise ValueError(f"{field} must be an integer")
+    return value
+
+
+def _require_float(payload: JsonObject, field: str) -> float:
+    value = _optional_float(payload, field)
+    if value is None:
+        raise ValueError(f"{field} must be a number")
+    return value
+
+
+def _require_json_objects(values: object, *, field: str) -> tuple[JsonObject, ...]:
+    parsed = _optional_json_objects(values, field=field)
+    if parsed is None:
+        raise ValueError(f"{field} must be a list")
+    return parsed
 
 
 def _tuple_of_strings(values: object, *, field: str) -> tuple[str, ...] | None:
@@ -845,6 +926,38 @@ class QueuedMessagesState:
 
 
 @dataclass(slots=True, frozen=True)
+class Goal:
+    """A tracked goal: its objective, lifecycle status, and resource accounting."""
+
+    id: str
+    objective: str
+    status: GoalStatus
+    tokens_used: int
+    time_used_seconds: float
+    created_at: int
+    updated_at: int
+    token_budget: int | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class GoalModeState:
+    """Session goal mode; `mode == "exiting"` while a completed goal unwinds."""
+
+    enabled: bool
+    mode: Literal["active", "exiting"]
+    goal: Goal
+    reason: Literal["completed"] | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class GoalResult:
+    """Outcome of every `goal` op; both fields are None when the session has no goal."""
+
+    goal: Goal | None
+    state: GoalModeState | None
+
+
+@dataclass(slots=True, frozen=True)
 class SessionState:
     model: ModelInfo | None
     thinking_level: ThinkingLevel | None
@@ -873,6 +986,8 @@ class SessionState:
     """Background jobs or deliveries can still inject a follow-up and wake the session."""
     is_settled: bool = False
     """Idle with nothing queued or pending; same predicate as `session_settled`."""
+    goal: GoalModeState | None = None
+    """Current goal mode, or None when the session has no goal."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -993,6 +1108,120 @@ class MessagesPage:
 
 
 @dataclass(slots=True, frozen=True)
+class SlashSubcommand:
+    name: str
+    description: str | None = None
+    usage: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AvailableSlashCommand:
+    """One slash command from `get_available_commands` / `available_commands_update`."""
+
+    name: str
+    source: SlashCommandSource
+    aliases: tuple[str, ...] = ()
+    description: str | None = None
+    input_hint: str | None = None
+    subcommands: tuple[SlashSubcommand, ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class SessionEntries:
+    """`get_entries` result: OMP-native `SessionEntry` objects in append order."""
+
+    entries: tuple[JsonObject, ...]
+    leaf_id: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class SessionTree:
+    """`get_tree` result: the raw `SessionManager` tree roots."""
+
+    tree: tuple[JsonObject, ...]
+    leaf_id: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class SubagentSnapshot:
+    """One running subagent from `get_subagents`; `progress` is the raw `AgentProgress`."""
+
+    id: str
+    index: int
+    agent: str
+    agent_source: AgentSource
+    status: SubagentStatus
+    last_update: int
+    description: str | None = None
+    task: str | None = None
+    assignment: str | None = None
+    session_file: str | None = None
+    parent_tool_call_id: str | None = None
+    progress: JsonObject | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class SubagentMessages:
+    """Incremental subagent transcript read; pass `next_byte` as the next `from_byte`.
+
+    `reset` is True when `from_byte` exceeded the file size and reading restarted at zero.
+    """
+
+    session_file: str
+    from_byte: int
+    next_byte: int
+    reset: bool
+    entries: tuple[JsonObject, ...]
+    messages: tuple[AgentMessage, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class LoginProvider:
+    id: str
+    name: str
+    available: bool
+    authenticated: bool
+
+
+@dataclass(slots=True, frozen=True)
+class HandoffResult:
+    saved_path: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AskOption:
+    label: str
+    description: str | None = None
+    preview: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class AskQuestion:
+    """One question of an `ask` request; hosts always offer free text besides `options`."""
+
+    id: str
+    question: str
+    options: tuple[AskOption, ...]
+    header: str | None = None
+    multi: bool = False
+    recommended: int | None = None
+    """Index into `options` of the recommended choice."""
+
+
+@dataclass(slots=True, frozen=True)
+class AskAnswer:
+    """Answer to one `ask` question; `send_ui_answers` takes one per question, in order.
+
+    `selected_options` holds exact option labels. A single-select question takes
+    at most one option and not both an option and `custom_input`.
+    """
+
+    id: str
+    selected_options: tuple[str, ...] = ()
+    custom_input: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
 class ExtensionUiRequest:
     id: str
     method: ExtensionUiMethod
@@ -1015,6 +1244,7 @@ class ExtensionUiRequest:
     url: str | None = None
     launch_url: str | None = None
     instructions: str | None = None
+    questions: tuple[AskQuestion, ...] | None = field(default=None, kw_only=True)
     type: Literal["extension_ui_request"] = "extension_ui_request"
 
     def is_passive(self) -> bool:
@@ -1053,6 +1283,9 @@ class AgentEndEvent:
     """True when the agent finished its turn (it resumes only for queued input or
     background-job results); False while it continues its own work (retry,
     compaction, stop-time reminders). None from older servers: use `is_terminal`."""
+    awaiting_async_work: bool | None = field(default=None, kw_only=True)
+    """True on a non-terminal end whose only possible resume is a background-job
+    result; the wake is not guaranteed (a cancelled job never delivers one)."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -1109,6 +1342,14 @@ class ToolExecutionUpdateEvent:
 
 
 @dataclass(slots=True, frozen=True)
+class ToolStreamUpdateEvent:
+    tool_call_id: str
+    tool_name: str
+    update: JsonValue
+    type: Literal["tool_stream_update"] = "tool_stream_update"
+
+
+@dataclass(slots=True, frozen=True)
 class ToolExecutionEndEvent:
     tool_call_id: str
     tool_name: str
@@ -1120,13 +1361,13 @@ class ToolExecutionEndEvent:
 @dataclass(slots=True, frozen=True)
 class AutoCompactionStartEvent:
     reason: Literal["threshold", "overflow", "idle", "incomplete"]
-    action: Literal["context-full", "handoff", "shake", "snapcompact"]
+    action: AutoCompactionAction
     type: Literal["auto_compaction_start"] = "auto_compaction_start"
 
 
 @dataclass(slots=True, frozen=True)
 class AutoCompactionEndEvent:
-    action: Literal["context-full", "handoff", "shake", "snapcompact"]
+    action: AutoCompactionAction
     result: CompactionResult | None
     aborted: bool
     will_retry: bool
@@ -1141,6 +1382,7 @@ class AutoRetryStartEvent:
     max_attempts: int
     delay_ms: int
     error_message: str
+    error_id: int | None = None
     type: Literal["auto_retry_start"] = "auto_retry_start"
 
 
@@ -1149,6 +1391,8 @@ class AutoRetryEndEvent:
     success: bool
     attempt: int
     final_error: str | None = None
+    retry_errors: tuple[JsonObject, ...] = ()
+    """Persisted retry errors whose transcript presentation changed when the retry settled."""
     type: Literal["auto_retry_end"] = "auto_retry_end"
 
 
@@ -1157,6 +1401,7 @@ class RetryFallbackAppliedEvent:
     from_model: str
     to_model: str
     role: str
+    reason: str | None = None
     type: Literal["retry_fallback_applied"] = "retry_fallback_applied"
 
 
@@ -1184,6 +1429,75 @@ class TodoReminderEvent:
 @dataclass(slots=True, frozen=True)
 class TodoAutoClearEvent:
     type: Literal["todo_auto_clear"] = "todo_auto_clear"
+
+
+@dataclass(slots=True, frozen=True)
+class CacheWarmingStartEvent:
+    """A prompt-cache refresh was handed to the provider."""
+
+    phase: CacheWarmingPhase
+    provider: str
+    model: str
+    type: Literal["cache_warming_start"] = "cache_warming_start"
+
+
+@dataclass(slots=True, frozen=True)
+class CacheWarmingEndEvent:
+    """Outcome of the refresh announced by the matching `CacheWarmingStartEvent`.
+
+    `usage` is present only when the refresh was billed; `warming_stop_reason`
+    only when warming stopped.
+    """
+
+    phase: CacheWarmingPhase
+    provider: str
+    model: str
+    outcome: CacheWarmingOutcome
+    usage: Usage | None = None
+    warming_stop_reason: str | None = None
+    type: Literal["cache_warming_end"] = "cache_warming_end"
+
+
+@dataclass(slots=True, frozen=True)
+class IrcMessageEvent:
+    message: CustomMessage
+    type: Literal["irc_message"] = "irc_message"
+
+
+@dataclass(slots=True, frozen=True)
+class NoticeEvent:
+    level: NotifyType
+    message: str
+    source: str | None = None
+    type: Literal["notice"] = "notice"
+
+
+@dataclass(slots=True, frozen=True)
+class ThinkingLevelChangedEvent:
+    """The effective thinking level changed.
+
+    `configured` is the user's selector when it differs from the effective level;
+    `resolved` is the level `auto` resolved to this turn, once classified.
+    """
+
+    thinking_level: ThinkingLevel | None
+    configured: ConfiguredThinkingLevel | None = None
+    resolved: Effort | None = None
+    type: Literal["thinking_level_changed"] = "thinking_level_changed"
+
+
+@dataclass(slots=True, frozen=True)
+class ModelChangedEvent:
+    type: Literal["model_changed"] = "model_changed"
+
+
+@dataclass(slots=True, frozen=True)
+class GoalUpdatedEvent:
+    """Goal mode changed, by a host `goal` command or the agent's `goal` tool."""
+
+    goal: Goal | None
+    state: GoalModeState | None = None
+    type: Literal["goal_updated"] = "goal_updated"
 
 
 @dataclass(slots=True, frozen=True)
@@ -1244,6 +1558,90 @@ class UnknownNotification:
     parse_error: str | None = field(default=None, kw_only=True)
 
 
+@dataclass(slots=True, frozen=True)
+class AvailableCommandsUpdateEvent:
+    """Slash-command catalog, pushed at startup and whenever command metadata changes."""
+
+    commands: tuple[AvailableSlashCommand, ...]
+    type: Literal["available_commands_update"] = "available_commands_update"
+
+
+@dataclass(slots=True, frozen=True)
+class SubagentLifecycleEvent:
+    """A subagent started or ended; forwarded at subscription level "progress" or "events"."""
+
+    id: str
+    agent: str
+    agent_source: AgentSource
+    status: SubagentLifecycleStatus
+    index: int
+    description: str | None = None
+    session_file: str | None = None
+    parent_tool_call_id: str | None = None
+    detached: bool | None = None
+    """True when the subagent runs as a detached background job."""
+    type: Literal["subagent_lifecycle"] = "subagent_lifecycle"
+
+
+@dataclass(slots=True, frozen=True)
+class SubagentProgressEvent:
+    """Aggregated subagent progress; `progress` is the raw `AgentProgress` object."""
+
+    index: int
+    agent: str
+    agent_source: AgentSource
+    task: str
+    progress: JsonObject
+    assignment: str | None = None
+    session_file: str | None = None
+    parent_tool_call_id: str | None = None
+    detached: bool | None = None
+    type: Literal["subagent_progress"] = "subagent_progress"
+
+
+@dataclass(slots=True, frozen=True)
+class SubagentEvent:
+    """A subagent's own session event; forwarded only at subscription level "events"."""
+
+    id: str
+    event: RpcAgentEvent | UnknownNotification
+    type: Literal["subagent_event"] = "subagent_event"
+
+
+@dataclass(slots=True, frozen=True)
+class LivePhaseEvent:
+    phase: LivePhase
+    type: Literal["live_phase"] = "live_phase"
+
+
+@dataclass(slots=True, frozen=True)
+class LiveLevelsEvent:
+    """Microphone (`input`) and speaker (`output`) RMS in [0, 1], at most every 100 ms."""
+
+    input: float
+    output: float
+    type: Literal["live_levels"] = "live_levels"
+
+
+@dataclass(slots=True, frozen=True)
+class LiveTranscriptEvent:
+    """Accumulated text of one realtime turn; replace earlier frames with the same `role` and `turn`."""
+
+    role: LiveRole
+    turn: int
+    text: str
+    final: bool
+    type: Literal["live_transcript"] = "live_transcript"
+
+
+@dataclass(slots=True, frozen=True)
+class LiveEndEvent:
+    """Sent exactly once when a live session ends; `error` carries the failure cause."""
+
+    error: str | None = None
+    type: Literal["live_end"] = "live_end"
+
+
 RpcAgentEvent: TypeAlias = (
     AgentStartEvent
     | AgentEndEvent
@@ -1265,6 +1663,22 @@ RpcAgentEvent: TypeAlias = (
     | TodoReminderEvent
     | TodoAutoClearEvent
     | QueueUpdateEvent
+    | ToolStreamUpdateEvent
+    | CacheWarmingStartEvent
+    | CacheWarmingEndEvent
+    | IrcMessageEvent
+    | NoticeEvent
+    | ThinkingLevelChangedEvent
+    | ModelChangedEvent
+    | GoalUpdatedEvent
+)
+
+SubagentNotification: TypeAlias = (
+    SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent
+)
+
+LiveEvent: TypeAlias = (
+    LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent
 )
 
 RpcNotification: TypeAlias = (
@@ -1273,6 +1687,9 @@ RpcNotification: TypeAlias = (
     | ExtensionError
     | PromptResultEvent
     | SessionSettledEvent
+    | AvailableCommandsUpdateEvent
+    | SubagentNotification
+    | LiveEvent
     | RpcAgentEvent
     | UnknownNotification
 )
@@ -1562,7 +1979,195 @@ def parse_session_state(payload: JsonObject) -> SessionState:
         ),
         has_pending_async_work=bool(payload.get("hasPendingAsyncWork", False)),
         is_settled=bool(payload.get("isSettled", False)),
+        goal=parse_goal_mode_state(
+            _optional_json_object(payload.get("goal"), field="sessionState.goal")
+        ),
     )
+
+
+def parse_goal(payload: JsonObject) -> Goal:
+    return Goal(
+        id=_require_str(payload, "id"),
+        objective=_require_str(payload, "objective"),
+        status=cast(
+            GoalStatus,
+            _require_literal(
+                payload.get("status"), _GOAL_STATUS_VALUES, field="goal.status"
+            ),
+        ),
+        tokens_used=_require_int(payload, "tokensUsed"),
+        time_used_seconds=_require_float(payload, "timeUsedSeconds"),
+        created_at=_require_int(payload, "createdAt"),
+        updated_at=_require_int(payload, "updatedAt"),
+        token_budget=_optional_int(payload, "tokenBudget"),
+    )
+
+
+def _optional_goal(value: object, *, field: str) -> Goal | None:
+    payload = _optional_json_object(value, field=field)
+    return parse_goal(payload) if payload is not None else None
+
+
+def parse_goal_mode_state(payload: JsonObject | None) -> GoalModeState | None:
+    if payload is None:
+        return None
+    return GoalModeState(
+        enabled=_require_bool(payload, "enabled"),
+        mode=cast(
+            Literal["active", "exiting"],
+            _require_literal(
+                payload.get("mode"), _GOAL_MODE_VALUES, field="goalState.mode"
+            ),
+        ),
+        goal=parse_goal(_clone_json_object(payload.get("goal"), field="goalState.goal")),
+        reason=cast(
+            Literal["completed"] | None,
+            _optional_literal(
+                payload.get("reason"), _GOAL_REASON_VALUES, field="goalState.reason"
+            ),
+        ),
+    )
+
+
+def parse_goal_result(payload: JsonObject) -> GoalResult:
+    return GoalResult(
+        goal=_optional_goal(payload.get("goal"), field="goal"),
+        state=parse_goal_mode_state(
+            _optional_json_object(payload.get("state"), field="state")
+        ),
+    )
+
+
+def _parse_slash_command(payload: JsonObject) -> AvailableSlashCommand:
+    input_payload = _optional_json_object(payload.get("input"), field="command.input")
+    return AvailableSlashCommand(
+        name=_require_str(payload, "name"),
+        source=cast(
+            SlashCommandSource,
+            _require_literal(
+                payload.get("source"),
+                _SLASH_COMMAND_SOURCE_VALUES,
+                field="command.source",
+            ),
+        ),
+        aliases=_tuple_of_strings(payload.get("aliases"), field="command.aliases")
+        or (),
+        description=_optional_str(payload, "description"),
+        input_hint=(
+            _optional_str(input_payload, "hint") if input_payload is not None else None
+        ),
+        subcommands=tuple(
+            SlashSubcommand(
+                name=_require_str(item, "name"),
+                description=_optional_str(item, "description"),
+                usage=_optional_str(item, "usage"),
+            )
+            for item in _clone_json_objects(
+                payload.get("subcommands"), field="command.subcommands"
+            )
+        ),
+    )
+
+
+def parse_available_slash_commands(value: object) -> tuple[AvailableSlashCommand, ...]:
+    return tuple(
+        _parse_slash_command(item)
+        for item in _require_json_objects(value, field="commands")
+    )
+
+
+def parse_session_entries(payload: JsonObject) -> SessionEntries:
+    return SessionEntries(
+        entries=_require_json_objects(payload.get("entries"), field="entries"),
+        leaf_id=_optional_str(payload, "leafId"),
+    )
+
+
+def parse_session_tree(payload: JsonObject) -> SessionTree:
+    return SessionTree(
+        tree=_require_json_objects(payload.get("tree"), field="tree"),
+        leaf_id=_optional_str(payload, "leafId"),
+    )
+
+
+def parse_thinking_levels(value: object) -> tuple[ThinkingLevel, ...]:
+    if not isinstance(value, list):
+        raise ValueError("levels must be a list")
+    return tuple(
+        cast(
+            ThinkingLevel,
+            _require_literal(item, _THINKING_LEVEL_VALUES, field="levels[]"),
+        )
+        for item in value
+    )
+
+
+def _parse_agent_source(payload: JsonObject, *, field: str) -> AgentSource:
+    return cast(
+        AgentSource,
+        _require_literal(payload.get("agentSource"), _AGENT_SOURCE_VALUES, field=field),
+    )
+
+
+def parse_subagent_snapshot(payload: JsonObject) -> SubagentSnapshot:
+    return SubagentSnapshot(
+        id=_require_str(payload, "id"),
+        index=_require_int(payload, "index"),
+        agent=_require_str(payload, "agent"),
+        agent_source=_parse_agent_source(payload, field="subagent.agentSource"),
+        status=cast(
+            SubagentStatus,
+            _require_literal(
+                payload.get("status"), _SUBAGENT_STATUS_VALUES, field="subagent.status"
+            ),
+        ),
+        last_update=_require_int(payload, "lastUpdate"),
+        description=_optional_str(payload, "description"),
+        task=_optional_str(payload, "task"),
+        assignment=_optional_str(payload, "assignment"),
+        session_file=_optional_str(payload, "sessionFile"),
+        parent_tool_call_id=_optional_str(payload, "parentToolCallId"),
+        progress=_optional_json_object(
+            payload.get("progress"), field="subagent.progress"
+        ),
+    )
+
+
+def parse_subagent_snapshots(value: object) -> tuple[SubagentSnapshot, ...]:
+    return tuple(
+        parse_subagent_snapshot(item)
+        for item in _require_json_objects(value, field="subagents")
+    )
+
+
+def parse_subagent_messages(payload: JsonObject) -> SubagentMessages:
+    return SubagentMessages(
+        session_file=_require_str(payload, "sessionFile"),
+        from_byte=_require_int(payload, "fromByte"),
+        next_byte=_require_int(payload, "nextByte"),
+        reset=_require_bool(payload, "reset"),
+        entries=_require_json_objects(payload.get("entries"), field="entries"),
+        messages=parse_agent_messages(cast(JsonValue | None, payload.get("messages"))),
+    )
+
+
+def parse_login_providers(value: object) -> tuple[LoginProvider, ...]:
+    return tuple(
+        LoginProvider(
+            id=_require_str(item, "id"),
+            name=_require_str(item, "name"),
+            available=_require_bool(item, "available"),
+            authenticated=_require_bool(item, "authenticated"),
+        )
+        for item in _require_json_objects(value, field="providers")
+    )
+
+
+def parse_handoff_result(payload: JsonObject | None) -> HandoffResult | None:
+    """`None` when no handoff was produced; otherwise the result, with an optional saved path."""
+    if payload is None:
+        return None
+    return HandoffResult(saved_path=_optional_str(payload, "savedPath"))
 
 
 def parse_bash_result(payload: JsonObject) -> BashResult:
@@ -1759,6 +2364,36 @@ def parse_extension_ui_request(payload: JsonObject) -> ExtensionUiRequest:
         url=_optional_str(payload, "url"),
         launch_url=_optional_str(payload, "launchUrl"),
         instructions=_optional_str(payload, "instructions"),
+        questions=(
+            tuple(
+                _parse_ask_question(item)
+                for item in _require_json_objects(
+                    payload.get("questions"), field="extension_ui_request.questions"
+                )
+            )
+            if payload.get("questions") is not None
+            else None
+        ),
+    )
+
+
+def _parse_ask_question(payload: JsonObject) -> AskQuestion:
+    return AskQuestion(
+        id=_require_str(payload, "id"),
+        question=_require_str(payload, "question"),
+        options=tuple(
+            AskOption(
+                label=_require_str(option, "label"),
+                description=_optional_str(option, "description"),
+                preview=_optional_str(option, "preview"),
+            )
+            for option in _require_json_objects(
+                payload.get("options"), field="ask.questions[].options"
+            )
+        ),
+        header=_optional_str(payload, "header"),
+        multi=_optional_bool(payload, "multi") is True,
+        recommended=_optional_int(payload, "recommended"),
     )
 
 
@@ -1800,6 +2435,17 @@ def parse_prompt_result(payload: JsonObject) -> PromptResultEvent:
     )
 
 
+def _parse_subagent_session_event(payload: JsonObject) -> RpcAgentEvent | UnknownNotification:
+    """Parse a forwarded subagent session event; drift degrades to `UnknownNotification`."""
+    try:
+        notification = parse_notification(payload)
+    except (TypeError, ValueError) as exc:
+        return UnknownNotification(payload, parse_error=str(exc))
+    if isinstance(notification, RpcAgentEvent):
+        return notification
+    return UnknownNotification(payload)
+
+
 def parse_notification(payload: JsonObject) -> RpcNotification:
     event_type = payload.get("type")
     if event_type == "ready":
@@ -1838,6 +2484,7 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
             message_count=_optional_int(payload, "messageCount"),
             is_terminal=_optional_bool(payload, "isTerminal"),
             yielded=_optional_bool(payload, "yielded"),
+            awaiting_async_work=_optional_bool(payload, "awaitingAsyncWork"),
         )
     if event_type == "turn_start":
         return TurnStartEvent()
@@ -1929,6 +2576,14 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
             else None,
             is_error=_optional_bool(payload, "isError"),
         )
+    if event_type == "tool_stream_update":
+        return ToolStreamUpdateEvent(
+            tool_call_id=str(payload.get("toolCallId", "")),
+            tool_name=str(payload.get("toolName", "")),
+            update=_clone_json_value(
+                payload.get("update"), field="tool_stream_update.update"
+            ),
+        )
     if event_type == "auto_compaction_start":
         return AutoCompactionStartEvent(
             reason=cast(
@@ -1940,7 +2595,7 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
                 ),
             ),
             action=cast(
-                Literal["context-full", "handoff", "shake", "snapcompact"],
+                AutoCompactionAction,
                 _require_literal(
                     payload.get("action", "context-full"),
                     _AUTO_COMPACTION_ACTION_VALUES,
@@ -1952,7 +2607,7 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
         result_payload = payload.get("result")
         return AutoCompactionEndEvent(
             action=cast(
-                Literal["context-full", "handoff", "shake", "snapcompact"],
+                AutoCompactionAction,
                 _require_literal(
                     payload.get("action", "context-full"),
                     _AUTO_COMPACTION_ACTION_VALUES,
@@ -1979,18 +2634,23 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
             max_attempts=int(payload.get("maxAttempts", 0)),
             delay_ms=int(payload.get("delayMs", 0)),
             error_message=str(payload.get("errorMessage", "")),
+            error_id=_optional_int(payload, "errorId"),
         )
     if event_type == "auto_retry_end":
         return AutoRetryEndEvent(
             success=bool(payload.get("success", False)),
             attempt=int(payload.get("attempt", 0)),
             final_error=_optional_str(payload, "finalError"),
+            retry_errors=_clone_json_objects(
+                payload.get("retryErrors"), field="auto_retry_end.retryErrors"
+            ),
         )
     if event_type == "retry_fallback_applied":
         return RetryFallbackAppliedEvent(
             from_model=str(payload.get("from", "")),
             to_model=str(payload.get("to", "")),
             role=str(payload.get("role", "")),
+            reason=_optional_str(payload, "reason"),
         )
     if event_type == "retry_fallback_succeeded":
         return RetryFallbackSucceededEvent(
@@ -2020,6 +2680,173 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
             follow_up=_tuple_of_strings(payload.get("followUp"), field="queue_update.followUp")
             or (),
         )
+    if event_type in {"cache_warming_start", "cache_warming_end"}:
+        phase = cast(
+            CacheWarmingPhase,
+            _require_literal(
+                payload.get("phase"),
+                _CACHE_WARMING_PHASE_VALUES,
+                field=f"{event_type}.phase",
+            ),
+        )
+        provider = _require_str(payload, "provider")
+        model = _require_str(payload, "model")
+        if event_type == "cache_warming_start":
+            return CacheWarmingStartEvent(phase=phase, provider=provider, model=model)
+        return CacheWarmingEndEvent(
+            phase=phase,
+            provider=provider,
+            model=model,
+            outcome=cast(
+                CacheWarmingOutcome,
+                _require_literal(
+                    payload.get("outcome"),
+                    _CACHE_WARMING_OUTCOME_VALUES,
+                    field="cache_warming_end.outcome",
+                ),
+            ),
+            usage=cast(
+                Usage | None,
+                _optional_json_object(
+                    payload.get("usage"), field="cache_warming_end.usage"
+                ),
+            ),
+            warming_stop_reason=_optional_str(payload, "warmingStopReason"),
+        )
+    if event_type == "irc_message":
+        message = _parse_agent_message(
+            _clone_json_object(payload.get("message"), field="irc_message.message"),
+            field="irc_message.message",
+        )
+        if message.get("role") != "custom":
+            raise ValueError("irc_message.message.role must be 'custom'")
+        return IrcMessageEvent(message=cast(CustomMessage, message))
+    if event_type == "notice":
+        return NoticeEvent(
+            level=cast(
+                NotifyType,
+                _require_literal(
+                    payload.get("level"), _NOTIFY_TYPE_VALUES, field="notice.level"
+                ),
+            ),
+            message=_require_str(payload, "message"),
+            source=_optional_str(payload, "source"),
+        )
+    if event_type == "thinking_level_changed":
+        return ThinkingLevelChangedEvent(
+            thinking_level=cast(
+                ThinkingLevel | None,
+                _optional_literal(
+                    payload.get("thinkingLevel"),
+                    _THINKING_LEVEL_VALUES,
+                    field="thinking_level_changed.thinkingLevel",
+                ),
+            ),
+            configured=cast(
+                ConfiguredThinkingLevel | None,
+                _optional_literal(
+                    payload.get("configured"),
+                    _CONFIGURED_THINKING_LEVEL_VALUES,
+                    field="thinking_level_changed.configured",
+                ),
+            ),
+            resolved=cast(
+                Effort | None,
+                _optional_literal(
+                    payload.get("resolved"),
+                    _EFFORT_VALUES,
+                    field="thinking_level_changed.resolved",
+                ),
+            ),
+        )
+    if event_type == "model_changed":
+        return ModelChangedEvent()
+    if event_type == "goal_updated":
+        return GoalUpdatedEvent(
+            goal=_optional_goal(payload.get("goal"), field="goal_updated.goal"),
+            state=parse_goal_mode_state(
+                _optional_json_object(payload.get("state"), field="goal_updated.state")
+            ),
+        )
+    if event_type == "available_commands_update":
+        return AvailableCommandsUpdateEvent(
+            commands=parse_available_slash_commands(payload.get("commands"))
+        )
+    if event_type in {"subagent_lifecycle", "subagent_progress", "subagent_event"}:
+        body = _clone_json_object(payload.get("payload"), field=f"{event_type}.payload")
+        if event_type == "subagent_event":
+            return SubagentEvent(
+                id=_require_str(body, "id"),
+                event=_parse_subagent_session_event(
+                    _clone_json_object(
+                        body.get("event"), field="subagent_event.payload.event"
+                    )
+                ),
+            )
+        if event_type == "subagent_lifecycle":
+            return SubagentLifecycleEvent(
+                id=_require_str(body, "id"),
+                agent=_require_str(body, "agent"),
+                agent_source=_parse_agent_source(
+                    body, field="subagent_lifecycle.payload.agentSource"
+                ),
+                status=cast(
+                    SubagentLifecycleStatus,
+                    _require_literal(
+                        body.get("status"),
+                        _SUBAGENT_LIFECYCLE_STATUS_VALUES,
+                        field="subagent_lifecycle.payload.status",
+                    ),
+                ),
+                index=_require_int(body, "index"),
+                description=_optional_str(body, "description"),
+                session_file=_optional_str(body, "sessionFile"),
+                parent_tool_call_id=_optional_str(body, "parentToolCallId"),
+                detached=_optional_bool(body, "detached"),
+            )
+        return SubagentProgressEvent(
+            index=_require_int(body, "index"),
+            agent=_require_str(body, "agent"),
+            agent_source=_parse_agent_source(
+                body, field="subagent_progress.payload.agentSource"
+            ),
+            task=_require_str(body, "task"),
+            progress=_clone_json_object(
+                body.get("progress"), field="subagent_progress.payload.progress"
+            ),
+            assignment=_optional_str(body, "assignment"),
+            session_file=_optional_str(body, "sessionFile"),
+            parent_tool_call_id=_optional_str(body, "parentToolCallId"),
+            detached=_optional_bool(body, "detached"),
+        )
+    if event_type == "live_phase":
+        return LivePhaseEvent(
+            phase=cast(
+                LivePhase,
+                _require_literal(
+                    payload.get("phase"), _LIVE_PHASE_VALUES, field="live_phase.phase"
+                ),
+            )
+        )
+    if event_type == "live_levels":
+        return LiveLevelsEvent(
+            input=_require_float(payload, "input"),
+            output=_require_float(payload, "output"),
+        )
+    if event_type == "live_transcript":
+        return LiveTranscriptEvent(
+            role=cast(
+                LiveRole,
+                _require_literal(
+                    payload.get("role"), _LIVE_ROLE_VALUES, field="live_transcript.role"
+                ),
+            ),
+            turn=_require_int(payload, "turn"),
+            text=_require_str(payload, "text"),
+            final=_require_bool(payload, "final"),
+        )
+    if event_type == "live_end":
+        return LiveEndEvent(error=_optional_str(payload, "error"))
     return UnknownNotification(
         payload=_clone_json_object(payload, field="notification")
     )

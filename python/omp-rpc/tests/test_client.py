@@ -17,6 +17,12 @@ from unittest import mock
 
 from omp_rpc import (
     AgentEndEvent,
+    AskAnswer,
+    AvailableCommandsUpdateEvent,
+    GoalResult,
+    HandoffResult,
+    LiveEvent,
+    LivePhaseEvent,
     OpenSessionResult,
     PromptResultEvent,
     QueueUpdateEvent,
@@ -24,6 +30,8 @@ from omp_rpc import (
     RpcCommandError,
     RpcConcurrencyError,
     RpcError,
+    RpcTimeoutError,
+    SubagentLifecycleEvent,
     host_tool,
 )
 
@@ -164,6 +172,7 @@ FAKE_SERVER = textwrap.dedent(
             "queuedMessageCount": sum(len(items) for items in queued_messages.values()),
             "queuedMessages": {"steering": queued_messages["steering"], "followUp": queued_messages["followUp"]},
             "todoPhases": todo_phases,
+            "goal": goal_state,
             "dumpTools": [{"name": "read", "description": "Read files", "parameters": {"type": "object"}}] + registered_host_tools,
         }
 
@@ -326,6 +335,8 @@ FAKE_SERVER = textwrap.dedent(
     auto_retry_enabled = True
     session_name = "Scratchpad"
     last_assistant_text = None
+    last_ui_response = None
+    goal_state = None
 
     for raw_line in sys.stdin:
         raw_line = raw_line.strip()
@@ -337,6 +348,7 @@ FAKE_SERVER = textwrap.dedent(
         request_id = command.get("id")
 
         if command_type == "extension_ui_response":
+            last_ui_response = command
             emit_prompt_turn("ui acknowledged")
             settle_pending_prompt()
             continue
@@ -362,6 +374,8 @@ FAKE_SERVER = textwrap.dedent(
             model_provider = command["provider"]
             model_id = command["modelId"]
             respond(request_id, "set_model", model_info(model_id, model_provider))
+        elif command_type == "cycle_model" and model_id == "solo":
+            print(json.dumps({"id": request_id, "type": "response", "command": "cycle_model", "success": True, "data": None}), flush=True)
         elif command_type == "cycle_model":
             model_id = "claude-sonnet-4-6" if model_id == "claude-sonnet-4-5" else "claude-sonnet-4-5"
             respond(request_id, "cycle_model", {"model": model_info(model_id, model_provider), "thinkingLevel": thinking_level, "isScoped": False})
@@ -518,6 +532,31 @@ FAKE_SERVER = textwrap.dedent(
                 print(json.dumps({"type": "queue_update", "steering": queued_messages["steering"], "followUp": queued_messages["followUp"]}), flush=True)
         elif command_type == "abort":
             respond(request_id, command_type, {})
+        elif command_type == "debug_last_ui_response":
+            respond(request_id, command_type, last_ui_response)
+        elif command_type == "goal":
+            if command["op"] == "create":
+                goal_state = {
+                    "enabled": True,
+                    "mode": "active",
+                    "goal": {
+                        "id": "goal-1",
+                        "objective": command["objective"],
+                        "status": "active",
+                        "tokenBudget": command.get("token_budget"),
+                        "tokensUsed": 0,
+                        "timeUsedSeconds": 0,
+                        "createdAt": 1,
+                        "updatedAt": 1,
+                    },
+                }
+            respond(request_id, "goal", {"goal": goal_state["goal"] if goal_state else None, "state": goal_state})
+        elif command_type == "handoff":
+            data = None if command.get("customInstructions") == "decline" else {}
+            print(json.dumps({"id": request_id, "type": "response", "command": "handoff", "success": True, "data": data}), flush=True)
+        elif command_type in {"predict_word", "slow_command"}:
+            time.sleep(0.6)
+            respond(request_id, command_type, {"suffix": "ld"})
         elif command_type in {"prompt", "abort_and_prompt"}:
             message = command["message"]
             if message == "/local":
@@ -538,6 +577,26 @@ FAKE_SERVER = textwrap.dedent(
             if message == "needs confirm":
                 print(json.dumps({"type": "extension_ui_request", "id": "ui-2", "method": "confirm", "title": "Confirm", "message": "Continue?"}), flush=True)
                 continue
+            if message == "needs ask":
+                print(
+                    json.dumps(
+                        {
+                            "type": "extension_ui_request",
+                            "id": "ui-ask",
+                            "method": "ask",
+                            "questions": [
+                                {"id": "db", "question": "Which database?", "options": [{"label": "Postgres"}, {"label": "SQLite"}], "recommended": 1},
+                                {"id": "features", "question": "Which features?", "options": [{"label": "Auth"}, {"label": "Search"}], "multi": True},
+                            ],
+                        }
+                    ),
+                    flush=True,
+                )
+                continue
+            if message == "side frames":
+                print(json.dumps({"type": "available_commands_update", "commands": [{"name": "plan", "source": "builtin"}]}), flush=True)
+                print(json.dumps({"type": "subagent_lifecycle", "payload": {"id": "Worker", "agent": "task", "agentSource": "bundled", "status": "started", "index": 0}}), flush=True)
+                print(json.dumps({"type": "live_phase", "phase": "listening"}), flush=True)
             if message == "needs cancel":
                 print(json.dumps({"type": "extension_ui_request", "id": "ui-3", "method": "editor", "title": "Edit", "placeholder": "value"}), flush=True)
                 continue
@@ -1041,12 +1100,105 @@ FORWARD_COMPAT_SERVER = textwrap.dedent(
 
 class RpcClientTests(unittest.TestCase):
     def make_client(self, server: str = FAKE_SERVER, **kwargs: object) -> RpcClient:
-        return RpcClient(
-            command=[sys.executable, "-u", "-c", server],
-            startup_timeout=2.0,
-            request_timeout=2.0,
+        options: dict[str, object] = {
+            "startup_timeout": 2.0,
+            "request_timeout": 2.0,
             **kwargs,
+        }
+        return RpcClient(command=[sys.executable, "-u", "-c", server], **options)
+
+    def test_ask_answers_reach_the_wire_in_question_order(self) -> None:
+        with self.make_client() as client:
+            client.prompt("needs ask")
+            request = client.next_ui_request(timeout=2.0)
+            self.assertTrue(request.requires_response())
+            questions = request.questions or ()
+            client.send_ui_answers(
+                request.id,
+                [
+                    AskAnswer(id=questions[0].id, custom_input="DuckDB"),
+                    AskAnswer(id=questions[1].id, selected_options=("Auth", "Search")),
+                ],
+            )
+            client.wait_for_idle(timeout=2.0)
+            self.assertEqual(
+                client.request_raw("debug_last_ui_response"),
+                {
+                    "type": "extension_ui_response",
+                    "id": "ui-ask",
+                    "answers": [
+                        {"id": "db", "selectedOptions": [], "customInput": "DuckDB"},
+                        {"id": "features", "selectedOptions": ["Auth", "Search"]},
+                    ],
+                },
+            )
+
+    def test_headless_ui_cancels_ask_so_the_prompt_completes(self) -> None:
+        with self.make_client() as client:
+            client.install_headless_ui()
+            turn = client.prompt_and_wait("needs ask", timeout=2.0)
+            self.assertEqual(turn.assistant_text, "ui acknowledged")
+            self.assertEqual(
+                client.request_raw("debug_last_ui_response"),
+                {"type": "extension_ui_response", "id": "ui-ask", "cancelled": True},
+            )
+
+    def test_null_command_data_is_distinct_from_an_empty_result(self) -> None:
+        with self.make_client() as client:
+            self.assertIsNone(client.handoff("decline"))
+            self.assertEqual(client.handoff(), HandoffResult(saved_path=None))
+            self.assertIsNotNone(client.cycle_model())
+            client.set_model("anthropic", "solo")
+            # Regression: a null cycle_model result used to raise instead of returning None.
+            self.assertIsNone(client.cycle_model())
+
+    def test_non_session_frames_reach_their_listeners_but_not_the_event_history(
+        self,
+    ) -> None:
+        commands: list[AvailableCommandsUpdateEvent] = []
+        lifecycle: list[SubagentLifecycleEvent] = []
+        live: list[LiveEvent] = []
+        with self.make_client() as client:
+            client.on_available_commands_update(commands.append)
+            client.on_subagent_lifecycle(lifecycle.append)
+            client.on_live(live.append)
+            turn = client.prompt_and_wait("side frames", timeout=2.0)
+
+        self.assertEqual([command.name for command in commands[0].commands], ["plan"])
+        self.assertEqual([(event.id, event.status) for event in lifecycle], [("Worker", "started")])
+        self.assertEqual(live, [LivePhaseEvent(phase="listening")])
+        self.assertEqual(turn.assistant_text, "pong")
+        self.assertFalse(
+            {"available_commands_update", "subagent_lifecycle", "live_phase"}
+            & {event.type for event in turn.events}
         )
+
+    def test_set_todos_accepts_blocked_tasks(self) -> None:
+        with self.make_client() as client:
+            phases = client.set_todos(
+                [{"content": "Ship", "status": "blocked", "blocker": "waiting on review"}]
+            )
+        task = phases[0].tasks[0]
+        self.assertEqual((task.status, task.blocker), ("blocked", "waiting on review"))
+
+    def test_predict_word_outlasts_request_timeout(self) -> None:
+        with self.make_client(request_timeout=0.3) as client:
+            self.assertEqual(client.predict_word("hello wor", 9), "ld")
+            with self.assertRaises(RpcTimeoutError):
+                client.request_raw("slow_command")
+
+    def test_goal_create_sends_snake_case_budget_and_updates_state(self) -> None:
+        with self.make_client() as client:
+            self.assertEqual(client.goal("get"), GoalResult(goal=None, state=None))
+            result = client.goal("create", objective="Ship the parser", token_budget=5000)
+            state = client.get_state()
+
+        assert result.goal is not None
+        self.assertEqual(
+            (result.goal.objective, result.goal.status, result.goal.token_budget),
+            ("Ship the parser", "active", 5000),
+        )
+        self.assertEqual(state.goal, result.state)
 
     def test_remove_queued_message_preserves_queue_and_duplicate_identity(self) -> None:
         with self.make_client() as client:
