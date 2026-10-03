@@ -68,38 +68,43 @@ export function parseAntigravityManifestVersion(yamlText: string): string | null
  * Success is cached for the process lifetime; failures are silent (the pinned
  * fallback stays valid) and suppress further lookups for
  * `ANTIGRAVITY_VERSION_RETRY_MS`. Skipped entirely when PI_AI_ANTIGRAVITY_VERSION is set.
+ *
+ * The lookup is shared by concurrent callers, so it is bounded only by its own
+ * timeout; `signal` ends this caller's wait without cancelling the lookup.
  */
 export function ensureAntigravityVersion(fetcher: FetchImpl = fetch, signal?: AbortSignal): Promise<void> {
 	if (process.env.PI_AI_ANTIGRAVITY_VERSION || discoveredAntigravityVersion) return Promise.resolve();
-	if (antigravityVersionFetch) return antigravityVersionFetch;
-	if (
-		antigravityVersionFailedAt !== undefined &&
-		Date.now() - antigravityVersionFailedAt < ANTIGRAVITY_VERSION_RETRY_MS
-	) {
-		return Promise.resolve();
-	}
-
-	antigravityVersionFetch = (async () => {
-		try {
-			const timeoutSignal = AbortSignal.timeout(ANTIGRAVITY_VERSION_FETCH_TIMEOUT_MS);
-			const response = await fetcher(ANTIGRAVITY_VERSION_MANIFEST_URL, {
-				headers: { "Cache-Control": "no-cache", "User-Agent": "electron-builder" },
-				signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
-			});
-			if (response.ok) {
-				discoveredAntigravityVersion = parseAntigravityManifestVersion(await response.text());
-			}
-		} catch {
-			// Silent: the pinned fallback remains valid when version discovery fails.
-		} finally {
-			if (!discoveredAntigravityVersion) {
-				antigravityVersionFetch = null;
-				// A caller abort is not a manifest failure; only back off on real misses.
-				if (!signal?.aborted) antigravityVersionFailedAt = Date.now();
-			}
+	if (!antigravityVersionFetch) {
+		if (
+			antigravityVersionFailedAt !== undefined &&
+			Date.now() - antigravityVersionFailedAt < ANTIGRAVITY_VERSION_RETRY_MS
+		) {
+			return Promise.resolve();
 		}
-	})();
-	return antigravityVersionFetch;
+		antigravityVersionFetch = (async () => {
+			try {
+				const response = await fetcher(ANTIGRAVITY_VERSION_MANIFEST_URL, {
+					headers: { "Cache-Control": "no-cache", "User-Agent": "electron-builder" },
+					signal: AbortSignal.timeout(ANTIGRAVITY_VERSION_FETCH_TIMEOUT_MS),
+				});
+				if (response.ok) {
+					discoveredAntigravityVersion = parseAntigravityManifestVersion(await response.text());
+				}
+			} catch {
+				// Silent: the pinned fallback remains valid when version discovery fails.
+			} finally {
+				antigravityVersionFetch = null;
+				if (!discoveredAntigravityVersion) antigravityVersionFailedAt = Date.now();
+			}
+		})();
+	}
+	const lookup = antigravityVersionFetch;
+	if (!signal) return lookup;
+	if (signal.aborted) return Promise.resolve();
+	const { promise: aborted, resolve } = Promise.withResolvers<void>();
+	const onAbort = () => resolve();
+	signal.addEventListener("abort", onAbort, { once: true });
+	return Promise.race([lookup, aborted]).finally(() => signal.removeEventListener("abort", onAbort));
 }
 
 /** Antigravity `User-Agent` header value; rebuilt when the discovered version changes. */

@@ -580,7 +580,7 @@ export const streamGoogleGeminiCli: StreamFunction<"google-gemini-cli"> = (
 			}
 			// The backend gates newer models on the client version; a process that
 			// skipped discovery (fresh model cache) must still send the current one.
-			if (isAntigravity) await ensureAntigravityVersion(fetch, options?.signal);
+			if (isAntigravity) await ensureAntigravityVersion(options?.fetch ?? fetch, options?.signal);
 			const headers = isAntigravity ? { "User-Agent": getAntigravityUserAgent() } : getGeminiCliHeaders(model.id);
 
 			const requestHeaders = {
