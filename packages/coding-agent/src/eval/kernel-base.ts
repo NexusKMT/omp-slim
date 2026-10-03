@@ -389,7 +389,11 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 		const deferred = Promise.withResolvers<Frame>();
 		this.#pendingControls.set(id, deferred);
 		try {
-			await this.#writeLine(payload);
+			// A broken stdin pipe is terminal: fail this control request and retire the kernel.
+			await this.#writeLine(payload, err => {
+				deferred.reject(err);
+				void this.shutdown();
+			});
 			return await raceControlTimeout(
 				deferred.promise,
 				timeoutMs,
