@@ -74,15 +74,15 @@ async function getConfigDirs(ctx: LoadContext): Promise<Array<{ dir: string; lev
 	return result;
 }
 
-/** Canonical ancestor directories through the optional inclusive stop directory. */
+/** Ancestor directories (cwd spelling) through the optional inclusive stop directory, compared canonically. */
 export function getAncestorDirs(cwd: string, stopAt?: string | null): Array<{ dir: string; depth: number }> {
 	const ancestors: Array<{ dir: string; depth: number }> = [];
-	let current = normalizePathForComparison(cwd);
+	let current = path.resolve(cwd);
 	const stop = stopAt ? normalizePathForComparison(stopAt) : null;
 	let depth = 0;
 	while (true) {
 		ancestors.push({ dir: current, depth });
-		if (stop && current === stop) break;
+		if (stop && normalizePathForComparison(current) === stop) break;
 		const parent = path.dirname(current);
 		if (parent === current) break;
 		current = parent;
@@ -100,7 +100,7 @@ export function getAncestorDirs(cwd: string, stopAt?: string | null): Array<{ di
 async function findNearestProjectConfigDir(ctx: LoadContext): Promise<{ dir: string; depth: number } | null> {
 	const home = normalizePathForComparison(ctx.home);
 	for (const ancestor of getAncestorDirs(ctx.cwd, ctx.repoRoot ?? ctx.home)) {
-		if (ancestor.dir === home) continue;
+		if (normalizePathForComparison(ancestor.dir) === home) continue;
 		const configDir = await ifNonEmptyDir(ancestor.dir, PATHS.projectDir);
 		if (configDir) return { dir: configDir, depth: ancestor.depth };
 	}
@@ -296,7 +296,9 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 	// Walk up from cwd finding .omp/skills/ in ancestors (closest first). Home is
 	// the user config root, never a project (see findNearestProjectConfigDir).
 	const home = normalizePathForComparison(ctx.home);
-	const ancestors = getAncestorDirs(ctx.cwd, ctx.repoRoot ?? ctx.home).filter(({ dir }) => dir !== home);
+	const ancestors = getAncestorDirs(ctx.cwd, ctx.repoRoot ?? ctx.home).filter(
+		({ dir }) => normalizePathForComparison(dir) !== home,
+	);
 	const projectScans = ancestors.map(({ dir }) =>
 		scanSkillsFromDir(ctx, {
 			dir: path.join(dir, PATHS.projectDir, "skills"),

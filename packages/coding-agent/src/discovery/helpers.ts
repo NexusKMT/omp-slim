@@ -1050,8 +1050,8 @@ export async function resolveActiveProjectRegistryPath(cwd: string): Promise<str
 	// Pass 1: walk up looking for an existing .omp/ directory (nearest wins).
 	// Stop before os.homedir() — ~/.omp/ is the user-level config dir, not a project root.
 	const homeDir = normalizePathForComparison(os.homedir());
-	let dir = normalizePathForComparison(cwd);
-	while (dir !== homeDir) {
+	let dir = path.resolve(cwd);
+	while (normalizePathForComparison(dir) !== homeDir) {
 		try {
 			const stat = await fs.promises.stat(path.join(dir, getConfigDirName()));
 			if (stat.isDirectory() && !isUserConfigRoot(dir)) {
@@ -1066,8 +1066,8 @@ export async function resolveActiveProjectRegistryPath(cwd: string): Promise<str
 	}
 
 	// Pass 2: walk up looking for .git as a fallback anchor.
-	dir = normalizePathForComparison(cwd);
-	while (dir !== homeDir) {
+	dir = path.resolve(cwd);
+	while (normalizePathForComparison(dir) !== homeDir) {
 		try {
 			await fs.promises.stat(path.join(dir, ".git"));
 			if (!isUserConfigRoot(dir)) return path.join(dir, getConfigDirName(), "plugins", "installed_plugins.json");
