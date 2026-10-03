@@ -80,6 +80,9 @@
 ### Changed
 
 - SSE events read without raw capture now share one frozen empty `raw` array instead of allocating one per event ([#13650](https://github.com/can1357/oh-my-pi/pull/13650) by [@H4vC](https://github.com/H4vC)).
+### Added
+
+- Added a `cursorPosition` option to `TerminalQueryResponder` so callers can leave cursor-position reports to a PTY host that answers them itself. ([#13663](https://github.com/can1357/oh-my-pi/pull/13663) by [@Runnin4ik](https://github.com/Runnin4ik))
 
 ### Fixed
 
