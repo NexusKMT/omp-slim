@@ -16,6 +16,7 @@
 ### Fixed
 
 - Fixed RPC hosts waiting forever for a prompt's `prompt_result` when an automatic handoff ran after a turn crossed the compaction threshold; threshold handoffs now finish before the turn settles, like other compaction methods
+- Fixed the "F5 to retry" row after an interrupted tool call hugging the error above it; it now sits where the working row stood, with the key styled like other key hints
 
 ## [18.5.0] - 2026-10-03
 
