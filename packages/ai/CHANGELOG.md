@@ -72,6 +72,7 @@
 - Runtime usage providers (`usage.setProvider`, extension `registerProvider({ usage })`) now key cached reports by their own `cacheVersion`, so reports written by processes without the override are no longer served to it ([#13814](https://github.com/can1357/oh-my-pi/issues/13814)).
 - xAI OAuth accounts with active weekly credits no longer switch away solely because an uncertain monthly counter exceeds its limit ([#13806](https://github.com/can1357/oh-my-pi/issues/13806)).
 - Cursor retries after a rejected conversation now keep the tool calls and results already completed in the turn, instead of re-sending the last message and redoing that work ([#11613](https://github.com/can1357/oh-my-pi/pull/11613) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed HTTP 4xx errors (other than 408/429) being retried as transient when the response body contains words like `server_error`, `timeout`, or `overloaded` ([#13807](https://github.com/can1357/oh-my-pi/issues/13807))
 
 ## [18.4.4] - 2026-09-29
 
