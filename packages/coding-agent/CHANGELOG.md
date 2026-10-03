@@ -21,6 +21,9 @@
 
 - Fixed `eval` `tool.*` calls to extension and custom tools with strict schemas (e.g. `ida_list_databases`) failing with `unexpected parameters: ['i']`; bridged calls now receive the same arguments as direct tool calls ([#14174](https://github.com/can1357/oh-my-pi/pull/14174) by [@wondercrash](https://github.com/wondercrash))
 
+### Fixed
+
+- Skill URI reads now expose the selected skill file path so nested skills can locate their sibling helpers ([#13957](https://github.com/can1357/oh-my-pi/pull/13957) by [@Dante-dan](https://github.com/Dante-dan)).
 ## [18.5.0] - 2026-10-03
 
 ### Breaking Changes
