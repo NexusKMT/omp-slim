@@ -94,7 +94,7 @@
 
 ### Fixed
 
-- Fixed Codex turns failing with "The experimental native turn lane cannot accept stateful WebSocket messages" when a message was sent mid-response; the turn now retries and the message is delivered with the next request ([#13705](https://github.com/can1357/oh-my-pi/pull/13705) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed Codex turns failing with "The experimental native turn lane cannot accept stateful WebSocket messages" when a message was sent mid-response; a turn that has not streamed output yet now retries, the message is delivered with the next request, and the session stops steering so later turns no longer hit it ([#13705](https://github.com/can1357/oh-my-pi/pull/13705) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.4.3] - 2026-09-28
 
