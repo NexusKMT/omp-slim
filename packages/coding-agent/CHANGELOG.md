@@ -240,6 +240,9 @@
 - Fixed aside messages containing pasted image or video paths so the source path is preserved when sent to the model.
 - Fixed extension-registered prompt-cache settings, including explicit opt-outs, not taking precedence over matching models.yml definitions.
 - Fixed prompt-cache warming to honor cache-retention settings, including disabling replay for no-retention caches and using the lifetime written by long-retention requests.
+### Fixed
+
+- Fixed collab guests silently queueing `->` / `=>` prompts locally instead of receiving the host-only refusal ([#13933](https://github.com/can1357/oh-my-pi/pull/13933) by [@Dante-dan](https://github.com/Dante-dan)); fixes [#13925](https://github.com/can1357/oh-my-pi/issues/13925).
 
 ## [18.4.5] - 2026-09-30
 
