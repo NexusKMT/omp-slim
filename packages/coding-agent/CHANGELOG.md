@@ -4,11 +4,11 @@
 
 ### Added
 
-- The `/models` Roles view shows which saved model preset is in effect, and Ctrl+←/→ switches to the previous or next one, in Tern and text mode
+- The `/models` Roles view shows which saved model preset is in effect, and Ctrl+←/→ switches to the previous or next one, in Tern and text mode ([#14210](https://github.com/can1357/oh-my-pi/pull/14210) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
-- Picking a model for a role in `/models` now puts the cursor on the model list, so ↑/↓ choose a model right away instead of moving through the sidebar and dropping the role selection
+- Picking a model for a role in `/models` now puts the cursor on the model list, so ↑/↓ choose a model right away instead of moving through the sidebar and dropping the role selection ([#14210](https://github.com/can1357/oh-my-pi/pull/14210) by [@H4vC](https://github.com/H4vC))
 
 ## [18.5.1] - 2026-10-03
 
