@@ -26,6 +26,9 @@
 - Fixed Google Antigravity Gemini 3.1 Flash Image being recognized as an image-capable model for image roles and fallback chains.
 - Fixed GitHub Copilot base models reporting an incorrect long-context window when a separate -1m model is available.
 - Fixed newer OpenAI and Anthropic model families being incorrectly marked as accepting sampling parameters when accessed through compatible providers such as Amazon Bedrock, Google, Devin, or OpenRouter; explicit compatibility overrides continue to take precedence.
+### Fixed
+
+- Fixed Antigravity models such as Claude Opus 5.5 and Sonnet 5.5 disappearing after `omp models refresh`. When the update check failed, omp reported an outdated Antigravity client version (2.8.0), so the server left the newer models out of the list. omp now falls back to 2.19.1 and checks the version before chat and image requests too.
 
 ## [18.5.0] - 2026-10-03
 
