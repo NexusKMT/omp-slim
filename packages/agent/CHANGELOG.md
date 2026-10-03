@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Remote Compaction V2 (OpenAI and Codex) now keeps your recent messages verbatim next to the compaction item, up to the 64k-token retained-message budget, as Codex CLI does. Previously the replacement history held only the compaction item: omp sends user turns without `type: "message"`, so the retention filter matched none of them. Earlier compaction, branch, handoff, and snapcompact summaries are not retained, since the compaction item already covers them.
+- Remote Compaction V2 (OpenAI and Codex) now keeps your recent messages verbatim next to the compaction item, up to the 64k-token retained-message budget, as Codex CLI does. Previously the replacement history held only the compaction item: omp sends user turns without `type: "message"`, so the retention filter matched none of them. Earlier compaction, branch, handoff, and snapcompact summaries are not retained, since the compaction item already covers them ([#14247](https://github.com/can1357/oh-my-pi/pull/14247) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.6.0] - 2026-10-03
 
