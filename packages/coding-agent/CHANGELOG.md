@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed subagents with strict output schemas rejecting nested optional fields sent as `null`; explicitly nullable JTD fields now remain nullable ([#14156](https://github.com/can1357/oh-my-pi/issues/14156)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Breaking Changes
