@@ -39,7 +39,7 @@ describe("classifyModel", () => {
 		});
 	});
 
-	test("DeepSeek V4 revisions ignore date and billing suffixes while keeping V4.1 separate", () => {
+	test("DeepSeek V4 revisions ignore suffixes and reviewed Flash aliases resolve to V4.1", () => {
 		expect(classifyModel("opencode-zen", "deepseek-v4-flash-free")).toMatchObject({
 			class: "deepseek",
 			family: "flash",
@@ -55,6 +55,14 @@ describe("classifyModel", () => {
 			family: "flash",
 			revision: "4.1.0",
 		});
+		for (const provider of ["deepseek", "opencode-go"]) {
+			expect(classifyModel(provider, "deepseek-flash")).toEqual({
+				class: "deepseek",
+				family: "flash",
+				revision: "4.1.0",
+			});
+		}
+		expect(classifyModel("custom", "deepseek-flash")).toEqual({ class: "deepseek", family: "flash" });
 		expect(classifyModel("deepseek", "deepseek-r1")).toEqual({ class: "deepseek", family: "r1" });
 	});
 

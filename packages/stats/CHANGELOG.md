@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the Frustration page splitting DeepSeek V4 Flash variants across providers into separate model-version rows ([#14194](https://github.com/can1357/oh-my-pi/issues/14194)).
+- Fixed the Frustration page splitting DeepSeek V4 provider variants and the V4.1 Flash alias into separate model-version rows ([#14194](https://github.com/can1357/oh-my-pi/issues/14194)).
 
 ## [18.5.1] - 2026-10-03
 
