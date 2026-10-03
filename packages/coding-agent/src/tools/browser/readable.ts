@@ -47,15 +47,16 @@ async function loadDom(): Promise<typeof DomNs> {
 }
 
 /**
- * Elements that end a line of prose. `textContent` concatenates across them,
- * which turns a whole article into one line.
+ * Elements that end a line of rendered text. `textContent` concatenates across
+ * them, which turns a whole article into one line. `<p>` also leaves a blank
+ * line, `<br>` is a single line break, and table cells are tab-separated within
+ * their row, as in the browser's `innerText`.
  */
 const BLOCK_TAGS: Readonly<Record<string, true>> = {
 	ADDRESS: true,
 	ARTICLE: true,
 	ASIDE: true,
 	BLOCKQUOTE: true,
-	BR: true,
 	CAPTION: true,
 	DD: true,
 	DETAILS: true,
@@ -85,43 +86,62 @@ const BLOCK_TAGS: Readonly<Record<string, true>> = {
 	SECTION: true,
 	SUMMARY: true,
 	TABLE: true,
-	TD: true,
-	TH: true,
 	TR: true,
 	UL: true,
 };
+/** Never rendered as text; skipped below the extraction root. */
 const SKIP_TAGS: Readonly<Record<string, true>> = { SCRIPT: true, STYLE: true, NOSCRIPT: true, TEMPLATE: true };
 
 /**
- * Text of a subtree with a line break wherever the document has a block
- * boundary. Whitespace inside a line is collapsed the way a renderer collapses
- * it; `<pre>` keeps its own.
+ * Text of a subtree with line breaks where the document has block boundaries.
+ * Whitespace outside `<pre>` is collapsed the way a renderer collapses it;
+ * `<pre>` keeps its indentation and blank lines.
  */
 function blockText(root: DomNs.Node): string {
-	const parts: string[] = [];
-	const walk = (node: DomNs.Node, preserve: boolean): void => {
+	let out = "";
+	let pendingBreaks = 0;
+	let pendingTab = false;
+	const emit = (text: string): void => {
+		if (!text) return;
+		if (pendingBreaks > 0) {
+			if (out) out = `${out.replace(/[ \t]+$/, "")}${"\n".repeat(pendingBreaks)}`;
+			pendingBreaks = 0;
+		} else if (pendingTab && out && !out.endsWith("\n")) {
+			out = `${out.replace(/ +$/, "")}\t`;
+		}
+		pendingTab = false;
+		out += text;
+	};
+	const walk = (node: DomNs.Node, pre: boolean): void => {
 		// 3 = TEXT_NODE, 1 = ELEMENT_NODE
 		if (node.nodeType === 3) {
 			const text = node.textContent ?? "";
-			parts.push(preserve ? text : text.replace(/\s+/g, " "));
+			if (pre) {
+				emit(text);
+				return;
+			}
+			const collapsed = text.replace(/\s+/g, " ");
+			const atLineStart = !out || pendingBreaks > 0 || pendingTab || /[ \n\t]$/.test(out);
+			emit(atLineStart ? collapsed.replace(/^ /, "") : collapsed);
 			return;
 		}
 		if (node.nodeType !== 1) return;
 		const tag = (node as DomNs.Element).tagName.toUpperCase();
-		if (SKIP_TAGS[tag]) return;
-		const block = BLOCK_TAGS[tag] === true;
-		if (block) parts.push("\n");
-		for (const child of node.childNodes) walk(child, preserve || tag === "PRE");
-		if (block) parts.push("\n");
+		if (node !== root && SKIP_TAGS[tag]) return;
+		if (tag === "BR") {
+			emit("\n");
+			return;
+		}
+		const breaks = tag === "P" ? 2 : BLOCK_TAGS[tag] ? 1 : 0;
+		const cell = tag === "TD" || tag === "TH";
+		pendingBreaks = Math.max(pendingBreaks, breaks);
+		if (cell) pendingTab = true;
+		for (const child of node.childNodes) walk(child, pre || tag === "PRE");
+		pendingBreaks = Math.max(pendingBreaks, breaks);
+		if (cell) pendingTab = true;
 	};
 	walk(root, false);
-	return parts
-		.join("")
-		.split("\n")
-		.map(line => line.trim())
-		.join("\n")
-		.replace(/\n{3,}/g, "\n\n")
-		.trim();
+	return out.replace(/^\n+/, "").replace(/\s+$/, "");
 }
 
 /**
@@ -147,7 +167,8 @@ export async function extractReadableFromHtml(
 		if (article) {
 			// Readability's `textContent` has no block boundaries at all, so re-read
 			// its own markup for them. The markup is a fragment and needs a body.
-			const body = article.content ? parseHTML(`<body>${article.content}</body>`).document.body : null;
+			const body =
+				format === "text" && article.content ? parseHTML(`<body>${article.content}</body>`).document.body : null;
 			const result = await toReadableResult(
 				url,
 				format,

@@ -84,24 +84,33 @@ describe("browser readable extraction", () => {
 	it("keeps block boundaries as line breaks in Readability text", async () => {
 		const paragraph = (n: number) =>
 			`<p>Paragraph ${n} explains the fare rules in enough words that Readability scores this block as article prose rather than page chrome.</p>`;
-		const html = `<!doctype html><html><head><title>Fares</title></head><body><nav>Home</nav><article><h1>Fares</h1>${paragraph(1)}${paragraph(2)}${paragraph(3)}<ul><li>Adult</li><li>Senior</li></ul><p>Transfers are <em>free</em>.<br>Passes are not.</p><pre>zone  price\n1     $2.40</pre></article></body></html>`;
+		const html = `<!doctype html><html><head><title>Fares</title></head><body><nav>Home</nav><article><h1>Fares</h1>${paragraph(1)}${paragraph(2)}${paragraph(3)}<ul><li>Adult</li><li>Senior</li></ul><p>Transfers are <em>free</em>.<br>Passes are not.</p><pre><code>def fare(zone):\n    if zone == 1:\n        return 2.40\n\n\nprint(fare(1))</code></pre></article></body></html>`;
 
 		const result = await extractReadableFromHtml(html, "https://example.com/fares", "text");
-		const lines = result?.text?.split("\n");
+		const text = result?.text ?? "";
 
-		expect(lines).toContain(paragraph(1).replace(/<\/?p>/g, ""));
-		expect(lines).toContain("Adult");
-		expect(lines).toContain("Senior");
-		expect(lines).toContain("Transfers are free.");
-		expect(lines).toContain("Passes are not.");
-		expect(result?.text).toContain("zone  price\n1     $2.40");
+		expect(text).toContain(`${paragraph(1).replace(/<\/?p>/g, "")}\n\nParagraph 2`);
+		expect(text).toContain("Adult\nSenior");
+		expect(text).toContain("Transfers are free.\nPasses are not.");
+		expect(text).toContain("def fare(zone):\n    if zone == 1:\n        return 2.40\n\n\nprint(fare(1))");
 	});
 
-	it("keeps block boundaries as line breaks in fallback text and drops scripts and styles", async () => {
-		const html = `<main><style>p { color: red }</style><h1>Fares</h1><p>One way.</p><table><tr><td>Zone 1</td><td>$2.40</td></tr></table><script>track()</script></main>`;
+	it("keeps rows, cells and inline spacing in fallback text and drops scripts and styles", async () => {
+		const html = `<main><style>p { color: red }</style><h1>Fares</h1><p><span>One </span> <b> way.</b></p><table><tr><th>Zone</th><th>Price</th></tr><tr><td>1</td><td>$2.40</td></tr></table><script>track()</script></main>`;
 
 		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "main" });
 
-		expect(result?.text).toBe("Fares\n\nOne way.\n\nZone 1\n\n$2.40");
+		expect(result?.text).toBe("Fares\n\nOne way.\n\nZone\tPrice\n1\t$2.40");
+	});
+
+	it("returns the text of a selected script element", async () => {
+		const html = `<main><p>Body.</p><script type="application/ld+json">{"a":1}</script></main>`;
+		const selector = "script[type='application/ld+json']";
+
+		const text = await extractReadableFromHtml(html, "https://example.com/", "text", { selector });
+		const markdown = await extractReadableFromHtml(html, "https://example.com/", "markdown", { selector });
+
+		expect(text?.text).toBe('{"a":1}');
+		expect(markdown?.markdown).toContain('{"a":1}');
 	});
 });
