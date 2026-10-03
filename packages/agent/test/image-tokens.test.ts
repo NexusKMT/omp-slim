@@ -82,6 +82,7 @@ describe("image-heavy remote compaction sizing", () => {
 
 		expect(result.estimatedTokensBefore).toBeGreaterThan(50_000);
 		expect(result.fits).toBe(true);
-		expect(result.input[0]).toEqual(input[0]);
+		expect(result.rewrittenOutputs).toBe(0);
+		expect(result.input).toEqual(input);
 	});
 });

@@ -247,7 +247,10 @@ export function trimRemoteCompactionInputToContextWindow(
 		after = probeRemoteCompactionInputBudget(rewrittenInput, tokenizer, instructions, tools, contextWindow);
 	}
 
-	if (rewrittenInput && (after.fits || after.textFits)) {
+	// Rewrites that reach a full fit are kept. When they cannot, and the text
+	// already fit, the overflow is image-only: rewriting cannot shrink the image
+	// estimate, so send the untouched input rather than discard tool output.
+	if (rewrittenInput && (after.fits || (!before.textFits && after.textFits))) {
 		return {
 			input: rewrittenInput,
 			rewrittenOutputs,
