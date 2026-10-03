@@ -25,6 +25,9 @@
 
 - Added APIs for improving agent follow-up and steering workflow management, including moving queued follow-ups into steering with a single queue-change notification.
 - Added support for trusted post-tool guidance via `afterToolCall` results, allowing additional context to be included in the next provider request, including after tool failures.
+### Fixed
+
+- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded ([#13847](https://github.com/can1357/oh-my-pi/pull/13847) by [@GabrielCoelhoCruz](https://github.com/GabrielCoelhoCruz))
 
 ## [18.4.4] - 2026-09-29
 

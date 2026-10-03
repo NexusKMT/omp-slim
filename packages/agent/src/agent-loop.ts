@@ -2448,7 +2448,10 @@ async function streamAssistantResponse(
 			}
 
 			try {
-				let trailing = await response.result();
+				let trailing = recoverTransientErrorToolTurn(
+					retainCompletedToolCalls(await response.result(), completedToolCallIds),
+					context.tools ?? [],
+				);
 				if (harmonyMitigationEnabled) {
 					const detection = detectHarmonyLeakInAssistantMessage(trailing);
 					if (detection) {
