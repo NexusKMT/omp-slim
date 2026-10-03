@@ -145,6 +145,12 @@ class "anthropic" {
 			revision ">=5" {
 				supports-per-message-effort #true
 			}
+			// Opus 5.5 is prefix-bound like Sonnet 5.5; without `drop_block` a
+			// changed system prompt or tool set fails the replay with a 400.
+			// Bounded for the same reason as the forced-tool-choice rule above.
+			revision ">=5.5 <6" {
+				supports-thinking-binding-controls #true
+			}
 		}
 	}
 	on "aimlapi" "gitlab-duo" "kilo" "nanogpt" "venice" {
