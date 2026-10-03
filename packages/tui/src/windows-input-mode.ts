@@ -117,14 +117,19 @@ function baseCodepointForVk(vk: number): number {
 	return 0;
 }
 
-type VtState = "partial" | "complete" | "invalid";
+/** `split`: the leading ESC is a standalone Escape and the rest starts a new sequence. */
+type VtState = "partial" | "complete" | "invalid" | "split";
 
 /** Classify relayed VT text that starts with ESC. */
 function vtState(text: string): VtState {
 	if (text.length === 1) return "partial";
 	const introducer = text[1]!;
-	// Alt-prefixed escape sequence (legacy Alt+Up is `ESC ESC [ A`).
-	if (introducer === "\x1b") return vtState(text.slice(1));
+	if (introducer === "\x1b") {
+		if (text.length === 2) return "partial";
+		// Only meta-CSI/SS3 (legacy Alt+Up is `ESC ESC [ A`) stays grouped; `ESC ESC d`
+		// is Escape followed by Alt+d, matching StdinBuffer.
+		return text[2] === "[" || text[2] === "O" ? vtState(text.slice(1)) : "split";
+	}
 	if (introducer === "[") {
 		if (/^\x1b\[[0-?]*[ -/]*[@-~]$/.test(text)) return "complete";
 		return /^\x1b\[[0-?]*[ -/]*$/.test(text) ? "partial" : "invalid";
@@ -252,7 +257,12 @@ export class Win32InputModeDecoder {
 				continue;
 			}
 			this.#pendingVt += text;
-			const state = vtState(this.#pendingVt);
+			let state = vtState(this.#pendingVt);
+			while (state === "split") {
+				out.push("\x1b");
+				this.#pendingVt = this.#pendingVt.slice(1);
+				state = vtState(this.#pendingVt);
+			}
 			if (state === "partial") continue;
 			out.push(this.#pendingVt);
 			this.#pendingVt = "";
@@ -312,9 +322,15 @@ export class Win32PasteMarkerNormalizer {
 	#marker = "";
 	#timer?: NodeJS.Timeout;
 	readonly #onInput: (data: string) => void;
+	readonly #onExpired?: () => void;
 
-	constructor(onInput: (data: string) => void) {
+	/**
+	 * `onExpired` runs after held records are released because their wait timed
+	 * out, so a downstream holder can treat the same wait as already elapsed.
+	 */
+	constructor(onInput: (data: string) => void, onExpired?: () => void) {
 		this.#onInput = onInput;
+		this.#onExpired = onExpired;
 	}
 
 	process(data: string): void {
@@ -391,7 +407,12 @@ export class Win32PasteMarkerNormalizer {
 		}
 
 		if (output) this.#onInput(output);
-		if (this.#candidate || this.#pending) this.#timer = setTimeout(() => this.flush(), 75);
+		if (this.#candidate || this.#pending) {
+			this.#timer = setTimeout(() => {
+				this.flush();
+				this.#onExpired?.();
+			}, 75);
+		}
 	}
 
 	/** Release an incomplete marker as its original key records. */

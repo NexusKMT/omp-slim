@@ -1581,10 +1581,10 @@ export class ProcessTerminal implements Terminal {
 					this.#win32PendingFlushTimer = undefined;
 					for (const key of win32Keys) this.#inputHandler(key);
 					if (decoder.hasPendingSequence) {
-						this.#win32PendingFlushTimer = setTimeout(() => {
-							this.#win32PendingFlushTimer = undefined;
-							for (const key of decoder.flushPendingSequence()) this.#inputHandler?.(key);
-						}, WIN32_RELAYED_ESCAPE_TIMEOUT_MS);
+						this.#win32PendingFlushTimer = setTimeout(
+							() => this.#releaseWin32PendingSequence(),
+							WIN32_RELAYED_ESCAPE_TIMEOUT_MS,
+						);
 					}
 					return;
 				}
@@ -1881,7 +1881,12 @@ export class ProcessTerminal implements Terminal {
 			// and the mode splits arrow keys into Escape plus literal text (#14034).
 			this.#safeWrite("\x1b[?9001h");
 			this.#win32InputDecoder = new Win32InputModeDecoder();
-			this.#win32PasteNormalizer = new Win32PasteMarkerNormalizer(data => this.#stdinBuffer?.process(data));
+			// The normalizer's expiry already spent the ESC wait; release the decoder's hold
+			// at once instead of starting a second window.
+			this.#win32PasteNormalizer = new Win32PasteMarkerNormalizer(
+				data => this.#stdinBuffer?.process(data),
+				() => this.#releaseWin32PendingSequence(),
+			);
 			return;
 		}
 		// A remote terminal with no identifying env may not understand the request.
@@ -1890,14 +1895,22 @@ export class ProcessTerminal implements Terminal {
 		this.#modifyOtherKeysActive = true;
 	}
 
+	/** Deliver relayed VT text the decoder is holding (a lone ESC becomes Escape). */
+	#releaseWin32PendingSequence(): void {
+		clearTimeout(this.#win32PendingFlushTimer);
+		this.#win32PendingFlushTimer = undefined;
+		const pending = this.#win32InputDecoder?.flushPendingSequence() ?? [];
+		for (const key of pending) this.#inputHandler?.(key);
+	}
+
 	#disableWin32InputMode(): void {
 		if (!this.#win32InputDecoder) return;
 		this.#win32PasteNormalizer?.flush();
 		this.#win32PasteNormalizer = undefined;
+		// Held input still belongs to the user (e.g. Escape before a late kitty reply).
+		this.#releaseWin32PendingSequence();
 		this.#safeWrite("\x1b[?9001l");
 		this.#win32InputDecoder = undefined;
-		clearTimeout(this.#win32PendingFlushTimer);
-		this.#win32PendingFlushTimer = undefined;
 	}
 
 	/**
