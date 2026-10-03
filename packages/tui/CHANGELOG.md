@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `Markdown` crashing on themes without `symbols`, such as the upstream pi-tui `MarkdownTheme` that legacy extensions build; missing symbols now fall back to the active theme's set
+- Fixed `Markdown` crashing on themes without `symbols`, such as the upstream pi-tui `MarkdownTheme` that legacy extensions build; missing symbols now fall back to the active theme's set ([#14161](https://github.com/can1357/oh-my-pi/pull/14161) by [@jaredlyon](https://github.com/jaredlyon))
 
 ## [18.5.0] - 2026-10-03
 
