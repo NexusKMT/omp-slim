@@ -210,7 +210,7 @@ function hasUnchangedOwnFields(object: object, fields: ReadonlyArray<readonly [P
 /** Only themes assembled here have stable callbacks and private link state. */
 export function canCacheMarkdownListItems(candidate: MarkdownTheme): boolean {
 	const registered = cacheableMarkdownThemes.get(candidate);
-	if (registered === undefined || registered.theme !== theme) return false;
+	if (registered === undefined || registered.theme !== theme || candidate.symbols === undefined) return false;
 	if (!hasUnchangedOwnFields(candidate, registered.fields)) return false;
 	if (!hasUnchangedOwnFields(candidate.symbols, registered.symbolFields)) return false;
 	try {
@@ -221,6 +221,7 @@ export function canCacheMarkdownListItems(candidate: MarkdownTheme): boolean {
 }
 
 function registerCacheableMarkdownTheme(markdownTheme: MarkdownTheme): void {
+	if (markdownTheme.symbols === undefined) return;
 	cacheableMarkdownThemes.set(markdownTheme, {
 		theme,
 		fields: ownFields(markdownTheme),
