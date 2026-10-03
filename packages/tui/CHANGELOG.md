@@ -88,6 +88,17 @@
 - Fixed streamed Markdown showing a just-completed bare `\begin{align}` block, or `_` emphasis that closed in the latest chunk, as raw text until the next line arrived ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed streamed Markdown whose text was replaced rather than extended showing an extra blank row, or merging a new list item into the list above, through the finished message ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
 - Fixed the space after inline code, emphasis or math that starts a line after a hard line break disappearing, so `` `c` b`` rendered as `cb` ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+### Added
+
+- Added `writeTerminalSequence()`, which writes an out-of-band escape sequence (window title, clipboard, notification) through the active terminal's ordered output path, falls back to stdout when no terminal is active, and writes nothing from a worker thread.
+
+### Changed
+
+- `PI_TUI_WRITE_LOG` now records an OSC 52 clipboard write as its payload length instead of the clipboard contents.
+
+### Fixed
+
+- Fixed terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
 
 ## [18.4.9] - 2026-10-01
 

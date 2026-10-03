@@ -6,6 +6,7 @@ import * as logger from "@oh-my-pi/pi-utils/logger";
 import * as postmortem from "@oh-my-pi/pi-utils/postmortem";
 import { restoreTerminalStderr, suppressTerminalStderr } from "@oh-my-pi/pi-utils/stderr-guard";
 import { TSP_VERSION } from "@oh-my-pi/pi-wire";
+import { getActiveTerminal, registerStdoutErrorHandler, setActiveTerminal } from "./active-terminal";
 import {
 	encodeBundledGlyphRegistrations,
 	encodeGlyphCoverageQuery,
@@ -30,6 +31,8 @@ import { isInsideTmux, wrapTmuxPassthrough } from "./tmux";
 import { setHangulCompatibilityJamoWidth } from "./utils";
 import { translateWindowsAltGrSequence } from "./windows-altgr";
 import { Win32InputModeDecoder } from "./windows-input-mode";
+
+export { writeTerminalSequence, writeThroughActiveTerminal } from "./active-terminal";
 
 const TERMINAL_PROGRESS_KEEPALIVE_MS = 1000;
 const TERMINAL_PROGRESS_ACTIVE_SEQUENCE = "\x1b]9;4;3\x07";
@@ -89,6 +92,9 @@ function shouldPollWindowsTerminalAppearance(env: NodeJS.ProcessEnv = Bun.env): 
  * their safety margin.
  */
 const MAX_CONPTY_WRITE_CHUNK_BYTES = 16 * 1024;
+
+/** An OSC 52 clipboard write: selection, base64 payload, BEL or ST terminator. */
+const OSC52_CLIPBOARD_WRITE = /\x1b\]52;([^;\x07\x1b]*);([^\x07\x1b]*)(\x07|\x1b\\)/g;
 
 /**
  * Split `data` into chunks whose encoded UTF-8 byte length is no greater than
@@ -280,8 +286,6 @@ export class StdoutStallWatchdog {
  * Minimal terminal interface for TUI
  */
 
-// Track active terminal for emergency cleanup on crash
-let activeTerminal: ProcessTerminal | null = null;
 // Track if a terminal was ever started (for emergency restore logic)
 let terminalEverStarted = false;
 // Whether the alternate screen buffer is currently active (mirrors the TUI's
@@ -305,38 +309,6 @@ function registerPostmortemTerminalRestore(): void {
 /** Record alternate-screen state (called by the TUI on `?1049h`/`?1049l` writes). */
 export function setAltScreenActive(active: boolean): void {
 	altScreenActive = active;
-}
-/**
- * Route an out-of-band escape sequence (e.g. an OSC title update) through the
- * active terminal's output path. While a TUI owns stdout, frame paints go
- * through the off-thread write pump and can split across multiple write(2)
- * calls; a direct main-thread `process.stdout.write` can land between two of
- * them — mid escape sequence — and the host terminal then prints the payload
- * as literal text at the cursor position. Returns false when no terminal has
- * started, in which case the caller owns stdout and may write directly.
- */
-export function writeThroughActiveTerminal(data: string): boolean {
-	if (!activeTerminal) return false;
-	activeTerminal.write(data);
-	return true;
-}
-
-const stdoutErrorHandlers = new Set<(err: Error) => void>();
-let stdoutErrorListenerInstalled = false;
-
-function onStdoutError(err: Error): void {
-	for (const handler of stdoutErrorHandlers) handler(err);
-}
-
-function registerStdoutErrorHandler(handler: (err: Error) => void): () => void {
-	stdoutErrorHandlers.add(handler);
-	if (!stdoutErrorListenerInstalled) {
-		process.stdout.on("error", onStdoutError);
-		stdoutErrorListenerInstalled = true;
-	}
-	return () => {
-		stdoutErrorHandlers.delete(handler);
-	};
 }
 
 const STD_INPUT_HANDLE = -10;
@@ -423,7 +395,7 @@ export function emergencyTerminalRestore(): void {
 		// Crash paths must surface subsequent stderr (fatal reports) on the
 		// real terminal; no-op when the stderr guard is inactive.
 		restoreTerminalStderr();
-		const terminal = activeTerminal;
+		const terminal = getActiveTerminal();
 		if (terminal) {
 			// Keyboard enhancement state is screen-local: pop the alt-screen
 			// frame before leaving it, then let stop() pop omp's main-screen frame.
@@ -1025,8 +997,9 @@ export class ProcessTerminal implements Terminal {
 		if (this.#headless) return;
 		registerPostmortemTerminalRestore();
 
-		// Register for emergency cleanup
-		activeTerminal = this;
+		// Own stdout: out-of-band writers route through this terminal, and the
+		// emergency restore finds it on crash.
+		setActiveTerminal(this);
 		terminalEverStarted = true;
 		// Own the blocking write(2) on a pump thread (unix TTYs only). A stale
 		// prebuilt natives module without the export falls back to direct writes.
@@ -2119,9 +2092,9 @@ export class ProcessTerminal implements Terminal {
 			this.#bracketedPasteRefreshTimer = undefined;
 		}
 		if (this.#headless) return;
-		// Unregister from emergency cleanup
-		if (activeTerminal === this) {
-			activeTerminal = null;
+		// Release stdout ownership (out-of-band writers and emergency cleanup)
+		if (getActiveTerminal() === this) {
+			setActiveTerminal(null);
 		}
 
 		// Release terminal ownership of fd 2 first so external programs,
@@ -2324,7 +2297,13 @@ export class ProcessTerminal implements Terminal {
 		this.#safeWrite(data);
 		if (this.#writeLogPath) {
 			try {
-				fs.appendFileSync(this.#writeLogPath, data, { encoding: "utf8" });
+				// Keep clipboard contents out of the debug log: record the payload's length only.
+				const logged = data.replace(
+					OSC52_CLIPBOARD_WRITE,
+					(_seq, selection: string, payload: string, end: string) =>
+						`\x1b]52;${selection};<${payload.length} bytes>${end}`,
+				);
+				fs.appendFileSync(this.#writeLogPath, logged, { encoding: "utf8" });
 			} catch {
 				// Ignore logging errors
 			}
