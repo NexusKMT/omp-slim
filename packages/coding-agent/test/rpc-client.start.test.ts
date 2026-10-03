@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
+import { type RpcAgentProcess, RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 
 describe("RpcClient.start", () => {
 	test("rejects when RPC process exits immediately", async () => {
@@ -36,5 +36,44 @@ describe("RpcClient.start", () => {
 			"example/model",
 			"--no-session",
 		]);
+	});
+});
+
+describe("RpcClient stdin failures", () => {
+	test("rejects the request without an unhandled rejection when write rejects and flush throws", async () => {
+		const exited = Promise.withResolvers<number>();
+		const proc: RpcAgentProcess & { stdin: { flush(): never } } = {
+			stdin: {
+				// A pending pipe write rejects with EPIPE once the agent is gone; flush() can throw synchronously.
+				write: () => Promise.reject(new Error("EPIPE: broken pipe, write")),
+				flush: () => {
+					throw new Error("flush failed");
+				},
+			},
+			stdout: new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode(`${JSON.stringify({ type: "ready" })}\n`));
+				},
+			}),
+			peekStderr: () => "",
+			kill: () => exited.resolve(0),
+			exited: exited.promise,
+		};
+		using client = new RpcClient({ spawn: () => proc });
+		await client.start();
+
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await expect(client.getState()).rejects.toThrow("flush failed");
+			// Unhandled rejections are reported once the microtask queue drains; one macrotask turn suffices.
+			const turn = Promise.withResolvers<void>();
+			setImmediate(turn.resolve);
+			await turn.promise;
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
 	});
 });

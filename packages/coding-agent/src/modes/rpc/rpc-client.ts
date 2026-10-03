@@ -1465,13 +1465,20 @@ export class RpcClient {
 			},
 		});
 
-		this.#writeFrame(fullCommand, err => {
+		const fail = (err: Error) => {
 			this.#pendingRequests.delete(id);
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeoutId);
 			reject(err);
-		});
+		};
+		// A synchronous flush() throw must settle this promise too: the caller only ever receives
+		// `promise`, so any later write rejection routed through `fail` would otherwise be unhandled.
+		try {
+			this.#writeFrame(fullCommand, fail);
+		} catch (err) {
+			fail(err instanceof Error ? err : new Error(String(err)));
+		}
 		return promise;
 	}
 
