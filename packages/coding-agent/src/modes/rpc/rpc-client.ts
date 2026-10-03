@@ -519,7 +519,11 @@ export class RpcClient {
 
 		const error = new Error("Client stopped");
 		const child = this.#process;
-		child.kill(undefined, this.options.terminationGraceMs);
+		try {
+			child.kill(undefined, this.options.terminationGraceMs);
+		} catch {
+			// The process may already have exited; client state below must still be cleared.
+		}
 		this.#abortController.abort(error);
 		this.#process = null;
 		for (const request of this.#pendingRequests.values()) request.reject(error);

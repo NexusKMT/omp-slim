@@ -104,4 +104,36 @@ describe("RpcClient stdin failures", () => {
 		await expect(client.goal("create", { tokenBudget: 1n as unknown as number })).rejects.toThrow(TypeError);
 		expect(killed).toBe(false);
 	});
+
+	test("still stops the client when killing the agent throws during pipe-failure cleanup", async () => {
+		const proc: RpcAgentProcess = {
+			stdin: { write: () => Promise.reject(new Error("EPIPE: broken pipe, write")) },
+			stdout: new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode(`${JSON.stringify({ type: "ready" })}\n`));
+				},
+			}),
+			peekStderr: () => "",
+			kill: () => {
+				throw new Error("kill failed");
+			},
+			exited: Promise.withResolvers<number>().promise,
+		};
+		using client = new RpcClient({ spawn: () => proc });
+		await client.start();
+
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			await expect(client.getState()).rejects.toThrow("EPIPE");
+			const turn = Promise.withResolvers<void>();
+			setImmediate(turn.resolve);
+			await turn.promise;
+			expect(unhandled).toEqual([]);
+			await expect(client.getState()).rejects.toThrow("Client not started");
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
 });

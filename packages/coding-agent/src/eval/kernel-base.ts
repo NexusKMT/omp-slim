@@ -516,10 +516,12 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 			logger.debug(`${this.#options.languageName}Kernel send`, { preview: line.slice(0, 120) });
 		}
 		// Not awaited: callers' timeouts start after this returns, so a wedged pipe must not block here.
-		// A failed write is reported through onWriteFailed; the kernel may stay alive without an exit event.
-		const write = Promise.resolve(this.#stdin.write(`${line}\n`));
+		// A failed write (sync throw or rejection) is reported through onWriteFailed; the kernel may stay
+		// alive without an exit event.
+		const stdin = this.#stdin;
+		const write = Promise.try(() => stdin.write(`${line}\n`));
 		void write.catch(() => {});
-		void Promise.all([write, this.#stdin.flush()]).catch(err => {
+		void Promise.all([write, Promise.try(() => stdin.flush())]).catch(err => {
 			logger.debug(`${this.#options.languageName} kernel stdin write failed`, { error: String(err) });
 			onWriteFailed?.(err);
 		});

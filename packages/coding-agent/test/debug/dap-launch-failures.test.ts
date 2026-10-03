@@ -494,6 +494,35 @@ describe("DAP launch failure handling", () => {
 		}
 	});
 
+	it("disposes the client when the stdin flush throws synchronously", async () => {
+		const proc = {
+			exited: Promise.withResolvers<number>().promise,
+			exitCode: null,
+			stdin: { write: () => 0, flush: () => undefined },
+			stdout: new ReadableStream<Uint8Array>(),
+			stderr: new ReadableStream<Uint8Array>(),
+			peekStderr: () => "",
+			kill: () => true,
+		} as unknown as DapClientState["proc"];
+		const writeSink = {
+			write: (_data: string | Uint8Array) => 0,
+			flush: () => {
+				throw new Error("EPIPE: broken pipe, write");
+			},
+		};
+		const client = new DapClient(TEST_ADAPTER, process.cwd(), proc, {
+			readable: new ReadableStream<Uint8Array>(),
+			writeSink,
+		});
+		try {
+			await expect(client.sendRequest("evaluate", {}, undefined, 5_000)).rejects.toThrow();
+			// The broken pipe is terminal: later requests fail fast instead of reusing the dead sink.
+			await expect(client.sendRequest("evaluate", {}, undefined, 5_000)).rejects.toThrow(/not running/);
+		} finally {
+			await client.dispose();
+		}
+	});
+
 	it("kills the detached adapter process when the Unix socket never appears (Linux)", async () => {
 		if (process.platform !== "linux") return;
 		const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "omp-debug-unix-leak-"));

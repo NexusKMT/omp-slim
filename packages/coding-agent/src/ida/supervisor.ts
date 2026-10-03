@@ -343,8 +343,8 @@ export class IdaWorker {
 		}
 	}
 
-	async #writeFrame(frame: object): Promise<void> {
-		const write = Promise.resolve(this.#proc.stdin.write(`${JSON.stringify(frame)}\n`));
+	async #writeFrame(line: string): Promise<void> {
+		const write = Promise.resolve(this.#proc.stdin.write(line));
 		void write.catch(() => {});
 		await Promise.all([write, this.#proc.stdin.flush()]);
 	}
@@ -356,8 +356,10 @@ export class IdaWorker {
 		this.#pending.set(id, response);
 		this.#current = { method, startedAt: Date.now() };
 		try {
+			// Serialize first: a non-serializable request is the caller's error and must not kill the worker.
+			const line = `${JSON.stringify({ id, method, params })}\n`;
 			try {
-				await this.#writeFrame({ id, method, params });
+				await this.#writeFrame(line);
 			} catch (error) {
 				if (this.#exitCode !== null) throw this.#exitError();
 				// A broken stdin pipe is terminal; killing the worker runs the normal exit path and frees the lock.
@@ -387,7 +389,7 @@ export class IdaWorker {
 			try {
 				if (process.platform === "win32") {
 					// Windows has no per-process SIGINT (kill terminates); worker.py reads this frame on its stdin thread.
-					await this.#writeFrame({ interrupt: id });
+					await this.#writeFrame(`${JSON.stringify({ interrupt: id })}\n`);
 				} else {
 					this.#proc.kill("SIGINT");
 				}

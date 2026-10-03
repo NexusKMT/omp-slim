@@ -523,9 +523,17 @@ export class DapClient {
 		const content = JSON.stringify(message);
 		// write() returns a Promise while the pipe write is pending; it rejects (EPIPE) once the adapter is
 		// gone. Observe it before flush(), which may throw synchronously and would orphan the rejection.
-		const write = this.#writeSink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n${content}`);
-		if (write instanceof Promise) write.catch(() => {});
-		const flush = this.#writeSink.flush();
+		let write: number | Promise<number>;
+		let flush: number | Promise<number> | undefined;
+		try {
+			write = this.#writeSink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n${content}`);
+			if (write instanceof Promise) write.catch(() => {});
+			flush = this.#writeSink.flush();
+		} catch (error) {
+			// A synchronous write/flush failure is as terminal as a rejected one.
+			void this.dispose();
+			throw error;
+		}
 		if (!(write instanceof Promise) && !(flush instanceof Promise)) return;
 		const flushResult = Promise.all([write, flush]);
 
