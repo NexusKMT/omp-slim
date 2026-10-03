@@ -27,6 +27,7 @@ import {
 } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import type { KeyId } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
+import { refreshShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
 import { MAIN_AGENT_RULE_NAME } from "../../capability/rule";
 import type { ModelRegistry } from "../../config/model-registry";
 import { type Settings, withActiveSettings } from "../../config/settings";
@@ -165,6 +166,13 @@ function handlerTimeoutForEvent(eventType: string): number {
 
 const EXTENSION_HANDLER_TIMEOUT = Symbol("extensionHandlerTimeout");
 const EXTENSION_HANDLER_ABORTED = Symbol("extensionHandlerAborted");
+
+/** Events after which the session file and id may differ from what child shells last saw. */
+const SESSION_IDENTITY_EVENTS: Record<string, true> = {
+	session_start: true,
+	session_switch: true,
+	session_branch: true,
+};
 
 interface HandlerTimeoutBudget {
 	pause(): void;
@@ -1621,6 +1629,18 @@ export class ExtensionRunner {
 					if (stopResult.continue === true && hasContinuationContext) result ??= stopResult;
 				}
 			}
+		}
+
+		// Handlers for these events export session-scoped environment (a session
+		// id, per-session tool config). The shell spawn environment is a cached
+		// copy that may predate them or belong to the previous session, so capture
+		// process.env for it as soon as they have run. Only the main agent's events
+		// do this: in-process subagents share process.env, and a subagent's session
+		// start must not hand its values to the parent's commands. A process that
+		// hosts several top-level sessions (ACP) still has one spawn environment,
+		// which follows the latest of their events.
+		if (ctx !== undefined && this.agent.kind === "main" && SESSION_IDENTITY_EVENTS[event.type] === true) {
+			refreshShellConfigCache();
 		}
 
 		return result as RunnerEmitResult<TEvent>;

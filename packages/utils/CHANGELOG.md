@@ -87,6 +87,9 @@
 ### Fixed
 
 - Fixed the unsettled-command report overriding an explicit non-zero exit code with 1 and printing a spurious "ended before completing" line ([#13623](https://github.com/can1357/oh-my-pi/pull/13623) by [@H4vC](https://github.com/H4vC))
+### Added
+
+- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.2] - 2026-09-28
 

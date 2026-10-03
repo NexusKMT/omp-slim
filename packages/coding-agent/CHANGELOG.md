@@ -387,6 +387,9 @@
 ### Fixed
 
 - Fixed `bash` commands run with `pty: true` missing shell environment variables that the same commands without `pty` already received ([#13678](https://github.com/can1357/oh-my-pi/pull/13678) by [@sjawhar](https://github.com/sjawhar))
+### Fixed
+
+- Bash commands now see environment variables an extension sets in the main session's `session_start`, `session_switch` or `session_branch` handler, and after a session switch they no longer keep the previous session's values ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
 
 ## [18.4.2] - 2026-09-28
 
