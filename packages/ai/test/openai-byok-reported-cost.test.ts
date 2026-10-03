@@ -1,10 +1,10 @@
 // OpenRouter BYOK turns run on the account's own provider key: `usage.cost`
-// carries only the credits charge (the 5% BYOK fee once past the plan
-// allowance, $0 inside it) and `usage.cost_details.upstream_inference_cost`
-// carries the provider spend. Both are real charges, so
-// `applyProviderReportedCost` records their sum; reading `cost` alone used to
-// drop the spend (verified live 2026-10-02 on openrouter/openai/gpt-6.1-sol,
-// inside the allowance: cost=0, is_byok=true, upstream=6.6e-05).
+// carries only the credits charge OpenRouter bills the turn (its BYOK fee:
+// plan-dependent, $0 inside the free allowance) and
+// `usage.cost_details.upstream_inference_cost` carries the provider spend. Both
+// are real charges, so `applyProviderReportedCost` records their sum; reading
+// `cost` alone used to drop the spend (verified live 2026-10-02 on
+// openrouter/openai/gpt-6.1-sol: cost=0, is_byok=true, upstream=6.6e-05).
 import { describe, expect, it } from "bun:test";
 import { applyProviderReportedCost } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import type { Model, Usage } from "@oh-my-pi/pi-ai/types";
@@ -42,7 +42,7 @@ describe("applyProviderReportedCost (OpenRouter BYOK)", () => {
 		expect(usage.cost.cacheWrite).toBeCloseTo(0.118315 * scale, 10);
 	});
 
-	it("adds the credits charge (BYOK fee) on top of the upstream cost", () => {
+	it("adds the credits charge on top of the upstream cost", () => {
 		const usage = usageEstimate();
 		applyProviderReportedCost(openRouterModel, usage, {
 			cost: 0.025,

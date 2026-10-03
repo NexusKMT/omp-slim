@@ -409,8 +409,9 @@ export function applyOpenAIResponsesServiceTierCost(
 /**
  * Reconcile token-price estimates with a gateway's authoritative account charge.
  * BYOK turns (`is_byok: true`) price from the provider spend in
- * `cost_details.upstream_inference_cost` plus the credits charge in `cost`
- * (the 5% BYOK fee once past the plan allowance), so both are covered.
+ * `cost_details.upstream_inference_cost` plus whatever credits charge
+ * OpenRouter reports in `cost` (its BYOK fee is plan-dependent and can be $0),
+ * so both are covered.
  */
 export function applyProviderReportedCost(model: Pick<Model, "provider">, usage: Usage, rawUsage: unknown): void {
 	if (
@@ -421,19 +422,19 @@ export function applyProviderReportedCost(model: Pick<Model, "provider">, usage:
 		return;
 	let reportedCost = Reflect.get(rawUsage, "cost");
 	// BYOK turns run on the account's own provider key: `cost` carries only the
-	// credits charge (the 5% BYOK fee once past the plan allowance, $0 inside
-	// it) and `cost_details.upstream_inference_cost` carries the provider
-	// spend. Both are real charges, so add them (verified live 2026-10-02:
-	// openrouter/openai/gpt-6.1-sol returned `cost: 0, is_byok: true,
-	// cost_details.upstream_inference_cost: 6.6e-05` inside the allowance).
+	// credits charge OpenRouter bills the turn (its BYOK fee, plan-dependent and
+	// $0 inside the free allowance) while `cost_details.upstream_inference_cost`
+	// carries the provider spend. Both are real charges, so add them (verified
+	// live 2026-10-02: openrouter/openai/gpt-6.1-sol returned `cost: 0,
+	// is_byok: true, cost_details.upstream_inference_cost: 6.6e-05`).
 	if (Reflect.get(rawUsage, "is_byok") === true) {
 		const details = Reflect.get(rawUsage, "cost_details");
 		const upstreamCost =
 			typeof details === "object" && details !== null ? Reflect.get(details, "upstream_inference_cost") : undefined;
 		if (typeof upstreamCost === "number" && Number.isFinite(upstreamCost) && upstreamCost >= 0) {
-			const fee =
+			const creditsCharge =
 				typeof reportedCost === "number" && Number.isFinite(reportedCost) && reportedCost >= 0 ? reportedCost : 0;
-			reportedCost = fee + upstreamCost;
+			reportedCost = creditsCharge + upstreamCost;
 		}
 	}
 	if (typeof reportedCost !== "number" || !Number.isFinite(reportedCost) || reportedCost < 0) return;
