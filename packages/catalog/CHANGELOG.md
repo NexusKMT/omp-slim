@@ -8,6 +8,7 @@
 - OpenCode Go's LongCat 2.5 Preview offers no unsupported effort levels and can turn reasoning off; Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
 - Fixed Claude Opus 5.5 on the Anthropic API and Cloudflare AI Gateway failing with `Invalid 'signature' in 'thinking' block ... bound to a different conversation` after tools or the system prompt changed mid-session; requests now send `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` like Fable 5.1 and Sonnet 5.5 ([#14167](https://github.com/can1357/oh-my-pi/issues/14167))
 - Fixed Cursor Grok 4.5/4.6 model ids flipping between `cursor-grok-4.6` and `grok-4.6` across runs, which made fallback chains and role settings intermittently reference an unknown model; saved `cursor/grok-4.5`/`cursor/grok-4.6` (and `-fast`) selectors and `modelOverrides` entries now apply to the stable ids ([#14164](https://github.com/can1357/oh-my-pi/issues/14164))
+- Added full reasoning effort ladders to ClinePass DeepSeek V4.1 Flash Free and Muse Spark 1.3 Contributor Free models so thinking levels can be configured ([#14132](https://github.com/can1357/oh-my-pi/pull/14132) by [@hanumanji198586](https://github.com/hanumanji198586)).
 
 ## [18.5.0] - 2026-10-03
 
