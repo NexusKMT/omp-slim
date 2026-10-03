@@ -56,6 +56,7 @@ NotificationListener = Callable[[RpcNotification], None]
 UiRequestListener = Callable[[ExtensionUiRequest], None]
 ProtocolErrorListener = Callable[["RpcProtocolError"], None]
 ListenerErrorListener = Callable[["ListenerErrorEvent"], None]
+HostToolCompletedListener = Callable[["HostToolCompletedEvent"], None]
 TListener = TypeVar("TListener")
 THistoryItem = TypeVar("THistoryItem")
 
@@ -345,6 +346,22 @@ class ListenerErrorEvent:
 
 
 @dataclass(slots=True, frozen=True)
+class HostToolCompletedEvent:
+    """A registered host tool's `execute()` returned without raising.
+
+    Emitted by `RpcClient.on_host_tool_completed` for every dispatch path —
+    top-level call, `xd://` device write, or the eval bridge — unlike
+    `tool_execution_end`, which only names the transport tool the agent
+    invoked. `tool_call_id` is the id omp dispatched with; for eval-bridged
+    calls it is synthetic and matches no `tool_execution_*` event.
+    """
+
+    tool_name: str
+    tool_call_id: str
+
+
+
+@dataclass(slots=True, frozen=True)
 class PromptTurn:
     events: tuple[RpcAgentEvent, ...]
     messages: tuple[AgentMessage, ...]
@@ -551,6 +568,7 @@ class RpcClient(WireClient):
         self._typed_listeners: dict[str, list[Callable[..., None]]] = {}
         self._protocol_error_listeners: list[ProtocolErrorListener] = []
         self._listener_error_listeners: list[ListenerErrorListener] = []
+        self._host_tool_completed_listeners: list[HostToolCompletedListener] = []
 
     def __enter__(self) -> RpcClient:
         return self.start()
@@ -787,6 +805,10 @@ class RpcClient(WireClient):
                     # A concurrent reap()/stop() already confirmed and removed it.
                     pass
         return all(process is exclude for process, _ in self._survivors)
+
+    def on_host_tool_completed(self, listener: HostToolCompletedListener) -> Callable[[], None]:
+        self._host_tool_completed_listeners.append(listener)
+        return lambda: self._remove_listener(self._host_tool_completed_listeners, listener)
 
     def on_event(self, listener: AgentEventListener) -> Callable[[], None]:
         self._event_listeners.append(listener)
@@ -1577,14 +1599,20 @@ class RpcClient(WireClient):
                         }
                     ),
                 )
-                result = tool.execute(params, context)
+                result = self._normalize_host_tool_result(tool.execute(params, context))
+                self._dispatch_listeners(
+                    "host_tool_completed",
+                    tool_name,
+                    self._host_tool_completed_listeners,
+                    HostToolCompletedEvent(tool_name=tool_name, tool_call_id=tool_call_id),
+                )
                 if pending_call.cancel_event.is_set():
                     return
                 self._send_notification(
                     {
                         "type": "host_tool_result",
                         "id": request_id,
-                        "result": self._normalize_host_tool_result(result),
+                        "result": result,
                     }
                 )
             except Exception as exc:

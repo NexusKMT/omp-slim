@@ -15,6 +15,8 @@ from ._wire import *  # noqa: F403 - generated surface, bounded by `_wire.__all_
 from ._wire_runtime import JsonObject, JsonPrimitive, JsonValue, UnknownNotification
 from .client import (
     AgentEventListener,
+    HostToolCompletedEvent,
+    HostToolCompletedListener,
     ListenerErrorEvent,
     ListenerErrorListener,
     NotificationListener,
@@ -71,6 +73,8 @@ __all__ = [
     "JsonObject",
     "JsonPrimitive",
     "JsonValue",
+    "HostToolCompletedEvent",
+    "HostToolCompletedListener",
     "ListenerErrorEvent",
     "ListenerErrorListener",
     "NotificationListener",
