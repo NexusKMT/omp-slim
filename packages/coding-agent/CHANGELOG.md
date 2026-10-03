@@ -5,6 +5,7 @@
 ### Added
 
 - RPC mode can run a GPT live voice session bound to the RPC session, so delegated work uses the host's tools: `live_start` (optional `voice`, and `instructions` replacing the bundled live prompt), `live_stop`, and `live_mute`, with unsolicited `live_phase`, `live_levels` (at most every 100 ms), `live_transcript`, and `live_end` frames that `set_event_filter` never drops. `RpcClient` adds `liveStart()`, `liveStop()`, `liveMute()`, and `onLive()`. Closing stdin stops an active live session.
+- Added the read-only `archive` eval global (docs at `xd://eval/archive`, on by default via `archive.enabled`): list recent projects, past sessions for the current project or across all projects with their idle recaps, open one session with its full recap journal and prompts, and read or search prompt history
 
 ### Changed
 
