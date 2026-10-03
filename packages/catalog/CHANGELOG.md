@@ -4,23 +4,26 @@
 
 ### Added
 
-- Fixed HTTP 400 "This model doesn't support the image field for user messages" when an OpenAI model on a custom Bedrock Converse provider reads an image through a tool ([#14122](https://github.com/can1357/oh-my-pi/pull/14122) by [@nick-maderight](https://github.com/nick-maderight))
-- `openaiCodexModelManagerOptions` accepts `baseUrl`, so Codex discovery can list a Codex-compatible gateway's models; the discovery cache is kept per endpoint, and the official endpoint keeps its existing cache ([#13832](https://github.com/can1357/oh-my-pi/pull/13832) by [@Lynricsy](https://github.com/Lynricsy))
-- Exposed the `max` reasoning effort tier for Muse Spark 1.3 contributor models on the Meta and Muse Code providers.
+- Added support for listing models from Codex-compatible gateways through openaiCodexModelManagerOptions.baseUrl, with discovery caches isolated per endpoint.
+- Exposed the max reasoning-effort tier for Muse Spark 1.3 contributor models on Meta and Muse Code providers.
+
+### Changed
+
+- Added full configurable reasoning-effort ladders for ClinePass DeepSeek V4.1 Flash Free and Muse Spark 1.3 Contributor Free models.
+- Recognize bare and provider-qualified k3 and k3-256k selectors as Kimi K3, enabling K3-specific catalog policies and replace-edit fallback behavior while preserving explicit edit-mode overrides.
+- Updated Fireworks model pricing to use Fireworks-specific rates, correcting missing and inaccurate costs for supported models.
+- Updated Fireworks fast-model listings to replace retired models with glm-5.3-fast and kimi-k3-fast; GLM-5.3 Fast now exposes low, high, and max reasoning levels on Fireworks, Baseten, and Vercel AI Gateway.
 
 ### Fixed
 
-- Fixed local Ollama thinking models (e.g. Gemma 4) still reasoning when thinking is turned off, which made session titles take 10+ seconds
-- OpenCode Go's LongCat 2.5 Preview offers no unsupported effort levels and can turn reasoning off; Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
-- Fixed Claude Opus 5.5 on the Anthropic API and Cloudflare AI Gateway failing with `Invalid 'signature' in 'thinking' block ... bound to a different conversation` after tools or the system prompt changed mid-session; requests now send `thinking.block_binding.prefix_mismatch_behavior: "drop_block"` like Fable 5.1 and Sonnet 5.5 ([#14167](https://github.com/can1357/oh-my-pi/issues/14167))
-- Fixed Cursor Grok 4.5/4.6 model ids flipping between `cursor-grok-4.6` and `grok-4.6` across runs, which made fallback chains and role settings intermittently reference an unknown model; saved `cursor/grok-4.5`/`cursor/grok-4.6` (and `-fast`) selectors and `modelOverrides` entries now apply to the stable ids ([#14164](https://github.com/can1357/oh-my-pi/issues/14164))
-- Added full reasoning effort ladders to ClinePass DeepSeek V4.1 Flash Free and Muse Spark 1.3 Contributor Free models so thinking levels can be configured ([#14132](https://github.com/can1357/oh-my-pi/pull/14132) by [@hanumanji198586](https://github.com/hanumanji198586)).
-- Recognized bare and provider-qualified `k3` and `k3-256k` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides ([#14098](https://github.com/can1357/oh-my-pi/pull/14098) by [@NaC-L](https://github.com/NaC-L)).
-- Fixed Fireworks model prices taken from other hosts or missing: discovered and bundled Fireworks models now use Fireworks' own models.dev prices, so `ember-1`, `nemotron-3-ultra-nvfp4`, `nemotron-lightning-3.5-30b-a3b`, and `qwen3.8-2.4t-a95b` no longer show as free and the costs of `deepseek-v4.1-flash`, `gpt-oss-120b`, `inkling`, and `qwen3.8-max` are corrected ([#14069](https://github.com/can1357/oh-my-pi/pull/14069) by [@alphastorm](https://github.com/alphastorm))
-- Fixed Fireworks Fast models failing with HTTP 404: the retired `kimi-k2.6-fast`, `kimi-k2.7-code-fast`, and `glm-5.1-fast` are replaced by `glm-5.3-fast` and `kimi-k3-fast`, and GLM-5.3 Fast on Fireworks, Baseten, and Vercel AI Gateway now offers GLM-5.3's `low`/`high`/`max` thinking levels ([#14067](https://github.com/can1357/oh-my-pi/pull/14067) by [@alphastorm](https://github.com/alphastorm))
-- Fixed `google-antigravity/gemini-3.1-flash-image` being treated as a chat model, so it now works in the `image` role and image fallback chains instead of warning that the chain does not resolve to a compatible model ([#13883](https://github.com/can1357/oh-my-pi/pull/13883) by [@eggpeat](https://github.com/eggpeat)).
-- Fixed GitHub Copilot base models showing a ~1M context window alongside their `-1m` sibling when Copilot's billed default tier overlaps the long-context tier; the base model now uses Copilot's reported default prompt budget ([#13912](https://github.com/can1357/oh-my-pi/issues/13912))
-- Fixed OpenAI GPT-5+/o-series and Claude Opus 4.7+, Sonnet/Fable/Mythos 5+ being marked as accepting sampling parameters when served over Amazon Bedrock, Google, Devin, or an OpenAI-compatible gateway such as OpenRouter: the `supports-sampling-params` axis now applies to every compat record, and the `openai` and `anthropic` class rules set it to `false` for those lines on every provider. An explicit `compat.supportsSamplingParams` override still wins ([#13636](https://github.com/can1357/oh-my-pi/pull/13636) by [@srobroek](https://github.com/srobroek)).
+- Fixed image input for OpenAI models used through custom Amazon Bedrock Converse providers when images are read through tools.
+- Fixed local Ollama thinking models continuing to reason when thinking was disabled, reducing delays such as slow session-title generation.
+- Fixed reasoning-level availability for OpenCode Go models so unsupported levels are no longer offered and reasoning can be disabled where supported.
+- Fixed Anthropic-compatible Claude Opus 5.5 sessions failing after tool use or system-prompt changes.
+- Fixed Cursor Grok 4.5 and 4.6 model selectors and overrides intermittently resolving to inconsistent model IDs.
+- Fixed Google Antigravity Gemini 3.1 Flash Image being recognized as an image-capable model for image roles and fallback chains.
+- Fixed GitHub Copilot base models reporting an incorrect long-context window when a separate -1m model is available.
+- Fixed newer OpenAI and Anthropic model families being incorrectly marked as accepting sampling parameters when accessed through compatible providers such as Amazon Bedrock, Google, Devin, or OpenRouter; explicit compatibility overrides continue to take precedence.
 
 ## [18.5.0] - 2026-10-03
 

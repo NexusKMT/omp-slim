@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed tab adoption stalling when Chrome has discarded background tabs ([#13375](https://github.com/can1357/oh-my-pi/pull/13375) by [@jasonharrison](https://github.com/jasonharrison))
+- Fixed tab adoption stalling when Chrome discards background tabs.
 
 ## [18.3.1] - 2026-09-25
 

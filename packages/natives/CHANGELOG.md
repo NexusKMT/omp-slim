@@ -4,10 +4,10 @@
 
 ### Fixed
 
-- Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
-- Fixed `setValue` failing on macOS date and time controls such as Calendar's date pickers: an ISO-8601 date or date-time is now written as a date and read back, and any other text is refused naming the accepted forms ([#13660](https://github.com/can1357/oh-my-pi/pull/13660) by [@will-bogusz](https://github.com/will-bogusz)).
-- Fixed computer use `setValue` refusing macOS popup buttons (such as a Save sheet's File Format): it now chooses the option with that title in one call and confirms it, or throws listing the available options ([#13658](https://github.com/can1357/oh-my-pi/pull/13658) by [@will-bogusz](https://github.com/will-bogusz))
-- Fixed macOS `win.ax()`, element snapshots, and `attributes()` showing checkbox and radio values as `<CFNumber 0x…>` debug text and radio-group values as changing `<AXUIElement 0x…>` pointers; numbers now read as numbers and element values as the referenced element's title ([#13652](https://github.com/can1357/oh-my-pi/issues/13652)).
+- Fixed macOS computer-use scrolling so takeover and desktop scroll actions move iPhone Mirroring and other pixel-forwarding windows reliably, with smooth mouse-like wheel steps.
+- Fixed macOS computer-use value entry for date and time controls, including Calendar date pickers, with support for ISO 8601 dates and date-times and clear validation for unsupported formats.
+- Fixed macOS computer-use value entry for popup buttons, allowing options to be selected by title with confirmation and reporting available options when a title is not found.
+- Fixed macOS accessibility values for checkboxes, radio buttons, and radio groups so snapshots, attributes, and window information return usable numbers, titles, and referenced element values instead of debug representations.
 
 ## [18.5.0] - 2026-10-03
 

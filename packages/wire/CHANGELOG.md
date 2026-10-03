@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added support for submitting explicit prompts to live editable composers without simulating keyboard input.
+
 ## [18.4.11] - 2026-10-02
 
 ### Added

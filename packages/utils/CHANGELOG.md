@@ -4,14 +4,13 @@
 
 ### Added
 
-- Added `mathBlockMayCloseAt`, `mathBlockOpenerAt` and `mathBlockCloserIndex` to `math-delimiters`, which tell whether an own-line display block in a growing text could still close, which display opener a line starts, and the first later line that could close it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Added `MathBlockScan` to `math-delimiters`, which finds the own-line display blocks at many offsets of one text in linear time ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Added a `cursorPosition` option to `TerminalQueryResponder` so callers can leave cursor-position reports to a PTY host that answers them itself. ([#13663](https://github.com/can1357/oh-my-pi/pull/13663) by [@Runnin4ik](https://github.com/Runnin4ik))
-- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment ([#13629](https://github.com/can1357/oh-my-pi/pull/13629) by [@sjawhar](https://github.com/sjawhar)).
+- Added utilities for detecting and scanning own-line display-math blocks in growing text, including identifying possible openers and closers efficiently.
+- Added an option to `TerminalQueryResponder` that lets PTY hosts provide cursor-position reports themselves.
+- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment.
 
 ### Fixed
 
-- Fixed the in-house `marked` lexer dropping the text in front of a U+2028 or U+2029 separator on its line ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed the Markdown lexer dropping text preceding U+2028 or U+2029 line-separator characters.
 
 ## [18.5.0] - 2026-10-03
 

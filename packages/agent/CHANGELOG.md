@@ -4,19 +4,18 @@
 
 ### Added
 
-- Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail))
+- Added provider-reported usage cost, the unnormalized provider ID, and the requested model ID to CostEstimatorContext, allowing cost estimators to use the cost already recorded for a request instead of recomputing it from token counts.
 
 ### Changed
 
-- `readToolSupersedeKey()` now keys `:raw` and `:conflicts` reads as `path\u0001selector`, so a bare-path read no longer supersedes them; a failed result now supersedes only older failed results of its key ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+- Improved tool-result supersession so path reads with selectors are tracked independently from bare-path reads, while failed results supersede only earlier failed results for the same key.
 
 ### Fixed
 
-- Fixed parallel tool calls that arrive under a reused or empty tool-call id running their sibling's arguments and merging results — each call now executes and reports its own payload ([#13735](https://github.com/can1357/oh-my-pi/pull/13735) by [@yingliang-zhang](https://github.com/yingliang-zhang))
-- Fixed completed tool calls being skipped and retried when a provider stream ended with a transient read error; half-streamed calls from that turn are now discarded ([#13847](https://github.com/can1357/oh-my-pi/pull/13847) by [@GabrielCoelhoCruz](https://github.com/GabrielCoelhoCruz))
-- Added the optional `supersedeComplete` hook (`SupersedeCompleteFn`) to `PruneConfig` and `SupersedePruneConfig`: a selector-free result supersedes selector-carrying results of its key only when the hook reports it complete ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
-- Fixed code the agent had already read disappearing from context when a later read of the same file returned only a summary, a truncated page, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
-- Fixed intent tracing stripping a tool's own `i` argument and reordering its schema for tools that declare `i` as a real parameter ([#13762](https://github.com/can1357/oh-my-pi/pull/13762) by [@jchanghong023](https://github.com/jchanghong023)).
+- Fixed parallel tool calls with reused or empty IDs executing with another call’s arguments or merging results; each call now executes and reports its own payload.
+- Fixed completed tool calls being retried after a transient provider-stream read error; incomplete calls from the affected turn are now discarded.
+- Fixed previously read code being removed from context when a subsequent read returned a summary, truncated content, or an error.
+- Fixed intent tracing for tools that define i as a real argument, preserving the argument and its declared schema order.
 
 ## [18.4.11] - 2026-10-02
 

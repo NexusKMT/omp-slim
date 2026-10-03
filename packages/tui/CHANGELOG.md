@@ -4,46 +4,30 @@
 
 ### Added
 
-- Added a `Rebuilding…` notice for tmux resize rebuilds large enough to take noticeable time; quick rebuilds no longer flash it
-- Added display of subagent completion percent in agent tree, task, and wait views
-- Added `writeTerminalSequence()`, which writes an out-of-band escape sequence (window title, clipboard, notification) through the active terminal's ordered output path, falls back to stdout when no terminal is active, and writes nothing from a worker thread.
+- Added native terminal support for submitting explicit composer prompts atomically, preserving displaced drafts and attachments for local recall.
+- Added progress percentages to subagent entries in the agent tree, task, and wait views.
+- Added a `Rebuilding…` indicator for lengthy tmux resize redraws without flashing it for quick updates.
+- Added `writeTerminalSequence()` for sending supported terminal escape sequences through the active terminal output stream, with stdout fallback when no terminal is active.
 
 ### Changed
 
-- `PI_TUI_WRITE_LOG` now records an OSC 52 clipboard write as its payload length instead of the clipboard contents.
+- Clipboard payloads are now represented by their length in `PI_TUI_WRITE_LOG` rather than by their contents.
 
 ### Fixed
 
-- Narrow `/models` layouts retain the scope sidebar while model rows drop metadata and truncate names as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
-- Fixed `Markdown` crashing on themes without `symbols`, such as the upstream pi-tui `MarkdownTheme` that legacy extensions build; missing symbols now fall back to the active theme's set ([#14161](https://github.com/can1357/oh-my-pi/pull/14161) by [@jaredlyon](https://github.com/jaredlyon))
-- Fixed model hub role assignment offering models the role can't use after switching providers ([#12692](https://github.com/can1357/oh-my-pi/issues/12692)).
-- Fixed extra terminal output during tmux rebuilds by compacting padding and avoiding redundant row erases
-- Fixed sluggish pane zoom and resize responses by restoring the 120 ms settle window while keeping tmux rebuilds hidden and recovering history after rapid shrink/grow changes ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed long transcripts visibly scrolling past during tmux zoom and unzoom in Rebuild mode when synchronized output is supported
-- Fixed rapid pane and window resize events repeatedly clearing and replaying the transcript; changes within the settle window now share one repaint ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed a resize drag that ends at its starting size (for example, dragging a tmux pane out and back) leaving duplicated transcript rows and a doubled status line above the repainted screen ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed a large resize (such as zooming or unzooming a tmux pane) flashing the stale screen once before the transcript is redrawn; the settled redraw now replaces the resize frame in a single step ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed unnecessary transcript rebuilds when a pane only grows taller without changing width ([#13661](https://github.com/can1357/oh-my-pi/pull/13661) by [@rath](https://github.com/rath))
-- Fixed blank space below the input and missing transcript rows when rapidly increasing a tmux pane's height; shrink/grow bursts in Rebuild mode also restore clipped history
-- Fixed multiline paste on Windows inserting `[13;28;13;1;0;1_`-style codes instead of line breaks ([#14065](https://github.com/can1357/oh-my-pi/issues/14065))
-- Fixed bracketed-paste markers appearing in the composer when Windows sends paste delimiters as key records ([#14100](https://github.com/can1357/oh-my-pi/issues/14100)).
-- Fixed terminal notifications occasionally garbling the screen with stray escape-code fragments while output was streaming.
-- Detected the Monstar terminal (`TERM=monstar`, or `monstar` as the tmux client terminal type) with the Ghostty-level rendering it had before it changed `TERM`: Kitty graphics with Unicode placeholders, OSC 8 hyperlinks, synchronized output, styled underlines, and the OSC 9;4 progress keepalive. Monstar desktop notifications use OSC 9, so they focus the Monstar window when you click them.
-- Agent Hub transcripts with assistant messages lacking usage or cost now open instead of crashing ([#13844](https://github.com/can1357/oh-my-pi/issues/13844))
-- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
-- Fixed fenced diff blocks in ask questions losing their block layout; added and removed lines now render separately with diff highlighting ([#13817](https://github.com/can1357/oh-my-pi/pull/13817) by [@jasonharrison](https://github.com/jasonharrison)).
-- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line ([#13792](https://github.com/can1357/oh-my-pi/pull/13792) by [@NaC-L](https://github.com/NaC-L)).
-
-### Removed
-
-- Fixed long Markdown messages sometimes showing raw display math, a visible HTML comment, or a code block split in two ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown keeping raw `$$` math or an unresolved reference link after the message finished, when a display-math block contained blank lines or a link definition sat inside a quote or list ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed long Markdown messages restarting a numbered list, or showing an extra blank row, at a line of no-break spaces ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed a bare `\begin{align}` math block after a blank line rendering without the blank row above it ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed a finished Markdown message showing an extra blank row where an orphan closing fence was removed ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown showing a just-completed bare `\begin{align}` block, or `_` emphasis that closed in the latest chunk, as raw text until the next line arrived ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed streamed Markdown whose text was replaced rather than extended showing an extra blank row, or merging a new list item into the list above, through the finished message ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
-- Fixed the space after inline code, emphasis or math that starts a line after a hard line break disappearing, so `` `c` b`` rendered as `cb` ([#13839](https://github.com/can1357/oh-my-pi/pull/13839) by [@sjawhar](https://github.com/sjawhar)).
+- Fixed pending clipboard-image attachments being bypassed when subsequent input or native prompts were submitted before loading completed.
+- Improved narrow `/models` layouts by retaining the scope sidebar while simplifying and truncating model rows as needed.
+- Fixed Markdown rendering with themes that do not define their own symbol set; the active theme's symbols are now used as a fallback.
+- Fixed model role assignment showing models that are unavailable for the selected provider.
+- Improved tmux resize, zoom, and rebuild behavior, including smoother coalesced redraws, reduced visual artifacts and extra output, correct transcript restoration after rapid size changes, and preservation of history when panes are resized.
+- Fixed multiline paste on Windows inserting escape-code fragments instead of line breaks, and prevented bracketed-paste markers from appearing in the composer.
+- Fixed terminal notifications occasionally corrupting the screen with stray escape-code fragments during streaming output.
+- Added rendering and notification compatibility for Monstar terminals, including Kitty graphics, hyperlinks, synchronized output, styled underlines, progress keepalives, and Monstar-focused desktop notifications.
+- Fixed Agent Hub transcripts crashing when assistant messages do not include usage or cost data.
+- Fixed idle terminal activity notifications while preserving bracketed-paste recovery during input and rendering.
+- Fixed diff blocks in ask questions losing their layout; additions and removals now retain separate diff highlighting.
+- Fixed duplicate ASCII Plan, Prewalk, and Goal labels in the status line.
+- Improved Markdown rendering for long and streamed messages, including display math, fenced code, reference links, lists, whitespace, emphasis, and line breaks, so completed content no longer shows raw markup, misplaced blank lines, or broken block layout.
 
 ## [18.5.0] - 2026-10-03
 
@@ -3031,14 +3015,4 @@ Initial release under @oh-my-pi scope. See previous releases at [badlogic/pi-mon
 - Crash in `visibleWidth()` and grapheme iteration when encountering undefined code points ([#372](https://github.com/badlogic/pi-mono/pull/372) by [@HACKE-RC](https://github.com/HACKE-RC))
 - ZWJ emoji sequences (rainbow flag, family, etc.) now render with correct width instead of being split into multiple characters ([#369](https://github.com/badlogic/pi-mono/pull/369) by [@nathyong](https://github.com/nathyong))
 
-## [0.29.0] - 2025-12-25
-
-### Added
-
-- **Auto-space before pasted file paths**: When pasting a file path (starting with `/`, `~`, or `.`) and the cursor is after a word character, a space is automatically prepended for better readability. Useful when dragging screenshots from macOS. ([#307](https://github.com/badlogic/pi-mono/pull/307) by [@mitsuhiko](https://github.com/mitsuhiko))
-- **Word navigation for Input component**: Added Ctrl+Left/Right and Alt+Left/Right support for word-by-word cursor movement. ([#306](https://github.com/badlogic/pi-mono/pull/306) by [@kim0](https://github.com/kim0))
-- **Full Unicode input**: Input component now accepts Unicode characters beyond ASCII. ([#306](https://github.com/badlogic/pi-mono/pull/306) by [@kim0](https://github.com/kim0))
-
-### Fixed
-
-- **Readline-style Ctrl+W**: Now skips trailing whitespace before deleting the preceding word, matching standard readline behavior. ([#306](https://github.com/badlogic/pi-mono/pull/306) by [@kim0](https://github.com/kim0))
+Older entries are archived in [packages/tui/CHANGELOG.md@bac7e83b5b0e](https://github.com/can1357/oh-my-pi/blob/bac7e83b5b0eb86c909c17830a6666efc359578b/packages/tui/CHANGELOG.md).

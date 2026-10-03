@@ -4,13 +4,12 @@
 
 ### Changed
 
-- Upgraded `fastembed` to `3.0.0`: local embedding models now download from Hugging Face (`Qdrant/*`) into `<cache>/<Qdrant_repo>/` and interrupted downloads resume per file; existing models are fetched once more into the new layout, producing the same vectors ([#13916](https://github.com/can1357/oh-my-pi/issues/13916))
+- Upgraded local embedding support to fastembed 3.0.0. Models now download from Hugging Face into the updated cache layout, with interrupted downloads resuming automatically; existing models are migrated on first use while producing the same vectors.
 
 ### Fixed
 
-- Fixed `enhancedRecall` answering a short query with the cached results of an unrelated longer query that contained most of its words ([#13823](https://github.com/can1357/oh-my-pi/pull/13823) by [@sjawhar](https://github.com/sjawhar))
-- Fixed local embeddings failing with `TAR_BAD_ARCHIVE` on a fresh model cache once Qdrant's `storage.googleapis.com/qdrant-fastembed` bucket stops serving `fastembed@2` downloads ([#13916](https://github.com/can1357/oh-my-pi/issues/13916))
-- Fixed local embeddings failing on Linux ARM64 with `Cannot find module '@anush008/tokenizers-linux-arm64-gnu'`; the on-demand fastembed runtime now installs a tokenizers build with ARM64 bindings and reinstalls existing broken runtimes ([#14083](https://github.com/can1357/oh-my-pi/issues/14083))
+- Fixed enhanced recall returning cached results from an unrelated longer query when answering a shorter query.
+- Fixed local embedding setup on fresh caches and Linux ARM64, including compatibility with current model downloads and ARM64 tokenization support.
 
 ## [18.4.4] - 2026-09-29
 
