@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed local Ollama thinking models (e.g. Gemma 4) still reasoning when thinking is turned off, which made session titles take 10+ seconds
+
 ## [18.5.0] - 2026-10-03
 
 ### Added
