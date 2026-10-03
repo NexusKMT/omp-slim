@@ -178,10 +178,11 @@ await field.press("Shift+ArrowLeft");
 const shifted = await tab.evaluate(() => { const t = document.querySelector("#field"); return [t.selectionStart, t.selectionEnd]; });
 await field.press("${SHORTCUT}+a");
 await field.type("x");
+await (await tab.waitFor("#paste")).press("a", { text: "é" });
 const inner = await tab.frame("#inner");
 await inner.press("${SHORTCUT}+a", { selector: "#deep" });
 const frame = await inner.evaluate(() => { const t = document.querySelector("#deep"); return [t.selectionStart, t.selectionEnd]; });
-return { page, spelled, shifted, replaced: await tab.value("#field"), frame };`,
+return { page, spelled, shifted, replaced: await tab.value("#field"), frame, optioned: await tab.value("#paste") };`,
 					timeout: 20,
 				},
 				context,
@@ -192,6 +193,7 @@ return { page, spelled, shifted, replaced: await tab.value("#field"), frame };`,
 				shifted: [2, 3],
 				replaced: "x",
 				frame: [0, 11],
+				optioned: "é",
 			});
 		} finally {
 			await prelude.invoke({ action: "close", name: COMBO_TAB_NAME, kill: true }, context).catch(() => undefined);

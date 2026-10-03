@@ -678,10 +678,12 @@ export function toActionableHandle(
 		// through `pressKey` so combos and the macOS editing commands work on handles too.
 		const focus = interactive.focus;
 		if (focus) {
-			interactive.press = async key => {
+			const press: ElementHandle["press"] = async (key, options) => {
 				await focus();
-				await pressKey(enriched.frame.page(), key as string);
+				await pressKey(enriched.frame.page(), key, options);
 			};
+			// Erased to the shared raw-method shape, like `methods` above.
+			interactive.press = press as RawHandleMethod;
 		}
 		originals = { interactive, type: enriched.type.bind(enriched) };
 		enriched[RAW_HANDLE_METHODS] = originals;

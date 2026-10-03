@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import type { ElementHandle, KeyInput, MouseButton, Page } from "puppeteer-core";
+import type { ElementHandle, KeyInput, KeyPressOptions, MouseButton, Page } from "puppeteer-core";
 import { throwIfAborted } from "../tool-errors";
 import { splitKeyCombo, ternKey } from "./tern/keys";
 
@@ -521,10 +521,11 @@ function editingCommand(keys: readonly string[]): string | undefined {
 
 /**
  * Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Meta+a`): the leading
- * keys go down in order, the last key is pressed, then the leading keys are released
- * in reverse.
+ * keys go down in order, the last key is pressed with `options`, then the leading
+ * keys are released in reverse.
  */
-export async function pressKey(page: Page, combo: string): Promise<void> {
+export async function pressKey(page: Page, combo: string, options?: KeyPressOptions): Promise<void> {
+	// Unchecked on purpose: puppeteer validates each name and throws `Unknown key: "…"`.
 	const keys = splitKeyCombo(combo) as KeyInput[];
 	const key = keys[keys.length - 1]!;
 	const held = keys.slice(0, -1);
@@ -535,7 +536,11 @@ export async function pressKey(page: Page, combo: string): Promise<void> {
 			await page.keyboard.down(modifier);
 			pressed.push(modifier);
 		}
-		await page.keyboard.press(key, command ? { commands: [command] } : undefined);
+		// puppeteer marks `commands` @deprecated ("automatically handled"), but nothing in
+		// it names the macOS editing commands, and it still forwards the field to
+		// Input.dispatchKeyEvent. The darwin tests in browser-interactions.test.ts are the
+		// canary if a puppeteer upgrade drops it; Linux CI never sends a command.
+		await page.keyboard.press(key, command ? { ...options, commands: [command] } : options);
 	} finally {
 		for (const modifier of pressed.reverse()) await page.keyboard.up(modifier);
 	}
