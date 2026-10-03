@@ -106,6 +106,10 @@
 - Fixed project configuration from `~/.omp` being incorrectly applied to unrelated working directories under the user's home directory.
 - Fixed `omp update` failing on standalone-binary installs when npm advertised a version whose GitHub release was never published; the updater now installs the newest published release instead ([#12913](https://github.com/can1357/oh-my-pi/issues/12913)).
 
+### Fixed
+
+- Fixed disposed SDK sessions retaining spilled tool output in memory and accepting new artifact writes ([#14107](https://github.com/can1357/oh-my-pi/pull/14107) by [@iliaal](https://github.com/iliaal)).
+
 ## [18.4.10] - 2026-10-02
 
 ### Added
