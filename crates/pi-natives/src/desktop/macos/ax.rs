@@ -10,7 +10,8 @@ use std::{
 
 use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-	CFArray, CFBoolean, CFRange, CFRetained, CFString, CFType, CGPoint, CGSize, Type,
+	CFArray, CFBoolean, CFDate, CFRange, CFRetained, CFString, CFTimeZone, CFType, CGPoint, CGSize,
+	Type,
 };
 
 use super::{
@@ -20,7 +21,7 @@ use super::{
 		error::{CoreResult, DesktopError},
 		types::DesktopWindow,
 	},
-	process, skylight,
+	date, process, skylight,
 };
 
 const AX_TIMEOUT_SECONDS: f32 = 2.0;
@@ -483,6 +484,9 @@ impl AxBackend for MacAx {
 				"AXValue is not settable; no typing fallback was attempted",
 			));
 		}
+		if let Some(current) = copy_date(element, "AXValue") {
+			return set_date_value(element, value, current);
+		}
 		skylight::with_background_guard(element_pid(element)?, || {
 			set_string_value(element, "AXValue", value)?;
 			verify_text_value(element, value)
@@ -633,6 +637,44 @@ fn verify_text_value(element: &AXUIElement, expected: &str) -> CoreResult<()> {
 			 be partial, inspect the target before retrying; no typing fallback was attempted",
 		))
 	}
+}
+
+/// Date and time controls publish `AXValue` as a `CFDate` and refuse the same
+/// date written as a `CFString`, so an ISO-8601 value is written as a `CFDate`
+/// in the system time zone the control displays, then read back as one.
+fn set_date_value(element: &AXUIElement, text: &str, current: f64) -> CoreResult<()> {
+	// CF caches the system zone per process; the target app follows changes to it.
+	CFTimeZone::reset_system();
+	let zone = CFTimeZone::system()
+		.ok_or_else(|| DesktopError::ax_failed("the system time zone is unavailable"))?;
+	let offset_at = |at: f64| zone.seconds_from_gmt(at) as i64;
+	let Some(request) = date::parse(text) else {
+		return Err(DesktopError::ax_failed(format!(
+			"AXValue is a date and {text:?} is not ISO-8601: write {}; it reads {} now; nothing was \
+			 written",
+			date::ACCEPTED_FORMS,
+			date::format_local(current, offset_at),
+		)));
+	};
+	let target = request
+		.absolute_time(current, offset_at)
+		.map_err(|reason| DesktopError::ax_failed(format!("{reason}; nothing was written")))?;
+	let value = CFDate::new(None, target)
+		.ok_or_else(|| DesktopError::ax_failed("creating the CFDate to write failed"))?;
+	let attribute = CFString::from_str("AXValue");
+	skylight::with_background_guard(element_pid(element)?, || {
+		// SAFETY: The element, attribute and date remain retained for the setter.
+		let error = unsafe { element.set_attribute_value(&attribute, &value) };
+		ax_result(error, "setting AXValue to a date failed")?;
+		match copy_date(element, "AXValue") {
+			Some(actual) if (actual - target).abs() < 1e-3 => Ok(()),
+			actual => Err(DesktopError::ax_failed(format!(
+				"AX accepted the date write but the control reads {} instead of {}",
+				actual.map_or_else(|| "no date".to_owned(), |at| date::format_local(at, offset_at)),
+				date::format_local(target, offset_at),
+			))),
+		}
+	})
 }
 
 /// Inserts into a native field only when its focused element belongs to this
@@ -801,6 +843,14 @@ fn copy_attribute_result(
 
 fn copy_attribute(element: &AXUIElement, attribute: &str) -> Option<CFRetained<CFType>> {
 	copy_attribute_result(element, attribute).ok().flatten()
+}
+
+/// The attribute's value as a `CFAbsoluteTime`, when it is a `CFDate`.
+fn copy_date(element: &AXUIElement, attribute: &str) -> Option<f64> {
+	let value = copy_attribute(element, attribute)?
+		.downcast::<CFDate>()
+		.ok()?;
+	Some(value.absolute_time())
 }
 
 fn copy_string(element: &AXUIElement, attribute: &str) -> Option<String> {

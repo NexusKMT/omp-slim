@@ -42,6 +42,9 @@
 ### Fixed
 
 - Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
+### Fixed
+
+- Fixed `setValue` failing on macOS date and time controls such as Calendar's date pickers: an ISO-8601 date or date-time is now written as a date and read back, and any other text is refused naming the accepted forms ([#13660](https://github.com/can1357/oh-my-pi/pull/13660) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.4] - 2026-09-29
 
