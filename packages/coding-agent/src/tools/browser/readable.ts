@@ -98,50 +98,58 @@ const SKIP_TAGS: Readonly<Record<string, true>> = { SCRIPT: true, STYLE: true, N
  * `<pre>` keeps its indentation and blank lines.
  */
 function blockText(root: DomNs.Node): string {
-	let out = "";
+	// Parts are never empty, so the last part's last character is the output's.
+	// Only the last parts are ever rewritten, which keeps the walk linear.
+	const parts: string[] = [];
 	let pendingBreaks = 0;
-	let pendingTab = false;
-	const emit = (text: string): void => {
-		if (!text) return;
+	let cellsInRow = 0;
+	const append = (text: string): void => {
 		if (pendingBreaks > 0) {
-			if (out) out = `${out.replace(/[ \t]+$/, "")}${"\n".repeat(pendingBreaks)}`;
+			while (parts.length > 0) {
+				const last = parts[parts.length - 1]!.replace(/[ \t]+$/, "");
+				if (last) {
+					parts[parts.length - 1] = last;
+					parts.push("\n".repeat(pendingBreaks));
+					break;
+				}
+				parts.pop();
+			}
 			pendingBreaks = 0;
-		} else if (pendingTab && out && !out.endsWith("\n")) {
-			out = `${out.replace(/ +$/, "")}\t`;
 		}
-		pendingTab = false;
-		out += text;
+		parts.push(text);
 	};
 	const walk = (node: DomNs.Node, pre: boolean): void => {
 		// 3 = TEXT_NODE, 1 = ELEMENT_NODE
 		if (node.nodeType === 3) {
-			const text = node.textContent ?? "";
-			if (pre) {
-				emit(text);
-				return;
+			let text = node.textContent ?? "";
+			if (!pre) {
+				text = text.replace(/\s+/g, " ");
+				const last = parts[parts.length - 1];
+				if (pendingBreaks > 0 || !last || " \n\t".includes(last.at(-1)!)) text = text.replace(/^ /, "");
 			}
-			const collapsed = text.replace(/\s+/g, " ");
-			const atLineStart = !out || pendingBreaks > 0 || pendingTab || /[ \n\t]$/.test(out);
-			emit(atLineStart ? collapsed.replace(/^ /, "") : collapsed);
+			if (text) append(text);
 			return;
 		}
 		if (node.nodeType !== 1) return;
 		const tag = (node as DomNs.Element).tagName.toUpperCase();
 		if (node !== root && SKIP_TAGS[tag]) return;
 		if (tag === "BR") {
-			emit("\n");
+			if (parts.length > 0) pendingBreaks++;
 			return;
 		}
+		if (tag === "TR") cellsInRow = 0;
+		if (tag === "TD" || tag === "TH") {
+			// One tab per cell boundary, so empty cells keep later values in their column.
+			if (cellsInRow > 0) append("\t");
+			cellsInRow++;
+		}
 		const breaks = tag === "P" ? 2 : BLOCK_TAGS[tag] ? 1 : 0;
-		const cell = tag === "TD" || tag === "TH";
 		pendingBreaks = Math.max(pendingBreaks, breaks);
-		if (cell) pendingTab = true;
 		for (const child of node.childNodes) walk(child, pre || tag === "PRE");
 		pendingBreaks = Math.max(pendingBreaks, breaks);
-		if (cell) pendingTab = true;
 	};
 	walk(root, false);
-	return out.replace(/^\n+/, "").replace(/\s+$/, "");
+	return parts.join("").trimEnd();
 }
 
 /**
@@ -200,7 +208,7 @@ export async function extractReadableFromHtml(
 	for (const el of candidates) {
 		if (!el) continue;
 		const innerHTML = el.innerHTML?.trim();
-		const textContent = blockText(el);
+		const textContent = format === "text" ? blockText(el) : el.textContent?.trim();
 		if (!innerHTML || !textContent) continue;
 		const result = await toReadableResult(
 			url,

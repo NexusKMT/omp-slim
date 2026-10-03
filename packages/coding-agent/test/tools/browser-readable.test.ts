@@ -96,11 +96,13 @@ describe("browser readable extraction", () => {
 	});
 
 	it("keeps rows, cells and inline spacing in fallback text and drops scripts and styles", async () => {
-		const html = `<main><style>p { color: red }</style><h1>Fares</h1><p><span>One </span> <b> way.</b></p><table><tr><th>Zone</th><th>Price</th></tr><tr><td>1</td><td>$2.40</td></tr></table><script>track()</script></main>`;
+		const html = `<main><style>p { color: red }</style><h1>Fares</h1><p><span>One </span> <b> way.</b></p><table><tr><th>Zone</th><th>Day</th><th>Price</th></tr><tr><td></td><td>Sat</td><td>$2.40</td></tr><tr><td>1</td><td></td><td>$2.40</td></tr></table><p>Ends here <br></p><p><br></p><p>Last</p><script>track()</script></main>`;
 
 		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "main" });
 
-		expect(result?.text).toBe("Fares\n\nOne way.\n\nZone\tPrice\n1\t$2.40");
+		expect(result?.text).toBe(
+			"Fares\n\nOne way.\n\nZone\tDay\tPrice\n\tSat\t$2.40\n1\t\t$2.40\n\nEnds here\n\n\nLast",
+		);
 	});
 
 	it("returns the text of a selected script element", async () => {
