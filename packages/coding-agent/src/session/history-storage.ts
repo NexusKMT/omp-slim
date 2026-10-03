@@ -94,6 +94,8 @@ export class HistoryStorage {
 	static #instance?: HistoryStorage;
 	#sessionResolver?: () => string | undefined;
 	#addListener?: () => void;
+	#errorListener?: (error: unknown) => void;
+	#writeFailureReported = false;
 
 	// Prepared statements
 	#upsertRowStmt: Statement;
@@ -215,12 +217,18 @@ ON CONFLICT(prompt) DO UPDATE SET
 		this.#addListener = listener;
 	}
 
+	/** Register a callback for the first failed write in each outage, reset by a successful write. */
+	setErrorListener(listener: (error: unknown) => void): void {
+		this.#errorListener = listener;
+	}
+
 	/**
 	 * Stores a prompt, replaces its provenance with the latest submission, and
 	 * bumps its use count on resubmission.
 	 * The write is synchronous: prompt submission is human-paced, not a hot
-	 * path, so the row is durable the moment `add()` returns and can never be
-	 * lost to an exit racing a deferred flush. Failures are logged, not thrown.
+	 * path. On success the row is durable the moment `add()` returns and cannot
+	 * be lost to an exit racing a deferred flush. Failures are logged, not thrown;
+	 * the error listener is notified once per outage until a write succeeds.
 	 */
 	add(prompt: string, cwd?: string, sessionId?: string): Promise<void> {
 		const trimmed = normalizePrompt(prompt);
@@ -230,8 +238,13 @@ ON CONFLICT(prompt) DO UPDATE SET
 			this.#insertBatch([{ prompt: trimmed, cwd: cwd ?? undefined, sessionId: session || undefined }]);
 		} catch (error) {
 			logger.error("HistoryStorage add failed", { error: String(error) });
+			if (!this.#writeFailureReported) {
+				this.#writeFailureReported = true;
+				this.#errorListener?.(error);
+			}
 			return Promise.resolve();
 		}
+		this.#writeFailureReported = false;
 		this.#addListener?.();
 		return Promise.resolve();
 	}
