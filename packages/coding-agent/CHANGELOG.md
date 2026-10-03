@@ -100,6 +100,7 @@
 - Fixed `agent://<id>` showing an agent's previous published output as current while that agent runs a follow-up or wake turn; the read now says the output is from the previous run ([#14120](https://github.com/can1357/oh-my-pi/pull/14120) by [@H4vC](https://github.com/H4vC)).
 - Fixed `proc://` listing agents as running when they have no turn in flight; their rows now say the run is stale or already finished, as the `jobs` tool does ([#14120](https://github.com/can1357/oh-my-pi/pull/14120) by [@H4vC](https://github.com/H4vC)).
 - Changed subagents to skip their own builds, tests, and smoke runs and leave verification to the main agent, avoiding CPU spikes from many subagents verifying at once.
+- Fixed user plugins showing as project plugins and requiring `--scope` when `HOME` has a trailing slash or points through a symlink ([#14111](https://github.com/can1357/oh-my-pi/issues/14111)).
 - Fixed `omp update` failing on standalone-binary installs when npm advertised a version whose GitHub release was never published; the updater now installs the newest published release instead ([#12913](https://github.com/can1357/oh-my-pi/issues/12913)).
 - Fixed `collab.autoStart` leaving a session unhosted and missing from `omp collab list` after one failed relay connection; a room the relay never opened is now retried on the relaunch backoff (immediately, then 1 s up to 60 s), and the room that finally opens still publishes generation 1 ([#14112](https://github.com/can1357/oh-my-pi/pull/14112) by [@alphastorm](https://github.com/alphastorm)).
 ### Fixed
