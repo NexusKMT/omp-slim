@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed OpenAI Responses sessions (e.g. OpenRouter + Claude) getting stuck in a `400` retry loop after a tool call whose streamed arguments were invalid JSON but repairable: the next request now replays the call with the arguments that were executed instead of dropping it and ending the input on an orphan tool-result note ([#14155](https://github.com/can1357/oh-my-pi/issues/14155)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Fixed
