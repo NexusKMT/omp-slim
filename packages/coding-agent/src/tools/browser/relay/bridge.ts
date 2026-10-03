@@ -802,7 +802,7 @@ export class RelayBridge {
 				// Discarded tabs can stall debugger calls. Retract targets already
 				// announced by Target.setDiscoverTargets so Puppeteer can connect().
 				const tabs = [...this.#tabs.values()].filter(tab => this.#eligible(tab) && !tab.discarded);
-				await Promise.all(tabs.map(tab => this.#ensureAttached(tab, true)));
+				await Promise.all(tabs.map(tab => this.#ensureAttached(tab, { retryAfterDiscard: true })));
 				for (const tab of tabs) {
 					if (!tab.attached || tab.discarded || !this.#eligible(tab)) {
 						// Failed or newly discarded tabs must not hold up connect().
@@ -1104,7 +1104,7 @@ export class RelayBridge {
 			}
 		}
 		if (!hasAutoAttach) return;
-		void this.#ensureAttached(tab, true).then(ok => {
+		void this.#ensureAttached(tab, { retryAfterDiscard: true }).then(ok => {
 			if (!ok) return;
 			if (tab.discarded || !this.#eligible(tab) || this.#tabs.get(tab.tabKey) !== tab) {
 				this.#retractTab(tab);
@@ -1316,7 +1316,7 @@ export class RelayBridge {
 		});
 	}
 
-	async #ensureAttached(tab: TabState, retryAfterDiscard = false): Promise<boolean> {
+	async #ensureAttached(tab: TabState, opts: { retryAfterDiscard?: boolean } = {}): Promise<boolean> {
 		if (tab.discarded) return false;
 		// The extension emits the detach echo before resolving the RPC. Awaiting
 		// prevents a replacement attach racing either operation.
@@ -1327,7 +1327,7 @@ export class RelayBridge {
 		const inst = this.#instances.get(tab.instanceId);
 		if (!inst?.socket) return false;
 		if (tab.attaching) {
-			if (tab.attachCancelled && retryAfterDiscard) tab.retryAttachAfterDiscard = true;
+			if (tab.attachCancelled && opts.retryAfterDiscard) tab.retryAttachAfterDiscard = true;
 			return await tab.attaching;
 		}
 		const generation = tab.attachGeneration;
