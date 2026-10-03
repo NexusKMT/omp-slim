@@ -1545,4 +1545,4 @@
 - Fixed WorkPool children retaining a stale Gemini-formatted `yield` declaration when pooled items were installed or cleared.
 - Preserve effective context and output limits when model overrides change unrelated settings, such as thinking effort levels.
 
-Older entries are archived in [packages\coding-agent\CHANGELOG.md@47b1156699bb](https://github.com/can1357/oh-my-pi/blob/47b1156699bb852a157216acec52ff743d992dca/packages\coding-agent\CHANGELOG.md).
+Older entries are archived in [packages/coding-agent/CHANGELOG.md@47b1156699bb](https://github.com/can1357/oh-my-pi/blob/47b1156699bb852a157216acec52ff743d992dca/packages/coding-agent/CHANGELOG.md).
