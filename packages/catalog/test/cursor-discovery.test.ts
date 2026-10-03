@@ -44,6 +44,9 @@ const FIXTURE_MODEL_IDS = [
 	"kimi-k3-high",
 	"kimi-k3-low",
 	"kimi-k3-max",
+	"k3",
+	"cursor/k3",
+	"CURSOR/K3",
 	"cursor-grok-4.5",
 	"cursor-grok-4.5-fast",
 	"cursor-grok-4.6",
@@ -51,11 +54,14 @@ const FIXTURE_MODEL_IDS = [
 	"composer-2.5",
 	"composer-2.5-fast",
 	// Similar but unverified ids must not inherit image routing.
+	"K3",
 	"composer-3",
 	"composer-2.50",
 	"cursor-grok-5",
 	"grok-code-fast-2",
 	"k3-256k",
+	"cursor/k3-256k",
+	"K3-256K",
 	// Versioned Cursor Grok siblings: the id marks them reasoning.
 	"cursor-grok-4.5-high",
 	"cursor-grok-4.6-xhigh",
@@ -120,6 +126,26 @@ describe("cursor discovery input modalities (issue #4726)", () => {
 		expect(byId.get("cursor-grok-5")?.input).toEqual(["text"]);
 		expect(byId.get("grok-code-fast-2")?.input).toEqual(["text"]);
 		expect(byId.get("k3-256k")?.input).toEqual(["text"]);
+	});
+
+	it("preserves verified K3 aliases without inflating unverified K3 selector capabilities", async () => {
+		const byId = await discover();
+		for (const id of ["kimi-k3-high", "kimi-k3-low", "kimi-k3-max", "k3", "cursor/k3", "CURSOR/K3"]) {
+			const spec = byId.get(id);
+			expect(spec).toBeDefined();
+			if (spec) {
+				expect(buildModel(spec).input).toEqual(["text", "image"]);
+				expect(buildModel(spec).contextWindow).toBe(1_000_000);
+			}
+		}
+		for (const id of ["K3", "k3-256k", "cursor/k3-256k", "K3-256K"]) {
+			const spec = byId.get(id);
+			expect(spec).toBeDefined();
+			if (spec) {
+				expect(buildModel(spec).input).toEqual(["text"]);
+				expect(buildModel(spec).contextWindow).toBe(200_000);
+			}
+		}
 	});
 
 	it("recognizes reference-less Kimi K3 effort variants as reasoning models", async () => {
