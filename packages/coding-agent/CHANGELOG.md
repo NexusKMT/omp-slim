@@ -58,8 +58,8 @@
 - Fixed supervised PTY services receiving an unintended startup keypress.
 - Fixed `bash` commands using `pty: true` missing shell environment variables, and ensured extension-provided environment changes follow session switches correctly.
 - Fixed notes-backed context rollover restoring an outdated parent assignment when reviving a subagent.
-- Fixed the `ida` tool worker failing on every request on Windows.
 - Advisor tool calls now report the advisor as the calling agent to extension tool-call and tool-result handlers.
+- Fixed the IDA integration on Windows: the IDA worker crashed after its first response, and timing out or aborting an IDA request killed the worker instead of interrupting it ([#14186](https://github.com/can1357/oh-my-pi/pull/14186) by [@H4vC](https://github.com/H4vC))
 
 ## [18.5.0] - 2026-10-03
 
