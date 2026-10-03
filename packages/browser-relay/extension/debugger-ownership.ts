@@ -2,7 +2,8 @@
  * `chrome.debugger.getTargets()` reports `attached: true` for any debugger
  * client (DevTools, another extension), not only this one. A command sent
  * through `chrome.debugger.sendCommand` succeeds only on our own attachment,
- * so the probe keeps exactly the tabs this extension can drive.
+ * so the probe keeps exactly the tabs this extension can drive. The browser
+ * process answers it, so a blocked or crashed page doesn't delay the probe.
  */
 export async function ownedDebuggerTabs(
 	targets: ReadonlyArray<{ attached: boolean; tabId?: number }>,

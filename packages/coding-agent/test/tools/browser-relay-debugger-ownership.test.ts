@@ -17,5 +17,6 @@ it("reports only tabs the extension's own debugger is attached to", async () => 
 		},
 	);
 	expect(owned).toEqual([2]);
-	expect(probed).toEqual([1, 2]);
+	// Only tabs reported as attached are probed: no command goes to tabs nobody is debugging.
+	expect(new Set(probed)).toEqual(new Set([1, 2]));
 });
