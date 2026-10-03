@@ -15,7 +15,7 @@
 - Fixed long `/btw` answers in Tern being clipped with no way to scroll: `/btw` now answers in the scrollable BTW history sheet ([#14331](https://github.com/can1357/oh-my-pi/pull/14331) by [@H4vC](https://github.com/H4vC))
 - Fixed `/btw` answers longer than 4 KiB being cut off with `[…truncated]` once they finished ([#14331](https://github.com/can1357/oh-my-pi/pull/14331) by [@H4vC](https://github.com/H4vC))
 - In Tern, Esc puts the BTW history sheet away while an answer keeps streaming (`/btw` reopens it); `x` cancels the answer ([#14331](https://github.com/can1357/oh-my-pi/pull/14331) by [@H4vC](https://github.com/H4vC))
-- Fixed every browser call in relay mode waiting 35 seconds after Chrome quit and then saying the extension "never connected": once the extension has been gone longer than its redial window the call fails at once and says it disconnected
+- Fixed every browser call in relay mode waiting 35 seconds after Chrome quit and then saying the extension "never connected": once the extension has been gone longer than its redial window the call fails at once and says it disconnected ([#14236](https://github.com/can1357/oh-my-pi/pull/14236) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.6.0] - 2026-10-03
 
