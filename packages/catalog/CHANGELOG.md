@@ -11,6 +11,7 @@
 ### Added
 
 - Added `closeModelCache()` (`@oh-my-pi/pi-catalog/model-cache`) to release the shared default `models.db` handle so an agent directory can be deleted on Windows; the next cache access reopens it
+- Fixed HTTP 400 "This model doesn't support the image field for user messages" when an OpenAI model on a custom Bedrock Converse provider reads an image through a tool ([#14122](https://github.com/can1357/oh-my-pi/pull/14122) by [@nick-maderight](https://github.com/nick-maderight))
 
 ## [18.4.11] - 2026-10-02
 
