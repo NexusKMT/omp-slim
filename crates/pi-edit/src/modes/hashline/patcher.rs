@@ -123,15 +123,15 @@ fn mismatch(
 	})
 }
 
-/// Minimum trimmed length for a current-content line to count as targeting
-/// evidence. Short closers (`}`, `});`) repeat everywhere; accepting on
-/// those would let stale anchors through.
+/// Minimum trimmed length, in chars, for a current-content line to count as
+/// targeting evidence. Short closers (`}`, `});`) repeat everywhere; accepting
+/// on those would let stale anchors through.
 const SHIFT_RESCUE_EVIDENCE_MIN_CHARS: usize = 8;
 
-/// One replacement op's anchors plus its payload body.
+/// One replacement op's anchors plus its payload body lines.
 struct ReplaceGroup {
 	anchors: Vec<u32>,
-	body:    String,
+	body:    Vec<String>,
 }
 
 /// Group a section's replacement ops. The parser lowers `PUT a.=b:` to a run
@@ -155,7 +155,7 @@ fn replace_groups(section: &PatchSection) -> Result<Vec<ReplaceGroup>, EditError
 		}
 		if !body.is_empty() && !anchors.is_empty() {
 			anchors.sort_unstable();
-			groups.push(ReplaceGroup { anchors, body: body.join("\n") });
+			groups.push(ReplaceGroup { anchors, body });
 		} else if body.is_empty() && anchors.is_empty() {
 			cursor += 1;
 		}
@@ -243,22 +243,78 @@ fn images_seen(maps: &[VersionMap], line: u32) -> bool {
 	})
 }
 
-/// Body evidence: the op targets the line as currently numbered when its
-/// payload carries that line's content. A stale-numbered op carries the
-/// content of the intended line instead, so this check is what keeps the
-/// rescue from accepting stale anchors.
-fn body_evidences(body: &str, current_line: &str) -> bool {
-	let trimmed = current_line.trim();
-	trimmed.len() >= SHIFT_RESCUE_EVIDENCE_MIN_CHARS && body.contains(trimmed)
+/// Trimmed content of current line `line` when it is long enough to serve as
+/// evidence and occurs exactly once in the file. Repeated content cannot name
+/// which copy an anchor meant: a stale number could image a twin line.
+fn unique_evidence<'a>(current_lines: &[&'a str], line: u32) -> Option<&'a str> {
+	let content = usize::try_from(line)
+		.ok()
+		.and_then(|n| n.checked_sub(1))
+		.and_then(|n| current_lines.get(n))?
+		.trim();
+	if content.chars().count() < SHIFT_RESCUE_EVIDENCE_MIN_CHARS {
+		return None;
+	}
+	let occurrences = current_lines
+		.iter()
+		.filter(|other| other.trim() == content)
+		.count();
+	(occurrences == 1).then_some(content)
+}
+
+fn is_ident_char(c: char) -> bool {
+	c.is_alphanumeric() || c == '_'
+}
+
+/// True when `body_line` carries `evidence` as a token-bounded span: the line
+/// verbatim, or with edits around it (an appended comment, a wrapping call),
+/// but never as the prefix of a longer identifier or number (`foo(bar)` is
+/// not carried by `foo(bar_baz)`, `= 18` not by `= 180`).
+fn line_carries(body_line: &str, evidence: &str) -> bool {
+	let starts_ident = evidence.starts_with(is_ident_char);
+	let ends_ident = evidence.ends_with(is_ident_char);
+	let glued =
+		|edge_ident: bool, neighbor: Option<char>| edge_ident && neighbor.is_some_and(is_ident_char);
+	body_line.match_indices(evidence).any(|(at, _)| {
+		let before = body_line[..at].chars().next_back();
+		let after = body_line[at + evidence.len()..].chars().next();
+		!glued(starts_ident, before) && !glued(ends_ident, after)
+	})
+}
+
+/// Body evidence that an op targets `first..=last` as currently numbered: the
+/// payload carries the first anchor's current content and, for ranges, the
+/// last anchor's current content at or after it. Checking both ends is what
+/// rejects stale numbers whichever way lines moved: after lines shift down,
+/// a stale range's first line holds content from above the intended range;
+/// after lines shift up, its last line holds content from below it. Either
+/// way that end's content is absent from the payload.
+fn body_targets(body: &[String], current_lines: &[&str], first: u32, last: u32) -> bool {
+	let Some(head) = unique_evidence(current_lines, first) else {
+		return false;
+	};
+	let Some(head_at) = body.iter().position(|line| line_carries(line, head)) else {
+		return false;
+	};
+	if first == last {
+		return true;
+	}
+	let Some(tail) = unique_evidence(current_lines, last) else {
+		return false;
+	};
+	body
+		.iter()
+		.rposition(|line| line_carries(line, tail))
+		.is_some_and(|tail_at| tail_at >= head_at)
 }
 
 /// Anchors the guard would reject that a shift-aware reading accepts: every
 /// unseen anchor of a replacement op images a displayed line of a retained
-/// version (same content, older number), the payload carries the first
-/// anchor's current content, and that content is unique in the file.
-/// Stale-numbered anchors fail the payload check and stay rejected, as do
-/// anchors no retained version displayed and evidence that repeats elsewhere
-/// (a stale number could image a different line with identical text).
+/// version (same content, older number), and the payload carries the current
+/// content of both ends of the unseen span ([`body_targets`]). Stale-numbered
+/// anchors fail the payload check and stay rejected, as do anchors no retained
+/// version displayed, ends too short or repeated to identify a line, and pure
+/// inserts/cuts (no payload to evidence against).
 fn rescue_shifted_anchors(
 	section: &PatchSection,
 	store: &EditStore,
@@ -277,29 +333,12 @@ fn rescue_shifted_anchors(
 			.copied()
 			.filter(|line| pending.contains(line))
 			.collect();
-		if group_unseen.is_empty() {
-			continue;
-		}
-		let first_text = usize::try_from(group_unseen[0])
-			.ok()
-			.and_then(|n| n.checked_sub(1))
-			.and_then(|n| current_lines.get(n));
-		let Some(first_text) = first_text else {
+		let (Some(&first), Some(&last)) = (group_unseen.first(), group_unseen.last()) else {
 			continue;
 		};
-		if !body_evidences(&group.body, first_text) {
-			continue;
-		}
-		let evidence = first_text.trim();
-		if current_lines
-			.iter()
-			.filter(|line| line.trim() == evidence)
-			.count()
-			!= 1
+		if body_targets(&group.body, &current_lines, first, last)
+			&& group_unseen.iter().all(|line| images_seen(&maps, *line))
 		{
-			continue;
-		}
-		if group_unseen.iter().all(|line| images_seen(&maps, *line)) {
 			rescued.extend(group_unseen);
 		}
 	}
@@ -710,18 +749,38 @@ mod tests {
 		assert_eq!(image.as_slice(), &[Some(1), None, None, Some(3)]);
 	}
 
+	fn body(lines: &[&str]) -> Vec<String> {
+		lines.iter().map(|line| (*line).to_owned()).collect()
+	}
+
 	#[test]
-	fn body_evidence_needs_substantial_current_content() {
-		assert!(body_evidences("let v0060 = 60; // replay edit", "let v0060 = 60;"));
-		assert!(body_evidences(
-			"    implementation(projects.engine.plugin)\n\n    integrationImplementation()",
-			"    implementation(projects.engine.plugin)",
-		));
+	fn body_targets_single_anchor_needs_substantial_unique_token_bounded_content() {
+		let file = ["let v0060 = 60;", "}", "foo(bar);", "dup_line();", "dup_line();"];
+		// Edited line carrying the current content plus an appended comment.
+		assert!(body_targets(&body(&["let v0060 = 60; // replay edit"]), &file, 1, 1));
 		// Stale anchor: the body carries another line's content.
-		assert!(!body_evidences("let v0060 = 60; // replay edit", "let v0058 = 58;"));
+		assert!(!body_targets(&body(&["let v0058 = 58; // edit"]), &file, 1, 1));
+		// Prefix of a longer number / identifier is not the same line.
+		assert!(!body_targets(&body(&["let v0060 = 600;"]), &["let v0060 = 60"], 1, 1));
+		assert!(!body_targets(&body(&["process(items);"]), &["process(item"], 1, 1));
+		assert!(body_targets(&body(&["process(item); // edit"]), &["process(item"], 1, 1));
 		// Short closers repeat everywhere and prove nothing.
-		assert!(!body_evidences("}\nfoo();", "}"));
-		assert!(!body_evidences("anything", "   "));
+		assert!(!body_targets(&body(&["}", "x();"]), &file, 2, 2));
+		// Repeated content cannot name which copy is meant.
+		assert!(!body_targets(&body(&["dup_line(); // edit"]), &file, 4, 4));
+	}
+
+	#[test]
+	fn body_targets_range_needs_both_ends_in_order() {
+		let file = ["let v0001 = 1;", "let v0002 = 2;", "let v0003 = 3;", "let v0004 = 4;"];
+		let faithful = body(&["let v0001 = 1;", "let v0002 = 20;", "let v0004 = 4; // edit"]);
+		assert!(body_targets(&faithful, &file, 1, 4));
+		// Lines shifted up: a stale range ends one line past what the body carries.
+		let stale = body(&["let v0001 = 1;", "let v0002 = 2;", "let v0003 = 30;"]);
+		assert!(!body_targets(&stale, &file, 1, 4));
+		// Tail carried only before the head is not this range.
+		let reversed = body(&["let v0004 = 4;", "let v0001 = 1;"]);
+		assert!(!body_targets(&reversed, &file, 1, 4));
 	}
 }
 
@@ -998,5 +1057,58 @@ mod lifecycle {
 			.await
 			.unwrap_err();
 		assert!(err.contains("never displayed"), "unexpected error: {err}");
+	}
+
+	/// Lines shift *up* (a cut above), then a range reuses the stale
+	/// pre-shift numbers while restating most of the intended lines. The
+	/// first anchor's current content (old line 20) is in the payload, but
+	/// the last anchor's (old line 23) is not, so the guard rejects instead
+	/// of duplicating old 18-19 and dropping old 22-23.
+	#[tokio::test]
+	async fn stale_range_after_upward_shift_stays_rejected() {
+		let ctx = Lifecycle::new("case-i.ts", 30);
+		let tag0 = ctx.read("case-i.ts", &all_seen(30));
+		ctx.edit(&format!("[case-i.ts#{tag0}]\nCUT 3.=4\n"))
+			.await
+			.unwrap();
+		let before = ctx.text("case-i.ts");
+		let tag1 = ctx.head_tag("case-i.ts");
+		let err = ctx
+			.edit(&format!(
+				"[case-i.ts#{tag1}]\nPUT 18.=21:\n+let v0018 = 180;\n+let v0019 = 19;\n+let v0020 = \
+				 20;\n+let v0021 = 210;\n"
+			))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+		assert_eq!(ctx.text("case-i.ts"), before);
+	}
+
+	/// The same edit at the correctly shifted numbers carries both ends'
+	/// current content and applies.
+	#[tokio::test]
+	async fn faithful_range_after_upward_shift_applies() {
+		let ctx = Lifecycle::new("case-j.ts", 30);
+		let tag0 = ctx.read("case-j.ts", &all_seen(30));
+		ctx.edit(&format!("[case-j.ts#{tag0}]\nCUT 3.=4\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-j.ts");
+		ctx.edit(&format!(
+			"[case-j.ts#{tag1}]\nPUT 16.=19:\n+let v0018 = 18; // a\n+let v0019 = 19;\n+let v0020 = \
+			 20;\n+let v0021 = 21; // b\n"
+		))
+		.await
+		.unwrap();
+		let text = ctx.text("case-j.ts");
+		let window: Vec<&str> = text.lines().skip(14).take(6).collect();
+		assert_eq!(window, [
+			"let v0017 = 17;",
+			"let v0018 = 18; // a",
+			"let v0019 = 19;",
+			"let v0020 = 20;",
+			"let v0021 = 21; // b",
+			"let v0022 = 22;",
+		]);
 	}
 }
