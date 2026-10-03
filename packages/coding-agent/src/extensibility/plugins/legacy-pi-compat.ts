@@ -1973,9 +1973,12 @@ async function collectExtensionSpecifierReplacements(
 	source: string,
 	importerPath: string,
 	rewriteImports = false,
+	/** The walk that read `source` for `importerPath`; its analysis memo is keyed by path. */
 	sources?: ExtensionGraphSources,
 ): Promise<Array<ExtensionSpecifierReference & { replacement: string }>> {
-	const references = getExtensionSourceAnalysis(source, importerPath).references;
+	const { references } = sources
+		? await sources.analyze(importerPath)
+		: getExtensionSourceAnalysis(source, importerPath);
 	const resolvedSpecifierTargets = new Map<string, string>();
 	const replacements: Array<ExtensionSpecifierReference & { replacement: string }> = [];
 	for (const reference of references) {
