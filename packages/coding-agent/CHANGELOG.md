@@ -64,6 +64,7 @@
 - Fixed `readlink` in the bash tool printing a provider-backed path (e.g. `local://file`) with a `\\?\` prefix on Windows
 - Fixed the daemon broker on Windows dying with the omp process that started it, which stopped the shared browser relay (and every other broker daemon) while other omp sessions were still using it
 - Fixed the `browser` tool's Tern backend being refused by any Tern newer than the protocol omp was built against; it now speaks Tern's JSON script protocol, which no Tern build ties it to, and a Tern from before it reports as unavailable (update Tern) so the Chromium fallback takes over.
+- Fixed background bash jobs and auto-backgrounded eval cells being killed at their default deadline (300 s for bash, 30 s for eval) with no warning: the bash tool description again says `async` keeps the deadline and that `timeout: 0` removes it, and the background-start notice now states the job's deadline (`killed once it has run 300s in total`, or `no deadline`) ([#14094](https://github.com/can1357/oh-my-pi/pull/14094) by [@apoc](https://github.com/apoc))
 
 ## [18.4.12] - 2026-10-02
 
