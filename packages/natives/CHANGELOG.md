@@ -39,6 +39,9 @@
 - Fixed Wayland computer input staying unavailable after a cancelled RemoteDesktop permission prompt or a disconnected input session ([#13857](https://github.com/can1357/oh-my-pi/issues/13857)).
 - Fixed Wayland `win.screenshot()` returning the top-left of the monitor for native Wayland windows whose position AT-SPI cannot report (Discord, Teams, Chromium); it now fails with `CaptureFailed` instead of capturing the wrong region ([#13854](https://github.com/can1357/oh-my-pi/issues/13854)).
 - Fixed `computer.focusedElement()` failing with `AxFailed: atspi: null reference` on Linux while a Chromium or Electron app (Spotify, Discord, Steam, …) is running ([#13855](https://github.com/can1357/oh-my-pi/issues/13855)).
+### Fixed
+
+- Fixed macOS `takeover` and desktop scrolls moving iPhone Mirroring and other pixel-forwarding windows by at most about 99 points or not at all; these scrolls now arrive as small wheel steps over up to about 0.7 s, like a physical mouse ([#13738](https://github.com/can1357/oh-my-pi/pull/13738) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.4.4] - 2026-09-29
 
