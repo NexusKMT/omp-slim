@@ -69,6 +69,8 @@ describe("BaseKernel stdin failures", () => {
 			// No timeoutMs: before the fix this execution never settled.
 			const result = await kernel.execute("print(1)");
 			expect(result.cancelled).toBe(true);
+			// Callers warn that completion is uncertain only for kernel-killed results.
+			expect(result.kernelKilled).toBe(true);
 			expect(result.error).toMatchObject({ name: "TransportError", value: "EPIPE: broken pipe, write" });
 			// The broken pipe is terminal: the kernel stops reporting alive (so the session replaces it) and is killed.
 			expect(kernel.isAlive()).toBe(false);
