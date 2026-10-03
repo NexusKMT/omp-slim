@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `enhancedRecall` answering a short query with the cached results of an unrelated longer query that contained most of its words ([#13823](https://github.com/can1357/oh-my-pi/pull/13823) by [@sjawhar](https://github.com/sjawhar))
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
