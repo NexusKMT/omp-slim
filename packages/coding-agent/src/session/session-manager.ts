@@ -3847,9 +3847,7 @@ export class SessionManager {
 		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
 		let sourceEntries: FileEntry[];
 		try {
-			sourceEntries = structuredClone(
-				await loadEntriesFromFile(sourcePath, storage, { throwIfMissing: true }),
-			) as FileEntry[];
+			sourceEntries = await loadEntriesFromFile(sourcePath, storage, { throwIfMissing: true });
 		} catch (err) {
 			if (isEnoent(err) || isEnotdir(err)) throw new ForkSourceNotFoundError(sourcePath);
 			throw err;
