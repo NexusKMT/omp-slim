@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed local Ollama thinking models (e.g. Gemma 4) still reasoning when thinking is turned off, which made session titles take 10+ seconds
+- OpenCode Go's LongCat 2.5 Preview offers no unsupported effort levels and can turn reasoning off; Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
 
 ## [18.5.0] - 2026-10-03
 

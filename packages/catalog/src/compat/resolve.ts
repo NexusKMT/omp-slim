@@ -179,7 +179,7 @@ function overlayEffortMapAxis(
 }
 
 function effortList(value: unknown): readonly Effort[] | undefined {
-	if (!Array.isArray(value) || value.length === 0) return undefined;
+	if (!Array.isArray(value)) return undefined;
 	const out: Effort[] = [];
 	for (const entry of value) {
 		const effort = THINKING_EFFORTS.find(candidate => candidate === entry);
@@ -1162,6 +1162,7 @@ function resolveThinkingPolicy<TApi extends Api>(
 	if (compat !== undefined && "trustExplicitThinkingOnly" in compat && compat.trustExplicitThinkingOnly === true) {
 		return undefined;
 	}
+	if (rule.efforts?.length === 0) return undefined;
 	const config: ThinkingConfig = {
 		mode: rule.mode ?? defaultThinkingMode(spec, facts),
 		efforts: rule.efforts ?? fallbackEfforts(spec, compat),
