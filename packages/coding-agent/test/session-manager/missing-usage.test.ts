@@ -74,4 +74,14 @@ describe("assistant messages persisted without usage", () => {
 		expect(message?.role === "assistant" && message.usage.totalTokens).toBe(3);
 		expect(session.getUsageStatistics()).toMatchObject({ input: 1, output: 2, cost: 0 });
 	});
+
+	it("fork as zero usage instead of leaving it undefined", async () => {
+		using tempDir = TempDir.createSync("@pi-fork-missing-usage-");
+		const source = await writeSessionWithoutUsage(tempDir.path());
+		const session = await SessionManager.forkFrom(source, tempDir.path(), path.join(tempDir.path(), "forks"));
+
+		const [message] = session.buildSessionContext().messages;
+		expect(message?.role === "assistant" && message.usage.cacheRead).toBe(0);
+		expect(session.getUsageStatistics().cost).toBe(0);
+	});
 });

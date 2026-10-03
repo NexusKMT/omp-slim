@@ -408,6 +408,17 @@ function entryUsage(entry: SessionEntry): Usage | undefined {
 	return undefined;
 }
 
+/** Complete incomplete assistant usage in loaded history; returns how many messages were repaired. */
+function normalizeLoadedUsage(entries: SessionEntry[]): number {
+	let repaired = 0;
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
+			repaired++;
+		}
+	}
+	return repaired;
+}
+
 function addUsage(target: UsageStatistics, usage: Usage | undefined): void {
 	if (!usage) return;
 	target.input += usage.input;
@@ -1890,12 +1901,7 @@ export class SessionManager {
 		this.#sessionName = header.title;
 		this.#titleSource = header.titleSource;
 		this.#titleUpdatedAt = header.timestamp;
-		let repairedUsage = 0;
-		for (const entry of entries) {
-			if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
-				repairedUsage++;
-			}
-		}
+		const repairedUsage = normalizeLoadedUsage(entries);
 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
 		this.#index.rebuild(entries);
 	}
@@ -3840,6 +3846,7 @@ export class SessionManager {
 
 		const sourceHeader = sourceEntries.find(entry => entry.type === "session") as SessionHeader | undefined;
 		const history = sourceEntries.filter(entry => entry.type !== "session") as SessionEntry[];
+		normalizeLoadedUsage(history);
 		if (options?.resetInheritedCost) SessionManager.#resetInheritedUsageCost(history);
 		manager.#resetToNewSession(
 			{
