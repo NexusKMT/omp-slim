@@ -40,6 +40,7 @@
 
 - Fixed `computer.window(74)` matching every open window and `computer.window({ id: 74 })` matching none; a numeric id now resolves the same window as `"74"` ([#13649](https://github.com/can1357/oh-my-pi/pull/13649) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed IRC-woken keep-alive subagents dead-lettering their background-job completions: the wake turn now waits for owned async work to settle (including the async-result continuation) before finishing its turn observer, so a yield after the continuation still registers the parent-owned job and refreshes the artifact ([#11564](https://github.com/can1357/oh-my-pi/issues/11564))
+- Fixed hashline snapshots surviving `/new`: the session-scoped edit store is now cleared on session reset, so stale tags can no longer surface as "issued in this session" in mismatch diagnostics ([#13370](https://github.com/can1357/oh-my-pi/issues/13370))
 - Fixed hosted OpenAI web search on hosts that accept only string tool_choice values, such as Command Code ([#13666](https://github.com/can1357/oh-my-pi/pull/13666) by [@riicodespretty](https://github.com/riicodespretty))
 - Fixed a `task` call with several subagents reporting success when one of them hit a task error, such as a failed isolation merge; the call is now marked as an error, as a single-subagent call already was ([#13704](https://github.com/can1357/oh-my-pi/pull/13704) by [@aktanazat](https://github.com/aktanazat))
 ### Added

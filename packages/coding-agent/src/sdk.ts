@@ -4589,6 +4589,12 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		});
 		hasSession = true;
 		credentialNoticeSession = session;
+		// Hashline snapshots are session-scoped: /new and switchSession fire the
+		// change callbacks, so clear the tool-side store there — stale tags would
+		// otherwise surface as "issued in this session" in mismatch diagnostics
+		// after a reset (#13370). The tools snapshot into THIS store, not the
+		// AgentSession's own lazy field.
+		session.registerSessionChangeCallback(() => toolSession.editStore?.clear());
 		if (ownedSkillDescriptionStore) {
 			// Let in-flight compressions land before releasing the file.
 			session.addDisposer(
