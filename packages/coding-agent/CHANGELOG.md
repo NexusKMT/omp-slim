@@ -18,6 +18,7 @@
 - Fixed RPC hosts waiting forever for a prompt's `prompt_result` when an automatic handoff ran after a turn crossed the compaction threshold; threshold handoffs now finish before the turn settles, like other compaction methods
 - Fixed the "F5 to retry" row after an interrupted tool call hugging the error above it; it now sits where the working row stood, with the key styled like other key hints
 ### Fixed
+- Fixed a wedged shared headless browser staying resident — with every tab omp could not close — until the last session in the project exited; after a failed close omp now replaces a browser whose CDP endpoint has stopped answering ([#13645](https://github.com/can1357/oh-my-pi/pull/13645) by [@rlfleming93](https://github.com/rlfleming93)).
 
 - Fixed `eval` `tool.*` calls to extension and custom tools with strict schemas (e.g. `ida_list_databases`) failing with `unexpected parameters: ['i']`; bridged calls now receive the same arguments as direct tool calls ([#14174](https://github.com/can1357/oh-my-pi/pull/14174) by [@wondercrash](https://github.com/wondercrash))
 
