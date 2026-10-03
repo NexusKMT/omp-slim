@@ -1,3 +1,5 @@
+mod popup;
+
 use std::{
 	collections::{HashSet, VecDeque},
 	ffi::c_void,
@@ -458,13 +460,7 @@ impl AxBackend for MacAx {
 				actions.join(", "),
 			)));
 		}
-		let action = CFString::from_str(&native);
-		let perform = || {
-			// SAFETY: The retained element and action CFString remain valid for the
-			// synchronous AX request.
-			let error = unsafe { element.perform_action(&action) };
-			ax_result(error, format!("AX action '{native}' failed"))
-		};
+		let perform = || perform_action(element, &native);
 		// AXRaise is an explicit request to change stacking, including the
 		// takeover preparation path. Other semantic actions must stay background.
 		if native == "AXRaise" {
@@ -476,6 +472,14 @@ impl AxBackend for MacAx {
 
 	fn set_value(&mut self, h: &AxHandle, value: &str) -> CoreResult<()> {
 		let element = mac_handle(h)?;
+		// A popup's value is chosen from its menu, not written. This runs before
+		// the text-target refusals: nothing is typed or written, and the verdict
+		// is the popup's own read-back after a real menu press.
+		if copy_string(element, "AXRole").as_deref() == Some("AXPopUpButton") {
+			return skylight::with_background_guard(element_pid(element)?, || {
+				popup::choose(element, value)
+			});
+		}
 		// Web AXValue can echo a write without the renderer accepting it. The
 		// API has no "unverified" outcome, so refuse before mutating that surface.
 		ensure_native_text_target(element)?;
@@ -754,6 +758,14 @@ fn replace_utf16_selection(
 	result.push_str(text);
 	result.push_str(&before[end_byte..]);
 	Some(result)
+}
+
+fn perform_action(element: &AXUIElement, action: &str) -> CoreResult<()> {
+	let name = CFString::from_str(action);
+	// SAFETY: The retained element and action CFString remain valid for the
+	// synchronous AX request.
+	let error = unsafe { element.perform_action(&name) };
+	ax_result(error, format!("AX action '{action}' failed"))
 }
 
 fn ensure_trusted() -> CoreResult<()> {
