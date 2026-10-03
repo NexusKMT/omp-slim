@@ -1,7 +1,10 @@
 //! Section staging: prepare/commit split (`packages/hashline/src/patcher.ts` +
 //! `coding-agent/src/edit/hashline/execute.ts`).
 
-use std::{collections::HashMap, path::Path};
+use std::{
+	collections::{BTreeSet, HashMap},
+	path::Path,
+};
 
 use super::{
 	apply::{ApplyOptions, EmptyPaste, apply_edits},
@@ -120,6 +123,151 @@ fn mismatch(
 	})
 }
 
+/// Minimum trimmed length for a current-content line to count as targeting
+/// evidence. Short closers (`}`, `});`) repeat everywhere; accepting on
+/// those would let stale anchors through.
+const SHIFT_RESCUE_EVIDENCE_MIN_CHARS: usize = 8;
+
+/// One replacement op's anchors plus its payload body.
+struct ReplaceGroup {
+	anchors: Vec<u32>,
+	body:    String,
+}
+
+/// Group a section's replacement ops. The parser lowers `PUT a.=b:` to a run
+/// of replacement inserts immediately followed by the consumed lines' deletes,
+/// so each insert-run/delete-run pair is one op. Pure insertions and cuts
+/// carry no replaced content to evidence against, so they form no group.
+fn replace_groups(section: &PatchSection) -> Result<Vec<ReplaceGroup>, EditError> {
+	let edits = section.edits()?;
+	let mut groups = Vec::new();
+	let mut cursor = 0;
+	while cursor < edits.len() {
+		let mut body = Vec::new();
+		while let Some(Edit::Insert { text, replacement: true, .. }) = edits.get(cursor) {
+			body.push(text.clone());
+			cursor += 1;
+		}
+		let mut anchors = Vec::new();
+		while let Some(Edit::Delete { anchor, .. }) = edits.get(cursor) {
+			anchors.push(anchor.line);
+			cursor += 1;
+		}
+		if !body.is_empty() && !anchors.is_empty() {
+			anchors.sort_unstable();
+			groups.push(ReplaceGroup { anchors, body: body.join("\n") });
+		} else if body.is_empty() && anchors.is_empty() {
+			cursor += 1;
+		}
+	}
+	Ok(groups)
+}
+
+/// Map a current-numbered line back through `old_text → new_text`: the old
+/// line it images, when it lands inside an unchanged run. Added lines and
+/// lines inside rewritten spans have no image.
+fn shifted_image(old_text: &str, new_text: &str, new_line: u32) -> Option<u32> {
+	let old_lines: Vec<&str> = old_text.split('\n').collect();
+	let new_lines: Vec<&str> = new_text.split('\n').collect();
+	let (old_ids, new_ids) = pi_diff::intern(&old_lines, &new_lines);
+	let (mut old_line, mut current) = (1_u32, 1_u32);
+	for run in pi_diff::myers_diff(&old_ids, &new_ids) {
+		if run.added {
+			current += run.count;
+			continue;
+		}
+		if run.removed {
+			old_line += run.count;
+			continue;
+		}
+		if new_line >= current && new_line < current + run.count {
+			return Some(old_line + (new_line - current));
+		}
+		old_line += run.count;
+		current += run.count;
+	}
+	None
+}
+
+/// True when `line` (current numbering) images a line some retained version
+/// displayed: the model saw exactly this content, only at another number.
+fn shifted_from_seen(store: &EditStore, canonical: &Path, current_text: &str, line: u32) -> bool {
+	for version in store.versions(canonical) {
+		let Some(seen) = version.seen_lines.as_ref() else {
+			continue;
+		};
+		if seen.is_empty() {
+			continue;
+		}
+		if &*version.text == current_text {
+			if seen.contains(&line) {
+				return true;
+			}
+			continue;
+		}
+		if let Some(source) = shifted_image(&version.text, current_text, line)
+			&& seen.contains(&source)
+		{
+			return true;
+		}
+	}
+	false
+}
+
+/// Body evidence: the op targets the line as currently numbered when its
+/// payload carries that line's content. A stale-numbered op carries the
+/// content of the intended line instead, so this check is what keeps the
+/// rescue from accepting stale anchors.
+fn body_evidences(body: &str, current_line: &str) -> bool {
+	let trimmed = current_line.trim();
+	trimmed.len() >= SHIFT_RESCUE_EVIDENCE_MIN_CHARS && body.contains(trimmed)
+}
+
+/// Anchors the guard would reject that a shift-aware reading accepts: every
+/// unseen anchor of a replacement op images a displayed line of a retained
+/// version (same content, older number) and the payload carries the first
+/// anchor's current content. Stale-numbered anchors fail the payload check
+/// and stay rejected, as do anchors no retained version displayed.
+fn rescue_shifted_anchors(
+	section: &PatchSection,
+	store: &EditStore,
+	canonical: &Path,
+	current_text: &str,
+	unseen: &[u32],
+) -> Result<Vec<u32>, EditError> {
+	let pending: BTreeSet<u32> = unseen.iter().copied().collect();
+	let current_lines: Vec<&str> = current_text.split('\n').collect();
+	let mut rescued = Vec::new();
+	for group in replace_groups(section)? {
+		let group_unseen: Vec<u32> = group
+			.anchors
+			.iter()
+			.copied()
+			.filter(|line| pending.contains(line))
+			.collect();
+		if group_unseen.is_empty() {
+			continue;
+		}
+		let first_text = usize::try_from(group_unseen[0])
+			.ok()
+			.and_then(|n| n.checked_sub(1))
+			.and_then(|n| current_lines.get(n));
+		let Some(first_text) = first_text else {
+			continue;
+		};
+		if !body_evidences(&group.body, first_text) {
+			continue;
+		}
+		if group_unseen
+			.iter()
+			.all(|line| shifted_from_seen(store, canonical, current_text, *line))
+		{
+			rescued.extend(group_unseen);
+		}
+	}
+	Ok(rescued)
+}
+
 fn assert_seen_lines(
 	section: &PatchSection,
 	expected: &str,
@@ -136,13 +284,25 @@ fn assert_seen_lines(
 	if seen.is_empty() {
 		return Ok(());
 	}
-	let unseen = section
+	let mut unseen = section
 		.collect_anchor_lines()?
 		.into_iter()
 		.filter(|line| !seen.contains(line))
 		.collect::<Vec<_>>();
 	if unseen.is_empty() {
 		return Ok(());
+	}
+	// A follow-up edit below an earlier shifting edit anchors moved lines at
+	// their new numbers. When the payload carries the anchored content, the
+	// model targeted the lines as numbered — accept them instead of forcing a
+	// wasted reveal round-trip.
+	let rescued = rescue_shifted_anchors(section, store, canonical, text, &unseen)?;
+	if !rescued.is_empty() {
+		let rescued: BTreeSet<u32> = rescued.into_iter().collect();
+		unseen.retain(|line| !rescued.contains(line));
+		if unseen.is_empty() {
+			return Ok(());
+		}
 	}
 	let source = snapshot.text.split('\n').collect::<Vec<_>>();
 	let mut revealed = Vec::new();
@@ -494,4 +654,261 @@ pub fn stage_patch(
 		}));
 	}
 	Ok(staged)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn shifted_image_maps_through_insertions() {
+		let old = "a\nb\nc\nd";
+		let new = "a\nX\nY\nb\nc\nd";
+		assert_eq!(shifted_image(old, new, 1), Some(1));
+		assert_eq!(shifted_image(old, new, 2), None);
+		assert_eq!(shifted_image(old, new, 3), None);
+		assert_eq!(shifted_image(old, new, 4), Some(2));
+		assert_eq!(shifted_image(old, new, 6), Some(4));
+		assert_eq!(shifted_image(old, new, 7), None);
+	}
+
+	#[test]
+	fn shifted_image_maps_through_replacements() {
+		let old = "a\nb\nc";
+		let new = "a\nB1\nB2\nc";
+		assert_eq!(shifted_image(old, new, 1), Some(1));
+		assert_eq!(shifted_image(old, new, 2), None);
+		assert_eq!(shifted_image(old, new, 4), Some(3));
+	}
+
+	#[test]
+	fn body_evidence_needs_substantial_current_content() {
+		assert!(body_evidences("let v0060 = 60; // replay edit", "let v0060 = 60;"));
+		assert!(body_evidences(
+			"    implementation(projects.engine.plugin)\n\n    integrationImplementation()",
+			"    implementation(projects.engine.plugin)",
+		));
+		// Stale anchor: the body carries another line's content.
+		assert!(!body_evidences("let v0060 = 60; // replay edit", "let v0058 = 58;"));
+		// Short closers repeat everywhere and prove nothing.
+		assert!(!body_evidences("}\nfoo();", "}"));
+		assert!(!body_evidences("anything", "   "));
+	}
+}
+
+#[cfg(test)]
+mod lifecycle {
+	use std::path::PathBuf;
+
+	use async_trait::async_trait;
+	use tempfile::TempDir;
+
+	use crate::{
+		EditMode, EditResult, EditWriter, WriteRequest, WriteResponse,
+		path_policy::{PathPolicy, canonical_key},
+		session::{ApplyRequest, Session, SessionConfig},
+		store::EditStore,
+	};
+
+	struct DiskWriter;
+
+	#[async_trait]
+	impl EditWriter for DiskWriter {
+		async fn write(&self, request: WriteRequest) -> EditResult<WriteResponse> {
+			match request.content {
+				Some(content) => {
+					if let Some(parent) = request.absolute.parent() {
+						std::fs::create_dir_all(parent).unwrap();
+					}
+					std::fs::write(&request.absolute, &content).unwrap();
+					Ok(WriteResponse { written: content, diagnostics_json: None })
+				},
+				None => Ok(WriteResponse::default()),
+			}
+		}
+	}
+
+	struct Lifecycle {
+		dir:    TempDir,
+		policy: PathPolicy,
+		store:  EditStore,
+	}
+
+	impl Lifecycle {
+		fn new(file: &str, lines: usize) -> Self {
+			let dir = TempDir::new().unwrap();
+			let mut text = String::new();
+			for i in 1..=lines {
+				use std::fmt::Write as _;
+				writeln!(text, "let v{i:04} = {i};").unwrap();
+			}
+			std::fs::write(dir.path().join(file), &text).unwrap();
+			let policy = PathPolicy {
+				cwd:                  dir.path().to_owned(),
+				home_dir:             dir.path().to_owned(),
+				url_schemes:          Vec::new(),
+				url_alias_schemes:    Vec::new(),
+				plan_writable_roots:  Vec::new(),
+				plan_active:          false,
+				block_auto_generated: false,
+			};
+			Self { dir, policy, store: EditStore::new() }
+		}
+
+		fn canonical(&self, file: &str) -> PathBuf {
+			canonical_key(&self.dir.path().join(file))
+		}
+
+		fn text(&self, file: &str) -> String {
+			std::fs::read_to_string(self.dir.path().join(file)).unwrap()
+		}
+
+		fn read(&self, file: &str, seen: &[u32]) -> String {
+			self
+				.store
+				.record(&self.canonical(file), &self.text(file), Some(seen))
+		}
+
+		fn head_tag(&self, file: &str) -> String {
+			self.store.head(&self.canonical(file)).unwrap().hash
+		}
+
+		async fn edit(&self, patch: &str) -> Result<(), String> {
+			let mut session = Session::new(
+				SessionConfig {
+					mode:               EditMode::Hashline,
+					policy:             self.policy.clone(),
+					allow_fuzzy:        false,
+					fuzzy_threshold:    0.0,
+					enforce_seen_lines: true,
+					raw_input:          true,
+				},
+				self.store.clone(),
+			);
+			session.push(patch);
+			session.finish();
+			session
+				.apply(ApplyRequest::default(), &DiskWriter)
+				.await
+				.map(|_| ())
+				.map_err(|err| err.to_string())
+		}
+	}
+
+	fn all_seen(lines: usize) -> Vec<u32> {
+		(1..=lines as u32).collect()
+	}
+
+	/// Full read, two inserted lines above, then a replace at the shifted
+	/// number carrying the line's content: the vardorvis shape. Applies.
+	#[tokio::test]
+	async fn faithful_shifted_replace_applies() {
+		let ctx = Lifecycle::new("case-a.ts", 30);
+		let tag0 = ctx.read("case-a.ts", &all_seen(30));
+		ctx.edit(&format!("[case-a.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-a.ts");
+		ctx.edit(&format!("[case-a.ts#{tag1}]\nPUT 20.=20:\n+let v0018 = 18; // edited\n"))
+			.await
+			.unwrap();
+		let text = ctx.text("case-a.ts");
+		assert_eq!(text.lines().count(), 32);
+		assert!(text.lines().nth(19).unwrap().contains("// edited"));
+	}
+
+	/// Same setup, but the follow-up reuses the stale pre-shift number.
+	/// The body belongs to another line, so the guard still rejects and
+	/// the file is untouched.
+	#[tokio::test]
+	async fn stale_shifted_replace_stays_rejected() {
+		let ctx = Lifecycle::new("case-b.ts", 30);
+		let tag0 = ctx.read("case-b.ts", &all_seen(30));
+		ctx.edit(&format!("[case-b.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let before = ctx.text("case-b.ts");
+		let tag1 = ctx.head_tag("case-b.ts");
+		let err = ctx
+			.edit(&format!("[case-b.ts#{tag1}]\nPUT 18.=18:\n+let v0018 = 18; // edited\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+		assert_eq!(ctx.text("case-b.ts"), before);
+	}
+
+	/// Pure insertions carry no replaced content to evidence the boundary
+	/// against, so an insert after a shifted line stays rejected.
+	#[tokio::test]
+	async fn insert_after_shifted_line_stays_rejected() {
+		let ctx = Lifecycle::new("case-c.ts", 30);
+		let tag0 = ctx.read("case-c.ts", &all_seen(30));
+		ctx.edit(&format!("[case-c.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-c.ts");
+		let err = ctx
+			.edit(&format!("[case-c.ts#{tag1}]\nPUT >18:\n+// later insert\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+	}
+
+	/// Cuts capture no payload body, so a cut on a shifted line stays
+	/// rejected.
+	#[tokio::test]
+	async fn cut_on_shifted_line_stays_rejected() {
+		let ctx = Lifecycle::new("case-d.ts", 30);
+		let tag0 = ctx.read("case-d.ts", &all_seen(30));
+		ctx.edit(&format!("[case-d.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-d.ts");
+		let err = ctx
+			.edit(&format!("[case-d.ts#{tag1}]\nCUT 20.=20\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+	}
+
+	/// Body evidence alone is not enough: with no shifting edit in the
+	/// file's history, an unseen anchor stays rejected even when the
+	/// payload guesses its content exactly.
+	#[tokio::test]
+	async fn unseen_anchor_without_shift_history_stays_rejected() {
+		let ctx = Lifecycle::new("case-e.ts", 30);
+		let seen: Vec<u32> = (1..=10).collect();
+		let tag0 = ctx.read("case-e.ts", &seen);
+		let err = ctx
+			.edit(&format!("[case-e.ts#{tag0}]\nPUT 25.=25:\n+let v0025 = 25; // edited\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+	}
+
+	/// One section, two ops: the faithful op is rescued while the stale
+	/// op is still rejected — and the rejection names only the stale
+	/// lines.
+	#[tokio::test]
+	async fn mixed_section_rejects_only_the_stale_op() {
+		let ctx = Lifecycle::new("case-f.ts", 30);
+		let tag0 = ctx.read("case-f.ts", &all_seen(30));
+		ctx.edit(&format!("[case-f.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-f.ts");
+		let err = ctx
+			.edit(&format!(
+				"[case-f.ts#{tag1}]\nPUT 20.=20:\n+let v0018 = 18; // edited\nPUT 18.=18:\n+let v0018 \
+				 = 18; // edited\n"
+			))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+		assert!(
+			!err.lines().any(|line| line.starts_with("  20:")),
+			"faithful line leaked into reveal: {err}"
+		);
+		assert!(err.contains("  18:let v0016 = 16;"), "stale line missing from reveal: {err}");
+	}
 }
