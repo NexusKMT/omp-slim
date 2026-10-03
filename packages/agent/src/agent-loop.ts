@@ -2985,9 +2985,12 @@ async function prepareToolCallDispatch(
 		const entry: PreparedToolCall = { tool, args: toolCall.arguments as Record<string, unknown> };
 		prepared.set(toolCall.id, entry);
 		let argsForExecution = toolCall.arguments as Record<string, unknown>;
-		// A schema-owned `i` is a tool argument, never a harness intent.
-		if (intentTracing && !(tool && schemaDefinesProperty(toolWireSchema(tool), INTENT_FIELD))) {
-			const { intent, strippedArgs } = extractIntent(toolCall.arguments);
+		if (intentTracing) {
+			// A schema-owned `i` is a tool argument, never a harness intent.
+			const ownsIntent = tool !== undefined && schemaDefinesProperty(toolWireSchema(tool), INTENT_FIELD);
+			const { intent, strippedArgs } = ownsIntent
+				? { intent: undefined, strippedArgs: argsForExecution }
+				: extractIntent(toolCall.arguments);
 			argsForExecution = strippedArgs;
 			if (intent !== undefined && intent.length > MAX_INTENT_LENGTH && tool) {
 				entry.args = strippedArgs;

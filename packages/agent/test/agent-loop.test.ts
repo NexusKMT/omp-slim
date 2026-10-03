@@ -307,6 +307,41 @@ describe("agentLoop with AgentMessage", () => {
 		expect(executed).toEqual([{ label: "x", i: "INDEX" }]);
 	});
 
+	it("still derives intent for a tool that owns `i` as an argument", async () => {
+		const toolSchema = type({ label: "string", "i?": "string" });
+		const executed: unknown[] = [];
+		const tool: AgentTool<typeof toolSchema, { label: string; i?: string }> = {
+			name: "demo",
+			label: "Demo",
+			description: "Demo tool",
+			parameters: toolSchema,
+			intent: args => `Labeling ${args.label} at ${args.i}`,
+			async execute(_toolCallId, params) {
+				executed.push(params);
+				return { content: [{ type: "text", text: "ok" }] };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "demo", arguments: { label: "x", i: "INDEX" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter, intentTracing: true };
+		const stream = agentLoop([createUserMessage("run demo")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		const messages = await stream.result();
+		const assistant = messages.find(
+			message => message.role === "assistant" && message.content.some(content => content.type === "toolCall"),
+		) as AssistantMessage | undefined;
+		const tracedToolCall = assistant?.content.find(content => content.type === "toolCall");
+		expect(executed).toEqual([{ label: "x", i: "INDEX" }]);
+		expect(tracedToolCall?.type === "toolCall" && tracedToolCall.intent).toBe("Labeling x at INDEX");
+	});
+
 	it("dispatches a tool call appended by transformAssistantMessage on a stop turn", async () => {
 		// In-text edit recovery (coding-agent) rewrites a text-only `stop` turn into
 		// a synthetic tool call inside this hook; the loop must scan tool calls
