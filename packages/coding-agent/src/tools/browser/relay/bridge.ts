@@ -61,6 +61,13 @@ interface SessionRef {
 	runtimeEnabling: Promise<void> | null;
 	/** Monotonic ownership token for enable rollback and replay. */
 	runtimeEpoch: number;
+	/**
+	 * This session sent `Target.setAutoAttach`. Chrome reports a real child
+	 * target (OOPIF, worker) only on the session that asked; announcing it on
+	 * every page session would hand puppeteer one child id twice, and puppeteer
+	 * replaces the first session object, dropping every reply bound for it.
+	 */
+	autoAttach: boolean;
 }
 
 interface TargetInfo {
@@ -89,6 +96,15 @@ class CdpConnection {
 		const out: string[] = [];
 		for (const [sessionId, ref] of this.sessions) {
 			if (ref.tabKey === tabKey && (!kind || ref.kind === kind)) out.push(sessionId);
+		}
+		return out;
+	}
+
+	/** Page sessions that armed `Target.setAutoAttach`: the only ones Chrome would report children on. */
+	autoAttachSessionsForTab(tabKey: string): string[] {
+		const out: string[] = [];
+		for (const [sessionId, ref] of this.sessions) {
+			if (ref.tabKey === tabKey && ref.kind === "page" && ref.autoAttach) out.push(sessionId);
 		}
 		return out;
 	}
@@ -564,6 +580,7 @@ export class RelayBridge {
 			return;
 		}
 		if (msg.method !== "Runtime.enable") {
+			if (msg.method === "Target.setAutoAttach") ref.autoAttach = msg.params?.autoAttach === true;
 			await this.#forwardToTab(conn, msg, ref.tabKey, undefined);
 			return;
 		}
@@ -952,10 +969,10 @@ export class RelayBridge {
 		}
 		if (sourceSessionId) {
 			// Event from a real child session: pass through verbatim to every
-			// connection that observes this tab.
+			// connection that was told about the child.
 			const payload = JSON.stringify({ sessionId: sourceSessionId, method, params });
 			for (const conn of this.#conns.values()) {
-				if (conn.sessionsForTab(tabKey, "page").length > 0) conn.socket.send(payload);
+				if (conn.autoAttachSessionsForTab(tabKey).length > 0) conn.socket.send(payload);
 			}
 			return;
 		}
@@ -993,9 +1010,12 @@ export class RelayBridge {
 			}
 			return;
 		}
-		// Other root-session events fan out once per minted page session.
+		// Other root-session events fan out once per minted page session. Real
+		// child attach/detach goes only to sessions that armed auto-attach.
+		const childEvent = method === "Target.attachedToTarget" || method === "Target.detachedFromTarget";
 		for (const conn of this.#conns.values()) {
-			for (const pageSession of conn.sessionsForTab(tabKey, "page")) {
+			const sessions = childEvent ? conn.autoAttachSessionsForTab(tabKey) : conn.sessionsForTab(tabKey, "page");
+			for (const pageSession of sessions) {
 				conn.socket.send(JSON.stringify({ sessionId: pageSession, method, params }));
 			}
 		}
@@ -1254,6 +1274,7 @@ export class RelayBridge {
 			runtimeContexts: new Set(),
 			runtimeEnabling: null,
 			runtimeEpoch: 0,
+			autoAttach: false,
 		});
 		return sessionId;
 	}

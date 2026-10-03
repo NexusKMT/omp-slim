@@ -366,6 +366,68 @@ describe("RelayBridge tab grouping", () => {
 	});
 });
 
+describe("RelayBridge child targets", () => {
+	it("announces a real child target only to the page session that armed auto-attach", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const armed = await attachPage(bridge, ext, cdp, conn, 1);
+		bridge.cdpMessage(
+			conn,
+			JSON.stringify({
+				id: ++msgSeq,
+				sessionId: armed,
+				method: "Target.setAutoAttach",
+				params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+			}),
+		);
+		ack(bridge, ext, "send");
+		await flush();
+		// A second page session on the same connection, like puppeteer's page.createCDPSession().
+		await attachPage(bridge, ext, cdp, conn, 1);
+		// Another connection that observes the tab but never asked for children.
+		const otherCdp = new FakeCdpSocket();
+		const other = bridge.cdpConnected(otherCdp);
+		await attachPage(bridge, ext, otherCdp, other, 1);
+
+		const child = { sessionId: "CHILD1", targetInfo: { targetId: "FRAME1", type: "iframe" } };
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, method: "Target.attachedToTarget", params: child }),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({ t: "cdpEvent", tabId: 1, sessionId: "CHILD1", method: "Page.frameNavigated", params: {} }),
+		);
+		bridge.extMessage(
+			ext,
+			JSON.stringify({
+				t: "cdpEvent",
+				tabId: 1,
+				method: "Target.detachedFromTarget",
+				params: { sessionId: "CHILD1" },
+			}),
+		);
+
+		const childTraffic = (socket: FakeCdpSocket) =>
+			socket.messages.filter(
+				m =>
+					m.sessionId === "CHILD1" ||
+					((m.method === "Target.attachedToTarget" || m.method === "Target.detachedFromTarget") &&
+						(m.params as { sessionId?: string } | undefined)?.sessionId === "CHILD1"),
+			);
+		// Puppeteer replaces the session object for a re-announced child id and drops replies bound for the first.
+		expect(childTraffic(cdp).map(m => [m.method, m.sessionId])).toEqual([
+			["Target.attachedToTarget", armed],
+			["Page.frameNavigated", "CHILD1"],
+			["Target.detachedFromTarget", armed],
+		]);
+		expect(childTraffic(otherCdp)).toEqual([]);
+	});
+});
+
 describe("RelayBridge Runtime sessions", () => {
 	it("virtualizes Runtime enable state for each pseudo-session", async () => {
 		const bridge = new RelayBridge({});
