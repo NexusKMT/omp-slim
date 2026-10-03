@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Narrow `/models` layouts keep model names visible by shrinking the sidebar and dropping row metadata as needed.
+- Narrow `/models` layouts keep model names visible by shrinking the sidebar and dropping row metadata as needed ([#14173](https://github.com/can1357/oh-my-pi/pull/14173) by [@deniial00](https://github.com/deniial00)).
 
 ## [18.5.0] - 2026-10-03
 
