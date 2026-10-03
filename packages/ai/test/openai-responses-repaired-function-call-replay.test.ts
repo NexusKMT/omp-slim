@@ -97,3 +97,21 @@ it("replays a lenient-repaired function call with the arguments that were execut
 	expect(input.at(-1)).toMatchObject({ type: "function_call_output" });
 	expect(JSON.stringify(input)).not.toContain("Orphan");
 });
+
+it("does not crash on a relaxed scalar function-call argument", async () => {
+	const output = emptyAssistant();
+	const nativeItems: Array<Record<string, unknown>> = [];
+	await processResponsesStream(
+		events(functionCallEvents(0, "call_scalar", "bash", "'hello'")),
+		output,
+		{ push: () => {}, end: () => {} } as never,
+		model,
+		{ onOutputItemDone: item => nativeItems.push(item as unknown as Record<string, unknown>) },
+	);
+
+	const toolCall = output.content.find(block => block.type === "toolCall");
+	if (toolCall?.type !== "toolCall") throw new Error("expected a finalized toolCall block");
+	expect(JSON.stringify(toolCall.arguments)).toBe('"hello"');
+	const nativeCall = nativeItems.find(item => item.type === "function_call");
+	expect(JSON.parse(String(nativeCall?.arguments))).toBe("hello");
+});

@@ -24,7 +24,7 @@ export function replayableToolCallArguments(raw: string, executed: ToolCall["arg
 		JSON.parse(raw);
 		return raw;
 	} catch {
-		return "__parseError" in executed ? raw : JSON.stringify(executed);
+		return executed && typeof executed === "object" && "__parseError" in executed ? raw : JSON.stringify(executed);
 	}
 }
 
