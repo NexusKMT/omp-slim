@@ -8,7 +8,7 @@ import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import type { ReadTool } from "@oh-my-pi/pi-coding-agent/tools/read";
+import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
@@ -70,8 +70,8 @@ describe("sdk edit-store session reset", () => {
 		// Record a tag exactly the way the read tool does: through the TOOL
 		// session's store (the sdk-built host context), not the AgentSession's
 		// own lazy field.
-		const readTool = session.getToolByName("read") as unknown as ReadTool;
-		const toolStore = getEditStore(readTool.session);
+		const toolSession: ToolSession = Reflect.get(session.getToolByName("read") ?? {}, "session");
+		const toolStore = getEditStore(toolSession);
 		const tag = toolStore.recordSnapshot("/tmp/omp-13370/a.rs", "alpha\nbeta\n", undefined);
 		expect(tag).toBeDefined();
 		expect(toolStore.byHashText("/tmp/omp-13370/a.rs", tag)).toBe("alpha\nbeta\n");
