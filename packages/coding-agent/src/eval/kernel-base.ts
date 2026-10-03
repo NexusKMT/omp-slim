@@ -358,9 +358,8 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 		}
 
 		requestWritten = true;
-		try {
-			await this.#writeLine(payload);
-		} catch (err) {
+		const transportFailed = (err: unknown) => {
+			if (pending.settled) return;
 			pending.cancelled = true;
 			pending.error = {
 				name: "TransportError",
@@ -368,6 +367,11 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 				traceback: [],
 			};
 			finalize();
+		};
+		try {
+			await this.#writeLine(payload, transportFailed);
+		} catch (err) {
+			transportFailed(err);
 		}
 
 		return promise;
@@ -493,18 +497,20 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 		}
 	}
 
-	async #writeLine(line: string): Promise<void> {
+	async #writeLine(line: string, onWriteFailed?: (err: unknown) => void): Promise<void> {
 		if (!this.#stdin) {
 			throw new Error(`${this.#options.languageName} kernel stdin is not open`);
 		}
 		if (this.#options.traceIpc) {
 			logger.debug(`${this.#options.languageName}Kernel send`, { preview: line.slice(0, 120) });
 		}
-		// Not awaited: callers' timeouts start after this returns, and kernel exit already aborts pending work.
+		// Not awaited: callers' timeouts start after this returns, so a wedged pipe must not block here.
+		// A failed write is reported through onWriteFailed; the kernel may stay alive without an exit event.
 		const write = Promise.resolve(this.#stdin.write(`${line}\n`));
 		void write.catch(() => {});
 		void Promise.all([write, this.#stdin.flush()]).catch(err => {
 			logger.debug(`${this.#options.languageName} kernel stdin write failed`, { error: String(err) });
+			onWriteFailed?.(err);
 		});
 	}
 

@@ -47,6 +47,35 @@ describe("isSignalableProcessGroup", () => {
 	});
 });
 
+describe("BaseKernel stdin failures", () => {
+	test("settles an execution with a TransportError when the pending stdin write rejects", async () => {
+		const exited = Promise.withResolvers<number>();
+		const proc = {
+			pid: undefined,
+			// A pending pipe write rejects with EPIPE once the runner's stdin is gone, while the process may still live.
+			stdin: {
+				write: () => Promise.reject(new Error("EPIPE: broken pipe, write")),
+				flush: () => undefined,
+				end: () => {},
+			},
+			stdout: new ReadableStream<Uint8Array>(),
+			stderr: new ReadableStream<Uint8Array>(),
+			exited: exited.promise,
+			kill: () => exited.resolve(0),
+		};
+		const kernel = new TestKernel();
+		kernel.setProcess(proc as unknown as Parameters<TestKernel["setProcess"]>[0]);
+		try {
+			// No timeoutMs: before the fix this execution never settled.
+			const result = await kernel.execute("print(1)");
+			expect(result.cancelled).toBe(true);
+			expect(result.error).toMatchObject({ name: "TransportError", value: "EPIPE: broken pipe, write" });
+		} finally {
+			await kernel.shutdown({ timeoutMs: 50 });
+		}
+	});
+});
+
 describe("killProcessGroup", () => {
 	test("never signals a degenerate group even when asked to", () => {
 		expect(killProcessGroup(0, "SIGKILL")).toBe(false);
