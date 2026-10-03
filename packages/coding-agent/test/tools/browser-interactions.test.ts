@@ -155,7 +155,8 @@ return { during, after };`,
 		const context = { session, toolCallId: "browser-select" };
 		const selectHtml = `<!doctype html>
 <select id="country"><option value="">Choose…</option><option value="us">United States</option><option value="ca">Canada</option></select>
-<select id="size"><option value="m">Large</option><option value="Large">Extra large</option></select>`;
+<select id="size"><option value="m">Large</option><option value="Large">Extra large</option></select>
+<select id="extras" multiple><option value="cheese">Cheese</option><option value="ham">Ham</option><option value="olives">Olives</option></select>`;
 		await prelude.invoke(
 			{ action: "open", name: SELECT_TAB_NAME, url: `data:text/html,${encodeURIComponent(selectHtml)}` },
 			context,
@@ -172,7 +173,13 @@ const handle = await tab.waitFor("#country");
 const handleByLabel = await handle.select("United States");
 const afterHandle = await tab.value("#country");
 const valueWins = await tab.select("#size", "Large");
-return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins };`,
+const firstOnSingle = await tab.select("#country", "Canada", "us");
+const handleFirstOnSingle = await handle.select("us", "ca");
+const afterFirst = await tab.value("#country");
+const noMatch = await tab.select("#country", "Mexico");
+const handleNoMatch = await handle.select("Mexico");
+const multiple = await tab.select("#extras", "Cheese", "olives");
+return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, firstOnSingle, handleFirstOnSingle, afterFirst, noMatch, handleNoMatch, multiple };`,
 					timeout: 20,
 				},
 				context,
@@ -184,6 +191,12 @@ return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins };`
 				handleByLabel: ["us"],
 				afterHandle: "us",
 				valueWins: ["Large"],
+				firstOnSingle: ["ca"],
+				handleFirstOnSingle: ["us"],
+				afterFirst: "us",
+				noMatch: [],
+				handleNoMatch: [],
+				multiple: ["cheese", "olives"],
 			});
 		} finally {
 			await prelude.invoke({ action: "close", name: SELECT_TAB_NAME, kill: true }, context).catch(() => undefined);

@@ -421,8 +421,10 @@ export async function highlightElement(
 }
 
 /**
- * Select `<select>` options by value, then by visible label, and return the selected values.
- * An exact value match always wins over a label, so value-based calls keep their meaning.
+ * Select `<select>` options by value, then by visible label, and return the values this call
+ * selected. An exact value match always wins over a label, so value-based calls keep their
+ * meaning. A single `<select>` takes the first matching value; one that matches nothing is
+ * cleared to the browser's default option and returns `[]`.
  */
 export async function selectElementOptions(
 	handle: ElementHandle,
@@ -436,10 +438,13 @@ export async function selectElementOptions(
 				value: string;
 				label: string;
 				text: string;
+				index: number;
 				selected: boolean;
 			}
 			interface SelectLike {
 				tagName: string;
+				multiple: boolean;
+				selectedIndex: number;
 				options: ArrayLike<SelectOption>;
 				dispatchEvent: (event: unknown) => boolean;
 			}
@@ -447,21 +452,26 @@ export async function selectElementOptions(
 			if (select?.tagName !== "SELECT") return null;
 			const page = globalThis as unknown as PageGlobals;
 			const options = Array.from(select.options);
-			const wanted = new Set<SelectOption>();
+			const wanted: SelectOption[] = [];
 			for (const value of vals as string[]) {
 				const option =
 					options.find(candidate => candidate.value === value) ??
 					options.find(
 						candidate => candidate.label === value || candidate.text.replace(/\s+/g, " ").trim() === value,
 					);
-				if (option) wanted.add(option);
+				if (option) wanted.push(option);
 			}
-			// Assign the full selection first, then read back: on a single
-			// <select>, un-selecting the current option mid-loop leaves the
-			// browser reporting it selected until another option takes over,
-			// which double-counted the old value in the returned list.
-			for (const option of options) option.selected = wanted.has(option);
-			const result = options.filter(option => option.selected).map(option => option.value);
+			let result: string[];
+			if (wanted.length === 0) {
+				for (const option of options) option.selected = false;
+				result = [];
+			} else if (select.multiple) {
+				for (const option of options) option.selected = wanted.includes(option);
+				result = options.filter(option => option.selected).map(option => option.value);
+			} else {
+				select.selectedIndex = wanted[0]!.index;
+				result = [wanted[0]!.value];
+			}
 			select.dispatchEvent(new page.Event("input", { bubbles: true }));
 			select.dispatchEvent(new page.Event("change", { bubbles: true }));
 			return result;
