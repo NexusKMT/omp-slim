@@ -192,6 +192,9 @@
 ### Fixed
 
 - Agent Hub transcripts with assistant messages lacking usage or cost now open instead of crashing ([#13844](https://github.com/can1357/oh-my-pi/issues/13844))
+### Fixed
+
+- Fixed idle terminal activity notifications while preserving bracketed paste recovery on input and rendering ([#13786](https://github.com/can1357/oh-my-pi/pull/13786) by [@srid](https://github.com/srid))
 
 ## [18.4.4] - 2026-09-29
 
