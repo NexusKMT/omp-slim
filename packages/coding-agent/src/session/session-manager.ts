@@ -80,6 +80,7 @@ import {
 import {
 	loadEntriesFromFile,
 	loadSessionFile,
+	normalizeAssistantUsage,
 	parseSessionContent,
 	readSessionHeaderId,
 	resolveBlobRefsInEntries,
@@ -405,24 +406,6 @@ function entryUsage(entry: SessionEntry): Usage | undefined {
 	if (message.role === "assistant") return message.usage;
 	if (message.role === "toolResult" && message.toolName === "task") return taskUsageFrom(message.details);
 	return undefined;
-}
-
-/**
- * Give a usage-less assistant message zero usage so renderers and totals never
- * dereference `undefined`. Persisted and imported transcripts can predate usage
- * metadata, so this is legitimate history, not a producer bug.
- */
-function repairMissingUsage(entry: SessionEntry): boolean {
-	if (entry.type !== "message" || entry.message.role !== "assistant" || entry.message.usage) return false;
-	entry.message.usage = {
-		input: 0,
-		output: 0,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: 0,
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-	};
-	return true;
 }
 
 function addUsage(target: UsageStatistics, usage: Usage | undefined): void {
@@ -1907,6 +1890,13 @@ export class SessionManager {
 		this.#sessionName = header.title;
 		this.#titleSource = header.titleSource;
 		this.#titleUpdatedAt = header.timestamp;
+		let repairedUsage = 0;
+		for (const entry of entries) {
+			if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
+				repairedUsage++;
+			}
+		}
+		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
 		this.#index.rebuild(entries);
 	}
 
@@ -1932,7 +1922,9 @@ export class SessionManager {
 			logger.warn("Dropped session entry appended after terminal release", { type: entry.type });
 			return;
 		}
-		if (repairMissingUsage(entry)) logger.warn("Assistant message recorded without usage", { id: entry.id });
+		if (entry.type === "message" && entry.message.role === "assistant" && normalizeAssistantUsage(entry.message)) {
+			logger.warn("Assistant message recorded with incomplete usage", { id: entry.id });
+		}
 		this.#entries.push(entry);
 		this.#index.insert(entry);
 		const batch = this.#atomicEntryBatch;
@@ -3586,25 +3578,16 @@ export class SessionManager {
 		});
 	}
 
-	/**
-	 * Repair loaded assistant entries: strip stale OpenAI Responses replay
-	 * metadata and give usage-less messages zero usage.
-	 */
+	/** Strip stale OpenAI Responses replay metadata from loaded assistant entries. */
 	sanitizeLoadedOpenAIResponsesReplayMetadata(): boolean {
 		let changed = false;
-		let missingUsage = 0;
 		for (const entry of this.#entries) {
 			if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-			if (repairMissingUsage(entry)) missingUsage++;
-
 			const sanitized = sanitizeRehydratedOpenAIResponsesAssistantMessage(entry.message);
 			if (sanitized === entry.message) continue;
 
 			entry.message = sanitized;
 			changed = true;
-		}
-		if (missingUsage > 0) {
-			logger.warn("Loaded assistant messages without usage; treating as zero", { count: missingUsage });
 		}
 
 		return changed;
