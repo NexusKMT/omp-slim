@@ -25,7 +25,7 @@ use crate::{
 	engine::{FileOp as EngineFileOp, HeaderKind, Resolved, StagedFile},
 	error::EditError,
 	files::FileSource,
-	store::{Clipboard, EditStore, file_hash, payload_hash},
+	store::{Clipboard, EditStore, Snapshot, file_hash, payload_hash},
 };
 
 const SEEN_LINE_REVEAL_CAP: usize = 40;
@@ -163,13 +163,15 @@ fn replace_groups(section: &PatchSection) -> Result<Vec<ReplaceGroup>, EditError
 	Ok(groups)
 }
 
-/// Map a current-numbered line back through `old_text → new_text`: the old
-/// line it images, when it lands inside an unchanged run. Added lines and
-/// lines inside rewritten spans have no image.
-fn shifted_image(old_text: &str, new_text: &str, new_line: u32) -> Option<u32> {
+/// Map every current-numbered line back through `old_text → new_text`: the
+/// old line it images when it lands inside an unchanged run (`None` for added
+/// lines and lines inside rewritten spans). One Myers walk serves every
+/// anchor, instead of one full-file diff per line.
+fn shifted_images(old_text: &str, new_text: &str) -> Vec<Option<u32>> {
 	let old_lines: Vec<&str> = old_text.split('\n').collect();
 	let new_lines: Vec<&str> = new_text.split('\n').collect();
 	let (old_ids, new_ids) = pi_diff::intern(&old_lines, &new_lines);
+	let mut image = vec![None; new_lines.len()];
 	let (mut old_line, mut current) = (1_u32, 1_u32);
 	for run in pi_diff::myers_diff(&old_ids, &new_ids) {
 		if run.added {
@@ -180,38 +182,65 @@ fn shifted_image(old_text: &str, new_text: &str, new_line: u32) -> Option<u32> {
 			old_line += run.count;
 			continue;
 		}
-		if new_line >= current && new_line < current + run.count {
-			return Some(old_line + (new_line - current));
+		let (mut new_line, mut old) = (current, old_line);
+		for _ in 0..run.count {
+			if let Some(slot) = image.get_mut(new_line as usize - 1) {
+				*slot = Some(old);
+			}
+			new_line += 1;
+			old += 1;
 		}
-		old_line += run.count;
-		current += run.count;
+		old_line = old;
+		current = new_line;
 	}
-	None
+	image
+}
+
+/// One retained version's seen set plus its lines' images in the current
+/// text, computed once per rescue instead of once per anchor.
+struct VersionMap {
+	seen:      BTreeSet<u32>,
+	same_text: bool,
+	image:     Vec<Option<u32>>,
+}
+
+/// Snapshot histories newest-first into reusable shift mappings, skipping
+/// versions that displayed nothing.
+fn version_maps(versions: &[Snapshot], current_text: &str) -> Vec<VersionMap> {
+	versions
+		.iter()
+		.filter_map(|version| {
+			let seen = version.seen_lines.clone()?;
+			if seen.is_empty() {
+				return None;
+			}
+			if &*version.text == current_text {
+				Some(VersionMap { seen, same_text: true, image: Vec::new() })
+			} else {
+				Some(VersionMap {
+					seen,
+					same_text: false,
+					image: shifted_images(&version.text, current_text),
+				})
+			}
+		})
+		.collect()
 }
 
 /// True when `line` (current numbering) images a line some retained version
 /// displayed: the model saw exactly this content, only at another number.
-fn shifted_from_seen(store: &EditStore, canonical: &Path, current_text: &str, line: u32) -> bool {
-	for version in store.versions(canonical) {
-		let Some(seen) = version.seen_lines.as_ref() else {
-			continue;
-		};
-		if seen.is_empty() {
-			continue;
+fn images_seen(maps: &[VersionMap], line: u32) -> bool {
+	maps.iter().any(|map| {
+		if map.same_text {
+			map.seen.contains(&line)
+		} else {
+			usize::try_from(line)
+				.ok()
+				.and_then(|n| n.checked_sub(1))
+				.and_then(|n| map.image.get(n).copied().flatten())
+				.is_some_and(|source| map.seen.contains(&source))
 		}
-		if &*version.text == current_text {
-			if seen.contains(&line) {
-				return true;
-			}
-			continue;
-		}
-		if let Some(source) = shifted_image(&version.text, current_text, line)
-			&& seen.contains(&source)
-		{
-			return true;
-		}
-	}
-	false
+	})
 }
 
 /// Body evidence: the op targets the line as currently numbered when its
@@ -225,9 +254,11 @@ fn body_evidences(body: &str, current_line: &str) -> bool {
 
 /// Anchors the guard would reject that a shift-aware reading accepts: every
 /// unseen anchor of a replacement op images a displayed line of a retained
-/// version (same content, older number) and the payload carries the first
-/// anchor's current content. Stale-numbered anchors fail the payload check
-/// and stay rejected, as do anchors no retained version displayed.
+/// version (same content, older number), the payload carries the first
+/// anchor's current content, and that content is unique in the file.
+/// Stale-numbered anchors fail the payload check and stay rejected, as do
+/// anchors no retained version displayed and evidence that repeats elsewhere
+/// (a stale number could image a different line with identical text).
 fn rescue_shifted_anchors(
 	section: &PatchSection,
 	store: &EditStore,
@@ -237,6 +268,7 @@ fn rescue_shifted_anchors(
 ) -> Result<Vec<u32>, EditError> {
 	let pending: BTreeSet<u32> = unseen.iter().copied().collect();
 	let current_lines: Vec<&str> = current_text.split('\n').collect();
+	let maps = version_maps(&store.versions(canonical), current_text);
 	let mut rescued = Vec::new();
 	for group in replace_groups(section)? {
 		let group_unseen: Vec<u32> = group
@@ -258,10 +290,16 @@ fn rescue_shifted_anchors(
 		if !body_evidences(&group.body, first_text) {
 			continue;
 		}
-		if group_unseen
+		let evidence = first_text.trim();
+		if current_lines
 			.iter()
-			.all(|line| shifted_from_seen(store, canonical, current_text, *line))
+			.filter(|line| line.trim() == evidence)
+			.count()
+			!= 1
 		{
+			continue;
+		}
+		if group_unseen.iter().all(|line| images_seen(&maps, *line)) {
 			rescued.extend(group_unseen);
 		}
 	}
@@ -661,24 +699,15 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn shifted_image_maps_through_insertions() {
-		let old = "a\nb\nc\nd";
-		let new = "a\nX\nY\nb\nc\nd";
-		assert_eq!(shifted_image(old, new, 1), Some(1));
-		assert_eq!(shifted_image(old, new, 2), None);
-		assert_eq!(shifted_image(old, new, 3), None);
-		assert_eq!(shifted_image(old, new, 4), Some(2));
-		assert_eq!(shifted_image(old, new, 6), Some(4));
-		assert_eq!(shifted_image(old, new, 7), None);
+	fn shifted_images_maps_through_insertions() {
+		let image = shifted_images("a\nb\nc\nd", "a\nX\nY\nb\nc\nd");
+		assert_eq!(image.as_slice(), &[Some(1), None, None, Some(2), Some(3), Some(4)]);
 	}
 
 	#[test]
-	fn shifted_image_maps_through_replacements() {
-		let old = "a\nb\nc";
-		let new = "a\nB1\nB2\nc";
-		assert_eq!(shifted_image(old, new, 1), Some(1));
-		assert_eq!(shifted_image(old, new, 2), None);
-		assert_eq!(shifted_image(old, new, 4), Some(3));
+	fn shifted_images_maps_through_replacements() {
+		let image = shifted_images("a\nb\nc", "a\nB1\nB2\nc");
+		assert_eq!(image.as_slice(), &[Some(1), None, None, Some(3)]);
 	}
 
 	#[test]
@@ -761,6 +790,10 @@ mod lifecycle {
 
 		fn text(&self, file: &str) -> String {
 			std::fs::read_to_string(self.dir.path().join(file)).unwrap()
+		}
+
+		fn write_text(&self, file: &str, text: &str) {
+			std::fs::write(self.dir.path().join(file), text).unwrap();
 		}
 
 		fn read(&self, file: &str, seen: &[u32]) -> String {
@@ -910,5 +943,60 @@ mod lifecycle {
 			"faithful line leaked into reveal: {err}"
 		);
 		assert!(err.contains("  18:let v0016 = 16;"), "stale line missing from reveal: {err}");
+	}
+	/// A file whose old lines 16 and 18 carry identical content, for the
+	/// repeated-content ambiguity probes below.
+	fn duplicate_fixture(ctx: &Lifecycle, file: &str) {
+		use std::fmt::Write as _;
+		let mut text = String::new();
+		for i in 1..=30 {
+			if i == 16 || i == 18 {
+				text.push_str("    return unchanged;\n");
+			} else {
+				writeln!(text, "let v{i:04} = {i};").unwrap();
+			}
+		}
+		ctx.write_text(file, &text);
+	}
+
+	/// Blocking review thread: with duplicated content, a stale anchor images
+	/// a *different* line whose identical text also occurs in the payload.
+	/// Accepting would silently edit the wrong line, so ambiguity rejects.
+	#[tokio::test]
+	async fn stale_duplicate_content_stays_rejected() {
+		let ctx = Lifecycle::new("case-g.ts", 30);
+		duplicate_fixture(&ctx, "case-g.ts");
+		let tag0 = ctx.read("case-g.ts", &all_seen(30));
+		ctx.edit(&format!("[case-g.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let before = ctx.text("case-g.ts");
+		let tag1 = ctx.head_tag("case-g.ts");
+		// Stale number for old line 18 (now line 20): line 18 now holds old
+		// line 16's identical text, which the payload also carries.
+		let err = ctx
+			.edit(&format!("[case-g.ts#{tag1}]\nPUT 18.=18:\n+    return unchanged; // edited\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
+		assert_eq!(ctx.text("case-g.ts"), before);
+	}
+
+	/// Conservative companion: even the correctly shifted anchor on repeated
+	/// content rejects, because the evidence cannot name which copy is meant.
+	#[tokio::test]
+	async fn faithful_duplicate_content_stays_rejected() {
+		let ctx = Lifecycle::new("case-h.ts", 30);
+		duplicate_fixture(&ctx, "case-h.ts");
+		let tag0 = ctx.read("case-h.ts", &all_seen(30));
+		ctx.edit(&format!("[case-h.ts#{tag0}]\nPUT >5:\n+// ins a\n+// ins b\n"))
+			.await
+			.unwrap();
+		let tag1 = ctx.head_tag("case-h.ts");
+		let err = ctx
+			.edit(&format!("[case-h.ts#{tag1}]\nPUT 20.=20:\n+    return unchanged; // edited\n"))
+			.await
+			.unwrap_err();
+		assert!(err.contains("never displayed"), "unexpected error: {err}");
 	}
 }
