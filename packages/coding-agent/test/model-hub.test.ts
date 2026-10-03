@@ -180,6 +180,17 @@ describe("ModelHub", () => {
 		}
 	});
 
+	describe("responsive layout", () => {
+		test("keeps model scopes and names visible at phone-sized widths", () => {
+			const { hub } = createHub({ models: [makeModel("test", "phone-model")] });
+			const lines = hub.render(36).map(line => stripVTControlCharacters(line));
+
+			expect(lines.some(line => line.includes("Models"))).toBe(true);
+			expect(lines.some(line => line.includes("All models"))).toBe(true);
+			expect(lines.some(line => line.includes("phone"))).toBe(true);
+		});
+	});
+
 	describe("role chips and roles view", () => {
 		test("separates chat and kind roles and filters role tabs", () => {
 			const chat = makeModel("test", "chat-model");
