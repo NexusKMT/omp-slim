@@ -12,6 +12,8 @@
 
 - `wait` now blocks only on background jobs and services the calling agent (main or subagent) started and errors when none are running, instead of waiting for peer messages; a message still ends a wait on such work
 - Improved auto-generated session titles: requests that only point at an image ("fix [Image #1]") are titled from the assistant's first ~40 words instead of a guess, placeholders are no longer echoed, and mid-session title refreshes keep the session's opening request so they name the goal instead of a file or symbol
+- In a focused subagent view, submitting `.` or `c` now sends the same hidden continue directive to that subagent as it does in the main session ([#13801](https://github.com/can1357/oh-my-pi/pull/13801) by [@Dante-dan](https://github.com/Dante-dan); [issue #13790](https://github.com/can1357/oh-my-pi/issues/13790)).
+- `/dump all` writes a zip to the temp directory with the main transcript, the LLM request JSON, and one file per subagent transcript (nested subagents included, killed ones marked aborted); the TUI copies the archive path to the clipboard. Plain `/dump` is unchanged ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 

@@ -950,7 +950,7 @@ export class InputController {
 			if ((!isSettingsInitialized() || cfgEmojiAutocomplete.get(settings)) && text) text = expandEmoticons(text);
 
 			// Focused subagent session: the editor is a plain chat box for it.
-			// Everything below (continue shortcuts, slash/bash/python, loop,
+			// Everything below (slash/bash/python, loop,
 			// compaction queueing) is main-session-only.
 			if (this.ctx.focusedAgentId) {
 				await this.#submitToFocusedSession(text, "steer");
@@ -1427,7 +1427,7 @@ export class InputController {
 		this.ctx.session.maybeStartTitleGeneration(text);
 	}
 
-	/** Submit editor text to the focused subagent session (chat-only focus policy). */
+	/** Submit editor text to the focused subagent session (chat and continue shortcuts only). */
 	async #submitToFocusedSession(text: string, streamingBehavior: "steer" | "followUp"): Promise<void> {
 		const target = this.ctx.viewSession;
 		const images = this.ctx.editor.pendingImages.length > 0 ? [...this.ctx.editor.pendingImages] : undefined;
@@ -1460,12 +1460,18 @@ export class InputController {
 			);
 			return; // editor text not cleared: Editor does not auto-clear on submit
 		}
+		const isContinueShortcut = streamingBehavior === "steer" && !images && (text === "." || text === "c");
 		this.ctx.editor.clearDraft(text);
 		try {
-			// prompt() handles idle (new turn) and streaming (queues per streamingBehavior).
-			await this.ctx.withLocalSubmission(text, () => target.prompt(text, { streamingBehavior, images }), {
-				imageCount: images?.length ?? 0,
-			});
+			// Synthetic directives must not use streamingBehavior: AgentSession would
+			// otherwise queue them as visible user messages while the target is busy.
+			if (isContinueShortcut) {
+				await target.prompt(manualContinuePrompt, { synthetic: true, userInitiated: true });
+			} else {
+				await this.ctx.withLocalSubmission(text, () => target.prompt(text, { streamingBehavior, images }), {
+					imageCount: images?.length ?? 0,
+				});
+			}
 		} catch (error) {
 			// Hand the message back, mirroring the main submit error path: restore
 			// pasted images so the user can retry an image-only or text+image draft.
