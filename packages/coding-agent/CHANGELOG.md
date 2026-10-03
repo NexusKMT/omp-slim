@@ -338,6 +338,9 @@
 ### Fixed
 
 - Fixed stale-read pruning dropping code already read when a later read of the same file showed only a summary, a partial page, a notice, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+### Fixed
+
+- Fixed session usage and cost totals omitting Mnemopi memory completions, including billed failures before a fallback succeeds. ([#13631](https://github.com/can1357/oh-my-pi/pull/13631) by [@sm0keyyy](https://github.com/sm0keyyy))
 
 ## [18.4.3] - 2026-09-28
 
