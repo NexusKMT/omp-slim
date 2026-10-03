@@ -5566,18 +5566,33 @@ function canReplayCursorThinking(msg: AssistantMessage, targetModelId: string | 
 	);
 }
 
-function buildCursorAssistantContent(
-	msg: AssistantMessage,
-	targetModelId: string | undefined,
-): CursorRootPromptAssistantContentPart[] {
-	const content: CursorRootPromptAssistantContentPart[] = [];
+interface CursorAssistantStep {
+	content: CursorRootPromptAssistantContentPart[];
+	/** Raw (un-normalized) ids of the calls this round issued, in order. */
+	callIds: string[];
+}
+
+/**
+ * Split one assistant message into the model rounds it recorded. A Cursor
+ * server turn persists as a single message whose tool calls interleave with
+ * the text and reasoning that followed each result; a round ends at a call
+ * followed by anything other than another call. Consecutive calls stay in one
+ * round — they were issued together. Hidden reasoning still marks a boundary.
+ */
+function buildCursorAssistantSteps(msg: AssistantMessage, targetModelId: string | undefined): CursorAssistantStep[] {
+	const steps: CursorAssistantStep[] = [];
+	let step: CursorAssistantStep = { content: [], callIds: [] };
 	const replayThinking = canReplayCursorThinking(msg, targetModelId);
 	for (const item of msg.content) {
+		if (item.type !== "toolCall" && step.callIds.length > 0) {
+			steps.push(step);
+			step = { content: [], callIds: [] };
+		}
 		if (item.type === "text") {
-			if (item.text) content.push({ type: "text", text: item.text });
+			if (item.text) step.content.push({ type: "text", text: item.text });
 		} else if (item.type === "thinking") {
 			if (replayThinking && item.thinking) {
-				content.push({
+				step.content.push({
 					type: "reasoning",
 					text: item.thinking,
 					providerOptions: { cursor: { modelName: msg.model } },
@@ -5591,15 +5606,17 @@ function buildCursorAssistantContent(
 			// gets the whole Run rejected as opaque resource_exhausted. Sanitize the
 			// id everywhere it reaches the wire; the tool-result side normalizes the
 			// same id identically, so the call/result pairing stays intact.
-			content.push({
+			step.content.push({
 				type: "tool-call",
 				toolCallId: normalizeToolCallId(item.id),
 				toolName: item.name,
 				args: normalizeCursorMcpArguments(item.arguments),
 			});
+			step.callIds.push(item.id);
 		}
 	}
-	return content;
+	steps.push(step);
+	return steps.filter(({ content }) => content.length > 0);
 }
 
 function assertCursorKimiK3HistoryReplayable(
@@ -5712,25 +5729,61 @@ function buildRootPromptMessagesJson(
 ): Uint8Array[] {
 	assertCursorKimiK3HistoryReplayable(messages, activeUserMessageIndex, targetModelId);
 	const historyEnd = activeUserMessageIndex >= 0 ? activeUserMessageIndex : messages.length;
-	const { pairedToolCallIds } = collectCursorToolHistory(messages, historyEnd);
+	const { toolResults, pairedToolCallIds } = collectCursorToolHistory(messages, historyEnd);
 	const entries: Uint8Array[] = [...systemPromptIds];
 	const pushJson = (obj: unknown) => {
 		const bytes = new TextEncoder().encode(JSON.stringify(obj));
 		entries.push(storeCursorBlob(blobStore, bytes));
 	};
+	// Results already replayed under the step that issued their call; the
+	// message-order pass below skips them.
+	const emittedResults = new Set<string>();
+	// Emit even when the result text is empty: the assistant `tool-call` is
+	// already in history, so dropping the pair would replay an orphaned call.
+	const pushToolResult = (result: ToolResultMessage) => {
+		const toolCallId = normalizeToolCallId(result.toolCallId);
+		pushJson({
+			role: "tool",
+			id: toolCallId,
+			content: [
+				{
+					type: "tool-result",
+					toolName: result.toolName,
+					toolCallId,
+					result: toolResultToText(result),
+					...(result.isError ? { isError: true } : {}),
+				},
+			],
+		});
+		emittedResults.add(result.toolCallId);
+	};
 
-	for (let i = 0; i < messages.length; i++) {
-		if (i === activeUserMessageIndex) break;
+	for (let i = 0; i < historyEnd; i++) {
 		const msg = messages[i];
 		if (msg.role === "user" || msg.role === "developer") {
 			const content = buildCursorRootPromptContent(msg.content);
 			if (content.length === 0) continue;
 			pushJson({ role: "user", content });
 		} else if (msg.role === "assistant") {
-			const content = buildCursorAssistantContent(msg, targetModelId);
-			if (content.length === 0) continue;
-			pushJson({ role: "assistant", content });
+			const steps = buildCursorAssistantSteps(msg, targetModelId);
+			for (const [stepIndex, step] of steps.entries()) {
+				pushJson({ role: "assistant", content: step.content });
+				// The final step's results stay in message order below: they are
+				// what the following turn responds to, and may arrive out of order.
+				if (stepIndex === steps.length - 1) continue;
+				// Replay this round's results in the order they arrived: calls issued
+				// together can finish out of call order.
+				const roundCallIds = new Set(step.callIds);
+				for (let j = i + 1; j < historyEnd; j++) {
+					const later = messages[j];
+					if (later.role !== "toolResult" || !roundCallIds.has(later.toolCallId)) continue;
+					if (emittedResults.has(later.toolCallId)) continue;
+					const result = toolResults.get(later.toolCallId);
+					if (result) pushToolResult(result);
+				}
+			}
 		} else if (msg.role === "toolResult") {
+			if (emittedResults.has(msg.toolCallId)) continue;
 			if (!pairedToolCallIds.has(msg.toolCallId)) {
 				pushJson({
 					role: "assistant",
@@ -5738,22 +5791,7 @@ function buildRootPromptMessagesJson(
 				});
 				continue;
 			}
-			// Emit even when the result text is empty: the assistant `tool-call` is
-			// already in history, so dropping the pair would replay an orphaned call.
-			const toolCallId = normalizeToolCallId(msg.toolCallId);
-			pushJson({
-				role: "tool",
-				id: toolCallId,
-				content: [
-					{
-						type: "tool-result",
-						toolName: msg.toolName,
-						toolCallId,
-						result: toolResultToText(msg),
-						...(msg.isError ? { isError: true } : {}),
-					},
-				],
-			});
+			pushToolResult(msg);
 		}
 	}
 
