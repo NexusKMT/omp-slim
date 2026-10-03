@@ -25,27 +25,6 @@ provider "google-antigravity" {
 	class "anthropic" {
 		family "opus" {
 			thinking-mode "budget"
-			// Standard regional partner-model rates per million tokens, with
-			// five-minute cache writes:
-			// https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing#other-google-models
-			revision "=5.5" {
-				cost-patch {
-					input 4
-					output 20
-					cache-read 0.2
-					cache-write 5
-				}
-			}
-		}
-		family "sonnet" {
-			revision "=5.5" {
-				cost-patch {
-					input 2
-					output 10
-					cache-read 0.2
-					cache-write 2.5
-				}
-			}
 		}
 	}
 	class "gemini" {

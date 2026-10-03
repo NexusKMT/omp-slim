@@ -124,19 +124,16 @@ async function captureRequest(
 }
 
 describe("google-gemini-cli effort-tier variant routing", () => {
-	it("discovers one priced Claude 5.5 model per family and routes its supported efforts to the served tiers", async () => {
+	it("discovers one Claude 5.5 model per family and routes its supported efforts to the served tiers", async () => {
 		const tiers = [Effort.Low, Effort.Medium, Effort.High] as const;
-		const families = [
-			{ id: "claude-opus-5-5", cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 } },
-			{ id: "claude-sonnet-5-5", cost: { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } },
-		];
+		const families = ["claude-opus-5-5", "claude-sonnet-5-5"];
 		const specs = await fetchAntigravityDiscoveryModels({
 			token: "token",
 			userAgent: "test",
 			fetcher: async () =>
 				Response.json({
 					models: Object.fromEntries(
-						families.flatMap(({ id }) =>
+						families.flatMap(id =>
 							tiers.map(tier => [
 								`${id}-${tier}`,
 								{
@@ -150,14 +147,13 @@ describe("google-gemini-cli effort-tier variant routing", () => {
 					),
 				}),
 		});
-		expect(specs?.map(spec => spec.id)).toEqual(families.map(family => family.id));
+		expect(specs?.map(spec => spec.id)).toEqual(families);
 		if (!specs) throw new Error("discovery failed");
 
-		for (const { id, cost } of families) {
+		for (const id of families) {
 			const spec = specs.find(spec => spec.id === id);
 			if (!spec) throw new Error(`missing logical model ${id}`);
 			const model = buildModel(spec);
-			expect(model.cost).toEqual(cost);
 			for (const tier of tiers) {
 				expect(resolveVariantSelector("google-antigravity", `${id}-${tier}`)).toBe(id);
 				const request = await captureRequest(model, tier);
