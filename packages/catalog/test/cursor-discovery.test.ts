@@ -29,7 +29,7 @@ import {
 	ModelVendorId,
 } from "../src/discovery/cursor-proto";
 import { create, fromBinary, toBinary } from "../src/discovery/protobuf";
-import { collapseBuiltVariants } from "../src/compat/collapse";
+import { collapseBuiltVariants, resolveVariantSelector } from "../src/compat/collapse";
 import { resolveProviderModels } from "../src/model-manager";
 import { cursorModelManagerOptions } from "../src/provider-models/special";
 import { getModelPricingStatus } from "../src/models";
@@ -1179,5 +1179,18 @@ describe("cursor rich discovery review regressions", () => {
 		const expected = ["cursor-grok-4.6", "cursor-grok-4.6-fast"];
 		expect(await discoverIds(200)).toEqual(expected);
 		expect(await discoverIds(503)).toEqual(expected);
+	});
+
+	it("resolves the retired unprefixed rich Grok lane ids to the stable family ids (#14164)", () => {
+		for (const [retired, stable] of [
+			["grok-4.5", "cursor-grok-4.5"],
+			["grok-4.5-fast", "cursor-grok-4.5-fast"],
+			["grok-4.6", "cursor-grok-4.6"],
+			["grok-4.6-fast", "cursor-grok-4.6-fast"],
+		] as const) {
+			expect(resolveVariantSelector("cursor", retired)).toBe(stable);
+		}
+		// Grok 4.7 lanes were always unprefixed; they must not be re-keyed.
+		expect(resolveVariantSelector("cursor", "grok-4.7")).toBeUndefined();
 	});
 });

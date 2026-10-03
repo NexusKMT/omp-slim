@@ -639,6 +639,13 @@ collapse {
 	// Retired id: the Codex image model was relabeled to what the backend runs
 	// (gpt-image-2-codex); keep saved `openai-codex/gpt-image-1` roles resolving.
 	provider-alias "openai-codex" "gpt-image-1" "gpt-image-2"
+	// Retired rich-lane ids: AvailableModels discovery named Grok 4.5/4.6
+	// lanes after the unprefixed model name before they adopted the reviewed
+	// `cursor-grok-*` family ids (#14164); keep saved selectors resolving.
+	provider-alias "cursor" "grok-4.5" "cursor-grok-4.5"
+	provider-alias "cursor" "grok-4.5-fast" "cursor-grok-4.5-fast"
+	provider-alias "cursor" "grok-4.6" "cursor-grok-4.6"
+	provider-alias "cursor" "grok-4.6-fast" "cursor-grok-4.6-fast"
 	variant-family "cursor" "cursor-grok-4.5" name="Grok 4.5" {
 		members "cursor-grok-4.5-low" "cursor-grok-4.5-medium" "cursor-grok-4.5-high"
 		route "low" "cursor-grok-4.5-low"
