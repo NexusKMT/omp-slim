@@ -3,6 +3,7 @@ import { ThinkingLevel, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import {
 	type CompactionPreparation,
 	compact,
+	createCustomMessage,
 	createFileOps,
 	DEFAULT_COMPACTION_SETTINGS,
 	NativeCompactionError,
@@ -2361,17 +2362,31 @@ describe("compact() remote compaction failure handling", () => {
 	});
 
 	test.each(["v2", "codex-v2"])(
-		"retains the serialized user turns, not the prior summary, in V2 replacement history (%s)",
+		"retains only user-written turns, as serialized, in V2 replacement history (%s)",
 		async protocol => {
 			const compactionItem = { type: "compaction", encrypted_content: "enc_v2" };
+			const quotedLeadIn = "Previous snapcompact archive source text:\n\nPlease rename this heading in our UI.";
+			const imageData = Buffer.from("screenshot").toString("base64");
 			const preparation = makePreparation();
 			preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
 			preparation.previousSummary = "Archived decision: use port 4242.";
 			preparation.messagesToSummarize = [
 				{ role: "user", content: "first user request", timestamp: 1 },
-				{ role: "user", content: [{ type: "text", text: "second user request" }], timestamp: 2 },
+				{ role: "developer", content: "harness developer note", timestamp: 2 },
+				createCustomMessage("hook", "extension hook note", false, undefined, new Date(3).toISOString()),
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: quotedLeadIn },
+						{ type: "image", data: imageData, mimeType: "image/png" },
+					],
+					timestamp: 4,
+				},
 			];
-			const baseModel = makeOpenAiModel({ remoteCompaction: { enabled: true, v2StreamingEnabled: true } });
+			const baseModel = makeOpenAiModel({
+				input: ["text", "image"],
+				remoteCompaction: { enabled: true, v2StreamingEnabled: true },
+			});
 			const model: Model =
 				protocol === "codex-v2"
 					? {
@@ -2398,16 +2413,23 @@ describe("compact() remote compaction failure handling", () => {
 
 			const result = await compact(preparation, model, "test-key", undefined, undefined, { fetch: fetchMock });
 
-			// The serializer sends user turns as type-less `{ role: "user", content }` items;
-			// the first one is the previous local summary, which Codex-style retention drops.
-			const [summaryTurn, ...userTurns] = requestInput.filter(item => item.role === "user");
-			expect(JSON.stringify(summaryTurn)).toContain("Archived decision: use port 4242.");
-			expect(userTurns.map(item => item.type)).toEqual([undefined, undefined, undefined]);
-			expect(getCompactionV2PreserveData(result.preserveData)?.replacementHistory).toEqual([
-				...userTurns,
-				compactionItem,
-			]);
-			expect(JSON.stringify(userTurns)).toContain("second user request");
+			const textOf = (item: Record<string, unknown>) =>
+				Array.isArray(item.content)
+					? item.content.filter(isRecord).map(part => (typeof part.text === "string" ? part.text : ""))
+					: [];
+			const wireUsers = requestInput.filter(item => item.role === "user");
+			// The serializer sends user turns without `type`; the summary is a user-role turn on
+			// both transports, and OpenAI also sends developer and hook messages as user-role turns.
+			expect(wireUsers.every(item => item.type === undefined)).toBe(true);
+			expect(JSON.stringify(wireUsers)).toContain("Archived decision: use port 4242.");
+			if (protocol === "v2") expect(JSON.stringify(wireUsers)).toContain("extension hook note");
+
+			const remote = getCompactionV2PreserveData(result.preserveData);
+			const retained = remote?.replacementHistory.slice(0, -1) ?? [];
+			expect(remote?.replacementHistory.at(-1)).toEqual(compactionItem);
+			expect(retained.map(item => textOf(item)[0])).toEqual(["first user request", quotedLeadIn, "recent"]);
+			for (const item of retained) expect(wireUsers).toContainEqual(item);
+			expect(result.preserveData?.openaiRemoteCompaction).toMatchObject({ retainedImageCount: 1 });
 		},
 	);
 

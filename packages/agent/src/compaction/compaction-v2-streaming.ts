@@ -36,10 +36,6 @@ import {
 import { $env, isUnexpectedSocketCloseMessage, logger, ptree, stringifyJson } from "@oh-my-pi/pi-utils";
 import { appendAzureApiVersion, resolveAzureOpenAiBaseUrl } from "./azure-openai-endpoint";
 import { prepareBedrockCompactionRequest } from "./bedrock";
-import branchSummaryContextPrompt from "./prompts/branch-summary-context.md" with { type: "text" };
-import compactionSummaryContextPrompt from "./prompts/compaction-summary-context.md" with { type: "text" };
-import handoffSummaryContextPrompt from "./prompts/handoff-summary-context.md" with { type: "text" };
-import snapcompactArchiveContextPrompt from "./prompts/snapcompact-archive-context.md" with { type: "text" };
 
 // ============================================================================
 // Types & Configuration
@@ -67,15 +63,6 @@ const CONTEXTUAL_USER_PREFIXES = [
 	"<token_budget>",
 	"<model_switch>",
 ];
-// Prior summaries reach the compaction input as user turns rendered from these
-// templates. The new compaction item already carries them, so retaining them
-// would replay the old summary on every later turn; match their static lead-in.
-const SUMMARY_USER_PREFIXES = [
-	compactionSummaryContextPrompt,
-	branchSummaryContextPrompt,
-	handoffSummaryContextPrompt,
-	snapcompactArchiveContextPrompt,
-].map(template => template.slice(0, template.indexOf("{{")));
 
 /** Token usage reported by the streamed V2 Responses completion. */
 export interface CompactionV2Usage {
@@ -90,6 +77,8 @@ export interface CompactionV2Usage {
 export interface CompactionV2Request {
 	body: OpenAICodexCompactionBody;
 	input: unknown[];
+	/** Candidates for verbatim retention next to the compaction item; user messages among them are kept. */
+	retainedUserItems: unknown[];
 	retainedMessageBudget: number;
 	sessionId?: string;
 	promptCacheKey?: string;
@@ -203,6 +192,7 @@ export function buildCompactionV2Request(
 		sessionId?: string;
 		promptCacheKey?: string;
 		retainedMessageBudget?: number;
+		retainedUserItems?: unknown[];
 	},
 ): CompactionV2Request {
 	const cacheOptions = { sessionId: options?.sessionId, promptCacheKey: options?.promptCacheKey };
@@ -236,12 +226,18 @@ export function buildCompactionV2RequestFromBody(
 		sessionId?: string;
 		promptCacheKey?: string;
 		retainedMessageBudget?: number;
+		/**
+		 * Serialized user-authored messages to retain. Defaults to `input`, which
+		 * is only right when every user-role input item was written by the user.
+		 */
+		retainedUserItems?: unknown[];
 	},
 ): CompactionV2Request {
 	const input = Array.isArray(body.input) ? body.input : [];
 	return {
 		body: { ...body, model: resolveCompactionV2Model(model), input },
 		input,
+		retainedUserItems: options?.retainedUserItems ?? input,
 		retainedMessageBudget: resolveCompactionV2RetainedMessageBudget(options?.retainedMessageBudget),
 		sessionId: options?.sessionId,
 		promptCacheKey: options?.promptCacheKey,
@@ -549,7 +545,7 @@ function finishCompactionV2Collection(
 
 	const compactionItem = state.compactionItems[0];
 	const { replacementHistory, retainedImageCount } = buildCompactionV2ReplacementHistory(
-		request.input,
+		request.retainedUserItems,
 		compactionItem,
 		request.retainedMessageBudget,
 	);
@@ -678,7 +674,7 @@ function isRetryableCompactionError(error: Error): boolean {
 // Replacement History
 // ============================================================================
 
-/** Build Codex-style V2 replacement history from prompt input plus compaction output. */
+/** Build Codex-style V2 replacement history from retention candidates plus compaction output. */
 export function buildCompactionV2ReplacementHistory(
 	input: unknown[],
 	compactionItem: Record<string, unknown>,
@@ -703,18 +699,12 @@ function isRetainedUserMessageForCompactionV2(item: Record<string, unknown>): bo
 	return isMessage && item.role === "user" && !isContextualUserMessage(item);
 }
 
-/** Harness-injected context or a prior summary, not a turn the user wrote. */
 function isContextualUserMessage(item: Record<string, unknown>): boolean {
 	const content = Array.isArray(item.content) ? item.content : [];
 	return content.some(part => {
 		if (!isRecord(part) || part.type !== "input_text") return false;
-		const text = stringField(part, "text")?.trimStart();
-		if (!text) return false;
-		const lower = text.toLowerCase();
-		return (
-			CONTEXTUAL_USER_PREFIXES.some(prefix => lower.startsWith(prefix)) ||
-			SUMMARY_USER_PREFIXES.some(prefix => text.startsWith(prefix))
-		);
+		const text = stringField(part, "text")?.trimStart().toLowerCase();
+		return !!text && CONTEXTUAL_USER_PREFIXES.some(prefix => text.startsWith(prefix));
 	});
 }
 
