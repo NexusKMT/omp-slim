@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Changed
 
 - Upgraded local embedding support to fastembed 3.0.0. Models now download from Hugging Face into the updated cache layout, with interrupted downloads resuming automatically; existing models are migrated on first use while producing the same vectors.

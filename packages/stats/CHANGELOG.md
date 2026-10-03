@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Fixed
 
 - Fixed stats dashboard request rows for Judge and other role-model calls so they open correctly and display usage details.

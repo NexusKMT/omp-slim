@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Added
 
 - Added RPC support for GPT live voice sessions bound to the RPC session, including live start, stop, mute, phase, level, transcript, and end events; closing stdin also stops an active live session.

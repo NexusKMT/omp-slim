@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Added
 
 - Added utilities for detecting and scanning own-line display-math blocks in growing text, including identifying possible openers and closers efficiently.

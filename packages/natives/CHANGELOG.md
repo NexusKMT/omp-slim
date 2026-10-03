@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Fixed
 
 - Fixed macOS computer-use scrolling so takeover and desktop scroll actions move iPhone Mirroring and other pixel-forwarding windows reliably, with smooth mouse-like wheel steps.

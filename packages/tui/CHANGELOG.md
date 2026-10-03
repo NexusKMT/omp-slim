@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Added
 
 - Added native terminal support for submitting explicit composer prompts atomically, preserving displaced drafts and attachments for local recall.

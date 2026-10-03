@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Added
 
 - Added provider-reported usage cost, the unnormalized provider ID, and the requested model ID to CostEstimatorContext, allowing cost estimators to use the cost already recorded for a request instead of recomputing it from token counts.

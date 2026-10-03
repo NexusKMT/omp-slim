@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Fixed
 
 - Fixed tab adoption stalling when Chrome discards background tabs.

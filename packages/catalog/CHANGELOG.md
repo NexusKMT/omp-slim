@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.5.1] - 2026-10-03
+
 ### Added
 
 - Added support for listing models from Codex-compatible gateways through openaiCodexModelManagerOptions.baseUrl, with discovery caches isolated per endpoint.
