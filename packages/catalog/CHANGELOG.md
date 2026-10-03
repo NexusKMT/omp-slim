@@ -21,6 +21,7 @@
 - Fixed new sessions on Fireworks failing with HTTP 404 on the first turn: the Fireworks default model is now `kimi-k3`, because Fireworks no longer serves `kimi-k2.7-code` ([#14068](https://github.com/can1357/oh-my-pi/pull/14068) by [@alphastorm](https://github.com/alphastorm))
 - Recognized bare and provider-qualified `k3` and `k3-256k` selectors as Kimi K3, enabling the existing replace-edit fallback and K3 catalog policies while preserving explicit edit-mode overrides ([#14098](https://github.com/can1357/oh-my-pi/pull/14098) by [@NaC-L](https://github.com/NaC-L)).
 - Fixed Fireworks model prices taken from other hosts or missing: discovered and bundled Fireworks models now use Fireworks' own models.dev prices, so `ember-1`, `nemotron-3-ultra-nvfp4`, `nemotron-lightning-3.5-30b-a3b`, and `qwen3.8-2.4t-a95b` no longer show as free and the costs of `deepseek-v4.1-flash`, `gpt-oss-120b`, `inkling`, and `qwen3.8-max` are corrected ([#14069](https://github.com/can1357/oh-my-pi/pull/14069) by [@alphastorm](https://github.com/alphastorm))
+- Fixed Fireworks Fast models failing with HTTP 404: the retired `kimi-k2.6-fast`, `kimi-k2.7-code-fast`, and `glm-5.1-fast` are replaced by `glm-5.3-fast` and `kimi-k3-fast`, and GLM-5.3 Fast on Fireworks, Baseten, and Vercel AI Gateway now offers GLM-5.3's `low`/`high`/`max` thinking levels ([#14067](https://github.com/can1357/oh-my-pi/pull/14067) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.4.10] - 2026-10-02
 

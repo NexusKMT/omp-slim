@@ -363,16 +363,16 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 	});
 
 	it("excludes a Fireworks Fast failed turn with partial visible text from Fast→base fallback", () => {
-		const fastModel = getBundledModel("fireworks", "kimi-k2.6-fast");
-		if (!fastModel) throw new Error("Expected bundled model kimi-k2.6-fast");
+		const fastModel = getBundledModel("fireworks", "kimi-k3-fast");
+		if (!fastModel) throw new Error("Expected bundled model kimi-k3-fast");
 		const recovery = new TurnRecovery(createHost(fastModel, modelRegistry));
 		const message = makeMessage([{ type: "text", text: "partial visible output" }], fastModel);
 		expect(recovery.isFireworksFastFallbackEligible(message)).toBe(false);
 	});
 
 	it("keeps a Fireworks Fast empty/whitespace failed turn eligible for Fast→base fallback", () => {
-		const fastModel = getBundledModel("fireworks", "kimi-k2.6-fast");
-		if (!fastModel) throw new Error("Expected bundled model kimi-k2.6-fast");
+		const fastModel = getBundledModel("fireworks", "kimi-k3-fast");
+		if (!fastModel) throw new Error("Expected bundled model kimi-k3-fast");
 		const recovery = new TurnRecovery(createHost(fastModel, modelRegistry));
 		expect(recovery.isFireworksFastFallbackEligible(makeMessage([], fastModel))).toBe(true);
 		expect(recovery.isFireworksFastFallbackEligible(makeMessage([{ type: "text", text: "   \n" }], fastModel))).toBe(

@@ -1331,7 +1331,7 @@ describe("AgentSession retry fallback", () => {
 	});
 
 	it("does not degrade Fireworks Fast or retry a chain after queued fail-closed preflight", async () => {
-		const primaryModel = getBundledModel("fireworks", "kimi-k2.6-fast");
+		const primaryModel = getBundledModel("fireworks", "kimi-k3-fast");
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!primaryModel || !fallbackModel) throw new Error("Expected bundled queued fail-closed models");
 		const requestedModels: string[] = [];
@@ -4953,7 +4953,7 @@ describe("AgentSession retry fallback", () => {
 	});
 
 	it("reports a Fireworks Fast degrade as fallback-routed even though it arms no chain", async () => {
-		const fastModel = getBundledModel("fireworks", "kimi-k2.6-fast");
+		const fastModel = getBundledModel("fireworks", "kimi-k3-fast");
 		if (!fastModel) throw new Error("Expected the bundled Fireworks Fast model to exist");
 		const baseId = fastModel.id.replace(/-fast$/, "");
 		const baseModel = getBundledModel("fireworks", baseId);
