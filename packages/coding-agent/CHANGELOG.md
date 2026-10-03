@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed `eval` `tool.*` calls to extension and custom tools with strict schemas (e.g. `ida_list_databases`) failing with `unexpected parameters: ['i']`; bridged calls now receive the same arguments as direct tool calls
+- Fixed `eval` `tool.*` calls to extension and custom tools with strict schemas (e.g. `ida_list_databases`) failing with `unexpected parameters: ['i']`; bridged calls now receive the same arguments as direct tool calls ([#14174](https://github.com/can1357/oh-my-pi/pull/14174) by [@wondercrash](https://github.com/wondercrash))
 
 ## [18.5.0] - 2026-10-03
 
