@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a 1px pink/cyan fringe on the left and right edges of the "Classify with judge" button in the stats dashboard ([#14126](https://github.com/can1357/oh-my-pi/pull/14126) by [@grepme](https://github.com/grepme)).
+
 ## [18.4.4] - 2026-09-29
 
 ### Added
