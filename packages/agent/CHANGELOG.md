@@ -6,6 +6,9 @@
 
 - Added the request's provider-computed `usageCost`, the un-normalized `providerId`, and the requested `modelId` to `CostEstimatorContext`, so a `costEstimator` can report the cost already recorded for the request instead of recomputing it from token counts ([#14055](https://github.com/can1357/oh-my-pi/pull/14055) by [@xaviergmail](https://github.com/xaviergmail))
 
+### Fixed
+
+- Fixed parallel tool calls that arrive under a reused or empty tool-call id running their sibling's arguments and merging results — each call now executes and reports its own payload ([#13735](https://github.com/can1357/oh-my-pi/pull/13735) by [@yingliang-zhang](https://github.com/yingliang-zhang))
 ## [18.4.11] - 2026-10-02
 
 ### Fixed
