@@ -79,4 +79,29 @@ describe("RpcClient stdin failures", () => {
 			process.off("unhandledRejection", onUnhandled);
 		}
 	});
+
+	test("rejects a non-serializable command without stopping a healthy client", async () => {
+		const exited = Promise.withResolvers<number>();
+		let killed = false;
+		const proc: RpcAgentProcess = {
+			stdin: { write: () => 0 },
+			stdout: new ReadableStream<Uint8Array>({
+				start(controller) {
+					controller.enqueue(new TextEncoder().encode(`${JSON.stringify({ type: "ready" })}\n`));
+				},
+			}),
+			peekStderr: () => "",
+			kill: () => {
+				killed = true;
+				exited.resolve(0);
+			},
+			exited: exited.promise,
+		};
+		using client = new RpcClient({ spawn: () => proc });
+		await client.start();
+
+		// A serialization error is not a pipe failure: only this request fails.
+		await expect(client.goal("create", { tokenBudget: 1n as unknown as number })).rejects.toThrow(TypeError);
+		expect(killed).toBe(false);
+	});
 });

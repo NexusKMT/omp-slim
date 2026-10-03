@@ -1472,7 +1472,13 @@ export class RpcClient {
 			clearTimeout(timeoutId);
 			reject(err);
 		};
-		this.#writeFrame(fullCommand, fail);
+		// Settle this promise on a synchronous throw too (e.g. a non-serializable command): the caller only
+		// receives `promise`, so a later rejection routed through `fail` would otherwise be unhandled.
+		try {
+			this.#writeFrame(fullCommand, fail);
+		} catch (err) {
+			fail(err instanceof Error ? err : new Error(String(err)));
+		}
 		return promise;
 	}
 
@@ -1540,13 +1546,15 @@ export class RpcClient {
 		}
 		const child = this.#process;
 		const stdin = child.stdin;
+		// Serialize first: a non-serializable frame is the caller's error, not a pipe failure.
+		const line = `${JSON.stringify(frame)}\n`;
 		// A broken stdin pipe is terminal: fail this frame's request, then stop so start() can relaunch.
 		const failed = (err: unknown) => {
 			onError?.(err instanceof Error ? err : new Error(String(err)));
 			if (this.#process === child) void this.stop();
 		};
 		try {
-			const write = stdin.write(`${JSON.stringify(frame)}\n`);
+			const write = stdin.write(line);
 			if (isPromise(write)) write.catch(failed);
 			if (!("flush" in stdin)) return;
 			const flushResult = (stdin as FileSink).flush();
