@@ -360,6 +360,9 @@ export class IdaWorker {
 				await this.#writeFrame({ id, method, params });
 			} catch (error) {
 				if (this.#exitCode !== null) throw this.#exitError();
+				// A broken stdin pipe is terminal; killing the worker runs the normal exit path and frees the lock.
+				this.#pending.delete(id);
+				await this.#kill();
 				throw new ToolError(`Failed to send ${method} to the IDA worker for ${this.id}: ${errorMessage(error)}`);
 			}
 

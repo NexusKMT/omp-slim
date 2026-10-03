@@ -367,6 +367,8 @@ export abstract class BaseKernel<TExecuteOptions extends KernelExecuteOptions = 
 				traceback: [],
 			};
 			finalize();
+			// A broken stdin pipe is terminal: retire the kernel so the session starts a fresh one.
+			void this.shutdown();
 		};
 		try {
 			await this.#writeLine(payload, transportFailed);

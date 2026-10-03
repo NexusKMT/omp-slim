@@ -40,7 +40,7 @@ describe("RpcClient.start", () => {
 });
 
 describe("RpcClient stdin failures", () => {
-	test("rejects the request without an unhandled rejection when write rejects and flush throws", async () => {
+	test("fails the request and stops the client when write rejects and flush throws", async () => {
 		const exited = Promise.withResolvers<number>();
 		const proc: RpcAgentProcess & { stdin: { flush(): never } } = {
 			stdin: {
@@ -72,6 +72,9 @@ describe("RpcClient stdin failures", () => {
 			setImmediate(turn.resolve);
 			await turn.promise;
 			expect(unhandled).toEqual([]);
+			// The broken pipe is terminal: the agent is killed and the client no longer accepts commands.
+			expect(await exited.promise).toBe(0);
+			await expect(client.getState()).rejects.toThrow("Client not started");
 		} finally {
 			process.off("unhandledRejection", onUnhandled);
 		}

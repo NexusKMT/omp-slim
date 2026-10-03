@@ -48,7 +48,7 @@ describe("isSignalableProcessGroup", () => {
 });
 
 describe("BaseKernel stdin failures", () => {
-	test("settles an execution with a TransportError when the pending stdin write rejects", async () => {
+	test("settles an execution with a TransportError and retires the kernel when the stdin write rejects", async () => {
 		const exited = Promise.withResolvers<number>();
 		const proc = {
 			pid: undefined,
@@ -70,6 +70,9 @@ describe("BaseKernel stdin failures", () => {
 			const result = await kernel.execute("print(1)");
 			expect(result.cancelled).toBe(true);
 			expect(result.error).toMatchObject({ name: "TransportError", value: "EPIPE: broken pipe, write" });
+			// The broken pipe is terminal: the kernel stops reporting alive (so the session replaces it) and is killed.
+			expect(kernel.isAlive()).toBe(false);
+			expect(await exited.promise).toBe(0);
 		} finally {
 			await kernel.shutdown({ timeoutMs: 50 });
 		}

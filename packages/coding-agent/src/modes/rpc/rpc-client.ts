@@ -1472,13 +1472,7 @@ export class RpcClient {
 			clearTimeout(timeoutId);
 			reject(err);
 		};
-		// A synchronous flush() throw must settle this promise too: the caller only ever receives
-		// `promise`, so any later write rejection routed through `fail` would otherwise be unhandled.
-		try {
-			this.#writeFrame(fullCommand, fail);
-		} catch (err) {
-			fail(err instanceof Error ? err : new Error(String(err)));
-		}
+		this.#writeFrame(fullCommand, fail);
 		return promise;
 	}
 
@@ -1544,12 +1538,22 @@ export class RpcClient {
 		if (!this.#process?.stdin) {
 			throw new Error("Client not started");
 		}
-		const stdin = this.#process.stdin;
-		const write = stdin.write(`${JSON.stringify(frame)}\n`);
-		if (isPromise(write)) write.catch((err: Error) => onError?.(err));
-		if (!("flush" in stdin)) return;
-		const flushResult = (stdin as FileSink).flush();
-		if (isPromise(flushResult)) flushResult.catch((err: Error) => onError?.(err));
+		const child = this.#process;
+		const stdin = child.stdin;
+		// A broken stdin pipe is terminal: fail this frame's request, then stop so start() can relaunch.
+		const failed = (err: unknown) => {
+			onError?.(err instanceof Error ? err : new Error(String(err)));
+			if (this.#process === child) void this.stop();
+		};
+		try {
+			const write = stdin.write(`${JSON.stringify(frame)}\n`);
+			if (isPromise(write)) write.catch(failed);
+			if (!("flush" in stdin)) return;
+			const flushResult = (stdin as FileSink).flush();
+			if (isPromise(flushResult)) flushResult.catch(failed);
+		} catch (err) {
+			failed(err);
+		}
 	}
 
 	#getData<T>(response: RpcResponse): T {
