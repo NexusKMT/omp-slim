@@ -47,6 +47,9 @@
 ### Changed
 
 - Changed Ctrl+Z in Tern's native composer to undo the last edit (TSP `undo` event) instead of suspending
+### Fixed
+
+- Fixed model hub role assignment offering models the role can't use after switching providers ([#12692](https://github.com/can1357/oh-my-pi/issues/12692)).
 
 ## [18.4.11] - 2026-10-02
 
