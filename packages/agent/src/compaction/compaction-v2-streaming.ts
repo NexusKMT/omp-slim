@@ -36,6 +36,10 @@ import {
 import { $env, isUnexpectedSocketCloseMessage, logger, ptree, stringifyJson } from "@oh-my-pi/pi-utils";
 import { appendAzureApiVersion, resolveAzureOpenAiBaseUrl } from "./azure-openai-endpoint";
 import { prepareBedrockCompactionRequest } from "./bedrock";
+import branchSummaryContextPrompt from "./prompts/branch-summary-context.md" with { type: "text" };
+import compactionSummaryContextPrompt from "./prompts/compaction-summary-context.md" with { type: "text" };
+import handoffSummaryContextPrompt from "./prompts/handoff-summary-context.md" with { type: "text" };
+import snapcompactArchiveContextPrompt from "./prompts/snapcompact-archive-context.md" with { type: "text" };
 
 // ============================================================================
 // Types & Configuration
@@ -63,6 +67,15 @@ const CONTEXTUAL_USER_PREFIXES = [
 	"<token_budget>",
 	"<model_switch>",
 ];
+// Prior summaries reach the compaction input as user turns rendered from these
+// templates. The new compaction item already carries them, so retaining them
+// would replay the old summary on every later turn; match their static lead-in.
+const SUMMARY_USER_PREFIXES = [
+	compactionSummaryContextPrompt,
+	branchSummaryContextPrompt,
+	handoffSummaryContextPrompt,
+	snapcompactArchiveContextPrompt,
+].map(template => template.slice(0, template.indexOf("{{")));
 
 /** Token usage reported by the streamed V2 Responses completion. */
 export interface CompactionV2Usage {
@@ -672,8 +685,7 @@ export function buildCompactionV2ReplacementHistory(
 	retainedMessageBudget = V2_RETAINED_MESSAGE_TOKEN_BUDGET,
 ): { replacementHistory: Array<Record<string, unknown>>; retainedImageCount: number } {
 	const retained = input.filter(
-		(item): item is Record<string, unknown> =>
-			isRecord(item) && isRetainedForCompactionV2(item) && shouldKeepCompactionV2HistoryItem(item),
+		(item): item is Record<string, unknown> => isRecord(item) && isRetainedUserMessageForCompactionV2(item),
 	);
 	const replacementHistory = truncateRetainedMessagesForCompactionV2(
 		retained,
@@ -684,25 +696,25 @@ export function buildCompactionV2ReplacementHistory(
 	return { replacementHistory, retainedImageCount };
 }
 
-function isRetainedForCompactionV2(item: Record<string, unknown>): boolean {
-	if (item.type !== "message") return false;
-	const role = stringField(item, "role");
-	return role === "user" || role === "developer" || role === "system";
+function isRetainedUserMessageForCompactionV2(item: Record<string, unknown>): boolean {
+	// Responses input messages may omit `type`: omp serializes turns as
+	// `{ role, content }`, which the API reads as `type: "message"`.
+	const isMessage = item.type === "message" || (item.type === undefined && typeof item.role === "string");
+	return isMessage && item.role === "user" && !isContextualUserMessage(item);
 }
 
-function shouldKeepCompactionV2HistoryItem(item: Record<string, unknown>): boolean {
-	if (item.type !== "message") return item.type === "compaction";
-	const role = stringField(item, "role");
-	if (role !== "user") return false;
-	return !isContextualUserMessage(item);
-}
-
+/** Harness-injected context or a prior summary, not a turn the user wrote. */
 function isContextualUserMessage(item: Record<string, unknown>): boolean {
 	const content = Array.isArray(item.content) ? item.content : [];
 	return content.some(part => {
 		if (!isRecord(part) || part.type !== "input_text") return false;
-		const text = stringField(part, "text")?.trimStart().toLowerCase();
-		return !!text && CONTEXTUAL_USER_PREFIXES.some(prefix => text.startsWith(prefix));
+		const text = stringField(part, "text")?.trimStart();
+		if (!text) return false;
+		const lower = text.toLowerCase();
+		return (
+			CONTEXTUAL_USER_PREFIXES.some(prefix => lower.startsWith(prefix)) ||
+			SUMMARY_USER_PREFIXES.some(prefix => text.startsWith(prefix))
+		);
 	});
 }
 

@@ -2360,6 +2360,57 @@ describe("compact() remote compaction failure handling", () => {
 		expect(completeSpy).not.toHaveBeenCalled();
 	});
 
+	test.each(["v2", "codex-v2"])(
+		"retains the serialized user turns, not the prior summary, in V2 replacement history (%s)",
+		async protocol => {
+			const compactionItem = { type: "compaction", encrypted_content: "enc_v2" };
+			const preparation = makePreparation();
+			preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
+			preparation.previousSummary = "Archived decision: use port 4242.";
+			preparation.messagesToSummarize = [
+				{ role: "user", content: "first user request", timestamp: 1 },
+				{ role: "user", content: [{ type: "text", text: "second user request" }], timestamp: 2 },
+			];
+			const baseModel = makeOpenAiModel({ remoteCompaction: { enabled: true, v2StreamingEnabled: true } });
+			const model: Model =
+				protocol === "codex-v2"
+					? {
+							...baseModel,
+							api: "openai-codex-responses",
+							provider: "openai-codex",
+							baseUrl: "https://chatgpt.example/backend-api",
+							preferWebsockets: false,
+							remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+						}
+					: baseModel;
+			let requestInput: Array<Record<string, unknown>> = [];
+			const fetchMock: FetchImpl = async (_url, init) => {
+				const body: unknown = JSON.parse(String(init?.body));
+				requestInput = isRecord(body) && Array.isArray(body.input) ? body.input.filter(isRecord) : [];
+				return sseResponse([
+					{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+					{
+						type: "response.completed",
+						response: { usage: { input_tokens: 55, output_tokens: 3, total_tokens: 58 } },
+					},
+				]);
+			};
+
+			const result = await compact(preparation, model, "test-key", undefined, undefined, { fetch: fetchMock });
+
+			// The serializer sends user turns as type-less `{ role: "user", content }` items;
+			// the first one is the previous local summary, which Codex-style retention drops.
+			const [summaryTurn, ...userTurns] = requestInput.filter(item => item.role === "user");
+			expect(JSON.stringify(summaryTurn)).toContain("Archived decision: use port 4242.");
+			expect(userTurns.map(item => item.type)).toEqual([undefined, undefined, undefined]);
+			expect(getCompactionV2PreserveData(result.preserveData)?.replacementHistory).toEqual([
+				...userTurns,
+				compactionItem,
+			]);
+			expect(JSON.stringify(userTurns)).toContain("second user request");
+		},
+	);
+
 	test("rewrites an oversized trailing tool output before V2 streaming compaction", async () => {
 		const preparation = makePreparation();
 		preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
