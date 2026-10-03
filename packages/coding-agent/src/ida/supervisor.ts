@@ -343,6 +343,12 @@ export class IdaWorker {
 		}
 	}
 
+	async #writeFrame(frame: object): Promise<void> {
+		const write = Promise.resolve(this.#proc.stdin.write(`${JSON.stringify(frame)}\n`));
+		void write.catch(() => {});
+		await Promise.all([write, this.#proc.stdin.flush()]);
+	}
+
 	async #send(method: IdaMethod, params: object, options: IdaRequestOptions): Promise<unknown> {
 		if (this.#exitCode !== null) throw this.#exitError();
 		const id = this.#nextId++;
@@ -351,8 +357,7 @@ export class IdaWorker {
 		this.#current = { method, startedAt: Date.now() };
 		try {
 			try {
-				this.#proc.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
-				await this.#proc.stdin.flush();
+				await this.#writeFrame({ id, method, params });
 			} catch (error) {
 				if (this.#exitCode !== null) throw this.#exitError();
 				throw new ToolError(`Failed to send ${method} to the IDA worker for ${this.id}: ${errorMessage(error)}`);
@@ -379,8 +384,7 @@ export class IdaWorker {
 			try {
 				if (process.platform === "win32") {
 					// Windows has no per-process SIGINT (kill terminates); worker.py reads this frame on its stdin thread.
-					this.#proc.stdin.write(`${JSON.stringify({ interrupt: id })}\n`);
-					await this.#proc.stdin.flush();
+					await this.#writeFrame({ interrupt: id });
 				} else {
 					this.#proc.kill("SIGINT");
 				}

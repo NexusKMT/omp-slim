@@ -516,17 +516,21 @@ export class DapClient {
 	/**
 	 * Framed write to the adapter, bounded by {@link WRITE_MESSAGE_TIMEOUT_MS}
 	 * and by adapter exit. Without this bound a wedged adapter stdin used to
-	 * hang the whole client forever. On timeout or exit-before-flush the client
-	 * disposes itself and rethrows.
+	 * hang the whole client forever. On a failed write (EPIPE), timeout, or
+	 * exit-before-flush the client disposes itself and rethrows.
 	 */
 	async #writeMessage(message: DapRequestMessage | DapResponseMessage): Promise<void> {
 		const content = JSON.stringify(message);
-		this.#writeSink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n`);
-		this.#writeSink.write(content);
-		const flushResult = this.#writeSink.flush();
-		if (!(flushResult instanceof Promise)) return;
+		// write() returns a Promise while the pipe write is pending; it rejects (EPIPE) once the adapter is
+		// gone. Observe it before flush(), which may throw synchronously and would orphan the rejection.
+		const write = this.#writeSink.write(`Content-Length: ${Buffer.byteLength(content, "utf-8")}\r\n\r\n${content}`);
+		if (write instanceof Promise) write.catch(() => {});
+		const flush = this.#writeSink.flush();
+		if (!(write instanceof Promise) && !(flush instanceof Promise)) return;
+		const flushResult = Promise.all([write, flush]);
 
 		if (this.#adapterExited) {
+			flushResult.catch(() => {});
 			throw new Error(`DAP adapter ${this.adapter.name} exited before write completed`);
 		}
 

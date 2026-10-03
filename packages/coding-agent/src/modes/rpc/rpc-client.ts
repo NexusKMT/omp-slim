@@ -1538,14 +1538,11 @@ export class RpcClient {
 			throw new Error("Client not started");
 		}
 		const stdin = this.#process.stdin;
-		stdin.write(`${JSON.stringify(frame)}\n`);
+		const write = stdin.write(`${JSON.stringify(frame)}\n`);
+		if (isPromise(write)) write.catch((err: Error) => onError?.(err));
 		if (!("flush" in stdin)) return;
 		const flushResult = (stdin as FileSink).flush();
-		if (isPromise(flushResult)) {
-			flushResult.catch((err: Error) => {
-				onError?.(err);
-			});
-		}
+		if (isPromise(flushResult)) flushResult.catch((err: Error) => onError?.(err));
 	}
 
 	#getData<T>(response: RpcResponse): T {
