@@ -105,6 +105,7 @@ import {
 	discoverAndLoadExtensions,
 	discoverExtensionPaths,
 	EXTENSION_HANDLER_TIMEOUT_MS,
+	type ExtensionAgentIdentity,
 	type ExtensionContext,
 	type ExtensionFactory,
 	ExtensionRunner,
@@ -4374,6 +4375,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 		}
 
+		// Advisors share this session's extension runner (for the approval gate
+		// below), so their tool calls must name the advisor as `ctx.agent`; the
+		// runner's own identity would report them as this session's agent.
+		const advisorAgent: ExtensionAgentIdentity = Object.freeze({
+			kind: "sub",
+			id: "advisor",
+			name: "advisor",
+			depth: 0,
+			parentId: resolvedAgentId,
+		});
+
 		// Full toolset for the advisor, built unconditionally so it can be toggled at
 		// runtime. Bound to a DISTINCT ToolSession (its own `-advisor` session id +
 		// agent id) so the advisor's tool state — snapshot, seen-lines, conflict, and
@@ -4402,7 +4414,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			queueLaunchCompletion: notification =>
 				session?.queueLaunchCompletion(notification) ??
 				Promise.reject(new Error("Session unavailable for launch completion delivery")),
-			getAgentId: () => "advisor",
+			getAgentId: () => advisorAgent.id,
 			// The primary's availability signals are wrong for advisors: their tool
 			// slate is filtered separately at runtime (default read/grep/glob, no
 			// write transport), so xd:// devices are unreachable. Images are inlined,
@@ -4423,7 +4435,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		// first, matching the registry's wrap order.
 		const advisorTools: Tool[] = built
 			.filter((tool): tool is Tool => tool != null)
-			.map(tool => new ExtensionToolWrapper(wrapToolWithMetaNotice(tool), extensionRunner) as Tool);
+			.map(tool => new ExtensionToolWrapper(wrapToolWithMetaNotice(tool), extensionRunner, advisorAgent) as Tool);
 
 		const advisorWatchdogPrompts = [...watchdogFiles];
 		if (initialActiveRepoContext) {
@@ -4562,10 +4574,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// Same per-call `grep` seam the primary bridge gets, built against the
 			// advisor's own tool session so a `pi_grep` frame's context width and
 			// match cap are honored there too.
-			advisorCreateGrepTool: createBridgeGrepFactory(advisorToolSession, extensionRunner),
+			advisorCreateGrepTool: createBridgeGrepFactory(advisorToolSession, extensionRunner, advisorAgent),
 			// Same `replace`-mode requirement as the primary bridge; the advisor
 			// path gates it on the advisor's own `edit` grant.
-			advisorCreateEditTool: () => createBridgeEditTool(advisorToolSession, extensionRunner),
+			advisorCreateEditTool: () => createBridgeEditTool(advisorToolSession, extensionRunner, advisorAgent),
 			// The advisor's bridge tools are wrapped for approval, but the wrapper
 			// reads the mode and per-tool policies only from the execute-time
 			// context — the primary bridge passes the same store.
