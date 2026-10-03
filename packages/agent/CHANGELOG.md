@@ -44,6 +44,15 @@
 
 - Fixed GPT models on Amazon Bedrock's OpenAI routes (bedrock-runtime and bedrock-mantle `/openai/...`) falling back to a local summary instead of OpenAI's native remote compaction; set `remoteCompaction.enabled: false` to opt out ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
 - Fixed native compaction on Amazon Bedrock's OpenAI routes skipping the provider's request setup, which sent Bedrock Mantle compaction to an unresolved `{region}` host and skipped configured headers and proxies; other providers' compaction requests are unchanged ([#13311](https://github.com/can1357/oh-my-pi/pull/13311) by [@mustafaabidali](https://github.com/mustafaabidali)).
+- Added the optional `supersedeComplete` hook (`SupersedeCompleteFn`) to `PruneConfig` and `SupersedePruneConfig`: a selector-free result supersedes selector-carrying results of its key only when the hook reports it complete ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
+### Changed
+
+- `readToolSupersedeKey()` now keys `:raw` and `:conflicts` reads as `path\u0001selector`, so a bare-path read no longer supersedes them; a failed result now supersedes only older failed results of its key ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
+
+### Fixed
+
+- Fixed code the agent had already read disappearing from context when a later read of the same file returned only a summary, a truncated page, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
 
 ## [18.4.3] - 2026-09-28
 

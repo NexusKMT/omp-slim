@@ -333,6 +333,9 @@
 ### Removed
 
 - Removed the bash tool's `env` parameter; services inherit the configured shell environment
+### Fixed
+
+- Fixed stale-read pruning dropping code already read when a later read of the same file showed only a summary, a partial page, a notice, or an error ([#13670](https://github.com/can1357/oh-my-pi/pull/13670) by [@poweroftrue](https://github.com/poweroftrue))
 
 ## [18.4.3] - 2026-09-28
 
