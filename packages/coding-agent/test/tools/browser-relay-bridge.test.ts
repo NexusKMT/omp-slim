@@ -367,31 +367,21 @@ describe("RelayBridge tab grouping", () => {
 });
 
 describe("RelayBridge child targets", () => {
-	it("announces a real child target only to the page session that armed auto-attach", async () => {
-		const bridge = new RelayBridge({});
-		const ext = new FakeExtSocket();
-		connect(bridge, ext, [tab({ tabId: 1 })]);
-		const cdp = new FakeCdpSocket();
-		const conn = bridge.cdpConnected(cdp);
-		const armed = await attachPage(bridge, ext, cdp, conn, 1);
+	async function armAutoAttach(bridge: RelayBridge, ext: FakeExtSocket, connId: number, sessionId: string) {
 		bridge.cdpMessage(
-			conn,
+			connId,
 			JSON.stringify({
 				id: ++msgSeq,
-				sessionId: armed,
+				sessionId,
 				method: "Target.setAutoAttach",
 				params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
 			}),
 		);
 		ack(bridge, ext, "send");
 		await flush();
-		// A second page session on the same connection, like puppeteer's page.createCDPSession().
-		await attachPage(bridge, ext, cdp, conn, 1);
-		// Another connection that observes the tab but never asked for children.
-		const otherCdp = new FakeCdpSocket();
-		const other = bridge.cdpConnected(otherCdp);
-		await attachPage(bridge, ext, otherCdp, other, 1);
+	}
 
+	function announceChild(bridge: RelayBridge, ext: FakeExtSocket): void {
 		const child = { sessionId: "CHILD1", targetInfo: { targetId: "FRAME1", type: "iframe" } };
 		bridge.extMessage(
 			ext,
@@ -410,21 +400,63 @@ describe("RelayBridge child targets", () => {
 				params: { sessionId: "CHILD1" },
 			}),
 		);
+	}
 
-		const childTraffic = (socket: FakeCdpSocket) =>
-			socket.messages.filter(
+	function childTraffic(socket: FakeCdpSocket): Array<[unknown, unknown]> {
+		return socket.messages
+			.filter(
 				m =>
 					m.sessionId === "CHILD1" ||
 					((m.method === "Target.attachedToTarget" || m.method === "Target.detachedFromTarget") &&
 						(m.params as { sessionId?: string } | undefined)?.sessionId === "CHILD1"),
-			);
+			)
+			.map(m => [m.method, m.sessionId]);
+	}
+
+	it("announces a real child target only to the page session that armed auto-attach", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const armed = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, armed);
+		// A second page session on the same connection, like puppeteer's page.createCDPSession().
+		await attachPage(bridge, ext, cdp, conn, 1);
+		// Another connection that observes the tab but never asked for children.
+		const otherCdp = new FakeCdpSocket();
+		const other = bridge.cdpConnected(otherCdp);
+		await attachPage(bridge, ext, otherCdp, other, 1);
+
+		announceChild(bridge, ext);
+
 		// Puppeteer replaces the session object for a re-announced child id and drops replies bound for the first.
-		expect(childTraffic(cdp).map(m => [m.method, m.sessionId])).toEqual([
+		expect(childTraffic(cdp)).toEqual([
 			["Target.attachedToTarget", armed],
 			["Page.frameNavigated", "CHILD1"],
 			["Target.detachedFromTarget", armed],
 		]);
 		expect(childTraffic(otherCdp)).toEqual([]);
+	});
+
+	it("announces a child once per connection even when two of its page sessions armed auto-attach", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const first = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, first);
+		const second = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, second);
+
+		announceChild(bridge, ext);
+
+		expect(childTraffic(cdp)).toEqual([
+			["Target.attachedToTarget", first],
+			["Page.frameNavigated", "CHILD1"],
+			["Target.detachedFromTarget", first],
+		]);
 	});
 });
 

@@ -100,13 +100,16 @@ class CdpConnection {
 		return out;
 	}
 
-	/** Page sessions that armed `Target.setAutoAttach`: the only ones Chrome would report children on. */
-	autoAttachSessionsForTab(tabKey: string): string[] {
-		const out: string[] = [];
+	/**
+	 * The page session that receives this tab's real child targets: the first
+	 * one that armed `Target.setAutoAttach`. One per connection, so a child id
+	 * is never announced twice to the same client.
+	 */
+	childTargetSessionForTab(tabKey: string): string | undefined {
 		for (const [sessionId, ref] of this.sessions) {
-			if (ref.tabKey === tabKey && ref.kind === "page" && ref.autoAttach) out.push(sessionId);
+			if (ref.tabKey === tabKey && ref.kind === "page" && ref.autoAttach) return sessionId;
 		}
-		return out;
+		return undefined;
 	}
 }
 
@@ -972,7 +975,7 @@ export class RelayBridge {
 			// connection that was told about the child.
 			const payload = JSON.stringify({ sessionId: sourceSessionId, method, params });
 			for (const conn of this.#conns.values()) {
-				if (conn.autoAttachSessionsForTab(tabKey).length > 0) conn.socket.send(payload);
+				if (conn.childTargetSessionForTab(tabKey)) conn.socket.send(payload);
 			}
 			return;
 		}
@@ -1011,11 +1014,15 @@ export class RelayBridge {
 			return;
 		}
 		// Other root-session events fan out once per minted page session. Real
-		// child attach/detach goes only to sessions that armed auto-attach.
+		// child attach/detach goes only to the session that armed auto-attach.
 		const childEvent = method === "Target.attachedToTarget" || method === "Target.detachedFromTarget";
 		for (const conn of this.#conns.values()) {
-			const sessions = childEvent ? conn.autoAttachSessionsForTab(tabKey) : conn.sessionsForTab(tabKey, "page");
-			for (const pageSession of sessions) {
+			if (childEvent) {
+				const armed = conn.childTargetSessionForTab(tabKey);
+				if (armed) conn.socket.send(JSON.stringify({ sessionId: armed, method, params }));
+				continue;
+			}
+			for (const pageSession of conn.sessionsForTab(tabKey, "page")) {
 				conn.socket.send(JSON.stringify({ sessionId: pageSession, method, params }));
 			}
 		}
