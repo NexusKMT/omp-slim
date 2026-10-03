@@ -28,6 +28,7 @@ import {
 import {
 	type Dialect,
 	encodeInbandToolHistory,
+	mintToolCallId,
 	renderInbandToolPrompt,
 	renderToolExamples,
 	wrapInbandToolStream,
@@ -2892,8 +2893,8 @@ type ToolCallIdsRepairedCarrier = AssistantMessage & { [kToolCallIdsRepaired]?: 
  * kept, minted, or seen on a server-resolved block under one
  * {@link AgentContext}. Keyed by the dispatch context (the same object every
  * `prepareToolCallDispatch` receives) so the uniqueness window spans every
- * assistant turn of the run — and any later run sharing the context — rather
- * than resetting per message.
+ * assistant turn of the run rather than resetting per message. Each run gets a
+ * fresh loop context, so minted ids use the process-unique `mintToolCallId`.
  */
 const dispatchedToolCallIdsByContext = new WeakMap<AgentContext, Set<string>>();
 
@@ -2934,12 +2935,11 @@ function ensureUniqueToolCallIds(message: ToolCallIdsRepairedCarrier, dispatched
 				candidate = appendDuplicateSuffix(block.id, `_dup${suffix}`, MAX_TOOL_CALL_ID_LENGTH);
 			}
 		} else {
-			let mint = 1;
-			candidate = `call_${mint}`;
-			while (seen.has(candidate) || reserved.has(candidate) || dispatchedIds.has(candidate)) {
-				mint += 1;
-				candidate = `call_${mint}`;
-			}
+			// Process-unique minter: a per-run counter would re-mint `call_1` in
+			// every run and collide with earlier runs' calls in session history.
+			do {
+				candidate = mintToolCallId();
+			} while (seen.has(candidate) || reserved.has(candidate) || dispatchedIds.has(candidate));
 		}
 		block.id = candidate;
 		seen.add(candidate);

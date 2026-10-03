@@ -2084,6 +2084,41 @@ describe("agentLoop with AgentMessage", () => {
 		expect(results.map(r => r.toolCallId).sort()).toEqual([...allIds].sort());
 	});
 
+	it("mints never-materialized tool-call ids uniquely across runs of one session", async () => {
+		// Each prompt starts a fresh run (and a fresh loop context), but
+		// session-wide consumers (`formatSessionHistoryMarkdown`, persistence)
+		// key on toolCallId across runs — a per-run counter re-minting `call_1`
+		// collides with the previous run's call.
+		const executions: string[] = [];
+		const tool = makeEchoTool(executions);
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const runIds: string[] = [];
+		for (const value of ["r1", "r2"]) {
+			const mock = createMockModel({
+				responses: [
+					{ content: [{ type: "toolCall", id: "", name: "echo", arguments: { value } }] },
+					{ content: ["done"] },
+				],
+			});
+			const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+			const stream = agentLoop([createUserMessage(value)], context, config, undefined, mock.stream);
+			for await (const _event of stream) {
+				// drain
+			}
+			const messages = await stream.result();
+			context.messages.push(...messages);
+			for (const message of messages) {
+				if (message.role !== "assistant") continue;
+				for (const block of message.content) if (block.type === "toolCall") runIds.push(block.id);
+			}
+		}
+
+		expect(executions).toEqual(["r1", "r2"]);
+		expect(runIds).toHaveLength(2);
+		expect(runIds.every(id => id.trim().length > 0)).toBe(true);
+		expect(new Set(runIds).size).toBe(2);
+	});
+
 	it("keeps reused-id `_dup` re-keys unique across assistant turns", async () => {
 		// Failure mode if this regresses: the `_dup`/`call_<n>` candidate loops only
 		// checked the current message, so a second turn with the same reused-id
