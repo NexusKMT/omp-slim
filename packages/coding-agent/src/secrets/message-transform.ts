@@ -120,14 +120,9 @@ export function obfuscateToolArguments(
 	sharedRegexSecretValues?: ReadonlySet<string>,
 ): Record<string, unknown> {
 	if (!obfuscator.hasSecrets()) return args;
-	if (sharedRegexSecretValues !== undefined) {
-		return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s, sharedRegexSecretValues)) as Record<
-			string,
-			unknown
-		>;
-	}
+	// `batch()` joins an outer batch when one is already open.
 	return obfuscator.batch(() => {
-		const regexSecretValues = collectJsonRegexSecretValues(obfuscator, args as JsonValue);
+		const regexSecretValues = sharedRegexSecretValues ?? collectJsonRegexSecretValues(obfuscator, args as JsonValue);
 		return mapJsonStrings(args as JsonValue, s => obfuscator.obfuscate(s, regexSecretValues)) as Record<
 			string,
 			unknown

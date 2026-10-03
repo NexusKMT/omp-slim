@@ -1,5 +1,6 @@
 import * as crypto from "node:crypto";
 import type { SecretEntry } from "./obfuscator";
+import type { RegistryRevision } from "./registry-revision";
 import { ensureDistinctReplacement, generateDeterministicReplacement, REPLACEMENT_CHARS } from "./replacement";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -73,17 +74,21 @@ export class SecretValueSet extends Set<string> {
 	#lengths = new Map<number, number>();
 	/** First MAX_FRIENDLY_NAME_LEN chars → normalized values at least that long (display-cap prefix leaks). */
 	#heads = new Map<string, Set<string>>();
+	/** Bumped on every effective write when this set is part of an obfuscator's registry. */
+	readonly #revision: RegistryRevision | undefined;
 
-	constructor(values?: Iterable<string>) {
+	constructor(values?: Iterable<string>, revision?: RegistryRevision) {
 		// Populate after super(): `Set`'s iterable constructor would call `add`
 		// before this subclass's private fields exist.
 		super();
+		this.#revision = revision;
 		if (values) for (const value of values) this.add(value);
 	}
 
 	override add(value: string): this {
 		if (super.has(value)) return this;
 		super.add(value);
+		this.#revision?.bump();
 		const normalized = sanitizeForCollisionCheck(value);
 		if (normalized.length === 0) return this;
 		const count = this.#normalized.get(normalized) ?? 0;
@@ -104,6 +109,7 @@ export class SecretValueSet extends Set<string> {
 
 	override delete(value: string): boolean {
 		if (!super.delete(value)) return false;
+		this.#revision?.bump();
 		const normalized = sanitizeForCollisionCheck(value);
 		if (normalized.length === 0) return true;
 		const count = this.#normalized.get(normalized)!;
@@ -125,7 +131,9 @@ export class SecretValueSet extends Set<string> {
 	}
 
 	override clear(): void {
+		if (this.size === 0) return;
 		super.clear();
+		this.#revision?.bump();
 		this.#normalized.clear();
 		this.#lengths.clear();
 		this.#heads.clear();
