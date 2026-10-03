@@ -207,6 +207,89 @@ describe("agentLoop with AgentMessage", () => {
 		expect(messages.at(-1)?.role).toBe("assistant");
 	});
 
+	// DeepSeek dropping the DSML envelope openers: the healer cannot recover a
+	// call, so the turn ends as plain text with no tool call.
+	const strayDsml =
+		'bash\n<｜DSML｜parameter name="command" string="true">moon check --target native</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>';
+
+	it("tells the model its tool call failed when a turn ends with leaked DSML markup", async () => {
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		let retryContext: Message[] = [];
+		const mock = createMockModel({
+			responses: [
+				{ content: [`Checking the build.\n${strayDsml}`] },
+				context => {
+					retryContext = context.messages;
+					return { content: ["All done."] };
+				},
+			],
+		});
+		const config: AgentLoopConfig = {
+			model: mock.model,
+			convertToLlm: messages => messages.filter(m => m.role !== "custom") as Message[],
+		};
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		expect(mock.calls).toHaveLength(2);
+		expect(messages.map(m => m.role)).toEqual(["user", "assistant", "developer", "assistant"]);
+		expect(retryContext.map(m => m.role)).toEqual(["user", "assistant", "developer"]);
+		// The broken call (tool-name line included) never reaches history; the
+		// surrounding prose survives.
+		expect((messages[1] as AssistantMessage).content).toEqual([{ type: "text", text: "Checking the build." }]);
+		expect(JSON.stringify(retryContext[1])).not.toContain("DSML");
+		const nudge = retryContext.at(-1);
+		const nudgeText = nudge?.role === "developer" ? JSON.stringify(nudge.content) : "";
+		expect(nudgeText).toContain("Tool call failed");
+		// The correction teaches the complete envelope the model must emit.
+		expect(nudgeText).toContain('<｜DSML｜invoke name=\\"TOOL_NAME\\">');
+	});
+
+	it("removes the argument value of a leaked call whose closers the healer already stripped", async () => {
+		// What the DSML stream healer leaves of the broken call: orphan closers are
+		// gone, so the parameter opener is the last tag and its value runs to the end.
+		const healed =
+			'Checking the build.\nbash\n<｜DSML｜parameter name="command" string="true">moon check --target native\n\n';
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		const mock = createMockModel({ responses: [{ content: [healed] }, { content: ["All done."] }] });
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		expect((messages[1] as AssistantMessage).content).toEqual([{ type: "text", text: "Checking the build." }]);
+		expect(mock.calls).toHaveLength(2);
+	});
+
+	it("stops nudging after repeated DSML leaks", async () => {
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		function* leakForever(): Generator<MockResponse> {
+			while (true) yield { content: [strayDsml] };
+		}
+		const mock = createMockModel({ responses: leakForever() });
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		// Initial sample + MAX_DSML_LEAK_NUDGES (2) corrections, then the loop yields.
+		expect(mock.calls).toHaveLength(3);
+		expect(messages.at(-1)?.role).toBe("assistant");
+		// Even the turn past the nudge cap is committed without the markup.
+		expect(JSON.stringify(messages)).not.toContain("moon check");
+	});
+
+	it("does not treat DSML quoted in a code fence as a leaked tool call", async () => {
+		const context: AgentContext = { systemPrompt: ["You are helpful."], messages: [], tools: [] };
+		const mock = createMockModel({
+			responses: [{ content: [`The envelope looks like:\n\`\`\`text\n${strayDsml}\n\`\`\``] }],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter };
+
+		const messages = await agentLoop([createUserMessage("Hello")], context, config, undefined, mock.stream).result();
+
+		expect(mock.calls).toHaveLength(1);
+		expect(JSON.stringify(messages.at(-1))).toContain("DSML");
+	});
+
 	it("retries when harmony leakage reaches the committed assistant message (openai-codex)", async () => {
 		const context: AgentContext = {
 			systemPrompt: ["You are helpful."],
