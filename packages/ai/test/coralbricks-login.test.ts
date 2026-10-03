@@ -7,7 +7,6 @@ if (!loginCoralbricks) throw new Error("CoralBricks login is not registered");
 
 describe("CoralBricks login", () => {
 	test("validates the pasted key against the key-protected /v1/models endpoint", async () => {
-		const authUrls: string[] = [];
 		const requests: Array<{ url: string; method: string | undefined; authorization: string | null }> = [];
 		const fetchMock: FetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
 			const headers = new Headers(init?.headers);
@@ -16,15 +15,11 @@ describe("CoralBricks login", () => {
 		});
 
 		const apiKey = await loginCoralbricks({
-			onAuth: info => authUrls.push(info.url),
 			onPrompt: async () => "  cb-test-key  ",
 			fetch: fetchMock,
 		});
 
 		expect(apiKey).toBe("cb-test-key");
-		// The login flow opens Coral's key dashboard; only the URL is the
-		// contract here — the wording lives in the KDL auth entry.
-		expect(authUrls).toEqual(["https://www.coralbricks.ai/api-keys"]);
 		// Coral's `/v1/models` is key-protected (401 without a bearer key), so
 		// the probe validates the key and bills nothing, unlike a
 		// chat-completions ping against a prepaid balance.

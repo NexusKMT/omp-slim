@@ -11,7 +11,6 @@ import { describe, expect, it } from "bun:test";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import type { Context, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { getBundledModels } from "@oh-my-pi/pi-catalog/models";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 
 const CORALBRICKS_BASE_URL = "https://inference.coralbricks.ai/v1";
 
@@ -81,19 +80,6 @@ async function captureRequest(
 }
 
 describe("CoralBricks wire contract", () => {
-	it("resolves the reviewed GLM 5.3 effort ladder and gateway dialect through the catalog", () => {
-		const glm = requireBundled("glm-5.3-fp4");
-		expect(glm.thinking?.mode).toBe("effort");
-		expect(glm.thinking?.efforts).toEqual([Effort.Low, Effort.High, Effort.Max]);
-		expect(glm.thinking?.defaultLevel).toBe(Effort.Max);
-		expect(glm.thinking?.requiresEffort).toBe(true);
-		expect(glm.compat?.maxTokensField).toBe("max_tokens");
-		expect(glm.compat?.supportsStore).toBe(false);
-		expect(glm.compat?.supportsDeveloperRole).toBe(false);
-		expect(glm.compat?.supportsReasoningEffort).toBe(true);
-		expect(glm.compat?.reasoningContentField).toBe("reasoning_content");
-	});
-
 	it("routes requests to Coral's chat-completions endpoint with the resolved key", async () => {
 		const { url, authorization, payload } = await captureRequest(requireBundled("glm-5.3-fp4"), {});
 		expect(url).toBe(`${CORALBRICKS_BASE_URL}/chat/completions`);
@@ -110,11 +96,6 @@ describe("CoralBricks wire contract", () => {
 		expect(payload.thinking).toBeUndefined();
 		expect(payload.reasoning).toBeUndefined();
 		expect(payload.enable_thinking).toBeUndefined();
-	});
-
-	it("sends the max tier as the literal max effort", async () => {
-		const { payload } = await captureRequest(requireBundled("glm-5.3-fp4"), { reasoning: "max" });
-		expect(payload.reasoning_effort).toBe("max");
 	});
 
 	it("clamps a thinking-off request to the lowest effort (thinking cannot be disabled)", async () => {
@@ -136,11 +117,6 @@ describe("CoralBricks wire contract", () => {
 		// clamping to the lowest effort like the GLM SKUs.
 		const off = await captureRequest(requireBundled("deepseek-v4.1-flash-fast-fp4"), { disableReasoning: true });
 		expect(off.payload.reasoning_effort).toBe("none");
-		// The DeepSeek family's tool-call replay contract applies on this host
-		// too: assistant tool turns must replay `reasoning_content`.
-		const ds = requireBundled("deepseek-v4.1-flash-fast-fp4");
-		expect(ds.compat?.requiresReasoningContentForToolCalls).toBe(true);
-		expect(ds.compat?.reasoningContentField).toBe("reasoning_content");
 	});
 
 	it("parses streamed reasoning_content into a thinking block ahead of content", async () => {

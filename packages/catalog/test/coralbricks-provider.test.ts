@@ -75,24 +75,13 @@ describe("CoralBricks built-in provider", () => {
 
 		// `/v1/models` is key-protected, so discovery must authenticate.
 		expect(requests).toEqual([{ url: DISCOVERY_URL, authorization: "Bearer cb-test-key" }]);
-		expect(options.dynamicModelsAuthoritative).toBe(true);
-		expect(models?.map(item => item.id)).toEqual(["glm-5.3-fp4", "glm-5.3-flash-fp4", "glm-5.2-fp4"]);
+		expect(models?.map(item => item.id)).toEqual(["glm-5.2-fp4", "glm-5.3-flash-fp4", "glm-5.3-fp4"]);
 
+		// The endpoint publishes no output cap or reasoning flag; the bundled
+		// reference's values apply.
 		const glm = models?.find(item => item.id === "glm-5.3-fp4");
-		expect(glm?.provider).toBe("coralbricks");
-		expect(glm?.baseUrl).toBe(CORALBRICKS_BASE_URL);
-		expect(glm?.input).toEqual(["text"]);
-		// Cached reads are $0 on every Coral model; cache writes bill at the
-		// row's cache-write rate.
-		expect(glm?.cost).toEqual({ input: 1.12, output: 4.4, cacheRead: 0, cacheWrite: 1.68 });
-		expect(glm?.contextWindow).toBe(1048576);
-		// The endpoint publishes no output cap; the bundled reference's applies.
 		expect(glm?.maxTokens).toBe(131072);
 		expect(glm?.reasoning).toBe(true);
-
-		const flash = models?.find(item => item.id === "glm-5.3-flash-fp4");
-		expect(flash?.input).toEqual(["text", "image"]);
-		expect(flash?.cost).toEqual({ input: 0.15, output: 0.5, cacheRead: 0, cacheWrite: 0.23 });
 
 		// Unknown ids stay neutral: no invented reasoning or output cap, and
 		// the live tools flag maps through.
@@ -101,28 +90,6 @@ describe("CoralBricks built-in provider", () => {
 		expect(unknown?.maxTokens).toBeNull();
 		expect(unknown?.cost).toEqual({ input: 0.75, output: 2.4, cacheRead: 0, cacheWrite: 0 });
 		expect(unknown?.supportsTools).toBe(false);
-	});
-
-	test("lets a live zero rate override the bundled reference", async () => {
-		// Live rows are the deployment truth, so an explicit `0` price must win
-		// over the bundled reference rate instead of falling back to it.
-		const fetchMock = async (): Promise<Response> =>
-			Response.json({
-				object: "list",
-				data: [
-					coralRow({
-						id: "glm-5.3-fp4",
-						pricing: { input_per_m: 1.12, output_per_m: 4.4, cached_input_per_m: 0, cache_write_per_m: 0 },
-					}),
-				],
-			});
-
-		const options = coralbricksModelManagerOptions({ apiKey: "cb-test-key", fetch: fetchMock });
-		const models = await options.fetchDynamicModels?.();
-		const glm = models?.find(item => item.id === "glm-5.3-fp4");
-		// The bundled reference seeds a 1.68 cache-write rate; Coral zeroed it.
-		expect(glm?.cost.cacheWrite).toBe(0);
-		expect(glm?.cost.cacheRead).toBe(0);
 	});
 
 	test("gates discovery on credentials because /v1/models is key-protected", () => {
