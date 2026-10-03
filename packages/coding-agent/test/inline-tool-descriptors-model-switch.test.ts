@@ -80,4 +80,35 @@ describe("inline tool descriptors across model switches", () => {
 			expect(back.prompt).toContain("type read = (");
 		});
 	}
+	for (const systemPrompt of ["Fixed agent instructions.", ["Fixed agent instructions."]]) {
+		it(`restores required descriptions after switching with a fixed ${typeof systemPrompt === "string" ? "string" : "array"} prompt`, async () => {
+			const { session } = await createAgentSession({
+				cwd: dir,
+				agentDir: dir,
+				modelRegistry,
+				sessionManager: SessionManager.inMemory(),
+				settings: Settings.isolated({ inlineToolDescriptors: "auto" }),
+				model: gemini,
+				systemPrompt,
+				disableExtensionDiscovery: true,
+				skills: [],
+				contextFiles: [],
+				promptTemplates: [],
+				slashCommands: [],
+				enableMCP: false,
+				enableLsp: false,
+				skipPythonPreflight: true,
+				toolNames: ["read"],
+			});
+			sessions.push(session);
+
+			expect((await providerView(session)).readDescription).toBe("");
+			await session.setModel(glm);
+			const onGlm = await providerView(session);
+			expect(onGlm.readDescription).not.toBe("");
+
+			await session.setModel(gemini);
+			expect((await providerView(session)).readDescription).toBe("");
+		});
+	}
 });
