@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- The `/models` Roles view shows which saved model preset is in effect, and Ctrl+←/→ switches to the previous or next one, in Tern and text mode
+
+### Fixed
+
+- Picking a model for a role in `/models` now puts the cursor on the model list, so ↑/↓ choose a model right away instead of moving through the sidebar and dropping the role selection
+
 ## [18.5.1] - 2026-10-03
 
 ### Added

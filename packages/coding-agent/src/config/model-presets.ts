@@ -72,6 +72,29 @@ export function getModelPresetNames(settings: Settings): string[] {
 }
 
 /**
+ * First saved preset (by name) the current setup matches: identical effective
+ * role assignments and, when the preset records one, the same default thinking
+ * level. Undefined when the roles were edited past every preset.
+ */
+export function findActiveModelPreset(settings: Settings): string | undefined {
+	const roles = settings.getModelRoles();
+	// Same filter as `saveModelPreset`: empty selectors are never stored.
+	const roleIds = Object.keys(roles).filter(role => roles[role]);
+	const thinking = cfgDefaultThinkingLevel.get(settings);
+	return getModelPresetNames(settings).find(name => {
+		const lookup = getModelPreset(settings, name);
+		if (lookup.kind !== "found") return false;
+		const { modelRoles, defaultThinkingLevel } = lookup.preset;
+		if (defaultThinkingLevel !== undefined && defaultThinkingLevel !== thinking) return false;
+		const presetIds = Object.keys(modelRoles);
+		return (
+			presetIds.length === roleIds.length &&
+			presetIds.every(role => Object.hasOwn(roles, role) && roles[role] === modelRoles[role])
+		);
+	});
+}
+
+/**
  * Save the effective role assignments and `defaultThinkingLevel` as `name` in the
  * global config, overwriting a preset of the same name. Only this entry is
  * written, so presets defined by a project config are never copied globally.
