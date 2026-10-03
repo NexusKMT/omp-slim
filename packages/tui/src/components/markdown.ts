@@ -1637,6 +1637,8 @@ interface RenderSignature {
 	textSizing: boolean;
 	bgColorProbe: string;
 	headingProbe: string;
+	/** Fallback glyphs for themes without `symbols`; their identity alone cannot tell presets apart. */
+	symbolsProbe: string;
 }
 
 interface StreamPrefixLineCache extends RenderSignature {
@@ -1726,6 +1728,7 @@ export class Markdown implements Component {
 	#defaultTextStyle?: DefaultTextStyle;
 	#theme: MarkdownTheme;
 	#symbols: SymbolTheme;
+	#symbolsProbe: string;
 	#defaultStylePrefix?: string;
 	/** Number of spaces used to indent code block content. */
 	#codeBlockIndent: number;
@@ -1808,6 +1811,8 @@ export class Markdown implements Component {
 		this.#paddingY = paddingY;
 		this.#theme = theme;
 		this.#symbols = theme.symbols ?? getSymbolTheme();
+		const { quoteBorder, hrChar, colorSwatch, table } = this.#symbols;
+		this.#symbolsProbe = theme.symbols ? "" : [quoteBorder, hrChar, colorSwatch, ...Object.values(table)].join("");
 		this.#defaultTextStyle = defaultTextStyle;
 		this.#codeBlockIndent = Math.max(0, Math.floor(codeBlockIndent));
 	}
@@ -2335,6 +2340,7 @@ export class Markdown implements Component {
 			textSizing: TERMINAL.textSizing,
 			bgColorProbe,
 			headingProbe,
+			symbolsProbe: this.#symbolsProbe,
 		};
 	}
 	// All-primitive signature — compare via the canonical render-cache encoding.
@@ -2343,7 +2349,7 @@ export class Markdown implements Component {
 	}
 
 	#renderCacheKey(normalizedText: string, signature: RenderSignature): string {
-		return `${normalizedText}\x00${signature.width}\x00${signature.paddingX}\x00${signature.paddingY}\x00${signature.codeBlockIndent}\x00${signature.themeId}\x00${signature.defaultTextStyleId}\x00${signature.imageProtocol}\x00${signature.hyperlinks ? 1 : 0}\x00${signature.textSizing ? 1 : 0}\x00${signature.bgColorProbe}\x00${signature.headingProbe}`;
+		return `${normalizedText}\x00${signature.width}\x00${signature.paddingX}\x00${signature.paddingY}\x00${signature.codeBlockIndent}\x00${signature.themeId}\x00${signature.defaultTextStyleId}\x00${signature.imageProtocol}\x00${signature.hyperlinks ? 1 : 0}\x00${signature.textSizing ? 1 : 0}\x00${signature.bgColorProbe}\x00${signature.headingProbe}\x00${signature.symbolsProbe}`;
 	}
 
 	#renderStreamingContentLines(
