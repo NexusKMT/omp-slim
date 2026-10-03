@@ -12580,7 +12580,7 @@ export class AgentSession implements SettingsScope {
 	 */
 	async #retryInactiveAdvisorAfterModelDiscovery(): Promise<void> {
 		if (this.#isDisposed || !this.#advisors.hasInactiveNoModelAdvisor()) return;
-		await this.#modelRegistry.awaitBackgroundRefresh();
+		await this.#modelRegistry.awaitInitialBackgroundRefresh(this.#modelDiscoveryAbortController.signal);
 		if (this.#isDisposed) return;
 		if (this.#advisors.retryAfterModelDiscovery()) this.#emit({ type: "model_changed" });
 	}
