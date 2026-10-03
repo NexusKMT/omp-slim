@@ -175,9 +175,9 @@ class ProtocolParsingTests(unittest.TestCase):
             }
         )
         assert isinstance(malformed, SubagentEvent)
-        self.assertIsInstance(malformed.event, UnknownNotification)
-        assert isinstance(malformed.event, UnknownNotification)
-        self.assertIsNotNone(malformed.event.parse_error)
+        self.assertIsInstance(malformed.payload.event, UnknownNotification)
+        assert isinstance(malformed.payload.event, UnknownNotification)
+        self.assertIsNotNone(malformed.payload.event.parse_error)
 
         valid = parse_notification(
             {
@@ -189,7 +189,7 @@ class ProtocolParsingTests(unittest.TestCase):
             }
         )
         assert isinstance(valid, SubagentEvent)
-        self.assertIsInstance(valid.event, MessageEndEvent)
+        self.assertIsInstance(valid.payload.event, MessageEndEvent)
 
     def test_parse_live_frames(self) -> None:
         self.assertEqual(
@@ -479,11 +479,6 @@ class ProtocolParsingTests(unittest.TestCase):
         self.assertEqual(notification.message_count, 1)
         self.assertFalse(notification.is_terminal)
 
-        legacy = AgentEndEvent(notification.messages, "agent_end")
-        self.assertEqual(legacy.type, "agent_end")
-        self.assertIsNone(legacy.message_count)
-        self.assertIsNone(legacy.is_terminal)
-
     def test_parse_agent_end_yielded(self) -> None:
         for raw, expected in ((True, True), (False, False), (None, None)):
             with self.subTest(yielded=raw):
@@ -555,14 +550,6 @@ class ProtocolParsingTests(unittest.TestCase):
             notification.option_details,
             ({}, {"description": "Push to production"}),
         )
-
-    def test_extension_ui_request_preserves_positional_constructor(self) -> None:
-        request = ExtensionUiRequest(
-            "ui-legacy", "confirm", "Confirm", None, "Continue?"
-        )
-
-        self.assertEqual(request.message, "Continue?")
-        self.assertIsNone(request.option_details)
 
     def test_parse_open_url_request(self) -> None:
         notification = parse_notification(
@@ -730,64 +717,6 @@ class ProtocolParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_notification(
                 {"type": "extension_ui_request", "id": "ui-1", "method": "launch"}
-            )
-
-    def test_parse_message_update_rejects_invalid_assistant_done_reason(self) -> None:
-        with self.assertRaises(ValueError):
-            parse_notification(
-                {
-                    "type": "message_update",
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": "hello"}],
-                        "api": "anthropic-messages",
-                        "provider": "anthropic",
-                        "model": "claude-sonnet-4-5",
-                        "usage": {
-                            "input": 1,
-                            "output": 1,
-                            "cacheRead": 0,
-                            "cacheWrite": 0,
-                            "totalTokens": 2,
-                            "cost": {
-                                "input": 0.0,
-                                "output": 0.0,
-                                "cacheRead": 0.0,
-                                "cacheWrite": 0.0,
-                                "total": 0.0,
-                            },
-                        },
-                        "stopReason": "stop",
-                        "timestamp": 1,
-                    },
-                    "assistantMessageEvent": {
-                        "type": "done",
-                        "reason": "error",
-                        "message": {
-                            "role": "assistant",
-                            "content": [{"type": "text", "text": "hello"}],
-                            "api": "anthropic-messages",
-                            "provider": "anthropic",
-                            "model": "claude-sonnet-4-5",
-                            "usage": {
-                                "input": 1,
-                                "output": 1,
-                                "cacheRead": 0,
-                                "cacheWrite": 0,
-                                "totalTokens": 2,
-                                "cost": {
-                                    "input": 0.0,
-                                    "output": 0.0,
-                                    "cacheRead": 0.0,
-                                    "cacheWrite": 0.0,
-                                    "total": 0.0,
-                                },
-                            },
-                            "stopReason": "stop",
-                            "timestamp": 1,
-                        },
-                    },
-                }
             )
 
     def test_parse_notification_deep_clones_nested_messages(self) -> None:

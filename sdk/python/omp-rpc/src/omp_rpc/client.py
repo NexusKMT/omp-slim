@@ -13,178 +13,54 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Generic, Mapping, Sequence, TypeVar, cast
 
-from .host_tools import HostTool, HostToolContext
-from .host_uris import HostUri, HostUriContext, normalize_read_result
-from .protocol import (
+from ._wire import (
     _TODO_STATUS_VALUES,
-    _require_bool,
-    _require_literal,
-    _require_str,
-    _SUBAGENT_SUBSCRIPTION_LEVEL_VALUES,
-    AgentStartEvent,
     AgentEndEvent,
     AgentMessage,
+    AgentStartEvent,
     AskAnswer,
     AssistantMessage,
-    AvailableCommandsUpdateEvent,
-    AvailableSlashCommand,
-    AutoCompactionEndEvent,
-    AutoCompactionStartEvent,
-    AutoRetryEndEvent,
-    AutoRetryStartEvent,
-    BashResult,
-    FastModeResult,
-    BranchMessage,
-    CacheWarmingMode,
-    BranchResult,
-    CacheWarmingEndEvent,
-    CacheWarmingStartEvent,
-    CancellationResult,
-    CompactionResult,
-    ExtensionError,
     ExtensionUiRequest,
-    GoalOp,
-    GoalResult,
-    GoalUpdatedEvent,
-    HandoffResult,
     ImageContent,
-    InterruptMode,
-    IrcMessageEvent,
-    JsonObject,
-    JsonValue,
-    LiveEvent,
-    LoginProvider,
     MessageEndEvent,
-    MessagesPage,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    ModelChangedEvent,
-    ModelCycleResult,
-    ModelInfo,
-    NoticeEvent,
-    OpenSessionResult,
-    PromoteQueuedMessageResult,
     PromptResultEvent,
-    QueuedMessageQueue,
-    QueueUpdateEvent,
     ReadyEvent,
-    RemoveQueuedMessageResult,
-    RetryFallbackAppliedEvent,
-    RetryFallbackSucceededEvent,
     RpcAgentEvent,
     RpcNotification,
-    SessionEntries,
     SessionSettledEvent,
-    SessionState,
-    SessionStats,
-    SessionTree,
-    SteeringMode,
     StreamingBehavior,
-    SubagentEvent,
-    SubagentLifecycleEvent,
-    SubagentMessages,
-    SubagentProgressEvent,
-    SubagentSnapshot,
-    SubagentSubscriptionLevel,
     ThinkingLevel,
-    ThinkingLevelChangedEvent,
-    ThinkingLevelCycleResult,
     TodoItem,
     TodoPhase,
     TodoStatus,
-    TodoAutoClearEvent,
-    TodoReminderEvent,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-    ToolStreamUpdateEvent,
-    TtsrTriggeredEvent,
-    TurnEndEvent,
-    TurnStartEvent,
-    UnknownNotification,
-    assistant_text,
-    parse_agent_messages,
-    parse_available_slash_commands,
-    parse_bash_result,
-    parse_cache_warming_mode,
-    parse_fast_mode_result,
-    parse_branch_messages,
-    parse_branch_result,
-    parse_cancellation_result,
-    parse_compaction_result,
-    parse_goal_result,
-    parse_handoff_result,
-    parse_login_providers,
-    parse_model_cycle_result,
-    parse_model_info,
+    WireClient,
+    parse_agent_message,
     parse_notification,
-    parse_open_session_result,
-    parse_promote_queued_message_result,
-    parse_remove_queued_message_result,
-    parse_session_entries,
-    parse_session_state,
-    parse_session_stats,
-    parse_session_tree,
-    parse_subagent_messages,
-    parse_subagent_snapshots,
-    parse_thinking_level_cycle_result,
-    parse_thinking_levels,
-    parse_todo_phases,
+    parse_todo_phase,
 )
+from ._wire_runtime import (
+    JsonObject,
+    JsonValue,
+    UnknownNotification,
+    array,
+    decode_str,
+    expect_object,
+    required,
+)
+from .host_tools import HostTool, HostToolContext
+from .host_uris import HostUri, HostUriContext, normalize_read_result
+from .protocol import assistant_text
 
 AgentEventListener = Callable[[RpcAgentEvent], None]
 NotificationListener = Callable[[RpcNotification], None]
 UiRequestListener = Callable[[ExtensionUiRequest], None]
-ExtensionErrorListener = Callable[[ExtensionError], None]
-PromptResultListener = Callable[[PromptResultEvent], None]
-SessionSettledListener = Callable[[SessionSettledEvent], None]
-ReadyListener = Callable[[ReadyEvent], None]
-UnknownNotificationListener = Callable[[UnknownNotification], None]
-AgentStartListener = Callable[[AgentStartEvent], None]
-AgentEndListener = Callable[[AgentEndEvent], None]
-TurnStartListener = Callable[[TurnStartEvent], None]
-TurnEndListener = Callable[[TurnEndEvent], None]
-MessageStartListener = Callable[[MessageStartEvent], None]
-MessageUpdateListener = Callable[[MessageUpdateEvent], None]
-MessageEndListener = Callable[[MessageEndEvent], None]
-ToolExecutionStartListener = Callable[[ToolExecutionStartEvent], None]
-ToolExecutionUpdateListener = Callable[[ToolExecutionUpdateEvent], None]
-ToolExecutionEndListener = Callable[[ToolExecutionEndEvent], None]
-AutoCompactionStartListener = Callable[[AutoCompactionStartEvent], None]
-AutoCompactionEndListener = Callable[[AutoCompactionEndEvent], None]
-AutoRetryStartListener = Callable[[AutoRetryStartEvent], None]
-AutoRetryEndListener = Callable[[AutoRetryEndEvent], None]
-RetryFallbackAppliedListener = Callable[[RetryFallbackAppliedEvent], None]
-RetryFallbackSucceededListener = Callable[[RetryFallbackSucceededEvent], None]
-TtsrTriggeredListener = Callable[[TtsrTriggeredEvent], None]
-TodoReminderListener = Callable[[TodoReminderEvent], None]
-TodoAutoClearListener = Callable[[TodoAutoClearEvent], None]
-QueueUpdateListener = Callable[[QueueUpdateEvent], None]
-ToolStreamUpdateListener = Callable[[ToolStreamUpdateEvent], None]
-CacheWarmingStartListener = Callable[[CacheWarmingStartEvent], None]
-CacheWarmingEndListener = Callable[[CacheWarmingEndEvent], None]
-IrcMessageListener = Callable[[IrcMessageEvent], None]
-NoticeListener = Callable[[NoticeEvent], None]
-ThinkingLevelChangedListener = Callable[[ThinkingLevelChangedEvent], None]
-ModelChangedListener = Callable[[ModelChangedEvent], None]
-GoalUpdatedListener = Callable[[GoalUpdatedEvent], None]
-AvailableCommandsUpdateListener = Callable[[AvailableCommandsUpdateEvent], None]
-SubagentLifecycleListener = Callable[[SubagentLifecycleEvent], None]
-SubagentProgressListener = Callable[[SubagentProgressEvent], None]
-SubagentEventListener = Callable[[SubagentEvent], None]
-LiveListener = Callable[[LiveEvent], None]
 ProtocolErrorListener = Callable[["RpcProtocolError"], None]
 ListenerErrorListener = Callable[["ListenerErrorEvent"], None]
 TListener = TypeVar("TListener")
-TEventListener = TypeVar("TEventListener", bound=Callable[..., None])
 THistoryItem = TypeVar("THistoryItem")
 
 _ASYNC_COMMANDS = frozenset({"prompt", "abort_and_prompt"})
 _DEFAULT_ERROR_HISTORY_LIMIT = 128
-# The server runs one word prediction per session and holds one more behind it,
-# so a request may wait out a cold daemon start (~150 s) before its own answer.
-_PREDICT_WORD_TIMEOUT = 155.0
-_LOGIN_TIMEOUT = 600.0
 _MAX_RPC_FRAME_BYTES = 1024 * 1024
 _MAX_RPC_REASSEMBLED_BYTES = 64 * 1024 * 1024
 _RPC_CHUNK_PAYLOAD_BYTES = 256 * 1024
@@ -550,7 +426,14 @@ class _PromptLifecycleCoordinator:
                 self.active_operation = None
 
 
-class RpcClient:
+class RpcClient(WireClient):
+    """Process-backed RPC client.
+
+    Command methods and per-frame `on_<type>` listeners come from the generated
+    `WireClient`; this class owns the transport, prompt lifecycle, extension UI,
+    and host tool/URI dispatch.
+    """
+
     def __init__(
         self,
         *,
@@ -582,7 +465,7 @@ class RpcClient:
         max_event_history: int | None = 10_000,
         max_stderr_chunks: int | None = 512,
     ) -> None:
-        self._command = tuple(command) if command is not None else None
+        self._argv = tuple(command) if command is not None else None
         self._executable = executable
         self._provider = provider
         self._model = model
@@ -664,18 +547,8 @@ class RpcClient:
 
         self._notification_listeners: list[NotificationListener] = []
         self._event_listeners: list[AgentEventListener] = []
-        self._typed_event_listeners: dict[str, list[AgentEventListener]] = {}
-        self._ready_listeners: list[ReadyListener] = []
-        self._unknown_notification_listeners: list[UnknownNotificationListener] = []
-        self._ui_request_listeners: list[UiRequestListener] = []
-        self._extension_error_listeners: list[ExtensionErrorListener] = []
-        self._prompt_result_listeners: list[PromptResultListener] = []
-        self._session_settled_listeners: list[SessionSettledListener] = []
-        self._available_commands_listeners: list[AvailableCommandsUpdateListener] = []
-        self._subagent_lifecycle_listeners: list[SubagentLifecycleListener] = []
-        self._subagent_progress_listeners: list[SubagentProgressListener] = []
-        self._subagent_event_listeners: list[SubagentEventListener] = []
-        self._live_listeners: list[LiveListener] = []
+        # Frame `type` → listeners registered through the generated `on_<type>` methods.
+        self._typed_listeners: dict[str, list[Callable[..., None]]] = {}
         self._protocol_error_listeners: list[ProtocolErrorListener] = []
         self._listener_error_listeners: list[ListenerErrorListener] = []
 
@@ -923,183 +796,6 @@ class RpcClient:
         self._notification_listeners.append(listener)
         return lambda: self._remove_listener(self._notification_listeners, listener)
 
-    def on_ready(self, listener: ReadyListener) -> Callable[[], None]:
-        self._ready_listeners.append(listener)
-        return lambda: self._remove_listener(self._ready_listeners, listener)
-
-    def on_agent_start(self, listener: AgentStartListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("agent_start", listener)
-
-    def on_agent_end(self, listener: AgentEndListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("agent_end", listener)
-
-    def on_turn_start(self, listener: TurnStartListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("turn_start", listener)
-
-    def on_turn_end(self, listener: TurnEndListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("turn_end", listener)
-
-    def on_message_start(self, listener: MessageStartListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("message_start", listener)
-
-    def on_message_update(self, listener: MessageUpdateListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("message_update", listener)
-
-    def on_message_end(self, listener: MessageEndListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("message_end", listener)
-
-    def on_tool_execution_start(
-        self, listener: ToolExecutionStartListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("tool_execution_start", listener)
-
-    def on_tool_execution_update(
-        self, listener: ToolExecutionUpdateListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("tool_execution_update", listener)
-
-    def on_tool_execution_end(
-        self, listener: ToolExecutionEndListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("tool_execution_end", listener)
-
-    def on_auto_compaction_start(
-        self, listener: AutoCompactionStartListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("auto_compaction_start", listener)
-
-    def on_auto_compaction_end(
-        self, listener: AutoCompactionEndListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("auto_compaction_end", listener)
-
-    def on_auto_retry_start(
-        self, listener: AutoRetryStartListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("auto_retry_start", listener)
-
-    def on_auto_retry_end(self, listener: AutoRetryEndListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("auto_retry_end", listener)
-
-    def on_retry_fallback_applied(
-        self, listener: RetryFallbackAppliedListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("retry_fallback_applied", listener)
-
-    def on_retry_fallback_succeeded(
-        self, listener: RetryFallbackSucceededListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("retry_fallback_succeeded", listener)
-
-    def on_ttsr_triggered(self, listener: TtsrTriggeredListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("ttsr_triggered", listener)
-
-    def on_todo_reminder(self, listener: TodoReminderListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("todo_reminder", listener)
-
-    def on_todo_auto_clear(self, listener: TodoAutoClearListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("todo_auto_clear", listener)
-
-    def on_queue_update(self, listener: QueueUpdateListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("queue_update", listener)
-
-    def on_tool_stream_update(
-        self, listener: ToolStreamUpdateListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("tool_stream_update", listener)
-
-    def on_cache_warming_start(
-        self, listener: CacheWarmingStartListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("cache_warming_start", listener)
-
-    def on_cache_warming_end(
-        self, listener: CacheWarmingEndListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("cache_warming_end", listener)
-
-    def on_irc_message(self, listener: IrcMessageListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("irc_message", listener)
-
-    def on_notice(self, listener: NoticeListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("notice", listener)
-
-    def on_thinking_level_changed(
-        self, listener: ThinkingLevelChangedListener
-    ) -> Callable[[], None]:
-        return self._add_typed_event_listener("thinking_level_changed", listener)
-
-    def on_model_changed(self, listener: ModelChangedListener) -> Callable[[], None]:
-        return self._add_typed_event_listener("model_changed", listener)
-
-    def on_goal_updated(self, listener: GoalUpdatedListener) -> Callable[[], None]:
-        """Subscribe to goal mode changes, including those made by the agent's `goal` tool."""
-        return self._add_typed_event_listener("goal_updated", listener)
-
-    def on_available_commands_update(
-        self, listener: AvailableCommandsUpdateListener
-    ) -> Callable[[], None]:
-        """Subscribe to the slash-command catalog, pushed at startup and on every change."""
-        self._available_commands_listeners.append(listener)
-        return lambda: self._remove_listener(
-            self._available_commands_listeners, listener
-        )
-
-    def on_subagent_lifecycle(
-        self, listener: SubagentLifecycleListener
-    ) -> Callable[[], None]:
-        """Subscribe to subagent start/end frames; requires `set_subagent_subscription("progress")` or higher."""
-        self._subagent_lifecycle_listeners.append(listener)
-        return lambda: self._remove_listener(
-            self._subagent_lifecycle_listeners, listener
-        )
-
-    def on_subagent_progress(
-        self, listener: SubagentProgressListener
-    ) -> Callable[[], None]:
-        """Subscribe to subagent progress frames; requires `set_subagent_subscription("progress")` or higher."""
-        self._subagent_progress_listeners.append(listener)
-        return lambda: self._remove_listener(
-            self._subagent_progress_listeners, listener
-        )
-
-    def on_subagent_event(self, listener: SubagentEventListener) -> Callable[[], None]:
-        """Subscribe to subagents' own session events; requires `set_subagent_subscription("events")`."""
-        self._subagent_event_listeners.append(listener)
-        return lambda: self._remove_listener(self._subagent_event_listeners, listener)
-
-    def on_live(self, listener: LiveListener) -> Callable[[], None]:
-        """Subscribe to live voice frames: phase, levels, transcript, and end."""
-        self._live_listeners.append(listener)
-        return lambda: self._remove_listener(self._live_listeners, listener)
-
-    def on_ui_request(self, listener: UiRequestListener) -> Callable[[], None]:
-        self._ui_request_listeners.append(listener)
-        return lambda: self._remove_listener(self._ui_request_listeners, listener)
-
-    def on_extension_error(
-        self, listener: ExtensionErrorListener
-    ) -> Callable[[], None]:
-        self._extension_error_listeners.append(listener)
-        return lambda: self._remove_listener(self._extension_error_listeners, listener)
-
-    def on_prompt_result(self, listener: PromptResultListener) -> Callable[[], None]:
-        """Subscribe to `prompt_result` frames: each prompt's terminal outcome, keyed by request id."""
-        self._prompt_result_listeners.append(listener)
-        return lambda: self._remove_listener(self._prompt_result_listeners, listener)
-
-    def on_session_settled(
-        self, listener: SessionSettledListener
-    ) -> Callable[[], None]:
-        """Subscribe to `session_settled`: the session is done, not merely yielded.
-
-        Fires once per stretch of agent activity, after the last run yielded and
-        background work that could wake the session (async bash/task/eval jobs,
-        queued messages) has drained.
-        """
-        self._session_settled_listeners.append(listener)
-        return lambda: self._remove_listener(self._session_settled_listeners, listener)
-
     def on_protocol_error(self, listener: ProtocolErrorListener) -> Callable[[], None]:
         self._protocol_error_listeners.append(listener)
         return lambda: self._remove_listener(self._protocol_error_listeners, listener)
@@ -1109,11 +805,33 @@ class RpcClient:
         return lambda: self._remove_listener(self._listener_error_listeners, listener)
 
     def on_unknown_notification(
-        self, listener: UnknownNotificationListener
+        self, listener: Callable[[UnknownNotification], None]
     ) -> Callable[[], None]:
-        self._unknown_notification_listeners.append(listener)
-        return lambda: self._remove_listener(
-            self._unknown_notification_listeners, listener
+        """Subscribe to frames this client does not model or could not parse."""
+        return self._listen("unknown", listener)
+
+    def _listen(
+        self, frame_type: str, listener: Callable[..., None]
+    ) -> Callable[[], None]:
+        listeners = self._typed_listeners.setdefault(frame_type, [])
+        listeners.append(listener)
+        return lambda: self._remove_listener(listeners, listener)
+
+    def _command(
+        self,
+        command: str,
+        params: Mapping[str, object],
+        *,
+        timeout: float | None = None,
+    ) -> JsonObject | None:
+        # Generated methods already omit unset optional params; a required `None`
+        # (e.g. `set_event_filter(None)`) must reach the wire.
+        return self._request_data(
+            command,
+            self._next_request_id(),
+            cast(Mapping[str, JsonValue], params),
+            drop_none=False,
+            timeout=timeout,
         )
 
     def install_headless_ui(
@@ -1218,334 +936,6 @@ class RpcClient:
             payload["timedOut"] = True
         self._send_notification(payload)
 
-    def get_state(self) -> SessionState:
-        payload = self._request("get_state")
-        return parse_session_state(payload)
-
-    def set_fast_mode(self, enabled: bool) -> FastModeResult:
-        return parse_fast_mode_result(self._request("set_fast_mode", enabled=enabled))
-
-    def goal(
-        self,
-        op: GoalOp,
-        *,
-        objective: str | None = None,
-        token_budget: int | None = None,
-    ) -> GoalResult:
-        """Read or change goal mode with the lifecycle of the interactive `/goal` command.
-
-        `get` only reads. `create` needs `objective` (and accepts a positive
-        `token_budget`); `resume`, `pause`, and `drop` act on the current goal.
-        Goal turns continue on their own only when the server's
-        `goal.continuationModes` contains `"rpc"`. Refusals raise `RpcCommandError`.
-        """
-        return parse_goal_result(
-            self._request(
-                "goal", op=op, objective=objective, token_budget=token_budget
-            )
-        )
-
-    def set_ask_dialog(self, enabled: bool) -> bool:
-        """Opt in to `ask` UI requests, answered with `send_ui_answers`; returns the applied setting.
-
-        Until enabled, the `ask` tool prompts with one `select` (plus `editor`)
-        per question. Older servers raise `RpcCommandError`; keep the `select`
-        handling as the fallback.
-        """
-        return _require_bool(
-            self._request("set_ask_dialog", enabled=enabled), "enabled"
-        )
-
-    def get_available_commands(self) -> tuple[AvailableSlashCommand, ...]:
-        return parse_available_slash_commands(
-            self._request("get_available_commands").get("commands")
-        )
-
-    def get_entries(self, since: str | None = None) -> SessionEntries:
-        """Read the append-history; with `since`, only entries strictly after that durable entry id.
-
-        An unknown `since` raises `RpcCommandError` with code `"unknown_since"`.
-        """
-        return parse_session_entries(self._request("get_entries", since=since))
-
-    def get_tree(self) -> SessionTree:
-        return parse_session_tree(self._request("get_tree"))
-
-    def set_subagent_subscription(
-        self, level: SubagentSubscriptionLevel
-    ) -> SubagentSubscriptionLevel:
-        """Select forwarded subagent frames: `"off"` (default), `"progress"`, or `"events"`."""
-        payload = self._request("set_subagent_subscription", level=level)
-        return cast(
-            SubagentSubscriptionLevel,
-            _require_literal(
-                payload.get("level"),
-                _SUBAGENT_SUBSCRIPTION_LEVEL_VALUES,
-                field="set_subagent_subscription.level",
-            ),
-        )
-
-    def get_subagents(self) -> tuple[SubagentSnapshot, ...]:
-        return parse_subagent_snapshots(self._request("get_subagents").get("subagents"))
-
-    def get_subagent_messages(
-        self,
-        *,
-        subagent_id: str | None = None,
-        session_file: str | None = None,
-        from_byte: int | None = None,
-    ) -> SubagentMessages:
-        """Read a subagent transcript by id or registered session file (`subagent_id` wins).
-
-        Pass the previous result's `next_byte` as `from_byte` to read incrementally.
-        """
-        return parse_subagent_messages(
-            self._request(
-                "get_subagent_messages",
-                subagentId=subagent_id,
-                sessionFile=session_file,
-                fromByte=from_byte,
-            )
-        )
-
-    def cancel_subagent(self, subagent_id: str) -> bool:
-        """Hard-kill one running subagent without aborting the parent turn.
-
-        Returns False when the id is not a running subagent of this session, so
-        repeated calls are safe.
-        """
-        return _require_bool(
-            self._request("cancel_subagent", subagentId=subagent_id), "cancelled"
-        )
-
-    def steer_subagent(self, subagent_id: str, message: str) -> None:
-        """Send `message` to a running subagent as its user.
-
-        Returns once the message is queued into its turn or its next turn starts;
-        raises `RpcCommandError` when the subagent is not running or refuses it.
-        """
-        self._request("steer_subagent", subagentId=subagent_id, message=message)
-
-    def live_start(
-        self, *, voice: str | None = None, instructions: str | None = None
-    ) -> str:
-        """Start a live voice session bound to this session; returns the voice in use.
-
-        Returns once connected and recording. `instructions` replaces the bundled
-        live prompt (a Handlebars template with `{{username}}` and `{{firstName}}`).
-        Frames arrive through `on_live`.
-        """
-        return _require_str(
-            self._request("live_start", voice=voice, instructions=instructions),
-            "voice",
-        )
-
-    def live_stop(self) -> None:
-        """Stop the live voice session, if any; returns once it has stopped."""
-        self._request("live_stop")
-
-    def live_mute(self, muted: bool | None = None) -> bool:
-        """Set microphone mute, or toggle it when `muted` is None; returns the new state."""
-        return _require_bool(self._request("live_mute", muted=muted), "muted")
-
-    def set_model(self, provider: str, model_id: str) -> ModelInfo:
-        payload = self._request("set_model", provider=provider, modelId=model_id)
-        model = parse_model_info(payload)
-        if model is None:
-            raise RpcError("set_model returned an empty payload")
-        return model
-
-    def cycle_model(self) -> ModelCycleResult | None:
-        """Cycle to the next model; None when there is no other model to cycle to."""
-        return parse_model_cycle_result(
-            self._request_data("cycle_model", self._next_request_id(), {})
-        )
-
-    def get_available_models(self) -> tuple[ModelInfo, ...]:
-        payload = self._request("get_available_models")
-        models = cast(list[JsonObject], payload.get("models") or [])
-        return tuple(filter(None, (parse_model_info(model) for model in models)))
-
-    def set_thinking_level(self, level: ThinkingLevel) -> None:
-        self._request("set_thinking_level", level=level)
-
-    def cycle_thinking_level(self) -> ThinkingLevelCycleResult | None:
-        return parse_thinking_level_cycle_result(self._request("cycle_thinking_level"))
-
-    def get_available_thinking_levels(self) -> tuple[ThinkingLevel, ...]:
-        """Selectable levels for the live model, `"off"` first (never `"auto"` or `"inherit"`)."""
-        return parse_thinking_levels(
-            self._request("get_available_thinking_levels").get("levels")
-        )
-
-    def set_steering_mode(self, mode: SteeringMode) -> None:
-        self._request("set_steering_mode", mode=mode)
-
-    def set_follow_up_mode(self, mode: SteeringMode) -> None:
-        self._request("set_follow_up_mode", mode=mode)
-
-    def set_interrupt_mode(self, mode: InterruptMode) -> None:
-        self._request("set_interrupt_mode", mode=mode)
-
-    def compact(self, custom_instructions: str | None = None) -> CompactionResult:
-        payload = self._request("compact", customInstructions=custom_instructions)
-        return parse_compaction_result(payload)
-
-    def set_auto_compaction(self, enabled: bool) -> None:
-        self._request("set_auto_compaction", enabled=enabled)
-
-    def set_auto_retry(self, enabled: bool) -> None:
-        self._request("set_auto_retry", enabled=enabled)
-
-    def set_cache_warming(self, mode: CacheWarmingMode) -> CacheWarmingMode:
-        """Override cache warming for this session only, never writing config.yml; returns the effective mode."""
-        return parse_cache_warming_mode(self._request("set_cache_warming", mode=mode))
-
-    def abort_retry(self) -> None:
-        self._request("abort_retry")
-
-    def bash(self, command: str) -> BashResult:
-        payload = self._request("bash", command=command)
-        return parse_bash_result(payload)
-
-    def abort_bash(self) -> None:
-        self._request("abort_bash")
-
-    def get_session_stats(self) -> SessionStats:
-        payload = self._request("get_session_stats")
-        return parse_session_stats(payload)
-
-    def export_html(self, output_path: str | Path | None = None) -> Path:
-        payload = self._request(
-            "export_html",
-            outputPath=str(output_path) if output_path is not None else None,
-        )
-        return Path(str(payload["path"]))
-
-    def new_session(self, parent_session: str | None = None) -> CancellationResult:
-        return parse_cancellation_result(
-            self._request("new_session", parentSession=parent_session)
-        )
-
-    def open_session(self, session_dir: str | Path) -> OpenSessionResult:
-        """Continue the newest non-empty session in `session_dir`, or start a fresh one there."""
-        return parse_open_session_result(
-            self._request("open_session", sessionDir=str(session_dir))
-        )
-
-    def set_event_filter(
-        self, events: Sequence[str] | None
-    ) -> tuple[str, ...] | None:
-        """Forward only the listed session event types; `None` forwards all.
-
-        Responses, `prompt_result`, and UI/host frames are never filtered. Returns
-        the filter the server applied.
-        """
-        # `events: null` clears the filter, so it must reach the wire explicitly.
-        payload = self._request_with_id(
-            "set_event_filter",
-            self._next_request_id(),
-            {"events": cast(JsonValue, list(events) if events is not None else None)},
-            drop_none=False,
-        )
-        applied = payload.get("events")
-        if applied is None:
-            return None
-        if not isinstance(applied, list) or not all(
-            isinstance(event, str) for event in applied
-        ):
-            raise RpcError("set_event_filter response has an invalid events list")
-        return tuple(cast(list[str], applied))
-
-    def switch_session(self, session_path: str | Path) -> CancellationResult:
-        return parse_cancellation_result(
-            self._request("switch_session", sessionPath=str(session_path))
-        )
-
-    def branch(self, entry_id: str) -> BranchResult:
-        return parse_branch_result(self._request("branch", entryId=entry_id))
-
-    def fork(self, entry_id: str | None = None) -> CancellationResult:
-        """Fork into a new session file: history through `entry_id`, or the whole session."""
-        return parse_cancellation_result(self._request("fork", entryId=entry_id))
-
-    def get_branch_messages(self) -> tuple[BranchMessage, ...]:
-        return parse_branch_messages(self._request("get_branch_messages"))
-
-    def get_last_assistant_text(self) -> str | None:
-        payload = self._request("get_last_assistant_text")
-        value = payload.get("text")
-        return str(value) if isinstance(value, str) else None
-
-    def set_session_name(self, name: str) -> None:
-        self._request("set_session_name", name=name)
-
-    def handoff(self, custom_instructions: str | None = None) -> HandoffResult | None:
-        """Hand the conversation off to a fresh session; None when no handoff was produced.
-
-        Raises `RpcCommandError` while a response is streaming.
-        """
-        return parse_handoff_result(
-            self._request_data(
-                "handoff",
-                self._next_request_id(),
-                {"customInstructions": custom_instructions},
-            )
-        )
-
-    def get_login_providers(self) -> tuple[LoginProvider, ...]:
-        return parse_login_providers(
-            self._request("get_login_providers").get("providers")
-        )
-
-    def login(self, provider_id: str, *, timeout: float = _LOGIN_TIMEOUT) -> str:
-        """Run OAuth login for `provider_id`; returns the provider id once credentials are stored.
-
-        The server drives the flow through UI requests delivered to
-        `on_ui_request` / `next_ui_request`: an `open_url` request carries the
-        authorization URL (`launch_url`, when set, is the truncation-safe copy
-        target), and providers that need a pasted code follow with an `input`
-        request. Providers that need secret input fail with `RpcCommandError`.
-        """
-        payload = self._request_with_id(
-            "login",
-            self._next_request_id(),
-            {"providerId": provider_id},
-            timeout=timeout,
-        )
-        return _require_str(payload, "providerId")
-
-    def predict_word(self, text: str, cursor: int) -> str | None:
-        """Ghost-text suffix for the prose word ending at `cursor`; None when none applies.
-
-        `cursor` is a UTF-16 code-unit offset into `text`. The server keeps one
-        prediction in flight per session and answers a superseded request None.
-        Failures (prediction daemon unavailable) raise `RpcCommandError`; treat
-        them as "no suggestion".
-        """
-        payload = self._request_with_id(
-            "predict_word",
-            self._next_request_id(),
-            {"text": text, "cursor": cursor},
-            timeout=_PREDICT_WORD_TIMEOUT,
-        )
-        suffix = payload.get("suffix")
-        if suffix is not None and not isinstance(suffix, str):
-            raise ValueError("suffix must be a string")
-        return suffix
-
-    def predict_word_feedback(
-        self, text: str, cursor: int, suggestion: str, *, accepted: bool
-    ) -> None:
-        """Report a shown suggestion as accepted or typed past, with the text and cursor it was shown at."""
-        self._request(
-            "predict_word_feedback",
-            text=text,
-            cursor=cursor,
-            suggestion=suggestion,
-            accepted=accepted,
-        )
-
     def get_todos(self) -> tuple[TodoPhase, ...]:
         return self.get_state().todo_phases
 
@@ -1553,8 +943,10 @@ class RpcClient:
         self, todos: Sequence[TodoSeed | TodoPhaseSeed]
     ) -> tuple[TodoPhase, ...]:
         phases = self._normalize_todo_phases(todos)
-        payload = self._request("set_todos", phases=cast(JsonValue, phases))
-        return parse_todo_phases(payload.get("todoPhases"))
+        data = self._command("set_todos", {"phases": phases})
+        return required(
+            expect_object(data, "set_todos"), "todoPhases", array(parse_todo_phase), "set_todos"
+        )
 
     def clear_todos(self) -> tuple[TodoPhase, ...]:
         return self.set_todos(())
@@ -1598,29 +990,12 @@ class RpcClient:
                     )
                 ):
                     raise
-        payload = self._request("get_messages")
-        return parse_agent_messages(cast(JsonValue | None, payload.get("messages")))
-
-    def get_messages_page(
-        self, *, cursor: str | None = None, limit: int | None = None
-    ) -> MessagesPage:
-        payload = self._request("get_messages_page", cursor=cursor, limit=limit)
-        raw_total = payload.get("totalMessages")
-        if (
-            not isinstance(raw_total, int)
-            or isinstance(raw_total, bool)
-            or raw_total < 0
-        ):
-            raise RpcError("get_messages_page response has an invalid totalMessages")
-        raw_cursor = payload.get("nextCursor")
-        if raw_cursor is not None and not isinstance(raw_cursor, str):
-            raise RpcError("get_messages_page response has an invalid nextCursor")
-        return MessagesPage(
-            messages=parse_agent_messages(
-                cast(JsonValue | None, payload.get("messages"))
-            ),
-            total_messages=raw_total,
-            next_cursor=raw_cursor,
+        data = self._command("get_messages", {})
+        return required(
+            expect_object(data, "get_messages"),
+            "messages",
+            array(parse_agent_message),
+            "get_messages",
         )
 
     def set_custom_tools(self, tools: Sequence[HostTool[Any, Any]]) -> tuple[str, ...]:
@@ -1628,28 +1003,24 @@ class RpcClient:
         if self._process is None:
             return tuple(tool.name for tool in self._custom_tools)
 
-        payload = self._request(
-            "set_host_tools",
-            tools=cast(
-                JsonValue,
-                [
-                    {
-                        "name": tool.name,
-                        "label": tool.label,
-                        "description": tool.description,
-                        "parameters": tool.parameters,
-                        "hidden": tool.hidden,
-                        "loadMode": tool.load_mode,
-                        "readsSkillUris": tool.reads_skill_uris,
-                    }
-                    for tool in self._custom_tools
-                ],
-            ),
+        definitions: list[JsonObject] = []
+        for tool in self._custom_tools:
+            definition: JsonObject = {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+                "hidden": tool.hidden,
+                "readsSkillUris": tool.reads_skill_uris,
+            }
+            if tool.label is not None:
+                definition["label"] = tool.label
+            if tool.load_mode is not None:
+                definition["loadMode"] = tool.load_mode
+            definitions.append(definition)
+        data = self._command("set_host_tools", {"tools": definitions})
+        return required(
+            expect_object(data, "set_host_tools"), "toolNames", array(decode_str), "set_host_tools"
         )
-        tool_names = payload.get("toolNames") or []
-        if not isinstance(tool_names, list):
-            raise RpcError("set_host_tools response did not include toolNames")
-        return tuple(str(name) for name in tool_names)
 
     def set_host_uris(self, host_uris: Sequence[HostUri[Any]]) -> tuple[str, ...]:
         self._host_uris = tuple(host_uris)
@@ -1667,14 +1038,13 @@ class RpcClient:
                 entry["description"] = uri.description
             schemes_payload.append(entry)
 
-        payload = self._request(
+        data = self._command("set_host_uri_schemes", {"schemes": schemes_payload})
+        return required(
+            expect_object(data, "set_host_uri_schemes"),
+            "schemes",
+            array(decode_str),
             "set_host_uri_schemes",
-            schemes=cast(JsonValue, schemes_payload),
         )
-        schemes = payload.get("schemes") or []
-        if not isinstance(schemes, list):
-            raise RpcError("set_host_uri_schemes response did not include schemes")
-        return tuple(str(entry) for entry in schemes)
 
     def prompt(
         self,
@@ -1696,41 +1066,6 @@ class RpcClient:
             streamingBehavior=streaming_behavior,
         )
         return request_id
-
-    def steer(
-        self, message: str, *, images: Sequence[ImageContent] | None = None
-    ) -> None:
-        self._request(
-            "steer",
-            message=message,
-            images=list(images) if images is not None else None,
-        )
-
-    def follow_up(
-        self, message: str, *, images: Sequence[ImageContent] | None = None
-    ) -> None:
-        self._request(
-            "follow_up",
-            message=message,
-            images=list(images) if images is not None else None,
-        )
-
-    def remove_queued_message(
-        self, message: str, queue: QueuedMessageQueue
-    ) -> RemoveQueuedMessageResult:
-        """Remove one queued prompt; inspect the returned result's ``removed`` flag."""
-        return parse_remove_queued_message_result(
-            self._request("remove_queued_message", message=message, queue=queue)
-        )
-
-    def promote_queued_message(self, message: str) -> PromoteQueuedMessageResult:
-        """Move one queued follow-up to steering; inspect the result's ``promoted`` flag."""
-        return parse_promote_queued_message_result(
-            self._request("promote_queued_message", message=message)
-        )
-
-    def abort(self) -> None:
-        self._request("abort")
 
     def abort_and_prompt(
         self, message: str, *, images: Sequence[ImageContent] | None = None
@@ -2383,14 +1718,6 @@ class RpcClient:
         if pending is not None:
             pending.cancel_event.set()
 
-    def _add_typed_event_listener(
-        self, event_type: str, listener: TEventListener
-    ) -> Callable[[], None]:
-        listeners = self._typed_event_listeners.setdefault(event_type, [])
-        typed_listener = cast(AgentEventListener, listener)
-        listeners.append(typed_listener)
-        return lambda: self._remove_listener(listeners, typed_listener)
-
     @staticmethod
     def _normalize_todo_phases(
         todos: Sequence[TodoSeed | TodoPhaseSeed],
@@ -2398,59 +1725,47 @@ class RpcClient:
         if len(todos) == 0:
             return []
 
-        next_task_id = 1
-
-        def next_task() -> str:
-            nonlocal next_task_id
-            task_id = f"task-{next_task_id}"
-            next_task_id += 1
-            return task_id
+        def wire_item(
+            content: str,
+            status: TodoStatus,
+            blocker: object,
+            details: object,
+            notes: object,
+        ) -> JsonObject:
+            item: JsonObject = {"content": content, "status": status}
+            if isinstance(blocker, str):
+                item["blocker"] = blocker
+            if isinstance(details, str):
+                item["details"] = details
+            if isinstance(notes, str):
+                item["notes"] = [notes]
+            elif isinstance(notes, (list, tuple)) and all(isinstance(n, str) for n in notes):
+                item["notes"] = list(cast(Sequence[str], notes))
+            return item
 
         def normalize_todo_item(seed: TodoSeed) -> JsonObject:
             if isinstance(seed, str):
-                return {
-                    "id": next_task(),
-                    "content": seed,
-                    "status": cast(JsonValue, "pending"),
-                }
+                return {"content": seed, "status": "pending"}
 
             if isinstance(seed, TodoItem):
                 if seed.status not in _TODO_STATUS_VALUES:
                     raise RpcError(f"Unsupported todo status: {seed.status}")
-                return {
-                    "id": seed.id or next_task(),
-                    "content": seed.content,
-                    "status": cast(JsonValue, seed.status),
-                    "notes": seed.notes,
-                    "details": seed.details,
-                    "blocker": seed.blocker,
-                }
+                return wire_item(seed.content, seed.status, seed.blocker, seed.details, seed.notes)
 
             content = seed.get("content")
             if not isinstance(content, str) or not content.strip():
                 raise RpcError("Todo items must provide a non-empty 'content' value")
 
-            raw_id = seed.get("id")
             raw_status = seed.get("status")
-            raw_notes = seed.get("notes")
-            raw_details = seed.get("details")
-            raw_blocker = seed.get("blocker")
             if isinstance(raw_status, str):
                 if raw_status not in _TODO_STATUS_VALUES:
                     raise RpcError(f"Unsupported todo status: {raw_status}")
                 status: TodoStatus = cast(TodoStatus, raw_status)
             else:
                 status = "pending"
-            return {
-                "id": str(raw_id)
-                if isinstance(raw_id, str) and raw_id
-                else next_task(),
-                "content": content,
-                "status": cast(JsonValue, status),
-                "notes": raw_notes if isinstance(raw_notes, str) else None,
-                "details": raw_details if isinstance(raw_details, str) else None,
-                "blocker": raw_blocker if isinstance(raw_blocker, str) else None,
-            }
+            return wire_item(
+                content, status, seed.get("blocker"), seed.get("details"), seed.get("notes")
+            )
 
         def is_phase_seed(seed: TodoSeed | TodoPhaseSeed) -> bool:
             if isinstance(seed, TodoPhase):
@@ -2459,54 +1774,46 @@ class RpcClient:
                 return False
             return "tasks" in seed or ("name" in seed and "content" not in seed)
 
-        def normalize_phase(seed: TodoPhaseSeed, index: int) -> JsonObject:
+        def normalize_phase(seed: TodoPhaseSeed) -> JsonObject:
             if isinstance(seed, TodoPhase):
-                phase_id = seed.id or f"phase-{index}"
                 name = seed.name
                 tasks = [normalize_todo_item(task) for task in seed.tasks]
             else:
                 raw_name = seed.get("name")
                 if not isinstance(raw_name, str) or not raw_name.strip():
                     raise RpcError("Todo phases must provide a non-empty 'name' value")
-                phase_id_value = seed.get("id")
                 raw_tasks = seed.get("tasks") or ()
                 if not isinstance(raw_tasks, Sequence) or isinstance(
                     raw_tasks, (str, bytes)
                 ):
                     raise RpcError("Todo phase 'tasks' must be a sequence")
-                phase_id = (
-                    str(phase_id_value)
-                    if isinstance(phase_id_value, str) and phase_id_value
-                    else f"phase-{index}"
-                )
                 name = raw_name
                 tasks = [
                     normalize_todo_item(cast(TodoSeed, task)) for task in raw_tasks
                 ]
 
-            return {"id": phase_id, "name": name, "tasks": tasks}
+            return {"name": name, "tasks": cast(JsonValue, tasks)}
 
         if any(is_phase_seed(todo) for todo in todos):
             phases: list[JsonObject] = []
-            for index, seed in enumerate(todos, start=1):
+            for seed in todos:
                 if not is_phase_seed(seed):
                     raise RpcError(
                         "Cannot mix flat todo items with todo phases in one set_todos() call"
                     )
-                phases.append(normalize_phase(cast(TodoPhaseSeed, seed), index))
+                phases.append(normalize_phase(cast(TodoPhaseSeed, seed)))
             return phases
 
         return [
             {
-                "id": "phase-1",
                 "name": "Todos",
                 "tasks": [normalize_todo_item(cast(TodoSeed, todo)) for todo in todos],
             }
         ]
 
     def _build_command(self) -> tuple[str, ...]:
-        if self._command is not None:
-            return self._command
+        if self._argv is not None:
+            return self._argv
 
         command: list[str] = [self._executable, "--mode", "rpc"]
         if self._provider:
@@ -2645,120 +1952,30 @@ class RpcClient:
                     notification,
                 )
 
+                # Client state first, so a listener observes it already updated.
                 if isinstance(notification, ReadyEvent):
                     self._ready_event = notification
                     self._ready_received = True
                     self._ready.set()
-                    self._dispatch_listeners(
-                        "ready",
-                        notification.type,
-                        self._ready_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, ExtensionUiRequest):
+                elif isinstance(notification, ExtensionUiRequest):
                     self._ui_requests.put(notification)
-                    self._dispatch_listeners(
-                        "ui_request",
-                        notification.type,
-                        self._ui_request_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, ExtensionError):
-                    self._dispatch_listeners(
-                        "extension_error",
-                        notification.type,
-                        self._extension_error_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, PromptResultEvent):
+                elif isinstance(notification, PromptResultEvent):
                     self._record_prompt_result(notification)
-                    self._dispatch_listeners(
-                        "prompt_result",
-                        notification.type,
-                        self._prompt_result_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, AvailableCommandsUpdateEvent):
-                    self._dispatch_listeners(
-                        "available_commands_update",
-                        notification.type,
-                        self._available_commands_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, SubagentLifecycleEvent):
-                    self._dispatch_listeners(
-                        "subagent_lifecycle",
-                        notification.type,
-                        self._subagent_lifecycle_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, SubagentProgressEvent):
-                    self._dispatch_listeners(
-                        "subagent_progress",
-                        notification.type,
-                        self._subagent_progress_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, SubagentEvent):
-                    self._dispatch_listeners(
-                        "subagent_event",
-                        notification.type,
-                        self._subagent_event_listeners,
-                        notification,
-                    )
-                    continue
-
-                if isinstance(notification, LiveEvent):
-                    self._dispatch_listeners(
-                        "live", notification.type, self._live_listeners, notification
-                    )
-                    continue
-
-                if isinstance(notification, SessionSettledEvent):
+                elif isinstance(notification, SessionSettledEvent):
                     with self._event_condition:
                         self._session_settled_count += 1
                         self._event_condition.notify_all()
+                elif isinstance(notification, RpcAgentEvent):
+                    self._append_event(payload)
                     self._dispatch_listeners(
-                        "session_settled",
-                        notification.type,
-                        self._session_settled_listeners,
-                        notification,
+                        "event", notification.type, self._event_listeners, notification
                     )
-                    continue
 
-                if isinstance(notification, UnknownNotification):
-                    self._dispatch_listeners(
-                        "unknown_notification",
-                        notification.type,
-                        self._unknown_notification_listeners,
-                        notification,
-                    )
-                    continue
-
-                event = cast(RpcAgentEvent, notification)
-                self._append_event(payload)
                 self._dispatch_listeners(
-                    "event", event.type, self._event_listeners, event
-                )
-                self._dispatch_listeners(
-                    "typed_event",
-                    event.type,
-                    self._typed_event_listeners.get(event.type, []),
-                    event,
+                    "typed",
+                    notification.type,
+                    self._typed_listeners.get(notification.type, []),
+                    notification,
                 )
         except Exception as exc:
             self._mark_closed(exc)

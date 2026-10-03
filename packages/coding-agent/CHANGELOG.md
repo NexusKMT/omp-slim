@@ -5,11 +5,16 @@
 ### Added
 
 - RPC mode can run a GPT live voice session bound to the RPC session, so delegated work uses the host's tools: `live_start` (optional `voice`, and `instructions` replacing the bundled live prompt), `live_stop`, and `live_mute`, with unsolicited `live_phase`, `live_levels` (at most every 100 ms), `live_transcript`, and `live_end` frames that `set_event_filter` never drops. `RpcClient` adds `liveStart()`, `liveStop()`, `liveMute()`, and `onLive()`. Closing stdin stops an active live session.
+- Published a machine-readable RPC wire schema (`src/modes/rpc/wire/rpc-wire.schema.json`, JSON Schema 2020-12 plus a command table) for generating RPC clients in other languages; `bun run gen:rpc` generates the Python `omp-rpc` client from it, plus new Rust (`sdk/rust/omp-rpc`) and Go (`sdk/go/omp-rpc`) client packages that negotiate protocol v2, wait for prompt results, and serve host tools and host URIs. The Python `omp-rpc` package moved from `python/omp-rpc` to `sdk/python/omp-rpc`
 - Added the read-only `archive` eval global (docs at `xd://eval/archive`, on by default via `archive.enabled`): list recent projects, past sessions for the current project or across all projects with their idle recaps, open one session with its full recap journal and prompts, and read or search prompt history
 
 ### Changed
 
 - Improved auto-generated session titles: requests that only point at an image ("fix [Image #1]") are titled from the assistant's first ~40 words instead of a guess, placeholders are no longer echoed, and mid-session title refreshes keep the session's opening request so they name the goal instead of a file or symbol
+
+### Fixed
+
+- Fixed RPC hosts waiting forever for a prompt's `prompt_result` when an automatic handoff ran after a turn crossed the compaction threshold; threshold handoffs now finish before the turn settles, like other compaction methods
 
 ## [18.5.0] - 2026-10-03
 

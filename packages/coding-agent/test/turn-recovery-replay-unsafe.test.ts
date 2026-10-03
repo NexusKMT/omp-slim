@@ -99,8 +99,7 @@ function createHost(
 		syncAfterModelChange: async () => {},
 		resetCurrentResponsesProviderSession: () => {},
 		maybeAutoRedeemReset: async () => ({ restored: false }),
-		runAutoCompaction: async () =>
-			({ deferredHandoff: false, continuationScheduled: false }) as RecoveryCompactionResult,
+		runAutoCompaction: async () => ({ continuationScheduled: false }) as RecoveryCompactionResult,
 		shakeForRequestBodyReadTimeout: async () => false,
 		withBashBranchTransition: <T>(operation: () => T): T => operation(),
 	};

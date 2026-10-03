@@ -21,7 +21,6 @@ from omp_rpc import (
     AvailableCommandsUpdateEvent,
     GoalResult,
     HandoffResult,
-    LiveEvent,
     LivePhaseEvent,
     OpenSessionResult,
     PromptResultEvent,
@@ -1116,7 +1115,7 @@ class RpcClientTests(unittest.TestCase):
             client.send_ui_answers(
                 request.id,
                 [
-                    AskAnswer(id=questions[0].id, custom_input="DuckDB"),
+                    AskAnswer(id=questions[0].id, selected_options=(), custom_input="DuckDB"),
                     AskAnswer(id=questions[1].id, selected_options=("Auth", "Search")),
                 ],
             )
@@ -1157,15 +1156,18 @@ class RpcClientTests(unittest.TestCase):
     ) -> None:
         commands: list[AvailableCommandsUpdateEvent] = []
         lifecycle: list[SubagentLifecycleEvent] = []
-        live: list[LiveEvent] = []
+        live: list[LivePhaseEvent] = []
         with self.make_client() as client:
             client.on_available_commands_update(commands.append)
             client.on_subagent_lifecycle(lifecycle.append)
-            client.on_live(live.append)
+            client.on_live_phase(live.append)
             turn = client.prompt_and_wait("side frames", timeout=2.0)
 
         self.assertEqual([command.name for command in commands[0].commands], ["plan"])
-        self.assertEqual([(event.id, event.status) for event in lifecycle], [("Worker", "started")])
+        self.assertEqual(
+            [(event.payload.id, event.payload.status) for event in lifecycle],
+            [("Worker", "started")],
+        )
         self.assertEqual(live, [LivePhaseEvent(phase="listening")])
         self.assertEqual(turn.assistant_text, "pong")
         self.assertFalse(

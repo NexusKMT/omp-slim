@@ -68,7 +68,7 @@ After the success response, oversized stdout objects use an uninterrupted sequen
 }
 ```
 
-Clients MUST validate `chunkId`, `index`, `count`, and `byteLength`, reject interleaved or interrupted sequences, enforce the advertised reassembly limit, concatenate decoded bytes in index order, decode them as strict UTF-8, and parse the result as one JSON object. The TypeScript `RpcFrameDecoder`, exported from `@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame`, implements this validation. The bundled TypeScript and Python `RpcClient` implementations negotiate v2 automatically when the ready frame advertises it.
+Clients MUST validate `chunkId`, `index`, `count`, and `byteLength`, reject interleaved or interrupted sequences, enforce the advertised reassembly limit, concatenate decoded bytes in index order, decode them as strict UTF-8, and parse the result as one JSON object. The TypeScript `RpcFrameDecoder`, exported from `@oh-my-pi/pi-coding-agent/modes/rpc/rpc-frame`, implements this validation. The bundled TypeScript and Python `RpcClient` implementations and the Rust and Go clients negotiate v2 automatically when the ready frame advertises it.
 
 For an oversized `agent_end` in either version, the encoder first removes the leading messages already delivered unchanged in `message_end` frames and adds `messageCount` with the original count. Hosts must retain streamed messages rather than treating `agent_end.messages` as a complete transcript.
 
@@ -1397,6 +1397,46 @@ stdin:
 
 ## Client libraries
 
+### Wire schema and generated clients
+
+`packages/coding-agent/src/modes/rpc/wire` describes every command (parameters,
+success `data`, nullability, timeouts), every unsolicited frame, and every shared
+type as omptype schemas. `bun run gen:rpc` emits:
+
+- `rpc-wire.schema.json`: a JSON Schema 2020-12 bundle plus an `x-rpc` section:
+  the command table, the stdout frame union (`serverFrame`: responses, host
+  requests, notifications), the notification and session-event unions, and the
+  host-to-server frame union (`inbound`). It is the language-neutral input for
+  client generators, with these decoder rules:
+  - objects marked `"x-open": true` are open records (messages, content, usage,
+    assistant streaming events): decoders check the `role`/`type` discriminator
+    and keep every key, so persisted messages missing newer fields still decode;
+  - a property `default` is the value decoders substitute when an older server
+    omits the field;
+  - string enums are closed: an unknown value fails the frame, which clients then
+    surface as an unknown notification instead of stopping;
+  - `x-unknown-fallback` on a property (a subagent's forwarded event) degrades a
+    value that fails to decode to an unknown notification without failing its
+    frame, and `x-scalar-or-array` marks an array older servers sent as a bare
+    scalar.
+- `rpc-wire.generated.ts`: the wire types in TypeScript.
+- `sdk/python/omp-rpc/src/omp_rpc/_wire.py`: Python types, decoders, command methods,
+  and frame listeners for the `omp-rpc` package.
+- `sdk/rust/omp-rpc/src/wire.rs`: Rust serde types, frame decoders, and a `Command`
+  trait implemented by one params struct per command (crate `omp-rpc`).
+- `sdk/go/omp-rpc/wire.go`: Go types, frame decoders, and one `Commands` method per
+  command (module `github.com/can1357/oh-my-pi/sdk/go/omp-rpc`).
+
+The Rust and Go packages ship hand-written process transports on top of the
+generated types: they negotiate v2 and reassemble chunks, page message history,
+wait for a prompt's `prompt_result` (`prompt_and_wait` / `PromptAndWait`), and serve
+host-owned tools and URI schemes. Their READMEs cover the APIs.
+
+`packages/coding-agent/test/rpc-wire` fails when a committed output is stale, and
+type-checks the generated TypeScript against `rpc-types.ts` and the internal types
+behind it: a new command, command parameter, event, event field, or enum value on
+the server breaks `bun check` until the schema covers it.
+
 ### TypeScript helper
 
 `packages/coding-agent/src/modes/rpc/rpc-client.ts` is a convenience wrapper, not the protocol definition.
@@ -1414,7 +1454,7 @@ Current helper characteristics:
 
 ### Python package
 
-The bundled [`omp-rpc`](../python/omp-rpc/pyproject.toml) distribution provides the process-backed Python client. Its import package is `omp_rpc`; the package API, typed commands and events, host-tool/host-URI helpers, and orchestration examples are maintained in the [`omp-rpc` README](../python/omp-rpc/README.md).
+The bundled [`omp-rpc`](../sdk/python/omp-rpc/pyproject.toml) distribution provides the process-backed Python client. Its import package is `omp_rpc`; the package API, typed commands and events, host-tool/host-URI helpers, and orchestration examples are maintained in the [`omp-rpc` README](../sdk/python/omp-rpc/README.md).
 
 ```python
 from omp_rpc import RpcClient
@@ -1425,4 +1465,4 @@ with RpcClient(provider="anthropic", model="claude-sonnet-4-5") as client:
     print(turn.require_assistant_text())
 ```
 
-By default, `RpcClient` starts `omp --mode rpc`; pass `command=[...]` to own the exact child command. It handles request correlation, typed notifications, v2 negotiation and chunk reassembly, message pagination, extension UI (including the opt-in `ask` dialog), and host-owned tools and URI schemes, and wraps every command above, including goal mode, subagent control, live voice, login, and word prediction. The `messageUpdates: "delta"` projection stays raw-protocol only. The Python package owns that client API and process lifecycle; this document and `rpc-types.ts` remain the canonical wire contract. Use raw protocol frames when a client library does not wrap the surface you need.
+By default, `RpcClient` starts `omp --mode rpc`; pass `command=[...]` to own the exact child command. It handles request correlation, typed notifications, v2 negotiation and chunk reassembly, message pagination, extension UI (including the opt-in `ask` dialog), and host-owned tools and URI schemes. Its command methods and `on_<frame type>` listeners are generated from the wire schema, so it wraps every command above; the `messageUpdates: "delta"` projection stays raw-protocol only. The Python package owns that client API and process lifecycle; this document and `rpc-types.ts` remain the canonical wire contract. Use raw protocol frames when a client library does not wrap the surface you need.

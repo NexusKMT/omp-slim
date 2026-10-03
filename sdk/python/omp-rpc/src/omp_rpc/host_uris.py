@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Callable, Generic, Literal, TypeAlias, TypeVar, TypedDict
 
-from .protocol import JsonObject
+from ._wire_runtime import JsonObject
 
 TPayload = TypeVar("TPayload")
 

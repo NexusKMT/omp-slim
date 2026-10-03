@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Callable, Generic, Literal, TypeAlias, TypeVar, TypedDict, cast
+from typing import Callable, Generic, TypeAlias, TypeVar, TypedDict, cast
 
-from .protocol import ImageContent, JsonObject, JsonValue, TextContent
+from ._wire import ImageContent, TextContent, ToolLoadMode
+from ._wire_runtime import JsonObject, JsonValue
 
 TParams = TypeVar("TParams")
 TDetails = TypeVar("TDetails")
@@ -16,8 +17,6 @@ class HostToolResultPayload(TypedDict, total=False):
 
 
 HostToolResultValue: TypeAlias = HostToolResultPayload | str
-ToolLoadMode: TypeAlias = Literal["essential", "discoverable"]
-"""How an enabled host tool is presented; the server defaults non-builtin names to `"discoverable"`."""
 
 
 def _normalize_result(result: HostToolResultValue) -> JsonObject:

@@ -19,6 +19,32 @@ provides:
   observation and control, live voice, OAuth login, handoff, and composer word prediction
 - typed host-tool helpers so Python RPC owners can expose custom tools with JSON Schema metadata
 
+## Generated from the wire schema
+
+Protocol types, their decoders, every command method, and every `on_<frame type>`
+listener live in `omp_rpc/_wire.py`, generated from the RPC wire schema in
+`packages/coding-agent/src/modes/rpc/wire` (also emitted as the language-neutral
+`rpc-wire.schema.json`). After changing the schema, regenerate from the repo root:
+
+```bash
+bun run gen:rpc
+```
+
+`packages/coding-agent/test/rpc-wire` fails when the committed outputs are stale or
+when the schema drifts from the server's own types. Decoding follows the schema:
+
+- records are frozen, keyword-only dataclasses with snake_case fields; required
+  fields are validated, unknown keys are dropped, and fields older servers omit
+  take their documented defaults
+- messages, content blocks, usage, and assistant streaming events are open
+  records (`TypedDict`s): only the `role`/`type` discriminator is checked and every
+  key is kept, so persisted messages missing newer fields still decode
+- a frame whose `type` this client does not model arrives as `UnknownNotification`
+
+Hand-written code covers what the schema cannot express: process lifecycle,
+prompt correlation (`prompt`, `prompt_and_wait`, `wait_for_settled`), message
+paging, todo seeding, extension UI replies, and host tool/URI dispatch.
+
 ## Basic Usage
 
 ```python
@@ -254,8 +280,8 @@ Subagent frames are off by default. Select a level, then subscribe:
 
 ```python
 client.set_subagent_subscription("progress")  # or "events" for full session events
-client.on_subagent_lifecycle(lambda e: print(e.id, e.status))
-client.on_subagent_progress(lambda e: print(e.agent, e.progress.get("toolCount")))
+client.on_subagent_lifecycle(lambda e: print(e.payload.id, e.payload.status))
+client.on_subagent_progress(lambda e: print(e.payload.agent, e.payload.progress.get("toolCount")))
 
 for snapshot in client.get_subagents():
     page = client.get_subagent_messages(subagent_id=snapshot.id)
@@ -266,15 +292,16 @@ cancelled = client.cancel_subagent("OmpWorker")  # False when not running
 ```
 
 At `"events"`, `on_subagent_event()` delivers each subagent's own session
-events as `SubagentEvent.event` (an `UnknownNotification` when it cannot be
-parsed).
+events as `SubagentEvent.payload.event` (an `UnknownNotification` when it cannot
+be parsed).
 
 ## Live Voice, Login, Handoff, and Word Prediction
 
 - `live_start(voice=None, instructions=None)` starts a GPT live voice session
   bound to this session and returns the voice in use; `live_mute(muted=None)`
-  sets or toggles the microphone; `live_stop()` ends it. `on_live()` receives
-  `LivePhaseEvent`, `LiveLevelsEvent`, `LiveTranscriptEvent`, and `LiveEndEvent`.
+  sets or toggles the microphone; `live_stop()` ends it. `on_live_phase()`,
+  `on_live_levels()`, `on_live_transcript()`, and `on_live_end()` receive the
+  live frames.
 - `get_login_providers()` lists OAuth providers; `login(provider_id)` blocks
   (up to 10 minutes) until credentials are stored. The flow arrives as UI
   requests: an `open_url` request (prefer `launch_url` as the copy target) and,
@@ -483,4 +510,4 @@ full = assistant_text_with_thinking(message)
 ## Protocol Reference
 
 The canonical wire protocol still lives in the repo at
-[`docs/rpc.md`](../../docs/rpc.md).
+[`docs/rpc.md`](../../../docs/rpc.md).
