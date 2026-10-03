@@ -44,6 +44,7 @@ import {
 } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	DEFAULT_PRUNE_CONFIG,
+	type PruneResult,
 	pruneSupersededToolResults,
 	pruneToolOutputs,
 	readToolSupersedeKey,
@@ -119,7 +120,6 @@ import {
 import { cfgRetry } from "./settings";
 
 export type CompactionCheckResult = Readonly<{
-	deferredHandoff: boolean;
 	continuationScheduled: boolean;
 	automaticContinuationBlocked?: boolean;
 	historyRewritten?: boolean;
@@ -127,19 +127,12 @@ export type CompactionCheckResult = Readonly<{
 
 /** Shared no-op result for dispatcher paths that perform no maintenance. */
 export const COMPACTION_CHECK_NONE: CompactionCheckResult = {
-	deferredHandoff: false,
-	continuationScheduled: false,
-};
-const COMPACTION_CHECK_DEFERRED_HANDOFF: CompactionCheckResult = {
-	deferredHandoff: true,
 	continuationScheduled: false,
 };
 const COMPACTION_CHECK_CONTINUATION: CompactionCheckResult = {
-	deferredHandoff: false,
 	continuationScheduled: true,
 };
 const COMPACTION_CHECK_BLOCK_AUTOMATIC_CONTINUATION: CompactionCheckResult = {
-	deferredHandoff: false,
 	continuationScheduled: false,
 	automaticContinuationBlocked: true,
 };
@@ -426,10 +419,6 @@ export interface SessionMaintenanceHost {
 	memoryBackendSession(): MemoryBackendOperationContext["session"];
 	emitSessionEvent(event: AgentSessionEvent, options?: { detachExtensions?: boolean }): Promise<void>;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
-	schedulePostPromptTask(
-		task: (signal: AbortSignal) => Promise<void>,
-		options?: { delayMs?: number; generation?: number; onSkip?: (reason: "aborted" | "stale-generation") => void },
-	): void;
 	scheduleAgentContinue(options: {
 		source: string;
 		delayMs?: number;
@@ -490,7 +479,6 @@ export interface SessionMaintenanceHost {
 	runRecoveryCompactionWithRollback(
 		reason: "overflow" | "incomplete",
 		message: AssistantMessage,
-		allowDefer: boolean,
 		options: { autoContinue: boolean; triggerContextTokens?: number; excludeMediaMethods?: boolean },
 	): Promise<CompactionCheckResult>;
 	parseRetryAfterMsFromError(errorMessage: string): number | undefined;
@@ -656,6 +644,20 @@ export class SessionMaintenance {
 		return { ...config, protectedTools: [...config.protectedTools, planMatcher] };
 	}
 
+	/**
+	 * Durably commit a prune pass, restoring the blanked results when the rewrite
+	 * fails so live context never diverges from the history its derived state
+	 * (advisor prefix, todo phases, provider sessions) was built from.
+	 */
+	async #persistPrune(result: PruneResult): Promise<void> {
+		try {
+			await this.#host.sessionManager.rewriteEntries();
+		} catch (error) {
+			result.undo();
+			throw error;
+		}
+	}
+
 	async #pruneToolOutputs(): Promise<{ prunedCount: number; tokensSaved: number } | undefined> {
 		const branchEntries = this.#host.sessionManager.getBranch();
 		const keepBoundaryId = getLatestCompactionEntry(branchEntries)?.firstKeptEntryId;
@@ -677,7 +679,7 @@ export class SessionMaintenance {
 			return undefined;
 		}
 
-		await this.#host.sessionManager.rewriteEntries();
+		await this.#persistPrune(result);
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.agent.replaceMessages(sessionContext.messages);
 		this.#host.rebaseAdvisorPrefix("prune-tool-outputs");
@@ -723,7 +725,7 @@ export class SessionMaintenance {
 			return undefined;
 		}
 
-		await this.#host.sessionManager.rewriteEntries();
+		await this.#persistPrune(result);
 		const sessionContext = this.#host.buildDisplaySessionContext();
 		this.#host.agent.replaceMessages(sessionContext.messages);
 		this.#host.rebaseAdvisorPrefix("prune-stale-tool-results");
@@ -1974,7 +1976,7 @@ export class SessionMaintenance {
 	/** Trigger idle compaction through the auto-compaction flow (with UI events). */
 	async runIdleCompaction(): Promise<void> {
 		if (this.#host.isStreaming() || this.isCompacting) return;
-		await this.runAutoCompaction("idle", false, true);
+		await this.runAutoCompaction("idle", false);
 	}
 
 	/**
@@ -2554,7 +2556,7 @@ export class SessionMaintenance {
 			contextWindow,
 			model: `${model.provider}/${model.id}`,
 		});
-		await this.runAutoCompaction("threshold", false, false, false, {
+		await this.runAutoCompaction("threshold", false, {
 			autoContinue: false,
 			triggerContextTokens: contextTokens,
 			pendingContextTokens: this.#tokenizer.countMessages(messages, { excludeEncryptedReasoning: true }),
@@ -2609,7 +2611,7 @@ export class SessionMaintenance {
 			// An abort or disposal that raced the awaited persistence barrier must
 			// not commit a boundary the interrupted turn never observed.
 			if (signal?.aborted || this.#host.isDisposed()) return;
-			const result = await this.runAutoCompaction("threshold", false, false, false, {
+			const result = await this.runAutoCompaction("threshold", false, {
 				autoContinue: false,
 				suppressContinuation: true,
 				phase: "mid_turn",
@@ -2696,7 +2698,7 @@ export class SessionMaintenance {
 		}
 
 		const messagesBefore = activeMessages.length;
-		const result = await this.runAutoCompaction("threshold", false, false, false, {
+		const result = await this.runAutoCompaction("threshold", false, {
 			autoContinue: false,
 			suppressContinuation: true,
 			triggerContextTokens: contextTokens,
@@ -2739,13 +2741,8 @@ export class SessionMaintenance {
 	 *
 	 * @param assistantMessage The assistant message to check
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
-	 * @param allowDefer If true, a threshold-driven handoff preference may schedule
-	 *   itself as a deferred post-prompt task instead of running inline. Callers running
-	 *   inside the `agent_end` handler set this to true so `session.prompt()` resolves
-	 *   cleanly; callers on the pre-prompt path (where the next agent turn is about to
-	 *   start) set it to false to avoid racing the deferred handoff against the new turn.
 	 * @param autoContinue Whether maintenance may schedule the agent-authored continuation prompt.
-	 * @returns whether compaction/recovery scheduled a handoff, retry, auto-continue, or
+	 * @returns whether compaction/recovery scheduled a retry, auto-continue, or
 	 *   queued-message drain that already owns the next turn. Callers MUST skip
 	 *   `session_stop` and other agent continuations when `continuationScheduled`
 	 *   is true.
@@ -2753,7 +2750,6 @@ export class SessionMaintenance {
 	async checkCompaction(
 		assistantMessage: AssistantMessage,
 		skipAbortedCheck = true,
-		allowDefer = true,
 		autoContinue = true,
 	): Promise<CompactionCheckResult> {
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
@@ -2894,12 +2890,10 @@ export class SessionMaintenance {
 
 			// No promotion target available fall through to compaction
 			if (compactionAvailable) {
-				const compactionResult = await this.#host.runRecoveryCompactionWithRollback(
-					"overflow",
-					assistantMessage,
-					allowDefer,
-					{ autoContinue, excludeMediaMethods: excludeMediaForPayloadRejection },
-				);
+				const compactionResult = await this.#host.runRecoveryCompactionWithRollback("overflow", assistantMessage, {
+					autoContinue,
+					excludeMediaMethods: excludeMediaForPayloadRejection,
+				});
 				// A statically usable method (per `hasUsableCompactionMethod`) can still
 				// reclaim nothing at runtime — e.g. `methodOrder: ["shake"]` with no
 				// heavy/droppable content on a plain text history — or `runAutoCompaction`
@@ -3145,7 +3139,7 @@ export class SessionMaintenance {
 					methods: resolveCompactionMethodOrder(incompleteCompactionSettings.methodOrder),
 					attempt: this.#incompleteRecoveryAttempts,
 				});
-				return await this.#host.runRecoveryCompactionWithRollback("incomplete", assistantMessage, allowDefer, {
+				return await this.#host.runRecoveryCompactionWithRollback("incomplete", assistantMessage, {
 					autoContinue,
 					triggerContextTokens: calculateContextTokens(assistantMessage.usage),
 				});
@@ -3242,7 +3236,7 @@ export class SessionMaintenance {
 			// Try promotion first — if a larger model is available, switch instead of compacting
 			const promoted = await this.#tryContextPromotion(assistantMessage);
 			if (!promoted) {
-				return await this.runAutoCompaction("threshold", false, false, allowDefer, {
+				return await this.runAutoCompaction("threshold", false, {
 					autoContinue,
 					triggerContextTokens: postMaintenanceContextTokens,
 					phase: "pre_turn",
@@ -4139,18 +4133,15 @@ export class SessionMaintenance {
 	/**
 	 * Internal: Run auto-compaction with events.
 	 *
-	 * @param allowDefer If true (default), a threshold-driven handoff preference
-	 *   may schedule itself as a deferred post-prompt task and return a
-	 *   deferred-handoff result immediately. The caller MUST avoid separately
-	 *   scheduling `agent.continue()` then; pre-prompt callers pass `false` to
-	 *   complete the handoff before the next agent turn begins.
+	 * Every method, handoff included, runs to completion before this resolves,
+	 * so the result reports the continuation that was actually scheduled — the
+	 * `agent_end` settle derives `willContinue` from it.
+	 *
 	 * @returns whether auto-compaction scheduled a follow-up turn.
 	 */
 	async runAutoCompaction(
 		reason: "overflow" | "threshold" | "idle" | "incomplete",
 		willRetry: boolean,
-		deferred = false,
-		allowDefer = true,
 		options: {
 			autoContinue?: boolean;
 			triggerContextTokens?: number;
@@ -4278,40 +4269,11 @@ export class SessionMaintenance {
 				options.detachPostCommit === true,
 			);
 			if (outcome !== "fallback") return outcome;
-			return await this.runAutoCompaction(reason, willRetry, deferred, allowDefer, {
+			return await this.runAutoCompaction(reason, willRetry, {
 				...options,
 				methodIndex: methodIndex + 1,
 				fallbackFromShake: true,
 			});
-		}
-		// "overflow" and "incomplete" force inline execution because they are recovery
-		// paths the caller wants resolved before scheduling the next turn. "idle" is
-		// triggered by the idle loop and does its own scheduling.
-		if (
-			method === "handoff" &&
-			!armedSpec &&
-			!deferred &&
-			allowDefer &&
-			reason !== "overflow" &&
-			reason !== "incomplete" &&
-			reason !== "idle"
-		) {
-			this.#host.schedulePostPromptTask(
-				async signal => {
-					await Promise.resolve();
-					if (signal.aborted) return;
-					await this.runAutoCompaction(reason, willRetry, true, true, {
-						...options,
-						methodIndex,
-						terminalTextAnswer,
-					});
-				},
-				{ generation },
-			);
-			return {
-				...COMPACTION_CHECK_DEFERRED_HANDOFF,
-				continuationScheduled: shouldAutoContinue,
-			};
 		}
 
 		const action: "context-full" | "handoff" | "snapcompact" | "remote" =
@@ -4626,7 +4588,7 @@ export class SessionMaintenance {
 						},
 						options.detachPostCommit === true,
 					);
-					return await this.runAutoCompaction(reason, willRetry, deferred, allowDefer, {
+					return await this.runAutoCompaction(reason, willRetry, {
 						...options,
 						methodIndex: methodIndex + 1,
 					});
@@ -4763,7 +4725,7 @@ export class SessionMaintenance {
 						},
 						options.detachPostCommit === true,
 					);
-					return await this.runAutoCompaction(reason, willRetry, deferred, allowDefer, {
+					return await this.runAutoCompaction(reason, willRetry, {
 						...options,
 						methodIndex: methodIndex + 1,
 					});
@@ -5037,7 +4999,7 @@ export class SessionMaintenance {
 					},
 					options.detachPostCommit === true,
 				);
-				return await this.runAutoCompaction(reason, willRetry, deferred, allowDefer, {
+				return await this.runAutoCompaction(reason, willRetry, {
 					...options,
 					methodIndex: methodIndex + 1,
 				});

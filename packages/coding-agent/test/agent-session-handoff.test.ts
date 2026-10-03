@@ -982,13 +982,9 @@ describe("AgentSession handoff", () => {
 		]);
 		expect(session.autoCompactionEnabled).toBe(true);
 	});
-	it("completes threshold-triggered auto-handoff while the original prompt is still unwinding", async () => {
-		authStorage.keys.setRuntime("anthropic", "test-key");
-		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
-		if (!model) {
-			throw new Error("Expected built-in anthropic model to exist");
-		}
 
+	/** Rebuild the session so one terminal text turn crosses a 1% threshold with a `handoff` method order. */
+	async function createThresholdHandoffSession(autoContinue: boolean) {
 		await session.dispose();
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 		events = [];
@@ -1068,7 +1064,7 @@ describe("AgentSession handoff", () => {
 			sessionManager,
 			settings: Settings.isolated({
 				"compaction.enabled": true,
-				"compaction.autoContinue": false,
+				"compaction.autoContinue": autoContinue,
 				"compaction.methodOrder": ["handoff", "soft"],
 				"compaction.thresholdPercent": 1,
 				"contextPromotion.enabled": false,
@@ -1083,6 +1079,11 @@ describe("AgentSession handoff", () => {
 		const generateHandoffSpy = vi
 			.spyOn(compactionModule, "generateHandoffFromContext")
 			.mockResolvedValue("## Goal\nContinue from here");
+		return { mock, agentEndWillContinue, generateHandoffSpy };
+	}
+
+	it("completes threshold-triggered auto-handoff while the original prompt is still unwinding", async () => {
+		const { mock, agentEndWillContinue, generateHandoffSpy } = await createThresholdHandoffSession(false);
 		await session.prompt("Trigger threshold handoff");
 
 		expect(mock.calls).toHaveLength(1);
@@ -1093,6 +1094,23 @@ describe("AgentSession handoff", () => {
 		expect(endEvents[0]).toMatchObject({ type: "auto_compaction_end", action: "handoff", aborted: false });
 		expect(endEvents[0]).not.toMatchObject({ errorMessage: expect.any(String) });
 		expect(sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(1);
+	});
+
+	it("yields the run when a threshold auto-handoff after a final answer schedules no continuation", async () => {
+		// Auto-continue is enabled, but a terminal text answer never auto-continues
+		// after compaction. The settle must say so: a non-yielded agent_end here
+		// promises a run that never starts, so RPC hosts wait forever for the
+		// prompt's `prompt_result`.
+		const { mock, agentEndWillContinue, generateHandoffSpy } = await createThresholdHandoffSession(true);
+		await session.prompt("Trigger threshold handoff");
+
+		expect(generateHandoffSpy).toHaveBeenCalledTimes(1);
+		expect(sessionManager.getEntries().filter(entry => entry.type === "compaction")).toHaveLength(1);
+		expect(mock.calls).toHaveLength(1);
+		expect(agentEndWillContinue).toEqual([undefined]);
+		expect(events.filter(event => event.type === "agent_end")).toEqual([
+			expect.objectContaining({ type: "agent_end", isTerminal: true, yielded: true }),
+		]);
 	});
 	it("resets to the base system prompt before generating a handoff", async () => {
 		const model = session.model;

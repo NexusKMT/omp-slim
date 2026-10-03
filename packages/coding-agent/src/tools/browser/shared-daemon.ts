@@ -183,7 +183,7 @@ const reachabilityChecks = new Map<string, Promise<boolean>>();
  * before the stop, so a browser another session replaced meanwhile is never
  * stopped under its name. A daemon that has not become ready is left to the
  * acquire path, which owns that race. Concurrent failed closes share one check.
- * Best-effort: never throws, and returns true only when a stop was requested.
+ * Best-effort: never throws, and returns true only when the broker confirmed the stop.
  */
 export function stopSharedBrowserIfUnreachable(
 	scope: SharedTargetScope,
