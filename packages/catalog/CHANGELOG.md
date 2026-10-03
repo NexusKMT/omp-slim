@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- OpenCode Go's LongCat 2.5 Preview no longer offers unsupported effort levels, and Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
+- OpenCode Go's LongCat 2.5 Preview offers no unsupported effort levels and can turn reasoning off; Space Bunny offers its published low-to-max levels ([#14171](https://github.com/can1357/oh-my-pi/issues/14171)).
 
 ## [18.5.0] - 2026-10-03
 

@@ -78,9 +78,12 @@ provider "opencode-go" {
 			thinking-mode "effort"
 		}
 	}
-	// The gateway publishes a reasoning toggle but no selectable effort tiers.
+	// LongCat exposes a reasoning toggle, not selectable effort tiers.
+	// Off uses the gateway's boolean reasoning switch, never a fake lowest tier.
 	models "longcat-2.5-preview-free" {
 		thinking-efforts
+		supports-reasoning-effort #false
+		reasoning-disable-mode "openrouter-enabled-false"
 	}
 	// Space Bunny publishes low through max, without the generic minimal tier.
 	models "space-bunny-free" {
