@@ -63,6 +63,7 @@
 
 ### Fixed
 
+- Fixed intent tracing stripping a tool's own `i` argument and reordering its schema for tools that declare `i` as a real parameter ([#13762](https://github.com/can1357/oh-my-pi/pull/13762) by [@jchanghong023](https://github.com/jchanghong023)).
 - Fixed auto-compaction with the `remote` method failing on long Codex/OpenAI sessions with "Remote compaction input exceeds the context window" ([#13611](https://github.com/can1357/oh-my-pi/issues/13611))
 - Fixed passive tool-call context being repeated when several calls in one batch returned the same text; identical per-call context is now delivered once, at its first position ([#13633](https://github.com/can1357/oh-my-pi/pull/13633) by [@andrebrait](https://github.com/andrebrait))
 

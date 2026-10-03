@@ -277,6 +277,36 @@ describe("agentLoop with AgentMessage", () => {
 		expect(mock.calls).toHaveLength(2);
 	});
 
+	it("keeps a schema-owned `i` argument for the tool under intent tracing", async () => {
+		// A tool that declares `i` as a real parameter owns the field: intent
+		// tracing must not strip it from the executed arguments.
+		const toolSchema = type({ label: "string", i: "string" });
+		const executed: unknown[] = [];
+		const tool: AgentTool<typeof toolSchema, { label: string; i: string }> = {
+			name: "demo",
+			label: "Demo",
+			description: "Demo tool",
+			parameters: toolSchema,
+			async execute(_toolCallId, params) {
+				executed.push(params);
+				return { content: [{ type: "text", text: "ok" }] };
+			},
+		};
+		const context: AgentContext = { systemPrompt: [""], messages: [], tools: [tool] };
+		const mock = createMockModel({
+			responses: [
+				{ content: [{ type: "toolCall", id: "tool-1", name: "demo", arguments: { label: "x", i: "INDEX" } }] },
+				{ content: ["done"] },
+			],
+		});
+		const config: AgentLoopConfig = { model: mock.model, convertToLlm: identityConverter, intentTracing: true };
+		const stream = agentLoop([createUserMessage("run demo")], context, config, undefined, mock.stream);
+		for await (const _event of stream) {
+			// drain
+		}
+		expect(executed).toEqual([{ label: "x", i: "INDEX" }]);
+	});
+
 	it("dispatches a tool call appended by transformAssistantMessage on a stop turn", async () => {
 		// In-text edit recovery (coding-agent) rewrites a text-only `stop` turn into
 		// a synthetic tool call inside this hook; the loop must scan tool calls
