@@ -6,6 +6,7 @@
 
 - Fixed a 1px pink/cyan fringe on the left and right edges of the "Classify with judge" button in the stats dashboard ([#14126](https://github.com/can1357/oh-my-pi/pull/14126) by [@grepme](https://github.com/grepme)).
 - Fixed `omp stats` request rows for Judge and other role-model calls returning 404 when opened; they now open with their usage details ([#13831](https://github.com/can1357/oh-my-pi/pull/13831) by [@robwilde](https://github.com/robwilde))
+- Fixed small nonzero error rates appearing as 0.0% in `omp stats` and its summary ([#13903](https://github.com/can1357/oh-my-pi/issues/13903)).
 
 ## [18.4.4] - 2026-09-29
 
