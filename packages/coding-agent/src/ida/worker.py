@@ -4,13 +4,16 @@ Request:  {"id": int, "method": str, "params": dict}
 Response: {"id", "ok": true, "result"} | {"id", "ok": false, "error": {"type", "message"}}
 """
 
+import _thread
 import ast
 import io
 import json
 import os
+import queue
 import re
 import signal
 import sys
+import threading
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -658,6 +661,10 @@ def _error(e):
 
 def _send(frame):
     data = json.dumps(frame, ensure_ascii=False, default=str) + "\n"
+    if _WINDOWS:
+        _proto.write(data)
+        _proto.flush()
+        return
     # Defer SIGINT while writing so a late interrupt cannot truncate a frame; it is
     # delivered after unblocking and swallowed by the idle loop.
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
@@ -666,6 +673,37 @@ def _send(frame):
         _proto.flush()
     finally:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+
+
+# Windows cannot deliver SIGINT to one child process (the supervisor's kill terminates it), so
+# the supervisor writes `{"interrupt": <id>}` to stdin instead. A reader thread consumes stdin
+# while a request runs and raises KeyboardInterrupt in the main thread, but only while that
+# request is still running, so a late interrupt never hits the next request.
+_WINDOWS = sys.platform == "win32"
+_requests = queue.Queue()
+_running_lock = threading.Lock()
+_running_id = None
+
+
+def _set_running(req_id):
+    global _running_id
+    with _running_lock:
+        _running_id = req_id
+
+
+def _read_requests():
+    for line in sys.stdin:
+        try:
+            frame = json.loads(line)
+        except ValueError:
+            frame = None
+        if isinstance(frame, dict) and "interrupt" in frame:
+            with _running_lock:
+                if _running_id is not None and _running_id == frame["interrupt"]:
+                    _thread.interrupt_main()
+            continue
+        _requests.put(line)
+    _requests.put("")
 
 
 def _close_and_exit(save):
@@ -706,7 +744,11 @@ def _handle(line):
         handler = _METHODS.get(method)
         if handler is None:
             raise ValueError(f"unknown method: {method}")
-        result = handler(params)
+        _set_running(req_id)
+        try:
+            result = handler(params)
+        finally:
+            _set_running(None)
     except SystemExit:
         raise
     except BaseException as e:
@@ -716,9 +758,11 @@ def _handle(line):
 
 
 def main():
+    if _WINDOWS:
+        threading.Thread(target=_read_requests, name="omp-ida-stdin", daemon=True).start()
     while True:
         try:
-            line = sys.stdin.readline()
+            line = _requests.get() if _WINDOWS else sys.stdin.readline()
             if not line:
                 break
             if line.strip():

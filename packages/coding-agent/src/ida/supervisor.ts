@@ -376,7 +376,13 @@ export class IdaWorker {
 			}
 
 			try {
-				this.#proc.kill("SIGINT");
+				if (process.platform === "win32") {
+					// Windows has no per-process SIGINT (kill terminates); worker.py reads this frame on its stdin thread.
+					this.#proc.stdin.write(`${JSON.stringify({ interrupt: id })}\n`);
+					await this.#proc.stdin.flush();
+				} else {
+					this.#proc.kill("SIGINT");
+				}
 			} catch {
 				// Already gone: the exit handler rejects the pending response.
 			}
