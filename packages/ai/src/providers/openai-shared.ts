@@ -406,7 +406,13 @@ export function applyOpenAIResponsesServiceTierCost(
 	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
 }
 
-/** Reconcile token-price estimates with a gateway's authoritative account charge. */
+/**
+ * Reconcile token-price estimates with a gateway's authoritative account charge.
+ * BYOK turns (`is_byok: true`) price from the provider spend in
+ * `cost_details.upstream_inference_cost` plus whatever credits charge
+ * OpenRouter reports in `cost` (its BYOK fee is plan-dependent and can be $0),
+ * so both are covered.
+ */
 export function applyProviderReportedCost(model: Pick<Model, "provider">, usage: Usage, rawUsage: unknown): void {
 	if (
 		(model.provider !== "openrouter" && model.provider !== "cline-pass") ||
@@ -414,7 +420,23 @@ export function applyProviderReportedCost(model: Pick<Model, "provider">, usage:
 		rawUsage === null
 	)
 		return;
-	const reportedCost = Reflect.get(rawUsage, "cost");
+	let reportedCost = Reflect.get(rawUsage, "cost");
+	// BYOK turns run on the account's own provider key: `cost` carries only the
+	// credits charge OpenRouter bills the turn (its BYOK fee, plan-dependent and
+	// $0 inside the free allowance) while `cost_details.upstream_inference_cost`
+	// carries the provider spend. Both are real charges, so add them (verified
+	// live 2026-10-02: openrouter/openai/gpt-6.1-sol returned `cost: 0,
+	// is_byok: true, cost_details.upstream_inference_cost: 6.6e-05`).
+	if (Reflect.get(rawUsage, "is_byok") === true) {
+		const details = Reflect.get(rawUsage, "cost_details");
+		const upstreamCost =
+			typeof details === "object" && details !== null ? Reflect.get(details, "upstream_inference_cost") : undefined;
+		if (typeof upstreamCost === "number" && Number.isFinite(upstreamCost) && upstreamCost >= 0) {
+			const creditsCharge =
+				typeof reportedCost === "number" && Number.isFinite(reportedCost) && reportedCost >= 0 ? reportedCost : 0;
+			reportedCost = creditsCharge + upstreamCost;
+		}
+	}
 	if (typeof reportedCost !== "number" || !Number.isFinite(reportedCost) || reportedCost < 0) return;
 
 	const estimatedCost = usage.cost.total;

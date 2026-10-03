@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed OpenAI Responses sessions (e.g. OpenRouter + Claude) getting stuck in a `400` retry loop after a tool call whose streamed arguments were invalid JSON but repairable: the next request now replays the call with the arguments that were executed instead of dropping it and ending the input on an orphan tool-result note ([#14155](https://github.com/can1357/oh-my-pi/issues/14155)).
+- Fixed OpenRouter BYOK generations being priced at $0: turns now record the provider spend from `cost_details.upstream_inference_cost` plus any credits charge from `cost`, so bring-your-own-key usage shows up in session and status-line costs ([#14149](https://github.com/can1357/oh-my-pi/pull/14149) by [@Krontx](https://github.com/Krontx)).
 
 ## [18.5.0] - 2026-10-03
 
