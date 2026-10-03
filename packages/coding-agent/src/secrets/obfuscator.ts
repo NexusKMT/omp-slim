@@ -82,15 +82,6 @@ const NO_VALUES: readonly string[] = [];
 /** Distinct placeholder prefixes whose regex verdict is memoized; forged prefixes beyond this are just re-tested. */
 const MAX_PREFIX_REGEX_MEMO = 4096;
 
-/** Completed batches kept for output reuse: the two SDK boundaries plus the advisor's scrub. */
-const MAX_RECENT_BATCHES = 3;
-
-function isSubsetOf(values: ReadonlySet<string>, of: ReadonlySet<string>): boolean {
-	if (values.size > of.size) return false;
-	for (const value of values) if (!of.has(value)) return false;
-	return true;
-}
-
 /** Per-string results reused within one {@link SecretObfuscator.batch}. */
 interface TextScan {
 	/** Registry revision the entry was computed under; stale entries are recomputed. */
@@ -101,30 +92,6 @@ interface TextScan {
 	literalFree: boolean;
 	/** Standalone collection result, i.e. after replace simulation; filled on first use. */
 	collectedValues: readonly string[] | undefined;
-}
-
-interface ObfuscationBatch {
-	scans: Map<string, TextScan>;
-	revisionAtStart: number;
-	/** Dirty strings `obfuscate` / `stripUnsafeFriendlyPlaceholderPrefixes` returned unchanged in this batch. */
-	fixedPoints: Set<string>;
-	stripFixedPoints: Set<string>;
-	/** The single shared collision set used by this batch, or `null` once more than one was used. */
-	shared: ReadonlySet<string> | null | undefined;
-	sharedSize: number;
-	/** Memoized `#reusableBatches` result for `reuseShared` at `reuseSize` and `reuseRevision`. */
-	reuseShared: ReadonlySet<string> | undefined;
-	reuseSize: number;
-	reuseRevision: number;
-	reusable: CompletedObfuscationBatch[];
-}
-
-interface CompletedObfuscationBatch {
-	fixedPoints: Set<string>;
-	stripFixedPoints: Set<string>;
-	/** Copy of the batch's shared collision set. */
-	shared: Set<string>;
-	revision: number;
 }
 
 interface RegexScanMemo {
@@ -155,11 +122,13 @@ function buildLiteralDetector(literals: readonly string[]): RegExp | undefined {
 
 /**
  * Invariant: every piece of state redaction reads either never changes after
- * construction (regex entries, a readonly field of a readonly array) or lives in a collection bound to
- * `#revision` (`TrackedMap`, `TrackedSet`, `SecretValueSet` with a revision),
- * whose writes bump it. Anything reused across calls (batch scans, fixed
- * points, the regex scan memo, sorted literal caches) is keyed by
- * `#revision.value`, so no write path has to remember to invalidate it.
+ * construction (regex entries, a readonly field of a readonly array) or lives
+ * in a collection bound to `#revision` (`TrackedMap`, `TrackedSet`,
+ * `SecretValueSet` with a revision), whose writes bump it. The short-lived
+ * reuse inside one batch or call (per-string scans, the regex scan memo,
+ * sorted literal caches) is keyed by `#revision.value`, so a mint partway
+ * through can never leave a stale result in use. No redaction result is kept
+ * across batches.
  */
 export class SecretObfuscator {
 	/** Registry version; see the class invariant. Declared first: the tracked fields below bind to it. */
@@ -224,11 +193,8 @@ export class SecretObfuscator {
 	#rawProbeDetector: RegExp | undefined;
 	#foldedProbeDetector: RegExp | undefined;
 
-	/** The {@link batch} in progress, if any. */
-	#batch: ObfuscationBatch | undefined;
-
-	/** Recently completed batches (newest first), reusable under {@link #reusableBatches}. */
-	#recentBatches: CompletedObfuscationBatch[] = [];
+	/** Per-string scan results of the {@link batch} in progress, if any; dropped when it ends. */
+	#batchScans: Map<string, TextScan> | undefined;
 
 	/** Placeholder ranges and expanded scan view of the last text `#collectRegexMatches` scanned. */
 	#lastRegexScan: RegexScanMemo | undefined;
@@ -465,21 +431,12 @@ export class SecretObfuscator {
 		}
 		// Every phase below is the identity on clean text, so skip building origin/scan state.
 		if (clean) return text;
-		// Redaction is deterministic in (text, registry, shared values): text a
-		// recent batch saw come back unchanged under the same registry revision and
-		// an equal shared set comes back unchanged again.
-		if (this.#reusableBatches(sharedValues).some(last => last.fixedPoints.has(text))) {
-			this.#recordFixedPoint(text, sharedValues, false);
-			return text;
-		}
 		const previousCurrent = this.#currentRegexSecretValues;
 		const previousShared = this.#sharedRegexSecretValues;
 		this.#currentRegexSecretValues = new SecretValueSet(currentValues);
 		this.#sharedRegexSecretValues = sharedValues;
 		try {
-			const result = this.#obfuscateDirtyText(text);
-			if (result === text) this.#recordFixedPoint(text, sharedValues, false);
-			return result;
+			return this.#obfuscateDirtyText(text);
 		} finally {
 			this.#currentRegexSecretValues = previousCurrent;
 			this.#sharedRegexSecretValues = previousShared;
@@ -488,87 +445,17 @@ export class SecretObfuscator {
 
 	/**
 	 * Run `run` as one outbound batch (collect, then redact, over one message
-	 * list). Each string is scanned once for the whole batch, and dirty strings a
-	 * recent batch already found to be fixed points are not re-redacted (see
-	 * {@link #reusableBatches}). Nested calls join the outer batch.
+	 * list) so each string is scanned once for both. Nothing outlives the batch.
+	 * Nested calls join the outer batch.
 	 */
 	batch<T>(run: () => T): T {
-		if (this.#batch !== undefined) return run();
-		const batch: ObfuscationBatch = {
-			scans: new Map(),
-			revisionAtStart: this.#revision.value,
-			fixedPoints: new Set(),
-			stripFixedPoints: new Set(),
-			shared: undefined,
-			sharedSize: 0,
-			reuseShared: undefined,
-			reuseSize: 0,
-			reuseRevision: -1,
-			reusable: [],
-		};
-		this.#batch = batch;
-		let completed = false;
+		if (this.#batchScans !== undefined) return run();
+		this.#batchScans = new Map();
 		try {
-			const result = run();
-			completed = true;
-			return result;
+			return run();
 		} finally {
-			this.#batch = undefined;
-			const revision = this.#revision.value;
-			// Fixed points are only facts about the registry revision they were observed under.
-			const retained = this.#recentBatches.filter(last => last.revision === revision);
-			const observed = batch.fixedPoints.size + batch.stripFixedPoints.size > 0;
-			if (
-				completed &&
-				batch.revisionAtStart === revision &&
-				batch.shared !== null &&
-				(batch.shared === undefined || batch.shared.size === batch.sharedSize) &&
-				observed
-			) {
-				retained.unshift({
-					fixedPoints: batch.fixedPoints,
-					stripFixedPoints: batch.stripFixedPoints,
-					shared: new Set(batch.shared ?? []),
-					revision,
-				});
-			}
-			this.#recentBatches = retained.slice(0, MAX_RECENT_BATCHES);
+			this.#batchScans = undefined;
 		}
-	}
-
-	/**
-	 * Recent batches whose fixed points hold for this call: the same registry
-	 * revision and a shared set with exactly the same values, so the redaction
-	 * of any text is the same computation it was then.
-	 */
-	#reusableBatches(shared: ReadonlySet<string>): readonly CompletedObfuscationBatch[] {
-		const batch = this.#batch;
-		if (batch === undefined || this.#recentBatches.length === 0) return [];
-		const revision = this.#revision.value;
-		if (batch.reuseShared !== shared || batch.reuseSize !== shared.size || batch.reuseRevision !== revision) {
-			batch.reuseShared = shared;
-			batch.reuseSize = shared.size;
-			batch.reuseRevision = revision;
-			batch.reusable = this.#recentBatches.filter(
-				last => last.revision === revision && last.shared.size === shared.size && isSubsetOf(shared, last.shared),
-			);
-		}
-		return batch.reusable;
-	}
-
-	#recordFixedPoint(text: string, shared: ReadonlySet<string>, stripped: boolean): void {
-		const batch = this.#batch;
-		if (batch === undefined) return;
-		// Fixed points hold for one shared-set content; a second set, or the same
-		// set growing mid-batch, leaves nothing safe to record.
-		if (batch.shared === undefined) {
-			batch.shared = shared;
-			batch.sharedSize = shared.size;
-		} else if (batch.shared !== shared || batch.sharedSize !== shared.size) {
-			batch.shared = null;
-		}
-		if (stripped) batch.stripFixedPoints.add(text);
-		else batch.fixedPoints.add(text);
 	}
 
 	/**
@@ -1221,7 +1108,7 @@ export class SecretObfuscator {
 	 * and redaction of the same string within a {@link batch}.
 	 */
 	#scanText(text: string): TextScan {
-		const scans = this.#batch?.scans;
+		const scans = this.#batchScans;
 		const cached = scans?.get(text);
 		if (cached !== undefined && cached.revision === this.#revision.value) return cached;
 		const rawValues = this.#collectRegexSecretValues(text);
@@ -1247,7 +1134,7 @@ export class SecretObfuscator {
 			return { values: EMPTY_SECRET_VALUES, literalFree: true };
 		const values = new Set(scan.initialValues);
 		const reusable =
-			this.#batch !== undefined &&
+			this.#batchScans !== undefined &&
 			this.#currentRegexSecretValues.size === 0 &&
 			this.#sharedRegexSecretValues.size === 0;
 		if (reusable && scan.collectedValues !== undefined && scan.revision === this.#revision.value) {
@@ -1359,18 +1246,12 @@ export class SecretObfuscator {
 
 	stripUnsafeFriendlyPlaceholderPrefixes(text: string, sharedRegexSecretValues: ReadonlySet<string>): string {
 		if (!text.includes("$$")) return text;
-		if (this.#reusableBatches(sharedRegexSecretValues).some(last => last.stripFixedPoints.has(text))) {
-			this.#recordFixedPoint(text, sharedRegexSecretValues, true);
-			return text;
-		}
 		const previousCurrent = this.#currentRegexSecretValues;
 		const previousShared = this.#sharedRegexSecretValues;
 		this.#currentRegexSecretValues = new SecretValueSet();
 		this.#sharedRegexSecretValues = sharedRegexSecretValues;
 		try {
-			const result = this.#stripUnsafeFriendlyPrefixes(text, "I".repeat(text.length)).text;
-			if (result === text) this.#recordFixedPoint(text, sharedRegexSecretValues, true);
-			return result;
+			return this.#stripUnsafeFriendlyPrefixes(text, "I".repeat(text.length)).text;
 		} finally {
 			this.#currentRegexSecretValues = previousCurrent;
 			this.#sharedRegexSecretValues = previousShared;

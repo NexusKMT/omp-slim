@@ -1,67 +1,30 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "@oh-my-pi/pi-ai";
 import { obfuscateMessages } from "@oh-my-pi/pi-coding-agent/secrets/message-transform";
-import { type SecretEntry, SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
+import { SecretObfuscator } from "@oh-my-pi/pi-coding-agent/secrets/obfuscator";
 import {
 	SecretValueSet,
 	sanitizedLabelCollidesWithSecret,
 	sanitizeForCollisionCheck,
 } from "@oh-my-pi/pi-coding-agent/secrets/placeholder";
 
-// "TOKABC123" is both OTHERSECRET's friendly label and the normalized form of
-// `tok_abc123`, which the regex protects: once that value is known, the label
-// would expose it and must be stripped from every placeholder carrying it.
-const COLLIDING_ENTRIES: SecretEntry[] = [
-	{ type: "plain", content: "OTHERSECRET", friendlyName: "TOKABC123" },
-	{ type: "regex", content: "tok_[a-z0-9]+" },
-];
-const KEY = "batch-reuse-test-key";
+describe("SecretObfuscator batch scans", () => {
+	it("rescans a string after a mint earlier in the same batch resolves the placeholder key", () => {
+		// Collection scans both messages before the key exists, so the second
+		// one is literal-free then. Redacting the first mints a placeholder,
+		// which resolves the key and registers it as a literal; the second
+		// message must be rescanned, not reported clean from the stale scan.
+		const key = "lazy-placeholder-key-0123456789";
+		const obfuscator = new SecretObfuscator([{ type: "regex", content: "tok_[a-z0-9]+" }], () => key);
+		const messages: Message[] = [
+			{ role: "user", content: "use tok_abc123 here", timestamp: 1 },
+			{ role: "user", content: `the key is ${key}`, timestamp: 2 },
+		];
 
-function userText(messages: Message[]): string {
-	const content = messages[0]?.content;
-	if (typeof content !== "string") throw new Error("expected string user content");
-	return content;
-}
+		const output = JSON.stringify(obfuscateMessages(obfuscator, messages));
 
-describe("SecretObfuscator batch reuse", () => {
-	it("re-redacts a reused fixed point once a later mint makes its friendly prefix unsafe", () => {
-		const obfuscator = new SecretObfuscator(COLLIDING_ENTRIES, KEY);
-		const history = obfuscateMessages(obfuscator, [{ role: "user", content: "use OTHERSECRET now", timestamp: 1 }]);
-		expect(userText(history)).toMatch(/^use \$\$TOKABC123_[A-Z0-9]+:U\$\$ now$/);
-
-		// The redacted history comes back unchanged, so later batches may reuse it.
-		expect(userText(obfuscateMessages(obfuscator, history))).toBe(userText(history));
-		expect(userText(obfuscateMessages(obfuscator, history))).toBe(userText(history));
-
-		// Minting tok_abc123 elsewhere changes the registry, so the reused result is stale.
-		expect(obfuscator.obfuscate("tok_abc123")).not.toContain("tok_abc123");
-
-		const after = userText(obfuscateMessages(obfuscator, history));
-		expect(after).not.toContain("TOKABC123_");
-		expect(after).toMatch(/^use \$\$[A-Z0-9]+:U\$\$ now$/);
-		expect(obfuscator.deobfuscate(after)).toBe("use OTHERSECRET now");
-	});
-
-	it("does not reuse fixed points across batches whose shared collision values differ", () => {
-		const historical = "see $$TOKABC123_OLDHASH:L$$ here";
-		const colliding = new SecretValueSet(["tok_abc123"]);
-		const expected = new SecretObfuscator(COLLIDING_ENTRIES, KEY).obfuscate(historical, colliding);
-		expect(expected).toBe("see $$OLDHASH:L$$ here");
-
-		const obfuscator = new SecretObfuscator(COLLIDING_ENTRIES, KEY);
-		for (let i = 0; i < 2; i++) {
-			expect(obfuscator.batch(() => obfuscator.obfuscate(historical, new SecretValueSet()))).toBe(historical);
-		}
-		expect(obfuscator.batch(() => obfuscator.obfuscate(historical, colliding))).toBe(expected);
-		for (let i = 0; i < 2; i++) {
-			const empty = new SecretValueSet();
-			expect(obfuscator.batch(() => obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(historical, empty))).toBe(
-				historical,
-			);
-		}
-		expect(obfuscator.batch(() => obfuscator.stripUnsafeFriendlyPlaceholderPrefixes(historical, colliding))).toBe(
-			expected,
-		);
+		expect(output).not.toContain("tok_abc123");
+		expect(output).not.toContain(key);
 	});
 });
 
