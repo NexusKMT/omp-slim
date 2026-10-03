@@ -135,6 +135,7 @@ describe.skipIf(!pythonPath)("Python runner quoted-source transformation", () =>
 			"if True:",
 			"    if True:",
 			"        %pwd",
+			"        !echo indented-shell",
 			'    source = """%pwd',
 			"!still-literal",
 			'"""',
@@ -152,6 +153,7 @@ describe.skipIf(!pythonPath)("Python runner quoted-source transformation", () =>
 			.join("");
 		expect(output).toContain("quoted shell");
 		expect(output).toContain("continued-shell");
+		expect(output).toContain("indented-shell");
 		expect(output).toContain("cell-magic-active");
 	});
 
@@ -172,7 +174,9 @@ describe.skipIf(!pythonPath)("Python runner quoted-source transformation", () =>
 	it("reports unterminated quoted source without executing its apparent shell commands", async () => {
 		const frames = await executeCell('source = """\n!echo must-not-run\n');
 		expect(frames.find(frame => frame.type === "done")?.status).toBe("error");
-		expect(frames.some(frame => frame.type === "error" && frame.evalue?.includes("unterminated"))).toBe(true);
+		// Python < 3.10 reports "EOF while scanning triple-quoted string literal".
+		const unterminated = /unterminated|EOF while scanning/;
+		expect(frames.some(frame => frame.type === "error" && unterminated.test(frame.evalue ?? ""))).toBe(true);
 		expect(frames.filter(frame => frame.type === "stdout")).toEqual([]);
 	});
 });

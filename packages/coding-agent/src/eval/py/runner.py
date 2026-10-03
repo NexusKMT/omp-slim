@@ -952,7 +952,9 @@ def _magic_line_indices(lines: list[str]) -> set[int]:
                 if string_depth or item.type in (
                     tokenize.NL, tokenize.NEWLINE, tokenize.INDENT,
                     tokenize.DEDENT, tokenize.ENDMARKER, tokenize.COMMENT,
-                ):
+                ) or (item.type == tokenize.ERRORTOKEN and item.string.isspace()):
+                    # Python < 3.12 emits indentation before `!` as one
+                    # whitespace ERRORTOKEN per column.
                     continue
                 row = offset + item.start[0] - 2
                 if row < offset or row >= len(lines) or row == last_row:
