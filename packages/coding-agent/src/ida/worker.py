@@ -14,6 +14,7 @@ import re
 import signal
 import sys
 import threading
+import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -677,21 +678,20 @@ def _send(frame):
 
 # Windows cannot deliver SIGINT to one child process (the supervisor's kill terminates it), so
 # the supervisor writes `{"interrupt": <id>}` to stdin instead. A reader thread consumes stdin
-# while a request runs and raises KeyboardInterrupt in the main thread, but only while that
-# request is still running, so a late interrupt never hits the next request.
+# and schedules KeyboardInterrupt in the main thread (at most once) while that request runs.
+# Scheduling is asynchronous, so `_run` absorbs a pending interrupt before the response is
+# written: it can never truncate a frame or hit the next request.
 _WINDOWS = sys.platform == "win32"
+# How long `_run` spins for a scheduled interrupt the request's own code already swallowed.
+_INTERRUPT_ABSORB_S = 0.5
 _requests = queue.Queue()
 _running_lock = threading.Lock()
 _running_id = None
-
-
-def _set_running(req_id):
-    global _running_id
-    with _running_lock:
-        _running_id = req_id
+_interrupt_pending = False
 
 
 def _read_requests():
+    global _interrupt_pending
     for line in sys.stdin:
         try:
             frame = json.loads(line)
@@ -699,11 +699,49 @@ def _read_requests():
             frame = None
         if isinstance(frame, dict) and "interrupt" in frame:
             with _running_lock:
-                if _running_id is not None and _running_id == frame["interrupt"]:
+                if not _interrupt_pending and _running_id is not None and _running_id == frame["interrupt"]:
+                    _interrupt_pending = True
                     _thread.interrupt_main()
             continue
         _requests.put(line)
     _requests.put("")
+
+
+def _run(req_id, handler, params):
+    """Run `handler` as request `req_id`; returns (ok, result or exception) with no interrupt left pending.
+
+    A KeyboardInterrupt can surface at any bytecode boundary from the moment `req_id` is
+    running until the pending interrupt is absorbed, so every step sits inside one retry loop.
+    """
+    global _running_id, _interrupt_pending
+    ok, value, started, finished, delivered = False, None, False, False, False
+    while True:
+        try:
+            if not started:
+                started = True
+                with _running_lock:
+                    _running_id = req_id
+            if not finished:
+                finished = True
+                try:
+                    value, ok = handler(params), True
+                except (KeyboardInterrupt, SystemExit):
+                    raise
+                except Exception as e:
+                    value = e
+            with _running_lock:
+                _running_id = None
+                pending = _interrupt_pending and not delivered
+                _interrupt_pending = False
+            # A scheduled interrupt fires at the next bytecode boundary; let it fire here.
+            deadline = time.monotonic() + _INTERRUPT_ABSORB_S if pending else 0
+            while time.monotonic() < deadline:
+                pass
+            return ok, value
+        except KeyboardInterrupt as e:
+            delivered = True
+            if not ok:
+                value = e
 
 
 def _close_and_exit(save):
@@ -744,17 +782,16 @@ def _handle(line):
         handler = _METHODS.get(method)
         if handler is None:
             raise ValueError(f"unknown method: {method}")
-        _set_running(req_id)
-        try:
-            result = handler(params)
-        finally:
-            _set_running(None)
     except SystemExit:
         raise
     except BaseException as e:
         _send({"id": req_id, "ok": False, "error": _error(e)})
         return
-    _send({"id": req_id, "ok": True, "result": result, "dirty": _DIRTY})
+    ok, result = _run(req_id, handler, params)
+    if ok:
+        _send({"id": req_id, "ok": True, "result": result, "dirty": _DIRTY})
+    else:
+        _send({"id": req_id, "ok": False, "error": _error(result)})
 
 
 def main():
