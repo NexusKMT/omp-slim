@@ -624,6 +624,7 @@ type PromptDispatchOutcome = { sessionClaimed: boolean };
 
 type ActiveAgentContinue = {
 	schedulerToken: number;
+	turnEnded: boolean;
 	source: string;
 	coalescedSources: Set<string>;
 	promise: Promise<AgentContinueOutcome>;
@@ -3482,6 +3483,9 @@ export class AgentSession implements SettingsScope {
 
 	#processAgentEvent = async (event: AgentEvent): Promise<void> => {
 		const eventPromptGeneration = this.#promptGeneration;
+		if (event.type === "agent_end" && this.#activeAgentContinue) {
+			this.#activeAgentContinue.turnEnded = true;
+		}
 		// A fresh run supersedes the previously settled (and pruned) refusal
 		// turn: state-based lookups take over again.
 		if (event.type === "agent_start") {
@@ -4384,17 +4388,36 @@ export class AgentSession implements SettingsScope {
 					return;
 				}
 
-				const active = this.#activeAgentContinue;
-				if (active) {
-					active.coalescedSources.add(options.source);
-					logger.debug("agent.continue coalesced after scheduling", {
-						source: options.source,
-						schedulerToken: request.schedulerToken,
-						activeSource: active.source,
-						activeSchedulerToken: active.schedulerToken,
-					});
-					this.#handleAgentContinueOutcome(await active.promise, request);
-					return;
+				for (;;) {
+					const active = this.#activeAgentContinue;
+					if (!active) break;
+					if (!active.turnEnded) {
+						active.coalescedSources.add(options.source);
+						logger.debug("agent.continue coalesced after scheduling", {
+							source: options.source,
+							schedulerToken: request.schedulerToken,
+							activeSource: active.source,
+							activeSchedulerToken: active.schedulerToken,
+						});
+						this.#handleAgentContinueOutcome(await active.promise, request);
+						return;
+					}
+
+					// A request made by the active turn's agent_end is its next step,
+					// not a duplicate of that turn. Wait until it settles before starting.
+					await active.promise;
+					if (signal.aborted || this.#isDisposed || this.isCompacting || this.isGeneratingHandoff) {
+						this.#skipAgentContinue("session-unavailable", request);
+						return;
+					}
+					if (options.generation !== undefined && this.#promptGeneration !== options.generation) {
+						this.#skipAgentContinue("stale-generation", request);
+						return;
+					}
+					if (options.shouldContinue && !options.shouldContinue()) {
+						this.#skipAgentContinue("should-continue-false", request);
+						return;
+					}
 				}
 
 				this.#beginInFlight();
@@ -4402,6 +4425,7 @@ export class AgentSession implements SettingsScope {
 				const promise = this.#runAgentContinue(signal, request, coalescedSources);
 				const attempt: ActiveAgentContinue = {
 					schedulerToken: request.schedulerToken,
+					turnEnded: false,
 					source: options.source,
 					coalescedSources,
 					promise,
