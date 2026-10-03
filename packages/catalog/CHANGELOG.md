@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Added full reasoning effort ladders to ClinePass DeepSeek V4.1 Flash Free and Muse Spark 1.3 Contributor Free models so thinking levels can be configured ([#14132](https://github.com/can1357/oh-my-pi/pull/14132) by [@hanumanji198586](https://github.com/hanumanji198586)).
+
 ## [18.5.0] - 2026-10-03
 
 ### Added
