@@ -9,6 +9,7 @@
 ### Changed
 
 - Picking a model for a role in `/models` now puts the cursor on the model list, so ↑/↓ choose a model and Enter assigns it right away instead of moving through the sidebar and dropping the role selection; ← still reaches the providers ([#14210](https://github.com/can1357/oh-my-pi/pull/14210) by [@H4vC](https://github.com/H4vC))
+- Secret redaction no longer slows down as a conversation grows: each request now takes time proportional to the history, not to its square, and unchanged history is not re-redacted (a 3 MB history went from about 2.7 s to under 30 ms per request), with identical redacted output ([#14213](https://github.com/can1357/oh-my-pi/pull/14213) by [@H4vC](https://github.com/H4vC))
 
 ## [18.5.1] - 2026-10-03
 

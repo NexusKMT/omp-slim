@@ -60,6 +60,106 @@ export function sanitizedLabelCollidesWithSecret(sanitizedLabel: string, sanitiz
 }
 
 /**
+ * Raw secret values plus an index of their collision-normalized forms, so
+ * {@link SecretValueSet.collidesWithLabel} answers "does any member leak through
+ * this label?" without re-normalizing and scanning every member per label.
+ * Callers that pass shared collision values to the obfuscator should build
+ * them with this class; a plain `Set` still works but is checked linearly.
+ */
+export class SecretValueSet extends Set<string> {
+	/** Normalized value → number of raw members normalizing to it. */
+	#normalized = new Map<string, number>();
+	/** Normalized length → number of distinct normalized values with that length. */
+	#lengths = new Map<number, number>();
+	/** First MAX_FRIENDLY_NAME_LEN chars → normalized values at least that long (display-cap prefix leaks). */
+	#heads = new Map<string, Set<string>>();
+
+	constructor(values?: Iterable<string>) {
+		// Populate after super(): `Set`'s iterable constructor would call `add`
+		// before this subclass's private fields exist.
+		super();
+		if (values) for (const value of values) this.add(value);
+	}
+
+	override add(value: string): this {
+		if (super.has(value)) return this;
+		super.add(value);
+		const normalized = sanitizeForCollisionCheck(value);
+		if (normalized.length === 0) return this;
+		const count = this.#normalized.get(normalized) ?? 0;
+		this.#normalized.set(normalized, count + 1);
+		if (count > 0) return this;
+		this.#lengths.set(normalized.length, (this.#lengths.get(normalized.length) ?? 0) + 1);
+		if (normalized.length >= MAX_FRIENDLY_NAME_LEN) {
+			const head = normalized.slice(0, MAX_FRIENDLY_NAME_LEN);
+			let bucket = this.#heads.get(head);
+			if (bucket === undefined) {
+				bucket = new Set();
+				this.#heads.set(head, bucket);
+			}
+			bucket.add(normalized);
+		}
+		return this;
+	}
+
+	override delete(value: string): boolean {
+		if (!super.delete(value)) return false;
+		const normalized = sanitizeForCollisionCheck(value);
+		if (normalized.length === 0) return true;
+		const count = this.#normalized.get(normalized)!;
+		if (count > 1) {
+			this.#normalized.set(normalized, count - 1);
+			return true;
+		}
+		this.#normalized.delete(normalized);
+		const lengthCount = this.#lengths.get(normalized.length)!;
+		if (lengthCount > 1) this.#lengths.set(normalized.length, lengthCount - 1);
+		else this.#lengths.delete(normalized.length);
+		if (normalized.length >= MAX_FRIENDLY_NAME_LEN) {
+			const head = normalized.slice(0, MAX_FRIENDLY_NAME_LEN);
+			const bucket = this.#heads.get(head)!;
+			bucket.delete(normalized);
+			if (bucket.size === 0) this.#heads.delete(head);
+		}
+		return true;
+	}
+
+	override clear(): void {
+		super.clear();
+		this.#normalized.clear();
+		this.#lengths.clear();
+		this.#heads.clear();
+	}
+
+	/** Same answer as `sanitizedLabelCollidesWithSecret(label, sanitizeForCollisionCheck(v))` for any member `v`. */
+	collidesWithLabel(sanitizedLabel: string): boolean {
+		if (this.#normalized.size === 0) return false;
+		const labelLength = sanitizedLabel.length;
+		for (const length of this.#lengths.keys()) {
+			for (let start = 0; start + length <= labelLength; start++) {
+				if (this.#normalized.has(sanitizedLabel.slice(start, start + length))) return true;
+			}
+		}
+		if (labelLength < MAX_FRIENDLY_NAME_LEN) return false;
+		const bucket = this.#heads.get(sanitizedLabel.slice(0, MAX_FRIENDLY_NAME_LEN));
+		if (bucket === undefined) return false;
+		for (const normalized of bucket) {
+			if (normalized.startsWith(sanitizedLabel)) return true;
+		}
+		return false;
+	}
+}
+
+/** Whether any value in `values` normalizes to a secret `sanitizedLabel` would expose. */
+export function labelCollidesWithAnySecret(sanitizedLabel: string, values: ReadonlySet<string>): boolean {
+	if (values instanceof SecretValueSet) return values.collidesWithLabel(sanitizedLabel);
+	for (const value of values) {
+		if (sanitizedLabelCollidesWithSecret(sanitizedLabel, sanitizeForCollisionCheck(value))) return true;
+	}
+	return false;
+}
+
+/**
  * Whether an entry needs the persisted placeholder key: either because it can
  * produce a reversible (keyed) obfuscate-mode placeholder, or because a default
  * (no custom `replacement`) replace-mode regex can reach
