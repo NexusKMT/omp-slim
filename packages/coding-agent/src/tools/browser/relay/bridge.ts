@@ -1322,6 +1322,7 @@ export class RelayBridge {
 		// prevents a replacement attach racing either operation.
 		while (tab.detaching) await tab.detaching;
 		if (tab.discarded) return false;
+		if (tab.attached) return true;
 		if (!this.#eligible(tab)) return false;
 		const inst = this.#instances.get(tab.instanceId);
 		if (!inst?.socket) return false;

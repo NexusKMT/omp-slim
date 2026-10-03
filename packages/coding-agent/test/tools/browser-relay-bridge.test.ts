@@ -611,6 +611,28 @@ describe("RelayBridge attachment release", () => {
 		expect(cdp.sessionFor(reattachId)).toBeDefined();
 	});
 
+	it("reuses an existing debugger attachment for a second connection", async () => {
+		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const registry = new FakeCdpSocket();
+		await attachPage(bridge, ext, registry, bridge.cdpConnected(registry), 1);
+		const worker = new FakeCdpSocket();
+		const workerConn = bridge.cdpConnected(worker);
+		const attachId = ++msgSeq;
+		bridge.cdpMessage(
+			workerConn,
+			JSON.stringify({ id: attachId, method: "Target.attachToTarget", params: { targetId: `PAGE${ANON}.1` } }),
+		);
+		await flush();
+		// Chrome rejects debugger.attach on an already attached tab; the bridge must not ask again.
+		nack(bridge, ext, "attach", "Another debugger is already attached to the tab with id: 1.");
+		await flush();
+		expect(ext.rpcs("attach")).toHaveLength(1);
+		expect(worker.sessionFor(attachId)).toBeDefined();
+		expect(bridge.listTargets().map(target => target.id)).toEqual([`PAGE${ANON}.1`]);
+	});
+
 	it("keeps the attachment while another connection still holds a session on the tab", async () => {
 		const bridge = new RelayBridge({ group: { title: "omp", color: "cyan" } });
 		const ext = new FakeExtSocket();
