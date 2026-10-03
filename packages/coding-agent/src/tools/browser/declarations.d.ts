@@ -1460,7 +1460,7 @@ interface BrowserFrame {
 	fill(selector: string, value: string): Promise<void>;
 	/** Type text into a matching element inside this frame. */
 	type(selector: string, text: string): Promise<void>;
-	/** Press a key, optionally after focusing a matching element. */
+	/** Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Control+a`), optionally after focusing a matching element. */
 	press(key: string, options?: BrowserPressOptions): Promise<void>;
 	/** Return a matching element's text content. */
 	text(selector: string): Promise<string>;
@@ -1502,7 +1502,7 @@ interface BrowserElement {
 	type(text: string): Promise<void>;
 	/** Replace this element's value. */
 	fill(value: string): Promise<void>;
-	/** Press a keyboard key on this element. */
+	/** Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Control+a`) on this element. */
 	press(key: string): Promise<void>;
 	/** Hover this element. */
 	hover(): Promise<void>;

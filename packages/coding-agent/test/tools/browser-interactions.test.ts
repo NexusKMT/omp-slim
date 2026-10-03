@@ -169,6 +169,9 @@ return { during, after };`,
 					name: COMBO_TAB_NAME,
 					code: `await tab.press("${SHORTCUT}+a", { selector: "#area" });
 const page = await tab.evaluate(() => { const t = document.querySelector("#area"); return [t.selectionStart, t.selectionEnd]; });
+await tab.evaluate(() => document.querySelector("#area").setSelectionRange(0, 0));
+await tab.press("${SHORTCUT}Left+KeyA", { selector: "#area" });
+const spelled = await tab.evaluate(() => { const t = document.querySelector("#area"); return [t.selectionStart, t.selectionEnd]; });
 const field = await tab.waitFor("#field");
 await field.type("abc");
 await field.press("Shift+ArrowLeft");
@@ -178,12 +181,18 @@ await field.type("x");
 const inner = await tab.frame("#inner");
 await inner.press("${SHORTCUT}+a", { selector: "#deep" });
 const frame = await inner.evaluate(() => { const t = document.querySelector("#deep"); return [t.selectionStart, t.selectionEnd]; });
-return { page, shifted, replaced: await tab.value("#field"), frame };`,
+return { page, spelled, shifted, replaced: await tab.value("#field"), frame };`,
 					timeout: 20,
 				},
 				context,
 			);
-			expect(valueFrom<unknown>(result)).toEqual({ page: [0, 11], shifted: [2, 3], replaced: "x", frame: [0, 11] });
+			expect(valueFrom<unknown>(result)).toEqual({
+				page: [0, 11],
+				spelled: [0, 11],
+				shifted: [2, 3],
+				replaced: "x",
+				frame: [0, 11],
+			});
 		} finally {
 			await prelude.invoke({ action: "close", name: COMBO_TAB_NAME, kill: true }, context).catch(() => undefined);
 		}
