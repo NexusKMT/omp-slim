@@ -29,7 +29,7 @@ import {
 	ModelVendorId,
 } from "../src/discovery/cursor-proto";
 import { create, fromBinary, toBinary } from "../src/discovery/protobuf";
-import { collapseBuiltVariants, resolveVariantSelector } from "../src/compat/collapse";
+import { collapseBuiltVariants, getVariantAliasSources, resolveVariantSelector } from "../src/compat/collapse";
 import { resolveProviderModels } from "../src/model-manager";
 import { cursorModelManagerOptions } from "../src/provider-models/special";
 import { getModelPricingStatus } from "../src/models";
@@ -1181,7 +1181,7 @@ describe("cursor rich discovery review regressions", () => {
 		expect(await discoverIds(503)).toEqual(expected);
 	});
 
-	it("resolves the retired unprefixed rich Grok lane ids to the stable family ids (#14164)", () => {
+	it("migrates selectors and overrides keyed by the retired unprefixed rich Grok lane ids (#14164)", () => {
 		for (const [retired, stable] of [
 			["grok-4.5", "cursor-grok-4.5"],
 			["grok-4.5-fast", "cursor-grok-4.5-fast"],
@@ -1189,8 +1189,11 @@ describe("cursor rich discovery review regressions", () => {
 			["grok-4.6-fast", "cursor-grok-4.6-fast"],
 		] as const) {
 			expect(resolveVariantSelector("cursor", retired)).toBe(stable);
+			// models.yml `modelOverrides` re-key through the reverse index.
+			expect(getVariantAliasSources("cursor", stable)).toContain(retired);
 		}
 		// Grok 4.7 lanes were always unprefixed; they must not be re-keyed.
 		expect(resolveVariantSelector("cursor", "grok-4.7")).toBeUndefined();
+		expect(getVariantAliasSources("cursor", "cursor-grok-4.7")).not.toContain("grok-4.7");
 	});
 });

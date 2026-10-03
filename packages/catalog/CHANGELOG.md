@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Cursor Grok 4.5/4.6 model ids flipping between `cursor-grok-4.6` and `grok-4.6` across runs, which made fallback chains and role settings intermittently reference an unknown model; saved `cursor/grok-4.5`/`cursor/grok-4.6` (and `-fast`) selectors now resolve to the stable ids ([#14164](https://github.com/can1357/oh-my-pi/issues/14164))
+- Fixed Cursor Grok 4.5/4.6 model ids flipping between `cursor-grok-4.6` and `grok-4.6` across runs, which made fallback chains and role settings intermittently reference an unknown model; saved `cursor/grok-4.5`/`cursor/grok-4.6` (and `-fast`) selectors and `modelOverrides` entries now apply to the stable ids ([#14164](https://github.com/can1357/oh-my-pi/issues/14164))
 
 ## [18.5.0] - 2026-10-03
 
