@@ -672,7 +672,7 @@ describe("ModelHub", () => {
 			expect(footerLine(bareHub.render(220))).not.toContain("Preset name:");
 		});
 
-		test("ctrl+←/→ switches between saved model presets from the Roles view", () => {
+		test("ctrl+←/→ and p/P switch between saved model presets from the Roles view", () => {
 			const a = makeModel("test", "model-a");
 			const b = makeModel("test", "model-b");
 			const c = makeModel("test", "model-c");
@@ -680,11 +680,10 @@ describe("ModelHub", () => {
 			cfgModelPresets.setEntry(settings, "alpha", { modelRoles: { default: "test/model-a" } });
 			cfgModelPresets.setEntry(settings, "beta", { modelRoles: { default: "test/model-b" } });
 			cfgModelPresets.setEntry(settings, "gamma", { modelRoles: { default: "test/model-c" } });
-			// Mirror the controller: applying a preset writes its roles; "beta" is refused.
+			// Mirror the controller: applying a preset writes its roles; "beta" is refused and writes nothing.
 			const onSwitchPreset = vi.fn((name: string) => {
-				if (name === "beta") return false;
+				if (name === "beta") return;
 				settings.setModelRole("default", name === "alpha" ? "test/model-a" : "test/model-c");
-				return true;
 			});
 			const { hub } = createHub({ models: [a, b, c], scoped: true, settings, callbacks: { onSwitchPreset } });
 
@@ -707,10 +706,18 @@ describe("ModelHub", () => {
 			hub.handleInput(CTRL_LEFT); // wraps back to the last preset
 			expect(onSwitchPreset).toHaveBeenLastCalledWith("gamma");
 
+			// The letter twins (macOS reserves ctrl+←/→) work on the role rows.
+			hub.handleInput("\n"); // dive into the rows
+			hub.handleInput("p"); // gamma → alpha
+			expect(onSwitchPreset).toHaveBeenLastCalledWith("alpha");
+			hub.handleInput("P"); // alpha → gamma
+			expect(onSwitchPreset).toHaveBeenLastCalledWith("gamma");
+
 			// Outside the Roles view the keys never switch presets.
-			hub.handleInput(DOWN);
+			hub.handleInput(LEFT); // back to the sidebar
+			hub.handleInput(DOWN); // Roles → All models
 			hub.handleInput(CTRL_RIGHT);
-			expect(onSwitchPreset).toHaveBeenCalledTimes(4);
+			expect(onSwitchPreset).toHaveBeenCalledTimes(6);
 		});
 
 		test("picking a role lands the arrows on the model rows, keeping the assignment flow", () => {

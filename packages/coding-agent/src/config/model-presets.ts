@@ -410,6 +410,11 @@ export function describeShadowedRoles(
 	return lines;
 }
 
+/** True when the switch applied the whole preset: switched, with no role or thinking level still decided elsewhere. */
+export function isCleanModelPresetSwitch(result: ModelPresetSwitchResult): boolean {
+	return result.kind === "switched" && result.shadowed.length === 0 && result.shadowedThinking === undefined;
+}
+
 /** Short summary of a switch outcome for status lines and command output. */
 export function formatModelPresetSwitch(name: string, result: ModelPresetSwitchResult): string {
 	switch (result.kind) {

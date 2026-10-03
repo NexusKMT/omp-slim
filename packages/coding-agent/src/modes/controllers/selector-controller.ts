@@ -30,6 +30,7 @@ import {
 	acquireModelRoleMutation,
 	applyModelPreset,
 	formatModelPresetSwitch,
+	isCleanModelPresetSwitch,
 	modelPresetSavedMessage,
 	saveModelPreset,
 } from "../../config/model-presets";
@@ -1004,16 +1005,10 @@ export class SelectorController {
 							this.ctx.statusLine.invalidate();
 							this.ctx.updateEditorBorderColor();
 						}
-						const clean =
-							result.kind === "switched" &&
-							result.shadowed.length === 0 &&
-							result.shadowedThinking === undefined;
-						if (clean) this.ctx.showStatus(message);
+						if (isCleanModelPresetSwitch(result)) this.ctx.showStatus(message);
 						else this.ctx.showWarning(message);
-						return result.kind === "switched" || result.kind === "failed";
 					} catch (error) {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
-						return false;
 					} finally {
 						hub?.refreshAfterExternalMutation();
 					}

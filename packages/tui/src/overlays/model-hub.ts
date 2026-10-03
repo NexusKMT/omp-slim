@@ -163,10 +163,11 @@ export interface ModelHubCallbacks {
 	/** Save the current role assignments and default thinking level as a named model preset. */
 	onSavePreset?: (name: string) => void;
 	/**
-	 * Apply a saved model preset (ctrl+←/→ in the Roles view). Resolve `false`
-	 * when nothing was written so the hub keeps its current preset cursor.
+	 * Apply a saved model preset (ctrl+←/→ or p/⇧P in the Roles view) and report
+	 * the outcome itself. A switch that writes nothing (a refused preset) still
+	 * advances the hub's preset cursor, so the next press moves past it.
 	 */
-	onSwitchPreset?: (name: string) => void | boolean | Promise<void | boolean>;
+	onSwitchPreset?: (name: string) => void | Promise<void>;
 	/** Persist a new quick-switch cycle order (the ctrl+p role cycle). */
 	onCycleOrderChange?: (order: string[]) => void;
 	onCancel: () => void;
@@ -226,7 +227,18 @@ type StripState =
 	  };
 
 /** A Roles-view command; keys and the picker's action bar both run {@link ModelHubComponent}'s `#runRolesAction`. */
-type RolesAction = "pick" | "clear" | "fallback" | "cycle" | "earlier" | "later" | "new" | "thinking" | "save";
+type RolesAction =
+	| "pick"
+	| "clear"
+	| "fallback"
+	| "cycle"
+	| "earlier"
+	| "later"
+	| "new"
+	| "thinking"
+	| "save"
+	| "nextPreset"
+	| "prevPreset";
 
 /** Printable keys of the Roles view and the command each runs. */
 const ROLES_ACTION_KEYS: Record<string, RolesAction> = {
@@ -238,6 +250,9 @@ const ROLES_ACTION_KEYS: Record<string, RolesAction> = {
 	n: "new",
 	t: "thinking",
 	s: "save",
+	// Letter twins of ctrl+←/→, which macOS reserves for switching Spaces.
+	p: "nextPreset",
+	P: "prevPreset",
 };
 
 /** Picker fact columns of the Roles view. */
@@ -1812,17 +1827,9 @@ export class ModelHubComponent implements Component {
 			settle();
 			return;
 		}
-		const result = onSwitchPreset(name);
-		// Settle on any outcome: the cursor moves even when the host refused the preset.
-		this.#finishAssignment(
-			result instanceof Promise
-				? result.then(
-						() => undefined,
-						() => undefined,
-					)
-				: undefined,
-			settle,
-		);
+		// The host reports refusals itself, so the cursor moves once the switch
+		// resolves, refused or not (`#presetBase` sees a refusal left the revision alone).
+		this.#finishAssignment(onSwitchPreset(name), settle);
 	}
 
 	handleInput(data: string): void {
@@ -2145,6 +2152,10 @@ export class ModelHubComponent implements Component {
 			case "save":
 				if (this.#callbacks.onSavePreset) this.#openNameStrip("preset");
 				return;
+			case "nextPreset":
+			case "prevPreset":
+				this.#switchPreset(action === "nextPreset" ? 1 : -1);
+				return;
 			case "thinking":
 				if (role) {
 					const target = this.#roleThinkingTarget(role);
@@ -2346,7 +2357,7 @@ export class ModelHubComponent implements Component {
 		const { names, active: activePreset } = this.#presets();
 		const preset =
 			names.length > 0
-				? `   ${theme.fg("dim", "Preset:")} ${activePreset ? theme.fg("accent", activePreset) : theme.fg("muted", "custom")}  ${theme.fg("dim", formatKeyHints(["ctrl+left", "ctrl+right"]))}`
+				? `   ${theme.fg("dim", "Preset:")} ${activePreset ? theme.fg("accent", activePreset) : theme.fg("muted", "custom")}  ${theme.fg("dim", `${formatKeyHints(["ctrl+left", "ctrl+right"])} · ${formatKeyHints(["p", "shift+p"])}`)}`
 				: "";
 		return truncateToWidth(
 			` ${theme.fg("dim", "Roles:")} ${track}  ${theme.fg("dim", formatKeyHints(["alt+left", "alt+right"]))}${preset}`,
@@ -2670,7 +2681,8 @@ export class ModelHubComponent implements Component {
 			const editable = row?.kind === "role" && this.#roleThinkingTarget(row.role) !== undefined;
 			const thinking = editable ? ` · ${formatKeyHint("t")} thinking` : "";
 			const savePreset = this.#callbacks.onSavePreset ? ` · ${formatKeyHint("s")} save preset` : "";
-			return `${upDown} rows · ${enter} pick · ${formatKeyHint("f")} fallback · ${formatKeyHint("x")} clear${thinking} · ${formatKeyHint("c")} cycle · [/] reorder · ${formatKeyHint("n")} new${savePreset}`;
+			const switchPreset = this.#presets().names.length > 0 ? ` · ${formatKeyHints(["p", "shift+p"])} preset` : "";
+			return `${upDown} rows · ${enter} pick · ${formatKeyHint("f")} fallback · ${formatKeyHint("x")} clear${thinking} · ${formatKeyHint("c")} cycle · [/] reorder · ${formatKeyHint("n")} new${savePreset}${switchPreset}`;
 		}
 		if (entry.kind === "provider" && entry.locked) {
 			return entry.oauth
@@ -3392,6 +3404,7 @@ export class ModelHubComponent implements Component {
 						roleAction("cycle", this.#cycleOrder().includes(row.role) ? "Leave cycle" : "Add to cycle", "c"),
 						roleAction("new", "New role", "n"),
 						this.#callbacks.onSavePreset ? roleAction("save", "Save preset", "s") : undefined,
+						this.#presets().names.length > 0 ? roleAction("nextPreset", "Next preset", "p") : undefined,
 					);
 					break;
 				}
@@ -3926,7 +3939,7 @@ export class ModelHubComponent implements Component {
 				reorder,
 				keys("new", "n"),
 				this.#callbacks.onSavePreset ? keys("save preset", "s") : undefined,
-				presetHint,
+				this.#presets().names.length > 0 ? keys("preset", "ctrl+left", "ctrl+right", "p", "shift+p") : undefined,
 			];
 		}
 		if (entry.kind === "provider" && entry.locked) {
