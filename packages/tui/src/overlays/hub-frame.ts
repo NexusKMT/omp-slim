@@ -135,7 +135,7 @@ export function describeHubFrame(
 	]);
 }
 
-/** Minimum body width retained by a hub when its sidebar must shrink. */
+/** Minimum body width retained by shared fullscreen hubs when space permits. */
 const HUB_BODY_MIN_WIDTH = 28;
 
 /** Persistent fullscreen split frame, sidebar viewport, and footer chip renderer. */
@@ -152,6 +152,8 @@ export class HubFrame {
 	readonly #stack: Stack;
 	readonly #title: string;
 	readonly #sidebarBounds: { min: number; max: number };
+	/** Whether narrow layouts may reduce the body floor to keep the sidebar usable. */
+	readonly #preserveSidebar: boolean;
 
 	/** Compose hub-specific sidebar and body renderers into a persistent frame. */
 	constructor(
@@ -159,9 +161,11 @@ export class HubFrame {
 		sidebarBounds: { min: number; max: number },
 		renderSidebar: (width: number, rows: number) => string[],
 		renderBody: (width: number, height: number | undefined) => readonly string[],
+		options: { preserveSidebar?: boolean } = {},
 	) {
 		this.#title = title;
 		this.#sidebarBounds = sidebarBounds;
+		this.#preserveSidebar = options.preserveSidebar ?? false;
 		this.#split = new SplitPane({
 			left: (width, height) => {
 				const rows = Math.max(0, Math.floor(height ?? 10));
@@ -334,7 +338,17 @@ export class HubFrame {
 	/** Paint a complete fullscreen hub with its title, width bounds, and contextual footer. */
 	render(width: number, height: number, entries: readonly SidebarEntry<string>[], footer: string): readonly string[] {
 		const contentRows = Math.max(10, height - 4);
-		this.#split.setLeftSize({ fixed: this.sidebarWidth(entries) });
+		const sidebarWidth = this.sidebarWidth(entries);
+		this.#split.setLeftSize({
+			fixed: sidebarWidth,
+			min: this.#preserveSidebar ? this.#sidebarBounds.min : undefined,
+		});
+		if (this.#preserveSidebar) {
+			const geometry = this.#split.measure(width);
+			const splitWidth = (geometry.left?.width ?? 0) + (geometry.right?.width ?? 0);
+			const rightMinWidth = Math.max(0, Math.min(HUB_BODY_MIN_WIDTH, splitWidth - this.#sidebarBounds.min));
+			this.#split.setRightMinWidth(rightMinWidth);
+		}
 		const leftWidth = this.#split.measure(width).left?.width ?? 0;
 		this.#top.setLines([topBorderSplit(width, this.#title, leftWidth)]);
 		this.#divider.setLines([dividerSplit(width, leftWidth)]);

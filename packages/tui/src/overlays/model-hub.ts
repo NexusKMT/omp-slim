@@ -376,6 +376,7 @@ export class ModelHubComponent implements Component {
 		{ min: 18, max: 26 },
 		(width, rows) => this.#renderSidebar(width, rows),
 		this.#renderBodyPane,
+		{ preserveSidebar: true },
 	);
 	#lockedLoginLine: number | null = null;
 	#rolesRowStart = 1;
