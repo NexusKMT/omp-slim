@@ -34,6 +34,8 @@ use std::{
 
 use napi::{Env, Error, Result, Status, Task, bindgen_prelude::*};
 use pi_shell::cancel as core_cancel;
+use pi_vfs::BlockingFs;
+use tokio_util::sync::CancellationToken;
 
 use crate::prof::profile_region;
 
@@ -412,6 +414,57 @@ where
 	T: ToNapiValue + TypeName + Send + 'static,
 {
 	AsyncTask::new(Blocking { tag, cancel_token: cancel_token.into(), work: Some(Box::new(work)) })
+}
+
+/// Run synchronous filesystem work without occupying libuv's pool.
+///
+/// Provider callbacks may need that pool for async I/O; cancellation interrupts
+/// pending provider requests and releases the worker.
+pub fn filesystem<'env, T, F>(
+	env: &'env Env,
+	tag: &'static str,
+	cancel_token: CancelToken,
+	fs: BlockingFs,
+	work: F,
+) -> Result<PromiseRaw<'env, T>>
+where
+	F: FnOnce(BlockingFs, CancelToken) -> Result<T> + Send + 'static,
+	T: ToNapiValue + Send + 'static,
+{
+	let cancellation = CancellationToken::new();
+	let fs = fs.with_cancellation(cancellation.clone());
+	let settlement_token = cancel_token.clone();
+	env.spawn_future_with_callback(
+		async move {
+			let worker_token = cancel_token.clone();
+			let mut worker = tokio::task::spawn_blocking(move || {
+				let _guard = profile_region(tag);
+				work(fs, worker_token)
+			});
+			let (result, cancelled) = tokio::select! {
+				biased;
+				result = &mut worker => (result, None),
+				reason = cancel_token.wait() => {
+					cancellation.cancel();
+					(worker.await, Some(reason))
+				},
+			};
+			Ok((
+				result
+					.map_err(|err| Error::from_reason(format!("native task `{tag}` failed: {err}")))?,
+				cancelled,
+			))
+		},
+		move |env, (result, cancelled)| {
+			if let Some(reason) = settlement_token.abort_reason().or(cancelled) {
+				return Err(match reason {
+					AbortReason::Timeout => Error::from_reason("Aborted: Timeout"),
+					_ => abort_error(*env, reason),
+				});
+			}
+			result
+		},
+	)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
