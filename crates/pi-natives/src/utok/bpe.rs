@@ -137,7 +137,9 @@ impl RankTable {
 		};
 		let mut pairs: Box<[u32; 65536]> =
 			vec![u32::MAX; 65536].into_boxed_slice().try_into().unwrap();
-		let mut short = HashMap::with_capacity_and_hasher(short_count, Fx::default());
+		// Keep lookup headroom without reserving more than the full vocabulary.
+		let short_capacity = short_count.saturating_mul(2).min(n);
+		let mut short = HashMap::with_capacity_and_hasher(short_capacity, Fx::default());
 		let mut long = FxMap::default();
 		let mut max_token_len = 0usize;
 		for rank in 0..n as u32 {
