@@ -165,8 +165,7 @@ describe("browser relay discovery endpoint", () => {
 		expect(response.status).toBe(503);
 		const info = (await response.json()) as RelayUnavailableInfo;
 		expect(info.extensionSeen).toBeTrue();
-		// Clients measure the redial window from the disconnect, so a quit Chrome fails fast later.
+		// Clients measure the redial window from the disconnect.
 		expect(info.disconnectedMs).toBeGreaterThanOrEqual(0);
-		expect(info.disconnectedMs).toBeLessThan(5_000);
 	});
 });

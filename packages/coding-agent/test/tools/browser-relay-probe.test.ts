@@ -69,39 +69,41 @@ describe("waitForRelayExtension", () => {
 			error: "relay extension is not connected",
 			extensionSeen: true,
 			uptimeMs: 600_000,
+			ompRelayVersion: VERSION,
 			disconnectedMs: 120_000,
 		};
+		let probes = 0;
 		fake = Bun.serve({
 			hostname: "127.0.0.1",
 			port: 0,
-			fetch: () => Response.json(info, { status: 503 }),
+			fetch: () => {
+				probes++;
+				return Response.json(info, { status: 503 });
+			},
 		});
-		const started = performance.now();
 		expect(await waitForRelayExtension(`http://127.0.0.1:${fake.port}`)).toBe("extension-gone");
-		expect(performance.now() - started).toBeLessThan(2_000);
+		expect(probes).toBe(1);
 	});
 
-	it("waits out only the rest of the redial window after a recent disconnect", async () => {
-		const goneAt = Date.now() - 34_000;
+	it("keeps polling after a recent disconnect and fails once the redial window has passed", async () => {
+		const disconnects = [1_000, 120_000];
+		let probes = 0;
 		fake = Bun.serve({
 			hostname: "127.0.0.1",
 			port: 0,
-			fetch: () =>
-				Response.json(
-					{
-						error: "relay extension is not connected",
-						extensionSeen: true,
-						uptimeMs: 600_000,
-						disconnectedMs: Date.now() - goneAt,
-					} satisfies RelayUnavailableInfo,
-					{ status: 503 },
-				),
+			fetch: () => {
+				const info: RelayUnavailableInfo = {
+					error: "relay extension is not connected",
+					extensionSeen: true,
+					uptimeMs: 600_000,
+					ompRelayVersion: VERSION,
+					disconnectedMs: disconnects[Math.min(probes++, disconnects.length - 1)],
+				};
+				return Response.json(info, { status: 503 });
+			},
 		});
-		const started = performance.now();
 		expect(await waitForRelayExtension(`http://127.0.0.1:${fake.port}`)).toBe("extension-gone");
-		const waited = performance.now() - started;
-		expect(waited).toBeGreaterThan(700);
-		expect(waited).toBeLessThan(5_000);
+		expect(probes).toBe(2);
 	});
 
 	it("rejects an already-running relay without discarded-tab metadata", async () => {
