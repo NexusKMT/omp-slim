@@ -23,19 +23,19 @@ All browser host operations request exec-tier approval, including inspection hel
 
 ```js
 const tab = await browser.open({
-	name: "main",
-	url: "https://example.com",
-	wait_until: "load",
+  name: "main",
+  url: "https://example.com",
+  wait_until: "load",
 });
 
 const observation = await tab.observe();
 await tab.id(observation.elements[0].id).click();
 const title = await tab.title();
 
-const length = await tab.run(async ({ tab }, suffix) => ((await tab.title()) + suffix).length, {
-	args: ["!"],
-	timeout: 30,
-});
+const length = await tab.run(
+  async ({ tab }, suffix) => (await tab.title() + suffix).length,
+  { args: ["!"], timeout: 30 },
+);
 
 await tab.close();
 ```
@@ -48,23 +48,23 @@ await tab.close();
 
 ### Open options
 
-| Option                | Contract                                                                                                                                                                                                                                                             |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                | Managed-tab name; default `"main"`.                                                                                                                                                                                                                                  |
-| `url`                 | Navigate the opened or reused tab to this URL.                                                                                                                                                                                                                       |
-| `app`                 | `{ cdp_url?, path?, args?, relay?, tern?, target? }`; backend selection is described below. `target` selects an attached page by URL/title substring.                                                                                                                |
-| `viewport`            | `{ width, height, scale? }`; `scale` becomes the device scale factor.                                                                                                                                                                                                |
-| `wait_until`          | `"load"`, `"domcontentloaded"`, `"networkidle0"`, or `"networkidle2"`.                                                                                                                                                                                               |
-| `dialogs`             | `"accept"` or `"dismiss"` automatic policy. Without one, alerts and beforeunload prompts are accepted; confirms and prompts remain pending.                                                                                                                          |
-| `allowed_domains`     | Exact hostnames or `*.example.com` patterns (including the bare domain). The network manager aborts intercepted HTTP(S)/WS(S) requests to other hosts; an empty list leaves requests unrestricted. This is not a sandbox, and native-webview coverage differs below. |
-| `init_scripts`        | Document-start JavaScript sources or cwd-relative source-file paths.                                                                                                                                                                                                 |
-| `downloads`           | Absolute or cwd-relative download directory.                                                                                                                                                                                                                         |
-| `user_agent`          | Per-tab user-agent override.                                                                                                                                                                                                                                         |
-| `ignore_https_errors` | Ignore invalid HTTPS certificates for the tab.                                                                                                                                                                                                                       |
-| `allow_file_access`   | Launch flag permitting local file pages to read local files; cannot change an already-running shared Chromium.                                                                                                                                                       |
-| `headed`              | Override `browser.headless` for this open. `headed: false` also opts out of automatic Tern selection.                                                                                                                                                                |
-| `persist`             | Default `false`; opt out of settle-freeze and idle-close management. Explicit reuse by the owning session can change it.                                                                                                                                             |
-| `timeout`             | Seconds; default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. First-use Chromium installation is outside the open deadline.                                                                                                                     |
+| Option | Contract |
+|---|---|
+| `name` | Managed-tab name; default `"main"`. |
+| `url` | Navigate the opened or reused tab to this URL. |
+| `app` | `{ cdp_url?, path?, args?, relay?, tern?, target? }`; backend selection is described below. `target` selects an attached page by URL/title substring. |
+| `viewport` | `{ width, height, scale? }`; `scale` becomes the device scale factor. |
+| `wait_until` | `"load"`, `"domcontentloaded"`, `"networkidle0"`, or `"networkidle2"`. |
+| `dialogs` | `"accept"` or `"dismiss"` automatic policy. Without one, alerts and beforeunload prompts are accepted; confirms and prompts remain pending. |
+| `allowed_domains` | Exact hostnames or `*.example.com` patterns (including the bare domain). The network manager aborts intercepted HTTP(S)/WS(S) requests to other hosts; an empty list leaves requests unrestricted. This is not a sandbox, and native-webview coverage differs below. |
+| `init_scripts` | Document-start JavaScript sources or cwd-relative source-file paths. |
+| `downloads` | Absolute or cwd-relative download directory. |
+| `user_agent` | Per-tab user-agent override. |
+| `ignore_https_errors` | Ignore invalid HTTPS certificates for the tab. |
+| `allow_file_access` | Launch flag permitting local file pages to read local files; cannot change an already-running shared Chromium. |
+| `headed` | Override `browser.headless` for this open. `headed: false` also opts out of automatic Tern selection. |
+| `persist` | Default `false`; opt out of settle-freeze and idle-close management. Explicit reuse by the owning session can change it. |
+| `timeout` | Seconds; default 30, capped by positive `tools.maxTimeout`, then clamped to 1–300. First-use Chromium installation is outside the open deadline. |
 
 Reopening with init scripts, a download directory, a user-agent override, or `ignore_https_errors: true` recycles an existing tab so those worker-init options can take effect.
 
@@ -101,10 +101,13 @@ A run accepts either a serialized function or a JavaScript function-body string,
 
 ```js
 const hrefs = await tab.run(async ({ page }) => {
-	return await page.$$eval("a", links => links.map(link => link.href));
+  return await page.$$eval("a", links => links.map(link => link.href));
 });
 
-const title = await tab.run("return await tab.title();", { timeout: 10 });
+const title = await tab.run(
+  "return await tab.title();",
+  { timeout: 10 },
+);
 ```
 
 Functions receive `{ tab, page, browser, wait, assert }` as their first argument. Additional `args` follow it. Plain data, functions, and `RegExp` values are serialized; the function cannot capture Eval-cell closures. Code strings use the same names as globals and allow top-level `await`.

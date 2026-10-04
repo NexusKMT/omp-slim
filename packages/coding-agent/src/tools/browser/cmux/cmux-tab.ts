@@ -2201,9 +2201,7 @@ class CmuxElementHandle {
 	}
 
 	async click(options?: { button?: string; count?: number }): Promise<void> {
-		// Both cmux element-click paths (its click RPC and the synthetic-event fallback) press the
-		// left button once, so another button or count is refused rather than delivered as one left
-		// click. (Its dblclick fallback fires only a `dblclick` event, so it can't stand in for two clicks.)
+		// Every cmux element-click path presses the left button once; refuse rather than mis-deliver.
 		if (options?.button !== undefined && options.button !== "left") {
 			throw new ToolError(
 				`handle.click({ button: ${JSON.stringify(options.button)} }) is not supported in a cmux browser, which only left-clicks elements`,
