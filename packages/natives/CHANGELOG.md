@@ -6,6 +6,12 @@
 
 - Reduced memory used for Jev token counting without changing token counts ([#14335](https://github.com/can1357/oh-my-pi/pull/14335) by [@iliaal](https://github.com/iliaal)).
 
+## [18.6.1] - 2026-10-04
+
+### Fixed
+
+- Fixed concurrent searches through host-provided filesystem callbacks so they no longer starve other asynchronous filesystem operations, and ensured canceled searches release promptly.
+
 ## [18.5.1] - 2026-10-03
 
 ### Fixed
