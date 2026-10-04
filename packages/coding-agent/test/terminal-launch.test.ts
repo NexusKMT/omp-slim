@@ -116,7 +116,6 @@ const terminalLaunchTypeChecks: [
 void terminalLaunchTypeChecks;
 
 describe("generic terminal launch construction", () => {
-
 	it("reports missing and unsupported launch providers with the supported set", () => {
 		const missing = getTerminalLaunchPlacement(null, "pane");
 		if (!("error" in missing)) throw new Error("missing multiplexer unexpectedly resolved");
