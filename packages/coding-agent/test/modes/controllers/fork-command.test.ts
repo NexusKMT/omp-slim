@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { classifyTerminalMultiplexer, type TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
@@ -20,13 +20,13 @@ let tempDirectory: string;
 let sourceSessionFile: string;
 
 beforeEach(async () => {
-	tempDirectory = await mkdtemp(path.join(os.tmpdir(), "omp-fork-command-"));
+	tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-fork-command-"));
 	sourceSessionFile = path.join(tempDirectory, "current-session.jsonl");
-	await writeFile(sourceSessionFile, '{"type":"session"}\n');
+	await Bun.write(sourceSessionFile, '{"type":"session"}\n');
 });
 
 afterEach(async () => {
-	await rm(tempDirectory, { recursive: true, force: true });
+	await fs.rm(tempDirectory, { recursive: true, force: true });
 });
 
 function createContext(
@@ -66,6 +66,7 @@ function createContext(
 		placement: request.placement,
 	}));
 	const showError = vi.fn();
+	const showHookConfirm = vi.fn(async () => options.confirmed ?? false);
 	const ctx = {
 		session,
 		sessionManager,
@@ -81,7 +82,7 @@ function createContext(
 		showStatus: vi.fn(),
 		showWarning: vi.fn(),
 		showError,
-		showHookConfirm: vi.fn(async () => options.confirmed ?? false),
+		showHookConfirm,
 	} as unknown as InteractiveModeContext;
 	const controller = new CommandController(ctx, {
 		classifyTerminalMultiplexer: options.classifyTerminalMultiplexer ?? classifyTerminalMultiplexer,
@@ -92,7 +93,7 @@ function createContext(
 			options.activeProfile === null ? undefined : (options.activeProfile ?? "active-profile"),
 		argv: () => options.argv ?? ["--model", "provider/model", "prompt text"],
 	});
-	return { controller, ctx, session, sessionManager, flush, launchTerminal, showError };
+	return { controller, ctx, session, sessionManager, flush, launchTerminal, showError, showHookConfirm };
 }
 
 function getCanonicalLaunchPlacements() {
@@ -111,7 +112,7 @@ function getCanonicalLaunchPlacements() {
 			placements.push({
 				multiplexer: multiplexer as TerminalLaunchMultiplexer,
 				placement,
-				shellGrammar: capability.shellGrammar,
+				shellGrammar: "shellGrammar" in capability ? capability.shellGrammar : undefined,
 			});
 		}
 	}
@@ -157,13 +158,13 @@ describe("/fork terminal placement", () => {
 	it.each(POSIX_SHELL_PLACEMENTS)(
 		"launches a placement with POSIX shell requirements after confirmation",
 		async ({ multiplexer, placement }) => {
-			const { controller, ctx, flush, launchTerminal } = createContext({
+			const { controller, flush, launchTerminal, showHookConfirm } = createContext({
 				classifyTerminalMultiplexer: () => multiplexer,
 				confirmed: true,
 			});
 			await controller.handleForkCommand(placement);
-			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
-			expect(ctx.showHookConfirm.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]!);
+			expect(showHookConfirm).toHaveBeenCalledTimes(1);
+			expect(showHookConfirm.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]!);
 			expect(flush).toHaveBeenCalledTimes(1);
 			expect(launchTerminal).toHaveBeenCalledTimes(1);
 			expect(launchTerminal.mock.calls[0]?.[0]).toHaveProperty("shellGrammar", "posix");
@@ -300,10 +301,10 @@ describe("/fork terminal placement", () => {
 		const newCwd = path.join(tempDirectory, "new project");
 		const agentDir = path.join(tempDirectory, "agent");
 		const overlayPath = path.join(oldCwd, "overlay.yml");
-		await mkdir(oldCwd, { recursive: true });
-		await mkdir(newCwd, { recursive: true });
-		await mkdir(agentDir, { recursive: true });
-		await writeFile(overlayPath, "defaultThinkingLevel: high\n");
+		await fs.mkdir(oldCwd, { recursive: true });
+		await fs.mkdir(newCwd, { recursive: true });
+		await fs.mkdir(agentDir, { recursive: true });
+		await Bun.write(overlayPath, "defaultThinkingLevel: high\n");
 		const settings = await Settings.loadReadOnly({
 			cwd: oldCwd,
 			agentDir,

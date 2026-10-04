@@ -293,7 +293,7 @@ export class CommandController {
 			let realigned = false;
 			try {
 				realigned = await this.ctx.applyCwdChange(actual);
-			} catch { }
+			} catch {}
 			if (!realigned) {
 				this.ctx.showError(
 					`Failed to roll back move: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)} (failed to re-align workspace to ${actual})`,
@@ -310,14 +310,14 @@ export class CommandController {
 		let sourceRestored = false;
 		try {
 			sourceRestored = await this.ctx.applyCwdChange(previousState.cwd);
-		} catch { }
+		} catch {}
 		if (sourceRestored) return;
 
 		const actual = this.ctx.sessionManager.getCwd();
 		let realigned = false;
 		try {
 			realigned = await this.ctx.applyCwdChange(actual);
-		} catch { }
+		} catch {}
 		if (!realigned) {
 			this.ctx.showError(`Failed to restore source workspace after rollback: workspace remains at ${actual}`);
 			await this.ctx.shutdown();
@@ -504,7 +504,7 @@ export class CommandController {
 					this.ctx.showError(`Custom share failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			} finally {
-				await fs.rm(tmpFile, { force: true }).catch(() => { });
+				await fs.rm(tmpFile, { force: true }).catch(() => {});
 			}
 			return;
 		}
@@ -1774,7 +1774,8 @@ export class CommandController {
 				if (shouldPersistCwd) return await this.#applyBashResultCwd(result);
 			} catch (error) {
 				this.ctx.showError(
-					`Bash command completed, but OMP failed to update its working directory: ${error instanceof Error ? error.message : "Unknown error"
+					`Bash command completed, but OMP failed to update its working directory: ${
+						error instanceof Error ? error.message : "Unknown error"
 					}`,
 				);
 			}
@@ -2485,12 +2486,12 @@ export function renderUsageReports(
 		const activeReport =
 			provider === "openai-codex" && activeAccount
 				? ((activeAccount.accountId
-					? providerReports.find(
-						report =>
-							report.metadata?.orgId === activeAccount.orgId &&
-							report.metadata?.accountId === activeAccount.accountId,
-					)
-					: undefined) ??
+						? providerReports.find(
+								report =>
+									report.metadata?.orgId === activeAccount.orgId &&
+									report.metadata?.accountId === activeAccount.accountId,
+							)
+						: undefined) ??
 					providerReports.find(
 						report =>
 							report.metadata?.orgId === activeAccount.orgId &&
@@ -2503,10 +2504,10 @@ export function renderUsageReports(
 			provider === "openai-codex"
 				? activeReport
 					? formatCodexTuiLabel(
-						activeReport,
-						providerReports,
-						activeAccount?.email || activeAccount?.accountId || "account",
-					)
+							activeReport,
+							providerReports,
+							activeAccount?.email || activeAccount?.accountId || "account",
+						)
 					: activeAccount?.email || activeAccount?.accountId || activeAccount?.projectId
 				: formatActiveAccountLabel(activeAccount);
 		if (activeAccountLabel) {
@@ -2564,9 +2565,9 @@ export function renderUsageReports(
 				provider === "openai-codex"
 					? activeReport === report
 					: orgMatches &&
-					!!activeAccount &&
-					((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
-						(!!activeAccount.email && activeAccount.email === report.metadata?.email));
+						!!activeAccount &&
+						((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
+							(!!activeAccount.email && activeAccount.email === report.metadata?.email));
 			const availability =
 				resets.redeemableCount === resets.bankedCount ? "" : ` · ${resets.redeemableCount} usable now`;
 			resetAccountLines.push(
