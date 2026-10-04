@@ -77,7 +77,7 @@ export interface CompactionV2Usage {
 export interface CompactionV2Request {
 	body: OpenAICodexCompactionBody;
 	input: unknown[];
-	/** Candidates for verbatim retention next to the compaction item; user messages among them are kept. */
+	/** Serialized user-written turns to keep next to the compaction item; defaults to `input`. */
 	retainedUserItems: unknown[];
 	retainedMessageBudget: number;
 	sessionId?: string;
@@ -226,10 +226,6 @@ export function buildCompactionV2RequestFromBody(
 		sessionId?: string;
 		promptCacheKey?: string;
 		retainedMessageBudget?: number;
-		/**
-		 * Serialized user-authored messages to retain. Defaults to `input`, which
-		 * is only right when every user-role input item was written by the user.
-		 */
 		retainedUserItems?: unknown[];
 	},
 ): CompactionV2Request {
