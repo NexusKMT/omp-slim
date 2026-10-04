@@ -6,6 +6,8 @@ import {
 	type BuiltinSlashCommandRuntime,
 } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import { CombinedAutocompleteProvider } from "@oh-my-pi/pi-tui/autocomplete";
+import { Editor } from "@oh-my-pi/pi-tui/components/editor";
+import { getEditorTheme } from "@oh-my-pi/pi-tui/theme";
 
 function createRuntime() {
 	const handleForkCommand = vi.fn(async (_placement?: "pane" | "window") => undefined);
@@ -21,12 +23,70 @@ function createRuntime() {
 	return { handleForkCommand, setText, showError, runtime };
 }
 
-describe("/fork slash command", () => {
-	it("offers pane, window, and tab through shared builtin autocomplete", async () => {
-		const provider = new CombinedAutocompleteProvider([...BUILTIN_SLASH_COMMANDS], process.cwd());
-		const suggestions = await provider.getSuggestions(["/fork "], 0, 6);
+function createForkEditor(): Editor {
+	const editor = new Editor({
+		...getEditorTheme(),
+		hintStyle: text => `\x1b[2m${text}\x1b[0m`,
+	});
+	editor.setAutocompleteProvider(new CombinedAutocompleteProvider([...BUILTIN_SLASH_COMMANDS], process.cwd()));
+	return editor;
+}
 
-		expect(suggestions?.items.map(item => item.label)).toEqual(["pane", "window", "tab"]);
+async function untilRendered(editor: Editor, predicate: (frame: string) => boolean): Promise<string> {
+	while (true) {
+		const frame = editor.render(80).join("\n");
+		if (predicate(frame)) return frame;
+		const { promise, resolve } = Promise.withResolvers<void>();
+		const previous = editor.onAutocompleteUpdate;
+		editor.onAutocompleteUpdate = () => {
+			editor.onAutocompleteUpdate = previous;
+			previous?.();
+			resolve();
+		};
+		await promise;
+	}
+}
+
+describe("/fork slash command", () => {
+	it("renders the pane suggestion as a dim hint and accepts it with Tab", async () => {
+		const editor = createForkEditor();
+		for (const character of "/fork ") editor.handleInput(character);
+
+		const frame = await untilRendered(
+			editor,
+			value =>
+				value.includes("\x1b[2mpane\x1b[0m") &&
+				value.includes("pane") &&
+				value.includes("window") &&
+				value.includes("tab"),
+		);
+		expect(frame).toContain("\x1b[2mpane\x1b[0m");
+		expect(editor.getText()).toBe("/fork ");
+
+		editor.handleInput("\t");
+		expect(editor.getText()).toBe("/fork pane ");
+	});
+
+	it("renders the remaining window suffix for a partial prefix and accepts it with Tab", async () => {
+		const editor = createForkEditor();
+		for (const character of "/fork w") editor.handleInput(character);
+
+		const frame = await untilRendered(
+			editor,
+			value => editor.isShowingAutocomplete() && value.includes("\x1b[2mindow\x1b[0m"),
+		);
+		expect(frame).toContain("\x1b[2mindow\x1b[0m");
+		expect(editor.getText()).toBe("/fork w");
+
+		editor.handleInput("\t");
+		expect(editor.getText()).toBe("/fork window ");
+	});
+
+	it("keeps bare /fork on the in-process fork path", async () => {
+		const harness = createRuntime();
+
+		expect(await executeBuiltinSlashCommand("/fork", harness.runtime)).toBe(true);
+		expect(harness.handleForkCommand).toHaveBeenCalledWith();
 	});
 
 	it.each([

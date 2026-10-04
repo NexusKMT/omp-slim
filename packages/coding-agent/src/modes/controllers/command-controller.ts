@@ -104,13 +104,14 @@ import { cfgProviderAppendOnlyContext } from "../../session/settings";
 import { cfgShareRedactSecrets, cfgShareServerUrl, cfgShareStore } from "../../commands/settings";
 import { flagConsumesValue, restartArgv } from "../../cli/flag-tables";
 import {
+	createDefaultTerminalLaunchRequest,
+	getTerminalLaunchPlacement,
 	launchTerminal,
 	TerminalLaunchError,
 	type TerminalLaunchRequest,
 	type TerminalLaunchResult,
 } from "../../subprocess/terminal-launch";
 import { resolveCliEntryCmd } from "../../subprocess/worker-client";
-import { createForkTerminalLaunchPlan } from "./fork-terminal";
 
 function formatCreditValue(value: number): string {
 	return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -157,35 +158,6 @@ function hasForkApiKeyOverride(argv: string[]): boolean {
 		if (flagConsumesValue(arg, argv[i + 1])) i++;
 	}
 	return false;
-}
-
-function multiplexerLabel(multiplexer: TerminalLaunchRequest["multiplexer"]): string {
-	switch (multiplexer) {
-		case "tmux":
-			return "tmux";
-		case "zellij":
-			return "Zellij";
-		case "herdr":
-			return "Herdr";
-		case "cmux":
-			return "CMUX";
-	}
-}
-
-function multiplexerPlacementLabel(
-	multiplexer: TerminalLaunchRequest["multiplexer"],
-	placement: "pane" | "window",
-): string {
-	if (placement === "pane") return "pane";
-	switch (multiplexer) {
-		case "tmux":
-			return "window";
-		case "zellij":
-		case "herdr":
-			return "tab";
-		case "cmux":
-			return "workspace";
-	}
 }
 
 export class CommandController {
@@ -321,7 +293,7 @@ export class CommandController {
 			let realigned = false;
 			try {
 				realigned = await this.ctx.applyCwdChange(actual);
-			} catch {}
+			} catch { }
 			if (!realigned) {
 				this.ctx.showError(
 					`Failed to roll back move: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)} (failed to re-align workspace to ${actual})`,
@@ -338,14 +310,14 @@ export class CommandController {
 		let sourceRestored = false;
 		try {
 			sourceRestored = await this.ctx.applyCwdChange(previousState.cwd);
-		} catch {}
+		} catch { }
 		if (sourceRestored) return;
 
 		const actual = this.ctx.sessionManager.getCwd();
 		let realigned = false;
 		try {
 			realigned = await this.ctx.applyCwdChange(actual);
-		} catch {}
+		} catch { }
 		if (!realigned) {
 			this.ctx.showError(`Failed to restore source workspace after rollback: workspace remains at ${actual}`);
 			await this.ctx.shutdown();
@@ -532,7 +504,7 @@ export class CommandController {
 					this.ctx.showError(`Custom share failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			} finally {
-				await fs.rm(tmpFile, { force: true }).catch(() => {});
+				await fs.rm(tmpFile, { force: true }).catch(() => { });
 			}
 			return;
 		}
@@ -1420,9 +1392,9 @@ export class CommandController {
 		const dependencies = this.#forkTerminalDependencies;
 		const environment = dependencies.environment();
 		const multiplexer = dependencies.classifyTerminalMultiplexer(environment);
-		if (!multiplexer || multiplexer === "screen" || multiplexer === "wmux") {
-			const plan = createForkTerminalLaunchPlan(multiplexer, placement, [], this.ctx.sessionManager.getCwd());
-			if ("error" in plan) this.ctx.showError(plan.error);
+		const placementInfo = getTerminalLaunchPlacement(multiplexer, placement);
+		if ("error" in placementInfo) {
+			this.ctx.showError(placementInfo.error);
 			return;
 		}
 
@@ -1447,8 +1419,8 @@ export class CommandController {
 			);
 			return;
 		}
-		let shellGrammar: "posix" | undefined;
-		if (multiplexer === "herdr" || multiplexer === "cmux") {
+		const shellGrammar = placementInfo.shellGrammar;
+		if (shellGrammar === "posix") {
 			const confirmed = await this.ctx.showHookConfirm(
 				"Confirm destination shell compatibility",
 				"This fork command uses POSIX shell syntax. Continue only if the destination's configured interactive shell accepts POSIX syntax; this cannot be inferred from the current terminal.",
@@ -1457,7 +1429,6 @@ export class CommandController {
 				this.ctx.showWarning("Fork cancelled: POSIX shell compatibility was not confirmed for the destination.");
 				return;
 			}
-			shellGrammar = "posix";
 		}
 
 		try {
@@ -1504,28 +1475,28 @@ export class CommandController {
 				...dependencies.resolveCliEntryCmd(),
 				...childArgs,
 			];
-			const plan = createForkTerminalLaunchPlan(
+			const launchPlan = createDefaultTerminalLaunchRequest(
 				multiplexer,
 				placement,
 				command,
 				this.ctx.sessionManager.getCwd(),
 				shellGrammar,
 			);
-			if ("error" in plan) {
-				this.ctx.showError(plan.error);
+			if ("error" in launchPlan) {
+				this.ctx.showError(launchPlan.error);
 				return;
 			}
 
-			await dependencies.launchTerminal(plan.request);
+			await dependencies.launchTerminal(launchPlan.request);
 			this.ctx.showStatus(
-				`Opened a fork in a ${multiplexerLabel(multiplexer)} ${multiplexerPlacementLabel(multiplexer, placement)}; this session continues here.`,
+				`Opened a fork in ${placementInfo.displayName} (${placementInfo.placementLabel}); this session continues here.`,
 			);
 		} catch (error) {
 			logger.error("Failed to open a terminal fork", { multiplexer, error });
 			this.ctx.showError(
 				error instanceof TerminalLaunchError
-					? `Could not open a fork in ${multiplexerLabel(multiplexer)}: ${error.message}`
-					: `Could not open a fork in ${multiplexerLabel(multiplexer)}. See logs for details.`,
+					? `Could not open a fork in ${placementInfo.displayName}: ${error.message}`
+					: `Could not open a fork in ${placementInfo.displayName}. See logs for details.`,
 			);
 		}
 	}
@@ -1803,8 +1774,7 @@ export class CommandController {
 				if (shouldPersistCwd) return await this.#applyBashResultCwd(result);
 			} catch (error) {
 				this.ctx.showError(
-					`Bash command completed, but OMP failed to update its working directory: ${
-						error instanceof Error ? error.message : "Unknown error"
+					`Bash command completed, but OMP failed to update its working directory: ${error instanceof Error ? error.message : "Unknown error"
 					}`,
 				);
 			}
@@ -2515,12 +2485,12 @@ export function renderUsageReports(
 		const activeReport =
 			provider === "openai-codex" && activeAccount
 				? ((activeAccount.accountId
-						? providerReports.find(
-								report =>
-									report.metadata?.orgId === activeAccount.orgId &&
-									report.metadata?.accountId === activeAccount.accountId,
-							)
-						: undefined) ??
+					? providerReports.find(
+						report =>
+							report.metadata?.orgId === activeAccount.orgId &&
+							report.metadata?.accountId === activeAccount.accountId,
+					)
+					: undefined) ??
 					providerReports.find(
 						report =>
 							report.metadata?.orgId === activeAccount.orgId &&
@@ -2533,10 +2503,10 @@ export function renderUsageReports(
 			provider === "openai-codex"
 				? activeReport
 					? formatCodexTuiLabel(
-							activeReport,
-							providerReports,
-							activeAccount?.email || activeAccount?.accountId || "account",
-						)
+						activeReport,
+						providerReports,
+						activeAccount?.email || activeAccount?.accountId || "account",
+					)
 					: activeAccount?.email || activeAccount?.accountId || activeAccount?.projectId
 				: formatActiveAccountLabel(activeAccount);
 		if (activeAccountLabel) {
@@ -2594,9 +2564,9 @@ export function renderUsageReports(
 				provider === "openai-codex"
 					? activeReport === report
 					: orgMatches &&
-						!!activeAccount &&
-						((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
-							(!!activeAccount.email && activeAccount.email === report.metadata?.email));
+					!!activeAccount &&
+					((!!activeAccount.accountId && activeAccount.accountId === report.metadata?.accountId) ||
+						(!!activeAccount.email && activeAccount.email === report.metadata?.email));
 			const availability =
 				resets.redeemableCount === resets.bankedCount ? "" : ` · ${resets.redeemableCount} usable now`;
 			resetAccountLines.push(

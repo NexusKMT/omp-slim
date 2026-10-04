@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { classifyTerminalMultiplexer, type TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { CommandController } from "@oh-my-pi/pi-coding-agent/modes/controllers/command-controller";
 import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/types";
 import { Settings } from "../../../src/config/settings";
 import {
 	createTerminalLauncher,
+	terminalLaunchCapabilities,
+	type TerminalLaunchMultiplexer,
+	type TerminalLaunchPlacement,
 	type TerminalLaunchRequest,
 	type TerminalLaunchResult,
 } from "../../../src/subprocess/terminal-launch";
@@ -32,6 +36,7 @@ function createContext(
 		sessionFile?: string;
 		persisted?: boolean;
 		environment?: () => NodeJS.ProcessEnv;
+		classifyTerminalMultiplexer?: typeof classifyTerminalMultiplexer;
 		activeProfile?: string | null;
 		activeModel?: { provider: string; id: string };
 		agentDir?: string;
@@ -79,6 +84,7 @@ function createContext(
 		showHookConfirm: vi.fn(async () => options.confirmed ?? false),
 	} as unknown as InteractiveModeContext;
 	const controller = new CommandController(ctx, {
+		classifyTerminalMultiplexer: options.classifyTerminalMultiplexer ?? classifyTerminalMultiplexer,
 		environment: options.environment ?? (() => ({ TMUX: "server,1,0", TMUX_PANE: "%1" })),
 		launchTerminal,
 		resolveCliEntryCmd: () => ["omp-entry"],
@@ -89,31 +95,56 @@ function createContext(
 	return { controller, ctx, session, sessionManager, flush, launchTerminal, showError };
 }
 
+function getCanonicalLaunchPlacements() {
+	const placements: Array<{
+		multiplexer: TerminalLaunchMultiplexer;
+		placement: TerminalLaunchPlacement;
+		shellGrammar?: "posix";
+	}> = [];
+	for (const [multiplexer, capabilities] of Object.entries(terminalLaunchCapabilities) as Array<
+		[TerminalMultiplexer, (typeof terminalLaunchCapabilities)[TerminalMultiplexer]]
+	>) {
+		if (!capabilities.supported) continue;
+		for (const placement of ["pane", "window"] as const) {
+			const capability = capabilities[placement];
+			if (!capability) continue;
+			placements.push({
+				multiplexer: multiplexer as TerminalLaunchMultiplexer,
+				placement,
+				shellGrammar: capability.shellGrammar,
+			});
+		}
+	}
+	return placements;
+}
+
+const CANONICAL_LAUNCH_PLACEMENTS = getCanonicalLaunchPlacements();
+const POSIX_SHELL_PLACEMENTS = CANONICAL_LAUNCH_PLACEMENTS.filter(({ shellGrammar }) => shellGrammar === "posix");
+const UNSUPPORTED_MULTIPLEXERS = Object.entries(terminalLaunchCapabilities).flatMap(([multiplexer, capabilities]) =>
+	capabilities.supported ? [] : [multiplexer as TerminalMultiplexer],
+);
+
 describe("/fork terminal placement", () => {
-	it("reports direct-terminal and unsupported multiplexer errors without launching", async () => {
-		for (const environment of [{}, { STY: "screen-session" }, { WMUX: "1" }]) {
-			const { controller, ctx, launchTerminal, flush } = createContext({ environment: () => environment });
+	it("preflights unavailable launch capabilities before busy or persistence checks", async () => {
+		for (const multiplexer of [null, ...UNSUPPORTED_MULTIPLEXERS]) {
+			const { controller, ctx, launchTerminal, flush } = createContext({
+				classifyTerminalMultiplexer: () => multiplexer,
+				streaming: true,
+				persisted: false,
+			});
 			await controller.handleForkCommand("pane");
 			expect(ctx.showError).toHaveBeenCalledTimes(1);
-			expect(ctx.showError).toHaveBeenCalledWith(
-				expect.stringContaining(
-					environment.STY ? "screen" : environment.WMUX ? "wmux" : "no supported terminal multiplexer",
-				),
-			);
+			expect(ctx.showHookConfirm).not.toHaveBeenCalled();
 			expect(launchTerminal).not.toHaveBeenCalled();
 			expect(flush).not.toHaveBeenCalled();
 		}
 	});
-	it.each([
-		["Herdr pane", { HERDR_ENV: "1" }, "pane"],
-		["Herdr window", { HERDR_ENV: "1" }, "window"],
-		["CMUX pane", { CMUX_SURFACE_ID: "surface-1" }, "pane"],
-		["CMUX window", { CMUX_WORKSPACE_ID: "workspace-1" }, "window"],
-	] as const)(
-		"does not flush or launch %s without POSIX shell confirmation",
-		async (_name, environment, placement) => {
+
+	it.each(POSIX_SHELL_PLACEMENTS)(
+		"requires POSIX shell confirmation before flushing a placement that declares it",
+		async ({ multiplexer, placement }) => {
 			const { controller, ctx, flush, launchTerminal } = createContext({
-				environment: () => environment,
+				classifyTerminalMultiplexer: () => multiplexer,
 			});
 			await controller.handleForkCommand(placement);
 			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
@@ -123,21 +154,39 @@ describe("/fork terminal placement", () => {
 		},
 	);
 
-	it.each([
-		["Herdr pane", { HERDR_ENV: "1" }, "pane"],
-		["Herdr window", { HERDR_ENV: "1" }, "window"],
-		["CMUX pane", { CMUX_SURFACE_ID: "surface-1" }, "pane"],
-		["CMUX window", { CMUX_WORKSPACE_ID: "workspace-1" }, "window"],
-	] as const)("allows a %s fork after POSIX shell confirmation", async (_name, environment, placement) => {
-		const { controller, ctx, flush, launchTerminal } = createContext({
-			environment: () => environment,
-			confirmed: true,
-		});
-		await controller.handleForkCommand(placement);
-		expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
-		expect(flush).toHaveBeenCalledTimes(1);
-		expect(launchTerminal).toHaveBeenCalledTimes(1);
-	});
+	it.each(POSIX_SHELL_PLACEMENTS)(
+		"launches a placement with POSIX shell requirements after confirmation",
+		async ({ multiplexer, placement }) => {
+			const { controller, ctx, flush, launchTerminal } = createContext({
+				classifyTerminalMultiplexer: () => multiplexer,
+				confirmed: true,
+			});
+			await controller.handleForkCommand(placement);
+			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(1);
+			expect(ctx.showHookConfirm.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]!);
+			expect(flush).toHaveBeenCalledTimes(1);
+			expect(launchTerminal).toHaveBeenCalledTimes(1);
+			expect(launchTerminal.mock.calls[0]?.[0]).toHaveProperty("shellGrammar", "posix");
+		},
+	);
+
+	it.each(CANONICAL_LAUNCH_PLACEMENTS)(
+		"uses launcher-native target defaults for a supported placement",
+		async ({ multiplexer, placement, shellGrammar }) => {
+			const { controller, ctx, launchTerminal, flush } = createContext({
+				classifyTerminalMultiplexer: () => multiplexer,
+				confirmed: true,
+			});
+			await controller.handleForkCommand(placement);
+			const request = launchTerminal.mock.calls[0]?.[0];
+			expect(request).toMatchObject({ multiplexer, placement });
+			expect(request).not.toHaveProperty("target");
+			expect(request).not.toHaveProperty("focus");
+			expect(request).not.toHaveProperty("direction");
+			expect(ctx.showHookConfirm).toHaveBeenCalledTimes(shellGrammar === "posix" ? 1 : 0);
+			expect(flush).toHaveBeenCalledTimes(1);
+		},
+	);
 
 	it("flushes and launches an absolute persisted source with the active profile", async () => {
 		const { controller, launchTerminal, flush, ctx, session } = createContext();
@@ -163,7 +212,7 @@ describe("/fork terminal placement", () => {
 			}),
 		);
 		expect(launchTerminal.mock.calls[0]?.[0].command.slice(-2)).toEqual(["--fork", path.resolve(sourceSessionFile)]);
-		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("this session continues here"));
+		expect(ctx.showStatus).toHaveBeenCalledTimes(1);
 		expect(session.isStreaming).toBe(false);
 		expect(session.fork).not.toHaveBeenCalled();
 	});

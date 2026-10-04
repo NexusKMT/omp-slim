@@ -287,6 +287,9 @@ window, Zellij/Herdr tab, or CMUX workspace). The child starts from the current
 persisted transcript, while the parent session stays active and continues
 running.
 
+Typing `/fork ` suggests `pane`, `window`, and `tab`; the selected argument
+appears as dim inline text and Tab accepts it.
+
 Placement commands autodetect tmux, Zellij, Herdr, or CMUX from the terminal;
 `/fork auto` is not a subcommand (valid arguments are `pane`, `window`, and
 `tab`). `window` maps to a tmux window, a Zellij/Herdr tab, or a CMUX workspace.
