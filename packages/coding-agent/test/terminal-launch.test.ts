@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
 	createTerminalLauncher,
 	type TerminalLaunchCliResult,
@@ -341,14 +344,15 @@ describe("terminal launch dispatcher", () => {
 		const result = await launch({
 			multiplexer: "cmux",
 			placement: "pane",
-			command: ["npm", "run", "dev"],
-			cwd: "/repo",
+			command: ["printf", "%s", "explicit CMUX command"],
+			cwd: process.cwd(),
 			target: "surface:9",
 			direction: "down",
 			shellGrammar: "posix",
 		});
 
-		expect(calls[0].argv).toEqual([
+		const commandIndex = calls[0]!.argv.indexOf("--command");
+		expect(calls[0]!.argv.slice(0, commandIndex + 1)).toEqual([
 			"/usr/bin/env",
 			"-u",
 			"CMUX_WORKSPACE_ID",
@@ -359,9 +363,13 @@ describe("terminal launch dispatcher", () => {
 			"--surface",
 			"surface:9",
 			"--command",
-			"cd '/repo' && 'npm' 'run' 'dev'",
 		]);
-		expect(calls[0].cwd).toBe("/repo");
+		expect(calls[0]!.cwd).toBe(process.cwd());
+		if (process.platform !== "win32") {
+			const commandProbe = await processCli(["/bin/sh", "-c", calls[0]!.argv[commandIndex + 1]!], process.cwd());
+			expect(commandProbe.exitCode).toBe(0);
+			expect(commandProbe.stdout).toBe("explicit CMUX command");
+		}
 		expect(result).toEqual({ multiplexer: "cmux", placement: "pane", id: "pane-9" });
 
 		// Exercise the emitted env-unsetting prefix with the real subprocess runner,
@@ -544,40 +552,58 @@ describe("terminal launch dispatcher", () => {
 		expect(result).toEqual({ multiplexer: "herdr", placement: "window", id: "w1:t2" });
 	});
 
-	it("quotes CMUX split input under an explicit POSIX destination-shell contract", async () => {
-		const { calls, launch } = createHarness({ CMUX_WORKSPACE_ID: "workspace:1", CMUX_SURFACE_ID: "surface:1" }, [
-			{ stdout: '{"pane_id":"pane-2","surface_id":"surface-2"}', exitCode: 0 },
-		]);
-		const result = await launch({
-			multiplexer: "cmux",
-			placement: "pane",
-			command: ["npm", "run", "dev; echo unsafe"],
-			cwd: "/repo with space",
-			target: "surface:9",
-			direction: "left",
-			shellGrammar: "posix",
-			execution: "shell-input",
-		});
-
-		expect(calls).toEqual([
-			{
-				argv: [
-					"/usr/bin/env",
-					"-u",
-					"CMUX_WORKSPACE_ID",
-					"cmux",
-					"--json",
-					"new-split",
-					"left",
-					"--surface",
-					"surface:9",
-					"--command",
-					"cd '/repo with space' && 'npm' 'run' 'dev; echo unsafe'",
-				],
-				cwd: "/repo with space",
-			},
-		]);
-		expect(result).toEqual({ multiplexer: "cmux", placement: "pane", id: "pane-2" });
+	it("preserves Unicode argv and pane cwd through ASCII-only CMUX shell input", async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmux-unicode-"));
+		try {
+			const cwd = path.join(tempRoot, "cwd-Ω-雪");
+			const recorder = path.join(tempRoot, "recorder.js");
+			await fs.mkdir(cwd);
+			await Bun.write(
+				recorder,
+				'process.stdout.write(JSON.stringify({ cwd: process.cwd(), argv: process.argv.slice(2) }) + "\\n");\n',
+			);
+			const args = ["Ω 雪", "", "  spaced  ", "it's 'quoted'", "; printf injected", "$(printf injected) * $HOME"];
+			const command = [process.execPath, recorder, ...args];
+			const { calls, launch } = createHarness({ CMUX_WORKSPACE_ID: "workspace:1", CMUX_SURFACE_ID: "surface:1" }, [
+				{ stdout: '{"pane_id":"pane-2"}', exitCode: 0 },
+				{ stdout: '{"workspace_id":"workspace-2"}', exitCode: 0 },
+			]);
+			await launch({
+				multiplexer: "cmux",
+				placement: "pane",
+				command,
+				cwd,
+				shellGrammar: "posix",
+				execution: "shell-input",
+			});
+			await launch({
+				multiplexer: "cmux",
+				placement: "window",
+				command,
+				cwd,
+				shellGrammar: "posix",
+				execution: "shell-input",
+			});
+			const panePayload = calls[0]!.argv[calls[0]!.argv.indexOf("--command") + 1]!;
+			const windowPayload = calls[1]!.argv[calls[1]!.argv.indexOf("--command") + 1]!;
+			expect(panePayload).toMatch(/^[\x00-\x7f]*$/u);
+			expect(panePayload).toContain("'; printf injected'");
+			expect(windowPayload).toMatch(/^[\x00-\x7f]*$/u);
+			expect(calls[0]!.cwd).toBe(cwd);
+			expect(calls[1]!.argv[calls[1]!.argv.indexOf("--cwd") + 1]).toBe(cwd);
+			if (process.platform !== "win32") {
+				const paneResult = await processCli(["/bin/sh", "-c", `${panePayload}; pwd`], process.cwd());
+				expect(paneResult.exitCode).toBe(0);
+				const [recordedChild, shellCwd] = paneResult.stdout.trimEnd().split("\n");
+				expect(JSON.parse(recordedChild!)).toEqual({ cwd, argv: args });
+				expect(shellCwd).toBe(cwd);
+				const windowResult = await processCli(["/bin/sh", "-c", windowPayload], cwd);
+				expect(windowResult.exitCode).toBe(0);
+				expect(JSON.parse(windowResult.stdout)).toEqual({ cwd, argv: args });
+			}
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	it("targets an explicit CMUX window without pre-focusing when focus is false", async () => {

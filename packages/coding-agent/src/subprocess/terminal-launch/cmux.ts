@@ -1,4 +1,4 @@
-import { quotePosixArgument, quotePosixArgv } from "../../utils/shell-quote";
+import { quotePosixArgvAsciiSafe } from "../../utils/shell-quote";
 import { launchError, parseJson, runStep } from "./shared";
 import type { TerminalLaunchBackend } from "./types";
 
@@ -25,7 +25,7 @@ export const launchCmux: TerminalLaunchBackend<"cmux"> = async (request, { envir
 		// ambient workspace target.
 		const workspace = request.target ? undefined : env.CMUX_WORKSPACE_ID;
 		const surface = request.target ?? env.CMUX_SURFACE_ID;
-		const shellCommand = `cd ${quotePosixArgument(request.cwd)} && ${quotePosixArgv(request.command)}`;
+		const shellCommand = quotePosixArgvAsciiSafe(request.command, request.cwd);
 		const focusArgs = request.focus === undefined ? [] : ["--focus", String(request.focus)];
 		const argv = ["cmux", "--json", "new-split", request.direction ?? "right"];
 		if (workspace) argv.push("--workspace", workspace);
@@ -52,7 +52,7 @@ export const launchCmux: TerminalLaunchBackend<"cmux"> = async (request, { envir
 	}
 	if (request.name) argv.push("--name", request.name);
 	const focusArgs = request.focus === undefined ? [] : ["--focus", String(request.focus)];
-	argv.push("--cwd", request.cwd, "--command", quotePosixArgv(request.command), ...focusArgs);
+	argv.push("--cwd", request.cwd, "--command", quotePosixArgvAsciiSafe(request.command), ...focusArgs);
 	const output = await runStep(request, "workspace create", argv, request.cwd, runCli);
 	const payload = cmuxPayload(parseJson(request, "workspace create", output));
 	if (payload.ok === false) {
