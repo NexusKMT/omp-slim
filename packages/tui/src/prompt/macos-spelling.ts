@@ -46,17 +46,8 @@ const NATIVE_BACKEND: SpellingBackend = {
 };
 
 /**
- * How long a native spelling call may take before the provider gives up on it.
- *
- * The Rust side has no deadline — `appkit.rs` awaits a `flume::bounded(1)` reply
- * with no timeout — so a `NSSpellChecker` call that never returns leaves the
- * promise pending forever. A pending promise never reaches a `catch`, so the
- * provider stays `#available`, nothing is logged, and `#automaticTypoActive`
- * stays true, which freezes the typo queue for the rest of the session. That is
- * the silent half of the hang.
- *
- * Rejecting on expiry routes into the existing `catch` handlers, which call
- * `#disable` — one warning instead of a session-long freeze.
+ * The native side awaits a `flume::bounded(1)` reply with no timeout, so a stuck call
+ * stays pending and never reaches the `catch` that disables the provider.
  */
 const BACKEND_TIMEOUT_MS = 2_000;
 
@@ -343,10 +334,8 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 	}
 
 	/**
-	 * Reject when a native spelling call overruns {@link BACKEND_TIMEOUT_MS}.
-	 *
-	 * Uses `setTimeout` rather than `Bun.sleep` deliberately: the TUI test rule
-	 * requires fake timers, and fake timers only intercept `setTimeout`.
+	 * Reject when a native spelling call overruns {@link BACKEND_TIMEOUT_MS}; uses `setTimeout`
+	 * because fake timers only intercept `setTimeout`.
 	 */
 	async #withTimeout<T>(work: Promise<T>): Promise<T> {
 		let timer: ReturnType<typeof setTimeout> | undefined;
