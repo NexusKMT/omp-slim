@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/model` leaving the session on its current model when you pick the model a project's `modelRoles.default` already names; it reported "role cleared" instead of switching
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed
