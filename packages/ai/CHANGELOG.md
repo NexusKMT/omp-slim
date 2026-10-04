@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed warm OpenAI Responses sessions replaying summary-only reasoning without the `reasoning_text` DeepSeek-family targets require, which caused 400s on Command Code DeepSeek models ([#14288](https://github.com/can1357/oh-my-pi/issues/14288))
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed
