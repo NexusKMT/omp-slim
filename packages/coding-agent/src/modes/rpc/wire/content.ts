@@ -279,7 +279,6 @@ export const modelDefs = {
 		mode: "string",
 		efforts: "Effort[]",
 		"defaultLevel?": "Effort",
-		"apiDefaultEffort?": "Effort",
 		"effortMap?": "Record<string, string>",
 		"supportsDisplay?": "boolean",
 		"prefixBinding?": "boolean",

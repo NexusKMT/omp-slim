@@ -721,12 +721,13 @@ describe("compact() Anthropic native lane", () => {
 				allowance: ai.ANTHROPIC_THINKING.high,
 			},
 			{
-				// Opus 5.5 runs at medium when a request names no effort.
+				// The request runs at the API's per-model default, unknown here, so it
+				// gets the largest effort's allowance: never less than the wire uses.
 				name: "API default in force, low selected",
 				recorded: { topLevel: null, tail: null },
 				requested: Effort.Low,
 				effort: undefined,
-				allowance: ai.ANTHROPIC_THINKING.medium,
+				allowance: ai.ANTHROPIC_THINKING.max,
 			},
 			{
 				name: "high in force, thinking turned off",

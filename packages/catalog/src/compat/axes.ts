@@ -301,7 +301,6 @@ export const AXES: Readonly<Record<string, AxisDef>> = {
 	]),
 
 	// ── thinking control surface ──
-	"thinking-api-default-effort": { key: "apiDefaultEffort", set: "thinking", shape: "scalar", values: EFFORTS },
 	"thinking-default-level": { key: "defaultLevel", set: "thinking", shape: "scalar", values: EFFORTS },
 	"thinking-effort-budgets": { key: "effortBudgets", set: "thinking", shape: "object" },
 	"thinking-effort-map": { key: "effortMap", set: "thinking", shape: "object" },

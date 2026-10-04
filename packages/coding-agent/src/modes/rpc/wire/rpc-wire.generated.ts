@@ -333,7 +333,6 @@ export interface ThinkingConfig {
 	mode: string;
 	efforts: Effort[];
 	defaultLevel?: Effort;
-	apiDefaultEffort?: Effort;
 	effortMap?: Record<string, string>;
 	supportsDisplay?: boolean;
 	prefixBinding?: boolean;

@@ -311,7 +311,6 @@ describe("generated model policies", () => {
 		expect(model?.thinking).toEqual({
 			mode: "anthropic-adaptive",
 			efforts: [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max],
-			apiDefaultEffort: Effort.High,
 			supportsDisplay: true,
 		});
 	});

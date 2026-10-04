@@ -1933,9 +1933,6 @@
 				"defaultLevel": {
 					"$ref": "#/$defs/Effort"
 				},
-				"apiDefaultEffort": {
-					"$ref": "#/$defs/Effort"
-				},
 				"effortMap": {
 					"type": "object",
 					"properties": {},

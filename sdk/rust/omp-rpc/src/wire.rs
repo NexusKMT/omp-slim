@@ -2529,8 +2529,6 @@ pub struct ThinkingConfig {
 	pub efforts: Vec<Effort>,
 	#[serde(rename = "defaultLevel", default, skip_serializing_if = "Option::is_none")]
 	pub default_level: Option<Effort>,
-	#[serde(rename = "apiDefaultEffort", default, skip_serializing_if = "Option::is_none")]
-	pub api_default_effort: Option<Effort>,
 	#[serde(rename = "effortMap", default, skip_serializing_if = "Option::is_none")]
 	pub effort_map: Option<BTreeMap<String, String>>,
 	#[serde(rename = "supportsDisplay", default, skip_serializing_if = "Option::is_none")]
