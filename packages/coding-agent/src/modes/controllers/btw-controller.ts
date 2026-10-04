@@ -388,7 +388,12 @@ export class BtwController {
 			const sessionId = this.#sessionManager.getSessionId();
 			if (signal?.aborted || store !== this.#store || sessionId !== originalSessionId) return false;
 			if (!trimmedQuestion) {
-				this.#showHistory(store);
+				const panel = this.#showHistory(store);
+				// Tern: reopening lands on the side question put away while it answered.
+				const active = this.#activeRequest;
+				if (this.ctx.ui.nativeRendering && active?.store === store && this.#isActiveRequest(active)) {
+					panel.showRecord(active.record.id);
+				}
 				return true;
 			}
 			// A just-cancelled/completed turn may still be publishing its checkpoint.
@@ -557,20 +562,18 @@ export class BtwController {
 		this.#historyPanel = undefined;
 		if (!overlay) return;
 		overlay.hide();
-		// Closing a different history entry returns to the active BTW instead of
-		// leaving a request running without a visible panel (text mode; Tern has
-		// no inline panel, /btw reopens the sheet).
+		// Closing while a BTW still answers keeps it running: text mode returns
+		// to its inline panel; Tern has none, so it says how to get back.
 		const request = this.#activeRequest;
-		if (
-			!this.ctx.ui.nativeRendering &&
-			request &&
-			this.#isActiveRequest(request) &&
-			getBtwLatestTurn(request.record).status === "running"
-		) {
-			request.component.setAnswer(getBtwLatestTurn(request.record).answer);
-			this.#visible = true;
-			this.ctx.btwContainer.clear();
-			this.ctx.btwContainer.addChild(request.component);
+		if (request && this.#isActiveRequest(request) && getBtwLatestTurn(request.record).status === "running") {
+			if (this.ctx.ui.nativeRendering) {
+				this.ctx.showStatus("/btw is still answering in the background · /btw to reopen it", { dim: true });
+			} else {
+				request.component.setAnswer(getBtwLatestTurn(request.record).answer);
+				this.#visible = true;
+				this.ctx.btwContainer.clear();
+				this.ctx.btwContainer.addChild(request.component);
+			}
 		}
 		this.ctx.ui.requestRender();
 	}
@@ -652,9 +655,9 @@ export class BtwController {
 				promptText,
 				history,
 				conversationKey: request.conversationKey,
-				// /btw answers are read in full and saved to history; the 4 KiB
-				// side-channel cap (meant for one-line replies) cut them mid-sentence.
-				dedupeReply: false,
+				// /btw answers are read in full and saved to history: keep the
+				// repeated-line collapse, but not the 4 KiB cap meant for one-liners.
+				replyMaxBytes: Number.POSITIVE_INFINITY,
 				onTextDelta: delta => {
 					const latest = getBtwLatestTurn(request.record);
 					if (latest.status !== "running") return;
@@ -671,6 +674,10 @@ export class BtwController {
 			if (this.#isActiveRequest(request)) {
 				request.component.setAnswer(replyText);
 				request.component.markComplete();
+				// Tern: the sheet was put away while answering; say where the answer is.
+				if (this.ctx.ui.nativeRendering && !this.#historyOverlay) {
+					this.ctx.showStatus("/btw answer ready · /btw to read it");
+				}
 				const copyText = request.component.getCopyText();
 				if (copyText !== undefined) {
 					this.#lastQuestion = request.question;
