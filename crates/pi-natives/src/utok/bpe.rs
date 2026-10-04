@@ -65,6 +65,8 @@ impl Hasher for FxHasher {
 type Fx = BuildHasherDefault<FxHasher>;
 type FxMap = HashMap<Box<[u8]>, u32, Fx>;
 
+const SHORT_MAX: usize = 15;
+
 /// Pack a key of ≤15 bytes losslessly into a `u128`: bytes little-endian
 /// at bits 0..len*8, zero padding, length tag at bits 120..128 (a
 /// 15-byte key leaves the top byte free, so equal packs imply equal keys
@@ -74,7 +76,7 @@ type FxMap = HashMap<Box<[u8]>, u32, Fx>;
 #[inline]
 fn pack(key: &[u8]) -> Option<u128> {
 	let n = key.len();
-	if n > 15 {
+	if n > SHORT_MAX {
 		return None;
 	}
 	let v: u128 = if let (Some(lo), Some(hi)) = (key.first_chunk::<8>(), key.last_chunk::<8>()) {
@@ -132,7 +134,8 @@ impl RankTable {
 		let short_count = {
 			let mut entries = p;
 			(0..n)
-				.filter(|_| matches!(read_token(&mut entries).len(), 1 | 3..=15))
+				.map(|_| read_token(&mut entries))
+				.filter(|key| matches!(key.len(), 1 | 3..=SHORT_MAX))
 				.count()
 		};
 		let mut pairs: Box<[u32; 65536]> =
