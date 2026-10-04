@@ -47,10 +47,8 @@ async function loadDom(): Promise<typeof DomNs> {
 }
 
 /**
- * Elements that end a line of rendered text. `textContent` concatenates across
- * them, which turns a whole article into one line. `<p>` also leaves a blank
- * line, `<br>` is a single line break, and table cells are tab-separated within
- * their row, as in the browser's `innerText`.
+ * Elements that end a line of rendered text, which `textContent` runs together. As in `innerText`,
+ * `<p>` also leaves a blank line, `<br>` is one line break, and table cells are tab-separated.
  */
 const BLOCK_TAGS: Readonly<Record<string, true>> = {
 	ADDRESS: true,
@@ -91,6 +89,8 @@ const BLOCK_TAGS: Readonly<Record<string, true>> = {
 };
 /** Never rendered as text; skipped below the extraction root. */
 const SKIP_TAGS: Readonly<Record<string, true>> = { SCRIPT: true, STYLE: true, NOSCRIPT: true, TEMPLATE: true };
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
 
 /**
  * Text of a subtree with line breaks where the document has block boundaries.
@@ -119,8 +119,7 @@ function blockText(root: DomNs.Node): string {
 		parts.push(text);
 	};
 	const walk = (node: DomNs.Node, pre: boolean): void => {
-		// 3 = TEXT_NODE, 1 = ELEMENT_NODE
-		if (node.nodeType === 3) {
+		if (node.nodeType === TEXT_NODE) {
 			let text = node.textContent ?? "";
 			if (!pre) {
 				text = text.replace(/\s+/g, " ");
@@ -130,7 +129,7 @@ function blockText(root: DomNs.Node): string {
 			if (text) append(text);
 			return;
 		}
-		if (node.nodeType !== 1) return;
+		if (node.nodeType !== ELEMENT_NODE) return;
 		const tag = (node as DomNs.Element).tagName.toUpperCase();
 		if (node !== root && SKIP_TAGS[tag]) return;
 		if (tag === "BR") {
