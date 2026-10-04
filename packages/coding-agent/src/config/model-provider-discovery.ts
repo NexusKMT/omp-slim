@@ -17,6 +17,12 @@ export const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [
 	"openai-codex",
 ];
 
+/** Special providers whose fresh, authoritative roster replaces bundled chat models even during startup cache loads. */
+export const AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS: Readonly<Record<string, true>> = {
+	"google-antigravity": true,
+	"openai-codex": true,
+};
+
 const STARTUP_MODEL_CACHE_PROVIDER_IDS_RECORD: Record<string, true> = Object.create(null);
 for (const providerId of [
 	...PROVIDER_DESCRIPTORS.map(descriptor => descriptor.providerId),

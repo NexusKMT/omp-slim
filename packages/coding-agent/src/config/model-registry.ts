@@ -100,6 +100,7 @@ import {
 	providersWithAuthoritativeProjectCatalog,
 } from "./model-patch";
 import {
+	AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
 	BUILT_IN_DISCOVERY_NON_AUTHORITATIVE_RETRY_MS,
 	type BuiltInDiscoveryResult,
@@ -1367,7 +1368,8 @@ export class ModelRegistry {
 				const models = loaded.modelsByProvider.get(providerId) ?? [];
 				if (
 					providersWithAuthoritativeProjectCatalog(models).has(providerId) ||
-					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(providerId)
+					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(providerId) ||
+					AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS[providerId] === true
 				) {
 					this.#cachedAuthoritativeProviders.add(providerId);
 				}
@@ -2124,13 +2126,11 @@ export class ModelRegistry {
 	): Promise<ModelManagerOptions<Api>[]> {
 		const specialProviderDescriptors: Array<{
 			providerId: string;
-			authoritative: boolean;
 			resolveKey: (value: string | undefined) => string | undefined;
 			createOptions: (key: string, raw: string | undefined) => ModelManagerOptions<Api>;
 		}> = [
 			{
 				providerId: "google-antigravity",
-				authoritative: true,
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: oauthToken =>
 					googleAntigravityModelManagerOptions({
@@ -2141,7 +2141,6 @@ export class ModelRegistry {
 			},
 			{
 				providerId: "google-gemini-cli",
-				authoritative: false,
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: (oauthToken, raw) =>
 					googleGeminiCliModelManagerOptions({
@@ -2153,7 +2152,6 @@ export class ModelRegistry {
 			},
 			{
 				providerId: "openai-codex",
-				authoritative: true,
 				resolveKey: value => value,
 				createOptions: accessToken => {
 					// A custom endpoint (models.yml `baseUrl`) receives only a configured,
@@ -2212,7 +2210,7 @@ export class ModelRegistry {
 					descriptor.providerId,
 					strategy,
 					descriptor.providerId,
-					descriptor.authoritative,
+					AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS[descriptor.providerId] === true,
 				),
 			),
 		);
