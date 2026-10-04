@@ -474,11 +474,10 @@ export const HQ_EDGE_FRAMES = 3;
  *  undercounting a high-res archive at the raised {@link MAX_FRAMES_DEFAULT}. */
 export const FRAME_TOKEN_ESTIMATE = 5024;
 
-/** Conservative upper bound for one persisted high-res (1932px) frame's
- *  base64 payload. The measured high-res Anthropic `8x13`/`11on16` PNG frames
- *  sit around 159 KB; 170 KB leaves margin for denser glyph pages without
- *  permitting multi-MB standing request bodies at large context windows.
- *  Smaller frames are charged less by {@link maxFramesForDataBudget}. */
+/** Conservative upper bound for one persisted frame's base64 payload. The
+ *  measured high-res Anthropic `8x13`/`11on16` PNG frames sit around 159 KB;
+ *  170 KB leaves margin for denser glyph pages without permitting multi-MB
+ *  standing request bodies at large context windows. */
 export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
 
 /** Maximum snapcompact image base64 carried in every rebuilt provider request.
@@ -488,20 +487,14 @@ export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
  *  ~11 MB JSON payload on every turn. */
 export const FRAME_DATA_BYTES_BUDGET = 3_000_000;
 
-/** Variants the area-scaled byte charge was measured on: archives with these
- *  edges and the denser `8on16-bw` middle (the auto shapes for Claude, OpenAI,
- *  Codex, Gemini and Kimi). Inkier variants (`8x13-bw`, `6x12-dim`, `doc-*`,
- *  `silver16-bw`) render ~120 KB or more per 1568px frame, so they keep the
- *  1932px charge. */
+/** Default edge variants whose frames shrink with pixel area. Inkier variants
+ *  keep the full {@link FRAME_DATA_BYTES_ESTIMATE} at any frame size. */
 const AREA_PRICED_VARIANTS: readonly ShapeGeometry[] = [SHAPE_VARIANTS["8on22-bw"], SHAPE_VARIANTS["11on16-bw"]];
 
 /** Frame-count cap implied by {@link FRAME_DATA_BYTES_BUDGET} for frames
- *  rendered by `shape`. For {@link AREA_PRICED_VARIANTS}, frames smaller than
- *  the 1932px high-res frame are charged {@link FRAME_DATA_BYTES_ESTIMATE}
- *  scaled by pixel area (1568px ≈ 112 KB, 26 frames; capped 1568px archives
- *  measure ≤ 115 KB per frame on average). Every other shape, and frames
- *  larger than 1932px (2048px Gemini frames measure below it), keeps the
- *  1932px charge. */
+ *  rendered by `shape`. {@link AREA_PRICED_VARIANTS} below 1932px are charged
+ *  {@link FRAME_DATA_BYTES_ESTIMATE} scaled by pixel area; every other shape
+ *  pays the full estimate. */
 export function maxFramesForDataBudget(shape: ShapeGeometry): number {
 	const areaPriced = AREA_PRICED_VARIANTS.some(
 		variant =>
