@@ -3,6 +3,7 @@ import { scheduler } from "node:timers/promises";
 import * as tls from "node:tls";
 import { isAnthropicSigningProxyUrl, isOfficialAnthropicApiUrl } from "@oh-my-pi/pi-catalog/compat/anthropic";
 import { hostMatchesUrl, isVertexRawPredictUrl } from "@oh-my-pi/pi-catalog/hosts";
+import type { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { mapEffortToAnthropicAdaptiveEffort } from "@oh-my-pi/pi-catalog/model-thinking";
 import { calculateCost, getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { isAnthropicOAuthToken } from "@oh-my-pi/pi-catalog/utils";
@@ -4435,6 +4436,26 @@ function planAnthropicEffortControls(
 		tail = current;
 	}
 	return { topLevel, inserts, record: { topLevel: topLevel ?? null, tail: tail ?? null } };
+}
+
+/**
+ * The effort an on-demand compaction request over `messages` runs at. It sends
+ * no effort change of its own, so the effort earlier requests left in force
+ * applies, and its thinking allowance must follow that effort, not `requested`.
+ */
+export function resolveAnthropicCompactionEffort(
+	model: Model<"anthropic-messages">,
+	messages: readonly Message[],
+	requested: Effort | undefined,
+): Effort | undefined {
+	if (!requested || model.compat.supportsPerMessageEffort !== true) return requested;
+	const records = collectAnthropicControlRecords(messages);
+	const inForce = planAnthropicEffortControls(undefined, messages, records, true, undefined, false).record?.tail;
+	if (!inForce || mapEffortToAnthropicAdaptiveEffort(model, requested) === inForce) return requested;
+	return (
+		model.thinking?.efforts?.findLast(effort => mapEffortToAnthropicAdaptiveEffort(model, effort) === inForce) ??
+		requested
+	);
 }
 
 /**

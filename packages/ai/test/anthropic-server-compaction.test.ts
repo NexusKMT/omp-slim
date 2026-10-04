@@ -742,7 +742,31 @@ describe("Anthropic compaction replay", () => {
 			JSON.parse(JSON.stringify(value), (key, inner) => (key === "cache_control" ? undefined : inner));
 		expect(compaction.payload.compaction).toBeDefined();
 		expect(compaction.payload.tools).toEqual(kept.payload.tools);
+		expect(compaction.payload.output_config).toEqual(kept.payload.output_config);
 		expect(withoutCacheControl(compaction.payload.messages)).toEqual(withoutCacheControl(kept.payload.messages));
+
+		// The next live turn sends both changes once, after the kept reply.
+		const next = await captureRequest(
+			preserved,
+			{ ...options, thinkingEnabled: true, effort: "low" },
+			[summaryMessage({ signature: SIGNATURE }), keptFrom(kept), { role: "user", content: "next", timestamp: 4 }],
+			[readTool],
+			[removedTool],
+		);
+		const wire = next.payload.messages;
+		if (!Array.isArray(wire)) throw new Error("Expected wire messages");
+		const keptIndex = wire.findIndex(message => JSON.stringify(message).includes("sig_kept"));
+		const controls = toolControls(wire);
+		const efforts = wire.flatMap((message, index) => (message.output_config?.effort === "low" ? [index] : []));
+		expect(controls).toHaveLength(1);
+		expect(JSON.parse(controls[0]?.json ?? "{}").content).toEqual([
+			{ type: "tool_removal", tool: { type: "tool_reference", name: "grep" } },
+		]);
+		expect(efforts).toHaveLength(1);
+		// The kept reply folds into the compaction block's assistant message.
+		expect(keptIndex).toBe(0);
+		expect(controls[0]?.index).toBeGreaterThan(keptIndex);
+		expect(efforts[0]).toBeGreaterThan(keptIndex);
 	});
 
 	it("keeps an effort change of the turn the block opened behind the compaction block", async () => {
