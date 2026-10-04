@@ -13,8 +13,7 @@ const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const TAB_NAME = `interactions-${crypto.randomUUID()}`;
 const STARVED_TAB_NAME = `starved-${crypto.randomUUID()}`;
 const COMBO_TAB_NAME = `combos-${crypto.randomUUID()}`;
-// The platform's editing modifier. On macOS its shortcuts are app-menu commands a
-// CDP key event never reaches, so they only edit when the key-down names the command.
+// The platform's editing modifier; on macOS its shortcuts only edit when the key-down names the command.
 const SHORTCUT = process.platform === "darwin" ? "Meta" : "Control";
 const comboHtml = `<!doctype html><textarea id="area">hello world</textarea><input id="field"><input id="paste">
 <iframe id="inner" srcdoc='<!doctype html><textarea id="deep">nested text</textarea>'></iframe>`;

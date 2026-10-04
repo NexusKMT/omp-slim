@@ -486,11 +486,8 @@ export async function keyUp(page: Page, key: KeyInput, signal?: AbortSignal): Pr
 }
 
 /**
- * macOS runs its editing shortcuts as app-menu commands, which a CDP key event
- * never reaches: the page sees Meta+V and nothing is pasted. There the key-down
- * names Chrome's editor command, which runs as the key's default action, so a
- * page that cancels the key still cancels the edit. Elsewhere Chrome binds these
- * shortcuts in the renderer and the plain key event already edits.
+ * macOS runs editing shortcuts as app-menu commands a CDP key event never reaches, so the key-down
+ * names Chrome's editor command instead; elsewhere the plain key event already edits.
  * Keyed by the sorted Tern modifiers and the lower-cased letter.
  */
 const EDITING_COMMANDS: Readonly<Record<string, string>> =
@@ -536,10 +533,8 @@ export async function pressKey(page: Page, combo: string, options?: KeyPressOpti
 			await page.keyboard.down(modifier);
 			pressed.push(modifier);
 		}
-		// puppeteer marks `commands` @deprecated ("automatically handled"), but nothing in
-		// it names the macOS editing commands, and it still forwards the field to
-		// Input.dispatchKeyEvent. The darwin tests in browser-interactions.test.ts are the
-		// canary if a puppeteer upgrade drops it; Linux CI never sends a command.
+		// `commands` is @deprecated in puppeteer but still forwarded to Input.dispatchKeyEvent,
+		// and puppeteer never adds the macOS editing commands itself.
 		await page.keyboard.press(key, command ? { ...options, commands: [command] } : options);
 	} finally {
 		for (const modifier of pressed.reverse()) await page.keyboard.up(modifier);

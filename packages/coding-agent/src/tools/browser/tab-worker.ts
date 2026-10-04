@@ -682,7 +682,6 @@ export function toActionableHandle(
 				await focus();
 				await pressKey(enriched.frame.page(), key, options);
 			};
-			// Erased to the shared raw-method shape, like `methods` above.
 			interactive.press = press as RawHandleMethod;
 		}
 		originals = { interactive, type: enriched.type.bind(enriched) };
