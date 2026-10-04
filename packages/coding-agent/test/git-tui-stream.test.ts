@@ -116,6 +116,25 @@ describe("git TUI streamed document", () => {
 		});
 	});
 
+	test("applies a later hunk without staging an earlier hunk", async () => {
+		await withReviewRepo(async repo => {
+			const filePath = path.join(repo, "seed.txt");
+			const original = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
+			const expected = original.replace("line 40\n", "changed 40\n");
+			const modified = expected.replace("line 5\n", "changed 5\n");
+			await Bun.write(filePath, original);
+			await $`git add seed.txt`.cwd(repo).quiet();
+			await $`git commit -m lines`.cwd(repo).quiet();
+			await Bun.write(filePath, modified);
+
+			const doc = buildDiffDocument(original, modified, "seed.txt");
+			expect(doc.hunks).toHaveLength(2);
+			await new GitModel(repo).applyPatch(doc.hunks[1].patch, { cached: true });
+			expect(await $`git show :seed.txt`.cwd(repo).quiet().text()).toBe(expected);
+			expect(await Bun.file(filePath).text()).toBe(modified);
+		});
+	});
+
 	test.each([
 		["replacement", "a\nb\nc\n", "a\nx\nc\n"],
 		["insert and delete", "a\nb\nc\nd\n", "a\nnew\nb\nd\n"],

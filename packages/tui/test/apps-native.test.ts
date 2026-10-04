@@ -172,7 +172,7 @@ describe("git native", () => {
 		await initTheme();
 		const h = await TspHarness.start(undefined, { cols: 150, rows: 24 });
 		const original = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
-		const changed = original.replace("line 5\nline 6", "changed 5\nchanged 6");
+		const changed = original.replace("line 5\nline 6", "changed 5\nchanged 6").replace("line 40\n", "changed 40\n");
 		const patches: string[] = [];
 		const loaded = Promise.withResolvers<void>();
 		const closed = showGitOverlay(h.tui, {
@@ -233,6 +233,14 @@ describe("git native", () => {
 		expect(patches).toHaveLength(1);
 		expect(patches[0]).toContain("+changed 5");
 		expect(patches[0]).toContain("+changed 6");
+	});
+
+	it("stages the cursor's later hunk rather than the previously selected hunk", async () => {
+		const patches = await patchesAfter(["\t", "4", "G", "k", " "]);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toContain("+changed 40");
+		expect(patches[0]).not.toContain("+changed 5");
+		expect(patches[0]).not.toContain("+changed 6");
 	});
 });
 
