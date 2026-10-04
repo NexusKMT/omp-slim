@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
-import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
+import { createMockModel, type MockResponse, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { resolveThresholdTokens, shouldCompact } from "@oh-my-pi/pi-agent-core/compaction";
@@ -1164,11 +1164,16 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		session: AgentSession;
 		/** System blocks of each provider request, in order. */
 		requests: string[][];
+		/** Tool names and descriptions of each provider request, in order. */
+		toolRequests: string[];
 	}
 
 	interface ExtensionHooks {
 		sessionStart?: () => void;
-		beforeAgentStart?: (session: AgentSession) => Promise<void>;
+		/** A `before_agent_start` handler; a returned prompt replaces the turn's system prompt. */
+		beforeAgentStart?: (session: AgentSession, systemPrompt: string[]) => Promise<string[] | undefined>;
+		/** Runs right before each model call reads the system prompt. */
+		beforeModelCall?: (session: AgentSession) => Promise<void>;
 	}
 
 	/**
@@ -1183,7 +1188,17 @@ describe("cold revival replays the system prompt the last request sent", () => {
 	): RecordingSession {
 		const mock = createMockModel({ responses, handler: { content: ["done"] } });
 		const requests: string[][] = [];
-		const tools = [createTool("read"), createTool("yield")];
+		const toolRequests: string[] = [];
+		const owner: { session?: AgentSession } = {};
+		// Like the real yield tool, its wire definition carries the active work-pool items.
+		const yieldTool: AgentTool = {
+			...createTool("yield"),
+			get description() {
+				const items = owner.session?.getWorkPoolYieldItems() ?? [];
+				return `yield tool${items.map(item => ` ${item.id}#${item.index}`).join("")}`;
+			},
+		};
+		const tools = [createTool("read"), yieldTool];
 		const agent = new Agent({
 			getApiKey: () => "test-key",
 			initialState: {
@@ -1206,6 +1221,7 @@ describe("cold revival replays the system prompt the last request sent", () => {
 			convertToLlm,
 			streamFn: (model, context, streamOptions) => {
 				requests.push([...(context.systemPrompt ?? [])]);
+				toolRequests.push(JSON.stringify(context.tools?.map(tool => [tool.name, tool.description])));
 				return mock.stream(model, context, streamOptions);
 			},
 		});
@@ -1221,18 +1237,21 @@ describe("cold revival replays the system prompt the last request sent", () => {
 				emit: async (event: { type: string }) => {
 					if (event.type === "session_start") hooks.sessionStart?.();
 				},
-				emitBeforeAgentStart: async () => {
-					await hooks.beforeAgentStart?.(session);
-					return undefined;
+				emitBeforeAgentStart: async (_prompt: string, _images: unknown, systemPrompt: string[]) => {
+					const override = await hooks.beforeAgentStart?.(session, systemPrompt);
+					return override ? { systemPrompt: override } : undefined;
 				},
 			} as unknown as ExtensionRunner,
 			rebuildSystemPrompt: async toolNames => ({ systemPrompt: buildPrompt(toolNames) }),
 		});
+		owner.session = session;
+		const { beforeModelCall } = hooks;
+		if (beforeModelCall) agent.addBeforeModelCallHook(() => beforeModelCall(session));
 		sessions.push(session);
-		return { session, requests };
+		return { session, requests, toolRequests };
 	}
 
-	const spawnResponses = (): MockResponseSource => [
+	const spawnResponses = (): MockResponse[] => [
 		{ content: [{ type: "toolCall", name: "yield", arguments: {} }] },
 		{ content: ["done"] },
 	];
@@ -1275,7 +1294,7 @@ describe("cold revival replays the system prompt the last request sent", () => {
 	}
 
 	/** Cold-revives the parked transcript the way the Agent Hub does and returns the follow-up's request. */
-	async function reviveAndFollowUp(cwd: string, hooks?: ExtensionHooks): Promise<string[]> {
+	async function reviveAndFollowUp(cwd: string, hooks?: ExtensionHooks): Promise<{ system: string[]; tools: string }> {
 		let revived: RecordingSession | undefined;
 		vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
 			const build = options!.systemPrompt;
@@ -1292,18 +1311,23 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		await session.prompt("follow-up");
 		await session.waitForIdle();
 		if (!revived) throw new Error("Expected the revive to create a session");
-		return revived.requests[0]!;
+		return { system: revived.requests[0]!, tools: revived.toolRequests[0]! };
 	}
 
 	it("replays the blocks after a first-turn before_agent_start tool change", async () => {
 		const cwd = makeTempDir("@pi-revive-first-turn-tools-");
 		const buildPrompt = (toolNames: string[]) => ["base", "rules", `tools: ${toolNames.join(",")}`];
-		const dropRead = { beforeAgentStart: (session: AgentSession) => session.setActiveToolsByName(["yield"]) };
+		const dropRead = {
+			beforeAgentStart: async (session: AgentSession) => {
+				await session.setActiveToolsByName(["yield"]);
+				return undefined;
+			},
+		};
 		const spawned = await spawn(cwd, buildPrompt, spawnResponses(), dropRead);
 		expect(spawned.requests[0]).toEqual(["base", "rules", "tools: yield"]);
 		await spawned.session.dispose();
 
-		expect(await reviveAndFollowUp(cwd, dropRead)).toEqual(spawned.requests.at(-1)!);
+		expect((await reviveAndFollowUp(cwd, dropRead)).system).toEqual(spawned.requests.at(-1)!);
 	});
 
 	it("replays the blocks after a later work-pool rebuild in the live session", async () => {
@@ -1319,7 +1343,62 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		expect(spawned.requests.at(-1)).toEqual(["base", "batch 2", "tools: read,yield"]);
 		await spawned.session.dispose();
 
-		expect(await reviveAndFollowUp(cwd)).toEqual(spawned.requests.at(-1)!);
+		expect((await reviveAndFollowUp(cwd)).system).toEqual(spawned.requests.at(-1)!);
+	});
+
+	it("replays the blocks after a warm revive rebuilds the base and runs a request", async () => {
+		const cwd = makeTempDir("@pi-revive-warm-rebuild-");
+		let batch = 1;
+		const buildPrompt = (toolNames: string[]) => ["base", `batch ${batch}`, `tools: ${toolNames.join(",")}`];
+		await spawn(cwd, buildPrompt, spawnResponses());
+		const lifecycle = AgentLifecycleManager.global();
+		await lifecycle.park("prompt-blocks");
+		let warm: RecordingSession | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
+			warm = createRecordingSession(options!.sessionManager!, buildPrompt, [{ content: ["next"] }]);
+			return { session: warm.session } as CreateAgentSessionResult;
+		});
+		const live = await lifecycle.ensureLive("prompt-blocks");
+		if (!warm || live !== warm.session) throw new Error("Expected a warm revive through the lifecycle");
+		// The next work-pool batch installs its yield contract, which rebuilds the base prompt.
+		batch = 2;
+		await live.setWorkPoolYieldItems([{ id: "item", index: 0 }]);
+		await live.prompt("next batch");
+		await live.waitForIdle();
+		expect(warm.requests.at(-1)).toEqual(["base", "batch 2", "tools: read,yield"]);
+		expect(warm.toolRequests.at(-1)).toContain("yield tool item#0");
+		await lifecycle.park("prompt-blocks");
+
+		const revived = await reviveAndFollowUp(cwd);
+		expect(revived.system).toEqual(warm.requests.at(-1)!);
+		expect(revived.tools).toBe(warm.toolRequests.at(-1)!);
+	});
+
+	it("replays the base a before_agent_start override was built from when the base rebuilds in the request window", async () => {
+		const cwd = makeTempDir("@pi-revive-override-window-");
+		let batch = 1;
+		const buildPrompt = (toolNames: string[]) => ["base", `batch ${batch}`, `tools: ${toolNames.join(",")}`];
+		const appendPolicy = async (_session: AgentSession, systemPrompt: string[]) => [...systemPrompt, "policy"];
+		let rebuildInWindow = false;
+		const spawned = await spawn(cwd, buildPrompt, [...spawnResponses(), { content: ["next"] }], {
+			beforeAgentStart: appendPolicy,
+			// A rebuild between the hook and the request leaves the turn's override on the wire.
+			beforeModelCall: async session => {
+				if (!rebuildInWindow) return;
+				rebuildInWindow = false;
+				batch = 2;
+				await session.refreshBaseSystemPrompt();
+			},
+		});
+		rebuildInWindow = true;
+		await spawned.session.prompt("next");
+		await spawned.session.waitForIdle();
+		expect(spawned.requests.at(-1)).toEqual(["base", "batch 1", "tools: read,yield", "policy"]);
+		await spawned.session.dispose();
+
+		expect((await reviveAndFollowUp(cwd, { beforeAgentStart: appendPolicy })).system).toEqual(
+			spawned.requests.at(-1)!,
+		);
 	});
 
 	it("keeps a finished child in the Agent Hub when startup extensions append many entries", async () => {

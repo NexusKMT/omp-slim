@@ -106,7 +106,6 @@ function createHarness(options?: { hangPrompt?: boolean; asyncJobManager?: Async
 	const session = {
 		state: { messages },
 		agent: { state: { systemPrompt: ["test"] } },
-		baseSystemPrompt: ["test"],
 		model: undefined,
 		extensionRunner: undefined,
 		sessionManager: { appendSessionInit: () => {} },

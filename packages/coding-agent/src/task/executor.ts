@@ -70,7 +70,7 @@ import { type ArtifactManager, writeArtifact } from "../session/artifacts";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "../session/async-job-delivery";
 import type { AuthStorage } from "../session/auth-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE } from "../session/messages";
-import { hasConversationalHistory, type PersistedSessionInit, SessionManager } from "../session/session-manager";
+import { hasConversationalHistory, SessionManager } from "../session/session-manager";
 import { truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import {
 	type ConfiguredThinkingLevel,
@@ -2793,23 +2793,6 @@ async function finalizeRunResult(args: FinalizeRunArgs): Promise<SingleResult> {
 	};
 }
 
-/**
- * Re-records `session_init` whenever a request ran on a different base system prompt than the
- * one last persisted (a tool change in `before_agent_start`, a work-pool rebuild). Signed thinking
- * is bound to the blocks each request sent, so cold revival must replay the latest of them. The
- * per-turn `before_agent_start` override is not stored: the revived turn re-runs it on this base.
- */
-function persistSessionInitPromptUpdates(session: AgentSession, init: PersistedSessionInit): void {
-	let persisted = init.systemPrompt;
-	session.subscribe(event => {
-		if (event.type !== "message_end" || event.message.role !== "assistant") return;
-		const base = session.baseSystemPrompt;
-		if (base.length === persisted.length && base.every((block, index) => block === persisted[index])) return;
-		persisted = base;
-		session.sessionManager.appendSessionInit({ ...init, systemPrompt: base });
-	});
-}
-
 /** Inputs for {@link attachIrcWakeTurnMonitor}. */
 export interface IrcWakeTurnMonitorOptions {
 	/** Registry id of the kept-alive subagent whose autonomous IRC wake turns are monitored. */
@@ -4377,8 +4360,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					? enabledSubagentTools.filter(name => name !== "write")
 					: enabledSubagentTools;
 
-			const sessionInit: PersistedSessionInit = {
-				systemPrompt: session.baseSystemPrompt,
+			session.sessionManager.appendSessionInit({
+				// Blocks as sent; the session appends a newer session_init whenever a model call's base changes.
+				systemPrompt: session.agent.state.systemPrompt,
 				task,
 				tools: persistedSubagentTools,
 				agent: agent.name,
@@ -4399,9 +4383,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				// stamp the contract so cold revival leaves them transcript-only
 				// even when the workspace was retained for recovery.
 				isolated: worktree !== undefined || undefined,
-			};
-			session.sessionManager.appendSessionInit(sessionInit);
-			persistSessionInitPromptUpdates(session, sessionInit);
+			});
 
 			abortSignal.addEventListener(
 				"abort",
