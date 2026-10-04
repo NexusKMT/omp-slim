@@ -256,7 +256,9 @@ const FALLBACK_IMAGE_TOKENIZATION: Record<ApiFamily, ImageTokenization> = {
  * so a Claude behind OpenRouter or Vertex is priced as Claude and Opus 4.6
  * under its 1,568-token cap; models without a rule fall back to their wire family.
  * OpenAI-family wires send `detail: "original"` (`high` would cap the frame
- * at 2,500 patches).
+ * at 2,500 patches). The square-frame price is a planning bound, not a
+ * dimension-exact estimate: shorter frames can price differently (standard-tier
+ * Claude bills a 1568×1488 frame 1,558 vs the square's 1,521).
  */
 function frameBilling(
 	target: ShapeTarget | undefined,

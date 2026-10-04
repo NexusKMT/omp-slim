@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed snapcompact frame token estimates following the gateway instead of the model reading the frames. Claude through OpenRouter or Vertex was priced as GPT or Gemini, Claude 4.6 and older (Opus 4.6, Sonnet 4.6, Haiku 4.5) at about twice what they bill (their 1,568-token cap was ignored), and Opus 4.7+ about 5% high. Estimates now come from the model's catalog image rule and land within 0.3% of the billed input on Codex, Opus 5.5 and Opus 4.6 ([#14286](https://github.com/can1357/oh-my-pi/pull/14286) by [@will-bogusz](https://github.com/will-bogusz)).
+- Fixed snapcompact frame token estimates following the gateway instead of the model reading the frames, which mispriced Claude behind OpenRouter or Vertex and Claude 4.6 and older ([#14286](https://github.com/can1357/oh-my-pi/pull/14286) by [@will-bogusz](https://github.com/will-bogusz)).
 
 ## [18.6.2] - 2026-10-04
 
