@@ -159,6 +159,7 @@ import {
 	diffAriaSnapshot,
 } from "./snapshot-plus";
 import {
+	ClickRefusedError,
 	clickAt,
 	clickElement,
 	clickQueryHandlerText,
@@ -168,7 +169,6 @@ import {
 	type InteractionHandle,
 	keyDown,
 	keyUp,
-	lastClickRefusal,
 	mouseDown,
 	mouseMove,
 	mouseUp,
@@ -567,13 +567,23 @@ async function runGuardedHandleAction<T>(
 	} catch (error) {
 		if (!signal.aborted) throw error;
 		state.invalidatedBy = label;
-		void pending.catch(() => undefined);
+		let actionError: unknown;
 		await withTimeout(
-			Promise.all([handle.dispose().catch(() => undefined), invalidate?.().catch(() => undefined)]),
+			Promise.all([
+				pending.then(
+					() => undefined,
+					(err: unknown) => {
+						actionError = err;
+					},
+				),
+				handle.dispose().catch(() => undefined),
+				invalidate?.().catch(() => undefined),
+			]),
 			HANDLE_ACTION_INVALIDATION_TIMEOUT_MS,
 			`Timed out invalidating ${label}`,
 		).catch(() => undefined);
-		throw error;
+		// A click still refused when the deadline hit carries the reason on its own abort error.
+		throw actionError instanceof ClickRefusedError ? actionError : error;
 	}
 }
 
@@ -1684,12 +1694,12 @@ export class WorkerCore {
 		// Fired when the watchdog wins the race (tears down the in-flight action) and in
 		// the finally (stops the watchdog's polling once the op settles either way).
 		const earlyAc = new AbortController();
-		const fnSignal = watchdog ? AbortSignal.any([opSignal, earlyAc.signal]) : opSignal;
 		try {
-			if (!watchdog) return await fn(fnSignal);
+			if (!watchdog) return await fn(opSignal);
+			const racedSignal = AbortSignal.any([opSignal, earlyAc.signal]);
 			return await Promise.race([
-				fn(fnSignal),
-				this.#zeroMatchWatchdog(watchdog.selector, label, watchdog.afterMs, fnSignal),
+				fn(racedSignal),
+				this.#zeroMatchWatchdog(watchdog.selector, label, watchdog.afterMs, racedSignal),
 			]);
 		} catch (err) {
 			// Fail fast with a named, attributable error instead of the opaque whole-cell timeout:
@@ -1701,7 +1711,7 @@ export class WorkerCore {
 				!cellSignal.aborted &&
 				(opTimeout?.aborted || (err instanceof Error && err.name === "TimeoutError"))
 			) {
-				const refusal = lastClickRefusal(fnSignal);
+				const refusal = err instanceof ClickRefusedError ? err.refusal : undefined;
 				const count = selector ? await this.#selectorMatchCount(selector) : undefined;
 				const hint = refusal
 					? `; the element never became clickable (last check: ${refusal}${count === undefined ? "" : `; selector matches ${count} element(s)`})`

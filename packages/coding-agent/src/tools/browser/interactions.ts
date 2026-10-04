@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { ElementHandle, KeyInput, MouseButton, Page } from "puppeteer-core";
-import { throwIfAborted } from "../tool-errors";
+import { ToolAbortError, throwIfAborted } from "../tool-errors";
 
 /** Options accepted by coordinate-based mouse clicks. */
 export interface ClickAtOptions {
@@ -120,15 +120,14 @@ interface PageGlobals {
 	DragEvent: new (type: string, options: { bubbles: boolean; cancelable: boolean; dataTransfer: unknown }) => unknown;
 }
 
-/**
- * Why the latest {@link actionableClickPoint} wait on a signal was still refusing its element,
- * so the op that times out on that signal can say why the click never landed.
- */
-const clickRefusals = new WeakMap<AbortSignal, string>();
-
-/** The reason the click waiting on `signal` was last refused, if it never became clickable. */
-export function lastClickRefusal(signal: AbortSignal): string | undefined {
-	return clickRefusals.get(signal);
+/** A click aborted while its element was still refused; `refusal` names the last failed check. */
+export class ClickRefusedError extends ToolAbortError {
+	constructor(
+		readonly refusal: string,
+		options?: ErrorOptions,
+	) {
+		super(undefined, options);
+	}
 }
 
 function requireFiniteNumber(value: number, label: string): void {
@@ -198,36 +197,32 @@ async function actionableClickPoint(handle: ElementHandle, label: string, signal
 		}),
 	);
 	let previous = await untilAborted(signal, () => handle.boundingBox());
-	while (true) {
-		throwIfAborted(signal);
-		await untilAborted(signal, () => Bun.sleep(16));
-		const current = await untilAborted(signal, () => handle.boundingBox());
-		const stable =
-			previous !== null &&
-			current !== null &&
-			Math.abs(previous.x - current.x) < 0.5 &&
-			Math.abs(previous.y - current.y) < 0.5 &&
-			Math.abs(previous.width - current.width) < 0.5 &&
-			Math.abs(previous.height - current.height) < 0.5;
-		const result = await isClickActionable(handle, signal);
-		// ElementHandle.boundingBox() is relative to the main frame; elementFromPoint() above is frame-local.
-		if (stable && result.ok && current) {
-			if (signal) clickRefusals.delete(signal);
-			return { x: current.x + result.x, y: current.y + result.y };
+	let refusal: string | undefined;
+	try {
+		while (true) {
+			throwIfAborted(signal);
+			await untilAborted(signal, () => Bun.sleep(16));
+			const current = await untilAborted(signal, () => handle.boundingBox());
+			const stable =
+				previous !== null &&
+				current !== null &&
+				Math.abs(previous.x - current.x) < 0.5 &&
+				Math.abs(previous.y - current.y) < 0.5 &&
+				Math.abs(previous.width - current.width) < 0.5 &&
+				Math.abs(previous.height - current.height) < 0.5;
+			const result = await isClickActionable(handle, signal);
+			// ElementHandle.boundingBox() is relative to the main frame; elementFromPoint() above is frame-local.
+			if (stable && result.ok && current) return { x: current.x + result.x, y: current.y + result.y };
+			if (stable && !result.ok && result.coveredBy) {
+				throw new ToolError(`${label} blocked: covered by ${result.coveredBy}`);
+			}
+			refusal = result.ok ? "still moving" : result.coveredBy ? `covered by ${result.coveredBy}` : result.reason;
+			previous = current;
+			await untilAborted(signal, () => Bun.sleep(34));
 		}
-		if (stable && !result.ok && result.coveredBy) {
-			throw new ToolError(`${label} blocked: covered by ${result.coveredBy}`);
-		}
-		if (signal) {
-			const refusal = result.ok
-				? "still moving"
-				: result.coveredBy
-					? `covered by ${result.coveredBy}`
-					: result.reason;
-			clickRefusals.set(signal, refusal);
-		}
-		previous = current;
-		await untilAborted(signal, () => Bun.sleep(34));
+	} catch (error) {
+		if (signal?.aborted && refusal !== undefined) throw new ClickRefusedError(refusal, { cause: signal.reason });
+		throw error;
 	}
 }
 
