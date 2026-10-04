@@ -88,19 +88,11 @@ class "openai" {
 	}
 }
 
-// Image billing per model line, from OpenAI's vision guide (multipliers,
-// per-model `detail` sizing, tile rates):
+// GPT-5.2+ bills images in 32px patches × 1.2, sized per `detail` level:
 // https://developers.openai.com/api/docs/guides/images-vision#calculating-costs
-// GPT-5.2+ covers images in 32px patches x 1.2. Measured on nine Codex models
-// (gpt-5.5 through gpt-6.1-sol and daybreak) with a 1568px frame
-// (+2,877..2,885 input tokens, formula 2,882) and a 1932px frame
-// (+4,390..4,396, formula 4,392). GPT-5/5.1, GPT-4o/4.1 and o1/o3 bill legacy
-// 512px tiles; the small SKUs carry their own patch multipliers. Pre-5.2
-// Codex SKUs are not in the guide, so they keep no rule (callers fall back to
-// their own estimate).
+// Older lines carry no rule; callers fall back to their own estimate.
 class "openai" {
-	// gpt-5.6 sizing; the guide does not list gpt-6 sol/luna or gpt-6.1, which
-	// bill like gpt-5.6 and astra at every measured size.
+	// gpt-5.6 sizing, shared by later lines.
 	revision ">=5.6" {
 		image-tokenization {
 			regime "openai-patch"
@@ -176,33 +168,7 @@ class "openai" {
 			}
 		}
 	}
-	family "gpt" {
-		revision ">=5 <5.2" {
-			image-tokenization {
-				regime "openai-tile"
-				base-tokens 70
-				tile-tokens 140
-			}
-		}
-		revision "=4.1" {
-			image-tokenization {
-				regime "openai-tile"
-				base-tokens 85
-				tile-tokens 170
-			}
-		}
-	}
-	family "o-series" {
-		image-tokenization {
-			regime "openai-tile"
-			base-tokens 75
-			tile-tokens 150
-		}
-	}
-	// residue: astra's limits differ from the rest of its revision, the
-	// mini/nano SKUs share their generation's revision but not its image rule,
-	// and gpt-4o carries no parsed revision. The guide's sizing table covers
-	// gpt-4.1-mini only; the other small SKUs are assumed to size like it.
+	// residue: astra's limits differ from the rest of its revision.
 	models "*gpt-6-astra*" {
 		image-tokenization {
 			regime "openai-patch"
@@ -218,115 +184,6 @@ class "openai" {
 			original {
 				max-edge 65535
 			}
-		}
-	}
-	models "*gpt-5-mini*" {
-		image-tokenization {
-			regime "openai-patch"
-			multiplier 1.2
-			auto "high"
-			low {
-				max-edge 2048
-				patch-budget 6144
-			}
-			high {
-				max-edge 2048
-				patch-budget 6144
-			}
-			original {
-				max-edge 2048
-				patch-budget 6144
-			}
-		}
-	}
-	models "*gpt-5-nano*" {
-		image-tokenization {
-			regime "openai-patch"
-			multiplier 1.5
-			auto "high"
-			low {
-				max-edge 2048
-				patch-budget 6144
-			}
-			high {
-				max-edge 2048
-				patch-budget 6144
-			}
-			original {
-				max-edge 2048
-				patch-budget 6144
-			}
-		}
-	}
-	models "*gpt-4.1-mini*" {
-		image-tokenization {
-			regime "openai-patch"
-			multiplier 1.62
-			auto "high"
-			low {
-				max-edge 2048
-				patch-budget 6144
-			}
-			high {
-				max-edge 2048
-				patch-budget 6144
-			}
-			original {
-				max-edge 2048
-				patch-budget 6144
-			}
-		}
-	}
-	models "*gpt-4.1-nano*" {
-		image-tokenization {
-			regime "openai-patch"
-			multiplier 2.46
-			auto "high"
-			low {
-				max-edge 2048
-				patch-budget 6144
-			}
-			high {
-				max-edge 2048
-				patch-budget 6144
-			}
-			original {
-				max-edge 2048
-				patch-budget 6144
-			}
-		}
-	}
-	models "*o4-mini*" {
-		image-tokenization {
-			regime "openai-patch"
-			multiplier 1.72
-			auto "high"
-			low {
-				max-edge 2048
-				patch-budget 6144
-			}
-			high {
-				max-edge 2048
-				patch-budget 6144
-			}
-			original {
-				max-edge 2048
-				patch-budget 6144
-			}
-		}
-	}
-	models "*gpt-4o*" {
-		image-tokenization {
-			regime "openai-tile"
-			base-tokens 85
-			tile-tokens 170
-		}
-	}
-	models "*gpt-4o-mini*" priority=1 {
-		image-tokenization {
-			regime "openai-tile"
-			base-tokens 2833
-			tile-tokens 5667
 		}
 	}
 }

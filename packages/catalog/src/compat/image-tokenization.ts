@@ -1,13 +1,6 @@
 /**
- * How a model line turns an input image into billed input tokens. Authored on
- * the `image-tokenization` catalog axis in `rules/classes/*.kdl`, so the
- * pricing follows the model's lineage on every host: Claude through
- * OpenRouter, Bedrock or Vertex is billed by Anthropic's rule, not by the
- * wire API carrying it.
- *
- * Resolved through the cascade on demand (like `delegation-bias`) rather than
- * baked onto `Model`, so `{ api, id }` targets without a built model resolve
- * too.
+ * Billed input tokens per image, from the model line's `image-tokenization`
+ * rule in `rules/classes/*.kdl`: the lineage's rule applies on every host.
  */
 import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import { classifyModel } from "../identity";
@@ -41,24 +34,15 @@ export interface OpenAiPatchTokenization {
 	auto: "high" | "original";
 }
 
-/**
- * One model line's image billing rule. The regime selects the provider's
- * formula; the numbers are the model's own parameters from the vendor docs.
- */
+/** One model line's image billing rule: the vendor formula and its per-model numbers. */
 export type ImageTokenization =
 	| OpenAiPatchTokenization
-	/** OpenAI legacy tiles: fit 2048px, short side to 768px, `base` + `tile` per 512px square. */
-	| { regime: "openai-tile"; baseTokens: number; tileTokens: number }
 	/** Anthropic 28px patches, resized to fit a padded-edge limit and a visual-token budget. */
 	| { regime: "anthropic-patch"; maxEdge: number; maxTokens: number }
 	/** A fixed per-image budget regardless of pixels (Gemini 3 `media_resolution`). */
 	| { regime: "fixed"; tokens: number };
 
-/**
- * GPT-5.5's image billing: the estimate for images whose reading model is
- * unknown or has no catalog rule. Current GPT models size `auto` like
- * `original`, so it takes the larger budget rather than risk undercounting.
- */
+/** GPT-5.5's image billing, for readers without a catalog rule; `auto` sizes like `original`. */
 export const DEFAULT_OPENAI_PATCH_TOKENIZATION: OpenAiPatchTokenization = {
 	regime: "openai-patch",
 	multiplier: 1.2,
@@ -68,55 +52,11 @@ export const DEFAULT_OPENAI_PATCH_TOKENIZATION: OpenAiPatchTokenization = {
 	auto: "original",
 };
 
-function positive(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function parsePatchSizing(value: unknown): PatchSizing | undefined {
-	if (!isRecord(value)) return undefined;
-	const maxEdge = positive(value.maxEdge);
-	if (maxEdge === undefined) return undefined;
-	if (value.patchBudget === undefined) return { maxEdge };
-	const patchBudget = positive(value.patchBudget);
-	return patchBudget === undefined ? undefined : { maxEdge, patchBudget };
-}
-
-/** Validate a resolved `image-tokenization` payload; malformed payloads resolve to undefined. */
-export function parseImageTokenization(payload: unknown): ImageTokenization | undefined {
-	if (!isRecord(payload)) return undefined;
-	switch (payload.regime) {
-		case "openai-patch": {
-			const multiplier = positive(payload.multiplier);
-			const low = parsePatchSizing(payload.low);
-			const high = parsePatchSizing(payload.high);
-			const original = parsePatchSizing(payload.original);
-			const auto = payload.auto;
-			if (multiplier === undefined || !low || !high || !original || (auto !== "high" && auto !== "original")) {
-				return undefined;
-			}
-			return { regime: "openai-patch", multiplier, low, high, original, auto };
-		}
-		case "openai-tile": {
-			const baseTokens = positive(payload.baseTokens);
-			const tileTokens = positive(payload.tileTokens);
-			return baseTokens === undefined || tileTokens === undefined
-				? undefined
-				: { regime: "openai-tile", baseTokens, tileTokens };
-		}
-		case "anthropic-patch": {
-			const maxEdge = positive(payload.maxEdge);
-			const maxTokens = positive(payload.maxTokens);
-			return maxEdge === undefined || maxTokens === undefined
-				? undefined
-				: { regime: "anthropic-patch", maxEdge, maxTokens };
-		}
-		case "fixed": {
-			const tokens = positive(payload.tokens);
-			return tokens === undefined ? undefined : { regime: "fixed", tokens };
-		}
-		default:
-			return undefined;
-	}
+function isImageTokenization(value: unknown): value is ImageTokenization {
+	return (
+		isRecord(value) &&
+		(value.regime === "openai-patch" || value.regime === "anthropic-patch" || value.regime === "fixed")
+	);
 }
 
 /** What reads the image: a built model, or any `{ id }` with optional host and identity. */
@@ -127,25 +67,20 @@ export interface ImageTokenizationTarget {
 	identity?: Pick<ModelIdentity, "class" | "family" | "revision">;
 }
 
-/**
- * The model's image billing rule, or undefined when no lineage rule covers it
- * (callers keep their own fallback). Targets without an `identity` are
- * classified from the id.
- */
+/** The model's image billing rule, or undefined when no lineage rule covers it. */
 export function resolveImageTokenization(target: ImageTokenizationTarget): ImageTokenization | undefined {
 	const provider = target.provider ?? "";
 	const identity = target.identity ?? classifyModel(provider, target.id, { lenient: true });
-	return parseImageTokenization(
-		resolveCascade({
-			provider,
-			api: target.api ?? "",
-			class: identity.class,
-			model: target.id,
-			reasoning: false,
-			...(identity.family !== undefined && { family: identity.family }),
-			...(identity.revision !== undefined && { revision: identity.revision }),
-		}).catalog.imageTokenization,
-	);
+	const rule = resolveCascade({
+		provider,
+		api: target.api ?? "",
+		class: identity.class,
+		model: target.id,
+		reasoning: false,
+		...(identity.family !== undefined && { family: identity.family }),
+		...(identity.revision !== undefined && { revision: identity.revision }),
+	}).catalog.imageTokenization;
+	return isImageTokenization(rule) ? rule : undefined;
 }
 
 /** Scale `size` down (never up) so its longest side is at most `maxEdge`. */
@@ -161,6 +96,7 @@ function fitLongEdge(size: ImageSize, maxEdge: number): ImageSize {
 
 const OPENAI_PATCH_PX = 32;
 
+/** <https://developers.openai.com/api/docs/guides/images-vision#patch-based-image-tokenization> */
 function openAiPatches(size: ImageSize, sizing: PatchSizing): number {
 	const { width, height } = fitLongEdge(size, sizing.maxEdge);
 	const patches = Math.ceil(width / OPENAI_PATCH_PX) * Math.ceil(height / OPENAI_PATCH_PX);
@@ -175,21 +111,6 @@ function openAiPatches(size: ImageSize, sizing: PatchSizing): number {
 	const resizedH = Math.floor(height * adjusted);
 	if (resizedW <= 0 || resizedH <= 0) return budget;
 	return Math.min(budget, Math.ceil(resizedW / OPENAI_PATCH_PX) * Math.ceil(resizedH / OPENAI_PATCH_PX));
-}
-
-const TILE_FIT_PX = 2048;
-const TILE_SHORT_SIDE_PX = 768;
-const TILE_PX = 512;
-
-function openAiTiles(size: ImageSize): number {
-	let { width, height } = fitLongEdge(size, TILE_FIT_PX);
-	const shortest = Math.min(width, height);
-	if (shortest > TILE_SHORT_SIDE_PX) {
-		const scale = TILE_SHORT_SIDE_PX / shortest;
-		width = width === shortest ? TILE_SHORT_SIDE_PX : Math.floor(width * scale);
-		height = height === shortest ? TILE_SHORT_SIDE_PX : Math.floor(height * scale);
-	}
-	return Math.ceil(width / TILE_PX) * Math.ceil(height / TILE_PX);
 }
 
 const ANTHROPIC_PATCH_PX = 28;
@@ -229,15 +150,7 @@ function anthropicTokens(size: ImageSize, maxEdge: number, maxTokens: number): n
 	return patches(lo, short(lo));
 }
 
-/**
- * Billed input tokens for one image of `size` under `rule`, sent with
- * `detail` (only OpenAI regimes read it). Follows the vendors' published
- * formulas:
- * - OpenAI patches: <https://developers.openai.com/api/docs/guides/images-vision#patch-based-image-tokenization>
- * - OpenAI tiles: <https://developers.openai.com/api/docs/guides/images-vision#tile-based-image-tokenization>
- * - Anthropic: ⌈w/28⌉·⌈h/28⌉ of the resized image:
- *   <https://platform.claude.com/docs/en/build-with-claude/vision-coordinates#how-claude-resizes-and-pads-images>
- */
+/** Billed input tokens for one image of `size` under `rule`; only `openai-patch` reads `detail`. */
 export function imageTokens(rule: ImageTokenization, size: ImageSize, detail?: ImageDetail): number {
 	switch (rule.regime) {
 		case "fixed":
@@ -246,8 +159,6 @@ export function imageTokens(rule: ImageTokenization, size: ImageSize, detail?: I
 			const level = detail === "low" || detail === "high" || detail === "original" ? detail : rule.auto;
 			return Math.ceil(openAiPatches(size, rule[level]) * rule.multiplier);
 		}
-		case "openai-tile":
-			return detail === "low" ? rule.baseTokens : rule.baseTokens + openAiTiles(size) * rule.tileTokens;
 		case "anthropic-patch":
 			return anthropicTokens(size, rule.maxEdge, rule.maxTokens);
 	}

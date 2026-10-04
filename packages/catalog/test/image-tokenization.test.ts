@@ -4,7 +4,6 @@ import {
 	DEFAULT_OPENAI_PATCH_TOKENIZATION,
 	type ImageTokenization,
 	imageTokens,
-	parseImageTokenization,
 	resolveImageTokenization,
 } from "@oh-my-pi/pi-catalog/compat/image-tokenization";
 
@@ -64,7 +63,7 @@ describe("resolveImageTokenization", () => {
 		).toEqual(HIRES);
 	});
 
-	it("prices every current Codex model with 32px patches × 1.2 and legacy GPT lines by tiles", () => {
+	it("prices every current Codex model with 32px patches × 1.2", () => {
 		for (const id of [
 			"gpt-6-astra",
 			"gpt-6.1-sol",
@@ -75,22 +74,8 @@ describe("resolveImageTokenization", () => {
 		]) {
 			const rule = ruleFor("openai-codex", id);
 			expect(rule).toMatchObject({ regime: "openai-patch", multiplier: 1.2 });
-			// Measured +2,877..2,885 per 1568px frame on all nine Codex models.
 			expect(imageTokens(rule, { width: 1568, height: 1562 }, "original")).toBe(2882);
 		}
-		expect(ruleFor("openai", "gpt-5.1")).toEqual({ regime: "openai-tile", baseTokens: 70, tileTokens: 140 });
-		expect(ruleFor("openai", "gpt-4o")).toEqual({ regime: "openai-tile", baseTokens: 85, tileTokens: 170 });
-		expect(ruleFor("openrouter", "openai/gpt-4o-mini")).toEqual({
-			regime: "openai-tile",
-			baseTokens: 2833,
-			tileTokens: 5667,
-		});
-		expect(ruleFor("openai", "o3")).toEqual({ regime: "openai-tile", baseTokens: 75, tileTokens: 150 });
-		// Small SKUs carry their own multipliers inside a tile-billed generation.
-		expect(ruleFor("openai", "gpt-5-mini")).toMatchObject({ regime: "openai-patch", multiplier: 1.2 });
-		expect(ruleFor("openai", "gpt-5-nano")).toMatchObject({ regime: "openai-patch", multiplier: 1.5 });
-		expect(ruleFor("openai", "gpt-4.1-mini")).toMatchObject({ regime: "openai-patch", multiplier: 1.62 });
-		expect(ruleFor("openai", "o4-mini")).toMatchObject({ regime: "openai-patch", multiplier: 1.72 });
 	});
 
 	it("sizes each detail level the way the guide lists for that model", () => {
@@ -102,12 +87,10 @@ describe("resolveImageTokenization", () => {
 		expect(imageTokens(ruleFor("openai", "gpt-5.5"), { width: 4096, height: 4096 }, "original")).toBe(12_000);
 		// gpt-5.6 `high` fits 2048px first.
 		expect(imageTokens(ruleFor("openai", "gpt-5.6-sol"), { width: 4096, height: 512 }, "high")).toBe(615);
-		// gpt-5.4 sizes `auto` like `high` (2,500 patches); measured `high` at 1932px: +2,938..2,942.
+		// gpt-5.4 sizes `auto` like `high` (2,500 patches).
 		const gpt54 = ruleFor("openai", "gpt-5.4-mini");
 		expect(imageTokens(gpt54, { width: 1932, height: 1920 })).toBe(2940);
 		expect(imageTokens(gpt54, { width: 1932, height: 1920 }, "original")).toBe(4392);
-		// gpt-4.1-mini: one 2048px / 6,144-patch sizing at every level, `low` included.
-		expect(imageTokens(ruleFor("openai", "gpt-4.1-mini"), { width: 1024, height: 1024 }, "low")).toBe(1659);
 	});
 
 	it("bills Gemini 3 a fixed budget and leaves unruled lines to the caller", () => {
@@ -117,8 +100,9 @@ describe("resolveImageTokenization", () => {
 		});
 		expect(resolveImageTokenization({ provider: "google", id: "gemini-2.5-pro" })).toBeUndefined();
 		expect(resolveImageTokenization({ provider: "openrouter", id: "moonshotai/kimi-k2.6" })).toBeUndefined();
-		// Pre-5.2 Codex SKUs are not in OpenAI's tables.
-		expect(resolveImageTokenization({ provider: "openai", id: "gpt-5.1-codex-max" })).toBeUndefined();
+		for (const id of ["gpt-5.1-codex-max", "gpt-5.1", "gpt-5-mini", "gpt-4.1", "gpt-4o", "o3"]) {
+			expect(resolveImageTokenization({ provider: "openai", id })).toBeUndefined();
+		}
 	});
 
 	it("uses a built model's identity", () => {
@@ -141,30 +125,22 @@ describe("resolveImageTokenization", () => {
 
 describe("imageTokens", () => {
 	it("matches the per-frame input-token deltas measured on live requests", () => {
-		// Nine Codex models, detail original/auto: +2,877..2,885 at 1568px, +4,390..4,396 at 1932px.
 		expect(imageTokens(GPT_PATCH, { width: 1568, height: 1562 }, "original")).toBe(2882);
 		expect(imageTokens(GPT_PATCH, { width: 1932, height: 1920 }, "original")).toBe(4392);
 		expect(imageTokens(GPT_PATCH, { width: 1932, height: 1920 }, "auto")).toBe(4392);
-		// detail high (2,500-patch budget): +2,938..2,942; low: +306.
+		// `high` resizes to a 2,500-patch budget; `low` fits 512px.
 		expect(imageTokens(GPT_PATCH, { width: 1932, height: 1920 }, "high")).toBe(2940);
 		expect(imageTokens(GPT_PATCH, { width: 1932, height: 1920 }, "low")).toBe(308);
-		// Opus 5.5 / Fable 5.1 / Opus 4.7: +4,765 for 1932×1920 (69·69 patches + request overhead).
 		expect(imageTokens(HIRES, { width: 1932, height: 1920 })).toBe(4761);
-		// Opus 4.6 (standard tier, 1,568 cap): +1,564 for 1932×1920 and +1,526
-		// per 1568px square — the API shrinks to the largest size under the cap.
+		// The standard tier shrinks to the largest size under its 1,568-token cap.
 		expect(imageTokens(STANDARD, { width: 1932, height: 1920 })).toBe(40 * 39);
 		expect(imageTokens(STANDARD, { width: 1568, height: 1568 })).toBe(39 * 39);
 	});
 
-	it("follows OpenAI's documented patch and tile examples", () => {
+	it("follows OpenAI's documented patch examples", () => {
 		expect(imageTokens(GPT_PATCH, { width: 1024, height: 1024 }, "high")).toBe(1229);
 		expect(imageTokens(GPT_PATCH, { width: 2048, height: 2048 }, "high")).toBe(3000);
 		expect(imageTokens(GPT_PATCH, { width: 4096, height: 512 }, "original")).toBe(2458);
-		const gpt4o: ImageTokenization = { regime: "openai-tile", baseTokens: 85, tileTokens: 170 };
-		// 2048×4096 → fit 1024×2048 → short side 768 → 768×1536 → 2×3 tiles.
-		expect(imageTokens(gpt4o, { width: 2048, height: 4096 }, "high")).toBe(85 + 6 * 170);
-		expect(imageTokens(gpt4o, { width: 1568, height: 1568 }, "original")).toBe(85 + 4 * 170);
-		expect(imageTokens(gpt4o, { width: 1568, height: 1568 }, "low")).toBe(85);
 	});
 
 	it("resizes Anthropic images like the reference implementation", () => {
@@ -179,19 +155,5 @@ describe("imageTokens", () => {
 		expect(imageTokens(STANDARD, { width: 3000, height: 2999 })).toBe(39 * 39);
 		expect(imageTokens(STANDARD, { width: 2999, height: 3000 })).toBe(39 * 39);
 		expect(imageTokens({ regime: "fixed", tokens: 1120 }, { width: 2048, height: 2048 })).toBe(1120);
-	});
-});
-
-describe("parseImageTokenization", () => {
-	it("rejects payloads missing a regime's numbers", () => {
-		expect(parseImageTokenization({ regime: "openai-patch", multiplier: 1.2 })).toBeUndefined();
-		expect(parseImageTokenization({ ...GPT_PATCH, high: { maxEdge: 2048, patchBudget: 0 } })).toBeUndefined();
-		expect(parseImageTokenization({ ...GPT_PATCH, auto: "low" })).toBeUndefined();
-		expect(parseImageTokenization({ ...GPT_PATCH })).toEqual(GPT_PATCH);
-		expect(parseImageTokenization({ regime: "openai-tile", baseTokens: 85 })).toBeUndefined();
-		expect(parseImageTokenization({ regime: "anthropic-patch", maxEdge: 2576, maxTokens: 0 })).toBeUndefined();
-		expect(parseImageTokenization({ regime: "unknown", tokens: 1 })).toBeUndefined();
-		expect(parseImageTokenization("fixed")).toBeUndefined();
-		expect(parseImageTokenization({ regime: "fixed", tokens: 1120 })).toEqual({ regime: "fixed", tokens: 1120 });
 	});
 });

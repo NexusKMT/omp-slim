@@ -238,10 +238,9 @@ function apiFamily(api?: Api): ApiFamily {
 }
 
 /**
- * Image billing for readers the catalog has no `image-tokenization` rule for,
- * by wire family: OpenAI 32px patches × 1.2 (GPT-5.5 sizing), Gemini's fixed 1,120-token
- * budget, and Anthropic's high-res rule (28px patches, 4,784 cap) — the
- * largest per-image bill — as the ceiling for everything else.
+ * Image billing for readers without a catalog `image-tokenization` rule, by
+ * wire family; Anthropic's high-res rule, the largest per-image bill, covers
+ * unknown APIs.
  */
 const FALLBACK_IMAGE_TOKENIZATION: Record<ApiFamily, ImageTokenization> = {
 	anthropic: { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 },
@@ -251,14 +250,11 @@ const FALLBACK_IMAGE_TOKENIZATION: Record<ApiFamily, ImageTokenization> = {
 };
 
 /**
- * Per-frame billing for a square frame of edge `frameSize` read by `target`.
- * The token estimate follows the model's catalog `image-tokenization` rule,
- * so a Claude behind OpenRouter or Vertex is priced as Claude and Opus 4.6
- * under its 1,568-token cap; models without a rule fall back to their wire family.
- * OpenAI-family wires send `detail: "original"` (`high` would cap the frame
- * at 2,500 patches). The square-frame price is a planning bound, not a
- * dimension-exact estimate: shorter frames can price differently (standard-tier
- * Claude bills a 1568×1488 frame 1,558 vs the square's 1,521).
+ * Per-frame billing for a square frame of edge `frameSize` read by `target`,
+ * from the model's catalog image rule or its wire family's fallback.
+ * OpenAI-family wires send `detail: "original"` (`high` caps the frame at
+ * 2,500 patches). The square price is a planning bound: shorter frames can
+ * bill differently.
  */
 function frameBilling(
 	target: ShapeTarget | undefined,

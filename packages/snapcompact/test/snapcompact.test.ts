@@ -385,8 +385,6 @@ describe("shape resolution", () => {
 	});
 
 	it("prices frames by the reading model's lineage, not the wire API", () => {
-		// Measured per-frame deltas (one billed request per frame count):
-		// Codex 1568px +2,877..2,885, Opus 5.5 1932px +4,765, Opus 4.6 +1,564.
 		const codex = snapcompact.resolveShape({ api: "openai-codex-responses", id: "gpt-6-astra" });
 		expect(codex.frameSize).toBe(1568);
 		expect(codex.frameTokenEstimate).toBe(2882);
