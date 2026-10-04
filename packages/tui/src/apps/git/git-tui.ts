@@ -15,7 +15,7 @@
  * `v` cycles the view (`1`–`4` pick one), `alt+↓`/`alt+↑` jump hunks and roll
  * into the adjacent file at the edges, `space` stages/unstages the focused
  * diff row (the focused hunk in hunk view), `s`/`u` stage/unstage
- * (hunk-aware), `x` discards a hunk, `delete` the
+ * (hunk-aware), `x` discards a hunk, `delete` discards the
  * whole file (press twice to confirm), `w` wraps, `b` cycles
  * whitespace handling (exact → ignore whitespace → ignore
  * formatting/import-only changes), `c` jumps to the commit form, `r`
