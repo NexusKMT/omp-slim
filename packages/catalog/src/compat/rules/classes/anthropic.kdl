@@ -1,5 +1,64 @@
 // Model-lineage compat for "anthropic"; regenerated from the frozen census using class taxonomy selectors.
 
+// Image billing is a lineage trait: ⌈w/28⌉·⌈h/28⌉ visual tokens on every host
+// (Claude API, Bedrock, Vertex, OpenRouter). Claude 4.7+ (and every
+// Fable/Mythos) reads high-res images: long edge up to 2576px, at most 4,784
+// tokens. Older lines fit 1568px and cap at 1,568 tokens, downscaling past it.
+// Measured with one 1932×1920 image: Opus 5.5 / Fable 5.1 / Opus 4.7 billed
+// +4,765 / +4,765 / +4,767 input tokens (formula 4,761); Opus 4.6 billed
+// +1,564 (shrunk under the cap to 40·39 = 1,560).
+// https://platform.claude.com/docs/en/build-with-claude/vision#evaluate-image-size
+// `<10` keeps separator-collapsed revisions (`claude-opus-45` is Opus 4.5) on
+// the standard tier.
+class "anthropic" {
+	image-tokenization {
+		regime "anthropic-patch"
+		max-edge 1568
+		max-tokens 1568
+	}
+	family "opus" {
+		revision ">=4.7 <10" {
+			image-tokenization {
+				regime "anthropic-patch"
+				max-edge 2576
+				max-tokens 4784
+			}
+		}
+	}
+	family "sonnet" {
+		revision ">=4.7 <10" {
+			image-tokenization {
+				regime "anthropic-patch"
+				max-edge 2576
+				max-tokens 4784
+			}
+		}
+	}
+	family "haiku" {
+		revision ">=4.7 <10" {
+			image-tokenization {
+				regime "anthropic-patch"
+				max-edge 2576
+				max-tokens 4784
+			}
+		}
+	}
+	family "fable" {
+		image-tokenization {
+			regime "anthropic-patch"
+			max-edge 2576
+			max-tokens 4784
+		}
+	}
+	family "mythos" {
+		image-tokenization {
+			regime "anthropic-patch"
+			max-edge 2576
+			max-tokens 4784
+		}
+	}
+}
+
 class "anthropic" {
 	family "fable" {
 		revision ">=5.1" {
