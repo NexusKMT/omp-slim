@@ -328,6 +328,32 @@ describe("searchCodex model selection", () => {
 		expect(result.answer).toBe("Codex answer");
 	});
 
+	it("searches with an OPENAI_CODEX_OAUTH_TOKEN env bearer and no stored OAuth row", async () => {
+		// hasCodexSearch admits the provider from keys.source(), which is env-aware,
+		// but the official-backend path seeds from oauth.access, which only reads
+		// stored `type: "oauth"` rows. With only the env var set, the provider was
+		// advertised and then every search failed with "No Codex OAuth credentials".
+		// Nothing is stored here on purpose — that is the setup from the issue.
+		const envAuthStorage = createAuthStorage();
+		const previous = process.env.OPENAI_CODEX_OAUTH_TOKEN;
+		process.env.OPENAI_CODEX_OAUTH_TOKEN = "env-bearer-token";
+		try {
+			const result = await searchCodex({
+				...makeSearchParams("env bearer codex search", mockCodexFetch("gpt-5.6-luna"), selectedCodexModel),
+				authStorage: envAuthStorage,
+				modelRegistry: new ModelRegistry(envAuthStorage),
+			});
+
+			expect(await hasCodexSearch(envAuthStorage)).toBe(true);
+			const headers = new Headers(capturedRequest?.headers);
+			expect(headers.get("authorization")).toBe("Bearer env-bearer-token");
+			expect(result.answer).toBe("Codex answer");
+		} finally {
+			if (previous === undefined) delete process.env.OPENAI_CODEX_OAUTH_TOKEN;
+			else process.env.OPENAI_CODEX_OAUTH_TOKEN = previous;
+		}
+	});
+
 	it("applies the configured request timeout to Codex search", async () => {
 		const timeoutSignal = new AbortController().signal;
 		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);

@@ -600,33 +600,62 @@ export async function searchCodex(params: SearchParams): Promise<SearchResponse>
 			},
 		);
 	} else {
+		// `hasCodexSearch` admits this provider from `keys.source()`, which knows
+		// about env bearers; `oauth.access` below does not — it only reads stored
+		// `type: "oauth"` rows. So an OPENAI_CODEX_OAUTH_TOKEN-only setup passed
+		// the availability check and then failed here with "No Codex OAuth
+		// credentials found". Take the registry resolver when the stored pool is
+		// empty but the origin is an env var, the same way xAI does
+		// (providers/xai.ts:451).
 		const seed = await params.authStorage.oauth.access(params.model.provider, params.sessionId, {
 			signal: params.signal,
 		});
 		if (!seed) {
-			throw new Error(`No Codex OAuth credentials found for selected provider "${params.model.provider}".`);
-		}
-
-		result = await withOAuthAccess(
-			params.authStorage,
-			params.model.provider,
-			async access => {
-				// A refreshed/rotated credential can carry a different bearer and
-				// ChatGPT account id than the seed used to select the first attempt.
-				const accountId = access.accountId ?? getCodexAccountId(access.accessToken);
-				const requestTransport = await resolveCodexSearchTransport(params);
-				return callCodexSearch({ accessToken: access.accessToken, accountId }, query, {
+			const credentialOrigin = params.modelRegistry.authStorage.keys.source(params.model.provider);
+			if (credentialOrigin?.kind !== "env") {
+				throw new Error(`No Codex OAuth credentials found for selected provider "${params.model.provider}".`);
+			}
+			result = await withAuth(
+				params.modelRegistry.resolver(params.model, params.sessionId),
+				async accessToken => {
+					const requestTransport = await resolveCodexSearchTransport(params);
+					return callCodexSearch({ accessToken, accountId: getCodexAccountId(accessToken) }, query, {
+						signal: params.signal,
+						timeoutMs: params.timeoutMs,
+						systemPrompt: params.systemPrompt,
+						searchContextSize: "high",
+						modelId: params.model.id,
+						fetch: params.fetch,
+						transport: requestTransport,
+					});
+				},
+				{
 					signal: params.signal,
-					timeoutMs: params.timeoutMs,
-					systemPrompt: params.systemPrompt,
-					searchContextSize: "high",
-					modelId: params.model.id,
-					fetch: params.fetch,
-					transport: requestTransport,
-				});
-			},
-			{ sessionId: params.sessionId, signal: params.signal, seed },
-		);
+					missingKeyMessage: `Codex credentials not found for selected provider "${params.model.provider}".`,
+				},
+			);
+		} else {
+			result = await withOAuthAccess(
+				params.authStorage,
+				params.model.provider,
+				async access => {
+					// A refreshed/rotated credential can carry a different bearer and
+					// ChatGPT account id than the seed used to select the first attempt.
+					const accountId = access.accountId ?? getCodexAccountId(access.accessToken);
+					const requestTransport = await resolveCodexSearchTransport(params);
+					return callCodexSearch({ accessToken: access.accessToken, accountId }, query, {
+						signal: params.signal,
+						timeoutMs: params.timeoutMs,
+						systemPrompt: params.systemPrompt,
+						searchContextSize: "high",
+						modelId: params.model.id,
+						fetch: params.fetch,
+						transport: requestTransport,
+					});
+				},
+				{ sessionId: params.sessionId, signal: params.signal, seed },
+			);
+		}
 	}
 
 	let sources = result.sources;
