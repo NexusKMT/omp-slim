@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed follow-up hashline edits being rejected as anchored on lines "never displayed" after an earlier edit shifted those lines, when the replacement carries the anchored content; genuinely stale line numbers are still rejected ([#14254](https://github.com/can1357/oh-my-pi/pull/14254) by [@abilliontokens](https://github.com/abilliontokens)).
+- Fixed `/collab` guests never seeing the `cfg://` setting-change approval and tool-issue report consent prompts, so a guest driving the session (e.g. from a phone) can now answer them ([#14281](https://github.com/can1357/oh-my-pi/issues/14281))
 
 ## [18.6.0] - 2026-10-03
 
