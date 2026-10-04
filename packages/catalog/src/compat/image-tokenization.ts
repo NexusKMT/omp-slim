@@ -9,6 +9,7 @@
  * baked onto `Model`, so `{ api, id }` targets without a built model resolve
  * too.
  */
+import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import { classifyModel } from "../identity";
 import { resolveCascade } from "./cascade";
 import type { ModelIdentity } from "./types";
@@ -72,18 +73,17 @@ function positive(value: unknown): number | undefined {
 }
 
 function parsePatchSizing(value: unknown): PatchSizing | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
-	const maxEdge = positive("maxEdge" in value ? value.maxEdge : undefined);
+	if (!isRecord(value)) return undefined;
+	const maxEdge = positive(value.maxEdge);
 	if (maxEdge === undefined) return undefined;
-	if (!("patchBudget" in value)) return { maxEdge };
+	if (value.patchBudget === undefined) return { maxEdge };
 	const patchBudget = positive(value.patchBudget);
 	return patchBudget === undefined ? undefined : { maxEdge, patchBudget };
 }
 
 /** Validate a resolved `image-tokenization` payload; malformed payloads resolve to undefined. */
-export function parseImageTokenization(value: unknown): ImageTokenization | undefined {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-	const payload = value as Record<string, unknown>;
+export function parseImageTokenization(payload: unknown): ImageTokenization | undefined {
+	if (!isRecord(payload)) return undefined;
 	switch (payload.regime) {
 		case "openai-patch": {
 			const multiplier = positive(payload.multiplier);

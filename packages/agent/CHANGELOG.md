@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The dimension-based image token estimate now uses the catalog's shared `imageTokens()` formula with GPT-5.5's sizing; estimates are unchanged ([#14286](https://github.com/can1357/oh-my-pi/pull/14286) by [@will-bogusz](https://github.com/will-bogusz)).
+
 ## [18.6.1] - 2026-10-04
 
 ### Fixed
