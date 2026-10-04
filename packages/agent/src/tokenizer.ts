@@ -149,13 +149,17 @@ interface MessageEstimate {
  * Model-aware local token counter. Immutable: the catalog-resolved encoding
  * is fixed at construction, so a cached count can never straddle two
  * encodings. An `Agent` owns one for its active model (swapping the instance
- * when the model's encoding changes); one-shot flows construct their own for
- * the model that will be billed. Known tokenizer families use exact native
- * counts; unknown models keep the fast byte estimate (or o200k when
- * `PI_TOKENIZER_ACCURATE=1`).
+ * when the model's encoding or snapcompact frame pricing changes); one-shot
+ * flows construct their own for the model that will be billed. Known
+ * tokenizer families use exact native counts; unknown models keep the fast
+ * byte estimate (or o200k when `PI_TOKENIZER_ACCURATE=1`).
  */
 export class Tokenizer {
 	readonly #encoding: natives.Encoding | null;
+	/** Reader of snapcompact frames: prices each frame at its family's billed cost. */
+	readonly #frameTarget: snapcompact.ShapeTarget | undefined;
+	/** {@link snapcompact.frameBillingKey} of the frame reader; a model switch that changes it needs a new instance. */
+	readonly frameBillingKey: string;
 
 	/** Exact counts only; byte fallbacks remain mode-dependent and uncached. */
 	readonly #nativeCounts = new LRUCache<string, number>({
@@ -174,8 +178,10 @@ export class Tokenizer {
 	 */
 	#estimates = new WeakMap<AgentMessage, MessageEstimate>();
 
-	constructor(model?: Pick<Model, "tokenizer"> | null) {
+	constructor(model?: (Pick<Model, "tokenizer"> & snapcompact.ShapeTarget) | null) {
 		this.#encoding = tokenizerEncodingForModel(model);
+		this.#frameTarget = model ?? undefined;
+		this.frameBillingKey = snapcompact.frameBillingKey(this.#frameTarget);
 	}
 
 	get encoding(): natives.Encoding | null {
@@ -329,14 +335,19 @@ export class Tokenizer {
 			case "compactionSummary": {
 				fragments.push(message.summary);
 				if (message.role === "compactionSummary") {
+					// Each frame is charged what its reader's provider bills for its
+					// width (Codex 1568px ≈ 2.9k, Gemini 1.1k, Opus 1932px ≈ 5k). A
+					// flat high-res ceiling overcounted Codex archives by ~70% and
+					// could re-fire the compaction trigger right after compacting.
 					if (message.blocks) {
 						for (const block of message.blocks) {
 							if (block.type === "text") fragments.push(block.text);
-							else extra += snapcompact.FRAME_TOKEN_ESTIMATE;
+							else extra += snapcompact.frameDataTokens(this.#frameTarget, block.data);
 						}
 					} else if (message.images) {
-						// Snapcompact frames render at ≥1568px; providers bill the downscaled cap.
-						extra += message.images.length * snapcompact.FRAME_TOKEN_ESTIMATE;
+						for (const image of message.images) {
+							extra += snapcompact.frameDataTokens(this.#frameTarget, image.data);
+						}
 					}
 				}
 				break;

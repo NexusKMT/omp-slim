@@ -446,6 +446,31 @@ export function resolveShapeForText(text: string, model?: ShapeTarget, variant?:
 		: shape;
 }
 
+/** Identity of the frame price list `target` bills under; equal keys price every frame alike. */
+export function frameBillingKey(target: ShapeTarget | undefined): string {
+	return billingFamily(target?.api);
+}
+
+/** Base64 of the PNG signature + IHDR chunk header + width/height (24 bytes). */
+const PNG_HEADER_BASE64_CHARS = 32;
+
+/**
+ * Billed-token estimate for one frame from its base64 PNG payload, read by
+ * `target`: the per-family price {@link resolveShape} attaches as
+ * `frameTokenEstimate`, at the frame's own width (Codex 1568px ≈ 2.9k,
+ * Gemini 1.1k, Opus 1932px ≈ 5k). Frame height hugs the printed rows, so the
+ * square-frame price is an upper bound. Payloads that are not a decodable PNG
+ * charge {@link FRAME_TOKEN_ESTIMATE}.
+ */
+export function frameDataTokens(target: ShapeTarget | undefined, data: string): number {
+	const header = Buffer.from(data.slice(0, PNG_HEADER_BASE64_CHARS), "base64");
+	if (header.length < 24 || header.readUInt32BE(0) !== 0x89504e47 || header.toString("latin1", 12, 16) !== "IHDR") {
+		return FRAME_TOKEN_ESTIMATE;
+	}
+	const width = header.readUInt32BE(16);
+	return width > 0 ? familyBilling(billingFamily(target?.api), width).frameTokenEstimate : FRAME_TOKEN_ESTIMATE;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -468,10 +493,12 @@ export const MAX_FRAMES_DEFAULT = 80;
  *  text region (newest) — with the denser low-quality tier filling the middle. */
 export const HQ_EDGE_FRAMES = 3;
 
-/** Conservative per-frame token estimate used for context budgeting — the
- *  upper bound across shapes: high-res Claude frames hit the 4,784 visual-token
- *  cap, billed at +5% margin (ceil(4784 * 1.05)). Keeps the overflow guard from
- *  undercounting a high-res archive at the raised {@link MAX_FRAMES_DEFAULT}. */
+/** Per-frame token estimate when a frame's pixel size is unknown — the
+ *  upper bound across shapes: high-res Claude frames hit the 4,784
+ *  visual-token cap, billed at +5% margin (ceil(4784 * 1.05)). Archive sizing
+ *  charges it per frame so a high-res archive at the raised
+ *  {@link MAX_FRAMES_DEFAULT} never undercounts; frames whose size is known
+ *  are counted at their own family price ({@link frameDataTokens}). */
 export const FRAME_TOKEN_ESTIMATE = 5024;
 
 /** Conservative upper bound for one persisted frame's base64 payload. The
