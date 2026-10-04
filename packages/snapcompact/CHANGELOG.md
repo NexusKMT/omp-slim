@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed short snapcompact frames being rejected by vision backends that require image dimensions above 32px ([#14355](https://github.com/can1357/oh-my-pi/issues/14355)).
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed
