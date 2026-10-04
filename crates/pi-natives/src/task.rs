@@ -415,40 +415,52 @@ where
 	F: FnOnce(BlockingFs, CancelToken) -> Result<T> + Send + 'static,
 	T: ToNapiValue + Send + 'static,
 {
-	let cancellation = CancellationToken::new();
-	let fs = fs.with_cancellation(cancellation.clone());
 	let settlement_token = cancel_token.clone();
 	env.spawn_future_with_callback(
-		async move {
-			let worker_token = cancel_token.clone();
-			let mut worker = tokio::task::spawn_blocking(move || {
-				let _guard = profile_region(tag);
-				catch_worker_panic(tag, move || work(fs, worker_token))?
-			});
-			let (result, cancelled) = tokio::select! {
-				biased;
-				result = &mut worker => (result, None),
-				reason = cancel_token.wait() => {
-					cancellation.cancel();
-					(worker.await, Some(reason))
-				},
-			};
-			Ok((
-				result
-					.map_err(|err| Error::from_reason(format!("native task `{tag}` failed: {err}")))?,
-				cancelled,
-			))
-		},
-		move |env, (result, cancelled)| {
-			if let Some(reason) = settlement_token.abort_reason().or(cancelled) {
+		async move { Ok(run_filesystem_worker(tag, cancel_token, fs, work).await) },
+		move |env, result| {
+			if let Some(reason) = settlement_token.abort_reason() {
 				return Err(match reason {
 					AbortReason::Timeout => Error::from_reason("Aborted: Timeout"),
 					_ => abort_error(*env, reason),
 				});
 			}
-			result
+			// An elapsed deadline has no explicit abort flag. The worker was
+			// already cancelled, so the provider cannot hold up this Promise.
+			result.unwrap_or_else(|| Err(Error::from_reason("Aborted: Timeout")))
 		},
 	)
+}
+
+/// Stop waiting for a queued or running worker when its caller cancels.
+async fn run_filesystem_worker<T, F>(
+	tag: &'static str,
+	cancel_token: CancelToken,
+	fs: BlockingFs,
+	work: F,
+) -> Option<Result<T>>
+where
+	F: FnOnce(BlockingFs, CancelToken) -> Result<T> + Send + 'static,
+	T: Send + 'static,
+{
+	let cancellation = CancellationToken::new();
+	let fs = fs.with_cancellation(cancellation.clone());
+	let worker_token = cancel_token.clone();
+	let mut worker = tokio::task::spawn_blocking(move || {
+		let _guard = profile_region(tag);
+		catch_worker_panic(tag, move || work(fs, worker_token))?
+	});
+	tokio::select! {
+		biased;
+		result = &mut worker => Some(result.unwrap_or_else(|err| {
+			Err(Error::from_reason(format!("native task `{tag}` failed: {err}")))
+		})),
+		_ = cancel_token.wait() => {
+			cancellation.cancel();
+			worker.abort();
+			None
+		},
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -532,6 +544,76 @@ mod tests {
 		assert_eq!(err.status, Status::GenericFailure);
 		assert!(err.reason.contains("t_panic_str"), "reason = {}", err.reason);
 		assert!(err.reason.contains("kaboom"), "reason = {}", err.reason);
+	}
+
+	#[test]
+	fn queued_filesystem_workers_settle_on_abort_and_timeout() {
+		use std::{
+			sync::{
+				Arc,
+				atomic::{AtomicBool, Ordering},
+				mpsc,
+			},
+			task::Poll,
+			time::Duration,
+		};
+
+		let runtime = tokio::runtime::Builder::new_multi_thread()
+			.worker_threads(1)
+			.max_blocking_threads(1)
+			.enable_all()
+			.build()
+			.unwrap();
+		let (entered_tx, entered_rx) = mpsc::channel();
+		let (release_tx, release_rx) = mpsc::channel::<()>();
+		let occupied = runtime.spawn_blocking(move || {
+			let _ = entered_tx.send(());
+			let _ = release_rx.recv();
+		});
+		entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+		let ran = Arc::new(AtomicBool::new(false));
+		let mut token = CancelToken::new(None, None);
+		let abort = token.emplace_abort_token();
+		let ran_on_abort = Arc::clone(&ran);
+		let aborted = runtime.block_on(async {
+			let mut pending =
+				Box::pin(run_filesystem_worker("queued", token, BlockingFs::native(), move |_, _| {
+					ran_on_abort.store(true, Ordering::SeqCst);
+					Ok(1_u32)
+				}));
+			std::future::poll_fn(|cx| {
+				assert!(pending.as_mut().poll(cx).is_pending());
+				Poll::Ready(())
+			})
+			.await;
+			abort.abort(AbortReason::Signal);
+			tokio::time::timeout(Duration::from_secs(1), pending).await
+		});
+
+		let ran_on_timeout = Arc::clone(&ran);
+		let timed_out = runtime.block_on(async {
+			tokio::time::timeout(
+				Duration::from_secs(1),
+				run_filesystem_worker(
+					"queued",
+					CancelToken::new(Some(0), None),
+					BlockingFs::native(),
+					move |_, _| {
+						ran_on_timeout.store(true, Ordering::SeqCst);
+						Ok(2_u32)
+					},
+				),
+			)
+			.await
+		});
+
+		release_tx.send(()).unwrap();
+		runtime.block_on(occupied).unwrap();
+		drop(runtime);
+		assert!(matches!(aborted, Ok(None)), "abort waited for a busy worker");
+		assert!(matches!(timed_out, Ok(None)), "deadline waited for a busy worker");
+		assert!(!ran.load(Ordering::SeqCst), "cancelled queued work executed");
 	}
 
 	#[tokio::test]
