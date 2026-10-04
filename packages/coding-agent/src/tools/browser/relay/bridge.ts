@@ -61,12 +61,7 @@ interface SessionRef {
 	runtimeEnabling: Promise<void> | null;
 	/** Monotonic ownership token for enable rollback and replay. */
 	runtimeEpoch: number;
-	/**
-	 * This session sent `Target.setAutoAttach`. Chrome reports a real child
-	 * target (OOPIF, worker) only on the session that asked; announcing it on
-	 * every page session would hand puppeteer one child id twice, and puppeteer
-	 * replaces the first session object, dropping every reply bound for it.
-	 */
+	/** Sent `Target.setAutoAttach`; only such a session is told about real child targets. */
 	autoAttach: boolean;
 }
 
@@ -86,11 +81,7 @@ class CdpConnection {
 	readonly sessions = new Map<string, SessionRef>();
 	/** Tabs this connection claimed as drive targets (`OMP.claimTarget` / `Target.createTarget`). */
 	readonly claims = new Set<string>();
-	/**
-	 * Real child session id → the page (or parent child) session it was
-	 * announced on. Child traffic and the detach follow this assignment, so a
-	 * child keeps its parent even if another session armed auto-attach since.
-	 */
+	/** Real child session id → the session it was announced on; its events and detach go there. */
 	readonly childParents = new Map<string, string>();
 
 	constructor(
@@ -106,11 +97,7 @@ class CdpConnection {
 		return out;
 	}
 
-	/**
-	 * The page session that receives this tab's real child targets: the first
-	 * one that armed `Target.setAutoAttach`. One per connection, so a child id
-	 * is never announced twice to the same client.
-	 */
+	/** This tab's first page session that armed auto-attach; one per connection so no child is announced twice. */
 	childTargetSessionForTab(tabKey: string): string | undefined {
 		for (const [sessionId, ref] of this.sessions) {
 			if (ref.tabKey === tabKey && ref.kind === "page" && ref.autoAttach) return sessionId;
