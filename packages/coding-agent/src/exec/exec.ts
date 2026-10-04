@@ -21,7 +21,9 @@ export interface ExecOptions {
 export interface ExecResult {
 	stdout: string;
 	stderr: string;
+	/** Process exit code; `-1` when the process was killed (timeout, abort) before exiting on its own. */
 	code: number;
+	/** True when the process was killed by `timeout` or `signal`. */
 	killed: boolean;
 }
 
@@ -47,7 +49,7 @@ export async function execCommand(
 	return {
 		stdout: result.stdout,
 		stderr: result.stderr,
-		code: result.exitCode ?? 0,
+		code: result.exitCode ?? -1,
 		killed: Boolean(result.exitError?.aborted),
 	};
 }
