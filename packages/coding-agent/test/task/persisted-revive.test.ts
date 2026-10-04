@@ -1229,11 +1229,12 @@ describe("cold revival replays the system prompt the last request sent", () => {
 			agent,
 			sessionManager,
 			settings: Settings.isolated({ "compaction.enabled": false, "todo.enabled": false }),
-			modelRegistry: { getApiKey: async () => "test-key" } as never,
+			modelRegistry: { getApiKey: async () => "test-key", getAvailable: () => [] } as never,
 			toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
 			extensionRunner: {
 				initialize: () => {},
 				onError: () => () => {},
+				hasHandlers: () => false,
 				emit: async (event: { type: string }) => {
 					if (event.type === "session_start") hooks.sessionStart?.();
 				},
@@ -1399,6 +1400,36 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		expect((await reviveAndFollowUp(cwd, { beforeAgentStart: appendPolicy })).system).toEqual(
 			spawned.requests.at(-1)!,
 		);
+	});
+
+	it("re-reads the contract after a same-path reload restores an older one", async () => {
+		const cwd = makeTempDir("@pi-revive-same-path-reload-");
+		let batch = 1;
+		const buildPrompt = (toolNames: string[]) => ["base", `batch ${batch}`, `tools: ${toolNames.join(",")}`];
+		const spawned = await spawn(cwd, buildPrompt, [
+			...spawnResponses(),
+			{ content: ["next"] },
+			{ content: ["again"] },
+		]);
+		const sessionFile = path.join(cwd, "prompt-blocks.jsonl");
+		await spawned.session.sessionManager.flush();
+		const beforeBatch = await Bun.file(sessionFile).text();
+		batch = 2;
+		await spawned.session.setWorkPoolYieldItems([{ id: "item", index: 0 }]);
+		await spawned.session.prompt("next batch");
+		await spawned.session.waitForIdle();
+		// An older transcript, whose latest contract is the batch-1 one, is restored and reloaded.
+		await spawned.session.sessionManager.flush();
+		await Bun.write(sessionFile, beforeBatch);
+		await spawned.session.reload();
+		await spawned.session.prompt("again");
+		await spawned.session.waitForIdle();
+		expect(spawned.requests.at(-1)).toEqual(["base", "batch 2", "tools: read,yield"]);
+		await spawned.session.dispose();
+
+		const revived = await reviveAndFollowUp(cwd);
+		expect(revived.system).toEqual(spawned.requests.at(-1)!);
+		expect(revived.tools).toBe(spawned.toolRequests.at(-1)!);
 	});
 
 	it("keeps a finished child in the Agent Hub when startup extensions append many entries", async () => {

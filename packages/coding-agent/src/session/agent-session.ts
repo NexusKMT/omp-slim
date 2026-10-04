@@ -10811,6 +10811,9 @@ export class AgentSession implements SettingsScope {
 				// still observe message_end, then mute before swapping files.
 				await this.#advisors.drainAndDetachRecorders();
 			}
+			// The file may be reloaded at the same path with a different latest contract (or the
+			// switch rolled back via restoreState); re-read it on the next model call either way.
+			this.#sessionInit = undefined;
 			await this.sessionManager.setSessionFile(sessionPath);
 			this.#bash.markSessionTransition(bashTransition);
 			const newCwd = this.sessionManager.getCwd();
