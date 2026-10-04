@@ -1,11 +1,18 @@
 import { describe, expect, it } from "bun:test";
 import type { ImageContent, Model } from "@oh-my-pi/pi-ai";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { Agent } from "../src/agent";
 import { createCompactionSummaryMessage, defaultConvertToLlm } from "../src/compaction/messages";
 import { Tokenizer } from "../src/tokenizer";
 
 const tokenizer = new Tokenizer();
+
+function bundled(provider: "anthropic" | "openai-codex", id: string): Model {
+	const model = getBundledModel(provider, id);
+	if (!model) throw new Error(`Expected bundled ${provider}/${id}`);
+	return model;
+}
 
 /** A real frame rendered in `shape`, as the archive would attach it. */
 async function frameImage(shape: snapcompact.Shape): Promise<ImageContent> {
@@ -67,9 +74,9 @@ describe("compaction summary message with snapcompact frames", () => {
 		const opusFrame = await frameImage(
 			snapcompact.resolveShape({ api: "anthropic-messages", id: "claude-opus-5-5" }),
 		);
-		const base = { tokenizer: undefined, input: ["text", "image"], contextWindow: 400_000 } as const;
-		const anthropicModel = { ...base, api: "anthropic-messages", id: "claude-opus-5-5" } as unknown as Model;
-		const codexModel = { ...base, api: "openai-codex-responses", id: "gpt-6-astra" } as unknown as Model;
+		// Same (absent) encoding on both models, so only the frame billing can force a new tokenizer.
+		const anthropicModel: Model = { ...bundled("anthropic", "claude-opus-5-5"), tokenizer: undefined };
+		const codexModel: Model = { ...bundled("openai-codex", "gpt-6-astra"), tokenizer: undefined };
 		const agent = new Agent({ initialState: { model: anthropicModel, systemPrompt: [], tools: [], messages: [] } });
 		const anthropicCharge = frameCharge(agent.tokenizer, [opusFrame]);
 		agent.setModel(codexModel);

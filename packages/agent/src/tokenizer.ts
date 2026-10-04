@@ -5,7 +5,7 @@ import { materializeString, stringifyJson } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { isEstimateCacheable, messageEstimateVersion } from "./compaction/message-cache";
-import { estimateImageContentTokens } from "./image-tokens";
+import { base64ImageSize, estimateImageContentTokens } from "./image-tokens";
 import type { AgentMessage } from "./types";
 
 const testEnv = Bun.env.NODE_ENV === "test";
@@ -342,11 +342,11 @@ export class Tokenizer {
 					if (message.blocks) {
 						for (const block of message.blocks) {
 							if (block.type === "text") fragments.push(block.text);
-							else extra += snapcompact.frameDataTokens(this.#frameTarget, block.data);
+							else extra += this.#frameTokens(block.data);
 						}
 					} else if (message.images) {
 						for (const image of message.images) {
-							extra += snapcompact.frameDataTokens(this.#frameTarget, image.data);
+							extra += this.#frameTokens(image.data);
 						}
 					}
 				}
@@ -358,5 +358,11 @@ export class Tokenizer {
 
 		if (fragments.length === 0) return extra;
 		return extra + this.countTokens(fragments);
+	}
+
+	/** One snapcompact frame at its reader's price for its width; frames whose size cannot be read cost the ceiling. */
+	#frameTokens(data: string): number {
+		const width = base64ImageSize(data)?.width;
+		return width ? snapcompact.frameTokens(this.#frameTarget, width) : snapcompact.FRAME_TOKEN_ESTIMATE;
 	}
 }

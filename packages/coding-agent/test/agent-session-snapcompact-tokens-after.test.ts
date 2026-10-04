@@ -8,7 +8,7 @@
  * flat 1,120) that put `tokensAfter` ~3.8k per frame above the live count.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import { Agent, type AgentMessage } from "@oh-my-pi/pi-agent-core";
+import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -39,10 +39,10 @@ describe("snapcompact tokensAfter matches the post-commit context count", () => 
 		authStorage.close();
 	});
 
-	function bundled(provider: string, id: string): Model {
-		const model = getBundledModel(provider as never, id);
+	function bundled(provider: "google" | "openai-codex", id: string): Model {
+		const model = getBundledModel(provider, id);
 		if (!model) throw new Error(`Expected bundled ${provider}/${id}`);
-		return { ...model, contextWindow: 400_000, maxTokens: 32_000 } as Model;
+		return { ...model, contextWindow: 400_000, maxTokens: 32_000 };
 	}
 
 	/** A session with enough discarded history for a multi-frame archive. */
@@ -93,14 +93,15 @@ describe("snapcompact tokensAfter matches the post-commit context count", () => 
 	function storedContextTokens(session: AgentSession): number {
 		return (
 			computeNonMessageTokens(session, session.agent.tokenizer, session.settings.revision) +
-			session.agent.tokenizer.countMessages(session.messages as AgentMessage[], { excludeEncryptedReasoning: true })
+			session.agent.tokenizer.countMessages(session.messages, { excludeEncryptedReasoning: true })
 		);
 	}
 
-	for (const { name, provider, id, frameSize, frameTokens } of [
+	const cases = [
 		{ name: "Gemini", provider: "google", id: "gemini-3.1-pro-preview", frameSize: 2048, frameTokens: 1120 },
 		{ name: "Codex", provider: "openai-codex", id: "gpt-6.1-sol", frameSize: 1568, frameTokens: 2882 },
-	]) {
+	] as const;
+	for (const { name, provider, id, frameSize, frameTokens } of cases) {
 		it(`persists the trigger's count for a real ${name} archive`, async () => {
 			const model = bundled(provider, id);
 			expect(snapcompact.resolveShape(model).frameSize).toBe(frameSize);
