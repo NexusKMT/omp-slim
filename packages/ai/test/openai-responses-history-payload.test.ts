@@ -1156,6 +1156,53 @@ describe("OpenAI responses history payload", () => {
 
 			expect(replayedReasoningTexts(warm.input)).toEqual([]);
 		});
+
+		it("replays encrypted summary items verbatim on OpenRouter tool-call turns", async () => {
+			// OpenRouter requires reasoning on tool-call turns for every reasoning
+			// model; an OpenAI-family item's opaque `encrypted_content` is its
+			// reasoning, so the summary must not be injected as `reasoning_text`.
+			const model = getOpenAIReasoningModel("openrouter", "openai/gpt-5");
+			const reasoningItem = {
+				type: "reasoning",
+				encrypted_content: "enc_blob",
+				summary: [{ type: "summary_text", text: "Open a.txt." }],
+			};
+			const context: Context = {
+				messages: [
+					{ role: "user", content: "Read a.txt.", timestamp: Date.now() },
+					{
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						usage: issue5002ZeroUsage,
+						role: "assistant",
+						content: [
+							{ type: "thinking", thinking: "Open a.txt." },
+							{ type: "toolCall", id: "call_a", name: "read", arguments: { path: "a.txt" } },
+						],
+						stopReason: "toolUse",
+						providerPayload: createOpenAIResponsesHistoryPayload(model.provider, [
+							reasoningItem,
+							{ type: "function_call", call_id: "call_a", name: "read", arguments: '{"path":"a.txt"}' },
+						]),
+						timestamp: Date.now(),
+					},
+					{
+						role: "toolResult",
+						toolCallId: "call_a",
+						toolName: "read",
+						content: [{ type: "text", text: "A" }],
+						isError: false,
+						timestamp: Date.now(),
+					},
+				],
+			};
+			const warm = (await captureResponsesPayload(model, context, undefined, { reasoning: Effort.Medium })) as {
+				input?: Array<{ type?: string }>;
+			};
+
+			expect(warm.input?.filter(item => item.type === "reasoning")).toEqual([reasoningItem]);
+		});
 	});
 
 	it("prefers assistant native history snapshots for openai-codex-responses", async () => {

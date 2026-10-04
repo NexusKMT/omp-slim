@@ -2309,9 +2309,13 @@ function createSyntheticResponsesReasoningItem(
  * stream reasoning as summary text return summary-only items; a warm session
  * replays them natively, so without this the wire carries no `reasoning_text`
  * while the cold rebuild of the same turn does (#14288). The summary is the
- * same text the cold path carries from the thinking block.
+ * same text the cold path carries from the thinking block. Items carrying
+ * `encrypted_content` are the server's opaque reasoning and replay untouched:
+ * OpenRouter sets the tool-call requirement for every reasoning model, and its
+ * OpenAI-family items must not gain a summary posing as raw reasoning text.
  */
 function withRequiredReasoningText(item: ResponseReasoningItem): ResponseReasoningItem {
+	if (typeof item.encrypted_content === "string") return item;
 	if (item.content?.some(part => part.type === "reasoning_text" && part.text.trim().length > 0)) return item;
 	const summaryText = (item.summary ?? [])
 		.map(part => part.text)
