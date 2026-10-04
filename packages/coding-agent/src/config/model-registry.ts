@@ -100,7 +100,6 @@ import {
 	providersWithAuthoritativeProjectCatalog,
 } from "./model-patch";
 import {
-	AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
 	BUILT_IN_DISCOVERY_NON_AUTHORITATIVE_RETRY_MS,
 	type BuiltInDiscoveryResult,
@@ -1368,8 +1367,7 @@ export class ModelRegistry {
 				const models = loaded.modelsByProvider.get(providerId) ?? [];
 				if (
 					providersWithAuthoritativeProjectCatalog(models).has(providerId) ||
-					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(providerId) ||
-					AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS[providerId] === true
+					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(providerId)
 				) {
 					this.#cachedAuthoritativeProviders.add(providerId);
 				}
@@ -2210,7 +2208,7 @@ export class ModelRegistry {
 					descriptor.providerId,
 					strategy,
 					descriptor.providerId,
-					AUTHORITATIVE_SPECIAL_MODEL_MANAGER_PROVIDER_IDS[descriptor.providerId] === true,
+					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(descriptor.providerId),
 				),
 			),
 		);
