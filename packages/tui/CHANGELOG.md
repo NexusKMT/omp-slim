@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed Space in the Git diff pane scrolling or acting on the wrong hunk instead of staging or unstaging the focused change ([#14326](https://github.com/can1357/oh-my-pi/issues/14326)).
+- Fixed the Space key in the Git diff pane so it stages or unstages the focused hunk instead of scrolling or acting on the wrong change.
 
 ## [18.6.0] - 2026-10-03
 

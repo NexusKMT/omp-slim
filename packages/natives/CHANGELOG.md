@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed concurrent searches through host-provided filesystem callbacks starving async filesystem work, and ensured cancellation releases searches waiting on those callbacks ([#14289](https://github.com/can1357/oh-my-pi/issues/14289)).
+- Fixed concurrent searches through host-provided filesystem callbacks so they no longer starve other asynchronous filesystem operations, and ensured canceled searches release promptly.
 
 ## [18.5.1] - 2026-10-03
 

@@ -4,8 +4,7 @@
 
 ### Fixed
 
-- Fixed warm OpenAI Responses sessions replaying summary-only reasoning without the `reasoning_text` DeepSeek-family targets require, which caused 400s on Command Code DeepSeek models ([#14288](https://github.com/can1357/oh-my-pi/issues/14288))
-- Fixed DeepSeek replies ending early when their visible text contained an incomplete DSML tool-call wrapper ([#14272](https://github.com/can1357/oh-my-pi/issues/14272)).
+- Fixed compatibility with Command Code DeepSeek and other DeepSeek-family models by preserving the reasoning context required for warm OpenAI Responses sessions and correctly handling incomplete DSML tool-call wrappers in visible output.
 
 ## [18.6.0] - 2026-10-03
 
