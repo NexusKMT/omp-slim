@@ -227,9 +227,11 @@ describe("date-cwd reminder on the provider wire", () => {
 					void session.steer("steered");
 					pushReadCall(stream, "read-1");
 				} else if (request === 2) {
-					// The next request is a tool continuation with no new user turn.
+					// The next requests are tool continuations with no new user turn.
 					setSystemTime(new Date(2026, 7, 15, 0, 1));
 					pushReadCall(stream, "read-2");
+				} else if (request < 5) {
+					pushReadCall(stream, `read-${request}`);
 				} else {
 					stream.push({ type: "done", reason: "stop", message: createAssistantMessage("ok") });
 				}
@@ -279,17 +281,22 @@ describe("date-cwd reminder on the provider wire", () => {
 			await session.sendUserMessage("first");
 			await session.waitForIdle();
 
-			expect(contexts).toHaveLength(3);
-			const before = contexts[1]!.messages;
-			const after = contexts[2]!.messages;
-			const steerIndex = before.findLastIndex(message => message.role === "user");
-			expect(JSON.stringify(before[steerIndex]!.content)).toContain("steered");
-			// Bytes the provider already saw stay put; the new date is appended instead.
-			expect(after.slice(0, before.length)).toEqual(before);
-			expect(after.at(-1)).toMatchObject({
-				role: "developer",
-				content: renderDateCwdReminder("2026-08-15", normalizePromptPath(tempDir.path())),
-			});
+			expect(contexts).toHaveLength(5);
+			const wire = contexts.map(context =>
+				context.messages.map(message => JSON.stringify([message.role, message.content])),
+			);
+			const steerIndex = contexts[1]!.messages.findLastIndex(message => message.role === "user");
+			expect(wire[1]![steerIndex]).toContain("steered");
+			// Bytes the provider already saw stay put on every later request; the new date is appended once.
+			for (let request = 2; request < wire.length; request++) {
+				expect(wire[request]!.slice(0, wire[request - 1]!.length)).toEqual(wire[request - 1]!);
+			}
+			const reminder = JSON.stringify([
+				"developer",
+				renderDateCwdReminder("2026-08-15", normalizePromptPath(tempDir.path())),
+			]);
+			expect(wire[2]!.at(-1)).toBe(reminder);
+			expect(wire[4]!.filter(message => message === reminder)).toHaveLength(1);
 		} finally {
 			setSystemTime();
 			authStorage.close();
