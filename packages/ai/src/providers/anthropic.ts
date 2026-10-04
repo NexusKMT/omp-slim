@@ -4308,11 +4308,16 @@ function diffAnthropicActiveTools(
  * at the tail. Records at a different index than they were written at are
  * rewritten history: they keep the declaration but emit no controls, so the
  * net change from the declared baseline lands at the first live position.
+ * Without `ownChange` (an on-demand compaction request, which ends inside the
+ * conversation) the tail control is left out: there it would sit between the
+ * summarized prefix and the retained turns, where live requests never sent
+ * it, and invalidate their signed thinking. The next live turn sends it.
  */
 function planAnthropicToolControls(
 	context: Context,
 	records: readonly AnthropicControlRecord[],
 	enabled: boolean,
+	ownChange: boolean,
 ): { tools: Tool[] | undefined; inserts: AnthropicControlInsert[]; record: AnthropicToolControls | undefined } {
 	if (!enabled || !context.tools) return { tools: context.tools, inserts: [], record: undefined };
 	const definitions = new Map<string, Tool>();
@@ -4355,7 +4360,7 @@ function planAnthropicToolControls(
 			if (toolChanges.length > 0) inserts.push({ index: record.index, spec: { toolChanges } });
 			previous = record.tools.active;
 		}
-		const toolChanges = diffAnthropicActiveTools(previous, activeNames, declaredSet);
+		const toolChanges = ownChange ? diffAnthropicActiveTools(previous, activeNames, declaredSet) : [];
 		if (toolChanges.length > 0) inserts.push({ index: context.messages.length, spec: { toolChanges } });
 	}
 
@@ -4382,7 +4387,8 @@ function planAnthropicToolControls(
  * restore, so a request without an explicit effort keeps the level in force.
  * Records at a different index than they were written at are rewritten history:
  * they keep the top-level effort but emit no controls, so the net change lands
- * at the first live position.
+ * at the first live position. Without `ownChange` (an on-demand compaction
+ * request) `current` is not applied: the request runs at the effort in force.
  */
 function planAnthropicEffortControls(
 	current: AnthropicOutputEffort | undefined,
@@ -4390,6 +4396,7 @@ function planAnthropicEffortControls(
 	records: readonly AnthropicControlRecord[],
 	enabled: boolean,
 	compactionReplay: AnthropicCompactionReplay | undefined,
+	ownChange: boolean,
 ): {
 	topLevel: AnthropicOutputEffort | undefined;
 	inserts: AnthropicControlInsert[];
@@ -4420,7 +4427,7 @@ function planAnthropicEffortControls(
 		}
 		tail = recorded ?? tail;
 	}
-	if (current !== undefined && current !== tail) {
+	if (ownChange && current !== undefined && current !== tail) {
 		inserts.push({
 			index: anthropicEffortInsertIndex(messages, messages.length, compactionReplay),
 			spec: { toolChanges: [], effort: current },
@@ -4603,6 +4610,9 @@ function buildParams(
 		cacheControl,
 	});
 
+	// An on-demand compaction request ends inside the conversation: it gets
+	// nothing live requests lack there, so it makes no tool or effort change.
+	const compactionRequest = compactionSupported ? options?.anthropicCompaction : undefined;
 	// Controls earlier requests recorded on their responses fix the declared
 	// tools, the top-level effort and every control message in between.
 	const records = collectAnthropicControlRecords(context.messages);
@@ -4610,6 +4620,7 @@ function buildParams(
 		context,
 		records,
 		model.compat.supportsMidConversationToolChanges === true,
+		!compactionRequest,
 	);
 
 	// Pre-compute tools.
@@ -4752,7 +4763,6 @@ function buildParams(
 	// A new on-demand compaction request cannot carry context_management.
 	// Later turns carrying its signed block may keep clear_thinking as usual.
 	// Persisted encrypted threshold blocks alone need a legacy replay edit.
-	const compactionRequest = compactionSupported ? options?.anthropicCompaction : undefined;
 	const signedReplay = compactionSupported && contextReplaysAnthropicCompaction(context.messages, model, "signed");
 	const legacyReplay =
 		compactionSupported && !signedReplay && contextReplaysAnthropicCompaction(context.messages, model, "legacy");
@@ -4778,6 +4788,7 @@ function buildParams(
 		records,
 		model.compat.supportsPerMessageEffort === true,
 		compactionReplay,
+		!compactionRequest,
 	);
 	// `between_tools` returns a 400 at `xhigh`/`max` effort, and the effort in
 	// force from earlier turns outlives a thinking toggle. Fall back to the

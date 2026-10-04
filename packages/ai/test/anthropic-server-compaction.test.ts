@@ -719,6 +719,32 @@ describe("Anthropic compaction replay", () => {
 		expect(wire.slice(0, keptIndex).some(message => message.role === "system")).toBe(false);
 	});
 
+	it("makes no tool or effort change of its own on a compaction request", async () => {
+		const live = { ...options, thinkingEnabled: true, effort: "high" as const };
+		const first = await captureRequest(preserved, live, context.messages, [readTool, removedTool]);
+		const summarized: Context["messages"] = [
+			...context.messages,
+			keptFrom(first),
+			{ role: "user", content: "more", timestamp: 3 },
+		];
+		// The live turn whose reply is kept after the summary.
+		const kept = await captureRequest(preserved, live, summarized, [readTool, removedTool]);
+		// Roster and effort change before compacting. Live turns send both after the
+		// kept reply; between it and the summarized range they would break its thinking.
+		const compaction = await captureRequest(
+			preserved,
+			{ ...options, thinkingEnabled: true, effort: "low", anthropicCompaction: {} },
+			summarized,
+			[readTool],
+			[removedTool],
+		);
+		const withoutCacheControl = (value: unknown): unknown =>
+			JSON.parse(JSON.stringify(value), (key, inner) => (key === "cache_control" ? undefined : inner));
+		expect(compaction.payload.compaction).toBeDefined();
+		expect(compaction.payload.tools).toEqual(kept.payload.tools);
+		expect(withoutCacheControl(compaction.payload.messages)).toEqual(withoutCacheControl(kept.payload.messages));
+	});
+
 	it("keeps an effort change of the turn the block opened behind the compaction block", async () => {
 		const opened: AssistantMessage = {
 			...keptFrom({ message: {} as AssistantMessage }),
