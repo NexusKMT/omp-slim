@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `advisor.immuneTurns` setting description claiming blockers are suppressed during the cooldown; blockers have always been exempt, and the description now says so ([#10493](https://github.com/can1357/oh-my-pi/issues/10493))
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed
