@@ -167,7 +167,8 @@ describe("git native", () => {
 		}
 	});
 
-	it("stages the focused diff row on Space without staging its adjacent change", async () => {
+	/** Open a 60-line file whose lines 5 and 6 changed, type `keys` into the diff, and return the applied patches. */
+	async function patchesAfter(keys: readonly string[]): Promise<string[]> {
 		await initTheme();
 		const h = await TspHarness.start(undefined, { cols: 150, rows: 24 });
 		const original = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
@@ -199,27 +200,39 @@ describe("git native", () => {
 		});
 		try {
 			await loaded.promise;
-			for (let i = 0; i < 10; i++) {
+			const ready = () => h.find(node => node.k === "diff" && JSON.stringify(node.p).includes("changed 5"));
+			for (let i = 0; i < 10 && !ready(); i++) {
 				await Promise.resolve();
 				h.tui.requestRender();
 				h.flush(10);
-				if (h.find(node => node.k === "diff" && JSON.stringify(node.p).includes("changed 5"))) break;
 			}
-			expect(h.find(node => node.k === "diff" && JSON.stringify(node.p).includes("changed 5"))).toBeDefined();
-			for (const key of ["\t", "g", "j", "j", "j", "j", " "]) {
+			expect(ready()).toBeDefined();
+			for (const key of keys) {
 				h.terminal.send(key);
 				h.flush();
 			}
 			await Promise.resolve();
-			expect(patches).toHaveLength(1);
-			expect(patches[0]).toContain("+changed 5");
-			expect(patches[0]).not.toContain("+changed 6");
+			return patches;
 		} finally {
 			h.terminal.send("q");
 			h.flush();
 			await closed;
 			h.tui.stop();
 		}
+	}
+
+	it("stages the focused diff row on Space without staging its adjacent change", async () => {
+		const patches = await patchesAfter(["\t", "g", "j", "j", "j", "j", " "]);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toContain("+changed 5");
+		expect(patches[0]).not.toContain("+changed 6");
+	});
+
+	it("stages the focused hunk on Space in hunk view", async () => {
+		const patches = await patchesAfter(["\t", "4", " "]);
+		expect(patches).toHaveLength(1);
+		expect(patches[0]).toContain("+changed 5");
+		expect(patches[0]).toContain("+changed 6");
 	});
 });
 
