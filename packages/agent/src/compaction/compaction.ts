@@ -1781,8 +1781,7 @@ export async function compact(
 				// summarization" and keep compaction running on an aborted signal.
 				if (signal?.aborted) throw err;
 				nativeCompactionError = selectNativeCompactionError(nativeCompactionError, err);
-				// Codex has no V1 `/responses/compact` endpoint unless one is
-				// configured, so only claim the fallback when it will actually run.
+				// Claim the V1 fallback only when the V1 block below will run.
 				logger.warn(
 					shouldUseOpenAiRemoteCompaction(model)
 						? "OpenAI V2 remote compaction failed, falling back to V1 remote compaction"
