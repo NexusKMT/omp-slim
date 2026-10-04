@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
-import { type } from "@oh-my-pi/omptype";
 import { scheduler } from "node:timers/promises";
-import { Agent, type AgentMessage, type AgentTool, RESCUE_SHAKE_CONFIG, Tokenizer } from "@oh-my-pi/pi-agent-core";
+import { type } from "@oh-my-pi/omptype";
+import { Agent, type AgentMessage, RESCUE_SHAKE_CONFIG, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, ImageContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
@@ -11,7 +11,6 @@ import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { formatShakeSummary } from "@oh-my-pi/pi-coding-agent/session/shake-types";
 import { TempDir } from "@oh-my-pi/pi-utils";
@@ -33,8 +32,6 @@ const usage = {
 	totalTokens: 24,
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-
-const emptyToolSchema = type({});
 
 describe("AgentSession shake", () => {
 	let tempDir: TempDir;
@@ -1007,14 +1004,27 @@ describe("AgentSession shake", () => {
 			expect(fullStart).toBeDefined();
 		});
 	});
-});
 
-describe("AgentSession shake while a tool call is executing", () => {
-	it("keeps the in-flight turn in agent state and lowers context usage before the next response", async () => {
-		const tempDir = TempDir.createSync("@pi-shake-midturn-");
-		const authStorage = await AuthStorage.create(path.join(tempDir.path(), "auth.db"));
-		const mock = createMockModel({
-			contextWindow: 1_000_000,
+	it("keeps the in-flight tool call and lowers context usage when shaking mid-turn", async () => {
+		seedHeavyToolResult("X".repeat(20_000));
+		appendRecentProtectedTail();
+		session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+		const toolEntered = Promise.withResolvers<void>();
+		const releaseTool = Promise.withResolvers<void>();
+		session.agent.setTools([
+			{
+				name: "block",
+				label: "Block",
+				description: "Blocks until released",
+				parameters: type({}),
+				async execute() {
+					toolEntered.resolve();
+					await releaseTool.promise;
+					return { content: [{ type: "text", text: "released" }] };
+				},
+			},
+		]);
+		session.agent.streamFn = createMockModel({
 			responses: [
 				{
 					content: [{ type: "toolCall", id: "call_block", name: "block", arguments: {} }],
@@ -1023,86 +1033,22 @@ describe("AgentSession shake while a tool call is executing", () => {
 				},
 				{ content: ["done"], stopReason: "stop", usage: { cacheRead: 1_000 } },
 			],
-		});
-		authStorage.keys.setRuntime(mock.provider, "test-key");
-		const toolEntered = Promise.withResolvers<void>();
-		const releaseTool = Promise.withResolvers<void>();
-		const blockTool: AgentTool<typeof emptyToolSchema> = {
-			name: "block",
-			label: "Block",
-			description: "Blocks until released",
-			parameters: emptyToolSchema,
-			async execute() {
-				toolEntered.resolve();
-				await releaseTool.promise;
-				return { content: [{ type: "text", text: "released" }] };
-			},
-		};
-		const sessionManager = SessionManager.inMemory(tempDir.path());
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model: mock, systemPrompt: ["Test"], tools: [blockTool], messages: [] },
-			convertToLlm,
-			streamFn: mock.stream,
-		});
-		const session = new AgentSession({
-			agent,
-			sessionManager,
-			settings: Settings.isolated({ "compaction.enabled": false, "retry.enabled": false, "todo.enabled": false }),
-			modelRegistry: new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml")),
-			toolRegistry: new Map([[blockTool.name, blockTool as AgentTool]]),
-		});
-		try {
-			const now = Date.now();
-			sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "do it" }], timestamp: now - 4 });
-			sessionManager.appendMessage({
-				role: "assistant",
-				content: [{ type: "toolCall", id: "call_bash", name: "bash", arguments: { command: "ls" } }],
-				api: mock.api,
-				provider: mock.provider,
-				model: mock.id,
-				stopReason: "toolUse",
-				usage,
-				timestamp: now - 3,
-			});
-			sessionManager.appendMessage({
-				role: "toolResult",
-				toolCallId: "call_bash",
-				toolName: "bash",
-				content: [{ type: "text", text: "X".repeat(20_000) }],
-				isError: false,
-				timestamp: now - 2,
-			});
-			sessionManager.appendMessage({
-				role: "user",
-				content: [{ type: "text", text: `newer context\n${"tail ".repeat(4_000)}` }],
-				timestamp: now - 1,
-			});
-			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+		}).stream;
 
-			const run = session.prompt("continue");
-			await toolEntered.promise;
-			expect(session.getContextUsage()?.tokens).toBe(50_000);
+		const run = session.prompt("continue");
+		await toolEntered.promise;
+		expect(session.getContextUsage()?.tokens).toBe(50_000);
+		const result = await session.shake("elide");
+		expect(result.tokensFreed).toBeGreaterThan(0);
+		expect(session.getContextUsage()?.tokens).toBe(50_000 - result.tokensFreed);
+		releaseTool.resolve();
+		await run;
 
-			const result = await session.shake("elide");
-
-			expect(result.tokensFreed).toBeGreaterThan(0);
-			expect(session.getContextUsage()?.tokens).toBe(50_000 - result.tokensFreed);
-			releaseTool.resolve();
-			await run;
-			const blockCallIndex = session.agent.state.messages.findIndex(
-				message =>
-					message.role === "assistant" &&
-					message.content.some(block => block.type === "toolCall" && block.id === "call_block"),
-			);
-			expect(blockCallIndex).toBeGreaterThan(-1);
-			const blockResult = session.agent.state.messages[blockCallIndex + 1];
-			expect(blockResult?.role === "toolResult" ? blockResult.toolCallId : undefined).toBe("call_block");
-		} finally {
-			releaseTool.resolve();
-			await session.dispose();
-			authStorage.close();
-			await tempDir.remove();
-		}
+		const messages = session.agent.state.messages;
+		const blockCall = messages.findIndex(
+			m => m.role === "assistant" && m.content.some(b => b.type === "toolCall" && b.id === "call_block"),
+		);
+		expect(blockCall).toBeGreaterThan(-1);
+		expect(messages[blockCall + 1]).toMatchObject({ role: "toolResult", toolCallId: "call_block" });
 	});
 });

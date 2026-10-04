@@ -176,10 +176,8 @@ export interface BuildSessionContextOptions {
 	 */
 	keepDanglingToolCalls?: boolean;
 	/**
-	 * Tool calls the live agent loop is still executing. They count as paired,
-	 * so a mid-turn rebuild of the agent context (shake, prune, image drop)
-	 * keeps the in-flight assistant turn intact; the loop appends its results
-	 * after the rebuild. Ids absent from the resolved path have no effect.
+	 * Tool calls the live agent loop is still executing. They count as paired, so a
+	 * mid-turn rebuild keeps the in-flight assistant turn; the loop appends their results.
 	 */
 	inFlightToolCallIds?: ReadonlySet<string>;
 	/** Price and resolve persisted snapcompact frame payloads on demand. */

@@ -115,12 +115,7 @@ export class SessionProviderBoundary {
 		);
 	}
 
-	/**
-	 * Tool calls of the assistant turn the running agent loop is executing. Its
-	 * assistant message is persisted at message_end, its results only as each
-	 * tool finishes; a mid-turn rebuild that stripped those calls would drop the
-	 * turn from agent state while the loop still replays it to the provider.
-	 */
+	/** Tool call ids of the assistant turn the running agent loop is still executing. */
 	#inFlightToolCallIds(): Set<string> | undefined {
 		const { isStreaming, messages } = this.#host.agent.state;
 		if (!isStreaming) return undefined;
