@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Space in the Git diff pane scrolling or acting on the wrong hunk instead of staging or unstaging the focused change ([#14326](https://github.com/can1357/oh-my-pi/issues/14326)).
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed
