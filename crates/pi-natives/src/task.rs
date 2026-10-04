@@ -188,6 +188,21 @@ where
 	work:         Option<Box<dyn FnOnce(CancelToken) -> Result<T> + Send>>,
 }
 
+/// Contain worker panics before they escape N-API or Tokio workers.
+///
+/// The recovery scope keeps the crash report on disk instead of writing to
+/// stderr while a TUI is active; caught payloads may also panic during drop.
+fn catch_worker_panic<T>(tag: &'static str, work: impl FnOnce() -> T) -> Result<T> {
+	match catch_unwind(AssertUnwindSafe(|| crate::crash_handler::blocking_task_panic_scope(work))) {
+		Ok(result) => Ok(result),
+		Err(payload) => {
+			let message = crate::crash_handler::panic_payload(&*payload);
+			dispose_panic_payload(payload);
+			Err(Error::new(Status::GenericFailure, format!("native task `{tag}` panicked: {message}")))
+		},
+	}
+}
+
 impl<T> Task for Blocking<T>
 where
 	T: ToNapiValue + Send + 'static + TypeName,
@@ -203,29 +218,9 @@ where
 			.ok_or_else(|| Error::from_reason("BlockingTask: work already consumed"))?;
 		let cancel_token = self.cancel_token.clone();
 		let tag = self.tag;
-		// Guard the napi-rs async-work FFI boundary. `execute` is registered as
-		// a plain `unsafe extern "C" fn` (napi 3.9.4 `src/async_work.rs:109`),
-		// so an unwind escaping this frame would cross a non-`C-unwind` FFI
-		// edge and force-abort the host under Rust's stabilized C-unwind rules
-		// (RFC 2945, stable since 1.81). The crash handler scope tells the
-		// global panic hook this panic is about to be caught and mapped to a
-		// `GenericFailure`, so it downgrades the report to a disk-only crash
-		// log — no stderr dump, no default-hook chaining.
-		match catch_unwind(AssertUnwindSafe(move || {
-			crate::crash_handler::blocking_task_panic_scope(move || work(cancel_token))
-		})) {
-			Ok(result) => result,
-			Err(payload) => {
-				// Extract the message BEFORE touching the payload's destructor:
-				// disposal is the one remaining step that can panic again.
-				let message = crate::crash_handler::panic_payload(&*payload);
-				dispose_panic_payload(payload);
-				Err(Error::new(
-					Status::GenericFailure,
-					format!("native task `{tag}` panicked: {message}"),
-				))
-			},
-		}
+		// N-API's execute callback is not `extern "C-unwind"`; never let a
+		// worker panic escape into its FFI frame.
+		catch_worker_panic(tag, move || work(cancel_token))?
 	}
 
 	fn resolve(&mut self, env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -314,11 +309,7 @@ where
 			.ok_or_else(|| Error::from_reason("BlockingMapped: work already consumed"))?;
 		let cancel_token = self.cancel_token.clone();
 		let tag = self.tag;
-		// Same FFI-boundary panic guard as [`Blocking::compute`]; see its
-		// comment for why the unwind must be caught here.
-		match catch_unwind(AssertUnwindSafe(move || {
-			crate::crash_handler::blocking_task_panic_scope(move || work(cancel_token))
-		})) {
+		match catch_worker_panic(tag, move || work(cancel_token)) {
 			Ok(Ok(value)) => Ok(value),
 			Ok(Err(domain)) => {
 				// Stash the typed error; the placeholder reason is replaced in
@@ -326,14 +317,7 @@ where
 				self.error = Some(domain);
 				Err(Error::from_reason("BlockingMapped: pending domain error"))
 			},
-			Err(payload) => {
-				let message = crate::crash_handler::panic_payload(&*payload);
-				dispose_panic_payload(payload);
-				Err(Error::new(
-					Status::GenericFailure,
-					format!("native task `{tag}` panicked: {message}"),
-				))
-			},
+			Err(error) => Err(error),
 		}
 	}
 
@@ -439,7 +423,7 @@ where
 			let worker_token = cancel_token.clone();
 			let mut worker = tokio::task::spawn_blocking(move || {
 				let _guard = profile_region(tag);
-				work(fs, worker_token)
+				catch_worker_panic(tag, move || work(fs, worker_token))?
 			});
 			let (result, cancelled) = tokio::select! {
 				biased;
@@ -548,6 +532,23 @@ mod tests {
 		assert_eq!(err.status, Status::GenericFailure);
 		assert!(err.reason.contains("t_panic_str"), "reason = {}", err.reason);
 		assert!(err.reason.contains("kaboom"), "reason = {}", err.reason);
+	}
+
+	#[tokio::test]
+	async fn filesystem_worker_panic_rejects_without_unwinding_tokio_task() {
+		let _silence = SilenceHook::new();
+		let result = tokio::task::spawn_blocking(|| {
+			catch_worker_panic("filesystem", || -> u32 { panic!("provider worker failed") })
+		})
+		.await
+		.expect("worker should join normally");
+		let error = result.unwrap_err();
+		assert_eq!(error.status, Status::GenericFailure);
+		assert!(
+			error
+				.reason
+				.contains("native task `filesystem` panicked: provider worker failed")
+		);
 	}
 
 	#[test]
