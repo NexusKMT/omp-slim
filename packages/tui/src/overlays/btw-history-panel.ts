@@ -50,6 +50,12 @@ interface BtwHistoryPanelOptions {
 	spaceHold?: (input: Input) => SpaceHoldHandler;
 	requestRender: () => void;
 	getHeight: () => number;
+	/**
+	 * Esc closes the panel even while the selected answer runs (it keeps
+	 * streaming in the background) and `x` cancels it, instead of Esc cancelling
+	 * first. For a host with no inline panel to fall back to (Tern).
+	 */
+	escapeHides?: boolean;
 }
 
 interface FollowUpComposer {
@@ -342,14 +348,15 @@ export class BtwHistoryPanel implements Component, Focusable {
 			return;
 		}
 		const record = this.#selected();
-		// Esc puts the sheet away without stopping a running answer (it keeps
-		// streaming in the background); `x` is the explicit cancel.
+		const running = record !== undefined && getBtwLatestTurn(record).status === "running" ? record : undefined;
+		const hides = this.#options.escapeHides === true;
 		if (matchesSelectCancel(data) || matchesKey(data, "escape")) {
-			this.#options.onClose();
+			if (running && !hides) this.#options.onCancel(running);
+			else this.#options.onClose();
 			return;
 		}
-		if (matchesKey(data, "x")) {
-			if (record && getBtwLatestTurn(record).status === "running") this.#options.onCancel(record);
+		if (hides && matchesKey(data, "x")) {
+			if (running) this.#options.onCancel(running);
 			return;
 		}
 		if (matchesKey(data, "f") || matchesKey(data, "enter")) {
@@ -578,9 +585,10 @@ export class BtwHistoryPanel implements Component, Focusable {
 			]);
 		}
 		const latest = record ? getBtwLatestTurn(record) : undefined;
+		const running = latest?.status === "running";
 		const hints: (NativeHint | undefined)[] = [
-			actionHint("tui.select.cancel", "close"),
-			latest?.status === "running" ? { keys: ["x"], label: "cancel" } : undefined,
+			actionHint("tui.select.cancel", running && !this.#options.escapeHides ? "cancel" : "close"),
+			running && this.#options.escapeHides ? { keys: ["x"], label: "cancel" } : undefined,
 			this.#records.length > 1 ? { keys: ["tab", "ctrl+/"], label: "switch pane" } : undefined,
 			actionHint(["tui.select.up", "tui.select.down"], this.#focus === "list" ? "select" : "scroll"),
 		];
@@ -758,14 +766,15 @@ export class BtwHistoryPanel implements Component, Focusable {
 		const record = this.#selected();
 		const composer = this.#composer;
 		const latest = record ? getBtwLatestTurn(record) : undefined;
+		const running = latest?.status === "running";
 		const actions = composer
 			? [
 					keyHint("tui.input.submit", this.#followUpPending ? "starting…" : "send"),
 					keyHint("tui.select.cancel", "cancel"),
 				]
 			: [
-					keyHint("tui.select.cancel", "close"),
-					...(latest?.status === "running" ? [rawKeyHint("x", "cancel")] : []),
+					keyHint("tui.select.cancel", running && !this.#options.escapeHides ? "cancel" : "close"),
+					...(running && this.#options.escapeHides ? [rawKeyHint("x", "cancel")] : []),
 					...(this.#records.length > 1 ? [rawKeyHint(["tab", "ctrl+/"], "switch pane")] : []),
 				];
 		if (!composer) {
