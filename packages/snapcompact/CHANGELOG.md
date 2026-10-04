@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `maxFramesForDataBudget()` now takes the frame shape and charges frames smaller than 1932px by pixel area (1568px: 26 frames under `FRAME_DATA_BYTES_BUDGET` instead of 17).
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed

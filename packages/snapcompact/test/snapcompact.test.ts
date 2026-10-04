@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { describe, expect, it } from "bun:test";
 import type { AssistantMessage, Message, Usage } from "@oh-my-pi/pi-ai";
 import { INTENT_FIELD } from "@oh-my-pi/pi-wire";
@@ -1149,6 +1150,53 @@ describe("compact", () => {
 			{ frameSize: TEST_FRAME_SIZE },
 		);
 		expect(snapcompact.getPreservedArchive(second.preserveData)?.text ?? "").toContain("¶think:");
+	});
+});
+
+describe("frame data budget", () => {
+	const codex = { api: "openai-codex-responses", id: "gpt-6-astra" } as const;
+	const sonnet = { api: "anthropic-messages", id: "claude-sonnet-4-5" } as const;
+	const opus = { api: "anthropic-messages", id: "claude-opus-4-8" } as const;
+
+	it("gives smaller frames more of the same byte budget", () => {
+		const highRes = snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(opus));
+		expect(highRes).toBe(Math.floor(snapcompact.FRAME_DATA_BYTES_BUDGET / snapcompact.FRAME_DATA_BYTES_ESTIMATE));
+		expect(snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(codex))).toBe(26);
+		expect(snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(sonnet))).toBe(26);
+		// Frames larger than 1932px keep the 1932px charge rather than losing frames.
+		const gemini = snapcompact.resolveShape({ api: "google-generative-ai", id: "gemini-3.5-flash" });
+		expect(snapcompact.maxFramesForDataBudget(gemini)).toBe(highRes);
+	});
+
+	it("keeps a full archive of real-sized frames within the byte budget", async () => {
+		// A tool-heavy transcript (read calls returning this repo's sources)
+		// renders frames at the sizes measured in real archives: ~100-110 KB at
+		// 1568px, ~155 KB at 1932px.
+		const packagesDir = path.join(import.meta.dir, "../..");
+		const files = [...new Bun.Glob("*/src/**/*.ts").scanSync({ cwd: packagesDir })].sort().slice(0, 1500);
+		const messagesToSummarize: Message[] = [];
+		for (const [index, file] of files.entries()) {
+			const id = `call-${index}`;
+			messagesToSummarize.push(
+				createUserMessage(`Read ${file} and explain it.`),
+				createAssistantMessage([{ type: "toolCall", id, name: "read", arguments: { path: file } }]),
+				{
+					role: "toolResult",
+					toolCallId: id,
+					toolName: "read",
+					content: [{ type: "text", text: await Bun.file(path.join(packagesDir, file)).text() }],
+					isError: false,
+					timestamp: 0,
+				},
+			);
+		}
+		for (const model of [codex, sonnet, opus]) {
+			const maxFrames = snapcompact.maxFramesForDataBudget(snapcompact.resolveShape(model));
+			const result = await snapcompact.compact(makePreparation({ messagesToSummarize }), { model, maxFrames });
+			const frames = snapcompact.getPreservedArchive(result.preserveData)?.frames ?? [];
+			expect(frames).toHaveLength(maxFrames);
+			expect(snapcompact.frameDataBytes(frames)).toBeLessThanOrEqual(snapcompact.FRAME_DATA_BYTES_BUDGET);
+		}
 	});
 });
 

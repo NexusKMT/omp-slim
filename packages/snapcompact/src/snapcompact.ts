@@ -474,10 +474,11 @@ export const HQ_EDGE_FRAMES = 3;
  *  undercounting a high-res archive at the raised {@link MAX_FRAMES_DEFAULT}. */
 export const FRAME_TOKEN_ESTIMATE = 5024;
 
-/** Conservative upper bound for one persisted frame's base64 payload. The
- *  measured high-res Anthropic `8x13`/`11on16` PNG frames sit around 159 KB;
- *  170 KB leaves margin for denser glyph pages without permitting multi-MB
- *  standing request bodies at large context windows. */
+/** Conservative upper bound for one persisted high-res (1932px) frame's
+ *  base64 payload. The measured high-res Anthropic `8x13`/`11on16` PNG frames
+ *  sit around 159 KB; 170 KB leaves margin for denser glyph pages without
+ *  permitting multi-MB standing request bodies at large context windows.
+ *  Smaller frames are charged less by {@link maxFramesForDataBudget}. */
 export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
 
 /** Maximum snapcompact image base64 carried in every rebuilt provider request.
@@ -487,9 +488,16 @@ export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
  *  ~11 MB JSON payload on every turn. */
 export const FRAME_DATA_BYTES_BUDGET = 3_000_000;
 
-/** Frame-count cap implied by {@link FRAME_DATA_BYTES_BUDGET}. */
-export function maxFramesForDataBudget(maxFrameDataBytes: number = FRAME_DATA_BYTES_BUDGET): number {
-	return Math.max(1, Math.floor(maxFrameDataBytes / FRAME_DATA_BYTES_ESTIMATE));
+/** Frame-count cap implied by {@link FRAME_DATA_BYTES_BUDGET} for frames
+ *  rendered by `shape`. A glyph page's PNG size grows with its pixel area, so
+ *  frames smaller than the 1932px high-res frame are charged
+ *  {@link FRAME_DATA_BYTES_ESTIMATE} scaled by area (1568px ≈ 112 KB, 26
+ *  frames; measured capped 1568px archives average ≤ 115 KB per frame).
+ *  Larger frames keep the 1932px bound: 2048px Gemini frames measure below it. */
+export function maxFramesForDataBudget(shape: Pick<Shape, "frameSize">): number {
+	const areaRatio = (shape.frameSize / HIGH_RES_ANTHROPIC_VARIANT.frameSize) ** 2;
+	const frameBytes = Math.min(FRAME_DATA_BYTES_ESTIMATE, Math.ceil(FRAME_DATA_BYTES_ESTIMATE * areaRatio));
+	return Math.max(1, Math.floor(FRAME_DATA_BYTES_BUDGET / frameBytes));
 }
 
 /** Base64 byte length for persisted snapcompact frames. */
