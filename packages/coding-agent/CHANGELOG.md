@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed `wait` reporting "Nothing to wait for" while subagents you messaged after they finished were still working on your message; their next answer is now a background job you can wait on, cancel through `proc://`, and receive once.
 - Fixed `/switch` autocomplete ordering: model suggestions now follow the alt+p picker's ranking (role models, recent use, provider, fuzzy relevance), and `@role` aliases appear when the argument starts with `@`, ctrl+p cycle roles first.
 - Fixed follow-up hashline edits being rejected as anchored on lines "never displayed" after an earlier edit shifted those lines, when the replacement carries the anchored content; genuinely stale line numbers are still rejected ([#14254](https://github.com/can1357/oh-my-pi/pull/14254) by [@abilliontokens](https://github.com/abilliontokens)).
 
