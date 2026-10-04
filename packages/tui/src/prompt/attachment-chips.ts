@@ -33,12 +33,9 @@ const RESET_FG = "\x1b[39m";
  *  (pastes are usually re-encoded JPEG/WebP) convert before transmit — the same pipeline
  *  the transcript uses. `null` = conversion in flight or failed. */
 const kImagePng = Symbol("omp.imagePng");
-/** Native image owning the draft's decoded bytes, shared by successive chip descriptions. */
-const kImageNode = Symbol("omp.imageNode");
 
 interface ImageContentWithPng extends ImageContent {
 	[kImagePng]?: ImageContent | null;
-	[kImageNode]?: NativeNode;
 }
 
 /**
@@ -57,7 +54,9 @@ export class AttachmentChipsBand implements Component {
 		private readonly requestRender: () => void,
 	) {}
 
-	#native: { chips: readonly ComposerChipDescriptor[]; node: NativeNode } | undefined;
+	#native:
+		| { chips: readonly ComposerChipDescriptor[]; node: NativeNode; images: ReadonlyMap<ImageContent, NativeNode> }
+		| undefined;
 
 	/**
 	 * A wrapping `row` of chip `card`s (`omp.composer.chip`) titled with the
@@ -69,6 +68,7 @@ export class AttachmentChipsBand implements Component {
 		const chips = this.editor.composerChips();
 		if (this.#native?.chips === chips) return this.#native.node;
 		const cards: NativeNode[] = [];
+		const images = new Map<ImageContent, NativeNode>();
 		for (const chip of chips) {
 			const icon = theme.symbol(
 				chip.kind === "paste" ? "chip.paste" : chip.kind === "video" ? "chip.video" : "chip.image",
@@ -86,9 +86,12 @@ export class AttachmentChipsBand implements Component {
 			} else {
 				const dims = this.#imageDims(chip.image);
 				caption = dims ? `${dims.width}x${dims.height}` : "";
-				const image = chip.image as ImageContentWithPng;
-				const native = image[kImageNode] ?? nativeImageNode(Buffer.from(image.data, "base64"), image.mimeType);
-				image[kImageNode] = native;
+				const image = chip.image;
+				const native =
+					images.get(image) ??
+					this.#native?.images.get(image) ??
+					nativeImageNode(Buffer.from(image.data, "base64"), image.mimeType);
+				images.set(image, native);
 				content = node("image", {
 					...native.p,
 					alt: title,
@@ -106,7 +109,7 @@ export class AttachmentChipsBand implements Component {
 			);
 		}
 		const described = row(cards, { gap: "sm", wrap: true, role: "omp.composer.chips", hidden: cards.length === 0 });
-		this.#native = { chips, node: described };
+		this.#native = { chips, node: described, images };
 		return described;
 	}
 

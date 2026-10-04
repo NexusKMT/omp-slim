@@ -16,6 +16,11 @@ describe("native image blob lifetime", () => {
 			fixture: "blob-replay.ts",
 			source: "",
 		},
+		{
+			name: "releases deleted attachment thumbnails while preserving undo and live chips",
+			fixture: "attachment-blob-lifetime.ts",
+			source: "",
+		},
 	];
 	for (const { name, fixture, source } of cases) {
 		it(
