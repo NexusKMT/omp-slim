@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.6.1] - 2026-10-04
+
 ### Fixed
 
 - Fixed the Space key in the Git diff pane so it stages or unstages the focused hunk instead of scrolling or acting on the wrong change.

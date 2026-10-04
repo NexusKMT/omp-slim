@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.6.1] - 2026-10-04
+
 ### Fixed
 
 - Fixed waiting for subagent follow-up messages: responses now appear as background jobs that can be waited on or canceled, and are delivered only once.

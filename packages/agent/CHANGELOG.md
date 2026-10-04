@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.6.1] - 2026-10-04
+
 ### Fixed
 
 - Fixed native OpenAI context compaction for sessions containing many screenshots, preventing image-size estimates from incorrectly causing compaction requests to be rejected.
