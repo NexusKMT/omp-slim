@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added routing-session cleanup for OpenAI Responses and Codex while preserving shared provider fallbacks.
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed
