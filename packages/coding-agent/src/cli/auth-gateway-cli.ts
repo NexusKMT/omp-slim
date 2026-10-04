@@ -174,11 +174,8 @@ export function gatewayRoutableModels(registry: ModelRegistry): Model<Api>[] {
 }
 
 /**
- * Providers the gateway can route right now: those the broker holds a
- * credential for, minus `disabledProviders` from effective settings. Derived
- * live on every rebuild: captured once at boot it would freeze the served
- * catalog, so a provider logged in later stays unroutable and one logged out
- * keeps being advertised until restart.
+ * Providers the broker holds a credential for, minus `disabledProviders`. Recomputed on
+ * every rebuild so a later login or logout reaches the served catalog.
  */
 export function gatewayRoutableProviders(storage: AuthStorage, settings: Settings): Set<string> {
 	const disabled = new Set(cfgDisabledProviders.get(settings));
@@ -276,17 +273,17 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	await storage.credentials.reload();
 
 	// Build the model resolver + catalog from the ModelRegistry — the same
-	// component the TUI/CLI use — scoped to providers we hold credentials for
-	// and not disabled in settings. `getAll()` is a superset of the bundled
-	// catalog (bundled first, then cached + broker-discovered), so the
-	// discovery-only models omp itself reaches become routable through the
-	// gateway instead of freezing on the compiled snapshot. `ignoreLocalModelConfig`
-	// keeps the host's `models.yml` out of the picture: client-side provider
-	// overrides (baseUrl/apiKey/headers/transport) and custom models must never
-	// route a broker-backed gateway or shadow broker credentials. `settings`
-	// carries `disabledProviders`, so discovery skips disabled providers too.
-	// Format handlers ask `resolveModel` to translate a client-requested `model`
-	// field into a pi-ai `Model<Api>` before dispatch; `listModels` powers `/v1/models`.
+	// component the TUI/CLI use — scoped to providers we hold credentials for.
+	// `getAll()` is a superset of the bundled catalog (bundled first, then
+	// cached + broker-discovered), so the discovery-only models omp itself
+	// reaches become routable through the gateway instead of freezing on the
+	// compiled snapshot. `ignoreLocalModelConfig` keeps the host's `models.yml`
+	// out of the picture: client-side provider overrides (baseUrl/apiKey/headers/
+	// transport) and custom models must never route a broker-backed gateway or
+	// shadow broker credentials. Format handlers ask `resolveModel` to translate
+	// a client-requested `model` field into a pi-ai `Model<Api>` before dispatch;
+	// `listModels` powers `/v1/models`. `settings` carries `disabledProviders`, so
+	// discovery skips disabled providers too.
 	const registry = new ModelRegistry(storage, undefined, { ignoreLocalModelConfig: true, settings });
 	let modelById = new Map<string, Model<Api>>();
 	// Rebuild the served catalog (a `registry.refresh()` pass, then re-index
