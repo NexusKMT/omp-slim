@@ -416,11 +416,7 @@ export interface CodexCompactionRequestContext extends CodexCompactionMetadata {
 export interface AnthropicCompactionRequest {
 	/** Custom summarization prompt; replaces the API default entirely when set. */
 	instructions?: string;
-	/**
-	 * Timestamp of the first message kept after the summary, when any is.
-	 * File metadata a replayed earlier summary queues past its own retained
-	 * tail is sent only when that position lies inside the summarized range.
-	 */
+	/** Timestamp of the first message kept after the summary; earlier summaries' file metadata due after it stays out. */
 	retainedFrom?: number;
 }
 

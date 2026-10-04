@@ -5056,13 +5056,7 @@ export function convertAnthropicMessages(
 		dropAllThinking?: boolean;
 		droppedThinkingBlocks?: ReadonlySet<string>;
 		credentialId?: number;
-		/**
-		 * This request asks for an on-demand compaction. Its messages end inside
-		 * the conversation, so nothing live requests do not send at that point
-		 * may be appended: no `Continue.` after a final assistant turn (the API
-		 * summarizes such a list as it is), and queued file metadata only when
-		 * live requests place it before the first retained message.
-		 */
+		/** On-demand compaction request: it ends inside the conversation, so it gets nothing live requests lack there. */
 		compactionRequest?: AnthropicCompactionRequest;
 	},
 ): AnthropicMessageParam[] {
@@ -5090,14 +5084,13 @@ export function convertAnthropicMessages(
 		params.push({ role: "user", content: redactSensitiveCredentials(filesText) });
 	};
 	const flushCompactionFiles = (before: number): void => {
-		while (pendingCompactionFiles.length > 0 && pendingCompactionFiles[0].after < before) {
-			pushCompactionFiles(pendingCompactionFiles.shift()!.text);
-		}
+		const due = pendingCompactionFiles.filter(files => files.after < before);
+		pendingCompactionFiles = pendingCompactionFiles.filter(files => files.after >= before);
+		for (const files of due) pushCompactionFiles(files.text);
 	};
-	// Summaries persisted before `exactTail` replayed their metadata after the
-	// first param boundary past the block (clear of the fold and of an open
-	// tool_use turn). Later thinking was signed against that layout, so it is
-	// kept for them.
+	// Summaries without `exactTail` replay their metadata after the first param
+	// boundary past the block (clear of the fold and of an open tool_use turn):
+	// thinking created after them was signed against that layout.
 	let legacyCompactionFiles: string | undefined;
 	const flushLegacyCompactionFiles = (): void => {
 		if (legacyCompactionFiles === undefined) return;

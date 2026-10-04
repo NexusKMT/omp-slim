@@ -678,14 +678,10 @@ export interface SummaryOptions {
 	metadata?: Record<string, unknown>;
 	convertToLlm?: ConvertToLlm;
 	/**
-	 * Builds the provider context a live turn sends for `summarized` followed
-	 * by `retained` (live system prompt, wire tools, transformed history) and
-	 * returns it cut to the `summarized` range. The whole history is
-	 * transformed first because some transforms (inline imaging, image
-	 * budgets) decide per request. Anthropic on-demand compaction sends it so
-	 * the retained tail's signed thinking stays bound to an unchanged prefix;
-	 * without it the request is assembled from `remoteSystemPrompt`, `tools`
-	 * and `convertToLlm`.
+	 * The provider context a live turn sends for `summarized` + `retained`, cut to
+	 * `summarized`. Anthropic on-demand compaction sends it so retained signed
+	 * thinking keeps its prefix; without it the request uses `remoteSystemPrompt`,
+	 * `tools` and `convertToLlm`.
 	 */
 	buildProviderContext?: (
 		summarized: AgentMessage[],

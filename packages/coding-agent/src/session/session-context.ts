@@ -504,15 +504,14 @@ export function buildSessionContext(
 			// The message's own time, not the entry's: an assistant message is
 			// stamped when its stream starts and saved after it ends, so a marker
 			// derived from the entry would postdate that turn and strip its thinking.
-			// Summaries persisted before `exactTail` keep the entry time: later
-			// thinking was signed against the request that stripped it.
-			const retainedAt =
-				firstRetained?.type === "message" && anthropicPayload.exactTail
-					? firstRetained.message.timestamp
-					: firstRetained
-						? new Date(firstRetained.timestamp).getTime()
-						: NaN;
-			if (Number.isFinite(retainedAt)) historyRewriteAt = retainedAt - 1;
+			// Summaries without `exactTail` keep the entry time: thinking created
+			// after them was signed against requests that stripped that turn's.
+			if (firstRetained?.type === "message" && anthropicPayload.exactTail) {
+				historyRewriteAt = firstRetained.message.timestamp - 1;
+			} else if (firstRetained) {
+				const retainedAt = new Date(firstRetained.timestamp).getTime();
+				if (Number.isFinite(retainedAt)) historyRewriteAt = retainedAt - 1;
+			}
 		}
 
 		// Re-attach any archived snapcompact frames so the model can keep
