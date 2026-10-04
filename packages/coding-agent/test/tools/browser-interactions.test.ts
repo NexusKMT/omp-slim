@@ -200,10 +200,7 @@ return {
 		const prelude = createBrowserPrelude(session);
 		const context = { session, toolCallId: "browser-custom-checkbox" };
 		const tabName = `custom-checkbox-${crypto.randomUUID()}`;
-		// #faded: the real input is opacity:0 under a drawn box. #covered: a span inside the label is drawn over the input.
-		// #terms: like #faded, but most of the label is a link that must not be followed.
-		// #nested: a button inside the label is drawn over the input; it takes the click itself, so the input is covered.
-		// #shadowed: the same with a link whose icon draws in a shadow root, so the hit is inside that shadow tree.
+		// #terms, #nested and #shadowed hold a link or button inside the label, which no click may follow.
 		const customHtml = `<!doctype html><style>label { position: relative; display: block; padding: 4px 24px } input { position: absolute; left: 4px; top: 4px; margin: 0 } .box { position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; background: #fff; border: 1px solid #333 }</style>
 <label><input id="faded" type="checkbox" style="opacity:0"><span style="position:absolute;left:4px;top:4px;width:14px;height:14px;border:1px solid #333"></span>Faded option</label>
 <label><input id="covered" type="checkbox"><span class="box"></span>Covered option</label>

@@ -14,10 +14,7 @@ export interface ClickAtOptions {
 
 /** Options accepted by element clicks. */
 export interface ElementClickOptions extends ClickAtOptions {
-	/**
-	 * Accept an `opacity:0` element. A custom checkbox keeps its real input transparent under a drawn
-	 * box, so `check()` clicks the input's own box and lands on whatever the page draws there.
-	 */
+	/** Accept an `opacity:0` element, such as a custom checkbox's real input under its drawn box. */
 	transparent?: boolean;
 }
 
@@ -136,9 +133,7 @@ function requireFiniteNumber(value: number, label: string): void {
 
 /**
  * Return a visible point relative to the element's box, or explain why it cannot receive a click.
- * A hit on one of the control's own `<label>`s counts as on-target for the left button only: the
- * label forwards a left click to its control, but no other button, and not when the hit is other
- * interactive content inside the label (a link or button there takes the click itself).
+ * A left click on one of the control's own `<label>`s counts as on-target, since the label forwards it.
  */
 export async function isClickActionable(
 	handle: ElementHandle,
@@ -181,23 +176,17 @@ export async function isClickActionable(
 				}
 				return false;
 			};
-			// A label forwards a click to its control unless the click lands on other interactive content
-			// inside it (HTML label activation behaviour). Walks the composed tree like composedContains.
+			// A label forwards a click to its control unless the hit is other interactive content inside it.
+			const interactiveContent =
+				'a[href], area[href], button, details, embed, iframe, input:not([type="hidden"]), label, select, textarea, summary, audio[controls], video[controls], [contenteditable=""], [contenteditable="true"]';
 			const hit: PageElement = topElement;
 			const forwardedBy = (owner: PageElement): boolean => {
-				for (let current: PageElement | null = hit, depth = 0; current && depth < 64; depth++) {
-					if (current === owner) return true;
-					if (
-						current.matches(
-							'a[href], area[href], button, details, embed, iframe, input:not([type="hidden"]), label, select, textarea, summary, audio[controls], video[controls], [contenteditable=""], [contenteditable="true"]',
-						)
-					) {
-						return false;
-					}
-					const root: PageRoot = current.getRootNode();
-					current = current.parentElement ?? root.host ?? null;
+				let current: PageElement | null = hit;
+				while (current && current !== owner) {
+					if (current.matches(interactiveContent)) return false;
+					current = current.parentElement ?? current.getRootNode().host ?? null;
 				}
-				return false;
+				return current === owner;
 			};
 			const onTarget =
 				composedContains(element, topElement) ||
