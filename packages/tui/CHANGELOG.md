@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduced native terminal memory usage after images and previews are discarded.
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed

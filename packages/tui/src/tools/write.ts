@@ -32,7 +32,7 @@ import {
 } from "./proc-render";
 import type { TspTone } from "@oh-my-pi/pi-wire";
 import { code, compact, node, span } from "../native/describe";
-import { registerNativeBlob } from "../native/blobs";
+import { nativeImageNode } from "../native/blobs";
 import type { NativeChild, NativeNode } from "../native/node";
 import { diagnosticsBadge, diagnosticsSection, displayPath, errorText, fileHref, resultText } from "./native-view";
 import { describeCfgWrite, renderCfgWrite, type CfgWriteDetails } from "./cfg-render";
@@ -112,9 +112,7 @@ interface TaggedWriteResult extends WriteResult {
 function describeSvgPreview(result: TaggedWriteResult, content: string, alt: string): NativeNode {
 	const cached = result[kSvgPreview];
 	if (cached?.content === content) return cached.node;
-	const blob = registerNativeBlob(new TextEncoder().encode(content), "image/svg+xml");
-	const preview = node("image", {
-		blob,
+	const preview = nativeImageNode(new TextEncoder().encode(content), "image/svg+xml", {
 		alt,
 		role: "omp.tool.write.image",
 		max: { h: `${NATIVE_SVG_PREVIEW_LINES}lines` },

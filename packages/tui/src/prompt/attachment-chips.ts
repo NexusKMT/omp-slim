@@ -12,7 +12,7 @@ import {
 	visibleWidth,
 } from "../index";
 import { fileHyperlink } from "../render/hyperlink";
-import { registerNativeBlob } from "../native/blobs";
+import { nativeImageNode } from "../native/blobs";
 import { node, row, span } from "../native/describe";
 import { plainText } from "../native/spans";
 import type { DescribeContext, NativeNode } from "../native/node";
@@ -33,12 +33,12 @@ const RESET_FG = "\x1b[39m";
  *  (pastes are usually re-encoded JPEG/WebP) convert before transmit — the same pipeline
  *  the transcript uses. `null` = conversion in flight or failed. */
 const kImagePng = Symbol("omp.imagePng");
-/** Content address of the draft image's decoded bytes, registered once for TSP `image` nodes. */
-const kImageBlob = Symbol("omp.imageBlob");
+/** Native image owning the draft's decoded bytes, shared by successive chip descriptions. */
+const kImageNode = Symbol("omp.imageNode");
 
 interface ImageContentWithPng extends ImageContent {
 	[kImagePng]?: ImageContent | null;
-	[kImageBlob]?: string;
+	[kImageNode]?: NativeNode;
 }
 
 /**
@@ -87,10 +87,10 @@ export class AttachmentChipsBand implements Component {
 				const dims = this.#imageDims(chip.image);
 				caption = dims ? `${dims.width}x${dims.height}` : "";
 				const image = chip.image as ImageContentWithPng;
-				const blob = image[kImageBlob] ?? registerNativeBlob(Buffer.from(image.data, "base64"), image.mimeType);
-				image[kImageBlob] = blob;
+				const native = image[kImageNode] ?? nativeImageNode(Buffer.from(image.data, "base64"), image.mimeType);
+				image[kImageNode] = native;
 				content = node("image", {
-					blob,
+					...native.p,
 					alt: title,
 					w: dims?.width,
 					h: dims?.height,
