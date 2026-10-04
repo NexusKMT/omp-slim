@@ -46,6 +46,21 @@ const NATIVE_BACKEND: SpellingBackend = {
 };
 
 /**
+ * How long a native spelling call may take before the provider gives up on it.
+ *
+ * The Rust side has no deadline — `appkit.rs` awaits a `flume::bounded(1)` reply
+ * with no timeout — so a `NSSpellChecker` call that never returns leaves the
+ * promise pending forever. A pending promise never reaches a `catch`, so the
+ * provider stays `#available`, nothing is logged, and `#automaticTypoActive`
+ * stays true, which freezes the typo queue for the rest of the session. That is
+ * the silent half of the hang.
+ *
+ * Rejecting on expiry routes into the existing `catch` handlers, which call
+ * `#disable` — one warning instead of a session-long freeze.
+ */
+const BACKEND_TIMEOUT_MS = 2_000;
+
+/**
  * Bridges Apple's spelling service into the editor's typo and autocorrection
  * paths. Word completion is the cross-platform `WordCompletionProvider`
  * (`word-completion.ts`).
@@ -165,7 +180,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		const context = lineContext(lines, cursorLine);
 		if (!this.#prose.isProse(context, start, start + word.length)) return null;
 		try {
-			const correction = await this.backend.autocorrectWord(textBeforeCursor, start, word.length);
+			const correction = await this.#withTimeout(this.backend.autocorrectWord(textBeforeCursor, start, word.length));
 			if (!correction || correction === word) return null;
 			return { replaceLen: word.length + boundary.length, insert: correction + boundary };
 		} catch (error) {
@@ -198,7 +213,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		try {
 			const seen = new Set<string>();
 			const items: string[] = [];
-			for (const guess of await this.backend.spellingGuesses(line, range.start, range.length)) {
+			for (const guess of await this.#withTimeout(this.backend.spellingGuesses(line, range.start, range.length))) {
 				if (!guess || seen.has(guess)) continue;
 				seen.add(guess);
 				items.push(guess);
@@ -300,7 +315,7 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 	async #fetchTypoRanges(text: string, generation: number): Promise<readonly native.SpellingRange[]> {
 		let checked: readonly native.SpellingRange[];
 		try {
-			checked = await this.backend.checkSpelling(text);
+			checked = await this.#withTimeout(this.backend.checkSpelling(text));
 		} catch (error) {
 			this.#disable(error);
 			return [];
@@ -325,6 +340,27 @@ export class MacOSSpellingProvider implements EditorTextAssistProvider {
 		this.#typoCache.clear();
 		this.#typoInFlight.clear();
 		this.#automaticTypoQueue.clear();
+	}
+
+	/**
+	 * Reject when a native spelling call overruns {@link BACKEND_TIMEOUT_MS}.
+	 *
+	 * Uses `setTimeout` rather than `Bun.sleep` deliberately: the TUI test rule
+	 * requires fake timers, and fake timers only intercept `setTimeout`.
+	 */
+	async #withTimeout<T>(work: Promise<T>): Promise<T> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const expiry = new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(
+				() => reject(new Error(`macOS spelling service did not respond within ${BACKEND_TIMEOUT_MS}ms`)),
+				BACKEND_TIMEOUT_MS,
+			);
+		});
+		try {
+			return await Promise.race([work, expiry]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	#disable(error: unknown): void {
