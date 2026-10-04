@@ -19,16 +19,27 @@ class "anthropic" {
 	family "sonnet" {
 		revision ">=5 <10" {
 			supports-sampling-params #false
+			thinking-api-default-effort "high"
 		}
 	}
 	family "fable" {
 		revision ">=5 <10" {
 			supports-sampling-params #false
+			thinking-api-default-effort "high"
 		}
 	}
 	family "mythos" {
 		revision ">=5 <10" {
 			supports-sampling-params #false
+			thinking-api-default-effort "high"
+		}
+	}
+	// A request without `output_config.effort` runs at the model's default:
+	// `high` on every effort model except Opus 5.5, which runs at `medium`.
+	// https://platform.claude.com/docs/en/build-with-claude/effort
+	family "opus" {
+		revision ">=4.7 <5.5" {
+			thinking-api-default-effort "high"
 		}
 	}
 	// On-demand compaction (compact-2026-09-04) works on the Claude API, Vertex,
@@ -91,6 +102,7 @@ class "anthropic" {
 			// https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
 			thinking-prefix-binding #true
 			supports-forced-tool-choice #false
+			thinking-api-default-effort "medium"
 		}
 	}
 	// Sonnet 5.5 rejects forced tool selection like Opus 5.5 (400 `tool_choice:

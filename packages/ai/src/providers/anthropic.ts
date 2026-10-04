@@ -4440,18 +4440,23 @@ function planAnthropicEffortControls(
 
 /**
  * The effort an on-demand compaction request over `messages` runs at. It sends
- * no effort change of its own, so the effort earlier requests left in force
- * applies, and its thinking allowance must follow that effort, not `requested`.
+ * no effort change of its own, so once an earlier request recorded an effort,
+ * the one it left in force applies (the model's API default when that request
+ * named none), even when `requested` differs or is off. Its thinking allowance
+ * must follow that effort. Without a recorded effort the request sets its own.
  */
 export function resolveAnthropicCompactionEffort(
 	model: Model<"anthropic-messages">,
 	messages: readonly Message[],
 	requested: Effort | undefined,
 ): Effort | undefined {
-	if (!requested || model.compat.supportsPerMessageEffort !== true) return requested;
+	if (model.compat.supportsPerMessageEffort !== true) return requested;
 	const records = collectAnthropicControlRecords(messages);
+	if (!records.some(record => record.controls.effort)) return requested;
 	const inForce = planAnthropicEffortControls(undefined, messages, records, true, undefined, false).record?.tail;
-	if (!inForce || mapEffortToAnthropicAdaptiveEffort(model, requested) === inForce) return requested;
+	// No recorded effort in force: the API default applies while thinking is on.
+	if (!inForce) return requested && (model.thinking?.apiDefaultEffort ?? requested);
+	if (requested && mapEffortToAnthropicAdaptiveEffort(model, requested) === inForce) return requested;
 	return (
 		model.thinking?.efforts?.findLast(effort => mapEffortToAnthropicAdaptiveEffort(model, effort) === inForce) ??
 		requested

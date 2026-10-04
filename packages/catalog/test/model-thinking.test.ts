@@ -229,6 +229,7 @@ describe("model thinking derivation", () => {
 		expect(opus48.thinking).toEqual({
 			mode: "anthropic-adaptive",
 			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High, Effort.XHigh],
+			apiDefaultEffort: Effort.High,
 			supportsDisplay: true,
 		});
 		expect(getSupportedEfforts(opus48)).toEqual([
@@ -1006,6 +1007,7 @@ describe("model thinking derivation", () => {
 		expect(filled.thinking).toEqual({
 			mode: "anthropic-adaptive",
 			efforts: [Effort.Low, Effort.High],
+			apiDefaultEffort: Effort.High,
 			supportsDisplay: true,
 		});
 

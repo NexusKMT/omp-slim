@@ -806,7 +806,8 @@ Image handling:
 Reasoning / thinking:
 
 Custom models and overrides may define `thinking` with required `mode` and `efforts`, plus
-`defaultLevel`, `effortMap`, `supportsDisplay`, and `requiresEffort`. Modes are `effort`, `budget`,
+`defaultLevel`, `apiDefaultEffort` (the effort the API uses when a request names none), `effortMap`,
+`supportsDisplay`, and `requiresEffort`. Modes are `effort`, `budget`,
 `google-level`, `anthropic-adaptive`, and `anthropic-budget-effort`. Efforts are ordered
 `minimal|low|medium|high|xhigh|max`. Legacy `levels` or `minLevel`/`maxLevel` shapes are normalized to
 `efforts`; explicit `efforts` wins over either.

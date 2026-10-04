@@ -1057,6 +1057,7 @@ interface RuleThinking {
 	mode?: ThinkingConfig["mode"];
 	efforts?: readonly Effort[];
 	defaultLevel?: Effort;
+	apiDefaultEffort?: Effort;
 	effortMap?: Partial<Record<Effort, string>>;
 	effortBudgets?: Partial<Record<Effort, number>>;
 	requiresEffort?: boolean;
@@ -1075,6 +1076,8 @@ function readRuleThinking(axes: ResolvedAxes): RuleThinking {
 	if (efforts !== undefined) out.efforts = efforts;
 	const defaultLevel = effortValue(raw.defaultLevel);
 	if (defaultLevel !== undefined) out.defaultLevel = defaultLevel;
+	const apiDefaultEffort = effortValue(raw.apiDefaultEffort);
+	if (apiDefaultEffort !== undefined) out.apiDefaultEffort = apiDefaultEffort;
 	const effortMap = effortRecord(raw.effortMap);
 	if (effortMap !== undefined) out.effortMap = effortMap;
 	const effortBudgets = effortNumberRecord(raw.effortBudgets);
@@ -1157,6 +1160,7 @@ function resolveThinkingPolicy<TApi extends Api>(
 		throw new Error(`Model ${spec.provider}/${spec.id} resolved to an empty thinking range`);
 	}
 	if (rule.defaultLevel !== undefined) config.defaultLevel = rule.defaultLevel;
+	if (rule.apiDefaultEffort !== undefined) config.apiDefaultEffort = rule.apiDefaultEffort;
 	const effortMap = mergeEffortMap(spec, rule.effortMap, compat, config.efforts);
 	if (effortMap !== undefined) config.effortMap = effortMap;
 	if (rule.effortBudgets !== undefined) config.effortBudgets = rule.effortBudgets;
@@ -1220,6 +1224,7 @@ function fillExplicitThinking<TApi extends Api>(
 		(rule.requiresEffort ??
 			(impliesMandatoryReasoning(facts, spec.id) || isQwenTemplateReasoningEffortCompat(compat)));
 	const needsDefaultLevel = thinking.defaultLevel === undefined && rule.defaultLevel !== undefined;
+	const needsApiDefaultEffort = thinking.apiDefaultEffort === undefined && rule.apiDefaultEffort !== undefined;
 	const needsPrefixBinding = thinking.prefixBinding === undefined && rule.prefixBinding === true;
 	const needsEffortBudgets = thinking.effortBudgets === undefined && rule.effortBudgets !== undefined;
 	if (
@@ -1227,6 +1232,7 @@ function fillExplicitThinking<TApi extends Api>(
 		!needsDisplay &&
 		!needsRequiresEffort &&
 		!needsDefaultLevel &&
+		!needsApiDefaultEffort &&
 		!needsPrefixBinding &&
 		!needsEffortBudgets
 	) {
@@ -1236,6 +1242,7 @@ function fillExplicitThinking<TApi extends Api>(
 	if (effortMap !== undefined) filled.effortMap = effortMap;
 	if (needsDisplay) filled.supportsDisplay = true;
 	if (needsDefaultLevel && rule.defaultLevel !== undefined) filled.defaultLevel = rule.defaultLevel;
+	if (needsApiDefaultEffort && rule.apiDefaultEffort !== undefined) filled.apiDefaultEffort = rule.apiDefaultEffort;
 	if (needsRequiresEffort) filled.requiresEffort = true;
 	if (needsPrefixBinding) filled.prefixBinding = true;
 	if (needsEffortBudgets) filled.effortBudgets = rule.effortBudgets;

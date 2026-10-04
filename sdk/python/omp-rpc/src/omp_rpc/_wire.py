@@ -500,6 +500,7 @@ class ThinkingConfig:
     mode: str
     efforts: tuple[Effort, ...]
     default_level: Effort | None = None
+    api_default_effort: Effort | None = None
     effort_map: dict[str, str] | None = None
     supports_display: bool | None = None
     prefix_binding: bool | None = None
@@ -1658,6 +1659,7 @@ def parse_thinking_config(value: object, path: str = "ThinkingConfig") -> Thinki
         mode=required(payload, "mode", decode_str, path),
         efforts=required(payload, "efforts", array(_decode_effort), path),
         default_level=optional(payload, "defaultLevel", _decode_effort, path),
+        api_default_effort=optional(payload, "apiDefaultEffort", _decode_effort, path),
         effort_map=optional(payload, "effortMap", record(decode_str), path),
         supports_display=optional(payload, "supportsDisplay", decode_bool, path),
         prefix_binding=optional(payload, "prefixBinding", decode_bool, path),

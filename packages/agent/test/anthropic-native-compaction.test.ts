@@ -19,9 +19,18 @@ import {
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import * as ai from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
-import type { AssistantMessage, Context, Message, Model, SimpleStreamOptions, Usage } from "@oh-my-pi/pi-ai/types";
+import type {
+	AnthropicRequestControls,
+	AssistantMessage,
+	Context,
+	Message,
+	Model,
+	SimpleStreamOptions,
+	Usage,
+} from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { ModelSpec } from "@oh-my-pi/pi-catalog/types";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 
@@ -695,46 +704,76 @@ describe("compact() Anthropic native lane", () => {
 		});
 	});
 
-	test("budgets thinking for the effort in force, not one selected since the last turn", async () => {
-		const model = makeAnthropicModel({ id: "claude-fable-5-1" });
-		const bodies: Array<{ max_tokens?: number; output_config?: { effort?: string } }> = [];
-		const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
-			bodies.push(JSON.parse(String(init?.body)));
-			return new Response(
-				JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
-				{
-					status: 400,
-					headers: { "content-type": "application/json" },
-				},
-			);
-		};
-		// The last turn ran at high; the user lowered the dial to low before compacting.
-		const messages: Message[] = [
-			{ role: "user", content: "Audit the handlers.", timestamp: 1 },
-			assistantMessage(model, {
-				content: [{ type: "text", text: "Audited." }],
-				timestamp: 2,
-				requestControls: { messageIndex: 1, effort: { topLevel: "high", tail: "high" } },
-			}),
-			{ role: "user", content: "Continue.", timestamp: 3 },
+	describe("budgets thinking for the effort in force, not one selected since the last turn", () => {
+		const model = getBundledModel("anthropic", "claude-opus-5-5") as Model<"anthropic-messages">;
+		const cases: Array<{
+			name: string;
+			recorded: AnthropicRequestControls["effort"];
+			requested: Effort | undefined;
+			effort: string | undefined;
+			allowance: number;
+		}> = [
+			{
+				name: "high in force, low selected",
+				recorded: { topLevel: "high", tail: "high" },
+				requested: Effort.Low,
+				effort: "high",
+				allowance: ai.ANTHROPIC_THINKING.high,
+			},
+			{
+				// Opus 5.5 runs at medium when a request names no effort.
+				name: "API default in force, low selected",
+				recorded: { topLevel: null, tail: null },
+				requested: Effort.Low,
+				effort: undefined,
+				allowance: ai.ANTHROPIC_THINKING.medium,
+			},
+			{
+				name: "high in force, thinking turned off",
+				recorded: { topLevel: "high", tail: "high" },
+				requested: undefined,
+				effort: "high",
+				allowance: ai.ANTHROPIC_THINKING.high,
+			},
 		];
-		await expect(
-			requestAnthropicNativeCompaction(
-				model,
-				"sk-ant-test",
-				{
-					context: { systemPrompt: ["Audit."], messages },
-					instructions: "Summarize.",
-					maxTokens: 13_107,
-					reasoning: Effort.Low,
-				},
-				undefined,
-				{ fetch, telemetry: undefined },
-			),
-		).rejects.toThrow("captured");
-		expect(bodies).toHaveLength(1);
-		expect(bodies[0]?.output_config?.effort).toBe("high");
-		expect(bodies[0]?.max_tokens).toBe(13_107 + ai.ANTHROPIC_THINKING.high);
+		for (const { name, recorded, requested, effort, allowance } of cases) {
+			test(name, async () => {
+				const bodies: Array<{ max_tokens?: number; output_config?: { effort?: string } }> = [];
+				const fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+					bodies.push(JSON.parse(String(init?.body)));
+					return new Response(
+						JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }),
+						{ status: 400, headers: { "content-type": "application/json" } },
+					);
+				};
+				const messages: Message[] = [
+					{ role: "user", content: "Audit the handlers.", timestamp: 1 },
+					assistantMessage(model, {
+						content: [{ type: "text", text: "Audited." }],
+						timestamp: 2,
+						requestControls: { messageIndex: 1, effort: recorded },
+					}),
+					{ role: "user", content: "Continue.", timestamp: 3 },
+				];
+				await expect(
+					requestAnthropicNativeCompaction(
+						model,
+						"sk-ant-test",
+						{
+							context: { systemPrompt: ["Audit."], messages },
+							instructions: "Summarize.",
+							maxTokens: 13_107,
+							reasoning: requested,
+						},
+						undefined,
+						{ fetch, telemetry: undefined },
+					),
+				).rejects.toThrow("captured");
+				expect(bodies).toHaveLength(1);
+				expect(bodies[0]?.output_config?.effort).toBe(effort);
+				expect(bodies[0]?.max_tokens).toBe(13_107 + allowance);
+			});
+		}
 	});
 });
 

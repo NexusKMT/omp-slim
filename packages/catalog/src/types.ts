@@ -86,6 +86,8 @@ export interface ThinkingConfig {
 	efforts: readonly Effort[];
 	/** Optional default effort applied when this model is selected. Falls back to global default if absent. */
 	defaultLevel?: Effort;
+	/** Effort the provider applies when a request names none. */
+	apiDefaultEffort?: Effort;
 	/**
 	 * Effort → provider wire-value remap, baked at build time. Identity for
 	 * efforts the map omits. Used by Anthropic adaptive thinking, OpenAI-
