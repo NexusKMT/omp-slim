@@ -488,14 +488,33 @@ export const FRAME_DATA_BYTES_ESTIMATE = 170_000;
  *  ~11 MB JSON payload on every turn. */
 export const FRAME_DATA_BYTES_BUDGET = 3_000_000;
 
+/** Variants the area-scaled byte charge was measured on: archives with these
+ *  edges and the denser `8on16-bw` middle (the auto shapes for Claude, OpenAI,
+ *  Codex, Gemini and Kimi). Inkier variants (`8x13-bw`, `6x12-dim`, `doc-*`,
+ *  `silver16-bw`) render ~120 KB or more per 1568px frame, so they keep the
+ *  1932px charge. */
+const AREA_PRICED_VARIANTS: readonly ShapeGeometry[] = [SHAPE_VARIANTS["8on22-bw"], SHAPE_VARIANTS["11on16-bw"]];
+
 /** Frame-count cap implied by {@link FRAME_DATA_BYTES_BUDGET} for frames
- *  rendered by `shape`. A glyph page's PNG size grows with its pixel area, so
- *  frames smaller than the 1932px high-res frame are charged
- *  {@link FRAME_DATA_BYTES_ESTIMATE} scaled by area (1568px ≈ 112 KB, 26
- *  frames; measured capped 1568px archives average ≤ 115 KB per frame).
- *  Larger frames keep the 1932px bound: 2048px Gemini frames measure below it. */
-export function maxFramesForDataBudget(shape: Pick<Shape, "frameSize">): number {
-	const areaRatio = (shape.frameSize / HIGH_RES_ANTHROPIC_VARIANT.frameSize) ** 2;
+ *  rendered by `shape`. For {@link AREA_PRICED_VARIANTS}, frames smaller than
+ *  the 1932px high-res frame are charged {@link FRAME_DATA_BYTES_ESTIMATE}
+ *  scaled by pixel area (1568px ≈ 112 KB, 26 frames; capped 1568px archives
+ *  measure ≤ 115 KB per frame on average). Every other shape, and frames
+ *  larger than 1932px (2048px Gemini frames measure below it), keeps the
+ *  1932px charge. */
+export function maxFramesForDataBudget(shape: ShapeGeometry): number {
+	const areaPriced = AREA_PRICED_VARIANTS.some(
+		variant =>
+			variant.font === shape.font &&
+			variant.cellWidth === shape.cellWidth &&
+			variant.cellHeight === shape.cellHeight &&
+			variant.stretch === shape.stretch &&
+			variant.variant === shape.variant &&
+			variant.stopwordDim === shape.stopwordDim &&
+			variant.columns === shape.columns &&
+			variant.lineRepeat === shape.lineRepeat,
+	);
+	const areaRatio = areaPriced ? (shape.frameSize / HIGH_RES_ANTHROPIC_VARIANT.frameSize) ** 2 : 1;
 	const frameBytes = Math.min(FRAME_DATA_BYTES_ESTIMATE, Math.ceil(FRAME_DATA_BYTES_ESTIMATE * areaRatio));
 	return Math.max(1, Math.floor(FRAME_DATA_BYTES_BUDGET / frameBytes));
 }
