@@ -1,6 +1,7 @@
 import type { TerminalMultiplexer } from "@oh-my-pi/pi-tui/terminal-multiplexer";
 
 export interface PlacementCapabilities {
+	displayName: string;
 	execution?: readonly string[];
 	target?: "pane" | "session" | "tab" | "workspace" | "surface" | "window" | false;
 	direction?: readonly string[];
@@ -14,20 +15,23 @@ export interface PlacementCapabilities {
 }
 
 type MultiplexerCapabilities =
-	| { supported: false; reason: string }
-	| ({ supported: true } & (
+	| { displayName: string; supported: false; reason: string }
+	| ({ displayName: string; supported: true } & (
 			| { pane: PlacementCapabilities; window?: PlacementCapabilities }
 			| { pane?: PlacementCapabilities; window: PlacementCapabilities }
 	  ));
 
 /**
- * Canonical multiplexer launch capabilities. Keep unsupported taxonomy entries
- * explicit so adding a provider requires an intentional launcher decision.
+ * Canonical multiplexer launch capabilities and presentation metadata. Supported
+ * entries drive request construction and user-facing names; unsupported taxonomy
+ * entries remain explicit so adding a provider requires an intentional decision.
  */
 export const terminalLaunchCapabilities = {
 	herdr: {
+		displayName: "Herdr",
 		supported: true,
 		pane: {
+			displayName: "pane",
 			execution: ["shell-input"],
 			target: "pane",
 			direction: ["right", "down"],
@@ -35,6 +39,7 @@ export const terminalLaunchCapabilities = {
 			shellGrammar: "posix",
 		},
 		window: {
+			displayName: "tab",
 			execution: ["shell-input"],
 			target: "workspace",
 			focus: true,
@@ -43,26 +48,32 @@ export const terminalLaunchCapabilities = {
 		},
 	},
 	tmux: {
+		displayName: "tmux",
 		supported: true,
 		pane: {
+			displayName: "pane",
 			execution: ["direct", "shell"],
 			target: "pane",
 			direction: ["right", "down"],
 			focus: true,
 		},
 		window: {
+			displayName: "window",
 			execution: ["direct", "shell"],
 			target: "session",
 			focus: true,
 		},
 	},
 	screen: {
+		displayName: "screen",
 		supported: false,
 		reason: "screen has no supported native launch command.",
 	},
 	zellij: {
+		displayName: "Zellij",
 		supported: true,
 		pane: {
+			displayName: "pane",
 			execution: ["direct"],
 			target: "tab",
 			direction: ["right", "down"],
@@ -72,6 +83,7 @@ export const terminalLaunchCapabilities = {
 			name: true,
 		},
 		window: {
+			displayName: "tab",
 			execution: ["direct"],
 			target: false,
 			focus: true,
@@ -79,8 +91,10 @@ export const terminalLaunchCapabilities = {
 		},
 	},
 	cmux: {
+		displayName: "CMUX",
 		supported: true,
 		pane: {
+			displayName: "pane",
 			execution: ["shell-input"],
 			target: "surface",
 			direction: ["right", "left", "up", "down"],
@@ -89,6 +103,7 @@ export const terminalLaunchCapabilities = {
 			cwdShellInput: true,
 		},
 		window: {
+			displayName: "workspace",
 			execution: ["shell-input"],
 			target: "window",
 			focus: true,
@@ -97,6 +112,7 @@ export const terminalLaunchCapabilities = {
 		},
 	},
 	wmux: {
+		displayName: "wmux",
 		supported: false,
 		reason: "wmux launch is not implemented by this API.",
 	},
@@ -107,6 +123,13 @@ export type TerminalLaunchMultiplexer = {
 }[TerminalMultiplexer];
 
 export type TerminalLaunchPlacement = "pane" | "window";
+
+export interface TerminalLaunchPlacementInfo {
+	multiplexer: TerminalLaunchMultiplexer;
+	displayName: string;
+	placementLabel: string;
+	shellGrammar?: "posix";
+}
 
 type CapabilityValues<C, K extends PropertyKey> = K extends keyof C
 	? C[K] extends readonly (infer Value)[]

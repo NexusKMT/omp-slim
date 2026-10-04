@@ -816,10 +816,9 @@ editor.
 `ctx.ui.openTerminal(request)` is available only in the interactive TUI. It creates a
 multiplexer pane or provider-native group (a tmux window, Zellij/Herdr tab, or CMUX
 workspace—not an OS window) and returns the reported native ID. RPC, ACP, print, and
-headless contexts do not provide this optional method. The public request type is
-derived from the canonical multiplexer taxonomy and only supports tmux, Zellij,
-Herdr, and CMUX; screen and wmux are recognized by the taxonomy but explicitly
-unsupported by this launcher.
+headless contexts do not provide this optional method. The request type and supported
+provider set derive from the canonical launch capabilities; screen and wmux remain
+recognized by the multiplexer taxonomy but are currently unsupported.
 
 Provider-specific session detection is centralized in
 `@oh-my-pi/pi-tui/terminal-multiplexer`: `hasTerminalMultiplexerSession(provider,
@@ -829,6 +828,22 @@ owner does not prove that a nested provider session or a native pane ID exists.
 
 The TUI host injects this capability; extensions do not need to import dispatcher
 code to use it.
+
+Built-in OMP callers can pass `classifyTerminalMultiplexer(env)` to
+`getTerminalLaunchPlacement(...)` for support and presentation metadata or as the
+first argument to `createDefaultTerminalLaunchRequest(...)` for a validated
+provider-default request. The factory also takes a placement, command argv, cwd, and
+optional shell confirmation. Both helpers are exported by
+`src/subprocess/terminal-launch.ts`.
+Placement lookup returns the provider display name, user-facing group label (such as
+`pane`, `tab`, or `workspace`), and any required shell grammar, or an error when no
+multiplexer is detected or the provider does not support that placement. The request
+factory returns `{ request }` or `{ error }`, validates the constructed request, and
+leaves provider-specific target, focus, direction, and execution options unset so the
+backend applies its own defaults. For shell-input launches, pass `shellGrammar: "posix"`
+only after confirming the destination shell uses POSIX grammar; the factory rejects
+a missing assertion. Extensions can continue using `ctx.ui.openTerminal(...)` with
+explicit typed requests.
 
 ```ts
 const result = await ctx.ui.openTerminal?.({

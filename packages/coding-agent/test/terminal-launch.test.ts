@@ -3,7 +3,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+	createDefaultTerminalLaunchRequest,
 	createTerminalLauncher,
+	getTerminalLaunchPlacement,
 	type TerminalLaunchCliResult,
 	type TerminalLaunchCliRunner,
 	type TerminalLaunchRequest,
@@ -112,6 +114,117 @@ const terminalLaunchTypeChecks: [
 	CmuxPaneShellGrammarIsRequired,
 ] = [false, false, true, false, false, false, false, false, false];
 void terminalLaunchTypeChecks;
+
+describe("generic terminal launch construction", () => {
+
+	it("reports missing and unsupported launch providers with the supported set", () => {
+		const missing = getTerminalLaunchPlacement(null, "pane");
+		if (!("error" in missing)) throw new Error("missing multiplexer unexpectedly resolved");
+		expect(missing.error).toContain("No terminal multiplexer was detected");
+		for (const provider of ["Herdr", "tmux", "Zellij", "CMUX"]) {
+			expect(missing.error).toContain(provider);
+		}
+
+		for (const multiplexer of ["screen", "wmux"] as const) {
+			const unsupported = getTerminalLaunchPlacement(multiplexer, "pane");
+			if (!("error" in unsupported)) throw new Error(`${multiplexer} unexpectedly supports launches`);
+			expect(unsupported.error).toContain(multiplexer);
+			expect(unsupported.error).toContain("does not support terminal launches");
+		}
+	});
+
+	it("rejects unconfirmed shell grammar and leaves optional provider defaults unset", () => {
+		const unconfirmed = createDefaultTerminalLaunchRequest("herdr", "pane", ["omp", "--resume"], "/repo");
+		if (!("error" in unconfirmed)) throw new Error("shell-input request unexpectedly omitted its grammar error");
+		expect(unconfirmed.error).toContain('requires shellGrammar: "posix"');
+
+		const confirmed = createDefaultTerminalLaunchRequest("herdr", "pane", ["omp", "--resume"], "/repo", "posix");
+		if ("error" in confirmed) throw new Error(confirmed.error);
+		for (const option of ["target", "focus", "direction", "execution"]) {
+			expect(Object.hasOwn(confirmed.request, option)).toBe(false);
+		}
+	});
+
+	it("executes factory-built direct requests through the provider argv seam", async () => {
+		const command = [
+			process.execPath,
+			"-e",
+			"process.stdout.write(JSON.stringify(process.argv.slice(1)))",
+			"argument with spaces",
+			"literal; shell text",
+		];
+		const built = createDefaultTerminalLaunchRequest("tmux", "pane", command, process.cwd());
+		if ("error" in built) throw new Error(built.error);
+
+		const calls: CliCall[] = [];
+		let childResult: TerminalLaunchCliResult | undefined;
+		const launch = createTerminalLauncher({
+			environment: () => ({ TMUX: "/tmp/tmux.sock,1,0", TMUX_PANE: "%2" }),
+			runCli: async (argv, cwd) => {
+				calls.push({ argv: [...argv], cwd });
+				childResult = await processCli(argv.slice(argv.indexOf("--") + 1), cwd);
+				return { stdout: "%23", exitCode: 0 };
+			},
+		});
+
+		const result = await launch(built.request);
+
+		expect(result).toEqual({ multiplexer: "tmux", placement: "pane", id: "%23" });
+		expect(childResult?.exitCode).toBe(0);
+		expect(JSON.parse(childResult!.stdout)).toEqual(["argument with spaces", "literal; shell text"]);
+		expect(calls[0]!.argv.slice(calls[0]!.argv.indexOf("--") + 1)).toEqual(command);
+	});
+
+	it("executes factory-built shell-input requests through a confirmed POSIX shell", async () => {
+		if (process.platform === "win32") return;
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "terminal-launch-request-"));
+		try {
+			const recorder = path.join(tempRoot, "record.js");
+			await Bun.write(
+				recorder,
+				"process.stdout.write(JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));",
+			);
+			const args = ["space argument", "it's literal; $(not a command)"];
+			const built = createDefaultTerminalLaunchRequest(
+				"herdr",
+				"pane",
+				[process.execPath, recorder, ...args],
+				tempRoot,
+				"posix",
+			);
+			if ("error" in built) throw new Error(built.error);
+
+			const calls: CliCall[] = [];
+			let shellOutput: string | undefined;
+			const launch = createTerminalLauncher({
+				environment: () => ({ HERDR_ENV: "1", HERDR_PANE_ID: "workspace:pane-1" }),
+				runCli: async (argv, cwd) => {
+					calls.push({ argv: [...argv], cwd });
+					if (argv[1] === "pane" && argv[2] === "split") {
+						return { stdout: '{"result":{"pane":{"pane_id":"workspace:pane-2"}}}', exitCode: 0 };
+					}
+					if (argv[1] === "pane" && argv[2] === "run") {
+						const executed = await processCli(["/bin/sh", "-c", argv[4]!], cwd);
+						shellOutput = executed.stdout;
+						return { stdout: "", exitCode: executed.exitCode };
+					}
+					throw new Error(`unexpected Herdr command: ${argv.join(" ")}`);
+				},
+			});
+
+			const result = await launch(built.request);
+
+			expect(result).toEqual({ multiplexer: "herdr", placement: "pane", id: "workspace:pane-2" });
+			expect(calls.map(call => call.argv.slice(0, 4))).toEqual([
+				["herdr", "pane", "split", "workspace:pane-1"],
+				["herdr", "pane", "run", "workspace:pane-2"],
+			]);
+			expect(JSON.parse(shellOutput!)).toEqual({ cwd: tempRoot, args });
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("terminal launch dispatcher", () => {
 	it("runs tmux pane commands with direct argv, explicit target, cwd, focus, and pane ID", async () => {

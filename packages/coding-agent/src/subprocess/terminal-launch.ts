@@ -6,6 +6,7 @@ import { launchZellij } from "./terminal-launch/zellij";
 import type { TerminalLaunchDependencies, TerminalLaunchRequest, TerminalLaunchResult } from "./terminal-launch/types";
 
 export * from "./terminal-launch/types";
+export { createDefaultTerminalLaunchRequest, getTerminalLaunchPlacement } from "./terminal-launch/request";
 
 /**
  * Create a terminal pane or multiplexer group and run a command in it.
