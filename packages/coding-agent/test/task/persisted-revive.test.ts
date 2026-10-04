@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
 import { type } from "@oh-my-pi/omptype";
+import { Agent, type AgentTool } from "@oh-my-pi/pi-agent-core";
+import { createMockModel, type MockResponseSource } from "@oh-my-pi/pi-ai/providers/mock";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import type { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { resolveThresholdTokens, shouldCompact } from "@oh-my-pi/pi-agent-core/compaction";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -14,11 +18,13 @@ import type { RpcSubagentFrame } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-t
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import type { AgentRef } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
+import { registerPersistedSubagents } from "@oh-my-pi/pi-coding-agent/registry/persisted-agents";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
-import type { AgentSession, AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AgentSession, type AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import type { CustomMessage } from "@oh-my-pi/pi-coding-agent/session/messages";
+import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	findRetryFallbackCandidates,
@@ -555,78 +561,6 @@ describe("persisted subagent revival", () => {
 		// Restricted") for a cold-revived ref, not the durable agent definition
 		// name. `agents: [scout]` rule scoping must key on the latter.
 		expect(capturedOptions?.agentName).toBe("scout");
-	});
-
-	it("replays the system prompt blocks the spawn's first turn sent, not one joined block", async () => {
-		const cwd = makeTempDir("@pi-revive-system-blocks-");
-		const sentBlocks = ["base prompt", "project rules", "agent charter"];
-		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
-			const listeners: Array<(event: AgentSessionEvent) => void> = [];
-			const agent = { state: { systemPrompt: ["prompt before extensions"] } };
-			const session = {
-				...createSessionDefaults(),
-				state: { messages: [] },
-				agent,
-				// A session_start handler that changes the active tools rebuilds the prompt before the first turn.
-				extensionRunner: {
-					initialize: () => {},
-					onError: () => {},
-					emit: async (event: { type: string }) => {
-						if (event.type === "session_start") agent.state.systemPrompt = sentBlocks;
-					},
-				},
-				sessionManager: options?.sessionManager,
-				getActiveToolNames: () => ["read", "yield"],
-				getEnabledToolNames: () => ["read", "yield"],
-				subscribe: (listener: (event: AgentSessionEvent) => void) => {
-					listeners.push(listener);
-					return () => {};
-				},
-				prompt: async () => {
-					for (const listener of listeners) {
-						listener({
-							type: "tool_execution_end",
-							toolCallId: "yield-1",
-							toolName: "yield",
-							result: { content: [{ type: "text", text: "done" }], details: { status: "success", data: {} } },
-							isError: false,
-						});
-					}
-					return true;
-				},
-			} as unknown as AgentSession;
-			return { session } as CreateAgentSessionResult;
-		});
-		const result = await executorModule.runSubprocess({
-			cwd,
-			agent: { name: "task", description: "test", systemPrompt: "agent charter", source: "bundled" },
-			task: "do work",
-			index: 0,
-			id: "system-blocks",
-			settings: Settings.isolated(),
-			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
-			enableLsp: false,
-			artifactsDir: cwd,
-		});
-		expect(result.exitCode).toBe(0);
-		const sessionFile = path.join(cwd, "system-blocks.jsonl");
-		const manager = await SessionManager.open(sessionFile);
-		manager.appendMessage({ role: "user", content: "do work", timestamp: Date.now() });
-		await manager.close();
-
-		let revivedOptions: CreateAgentSessionOptions | undefined;
-		createSession.mockImplementation(async options => {
-			revivedOptions = options;
-			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
-		});
-		const ref = createRef(sessionFile);
-		const reviver = await createFactory(cwd)(ref);
-		if (!reviver) throw new Error("Expected a persisted reviver");
-		await reviver(ref);
-
-		const systemPrompt = revivedOptions?.systemPrompt;
-		if (typeof systemPrompt !== "function") throw new Error("Expected a system prompt builder");
-		expect(systemPrompt(["fresh default"])).toEqual(sentBlocks);
 	});
 
 	it("falls back to the ref display name reviving a legacy session file without a persisted agent name", async () => {
@@ -1202,6 +1136,228 @@ describe("persisted subagent revival", () => {
 			AgentRegistry.resetGlobalForTests();
 			IrcBus.resetGlobalForTests();
 		});
+	});
+});
+
+describe("cold revival replays the system prompt the last request sent", () => {
+	const sessions: AgentSession[] = [];
+
+	afterEach(async () => {
+		await Promise.all(sessions.splice(0).map(session => session.dispose()));
+		AgentLifecycleManager.resetGlobalForTests();
+		AgentRegistry.global().unregister("prompt-blocks");
+	});
+
+	function createTool(name: string): AgentTool {
+		return {
+			name,
+			label: name,
+			description: `${name} tool`,
+			parameters: type({}),
+			async execute() {
+				return { content: [{ type: "text", text: "ok" }], details: { status: "success", data: {} } };
+			},
+		};
+	}
+
+	interface RecordingSession {
+		session: AgentSession;
+		/** System blocks of each provider request, in order. */
+		requests: string[][];
+	}
+
+	interface ExtensionHooks {
+		sessionStart?: () => void;
+		beforeAgentStart?: (session: AgentSession) => Promise<void>;
+	}
+
+	/**
+	 * A real AgentSession on a scripted model, recording each request's system blocks. The prompt
+	 * builder renders the active tool names into its own block, as the SDK's builder does.
+	 */
+	function createRecordingSession(
+		sessionManager: SessionManager,
+		buildPrompt: (toolNames: string[]) => string[],
+		responses: MockResponseSource,
+		hooks: ExtensionHooks = {},
+	): RecordingSession {
+		const mock = createMockModel({ responses, handler: { content: ["done"] } });
+		const requests: string[][] = [];
+		const tools = [createTool("read"), createTool("yield")];
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: {
+				model: buildModel({
+					id: "mock",
+					name: "mock",
+					api: "openai-responses",
+					provider: "openai",
+					baseUrl: "https://example.invalid",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 8192,
+					maxTokens: 2048,
+				}),
+				systemPrompt: buildPrompt(tools.map(tool => tool.name)),
+				tools,
+				messages: [],
+			},
+			convertToLlm,
+			streamFn: (model, context, streamOptions) => {
+				requests.push([...(context.systemPrompt ?? [])]);
+				return mock.stream(model, context, streamOptions);
+			},
+		});
+		const session: AgentSession = new AgentSession({
+			agent,
+			sessionManager,
+			settings: Settings.isolated({ "compaction.enabled": false, "todo.enabled": false }),
+			modelRegistry: { getApiKey: async () => "test-key" } as never,
+			toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
+			extensionRunner: {
+				initialize: () => {},
+				onError: () => () => {},
+				emit: async (event: { type: string }) => {
+					if (event.type === "session_start") hooks.sessionStart?.();
+				},
+				emitBeforeAgentStart: async () => {
+					await hooks.beforeAgentStart?.(session);
+					return undefined;
+				},
+			} as unknown as ExtensionRunner,
+			rebuildSystemPrompt: async toolNames => ({ systemPrompt: buildPrompt(toolNames) }),
+		});
+		sessions.push(session);
+		return { session, requests };
+	}
+
+	const spawnResponses = (): MockResponseSource => [
+		{ content: [{ type: "toolCall", name: "yield", arguments: {} }] },
+		{ content: ["done"] },
+	];
+
+	/** Spawns through runSubprocess on a real session, then returns its live session and requests. */
+	async function spawn(
+		cwd: string,
+		buildPrompt: (toolNames: string[]) => string[],
+		responses: MockResponseSource,
+		hooks?: ExtensionHooks,
+	): Promise<RecordingSession> {
+		let spawned: RecordingSession | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
+			spawned = createRecordingSession(options!.sessionManager!, buildPrompt, responses, hooks);
+			// The SDK registers a spawned child, which keeps it live after it yields.
+			AgentRegistry.global().register({
+				id: "prompt-blocks",
+				displayName: "prompt-blocks",
+				kind: "sub",
+				session: spawned.session,
+				sessionFile: options!.sessionManager!.getSessionFile() ?? null,
+				status: "running",
+			});
+			return { session: spawned.session } as CreateAgentSessionResult;
+		});
+		const result = await executorModule.runSubprocess({
+			cwd,
+			agent: { name: "task", description: "test", systemPrompt: "charter", source: "bundled" },
+			task: "do work",
+			index: 0,
+			id: "prompt-blocks",
+			settings: Settings.isolated(),
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			enableLsp: false,
+			artifactsDir: cwd,
+		});
+		expect(result.exitCode).toBe(0);
+		if (!spawned) throw new Error("Expected the spawn to create a session");
+		return spawned;
+	}
+
+	/** Cold-revives the parked transcript the way the Agent Hub does and returns the follow-up's request. */
+	async function reviveAndFollowUp(cwd: string, hooks?: ExtensionHooks): Promise<string[]> {
+		let revived: RecordingSession | undefined;
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
+			const build = options!.systemPrompt;
+			if (typeof build !== "function") throw new Error("Expected a system prompt builder");
+			// The SDK hands every rebuild's fresh default prompt to this builder.
+			const buildPrompt = (toolNames: string[]) => [build([`fresh default: ${toolNames.join(",")}`])].flat();
+			revived = createRecordingSession(options!.sessionManager!, buildPrompt, [{ content: ["follow-up"] }], hooks);
+			return { session: revived.session } as CreateAgentSessionResult;
+		});
+		const ref = { ...createRef(path.join(cwd, "prompt-blocks.jsonl")), id: "prompt-blocks" };
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		const session = await reviver(ref);
+		await session.prompt("follow-up");
+		await session.waitForIdle();
+		if (!revived) throw new Error("Expected the revive to create a session");
+		return revived.requests[0]!;
+	}
+
+	it("replays the blocks after a first-turn before_agent_start tool change", async () => {
+		const cwd = makeTempDir("@pi-revive-first-turn-tools-");
+		const buildPrompt = (toolNames: string[]) => ["base", "rules", `tools: ${toolNames.join(",")}`];
+		const dropRead = { beforeAgentStart: (session: AgentSession) => session.setActiveToolsByName(["yield"]) };
+		const spawned = await spawn(cwd, buildPrompt, spawnResponses(), dropRead);
+		expect(spawned.requests[0]).toEqual(["base", "rules", "tools: yield"]);
+		await spawned.session.dispose();
+
+		expect(await reviveAndFollowUp(cwd, dropRead)).toEqual(spawned.requests.at(-1)!);
+	});
+
+	it("replays the blocks after a later work-pool rebuild in the live session", async () => {
+		const cwd = makeTempDir("@pi-revive-explicit-rebuild-");
+		let batch = 1;
+		const buildPrompt = (toolNames: string[]) => ["base", `batch ${batch}`, `tools: ${toolNames.join(",")}`];
+		const spawned = await spawn(cwd, buildPrompt, spawnResponses());
+		// The next work-pool batch installs its yield contract, which rebuilds the base prompt.
+		batch = 2;
+		await spawned.session.setWorkPoolYieldItems([{ id: "item", index: 0 }]);
+		await spawned.session.prompt("next batch");
+		await spawned.session.waitForIdle();
+		expect(spawned.requests.at(-1)).toEqual(["base", "batch 2", "tools: read,yield"]);
+		await spawned.session.dispose();
+
+		expect(await reviveAndFollowUp(cwd)).toEqual(spawned.requests.at(-1)!);
+	});
+
+	it("keeps a finished child in the Agent Hub when startup extensions append many entries", async () => {
+		const cwd = makeTempDir("@pi-revive-hub-prefix-");
+		const parentFile = path.join(cwd, "parent.jsonl");
+		await Bun.write(
+			parentFile,
+			`${JSON.stringify({ type: "session", version: 3, id: "parent", timestamp: new Date().toISOString(), cwd })}\n`,
+		);
+		const childrenDir = path.join(cwd, "parent");
+		fs.mkdirSync(childrenDir);
+		vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
+			const sessionManager = options!.sessionManager!;
+			// A session_start extension that records its own state on startup.
+			const { session } = createRecordingSession(sessionManager, () => ["base"], spawnResponses(), {
+				sessionStart: () => {
+					for (let index = 0; index < 64; index++) sessionManager.appendCustomEntry("ext-state", { index });
+				},
+			});
+			return { session } as CreateAgentSessionResult;
+		});
+		const result = await executorModule.runSubprocess({
+			cwd,
+			agent: { name: "task", description: "test", systemPrompt: "charter", source: "bundled" },
+			task: "do work",
+			index: 0,
+			id: "prompt-blocks",
+			settings: Settings.isolated(),
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			enableLsp: false,
+			sessionFile: parentFile,
+			artifactsDir: childrenDir,
+		});
+		expect(result.exitCode).toBe(0);
+
+		const restored = new AgentRegistry();
+		await registerPersistedSubagents(restored, parentFile);
+		expect(restored.get("prompt-blocks")?.status).toBe("parked");
 	});
 });
 
