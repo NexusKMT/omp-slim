@@ -1479,14 +1479,14 @@ function createCodexRequestContext(
 		transportProviderSessionState?.webSocketPublicToPrivate.set(publicSessionKey, sessionKey);
 	}
 	const sharedWebsocketState =
-		sessionKey && providerSessionState
+		sessionKey && transportSessionId && providerSessionState
 			? isolatedTransportState
 				? providerSessionState.webSocketSessions.get(sessionKey)
-				: getCodexWebSocketSessionState(sessionKey, transportSessionId!, providerSessionState)
+				: getCodexWebSocketSessionState(sessionKey, transportSessionId, providerSessionState)
 			: undefined;
 	const websocketState =
-		sessionKey && isolatedTransportState
-			? getCodexWebSocketSessionState(sessionKey, transportSessionId!, isolatedTransportState)
+		sessionKey && transportSessionId && isolatedTransportState
+			? getCodexWebSocketSessionState(sessionKey, transportSessionId, isolatedTransportState)
 			: sharedWebsocketState;
 	if (isolatedTransportState && websocketState && sharedWebsocketState) {
 		websocketState.disableWebsocket = sharedWebsocketState.disableWebsocket;
@@ -3348,8 +3348,8 @@ export async function prewarmOpenAICodexResponses(
 	if (publicSessionKey && sessionKey) {
 		providerSessionState?.webSocketPublicToPrivate.set(publicSessionKey, sessionKey);
 	}
-	if (!sessionKey || !providerSessionState) return;
-	const state = getCodexWebSocketSessionState(sessionKey, transportSessionId!, providerSessionState);
+	if (!sessionKey || !transportSessionId || !providerSessionState) return;
+	const state = getCodexWebSocketSessionState(sessionKey, transportSessionId, providerSessionState);
 	if (!shouldUseCodexWebSocket(model, state, options?.preferWebsockets)) return;
 	const metadataSession = getOrCreateCodexMetadataSessionState(
 		transportSessionId ?? crypto.randomUUID(),

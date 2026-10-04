@@ -36,14 +36,16 @@ interface EffortTransition<TEffort extends string> {
 
 /** Per-conversation effort baseline and recorded transitions. */
 export interface OpenAIEffortControlState<TEffort extends string = string> {
-	sessionId?: string;
+	sessionId: string;
 	baseEffort?: TEffort;
 	currentEffort?: TEffort;
 	transitions: EffortTransition<TEffort>[];
 }
 
-export function createOpenAIEffortControlState<TEffort extends string>(): OpenAIEffortControlState<TEffort> {
-	return { transitions: [] };
+export function createOpenAIEffortControlState<TEffort extends string>(
+	sessionId: string,
+): OpenAIEffortControlState<TEffort> {
+	return { sessionId, transitions: [] };
 }
 
 const MAX_EFFORT_CONTROL_STATES = 16;
@@ -55,7 +57,7 @@ const MAX_EFFORT_CONTROL_STATES = 16;
 export function getOpenAIEffortControlState<TEffort extends string>(
 	states: Map<string, OpenAIEffortControlState<TEffort>>,
 	key: string,
-	sessionId?: string,
+	sessionId: string,
 ): OpenAIEffortControlState<TEffort> {
 	const existing = states.get(key);
 	if (existing) {
@@ -63,8 +65,7 @@ export function getOpenAIEffortControlState<TEffort extends string>(
 		states.set(key, existing);
 		return existing;
 	}
-	const created = createOpenAIEffortControlState<TEffort>();
-	created.sessionId = sessionId;
+	const created = createOpenAIEffortControlState<TEffort>(sessionId);
 	states.set(key, created);
 	if (states.size > MAX_EFFORT_CONTROL_STATES) {
 		const oldest = states.keys().next().value;
@@ -73,6 +74,7 @@ export function getOpenAIEffortControlState<TEffort extends string>(
 	return created;
 }
 
+/** Release one conversation's effort state from the Responses and Codex `releaseSession` implementations. */
 export function releaseOpenAIEffortControlSession<TEffort extends string>(
 	states: Map<string, OpenAIEffortControlState<TEffort>>,
 	sessionId: string,
