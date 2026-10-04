@@ -83,6 +83,39 @@ describe("git TUI streamed document", () => {
 		});
 	});
 
+	test("applies only the selected adjacent change to the index and reverses it", async () => {
+		await withReviewRepo(async repo => {
+			const filePath = path.join(repo, "seed.txt");
+			const original = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n";
+			const modified = original.replace("line 5\nline 6", "changed 5\nchanged 6");
+			await Bun.write(filePath, original);
+			await $`git add seed.txt`.cwd(repo).quiet();
+			await $`git commit -m lines`.cwd(repo).quiet();
+			await Bun.write(filePath, modified);
+
+			const model = new GitModel(repo);
+			const doc = buildDiffDocument(original, modified, "seed.txt");
+			const row = doc.rows.findIndex(item => item.newRaw === "changed 5");
+			expect(row).toBeGreaterThanOrEqual(0);
+			const patch = buildLineSelectionPatch(doc, row, row, "apply");
+			if (!patch) throw new Error("selected row produced no patch");
+			await model.applyPatch(patch, { cached: true });
+			expect((await $`git show :seed.txt`.cwd(repo).quiet().text()).split("\n").slice(4, 6)).toEqual([
+				"changed 5",
+				"line 6",
+			]);
+			expect(await Bun.file(filePath).text()).toBe(modified);
+
+			const staged = buildDiffDocument(original, await $`git show :seed.txt`.cwd(repo).quiet().text(), "seed.txt");
+			const stagedRow = staged.rows.findIndex(item => item.newRaw === "changed 5");
+			const undo = buildLineSelectionPatch(staged, stagedRow, stagedRow, "revert");
+			if (!undo) throw new Error("staged row produced no reverse patch");
+			await model.applyPatch(undo, { cached: true });
+			expect(await $`git show :seed.txt`.cwd(repo).quiet().text()).toBe(original);
+			expect(await Bun.file(filePath).text()).toBe(modified);
+		});
+	});
+
 	test.each([
 		["replacement", "a\nb\nc\n", "a\nx\nc\n"],
 		["insert and delete", "a\nb\nc\nd\n", "a\nnew\nb\nd\n"],

@@ -476,7 +476,7 @@ export function buildLineSelectionPatch(
 				`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`,
 		)
 		.join("\n");
-	return `--- a/${doc.filePath}\n+++ b/${doc.filePath}\n${body}\n`;
+	return `diff --git a/${doc.filePath} b/${doc.filePath}\n--- a/${doc.filePath}\n+++ b/${doc.filePath}\n${body}\n`;
 }
 
 // ── palette ──────────────────────────────────────────────────────────────────

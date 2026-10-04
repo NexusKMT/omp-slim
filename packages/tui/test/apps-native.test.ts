@@ -166,6 +166,61 @@ describe("git native", () => {
 			h.tui.stop();
 		}
 	});
+
+	it("stages the focused diff row on Space without staging its adjacent change", async () => {
+		await initTheme();
+		const h = await TspHarness.start(undefined, { cols: 150, rows: 24 });
+		const original = Array.from({ length: 60 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
+		const changed = original.replace("line 5\nline 6", "changed 5\nchanged 6");
+		const patches: string[] = [];
+		const loaded = Promise.withResolvers<void>();
+		const closed = showGitOverlay(h.tui, {
+			model: {
+				...model,
+				unstaged: [file("lines.txt", "unstaged")],
+				streamContents: async () => {
+					loaded.resolve();
+					return {
+						kind: "text",
+						oldText: original,
+						newText: changed,
+						streamResult: undefined as never,
+					};
+				},
+				applyPatch: async patch => {
+					patches.push(patch);
+				},
+			},
+			createAvatarSource: () => ({ get: () => null }),
+			aiStage: async () => ({ matchedFiles: 0, totalFiles: 0, stagedHunks: 0, totalHunks: 0, wholeFiles: 0 }),
+			generateCommitMessage: async () => {
+				throw new Error("unused");
+			},
+		});
+		try {
+			await loaded.promise;
+			for (let i = 0; i < 10; i++) {
+				await Promise.resolve();
+				h.tui.requestRender();
+				h.flush(10);
+				if (h.find(node => node.k === "diff" && JSON.stringify(node.p).includes("changed 5"))) break;
+			}
+			expect(h.find(node => node.k === "diff" && JSON.stringify(node.p).includes("changed 5"))).toBeDefined();
+			for (const key of ["\t", "g", "j", "j", "j", "j", " "]) {
+				h.terminal.send(key);
+				h.flush();
+			}
+			await Promise.resolve();
+			expect(patches).toHaveLength(1);
+			expect(patches[0]).toContain("+changed 5");
+			expect(patches[0]).not.toContain("+changed 6");
+		} finally {
+			h.terminal.send("q");
+			h.flush();
+			await closed;
+			h.tui.stop();
+		}
+	});
 });
 
 function context(kinds: readonly TspKind[]): DescribeContext {
