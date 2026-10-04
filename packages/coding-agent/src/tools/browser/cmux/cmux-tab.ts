@@ -1940,7 +1940,7 @@ export class CmuxTab implements InProcessRunTab {
 				case "select": {
 					const values = Array.isArray(args.values) ? args.values.map(String) : [String(args.value || "")];
 					if (element.tagName !== "SELECT") throw new Error("tab.select() requires a <select> element");
-					// Same rules as selectElementOptions in interactions.ts: value, then label.
+					// An exact value wins over a visible label.
 					const options = Array.from(element.options);
 					const wanted = [];
 					for (const value of values) {
