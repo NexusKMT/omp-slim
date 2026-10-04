@@ -1004,9 +1004,7 @@ const kit = {
 				return { ok: false, reason: "hidden", count, detail: "opacity:0" };
 			}
 		}
-		// A wrapped inline element (a link split over two lines) has a bounding box whose centre can
-		// fall between its fragments, on the parent; aim at its first fragment inside the viewport.
-		// Only an element without fragments falls back to its box.
+		// A wrapped link's box centre can fall between its lines, on the parent; aim at its first visible line.
 		const fragments = Array.from(el.getClientRects());
 		const fragment =
 			fragments.length === 0

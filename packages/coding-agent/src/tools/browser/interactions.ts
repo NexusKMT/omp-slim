@@ -139,9 +139,7 @@ export async function isClickActionable(handle: ElementHandle, signal?: AbortSig
 			if (Number(style.opacity) === 0) return { ok: false as const, reason: "opacity:0" };
 			const rect = element.getBoundingClientRect();
 			if (rect.width < 1 || rect.height < 1) return { ok: false as const, reason: "zero-size" };
-			// A wrapped inline element (a link split over two lines) has a bounding box whose centre can
-			// fall between its fragments, on the parent; aim at its first fragment inside the viewport.
-			// Only an element without fragments falls back to its box.
+			// A wrapped link's box centre can fall between its lines, on the parent; aim at its first visible line.
 			const fragments = Array.from(element.getClientRects());
 			const box =
 				fragments.length === 0

@@ -92,8 +92,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser interaction parity", () => {
 				{
 					action: "run",
 					name: tabName,
-					// The Tern backend aims with its page kit; it runs as plain page script, so its target point is
-					// checked on the same page.
+					// The Tern page kit is plain page script, so its aim point is checked on this page.
 					code: `const fragments = await tab.evaluate(() => document.querySelector("#link").getClientRects().length);
 await tab.click("#link");
 await tab.evaluate(${JSON.stringify(`(function () {\n${TERN_KIT_SOURCE}\n})()`)});
