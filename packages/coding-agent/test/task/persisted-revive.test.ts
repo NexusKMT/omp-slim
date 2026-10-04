@@ -557,16 +557,24 @@ describe("persisted subagent revival", () => {
 		expect(capturedOptions?.agentName).toBe("scout");
 	});
 
-	it("replays the system prompt blocks the spawn sent, not one joined block", async () => {
+	it("replays the system prompt blocks the spawn's first turn sent, not one joined block", async () => {
 		const cwd = makeTempDir("@pi-revive-system-blocks-");
 		const sentBlocks = ["base prompt", "project rules", "agent charter"];
 		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
 			const listeners: Array<(event: AgentSessionEvent) => void> = [];
+			const agent = { state: { systemPrompt: ["prompt before extensions"] } };
 			const session = {
 				...createSessionDefaults(),
 				state: { messages: [] },
-				agent: { state: { systemPrompt: sentBlocks } },
-				extensionRunner: undefined,
+				agent,
+				// A session_start handler that changes the active tools rebuilds the prompt before the first turn.
+				extensionRunner: {
+					initialize: () => {},
+					onError: () => {},
+					emit: async (event: { type: string }) => {
+						if (event.type === "session_start") agent.state.systemPrompt = sentBlocks;
+					},
+				},
 				sessionManager: options?.sessionManager,
 				getActiveToolNames: () => ["read", "yield"],
 				getEnabledToolNames: () => ["read", "yield"],

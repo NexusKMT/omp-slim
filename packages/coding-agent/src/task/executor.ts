@@ -4360,31 +4360,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					? enabledSubagentTools.filter(name => name !== "write")
 					: enabledSubagentTools;
 
-			session.sessionManager.appendSessionInit({
-				// Keep the sent block layout: signed thinking is bound to it, so revive must replay it unchanged.
-				systemPrompt: session.agent.state.systemPrompt,
-				task,
-				tools: persistedSubagentTools,
-				agent: agent.name,
-				modelRole: modelRole ?? resolveExplicitModelRole(modelOverride ?? agent.model, subagentSettings),
-				resolvedModel: progress.resolvedModel,
-				// Deferred model resolution installs this role inside createAgentSession,
-				// so read it back from the settings both install paths write.
-				retryFallback: getRetryFallbackRole(subagentSettings, subagentRetryFallbackRole(id)),
-				readOnly: isReadOnlyAgent(agent),
-				spawns: spawnsEnv,
-				readSummarize: agent.readSummarize,
-				advisor: advisorSelection ? (advisorSelection.model ?? "on") : undefined,
-				compactionThreshold: options.compactionThresholdOverride,
-				outputSchema,
-				outputSchemaMode: options.outputSchemaMode,
-				restrictToolNames: restrictToolNames || undefined,
-				// Isolated runs are never revivable (worktree merged + cleaned):
-				// stamp the contract so cold revival leaves them transcript-only
-				// even when the workspace was retained for recovery.
-				isolated: worktree !== undefined || undefined,
-			});
-
 			abortSignal.addEventListener(
 				"abort",
 				() => {
@@ -4414,6 +4389,33 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					filterActiveTools: toolNames => toolNames.filter(name => !isParentOwnedTool(name)),
 				}),
 			);
+
+			session.sessionManager.appendSessionInit({
+				// Read after session_start handlers, which can rebuild it: signed thinking is bound to the
+				// blocks actually sent, so revive must replay exactly these.
+				systemPrompt: session.agent.state.systemPrompt,
+				task,
+				tools: persistedSubagentTools,
+				agent: agent.name,
+				modelRole: modelRole ?? resolveExplicitModelRole(modelOverride ?? agent.model, subagentSettings),
+				resolvedModel: progress.resolvedModel,
+				// Deferred model resolution installs this role inside createAgentSession,
+				// so read it back from the settings both install paths write.
+				retryFallback: getRetryFallbackRole(subagentSettings, subagentRetryFallbackRole(id)),
+				readOnly: isReadOnlyAgent(agent),
+				spawns: spawnsEnv,
+				readSummarize: agent.readSummarize,
+				advisor: advisorSelection ? (advisorSelection.model ?? "on") : undefined,
+				compactionThreshold: options.compactionThresholdOverride,
+				outputSchema,
+				outputSchemaMode: options.outputSchemaMode,
+				restrictToolNames: restrictToolNames || undefined,
+				// Isolated runs are never revivable (worktree merged + cleaned):
+				// stamp the contract so cold revival leaves them transcript-only
+				// even when the workspace was retained for recovery.
+				isolated: worktree !== undefined || undefined,
+			});
+
 			while (pendingExtensionMessages.length > 0) {
 				await awaitAbortable(Promise.all(pendingExtensionMessages.splice(0)));
 			}
