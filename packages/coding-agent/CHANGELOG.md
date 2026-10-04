@@ -5,6 +5,9 @@
 ### Fixed
 
 - Fixed follow-up hashline edits being rejected as anchored on lines "never displayed" after an earlier edit shifted those lines, when the replacement carries the anchored content; genuinely stale line numbers are still rejected ([#14254](https://github.com/can1357/oh-my-pi/pull/14254) by [@abilliontokens](https://github.com/abilliontokens)).
+- Fixed long `/btw` answers in Tern being cut off with no way to scroll: in Tern a `/btw` question now opens the BTW history sheet with the new answer selected, streaming native markdown into a body that scrolls with the wheel and the arrow/page keys. The sheet's layout is fixed too: the history list no longer collapses under a long answer, and a lone question shows just its answer
+- Fixed `/btw` answers longer than 4 KiB being cut off with `[…truncated]` once they finished streaming
+- Following up in the BTW history sheet (Enter or `f`) now jumps to the bottom of the conversation and stays there while the new answer streams
 
 ## [18.6.0] - 2026-10-03
 

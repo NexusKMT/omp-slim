@@ -158,6 +158,35 @@ describe("BtwController", () => {
 		await controller.dispose();
 	});
 
+	it("in Tern answers a question in the BTW history sheet, streaming into its answer pane", async () => {
+		const pending = Promise.withResolvers<RunEphemeralTurnResult>();
+		let onTextDelta: ((delta: string) => void) | undefined;
+		const runEphemeralTurn = vi.fn((args: RunEphemeralTurnArgs) => {
+			onTextDelta = args.onTextDelta;
+			return pending.promise;
+		});
+		const btwContainer = new Container();
+		const ctx = makeCtx(makeFakeSession(runEphemeralTurn), btwContainer);
+		const showOverlay = vi.fn((_component: unknown) => ({ hide: vi.fn() }));
+		Object.assign(ctx.ui, { nativeRendering: true, showOverlay });
+		const controller = new BtwController(ctx);
+
+		await controller.start("Why?");
+		// No inline dock panel: Tern clips it, while the sheet body scrolls.
+		expect(btwContainer.children).toHaveLength(0);
+		const sheet = showOverlay.mock.calls[0]?.[0];
+		expect(sheet).toBeInstanceOf(BtwHistoryPanel);
+		if (!(sheet instanceof BtwHistoryPanel)) throw new Error("expected the BTW history sheet");
+		onTextDelta?.("Because streaming.");
+		const described = JSON.stringify(sheet.describe());
+		expect(described).toContain("Because streaming.");
+		// The new answer's pane has focus, so the arrow keys scroll it.
+		expect(described).toContain("scroll");
+		pending.resolve({ replyText: "Because streaming.", assistantMessage: createAssistantMessage("x") });
+		await drainBtwRequest();
+		await controller.dispose();
+	});
+
 	it("opens history without a model request when invoked without a question", async () => {
 		const runEphemeralTurn = vi.fn(async () => ({
 			replyText: "n/a",

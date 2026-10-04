@@ -451,7 +451,10 @@ export class BtwController {
 				persisted: false,
 			};
 			this.#activeRequest = request;
-			this.#visible = !previous || !this.#historyOverlay;
+			// Tern shows the answer in the BTW history sheet (its body scrolls, its
+			// markdown is native); the text renderer keeps the inline panel.
+			const sheet = this.ctx.ui.nativeRendering;
+			this.#visible = !sheet && (!previous || !this.#historyOverlay);
 			this.ctx.btwContainer.clear();
 			if (this.#visible) this.ctx.btwContainer.addChild(request.component);
 			this.ctx.ui.requestRender();
@@ -480,6 +483,7 @@ export class BtwController {
 				return false;
 			}
 			this.#refreshHistory();
+			if (sheet && !previous) this.#showHistory(store).showRecord(record.id);
 			void this.#runRequest(request);
 			return true;
 		} catch (error) {
@@ -554,9 +558,15 @@ export class BtwController {
 		if (!overlay) return;
 		overlay.hide();
 		// Closing a different history entry returns to the active BTW instead of
-		// leaving a request running without a visible panel.
+		// leaving a request running without a visible panel (text mode; Tern has
+		// no inline panel, /btw reopens the sheet).
 		const request = this.#activeRequest;
-		if (request && this.#isActiveRequest(request) && getBtwLatestTurn(request.record).status === "running") {
+		if (
+			!this.ctx.ui.nativeRendering &&
+			request &&
+			this.#isActiveRequest(request) &&
+			getBtwLatestTurn(request.record).status === "running"
+		) {
 			request.component.setAnswer(getBtwLatestTurn(request.record).answer);
 			this.#visible = true;
 			this.ctx.btwContainer.clear();
@@ -642,6 +652,9 @@ export class BtwController {
 				promptText,
 				history,
 				conversationKey: request.conversationKey,
+				// /btw answers are read in full and saved to history; the 4 KiB
+				// side-channel cap (meant for one-line replies) cut them mid-sentence.
+				dedupeReply: false,
 				onTextDelta: delta => {
 					const latest = getBtwLatestTurn(request.record);
 					if (latest.status !== "running") return;
