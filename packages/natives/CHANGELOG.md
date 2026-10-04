@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduced memory used for Jev token counting without changing token counts.
+
 ## [18.5.1] - 2026-10-03
 
 ### Fixed

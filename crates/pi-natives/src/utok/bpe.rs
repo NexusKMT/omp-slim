@@ -129,25 +129,20 @@ impl RankTable {
 		p = &p[6..];
 		let n = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
 		p = &p[4..];
+		let short_count = {
+			let mut entries = p;
+			(0..n)
+				.filter(|_| matches!(read_token(&mut entries).len(), 1 | 3..=15))
+				.count()
+		};
 		let mut pairs: Box<[u32; 65536]> =
 			vec![u32::MAX; 65536].into_boxed_slice().try_into().unwrap();
-		let mut short = HashMap::with_capacity_and_hasher(n, Fx::default());
+		let mut short = HashMap::with_capacity_and_hasher(short_count, Fx::default());
 		let mut long = FxMap::default();
 		let mut max_token_len = 0usize;
 		for rank in 0..n as u32 {
-			let mut len = 0usize;
-			let mut shift = 0;
-			loop {
-				let b = p[0];
-				p = &p[1..];
-				len |= ((b & 0x7f) as usize) << shift;
-				if b < 0x80 {
-					break;
-				}
-				shift += 7;
-			}
-			if len > 0 {
-				let key = &p[..len];
+			let key = read_token(&mut p);
+			if !key.is_empty() {
 				if let [a, b] = key {
 					pairs[usize::from(*a) << 8 | usize::from(*b)] = rank;
 				} else if let Some(k) = pack(key) {
@@ -155,8 +150,7 @@ impl RankTable {
 				} else {
 					long.insert(key.into(), rank);
 				}
-				max_token_len = max_token_len.max(len);
-				p = &p[len..];
+				max_token_len = max_token_len.max(key.len());
 			}
 		}
 		assert!(p.is_empty(), "utoken: trailing bytes in UTOK1 blob");
@@ -272,6 +266,23 @@ impl RankTable {
 			emit(w[0].0, w[1].0);
 		}
 	}
+}
+
+fn read_token<'a>(p: &mut &'a [u8]) -> &'a [u8] {
+	let mut len = 0usize;
+	let mut shift = 0;
+	loop {
+		let b = p[0];
+		*p = &p[1..];
+		len |= ((b & 0x7f) as usize) << shift;
+		if b < 0x80 {
+			break;
+		}
+		shift += 7;
+	}
+	let (key, rest) = p.split_at(len);
+	*p = rest;
+	key
 }
 
 /// A full BPE tokenizer: piece splitter + rank table + family flags.
@@ -396,3 +407,7 @@ fn nfc_quick<U: Unit>(units: &[U]) -> bool {
 	}
 	xutf::is_nfc_codepoints(Cps(units, 0))
 }
+
+#[cfg(test)]
+#[path = "tests/rank_table.rs"]
+mod tests;
