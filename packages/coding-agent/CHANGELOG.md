@@ -9,6 +9,9 @@
 - Fixed snapcompact's short final frames preventing vision-backed sessions from continuing on backends that reject 32px-or-smaller images ([#14355](https://github.com/can1357/oh-my-pi/issues/14355)).
 - Fixed the agent's `goal` calls asking for approval under `--approval-mode write`, which paused goal-mode loops at `complete`; `always-ask` still prompts for goal changes but not `get` ([#14368](https://github.com/can1357/oh-my-pi/issues/14368))
 - Fixed MCP server connection progress popping up a toast for every server that connects or fails in native terminals such as Tern; it now shows only in the classic terminal transcript
+### Fixed
+
+- Symlinked routing configs now reload when an intermediate file or profile directory link is replaced, and continue following edits to the new target without restarting the session ([#14192](https://github.com/can1357/oh-my-pi/pull/14192) by [@schickling-assistant](https://github.com/schickling-assistant)).
 
 ## [18.6.1] - 2026-10-04
 
@@ -41,9 +44,6 @@
 ### Fixed
 
 - Fixed an `EPIPE: broken pipe` unhandled rejection crashing the session when a debug adapter, eval kernel, IDA worker, or RPC server exits mid-write (seen on Windows) ([#14196](https://github.com/can1357/oh-my-pi/pull/14196) by [@andrebrait](https://github.com/andrebrait))
-### Fixed
-
-- Symlinked routing configs now reload when an intermediate file or profile directory link is replaced, and continue following edits to the new target without restarting the session ([#14192](https://github.com/can1357/oh-my-pi/pull/14192) by [@schickling-assistant](https://github.com/schickling-assistant)).
 
 ## [18.5.1] - 2026-10-03
 
