@@ -225,23 +225,8 @@ export class TranscriptContainer extends Container {
 	}
 
 	/**
-	 * Insert `component` at `index`, keeping `#entries` in the same order.
-	 * `addChild` appends to both `children` and `#entries` and sets
-	 * `#entriesUnverified`; a caller that then reaches for
-	 * `this.children.splice(...)` moves the component in one array only, so the
-	 * mirror no longer matches and the next `#syncEntries` rebuilds the whole
-	 * list — an O(n) map, an O(n) array, and an O(n) `findIndex` per child in
-	 * `canRemoveBlock`.
-	 *
-	 * That rebuild is paid once per insert, not once per frame: `#syncEntries`
-	 * clears `#entriesUnverified` and repairs the order, so later frames take the
-	 * fast path. The cost that matters is therefore per *insert*, and
-	 * insert-after-anchor runs once per tool call — so it grows with the
-	 * transcript, which matches the reported "freezes scale with transcript size".
-	 *
-	 * Moving both arrays together avoids the rebuild and preserves the invariant
-	 * `#entriesMatch` checks: work proportional to the live tail rather than to
-	 * the session.
+	 * `#entries` mirrors `children`; move both together or the next `#syncEntries`
+	 * pays a full O(n) rebuild.
 	 */
 	insertChildAt(component: Component, index: number): void {
 		this.addChild(component);
@@ -251,8 +236,8 @@ export class TranscriptContainer extends Container {
 		if (moved) this.children.splice(index, 0, moved);
 		const [entry] = this.#entries.splice(this.#entries.length - 1, 1);
 		if (entry) this.#entries.splice(index, 0, entry);
-		// Both arrays moved in lockstep, so the cheap check applies again — and
-		// the row caches travelled with the entry, which a rebuild would discard.
+		// Both arrays moved in lockstep, so the cheap check applies again, and the
+		// row caches travelled with the entry, which a rebuild would discard.
 		this.#entriesUnverified = false;
 	}
 
