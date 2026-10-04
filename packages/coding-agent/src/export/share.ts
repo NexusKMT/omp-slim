@@ -207,7 +207,7 @@ function collectShareRegexSecretValues(o: SecretObfuscator, data: SessionData): 
 				addContent(entry.content);
 				return;
 			case "session_init":
-				add(entry.systemPrompt);
+				for (const block of [entry.systemPrompt].flat()) add(block);
 				add(entry.task);
 				return;
 			case "label":
@@ -327,7 +327,10 @@ function redactShareEntry(
 		case "session_init":
 			return {
 				...entry,
-				systemPrompt: o.obfuscate(entry.systemPrompt, sharedRegexSecretValues),
+				systemPrompt:
+					typeof entry.systemPrompt === "string"
+						? o.obfuscate(entry.systemPrompt, sharedRegexSecretValues)
+						: entry.systemPrompt.map(block => o.obfuscate(block, sharedRegexSecretValues)),
 				task: o.obfuscate(entry.task, sharedRegexSecretValues),
 				outputSchema: undefined,
 			};

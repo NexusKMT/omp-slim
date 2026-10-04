@@ -3347,7 +3347,7 @@ export class SessionManager {
 	}
 
 	appendSessionInit(init: {
-		systemPrompt: string;
+		systemPrompt: string[];
 		task: string;
 		tools: string[];
 		agent?: string;
@@ -4207,7 +4207,7 @@ export function hasConversationalHistory(entries: readonly FileEntry[]): boolean
  * the {@link SessionInitEntry} payload without its tree bookkeeping fields.
  */
 export interface PersistedSessionInit {
-	systemPrompt: string;
+	systemPrompt: string[];
 	task: string;
 	tools: string[];
 	agent?: string;
@@ -4234,7 +4234,7 @@ export function extractSessionInit(entries: readonly FileEntry[]): PersistedSess
 	for (const entry of entries) {
 		if (entry.type !== "session_init") continue;
 		init = {
-			systemPrompt: entry.systemPrompt,
+			systemPrompt: typeof entry.systemPrompt === "string" ? [entry.systemPrompt] : entry.systemPrompt,
 			task: entry.task,
 			tools: entry.tools,
 			agent: entry.agent,

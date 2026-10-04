@@ -396,7 +396,7 @@ Records the provider and a pseudonymous SHA-256 account/scope hash used to re-pi
   "id": "d2e3f4a5",
   "parentId": "c2d3e4f5",
   "timestamp": "2026-02-16T10:29:00.000Z",
-  "systemPrompt": "...",
+  "systemPrompt": ["...", "..."],
   "task": "...",
   "tools": ["read", "edit"],
   "outputSchema": { "type": "object" },
@@ -411,6 +411,8 @@ The latest `session_init` is also the cold-subagent revival contract. Optional
 fields include `agent`, `modelRole`, `resolvedModel`, `retryFallback`, `readOnly`,
 `advisor`, and `compactionThreshold` (`thresholdPercent`/`thresholdTokens`).
 `isolated: true` marks an isolation-worktree child that cannot be cold-revived.
+`systemPrompt` holds the blocks exactly as sent, and revival replays them unchanged;
+older files store one joined string, which revives as a single block.
 `extractSessionInit()` and read-only `peekSessionInit()` expose this contract.
 
 ### `mode_change`

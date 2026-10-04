@@ -4361,7 +4361,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					: enabledSubagentTools;
 
 			session.sessionManager.appendSessionInit({
-				systemPrompt: session.agent.state.systemPrompt.join("\n\n"),
+				// Keep the sent block layout: signed thinking is bound to it, so revive must replay it unchanged.
+				systemPrompt: session.agent.state.systemPrompt,
 				task,
 				tools: persistedSubagentTools,
 				agent: agent.name,

@@ -153,7 +153,7 @@ async function createPersistedSession(
 	const sessionFile = manager.getSessionFile();
 	if (!sessionFile) throw new Error("Expected a persisted session file");
 	manager.appendSessionInit({
-		systemPrompt: "persisted prompt",
+		systemPrompt: ["persisted prompt"],
 		task: "persisted task",
 		tools: contract?.tools ?? ["read", "yield"],
 		restrictToolNames,
@@ -555,6 +555,70 @@ describe("persisted subagent revival", () => {
 		// Restricted") for a cold-revived ref, not the durable agent definition
 		// name. `agents: [scout]` rule scoping must key on the latter.
 		expect(capturedOptions?.agentName).toBe("scout");
+	});
+
+	it("replays the system prompt blocks the spawn sent, not one joined block", async () => {
+		const cwd = makeTempDir("@pi-revive-system-blocks-");
+		const sentBlocks = ["base prompt", "project rules", "agent charter"];
+		const createSession = vi.spyOn(sdkModule, "createAgentSession").mockImplementationOnce(async options => {
+			const listeners: Array<(event: AgentSessionEvent) => void> = [];
+			const session = {
+				...createSessionDefaults(),
+				state: { messages: [] },
+				agent: { state: { systemPrompt: sentBlocks } },
+				extensionRunner: undefined,
+				sessionManager: options?.sessionManager,
+				getActiveToolNames: () => ["read", "yield"],
+				getEnabledToolNames: () => ["read", "yield"],
+				subscribe: (listener: (event: AgentSessionEvent) => void) => {
+					listeners.push(listener);
+					return () => {};
+				},
+				prompt: async () => {
+					for (const listener of listeners) {
+						listener({
+							type: "tool_execution_end",
+							toolCallId: "yield-1",
+							toolName: "yield",
+							result: { content: [{ type: "text", text: "done" }], details: { status: "success", data: {} } },
+							isError: false,
+						});
+					}
+					return true;
+				},
+			} as unknown as AgentSession;
+			return { session } as CreateAgentSessionResult;
+		});
+		const result = await executorModule.runSubprocess({
+			cwd,
+			agent: { name: "task", description: "test", systemPrompt: "agent charter", source: "bundled" },
+			task: "do work",
+			index: 0,
+			id: "system-blocks",
+			settings: Settings.isolated(),
+			modelRegistry: { refresh: async () => {} } as unknown as ModelRegistry,
+			enableLsp: false,
+			artifactsDir: cwd,
+		});
+		expect(result.exitCode).toBe(0);
+		const sessionFile = path.join(cwd, "system-blocks.jsonl");
+		const manager = await SessionManager.open(sessionFile);
+		manager.appendMessage({ role: "user", content: "do work", timestamp: Date.now() });
+		await manager.close();
+
+		let revivedOptions: CreateAgentSessionOptions | undefined;
+		createSession.mockImplementation(async options => {
+			revivedOptions = options;
+			return { session: createRevivedSession([]).session } as CreateAgentSessionResult;
+		});
+		const ref = createRef(sessionFile);
+		const reviver = await createFactory(cwd)(ref);
+		if (!reviver) throw new Error("Expected a persisted reviver");
+		await reviver(ref);
+
+		const systemPrompt = revivedOptions?.systemPrompt;
+		if (typeof systemPrompt !== "function") throw new Error("Expected a system prompt builder");
+		expect(systemPrompt(["fresh default"])).toEqual(sentBlocks);
 	});
 
 	it("falls back to the ref display name reviving a legacy session file without a persisted agent name", async () => {

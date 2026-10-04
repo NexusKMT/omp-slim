@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed resumed subagents losing all of their earlier reasoning on Anthropic models: a parked subagent now comes back with the same system prompt layout it ran with, so its signed thinking stays valid ([#14338](https://github.com/can1357/oh-my-pi/pull/14338) by [@will-bogusz](https://github.com/will-bogusz))
+
 ## [18.6.1] - 2026-10-04
 
 ### Fixed
