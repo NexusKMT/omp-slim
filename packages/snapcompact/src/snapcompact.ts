@@ -452,13 +452,16 @@ export function frameBillingKey(target: ShapeTarget | undefined): string {
 }
 
 /**
- * Billed-token estimate for one frame of width `frameSize` read by `target`:
- * the per-family price {@link resolveShape} attaches as `frameTokenEstimate`
- * (Codex 1568px ≈ 2.9k, Gemini 1.1k, Opus 1932px ≈ 5k). Frame height hugs
- * the printed rows, so the square-frame price is an upper bound.
+ * Billed-token estimate for one rendered frame of `size` read by `target`,
+ * from the per-family price {@link resolveShape} attaches as
+ * `frameTokenEstimate` (Codex 1568px ≈ 2.9k, Gemini 1.1k, Opus 1932px ≈ 5k).
+ * The family formulas take one edge, so the frame is priced at its longer
+ * edge: under these patch-grid formulas that bounds a frame whose height hugs
+ * the printed rows. A pricer that downscales by aspect ratio must take the
+ * exact size instead.
  */
-export function frameTokens(target: ShapeTarget | undefined, frameSize: number): number {
-	return familyBilling(billingFamily(target?.api), frameSize).frameTokenEstimate;
+export function frameTokens(target: ShapeTarget | undefined, size: { width: number; height: number }): number {
+	return familyBilling(billingFamily(target?.api), Math.max(size.width, size.height)).frameTokenEstimate;
 }
 
 // ============================================================================

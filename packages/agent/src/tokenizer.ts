@@ -360,9 +360,9 @@ export class Tokenizer {
 		return extra + this.countTokens(fragments);
 	}
 
-	/** One snapcompact frame at its reader's price for its width; frames whose size cannot be read cost the ceiling. */
+	/** One snapcompact frame at its reader's price for its pixel size; frames whose size cannot be read cost the ceiling. */
 	#frameTokens(data: string): number {
-		const width = base64ImageSize(data)?.width;
-		return width ? snapcompact.frameTokens(this.#frameTarget, width) : snapcompact.FRAME_TOKEN_ESTIMATE;
+		const size = base64ImageSize(data);
+		return size ? snapcompact.frameTokens(this.#frameTarget, size) : snapcompact.FRAME_TOKEN_ESTIMATE;
 	}
 }
