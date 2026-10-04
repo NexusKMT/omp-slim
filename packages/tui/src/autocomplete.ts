@@ -14,6 +14,19 @@ const PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "="]);
  */
 const AT_PARTIAL_DELAY_MS = 150;
 
+/**
+ * Upper bound on the `@` fuzzy walk. Without one the native walk has no
+ * deadline: `fd.rs` follows symlinks with `FollowLinks::Always` at unbounded
+ * depth, and `pi-walker`'s only loop guard is an ancestor-chain stack, which
+ * stops true cycles but not a symlink DAG re-walking shared subtrees. The
+ * editor aborts and restarts the request on every keystroke, so an unbounded
+ * walk never returns and the popup only ever shows the 150 ms partial listing.
+ *
+ * A repo slower than this degrades to the immediate-directory listing, which
+ * is the same fallback the outside-cwd path already takes.
+ */
+const AT_FUZZY_TIMEOUT_MS = 1_500;
+
 function buildAutocompleteFuzzyDiscoveryProfile(
 	query: string,
 	basePath: string,
@@ -25,6 +38,7 @@ function buildAutocompleteFuzzyDiscoveryProfile(
 	hidden: boolean;
 	gitignore: boolean;
 	cache: boolean;
+	timeoutMs: number;
 	signal?: AbortSignal;
 } {
 	return {
@@ -34,6 +48,7 @@ function buildAutocompleteFuzzyDiscoveryProfile(
 		hidden: true,
 		gitignore: true,
 		cache: true,
+		timeoutMs: AT_FUZZY_TIMEOUT_MS,
 		...(signal ? { signal } : {}),
 	};
 }
