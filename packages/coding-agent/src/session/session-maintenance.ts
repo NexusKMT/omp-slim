@@ -3741,14 +3741,9 @@ export class SessionMaintenance {
 	}
 
 	/**
-	 * Count a rebuilt post-compaction context so a snapcompact archive costs
-	 * what the stored-context count ({@link #estimateStoredContextTokens}) will
-	 * charge once it is committed. A summary carrying frames is counted as
-	 * itself, so each frame gets the active model's frame price; `convertToLlm`
-	 * would turn it into a user message whose images get the generic image
-	 * estimate (a 2048px Gemini frame: ~4.9k instead of the 1,120 Gemini
-	 * bills). Everything else still goes through `convertToLlm`, which adds the
-	 * text-summary wrapper and renders app roles the Tokenizer cannot count.
+	 * Count a rebuilt context the way {@link #estimateStoredContextTokens} will once it is committed:
+	 * a summary carrying frames is counted as itself so each frame gets the active model's frame
+	 * price, not the generic image estimate `convertToLlm` would give it.
 	 */
 	#countProjectedMessages(messages: AgentMessage[]): number {
 		const options = { excludeEncryptedReasoning: true } as const;

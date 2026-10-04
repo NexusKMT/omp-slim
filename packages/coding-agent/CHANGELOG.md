@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the "after" token count on a snapcompact compaction divider disagreeing with the context count right after it (about 3,500 tokens too high per frame on Gemini): it priced the archive's frames as generic images instead of at the model's frame price ([#14291](https://github.com/can1357/oh-my-pi/pull/14291) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed the token count after a snapcompact compaction (divider and RPC result) disagreeing with the context count right after it ([#14291](https://github.com/can1357/oh-my-pi/pull/14291) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed follow-up hashline edits being rejected as anchored on lines "never displayed" after an earlier edit shifted those lines, when the replacement carries the anchored content; genuinely stale line numbers are still rejected ([#14254](https://github.com/can1357/oh-my-pi/pull/14254) by [@abilliontokens](https://github.com/abilliontokens)).
 
 ## [18.6.0] - 2026-10-03

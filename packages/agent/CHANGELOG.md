@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed snapcompact archive frames being counted at Opus's high-res price (5,024 tokens) on every model: a Codex archive was overcounted by about 70% and a Gemini archive about 4.5×, which could re-trigger auto-compaction right after compacting. Each frame is now counted at what the active model's provider bills for it ([#14291](https://github.com/can1357/oh-my-pi/pull/14291) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed the context count and auto-compaction trigger pricing every snapcompact archive frame at Opus's high-res rate, which overcounted Codex and Gemini sessions and could re-trigger compaction right after compacting ([#14291](https://github.com/can1357/oh-my-pi/pull/14291) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed native (OpenAI) compaction being refused as over the context window in sessions with many screenshots. Images were counted as about 1,200 tokens when deciding to compact but 12,000 when checking whether the compaction request fits; both checks now estimate images from their actual dimensions, and a request is no longer refused when only the image estimate pushes it over the window ([#14260](https://github.com/can1357/oh-my-pi/pull/14260) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.6.0] - 2026-10-03

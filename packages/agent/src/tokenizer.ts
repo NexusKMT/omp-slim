@@ -156,9 +156,7 @@ interface MessageEstimate {
  */
 export class Tokenizer {
 	readonly #encoding: natives.Encoding | null;
-	/** Reader of snapcompact frames: prices each frame at its family's billed cost. */
 	readonly #frameTarget: snapcompact.ShapeTarget | undefined;
-	/** {@link snapcompact.frameBillingKey} of the frame reader; a model switch that changes it needs a new instance. */
 	readonly frameBillingKey: string;
 
 	/** Exact counts only; byte fallbacks remain mode-dependent and uncached. */
@@ -335,10 +333,6 @@ export class Tokenizer {
 			case "compactionSummary": {
 				fragments.push(message.summary);
 				if (message.role === "compactionSummary") {
-					// Each frame is charged what its reader's provider bills for its
-					// width (Codex 1568px ≈ 2.9k, Gemini 1.1k, Opus 1932px ≈ 5k). A
-					// flat high-res ceiling overcounted Codex archives by ~70% and
-					// could re-fire the compaction trigger right after compacting.
 					if (message.blocks) {
 						for (const block of message.blocks) {
 							if (block.type === "text") fragments.push(block.text);
@@ -360,7 +354,7 @@ export class Tokenizer {
 		return extra + this.countTokens(fragments);
 	}
 
-	/** One snapcompact frame at its reader's price for its pixel size; frames whose size cannot be read cost the ceiling. */
+	/** One snapcompact frame at the active model's price for its pixel size; unreadable frames cost the ceiling. */
 	#frameTokens(data: string): number {
 		const size = base64ImageSize(data);
 		return size ? snapcompact.frameTokens(this.#frameTarget, size) : snapcompact.FRAME_TOKEN_ESTIMATE;

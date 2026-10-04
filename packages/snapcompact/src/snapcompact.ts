@@ -452,13 +452,8 @@ export function frameBillingKey(target: ShapeTarget | undefined): string {
 }
 
 /**
- * Billed-token estimate for one rendered frame of `size` read by `target`,
- * from the per-family price {@link resolveShape} attaches as
- * `frameTokenEstimate` (Codex 1568px ≈ 2.9k, Gemini 1.1k, Opus 1932px ≈ 5k).
- * The family formulas take one edge, so the frame is priced at its longer
- * edge: under these patch-grid formulas that bounds a frame whose height hugs
- * the printed rows. A pricer that downscales by aspect ratio must take the
- * exact size instead.
+ * Billed-token estimate for one rendered frame of `size` read by `target`. The
+ * family formulas take one edge, so the frame is priced at its longer edge.
  */
 export function frameTokens(target: ShapeTarget | undefined, size: { width: number; height: number }): number {
 	return familyBilling(billingFamily(target?.api), Math.max(size.width, size.height)).frameTokenEstimate;
@@ -486,12 +481,11 @@ export const MAX_FRAMES_DEFAULT = 80;
  *  text region (newest) — with the denser low-quality tier filling the middle. */
 export const HQ_EDGE_FRAMES = 3;
 
-/** Per-frame token estimate when a frame's pixel size is unknown — the
- *  upper bound across shapes: high-res Claude frames hit the 4,784
- *  visual-token cap, billed at +5% margin (ceil(4784 * 1.05)). Archive sizing
- *  charges it per frame so a high-res archive at the raised
- *  {@link MAX_FRAMES_DEFAULT} never undercounts; frames whose size is known
- *  are counted at their own family price ({@link frameTokens}). */
+/** Conservative per-frame token estimate for archive sizing and for frames of
+ *  unknown size — the upper bound across shapes: high-res Claude frames hit the
+ *  4,784 visual-token cap, billed at +5% margin (ceil(4784 * 1.05)). Keeps the
+ *  overflow guard from undercounting a high-res archive at the raised
+ *  {@link MAX_FRAMES_DEFAULT}. */
 export const FRAME_TOKEN_ESTIMATE = 5024;
 
 /** Conservative upper bound for one persisted frame's base64 payload. The
