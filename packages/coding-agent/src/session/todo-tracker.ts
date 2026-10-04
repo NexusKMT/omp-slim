@@ -41,6 +41,10 @@ const USER_RESPONSE_CUE_RE =
  */
 const NON_ASCII_TEXT_RE = /[^\x00-\x7F]/;
 
+// Paired emphasis wrappers only. QUESTION_PROMPT_RE is ^-anchored, so a bolded
+// question missed it and the stop-time reminder fired on the model's own question.
+const INLINE_EMPHASIS_RE = /^(\*\*\*|\*\*|\*|___|__|_|~~)([\s\S]+)\1$/;
+
 interface PromptLine {
 	text: string;
 	hadPromptLabel: boolean;
@@ -371,8 +375,9 @@ function assistantText(message: AssistantMessage): string {
 function promptLine(line: string): PromptLine {
 	const withoutMarkdownPrefix = line.trim().replace(MARKDOWN_PROMPT_PREFIX_RE, "").trim();
 	const withoutPromptLabel = withoutMarkdownPrefix.replace(PROMPT_LABEL_RE, "").trim();
+	const withoutEmphasis = withoutPromptLabel.replace(INLINE_EMPHASIS_RE, "$2").trim();
 	return {
-		text: withoutPromptLabel,
+		text: withoutEmphasis,
 		hadPromptLabel: withoutPromptLabel !== withoutMarkdownPrefix,
 	};
 }
