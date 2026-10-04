@@ -73,6 +73,9 @@ export function googleAntigravityModelManagerOptions(
 	const token = config?.oauthToken;
 	return {
 		providerId: "google-antigravity",
+		// `fetchAvailableModels` is the account's served roster; bundled rows it
+		// omits (e.g. Claude 5.5 on plans without it) 404 on every request (#14328).
+		dynamicModelsAuthoritative: true,
 		...(token
 			? {
 					fetchDynamicModels: () =>

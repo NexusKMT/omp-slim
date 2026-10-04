@@ -2130,7 +2130,7 @@ export class ModelRegistry {
 		}> = [
 			{
 				providerId: "google-antigravity",
-				authoritative: false,
+				authoritative: true,
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: oauthToken =>
 					googleAntigravityModelManagerOptions({
