@@ -10,15 +10,15 @@ const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const server = Bun.serve({
 	port: 0,
 	fetch(request) {
-		const { pathname, port } = new URL(request.url);
-		const html = (body: string) =>
-			new Response(`<!doctype html>${body}`, { headers: { "content-type": "text/html" } });
-		if (pathname === "/card") return html(`<input aria-label="Card"><button>Pay</button>`);
+		const { pathname } = new URL(request.url);
+		const iframe = `<iframe id="f" name="payment" srcdoc="<!doctype html><input id='in'><div id='out'>ready</div><script>document.querySelector('#in').addEventListener('input',e=>document.querySelector('#out').textContent=e.target.value)</script>"></iframe>`;
+		const headers = { "content-type": "text/html" };
+		if (pathname === "/card") return new Response(`<input aria-label="Card"><button>Pay</button>`, { headers });
 		if (pathname === "/observe-frames") {
 			// localhost and 127.0.0.1 are different sites, so the frame runs out of process.
-			return html(`<button>Main</button><iframe id="pay" src="http://localhost:${port}/card"></iframe>`);
+			const card = `http://localhost:${new URL(request.url).port}/card`;
+			return new Response(`<button>Main</button><iframe id="pay" src="${card}"></iframe>`, { headers });
 		}
-		const iframe = `<iframe id="f" name="payment" srcdoc="<!doctype html><input id='in'><div id='out'>ready</div><script>document.querySelector('#in').addEventListener('input',e=>document.querySelector('#out').textContent=e.target.value)</script>"></iframe>`;
 		return new Response(
 			`<!doctype html><title>${pathname}</title><body data-path="${pathname}">${iframe}<script>
 				sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') || 0) + 1));
