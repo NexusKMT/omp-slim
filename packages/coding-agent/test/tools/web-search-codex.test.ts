@@ -5,6 +5,7 @@ import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import type { SearchParams } from "@oh-my-pi/pi-coding-agent/web/search/providers/base";
 import { hasCodexSearch, searchCodex } from "@oh-my-pi/pi-coding-agent/web/search/providers/codex";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 type CapturedRequest = {
 	url: string;
@@ -234,13 +235,24 @@ describe("searchCodex model selection", () => {
 	let modelRegistry: ModelRegistry;
 	let proxyModelRegistry: ModelRegistry;
 	let oauthModelRegistry: ModelRegistry;
+	let tempDir: TempDir;
 	let capturedRequest: CapturedRequest | null = null;
 
 	function createAuthStorage(): AuthStorage {
 		return new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
 	}
 
+	// Every registry below is pointed at a temp `models.yml`. Without it the
+	// constructor reads the host `~/.omp/agent/models.yml`, and a configured
+	// `openai-codex` apiKey there replaces the env bearer under test with a
+	// config-sourced key, so the suite fails on exactly the machines it is
+	// meant to protect. Keep this path explicit when adding registries.
+	function modelsYmlPath(): string {
+		return tempDir.join("models.yml");
+	}
+
 	beforeEach(() => {
+		tempDir = TempDir.createSync();
 		oauthAuthStorage = createAuthStorage();
 		vi.spyOn(oauthAuthStorage.oauth, "access").mockResolvedValue({
 			accessToken: residencyToken,
@@ -256,9 +268,9 @@ describe("searchCodex model selection", () => {
 		oauthOnlyAuthStorage = createAuthStorage();
 		oauthOnlyAuthStorage.keys.setRuntime("openai-codex", "official-oauth-token");
 		vi.spyOn(oauthOnlyAuthStorage.keys, "source").mockReturnValue({ kind: "oauth", concrete: true });
-		modelRegistry = new ModelRegistry(oauthAuthStorage);
-		proxyModelRegistry = new ModelRegistry(proxyAuthStorage);
-		oauthModelRegistry = new ModelRegistry(oauthOnlyAuthStorage);
+		modelRegistry = new ModelRegistry(oauthAuthStorage, modelsYmlPath());
+		proxyModelRegistry = new ModelRegistry(proxyAuthStorage, modelsYmlPath());
+		oauthModelRegistry = new ModelRegistry(oauthOnlyAuthStorage, modelsYmlPath());
 	});
 
 	function makeSearchParams(
@@ -294,13 +306,14 @@ describe("searchCodex model selection", () => {
 		};
 	}
 
-	afterEach(() => {
+	afterEach(async () => {
 		vi.restoreAllMocks();
 		capturedRequest = null;
 		oauthAuthStorage.close();
 		emailOnlyAuthStorage.close();
 		proxyAuthStorage.close();
 		oauthOnlyAuthStorage.close();
+		await tempDir.remove();
 	});
 
 	it("sends the selected Codex model id on the wire", async () => {
@@ -319,7 +332,7 @@ describe("searchCodex model selection", () => {
 		const result = await searchCodex({
 			...makeSearchParams("email-only Codex search", mockCodexFetch("gpt-5.6-luna")),
 			authStorage: emailOnlyAuthStorage,
-			modelRegistry: new ModelRegistry(emailOnlyAuthStorage),
+			modelRegistry: new ModelRegistry(emailOnlyAuthStorage, modelsYmlPath()),
 		});
 
 		const headers = new Headers(capturedRequest?.headers);
@@ -341,7 +354,7 @@ describe("searchCodex model selection", () => {
 			const result = await searchCodex({
 				...makeSearchParams("env bearer codex search", mockCodexFetch("gpt-5.6-luna"), selectedCodexModel),
 				authStorage: envAuthStorage,
-				modelRegistry: new ModelRegistry(envAuthStorage),
+				modelRegistry: new ModelRegistry(envAuthStorage, modelsYmlPath()),
 			});
 
 			expect(await hasCodexSearch(envAuthStorage)).toBe(true);
