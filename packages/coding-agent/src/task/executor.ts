@@ -2986,23 +2986,11 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 	const { id, agent } = options;
 	const index = options.index ?? 0;
 	const maxRuntimeMs = options.maxRuntimeMs ?? 0;
-	// The observation whose monitor is attached. One stays open while its finish
-	// settles owned async work, and the idle session may start another turn in
-	// that window. A second monitor would also see that turn's `yield`, so both
-	// would finalize the artifact and deliver to the parent. The turn joins the
-	// open observation instead, and the last finished turn finalizes it.
-	let active: { join(records: AgentMessage[]): void; finish(error?: unknown): Promise<void> } | undefined;
 	session.setIrcWakeTurnObserver(records => {
 		// Autonomous IRC wake turns reuse the session's YieldTool just like
 		// runSubagentFollowUpTurn; clear the prior run's incremental-section flag
 		// and retry counters so this wake turn's guards see only its own state.
 		resetYieldTurnState(session.getToolByName("yield"));
-		if (active) {
-			active.join(records);
-			return active.finish;
-		}
-		// Copied: the session dispatches its own array, and joined turns append here.
-		const observed = [...records];
 		const ircTask =
 			records
 				.map(record => {
@@ -3094,19 +3082,8 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 
 		turnMonitor.setActiveSession(session);
 		const unsubscribeTurn = turnMonitor.attach(session);
-		if (wakeSources(observed, id).some(source => source.from === ownerId)) registerWakeJob();
-		let openTurns = 1;
-		let latestTurnError: unknown;
-		const join = (joined: AgentMessage[]): void => {
-			openTurns++;
-			observed.push(...joined);
-			if (wakeSources(joined, id).some(source => source.from === ownerId)) registerWakeJob();
-		};
-		const finish = async (finishedTurnError?: unknown): Promise<void> => {
-			latestTurnError = finishedTurnError;
-			if (--openTurns > 0) return;
-			if (active?.finish === finish) active = undefined;
-			const turnError = latestTurnError;
+		if (wakeSources(records, id).some(source => source.from === ownerId)) registerWakeJob();
+		return async turnError => {
 			unsubscribeTurn();
 			const activeSession = turnMonitor.takeActiveSession();
 			if (activeSession) turnMonitor.captureSalvage(activeSession);
@@ -3216,7 +3193,7 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 				try {
 					await relayWakeTurnOutput({
 						id,
-						records: observed,
+						records,
 						turnStartTime,
 						yielded,
 						result,
@@ -3237,8 +3214,6 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 				}
 			}
 		};
-		active = { join, finish };
-		return finish;
 	});
 }
 

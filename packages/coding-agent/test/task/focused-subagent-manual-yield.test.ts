@@ -66,18 +66,27 @@ afterEach(async () => {
 	await removeWithRetries(root);
 });
 
-/** Whether any user/developer message the mock model sees asked it to "go on" (a manual focused prompt). */
-function sawManualPrompt(messages: ReadonlyArray<{ role: string; content: unknown }>): boolean {
-	return messages.some(message => {
-		if (message.role !== "user" && message.role !== "developer") return false;
-		if (typeof message.content === "string") return message.content.includes("go on");
-		return (
-			Array.isArray(message.content) &&
-			message.content.some(
-				part => part && typeof part === "object" && "text" in part && String(part.text).includes("go on"),
-			)
-		);
-	});
+/** Result each typed prompt asks for; the spawn task and any non-user turn yield `initial result`. */
+const PROMPT_RESULTS: Record<string, string> = { "go on": "manual result", "finish up": "final result" };
+
+/** The yield data for the newest typed (user-role) prompt the mock model sees. */
+function resultForLatestPrompt(messages: ReadonlyArray<{ role: string; content: unknown }>): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message.role !== "user") continue;
+		const text =
+			typeof message.content === "string"
+				? message.content
+				: Array.isArray(message.content)
+					? message.content
+							.map(part => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
+							.join("")
+					: "";
+		for (const prompt in PROMPT_RESULTS) {
+			if (text.includes(prompt)) return PROMPT_RESULTS[prompt];
+		}
+	}
+	return "initial result";
 }
 
 /** Runs `AGENT_ID` to a kept-alive idle state that yielded `initial result`, with the parent's delivery sink recording completions. */
@@ -95,7 +104,7 @@ async function spawnKeptAliveChild() {
 			if (!(context.tools ?? []).some(tool => tool.name === "yield")) return { content: ["label"] };
 			// A turn that already yielded ends on the tool result; answer it with prose.
 			if (context.messages.at(-1)?.role === "toolResult") return { content: ["ok"] };
-			const data = sawManualPrompt(context.messages) ? "manual result" : "initial result";
+			const data = resultForLatestPrompt(context.messages);
 			return { content: [{ type: "toolCall", name: "yield", arguments: { type: "result", data } }] };
 		},
 	});
@@ -166,7 +175,7 @@ it("a focused manual prompt's yield rewrites the artifact and notifies the paren
 	}
 }, 15_000);
 
-it("a prompt typed while the previous turn awaits owned background work delivers one completion", async () => {
+it("a prompt typed while the previous turn awaits owned background work reports each turn's own result", async () => {
 	const child = await spawnKeptAliveChild();
 	try {
 		// Owned background work keeps the first manual turn's observation open
@@ -182,14 +191,20 @@ it("a prompt typed while the previous turn awaits owned background work delivers
 			{ ownerId: AGENT_ID, agentId: AGENT_ID },
 		);
 		await child.session.prompt("go on");
-		await child.session.prompt("go on");
+		await child.session.prompt("finish up");
 		gate.resolve();
 
 		await child.firstDelivery;
 		await manager.waitForOwnerJobs(PARENT_ID);
 		await manager.drainDeliveries({ filter: { ownerId: PARENT_ID } });
-		expect(child.deliveries).toHaveLength(1);
-		expect(child.deliveries[0]).toContain("manual result");
+		// One completion per turn, each carrying only that turn's yield.
+		const manual = child.deliveries.filter(text => text.includes("manual result"));
+		const final = child.deliveries.filter(text => text.includes("final result"));
+		expect(child.deliveries).toHaveLength(2);
+		expect(manual).toHaveLength(1);
+		expect(final).toHaveLength(1);
+		expect(manual[0]).not.toContain("final result");
+		expect(await Bun.file(child.artifact).text()).toContain("final result");
 	} finally {
 		child.close();
 	}

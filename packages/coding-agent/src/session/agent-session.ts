@@ -622,6 +622,15 @@ type AgentContinueOutcome =
  */
 type PromptDispatchOutcome = { sessionClaimed: boolean };
 
+/** One turn bracketed by the installed turn observer; see {@link AgentSession} `#startTurnObservation`. */
+type TurnObservation = {
+	finish: (error?: unknown) => void | Promise<void>;
+	/** The observed turn returned; the observation only waits for owned async work. */
+	turnEnded: boolean;
+	closed: boolean;
+	turnError: unknown;
+};
+
 type ActiveAgentContinue = {
 	schedulerToken: number;
 	turnEnded: boolean;
@@ -850,6 +859,8 @@ export class AgentSession implements SettingsScope {
 	#ircWakeTurnObserver:
 		| ((records: AgentMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined)
 		| undefined;
+	/** The observation whose monitor is attached; at most one at a time. */
+	#openTurnObservation: TurnObservation | undefined;
 	// Agent identity (registry id) used for IRC routing and job ownership.
 	#agentId: string | undefined;
 	#agentKind: "main" | "sub" = "main";
@@ -1224,13 +1235,13 @@ export class AgentSession implements SettingsScope {
 		// The wake observer is attached only once prompt ownership is won below: a
 		// deferred wake runs no turn, so observing it would capture the next
 		// turn's yield/output and relay it as this wake's reply.
-		let finishObservation: ((error?: unknown) => void | Promise<void>) | undefined;
+		let observation: TurnObservation | undefined;
 		this.#resetPromptMaintenanceState();
 		// Capture the generation before the wake so its post-prompt recovery wait
 		// bails the instant an abort (which bumps #promptGeneration) supersedes
 		// this wake — otherwise the wait would follow a successor turn (a queued
 		// follow-up or another stranded IRC wake started by abort cleanup),
-		// delaying finishObservation and mis-attributing the successor's RPC
+		// delaying the observation's finish and mis-attributing the successor's RPC
 		// progress to this now-dead wake monitor.
 		const generation = this.#promptGeneration;
 		this.#beginInFlight();
@@ -1260,7 +1271,7 @@ export class AgentSession implements SettingsScope {
 					logger.debug("IRC wake turn deferred behind the running turn");
 					return;
 				}
-				finishObservation = this.#startTurnObservation(records);
+				observation = this.#startTurnObservation(records);
 				return this.agent.prompt(records);
 			})
 			.catch(error => {
@@ -1296,18 +1307,38 @@ export class AgentSession implements SettingsScope {
 				}
 				// Release the in-flight bracket BEFORE settling owned async work.
 				this.#endInFlight();
-				await this.#finishTurnObservation(finishObservation, turnError);
+				await this.#finishTurnObservation(observation, turnError);
 			});
 	}
 
-	/** Starts the installed turn observer (the task executor's subagent run monitor) for a turn about to run. */
-	#startTurnObservation(records: AgentMessage[]): ((error?: unknown) => void | Promise<void>) | undefined {
+	/**
+	 * Starts the installed turn observer (the task executor's subagent run monitor)
+	 * for a turn about to run. At most one observation is open per session, so a
+	 * turn's `yield` is never seen by two monitors.
+	 *
+	 * An open observation whose turn has ended is only waiting for owned async work
+	 * (see {@link #finishTurnObservation}). A new wake or user prompt supersedes it:
+	 * it is finalized now with its own turn's outcome, and the new turn gets a fresh
+	 * monitor. Later async-result continuations then belong to the new turn. An
+	 * observation whose turn is still running means the caller is about to lose the
+	 * prompt race (AgentBusyError), so nothing is started.
+	 */
+	#startTurnObservation(records: AgentMessage[]): TurnObservation | undefined {
+		const open = this.#openTurnObservation;
+		if (open) {
+			if (!open.turnEnded) return undefined;
+			void this.#closeTurnObservation(open);
+		}
+		let finish: TurnObservation["finish"] | undefined;
 		try {
-			return this.#ircWakeTurnObserver?.(records);
+			finish = this.#ircWakeTurnObserver?.(records);
 		} catch (error) {
 			logger.warn("Turn observer failed to start", { error: String(error) });
-			return undefined;
 		}
+		if (!finish) return undefined;
+		const observation: TurnObservation = { finish, turnEnded: false, closed: false, turnError: undefined };
+		this.#openTurnObservation = observation;
+		return observation;
 	}
 
 	/**
@@ -1322,19 +1353,28 @@ export class AgentSession implements SettingsScope {
 	 * monitor still see the eventual yield — finishing first would unsubscribe it
 	 * and the completion would dead-letter with no parent-owned job and no
 	 * refreshed artifact (#11564). Settles immediately when nothing is pending;
-	 * an interrupt cancels the jobs and settles the wait normally.
+	 * an interrupt cancels the jobs and settles the wait normally. A newer turn
+	 * may close the observation first (see {@link #startTurnObservation}).
 	 */
-	async #finishTurnObservation(
-		finish: ((error?: unknown) => void | Promise<void>) | undefined,
-		turnError: unknown,
-	): Promise<void> {
+	async #finishTurnObservation(observation: TurnObservation | undefined, turnError: unknown): Promise<void> {
+		if (!observation) return;
+		observation.turnEnded = true;
+		observation.turnError = turnError;
 		try {
 			await this.settleAsyncWork();
 		} catch (error) {
 			logger.warn("Turn observation async-work settle failed", { error: String(error) });
 		}
+		await this.#closeTurnObservation(observation);
+	}
+
+	/** Runs an observation's finish exactly once; the observer detaches synchronously before the first await. */
+	async #closeTurnObservation(observation: TurnObservation): Promise<void> {
+		if (observation.closed) return;
+		observation.closed = true;
+		if (this.#openTurnObservation === observation) this.#openTurnObservation = undefined;
 		try {
-			await finish?.(turnError);
+			await observation.finish(observation.turnError);
 		} catch (error) {
 			logger.warn("Turn observer failed to finish", { error: String(error) });
 		}
@@ -7122,7 +7162,7 @@ export class AgentSession implements SettingsScope {
 		// yield rewrites the artifact and reaches the parent (#14428). Executor
 		// prompts are agent-attributed and run under their own monitor; a pooled
 		// turn owns the worker's yield contract.
-		const finishObservation =
+		const observation =
 			(options?.userInitiated === true || promptAttribution === "user") && this.#workPoolYieldItems.length === 0
 				? this.#startTurnObservation([message])
 				: undefined;
@@ -7157,7 +7197,7 @@ export class AgentSession implements SettingsScope {
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
 			this.#toolChoiceQueue.removeByLabel("external-thinking");
 			// Detached: settling owned async work may outlast this prompt call.
-			if (finishObservation) void this.#finishTurnObservation(finishObservation, turnError);
+			void this.#finishTurnObservation(observation, turnError);
 		}
 		outcome.sessionClaimed = dispatched;
 		if (!dispatched && message.role === "user") {
