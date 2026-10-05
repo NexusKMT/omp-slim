@@ -1100,14 +1100,15 @@ export declare function cosineSimilarityPairs(vectors: Float64Array, count: numb
 export declare function countTokens(input: string | string[], encoding?: Encoding | undefined | null): number
 
 /**
- * Decode one complete SIXEL control string into a PNG.
+ * Decode one complete SIXEL control string into a PNG, on the native
+ * blocking pool.
  *
  * The decoder is deliberately bounded before handing the stream to
  * `icy_sixel`: raster declarations, repeats, and row advances are scanned
  * first so hostile dimensions cannot make the dependency allocate its much
  * larger internal maximum.
  */
-export declare function decodeSixelToPng(bytes: Uint8Array): Uint8Array
+export declare function decodeSixelToPng(bytes: Uint8Array): Promise<Uint8Array>
 
 export interface DesktopCapabilities {
   backend: string
@@ -1522,13 +1523,14 @@ export interface EnclosingBoundaryOptions {
 /**
  * Encode image bytes into a SIXEL escape sequence for terminal rendering.
  *
- * The input image is decoded and resized to the requested pixel dimensions
- * before encoding.
+ * The input image is decoded, resized to the requested pixel dimensions and
+ * dithered on the native blocking pool, so the work never stalls the
+ * JavaScript event loop.
  *
  * # Errors
- * Returns an error if decoding, resizing, or SIXEL encoding fails.
+ * Rejects if decoding, resizing, or SIXEL encoding fails.
  */
-export declare function encodeSixel(bytes: Uint8Array, targetWidthPx: number, targetHeightPx: number): string
+export declare function encodeSixel(bytes: Uint8Array, targetWidthPx: number, targetHeightPx: number): Promise<string>
 
 /** Tokenizer encoding to use. */
 export declare enum Encoding {

@@ -341,7 +341,7 @@ export async function encodeTerminalImage(image: ImageContent): Promise<string> 
 }
 
 async function decodeSixel(bytes: Uint8Array): Promise<ImageContent | undefined> {
-	const png = decodeSixelToPng(bytes);
+	const png = await decodeSixelToPng(bytes);
 	if (png.length > MAX_IMAGE_INPUT_BYTES) return undefined;
 	return normalizePng(png);
 }
