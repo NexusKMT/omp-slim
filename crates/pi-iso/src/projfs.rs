@@ -324,11 +324,15 @@ mod imp {
 	static PROJFS_SESSIONS: LazyLock<Mutex<BTreeMap<String, ProjfsSessionState>>> =
 		LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+	/// Whether the `ProjFS` library loads is a host fact, so it is probed once
+	/// per process.
+	static PROBE: LazyLock<ProbeResult> = LazyLock::new(|| match ProjfsApi::load() {
+		Ok(_) => ProbeResult { available: true, reason: None },
+		Err(reason) => ProbeResult { available: false, reason: Some(reason) },
+	});
+
 	pub fn probe() -> ProbeResult {
-		match ProjfsApi::load() {
-			Ok(_) => ProbeResult { available: true, reason: None },
-			Err(reason) => ProbeResult { available: false, reason: Some(reason) },
-		}
+		PROBE.clone()
 	}
 
 	pub fn start(lower_root: &str, projection_root: &str) -> IsoResult<()> {

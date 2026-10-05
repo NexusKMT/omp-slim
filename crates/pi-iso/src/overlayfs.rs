@@ -95,11 +95,23 @@ mod imp {
 	static ACTIVE_MOUNTS: LazyLock<Mutex<BTreeMap<PathBuf, MountFlavor>>> =
 		LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+	/// Whether `fuse-overlayfs` runs is a host fact, so it is probed once per
+	/// process.
+	static FUSE_OVERLAYFS: LazyLock<bool> = LazyLock::new(|| {
+		Command::new("fuse-overlayfs")
+			.arg("--version")
+			.stdin(Stdio::null())
+			.stdout(Stdio::null())
+			.stderr(Stdio::null())
+			.status()
+			.is_ok()
+	});
+
 	pub fn probe() -> ProbeResult {
 		if kernel_overlay_supported() {
 			return ProbeResult::available();
 		}
-		if fuse_overlayfs_available() {
+		if *FUSE_OVERLAYFS {
 			return ProbeResult::available();
 		}
 		ProbeResult::unavailable(
@@ -293,16 +305,6 @@ mod imp {
 		text
 			.lines()
 			.any(|line| line.split_whitespace().any(|word| word == "overlay"))
-	}
-
-	fn fuse_overlayfs_available() -> bool {
-		Command::new("fuse-overlayfs")
-			.arg("--version")
-			.stdin(Stdio::null())
-			.stdout(Stdio::null())
-			.stderr(Stdio::null())
-			.status()
-			.is_ok()
 	}
 
 	fn canonical_existing_dir(path: &Path) -> IsoResult<PathBuf> {
