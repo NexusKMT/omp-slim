@@ -24,7 +24,12 @@ use parking_lot::Mutex;
 use pi_shell::output_decode::OutputDecoder;
 use portable_pty::{CommandBuilder, ExitStatus, PtySize, native_pty_system};
 
-use crate::{js::into_string, ps, task};
+use crate::{
+	js::into_string,
+	ps,
+	shell::{BRIDGE_QUEUE_CHUNKS, BridgeItem, FORWARD_STALL_TIMEOUT, pump_chunks},
+	task,
+};
 
 /// Options for running a command in a PTY session.
 #[napi(object)]
@@ -100,6 +105,15 @@ enum ReaderEvent {
 	Done,
 }
 
+impl BridgeItem for ReaderEvent {
+	fn into_text(self) -> Option<String> {
+		match self {
+			Self::Chunk(text) => Some(text),
+			Self::Done => None,
+		}
+	}
+}
+
 enum ControlMessage {
 	Input(String),
 	Resize {
@@ -117,13 +131,6 @@ enum ControlMessage {
 	Exited(std::io::Result<ExitStatus>),
 }
 
-/// Capacity of the reader→JS queue. One queued chunk is at most one PTY read
-/// (≤64 KiB), so the Rust side holds ~4 MiB before the reader thread's `send`
-/// parks — which fills the OS PTY buffer and backpressures the child instead of
-/// buffering the surplus in process memory. Same bound as the non-PTY bash
-/// bridge (#4078). A separate `pump_pty_chunks` task `call_async`s so the
-/// control loop never waits on JS (input/resize/kill/exit stay live).
-const READER_QUEUE_CHUNKS: usize = 64;
 const POST_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_millis(300);
 /// Idle window used only when the child has already exited, the reader has
 /// *not* hit EOF, the bridge queue is empty, and no `on_chunk` is in flight.
@@ -413,23 +420,32 @@ fn run_pty_sync(
 		.try_clone_reader()
 		.map_err(|err| Error::from_reason(format!("Failed to create PTY reader: {err}")))?;
 
-	let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+	// The reader→JS queue is bounded like the bash bridge (#4078): a full queue
+	// parks the reader's `send`, filling the OS PTY buffer and backpressuring
+	// the child. A separate pump task `call_async`s so the control loop never
+	// waits on JS (input/resize/kill/exit stay live).
+	let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 	let queued = reader_tx.clone();
 	let reader_thread = std::thread::spawn(move || {
 		const BUF: usize = 65536;
 		let mut buf = vec![0u8; BUF];
 		let mut decoder = OutputDecoder::new();
+		// Once the pump is gone (JS failed, or a wedged `on_chunk` hit the
+		// stall timeout) keep reading and discard: the child must not block on
+		// a full PTY buffer that nothing drains (#12657).
+		let mut forwarding = true;
 		loop {
 			match reader.read(&mut buf) {
-				Ok(0) => break,
-				Ok(n) => {
+				Ok(0) | Err(_) => break,
+				Ok(n) if forwarding => {
 					let text = decoder.push(&buf[..n]);
-					if !text.is_empty() && reader_tx.send(ReaderEvent::Chunk(text)).is_err() {
-						return;
-					}
+					forwarding = text.is_empty() || reader_tx.send(ReaderEvent::Chunk(text)).is_ok();
 				},
-				Err(_) => break,
+				Ok(_) => {},
 			}
+		}
+		if !forwarding {
+			return;
 		}
 		let rest = decoder.finish();
 		if !rest.is_empty() && reader_tx.send(ReaderEvent::Chunk(rest)).is_err() {
@@ -469,8 +485,10 @@ fn run_pty_sync(
 	let pump_task = {
 		let in_js = Arc::clone(&in_js);
 		napi::tokio::spawn(async move {
-			pump_pty_chunks(
+			pump_chunks(
 				reader_rx,
+				FORWARD_STALL_TIMEOUT,
+				Some(in_js.as_ref()),
 				async move |payload| {
 					let Some(callback) = on_chunk.as_ref() else {
 						return true;
@@ -481,7 +499,6 @@ fn run_pty_sync(
 					}
 					ok
 				},
-				Some(in_js.as_ref()),
 			)
 			.await;
 			let _ = pump_done_tx.send(());
@@ -594,57 +611,6 @@ fn run_pty_sync(
 	Ok(PtyRunResult { exit_code, cancelled, timed_out })
 }
 
-/// Drain `rx`, greedily coalescing queued chunks into ≤64 KiB batches, and
-/// feed each batch to `forward`, awaiting its completion before pulling more.
-/// Mirrors `shell.rs` `pump_chunks` (#4078): JS consumption backpressures the
-/// bounded reader queue; the PTY control loop never calls into napi.
-async fn pump_pty_chunks(
-	rx: flume::Receiver<ReaderEvent>,
-	mut forward: impl AsyncFnMut(String) -> bool,
-	busy: Option<&AtomicBool>,
-) {
-	const MAX_BATCH_BYTES: usize = 64 * 1024;
-	const INITIAL_BATCH_CAP: usize = 8 * 1024;
-	let mut batch = String::with_capacity(INITIAL_BATCH_CAP);
-	let set_busy = |value: bool| {
-		if let Some(busy) = busy {
-			busy.store(value, Ordering::Release);
-		}
-	};
-	loop {
-		let first = match rx.recv_async().await {
-			Ok(ReaderEvent::Chunk(text)) => {
-				// Hold the idle-check flag before coalesce/forward so a drained
-				// queue is not mistaken for a stuck-open slave.
-				set_busy(true);
-				text
-			},
-			Ok(ReaderEvent::Done) | Err(_) => break,
-		};
-		batch.push_str(&first);
-		let mut done = false;
-		while batch.len() < MAX_BATCH_BYTES {
-			match rx.try_recv() {
-				Ok(ReaderEvent::Chunk(more)) => batch.push_str(&more),
-				Ok(ReaderEvent::Done) => {
-					done = true;
-					break;
-				},
-				Err(_) => break,
-			}
-		}
-		let payload = std::mem::replace(&mut batch, String::with_capacity(INITIAL_BATCH_CAP));
-		let keep_going = payload.is_empty() || forward(payload).await;
-		set_busy(false);
-		if !keep_going {
-			return;
-		}
-		if done {
-			return;
-		}
-	}
-}
-
 /// Wait for the JS pump after the child has exited and the master is dropped.
 ///
 /// `queued` is a clone of the reader sender, used only to see whether the
@@ -726,100 +692,16 @@ mod reader_queue_tests {
 		time::{Duration, Instant},
 	};
 
-	use tokio::time;
-
 	use super::{
-		POST_CANCEL_DRAIN_TIMEOUT, READER_QUEUE_CHUNKS, ReaderEvent, STUCK_SLAVE_IDLE,
-		await_pty_output_drain, pump_pty_chunks,
+		BRIDGE_QUEUE_CHUNKS, POST_CANCEL_DRAIN_TIMEOUT, ReaderEvent, STUCK_SLAVE_IDLE,
+		await_pty_output_drain,
 	};
 
-	/// Regression for the PTY sibling of #4078: a stalled JS consumer
-	/// (`forward`) must not let the reader queue grow without bound, and chunks
-	/// must arrive losslessly and in order. Copied from
-	/// `bridge_pump_bounds_queue_and_delivers_all_bytes`.
-	#[tokio::test(flavor = "multi_thread")]
-	async fn pty_pump_bounds_queue_and_delivers_all_bytes() {
-		const CHUNKS: usize = 512;
-		const CHUNK_BYTES: usize = 4096;
-		let (tx, rx) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
-		let producer = tokio::spawn(async move {
-			let mut expected = String::with_capacity(CHUNKS * CHUNK_BYTES);
-			let mut max_queued = 0usize;
-			for i in 0..CHUNKS {
-				let chunk = format!("[{i:06}]{}", "x".repeat(CHUNK_BYTES - 8));
-				expected.push_str(&chunk);
-				tx.send_async(ReaderEvent::Chunk(chunk))
-					.await
-					.expect("pump should outlive the producer");
-				max_queued = max_queued.max(tx.len());
-			}
-			tx.send_async(ReaderEvent::Done)
-				.await
-				.expect("pump should accept Done");
-			(expected, max_queued)
-		});
-
-		let mut received = String::with_capacity(CHUNKS * CHUNK_BYTES);
-		time::timeout(
-			Duration::from_secs(30),
-			pump_pty_chunks(
-				rx,
-				async |payload: String| {
-					received.push_str(&payload);
-					time::sleep(Duration::from_micros(500)).await;
-					true
-				},
-				None,
-			),
-		)
-		.await
-		.expect("pump should finish once the producer hangs up");
-
-		let (expected, max_queued) = producer.await.expect("producer task");
-		assert!(
-			max_queued <= READER_QUEUE_CHUNKS,
-			"PTY reader queue grew past its bound: {max_queued} chunks",
-		);
-		assert_eq!(received.len(), expected.len(), "bytes were dropped or duplicated");
-		assert_eq!(received, expected, "chunks must arrive losslessly and in order");
-	}
-
-	/// When JS dies (`forward` fails), the pump must drop its receiver so parked
-	/// sends fail fast — the PTY reader keeps draining the child instead of
-	/// wedging it on a full bridge queue.
-	#[tokio::test(flavor = "multi_thread")]
-	async fn pty_pump_death_disconnects_channel_without_blocking_senders() {
-		let (tx, rx) = flume::bounded::<ReaderEvent>(4);
-		let pump = tokio::spawn(pump_pty_chunks(rx, async |_payload: String| false, None));
-		let producer = tokio::spawn(async move {
-			let mut disconnected = 0usize;
-			for _ in 0..64 {
-				if tx
-					.send_async(ReaderEvent::Chunk("x".repeat(1024)))
-					.await
-					.is_err()
-				{
-					disconnected += 1;
-				}
-			}
-
-			disconnected
-		});
-		let disconnected = time::timeout(Duration::from_secs(5), producer)
-			.await
-			.expect("sends must not park once the consumer died")
-			.expect("producer task");
-		assert!(disconnected > 0, "channel should disconnect after the pump stops");
-		time::timeout(Duration::from_secs(5), pump)
-			.await
-			.expect("pump should exit after forward fails")
-			.expect("pump task");
-	}
 	#[test]
 	fn drain_waits_for_slow_js_after_reader_eof() {
 		let (pump_tx, pump_rx) = flume::bounded(1);
 		let reader = std::thread::spawn(|| {});
-		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let in_js = AtomicBool::new(false);
 		std::thread::spawn(move || {
 			std::thread::sleep(Duration::from_millis(2500));
@@ -835,7 +717,7 @@ mod reader_queue_tests {
 
 	#[test]
 	fn drain_drops_sender_clone_after_reader_eof_so_pump_unblocks() {
-		let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (reader_tx, reader_rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let queued = reader_tx.clone();
 		drop(reader_tx);
 		let (pump_tx, pump_rx) = flume::bounded(1);
@@ -864,7 +746,7 @@ mod reader_queue_tests {
 		let reader = std::thread::spawn(|| {
 			std::thread::park();
 		});
-		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let in_js = AtomicBool::new(false);
 		let stopped = AtomicBool::new(false);
 		let start = Instant::now();
@@ -881,7 +763,7 @@ mod reader_queue_tests {
 	fn drain_does_not_treat_queued_backpressure_as_stuck_slave() {
 		let (pump_tx, pump_rx) = flume::bounded(1);
 		let reader = std::thread::spawn(std::thread::park);
-		let (queued, _rx) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _rx) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		queued
 			.send(ReaderEvent::Chunk("x".into()))
 			.expect("queue accepts a chunk");
@@ -902,7 +784,7 @@ mod reader_queue_tests {
 	fn drain_does_not_treat_in_flight_callback_as_stuck_slave() {
 		let (pump_tx, pump_rx) = flume::bounded(1);
 		let reader = std::thread::spawn(std::thread::park);
-		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let in_js = Arc::new(AtomicBool::new(true));
 		let in_js_flag = Arc::clone(&in_js);
 		std::thread::spawn(move || {
@@ -922,7 +804,7 @@ mod reader_queue_tests {
 	fn drain_cancel_does_not_wait_for_slow_js() {
 		let (_pump_tx, pump_rx) = flume::bounded::<()>(1);
 		let reader = std::thread::spawn(std::thread::park);
-		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let in_js = AtomicBool::new(true);
 		let stopped = AtomicBool::new(false);
 		let start = Instant::now();
@@ -941,7 +823,7 @@ mod reader_queue_tests {
 	fn drain_cancel_returns_once_pump_observes_stop() {
 		let (pump_tx, pump_rx) = flume::bounded::<()>(1);
 		let reader = std::thread::spawn(std::thread::park);
-		let (queued, _) = flume::bounded::<ReaderEvent>(READER_QUEUE_CHUNKS);
+		let (queued, _) = flume::bounded::<ReaderEvent>(BRIDGE_QUEUE_CHUNKS);
 		let in_js = AtomicBool::new(true);
 		let start = Instant::now();
 		await_pty_output_drain(pump_rx, reader, queued, &in_js, true, move || {
