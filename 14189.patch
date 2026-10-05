@@ -1,0 +1,146 @@
+diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
+index 30919e986e1..b0b62f338de 100644
+--- a/packages/coding-agent/CHANGELOG.md
++++ b/packages/coding-agent/CHANGELOG.md
+@@ -48,6 +48,7 @@
+ - Fixed browser `tab.waitForDownload()` missing a download started by the next tab action on tabs opened without a `downloads` directory; the file landed in the browser's default folder and the wait timed out ([#14417](https://github.com/can1357/oh-my-pi/pull/14417) by [@will-bogusz](https://github.com/will-bogusz))
+ - Fixed `browser.open` failing with a bare `[object ErrorEvent]` when the browser's debugger websocket refuses the connection; the error now names the endpoint and why it failed ([#14418](https://github.com/can1357/oh-my-pi/pull/14418) by [@will-bogusz](https://github.com/will-bogusz))
+ - Fixed browser tab evaluations hanging when the page redirected again while the tab was being read; they now run on the page the redirect landed on ([#14423](https://github.com/can1357/oh-my-pi/pull/14423) by [@will-bogusz](https://github.com/will-bogusz))
++- Fixed native hook discovery silently ignoring symlinked hooks: a `hooks/pre` or `hooks/post` entry that is a symlink was dropped with no load error and no warning, so linking a shared hook into the hooks directory did nothing; symlinks are now discovered like regular files, matching the extension loader ([#14189](https://github.com/can1357/oh-my-pi/issues/14189))
+ 
+ ## [18.6.2] - 2026-10-04
+ 
+diff --git a/packages/coding-agent/src/discovery/builtin.ts b/packages/coding-agent/src/discovery/builtin.ts
+index 22d9b92e35e..cb298ffcfd6 100644
+--- a/packages/coding-agent/src/discovery/builtin.ts
++++ b/packages/coding-agent/src/discovery/builtin.ts
+@@ -719,7 +719,10 @@ async function loadHooks(ctx: LoadContext): Promise<LoadResult<Hook>> {
+ 
+ 		for (const entry of typeEntries) {
+ 			if (entry.name.startsWith(".")) continue;
+-			if (!entry.isFile()) continue;
++			// `readDirEntries` is a plain `readdir(withFileTypes)` and reports a symlink as
++			// a link, not a file, so linking a shared hook into the hooks dir would drop it
++			// silently. Match the extension loader and accept links here.
++			if (!entry.isFile() && !entry.isSymbolicLink()) continue;
+ 
+ 			const hookPath = path.join(typeDir, entry.name);
+ 			const baseName = entry.name.includes(".") ? entry.name.slice(0, entry.name.lastIndexOf(".")) : entry.name;
+diff --git a/packages/coding-agent/test/discovery/builtin-hooks.test.ts b/packages/coding-agent/test/discovery/builtin-hooks.test.ts
+new file mode 100644
+index 00000000000..3eb814572aa
+--- /dev/null
++++ b/packages/coding-agent/test/discovery/builtin-hooks.test.ts
+@@ -0,0 +1,109 @@
++import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
++import * as nodeFs from "node:fs";
++import * as fs from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import { clearCache as clearFsCache } from "@oh-my-pi/pi-coding-agent/capability/fs";
++import { type Hook, hookCapability } from "@oh-my-pi/pi-coding-agent/capability/hook";
++import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++import { initializeWithSettings, loadCapability } from "@oh-my-pi/pi-coding-agent/discovery";
++import { __resetDirsFromEnvForTests, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
++import { restoreEnvValue } from "../helpers/settings-test-state";
++
++const HOOK_SOURCE = `export default function(pi) {
++	pi.on("tool_call", async () => ({ block: true, reason: "blocked by hook" }));
++}`;
++
++/**
++ * Creating a symlink needs Developer Mode or elevation on Windows and is simply absent on
++ * some images, so the link test is gated on whether this host can make one at all.
++ *
++ * Probed at module scope, not in `beforeEach`: `skipIf` reads its condition when the test
++ * is registered, which happens before any hook runs, so a probe assigned in `beforeEach`
++ * would leave the flag undefined and skip the test on every host.
++ */
++const probeSymlinks = (): boolean => {
++	const dir = nodeFs.mkdtempSync(path.join(os.tmpdir(), "omp-symlink-probe-"));
++	try {
++		const target = path.join(dir, "target.ts");
++		nodeFs.writeFileSync(target, HOOK_SOURCE);
++		nodeFs.symlinkSync(target, path.join(dir, "link.ts"), "file");
++		return true;
++	} catch {
++		return false;
++	} finally {
++		nodeFs.rmSync(dir, { recursive: true, force: true });
++	}
++};
++
++const SYMLINKS_USABLE = probeSymlinks();
++
++describe("native hook discovery", () => {
++	let root: string;
++	let project: string;
++	let projectPre: string;
++	let sharedHooks: string;
++	let originalHome: string | undefined;
++	let originalAgentDirEnv: string | undefined;
++	let originalOmpProfileEnv: string | undefined;
++	let originalPiProfileEnv: string | undefined;
++
++	beforeEach(async () => {
++		resetSettingsForTest();
++		clearFsCache();
++		originalHome = process.env.HOME;
++		originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
++		originalOmpProfileEnv = process.env.OMP_PROFILE;
++		originalPiProfileEnv = process.env.PI_PROFILE;
++		root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-builtin-hooks-"));
++		const home = path.join(root, "home");
++		project = path.join(root, "project");
++		projectPre = path.join(project, ".omp", "hooks", "pre");
++		sharedHooks = path.join(root, "shared-hooks");
++		process.env.HOME = home;
++		vi.spyOn(os, "homedir").mockReturnValue(home);
++		setAgentDir(path.join(home, ".omp", "agent"));
++		await Promise.all([
++			fs.mkdir(projectPre, { recursive: true }),
++			fs.mkdir(path.join(home, ".omp", "agent", "hooks", "pre"), { recursive: true }),
++			fs.mkdir(sharedHooks, { recursive: true }),
++			fs.mkdir(path.join(project, ".git"), { recursive: true }),
++		]);
++		initializeWithSettings(await Settings.init({ inMemory: true, cwd: project }));
++	});
++
++	afterEach(async () => {
++		resetSettingsForTest();
++		clearFsCache();
++		vi.restoreAllMocks();
++		restoreEnvValue("HOME", originalHome);
++		restoreEnvValue("OMP_PROFILE", originalOmpProfileEnv);
++		restoreEnvValue("PI_PROFILE", originalPiProfileEnv);
++		restoreEnvValue("PI_CODING_AGENT_DIR", originalAgentDirEnv);
++		__resetDirsFromEnvForTests();
++		await removeWithRetries(root);
++	});
++
++	test("discovers a hook written as a plain file", async () => {
++		const hookPath = path.join(projectPre, "plain-hook.ts");
++		await fs.writeFile(hookPath, HOOK_SOURCE);
++
++		const result = await loadCapability<Hook>(hookCapability.id, { cwd: project, providers: ["native"] });
++
++		expect(result.items.map(hook => hook.path)).toContain(hookPath);
++	});
++
++	// Linking a shared hook into the hooks dir is the install method this covers. Without
++	// the fix `readdir(withFileTypes)` reports the entry as a link rather than a file and
++	// `loadHooks` drops it with no item and no warning, so the link is absent here.
++	test.skipIf(!SYMLINKS_USABLE)("discovers a hook linked into the hooks dir", async () => {
++		const shared = path.join(sharedHooks, "shared-hook.ts");
++		await fs.writeFile(shared, HOOK_SOURCE);
++		const linkPath = path.join(projectPre, "linked-hook.ts");
++		await fs.symlink(shared, linkPath, "file");
++
++		const result = await loadCapability<Hook>(hookCapability.id, { cwd: project, providers: ["native"] });
++
++		expect(result.items.map(hook => hook.path)).toContain(linkPath);
++	});
++});
+\ No newline at end of file
+warning: in the working copy of 'packages/coding-agent/CHANGELOG.md', CRLF will be replaced by LF the next time Git touches it
+warning: in the working copy of 'packages/coding-agent/src/discovery/builtin.ts', CRLF will be replaced by LF the next time Git touches it
