@@ -563,10 +563,14 @@ export class AssistantMessageComponent extends Container {
 		this.#proseOnlyThinking = proseOnly;
 	}
 
-	/** Keep finished thinking sections expanded instead of folding them to "Thought for 12s". */
+	/**
+	 * Keep finished thinking sections expanded instead of folding them to "Thought for 12s".
+	 * Sections the user folded or unfolded by hand keep that choice.
+	 */
 	setExpandThinkingBlocks(expand: boolean): void {
+		if (this.#expandThinkingBlocks === expand) return;
 		this.#expandThinkingBlocks = expand;
-		this.#thinkingCollapsed.clear();
+		this.#nativeViewVersion++;
 	}
 
 	override dispose(): void {
