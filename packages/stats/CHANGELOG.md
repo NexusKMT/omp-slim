@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the stats dashboard menu button showing on desktop, where clicking it dimmed the page without opening navigation.
+
 ## [18.6.0] - 2026-10-03
 
 ### Fixed
