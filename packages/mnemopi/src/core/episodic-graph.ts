@@ -661,6 +661,7 @@ export class EpisodicGraph {
 	private knownMemoryIds(exclude: string): string[] {
 		const now = nowIso();
 		const ids = new Set<string>();
+		const live = new Set<string>();
 		const retired = new Set<string>();
 		const gistRows = this.db
 			.query("SELECT DISTINCT memory_id FROM gists WHERE memory_id IS NOT NULL AND memory_id != ?")
@@ -670,7 +671,7 @@ export class EpisodicGraph {
 			const workingRows = this.db
 				.query(`SELECT id, ${LIVE_MEMORY_SQL} AS live FROM working_memory WHERE id != ?`)
 				.all(now, exclude) as MemoryLivenessRow[];
-			partitionByLiveness(workingRows, ids, retired);
+			partitionByLiveness(workingRows, live, retired);
 		} catch {
 			// Standalone graph stores do not have Beam memory tables.
 		}
@@ -678,11 +679,12 @@ export class EpisodicGraph {
 			const episodicRows = this.db
 				.query(`SELECT id, ${LIVE_MEMORY_SQL} AS live FROM episodic_memory WHERE id != ?`)
 				.all(now, exclude) as MemoryLivenessRow[];
-			partitionByLiveness(episodicRows, ids, retired);
+			partitionByLiveness(episodicRows, live, retired);
 		} catch {
 			// Standalone graph stores do not have Beam memory tables.
 		}
-		for (const id of retired) ids.delete(id);
+		for (const id of live) ids.add(id);
+		for (const id of retired) if (!live.has(id)) ids.delete(id);
 		return [...ids];
 	}
 

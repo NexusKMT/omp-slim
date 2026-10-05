@@ -242,6 +242,89 @@ describe("proactive memory linking", () => {
 		}
 	});
 
+	it("links a memory id that is still valid in one tier but retired in the other", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const beam = new BeamMemory({ sessionId: "proactive-cross-tier", dbPath: ":memory:" });
+		try {
+			const expired = "2000-01-01T00:00:00.000Z";
+			const workingLive = "Alice set up the CI/CD pipeline for backend deployment";
+			const episodicLive = "Alice reviewed the CI/CD pipeline for backend deployment";
+			const bothRetired = "Alice tested the CI/CD pipeline for backend deployment";
+			beam.importFromDict({
+				working_memory: [
+					{ id: "live-working-retired-episodic", content: workingLive },
+					{ id: "retired-working-live-episodic", content: episodicLive, valid_until: expired },
+					{ id: "retired-in-both-tiers", content: bothRetired, valid_until: expired },
+				],
+				episodic_memory: [
+					{ id: "live-working-retired-episodic", content: workingLive, valid_until: expired },
+					{ id: "retired-working-live-episodic", content: episodicLive },
+					{ id: "retired-in-both-tiers", content: bothRetired, superseded_by: "replacement" },
+				],
+			});
+
+			const next = beam.remember("Alice configured the CI/CD pipeline for backend deployment", {
+				importance: 0.8,
+			});
+
+			const targets = new Set(
+				(
+					beam.db.query("SELECT DISTINCT target FROM graph_edges WHERE source = ?").all(next) as {
+						target: string;
+					}[]
+				).map(row => row.target),
+			);
+			expect(targets.has("live-working-retired-episodic")).toBe(true);
+			expect(targets.has("retired-working-live-episodic")).toBe(true);
+			expect(targets.has("retired-in-both-tiers")).toBe(false);
+		} finally {
+			beam.close();
+		}
+	});
+
+	it("does not link memories that are superseded but not yet expired", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const beam = new BeamMemory({ sessionId: "proactive-superseded", dbPath: ":memory:" });
+		try {
+			const future = "2999-01-01T00:00:00.000Z";
+			beam.importFromDict({
+				working_memory: [
+					{
+						id: "superseded-working",
+						content: "Alice set up the CI/CD pipeline for backend deployment",
+						superseded_by: "replacement-working",
+					},
+					{ id: "valid-working", content: "Alice set up the CI/CD pipeline for frontend deployment" },
+				],
+				episodic_memory: [
+					{
+						id: "superseded-episodic",
+						content: "Alice reviewed the CI/CD pipeline for backend deployment",
+						superseded_by: "replacement-episodic",
+						valid_until: future,
+					},
+				],
+			});
+
+			const next = beam.remember("Alice configured the CI/CD pipeline for backend deployment", {
+				importance: 0.8,
+			});
+
+			const targets = new Set(
+				(
+					beam.db.query("SELECT DISTINCT target FROM graph_edges WHERE source = ?").all(next) as {
+						target: string;
+					}[]
+				).map(row => row.target),
+			);
+			expect(targets.has("valid-working")).toBe(true);
+			expect(targets.has("superseded-working")).toBe(false);
+			expect(targets.has("superseded-episodic")).toBe(false);
+		} finally {
+			beam.close();
+		}
+	});
+
 	it("does not create recall-similarity edges for unrelated content", () => {
 		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
 		const beam = new BeamMemory({ sessionId: "proactive-unrelated", dbPath: ":memory:" });
