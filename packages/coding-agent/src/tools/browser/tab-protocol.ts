@@ -61,9 +61,6 @@ export type WorkerInitPayload =
 			userAgent?: string;
 			/** Ignore invalid HTTPS certificates for this page. */
 			ignoreHttpsErrors?: boolean;
-			url?: string;
-			waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
-			timeoutMs: number;
 	  }
 	| {
 			mode: "attach";
@@ -81,9 +78,6 @@ export type WorkerInitPayload =
 			userAgent?: string;
 			/** Ignore invalid HTTPS certificates for this page. */
 			ignoreHttpsErrors?: boolean;
-			url?: string;
-			waitUntil?: "load" | "domcontentloaded" | "networkidle0" | "networkidle2";
-			timeoutMs: number;
 			/**
 			 * Post-timeout recycle: before adopting the page, dismiss any open JS dialog and
 			 * stop a pending navigation so a blocked target cannot stall worker init (which

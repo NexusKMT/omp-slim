@@ -10,6 +10,7 @@ import { buildHeadlessLaunchArgs } from "@oh-my-pi/pi-coding-agent/tools/browser
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import type { Page } from "puppeteer-core";
+import { rejectionOf } from "../helpers/rejection";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
@@ -187,6 +188,39 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser open options", () => {
 			server.stop(true);
 		}
 	});
+
+	it("keeps the tab on what loaded when the page outlasts the open timeout", async () => {
+		const server = Bun.serve({
+			port: 0,
+			fetch(request) {
+				// The image never answers, so the page never fires `load`.
+				if (new URL(request.url).pathname === "/hang.png") return new Promise<Response>(() => {});
+				return new Response('<title>slow</title><p>partial</p><img src="/hang.png">', {
+					headers: { "content-type": "text/html" },
+				});
+			},
+		});
+		try {
+			const invoke = browserHost();
+			const name = `slow-${crypto.randomUUID()}`;
+			const open = () => rejectionOf(invoke({ action: "open", name, url: server.url.href, timeout: 3 }));
+			const keptTab = { message: expect.stringContaining(`browser.tab(${JSON.stringify(name)})`) };
+			// The first open creates the tab; the second reuses the one it kept.
+			expect(await open()).toMatchObject(keptTab);
+			expect(await open()).toMatchObject(keptTab);
+			expect(
+				returnedValue(
+					await invoke({
+						action: "run",
+						name,
+						code: "return { url: tab.url(), text: await tab.evaluate(() => document.body.innerText) };",
+					}),
+				),
+			).toEqual({ url: server.url.href, text: "partial" });
+		} finally {
+			server.stop(true);
+		}
+	}, 20_000);
 
 	it("waits for a completed download and records its bytes", async () => {
 		const payload = new TextEncoder().encode("download payload\n");

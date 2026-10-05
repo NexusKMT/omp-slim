@@ -1335,14 +1335,6 @@ export class WorkerCore {
 			this.#tracing = new BrowserTracingController(this.#page);
 			this.#network = new BrowserNetworkManager(this.#page, payload.allowedDomains);
 			await this.#network.start();
-			if (payload.url) {
-				await this.#page.goto(payload.url, {
-					// Default to "load" because dev servers with HMR/WS never reach networkidle.
-					waitUntil: payload.waitUntil ?? "load",
-					timeout: payload.timeoutMs,
-				});
-			}
-			this.#targetId = await targetIdForPage(this.#page);
 			this.#transport.send({ type: "ready", info: await this.#currentReadyInfo() });
 		} catch (error) {
 			// A failed headless init leaves the worker's page orphaned in the shared

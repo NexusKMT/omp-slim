@@ -12,6 +12,7 @@ import { callSessionTool } from "../../eval/js/tool-bridge";
 import { webpExclusionForModel } from "@oh-my-pi/pi-tui/chat/image-loading";
 import type { ToolSession } from "../index";
 import { expandPath } from "../path-utils";
+import { CELL_BUDGET_SLACK_MS } from "../run-scope";
 import { ToolAbortError, toWorkerErrorPayload } from "../tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { gracefulKillTreeOnce, pickElectronTarget, shouldPreserveConnectedBrowserFocus } from "./attach";
@@ -222,6 +223,9 @@ const SETUP_BUDGET_CAP_MS = 10_000;
 // a sub-3s caller's entire init budget, so the remaining-budget math must
 // never hand raceWithTimeout a non-positive value.
 const READY_BUDGET_FLOOR_MS = 500;
+// Share of an open's remaining budget kept back from its navigation so the
+// goto's own timeout report reaches the caller before the open's deadline.
+const OPEN_NAVIGATION_REPORT_MS = 500;
 // Names of tabs the supervisor force-killed (timeout past grace, failed recycle),
 // mapped to the kill reason. Lets the next `run` on that name explain WHY the tab
 // vanished instead of a bare "not alive". Cleared when the name is opened again.
@@ -397,11 +401,6 @@ async function acquireTabImpl(
 						`await tab.emulate({ viewport: ${JSON.stringify({ width: opts.viewport.width, height: opts.viewport.height, scale: opts.viewport.deviceScaleFactor })} });`,
 					);
 				}
-				if (opts.url) {
-					reuseSteps.push(
-						`await tab.goto(${JSON.stringify(opts.url)}, { waitUntil: ${JSON.stringify(opts.waitUntil ?? "load")} });`,
-					);
-				}
 				if (reuseSteps.length) {
 					await runInTabWithSnapshot(
 						name,
@@ -413,6 +412,7 @@ async function acquireTabImpl(
 						{ cwd: getProjectDir() },
 					);
 				}
+				if (opts.url) await navigateOpenedTab(name, opts.url, opts, startedAt);
 				return { tab: tabs.get(name)!, created: false };
 			}
 		} else {
@@ -534,7 +534,35 @@ async function acquireTabImpl(
 	// this process dies abnormally before its own teardown closes the tab.
 	const scope = sharedScopeOf(browser);
 	if (scope) void recordSharedTarget(scope, info.targetId);
+	if (opts.url) await navigateOpenedTab(name, opts.url, opts, startedAt);
 	return { tab, created: true };
+}
+
+/**
+ * Navigate a published tab for an open, within what is left of the open's
+ * budget. A page that outlasts it fails with goto's own report while the tab
+ * stays on what loaded, instead of losing to the open's bare deadline.
+ */
+async function navigateOpenedTab(name: string, url: string, opts: AcquireTabOptions, startedAt: number): Promise<void> {
+	const remainingMs = opts.timeoutMs - (performance.now() - startedAt);
+	const gotoMs = Math.max(1, Math.round(remainingMs - Math.min(OPEN_NAVIGATION_REPORT_MS, remainingMs / 2)));
+	try {
+		await runInTabWithSnapshot(
+			name,
+			{
+				code: `await tab.goto(${JSON.stringify(url)}, { waitUntil: ${JSON.stringify(opts.waitUntil ?? "load")} });`,
+				// tab.goto bounds itself to the cell budget less CELL_BUDGET_SLACK_MS.
+				timeoutMs: gotoMs + CELL_BUDGET_SLACK_MS,
+				signal: opts.signal,
+			},
+			{ cwd: getProjectDir() },
+		);
+	} catch (error) {
+		if (!(error instanceof ToolError) || tabs.get(name)?.state !== "alive") throw error;
+		throw new ToolError(
+			`${error.message}\nTab ${JSON.stringify(name)} stays open on what loaded; reach it with browser.tab(${JSON.stringify(name)}).`,
+		);
+	}
 }
 
 async function acquireCmuxTab(
@@ -1418,9 +1446,6 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 			downloadsPath: opts.downloadsPath,
 			userAgent: opts.userAgent,
 			ignoreHttpsErrors: opts.ignoreHttpsErrors,
-			url: opts.url,
-			waitUntil: opts.waitUntil,
-			timeoutMs: opts.timeoutMs,
 		};
 	}
 	// Connected and relay browsers are user-driven. When no target is requested,
@@ -1446,9 +1471,6 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
 		downloadsPath: opts.downloadsPath,
 		userAgent: opts.userAgent,
 		ignoreHttpsErrors: opts.ignoreHttpsErrors,
-		url: opts.url,
-		waitUntil: opts.waitUntil,
-		timeoutMs: opts.timeoutMs,
 		activateForScreenshot,
 	};
 }
@@ -1543,7 +1565,6 @@ async function recycleTimedOutWorkerTab(tab: WorkerTabSession, timeoutMs: number
 		// otherwise init stalls, times out, and the tab gets force-killed.
 		recover: true,
 		emulateFocus: tab.kindTag === "headless",
-		timeoutMs,
 		activateForScreenshot: tab.activateForScreenshot,
 	};
 	let worker = await spawnTabWorker();
