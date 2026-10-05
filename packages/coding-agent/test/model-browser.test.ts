@@ -562,7 +562,18 @@ describe("serviceTierFor", () => {
 			maxTokens: 128_000,
 			serviceTiers: ["ultrafast"],
 		});
-		const anthropic = makeModel("anthropic", "claude-opus-5-5");
+		const anthropic = buildModel({
+			id: "claude-opus-5-5",
+			name: "claude-opus-5-5",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://api.anthropic.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+			contextWindow: 200_000,
+			maxTokens: 64_000,
+		});
 
 		// First-party OpenAI takes ultrafast as-is.
 		expect(source.serviceTierFor?.(firstParty)).toBe("ultrafast");
@@ -572,5 +583,11 @@ describe("serviceTierFor", () => {
 		expect(source.serviceTierFor?.(codexAdvertised)).toBe("ultrafast");
 		// No configured tier for the family.
 		expect(source.serviceTierFor?.(anthropic)).toBeUndefined();
+
+		// Anthropic realizes priority through fast mode rather than a service_tier
+		// field, so a configured priority tier still labels its measurements.
+		const anthropicPriority = createModelBrowserSource(Settings.isolated({ "tier.anthropic": "priority" }));
+		expect(anthropicPriority.serviceTierFor?.(anthropic)).toBe("priority");
+		expect(anthropicPriority.serviceTierFor?.(firstParty)).toBeUndefined();
 	});
 });
