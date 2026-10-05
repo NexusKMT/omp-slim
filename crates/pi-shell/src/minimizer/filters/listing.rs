@@ -830,7 +830,7 @@ fn compact_source_outline(input: &str, path: &str, level: OutlineLevel) -> Strin
 		}
 	}
 
-	if has_content(&out) {
+	if primitives::has_content(&out) {
 		out.push('\n');
 	}
 
@@ -1210,10 +1210,6 @@ fn is_summary_line(line: &str) -> bool {
 			.is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"filesystem"))
 		|| contains(b" mounted on")
 		|| contains(b" files ")
-}
-
-fn has_content(text: &str) -> bool {
-	text.lines().any(|line| !line.trim().is_empty())
 }
 
 #[cfg(test)]

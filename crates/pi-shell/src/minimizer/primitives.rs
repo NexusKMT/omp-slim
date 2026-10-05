@@ -230,6 +230,89 @@ pub fn is_horizontal_rule(line: &str) -> bool {
 		&& line.chars().any(|ch| matches!(ch, '-' | '*' | '_'))
 }
 
+/// `gh`/`glab` issue/PR/MR view filter.
+///
+/// On failure keep the raw output (dedup + head/tail) so error context
+/// survives; on success strip markdown body noise (HTML comments,
+/// badges/images, horizontal rules, blank-line runs) first.
+#[must_use]
+pub fn markdown_view(input: &str, exit_code: i32) -> String {
+	if exit_code != 0 {
+		return head_tail_dedup(input);
+	}
+	head_tail_dedup(&strip_markdown_noise(input))
+}
+
+fn strip_markdown_noise(input: &str) -> String {
+	let mut out = String::new();
+	let mut in_html_comment = false;
+	let mut previous_blank = false;
+	let mut comment_lines = 0usize;
+
+	for line in input.lines() {
+		let trimmed = line.trim();
+		if in_html_comment {
+			if trimmed.contains("-->") {
+				in_html_comment = false;
+				comment_lines = 0;
+			} else {
+				comment_lines += 1;
+				// Cap unclosed comment consumption at 50 lines so malformed or
+				// truncated markdown cannot swallow the rest of the body.
+				if comment_lines > 50 {
+					in_html_comment = false;
+					comment_lines = 0;
+				}
+			}
+			continue;
+		}
+		if trimmed.starts_with("<!--") {
+			if !trimmed.contains("-->") {
+				in_html_comment = true;
+				comment_lines = 0;
+			}
+			continue;
+		}
+		if is_markdown_badge_or_image(trimmed) || is_horizontal_rule(trimmed) {
+			continue;
+		}
+		if trimmed.is_empty() {
+			if !previous_blank {
+				out.push('\n');
+			}
+			previous_blank = true;
+			continue;
+		}
+		previous_blank = false;
+		out.push_str(line.trim_end());
+		out.push('\n');
+	}
+	out
+}
+
+pub fn push_line(out: &mut String, line: &str) {
+	out.push_str(line);
+	out.push('\n');
+}
+
+/// Whether `text` has any non-whitespace line.
+#[must_use]
+pub fn has_content(text: &str) -> bool {
+	text.lines().any(|line| !line.trim().is_empty())
+}
+
+/// Join lines with `\n` and terminate with a trailing newline; empty input
+/// stays empty rather than becoming a lone `\n`.
+#[must_use]
+pub fn join_lines<S: std::borrow::Borrow<str>>(lines: &[S]) -> String {
+	if lines.is_empty() {
+		return String::new();
+	}
+	let mut out = lines.join("\n");
+	out.push('\n');
+	out
+}
+
 /// Compact a long plain listing to head/tail form.
 #[must_use]
 pub fn compact_listing(input: &str, max_lines: usize) -> String {
