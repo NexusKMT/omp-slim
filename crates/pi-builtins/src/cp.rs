@@ -1522,7 +1522,17 @@ fn copy_source(
 				host.resolve(&x),
 				&CanonicalizeOptions::new(MissingHandling::Normal, ResolveMode::Physical),
 			) {
-				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context, None)?;
+				copy_attributes(
+					host,
+					&src,
+					&y,
+					&options.attributes,
+					false,
+					true,
+					options.set_selinux_context,
+					None,
+					DestFacts::default(),
+				)?;
 			}
 		}
 	}
@@ -1647,6 +1657,7 @@ fn preserve_via(
 
 /// Copies extended attributes (xattrs) from `source` to `dest`, making a
 /// read-only `dest` temporarily user-writable so the attributes can be set.
+/// A source without any leaves `dest` untouched.
 fn copy_extended_attrs(
 	filesystem: &BlockingFs,
 	source: &Path,
@@ -1654,6 +1665,15 @@ fn copy_extended_attrs(
 	follow_source: bool,
 	skip_selinux: bool,
 ) -> io::Result<()> {
+	let mut names = filesystem.list_xattr(source, follow_source)?;
+	// With -Z the destination gets the default context instead.
+	if skip_selinux {
+		names.retain(|name| name != "security.selinux");
+	}
+	if names.is_empty() {
+		return Ok(());
+	}
+
 	let metadata = filesystem.symlink_metadata(dest)?;
 
 	let mut permissions = metadata.permissions();
@@ -1663,18 +1683,12 @@ fn copy_extended_attrs(
 		filesystem.set_permissions(dest, permissions)?;
 	}
 
-	let copied = (|| -> io::Result<()> {
-		for name in filesystem.list_xattr(source, follow_source)? {
-			// With -Z the destination gets the default context instead.
-			if skip_selinux && name == "security.selinux" {
-				continue;
-			}
-			if let Some(value) = filesystem.get_xattr(source, &name, follow_source)? {
-				filesystem.set_xattr(dest, &name, &value, false)?;
-			}
+	let copied = names.iter().try_for_each(|name| {
+		match filesystem.get_xattr(source, name, follow_source)? {
+			Some(value) => filesystem.set_xattr(dest, name, &value, false),
+			None => Ok(()),
 		}
-		Ok(())
-	})();
+	});
 
 	if was_readonly {
 		let mut permissions = filesystem.symlink_metadata(dest)?.permissions();
@@ -1688,7 +1702,8 @@ fn copy_extended_attrs(
 /// Copy the specified attributes from one path to another. `follow_source`
 /// reads the attributes of the file a symlinked `source` points to;
 /// `source_metadata`, when the caller already holds it, must have been read
-/// the same way.
+/// the same way. `dest_facts` is what the caller knows of `dest`: no need to
+/// look again, or to change what already matches.
 #[allow(clippy::too_many_arguments, reason = "mirrors the call sites' copy state")]
 fn copy_attributes(
 	host: &mut Host,
@@ -1699,6 +1714,7 @@ fn copy_attributes(
 	follow_source: bool,
 	skip_selinux_xattr: bool,
 	source_metadata: Option<&Metadata>,
+	dest_facts: DestFacts,
 ) -> CopyResult<()> {
 	// Plain `cp`/`cp -r` preserves nothing: skip the stats below. A freshly
 	// created directory always gets its mode set, one way or the other.
@@ -1724,7 +1740,16 @@ fn copy_attributes(
 			&fetched
 		},
 	};
-	let dest_is_symlink = filesystem.is_symlink(&dest_fs);
+	let dest_is_symlink = dest_facts
+		.symlink
+		.unwrap_or_else(|| filesystem.is_symlink(&dest_fs));
+	// As in GNU, an owner or mode `dest` already has is not set again.
+	let source_owner = source_metadata.uid().zip(source_metadata.gid());
+	let chowns = matches!(attributes.ownership, Preserve::Yes { .. })
+		&& source_owner.is_some()
+		&& dest_facts.owner != source_owner;
+	let mode_in_place =
+		!chowns && dest_facts.mode == Some(source_metadata.permissions().mode() & 0o7777);
 
 	let mode_explicitly_disabled = matches!(attributes.mode, Preserve::No { explicit: true });
 
@@ -1739,7 +1764,7 @@ fn copy_attributes(
 	// Ownership must be changed first to avoid interfering with mode change.
 	handle_preserve(host, attributes.ownership, || {
 		// A provider without owners has nothing to carry over.
-		let (Some(uid), Some(gid)) = (source_metadata.uid(), source_metadata.gid()) else {
+		let Some((uid, gid)) = source_owner.filter(|_| chowns) else {
 			return Ok(());
 		};
 		// GNU cp doesn't report a failure to set the ownership, and falls back
@@ -1753,7 +1778,7 @@ fn copy_attributes(
 	handle_preserve(host, mode, || {
 		// chmod cannot change a symbolic link, and every link has the same
 		// permissions anyway.
-		if !dest_is_symlink {
+		if !dest_is_symlink && !mode_in_place {
 			set_mode(&filesystem, &dest_fs, dest, source_metadata.permissions())?;
 		}
 		Ok(())
@@ -2182,6 +2207,8 @@ fn handle_copy_mode(
 	dest: &Path,
 	options: &Options,
 	source_metadata: &Metadata,
+	// The lstat of `dest` just before the copy; `None` when there is none.
+	dest_metadata: Option<&Metadata>,
 	source_in_command_line: bool,
 	backed_up: bool,
 ) -> CopyResult<DestFate> {
@@ -2213,7 +2240,7 @@ fn handle_copy_mode(
 			})?;
 		},
 		CopyMode::Copy | CopyMode::Update => {
-			return copy_helper(host, state, source, dest, options, source_metadata);
+			return copy_helper(host, state, source, dest, options, source_metadata, dest_metadata);
 		},
 		CopyMode::SymLink => {
 			if !source.is_absolute()
@@ -2253,6 +2280,21 @@ enum DestFate {
 	/// Removed and created anew (`-f`, special files); the destination takes
 	/// the source's permissions.
 	Recreated,
+	/// Created by the copy where there was none, with `mode` (permission
+	/// bits) in place, and owned by `owner` (uid, gid) when the copy looked:
+	/// only ownership preservation needs it.
+	Created { mode: u32, owner: Option<(u32, u32)> },
+}
+
+/// What a caller knows of a destination without looking at it again.
+#[derive(Debug, Clone, Copy, Default)]
+struct DestFacts {
+	/// Whether it is a symlink; `None` looks.
+	symlink: Option<bool>,
+	/// Its permission bits, when this copy created it.
+	mode:    Option<u32>,
+	/// Its owner and group, when this copy created it and looked.
+	owner:   Option<(u32, u32)>,
 }
 
 /// Permissions for the destination: an existing destination keeps its own;
@@ -2478,21 +2520,23 @@ fn copy_file(
 		return Ok(());
 	}
 
-	// A copied symlink replaces the destination, which GNU removes before
-	// reporting the copy.
-	if source_metadata.is_symlink()
-		&& matches!(options.copy_mode, CopyMode::Copy | CopyMode::Update)
-		&& (filesystem.is_symlink(&dest_fs) || filesystem.is_file(&dest_fs))
-	{
-		delete_path(host, state, dest, options)?;
-		dest_replaced = true;
-	}
-
-	let dest_metadata = if dest_replaced {
+	let mut dest_metadata = if dest_replaced {
 		filesystem.symlink_metadata(&dest_fs).ok()
 	} else {
 		initial_dest_metadata
 	};
+
+	// A copied symlink replaces the destination, which GNU removes before
+	// reporting the copy.
+	if source_metadata.is_symlink()
+		&& matches!(options.copy_mode, CopyMode::Copy | CopyMode::Update)
+		&& dest_metadata
+			.as_ref()
+			.is_some_and(|metadata| metadata.is_symlink() || metadata.is_file())
+	{
+		delete_path(host, state, dest, options)?;
+		dest_metadata = None;
+	}
 
 	let source_is_stream = is_stream(&source_metadata);
 
@@ -2508,14 +2552,23 @@ fn copy_file(
 		dest,
 		options,
 		&source_metadata,
+		dest_metadata.as_ref(),
 		source_in_command_line,
 		backup.is_some(),
 	)?;
 
+	// A file this copy created has a known mode and maybe owner.
+	let (mut created_mode, owner) = match fate {
+		DestFate::Created { mode, owner } => (Some(mode), owner),
+		DestFate::Kept | DestFate::Recreated => (None, None),
+	};
+
 	// Links share their target's permissions; only a copy gets its own.
 	let copied_data = !source_metadata.is_symlink()
 		&& !matches!(options.copy_mode, CopyMode::Link | CopyMode::SymLink);
-	if !dest_is_symlink && copied_data {
+	// A preserved mode is set by `copy_attributes` below.
+	let mode_set_later = matches!(options.attributes.mode, Preserve::Yes { .. }) && !source_is_stream;
+	if !dest_is_symlink && copied_data && !mode_set_later {
 		let kept = dest_metadata
 			.as_ref()
 			.filter(|_| fate == DestFate::Kept);
@@ -2526,8 +2579,27 @@ fn copy_file(
 		//
 		// FWIW, the OS will throw an error later, on the write op, if
 		// the user does not have permission to write to the file.
-		let _ = filesystem.set_permissions(&dest_fs, dest_permissions);
+		if created_mode != Some(dest_permissions.mode()) {
+			let _ = filesystem.set_permissions(&dest_fs, dest_permissions);
+			created_mode = None;
+		}
 	}
+
+	// What the copy left at `dest`: a recreated symlink, or a file wherever no
+	// symlink was written through.
+	let dest_facts = DestFacts {
+		symlink: match options.copy_mode {
+			CopyMode::Copy | CopyMode::Update if source_metadata.is_symlink() => Some(true),
+			CopyMode::Copy | CopyMode::Update
+				if !dest_metadata.as_ref().is_some_and(Metadata::is_symlink) =>
+			{
+				Some(false)
+			},
+			_ => None,
+		},
+		mode: created_mode,
+		owner,
+	};
 
 	// Some stream files may not exist after we have copied them, like
 	// anonymous pipes; there are no attributes left to copy.
@@ -2541,6 +2613,7 @@ fn copy_file(
 			dereference,
 			options.set_selinux_context,
 			Some(&source_metadata),
+			dest_facts,
 		)?;
 	}
 
@@ -2590,6 +2663,7 @@ fn copy_helper(
 	dest: &Path,
 	options: &Options,
 	source_metadata: &Metadata,
+	dest_metadata: Option<&Metadata>,
 ) -> CopyResult<DestFate> {
 	let filesystem = host.fs().clone();
 	let dest_fs = host.resolve(dest);
@@ -2633,7 +2707,7 @@ fn copy_helper(
 		copy_link(host, state, source, dest, options, source_metadata)?;
 		return Ok(DestFate::Kept);
 	}
-	let (copy_debug, fate) = copy_data(host, state, source, dest, options, source_metadata)?;
+	let (copy_debug, fate) = copy_data(host, state, source, dest, options, source_metadata, dest_metadata)?;
 	if !options.attributes_only && options.debug {
 		state.say(host, copy_debug);
 	}
@@ -2712,6 +2786,7 @@ fn copy_link(
 		false,
 		options.set_selinux_context,
 		Some(source_metadata),
+		DestFacts { symlink: Some(true), ..DestFacts::default() },
 	)
 }
 
@@ -2763,7 +2838,8 @@ fn check_streamed_modes(options: &Options, source: &Path, dest: &Path) -> CopyRe
 	Ok(())
 }
 
-/// Copies the data of the regular file (or stream) `source` to `dest`.
+/// Copies the data of the regular file (or stream) `source` to `dest`, whose
+/// lstat just before the copy is `dest_metadata` (`None`: absent).
 ///
 /// Opens the source, then creates or truncates the destination, reporting
 /// either failure as GNU does. Two native host files take the platform's
@@ -2776,6 +2852,7 @@ fn copy_data(
 	dest: &Path,
 	options: &Options,
 	source_metadata: &Metadata,
+	dest_metadata: Option<&Metadata>,
 ) -> CopyResult<(CopyDebug, DestFate)> {
 	let filesystem = host.fs().clone();
 	let source_fs = host.resolve(source);
@@ -2842,6 +2919,11 @@ fn copy_data(
 	let cannot_create =
 		|e| CpError::IoErrContext(e, format!("cannot create regular file {}", dest.quote()));
 	let (dest_file, fate) = match filesystem.open_with(&dest_fs, &dest_options) {
+		// A host file this open created has exactly its creation mode less the
+		// umask (see `Fs::with_creation_mask`).
+		Ok(file) if dest_metadata.is_none() && native => {
+			(file, DestFate::Created { mode: create_mode & !host.umask(), owner: None })
+		},
 		Ok(file) => (file, DestFate::Kept),
 		// `-f`: remove a destination that cannot be opened, and try again.
 		Err(_) if options.unlink_after_failed_open() && filesystem.symlink_metadata(&dest_fs).is_ok() => {
@@ -2898,16 +2980,24 @@ fn copy_data(
 		CopyDebug { offload: OffloadReflinkDebug::Avoided, ..CopyDebug::STREAMED }
 	} else {
 		#[cfg(any(target_os = "linux", target_os = "android"))]
-		let fast = match (native, source_file.native(), dest_file.native()) {
-			(true, Some(source_native), Some(dest_native)) => {
-				let dest_is_fifo = dest_native
-					.metadata()
-					.is_ok_and(|metadata| std::os::unix::fs::FileTypeExt::is_fifo(&metadata.file_type()));
+		let fast = match (native, source_file.native(), dest_file.native(), source_metadata.native()) {
+			(true, Some(source_native), Some(dest_native), Some(source_stat)) => {
+				// Only a FIFO the open found, possibly through a symlink, is one.
+				let dest_is_fifo = match dest_metadata {
+					_ if fate != DestFate::Kept => false,
+					Some(metadata) if metadata.is_symlink() => dest_native
+						.metadata()
+						.is_ok_and(|metadata| std::os::unix::fs::FileTypeExt::is_fifo(&metadata.file_type())),
+					Some(metadata) => metadata.file_type().is_fifo(),
+					None => false,
+				};
 				let copy_debug = linux::copy(
 					source_native,
 					dest_native,
+					source_stat,
 					dest_is_fifo,
 					options.sparse_mode,
+					options.debug && !options.attributes_only,
 					source,
 					dest,
 				)?;
@@ -2927,6 +3017,18 @@ fn copy_data(
 		}
 	};
 
+	// Preserving ownership changes it only where it differs; the open handle
+	// tells a created file's owner cheaper than a chown that changes nothing.
+	let fate = match fate {
+		DestFate::Created { mode, .. } if matches!(options.attributes.ownership, Preserve::Yes { .. }) => {
+			let owner = dest_file
+				.metadata()
+				.ok()
+				.and_then(|metadata| metadata.uid().zip(metadata.gid()));
+			DestFate::Created { mode, owner }
+		},
+		fate => fate,
+	};
 	drop(source_file);
 	dest_file
 		.close()
@@ -3138,7 +3240,17 @@ fn copy_directory(
 				host.resolve(&x),
 				&CanonicalizeOptions::new(MissingHandling::Normal, ResolveMode::Physical),
 			) {
-				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context, None)?;
+				copy_attributes(
+					host,
+					&src,
+					&y,
+					&options.attributes,
+					false,
+					true,
+					options.set_selinux_context,
+					None,
+					DestFacts::default(),
+				)?;
 			}
 		}
 	}
@@ -3252,6 +3364,7 @@ fn copy_entry(
 		true,
 		options.set_selinux_context,
 		(!entry_is_symlink).then_some(&metadata),
+		DestFacts { symlink: created.then_some(false), ..DestFacts::default() },
 	)
 }
 
@@ -3296,22 +3409,24 @@ fn build_dir(
 }
 
 /// Native Linux data copies after a declined or failed clone:
-/// `copy_file_range` (through `io::copy`) and `SEEK_DATA`/`SEEK_HOLE` sparse
-/// copies on already opened descriptors.
+/// `copy_file_range`, `sendfile` and `SEEK_DATA`/`SEEK_HOLE` sparse copies on
+/// already opened descriptors.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux {
 	use std::{
-		fs::File,
-		io::{self, Read as _, Seek as _, SeekFrom},
+		fs::{File, Metadata},
+		io::{self, Read as _, Seek as _, SeekFrom, Write as _},
 		os::{
 			fd::AsRawFd as _,
 			unix::fs::{FileExt as _, MetadataExt as _},
 		},
 		path::Path,
+		ptr,
 	};
 
 	use super::{
-		CopyDebug, CopyResult, CpError, OffloadReflinkDebug, SparseDebug, SparseMode, context_for,
+		COPY_BUFFER, CopyDebug, CopyResult, CpError, OffloadReflinkDebug, SparseDebug, SparseMode,
+		context_for,
 	};
 
 	/// Debug report of a copy whose source could not be inspected.
@@ -3335,19 +3450,76 @@ mod linux {
 		SparseCopyWithoutHole,
 	}
 
-	/// Copies all of `source` into `dest` from their current offsets;
-	/// `io::copy` uses `copy_file_range`/`sendfile` between files.
+	/// Copies all of `source` into `dest` from their current offsets, giving
+	/// each kernel copy up where `io::copy` does: `copy_file_range`, then
+	/// `sendfile` (another filesystem, a pipe, a `/proc` file that reads as
+	/// empty), then reads and writes. Unlike `io::copy`, it does not `fstat`
+	/// both files first.
 	fn fs_copy(source: &File, dest: &File) -> io::Result<()> {
-		io::copy(&mut &*source, &mut &*dest).map(drop)
+		let (source_fd, dest_fd) = (source.as_raw_fd(), dest.as_raw_fd());
+		let mut copied = false;
+		loop {
+			// SAFETY: copies between two live descriptors at their own offsets.
+			let result = unsafe {
+				libc::syscall(
+					libc::SYS_copy_file_range,
+					source_fd,
+					ptr::null_mut::<libc::loff_t>(),
+					dest_fd,
+					ptr::null_mut::<libc::loff_t>(),
+					1usize << 30,
+					0u32,
+				)
+			};
+			match result {
+				0 if copied => return Ok(()),
+				// Nothing copied: maybe a `/proc` file that reports no data.
+				0 => break,
+				1.. => copied = true,
+				_ => {
+					let error = io::Error::last_os_error();
+					match error.raw_os_error() {
+						Some(libc::EOVERFLOW) => break,
+						Some(
+							libc::ENOSYS | libc::EXDEV | libc::EINVAL | libc::EPERM | libc::EOPNOTSUPP | libc::EBADF,
+						) if !copied => break,
+						_ => return Err(error),
+					}
+				},
+			}
+		}
+		let mut sent = false;
+		loop {
+			// SAFETY: as above.
+			let result = unsafe { libc::sendfile(dest_fd, source_fd, ptr::null_mut(), 0x7fff_f000) };
+			match result {
+				0 => return Ok(()),
+				1.. => sent = true,
+				_ => {
+					let error = io::Error::last_os_error();
+					match error.raw_os_error() {
+						Some(libc::EOVERFLOW) => break,
+						Some(libc::ENOSYS | libc::EPERM | libc::EINVAL) if !sent => break,
+						_ => return Err(error),
+					}
+				},
+			}
+		}
+		let mut buffer = vec![0; COPY_BUFFER];
+		loop {
+			match (&*source).read(&mut buffer) {
+				Ok(0) => return Ok(()),
+				Ok(read) => (&*dest).write_all(&buffer[..read])?,
+				Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
+				Err(error) => return Err(error),
+			}
+		}
 	}
 
-	/// Checks whether a file contains any non null bytes i.e. any byte != 0x0
-	/// This function returns a tuple of (bool, u64, u64) signifying a tuple of
-	/// (whether a file has data, its size, no of blocks it has allocated in
-	/// disk). The file offset is left at the start.
-	fn check_for_data(source: &File) -> io::Result<(bool, u64, u64)> {
-		let metadata = source.metadata()?;
-
+	/// Whether `source`, described by `metadata`, holds any data: `(has data,
+	/// size, allocated blocks)`, blocks counted as none for an empty file. The
+	/// file offset is left at the start.
+	fn check_for_data(source: &File, metadata: &Metadata) -> io::Result<(bool, u64, u64)> {
 		let size = metadata.size();
 		let blocks = metadata.blocks();
 		// checks edge case of virtual files in /proc which have a size of zero
@@ -3368,14 +3540,6 @@ mod linux {
 			_ if result >= 0 => Ok((true, size, blocks)), // Data found
 			_ => Err(error),
 		}
-	}
-
-	/// Checks whether a file is sparse i.e. it contains holes, uses the crude
-	/// heuristic blocks < size / 512
-	/// Reference:`<https://doc.rust-lang.org/std/os/unix/fs/trait.MetadataExt.html#tymethod.blocks>`
-	fn check_sparse_detection(source: &File) -> io::Result<bool> {
-		let metadata = source.metadata()?;
-		Ok(metadata.blocks() < metadata.size() / 512)
 	}
 
 	/// Converts a byte offset for `lseek`/`pread`.
@@ -3446,20 +3610,23 @@ mod linux {
 		Ok(())
 	}
 
-	/// Copies the native file `source` into the freshly truncated `dest`,
-	/// making holes per `sparse_mode`. The report's `reflink` is `No`; the
-	/// caller accounts for its own clone attempt.
+	/// Copies the native file `source`, whose stat is `metadata`, into the
+	/// freshly truncated `dest`, making holes per `sparse_mode`. The report's
+	/// `reflink` is `No`; the caller accounts for its own clone attempt.
+	/// Without `report`, the data is only looked for where the copy needs it.
 	pub(super) fn copy(
 		source: &File,
 		dest: &File,
+		metadata: &Metadata,
 		dest_is_fifo: bool,
 		sparse_mode: SparseMode,
+		report: bool,
 		source_path: &Path,
 		dest_path: &Path,
 	) -> CopyResult<CopyDebug> {
 		let (copy_debug, result) = match sparse_mode {
 			SparseMode::Always => {
-				let (debug, method) = detect_sparse_always(source, dest_is_fifo).unwrap_or((
+				let (debug, method) = detect_sparse_always(source, metadata, dest_is_fifo).unwrap_or((
 					CopyDebug { sparse_detection: SparseDebug::Zeros, ..UNDETECTED },
 					CopyMethod::Default,
 				));
@@ -3470,10 +3637,15 @@ mod linux {
 				(debug, result)
 			},
 			SparseMode::Never => {
-				(detect_sparse_never(source).unwrap_or(UNDETECTED), fs_copy(source, dest))
+				let debug = if report {
+					detect_sparse_never(source, metadata).unwrap_or(UNDETECTED)
+				} else {
+					UNDETECTED
+				};
+				(debug, fs_copy(source, dest))
 			},
 			SparseMode::Auto => {
-				let (debug, method) = detect_sparse_auto(source, dest_is_fifo)
+				let (debug, method) = detect_sparse_auto(source, metadata, dest_is_fifo, report)
 					.unwrap_or((UNDETECTED, CopyMethod::Default));
 				let result = match method {
 					CopyMethod::SparseCopyWithoutHole => sparse_copy_without_hole(source, dest),
@@ -3487,12 +3659,11 @@ mod linux {
 	}
 
 	/// Debug report for `--sparse=never`.
-	fn detect_sparse_never(source: &File) -> io::Result<CopyDebug> {
+	fn detect_sparse_never(source: &File, metadata: &Metadata) -> io::Result<CopyDebug> {
 		let mut copy_debug = UNDETECTED;
-		let (data_flag, size, _blocks) = check_for_data(source)?;
-		let sparse_flag = check_sparse_detection(source)?;
+		let (data_flag, size, _blocks) = check_for_data(source, metadata)?;
 
-		if sparse_flag {
+		if metadata.blocks() < metadata.size() / 512 {
 			copy_debug.sparse_detection = SparseDebug::SeekHole;
 		}
 
@@ -3505,13 +3676,19 @@ mod linux {
 	/// Debug report and copy method for `--sparse=auto`.
 	fn detect_sparse_auto(
 		source: &File,
+		metadata: &Metadata,
 		dest_is_fifo: bool,
+		report: bool,
 	) -> io::Result<(CopyDebug, CopyMethod)> {
-		let mut copy_debug = UNDETECTED;
+		let sparse_flag = metadata.blocks() < metadata.size() / 512;
+		// Only a sparse file is copied by where its data is.
+		if !sparse_flag && !report {
+			return Ok((UNDETECTED, CopyMethod::Default));
+		}
 
+		let mut copy_debug = UNDETECTED;
 		let mut copy_method = CopyMethod::Default;
-		let (data_flag, size, blocks) = check_for_data(source)?;
-		let sparse_flag = check_sparse_detection(source)?;
+		let (data_flag, size, blocks) = check_for_data(source, metadata)?;
 
 		if (data_flag && size != 0) || (size > 0 && size < 512) {
 			copy_debug.offload = OffloadReflinkDebug::Yes;
@@ -3543,13 +3720,14 @@ mod linux {
 	/// Debug report and copy method for `--sparse=always`.
 	fn detect_sparse_always(
 		source: &File,
+		metadata: &Metadata,
 		dest_is_fifo: bool,
 	) -> io::Result<(CopyDebug, CopyMethod)> {
 		let mut copy_debug = CopyDebug { sparse_detection: SparseDebug::Zeros, ..UNDETECTED };
 		let mut copy_method = CopyMethod::SparseCopy;
 
-		let (data_flag, size, blocks) = check_for_data(source)?;
-		let sparse_flag = check_sparse_detection(source)?;
+		let (data_flag, size, blocks) = check_for_data(source, metadata)?;
+		let sparse_flag = metadata.blocks() < metadata.size() / 512;
 
 		if data_flag || size < 512 {
 			copy_debug.offload = OffloadReflinkDebug::Avoided;
