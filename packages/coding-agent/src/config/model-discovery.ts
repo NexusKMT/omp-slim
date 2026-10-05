@@ -902,6 +902,7 @@ export async function discoverOpenAIModelsList(
 						id?: string;
 						max_model_len?: unknown;
 						context_length?: unknown;
+						max_tokens?: unknown;
 						limits?: unknown;
 						input?: unknown;
 						input_modalities?: unknown;
@@ -953,8 +954,17 @@ export async function discoverOpenAIModelsList(
 			Number.isSafeInteger(maxInputTokens + maxOutputTokens)
 				? maxInputTokens + maxOutputTokens
 				: undefined;
+		// Gateways advertise the per-request output cap under several names.
+		// `limits.max_output_tokens` names the output limit explicitly and wins;
+		// the flat `max_tokens` is the generic spelling already read by the
+		// llama.cpp / lm-studio extractor (`extractLlamaCppMaxTokens`), so accept
+		// it too rather than falling back to the default while the provider
+		// publishes one (#13062). Reference and discovery default stay as the
+		// fallback for silent endpoints.
+		const advertisedMaxTokens = toPositiveNumberOrUndefined(item.max_tokens);
+		const candidateMaxTokens = maxOutputTokens ?? advertisedMaxTokens;
 		const reportedMaxTokens =
-			maxOutputTokens !== undefined && Number.isSafeInteger(maxOutputTokens) ? maxOutputTokens : undefined;
+			candidateMaxTokens !== undefined && Number.isSafeInteger(candidateMaxTokens) ? candidateMaxTokens : undefined;
 		const reportedContextWindow =
 			toPositiveNumberOrUndefined(item.max_model_len) ??
 			toPositiveNumberOrUndefined(item.context_length) ??

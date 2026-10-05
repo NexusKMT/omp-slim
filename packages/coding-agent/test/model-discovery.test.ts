@@ -2635,6 +2635,67 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(legacyReference?.maxTokens).toBe(128_000);
 	});
 
+	test("openai-models-list discovery honors a top-level max_tokens output limit", async () => {
+		// A gateway that publishes a plain `max_tokens` on its `/v1/models` rows
+		// had the value discarded, so the row fell back to the 32K discovery
+		// default even though the provider advertised a higher output ceiling
+		// (#13062). The llama.cpp / lm-studio extractors already read a top-level
+		// `max_tokens`; this path now agrees with them.
+		const ctx = {
+			fetch: (async (input: unknown) => {
+				if (String(input) !== "http://127.0.0.1:9993/v1/models") {
+					throw new Error(`Unexpected URL: ${String(input)}`);
+				}
+				return new Response(
+					JSON.stringify({
+						data: [
+							{ id: "openai-test/advertised-output-limit", max_tokens: 65_536 },
+							{
+								id: "openai-test/advertised-output-and-context",
+								context_length: 1_048_576,
+								max_tokens: 65_536,
+							},
+							// `limits.max_output_tokens` is the explicit output
+							// field, so it outranks the flat `max_tokens` the same
+							// way `max_output_length ?? entry.max_tokens` does in the
+							// Synthetic catalog mapper.
+							{
+								id: "openai-test/nested-output-wins",
+								max_tokens: 65_536,
+								limits: { max_input_tokens: 131_072, max_output_tokens: 32_768 },
+							},
+							// Advertised above the context window: the cap keeps
+							// following the provider value, bounded by the context.
+							{ id: "openai-test/output-over-context", context_length: 8_192, max_tokens: 65_536 },
+							{ id: "openai-test/no-limits" },
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}) satisfies FetchImpl,
+			getBearerApiKeyResolver: async () => undefined,
+		};
+		const models = await discoverOpenAIModelsList(
+			{
+				provider: "openai-test",
+				api: "openai-completions",
+				baseUrl: "http://127.0.0.1:9993/v1",
+				discovery: { type: "openai-models-list" },
+			},
+			ctx,
+		);
+		const maxTokensById: Record<string, number | null> = {};
+		for (const model of models) maxTokensById[model.id] = model.maxTokens;
+
+		expect(maxTokensById["openai-test/advertised-output-limit"]).toBe(65_536);
+		const withContext = models.find(model => model.id === "openai-test/advertised-output-and-context");
+		expect(withContext?.contextWindow).toBe(1_048_576);
+		expect(withContext?.maxTokens).toBe(65_536);
+		expect(maxTokensById["openai-test/nested-output-wins"]).toBe(32_768);
+		expect(maxTokensById["openai-test/output-over-context"]).toBe(8_192);
+		expect(maxTokensById["openai-test/no-limits"]).toBe(32_768);
+	});
+
 	test("openai-models-list discovery enriches thin /v1/models payloads from the bundled reference catalog", async () => {
 		writeRawModelsJson({
 			"openai-test": {
