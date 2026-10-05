@@ -3993,7 +3993,7 @@ impl Utility for Ls {
 			.matches
 			.get_many::<OsString>(options::PATHS)
 			.map_or_else(|| vec![Path::new(".")], |v| v.map(Path::new).collect());
-		match list(locs, &config, host.stdout_clone()) {
+		match list(locs, &config, StreamWriter::new(host.stdout_clone(), host.stdout_is_regular_file())) {
 			Ok(()) => runtime.status.get(),
 			Err(err) => {
 				host.error(&err, 1);
@@ -4963,7 +4963,7 @@ struct ListState<'a> {
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Result<()> {
+pub fn list(locs: Vec<&Path>, config: &Config, out: StreamWriter) -> std::io::Result<()> {
 	let fs = config.runtime.fs();
 	let mut files = Vec::<PathData>::new();
 	let mut dirs = Vec::<PathData>::new();
@@ -4972,7 +4972,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 	let now = SystemTime::now();
 
 	let mut state = ListState {
-		out: StreamWriter::new(stdout),
+		out,
 		style_manager: config
 			.color
 			.as_ref()
