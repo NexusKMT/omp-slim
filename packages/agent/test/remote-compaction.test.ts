@@ -2258,11 +2258,10 @@ describe("compact() remote compaction failure handling", () => {
 	test.each([
 		{ provider: "openai", fallsBackToV1: true },
 		{ provider: "openai-codex", fallsBackToV1: false },
-	])("logs a V1 fallback only when V1 will run ($provider)", async ({ provider, fallsBackToV1 }) => {
+	])("claims a V1 fallback only when V1 runs ($provider)", async ({ provider, fallsBackToV1 }) => {
 		const warn = vi.spyOn(piUtils.logger, "warn");
 		const preparation = makePreparation();
 		preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
-		preparation.messagesToSummarize = [{ role: "user", content: "re-expanded history ".repeat(4_000), timestamp: 1 }];
 		const baseModel = makeOpenAiModel({ remoteCompaction: { enabled: true, v2StreamingEnabled: true } });
 		const model: Model =
 			provider === "openai-codex"
@@ -2273,22 +2272,23 @@ describe("compact() remote compaction failure handling", () => {
 						baseUrl: "https://chatgpt.example/backend-api",
 						preferWebsockets: false,
 						remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
-						contextWindow: 2_000,
 					}
-				: { ...baseModel, contextWindow: 2_000 };
-		const fetchMock = vi.fn<FetchImpl>(async () => {
-			throw new Error("native compaction must not reach the network");
-		});
+				: baseModel;
+		const requestedUrls: string[] = [];
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			requestedUrls.push(url);
+			return url.endsWith("/responses/compact")
+				? Response.json({ output: [{ type: "compaction", encrypted_content: "enc-v1" }] })
+				: new Response("V2 unavailable", { status: 400, statusText: "Bad Request" });
+		};
 
 		await compact(preparation, model, "test-key", undefined, undefined, { fetch: fetchMock }).catch(() => undefined);
 
-		const messages = warn.mock.calls.map(([message]) => message);
-		expect(messages).toContain(
-			fallsBackToV1
-				? "OpenAI V2 remote compaction failed, falling back to V1 remote compaction"
-				: "OpenAI V2 remote compaction failed",
-		);
-		expect(messages.some(message => message.includes("falling back to V1"))).toBe(fallsBackToV1);
+		const ranV1 = requestedUrls.some(url => url.endsWith("/responses/compact"));
+		const claimedV1 = warn.mock.calls.some(([message]) => message.includes("falling back to V1"));
+		expect(ranV1).toBe(fallsBackToV1);
+		expect(claimedV1).toBe(ranV1);
 	});
 
 	test("streams V2 compaction before V1 when both settings and model opt in", async () => {
