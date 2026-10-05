@@ -1953,12 +1953,23 @@ export async function compact(
 			...allMessages.slice(0, safeCut),
 		];
 		// Earlier file metadata replays before the first message created after
-		// its summary. When that point lies inside the new retained tail, the
-		// request stops short of it and the new summary must keep replaying it.
-		const retainedFrom = allMessages[safeCut]?.timestamp;
+		// its summary. Metadata due inside the new retained tail stays out of the
+		// request, and the new summary keeps replaying it. So does metadata due
+		// right at the cut when the first kept message is a user-side turn: live
+		// requests sent it merged into that turn, and ending the request with it
+		// would merge the summarized range into the kept turn instead, which
+		// invalidates the kept thinking.
+		const firstRetained = allMessages[safeCut];
+		const filesDueBefore =
+			firstRetained === undefined
+				? undefined
+				: firstRetained.role === "assistant"
+					? firstRetained.timestamp
+					: (allMessages.slice(0, safeCut).findLast(message => message.role !== "toolResult")?.timestamp ??
+						Number.NEGATIVE_INFINITY);
 		const previousPayload = previousSummaryMessage?.providerPayload;
 		if (
-			retainedFrom !== undefined &&
+			filesDueBefore !== undefined &&
 			previousSummaryMessage !== undefined &&
 			previousPayload?.type === "anthropicCompaction" &&
 			previousPayload.exactTail
@@ -1968,7 +1979,7 @@ export async function compact(
 				...(previousPayload.filesText
 					? [{ text: previousPayload.filesText, after: previousSummaryMessage.timestamp }]
 					: []),
-			].filter(files => files.after >= retainedFrom);
+			].filter(files => files.after >= filesDueBefore);
 			if (carried.length > 0) nativeRetainedFiles = carried;
 		}
 		try {
@@ -1987,7 +1998,7 @@ export async function compact(
 				apiKey,
 				{
 					context,
-					retainedFrom,
+					filesDueBefore,
 					instructions: buildAnthropicCompactionInstructions(
 						summaryOptions.promptOverride ?? SUMMARIZATION_PROMPT,
 						customInstructions,

@@ -187,8 +187,8 @@ export interface AnthropicNativeCompactionRequest {
 	/** The summarized prefix as the live turn would send it. */
 	context: Context;
 	instructions: string;
-	/** Timestamp of the first message kept after the summary, when any is. */
-	retainedFrom?: number;
+	/** Replayed file metadata due before this time ends the request (see `AnthropicCompactionRequest.filesDueBefore`). */
+	filesDueBefore?: number;
 	maxTokens: number;
 	reasoning?: Effort;
 }
@@ -245,7 +245,7 @@ export async function requestAnthropicNativeCompaction(
 			promptCacheKey: options.promptCacheKey,
 			providerSessionState: options.providerSessionState,
 			maxInFlightRequests: options.maxInFlightRequests,
-			anthropicCompaction: { instructions: request.instructions, retainedFrom: request.retainedFrom },
+			anthropicCompaction: { instructions: request.instructions, filesDueBefore: request.filesDueBefore },
 		},
 		{
 			telemetry: options.telemetry,

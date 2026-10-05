@@ -5523,11 +5523,11 @@ export function convertAnthropicMessages(
 		i = previous + 1;
 	}
 	if (opts?.compactionRequest) {
-		// Metadata whose replay point precedes the first retained message ends
-		// the summarized range; the rest lies inside the retained tail and is
-		// carried by the new summary instead. Legacy metadata still pending
-		// here belongs after the first retained turn, outside this request.
-		flushCompactionFiles(opts.compactionRequest.retainedFrom ?? Number.POSITIVE_INFINITY);
+		// Metadata due before `filesDueBefore` ends the summarized range; the
+		// rest replays with the retained tail and is carried by the new summary
+		// instead. Legacy metadata still pending here belongs after the first
+		// retained turn, outside this request.
+		flushCompactionFiles(opts.compactionRequest.filesDueBefore ?? Number.POSITIVE_INFINITY);
 		return params;
 	}
 	// A trailing compaction summary leaves its file metadata queued; emit it

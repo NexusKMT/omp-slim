@@ -416,8 +416,11 @@ export interface CodexCompactionRequestContext extends CodexCompactionMetadata {
 export interface AnthropicCompactionRequest {
 	/** Custom summarization prompt; replaces the API default entirely when set. */
 	instructions?: string;
-	/** Timestamp of the first message kept after the summary; earlier summaries' file metadata due after it stays out. */
-	retainedFrom?: number;
+	/**
+	 * Replayed summaries' file metadata due before this time (ms) ends the request;
+	 * later metadata replays with the retained tail, which the new summary carries.
+	 */
+	filesDueBefore?: number;
 }
 
 /** OpenAI's GPT-5.6+ explicit prompt-cache controls. */

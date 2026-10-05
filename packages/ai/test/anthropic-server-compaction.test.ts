@@ -517,19 +517,20 @@ describe("Anthropic compaction replay", () => {
 		it("ends a compaction request where the summarized range ends", () => {
 			const summary = summaryMessage({ signature: SIGNATURE, filesText: files }, "anthropic", 20);
 			const prefix: Context["messages"] = [summary, call, result(11), answer];
-			// The retained tail starts before the metadata's replay point: it
-			// stays out, and a final assistant turn gets no `Continue.`.
-			const insideTail = convertAnthropicMessages(prefix, model, false, {
+			// Metadata due at or after the cutoff replays with the retained tail
+			// (e.g. merged into a kept user turn): it stays out, and a final
+			// assistant turn gets no `Continue.`.
+			const keptWithTail = convertAnthropicMessages(prefix, model, false, {
 				replayCompaction: true,
-				compactionRequest: { retainedFrom: 13 },
+				compactionRequest: { filesDueBefore: 12 },
 			});
-			expect(roles(insideTail)).toEqual(["assistant", "user", "assistant"]);
-			// The retained tail starts after it: the metadata closes the range.
-			const beforeTail = convertAnthropicMessages(prefix, model, false, {
+			expect(roles(keptWithTail)).toEqual(["assistant", "user", "assistant"]);
+			// Metadata due before the cutoff closes the range.
+			const closesRange = convertAnthropicMessages(prefix, model, false, {
 				replayCompaction: true,
-				compactionRequest: { retainedFrom: 21 },
+				compactionRequest: { filesDueBefore: 22 },
 			});
-			expect(roles(beforeTail)).toEqual(["assistant", "user", "assistant", files]);
+			expect(roles(closesRange)).toEqual(["assistant", "user", "assistant", files]);
 		});
 
 		it("keeps the original layout for summaries persisted without exactTail", () => {
@@ -564,7 +565,7 @@ describe("Anthropic compaction replay", () => {
 			// retained tail starts at the first turn.
 			const request = convertAnthropicMessages([persisted], model, false, {
 				replayCompaction: true,
-				compactionRequest: { retainedFrom: 10 },
+				compactionRequest: { filesDueBefore: 10 },
 			});
 			expect(roles(request)).toEqual(["assistant"]);
 		});

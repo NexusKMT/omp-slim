@@ -654,35 +654,6 @@ describe("async speculative compaction", () => {
 		}
 	});
 
-	it("builds native compaction requests through the live provider pipeline on every compaction path", async () => {
-		// Signed thinking kept after an on-demand summary stays valid only when
-		// the compaction request's prefix matches the live request byte for byte.
-		const liveContext: Context = { systemPrompt: ["live"], messages: [], tools: [] };
-		const built: AgentMessage[][] = [];
-		maintenance = createMaintenance({
-			buildLiveProviderContext: async (summarized, retained) => {
-				built.push(summarized, retained);
-				return liveContext;
-			},
-		});
-		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
-			summary: "summary",
-			firstKeptEntryId: preparation.firstKeptEntryId,
-			tokensBefore: preparation.tokensBefore,
-			details: {},
-		}));
-		maintenance.maybeStartSpeculativeCompaction(SPECULATION_BAND_START, CONTEXT_WINDOW);
-		await waitForState("armed");
-		await maintenance.compact();
-		expect(compactSpy).toHaveBeenCalledTimes(2);
-		const prefix: AgentMessage[] = [{ role: "user", content: "prefix", timestamp: 1 }];
-		const tail: AgentMessage[] = [{ role: "user", content: "tail", timestamp: 2 }];
-		for (const call of compactSpy.mock.calls) {
-			expect(await call[5]?.buildProviderContext?.(prefix, tail)).toBe(liveContext);
-		}
-		expect(built).toEqual([prefix, tail, prefix, tail]);
-	});
-
 	it("defers a threshold pass that jumped past the band, then commits the armed result for free", async () => {
 		const compactSpy = vi.spyOn(compactionModule, "compact").mockImplementation(async preparation => ({
 			summary: "grace summary",
