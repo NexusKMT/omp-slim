@@ -1438,12 +1438,12 @@ export class WorkerCore {
 		const page = this.#requirePage();
 		const emulated = page.viewport();
 		if (emulated) return emulated;
-		return (await untilAborted(signal, () =>
+		return await untilAborted(signal, () =>
 			page.evaluate(() => {
 				const win = globalThis as unknown as { innerWidth: number; innerHeight: number; devicePixelRatio: number };
 				return { width: win.innerWidth, height: win.innerHeight, deviceScaleFactor: win.devicePixelRatio };
 			}),
-		)) as ReadyInfo["viewport"];
+		);
 	}
 
 	/** Apply an automatic dialog policy selected while opening the tab. */
