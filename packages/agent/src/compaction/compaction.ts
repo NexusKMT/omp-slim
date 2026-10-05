@@ -677,6 +677,13 @@ export interface SummaryOptions {
 	metadata?: Record<string, unknown>;
 	convertToLlm?: ConvertToLlm;
 	/**
+	 * Whether a message is a turn the user wrote. Remote Compaction V2 keeps these
+	 * next to the compaction item. Defaults to `role === "user"`; hosts whose
+	 * user-initiated turns also arrive as custom messages (e.g. skill invocations)
+	 * widen it.
+	 */
+	isUserAuthored?: (message: AgentMessage) => boolean;
+	/**
 	 * Optional telemetry handle. When provided, every LLM call emitted during
 	 * compaction is wrapped in an OTEL chat span tagged with
 	 * `omp.gen_ai.oneshot.kind` (`compaction_summary`, `compaction_short_summary`,
@@ -1612,6 +1619,7 @@ export async function compact(
 		initiatorOverride: options?.initiatorOverride,
 		metadata: options?.metadata,
 		convertToLlm: options?.convertToLlm,
+		isUserAuthored: options?.isUserAuthored,
 		telemetry: options?.telemetry,
 		// Honor /model thinking selection on every fan-out summarizer.
 		// Without this propagation, generateSummary / generateTurnPrefixSummary
@@ -1675,7 +1683,17 @@ export async function compact(
 			previousRemoteCompaction?.provider === model.provider
 				? previousRemoteCompaction.replacementHistory
 				: undefined;
-		const messages = (summaryOptions.convertToLlm ?? defaultConvertToLlm)(remoteMessages);
+		const convertToLlm = summaryOptions.convertToLlm ?? defaultConvertToLlm;
+		const messages = convertToLlm(remoteMessages);
+		// Replacement history keeps what the user wrote. Summaries, archive
+		// migrations, and custom/hook messages can serialize as user-role items
+		// too, so pick the user's own messages before serialization erases that,
+		// then serialize each one exactly as the request does.
+		const isUserAuthored = summaryOptions.isUserAuthored ?? ((message: AgentMessage) => message.role === "user");
+		const userMessages = convertToLlm(
+			[...messagesToSummarize, ...turnPrefixMessages, ...recentMessages].filter(isUserAuthored),
+		);
+		const retainedUserItems: unknown[] = [...(previousReplacementHistory ?? [])];
 		const remoteSystemPrompt = summaryOptions.remoteSystemPrompt ?? [SUMMARIZATION_SYSTEM_PROMPT];
 		let codexBody: OpenAICodexCompactionBody | undefined;
 		let remoteHistory: Array<Record<string, unknown>>;
@@ -1715,8 +1733,19 @@ export async function compact(
 			}
 			remoteHistory = stripOpenAIResponsesOutputOnlyStatusesForReplay(nativeInput);
 			codexBody.input = remoteHistory;
+			for (const message of userMessages) {
+				const userBody = await buildTransformedCodexRequestBody(
+					model,
+					{ messages: [message] },
+					{ responsesLite: model.useResponsesLite },
+				);
+				retainedUserItems.push(...(userBody.input ?? []));
+			}
 		} else {
 			remoteHistory = buildOpenAiResponsesCompactionInput(messages, model, previousReplacementHistory);
+			for (const message of userMessages) {
+				retainedUserItems.push(...buildOpenAiResponsesCompactionInput([message], model, undefined));
+			}
 		}
 		if (remoteHistory.length > 0) {
 			try {
@@ -1754,6 +1783,7 @@ export async function compact(
 					sessionId: summaryOptions.sessionId,
 					promptCacheKey: summaryOptions.promptCacheKey,
 					retainedMessageBudget: settings.v2RetainedMessageBudget,
+					retainedUserItems,
 				};
 				const request = codexBody
 					? buildCompactionV2RequestFromBody(model, { ...codexBody, input: trimmed.input }, requestOptions)
@@ -1781,11 +1811,17 @@ export async function compact(
 				// summarization" and keep compaction running on an aborted signal.
 				if (signal?.aborted) throw err;
 				nativeCompactionError = selectNativeCompactionError(nativeCompactionError, err);
-				logger.warn("OpenAI V2 remote compaction failed, falling back to V1 remote compaction", {
-					error: err instanceof Error ? err.message : String(err),
-					model: model.id,
-					provider: model.provider,
-				});
+				// Claim the V1 fallback only when the V1 block below will run.
+				logger.warn(
+					shouldUseOpenAiRemoteCompaction(model)
+						? "OpenAI V2 remote compaction failed, falling back to V1 remote compaction"
+						: "OpenAI V2 remote compaction failed",
+					{
+						error: err instanceof Error ? err.message : String(err),
+						model: model.id,
+						provider: model.provider,
+					},
+				);
 			}
 		}
 	}
