@@ -1877,24 +1877,25 @@ export class WorkerCore {
 					return content;
 				}),
 			click: selector =>
-				op(`tab.click(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					const label = `tab.click(${JSON.stringify(selector)})`;
-					const resolved = normalizeSelector(selector);
-					if (resolved.startsWith("text/") && parseAriaRefSelector(selector) === null) {
-						await clickQueryHandlerText(page, resolved, label, actionOpMs, sig);
-						return;
-					}
-					const handle =
-						parseAriaRefSelector(selector) !== null
-							? await this.#resolveAriaRef(selector)
-							: ((await untilAborted(sig, () => page.$(resolved))) as ElementHandle | null);
-					if (!handle) throw new ToolError(`${label} matched no visible element`);
-					try {
-						await clickElement(handle, label, sig);
-					} finally {
-						void handle.dispose().catch(() => undefined);
-					}
-				}),
+				op(
+					`tab.click(${JSON.stringify(selector)})`,
+					actionOpMs,
+					async sig => {
+						const label = `tab.click(${JSON.stringify(selector)})`;
+						const resolved = normalizeSelector(selector);
+						if (resolved.startsWith("text/") && parseAriaRefSelector(selector) === null) {
+							await clickQueryHandlerText(page, resolved, label, actionOpMs, sig);
+							return;
+						}
+						const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
+						try {
+							await clickElement(handle, label, sig);
+						} finally {
+							void handle.dispose().catch(() => undefined);
+						}
+					},
+					{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
+				),
 			type: (selector, text) =>
 				op(
 					`tab.type(${JSON.stringify(selector)})`,
