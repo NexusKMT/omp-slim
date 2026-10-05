@@ -677,6 +677,13 @@ export interface SummaryOptions {
 	metadata?: Record<string, unknown>;
 	convertToLlm?: ConvertToLlm;
 	/**
+	 * Whether a message is a turn the user wrote. Remote Compaction V2 keeps these
+	 * next to the compaction item. Defaults to `role === "user"`; hosts whose
+	 * user-initiated turns also arrive as custom messages (e.g. skill invocations)
+	 * widen it.
+	 */
+	isUserAuthored?: (message: AgentMessage) => boolean;
+	/**
 	 * Optional telemetry handle. When provided, every LLM call emitted during
 	 * compaction is wrapped in an OTEL chat span tagged with
 	 * `omp.gen_ai.oneshot.kind` (`compaction_summary`, `compaction_short_summary`,
@@ -1612,6 +1619,7 @@ export async function compact(
 		initiatorOverride: options?.initiatorOverride,
 		metadata: options?.metadata,
 		convertToLlm: options?.convertToLlm,
+		isUserAuthored: options?.isUserAuthored,
 		telemetry: options?.telemetry,
 		// Honor /model thinking selection on every fan-out summarizer.
 		// Without this propagation, generateSummary / generateTurnPrefixSummary
@@ -1681,8 +1689,9 @@ export async function compact(
 		// migrations, and custom/hook messages can serialize as user-role items
 		// too, so pick the user's own messages before serialization erases that,
 		// then serialize each one exactly as the request does.
+		const isUserAuthored = summaryOptions.isUserAuthored ?? ((message: AgentMessage) => message.role === "user");
 		const userMessages = convertToLlm(
-			[...messagesToSummarize, ...turnPrefixMessages, ...recentMessages].filter(message => message.role === "user"),
+			[...messagesToSummarize, ...turnPrefixMessages, ...recentMessages].filter(isUserAuthored),
 		);
 		const retainedUserItems: unknown[] = [...(previousReplacementHistory ?? [])];
 		const remoteSystemPrompt = summaryOptions.remoteSystemPrompt ?? [SUMMARIZATION_SYSTEM_PROMPT];

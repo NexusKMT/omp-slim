@@ -14,6 +14,7 @@ import {
 	buildCompactionV2Request,
 	buildOpenAiNativeHistory,
 	CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE,
+	countResponsesHistoryTokens,
 	getCompactionV2PreserveData,
 	requestCompactionV2Streaming,
 	requestOpenAiRemoteCompaction,
@@ -837,6 +838,20 @@ describe("remote compaction input forwarding", () => {
 		expect(result.input).toEqual(input);
 		expect(result.estimatedTokensAfter).toBeGreaterThan(12_000);
 		expect(result.estimatedTokensAfter).toBeLessThanOrEqual(15_000);
+	});
+
+	test("counts retained replacement-history images by estimate instead of base64 size", () => {
+		const image = { type: "input_image", detail: "auto", image_url: `data:image/png;base64,${"a".repeat(320_000)}` };
+		const withImage = [{ role: "user", content: [{ type: "input_text", text: "see screenshot" }, image] }];
+		const withoutImage = [{ role: "user", content: [{ type: "input_text", text: "see screenshot" }] }];
+		const tokenizer = new Tokenizer();
+
+		const imageTokens =
+			countResponsesHistoryTokens(withImage, tokenizer) - countResponsesHistoryTokens(withoutImage, tokenizer);
+
+		// The serialized base64 alone tokenizes to ~80K; the flat estimate stays within one vision budget.
+		expect(imageTokens).toBeGreaterThan(0);
+		expect(imageTokens).toBeLessThan(20_000);
 	});
 
 	test("excludes opaque encrypted reasoning and compaction state from the fit estimate (#13611)", () => {
@@ -2468,6 +2483,43 @@ describe("compact() remote compaction failure handling", () => {
 			expect(result.preserveData?.openaiRemoteCompaction).toMatchObject({ retainedImageCount: 1 });
 		},
 	);
+
+	test("retains custom turns the host marks as user-written in V2 replacement history", async () => {
+		const compactionItem = { type: "compaction", encrypted_content: "enc_v2" };
+		const preparation = makePreparation();
+		preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
+		preparation.messagesToSummarize = [
+			{ role: "user", content: "older plain request", timestamp: 1 },
+			createCustomMessage(
+				"skill-prompt",
+				"run the release skill",
+				true,
+				undefined,
+				new Date(2).toISOString(),
+				"user",
+			),
+			createCustomMessage("notice", "attached file note", false, undefined, new Date(3).toISOString(), "user"),
+		];
+		const model = makeOpenAiModel({ remoteCompaction: { enabled: true, v2StreamingEnabled: true } });
+		const fetchMock: FetchImpl = async () =>
+			sseResponse([
+				{ type: "response.output_item.done", output_index: 0, item: compactionItem },
+				{ type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 } } },
+			]);
+
+		const result = await compact(preparation, model, "test-key", undefined, undefined, {
+			fetch: fetchMock,
+			isUserAuthored: message =>
+				message.role === "user" || (message.role === "custom" && message.customType === "skill-prompt"),
+		});
+
+		const retained = JSON.stringify(
+			getCompactionV2PreserveData(result.preserveData)?.replacementHistory.slice(0, -1),
+		);
+		expect(retained).toContain("older plain request");
+		expect(retained).toContain("run the release skill");
+		expect(retained).not.toContain("attached file note");
+	});
 
 	test("rewrites an oversized trailing tool output before V2 streaming compaction", async () => {
 		const preparation = makePreparation();
