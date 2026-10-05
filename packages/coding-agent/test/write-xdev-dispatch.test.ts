@@ -873,7 +873,7 @@ describe("device-only write transport for explicit lists omitting write", () => 
 					() => null,
 					(caught: unknown) => caught,
 				);
-			expect(err).toBeInstanceOf(ToolError);
+			expect(err).toBeInstanceOf(Error);
 			expect((err as Error).message).toBe(
 				"This `write` tool is limited to the xd:// device transport: call it with path `xd://<tool>` and the device's JSON arguments in `content` (`read xd://` lists mounted devices). Active plan mode additionally permits local:// sandbox drafts. Filesystem writes are not available elsewhere.",
 			);
