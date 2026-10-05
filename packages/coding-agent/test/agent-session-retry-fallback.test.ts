@@ -840,7 +840,7 @@ describe("AgentSession retry fallback", () => {
 		expect(session.messages.some(message => message.role === "user")).toBe(true);
 	});
 
-	it("keeps a declined reserve fallback across effort changes and missing quota until recovery", async () => {
+	it("keeps a declined reserve fallback until the selected account recovers", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
 		if (!primaryModel || !fallbackModel) throw new Error("Expected bundled reserve fallback models");
@@ -858,9 +858,21 @@ describe("AgentSession retry fallback", () => {
 		});
 		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
 		let health: "reserve" | "unknown" | "healthy" = "reserve";
+		let selectedHealth: "reserve" | "healthy" | undefined = "reserve";
 		vi.spyOn(modelRegistry.authStorage.health, "model").mockImplementation(async provider => ({
 			state: provider === primaryModel.provider ? health : "healthy",
-			accounts: [],
+			accounts:
+				provider === primaryModel.provider
+					? [
+							{
+								credentialId: 1,
+								credentialType: "oauth",
+								selected: selectedHealth === undefined ? undefined : true,
+								state: selectedHealth ?? "reserve",
+							},
+							{ credentialId: 2, credentialType: "oauth", state: health },
+						]
+					: [],
 		}));
 		const confirmFallback = vi.fn(async () => false);
 		session = new AgentSession({
@@ -887,8 +899,26 @@ describe("AgentSession retry fallback", () => {
 		expect(confirmFallback).toHaveBeenCalledTimes(1);
 		expect(session.model?.id).toBe(primaryModel.id);
 		health = "healthy";
+		await session.prompt("Continue while only another account is healthy");
+		await session.waitForIdle();
+		health = "reserve";
+		await session.prompt("Keep the refusal when the other account reaches reserve");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(1);
+		selectedHealth = undefined;
+		health = "healthy";
+		await session.prompt("Continue while account selection is temporarily unavailable");
+		await session.waitForIdle();
+		selectedHealth = "reserve";
+		health = "reserve";
+		await session.prompt("Keep the refusal when the same reserved account is selected again");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(1);
+		selectedHealth = "healthy";
+		health = "healthy";
 		await session.prompt("Continue after quota recovery");
 		await session.waitForIdle();
+		selectedHealth = "reserve";
 		health = "reserve";
 		await session.prompt("Ask again for a new reserve episode");
 		await session.waitForIdle();

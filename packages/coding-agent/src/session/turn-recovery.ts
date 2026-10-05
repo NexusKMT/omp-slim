@@ -1850,7 +1850,8 @@ export class TurnRecovery {
 		if (signal.aborted || !modelsAreEqual(this.#host.model(), currentModel)) return false;
 		const selectedAccount = health.accounts.find(account => account.selected);
 		if (health.state === "healthy") {
-			this.#usageReserveApproval = undefined;
+			// A healthy sibling does not end the selected account's reserve episode.
+			if (selectedAccount?.state === "healthy") this.#usageReserveApproval = undefined;
 			if (
 				selectedAccount &&
 				selectedAccount.state !== "healthy" &&
