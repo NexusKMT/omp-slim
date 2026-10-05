@@ -1692,9 +1692,14 @@ export class WorkerCore {
 		const earlyAc = new AbortController();
 		try {
 			// A download this op starts before a pending `waitForDownload()` has enabled
-			// tracking would bypass it, so hold the op until tracking applies.
+			// tracking would bypass it, so hold the op until tracking applies — within
+			// the op's own deadline, so a stalled enable surfaces as this op's timeout.
 			const arming = this.#downloads?.arming;
-			if (arming) await arming.catch(() => undefined);
+			if (arming)
+				await untilAborted(
+					opSignal,
+					arming.catch(() => undefined),
+				);
 			if (!watchdog) return await fn(opSignal);
 			const racedSignal = AbortSignal.any([opSignal, earlyAc.signal]);
 			return await Promise.race([
