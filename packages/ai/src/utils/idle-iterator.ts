@@ -535,12 +535,10 @@ async function nextWithinGrace<T>(
 		return GRACE_ENDED;
 	}
 	const nextPromise = iterator.next();
-	let timer: NodeJS.Timeout | undefined;
-	const timeoutPromise = new Promise<"timeout">(resolve => {
-		timer = setTimeout(() => resolve("timeout"), remainingMs);
-	});
+	const timeout = Promise.withResolvers<"timeout">();
+	const timer = setTimeout(() => timeout.resolve("timeout"), remainingMs);
 	try {
-		const outcome = await Promise.race([nextPromise, timeoutPromise]);
+		const outcome = await Promise.race([nextPromise, timeout.promise]);
 		if (outcome !== "timeout") return outcome;
 		// The abandoned read settles (likely rejects) once onGraceEnd aborts
 		// the transport — mark it handled so it cannot surface as an
