@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a session using a custom `browser.relayUrl` port stopping the browser relay that other sessions were using on a different port
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed
