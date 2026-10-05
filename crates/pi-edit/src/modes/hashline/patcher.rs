@@ -437,7 +437,7 @@ pub(crate) fn apply_with_recovery(
 	let stored = store.by_hash(canonical, expected);
 	let mut block_resolutions = Vec::new();
 	let mut resolve_warnings = Vec::new();
-	let resolved: Cow<'_, [Edit]> = if has_block_edit(edits) {
+	let resolved = if has_block_edit(edits) {
 		let base = if live_matches {
 			normalized
 		} else if let Some(snapshot) = &stored {
@@ -445,14 +445,14 @@ pub(crate) fn apply_with_recovery(
 		} else {
 			return Err(mismatch(section, canonical, normalized, expected, store));
 		};
-		Cow::Owned(resolve_block_edits(
+		resolve_block_edits(
 			edits,
 			base,
 			&section.path,
 			Unresolved::Throw,
 			&mut |item| block_resolutions.push(item),
 			&mut |warning| resolve_warnings.push(warning),
-		)?)
+		)?
 	} else {
 		Cow::Borrowed(edits)
 	};
@@ -522,18 +522,19 @@ fn format_block_resolution(resolution: &BlockResolution) -> String {
 	format!("{op} → resolved {span} ({lines} line{}){suffix}", if lines == 1 { "" } else { "s" })
 }
 
+/// When the authored path does not exist, rebind the section to the one
+/// stored snapshot with the same content tag and file name. `None` keeps
+/// the authored section and target, which callers use by reference.
 pub(crate) fn recover_target(
 	section: &PatchSection,
 	initial: &Resolved,
 	files: &mut dyn FileSource,
 	store: &EditStore,
-) -> (PatchSection, Resolved) {
+) -> Option<(PatchSection, Resolved)> {
 	if files.exists(&initial.absolute) {
-		return (section.with_path(&section.path), initial.clone());
+		return None;
 	}
-	let Some(tag) = section.file_hash.as_deref() else {
-		return (section.with_path(&section.path), initial.clone());
-	};
+	let tag = section.file_hash.as_deref()?;
 	let authored_name = initial.absolute.file_name();
 	let mut candidates = store
 		.find_by_hash(tag)
@@ -550,11 +551,11 @@ pub(crate) fn recover_target(
 			.policy()
 			.allow_tag_path_recovery(&section.path, &candidates[0])
 	{
-		return (section.with_path(&section.path), initial.clone());
+		return None;
 	}
 	let path = candidates.remove(0);
 	let display = path.to_string_lossy().into_owned();
-	(section.with_path(&display), Resolved { absolute: path, display })
+	Some((section.with_path(&display), Resolved { absolute: path, display }))
 }
 /// Stage a whole-file delete for a target whose bytes cannot be decoded:
 /// existence is proven, but there is no content to diff or snapshot.
@@ -608,11 +609,14 @@ pub fn stage_patch(
 			return Err(EditError::apply(missing_snapshot_tag_message(&original.path)));
 		};
 		let initial = files.resolve(&original.path, false)?;
-		let (section, resolved) = recover_target(original, &initial, files, store);
+		let recovered = recover_target(original, &initial, files, store);
+		let (section, resolved) = recovered
+			.as_ref()
+			.map_or((original, &initial), |(section, resolved)| (section, resolved));
 		// Whole-file delete needs existence, not text, so an undecodable file
 		// stages without its content; anything else still rejects.
 		let undecodable_delete = matches!(parsed.file_op, Some(FileOp::Rem));
-		let read = match files.try_read(&resolved) {
+		let read = match files.try_read(resolved) {
 			Ok(read) => read,
 			Err(err) if err.is_invalid_utf8() && undecodable_delete => None,
 			Err(err) => return Err(err),
@@ -620,8 +624,8 @@ pub fn stage_patch(
 		let Some(read) = read else {
 			if undecodable_delete && files.exists(&resolved.absolute) {
 				staged.push(undecodable_delete_staged(
-					&section,
-					&resolved,
+					section,
+					resolved,
 					&original.path,
 					tag,
 					parsed.warnings.clone(),
@@ -661,7 +665,7 @@ pub fn stage_patch(
 			parsed.edits.as_slice()
 		};
 		let apply = apply_with_recovery(
-			&section,
+			section,
 			&read.canonical,
 			&read.text,
 			edits,
