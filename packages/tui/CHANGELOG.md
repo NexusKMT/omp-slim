@@ -7,6 +7,7 @@
 - `/hotkeys` shows the effective `app.stt.pushToTalk` binding, including `Disabled` when unbound ([#6592](https://github.com/can1357/oh-my-pi/pull/6592) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Fixed
+- The git viewer footer advertised stage, discard and file-select keys while viewing a commit, where every one of those is a no-op; the hints and the header now reflect the view being shown ([#14347](https://github.com/can1357/oh-my-pi/issues/14347)).
 
 - Fixed hold-Space push-to-talk stopping the instant recording began (showing "No speech detected.") when opening the microphone briefly froze the UI ([#14463](https://github.com/can1357/oh-my-pi/pull/14463) by [@pgkt04](https://github.com/pgkt04))
 
