@@ -283,4 +283,117 @@ try {
 			await fs.rm(home, { recursive: true, force: true });
 		}
 	}, 60_000);
+
+	it("replaces a broker-owned relay from another omp version, then leaves it and a manually started one alone", async () => {
+		const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-relay-restart-"));
+		const globalRuntimeDir = path.join(home, ".omp", "run", "daemons", "global", "browser-relay");
+		const ownedPort = await findFreeCdpPort();
+		let manualPort = await findFreeCdpPort();
+		while (manualPort === ownedPort) manualPort = await findFreeCdpPort();
+		// Stands in for a relay from an older omp: serves /json/version without the version or capability markers.
+		const staleRelayPath = path.join(home, "stale-relay.ts");
+		await Bun.write(
+			staleRelayPath,
+			`const port = Number(process.argv[2]);
+Bun.serve({ hostname: "127.0.0.1", port, fetch: () => Response.json({ Browser: "Chrome/1" }) });
+console.log(\`omp browser relay listening on http://127.0.0.1:\${port}\`);
+`,
+		);
+		const child = Bun.spawn(
+			[
+				process.execPath,
+				"-e",
+				`import { VERSION } from "@oh-my-pi/pi-utils/dirs";
+import { closeDaemonClients, daemonClientForGlobal } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/launch/client.ts"))};
+import { restartRelayDaemon } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/tools/browser/relay/daemon.ts"))};
+const [ownedPort, manualPort, staleRelay] = [Bun.env.OMP_TEST_OWNED_PORT!, Bun.env.OMP_TEST_MANUAL_PORT!, Bun.env.OMP_TEST_STALE_RELAY!];
+const versionAt = async (port: string) =>
+	((await (await fetch(\`http://127.0.0.1:\${port}/json/version\`)).json()) as { ompRelayVersion?: string }).ompRelayVersion ?? null;
+const manual = Bun.spawn([process.execPath, staleRelay, manualPort], { stdout: "pipe" });
+try {
+	const client = await daemonClientForGlobal("browser-relay");
+	await client.request({
+		op: "start",
+		spec: {
+			name: \`omp.browser.relay.\${ownedPort}\`,
+			application: process.execPath,
+			args: [staleRelay, ownedPort],
+			env: {},
+			cwd: process.cwd(),
+			pty: false,
+			ready: { log: "browser relay listening", timeoutMs: 15_000 },
+			restart: "no",
+			persist: false,
+			detached: false,
+		},
+	});
+	await manual.stdout.getReader().read();
+	const ownedUrl = \`http://127.0.0.1:\${ownedPort}\`;
+	const pid = async () => (await client.request({ op: "describe", name: \`omp.browser.relay.\${ownedPort}\` })).daemon?.pid;
+	const owned = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const replacement = await pid();
+	const ownedAgain = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const manualRestarted = await restartRelayDaemon({ cdpUrl: \`http://127.0.0.1:\${manualPort}\` });
+	process.stdout.write(
+		JSON.stringify({
+			owned,
+			ownedVersionIsCurrent: (await versionAt(ownedPort)) === VERSION,
+			ownedAgain,
+			replacementKept: replacement !== undefined && (await pid()) === replacement,
+			manualRestarted,
+			manualVersion: await versionAt(manualPort),
+		}),
+	);
+} finally {
+	manual.kill();
+	await closeDaemonClients();
+}`,
+			],
+			{
+				cwd: path.resolve(import.meta.dir, "../.."),
+				env: {
+					...process.env,
+					HOME: home,
+					USERPROFILE: home,
+					PI_CONFIG_DIR: ".omp",
+					OMP_DAEMON_IDLE_GRACE_MS: "200",
+					OMP_TEST_OWNED_PORT: String(ownedPort),
+					OMP_TEST_MANUAL_PORT: String(manualPort),
+					OMP_TEST_STALE_RELAY: staleRelayPath,
+				},
+				stdout: "pipe",
+				stderr: "pipe",
+			},
+		);
+		try {
+			const [exitCode, stdout, stderr] = await Promise.all([
+				child.exited,
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+			]);
+			expect(exitCode, stderr).toBe(0);
+			expect(JSON.parse(stdout)).toEqual({
+				owned: true,
+				ownedVersionIsCurrent: true,
+				ownedAgain: true,
+				replacementKept: true,
+				manualRestarted: false,
+				manualVersion: null,
+			});
+		} finally {
+			if (child.exitCode === null) child.kill();
+			await child.exited;
+			const rescue = await createDaemonBrokerClient(globalRuntimeDir, {
+				runtimeDir: globalRuntimeDir,
+				idleGraceMs: 200,
+			});
+			try {
+				await rescue.request({ op: "shutdown" });
+			} catch {
+				// The last-client grace may already have stopped the broker.
+			}
+			rescue.close();
+			await fs.rm(home, { recursive: true, force: true });
+		}
+	}, 60_000);
 });

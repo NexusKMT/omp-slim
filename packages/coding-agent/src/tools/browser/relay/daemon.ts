@@ -13,11 +13,12 @@
  * without attempting another bind.
  */
 import { logger } from "@oh-my-pi/pi-utils";
+import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { daemonClientForGlobal } from "../../../launch/client";
 import { describeQuietly, stopQuietly, waitReady } from "../../../launch/ensure";
 import { resolveWorkerSpawnCmd } from "../../../subprocess/worker-client";
 import { throwIfAborted } from "../../tool-errors";
-import { probeCdpStatus } from "../attach";
+import { probeCdpResponse, probeCdpStatus } from "../attach";
 import { DEFAULT_RELAY_URL } from "./kind";
 
 const DEFAULT_RELAY_PORT = new URL(DEFAULT_RELAY_URL).port;
@@ -25,6 +26,14 @@ const DEFAULT_RELAY_PORT = new URL(DEFAULT_RELAY_URL).port;
 /** Broker daemon name for the relay on `port`; one per port, so relays on different ports never replace each other. */
 function relayDaemonName(port: string): string {
 	return port === DEFAULT_RELAY_PORT ? "omp.browser.relay" : `omp.browser.relay.${port}`;
+}
+
+function relayPort(cdpUrl: string): string | null {
+	try {
+		return String(new URL(cdpUrl).port || 80);
+	} catch {
+		return null;
+	}
 }
 
 const RELAY_BROKER_SCOPE = "browser-relay";
@@ -58,12 +67,8 @@ export function isLoopbackRelayUrl(cdpUrl: string): boolean {
  * could not be started (broker unavailable or start rounds exhausted).
  */
 export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSignal }): Promise<boolean> {
-	let port: string;
-	try {
-		port = String(new URL(opts.cdpUrl).port || 80);
-	} catch {
-		return false;
-	}
+	const port = relayPort(opts.cdpUrl);
+	if (port === null) return false;
 	const name = relayDaemonName(port);
 	// Open the lazy client before probing. Merely caching SocketDaemonClient
 	// would not create the broker connection (and therefore would hold no lease).
@@ -117,4 +122,43 @@ export async function ensureRelayDaemon(opts: { cdpUrl: string; signal?: AbortSi
 		}
 	}
 	return false;
+}
+
+/**
+ * Replace the broker-owned relay at `cdpUrl` with one from this OMP version.
+ * True once the old relay has stopped (the caller's wait reports whether the
+ * new one serves) or another process already replaced it. False when the
+ * broker runs no relay there (a manually started relay is left alone) or the
+ * old relay did not stop.
+ */
+export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortSignal }): Promise<boolean> {
+	const port = relayPort(opts.cdpUrl);
+	if (port === null) return false;
+	const name = relayDaemonName(port);
+	const client = await daemonClientForGlobal(RELAY_BROKER_SCOPE);
+	const existing = await describeQuietly(client, name, "Browser relay", opts.signal);
+	if (!existing || existing.state === "exited" || existing.state === "failed") return false;
+	// Another omp of this version may have replaced it since the caller's probe.
+	if (await servesVersion(opts.cdpUrl, opts.signal)) return true;
+	const stopped = await stopQuietly(client, name, "Browser relay", opts.signal);
+	if (stopped?.state !== "exited" && stopped?.state !== "failed") return false;
+	await ensureRelayDaemon(opts);
+	return true;
+}
+
+/** Whether the relay at `cdpUrl` reports this OMP version on `/json/version` (ready or waiting for its extension). */
+async function servesVersion(cdpUrl: string, signal: AbortSignal | undefined): Promise<boolean> {
+	const response = await probeCdpResponse(`${cdpUrl}/json/version`, { timeoutMs: PROBE_TIMEOUT_MS, signal });
+	if (!response) return false;
+	try {
+		const parsed: unknown = JSON.parse(response.body);
+		return (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			"ompRelayVersion" in parsed &&
+			parsed.ompRelayVersion === VERSION
+		);
+	} catch {
+		return false;
+	}
 }
