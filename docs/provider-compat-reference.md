@@ -153,8 +153,9 @@ Types: `OpenAICompat` / `ResolvedOpenAISharedCompat` in `packages/catalog/src/ty
 
 Stateful chaining precedence is the call's `statefulResponses` option, then
 `PI_OPENAI_STATEFUL`, then `compat.statefulResponses`, then
-`compat.officialEndpoint`. The environment accepts `1` to enable and `0` or
-`false` to disable; unset or empty preserves the model default. The compat key
+`compat.officialEndpoint`. The environment enables chaining for `1`, `y`, `yes`,
+`true`, or `on` (all-lowercase or all-uppercase) and disables it for any other non-empty value;
+unset or empty preserves the model default. The compat key
 does not imply `officialEndpoint` or enable `text.verbosity`, obfuscation opt-out,
 or any other official-only behavior. Chaining requires `sessionId` and
 `providerSessionState`.
