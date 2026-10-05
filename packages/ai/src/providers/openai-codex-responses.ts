@@ -1340,9 +1340,11 @@ function getCodexServiceTierCostMultiplier(
 	model: Pick<Model<"openai-codex-responses">, "serviceTierCost">,
 	serviceTier: ServiceTier | "default" | undefined,
 ): number {
-	// `ultrafast` has no published price (API preview, Codex credits), so it is
-	// shown at 1x rather than an invented multiplier.
-	if (serviceTier !== "flex" && serviceTier !== "priority") return 1;
+	// The subscription route bills in credits, so its cost is credit-equivalent:
+	// each tier's multiplier comes from the catalog table (Astra's ultrafast
+	// mirrors the API's published 6x premium). A tier with no entry stays at 1x
+	// rather than an invented multiplier.
+	if (serviceTier !== "flex" && serviceTier !== "priority" && serviceTier !== "ultrafast") return 1;
 	return model.serviceTierCost?.[serviceTier] ?? 1;
 }
 
@@ -1353,7 +1355,7 @@ function getCodexServiceTierCostMultiplier(
  */
 function resolveCodexCostServiceTier(res: ServiceTier | undefined, req?: unknown): ServiceTier | "default" | undefined {
 	const served = res ?? req;
-	return served === "flex" || served === "priority" ? served : "default";
+	return served === "flex" || served === "priority" || served === "ultrafast" ? served : "default";
 }
 
 function applyCodexServiceTierPricing(

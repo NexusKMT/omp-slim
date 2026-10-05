@@ -76,6 +76,11 @@ provider "openai-codex" {
 		service-tier-cost {
 			flex 0.5
 			priority 2.5
+			// Ultrafast is Astra-only and priced at 6x the standard card on the
+			// first-party API ($60/$300 vs $10/$50 per 1M). The subscription route
+			// bills it in credits with no published rate, so the credit-equivalent
+			// cost mirrors the API premium instead of inventing one.
+			ultrafast 6
 		}
 		limits-patch {
 			context-window 272000

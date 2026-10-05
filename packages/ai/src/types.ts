@@ -299,23 +299,30 @@ export function realizesPriorityServiceTier(
 }
 
 /**
- * Premium-request weight contributed by a priority request to a provider that
- * realizes it and bills extra. Mirrors GitHub Copilot's `premiumRequests`
- * accounting so the "premium requests" stat aggregates priority traffic across
- * the OpenAI family, direct Anthropic fast mode, and Google priority.
+ * Premium-request weight contributed by a request a provider bills above
+ * standard. Priority (Fast mode) counts 1 on every provider that realizes it;
+ * `ultrafast` counts 1 on the OpenAI family, where it is a premium serving tier
+ * (its cost premium is recorded separately in `usage.cost`). Mirrors GitHub
+ * Copilot's `premiumRequests` accounting so the "premium requests" stat
+ * aggregates premium traffic across the OpenAI family, direct Anthropic fast
+ * mode, and Google priority.
  *
- * Returns 1 only when priority is actually realized on the wire for `model`
- * (see {@link realizesPriorityServiceTier}) and the provider bills it as a
- * premium request. OpenRouter is excluded — it bills per its own pricing, not
- * Copilot-premium semantics — as are Bedrock/Vertex Claude, where priority is
- * silently dropped.
+ * Returns 1 only when the tier is actually realized on the wire for `model`
+ * (see {@link realizesPriorityServiceTier} and {@link shouldSendServiceTier})
+ * and the provider bills it as a premium request. OpenRouter is excluded — it
+ * bills per its own pricing, not Copilot-premium semantics — as are
+ * Bedrock/Vertex Claude, where priority is silently dropped.
  */
-export function getPriorityPremiumRequests(
+export function getPremiumServiceTierRequests(
 	serviceTier: ServiceTier | null | undefined,
 	model: ServiceTierModel,
 ): number {
-	if (!realizesPriorityServiceTier(serviceTier, model)) return 0;
 	const provider = model.provider;
+	if (serviceTier === "ultrafast") {
+		if (provider !== "openai" && provider !== "openai-codex") return 0;
+		return shouldSendServiceTier("ultrafast", model) ? 1 : 0;
+	}
+	if (!realizesPriorityServiceTier(serviceTier, model)) return 0;
 	return provider === "openai" ||
 		provider === "openai-codex" ||
 		provider === "anthropic" ||
