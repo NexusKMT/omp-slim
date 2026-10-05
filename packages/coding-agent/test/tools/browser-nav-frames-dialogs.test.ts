@@ -9,8 +9,32 @@ import { chromiumAvailable } from "./chromium-probe";
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const server = Bun.serve({
 	port: 0,
+	// `/never-ends` must outlive the run budget instead of Bun's 10s idle cut.
+	idleTimeout: 0,
 	fetch(request) {
 		const { pathname } = new URL(request.url);
+		if (pathname === "/never-ends") {
+			// A frame document whose body never closes, like an ad or chat widget that keeps streaming.
+			return new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("<p>partial</p>"));
+					},
+				}),
+				{ headers: { "content-type": "text/html" } },
+			);
+		}
+		if (pathname === "/stuck-frame") {
+			return new Response(`<!doctype html><title>stuck</title><iframe src="/never-ends"></iframe>`, {
+				headers: { "content-type": "text/html" },
+			});
+		}
+		if (pathname === "/late-frame") {
+			return new Response(
+				`<!doctype html><title>late</title><script>addEventListener("load", () => { const frame = document.createElement("iframe"); frame.src = "/never-ends"; document.body.append(frame); });</script>`,
+				{ headers: { "content-type": "text/html" } },
+			);
+		}
 		const iframe = `<iframe id="f" name="payment" srcdoc="<!doctype html><input id='in'><div id='out'>ready</div><script>document.querySelector('#in').addEventListener('input',e=>document.querySelector('#out').textContent=e.target.value)</script>"></iframe>`;
 		return new Response(
 			`<!doctype html><title>${pathname}</title><body data-path="${pathname}">${iframe}<script>
@@ -113,6 +137,27 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			),
 		).toBe(beforePush);
 	}, 30_000);
+
+	test("navigates pages whose child frame never finishes loading", async () => {
+		const invoke = createHost();
+		await invoke({ action: "open", name: "stuck", url: `${baseUrl}/one` });
+		const result = await invoke({
+			action: "run",
+			name: "stuck",
+			timeout: 10,
+			code: `
+				// The main document's load fires before its never-ending frame is added.
+				await tab.goto(${JSON.stringify(`${baseUrl}/late-frame`)});
+				// The main document is parsed; its frame never finishes.
+				await tab.goto(${JSON.stringify(`${baseUrl}/stuck-frame`)}, { waitUntil: "domcontentloaded" });
+				await tab.back();
+				await tab.forward({ waitUntil: "domcontentloaded" });
+				await tab.reload({ waitUntil: "domcontentloaded" });
+				return [tab.url(), await tab.evaluate(() => document.readyState)];
+			`,
+		});
+		expect(valueOf(result)).toEqual([`${baseUrl}/stuck-frame`, "interactive"]);
+	}, 60_000);
 
 	test("auto-accepts alerts and explicitly settles confirm and prompt dialogs", async () => {
 		const invoke = createHost();
