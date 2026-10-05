@@ -1036,26 +1036,28 @@ interface ObservedElement {
 }
 
 /**
- * Resolve a CDP backend node id to a connected element handle in `frame`'s main world, or
- * null when the node no longer exists or left the document. Text nodes resolve to their parent.
+ * Resolve a CDP backend node id to an element handle in `frame`'s main world, or null when the
+ * node is gone, has left the document, or belongs to a document the frame no longer shows (any
+ * resolution failure counts as gone). Text nodes resolve to their parent.
  */
 async function resolveBackendNode(frame: Frame, backendNodeId: number): Promise<ElementHandle | null> {
 	let node: JSHandle;
 	try {
 		node = await frame.mainRealm().adoptBackendNode(backendNodeId);
-	} catch (error) {
-		if (error instanceof Error && error.message.includes("No node with given id")) return null;
-		throw error;
+	} catch {
+		return null;
 	}
 	try {
 		const resolved = await node.evaluateHandle(value => {
 			const candidate = value as unknown as { nodeType: number; parentElement: Element | null };
-			const element = candidate.nodeType === 3 ? candidate.parentElement : (value as unknown as Element);
-			return element?.isConnected ? element : null;
+			const element = (candidate.nodeType === 3 ? candidate.parentElement : value) as unknown as Element | null;
+			return element?.isConnected && (element.ownerDocument as unknown) === document ? element : null;
 		});
 		const element = resolved.asElement();
 		if (!element) await resolved.dispose().catch(() => undefined);
 		return element as ElementHandle | null;
+	} catch {
+		return null;
 	} finally {
 		await node.dispose().catch(() => undefined);
 	}
@@ -2859,9 +2861,16 @@ export class WorkerCore {
 			const element = this.#observedElements.get(id);
 			if (!element) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
 			const resolved = await resolveBackendNode(element.frame, element.backendNodeId);
-			if (!resolved) {
-				this.#clearElementCache();
+			// An observe() during the await renumbers ids, so the id may now name another element.
+			if (!resolved || this.#observedElements.get(id) !== element) {
+				await resolved?.dispose().catch(() => undefined);
+				if (this.#observedElements.get(id) === element) this.#clearElementCache();
 				throw new ToolError(`Element id ${id} is stale. Run tab.observe() again.`);
+			}
+			const cached = this.#elementCache.get(id);
+			if (cached) {
+				await resolved.dispose().catch(() => undefined);
+				return cached;
 			}
 			this.#elementCache.set(id, resolved);
 			return resolved;
