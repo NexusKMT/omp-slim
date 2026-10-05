@@ -840,6 +840,60 @@ describe("AgentSession retry fallback", () => {
 		expect(session.messages.some(message => message.role === "user")).toBe(true);
 	});
 
+	it("keeps a declined reserve fallback across effort changes and missing quota until recovery", async () => {
+		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
+		if (!primaryModel || !fallbackModel) throw new Error("Expected bundled reserve fallback models");
+		const mock = createMockModel({ handler: { content: ["stayed on primary"] } });
+		const agent = new Agent({
+			getApiKey: model => `${model.provider}-test-key`,
+			initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: mock.stream,
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.usageAwareFallback": true,
+			"retry.usageReservePolicy": "confirm",
+			"retry.fallbackChains": { default: [`${fallbackModel.provider}/${fallbackModel.id}`] },
+		});
+		settings.setModelRole("default", `${primaryModel.provider}/${primaryModel.id}`);
+		let health: "reserve" | "unknown" | "healthy" = "reserve";
+		vi.spyOn(modelRegistry.authStorage.health, "model").mockImplementation(async provider => ({
+			state: provider === primaryModel.provider ? health : "healthy",
+			accounts: [],
+		}));
+		const confirmFallback = vi.fn(async () => false);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+		});
+		session.setUsageFallbackConfirmer(confirmFallback);
+		session.setThinkingLevel(Effort.Medium);
+		await session.prompt("Stay on the primary");
+		await session.waitForIdle();
+		session.setThinkingLevel(Effort.High);
+		await session.prompt("Continue with more thinking");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(1);
+		health = "unknown";
+		await session.prompt("Continue without quota data");
+		await session.waitForIdle();
+		health = "reserve";
+		await session.prompt("Continue when quota data returns");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(1);
+		expect(session.model?.id).toBe(primaryModel.id);
+		health = "healthy";
+		await session.prompt("Continue after quota recovery");
+		await session.waitForIdle();
+		health = "reserve";
+		await session.prompt("Ask again for a new reserve episode");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(2);
+	});
+
 	it("honors a live fail-closed policy after reserve spending was approved", async () => {
 		const primaryModel = getBundledModel("anthropic", "claude-sonnet-4-5");
 		const fallbackModel = getBundledModel("openai", "gpt-4o-mini");
