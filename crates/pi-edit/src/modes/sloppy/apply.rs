@@ -22,7 +22,10 @@ use super::{
 	},
 };
 use crate::{
-	error::EditError, fuzzy::levenshtein_distance, store::EditStore, text::normalize_unicode,
+	error::EditError,
+	fuzzy::{PatternDistance, levenshtein_within},
+	store::EditStore,
+	text::normalize_unicode,
 };
 
 /// State shared by every operation in one file section.
@@ -432,10 +435,18 @@ fn fuzzy_occurrences(content: &str, pattern: &str, allow_punctuation: bool) -> V
 	if starts.is_empty() && content.len() <= 10_000 {
 		starts.extend(content.char_indices().map(|(index, _)| index));
 	}
+	let pattern_chars: Vec<char> = pattern.chars().collect();
+	let mut candidate_chars = Vec::new();
 	let mut raw = Vec::new();
 	for start in starts {
 		let mut best: Option<Occurrence> = None;
 		for length in pattern.len().saturating_sub(limit).max(1)..=pattern.len() + limit {
+			// Only a distance within `limit` that beats the best so far counts.
+			let max = match best {
+				Some(current) if current.distance == 0 => break,
+				Some(current) => limit.min(current.distance - 1),
+				None => limit,
+			};
 			let end = start + length;
 			if end > content.len() || !content.is_char_boundary(end) {
 				continue;
@@ -449,10 +460,11 @@ fn fuzzy_occurrences(content: &str, pattern: &str, allow_punctuation: bool) -> V
 			{
 				continue;
 			}
-			let distance = levenshtein_distance(pattern, candidate);
-			if distance > limit || best.is_some_and(|current| distance >= current.distance) {
+			candidate_chars.clear();
+			candidate_chars.extend(candidate.chars());
+			let Some(distance) = levenshtein_within(&pattern_chars, &candidate_chars, max) else {
 				continue;
-			}
+			};
 			best = Some(Occurrence { start, end, distance, punctuation_edits });
 		}
 		if let Some(best) = best {
@@ -972,13 +984,18 @@ fn no_match_error(
 }
 
 fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
+	let pattern_chars: Vec<char> = pattern.chars().collect();
+	let pattern_distance = PatternDistance::new(&pattern_chars);
+	let mut candidate_chars = Vec::new();
 	let mut ranked = Vec::new();
 	let mut offset = 0;
 	for line in content.split('\n') {
 		let normalized = normalize_text(line);
 		if !normalized.text.is_empty() {
 			let denominator = pattern.len().max(normalized.text.len()).max(1);
-			let score = levenshtein_distance(pattern, &normalized.text) as f64 / denominator as f64;
+			candidate_chars.clear();
+			candidate_chars.extend(normalized.text.chars());
+			let score = pattern_distance.distance(&candidate_chars) as f64 / denominator as f64;
 			ranked.push((line, offset, normalized, score));
 			ranked.sort_by(|left, right| left.3.total_cmp(&right.3));
 			ranked.truncate(3);
@@ -1009,8 +1026,10 @@ fn closest_fragment(content: &str, pattern: &str) -> (String, usize, f64) {
 					continue;
 				}
 				let candidate = &normalized.text[start..end];
-				let score = levenshtein_distance(pattern, candidate) as f64
-					/ pattern.len().max(candidate.len()).max(1) as f64;
+				let denominator = pattern.len().max(candidate.len()).max(1);
+				candidate_chars.clear();
+				candidate_chars.extend(candidate.chars());
+				let score = pattern_distance.distance(&candidate_chars) as f64 / denominator as f64;
 				if score >= best.2 {
 					continue;
 				}
@@ -1252,13 +1271,25 @@ pub(crate) fn closest_desired_block(content: &str, stated_text: &str) -> Option<
 	if lines.len() < count {
 		return None;
 	}
+	// normalize_text drops the joining newlines, so a window's normalized text
+	// is its lines' normalized texts back to back: normalize every line once
+	// and slice windows out of the result.
+	let mut normalized = String::with_capacity(content.len());
+	let mut line_starts = Vec::with_capacity(lines.len() + 1);
+	for line in &lines {
+		line_starts.push(normalized.len());
+		normalized.push_str(&normalize_text(line).text);
+	}
+	line_starts.push(normalized.len());
+	let stated_distance = PatternDistance::new(&stated.chars().collect::<Vec<_>>());
+	let mut current_chars = Vec::new();
 	let mut scores = Vec::new();
 	for index in 0..=lines.len() - count {
-		let current = normalize_text(&lines[index..index + count].join("\n")).text;
+		let current = &normalized[line_starts[index]..line_starts[index + count]];
 		let max = stated.len().max(current.len()).max(1);
-		let affix = stated.starts_with(&current)
+		let affix = stated.starts_with(current)
 			|| current.starts_with(&stated)
-			|| stated.ends_with(&current)
+			|| stated.ends_with(current)
 			|| current.ends_with(&stated);
 		let score = if current.is_empty()
 			|| affix
@@ -1266,7 +1297,9 @@ pub(crate) fn closest_desired_block(content: &str, stated_text: &str) -> Option<
 		{
 			1.0
 		} else {
-			levenshtein_distance(&stated, &current) as f64 / max as f64
+			current_chars.clear();
+			current_chars.extend(current.chars());
+			stated_distance.distance(&current_chars) as f64 / max as f64
 		};
 		scores.push((index, score));
 	}

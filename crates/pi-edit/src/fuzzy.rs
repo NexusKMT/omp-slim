@@ -2,6 +2,8 @@
 //! `sloppy`: Levenshtein similarity, whole-block fuzzy search,
 //! line-sequence placement, and context-line placement.
 
+use std::collections::HashMap;
+
 use crate::{
 	error::EditError,
 	text::{
@@ -252,6 +254,159 @@ pub fn levenshtein_distance(a: &str, b: &str) -> usize {
 	let a_chars: Vec<char> = a.chars().collect();
 	let b_chars: Vec<char> = b.chars().collect();
 	levenshtein_chars(&a_chars, &b_chars)
+}
+
+/// [`levenshtein_distance`] over pre-collected chars when it is at most
+/// `max`, else `None`. Only the `2·max + 1` diagonals that can stay within
+/// `max` are computed, so the cost is O(len·max) instead of O(len²).
+pub fn levenshtein_within(a: &[char], b: &[char], max: usize) -> Option<usize> {
+	if a == b {
+		return Some(0);
+	}
+	let shared = a
+		.iter()
+		.zip(b)
+		.take_while(|(left, right)| left == right)
+		.count();
+	let (a, b) = (&a[shared..], &b[shared..]);
+	let shared = a
+		.iter()
+		.rev()
+		.zip(b.iter().rev())
+		.take_while(|(left, right)| left == right)
+		.count();
+	let (a, b) = (&a[..a.len() - shared], &b[..b.len() - shared]);
+	let (longer, shorter) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+	let (rows, columns) = (longer.len(), shorter.len());
+	if rows - columns > max {
+		return None;
+	}
+	if columns == 0 {
+		return Some(rows);
+	}
+	// No distance exceeds `rows`; capping keeps `over` from overflowing.
+	let max = max.min(rows);
+	let over = max + 1;
+	let mut previous: Vec<usize> = (0..=columns).map(|column| column.min(over)).collect();
+	let mut current = vec![over; columns + 1];
+	for row in 1..=rows {
+		let low = row.saturating_sub(max).max(1);
+		let high = (row + max).min(columns);
+		current[0] = row.min(over);
+		if low > 1 {
+			current[low - 1] = over;
+		}
+		let mut row_min = current[0];
+		let character = longer[row - 1];
+		for column in low..=high {
+			let substitute = previous[column - 1] + usize::from(character != shorter[column - 1]);
+			let value = substitute
+				.min(previous[column] + 1)
+				.min(current[column - 1] + 1)
+				.min(over);
+			current[column] = value;
+			row_min = row_min.min(value);
+		}
+		if high < columns {
+			current[high + 1] = over;
+		}
+		if row_min > max {
+			return None;
+		}
+		std::mem::swap(&mut previous, &mut current);
+	}
+	let distance = previous[columns];
+	(distance <= max).then_some(distance)
+}
+
+/// [`levenshtein_distance`] from one fixed pattern to many texts.
+///
+/// Myers' bit-parallel algorithm with Hyyrö's 64-row blocks costs
+/// O(text · ⌈pattern / 64⌉) word operations once the pattern's character
+/// masks are built.
+pub struct PatternDistance {
+	len:      usize,
+	words:    usize,
+	/// Masks for ASCII characters, `words` per code point.
+	ascii:    Vec<u64>,
+	other:    HashMap<char, Vec<u64>>,
+	zeros:    Vec<u64>,
+	/// The last pattern row's bit in the last word.
+	last_bit: u64,
+}
+
+impl PatternDistance {
+	pub fn new(pattern: &[char]) -> Self {
+		let len = pattern.len();
+		let words = len.div_ceil(64).max(1);
+		let mut ascii = vec![0; 128 * words];
+		let mut other: HashMap<char, Vec<u64>> = HashMap::new();
+		for (row, &character) in pattern.iter().enumerate() {
+			let (word, bit) = (row / 64, 1u64 << (row % 64));
+			if character.is_ascii() {
+				ascii[character as usize * words + word] |= bit;
+			} else {
+				other.entry(character).or_insert_with(|| vec![0; words])[word] |= bit;
+			}
+		}
+		let last_bit = 1u64 << (len.saturating_sub(1) % 64);
+		Self { len, words, ascii, other, zeros: vec![0; words], last_bit }
+	}
+
+	/// Edit distance between the pattern and `text`.
+	pub fn distance(&self, text: &[char]) -> usize {
+		if self.len == 0 {
+			return text.len();
+		}
+		let words = self.words;
+		// Vertical deltas between adjacent rows: all +1 in column 0.
+		let mut positive = vec![!0u64; words];
+		let mut negative = vec![0u64; words];
+		let mut score = self.len;
+		for &character in text {
+			let masks = if character.is_ascii() {
+				&self.ascii[character as usize * words..][..words]
+			} else {
+				self
+					.other
+					.get(&character)
+					.map_or(&self.zeros[..], Vec::as_slice)
+			};
+			// Global distance: the top row grows by one per text character.
+			let (mut carry_positive, mut carry_negative) = (true, false);
+			for word in 0..words {
+				let (vertical_positive, vertical_negative) = (positive[word], negative[word]);
+				let mut equal = masks[word];
+				let vertical = equal | vertical_negative;
+				if carry_negative {
+					equal |= 1;
+				}
+				let horizontal = ((equal & vertical_positive).wrapping_add(vertical_positive)
+					^ vertical_positive)
+					| equal;
+				let mut horizontal_positive = vertical_negative | !(horizontal | vertical_positive);
+				let mut horizontal_negative = vertical_positive & horizontal;
+				let high = if word + 1 == words {
+					self.last_bit
+				} else {
+					1 << 63
+				};
+				let out_positive = horizontal_positive & high != 0;
+				let out_negative = horizontal_negative & high != 0;
+				horizontal_positive = (horizontal_positive << 1) | u64::from(carry_positive);
+				horizontal_negative = (horizontal_negative << 1) | u64::from(carry_negative);
+				positive[word] = horizontal_negative | !(vertical | horizontal_positive);
+				negative[word] = horizontal_positive & vertical;
+				(carry_positive, carry_negative) = (out_positive, out_negative);
+			}
+			if carry_positive {
+				score += 1;
+			} else if carry_negative {
+				score -= 1;
+			}
+		}
+		score
+	}
 }
 
 /// Similarity in `[0, 1]`: `1 - distance / max_len`.
@@ -1227,6 +1382,44 @@ pub fn replace_text(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn fast_distances_match_reference_across_block_boundaries() {
+		// Patterns straddling the 64-row word boundaries of the bit-parallel
+		// distance, with non-ASCII rows and texts shorter, equal and longer.
+		let mut state = 0x5eed_u64;
+		let mut next = |bound: usize| {
+			state = state
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1);
+			((state >> 33) as usize) % bound
+		};
+		let alphabet = ['a', 'b', 'é', '界'];
+		for pattern_len in [0, 1, 63, 64, 65, 127, 128, 129] {
+			for _ in 0..40 {
+				let pattern: Vec<char> = (0..pattern_len).map(|_| alphabet[next(4)]).collect();
+				let mut text = pattern.clone();
+				for _ in 0..next(12) {
+					let at = next(text.len() + 1);
+					match next(3) {
+						0 => text.insert(at, alphabet[next(4)]),
+						1 if at < text.len() => drop(text.remove(at)),
+						_ if at < text.len() => text[at] = alphabet[next(4)],
+						_ => {},
+					}
+				}
+				let expected = levenshtein_chars(&pattern, &text);
+				assert_eq!(PatternDistance::new(&pattern).distance(&text), expected);
+				for max in [0, expected.saturating_sub(1), expected, expected + 3] {
+					assert_eq!(
+						levenshtein_within(&pattern, &text, max),
+						(expected <= max).then_some(expected),
+						"len {pattern_len} max {max}"
+					);
+				}
+			}
+		}
+	}
 
 	fn options(allow_fuzzy: bool) -> FindMatchOptions<'static> {
 		FindMatchOptions { allow_fuzzy, threshold: None, excluded_ranges: &[] }
