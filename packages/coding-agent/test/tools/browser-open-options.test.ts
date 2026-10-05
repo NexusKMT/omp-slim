@@ -7,7 +7,7 @@ import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { applyIgnoreHttpsErrors, resolveInitScriptSources } from "@oh-my-pi/pi-coding-agent/tools/browser/open-options";
 import { buildHeadlessLaunchArgs } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
-import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { getTab, releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import type { Page } from "puppeteer-core";
 import { rejectionOf } from "../helpers/rejection";
@@ -221,6 +221,18 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser open options", () => {
 			server.stop(true);
 		}
 	}, 20_000);
+
+	it("keeps the tab and says so when an open's navigation fails", async () => {
+		const refused = Bun.serve({ port: 0, fetch: () => new Response("") });
+		const url = refused.url.href;
+		refused.stop(true);
+		const invoke = browserHost();
+		const name = `refused-${crypto.randomUUID()}`;
+		expect(await rejectionOf(invoke({ action: "open", name, url }))).toMatchObject({
+			message: expect.stringContaining(`browser.tab(${JSON.stringify(name)})`),
+		});
+		expect(getTab(name)?.state).toBe("alive");
+	});
 
 	it("waits for a completed download and records its bytes", async () => {
 		const payload = new TextEncoder().encode("download payload\n");

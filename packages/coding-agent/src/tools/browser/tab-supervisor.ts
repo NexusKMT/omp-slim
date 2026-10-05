@@ -558,7 +558,8 @@ async function navigateOpenedTab(name: string, url: string, opts: AcquireTabOpti
 			{ cwd: getProjectDir() },
 		);
 	} catch (error) {
-		if (!(error instanceof ToolError) || tabs.get(name)?.state !== "alive") throw error;
+		if (error instanceof ToolAbortError || !(error instanceof Error) || tabs.get(name)?.state !== "alive")
+			throw error;
 		throw new ToolError(
 			`${error.message}\nTab ${JSON.stringify(name)} stays open on what loaded; reach it with browser.tab(${JSON.stringify(name)}).`,
 		);
