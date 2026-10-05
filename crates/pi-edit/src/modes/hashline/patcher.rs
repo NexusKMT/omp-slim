@@ -2,6 +2,7 @@
 //! `coding-agent/src/edit/hashline/execute.ts`).
 
 use std::{
+	borrow::Cow,
 	collections::{BTreeSet, HashMap},
 	path::Path,
 };
@@ -436,7 +437,7 @@ pub(crate) fn apply_with_recovery(
 	let stored = store.by_hash(canonical, expected);
 	let mut block_resolutions = Vec::new();
 	let mut resolve_warnings = Vec::new();
-	let resolved = if has_block_edit(edits) {
+	let resolved: Cow<'_, [Edit]> = if has_block_edit(edits) {
 		let base = if live_matches {
 			normalized
 		} else if let Some(snapshot) = &stored {
@@ -444,16 +445,16 @@ pub(crate) fn apply_with_recovery(
 		} else {
 			return Err(mismatch(section, canonical, normalized, expected, store));
 		};
-		resolve_block_edits(
+		Cow::Owned(resolve_block_edits(
 			edits,
 			base,
 			&section.path,
 			Unresolved::Throw,
 			&mut |item| block_resolutions.push(item),
 			&mut |warning| resolve_warnings.push(warning),
-		)?
+		)?)
 	} else {
-		edits.to_vec()
+		Cow::Borrowed(edits)
 	};
 	validate_clipboard_sequence(&resolved, clipboard)?;
 	if live_matches {
