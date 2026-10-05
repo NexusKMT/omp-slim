@@ -1260,11 +1260,7 @@ export class AgentSession implements SettingsScope {
 					logger.debug("IRC wake turn deferred behind the running turn");
 					return;
 				}
-				try {
-					finishObservation = this.#ircWakeTurnObserver?.(records);
-				} catch (error) {
-					logger.warn("IRC wake turn observer failed to start", { error: String(error) });
-				}
+				finishObservation = this.#startTurnObservation(records);
 				return this.agent.prompt(records);
 			})
 			.catch(error => {
@@ -1298,30 +1294,50 @@ export class AgentSession implements SettingsScope {
 					);
 					this.#queuedMessageDrainBlocked ||= parkedQueueDrainBlocked;
 				}
-				// Release the in-flight bracket BEFORE settling owned async work:
-				// the bracket holds the prompt-in-flight count up, which withholds
-				// the yield-queue's idle flush, so waiting inside it would deadlock
-				// the very delivery the settle awaits (robomp review on #13703).
+				// Release the in-flight bracket BEFORE settling owned async work.
 				this.#endInFlight();
-				// Owner-scoped background work continues past the wake turn: the
-				// async-result continuation is where the agent may finally yield.
-				// Keep the observer attached across that pause (settle = jobs →
-				// deliveries → idle) so the monitor still sees the eventual yield —
-				// finishing here would unsubscribe it first and the completion
-				// would dead-letter with no parent-owned job and no refreshed
-				// artifact (#11564). Settles immediately when nothing is pending;
-				// an interrupt cancels the jobs and settles the wait normally.
-				try {
-					await this.settleAsyncWork();
-				} catch (error) {
-					logger.warn("IRC wake async-work settle failed", { error: String(error) });
-				}
-				try {
-					await finishObservation?.(turnError);
-				} catch (error) {
-					logger.warn("IRC wake turn observer failed to finish", { error: String(error) });
-				}
+				await this.#finishTurnObservation(finishObservation, turnError);
 			});
+	}
+
+	/** Starts the installed turn observer (the task executor's subagent run monitor) for a turn about to run. */
+	#startTurnObservation(records: AgentMessage[]): ((error?: unknown) => void | Promise<void>) | undefined {
+		try {
+			return this.#ircWakeTurnObserver?.(records);
+		} catch (error) {
+			logger.warn("Turn observer failed to start", { error: String(error) });
+			return undefined;
+		}
+	}
+
+	/**
+	 * Finishes a turn observation once the turn's owned async work has settled.
+	 * Call only after the turn released its in-flight bracket: the bracket
+	 * withholds the yield-queue's idle flush, so settling inside it would deadlock
+	 * the very delivery the settle awaits (robomp review on #13703).
+	 *
+	 * Owner-scoped background work continues past the turn: the async-result
+	 * continuation is where the agent may finally yield. Keeping the observer
+	 * attached across that pause (settle = jobs → deliveries → idle) lets the
+	 * monitor still see the eventual yield — finishing first would unsubscribe it
+	 * and the completion would dead-letter with no parent-owned job and no
+	 * refreshed artifact (#11564). Settles immediately when nothing is pending;
+	 * an interrupt cancels the jobs and settles the wait normally.
+	 */
+	async #finishTurnObservation(
+		finish: ((error?: unknown) => void | Promise<void>) | undefined,
+		turnError: unknown,
+	): Promise<void> {
+		try {
+			await this.settleAsyncWork();
+		} catch (error) {
+			logger.warn("Turn observation async-work settle failed", { error: String(error) });
+		}
+		try {
+			await finish?.(turnError);
+		} catch (error) {
+			logger.warn("Turn observer failed to finish", { error: String(error) });
+		}
 	}
 
 	/** Remove advisor concern/blocker cards from the agent-core steer/follow-up
@@ -7101,6 +7117,16 @@ export class AgentSession implements SettingsScope {
 			preludeMessages.push(eagerTaskPrelude);
 		}
 
+		// A user prompt on a kept-alive subagent (focused-session steering) starts a
+		// turn no task executor drives: observe it like an IRC wake so an accepted
+		// yield rewrites the artifact and reaches the parent (#14428). Executor
+		// prompts are agent-attributed and run under their own monitor; a pooled
+		// turn owns the worker's yield contract.
+		const finishObservation =
+			(options?.userInitiated === true || promptAttribution === "user") && this.#workPoolYieldItems.length === 0
+				? this.#startTurnObservation([message])
+				: undefined;
+		let turnError: unknown;
 		let dispatched = false;
 		try {
 			dispatched = await this.#promptWithMessage(message, expandedText, {
@@ -7120,6 +7146,7 @@ export class AgentSession implements SettingsScope {
 						: undefined,
 			});
 		} catch (error) {
+			turnError = error;
 			if (error instanceof AgentStartPolicyChangedError && message.role === "user") {
 				this.#promptDropped?.({ text: typedText, images: options?.images });
 			}
@@ -7129,6 +7156,8 @@ export class AgentSession implements SettingsScope {
 			// (e.g., compaction aborted, validation failed).
 			this.#toolChoiceQueue.removeByLabel("eager-todo");
 			this.#toolChoiceQueue.removeByLabel("external-thinking");
+			// Detached: settling owned async work may outlast this prompt call.
+			if (finishObservation) void this.#finishTurnObservation(finishObservation, turnError);
 		}
 		outcome.sessionClaimed = dispatched;
 		if (!dispatched && message.role === "user") {
@@ -10397,7 +10426,10 @@ export class AgentSession implements SettingsScope {
 		this.#irc.trackReply(pending);
 	}
 
-	/** Installs task-executor monitoring around autonomous IRC wake turns. */
+	/**
+	 * Installs task-executor monitoring around turns no executor drives: autonomous IRC
+	 * wake turns and user prompts (focused-session steering of a kept-alive subagent).
+	 */
 	setIrcWakeTurnObserver(
 		observer: ((records: AgentMessage[]) => ((error?: unknown) => void | Promise<void>) | undefined) | undefined,
 	): void {
