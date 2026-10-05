@@ -750,8 +750,10 @@ mod imp {
 		let mut entries = Vec::new();
 		for entry in fs::read_dir(&source_dir)? {
 			let entry = entry?;
+			// On Windows `DirEntry::metadata` comes from the FindNextFileW record (lstat
+			// semantics), so it avoids a per-entry open/stat round trip.
+			let metadata = entry.metadata()?;
 			let path = entry.path();
-			let metadata = fs::symlink_metadata(&path)?;
 			let symlink_target = symlink_target_wide(&path, &metadata)?;
 			let name = entry.file_name();
 			let mut name_wide = to_wide(name.as_os_str());
