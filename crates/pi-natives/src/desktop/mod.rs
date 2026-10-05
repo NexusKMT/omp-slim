@@ -1260,9 +1260,10 @@ mod capture_tests {
 
 	fn click_reference(worker: &mut Worker, origin: &str) -> CoreResult<Response> {
 		let generation = worker.registry.current_generation(origin);
+		let props = worker.ax()?.props(&AxHandle::Test(1))?;
 		let reference = worker
 			.registry
-			.register(origin, generation, AxHandle::Test(1));
+			.register(origin, generation, AxHandle::Test(1), &props);
 		let (reply, _rx) = flume::bounded(1);
 		worker.process(&Request::AxClick {
 			reference,

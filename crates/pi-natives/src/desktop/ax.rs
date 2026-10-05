@@ -1,7 +1,7 @@
 use std::{
 	collections::HashMap,
 	fmt::Write as _,
-	hash::{Hash, Hasher},
+	hash::{DefaultHasher, Hash, Hasher},
 };
 
 use super::{
@@ -83,17 +83,21 @@ pub struct AxBounds {
 }
 
 struct Registered {
-	handle:     AxHandle,
-	target_key: String,
-	generation: u64,
+	handle:      AxHandle,
+	target_key:  String,
+	generation:  u64,
+	/// Role and label at registration. An identity read again with another
+	/// role or label is a different element that reuses it.
+	fingerprint: u64,
 }
 
 pub struct AxRegistry {
 	next_ref:    u64,
 	generations: HashMap<String, u64>,
 	entries:     HashMap<u64, Registered>,
-	/// Ref of each registered element, so an element read again keeps its ref.
-	refs:        HashMap<AxHandle, u64>,
+	/// Ref of each element registered under each target, so an element read
+	/// again keeps its ref.
+	refs:        HashMap<String, HashMap<AxHandle, u64>>,
 }
 
 impl Default for AxRegistry {
@@ -123,20 +127,55 @@ impl AxRegistry {
 		*self.generations.entry(target.to_string()).or_insert(1)
 	}
 
-	/// Returns the element's ref, minting one the first time it is seen, and
-	/// renews it for `target`'s `generation`.
-	pub(crate) fn register(&mut self, target: &str, generation: u64, handle: AxHandle) -> String {
-		let id = if let Some(&id) = self.refs.get(&handle) {
-			id
-		} else {
-			let id = self.next_ref;
-			self.next_ref = self.next_ref.saturating_add(1);
-			self.refs.insert(handle.clone(), id);
-			id
+	/// Returns the element's ref under `target`, minting one the first time it
+	/// is seen there, and renews it for `target`'s `generation`. An identity
+	/// that now names an element with another role or label gets a new ref,
+	/// and the old one expires so it cannot act on the newcomer.
+	pub(crate) fn register(
+		&mut self,
+		target: &str,
+		generation: u64,
+		handle: AxHandle,
+		props: &AxProps,
+	) -> String {
+		let mut hasher = DefaultHasher::new();
+		props.role.hash(&mut hasher);
+		label(props).hash(&mut hasher);
+		let fingerprint = hasher.finish();
+		let known = self
+			.refs
+			.get(target)
+			.and_then(|refs| refs.get(&handle))
+			.copied();
+		let id = match known {
+			Some(id)
+				if self
+					.entries
+					.get(&id)
+					.is_some_and(|entry| entry.fingerprint == fingerprint) =>
+			{
+				id
+			},
+			reused => {
+				if let Some(id) = reused {
+					self.entries.remove(&id);
+				}
+				let id = self.next_ref;
+				self.next_ref = self.next_ref.saturating_add(1);
+				self
+					.refs
+					.entry(target.to_string())
+					.or_default()
+					.insert(handle.clone(), id);
+				id
+			},
 		};
-		self
-			.entries
-			.insert(id, Registered { handle, target_key: target.to_string(), generation });
+		self.entries.insert(id, Registered {
+			handle,
+			target_key: target.to_string(),
+			generation,
+			fingerprint,
+		});
 		self.enforce_cap();
 		format!("e{id}")
 	}
@@ -163,8 +202,8 @@ impl AxRegistry {
 		let refs = &mut self.refs;
 		self.entries.retain(|_, entry| {
 			let expired = expired(entry);
-			if expired {
-				refs.remove(&entry.handle);
+			if expired && let Some(target_refs) = refs.get_mut(&entry.target_key) {
+				target_refs.remove(&entry.handle);
 			}
 			!expired
 		});
@@ -369,7 +408,7 @@ fn format_tree(
 	text: &mut String,
 	nodes: &mut u32,
 ) {
-	let reference = registry.register(target, generation, node.handle);
+	let reference = registry.register(target, generation, node.handle, &node.props);
 	if !text.is_empty() {
 		text.push('\n');
 	}
@@ -478,7 +517,7 @@ pub fn query(
 			&& contains(label(&node.props), title.as_ref())
 			&& contains(node.props.value.as_deref(), value.as_ref())
 		{
-			let reference = registry.register(target, generation, node.handle);
+			let reference = registry.register(target, generation, node.handle, &node.props);
 			result.push(node_to_napi(reference, node.props));
 			if result.len() >= limit {
 				break;
@@ -496,7 +535,7 @@ pub fn register_node(
 ) -> CoreResult<AxNode> {
 	let props = backend.props(&handle)?;
 	let generation = registry.current_generation(target);
-	let reference = registry.register(target, generation, handle);
+	let reference = registry.register(target, generation, handle, &props);
 	Ok(node_to_napi(reference, props))
 }
 pub fn element_at_node(
@@ -684,7 +723,7 @@ mod tests {
 		let mut r = AxRegistry::default();
 		for g in 1..=3 {
 			let generation = r.begin_snapshot("x");
-			r.register("x", generation, AxHandle::Test(g));
+			r.register("x", generation, AxHandle::Test(g), &p("button", None));
 		}
 		assert!(r.resolve("e1").is_err());
 		assert!(r.resolve("e2").is_ok());
@@ -730,11 +769,32 @@ mod tests {
 		assert_eq!(registry.resolve("e3").err().map(|error| error.code), Some(ErrorCode::StaleRef));
 	}
 	#[test]
+	fn refs_are_per_target_and_a_reused_identity_gets_a_new_ref() {
+		let mut r = AxRegistry::default();
+		let go = p("button", Some("Go"));
+		let desktop = r.current_generation("desktop");
+		assert_eq!(r.register("desktop", desktop, AxHandle::Test(5), &go), "e1");
+		for _ in 0..2 {
+			let generation = r.begin_snapshot("7");
+			assert_eq!(r.register("7", generation, AxHandle::Test(5), &go), "e2");
+		}
+		let generation = r.begin_snapshot("7");
+		assert_eq!(
+			r.register("7", generation, AxHandle::Test(5), &p("checkbox", Some("Done"))),
+			"e3"
+		);
+		assert_eq!(r.resolve("e2").err().map(|error| error.code), Some(ErrorCode::StaleRef));
+		r.begin_snapshot("7");
+		r.begin_snapshot("7");
+		assert!(r.resolve("e3").is_err());
+		assert!(r.resolve("e1").is_ok());
+	}
+	#[test]
 	fn hard_cap_evicts_oldest_generation_of_largest_target() {
 		let mut r = AxRegistry::default();
 		let g = r.current_generation("x");
 		for n in 0..5_001 {
-			r.register("x", g, AxHandle::Test(n));
+			r.register("x", g, AxHandle::Test(n), &p("button", None));
 		}
 		assert!(r.entries.len() <= 5_000);
 		assert!(r.resolve("e1").is_err());

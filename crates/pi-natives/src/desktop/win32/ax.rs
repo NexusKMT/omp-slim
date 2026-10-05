@@ -52,7 +52,10 @@ impl Win32Ax {
 	)]
 	fn element(handle: &AxHandle) -> CoreResult<&UIElement> {
 		match handle {
-			AxHandle::Uia(element, _) => Ok(element),
+			AxHandle::Uia(element, runtime_id) if !runtime_id.is_empty() => Ok(element),
+			AxHandle::Uia(..) => {
+				Err(DesktopError::ax_failed("UI Automation element reports no RuntimeId"))
+			},
 			#[cfg(test)]
 			_ => Err(DesktopError::ax_failed("accessibility handle does not belong to UI Automation")),
 		}
@@ -163,10 +166,11 @@ fn ax_error(error: impl std::fmt::Display) -> DesktopError {
 }
 
 /// Handle for `element` carrying the `RuntimeId` that identifies it across
-/// reads.
-fn uia_handle(element: UIElement) -> CoreResult<AxHandle> {
-	let runtime_id = element.get_runtime_id().map_err(ax_error)?;
-	Ok(AxHandle::Uia(element, runtime_id.into_boxed_slice()))
+/// reads. An element that reports none gets an empty one, which every
+/// operation refuses, so a walk counts it among its unreadable nodes.
+fn uia_handle(element: UIElement) -> AxHandle {
+	let runtime_id = element.get_runtime_id().unwrap_or_default();
+	AxHandle::Uia(element, runtime_id.into_boxed_slice())
 }
 
 /// Native window handle `element` represents, if any.
@@ -345,8 +349,8 @@ impl AxBackend for Win32Ax {
 		self
 			.automation()?
 			.element_from_handle(handle)
+			.map(uia_handle)
 			.map_err(ax_error)
-			.and_then(uia_handle)
 	}
 
 	fn props(&mut self, handle: &AxHandle) -> CoreResult<AxProps> {
@@ -381,24 +385,18 @@ impl AxBackend for Win32Ax {
 
 	fn children(&mut self, handle: &AxHandle) -> CoreResult<Vec<AxHandle>> {
 		let element = Self::element(handle)?;
-		// A child that no longer reports its RuntimeId has gone away.
 		Ok(self
 			.walker()?
 			.get_children(element)
 			.unwrap_or_default()
 			.into_iter()
-			.filter_map(|child| uia_handle(child).ok())
+			.map(uia_handle)
 			.collect())
 	}
 
 	fn parent(&mut self, handle: &AxHandle) -> CoreResult<Option<AxHandle>> {
 		let element = Self::element(handle)?;
-		self
-			.walker()?
-			.get_parent(element)
-			.ok()
-			.map(uia_handle)
-			.transpose()
+		Ok(self.walker()?.get_parent(element).ok().map(uia_handle))
 	}
 
 	fn perform(&mut self, handle: &AxHandle, action: &str) -> CoreResult<()> {
@@ -474,18 +472,18 @@ impl AxBackend for Win32Ax {
 		self
 			.automation()?
 			.element_from_point(Point::new(x.round() as i32, y.round() as i32))
-			.map_err(ax_error)
-			.and_then(uia_handle)
+			.map(uia_handle)
 			.map(Some)
+			.map_err(ax_error)
 	}
 
 	fn focused_element(&mut self) -> CoreResult<Option<AxHandle>> {
 		self
 			.automation()?
 			.get_focused_element()
-			.map_err(ax_error)
-			.and_then(uia_handle)
+			.map(uia_handle)
 			.map(Some)
+			.map_err(ax_error)
 	}
 
 	fn attributes(&mut self, handle: &AxHandle) -> CoreResult<Vec<(String, String)>> {
