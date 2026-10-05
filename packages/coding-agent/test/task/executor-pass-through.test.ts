@@ -896,4 +896,35 @@ describe("runSubprocess follows the parent's MCP manager", () => {
 		expect(spy.mock.calls[0]?.[0]?.mcpTools).toBeUndefined();
 		expect(child.refreshed.at(-1)).toContain(toolOf("alpha"));
 	}, 20_000);
+
+	it("never rebinds an MCP proxy over an explicitly supplied same-name child tool", async () => {
+		// Kernel-defined (eval) tools reach children through `customTools` and may
+		// carry `mcp__…` names; the child's own tool must keep the name on reload.
+		const kernelTool: CustomTool = {
+			name: toolOf("alpha"),
+			label: toolOf("alpha"),
+			description: "Kernel-defined tool sharing an MCP tool's minted name.",
+			parameters: { type: "object", properties: {} },
+			execute: async () => ({ content: [{ type: "text", text: "kernel" }] }),
+		};
+		const siblingProxy = `mcp__alpha_${manyToolName(1)}`;
+		await manager.connectServers({ alpha: fixtureConfig() }, {});
+		const child = followingChild(async ({ refreshedWith }) => {
+			await manager.disconnectAll();
+			await manager.connectServers({ alpha: fixtureConfig() }, {});
+			await refreshedWith([siblingProxy]);
+		});
+		const spy = vi.spyOn(sdkModule, "createAgentSession").mockResolvedValue(createSessionResult(child.session));
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "mcp-follow-collision",
+			mcpManager: manager,
+			customTools: [kernelTool],
+		});
+
+		expect(result.exitCode).toBe(0);
+		expect(spy.mock.calls[0]?.[0]?.customTools).toEqual([kernelTool]);
+		expect(child.refreshed.at(-1)).not.toContain(toolOf("alpha"));
+	}, 20_000);
 });

@@ -723,7 +723,8 @@ export interface CreateAgentSessionOptions {
 	 * register as manager-owned MCP tools — active from the start and replaced
 	 * wholesale by `refreshMCPTools` — so a parent `/mcp reload` can both add
 	 * and remove them. Passed as `customTools` they would instead be retained as
-	 * extension-owned tools across every refresh. Ignored for restricted sessions.
+	 * extension-owned tools across every refresh. A same-named `customTools`
+	 * entry keeps precedence and drops the proxy. Ignored for restricted sessions.
 	 */
 	mcpTools?: CustomTool[];
 
@@ -3286,16 +3287,20 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		const registeredTools = restrictToolNames ? [] : extensionRunner.getAllRegisteredTools();
 		const initialRegisteredTools = new WeakSet(registeredTools);
-		// Manager-owned proxies join the SDK custom tools (same registration and
-		// precedence) but are classified as manager tools via their origins.
-		const sdkMcpTools = restrictToolNames ? [] : (options.mcpTools ?? []);
-		initialMcpManagerTools.push(...sdkMcpTools);
-		const sdkCustomTools = [
-			...(restrictToolNames && options.allowRestrictedCustomTools !== true
+		// Manager-owned proxies register like SDK custom tools but are classified
+		// as manager tools via their origins. An explicitly supplied custom tool
+		// keeps its name: the proxy is dropped rather than registered as a loser
+		// whose manager classification would let a refresh replace the winner.
+		const explicitCustomTools =
+			restrictToolNames && options.allowRestrictedCustomTools !== true
 				? []
-				: (options.customTools?.filter(tool => !isLegacyBuiltinToolDefinition(tool)) ?? [])),
-			...sdkMcpTools,
-		];
+				: (options.customTools?.filter(tool => !isLegacyBuiltinToolDefinition(tool)) ?? []);
+		const explicitCustomToolNames = new Set(explicitCustomTools.map(tool => tool.name));
+		const sdkMcpTools = restrictToolNames
+			? []
+			: (options.mcpTools ?? []).filter(tool => !explicitCustomToolNames.has(tool.name));
+		initialMcpManagerTools.push(...sdkMcpTools);
+		const sdkCustomTools = [...sdkMcpTools, ...explicitCustomTools];
 		const sdkCustomToolNames = new Set(sdkCustomTools.map(tool => tool.name));
 		const allCustomTools = [
 			...registeredTools,

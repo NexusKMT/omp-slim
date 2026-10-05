@@ -997,8 +997,13 @@ export interface MCPToolFollower {
  * session is still being created is recorded and replayed on {@link
  * MCPToolFollower.bind}, so no window exists where an update is lost. Bursts
  * (a reload re-placing every server) coalesce into one rebind per tick.
+ *
+ * `reservedNames` are the child's explicitly supplied tool names (e.g.
+ * kernel-defined `mcp__…` tools): `createAgentSession` drops same-named proxies
+ * so those tools win, and every rebind must keep dropping them, or the first
+ * reload would replace the child's own tool with the MCP capability.
  */
-export function followMCPTools(mcpManager: MCPManager): MCPToolFollower {
+export function followMCPTools(mcpManager: MCPManager, reservedNames?: ReadonlySet<string>): MCPToolFollower {
 	let session: MCPToolFollowerSession | undefined;
 	let pending = false;
 	let scheduled = false;
@@ -1006,7 +1011,9 @@ export function followMCPTools(mcpManager: MCPManager): MCPToolFollower {
 		scheduled = false;
 		if (!session || !pending) return;
 		pending = false;
-		session.refreshMCPTools(createMCPProxyTools(mcpManager)).catch(error => {
+		const proxies = createMCPProxyTools(mcpManager);
+		const tools = reservedNames?.size ? proxies.filter(tool => !reservedNames.has(tool.name)) : proxies;
+		session.refreshMCPTools(tools).catch(error => {
 			logger.warn("Subagent MCP tool refresh failed", {
 				error: error instanceof Error ? error.message : String(error),
 			});
@@ -3638,6 +3645,11 @@ interface SubagentLaunchInputs {
 	onFirstChatDispatch?: () => void;
 }
 
+/** Names of the child's explicitly supplied tools; they win over same-named MCP proxies on every rebind. */
+function explicitSubagentToolNames(spec: SubagentSessionSpec): ReadonlySet<string> {
+	return new Set((spec.options.customTools ?? []).map(tool => tool.name));
+}
+
 function buildSubagentSessionOptions(
 	spec: SubagentSessionSpec,
 	settings: Settings,
@@ -3771,7 +3783,7 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 		}
 		await refreshSubagentIrcRoot(capture.spec.prompt, reopened, capture.sessionFile);
 		const mcpManager = capture.spec.options.mcpManager;
-		const mcpFollower = mcpManager ? followMCPTools(mcpManager) : undefined;
+		const mcpFollower = mcpManager ? followMCPTools(mcpManager, explicitSubagentToolNames(capture.spec)) : undefined;
 		let revived: AgentSession;
 		try {
 			({ session: revived } = await createAgentSession(
@@ -4332,7 +4344,9 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const hasExistingModelRole = sessionManager.getLastModelChangeRole() !== undefined;
 			// Subscribe before the builder mints proxies so a manager change during
 			// session startup is replayed on bind instead of lost.
-			const mcpFollower = mcpManager ? followMCPTools(mcpManager) : undefined;
+			const mcpFollower = mcpManager
+				? followMCPTools(mcpManager, explicitSubagentToolNames(sessionSpec))
+				: undefined;
 			let session: AgentSession;
 			let sessionPromise: Promise<CreateAgentSessionResult> | undefined;
 			try {
