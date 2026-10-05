@@ -118,9 +118,12 @@ import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mod
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	DEFAULT_PREWALK_TARGET,
+	disabledProviderIds,
 	getModelMatchPreferences,
 	type ResolvedModelRoleValue,
 	resolveCliModel,
+	resolveSessionModelSelector,
+	sessionModelDiscoveryProviders,
 } from "../config/model-resolver";
 import { expandPromptTemplate, type PromptTemplate } from "../config/prompt-templates";
 import { buildServiceTierByFamily, isServiceTierForFamily, serviceTierSettingToTier } from "../config/service-tier";
@@ -401,7 +404,13 @@ import {
 	SessionMaintenance,
 	type SessionMaintenanceHost,
 } from "./session-maintenance";
-import { cleanupEmptyMoveSession, copySessionArtifacts, type SessionManager } from "./session-manager";
+import {
+	cleanupEmptyMoveSession,
+	copySessionArtifacts,
+	extractSessionInit,
+	type PersistedSessionInit,
+	type SessionManager,
+} from "./session-manager";
 import { SessionMemory, type SessionMemoryHost } from "./session-memory";
 import { buildSessionMetadata } from "./session-metadata";
 import { SessionProviderBoundary, type SessionProviderBoundaryHost } from "./session-provider-boundary";
@@ -443,6 +452,7 @@ import {
 	cfgProvidersCacheWarming,
 	cfgProvidersCacheRetention,
 	cfgProvidersAntigravityEndpoint,
+	cfgRetryModelFallback,
 	cfgRetryUsageAwareFallback,
 	cfgSampling,
 	cfgSkillful,
@@ -890,6 +900,8 @@ export class AgentSession implements SettingsScope {
 
 	// Model registry for API key resolution
 	#modelRegistry: ModelRegistry;
+	/** Creation-time permission for switchSession to keep the current model when a target's saved model is unrestorable. */
+	readonly #allowSessionModelFallback: boolean;
 	#usageFallbackConfirmer: UsageFallbackConfirmer | undefined;
 	#usagePreflightAbortControllers = new Set<AbortController>();
 	/** In-flight vision descriptions that gate prompt admission; abort() cancels them. */
@@ -974,6 +986,8 @@ export class AgentSession implements SettingsScope {
 	 *  enqueue and fold/resume normally across an in-session interrupt, only a session identity
 	 *  change should drop them. */
 	#sessionGeneration = 0;
+	/** Latest `session_init` of the transcript the model calls ran on; `init` is null when it has none. */
+	#sessionInit: { sessionFile: string | undefined; init: PersistedSessionInit | null } | undefined;
 	/** Settles when switchSession commits or restores its previous generation on rollback.
 	 *  newSession never rolls its generation back, so it does not delay stale aside/SDK calls. */
 	#sessionGenerationSettled: Promise<void> | undefined;
@@ -1462,6 +1476,7 @@ export class AgentSession implements SettingsScope {
 		this.#skillDescriptions = config.skillDescriptions ?? new SkillDescriptionCatalog();
 		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
+		this.#allowSessionModelFallback = config.allowSessionModelFallback === true;
 		this.#extensionRoots =
 			config.extensionRoots ??
 			(() => ({
@@ -1906,6 +1921,7 @@ export class AgentSession implements SettingsScope {
 			cancel: toolCallId => this.#ttsr.cancelBridgedToolCall(toolCallId),
 		});
 		this.agent.setOnBeforeYield(() => this.#ttsr.settleJudgments());
+		this.agent.setOnModelCallSystemPrompt(prompt => this.#recordModelCallSystemPrompt(prompt));
 		this.#obfuscator = config.obfuscator;
 		const providerBoundaryHost: SessionProviderBoundaryHost = {
 			agent: this.agent,
@@ -5875,6 +5891,39 @@ export class AgentSession implements SettingsScope {
 		return this.agent.state.systemPrompt;
 	}
 
+	/**
+	 * Keeps a subagent transcript's latest `session_init` on the base prompt and work-pool yield items
+	 * its model calls are built from, appending a newer one when either changes: signed thinking is
+	 * bound to the system prompt and tools, so cold revival must replay them. A per-turn override is
+	 * stored as the base its hook was given, since the revived turn re-runs the hook. Transcripts
+	 * without a `session_init` are left alone.
+	 */
+	#recordModelCallSystemPrompt(prompt: string[]): void {
+		const sessionFile = this.sessionManager.getSessionFile();
+		let cached = this.#sessionInit;
+		if (!cached || cached.sessionFile !== sessionFile) {
+			cached = { sessionFile, init: extractSessionInit(this.sessionManager.getEntries()) };
+			this.#sessionInit = cached;
+		}
+		const { init } = cached;
+		if (!init) return;
+		const base = this.#tools.baseOfSystemPrompt(prompt);
+		const items = this.#workPoolYieldItems;
+		const persistedItems = init.workPoolYieldItems ?? [];
+		if (
+			base.length === init.systemPrompt.length &&
+			base.every((block, index) => block === init.systemPrompt[index]) &&
+			items.length === persistedItems.length &&
+			items.every(
+				(item, index) => item.id === persistedItems[index]?.id && item.index === persistedItems[index]?.index,
+			)
+		) {
+			return;
+		}
+		cached.init = { ...init, systemPrompt: base, workPoolYieldItems: items.length > 0 ? [...items] : undefined };
+		this.sessionManager.appendSessionInit(cached.init);
+	}
+
 	/** Marks streamed text as committed or buffered for turn-recovery replay decisions. */
 	setTextOutputCommitted(committed: boolean): void {
 		this.#textOutputCommitted = committed;
@@ -7418,7 +7467,7 @@ export class AgentSession implements SettingsScope {
 					if (!isCurrent() || !overrideIsCurrent()) return undefined;
 					if (basePreparation.commit?.() === false) return undefined;
 					if (result?.systemPrompt !== undefined) {
-						this.#tools.setTurnSystemPromptOverride(result.systemPrompt);
+						this.#tools.setTurnSystemPromptOverride(result.systemPrompt, basePreparation.systemPrompt);
 					} else {
 						this.#tools.clearTurnSystemPromptOverride();
 						this.agent.setSystemPrompt(this.#tools.baseSystemPrompt);
@@ -8882,6 +8931,13 @@ export class AgentSession implements SettingsScope {
 			// Record what this rebuild published for future rollbacks: the live set
 			// as of success. Then drain any wake parked while pooled.
 			this.#lastPublishedWorkPoolYieldItems = this.#workPoolYieldItems.map(item => ({ ...item }));
+			// Persist the contract now: a batch-end clear makes no model call, and a
+			// cold revival must not restore the finished batch's items. Only once a
+			// model call has resolved this transcript's session_init; before that,
+			// the executor has not written it yet.
+			if (this.#sessionInit?.init && this.#sessionInit.sessionFile === this.sessionManager.getSessionFile()) {
+				this.#recordModelCallSystemPrompt(this.#tools.baseSystemPrompt);
+			}
 			// A deferred wake may be parked while pooled; now that the fresh
 			// contract is published, let it wake (or stay parked when pooled).
 			this.#resumeStrandedIrcAsides();
@@ -10596,7 +10652,8 @@ export class AgentSession implements SettingsScope {
 			content: assistantMessage.content.filter(block => block.type !== "toolCall"),
 		};
 		return {
-			replyText: args.dedupeReply === false ? replyText.trim() : dedupeEphemeralReply(replyText.trim()),
+			replyText:
+				args.dedupeReply === false ? replyText.trim() : dedupeEphemeralReply(replyText.trim(), args.replyMaxBytes),
 			assistantMessage: sanitizedMessage,
 		};
 	}
@@ -10677,6 +10734,14 @@ export class AgentSession implements SettingsScope {
 	 * Switch to a different session file.
 	 * Aborts current operation, loads messages, restores model/thinking.
 	 * Listeners are preserved and will continue receiving events.
+	 *
+	 * When none of the target session's saved models can be restored, the switch
+	 * throws `Could not restore model <provider/id>` and the current session stays
+	 * active; as with a rejected cwd change, `session_before_switch` has already
+	 * run and any in-flight turn has already been aborted (the target's models are
+	 * only known once its file is loaded). A session created with `allowSessionModelFallback` (and
+	 * `retry.modelFallback` on) instead keeps its current model and reports a
+	 * warning. Reloading the current session keeps the current model.
 	 * @returns true if switch completed, false if cancelled by hook or cwd change
 	 */
 	async switchSession(
@@ -10685,8 +10750,24 @@ export class AgentSession implements SettingsScope {
 			onCwdChange?: (newCwd: string, previousCwd: string) => Promise<boolean>;
 			/** Collab snapshot adoption keeps the guest's process cwd and marks the replica runtime-only. */
 			preserveLocalCwd?: boolean;
+			/**
+			 * Use this model instead of the target's saved one, like an explicit
+			 * `--model` at startup, and record it in the session when it differs.
+			 */
+			model?: Model;
+			/** Keep the current model without restoring the target's (collab replicas mirror the host's model). */
+			keepModel?: boolean;
+			/**
+			 * Receives the model fallback warning after the switch commits, instead of a
+			 * `notice` event; for hosts that re-render the transcript after switching.
+			 */
+			onModelFallback?: (warning: string) => void;
 		},
 	): Promise<boolean> {
+		const explicitModel = options?.model;
+		if (explicitModel && !this.#modelRegistry.hasConfiguredAuth(explicitModel)) {
+			throw new Error(`No API key for ${explicitModel.provider}/${explicitModel.id}`);
+		}
 		using _transition = this.#beginSessionTransition();
 		const previousSessionFile = this.sessionManager.getSessionFile();
 		const switchingToDifferentSession = previousSessionFile
@@ -10780,6 +10861,9 @@ export class AgentSession implements SettingsScope {
 				// still observe message_end, then mute before swapping files.
 				await this.#advisors.drainAndDetachRecorders();
 			}
+			// The file may be reloaded at the same path with a different latest contract (or the
+			// switch rolled back via restoreState); re-read it on the next model call either way.
+			this.#sessionInit = undefined;
 			await this.sessionManager.setSessionFile(sessionPath);
 			this.#bash.markSessionTransition(bashTransition);
 			const newCwd = this.sessionManager.getCwd();
@@ -10810,6 +10894,28 @@ export class AgentSession implements SettingsScope {
 			this.#memory.rekeyForCurrentSessionId();
 
 			let sessionContext = this.buildDisplaySessionContext();
+			// Resolve the target's model before announcing the switch, so an
+			// unrestorable one rolls back before any hook sees the target session.
+			const targetModelStrings = getRestorableSessionModels(
+				sessionContext.models,
+				this.sessionManager.getLastModelChangeRole(),
+			);
+			let targetModel = explicitModel;
+			let modelFallbackWarning: string | undefined;
+			if (!targetModel && !options?.keepModel && targetModelStrings.length > 0) {
+				targetModel = await this.#resolveSessionModel(targetModelStrings);
+				if (!targetModel && switchingToDifferentSession) {
+					// Like startup resume: never hand the transcript to a model the
+					// session did not choose unless a UI can say so.
+					if (!this.#allowSessionModelFallback || !cfgRetryModelFallback.get(this.settings)) {
+						throw new Error(`Could not restore model ${targetModelStrings[0]}`);
+					}
+					const currentModel = this.model;
+					modelFallbackWarning = currentModel
+						? `Could not restore model ${targetModelStrings[0]}. Using ${currentModel.provider}/${currentModel.id}`
+						: `Could not restore model ${targetModelStrings[0]}`;
+				}
+			}
 			const didReloadConversationChange =
 				previousSessionContext !== undefined &&
 				didSessionMessagesChange(previousSessionContext.messages, sessionContext.messages);
@@ -10835,35 +10941,26 @@ export class AgentSession implements SettingsScope {
 				this.#closeAllProviderSessions("session reload");
 			}
 
-			// Restore model if saved
-			const targetModelStrings = getRestorableSessionModels(
-				sessionContext.models,
-				this.sessionManager.getLastModelChangeRole(),
-			);
-			if (targetModelStrings.length > 0) {
-				const availableModels = this.#modelRegistry.getAvailable();
-				let match: Model | undefined;
-				for (const targetModelStr of targetModelStrings) {
-					const slashIdx = targetModelStr.indexOf("/");
-					if (slashIdx <= 0) continue;
-					const provider = targetModelStr.slice(0, slashIdx);
-					const modelId = targetModelStr.slice(slashIdx + 1);
-					match = availableModels.find(m => m.provider === provider && m.id === modelId);
-					if (match) break;
+			if (targetModel) {
+				const currentModel = this.model;
+				const shouldResetProviderState =
+					switchingToDifferentSession ||
+					(currentModel !== undefined &&
+						(currentModel.provider !== targetModel.provider ||
+							currentModel.id !== targetModel.id ||
+							currentModel.api !== targetModel.api));
+				if (shouldResetProviderState) {
+					await this.#setModelWithProviderSessionReset(targetModel);
+				} else {
+					this.agent.setModel(targetModel);
 				}
-				if (match) {
-					const currentModel = this.model;
-					const shouldResetProviderState =
-						switchingToDifferentSession ||
-						(currentModel !== undefined &&
-							(currentModel.provider !== match.provider ||
-								currentModel.id !== match.id ||
-								currentModel.api !== match.api));
-					if (shouldResetProviderState) {
-						await this.#setModelWithProviderSessionReset(match);
-					} else {
-						this.agent.setModel(match);
-					}
+				// Saved selectors may carry a thinking suffix; compare resolved models.
+				const savedModel =
+					targetModelStrings.length > 0
+						? resolveSessionModelSelector(this.#modelRegistry, targetModelStrings[0])?.model
+						: undefined;
+				if (explicitModel && !(savedModel && modelsAreEqual(savedModel, targetModel))) {
+					this.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`);
 				}
 			}
 
@@ -10956,6 +11053,10 @@ export class AgentSession implements SettingsScope {
 			}
 			generationSettled.resolve();
 			this.#sessionGenerationSettled = previousSessionGenerationSettled;
+			if (modelFallbackWarning) {
+				if (options?.onModelFallback) options.onModelFallback(modelFallbackWarning);
+				else this.emitNotice("warning", modelFallbackWarning);
+			}
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);
@@ -11039,6 +11140,31 @@ export class AgentSession implements SettingsScope {
 			if (error === SESSION_CWD_CHANGE_REJECTED) return false;
 			throw error;
 		}
+	}
+
+	/**
+	 * First restorable saved session model, resolved like startup resume: when
+	 * none is in the catalog, refresh the discovery-backed providers among them
+	 * once and retry.
+	 */
+	async #resolveSessionModel(selectors: readonly string[]): Promise<Model | undefined> {
+		const resolve = (): Model | undefined => {
+			for (const selector of selectors) {
+				const restored = resolveSessionModelSelector(this.#modelRegistry, selector);
+				if (restored) return restored.model;
+			}
+			return undefined;
+		};
+		const restored = resolve();
+		if (restored) return restored;
+		const providers = sessionModelDiscoveryProviders(
+			this.#modelRegistry,
+			selectors,
+			disabledProviderIds(this.settings),
+		);
+		if (providers.size === 0) return undefined;
+		await this.#modelRegistry.refreshDiscoverableProviders(providers, "online-if-uncached");
+		return resolve();
 	}
 
 	/**
