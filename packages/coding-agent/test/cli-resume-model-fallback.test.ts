@@ -5,7 +5,7 @@ import { readJsonl, TempDir } from "@oh-my-pi/pi-utils";
 const cliEntry = path.resolve(import.meta.dir, "../src/cli.ts");
 
 describe("headless startup resume", () => {
-	test.each(["print", "rpc", "rpc-ui"])(
+	test.each(["print", "json", "rpc", "rpc-ui"])(
 		"does not send a saved transcript to the settings default in %s mode",
 		async mode => {
 			using tempDir = TempDir.createSync("@omp-resume-model-");
