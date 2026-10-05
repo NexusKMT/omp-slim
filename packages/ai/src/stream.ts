@@ -1010,6 +1010,7 @@ function streamDispatch<TApi extends Api>(
 		return streamGitLabDuo(model, context, {
 			...(requestOptions as SimpleStreamOptions),
 			apiKey,
+			waitForTerminalDrain: limited,
 		});
 	}
 
@@ -1032,7 +1033,10 @@ function streamDispatch<TApi extends Api>(
 		return streamBedrock(model as Model<"bedrock-converse-stream">, context, requestOptions as BedrockOptions);
 	}
 	if (model.api === "factory-droid-agent") {
-		return streamFactoryDroid(model as Model<"factory-droid-agent">, context, requestOptions as FactoryDroidOptions);
+		return streamFactoryDroid(model as Model<"factory-droid-agent">, context, {
+			...(requestOptions as FactoryDroidOptions),
+			waitForTerminalDrain: limited,
+		});
 	}
 
 	const providerDefinition = getProviderDefinition(model.provider);
@@ -1569,10 +1573,11 @@ function streamSimpleRequest<TApi extends Api>(
 	// GitLab Duo - wraps Anthropic/OpenAI behind GitLab AI Gateway direct access tokens
 	if (model.provider === "gitlab-duo") {
 		return withThinkingLoopGuard(model, requestOptions, opts =>
-			withProviderInFlightLimit(model, opts, () =>
+			withProviderInFlightLimit(model, opts, limited =>
 				streamGitLabDuo(model, context, {
 					...opts,
 					apiKey,
+					waitForTerminalDrain: limited,
 				}),
 			),
 		);
