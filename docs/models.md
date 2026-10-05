@@ -158,6 +158,8 @@ providers:
         kind: image # stays on openai-responses, generated via the hosted image tool
 ```
 
+A configured `kind`, explicit or implied by a runner API, outranks the bundled catalog's classification of the same id and survives `modelOverrides` and refreshes.
+
 ### Allowed auth/discovery values
 
 - `auth`: `apiKey` (default), `none`, or `oauth`. `none` and `oauth` waive the custom-provider `apiKey` requirement, but `oauth` does not create credentials or register a login flow. It forces OAuth-style request shaping; a usable credential must come from stored auth, environment, or a configured key. Custom `anthropic-messages` models also use OAuth-style shaping when `auth` is omitted; set `auth: apiKey` for plain API-key shaping.

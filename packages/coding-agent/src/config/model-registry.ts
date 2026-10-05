@@ -3432,6 +3432,7 @@ export interface ProviderConfigInput {
 		id: string;
 		name: string;
 		api?: Api;
+		kind?: ModelKind;
 		baseUrl?: string;
 		reasoning: boolean;
 		thinking?: ThinkingConfig;

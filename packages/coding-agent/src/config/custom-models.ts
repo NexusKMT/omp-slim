@@ -129,7 +129,7 @@ export function finalizeCustomModel(model: CustomModelOverlay, options: CustomMo
 		id: resolvedModel.id,
 		name: resolvedModel.name ?? (options.useDefaults ? resolvedModel.id : undefined),
 		api: resolvedModel.api,
-		kind: resolvedModel.kind,
+		kindConfig: resolvedModel.kind,
 		provider: resolvedModel.provider,
 		baseUrl: resolvedModel.baseUrl,
 		reasoning: resolvedModel.reasoning ?? reference?.reasoning ?? (options.useDefaults ? false : undefined),

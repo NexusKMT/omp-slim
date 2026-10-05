@@ -160,6 +160,25 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(afterAnthropicCount).toBe(beforeAnthropicCount);
 	});
 
+	test("extension runner models keep their kind across refresh", async () => {
+		registry.registerProvider(
+			"my-gateway",
+			{
+				baseUrl: "https://gateway.example.com/v1",
+				apiKey: "RUNTIME_KEY",
+				api: "openai-completions",
+				models: [{ ...baseModel, id: "gpt-image-2", api: "openai-images", kind: "image" }],
+			},
+			"ext://runtime",
+		);
+		const isGatewayImage = (model: Model<Api>) => model.provider === "my-gateway" && model.id === "gpt-image-2";
+
+		expect(registry.getAvailable("image").some(isGatewayImage)).toBe(true);
+		expect(registry.getAll().some(isGatewayImage)).toBe(false);
+		await registry.refresh("offline");
+		expect(registry.getAll("image").some(isGatewayImage)).toBe(true);
+	});
+
 	test("registerProvider rebuilds inferred computer capability after OpenAI runtime reroutes", async () => {
 		const modelId = "gpt-5.4";
 		const directModel = registry.find("openai", modelId);

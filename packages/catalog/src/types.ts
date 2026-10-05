@@ -1348,6 +1348,12 @@ export interface Model<TApi extends Api = Api> {
 	id: string;
 	/** Role-specific runner capability; omitted for ordinary chat models. */
 	kind?: ModelKind;
+	/**
+	 * Verbatim configured kind (models.yml, `modelOverrides`, runtime
+	 * registrations). `buildModel` applies it over catalog `kind` rules on every
+	 * rebuild, so a configured runner keeps its role.
+	 */
+	kindConfig?: ModelKind;
 	/** Grounding transport supported by this chat model. */
 	webSearch?: WebSearchGrounding;
 	/** Cheaper same-provider model to run hosted web search in this model's place (model id or provider/id). */

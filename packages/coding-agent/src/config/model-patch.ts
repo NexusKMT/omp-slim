@@ -274,7 +274,10 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	const result = { ...base };
 	if (patch.name !== undefined) result.name = patch.name;
 	if (patch.api !== undefined) result.api = patch.api;
-	if (patch.kind !== undefined) result.kind = patch.kind;
+	if (patch.kind !== undefined) {
+		result.kind = patch.kind;
+		result.kindConfig = patch.kind;
+	}
 	if (patch.reasoning !== undefined) result.reasoning = patch.reasoning;
 	if (patch.thinking !== undefined) result.thinking = patch.thinking;
 	if (patch.input !== undefined) result.input = patch.input;
@@ -319,12 +322,13 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 		result.headers = patch.headers;
 		result.resolveHeaders = patch.resolveHeaders;
 		compat = patch.compat;
-		// A same-id definition that omits a lifetime must not carry the previous
-		// route's catalog policy; buildModel reapplies policy for the new route.
+		// A same-id definition that omits a lifetime or kind must not carry the
+		// previous route's configuration; buildModel reapplies policy for the new route.
 		if (patch.promptCache === undefined) {
 			delete result.promptCache;
 			delete result.promptCacheConfig;
 		}
+		if (patch.kind === undefined) delete result.kindConfig;
 	}
 	const built = buildModel({ ...toModelSpec(result), compat } as ModelSpec<Api>);
 	if (patch.thinking !== undefined && built.thinking !== undefined) {
@@ -338,7 +342,6 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	built.maxTokens = result.maxTokens;
 	// Explicit input and cost patches outrank catalog corrections.
 	if (patch.input !== undefined) built.input = patch.input;
-	if (patch.kind !== undefined) built.kind = patch.kind;
 	// Patches never change model identity. Preserve already-resolved pricing,
 	// including earlier custom prices and the deliberate absence of a schedule.
 	built.cost = result.cost;

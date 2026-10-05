@@ -2172,6 +2172,21 @@ describe("ModelRegistry", () => {
 			expect(chat?.kind ?? "chat").toBe("chat");
 			expect(chat?.api).toBe("openai-responses");
 		});
+
+		test("a configured kind outranks the catalog's classification across override rebuilds", () => {
+			// The bundled catalog classifies `local/falcon-h1-90m` as `tiny`.
+			const registry = readonlyRegistry({
+				providers: {
+					local: {
+						baseUrl: "https://gateway.example.com/v1",
+						apiKey: "gateway-key",
+						models: [{ id: "falcon-h1-90m", api: "openai-images" }],
+						modelOverrides: { "falcon-h1-90m": { name: "Renamed" } },
+					},
+				},
+			});
+			expect(registry.find("local", "falcon-h1-90m")).toMatchObject({ kind: "image", name: "Renamed" });
+		});
 	});
 
 	describe("github-copilot oauth endpoint alignment", () => {
