@@ -27,7 +27,7 @@
 - Auto-retry no longer switches to the fallback chain when Codex's native turn lane rejects live steering after the response streamed reasoning; the turn retries on the same model with the steering message as ordinary input, and the chain is consulted only once no same-model retry is left ([#14242](https://github.com/can1357/oh-my-pi/pull/14242) by [@alphastorm](https://github.com/alphastorm))
 ### Fixed
 
-- Fixed `openai-models-list` discovery discarding a provider-advertised output limit published as a flat `max_tokens` on the `/v1/models` row, pinning every such model to the 32K discovery default; an explicit `limits.max_output_tokens` still outranks the flat field, and rows advertising neither keep the reference or default cap ([#13062](https://github.com/can1357/oh-my-pi/issues/13062) by [@F0Rextasy](https://github.com/F0Rextasy))
+- Fixed `openai-models-list` discovery discarding a provider-advertised output limit published as a flat `max_tokens` on the `/v1/models` row, pinning every such model to the 32K discovery default. Each spelling (`limits.max_output_tokens`, then the flat field) is validated on its own and the explicit nested field outranks the flat one among the usable values, so a present-but-invalid field on either side no longer suppresses the other; rows advertising neither keep the reference or default cap ([#13062](https://github.com/can1357/oh-my-pi/issues/13062) by [@F0Rextasy](https://github.com/F0Rextasy))
 
 ## [18.6.2] - 2026-10-04
 
