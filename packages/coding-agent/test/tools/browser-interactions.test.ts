@@ -317,6 +317,57 @@ return { during, after };`,
 		}
 	}, 30_000);
 
+	test("clearing a field with an empty fill reports the change to the page", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const tabName = `cleared-${crypto.randomUUID()}`;
+		// The input listener mirrors a framework value tracker (React's): it records
+		// programmatic assignments and reports only input whose value differs from them.
+		const clearedHtml = `<!doctype html><input id="q" value="stale">
+<script>
+window.reported = [];
+const field = document.querySelector("#q");
+const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+let tracked = field.value;
+Object.defineProperty(field, "value", {
+  configurable: true,
+  get() { return native.get.call(this); },
+  set(next) { tracked = String(next); native.set.call(this, next); },
+});
+field.addEventListener("input", () => {
+  if (field.value === tracked) return;
+  tracked = field.value;
+  reported.push("input:" + field.value);
+});
+field.addEventListener("change", () => reported.push("change:" + field.value));
+</script>`;
+		const context = { session, toolCallId: "browser-cleared" };
+		await prelude.invoke(
+			{ action: "open", name: tabName, url: `data:text/html,${encodeURIComponent(clearedHtml)}` },
+			context,
+		);
+		try {
+			const result = await prelude.invoke(
+				{
+					action: "run",
+					name: tabName,
+					code: `await tab.fill("#q", "");
+// A field that is already empty has nothing to report.
+await tab.fill("#q", "");
+return { value: await tab.value("#q"), reported: await tab.evaluate(() => window.reported) };`,
+					timeout: 25,
+				},
+				context,
+			);
+			expect(valueFrom<{ value: string; reported: string[] }>(result)).toEqual({
+				value: "",
+				reported: ["input:", "change:"],
+			});
+		} finally {
+			await prelude.invoke({ action: "close", name: tabName, kill: true }, context).catch(() => undefined);
+		}
+	}, 40_000);
+
 	// Backgrounded headless tabs deliver no animation frames, which stalls every
 	// Puppeteer `Locator` precondition (viewport/stability/enabled) forever.
 	// Virtual time pinned at "pause" reproduces that state deterministically.
