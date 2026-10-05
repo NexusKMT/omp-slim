@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed a session using a custom `browser.relayUrl` port stopping the browser relay that other sessions were using on a different port
+- Fixed a session using a custom `browser.relayUrl` port stopping the browser relay that other sessions were using on a different port ([#14407](https://github.com/can1357/oh-my-pi/pull/14407) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.6.2] - 2026-10-04
 
