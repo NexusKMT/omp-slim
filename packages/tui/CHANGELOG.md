@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a `glob` result that ended in a timeout being shown as merely "truncated" in the transcript, which read like a result-limit cut; partial listings from a timed-out scan are now labelled "timed out" ([#6370](https://github.com/can1357/oh-my-pi/issues/6370), [#14426](https://github.com/can1357/oh-my-pi/pull/14426) by [@F0Rextasy](https://github.com/F0Rextasy))
+
 ## [18.6.1] - 2026-10-04
 
 ### Fixed

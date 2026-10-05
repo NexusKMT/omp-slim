@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { FileType } from "@oh-my-pi/pi-natives";
+import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "../../src/config/settings";
 import type { ToolSession } from "../../src/tools";
-import { GlobTool } from "../../src/tools/glob";
+import { GlobTool, type GlobOperationsOptions } from "../../src/tools/glob";
+import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
 import { findUniqueWorkspaceSuffixWithGlobForTest } from "../../src/tools/path-utils";
 import { ToolAbortError } from "../../src/tools/tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
@@ -252,5 +254,86 @@ describe("GlobTool hard-cap limit notice", () => {
 		const result = await globToolWith(files230).execute("glob-below-cap", { path: ".", limit: 50, gitignore: false });
 
 		expect(limitNotice(result)).toContain("[50 results limit reached. Use limit=100 for more]");
+	});
+});
+
+describe("GlobTool custom backend contract", () => {
+	type GlobExecuteResult = AgentToolResult<GlobToolDetails>;
+
+	function detailsOf(result: GlobExecuteResult): GlobToolDetails {
+		return result.details ?? {};
+	}
+
+	function textOf(result: GlobExecuteResult): string {
+		const first = result.content[0];
+		return first?.type === "text" && first.text !== undefined ? first.text : "";
+	}
+
+	test("stops reporting at the tool deadline when a custom backend never settles", async () => {
+		// A custom backend is third-party code that can hang forever. Before the
+		// deadline was applied to this branch, execute() simply awaited it, so the
+		// call never returned at all: the test failed by timing out, not by
+		// asserting.
+		let receivedSignal: AbortSignal | undefined;
+		const tool = new GlobTool(createSession(), {
+			timeoutMs: 200,
+			operations: {
+				exists: () => true,
+				glob: (_pattern, _cwd, options) => {
+					receivedSignal = options.signal;
+					return new Promise<string[]>(() => {});
+				},
+			},
+		});
+
+		const started = Date.now();
+		const result = await tool.execute("glob-custom-deadline", { path: "src/**/*.ts" });
+		const elapsed = Date.now() - started;
+
+		// The point is that it returned at the deadline rather than running on:
+		// before the fix this never resolved and the harness killed the test at
+		// 5s. The bound is loose enough to survive a loaded CI box.
+		expect(elapsed).toBeLessThan(3000);
+		expect(receivedSignal?.aborted).toBe(true);
+		expect(detailsOf(result).timedOut).toBe(true);
+		expect(textOf(result)).toContain("timed out");
+		// A zero-match scan that died mid-walk is not proof of absence.
+		expect(textOf(result)).not.toContain("No files found");
+	});
+
+	test("hands the custom backend the caller's search policy and result limit", async () => {
+		// These options are the extension's whole contract: a backend that reads
+		// `limit` and `hidden` can only honour them if the tool passes the values
+		// the caller actually asked for, not its own defaults.
+		const corpus = [
+			...Array.from({ length: 20 }, (_, i) => `src/file-${String(i).padStart(2, "0")}.ts`),
+			...Array.from({ length: 3 }, (_, i) => `src/.hidden-${i}.ts`),
+		];
+		let captured: GlobOperationsOptions | undefined;
+		const tool = new GlobTool(createSession(), {
+			operations: {
+				exists: () => true,
+				glob: (_pattern, _cwd, options) => {
+					captured = options;
+					const visible = options.hidden ? corpus : corpus.filter(p => !p.includes("/."));
+					return visible.slice(0, options.limit);
+				},
+			},
+		});
+
+		const result = await tool.execute("glob-custom-policy", {
+			path: "src/**/*.ts",
+			hidden: false,
+			gitignore: false,
+			limit: 7,
+		});
+
+		expect(captured?.limit).toBe(7);
+		expect(captured?.hidden).toBe(false);
+		expect(captured?.gitignore).toBe(false);
+		expect(captured?.signal).toBeInstanceOf(AbortSignal);
+		const text = textOf(result);
+		expect(detailsOf(result).fileCount).toBe(7);
+		expect(text).not.toContain(".hidden-");
 	});
 });
