@@ -121,7 +121,7 @@ export async function waitForRelayExtension(cdpUrl: string, signal?: AbortSignal
 		} else if (info?.disconnectedMs !== undefined) {
 			// Seen, then gone: the redial window is measured from the disconnect.
 			deadline = Math.min(deadline, Date.now() - info.disconnectedMs + EXTENSION_DIAL_WINDOW_MS);
-			if (Date.now() >= deadline) return "extension-gone";
+			if (Date.now() >= deadline) return staleRelay ? "outdated-relay" : "extension-gone";
 		}
 		if (Date.now() >= deadline) return staleRelay ? "outdated-relay" : "no-extension";
 		await Bun.sleep(POLL_INTERVAL_MS);

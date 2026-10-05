@@ -85,6 +85,25 @@ describe("waitForRelayExtension", () => {
 		expect(probes).toBe(1);
 	});
 
+	it("reports a stale relay before blaming an extension that has been gone past the redial window", async () => {
+		fake = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: () =>
+				Response.json(
+					{
+						error: "relay extension is not connected",
+						extensionSeen: true,
+						uptimeMs: 600_000,
+						ompRelayVersion: "0.0.0-other",
+						disconnectedMs: 120_000,
+					},
+					{ status: 503 },
+				),
+		});
+		expect(await waitForRelayExtension(`http://127.0.0.1:${fake.port}`)).toBe("outdated-relay");
+	});
+
 	it("keeps polling after a recent disconnect and fails once the redial window has passed", async () => {
 		const disconnects = [1_000, 120_000];
 		let probes = 0;
