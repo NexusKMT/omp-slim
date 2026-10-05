@@ -58,7 +58,12 @@ import submitReminderTemplate from "../prompts/system/subagent-yield-reminder.md
 import { AgentLifecycleManager, type AgentReviver } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { ensurePersistedRoster, isCurrentSessionRosterRef } from "../registry/persisted-agents";
-import { type CreateAgentSessionOptions, createAgentSession, discoverAuthStorage } from "../sdk";
+import {
+	type CreateAgentSessionOptions,
+	type CreateAgentSessionResult,
+	createAgentSession,
+	discoverAuthStorage,
+} from "../sdk";
 import {
 	type AgentSession,
 	type AgentSessionEvent,
@@ -968,6 +973,62 @@ export function createMCPProxyTools(mcpManager: MCPManager): CustomTool[] {
 			},
 		};
 	});
+}
+
+/** Session surface {@link followMCPTools} drives: the child's MCP rebind plus its teardown hook. */
+export type MCPToolFollowerSession = Pick<AgentSession, "refreshMCPTools" | "addDisposer">;
+
+/** Subscription created by {@link followMCPTools}; bind it to the session the proxies went into. */
+export interface MCPToolFollower {
+	/** Attach the created session; replays any change seen since subscribing, then follows later ones. */
+	bind(session: MCPToolFollowerSession): void;
+	/** Drop the subscription when the session was never created. */
+	dispose(): void;
+}
+
+/**
+ * Keep a child session's MCP proxy tools in step with the parent's shared
+ * manager. A child gets a spawn-time {@link createMCPProxyTools} snapshot and
+ * never owns the manager's single-slot tool callback, so without this a
+ * `/mcp reload` — or a server added, removed, or reconnected later — only
+ * reaches the owning session and every live subagent keeps its stale set.
+ *
+ * Subscribe BEFORE building the child's proxies: a change landing while the
+ * session is still being created is recorded and replayed on {@link
+ * MCPToolFollower.bind}, so no window exists where an update is lost. Bursts
+ * (a reload re-placing every server) coalesce into one rebind per tick.
+ */
+export function followMCPTools(mcpManager: MCPManager): MCPToolFollower {
+	let session: MCPToolFollowerSession | undefined;
+	let pending = false;
+	let scheduled = false;
+	const flush = (): void => {
+		scheduled = false;
+		if (!session || !pending) return;
+		pending = false;
+		session.refreshMCPTools(createMCPProxyTools(mcpManager)).catch(error => {
+			logger.warn("Subagent MCP tool refresh failed", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	};
+	const schedule = (): void => {
+		if (scheduled) return;
+		scheduled = true;
+		queueMicrotask(flush);
+	};
+	const unsubscribe = mcpManager.addToolsChangedListener(() => {
+		pending = true;
+		if (session) schedule();
+	});
+	return {
+		bind(next) {
+			session = next;
+			next.addDisposer(unsubscribe);
+			if (pending) schedule();
+		},
+		dispose: unsubscribe,
+	};
 }
 
 /**
@@ -3585,8 +3646,14 @@ function buildSubagentSessionOptions(
 	launch?: SubagentLaunchInputs,
 ): CreateAgentSessionOptions {
 	const inputs = spec.prompt;
+	// MCP proxies are minted per build, not captured in the spec: a kept-alive
+	// subagent revived after `/mcp reload` must see the manager's current tools.
+	const mcpTools = spec.options.mcpManager ? createMCPProxyTools(spec.options.mcpManager) : [];
+	const customTools = spec.options.customTools ?? [];
 	return {
 		...spec.options,
+		mcpTools: mcpTools.length > 0 ? mcpTools : undefined,
+		customTools: customTools.length > 0 ? customTools : undefined,
 		settings,
 		sessionManager,
 		expectedAgentRef,
@@ -3703,14 +3770,23 @@ function createWarmSubagentReviver(capture: WarmReviveCapture): AgentReviver {
 			reopened.adoptArtifactManager(capture.parentArtifactManager);
 		}
 		await refreshSubagentIrcRoot(capture.spec.prompt, reopened, capture.sessionFile);
-		const { session: revived } = await createAgentSession(
-			buildSubagentSessionOptions(
-				capture.spec,
-				restoreSubagentSettings(capture.settings),
-				reopened,
-				expectedAgentRef,
-			),
-		);
+		const mcpManager = capture.spec.options.mcpManager;
+		const mcpFollower = mcpManager ? followMCPTools(mcpManager) : undefined;
+		let revived: AgentSession;
+		try {
+			({ session: revived } = await createAgentSession(
+				buildSubagentSessionOptions(
+					capture.spec,
+					restoreSubagentSettings(capture.settings),
+					reopened,
+					expectedAgentRef,
+				),
+			));
+		} catch (error) {
+			mcpFollower?.dispose();
+			throw error;
+		}
+		mcpFollower?.bind(revived);
 		trackSubagentSettings(revived, capture);
 		// Re-run the executor's extension wiring on the rebuilt session. Skipping it leaves the
 		// runner pre-init, so a `tool_call` handler touching a runtime action trips the
@@ -4133,8 +4209,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			const restrictToolNames = options.restrictToolNames === true;
 			const enableMCP = !restrictToolNames && (options.enableMCP ?? true);
 			const mcpManager = enableMCP ? options.mcpManager : undefined;
-			const mcpProxyTools = mcpManager ? createMCPProxyTools(mcpManager) : [];
-			const sessionCustomTools = [...mcpProxyTools, ...(options.customTools ?? [])];
 
 			// Derive subagent-scoped telemetry from the parent's config so the
 			// child loop's spans nest under the parent's active execute_tool span
@@ -4229,7 +4303,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					skipPythonPreflight,
 					enableMCP,
 					mcpManager,
-					customTools: sessionCustomTools.length > 0 ? sessionCustomTools : undefined,
+					// MCP proxies are minted per build as `mcpTools` in buildSubagentSessionOptions.
+					customTools: options.customTools,
 					localProtocolOptions: options.localProtocolOptions,
 					telemetry: subagentTelemetry,
 				},
@@ -4255,28 +4330,34 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			await refreshSubagentIrcRoot(sessionSpec.prompt, sessionManager, sessionFile);
 
 			const hasExistingModelRole = sessionManager.getLastModelChangeRole() !== undefined;
-			const sessionPromise = createAgentSession(
-				buildSubagentSessionOptions(sessionSpec, subagentSettings, sessionManager, null, {
-					workPoolYieldItems: options.workPoolYieldItems ?? [],
-					// A revived session restores the tier history it persisted (including
-					// tiers a provider rejected or an extension changed since spawn); only
-					// the fresh spawn resolves the per-agent override.
-					resolveServiceTierByFamily,
-					onFirstChatDispatch: () => {
-						firstChatDispatchAt ??= performance.now();
-					},
-				}),
-			);
+			// Subscribe before the builder mints proxies so a manager change during
+			// session startup is replayed on bind instead of lost.
+			const mcpFollower = mcpManager ? followMCPTools(mcpManager) : undefined;
 			let session: AgentSession;
+			let sessionPromise: Promise<CreateAgentSessionResult> | undefined;
 			try {
+				sessionPromise = createAgentSession(
+					buildSubagentSessionOptions(sessionSpec, subagentSettings, sessionManager, null, {
+						workPoolYieldItems: options.workPoolYieldItems ?? [],
+						// A revived session restores the tier history it persisted (including
+						// tiers a provider rejected or an extension changed since spawn); only
+						// the fresh spawn resolves the per-agent override.
+						resolveServiceTierByFamily,
+						onFirstChatDispatch: () => {
+							firstChatDispatchAt ??= performance.now();
+						},
+					}),
+				);
 				({ session } = await awaitAbortable(sessionPromise));
 			} catch (err) {
+				mcpFollower?.dispose();
 				// Abort raced session startup. The session may still resolve later
 				// holding live LSP/MCP child processes — dispose it when it does so
 				// a cancelled subagent cannot leak them.
-				void sessionPromise.then(created => created.session.dispose()).catch(() => {});
+				void sessionPromise?.then(created => created.session.dispose()).catch(() => {});
 				throw err;
 			}
+			mcpFollower?.bind(session);
 			// The SDK records a new session's initial model as the default role.
 			// Pin the child's own chain so a parent default sharing that model
 			// cannot steal its fallback routing. Resumed history keeps its role.
