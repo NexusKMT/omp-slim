@@ -3916,7 +3916,10 @@ describe("openai-codex streaming", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 		expect(sentRequests[0]?.type).toBe("response.create");
 		expect(sentRequests[0]?.service_tier).toBe("priority");
-		expect(result.usage.premiumRequests).toBeUndefined();
+		// The served tier is recorded on the message and counted as a premium
+		// request, so live sessions and the stats backfill agree.
+		expect(result.serviceTier).toBe("priority");
+		expect(result.usage.premiumRequests).toBe(1);
 	});
 
 	it("continues websocket chains across Standard → Fast → Standard service tiers", async () => {

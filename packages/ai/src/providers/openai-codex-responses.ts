@@ -45,6 +45,7 @@ import type {
 	ToolResultMessage,
 	Usage,
 } from "../types";
+import { getPremiumServiceTierRequests, parseServiceTier } from "../types";
 import {
 	clampOpenAIResponsesImageDetailForReplay,
 	createOpenAIResponsesHistoryPayload,
@@ -1355,19 +1356,21 @@ function resolveCodexCostServiceTier(res: ServiceTier | undefined, req?: unknown
 }
 
 function applyCodexServiceTierPricing(
-	model: Pick<Model<"openai-codex-responses">, "serviceTierCost">,
+	model: Pick<Model<"openai-codex-responses">, "provider" | "api" | "identity" | "serviceTierCost">,
 	usage: AssistantMessage["usage"],
 	resTier: ServiceTier | undefined,
 	reqTier: unknown,
-): void {
-	const resolvedTier = resolveCodexCostServiceTier(resTier, reqTier);
+): ServiceTier {
+	const resolvedTier = resolveCodexCostServiceTier(resTier, reqTier) ?? "default";
+	usage.premiumRequests ??= getPremiumServiceTierRequests(resolvedTier, model, { served: true });
 	const multiplier = getCodexServiceTierCostMultiplier(model, resolvedTier);
-	if (multiplier === 1) return;
+	if (multiplier === 1) return resolvedTier;
 	usage.cost.input *= multiplier;
 	usage.cost.output *= multiplier;
 	usage.cost.cacheRead *= multiplier;
 	usage.cost.cacheWrite *= multiplier;
 	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
+	return resolvedTier;
 }
 
 function resetOutputState(output: AssistantMessage): void {
@@ -2669,8 +2672,7 @@ class CodexStreamProcessor {
 		const response = rawResponse && typeof rawResponse === "object" ? rawResponse : undefined;
 		const responseId = response && "id" in response && typeof response.id === "string" ? response.id : undefined;
 		const usage = response && "usage" in response ? parseCodexResponseUsage(response.usage) : undefined;
-		const serviceTier =
-			response && "service_tier" in response ? parseCodexServiceTier(response.service_tier) : undefined;
+		const serviceTier = response && "service_tier" in response ? parseServiceTier(response.service_tier) : undefined;
 		const status = response && "status" in response ? parseCodexResponseStatus(response.status) : undefined;
 		const endTurn = response && "end_turn" in response ? response.end_turn : undefined;
 
@@ -2729,7 +2731,12 @@ class CodexStreamProcessor {
 		finalizePendingResponsesToolCalls(output);
 
 		calculateCost(model, output.usage, output.timestamp);
-		applyCodexServiceTierPricing(model, output.usage, serviceTier, runtime.requestBodyForState.service_tier);
+		output.serviceTier = applyCodexServiceTierPricing(
+			model,
+			output.usage,
+			serviceTier,
+			runtime.requestBodyForState.service_tier,
+		);
 		output.stopReason = mapOpenAIResponsesStopReason(steered ? "completed" : status);
 		promoteResponsesToolUseStopReason(
 			output,
@@ -3557,20 +3564,6 @@ function jsonByteLength(value: unknown): number {
 function hashJson(value: unknown): string {
 	const json = JSON.stringify(value);
 	return String(Bun.hash(json === undefined ? "undefined" : json));
-}
-
-function parseCodexServiceTier(value: unknown): ServiceTier | undefined {
-	switch (value) {
-		case "auto":
-		case "default":
-		case "flex":
-		case "scale":
-		case "priority":
-		case "ultrafast":
-			return value;
-		default:
-			return undefined;
-	}
 }
 
 function parseCodexResponseStatus(value: unknown): ResponseStatus | undefined {

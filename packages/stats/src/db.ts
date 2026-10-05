@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs/promises";
-import type { Usage } from "@oh-my-pi/pi-ai";
+import type { ServiceTier, Usage } from "@oh-my-pi/pi-ai";
 import {
 	calculateUncachedInputCost,
 	calculateUsageCost,
@@ -158,6 +158,7 @@ export async function initDb(): Promise<Database> {
 			cost_no_cache_input REAL,
 			cost_unpriced INTEGER NOT NULL DEFAULT 0,
 			agent_type TEXT NOT NULL DEFAULT 'main',
+			service_tier TEXT,
 			UNIQUE(session_file, entry_id)
 		);
 
@@ -251,6 +252,11 @@ export async function initDb(): Promise<Database> {
 	}
 	if (!messageColumns.some(column => column.name === "cost_no_cache_input")) {
 		db.run("ALTER TABLE messages ADD COLUMN cost_no_cache_input REAL");
+	}
+	// Rows ingested before this column existed carry no served tier; a re-parse
+	// fills them from the session's assistant messages.
+	if (!messageColumns.some(column => column.name === "service_tier")) {
+		db.run("ALTER TABLE messages ADD COLUMN service_tier TEXT");
 	}
 	// Rows ingested before this column existed default to 0 (not unpriced), so
 	// their epoch-sentinel zeros read as free until a re-parse rewrites them.
@@ -828,9 +834,9 @@ export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 			duration, ttft, stop_reason, error_message,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens, premium_requests,
 			cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total, cost_no_cache_input,
-			cost_unpriced, agent_type
+			cost_unpriced, agent_type, service_tier
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		WHERE NOT EXISTS (
 			SELECT 1 FROM messages
 			WHERE entry_id = ? AND timestamp = ? AND session_file <> ?
@@ -843,7 +849,8 @@ export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 			cost_cache_write = excluded.cost_cache_write,
 			cost_total = excluded.cost_total,
 			cost_no_cache_input = excluded.cost_no_cache_input,
-			cost_unpriced = excluded.cost_unpriced
+			cost_unpriced = excluded.cost_unpriced,
+			service_tier = excluded.service_tier
 	`);
 
 	let inserted = 0;
@@ -877,6 +884,7 @@ export function insertMessageStats(stats: Iterable<MessageStatsInput>): number {
 				noCacheInputCost,
 				unpriced ? 1 : 0,
 				s.agentType,
+				s.serviceTier ?? null,
 				// `WHERE NOT EXISTS` binds: skip when a different session_file
 				// already holds this (entry_id, timestamp).
 				s.entryId,
@@ -941,6 +949,7 @@ function rowToMessageStats(row: any): MessageStats {
 			},
 		},
 		agentType: (row.agent_type as AgentType) ?? "main",
+		serviceTier: (row.service_tier as ServiceTier | null) ?? null,
 		costUnpriced: row.cost_unpriced === 1,
 	};
 }

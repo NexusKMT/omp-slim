@@ -4,6 +4,7 @@ import * as path from "node:path";
 import {
 	type AuthCredential,
 	type AuthCredentialStore,
+	parseServiceTier,
 	SqliteAuthCredentialStore,
 	type ServiceTier,
 	type StoredAuthCredential,
@@ -51,6 +52,8 @@ type StatsMessageRow = {
 	output_tokens: number;
 	duration: number;
 	ttft: number | null;
+	/** Served service tier; absent on stats databases written before the column existed. */
+	service_tier?: string | null;
 };
 
 /** Per-model running sums accumulated during a backfill walk. */
@@ -98,7 +101,7 @@ export interface ModelPerfStats {
  */
 const MODEL_PERF_DECAY_AT = 256;
 /** meta-table marker set once historical stats.db rows have been imported into model_perf. */
-const MODEL_PERF_BACKFILL_KEY = "model_perf_backfill";
+const MODEL_PERF_BACKFILL_KEY = "model_perf_backfill_v2";
 /**
  * Batch window for deferred model_perf writes. Perf aggregates are advisory, so
  * one transaction per minute replaces one per turn; the timer is unref'd and the
@@ -677,8 +680,14 @@ FROM model_usage_legacy
 		const statsDb = new Database(statsDbPath, { readonly: true });
 		try {
 			statsDb.run(`PRAGMA busy_timeout = ${getDbBusyTimeoutMs()}`);
+			// Stats databases written before the served-tier column existed cannot
+			// separate a fast serving path's samples from standard ones; those rows
+			// import as standard-tier history.
+			const hasTier = (statsDb.prepare("PRAGMA table_info(messages)").all() as { name: string }[]).some(
+				column => column.name === "service_tier",
+			);
 			using select = statsDb.prepare(
-				`SELECT rowid, timestamp, provider, model, output_tokens, duration, ttft
+				`SELECT rowid, timestamp, provider, model, output_tokens, duration, ttft${hasTier ? ", service_tier" : ""}
 FROM messages
 WHERE (timestamp < ?1 OR (timestamp = ?1 AND rowid < ?2))
 	AND timestamp >= ?3
@@ -701,7 +710,7 @@ LIMIT ?4`,
 				cursorTimestamp = last.timestamp;
 				cursorRowid = last.rowid;
 				for (const row of rows) {
-					const key = `${row.provider}/${row.model}`;
+					const key = modelPerfKey(`${row.provider}/${row.model}`, parseServiceTier(row.service_tier));
 					let accum = sums.get(key);
 					if (accum && accum.samples >= MODEL_PERF_DECAY_AT) continue;
 					const normalized = normalizeModelPerfSample(key, {

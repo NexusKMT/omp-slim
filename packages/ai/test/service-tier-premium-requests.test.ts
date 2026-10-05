@@ -198,6 +198,17 @@ describe("getPremiumServiceTierRequests", () => {
 		expect(getPremiumServiceTierRequests("ultrafast", gemini)).toBe(0);
 	});
 
+	it("trusts a served tier over the discovery gate", () => {
+		// A recorded served tier is proof the tier reached the wire, so a
+		// stats-backfill row without discovery metadata still counts.
+		expect(getPremiumServiceTierRequests("ultrafast", codex, { served: true })).toBe(1);
+		expect(getPremiumServiceTierRequests("ultrafast", customOpenAI, { served: true })).toBe(0);
+		// The family gate still applies: a non-OpenAI provider never bills it.
+		expect(getPremiumServiceTierRequests("ultrafast", gemini, { served: true })).toBe(0);
+		// `served` does not invent premium weight for a standard tier.
+		expect(getPremiumServiceTierRequests("default", openai, { served: true })).toBe(0);
+	});
+
 	it("does not bill OpenRouter, unrealized, or non-priority traffic", () => {
 		expect(getPremiumServiceTierRequests("priority", orOpenAI)).toBe(0); // OpenRouter bills its own way
 		expect(getPremiumServiceTierRequests("priority", vertexClaude)).toBe(0); // not realized

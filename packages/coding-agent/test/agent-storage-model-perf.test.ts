@@ -1,8 +1,15 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
+import { Agent } from "@oh-my-pi/pi-agent-core";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -97,6 +104,62 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(perf.get("openai-codex/gpt-6-astra")?.tps).toBeCloseTo(200000 / 8000, 5);
 		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
 		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.tps).toBeCloseTo(300, 5);
+	});
+
+	it("records a session turn under the tier the provider reported serving", async () => {
+		// The session's turn loop schedules real timers; only the deferred perf
+		// batch needs the fake clock, and closing the storage flushes it.
+		vi.useRealTimers();
+		tempDir = TempDir.createSync("@omp-served-tier-perf-");
+		const dbPath = path.join(tempDir.path(), "agent.db");
+		const storage = await AgentStorage.open(dbPath);
+		const settings = Settings.isolated({ "tier.openai": "ultrafast" }, { storage });
+		const auth = await AuthStorage.create(":memory:");
+		const registry = new ModelRegistry(auth, path.join(tempDir.path(), "models.yml"));
+		registry.getApiKey = async () => "test-key";
+		const model = buildModel({
+			provider: "openai-codex",
+			id: "gpt-6-astra",
+			name: "GPT-6 Astra",
+			api: "openai-codex-responses",
+			baseUrl: "https://example.com",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 32_000,
+		});
+		const mock = createMockModel({
+			id: "gpt-6-astra",
+			provider: "openai-codex",
+			responses: [
+				// The backend downgraded the requested ultrafast turn: the echo is what
+				// the row must follow, not the session's live setting.
+				{ content: ["downgraded"], usage: { input: 100, output: 1000 }, serviceTier: "default" },
+				{ content: ["served"], usage: { input: 100, output: 3000 }, serviceTier: "ultrafast" },
+			],
+		});
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: mock.stream,
+		});
+		const session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			modelRegistry: registry,
+			settings,
+			serviceTierByFamily: { openai: "ultrafast" },
+		});
+		await session.prompt("first");
+		await session.prompt("second");
+		AgentStorage.close(); // flushes the still-batched perf write
+
+		const reopened = await AgentStorage.open(dbPath);
+		const perf = reopened.getModelPerf();
+		expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(1);
+		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
+		auth.close();
 	});
 
 	it("persists a still-batched sample when the storage closes before the window elapses", async () => {
@@ -233,6 +296,30 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(glm?.tps).toBeCloseTo(100, 5);
 	});
 
+	it("imports a served tier's history into its own row", async () => {
+		const storage = await openStorage();
+
+		const statsDbPath = path.join(tempDir.path(), "stats.db");
+		const statsDb = new Database(statsDbPath);
+		statsDb.run(`CREATE TABLE messages (
+			provider TEXT, model TEXT, output_tokens INTEGER, duration INTEGER,
+			ttft INTEGER, stop_reason TEXT, timestamp INTEGER, service_tier TEXT
+		)`);
+		using insert = statsDb.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+		const now = Date.now();
+		insert.run("openai-codex", "gpt-6-astra", 100, 4000, null, "stop", now - 3000, null);
+		insert.run("openai-codex", "gpt-6-astra", 3000, 10000, null, "stop", now - 2000, "ultrafast");
+		statsDb.close();
+
+		await storage.backfillModelPerfFromStats(statsDbPath);
+
+		const perf = storage.getModelPerf();
+		// The standard turn stays the standard aggregate; the ultrafast turn does not
+		// drag it up.
+		expect(perf.get("openai-codex/gpt-6-astra")?.tps).toBeCloseTo(25, 5);
+		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.tps).toBeCloseTo(300, 5);
+	});
+
 	it("caps the backfill at the newest samples per model", async () => {
 		const storage = await openStorage();
 
@@ -323,7 +410,7 @@ describe("AgentStorage model perf aggregates", () => {
 					.get(),
 			).toEqual({ samples: 2, output_tokens: 30, gen_ms: 3000 });
 			expect(
-				db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?").get("model_perf_backfill"),
+				db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?").get("model_perf_backfill_v2"),
 			).toEqual({ value: "complete" });
 		} finally {
 			db.close();

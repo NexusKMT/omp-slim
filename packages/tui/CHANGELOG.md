@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed hold-Space push-to-talk stopping the instant recording began (showing "No speech detected.") when opening the microphone briefly froze the UI ([#14463](https://github.com/can1357/oh-my-pi/pull/14463) by [@pgkt04](https://github.com/pgkt04))
+- Fixed the model browser showing one blended speed for a model run on a fast service tier: rows now show the tier's own measured numbers, labeled with the tier ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
 
 ## [18.6.1] - 2026-10-04
 

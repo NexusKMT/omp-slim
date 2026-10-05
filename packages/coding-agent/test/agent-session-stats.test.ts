@@ -480,4 +480,54 @@ describe("AgentSession session stats", () => {
 			"swe-1-7-medium": 1,
 		});
 	});
+
+	it("sums premium requests from persisted assistant usage", () => {
+		const model = modelRegistry.getAll().find(candidate => candidate.contextWindow && candidate.contextWindow > 0);
+		if (!model) throw new Error("Expected a bundled model");
+
+		const usage = {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		};
+		const messages: Message[] = [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "premium" }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				serviceTier: "ultrafast",
+				usage: { ...usage, premiumRequests: 1 },
+				stopReason: "stop",
+				timestamp: 1,
+			},
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "standard" }],
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
+				usage: { ...usage, premiumRequests: 0 },
+				stopReason: "stop",
+				timestamp: 2,
+			},
+		];
+		const agent = new Agent({
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages },
+		});
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated({ "compaction.enabled": false }),
+			modelRegistry,
+		});
+
+		// The provider records the premium count on the turn's usage; the session
+		// total is what `/usage` and the status line report.
+		expect(session.getSessionStats().premiumRequests).toBe(1);
+	});
 });

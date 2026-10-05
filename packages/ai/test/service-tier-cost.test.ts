@@ -39,7 +39,10 @@ describe("standard OpenAI Responses service-tier cost", () => {
 		expect(astra.serviceTierCost).toEqual({ ultrafast: 6 });
 
 		const billed = usage();
-		applyOpenAIResponsesServiceTierCost(astra, billed, "ultrafast", "ultrafast");
+		// The returned tier is what the caller records on the message, so a
+		// downgraded turn cannot be attributed to the requested tier.
+		expect(applyOpenAIResponsesServiceTierCost(astra, billed, "ultrafast", "ultrafast")).toBe("ultrafast");
+		expect(billed.premiumRequests).toBe(1);
 		expect(billed.cost.input).toBeCloseTo(0.00006);
 		expect(billed.cost.output).toBeCloseTo(0.0003);
 		expect(billed.cost.total).toBeCloseTo(0.00036);
@@ -53,6 +56,8 @@ describe("standard OpenAI Responses service-tier cost", () => {
 		applyOpenAIResponsesServiceTierCost(luna, billed, "ultrafast", "ultrafast");
 		expect(billed.cost.input).toBeCloseTo(0.00001);
 		expect(billed.cost.total).toBeCloseTo(0.00006);
+		// Still a premium request: the tier reached the wire, only its price is unknown.
+		expect(billed.premiumRequests).toBe(1);
 	});
 
 	it("keeps the generic flex/priority defaults and trusts the served tier echo", () => {
@@ -66,9 +71,32 @@ describe("standard OpenAI Responses service-tier cost", () => {
 		applyOpenAIResponsesServiceTierCost(luna, flex, "flex", "flex");
 		expect(flex.cost.input).toBeCloseTo(0.000005);
 
-		// A downgraded turn (requested ultrafast, served default) bills standard.
+		// A downgraded turn (requested ultrafast, served default) bills standard and
+		// is not counted as a premium request.
 		const downgraded = usage();
-		applyOpenAIResponsesServiceTierCost(model("gpt-6-astra"), downgraded, "default", "ultrafast");
+		expect(applyOpenAIResponsesServiceTierCost(model("gpt-6-astra"), downgraded, "default", "ultrafast")).toBe(
+			"default",
+		);
 		expect(downgraded.cost.input).toBeCloseTo(0.00001);
+		expect(downgraded.premiumRequests).toBe(0);
+	});
+
+	it("leaves the tier unrecorded for providers whose echo cannot be trusted", () => {
+		const proxied = buildModel({
+			id: "gpt-6-astra",
+			name: "gpt-6-astra",
+			api: "openai-responses",
+			provider: "azure",
+			baseUrl: "https://example.openai.azure.com/openai/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+		});
+		const billed = usage();
+		expect(applyOpenAIResponsesServiceTierCost(proxied, billed, "ultrafast", "ultrafast")).toBeUndefined();
+		expect(billed.premiumRequests).toBeUndefined();
+		expect(billed.cost.input).toBeCloseTo(0.00001);
 	});
 });
