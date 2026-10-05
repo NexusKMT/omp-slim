@@ -871,7 +871,6 @@ export declare namespace Response {
 		output: Moderation.ModerationResult | Moderation.Error;
 	}
 	namespace Moderation {
-
 		/**
 		 * A moderation result produced for the response input or output.
 		 */
