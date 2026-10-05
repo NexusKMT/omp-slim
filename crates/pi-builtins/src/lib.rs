@@ -209,6 +209,9 @@ mod pkill;
 /// Shared process-matching engine behind `pgrep`, `pkill`, and `pidwait`.
 #[cfg(feature = "util.proc-match")]
 mod proc_match;
+/// Process selector lists shared by `ps` and the process-matching engine.
+#[cfg(any(feature = "util.ps", feature = "util.proc-match"))]
+mod proc_select;
 /// Shared process-table snapshot behind the process builtins.
 #[cfg(feature = "util.procs")]
 mod proc_snapshot;
