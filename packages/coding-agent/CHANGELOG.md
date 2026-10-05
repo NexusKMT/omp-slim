@@ -27,7 +27,7 @@
 - Auto-retry no longer switches to the fallback chain when Codex's native turn lane rejects live steering after the response streamed reasoning; the turn retries on the same model with the steering message as ordinary input, and the chain is consulted only once no same-model retry is left ([#14242](https://github.com/can1357/oh-my-pi/pull/14242) by [@alphastorm](https://github.com/alphastorm))
 ### Fixed
 
-- Fixed long conversations silently losing screenshots and other images the model was still meant to see: images the assistant itself generated no longer counted against the provider's per-request image cap, which had made the clamp evict real user and tool-result images to make room for them.
+- Fixed long conversations silently losing screenshots and other images the model was still meant to see: images the assistant itself generated no longer counted against the provider's per-request image cap, which had made the clamp evict real user and tool-result images to make room for them ([#14390](https://github.com/can1357/oh-my-pi/pull/14390) by [@F0Rextasy](https://github.com/F0Rextasy)).
 
 ## [18.6.2] - 2026-10-04
 
