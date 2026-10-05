@@ -1208,6 +1208,25 @@ fn remove_dir_recursive(host: &mut Host,
 		return remove_file(host, path, options, progress_bar);
 	}
 
+	// With nothing to ask or report per entry, a native tree goes in one
+	// call, which on Windows deletes each file through a handle relative to
+	// its directory rather than by full path; the walk then only runs to
+	// report what that call could not remove.
+	if options.interactive == InteractiveMode::Never
+		&& !options.verbose
+		&& progress_bar.is_none()
+		&& host.fs().is_native_local(&fs_path)
+		&& host.fs().remove_dir_all(&fs_path).is_ok()
+	{
+		return false;
+	}
+
+	remove_dir_tree(host, path, options, progress_bar)
+}
+
+/// Removes the directory `path`, known not to be a symlink to one, and
+/// everything in it.
+fn remove_dir_tree(host: &mut Host, path: &Path, options: &Options, progress_bar: Option<&ProgressBar>) -> bool {
 	// Base case 2: this is a non-empty directory, but the user
 	// doesn't want to descend into it.
 	if options.interactive == InteractiveMode::Always && !is_dir_empty(host, path) && !prompt_descend(host, path)
@@ -1218,7 +1237,7 @@ fn remove_dir_recursive(host: &mut Host,
 	// Native host trees use descriptor-relative traversal on Unix (except
 	// Redox); every other filesystem is walked through its provider.
 	#[cfg(all(unix, not(target_os = "redox")))]
-	if host.fs().is_native_local(&fs_path) {
+	if host.fs().is_native_local(&host.resolve(path)) {
 		return safe_remove_dir_recursive(host, path, options, progress_bar);
 	}
 
@@ -1228,8 +1247,8 @@ fn remove_dir_recursive(host: &mut Host,
 /// Removes the directory tree at `path` through the injected filesystem.
 ///
 /// `path` must name a directory (not a symlink to one). Children are removed
-/// through [`remove_dir_recursive`] so prompts, verbose output, progress, and
-/// native fast paths apply per entry exactly as for top-level operands.
+/// by the type their listing reports, so prompts, verbose output and
+/// progress apply per entry exactly as for top-level operands.
 fn remove_dir_recursive_with_provider(
 	host: &mut Host,
 	path: &Path,
@@ -1272,7 +1291,13 @@ fn remove_dir_recursive_with_provider(
 		match entry {
 			Ok(entry) => {
 				let child = child_path(path, &entry.file_name());
-				error |= remove_dir_recursive(host, &child, options, progress_bar);
+				// Only a real directory is descended into, never a symlink
+				// or junction to one; an entry of unknown type is looked up.
+				error |= match entry.file_type() {
+					Ok(file_type) if file_type.is_dir() => remove_dir_tree(host, &child, options, progress_bar),
+					Ok(_) => remove_file(host, &child, options, progress_bar),
+					Err(_) => remove_dir_recursive(host, &child, options, progress_bar),
+				};
 			},
 			Err(e) => {
 				error |= handle_error_with_force(host, e, path, options);
@@ -1286,17 +1311,15 @@ fn remove_dir_recursive_with_provider(
 		return true;
 	}
 
-	// Ask the user whether to remove the current directory.
-	if options.interactive == InteractiveMode::Always && !prompt_dir(host, path, options) {
-		return false;
-	}
-
-	// Children the user declined to remove keep the directory populated.
-	if !is_dir_empty(host, path) {
-		if options.interactive == InteractiveMode::Always {
+	if options.interactive == InteractiveMode::Always {
+		// Ask the user whether to remove the current directory.
+		if !prompt_dir(host, path, options) {
 			return false;
 		}
-		return remove_dir_with_special_cases(host, path, options, false);
+		// Children the user declined to remove keep the directory populated.
+		if !is_dir_empty(host, path) {
+			return false;
+		}
 	}
 
 	if let Some(pb) = progress_bar {
@@ -1466,8 +1489,12 @@ fn prompt_dir(host: &mut Host, path: &Path, options: &Options) -> bool {
 }
 
 fn prompt_file(host: &mut Host, path: &Path, options: &Options) -> bool {
-	// If interactive is Never we never want to send prompts
-	if options.interactive == InteractiveMode::Never {
+	// If interactive is Never we never want to send prompts, and the
+	// default mode only asks about write-protected files on a terminal.
+	let stdin_ok = options.__presume_input_tty.unwrap_or(false);
+	if options.interactive == InteractiveMode::Never
+		|| (options.interactive == InteractiveMode::PromptProtected && !stdin_ok)
+	{
 		return true;
 	}
 
