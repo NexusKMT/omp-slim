@@ -98,12 +98,25 @@ interface EdgeRow {
 	readonly timestamp: string | null;
 }
 
+interface MemoryLivenessRow {
+	readonly id: string;
+	readonly live: number;
+}
+
 const EXTRACT_FACTS_MAX_CONTENT_LEN = 4096;
 const MAX_FACTS_PER_MEMORY = 5;
 const DEFAULT_LINK_THRESHOLD = 0.35;
+const LIVE_MEMORY_SQL = "superseded_by IS NULL AND (valid_until IS NULL OR valid_until > ?)";
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function partitionByLiveness(rows: readonly MemoryLivenessRow[], live: Set<string>, retired: Set<string>): void {
+	for (const row of rows) {
+		if (row.live === 1) live.add(row.id);
+		else retired.add(row.id);
+	}
 }
 
 function unique(values: Iterable<string>, limit = Number.MAX_SAFE_INTEGER): string[] {
@@ -646,27 +659,30 @@ export class EpisodicGraph {
 	}
 
 	private knownMemoryIds(exclude: string): string[] {
+		const now = nowIso();
 		const ids = new Set<string>();
+		const retired = new Set<string>();
 		const gistRows = this.db
 			.query("SELECT DISTINCT memory_id FROM gists WHERE memory_id IS NOT NULL AND memory_id != ?")
 			.all(exclude) as { memory_id: string }[];
 		for (const row of gistRows) ids.add(row.memory_id);
 		try {
-			const workingRows = this.db.query("SELECT id FROM working_memory WHERE id != ?").all(exclude) as {
-				id: string;
-			}[];
-			for (const row of workingRows) ids.add(row.id);
+			const workingRows = this.db
+				.query(`SELECT id, ${LIVE_MEMORY_SQL} AS live FROM working_memory WHERE id != ?`)
+				.all(now, exclude) as MemoryLivenessRow[];
+			partitionByLiveness(workingRows, ids, retired);
 		} catch {
 			// Standalone graph stores do not have Beam memory tables.
 		}
 		try {
-			const episodicRows = this.db.query("SELECT id FROM episodic_memory WHERE id != ?").all(exclude) as {
-				id: string;
-			}[];
-			for (const row of episodicRows) ids.add(row.id);
+			const episodicRows = this.db
+				.query(`SELECT id, ${LIVE_MEMORY_SQL} AS live FROM episodic_memory WHERE id != ?`)
+				.all(now, exclude) as MemoryLivenessRow[];
+			partitionByLiveness(episodicRows, ids, retired);
 		} catch {
 			// Standalone graph stores do not have Beam memory tables.
 		}
+		for (const id of retired) ids.delete(id);
 		return [...ids];
 	}
 

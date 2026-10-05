@@ -206,6 +206,42 @@ describe("proactive memory linking", () => {
 		}
 	});
 
+	it("links new memories only to memories that are still valid", () => {
+		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
+		const beam = new BeamMemory({ sessionId: "proactive-invalidated", dbPath: ":memory:" });
+		try {
+			const retiredWorking = beam.remember("Alice set up the CI/CD pipeline for backend deployment", {
+				importance: 0.8,
+			});
+			const liveWorking = beam.remember("Alice set up the CI/CD pipeline for frontend deployment", {
+				importance: 0.8,
+			});
+			const retiredEpisodic = beam.consolidateToEpisodic(
+				"Alice reviewed the CI/CD pipeline for backend deployment",
+				[],
+			);
+			expect(beam.invalidate(retiredWorking)).toBe(true);
+			expect(beam.invalidate(retiredEpisodic)).toBe(true);
+
+			const next = beam.remember("Alice configured the CI/CD pipeline for backend deployment", {
+				importance: 0.8,
+			});
+
+			const targets = new Set(
+				(
+					beam.db.query("SELECT DISTINCT target FROM graph_edges WHERE source = ?").all(next) as {
+						target: string;
+					}[]
+				).map(row => row.target),
+			);
+			expect(targets.has(liveWorking)).toBe(true);
+			expect(targets.has(retiredWorking)).toBe(false);
+			expect(targets.has(retiredEpisodic)).toBe(false);
+		} finally {
+			beam.close();
+		}
+	});
+
 	it("does not create recall-similarity edges for unrelated content", () => {
 		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
 		const beam = new BeamMemory({ sessionId: "proactive-unrelated", dbPath: ":memory:" });
