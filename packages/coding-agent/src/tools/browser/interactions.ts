@@ -534,6 +534,74 @@ export async function highlightElement(
 	}
 }
 
+/**
+ * Select `<select>` options by value, then by visible label, and return the values this call
+ * selected. An exact value match always wins over a label, so value-based calls keep their
+ * meaning. A single `<select>` takes the first matching value. A value that matches no option
+ * throws before the select is touched, so a typo never commits the browser's default option.
+ */
+export async function selectElementOptions(
+	handle: ElementHandle,
+	values: string[],
+	label: string,
+	signal?: AbortSignal,
+): Promise<string[]> {
+	const outcome = (await untilAborted(signal, () =>
+		handle.evaluate((el, vals) => {
+			interface SelectOption {
+				value: string;
+				label: string;
+				text: string;
+				index: number;
+				selected: boolean;
+			}
+			interface SelectLike {
+				tagName: string;
+				multiple: boolean;
+				selectedIndex: number;
+				options: ArrayLike<SelectOption>;
+				dispatchEvent: (event: unknown) => boolean;
+			}
+			const select = el as unknown as SelectLike;
+			if (select?.tagName !== "SELECT") return null;
+			const page = globalThis as unknown as PageGlobals;
+			const options = Array.from(select.options);
+			const wanted: SelectOption[] = [];
+			const missing: string[] = [];
+			for (const value of vals as string[]) {
+				const option =
+					options.find(candidate => candidate.value === value) ??
+					options.find(
+						candidate => candidate.label === value || candidate.text.replace(/\s+/g, " ").trim() === value,
+					);
+				if (option) wanted.push(option);
+				else missing.push(value);
+			}
+			if (missing.length > 0) return { missing };
+			let selected: string[];
+			if (wanted.length === 0) {
+				for (const option of options) option.selected = false;
+				selected = [];
+			} else if (select.multiple) {
+				for (const option of options) option.selected = wanted.includes(option);
+				selected = options.filter(option => option.selected).map(option => option.value);
+			} else {
+				select.selectedIndex = wanted[0]!.index;
+				selected = [wanted[0]!.value];
+			}
+			select.dispatchEvent(new page.Event("input", { bubbles: true }));
+			select.dispatchEvent(new page.Event("change", { bubbles: true }));
+			return { selected };
+		}, values),
+	)) as { missing: string[] } | { selected: string[] } | null;
+	if (!outcome) throw new ToolError(`${label} requires a <select> element`);
+	if ("missing" in outcome)
+		throw new ToolError(
+			`No <select> option matches ${outcome.missing.map(value => JSON.stringify(value)).join(", ")}`,
+		);
+	return outcome.selected;
+}
+
 /** Upload files through an input, native chooser trigger, or synthetic drop-zone event sequence. */
 export async function uploadFilesToElement(
 	page: Page,
