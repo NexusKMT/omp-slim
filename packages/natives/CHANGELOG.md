@@ -13,6 +13,7 @@
 - Applying a patch to the worktree reads only the files the patch touches ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up parsing of large hashline edits ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - `Process.waitForExit()` on a single process waits for the operating system's exit notification instead of polling every 50 ms ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Reduced the memory used by tokenizer tables and by counting Claude tokens on long inputs ([#14530](https://github.com/can1357/oh-my-pi/pull/14530) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
