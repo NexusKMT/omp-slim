@@ -3,6 +3,7 @@
 use std::{collections::BTreeSet, sync::LazyLock};
 
 use pi_ast::block::{EnclosingBoundaryOptions, LineRange, enclosing_block_boundaries};
+use pi_diff::HunkLine;
 use regex::Regex;
 
 use crate::error::EditError;
@@ -362,13 +363,15 @@ pub fn generate_unified_diff_string(
 	context_lines: Option<usize>,
 	source: &BlockContextSource<'_>,
 ) -> DiffOutput {
-	let old_utf16 = old.encode_utf16().collect::<Vec<_>>();
-	let new_utf16 = new.encode_utf16().collect::<Vec<_>>();
+	let old_tokens = pi_diff::line_tokens_str(old);
+	let new_tokens = pi_diff::line_tokens_str(new);
+	let runs = pi_diff::diff_line_tokens(&old_tokens, &new_tokens);
 	let context_lines = context_lines.unwrap_or(3);
-	let hunks = pi_diff::structured_patch_hunks_u16(
-		&old_utf16,
-		&new_utf16,
+	let hunks = pi_diff::structured_patch_hunk_rows(
 		Some(u32::try_from(context_lines).unwrap_or(u32::MAX)),
+		&old_tokens,
+		&new_tokens,
+		&runs,
 	);
 	let mut output = Vec::new();
 	let mut first_changed_line = None;
@@ -379,22 +382,24 @@ pub fn generate_unified_diff_string(
 		));
 		let mut old_line = hunk.old_start;
 		let mut new_line = hunk.new_start;
-		for encoded in hunk.lines {
-			let line = String::from_utf16(&encoded).expect("hunk text originates from valid UTF-8");
-			if let Some(content) = line.strip_prefix('-') {
-				first_changed_line.get_or_insert(new_line);
-				output.push(format_numbered_diff_line('-', old_line, content));
-				old_line += 1;
-			} else if let Some(content) = line.strip_prefix('+') {
-				first_changed_line.get_or_insert(new_line);
-				output.push(format_numbered_diff_line('+', new_line, content));
-				new_line += 1;
-			} else if let Some(content) = line.strip_prefix(' ') {
-				output.push(format_numbered_diff_line(' ', old_line, content));
-				old_line += 1;
-				new_line += 1;
-			} else {
-				output.push(line);
+		for line in hunk.lines {
+			match line {
+				HunkLine::Removed(content) => {
+					first_changed_line.get_or_insert(new_line);
+					output.push(format_numbered_diff_line('-', old_line, content));
+					old_line += 1;
+				},
+				HunkLine::Added(content) => {
+					first_changed_line.get_or_insert(new_line);
+					output.push(format_numbered_diff_line('+', new_line, content));
+					new_line += 1;
+				},
+				HunkLine::Context(content) => {
+					output.push(format_numbered_diff_line(' ', old_line, content));
+					old_line += 1;
+					new_line += 1;
+				},
+				HunkLine::NoNewlineAtEof => output.push("\\ No newline at end of file".to_owned()),
 			}
 		}
 	}
