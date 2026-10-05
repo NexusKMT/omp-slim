@@ -7,6 +7,7 @@
 - `/hotkeys` shows the effective `app.stt.pushToTalk` binding, including `Disabled` when unbound ([#6592](https://github.com/can1357/oh-my-pi/pull/6592) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Fixed
+- The status-line footer added usage only from assistant messages, so a task subagent cost, which arrives in the toolResult the task tool returns, never appeared in the total; the footer now reads the cumulative `getUsageStatistics()` rollup, the same source the interactive status line uses ([#14393](https://github.com/can1357/oh-my-pi/pull/14393)).
 
 - Fixed hold-Space push-to-talk stopping the instant recording began (showing "No speech detected.") when opening the microphone briefly froze the UI ([#14463](https://github.com/can1357/oh-my-pi/pull/14463) by [@pgkt04](https://github.com/pgkt04))
 
