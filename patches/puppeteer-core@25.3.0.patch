@@ -711,3 +711,20 @@ index fb7fe66ecb99fd207b99c1e9a9ae00769f0b9a20..af5284b9ee8226e78fa0243ec2f83a63
              ...userDisabledFeatures,
          ]
              .filter(feature => {
+diff --git a/lib/puppeteer/node/NodeWebSocketTransport.js b/lib/puppeteer/node/NodeWebSocketTransport.js
+index a1af6472f4fb346978e3bd073ddb34963b129da2..951b5968947edaf24775716ccbab31d3fe98fabe 100644
+--- a/lib/puppeteer/node/NodeWebSocketTransport.js
++++ b/lib/puppeteer/node/NodeWebSocketTransport.js
+@@ -25,7 +25,11 @@ export class NodeWebSocketTransport {
+             ws.addEventListener('open', () => {
+                 return resolve(new NodeWebSocketTransport(ws));
+             });
+-            ws.addEventListener('error', reject);
++            // Reject with an Error carrying the handshake failure: the raw
++            // ErrorEvent stringifies to "[object ErrorEvent]" wherever it surfaces.
++            ws.addEventListener('error', event => {
++                reject(new Error(event.message, { cause: event.error }));
++            });
+         });
+     }
+     #ws;
