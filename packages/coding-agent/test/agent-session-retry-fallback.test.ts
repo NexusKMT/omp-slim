@@ -893,7 +893,7 @@ describe("AgentSession retry fallback", () => {
 		await session.prompt("Ask again for a new reserve episode");
 		await session.waitForIdle();
 		expect(confirmFallback).toHaveBeenCalledTimes(2);
-		session.freshSession();
+		expect(session.freshSession()).toBeDefined();
 		await session.prompt("Keep the decision after resetting the provider connection");
 		await session.waitForIdle();
 		expect(confirmFallback).toHaveBeenCalledTimes(2);
