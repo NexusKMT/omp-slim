@@ -287,21 +287,15 @@ async fn wait_for_exits(processes: &[proc_snapshot::ProcInfo]) {
 async fn wait_for_watchable_exits(
 	processes: &[proc_snapshot::ProcInfo],
 ) -> Vec<&proc_snapshot::ProcInfo> {
-	use std::os::fd::{FromRawFd, OwnedFd};
-
 	use tokio::io::{Interest, unix::AsyncFd};
 
 	let mut polled = Vec::new();
 	let mut watched = Vec::new();
 	for process in processes {
-		// SAFETY: pidfd_open takes scalar arguments and returns a new owned fd.
-		let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, process.pid(), 0) } as i32;
-		if fd < 0 {
+		let Some(fd) = proc_snapshot::sys::open_pidfd(process.pid()) else {
 			polled.push(process);
 			continue;
-		}
-		// SAFETY: a successful pidfd_open returned a uniquely owned descriptor.
-		let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+		};
 		// The pidfd names whoever owns the pid now. It is the selected process
 		// only if that process (matched by start time) is still alive after the
 		// open; otherwise it already exited and the pid may have been reused.
@@ -334,7 +328,8 @@ async fn wait_for_watchable_exits(
 		sync::Arc,
 	};
 
-	const SYNCHRONIZE: u32 = 0x0010_0000;
+	use proc_snapshot::sys;
+
 	const INFINITE: u32 = u32::MAX;
 	const WAIT_OBJECT_0: u32 = 0;
 	// WaitForMultipleObjects accepts at most 64 handles; one slot per call is
@@ -343,7 +338,6 @@ async fn wait_for_watchable_exits(
 
 	#[link(name = "kernel32")]
 	unsafe extern "system" {
-		fn OpenProcess(access: u32, inherit: i32, pid: u32) -> RawHandle;
 		fn CreateEventW(
 			attributes: *const std::ffi::c_void,
 			manual_reset: i32,
@@ -385,14 +379,10 @@ async fn wait_for_watchable_exits(
 			polled.push(process);
 			continue;
 		};
-		// SAFETY: OpenProcess returns a new owned synchronize handle or null.
-		let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
-		if handle.is_null() {
+		let Some(handle) = sys::open_process(pid, sys::SYNCHRONIZE) else {
 			polled.push(process);
 			continue;
-		}
-		// SAFETY: the successful OpenProcess above returned a uniquely owned handle.
-		let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+		};
 		// The snapshot holds its own handle to the selected process, and Windows
 		// never reuses a pid while a handle to it is open, so a pid that still
 		// reports running names the same process this handle was opened on.
