@@ -22,6 +22,8 @@ interface DownloadProgress {
 	guid: string;
 	state: "inProgress" | "completed" | "canceled";
 	receivedBytes: number;
+	/** Saved location on completion; tabs share one download directory per browser context, so this can differ from ours. */
+	filePath?: string;
 }
 
 interface PendingDownload extends DownloadStarted {
@@ -143,16 +145,15 @@ export class DownloadManager {
 				this.#rejectNext(new ToolError(`Download canceled: ${pending.url}`));
 				return;
 			}
-			void this.#complete(pending);
+			void this.#complete(pending, event.filePath);
 		};
 		session.on("Browser.downloadWillBegin", this.#willBegin);
 		session.on("Browser.downloadProgress", this.#progress);
 		this.#session = session;
 	}
 
-	async #complete(pending: PendingDownload): Promise<void> {
-		const directory = this.#directory ?? this.#defaultDirectory;
-		const downloadPath = path.join(directory, pending.suggestedFilename);
+	async #complete(pending: PendingDownload, filePath: string | undefined): Promise<void> {
+		const downloadPath = filePath ?? path.join(this.#directory ?? this.#defaultDirectory, pending.suggestedFilename);
 		for (let attempt = 0; attempt < 100; attempt++) {
 			try {
 				await fs.stat(downloadPath);
