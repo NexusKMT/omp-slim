@@ -22,10 +22,10 @@ use std::{
 
 use brush_core::{ShellExtensions, builtins::Registration};
 use clap::{Arg, ArgAction, ArgMatches, Command, builder::ValueParser, value_parser};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use pi_vfs::{
 	BlockingFs, CanonicalizeOptions, DirOptions, File, FileId, FileTime, Metadata, MissingHandling,
-	NodeKind, OpenOptions, Permissions, ResolveMode, child_path, decode_segment, file_name,
+	NodeKind, OpenOptions, Permissions, ResolveMode, SymlinkKind, child_path, decode_segment, file_name,
 	is_virtual_path, join_path, normalize_lexically, parent_path, url_scheme,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -46,7 +46,7 @@ use crate::{
 
 /// Failure of one copy step.
 #[derive(Debug, Error)]
-enum CpError {
+pub(crate) enum CpError {
 	/// A bare I/O failure.
 	#[error("{}", strip_errno(.0))]
 	IoErr(#[from] io::Error),
@@ -235,6 +235,10 @@ struct Options {
 	progress_bar:           bool,
 	/// `-Z`, `--context`: never copy the source's SELinux label.
 	set_selinux_context:    bool,
+	/// `mv` copying between filesystems: entries below a moved directory are
+	/// reported as renamed, and the operands are left for `mv` to report once
+	/// their sources are gone.
+	move_mode:              bool,
 }
 
 /// Debug states of the offload and reflink actions.
@@ -371,6 +375,9 @@ const PRESERVE_DEFAULT_VALUES: &str =
 /// Chunk size of streamed copies.
 const COPY_BUFFER: usize = 128 * 1024;
 
+/// Progress bar over the bytes of the copied tree.
+const PROGRESS_TEMPLATE: &str = "{msg}: [{elapsed_precise}] {wide_bar} {bytes:>7}/{total_bytes:7}";
+
 /// Parsed `cp` invocation.
 pub(crate) struct Cp {
 	matches: ArgMatches,
@@ -398,9 +405,11 @@ pub(crate) fn cp_builtin<SE: ShellExtensions>() -> Registration<SE> {
 	util::<Cp, SE>()
 }
 
-/// Writes `cp: <message>` to stderr. Exit status is decided by the caller.
+/// Writes `<utility>: <message>` to stderr, named after the running utility
+/// because `mv` copies between filesystems through this engine too. Exit
+/// status is decided by the caller: status 0 records nothing.
 fn show_error(host: &mut Host, message: impl fmt::Display) {
-	let _ = writeln!(host.stderr, "{}: {message}", Cp::NAME);
+	host.error(message, 0);
 }
 
 /// Writes `cp: warning: <message>` to stderr.
@@ -828,6 +837,16 @@ impl Attributes {
 	};
 	/// `-d`.
 	const LINKS: Self = Self { links: Preserve::Yes { required: true }, ..Self::NONE };
+	/// What GNU mv carries over when it copies between filesystems: all of
+	/// `-a`, but failing to preserve an attribute does not fail the move.
+	const MOVE: Self = Self {
+		ownership:  Preserve::Yes { required: false },
+		mode:       Preserve::Yes { required: false },
+		timestamps: Preserve::Yes { required: false },
+		context:    Preserve::No { explicit: false },
+		links:      Preserve::Yes { required: false },
+		xattr:      Preserve::Yes { required: false },
+	};
 	/// Nothing preserved.
 	const NONE: Self = Self {
 		ownership:  Preserve::No { explicit: false },
@@ -1074,6 +1093,7 @@ impl Options {
 			target_dir,
 			progress_bar: matches.get_flag(options::PROGRESS_BAR),
 			set_selinux_context: set_selinux_context || context.is_some(),
+			move_mode: false,
 		})
 	}
 
@@ -1113,8 +1133,9 @@ impl Options {
 	}
 }
 
-/// Bookkeeping shared by every copy of one `cp` invocation. Paths are kept
-/// in their operand spelling.
+/// Bookkeeping shared by every copy of one `cp` invocation, or of one `mv`
+/// invocation's moves between filesystems. Paths are kept in their operand
+/// spelling.
 #[derive(Default)]
 struct CopyState {
 	/// Identities of the symlinks this invocation created.
@@ -1141,6 +1162,82 @@ impl CopyState {
 				let _ = writeln!(host.stdout, "{line}");
 			},
 		}
+	}
+}
+
+/// The copying half of `mv`'s moves between filesystems, which GNU builds on
+/// cp's `copy()` too: `cp -a` on one entry whose destination is already
+/// gone, without failing the move over an attribute it cannot preserve.
+/// Hard links are remembered across every operand of one `mv`, so the later
+/// names of a moved file become links to its copy.
+pub(crate) struct MoveCopier {
+	options: Options,
+	state:   CopyState,
+}
+
+impl MoveCopier {
+	/// `verbose` reports each entry below a moved directory as renamed.
+	pub(crate) fn new(verbose: bool) -> Self {
+		Self {
+			options: Options {
+				attributes_only: false,
+				backup: BackupMode::None,
+				copy_contents: false,
+				cli_dereference: false,
+				copy_mode: CopyMode::Copy,
+				dereference: false,
+				no_target_dir: true,
+				one_file_system: false,
+				overwrite: OverwriteMode::Clobber(ClobberMode::Standard),
+				parents: false,
+				sparse_mode: SparseMode::Auto,
+				strip_trailing_slashes: false,
+				reflink_mode: ReflinkMode::Auto,
+				attributes: Attributes::MOVE,
+				recursive: true,
+				backup_suffix: String::new(),
+				target_dir: None,
+				update: UpdateMode::All,
+				debug: false,
+				verbose,
+				progress_bar: false,
+				set_selinux_context: false,
+				move_mode: true,
+			},
+			state:   CopyState::default(),
+		}
+	}
+
+	/// Copies `source`, whose lstat is `metadata`, to the vacant `dest`. The
+	/// failures of entries below a directory are reported as they happen and
+	/// the copy goes on, as GNU's does; the result is then
+	/// [`CpError::NotAllFilesCopied`]. Under `display_manager` a directory's
+	/// copy shows its progress.
+	pub(crate) fn copy(
+		&mut self,
+		host: &mut Host,
+		source: &Path,
+		dest: &Path,
+		metadata: Metadata,
+		display_manager: Option<&MultiProgress>,
+	) -> Result<(), CpError> {
+		if !metadata.is_dir() {
+			return copy_file(host, &mut self.state, source, dest, &self.options, true, Some(metadata));
+		}
+
+		self.state.progress_bar = display_manager.map(|display_manager| {
+			let total = disk_usage_directory(host, &host.resolve(source));
+			let style = ProgressStyle::with_template(PROGRESS_TEMPLATE).expect("valid progress template");
+			display_manager
+				.add(ProgressBar::new(total).with_style(style))
+				.with_message(source.to_string_lossy().into_owned())
+		});
+		let mut walk =
+			Walk { options: &self.options, root_dev: None, ancestors: Vec::new(), failed: false };
+		let copied = copy_entry(host, &mut self.state, &mut walk, source, dest, true);
+		self.state.progress_bar = None;
+		copied?;
+		if walk.failed { Err(CpError::NotAllFilesCopied) } else { Ok(()) }
 	}
 }
 
@@ -1264,12 +1361,7 @@ fn copy(host: &mut Host, sources: &[PathBuf], target: &Path, options: &Options) 
 	{
 		let total = disk_usage(host, sources, options.recursive);
 		let bar = ProgressBar::with_draw_target(Some(total), draw_target)
-			.with_style(
-				ProgressStyle::with_template(
-					"{msg}: [{elapsed_precise}] {wide_bar} {bytes:>7}/{total_bytes:7}",
-				)
-				.expect("valid progress template"),
-			)
+			.with_style(ProgressStyle::with_template(PROGRESS_TEMPLATE).expect("valid progress template"))
 			.with_message("cp");
 		bar.tick();
 		state.progress_bar = Some(bar);
@@ -1720,10 +1812,16 @@ fn set_mode(
 }
 
 /// Creates the symlink `dest` pointing at the literal `target`.
-fn symlink_file(host: &mut Host, state: &mut CopyState, target: &Path, dest: &Path) -> CopyResult<()> {
+fn symlink_file(
+	host: &mut Host,
+	state: &mut CopyState,
+	target: &Path,
+	dest: &Path,
+	kind: SymlinkKind,
+) -> CopyResult<()> {
 	let filesystem = host.fs().clone();
 	let dest_fs = host.resolve(dest);
-	filesystem.symlink(target, &dest_fs).map_err(|e| {
+	filesystem.symlink_with(target, &dest_fs, kind).map_err(|e| {
 		CpError::IoErrContext(
 			e,
 			format!("cannot create symbolic link {} to {}", dest.quote(), target.quote()),
@@ -2038,23 +2136,27 @@ fn make_parent_dirs(
 	Ok(())
 }
 
+/// Reports one copy for `-v`: `'source' -> 'dest'`, or `renamed 'source'
+/// -> 'dest'` for an entry below a directory `mv` moves.
 fn print_verbose_output(
 	host: &mut Host,
 	state: &CopyState,
+	options: &Options,
 	source: &Path,
 	dest: &Path,
 	backup: Option<&Path>,
 ) {
+	let action = if options.move_mode { "renamed " } else { "" };
 	match backup {
 		Some(backup) => state.say(
 			host,
 			format_args!(
-				"{} (backup: {})",
+				"{action}{} (backup: {})",
 				context_for(source, dest),
 				backup_display(dest, backup).quote()
 			),
 		),
-		None => state.say(host, context_for(source, dest)),
+		None => state.say(host, format_args!("{action}{}", context_for(source, dest))),
 	}
 }
 
@@ -2126,7 +2228,7 @@ fn handle_copy_mode(
 			if filesystem.exists(&dest_fs) && options.force() {
 				filesystem.remove_file(&dest_fs)?;
 			}
-			symlink_file(host, state, source, dest)?;
+			symlink_file(host, state, source, dest, SymlinkKind::Auto)?;
 		},
 		CopyMode::AttrOnly => {
 			filesystem
@@ -2194,6 +2296,8 @@ fn copy_file(
 	let source_fs = host.resolve(source);
 	let dest_fs = host.resolve(dest);
 	let dereference = options.dereference(source_in_command_line);
+	// `mv` reports a moved operand itself, once its source is gone.
+	let report = options.verbose && !(options.move_mode && source_in_command_line);
 
 	// GNU stats the source before touching the destination. The caller's
 	// lstat answers unless dereferencing must look through a symlink.
@@ -2346,7 +2450,9 @@ fn copy_file(
 	}
 
 	// When using --link mode, hard link structure is automatically preserved
-	// because we link to source files (which share inodes).
+	// because we link to source files (which share inodes). The lookup ignores
+	// the link count: `mv` removed the other names of an earlier operand, so
+	// its later names may be down to one.
 	if options.preserve_hard_links()
 		&& options.copy_mode != CopyMode::Link
 		&& let Some(new_source) = source_metadata
@@ -2365,8 +2471,8 @@ fn copy_file(
 				)
 			})?;
 
-		if options.verbose {
-			print_verbose_output(host, state, source, dest, backup.as_deref());
+		if report {
+			print_verbose_output(host, state, options, source, dest, backup.as_deref());
 		}
 
 		return Ok(());
@@ -2391,8 +2497,8 @@ fn copy_file(
 	let source_is_stream = is_stream(&source_metadata);
 
 	// GNU reports each copy as it starts it.
-	if options.verbose {
-		print_verbose_output(host, state, source, dest, backup.as_deref());
+	if report {
+		print_verbose_output(host, state, options, source, dest, backup.as_deref());
 	}
 
 	let fate = handle_copy_mode(
@@ -2438,9 +2544,12 @@ fn copy_file(
 		)?;
 	}
 
-	// Skip tracking copied files when using --link mode since hard link
-	// structure is automatically preserved
-	if options.copy_mode != CopyMode::Link
+	// Only `--preserve=links` looks copies up, and only a file with other
+	// names, or reached through a followed symlink, can be met again; GNU's
+	// `remember_copied` keeps the same ones.
+	if options.preserve_hard_links()
+		&& options.copy_mode != CopyMode::Link
+		&& (dereference || source_metadata.nlink().is_none_or(|links| links > 1))
 		&& let Some(id) = source_metadata.file_id()
 	{
 		state.copied_files.insert(id, dest.to_path_buf());
@@ -2521,7 +2630,7 @@ fn copy_helper(
 	}
 
 	if source_metadata.is_symlink() {
-		copy_link(host, state, source, dest, options)?;
+		copy_link(host, state, source, dest, options, source_metadata)?;
 		return Ok(DestFate::Kept);
 	}
 	let (copy_debug, fate) = copy_data(host, state, source, dest, options, source_metadata)?;
@@ -2565,20 +2674,45 @@ fn copy_special(
 	created.map(|()| DestFate::Recreated)
 }
 
+/// Recreates the symlink `source`, whose lstat is `source_metadata`, at
+/// `dest`; any existing destination was removed by `copy_file`.
 fn copy_link(
 	host: &mut Host,
 	state: &mut CopyState,
 	source: &Path,
 	dest: &Path,
 	options: &Options,
+	source_metadata: &Metadata,
 ) -> CopyResult<()> {
-	// Here, we will copy the symlink itself (actually, just recreate it); any
-	// existing destination was removed by `copy_file`.
 	let link = host.fs().read_link(host.resolve(source)).map_err(|e| {
 		CpError::IoErrContext(e, format!("cannot read symbolic link {}", source.quote()))
 	})?;
-	symlink_file(host, state, &link, dest)?;
-	copy_attributes(host, source, dest, &options.attributes, false, false, options.set_selinux_context, None)
+	// Windows tells file from directory symlinks, even dangling ones; keep the
+	// kind the source link has.
+	#[cfg(windows)]
+	let kind = {
+		let file_type = source_metadata.file_type();
+		if file_type.is_symlink_dir() {
+			SymlinkKind::Dir
+		} else if file_type.is_symlink_file() {
+			SymlinkKind::File
+		} else {
+			SymlinkKind::Auto
+		}
+	};
+	#[cfg(not(windows))]
+	let kind = SymlinkKind::Auto;
+	symlink_file(host, state, &link, dest, kind)?;
+	copy_attributes(
+		host,
+		source,
+		dest,
+		&options.attributes,
+		false,
+		false,
+		options.set_selinux_context,
+		Some(source_metadata),
+	)
 }
 
 /// Streams `source` into `dest` through their handles, polling cancellation
@@ -3049,8 +3183,9 @@ fn copy_entry(
 	let created = match filesystem.metadata(host.resolve(dest)) {
 		Err(_) => {
 			build_dir(host, dest, false, options, Some(source))?;
-			if options.verbose {
-				state.say(host, context_for(source, dest));
+			// `mv` reports a moved operand itself, once its source is gone.
+			if options.verbose && !(is_root && options.move_mode) {
+				print_verbose_output(host, state, options, source, dest, None);
 			}
 			true
 		},
