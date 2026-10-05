@@ -543,3 +543,34 @@ describe("Factory Droid credits badge", () => {
 		expect(browser.visibleCount).toBe(0);
 	});
 });
+
+describe("serviceTierFor", () => {
+	test("returns the configured tier only when the request would carry it", () => {
+		const source = createModelBrowserSource(Settings.isolated({ "tier.openai": "ultrafast" }));
+		const firstParty = makeModel("openai", "gpt-6-astra");
+		const codexUnlisted = makeModel("openai-codex", "gpt-6-astra");
+		const codexAdvertised = buildModel({
+			id: "gpt-6-astra",
+			name: "gpt-6-astra",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
+			contextWindow: 400_000,
+			maxTokens: 128_000,
+			serviceTiers: ["ultrafast"],
+		});
+		const anthropic = makeModel("anthropic", "claude-opus-5-5");
+
+		// First-party OpenAI takes ultrafast as-is.
+		expect(source.serviceTierFor?.(firstParty)).toBe("ultrafast");
+		// Codex realizes it only when discovery advertises it, so the browser must
+		// not label a tier the request would drop.
+		expect(source.serviceTierFor?.(codexUnlisted)).toBeUndefined();
+		expect(source.serviceTierFor?.(codexAdvertised)).toBe("ultrafast");
+		// No configured tier for the family.
+		expect(source.serviceTierFor?.(anthropic)).toBeUndefined();
+	});
+});

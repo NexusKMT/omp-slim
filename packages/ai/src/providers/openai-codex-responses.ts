@@ -1349,10 +1349,11 @@ function getCodexServiceTierCostMultiplier(
  * The tier a Codex response was billed at. The response echo is authoritative
  * whenever it reports a tier (the backend may serve a requested priority/flex
  * turn as `default`); the requested tier is used only when the echo is absent.
+ * The tier's identity is preserved even when it has no pricing entry (`scale`),
+ * because the recorded tier also drives premium-request and speed accounting.
  */
-function resolveCodexCostServiceTier(res: ServiceTier | undefined, req?: unknown): ServiceTier | "default" | undefined {
-	const served = res ?? req;
-	return served === "flex" || served === "priority" || served === "ultrafast" ? served : "default";
+function resolveCodexCostServiceTier(res: ServiceTier | undefined, req?: unknown): ServiceTier {
+	return res ?? parseServiceTier(req) ?? "default";
 }
 
 function applyCodexServiceTierPricing(

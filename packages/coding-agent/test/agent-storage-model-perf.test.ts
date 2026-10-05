@@ -350,6 +350,67 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(stats?.tps).toBeCloseTo(100, 5);
 	});
 
+	it("rebuilds the aggregates instead of double-counting when the v1 import already ran", async () => {
+		tempDir = TempDir.createSync("@omp-agent-storage-perf-rebuild-");
+		const homeDir = tempDir.join("home");
+		const agentDir = tempDir.join("agent");
+		const env = {
+			...process.env,
+			HOME: homeDir,
+			USERPROFILE: homeDir,
+			OMP_PROFILE: "",
+			PI_CODING_AGENT_DIR: agentDir,
+			PI_CONFIG_DIR: ".omp",
+			PI_PROFILE: "",
+			XDG_CACHE_HOME: tempDir.join("xdg-cache"),
+			XDG_CONFIG_HOME: tempDir.join("xdg-config"),
+			XDG_DATA_HOME: tempDir.join("xdg-data"),
+			XDG_STATE_HOME: tempDir.join("xdg-state"),
+		};
+		const probe = await runProbe(
+			[
+				'import { Database } from "bun:sqlite";',
+				'import * as fs from "node:fs";',
+				'import * as path from "node:path";',
+				'import { getAgentDbPath, getStatsDbPath } from "@oh-my-pi/pi-utils";',
+				`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+				"const statsPath = getStatsDbPath();",
+				"fs.mkdirSync(path.dirname(statsPath), { recursive: true });",
+				"const statsDb = new Database(statsPath);",
+				'statsDb.run("CREATE TABLE messages (provider TEXT, model TEXT, output_tokens INTEGER, duration INTEGER, ttft INTEGER, stop_reason TEXT, timestamp INTEGER, service_tier TEXT)");',
+				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ["openai", "repro", 20, 2000, null, "stop", Date.now(), null]);',
+				"statsDb.close();",
+				// A v1 install: the marker is set and the aggregates hold the blended import.
+				"await AgentStorage.open();",
+				"AgentStorage.close();",
+				"const agentDb = new Database(getAgentDbPath());",
+				'agentDb.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["model_perf_backfill", "complete"]);',
+				'agentDb.run("INSERT OR REPLACE INTO model_perf (model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms) VALUES (?, ?, ?, ?, ?, ?)", ["openai/repro", 5, 5000, 5000, 0, 0]);',
+				"agentDb.close();",
+				// Reopening runs the v2 migration: the stale blended row must be replaced
+				// by the stats-db import, not added to. The import is kicked without a
+				// handle, so wait for its completion marker (a child process cannot use
+				// fake timers to drive the deferred work).
+				"const storage = await AgentStorage.open();",
+				"const markerDb = new Database(getAgentDbPath());",
+				"for (let i = 0; i < 200; i++) {",
+				'	if (markerDb.query("SELECT value FROM meta WHERE key = ?").get("model_perf_backfill_v2")) break;',
+				"	await Bun.sleep(10);",
+				"}",
+				"markerDb.close();",
+				"const row = storage.getModelPerf().get('openai/repro');",
+				"console.error(JSON.stringify(row));",
+				"AgentStorage.close();",
+			].join("\n"),
+			env,
+		);
+		expect(probe.exitCode, probe.stderr).toBe(0);
+		const row = JSON.parse(probe.stderr.trim().split("\n").pop() ?? "null") as { samples: number; tps: number };
+		// 20 tokens over 2000ms from the stats database; the stale 1000 t/s row is gone.
+		expect(row.samples).toBe(1);
+		expect(row.tps).toBeCloseTo(10, 5);
+	});
+
 	it("does not start the stats backfill while flushing a live batch on exit", async () => {
 		tempDir = TempDir.createSync("@omp-agent-storage-exit-backfill-");
 		const homeDir = tempDir.join("home");

@@ -207,6 +207,13 @@ describe("getPremiumServiceTierRequests", () => {
 		expect(getPremiumServiceTierRequests("ultrafast", gemini, { served: true })).toBe(0);
 		// `served` does not invent premium weight for a standard tier.
 		expect(getPremiumServiceTierRequests("default", openai, { served: true })).toBe(0);
+		// Priority follows the same rule: a Codex model whose discovered list omits
+		// it still counts when the response reported serving it.
+		const unlisted = { ...codex, serviceTiers: ["ultrafast"] };
+		expect(getPremiumServiceTierRequests("priority", unlisted)).toBe(0);
+		expect(getPremiumServiceTierRequests("priority", unlisted, { served: true })).toBe(1);
+		// The provider allowlist is not bypassed.
+		expect(getPremiumServiceTierRequests("priority", { ...orOpenAI, serviceTiers: [] }, { served: true })).toBe(0);
 	});
 
 	it("does not bill OpenRouter, unrealized, or non-priority traffic", () => {

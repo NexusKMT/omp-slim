@@ -88,7 +88,10 @@ const BACKFILL_COMPLETE = "complete";
 const BACKFILL_PENDING = "pending";
 const USER_MESSAGES_BACKFILL_KEY = "user_messages_v9";
 const USER_MESSAGE_LINKS_REPAIR_KEY = "user_message_links_v1";
-const PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY = "premium_requests_priority_v1";
+// v2: the parser also records the served service tier per message, so a full
+// re-parse fills `service_tier` and re-derives ultrafast premium counts that the
+// v1 pass (priority only) left at zero.
+const PRIORITY_PREMIUM_REQUESTS_BACKFILL_KEY = "premium_requests_priority_v2";
 const AGENT_TYPE_BACKFILL_KEY = "agent_type_v1";
 const FORK_DEDUPE_KEY = "fork_dedupe_v1";
 // v2: tool-name sanitization at ingest (see `sanitizeToolName` in parser.ts)

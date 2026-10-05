@@ -103,6 +103,12 @@ const MODEL_PERF_DECAY_AT = 256;
 /** meta-table marker set once historical stats.db rows have been imported into model_perf. */
 const MODEL_PERF_BACKFILL_KEY = "model_perf_backfill_v2";
 /**
+ * Marker the v1 import wrote. Its presence means the aggregates already hold a
+ * blended import that cannot be separated retroactively, so the v2 pass rebuilds
+ * them from the stats database instead of adding the same history again.
+ */
+const MODEL_PERF_BACKFILL_V1_KEY = "model_perf_backfill";
+/**
  * Batch window for deferred model_perf writes. Perf aggregates are advisory, so
  * one transaction per minute replaces one per turn; the timer is unref'd and the
  * pending batch is flushed by {@link AgentStorage.close}, which the exit-only
@@ -647,6 +653,12 @@ FROM model_usage_legacy
 			if (marker) return;
 			const statsDbPath = getStatsDbPath();
 			if (!fs.existsSync(statsDbPath)) return;
+			// The v1 import folded every historical turn into the bare model row, so
+			// importing on top of it would double-count those samples. Rebuild from the
+			// stats database instead — the same source the v1 pass read, now carrying
+			// the served tier. Live samples recorded since the last stats sync are
+			// re-imported with it.
+			if (markerStmt.get(MODEL_PERF_BACKFILL_V1_KEY)) this.#db.run("DELETE FROM model_perf");
 			void this.backfillModelPerfFromStats(statsDbPath)
 				.then(imported => {
 					using markCompleteStmt = this.#db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");

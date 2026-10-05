@@ -329,7 +329,10 @@ export function getPremiumServiceTierRequests(
 		if (provider !== "openai" && provider !== "openai-codex") return 0;
 		return options?.served === true || shouldSendServiceTier("ultrafast", model) ? 1 : 0;
 	}
-	if (!realizesPriorityServiceTier(serviceTier, model)) return 0;
+	if (serviceTier !== "priority") return 0;
+	// A served tier is proof it reached the wire, so the realization gate only
+	// applies to requested-tier inference.
+	if (!options?.served && !realizesPriorityServiceTier(serviceTier, model)) return 0;
 	return provider === "openai" ||
 		provider === "openai-codex" ||
 		provider === "anthropic" ||

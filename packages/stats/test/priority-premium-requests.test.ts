@@ -144,7 +144,7 @@ describe("priority service-tier premium-request backfill", () => {
 		const raw = new Database(getStatsDbPath());
 		raw.exec("DELETE FROM messages");
 		raw.exec("DELETE FROM file_offsets");
-		raw.exec("DELETE FROM meta WHERE key = 'premium_requests_priority_v1'");
+		raw.exec("DELETE FROM meta WHERE key = 'premium_requests_priority_v2'");
 		raw.prepare(
 			`INSERT INTO messages (
 				session_file, entry_id, folder, model, provider, api, timestamp,
