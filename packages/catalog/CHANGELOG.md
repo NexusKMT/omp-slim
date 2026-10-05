@@ -5,6 +5,7 @@
 ### Added
 
 - Added an optional `statefulResponses` compat field for OpenAI Responses models, kept through OpenRouter's Responses dispatch ([#13686](https://github.com/can1357/oh-my-pi/pull/13686) by [@alphastorm](https://github.com/alphastorm)).
+- Added 15 Snowflake Cortex models with account-specific endpoints, Cortex compatibility rules, and estimated account-billed pricing.
 
 ### Changed
 
