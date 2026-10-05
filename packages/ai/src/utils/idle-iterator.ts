@@ -479,52 +479,94 @@ export interface TerminalGraceIteratorOptions {
  * hangs on `iterator.next()` until the idle watchdog converts an
  * already-successful turn into a timeout error. Grace expiry is a clean end
  * of iteration, never an error.
+ *
+ * A consumer that stops early (`break`) after `finishedAtMs()` is set is not
+ * held up, but the source is not torn down either: its remaining items are
+ * drained in the background, bounded by the same grace deadline. Cancelling
+ * the source immediately would drop the connection before compliant servers
+ * finish sending `[DONE]`, and gateways record such requests as
+ * client-cancelled even though the response was delivered in full.
  */
 export async function* iterateWithTerminalGrace<T>(
 	iterable: AsyncIterable<T>,
 	options: TerminalGraceIteratorOptions,
 ): AsyncGenerator<T> {
 	const iterator = iterable[Symbol.asyncIterator]();
+	// Set only while suspended at `yield`: `finally` then runs because the
+	// consumer stopped early, not because the source ended or failed.
+	let consumerStopped = false;
 	try {
 		while (true) {
-			const finishedAtMs = options.finishedAtMs();
-			if (finishedAtMs === undefined) {
-				const result = await iterator.next();
-				if (result.done) return;
-				yield result.value;
-				continue;
-			}
-			const remainingMs = finishedAtMs + options.graceMs - Date.now();
-			if (remainingMs <= 0) {
-				options.onGraceEnd?.();
-				return;
-			}
-			const nextPromise = iterator.next();
-			let timer: NodeJS.Timeout | undefined;
-			const timeoutPromise = new Promise<"timeout">(resolve => {
-				timer = setTimeout(() => resolve("timeout"), remainingMs);
-			});
-			try {
-				const outcome = await Promise.race([nextPromise, timeoutPromise]);
-				if (outcome === "timeout") {
-					// The abandoned read settles (likely rejects) once onGraceEnd
-					// aborts the transport — mark it handled so it cannot surface
-					// as an unhandled rejection.
-					nextPromise.catch(() => {});
-					options.onGraceEnd?.();
-					return;
-				}
-				if (outcome.done) return;
-				yield outcome.value;
-			} finally {
-				if (timer !== undefined) clearTimeout(timer);
-			}
+			const result = await nextWithinGrace(iterator, options);
+			if (result.done) return;
+			consumerStopped = true;
+			yield result.value;
+			consumerStopped = false;
 		}
 	} finally {
-		const returnPromise = iterator.return?.();
-		if (returnPromise) {
-			void Promise.resolve(returnPromise).catch(() => {});
+		if (consumerStopped && options.finishedAtMs() !== undefined) {
+			void drainWithinGrace(iterator, options);
+		} else {
+			releaseIterator(iterator);
 		}
+	}
+}
+
+const GRACE_ENDED: IteratorReturnResult<undefined> = { done: true, value: undefined };
+
+/**
+ * Pulls the next item, ending with `done` (after `onGraceEnd`) once the
+ * post-terminal grace deadline passes. Unbounded while `finishedAtMs()` is unset.
+ */
+async function nextWithinGrace<T>(
+	iterator: AsyncIterator<T>,
+	options: TerminalGraceIteratorOptions,
+): Promise<IteratorResult<T, unknown>> {
+	const finishedAtMs = options.finishedAtMs();
+	if (finishedAtMs === undefined) return iterator.next();
+	const remainingMs = finishedAtMs + options.graceMs - Date.now();
+	if (remainingMs <= 0) {
+		options.onGraceEnd?.();
+		return GRACE_ENDED;
+	}
+	const nextPromise = iterator.next();
+	let timer: NodeJS.Timeout | undefined;
+	const timeoutPromise = new Promise<"timeout">(resolve => {
+		timer = setTimeout(() => resolve("timeout"), remainingMs);
+	});
+	try {
+		const outcome = await Promise.race([nextPromise, timeoutPromise]);
+		if (outcome !== "timeout") return outcome;
+		// The abandoned read settles (likely rejects) once onGraceEnd aborts
+		// the transport — mark it handled so it cannot surface as an
+		// unhandled rejection.
+		nextPromise.catch(() => {});
+		options.onGraceEnd?.();
+		return GRACE_ENDED;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
+ * Discards the source's trailing items until it ends or the grace window
+ * closes, then releases it. Failures are swallowed: the consumer already
+ * accepted the response.
+ */
+async function drainWithinGrace<T>(iterator: AsyncIterator<T>, options: TerminalGraceIteratorOptions): Promise<void> {
+	try {
+		while (!(await nextWithinGrace(iterator, options)).done) {}
+	} catch {
+		// Transport errors after the consumer finished cannot change its result.
+	} finally {
+		releaseIterator(iterator);
+	}
+}
+
+function releaseIterator<T>(iterator: AsyncIterator<T>): void {
+	const returnPromise = iterator.return?.();
+	if (returnPromise) {
+		void Promise.resolve(returnPromise).catch(() => {});
 	}
 }
 
