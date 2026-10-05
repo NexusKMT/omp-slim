@@ -95,7 +95,10 @@ describe("live routing config files", () => {
 			accountId: "routing-test",
 		});
 		const sync = createAuthStorageSettingsSync(settings, storage);
-		cleanups.push(() => sync.stop(), () => storage.close());
+		cleanups.push(
+			() => sync.stop(),
+			() => storage.close(),
+		);
 		expect(selection(settings).patterns).toEqual(["anthropic/first"]);
 		// A non-finite per-call threshold uses the storage's configured reserve.
 		expect((await storage.health.model("live-routing-test", { reserveFraction: Number.NaN })).state).toBe("healthy");
