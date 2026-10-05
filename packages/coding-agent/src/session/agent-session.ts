@@ -10676,7 +10676,9 @@ export class AgentSession implements SettingsScope {
 	 *
 	 * When none of the target session's saved models can be restored, the switch
 	 * throws `Could not restore model <provider/id>` and the current session stays
-	 * active. A session created with `allowSessionModelFallback` (and
+	 * active; as with a rejected cwd change, `session_before_switch` has already
+	 * run and any in-flight turn has already been aborted (the target's models are
+	 * only known once its file is loaded). A session created with `allowSessionModelFallback` (and
 	 * `retry.modelFallback` on) instead keeps its current model and reports a
 	 * warning. Reloading the current session keeps the current model.
 	 * @returns true if switch completed, false if cancelled by hook or cwd change
@@ -10888,9 +10890,13 @@ export class AgentSession implements SettingsScope {
 				} else {
 					this.agent.setModel(targetModel);
 				}
-				const targetModelString = `${targetModel.provider}/${targetModel.id}`;
-				if (explicitModel && targetModelString !== targetModelStrings[0]) {
-					this.sessionManager.appendModelChange(targetModelString);
+				// Saved selectors may carry a thinking suffix; compare resolved models.
+				const savedModel =
+					targetModelStrings.length > 0
+						? resolveSessionModelSelector(this.#modelRegistry, targetModelStrings[0])?.model
+						: undefined;
+				if (explicitModel && !(savedModel && modelsAreEqual(savedModel, targetModel))) {
+					this.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`);
 				}
 			}
 
