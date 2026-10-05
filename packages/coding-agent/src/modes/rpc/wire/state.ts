@@ -130,7 +130,14 @@ export const stateDefs = {
 		{ cancelled: "boolean", resumed: "boolean", sessionId: "string", "sessionFile?": "string" },
 		"`open_session` outcome; `resumed` is false when a fresh session was started.",
 	),
-	RemoveQueuedMessageResult: { removed: "boolean" },
+	RemoveQueuedMessageResult: {
+		removed: "boolean",
+		"images?": doc("ImageContent[]", "The removed message's images, so the client can restore them with its text."),
+		"imagesDropped?": doc(
+			"boolean",
+			"Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened.",
+		),
+	},
 	PromoteQueuedMessageResult: { promoted: "boolean" },
 	RestoredQueuedMessage: doc(
 		{ text: "string", "images?": "ImageContent[]" },

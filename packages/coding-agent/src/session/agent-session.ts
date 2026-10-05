@@ -8667,13 +8667,22 @@ export class AgentSession implements SettingsScope {
 	 * duplicates.
 	 */
 	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
+		return this.takeQueuedMessage(text, queue) !== undefined;
+	}
+
+	/**
+	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
+	 * content (its chip text and images); undefined when nothing matched.
+	 */
+	takeQueuedMessage(text: string, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
 		const index = this.#findQueuedUserMessage(selected, text);
-		if (index < 0) return false;
+		if (index < 0) return undefined;
 
+		const removed = selected[index];
 		this.agent.replaceQueue(queue, this.#withoutQueuedUserMessage(selected, index));
 		this.#reconcileQueuedMessageDrain();
-		return true;
+		return toRestoredQueuedMessage(removed);
 	}
 
 	/**

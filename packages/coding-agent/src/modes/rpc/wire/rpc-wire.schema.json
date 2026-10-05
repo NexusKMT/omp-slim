@@ -2694,6 +2694,17 @@
 			"properties": {
 				"removed": {
 					"type": "boolean"
+				},
+				"images": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ImageContent"
+					},
+					"description": "The removed message's images, so the client can restore them with its text."
+				},
+				"imagesDropped": {
+					"type": "boolean",
+					"description": "Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened."
 				}
 			},
 			"required": [

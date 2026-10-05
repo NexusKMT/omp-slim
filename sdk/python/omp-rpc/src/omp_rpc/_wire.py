@@ -696,6 +696,10 @@ class OpenSessionResult:
 @dataclass(slots=True, frozen=True, kw_only=True)
 class RemoveQueuedMessageResult:
     removed: bool
+    images: tuple[ImageContent, ...] | None = None
+    """The removed message's images, so the client can restore them with its text."""
+    images_dropped: bool | None = None
+    """Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1894,6 +1898,8 @@ def parse_remove_queued_message_result(value: object, path: str = "RemoveQueuedM
     payload = expect_object(value, path)
     return RemoveQueuedMessageResult(
         removed=required(payload, "removed", decode_bool, path),
+        images=optional(payload, "images", array(parse_image_content), path),
+        images_dropped=optional(payload, "imagesDropped", decode_bool, path),
     )
 
 

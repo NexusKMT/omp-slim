@@ -3094,6 +3094,12 @@ pub struct OpenSessionResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoveQueuedMessageResult {
 	pub removed: bool,
+	/// The removed message's images, so the client can restore them with its text.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub images: Option<Vec<ImageContent>>,
+	/// Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened.
+	#[serde(rename = "imagesDropped", default, skip_serializing_if = "Option::is_none")]
+	pub images_dropped: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

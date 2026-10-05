@@ -2623,6 +2623,10 @@ func (v *OpenSessionResult) decodeFrom(raw map[string]json.RawMessage) error {
 
 type RemoveQueuedMessageResult struct {
 	Removed bool `json:"removed"`
+	// The removed message's images, so the client can restore them with its text.
+	Images []ImageContent `json:"images,omitempty"`
+	// Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened.
+	ImagesDropped *bool `json:"imagesDropped,omitempty"`
 }
 
 func (v *RemoveQueuedMessageResult) UnmarshalJSON(data []byte) error {
@@ -2633,6 +2637,8 @@ func (v *RemoveQueuedMessageResult) decodeFrom(raw map[string]json.RawMessage) e
 	var out RemoveQueuedMessageResult
 	d := fieldDecoder{raw: raw, owner: "RemoveQueuedMessageResult"}
 	d.required("removed", &out.Removed)
+	d.optional("images", &out.Images)
+	d.optional("imagesDropped", &out.ImagesDropped)
 	if d.err != nil {
 		return d.err
 	}

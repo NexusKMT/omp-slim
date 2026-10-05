@@ -273,6 +273,15 @@ export interface RpcOpenSessionResult {
 	sessionFile?: string;
 }
 
+/** `remove_queued_message` result. */
+export interface RpcRemoveQueuedMessageResult {
+	removed: boolean;
+	/** The removed message's images, so the client can restore them with its text. */
+	images?: ImageContent[];
+	/** Set when the images exceeded the transport limit and were omitted; the removal still happened. */
+	imagesDropped?: true;
+}
+
 /** `abort_and_restore_queue` result: the user-authored queued input withdrawn before the abort, oldest first. */
 export interface RpcAbortAndRestoreQueueResult {
 	steering: RestoredQueuedMessage[];
@@ -349,7 +358,13 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { agentInvoked: boolean } }
 	| { id?: string; type: "response"; command: "steer"; success: true }
 	| { id?: string; type: "response"; command: "follow_up"; success: true }
-	| { id?: string; type: "response"; command: "remove_queued_message"; success: true; data: { removed: boolean } }
+	| {
+			id?: string;
+			type: "response";
+			command: "remove_queued_message";
+			success: true;
+			data: RpcRemoveQueuedMessageResult;
+	  }
 	| { id?: string; type: "response"; command: "promote_queued_message"; success: true; data: { promoted: boolean } }
 	| { id?: string; type: "response"; command: "abort"; success: true }
 	| { id?: string; type: "response"; command: "abort_and_prompt"; success: true }

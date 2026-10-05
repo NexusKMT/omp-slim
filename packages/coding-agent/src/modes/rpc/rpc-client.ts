@@ -38,6 +38,7 @@ import type {
 	RpcLiveFrame,
 	RpcOpenSessionResult,
 	RpcPromptResultFrame,
+	RpcRemoveQueuedMessageResult,
 	RpcResponse,
 	RpcSessionSettledFrame,
 	RpcSessionState,
@@ -686,8 +687,9 @@ export class RpcClient {
 
 	/**
 	 * Remove the first matching user message and its companions from one pending queue.
+	 * A removed message's images are returned for restoring it to an editor.
 	 */
-	async removeQueuedMessage(message: string, queue: "steering" | "followUp"): Promise<{ removed: boolean }> {
+	async removeQueuedMessage(message: string, queue: "steering" | "followUp"): Promise<RpcRemoveQueuedMessageResult> {
 		const response = await this.#send({ type: "remove_queued_message", message, queue });
 		return this.#getData(response);
 	}

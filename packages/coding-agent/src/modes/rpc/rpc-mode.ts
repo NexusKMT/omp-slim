@@ -47,6 +47,7 @@ import {
 } from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { requestTextPrediction, textPredictionBackend } from "../../predict/client";
 import { type AgentSession, SessionBusyError } from "../../session/agent-session";
+import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
@@ -95,6 +96,7 @@ import type {
 	RpcHostUriRequest,
 	RpcHostUriResult,
 	RpcOpenSessionResult,
+	RpcRemoveQueuedMessageResult,
 	RpcResponse,
 	RpcSessionState,
 	RpcSubagentSubscriptionLevel,
@@ -679,6 +681,33 @@ export class RpcShutdownCoordinator {
 	}
 }
 
+/** UTF-8 JSON size of `value`, as compared against `RpcFrameEncoder.maxResponseBytes`. */
+function encodedBytes(value: unknown): number {
+	return Buffer.byteLength(JSON.stringify(value));
+}
+
+/**
+ * Build the `remove_queued_message` response within `maxBytes`. The message is already removed,
+ * so an oversized response must not become a transport-limit error that loses it: its images are
+ * omitted instead (`imagesDropped`).
+ */
+export function fitRemoveQueuedMessageResponse(
+	id: string | undefined,
+	removed: RestoredQueuedMessage | undefined,
+	maxBytes: number,
+): RpcResponse {
+	const response = (data: RpcRemoveQueuedMessageResult): RpcResponse => ({
+		id,
+		type: "response",
+		command: "remove_queued_message",
+		success: true,
+		data,
+	});
+	if (!removed?.images) return response({ removed: removed !== undefined });
+	const full = response({ removed: true, images: removed.images });
+	return encodedBytes(full) <= maxBytes ? full : response({ removed: true, imagesDropped: true });
+}
+
 /**
  * Build the `abort_and_restore_queue` response within `maxBytes`. The queue is already withdrawn,
  * so an oversized response must not become a transport-limit error that loses it: images go first
@@ -697,9 +726,8 @@ export function fitAbortAndRestoreQueueResponse(
 		success: true,
 		data,
 	});
-	const bytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value));
 	const full = response(restored);
-	if (bytes(full) <= maxBytes) return full;
+	if (encodedBytes(full) <= maxBytes) return full;
 	const imagesDropped = [...restored.steering, ...restored.followUp].some(entry => entry.images?.length);
 	const flags = imagesDropped ? { imagesDropped: true as const } : {};
 	const textOnly = {
@@ -708,14 +736,14 @@ export function fitAbortAndRestoreQueueResponse(
 	};
 	if (imagesDropped) {
 		const withoutImages = response({ ...textOnly, ...flags });
-		if (bytes(withoutImages) <= maxBytes) return withoutImages;
+		if (encodedBytes(withoutImages) <= maxBytes) return withoutImages;
 	}
 	const fitted: RpcAbortAndRestoreQueueResult = { steering: [], followUp: [], ...flags, truncated: true };
 	// Exact: each entry adds its own JSON plus a comma after the first in its array.
-	let remaining = maxBytes - bytes(response(fitted));
+	let remaining = maxBytes - encodedBytes(response(fitted));
 	for (const queue of ["steering", "followUp"] as const) {
 		for (const entry of textOnly[queue]) {
-			const cost = bytes(entry) + (fitted[queue].length > 0 ? 1 : 0);
+			const cost = encodedBytes(entry) + (fitted[queue].length > 0 ? 1 : 0);
 			if (cost > remaining) return response(fitted);
 			fitted[queue].push(entry);
 			remaining -= cost;
@@ -1810,9 +1838,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				if (command.queue !== "steering" && command.queue !== "followUp") {
 					return error(id, "remove_queued_message", 'queue must be "steering" or "followUp"');
 				}
-				return success(id, "remove_queued_message", {
-					removed: session.removeQueuedMessage(command.message, command.queue),
-				});
+				return fitRemoveQueuedMessageResponse(
+					id,
+					session.takeQueuedMessage(command.message, command.queue),
+					frameEncoder.maxResponseBytes,
+				);
 			}
 
 			case "promote_queued_message": {

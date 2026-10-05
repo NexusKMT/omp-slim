@@ -361,7 +361,9 @@ Agent-authored entries never match, including internal handoffs with `role: "use
 
 The check and removal are synchronous: `data.removed: false` means no matching user message is pending in that queue at dispatch time. Already-dequeued messages and inputs still being preprocessed cannot be cancelled by this command. Live-steered input may remain visible in queue snapshots until the transcript records it, even though it has already left the removable pending queue. It does not resend input, abort a turn, or change interruption behavior. Non-string `message` values and missing or invalid `queue` values produce an error response.
 
-A removal request may hide the chip or restore its draft only after `removed: true`; normal delivery still removes chips through queue snapshots. Older runtimes reject this command; clients must not fall back to aborting or resending queued messages. The TypeScript client exposes `removeQueuedMessage(message, queue): Promise<{ removed: boolean }>`.
+A removal request may hide the chip or restore its draft only after `removed: true`; normal delivery still removes chips through queue snapshots. Older runtimes reject this command; clients must not fall back to aborting or resending queued messages. The TypeScript client exposes `removeQueuedMessage(message, queue): Promise<{ removed, images?, imagesDropped? }>`.
+
+When the removed message carried images, `data.images` lists them (the same `ImageContent` entries `abort_and_restore_queue` returns), so a client can restore the draft with its attachments; text-only messages and `removed: false` responses omit it. If the images would exceed the negotiated transport limit (see `abort_and_restore_queue`), the server omits them and sets `data.imagesDropped: true` instead of failing; the message is still removed. Older runtimes return neither field.
 
 The official Python client exposes `remove_queued_message(message, queue) -> RemoveQueuedMessageResult`; inspect its `.removed` boolean rather than the result object's truthiness.
 

@@ -539,6 +539,10 @@ export interface OpenSessionResult {
 
 export interface RemoveQueuedMessageResult {
 	removed: boolean;
+	/** The removed message's images, so the client can restore them with its text. */
+	images?: ImageContent[];
+	/** Only ever `true`: the images exceeded the transport limit and were omitted; the removal still happened. */
+	imagesDropped?: boolean;
 }
 
 export interface PromoteQueuedMessageResult {

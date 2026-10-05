@@ -4,7 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
-import { fitAbortAndRestoreQueueResponse } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import {
+	fitAbortAndRestoreQueueResponse,
+	fitRemoveQueuedMessageResponse,
+} from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
 import type { RpcPromptResultFrame, RpcResponse, RpcSessionState } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-types";
 import { USER_INTERRUPT_LABEL } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { isRecord, readJsonl, removeWithRetries, withTimeout } from "@oh-my-pi/pi-utils";
@@ -73,6 +76,29 @@ describe("RPC queued-message editing", () => {
 			[{ type: "text", text: "keep this" }],
 		]);
 	}, 30_000);
+
+	test("returns the removed message's images so the client can restore its draft", async () => {
+		await client.start();
+		const image = { type: "image" as const, mimeType: "image/png", data: "AAAA" };
+		await client.followUp("with image", [image]);
+		expect(await client.removeQueuedMessage("with image", "followUp")).toEqual({ removed: true, images: [image] });
+		expect((await client.getState()).queuedMessageCount).toBe(0);
+	}, 30_000);
+
+	test("drops a removed message's images over the transport limit but still reports the removal", () => {
+		const removed = { text: "draft", images: [{ type: "image" as const, mimeType: "image/png", data: "AAAA" }] };
+		const full = fitRemoveQueuedMessageResponse("rm", removed, Number.MAX_SAFE_INTEGER);
+		const fullBytes = Buffer.byteLength(JSON.stringify(full));
+		// Exactly the size of the full response still admits the images.
+		expect(fitRemoveQueuedMessageResponse("rm", removed, fullBytes)).toEqual(full);
+		expect(fitRemoveQueuedMessageResponse("rm", removed, fullBytes - 1)).toEqual({
+			id: "rm",
+			type: "response",
+			command: "remove_queued_message",
+			success: true,
+			data: { removed: true, imagesDropped: true },
+		});
+	});
 
 	test("queue_update mirrors get_state.queuedMessages, matches the removal invariant, and never repeats", async () => {
 		await client.start();
