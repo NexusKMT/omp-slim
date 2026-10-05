@@ -50,7 +50,7 @@ mod imp {
 		borrow::Cow,
 		cell::OnceCell,
 		ffi::{OsStr, OsString},
-		io::Write,
+		io::{self, Write},
 		path::Path,
 	};
 
@@ -584,7 +584,7 @@ for details about the options it supports.";
 		file_type: FileType,
 		from_user: bool,
 		host: &mut Host,
-	) -> Result<String, i32> {
+	) -> io::Result<String> {
 		let quoting_style = host.var("QUOTING_STYLE")
 			.and_then(|style| style.parse().ok())
 			.unwrap_or_default();
@@ -596,10 +596,7 @@ for details about the options it supports.";
 					let quoted_dst = quote_file_name(&dst.to_string_lossy(), &quoting_style);
 					Ok(format!("{quoted_display_name} -> {quoted_dst}"))
 				},
-				Err(e) => {
-					host.error(e, 1);
-					Err(1)
-				},
+				Err(e) => Err(e),
 			}
 		} else {
 			let style = if from_user {
@@ -1199,11 +1196,12 @@ for details about the options it supports.";
 			file_type: FileType,
 			from_user: bool,
 			host: &mut Host,
-		) -> Result<(), i32> {
+			out: &mut Vec<u8>,
+		) -> io::Result<()> {
 			match *t {
-				Token::Byte(byte) => write_raw_byte(&mut host.stdout, byte),
+				Token::Byte(byte) => write_raw_byte(out, byte),
 				Token::Char(c) => {
-					let _ = write!(host.stdout, "{c}");
+					let _ = write!(out, "{c}");
 				},
 
 				Token::Directive { flag, width, precision, format } => {
@@ -1302,7 +1300,7 @@ for details about the options it supports.";
 						'r' => unsigned(meta.rdev()),
 						_ => OutputType::Unknown,
 					};
-					print_it(&mut host.stdout, &output, flag, width, precision);
+					print_it(out, &output, flag, width, precision);
 				},
 			}
 			Ok(())
@@ -1335,9 +1333,11 @@ for details about the options it supports.";
 						let tokens = &self.default_tokens;
 
 						// Usage
+						let mut out = Vec::with_capacity(256);
 						for t in tokens {
-							process_token_filesystem(&mut host.stdout, t, &meta, &display_name);
+							process_token_filesystem(&mut out, t, &meta, &display_name);
 						}
+						let _ = host.stdout.write_all(&out);
 					},
 					Err(error) => {
 						// context-stderr write.
@@ -1370,8 +1370,11 @@ for details about the options it supports.";
 							&self.default_dev_tokens
 						};
 
-						for t in tokens {
-							if let Err(code) = self.process_token_files(
+						// One write per file: the raw stdout would otherwise take a
+						// write per literal character and padding fill.
+						let mut out = Vec::with_capacity(256);
+						let rendered = tokens.iter().try_for_each(|t| {
+							self.process_token_files(
 								t,
 								&meta,
 								&display_name,
@@ -1379,9 +1382,15 @@ for details about the options it supports.";
 								file_type,
 								self.from_user,
 								host,
-							) {
-								return code;
-							}
+								&mut out,
+							)
+						});
+						// What rendered before a failing `%N` still precedes its
+						// error.
+						let _ = host.stdout.write_all(&out);
+						if let Err(error) = rendered {
+							host.error(error, 1);
+							return 1;
 						}
 					},
 					Err(e) => {
@@ -2301,11 +2310,12 @@ for details about the options it supports.";
 			file_type: FileType,
 			from_user: bool,
 			host: &mut Host,
-		) -> Result<(), i32> {
+			out: &mut Vec<u8>,
+		) -> io::Result<()> {
 			match *t {
-				Token::Byte(byte) => write_raw_byte(&mut host.stdout, byte),
+				Token::Byte(byte) => write_raw_byte(out, byte),
 				Token::Char(c) => {
-					let _ = write!(host.stdout, "{c}");
+					let _ = write!(out, "{c}");
 				},
 				Token::Directive { flag, width, precision, format } => {
 					let mode = win::synth_mode(meta);
@@ -2407,7 +2417,7 @@ for details about the options it supports.";
 						'r' => unsigned(meta.rdev()),
 						_ => OutputType::Unknown,
 					};
-					print_it(&mut host.stdout, &output, flag, width, precision);
+					print_it(out, &output, flag, width, precision);
 				},
 			}
 			Ok(())
@@ -2427,9 +2437,11 @@ for details about the options it supports.";
 					.and_then(|_| host.fs().stat_fs(&resolved));
 				match result {
 					Ok(meta) => {
+						let mut out = Vec::with_capacity(256);
 						for t in &self.default_tokens {
-							process_token_filesystem(&mut host.stdout, t, &meta, &display_name);
+							process_token_filesystem(&mut out, t, &meta, &display_name);
 						}
+						let _ = host.stdout.write_all(&out);
 					},
 					Err(error) => {
 						let _ = writeln!(
@@ -2454,8 +2466,11 @@ for details about the options it supports.";
 						let file_type = meta.file_type();
 						// Windows has no character/block special files, so the
 						// device-type default format is never selected.
-						for t in &self.default_tokens {
-							if let Err(code) = self.process_token_files(
+						// One write per file: the raw stdout would otherwise take a
+						// write per literal character and padding fill.
+						let mut out = Vec::with_capacity(256);
+						let rendered = self.default_tokens.iter().try_for_each(|t| {
+							self.process_token_files(
 								t,
 								&meta,
 								&display_name,
@@ -2463,9 +2478,15 @@ for details about the options it supports.";
 								file_type,
 								self.from_user,
 								host,
-							) {
-								return code;
-							}
+								&mut out,
+							)
+						});
+						// What rendered before a failing `%N` still precedes its
+						// error.
+						let _ = host.stdout.write_all(&out);
+						if let Err(error) = rendered {
+							host.error(error, 1);
+							return 1;
 						}
 					},
 					Err(e) => {
