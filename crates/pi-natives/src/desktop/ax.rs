@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Write as _};
+use std::{
+	collections::HashMap,
+	fmt::Write as _,
+	hash::{Hash, Hasher},
+};
 
 use super::{
 	backend::AxBackend,
@@ -10,12 +14,50 @@ use super::{
 pub enum AxHandle {
 	#[cfg(target_os = "macos")]
 	Mac(objc2_core_foundation::CFRetained<objc2_application_services::AXUIElement>),
+	/// The element and its `RuntimeId`, read once when the handle is made.
 	#[cfg(target_os = "windows")]
-	Uia(uiautomation::UIElement),
+	Uia(uiautomation::UIElement, Box<[i32]>),
 	#[cfg(target_os = "linux")]
 	AtSpi(atspi::ObjectRefOwned),
 	#[cfg(test)]
 	Test(u64),
+}
+
+/// Two handles are equal when they name the same live element, however many
+/// reads produced them: `CFEqual` on macOS, the `RuntimeId` on Windows, the bus
+/// name and object path on Linux.
+impl PartialEq for AxHandle {
+	fn eq(&self, other: &Self) -> bool {
+		match (self, other) {
+			#[cfg(target_os = "macos")]
+			(Self::Mac(a), Self::Mac(b)) => **a == **b,
+			#[cfg(target_os = "windows")]
+			(Self::Uia(_, a), Self::Uia(_, b)) => a == b,
+			#[cfg(target_os = "linux")]
+			(Self::AtSpi(a), Self::AtSpi(b)) => a == b,
+			#[cfg(test)]
+			(Self::Test(a), Self::Test(b)) => a == b,
+			#[cfg(test)]
+			_ => false,
+		}
+	}
+}
+
+impl Eq for AxHandle {}
+
+impl Hash for AxHandle {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		match self {
+			#[cfg(target_os = "macos")]
+			Self::Mac(element) => (**element).hash(state),
+			#[cfg(target_os = "windows")]
+			Self::Uia(_, runtime_id) => runtime_id.hash(state),
+			#[cfg(target_os = "linux")]
+			Self::AtSpi(object) => object.hash(state),
+			#[cfg(test)]
+			Self::Test(id) => id.hash(state),
+		}
+	}
 }
 
 #[derive(Debug, Clone)]
@@ -50,22 +92,30 @@ pub struct AxRegistry {
 	next_ref:    u64,
 	generations: HashMap<String, u64>,
 	entries:     HashMap<u64, Registered>,
+	/// Ref of each registered element, so an element read again keeps its ref.
+	refs:        HashMap<AxHandle, u64>,
 }
 
 impl Default for AxRegistry {
 	fn default() -> Self {
-		Self { next_ref: 1, generations: HashMap::new(), entries: HashMap::new() }
+		Self {
+			next_ref:    1,
+			generations: HashMap::new(),
+			entries:     HashMap::new(),
+			refs:        HashMap::new(),
+		}
 	}
 }
 
 impl AxRegistry {
+	/// Starts a snapshot of `target`. Its refs not registered again by this
+	/// snapshot or the previous one expire.
 	pub(crate) fn begin_snapshot(&mut self, target: &str) -> u64 {
 		let generation = self.generations.entry(target.to_string()).or_default();
 		*generation = generation.saturating_add(1);
 		let current = *generation;
-		self.entries.retain(|_, entry| {
-			entry.target_key != target || entry.generation.saturating_add(1) >= current
-		});
+		self
+			.evict(|entry| entry.target_key == target && entry.generation.saturating_add(1) < current);
 		current
 	}
 
@@ -73,9 +123,17 @@ impl AxRegistry {
 		*self.generations.entry(target.to_string()).or_insert(1)
 	}
 
+	/// Returns the element's ref, minting one the first time it is seen, and
+	/// renews it for `target`'s `generation`.
 	pub(crate) fn register(&mut self, target: &str, generation: u64, handle: AxHandle) -> String {
-		let id = self.next_ref;
-		self.next_ref = self.next_ref.saturating_add(1);
+		let id = if let Some(&id) = self.refs.get(&handle) {
+			id
+		} else {
+			let id = self.next_ref;
+			self.next_ref = self.next_ref.saturating_add(1);
+			self.refs.insert(handle.clone(), id);
+			id
+		};
 		self
 			.entries
 			.insert(id, Registered { handle, target_key: target.to_string(), generation });
@@ -101,6 +159,17 @@ impl AxRegistry {
 			.ok_or_else(|| DesktopError::stale_ref(format!("{reference} expired; re-run ax()/find()")))
 	}
 
+	fn evict(&mut self, mut expired: impl FnMut(&Registered) -> bool) {
+		let refs = &mut self.refs;
+		self.entries.retain(|_, entry| {
+			let expired = expired(entry);
+			if expired {
+				refs.remove(&entry.handle);
+			}
+			!expired
+		});
+	}
+
 	fn enforce_cap(&mut self) {
 		while self.entries.len() > 5_000 {
 			let mut target_sizes: HashMap<&str, usize> = HashMap::new();
@@ -123,9 +192,7 @@ impl AxRegistry {
 			else {
 				break;
 			};
-			self
-				.entries
-				.retain(|_, entry| entry.target_key != target || entry.generation != oldest);
+			self.evict(|entry| entry.target_key == target && entry.generation == oldest);
 		}
 	}
 }
@@ -508,7 +575,7 @@ pub fn normalize_role_atspi(native: &str, multiline: bool) -> String {
 mod tests {
 	use std::collections::HashMap;
 
-	use super::*;
+	use super::{super::error::ErrorCode, *};
 
 	struct Mock {
 		props:    HashMap<u64, AxProps>,
@@ -622,6 +689,45 @@ mod tests {
 		assert!(r.resolve("e1").is_err());
 		assert!(r.resolve("e2").is_ok());
 		assert!(r.resolve("e3").is_ok());
+	}
+	#[test]
+	fn reread_elements_keep_their_ref_and_removed_ones_expire() {
+		let mut m = Mock {
+			props:    [
+				(1, p("window", Some("Title"))),
+				(2, p("button", Some("Keep"))),
+				(3, p("button", Some("Gone"))),
+			]
+			.into(),
+			children: [(1, vec![2, 3])].into(),
+		};
+		let mut registry = AxRegistry::default();
+		let first =
+			snapshot(&mut m, &mut registry, &window(), &AxSnapshotOptions::default()).unwrap();
+		assert_eq!(
+			first.text,
+			"- window \"Title\" [ref=e1] app=Safari (focused)\n  - button \"Keep\" [ref=e2]\n  - \
+			 button \"Gone\" [ref=e3]"
+		);
+		m.children.insert(1, vec![2]);
+		for _ in 0..2 {
+			let reread =
+				snapshot(&mut m, &mut registry, &window(), &AxSnapshotOptions::default()).unwrap();
+			assert_eq!(
+				reread.text,
+				"- window \"Title\" [ref=e1] app=Safari (focused)\n  - button \"Keep\" [ref=e2]"
+			);
+		}
+		let found = query(&mut m, &mut registry, &window(), &AxQuery {
+			role:  Some("button".into()),
+			title: Some("keep".into()),
+			value: None,
+			limit: None,
+		})
+		.unwrap();
+		assert_eq!(found[0].ref_, "e2");
+		assert!(matches!(registry.resolve("e2").unwrap(), AxHandle::Test(2)));
+		assert_eq!(registry.resolve("e3").err().map(|error| error.code), Some(ErrorCode::StaleRef));
 	}
 	#[test]
 	fn hard_cap_evicts_oldest_generation_of_largest_target() {

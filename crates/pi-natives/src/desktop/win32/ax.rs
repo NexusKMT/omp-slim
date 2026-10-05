@@ -52,7 +52,7 @@ impl Win32Ax {
 	)]
 	fn element(handle: &AxHandle) -> CoreResult<&UIElement> {
 		match handle {
-			AxHandle::Uia(element) => Ok(element),
+			AxHandle::Uia(element, _) => Ok(element),
 			#[cfg(test)]
 			_ => Err(DesktopError::ax_failed("accessibility handle does not belong to UI Automation")),
 		}
@@ -160,6 +160,13 @@ impl Win32Ax {
 
 fn ax_error(error: impl std::fmt::Display) -> DesktopError {
 	DesktopError::ax_failed(format!("UI Automation failed: {error}"))
+}
+
+/// Handle for `element` carrying the `RuntimeId` that identifies it across
+/// reads.
+fn uia_handle(element: UIElement) -> CoreResult<AxHandle> {
+	let runtime_id = element.get_runtime_id().map_err(ax_error)?;
+	Ok(AxHandle::Uia(element, runtime_id.into_boxed_slice()))
 }
 
 /// Native window handle `element` represents, if any.
@@ -338,8 +345,8 @@ impl AxBackend for Win32Ax {
 		self
 			.automation()?
 			.element_from_handle(handle)
-			.map(AxHandle::Uia)
 			.map_err(ax_error)
+			.and_then(uia_handle)
 	}
 
 	fn props(&mut self, handle: &AxHandle) -> CoreResult<AxProps> {
@@ -374,18 +381,24 @@ impl AxBackend for Win32Ax {
 
 	fn children(&mut self, handle: &AxHandle) -> CoreResult<Vec<AxHandle>> {
 		let element = Self::element(handle)?;
+		// A child that no longer reports its RuntimeId has gone away.
 		Ok(self
 			.walker()?
 			.get_children(element)
 			.unwrap_or_default()
 			.into_iter()
-			.map(AxHandle::Uia)
+			.filter_map(|child| uia_handle(child).ok())
 			.collect())
 	}
 
 	fn parent(&mut self, handle: &AxHandle) -> CoreResult<Option<AxHandle>> {
 		let element = Self::element(handle)?;
-		Ok(self.walker()?.get_parent(element).ok().map(AxHandle::Uia))
+		self
+			.walker()?
+			.get_parent(element)
+			.ok()
+			.map(uia_handle)
+			.transpose()
 	}
 
 	fn perform(&mut self, handle: &AxHandle, action: &str) -> CoreResult<()> {
@@ -461,18 +474,18 @@ impl AxBackend for Win32Ax {
 		self
 			.automation()?
 			.element_from_point(Point::new(x.round() as i32, y.round() as i32))
-			.map(AxHandle::Uia)
-			.map(Some)
 			.map_err(ax_error)
+			.and_then(uia_handle)
+			.map(Some)
 	}
 
 	fn focused_element(&mut self) -> CoreResult<Option<AxHandle>> {
 		self
 			.automation()?
 			.get_focused_element()
-			.map(AxHandle::Uia)
-			.map(Some)
 			.map_err(ax_error)
+			.and_then(uia_handle)
+			.map(Some)
 	}
 
 	fn attributes(&mut self, handle: &AxHandle) -> CoreResult<Vec<(String, String)>> {
