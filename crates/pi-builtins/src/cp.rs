@@ -280,6 +280,12 @@ impl CopyDebug {
 		reflink:          OffloadReflinkDebug::Unsupported,
 		sparse_detection: SparseDebug::Unsupported,
 	};
+	/// A copy-on-write clone: the files share their storage.
+	const CLONED: Self = Self {
+		offload:          OffloadReflinkDebug::Unknown,
+		reflink:          OffloadReflinkDebug::Yes,
+		sparse_detection: SparseDebug::Unsupported,
+	};
 }
 
 impl fmt::Display for OffloadReflinkDebug {
@@ -1119,6 +1125,9 @@ struct CopyState {
 	copied_files:        FxHashMap<FileId, PathBuf>,
 	/// `-g` progress over the total source size.
 	progress_bar:        Option<ProgressBar>,
+	/// Source devices whose filesystem refused to clone: later files from
+	/// them skip straight to copying the data.
+	clone_unsupported:   FxHashSet<u64>,
 }
 
 impl CopyState {
@@ -2628,7 +2637,7 @@ fn check_streamed_modes(options: &Options, source: &Path, dest: &Path) -> CopyRe
 /// and refuses reflink/sparse requests it cannot honor.
 fn copy_data(
 	host: &mut Host,
-	state: &CopyState,
+	state: &mut CopyState,
 	source: &Path,
 	dest: &Path,
 	options: &Options,
@@ -2649,24 +2658,26 @@ fn copy_data(
 		return Err(CpError::Error("--sparse is only supported on linux".to_string()));
 	}
 
-	// Clone before opening anything; `auto` copies the data wherever the
-	// files cannot share extents (another filesystem, ext4, NTFS, ...).
 	let mut reflink_debug = OffloadReflinkDebug::No;
-	if native && !source_is_stream && options.reflink_mode != ReflinkMode::Never {
+	// `always`, and every clone on macOS, goes by path before opening
+	// anything: a failed clone then leaves no empty `dest` behind, and an
+	// APFS clone carries the source's timestamps, which a copy does not.
+	let clone_by_path = native
+		&& !source_is_stream
+		&& match options.reflink_mode {
+			ReflinkMode::Always => true,
+			ReflinkMode::Auto => cfg!(target_os = "macos"),
+			ReflinkMode::Never => false,
+		};
+	if clone_by_path {
 		match pi_iso::cow::clone_file(&source_fs, &dest_fs) {
 			Ok(()) => {
-				// An APFS clone carries the source's timestamps; a copy is new.
 				if !matches!(options.attributes.timestamps, Preserve::Yes { .. }) {
 					filesystem
 						.set_times(&dest_fs, FileTime::Now, FileTime::Now, true)
 						.map_err(|e| CpError::IoErrContext(e, context_for(source, dest)))?;
 				}
-				let copy_debug = CopyDebug {
-					offload:          OffloadReflinkDebug::Unknown,
-					reflink:          OffloadReflinkDebug::Yes,
-					sparse_detection: SparseDebug::Unsupported,
-				};
-				return Ok((copy_debug, DestFate::Kept));
+				return Ok((CopyDebug::CLONED, DestFate::Kept));
 			},
 			Err(_) if options.reflink_mode == ReflinkMode::Auto => {
 				reflink_debug = OffloadReflinkDebug::Unsupported;
@@ -2709,7 +2720,40 @@ fn copy_data(
 		Err(error) => return Err(cannot_create(error)),
 	};
 
-	let copy_debug = if source_is_stream {
+	// Elsewhere `auto` clones on the open handles, as GNU cp issues FICLONE
+	// on its descriptors, and copies the data wherever the files cannot
+	// share extents (another filesystem, ext4, NTFS, ...). A source
+	// filesystem that refused once is not asked again.
+	#[cfg(any(target_os = "linux", target_os = "android", windows))]
+	let cloned = match (source_file.native(), dest_file.native()) {
+		(Some(source_native), Some(dest_native))
+			if native && !source_is_stream && options.reflink_mode == ReflinkMode::Auto =>
+		{
+			let device = source_metadata.dev();
+			if device.is_some_and(|device| state.clone_unsupported.contains(&device)) {
+				reflink_debug = OffloadReflinkDebug::Unsupported;
+				false
+			} else if let Err(error) = pi_iso::cow::clone_open(source_native, dest_native) {
+				if pi_iso::cow::is_unsupported(&error)
+					&& !pi_iso::cow::is_cross_device(&error)
+					&& let Some(device) = device
+				{
+					state.clone_unsupported.insert(device);
+				}
+				reflink_debug = OffloadReflinkDebug::Unsupported;
+				false
+			} else {
+				true
+			}
+		},
+		_ => false,
+	};
+	#[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
+	let cloned = false;
+
+	let copy_debug = if cloned {
+		CopyDebug::CLONED
+	} else if source_is_stream {
 		let dest_is_stream = dest_file.metadata().is_ok_and(|metadata| is_stream(&metadata));
 		if !dest_is_stream {
 			dest_file.set_len(0).map_err(|e| {
