@@ -12,7 +12,7 @@ use std::{
 
 use super::{
 	parse::{
-		edit_header, has_marker_lines, missing_unmarked_lines, operation_payload, parse_operations,
+		edit_header, has_marker_lines, missing_unmarked_lines, operation_payload, parse_section,
 	},
 	types::{
 		ATOMICITY_NOTICE, Candidate, CandidateResult, EdgeGaps, LiteralFallback, MAX_CANDIDATES,
@@ -31,6 +31,9 @@ pub struct ApplyContext<'a> {
 	pub notes:     &'a mut Vec<String>,
 	pub store:     &'a EditStore,
 	pub canonical: &'a Path,
+	/// The payload is still streaming: a trailing `*** Find` without its
+	/// `*** Replace` is dropped instead of run through the recovery ladder.
+	pub streaming: bool,
 }
 
 /// Normalize matching text while retaining source byte boundaries.
@@ -2291,7 +2294,7 @@ fn apply_operations(
 	context: &mut ApplyContext<'_>,
 ) -> Result<String, EditError> {
 	let payload = fnv_payload(input);
-	let operations = parse_operations(input, content, context.path)?;
+	let operations = parse_section(input, content, context.path, context.streaming)?;
 	let mut removed = vec![None; operations.len()];
 	let mut planned = Vec::new();
 	let mut recovery_notes = Vec::new();

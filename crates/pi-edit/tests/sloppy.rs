@@ -335,6 +335,7 @@ fn escalates_the_third_identical_no_op_with_stop_guidance() {
 			notes:     &mut notes,
 			store:     &store,
 			canonical: &canonical,
+			streaming: false,
 		})
 		.expect_err("no-op must fail");
 		if attempt < 3 {
@@ -397,6 +398,29 @@ async fn returns_a_diff_for_an_applicable_section_and_an_error_for_a_miss() {
 	};
 	let preview = engine.preview(&partial, true, &mut files, &workspace.store);
 	assert!(preview.is_empty());
+}
+
+#[tokio::test]
+async fn streaming_preview_keeps_finished_ops_while_the_next_find_streams() {
+	let workspace = Workspace::new(EditMode::Sloppy);
+	workspace.write("a.txt", "alpha\nbeta\ngamma\n");
+	let mut files = FileCache::new(workspace.config.policy.clone());
+	let engine = SloppyEngine { allow_fuzzy: true, fuzzy_threshold: 0.95 };
+	// The second Find is still streaming; its Replace has not arrived. The
+	// preview keeps showing the finished first op: the unfinished one is
+	// neither guessed into an edit of the similar `gamma` line nor allowed to
+	// fail the whole section.
+	let partial = ArgSnapshot {
+		input: Some(
+			"*** Edit File: a.txt\n*** Find\nalpha\n*** Replace\nALPHA\n*** Find\ngamma2\n".to_owned(),
+		),
+		..ArgSnapshot::default()
+	};
+	let preview = engine.preview(&partial, true, &mut files, &workspace.store);
+	assert_eq!(preview.len(), 1);
+	let diff = preview[0].diff.as_deref().expect("first op previews");
+	assert!(diff.contains("+1|ALPHA"), "{diff}");
+	assert!(!diff.contains("-3|gamma") && !diff.contains("gamma2"), "{diff}");
 }
 
 #[test]

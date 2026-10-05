@@ -1543,6 +1543,7 @@ fn finish_pattern(
 	path: &str,
 	pattern_lines: &[String],
 	all: bool,
+	streaming: bool,
 	operations: &mut Vec<Operation>,
 	pending: &mut Vec<(usize, String)>,
 ) -> Result<(), EditError> {
@@ -1550,6 +1551,11 @@ fn finish_pattern(
 	let number = operations.len() + 1;
 	if has_inline_selection(&source) || has_marker_lines(&source) || has_bare_desired(&source) {
 		operations.push(create_operation_text(&source, "", all, number, false)?);
+		return Ok(());
+	}
+	// A Find whose Replace has not streamed in yet: the recovery ladder below
+	// scans the whole file, and its answer would be discarded anyway.
+	if streaming {
 		return Ok(());
 	}
 	if let Some((pattern, rewrite)) = recover_missing_separator(pattern_lines, content) {
@@ -1736,6 +1742,17 @@ pub fn parse_operations(
 	content: &str,
 	path: &str,
 ) -> Result<Vec<Operation>, EditError> {
+	parse_section(input, content, path, false)
+}
+
+/// [`parse_operations`] for one section; while `streaming`, a trailing
+/// `*** Find` without its `*** Replace` is dropped instead of recovered.
+pub(super) fn parse_section(
+	input: &str,
+	content: &str,
+	path: &str,
+	streaming: bool,
+) -> Result<Vec<Operation>, EditError> {
 	let payload = normalize_input(input);
 	let mut lines: Vec<String> = payload.split('\n').map(str::to_owned).collect();
 	if parse_opener(lines.first().map_or("", String::as_str)).is_none()
@@ -1852,6 +1869,7 @@ pub fn parse_operations(
 						path,
 						&pattern.lines,
 						all,
+						false,
 						&mut operations,
 						&mut pending,
 					)?;
@@ -1915,6 +1933,7 @@ pub fn parse_operations(
 			path,
 			&pattern.lines,
 			all,
+			streaming,
 			&mut operations,
 			&mut pending,
 		)?,

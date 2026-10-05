@@ -99,6 +99,7 @@ impl ModeEngine for SloppyEngine {
 					notes: &mut notes,
 					store,
 					canonical: &read.canonical,
+					streaming,
 				}) {
 					Ok(after) => {
 						let output =
@@ -162,6 +163,7 @@ impl ModeEngine for SloppyEngine {
 				notes: &mut notes,
 				store,
 				canonical: &read.canonical,
+				streaming: false,
 			})
 			.map_err(|error| {
 				if multi_file {
