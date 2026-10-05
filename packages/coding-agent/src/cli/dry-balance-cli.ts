@@ -44,6 +44,7 @@ export interface DryBalanceCommandArgs {
 		concurrency?: number;
 		json?: boolean;
 		bench?: boolean;
+		config?: string[];
 	};
 }
 
@@ -525,9 +526,9 @@ async function runBenchTargets(
 	);
 }
 
-async function createDefaultRuntime(): Promise<DryBalanceRuntime> {
+async function createDefaultRuntime(configFiles: string[] | undefined): Promise<DryBalanceRuntime> {
 	const cwd = getProjectDir();
-	const settings = await Settings.init({ cwd });
+	const settings = await Settings.init({ cwd, configFiles });
 	const authStorage = await discoverAuthStorage(undefined, { settings });
 	try {
 		const modelRegistry = new ModelRegistry(authStorage);
@@ -792,7 +793,7 @@ export async function runDryBalanceCommand(
 		});
 	const streamFn = deps.streamSimple ?? streamSimple;
 	const now = deps.now ?? (() => performance.now());
-	const runtime = await (deps.createRuntime ?? createDefaultRuntime)();
+	const runtime = await (deps.createRuntime?.() ?? createDefaultRuntime(command.flags.config));
 	let progress: DryBalanceBenchProgressSink | undefined;
 	let progressClosed = false;
 	const closeProgress = (): void => {
