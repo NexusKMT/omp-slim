@@ -531,7 +531,7 @@ export class EpisodicGraph {
 		if (linkExisting) {
 			const sourceTokens = contentTokenSet(content);
 			for (const otherId of previousMemoryIds) {
-				const otherContent = this.memoryContent(otherId);
+				const otherContent = this.memoryContent(otherId, timestamp);
 				const lexicalScore = Math.round(jaccard(sourceTokens, contentTokenSet(otherContent)) * 1000) / 1000;
 				let wroteCtxEdge = false;
 				if (lexicalScore >= minLinkScore) {
@@ -688,9 +688,11 @@ export class EpisodicGraph {
 		return [...ids];
 	}
 
-	private memoryContent(memoryId: string): string {
+	private memoryContent(memoryId: string, now: string): string {
 		try {
-			const working = this.db.query("SELECT content FROM working_memory WHERE id = ?").get(memoryId) as {
+			const working = this.db
+				.query(`SELECT content FROM working_memory WHERE id = ? AND ${LIVE_MEMORY_SQL}`)
+				.get(memoryId, now) as {
 				content: string;
 			} | null;
 			if (working !== null) return working.content;
@@ -698,7 +700,9 @@ export class EpisodicGraph {
 			// Standalone EpisodicGraph users may not have Beam tables.
 		}
 		try {
-			const episodic = this.db.query("SELECT content FROM episodic_memory WHERE id = ?").get(memoryId) as {
+			const episodic = this.db
+				.query(`SELECT content FROM episodic_memory WHERE id = ? AND ${LIVE_MEMORY_SQL}`)
+				.get(memoryId, now) as {
 				content: string;
 			} | null;
 			if (episodic !== null) return episodic.content;

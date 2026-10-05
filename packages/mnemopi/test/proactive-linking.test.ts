@@ -242,24 +242,42 @@ describe("proactive memory linking", () => {
 		}
 	});
 
-	it("links a memory id that is still valid in one tier but retired in the other", () => {
+	it("scores a memory id shared across tiers by the content of its live row", () => {
 		process.env.MNEMOPI_PROACTIVE_LINKING = "1";
 		const beam = new BeamMemory({ sessionId: "proactive-cross-tier", dbPath: ":memory:" });
 		try {
 			const expired = "2000-01-01T00:00:00.000Z";
-			const workingLive = "Alice set up the CI/CD pipeline for backend deployment";
-			const episodicLive = "Alice reviewed the CI/CD pipeline for backend deployment";
-			const bothRetired = "Alice tested the CI/CD pipeline for backend deployment";
+			const unrelated = "Grocery list includes bananas apples oranges and milk";
 			beam.importFromDict({
 				working_memory: [
-					{ id: "live-working-retired-episodic", content: workingLive },
-					{ id: "retired-working-live-episodic", content: episodicLive, valid_until: expired },
-					{ id: "retired-in-both-tiers", content: bothRetired, valid_until: expired },
+					{ id: "related-live-working", content: "Alice set up the CI/CD pipeline for backend deployment" },
+					{ id: "related-live-episodic", content: unrelated, valid_until: expired },
+					{
+						id: "related-retired-working",
+						content: "Alice tested the CI/CD pipeline for backend deployment",
+						valid_until: expired,
+					},
+					{ id: "related-retired-episodic", content: unrelated },
+					{
+						id: "retired-in-both-tiers",
+						content: "Alice checked the CI/CD pipeline for backend deployment",
+						valid_until: expired,
+					},
 				],
 				episodic_memory: [
-					{ id: "live-working-retired-episodic", content: workingLive, valid_until: expired },
-					{ id: "retired-working-live-episodic", content: episodicLive },
-					{ id: "retired-in-both-tiers", content: bothRetired, superseded_by: "replacement" },
+					{ id: "related-live-working", content: unrelated, valid_until: expired },
+					{ id: "related-live-episodic", content: "Alice reviewed the CI/CD pipeline for backend deployment" },
+					{ id: "related-retired-working", content: unrelated },
+					{
+						id: "related-retired-episodic",
+						content: "Alice verified the CI/CD pipeline for backend deployment",
+						superseded_by: "replacement-episodic",
+					},
+					{
+						id: "retired-in-both-tiers",
+						content: "Alice checked the CI/CD pipeline for backend deployment",
+						superseded_by: "replacement",
+					},
 				],
 			});
 
@@ -274,8 +292,10 @@ describe("proactive memory linking", () => {
 					}[]
 				).map(row => row.target),
 			);
-			expect(targets.has("live-working-retired-episodic")).toBe(true);
-			expect(targets.has("retired-working-live-episodic")).toBe(true);
+			expect(targets.has("related-live-working")).toBe(true);
+			expect(targets.has("related-live-episodic")).toBe(true);
+			expect(targets.has("related-retired-working")).toBe(false);
+			expect(targets.has("related-retired-episodic")).toBe(false);
 			expect(targets.has("retired-in-both-tiers")).toBe(false);
 		} finally {
 			beam.close();
