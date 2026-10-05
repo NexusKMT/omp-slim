@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the stats dashboard menu button showing on desktop, where clicking it dimmed the page without opening navigation.
+- Fixed the stats dashboard menu button showing on desktop, where clicking it dimmed the page without opening navigation ([#14406](https://github.com/can1357/oh-my-pi/pull/14406) by [@lin-snow](https://github.com/lin-snow)).
 
 ## [18.6.0] - 2026-10-03
 
