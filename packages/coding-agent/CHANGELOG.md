@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `/usage` sheet in Tern having no Close button like `/changelog` and `/resume`.
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed
