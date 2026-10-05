@@ -87,6 +87,7 @@ interface PageElement {
 	parentElement: PageElement | null;
 	shadowRoot: PageShadowRoot | null;
 	getBoundingClientRect(): PageRect;
+	getClientRects(): ArrayLike<PageRect>;
 	getRootNode(): PageRoot;
 	contains(other: PageElement): boolean;
 	getAttribute(name: string): string | null;
@@ -138,10 +139,21 @@ export async function isClickActionable(handle: ElementHandle, signal?: AbortSig
 			if (Number(style.opacity) === 0) return { ok: false as const, reason: "opacity:0" };
 			const rect = element.getBoundingClientRect();
 			if (rect.width < 1 || rect.height < 1) return { ok: false as const, reason: "zero-size" };
-			const left = Math.max(0, Math.min(page.innerWidth, rect.left));
-			const right = Math.max(0, Math.min(page.innerWidth, rect.right));
-			const top = Math.max(0, Math.min(page.innerHeight, rect.top));
-			const bottom = Math.max(0, Math.min(page.innerHeight, rect.bottom));
+			// A wrapped link's box centre can fall between its lines, on the parent; aim at its first visible line.
+			const fragments = Array.from(element.getClientRects());
+			const box =
+				fragments.length === 0
+					? rect
+					: fragments.find(
+							r =>
+								Math.min(page.innerWidth, r.right) - Math.max(0, r.left) >= 1 &&
+								Math.min(page.innerHeight, r.bottom) - Math.max(0, r.top) >= 1,
+						);
+			if (!box) return { ok: false as const, reason: "off-viewport" };
+			const left = Math.max(0, Math.min(page.innerWidth, box.left));
+			const right = Math.max(0, Math.min(page.innerWidth, box.right));
+			const top = Math.max(0, Math.min(page.innerHeight, box.top));
+			const bottom = Math.max(0, Math.min(page.innerHeight, box.bottom));
 			if (right - left < 1 || bottom - top < 1) return { ok: false as const, reason: "off-viewport" };
 			const x = Math.floor((left + right) / 2);
 			const y = Math.floor((top + bottom) / 2);
