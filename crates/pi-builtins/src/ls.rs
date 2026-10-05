@@ -3993,7 +3993,10 @@ impl Utility for Ls {
 			.matches
 			.get_many::<OsString>(options::PATHS)
 			.map_or_else(|| vec![Path::new(".")], |v| v.map(Path::new).collect());
-		match list(locs, &config, StreamWriter::new(host.stdout_clone(), host.stdout_is_regular_file())) {
+		// A listing only prints once its directory is read and sorted, so
+		// per-line flushing would show nothing sooner: block-buffer and flush
+		// once per directory instead.
+		match list(locs, &config, StreamWriter::block(host.stdout_clone())) {
 			Ok(()) => runtime.status.get(),
 			Err(err) => {
 				host.error(&err, 1);
@@ -5040,6 +5043,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, out: StreamWriter) -> std::io::Re
 	}
 
 	display_items(&files, config, &mut state, &mut dired)?;
+	state.out.flush()?;
 
 	for (pos, path_data) in dirs.iter().enumerate() {
 		let needs_blank_line = pos != 0 || !files.is_empty();
@@ -5108,7 +5112,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, out: StreamWriter) -> std::io::Re
 	if config.dired && !config.hyperlink {
 		dired::print_dired_output(config, &dired, &mut state.out)?;
 	}
-	Ok(())
+	state.out.flush()
 }
 
 fn sort_entries(entries: &mut [PathData], config: &Config) {
@@ -5284,6 +5288,7 @@ fn depth_first_list(
 	}
 
 	display_items(buf, config, state, dired)?;
+	state.out.flush()?;
 
 	if config.recursive {
 		for e in buf
