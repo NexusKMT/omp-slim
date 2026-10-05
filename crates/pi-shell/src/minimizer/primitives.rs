@@ -87,6 +87,16 @@ pub fn head_tail_lines(input: &str, head: usize, tail: usize) -> String {
 	if lines.len() <= head + tail {
 		return input.to_string();
 	}
+	head_tail_of_lines(&lines, head, tail)
+}
+
+/// [`head_tail_lines`] over already-split lines; when nothing is elided the
+/// lines are joined back with `\n`.
+#[must_use]
+pub fn head_tail_of_lines(lines: &[&str], head: usize, tail: usize) -> String {
+	if lines.len() <= head + tail {
+		return lines.join("\n");
+	}
 	let omitted = lines.len() - head - tail;
 	let mut out = String::new();
 	for line in lines.iter().take(head) {
