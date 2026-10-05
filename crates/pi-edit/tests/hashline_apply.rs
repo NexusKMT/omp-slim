@@ -355,7 +355,7 @@ fn unresolved_block_replacement_reports_context() {
 
 #[test]
 fn syntax_helpers_use_pi_ast() {
-	let lines = vec!["mod m {".into(), "\t#[test]".into(), "\tfn f() {}".into(), "}".into()];
+	let lines = vec!["mod m {", "\t#[test]", "\tfn f() {}", "}"];
 	assert!(
 		node_chain(&lines, "x.rs", 2)
 			.iter()
@@ -480,7 +480,7 @@ fn named_register_gap_paste_warns_and_does_nothing_when_empty() {
 	let edits = [paste];
 	let resolved =
 		resolve_clipboard_edits(&edits, &lines, &mut clipboard, EmptyPaste::Throw, &mut |warning| {
-			warnings.push(warning)
+			warnings.push(warning);
 		})
 		.unwrap();
 	assert!(resolved.is_empty());
@@ -500,7 +500,7 @@ fn empty_named_span_paste_is_rejected() {
 	};
 	let error = resolve_clipboard_edits(
 		&[paste],
-		&["a".into()],
+		&["a"],
 		&mut Clipboard::default(),
 		EmptyPaste::Throw,
 		&mut |_| {},
