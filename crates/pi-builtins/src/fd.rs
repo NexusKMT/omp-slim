@@ -503,10 +503,6 @@ impl TypeFilter {
 			|| self.block
 			|| self.character
 	}
-
-	const fn is_empty(&self) -> bool {
-		!self.has_kind() && !self.executable && !self.empty
-	}
 }
 
 #[derive(Clone, Copy)]
@@ -862,12 +858,7 @@ fn process_walker_entry<W: Write>(
 		}
 	}
 
-	let metadata = config.fs.symlink_metadata(path).ok();
-	if !matches_walker_filters(config, path, file_type, metadata.as_ref()) {
-		return Ok(pi_walker::WalkDecision::Skip);
-	}
-	let target = match_target(path, &config.base_dir, config.full_path);
-	if !config.matcher.matches(&target) {
+	if !matches_entry(config, path, file_type) {
 		return Ok(pi_walker::WalkDecision::Skip);
 	}
 
@@ -890,16 +881,42 @@ fn process_walker_entry<W: Write>(
 	Ok(pi_walker::WalkDecision::Include)
 }
 
-fn matches_walker_filters(
-	config: &SearchConfig,
-	path: &Path,
-	file_type: pi_walker::FileType,
-	metadata: Option<&Metadata>,
-) -> bool {
-	if !matches_walker_type_filter(&config.fs, &config.types, path, file_type, metadata) {
+/// Whether an entry passes every filter: the ones the listing answers (kind,
+/// extension, the pattern) first, then, only if the command asked for one,
+/// those that need the entry's metadata, so a plain `fd foo` stats nothing.
+fn matches_entry(config: &SearchConfig, path: &Path, file_type: pi_walker::FileType) -> bool {
+	let filter = &config.types;
+	if filter.has_kind()
+		&& !((filter.regular && file_type == pi_walker::FileType::File)
+			|| (filter.directory && file_type == pi_walker::FileType::Dir)
+			|| (filter.symlink && file_type == pi_walker::FileType::Symlink))
+	{
 		return false;
 	}
 	if !config.extensions.is_empty() && !matches_extension(path, &config.extensions) {
+		return false;
+	}
+	if !config
+		.matcher
+		.matches(&match_target(path, &config.base_dir, config.full_path))
+	{
+		return false;
+	}
+	let needs_metadata = filter.executable
+		|| filter.empty
+		|| !config.sizes.is_empty()
+		|| config.changed_after.is_some()
+		|| config.changed_before.is_some()
+		|| !config.owners.is_empty();
+	if !needs_metadata {
+		return true;
+	}
+	let metadata = config.fs.symlink_metadata(path).ok();
+	let metadata = metadata.as_ref();
+	if filter.executable && !is_executable(metadata) {
+		return false;
+	}
+	if filter.empty && !is_empty_entry(&config.fs, path, metadata, filter) {
 		return false;
 	}
 	if !config.sizes.is_empty() && !matches_size_filters(&config.sizes, metadata) {
@@ -911,35 +928,6 @@ fn matches_walker_filters(
 		return false;
 	}
 	if !config.owners.is_empty() && !matches_owner_filters(&config.owners, metadata) {
-		return false;
-	}
-	true
-}
-
-fn matches_walker_type_filter(
-	fs: &BlockingFs,
-	filter: &TypeFilter,
-	path: &Path,
-	file_type: pi_walker::FileType,
-	metadata: Option<&Metadata>,
-) -> bool {
-	if filter.is_empty() {
-		return true;
-	}
-	let kind_matches = if filter.has_kind() {
-		(filter.regular && file_type == pi_walker::FileType::File)
-			|| (filter.directory && file_type == pi_walker::FileType::Dir)
-			|| (filter.symlink && file_type == pi_walker::FileType::Symlink)
-	} else {
-		true
-	};
-	if !kind_matches {
-		return false;
-	}
-	if filter.executable && !is_executable(metadata) {
-		return false;
-	}
-	if filter.empty && !is_empty_entry(fs, path, metadata, filter) {
 		return false;
 	}
 	true
@@ -1031,12 +1019,7 @@ fn process_collected_entry<W: Write>(
 		}
 	}
 
-	let metadata = config.fs.symlink_metadata(&path).ok();
-	if !matches_walker_filters(config, &path, entry.file_type, metadata.as_ref()) {
-		return Ok(());
-	}
-	let target = match_target(&path, &config.base_dir, config.full_path);
-	if !config.matcher.matches(&target) {
+	if !matches_entry(config, &path, entry.file_type) {
 		return Ok(());
 	}
 
