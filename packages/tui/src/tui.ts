@@ -303,6 +303,7 @@ export interface Component {
 	 * Optional handler for keyboard input when component has focus
 	 */
 	handleInput?(data: string): void;
+
 	/**
 	 * If true, component receives key release events (Kitty protocol).
 	 * Default is false - release events are filtered out.
@@ -2731,13 +2732,9 @@ export class TUI extends Container {
 		}
 		if (data.length === 0) return;
 
-		// Consume terminal cell size responses before any component claims keyboard input.
-		if (this.#consumeCellSizeResponse(data)) {
-			return;
-		}
-
-		// If focused component is an overlay, verify it's still visible before input preflight
-		// or global listeners can claim its keys.
+		// If focused component is an overlay, verify it's still visible (visibility can change due to
+		// terminal resize or visible() callback). Runs before the capture preflight below, which must
+		// target the effective focus owner, not a hidden overlay.
 		const focusedOverlay = this.overlayStack.find(o => o.component === this.#focusedComponent);
 		if (focusedOverlay && !this.#isOverlayVisible(focusedOverlay)) {
 			// Focused overlay is no longer visible, redirect to topmost visible overlay
@@ -2785,6 +2782,11 @@ export class TUI extends Container {
 				return;
 			}
 			data = current;
+		}
+
+		// Consume terminal cell size responses without blocking unrelated input.
+		if (this.#consumeCellSizeResponse(data)) {
+			return;
 		}
 
 		// Global debug key handler (Shift+Ctrl+D)

@@ -227,6 +227,50 @@ describe("TUI input priority", () => {
 		}
 	});
 
+	it("keeps printable PTT keys visible to raw input listeners while the hold still records", async () => {
+		await initTheme();
+		vi.useFakeTimers();
+		setSystemTime(new Date(1_000));
+		const terminal = new VirtualTerminal(40, 8);
+		const tui = new TUI(terminal, undefined, { renderScheduler: fakeTimerScheduler() });
+		const editor = new CustomEditor(getEditorTheme());
+		const events: string[] = [];
+		editor.spaceHold.handler = {
+			enabled: () => true,
+			onStart: () => events.push("start"),
+			onEnd: () => events.push("end"),
+		};
+		tui.addChild(editor);
+		tui.setFocus(editor);
+		const observed: string[] = [];
+		tui.addInputListener(data => {
+			observed.push(data);
+			return undefined;
+		});
+
+		try {
+			tui.start();
+			await drainNextTick();
+			vi.advanceTimersByTime(40);
+			terminal.sendInput("a");
+			vi.advanceTimersByTime(200);
+			terminal.sendInput(" ");
+			vi.advanceTimersByTime(200);
+			terminal.sendInput("b");
+			expect(observed).toEqual(["a", " ", "b"]);
+			expect(editor.getText()).toBe("a b");
+
+			for (let i = 0; i < SPACE_HOLD_MECHANICAL_RUN + 2; i++) {
+				vi.advanceTimersByTime(30);
+				terminal.sendInput(" ");
+			}
+			expect(events).toEqual(["start"]);
+			expect(editor.getText()).toBe("a b");
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("routes BTW Ctrl+V into its active follow-up Input before the global paste listener", async () => {
 		await initTheme();
 		vi.useFakeTimers();

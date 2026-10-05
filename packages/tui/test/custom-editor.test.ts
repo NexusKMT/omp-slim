@@ -1102,4 +1102,16 @@ describe("CustomEditor space-hold push-to-talk", () => {
 		feedKey(editor, "x", SPACE_HOLD_MECHANICAL_RUN + 2, REPEAT_GAP_MS);
 		expect(events).toEqual(["start"]);
 	});
+
+	it("lets a pending character jump target the PTT key instead of typing it", () => {
+		const { editor, events } = makeEditor();
+		editor.setText("ab cd");
+		editor.handleInput("\x1b[H");
+		editor.handleInput("\x1d"); // Ctrl+] — jump forward
+		editor.handleInput(" ");
+
+		expect(editor.getText()).toBe("ab cd");
+		expect(editor.getCursor()).toEqual({ line: 0, col: 2 });
+		expect(events).toEqual([]);
+	});
 });

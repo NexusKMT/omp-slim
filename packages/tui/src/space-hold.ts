@@ -1,5 +1,17 @@
 import { addKeyAliases, canonicalKeyId } from "./keybindings";
-import type { KeyId } from "./keys";
+import { extractPrintableText, type KeyId, parseKey } from "./keys";
+
+/** Printable text a push-to-talk candidate key types (plain or shifted single characters and Space),
+ *  or undefined for non-printable keys and chords, which the gesture reserves instead of typing. */
+export function getSpaceHoldText(data: string, canonical: string | undefined): string | undefined {
+	if (canonical === undefined) return undefined;
+	const shifted = canonical.startsWith("shift+");
+	const base = shifted ? canonical.slice("shift+".length) : canonical;
+	if (base !== "space" && base.length !== 1) return undefined;
+	if (base === "space" && canonical !== "space" && !shifted) return undefined;
+	const text = extractPrintableText(data);
+	return text && (base !== "space" || text === " ") ? text : undefined;
+}
 
 /** Max gap (ms) between two configured-key presses for a later one to count as OS key auto-repeat
  *  rather than a deliberate press. OS auto-repeat is fast; a deliberate tap (even a fast one) is slower. */
@@ -52,8 +64,19 @@ export type SpaceHoldStep = "pass" | "type" | "swallow";
  *  consecutive deltas are mechanical (see {@link gapsAreMechanical}). Deliberate taps and jittery
  *  runs stay typed; only text typed during the current steady run is removed on recognition. */
 export class SpaceHoldGesture {
+	/** Canonical aliases of {@link keys}, rebuilt only when the bindings change (not per keystroke). */
+	#keyAliases = new Set<string>(["space"]);
+	#keys: readonly KeyId[] = ["space"];
 	/** Configured alternative keys. Alternatives are tracked independently and never combine into one run. */
-	keys: readonly KeyId[] = ["space"];
+	get keys(): readonly KeyId[] {
+		return this.#keys;
+	}
+	set keys(keys: readonly KeyId[]) {
+		this.#keys = keys;
+		const aliases = new Set<string>();
+		for (const key of keys) addKeyAliases(aliases, key);
+		this.#keyAliases = aliases;
+	}
 	/** Unset (the default) keeps configured keys behaving normally. */
 	handler: SpaceHoldHandler | undefined;
 	/** Deletes the given number of characters before the host input's cursor. */
@@ -84,12 +107,16 @@ export class SpaceHoldGesture {
 		this.#allowed = allowed;
 	}
 
-	/** Pure focused-owner preflight for routing configured keys before outer handlers. */
-	shouldRoute(key: string | undefined): boolean {
+	/** Pure focused-owner preflight on raw input: whether the key must reach the host before
+	 *  TUI-wide input listeners. Only non-printable bindings are claimed — they would otherwise
+	 *  trigger app shortcuts mid-hold; printable candidates keep the normal listener path so
+	 *  raw-input observers (e.g. extensions) still see typed text, as they did before remapping. */
+	shouldRoute(data: string): boolean {
 		if (!(this.handler?.enabled() && this.#allowed())) return false;
-		const candidateKey = this.#matchingKey(key);
-		const canonical = key === undefined ? undefined : canonicalKeyId(key);
-		return candidateKey !== undefined || (this.#active && canonical === this.#activeKey);
+		const parsedKey = parseKey(data);
+		if (parsedKey === undefined) return false;
+		const key = canonicalKeyId(parsedKey);
+		return this.#keyAliases.has(key) && getSpaceHoldText(data, key) === undefined;
 	}
 
 	/** Feed one canonical keypress and, when safely printable, its decoded text length. The host
@@ -102,7 +129,7 @@ export class SpaceHoldGesture {
 			return "pass";
 		}
 
-		const candidateKey = this.#matchingKey(key);
+		const candidateKey = key !== undefined && this.#keyAliases.has(key) ? key : undefined;
 
 		if (this.#active) {
 			if (candidateKey === this.#activeKey) {
@@ -179,14 +206,6 @@ export class SpaceHoldGesture {
 		const insertedLength = Math.max(0, insertedCharacterLength);
 		this.#typed += insertedLength;
 		this.#lastTypedLength = insertedLength;
-	}
-
-	#matchingKey(key: string | undefined): string | undefined {
-		if (key === undefined) return undefined;
-		const canonical = canonicalKeyId(key);
-		const aliases = new Set<string>();
-		for (const configuredKey of this.keys) addKeyAliases(aliases, configuredKey);
-		return aliases.has(canonical) ? canonical : undefined;
 	}
 
 	#resetRun(): void {

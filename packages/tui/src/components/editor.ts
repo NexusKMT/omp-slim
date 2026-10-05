@@ -3042,8 +3042,17 @@ export class Editor implements Component, Focusable {
 		return true;
 	}
 
+	/** Whether a character-jump hotkey is waiting for its target character. */
+	get isJumpPending(): boolean {
+		return this.#jumpMode !== null;
+	}
+
 	/** Type literal text through the character-editing pipeline without keybinding dispatch. */
 	typeCharacter(text: string): void {
+		// Same as #handleInputChunk: typed input wins over a stale in-flight provider lookup.
+		if (this.#autocompleteRequestRunning && this.#autocompleteState === null) {
+			this.#invalidateAutocompleteRequests();
+		}
 		this.#insertCharacter(text);
 	}
 

@@ -14,7 +14,7 @@ import {
 	type NativeUiEvent,
 	resolveTextEdit,
 } from "../native/node";
-import { SpaceHoldGesture } from "../space-hold";
+import { getSpaceHoldText, SpaceHoldGesture } from "../space-hold";
 import { type Component, CURSOR_MARKER, type Focusable } from "../tui";
 import { cursorColumnWindow } from "./scroll-viewport";
 import {
@@ -29,16 +29,6 @@ import {
 } from "../utils";
 
 const segmenter = getSegmenter();
-
-function getSpaceHoldText(data: string, canonical: string | undefined): string | undefined {
-	if (canonical === undefined) return undefined;
-	const shifted = canonical.startsWith("shift+");
-	const base = shifted ? canonical.slice("shift+".length) : canonical;
-	if (base !== "space" && base.length !== 1) return undefined;
-	if (base === "space" && canonical !== "space" && !shifted) return undefined;
-	const text = extractPrintableText(data);
-	return text && (base !== "space" || text === " ") ? text : undefined;
-}
 
 /**
  * Clean text entering the single-line value from outside the keyboard (pastes, dictation) —
@@ -145,9 +135,7 @@ export class Input implements Component, Focusable {
 	}
 
 	capturesInput(data: string): boolean {
-		const parsedKey = parseKey(data);
-		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
-		return this.spaceHold.shouldRoute(canonical);
+		return this.spaceHold.shouldRoute(data);
 	}
 
 	/**

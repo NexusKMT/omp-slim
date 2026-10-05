@@ -9,8 +9,8 @@ import {
 	type NativeEditorLayout,
 } from "../components/editor";
 import { addKeyAliases, canonicalKeyId, getKeybindings } from "../keybindings";
-import { type KeyId, extractPrintableText, parseKey, parseKittySequence } from "../keys";
-import { SpaceHoldGesture } from "../space-hold";
+import { type KeyId, parseKey, parseKittySequence } from "../keys";
+import { getSpaceHoldText, SpaceHoldGesture } from "../space-hold";
 import { type Component, TUI } from "../tui";
 import type { AppKeybinding } from "../app-keybindings";
 import { formatKeyHint } from "../key-hint-format";
@@ -46,16 +46,6 @@ import { isNativeRendering } from "../native/state";
 import { isQueuedMessageList, parseQueueShorthand, QUEUE_LIST_MARKER_RE } from "./queue-input";
 import { type WordCompletionMethod, WordCompletionProvider } from "./word-completion";
 import { fgOrPlain, theme } from "../theme/theme";
-
-function getSpaceHoldText(data: string, canonical: string | undefined): string | undefined {
-	if (canonical === undefined) return undefined;
-	const shifted = canonical.startsWith("shift+");
-	const base = shifted ? canonical.slice("shift+".length) : canonical;
-	if (base !== "space" && base.length !== 1) return undefined;
-	if (base === "space" && canonical !== "space" && !shifted) return undefined;
-	const text = extractPrintableText(data);
-	return text && (base !== "space" || text === " ") ? text : undefined;
-}
 
 /** A shell-mode draft's sigil (`!`, `!!`, `$`, `$$`) with its surrounding blanks; the mode chip stands in for it natively. */
 const SHELL_SIGIL_RE = /^\s*(?:!!?|\$\$?)[ \t]?/;
@@ -1332,17 +1322,17 @@ export class CustomEditor extends Editor {
 	/** Called when the viewing header asks to view agent `id` ({@link MAIN_AGENT_ID}: the main session). */
 	onFocusAgent?: (id: string) => void;
 
-	/** Space-bar push-to-talk; set its `handler` to enable it. It is a text-composition gesture, so it
-	 *  stays out of Vim's Normal/Visual modes (where the space bar is the `l` motion) and away from an
-	 *  open autocomplete menu. */
 	#spaceHoldSnapshot: { revision: number; line: number; col: number } | undefined;
 
+	/** Configurable push-to-talk; set its `handler` to enable it. It is a text-composition gesture, so
+	 *  it stays out of Vim's Normal/Visual modes (where the space bar is the `l` motion), away from an
+	 *  open autocomplete menu, and out of a pending character jump (whose target may be the key). */
 	readonly spaceHold = new SpaceHoldGesture(
 		count => {
 			this.#spaceHoldSnapshot = undefined;
 			if (count > 0) this.deleteBeforeCursor(count);
 		},
-		() => this.vimMode === "insert" && !this.isShowingAutocomplete(),
+		() => this.vimMode === "insert" && !this.isShowingAutocomplete() && !this.isJumpPending,
 	);
 
 	/** Custom key handlers from extensions and non-built-in app actions. */
@@ -1452,10 +1442,9 @@ export class CustomEditor extends Editor {
 		this.#pasteInFlight++;
 		void promise.then(this.#onPasteSettled, this.#onPasteSettled);
 	}
+
 	capturesInput(data: string): boolean {
-		const parsedKey = parseKey(data);
-		const canonical = parsedKey !== undefined ? canonicalKeyId(parsedKey) : undefined;
-		return this.spaceHold.shouldRoute(canonical);
+		return this.spaceHold.shouldRoute(data);
 	}
 
 	override handleInput(data: string): void {
