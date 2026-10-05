@@ -1581,6 +1581,10 @@ export class WorkerCore {
 		} finally {
 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 			await Bun.sleep(0);
+			// A cancelled run abandons its navigation: left loading, it holds up the interception
+			// restore below and still replaces the page later. A run that merely ended keeps an
+			// unawaited goto going.
+			if (ac.signal.aborted) await this.#stopLoading();
 			try {
 				await runPage?.cleanup();
 			} catch (error) {
@@ -1826,9 +1830,6 @@ export class WorkerCore {
 								`tab.goto(${JSON.stringify(url)}) timed out after ${budgetBound}ms; pending navigation stopped — retry with a longer tool timeout or waitUntil:"domcontentloaded"`,
 							);
 						}
-						// A cancelled run abandons its navigation too; left loading, it would still
-						// replace the page later. A run that merely ended keeps an unawaited goto going.
-						if (active.ac.signal.aborted) await this.#stopLoading();
 						throw err;
 					}
 				}),

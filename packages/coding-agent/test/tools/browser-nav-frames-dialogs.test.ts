@@ -286,7 +286,8 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			);
 			const request = await requested.promise;
 			cancel.abort();
-			await expect(run).rejects.toThrow();
+			// The cancel itself, not the interception-cleanup failure a still-loading page causes.
+			await expect(run).rejects.toThrow("Operation aborted");
 			// Chrome drops the request once the load is stopped; a load left running keeps waiting.
 			const dropped = new Promise<string>(resolve => {
 				if (request.aborted) resolve("stopped");
