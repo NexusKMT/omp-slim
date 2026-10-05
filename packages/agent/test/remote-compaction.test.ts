@@ -2256,6 +2256,42 @@ describe("compact() remote compaction failure handling", () => {
 		expect(AIError.retriable(id)).toBe(false);
 	});
 
+	test.each([
+		{ provider: "openai", fallsBackToV1: true },
+		{ provider: "openai-codex", fallsBackToV1: false },
+	])("claims a V1 fallback only when V1 runs ($provider)", async ({ provider, fallsBackToV1 }) => {
+		const warn = vi.spyOn(piUtils.logger, "warn");
+		const preparation = makePreparation();
+		preparation.settings = { ...preparation.settings, remoteStreamingV2Enabled: true };
+		const baseModel = makeOpenAiModel({ remoteCompaction: { enabled: true, v2StreamingEnabled: true } });
+		const model: Model =
+			provider === "openai-codex"
+				? {
+						...baseModel,
+						api: "openai-codex-responses",
+						provider: "openai-codex",
+						baseUrl: "https://chatgpt.example/backend-api",
+						preferWebsockets: false,
+						remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+					}
+				: baseModel;
+		const requestedUrls: string[] = [];
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			requestedUrls.push(url);
+			return url.endsWith("/responses/compact")
+				? Response.json({ output: [{ type: "compaction", encrypted_content: "enc-v1" }] })
+				: new Response("V2 unavailable", { status: 400, statusText: "Bad Request" });
+		};
+
+		await compact(preparation, model, "test-key", undefined, undefined, { fetch: fetchMock }).catch(() => undefined);
+
+		const ranV1 = requestedUrls.some(url => url.endsWith("/responses/compact"));
+		const claimedV1 = warn.mock.calls.some(([message]) => message.includes("falling back to V1"));
+		expect(ranV1).toBe(fallsBackToV1);
+		expect(claimedV1).toBe(ranV1);
+	});
+
 	test("streams V2 compaction before V1 when both settings and model opt in", async () => {
 		const completeSpy = vi.spyOn(ai, "completeSimple").mockResolvedValue(localSummaryMessage("local summary"));
 		const compactionItem = { type: "compaction", encrypted_content: "enc_v2" };
