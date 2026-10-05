@@ -1252,28 +1252,22 @@ pub struct ReplaceResult {
 	pub count:   usize,
 }
 
+/// What [`replace_text`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplaceOutcome {
+	/// At least one replacement.
+	Replaced(ReplaceResult),
+	/// Nothing replaced: the search found several exact occurrences, no
+	/// match, or only a match the replacement leaves unchanged. Callers
+	/// format their error from it instead of searching again.
+	Missed(MatchOutcome),
+}
+
 #[derive(Debug)]
 struct Replacement {
 	start: usize,
 	end:   usize,
 	text:  String,
-}
-
-fn pathless_occurrence_error(outcome: &MatchOutcome) -> String {
-	let occurrences = outcome.occurrences.unwrap_or(0);
-	let previews = outcome
-		.occurrence_previews
-		.as_ref()
-		.map_or_else(String::new, |items| items.join("\n\n"));
-	let more = if occurrences > MAX_RECORDED_MATCHES {
-		format!(" (showing first {MAX_RECORDED_MATCHES} of {occurrences})")
-	} else {
-		String::new()
-	};
-	format!(
-		"Found {occurrences} occurrences{more}:\n\n{previews}\n\nAdd more context lines to \
-		 disambiguate."
-	)
 }
 
 /// Find and replace text using the same exact/fuzzy behavior as `replaceText`.
@@ -1284,12 +1278,12 @@ pub fn replace_text(
 	fuzzy: bool,
 	all: bool,
 	threshold: Option<f64>,
-) -> Result<ReplaceResult, EditError> {
+) -> Result<ReplaceOutcome, EditError> {
 	if old_text.is_empty() {
 		return Err(EditError::apply("oldText must not be empty."));
 	}
 	let threshold = threshold.unwrap_or(DEFAULT_FUZZY_THRESHOLD);
-	let normalized_content = normalize_to_lf(content).into_owned();
+	let normalized_content = normalize_to_lf(content);
 	let normalized_old = normalize_to_lf(old_text);
 	let normalized_new = normalize_to_lf(new_text);
 	if all {
@@ -1297,10 +1291,10 @@ pub fn replace_text(
 			.match_indices(normalized_old.as_ref())
 			.count();
 		if exact_count > 0 {
-			return Ok(ReplaceResult {
+			return Ok(ReplaceOutcome::Replaced(ReplaceResult {
 				content: normalized_content.replace(normalized_old.as_ref(), normalized_new.as_ref()),
 				count:   exact_count,
-			});
+			}));
 		}
 		let mut replacements: Vec<Replacement> = Vec::new();
 		loop {
@@ -1325,16 +1319,25 @@ pub fn replace_text(
 				&& outcome.fuzzy_matches.is_none_or(|count| count <= 1);
 			let matched = outcome
 				.matched
-				.or_else(|| should_use_closest.then_some(outcome.closest).flatten());
-			let Some(matched) = matched else {
+				.as_ref()
+				.or_else(|| outcome.closest.as_ref().filter(|_| should_use_closest));
+			let adjusted = matched.map(|matched| {
+				adjust_indentation(
+					normalized_old.as_ref(),
+					&matched.actual_text,
+					normalized_new.as_ref(),
+				)
+			});
+			let (Some(matched), Some(adjusted)) = (matched, adjusted) else {
+				if replacements.is_empty() {
+					return Ok(ReplaceOutcome::Missed(outcome));
+				}
 				break;
 			};
-			let adjusted = adjust_indentation(
-				normalized_old.as_ref(),
-				&matched.actual_text,
-				normalized_new.as_ref(),
-			);
 			if adjusted == matched.actual_text {
+				if replacements.is_empty() {
+					return Ok(ReplaceOutcome::Missed(outcome));
+				}
 				break;
 			}
 			replacements.push(Replacement {
@@ -1355,7 +1358,10 @@ pub fn replace_text(
 			source_index = replacement.end;
 		}
 		output.push_str(&normalized_content[source_index..]);
-		return Ok(ReplaceResult { content: output, count: replacements.len() });
+		return Ok(ReplaceOutcome::Replaced(ReplaceResult {
+			content: output,
+			count:   replacements.len(),
+		}));
 	}
 
 	let outcome = find_match(&normalized_content, normalized_old.as_ref(), &FindMatchOptions {
@@ -1363,11 +1369,9 @@ pub fn replace_text(
 		threshold:       Some(threshold),
 		excluded_ranges: &[],
 	});
-	if outcome.occurrences.is_some_and(|count| count > 1) {
-		return Err(EditError::apply(pathless_occurrence_error(&outcome)));
-	}
-	let Some(matched) = outcome.matched else {
-		return Ok(ReplaceResult { content: normalized_content, count: 0 });
+	let matched = match &outcome.matched {
+		Some(matched) if outcome.occurrences.is_none_or(|count| count <= 1) => matched,
+		_ => return Ok(ReplaceOutcome::Missed(outcome)),
 	};
 	let adjusted =
 		adjust_indentation(normalized_old.as_ref(), &matched.actual_text, normalized_new.as_ref());
@@ -1376,7 +1380,7 @@ pub fn replace_text(
 	output.push_str(&normalized_content[..matched.start_index]);
 	output.push_str(&adjusted);
 	output.push_str(&normalized_content[matched.start_index + matched.actual_text.len()..]);
-	Ok(ReplaceResult { content: output, count: 1 })
+	Ok(ReplaceOutcome::Replaced(ReplaceResult { content: output, count: 1 }))
 }
 
 #[cfg(test)]
@@ -1703,31 +1707,41 @@ mod tests {
 		);
 	}
 
+	fn replaced(outcome: ReplaceOutcome) -> ReplaceResult {
+		match outcome {
+			ReplaceOutcome::Replaced(result) => result,
+			ReplaceOutcome::Missed(outcome) => panic!("expected a replacement, missed: {outcome:?}"),
+		}
+	}
+
 	#[test]
 	fn replace_text_adjusts_indentation() {
-		let result =
-			replace_text("    foo\n    bar", "foo\nbar", "foo\nbaz\nbar", true, false, None).unwrap();
+		let result = replaced(
+			replace_text("    foo\n    bar", "foo\nbar", "foo\nbaz\nbar", true, false, None).unwrap(),
+		);
 		assert_eq!(result, ReplaceResult {
 			content: "    foo\n    baz\n    bar".to_owned(),
 			count:   1,
 		});
 
-		let deindented = replace_text(
-			"    foo\n    bar",
-			"        foo\n        bar",
-			"        foo\n        baz",
-			true,
-			false,
-			Some(0.9),
-		)
-		.unwrap();
+		let deindented = replaced(
+			replace_text(
+				"    foo\n    bar",
+				"        foo\n        bar",
+				"        foo\n        baz",
+				true,
+				false,
+				Some(0.9),
+			)
+			.unwrap(),
+		);
 		assert_eq!(deindented.content, "    foo\n    baz");
 	}
 
 	#[test]
 	fn replace_text_all_exact_and_fuzzy() {
 		assert_eq!(
-			replace_text("foo foo", "foo", "bar", false, true, None).unwrap(),
+			replaced(replace_text("foo foo", "foo", "bar", false, true, None).unwrap()),
 			ReplaceResult { content: "bar bar".to_owned(), count: 2 }
 		);
 		let old = "a".repeat(50);
@@ -1735,23 +1749,31 @@ mod tests {
 		let second = format!("{}cccccc", "a".repeat(44));
 		let new = format!("{old}\nexpanded");
 		assert_eq!(
-			replace_text(&format!("{first}\n{second}"), &old, &new, true, true, Some(0.8)).unwrap(),
+			replaced(
+				replace_text(&format!("{first}\n{second}"), &old, &new, true, true, Some(0.8)).unwrap()
+			),
 			ReplaceResult { content: format!("{new}\n{new}"), count: 2 }
 		);
 	}
 
 	#[test]
-	fn replace_text_reports_ambiguity_and_normalizes_line_endings() {
-		let error = replace_text("foo\nbar\nfoo", "foo", "x", false, false, None).unwrap_err();
-		assert!(error.to_string().starts_with("Found 2 occurrences:"));
+	fn replace_text_misses_on_ambiguity_and_normalizes_line_endings() {
+		let ReplaceOutcome::Missed(ambiguous) =
+			replace_text("foo\nbar\nfoo", "foo", "x", false, false, None).unwrap()
+		else {
+			panic!("two exact occurrences must not be replaced");
+		};
+		assert_eq!(ambiguous.occurrences, Some(2));
 		assert_eq!(
-			replace_text("a\r\nb", "a\r\nb", "c\r\nd", false, false, None).unwrap(),
+			replaced(replace_text("a\r\nb", "a\r\nb", "c\r\nd", false, false, None).unwrap()),
 			ReplaceResult { content: "c\nd".to_owned(), count: 1 }
 		);
-		assert_eq!(replace_text("abc", "missing", "x", false, false, None).unwrap(), ReplaceResult {
-			content: "abc".to_owned(),
-			count:   0,
-		});
+		let ReplaceOutcome::Missed(missing) =
+			replace_text("abc", "missing", "x", false, false, None).unwrap()
+		else {
+			panic!("an absent string must not be replaced");
+		};
+		assert!(missing.matched.is_none());
 	}
 
 	#[test]
