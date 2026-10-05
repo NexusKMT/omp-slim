@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed cancelling a browser run during a slow `tab.goto` waiting for the page to answer, failing with "Failed to restore browser request interception", and still navigating the tab afterwards ([#14425](https://github.com/can1357/oh-my-pi/pull/14425) by [@will-bogusz](https://github.com/will-bogusz))
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed

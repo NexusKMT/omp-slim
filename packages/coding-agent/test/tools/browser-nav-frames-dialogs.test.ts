@@ -39,8 +39,8 @@ function createHost() {
 		}),
 	};
 	const prelude = createBrowserPrelude(session);
-	return (parameters: unknown) =>
-		prelude.invoke(parameters, { session, toolCallId: "browser-nav-frames-dialogs-test" });
+	return (parameters: unknown, signal?: AbortSignal) =>
+		prelude.invoke(parameters, { session, toolCallId: "browser-nav-frames-dialogs-test", signal });
 }
 
 function valueOf(result: { details?: unknown }): unknown {
@@ -264,5 +264,37 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			url: `${baseUrl}/two`,
 			persist: false,
 		});
+	}, 30_000);
+
+	test("stops the page load when a run is cancelled mid-goto", async () => {
+		const requested = Promise.withResolvers<AbortSignal>();
+		const slow = Bun.serve({
+			port: 0,
+			idleTimeout: 0,
+			fetch(request) {
+				requested.resolve(request.signal);
+				return new Promise<Response>(() => {});
+			},
+		});
+		try {
+			const invoke = createHost();
+			await invoke({ action: "open", name: "cancelled", url: `${baseUrl}/one` });
+			const cancel = new AbortController();
+			const run = invoke(
+				{ action: "run", name: "cancelled", code: `await tab.goto("http://127.0.0.1:${slow.port}/slow");` },
+				cancel.signal,
+			);
+			const request = await requested.promise;
+			cancel.abort();
+			await expect(run).rejects.toThrow();
+			// Chrome drops the request once the load is stopped; a load left running keeps waiting.
+			const dropped = new Promise<string>(resolve => {
+				if (request.aborted) resolve("stopped");
+				request.addEventListener("abort", () => resolve("stopped"));
+			});
+			expect(await Promise.race([dropped, Bun.sleep(5_000).then(() => "still loading")])).toBe("stopped");
+		} finally {
+			slow.stop(true);
+		}
 	}, 30_000);
 });
