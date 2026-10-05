@@ -1904,7 +1904,7 @@ export class Agent {
 				? agentLoop(messages, context, config, loopSignal, this.streamFn)
 				: agentLoopContinue(context, config, loopSignal, this.streamFn);
 
-			for await (const event of stream) {
+			for await (let event of stream) {
 				if (this.#abortController !== loopAbortController) return;
 				// Withdrawn input the loop already holds for this run never reaches the transcript.
 				if (
@@ -1912,6 +1912,10 @@ export class Agent {
 					this.#withdrawnMessages.get(event.message) === loopAbortController
 				) {
 					continue;
+				}
+				if (event.type === "agent_end") {
+					const messages = event.messages.filter(m => this.#withdrawnMessages.get(m) !== loopAbortController);
+					if (messages.length < event.messages.length) event = { ...event, messages };
 				}
 				if (event.type === "turn_start") turnOpen = true;
 				if (event.type === "turn_end") turnOpen = false;
