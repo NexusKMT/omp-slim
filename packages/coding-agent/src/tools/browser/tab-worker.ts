@@ -295,7 +295,7 @@ const SCROLL_ACK_TIMEOUT_MS = 2_000;
 const REQUEST_INTERCEPTION_CLEANUP_TIMEOUT_MS = 500;
 /** Bound cleanup window after a timed-out raw handle action. */
 const HANDLE_ACTION_INVALIDATION_TIMEOUT_MS = 500;
-/** Bound on one iframe's accessibility read; a frame whose renderer is stuck in script never answers. */
+/** Bound on reading every iframe in one observation; a frame whose renderer is stuck in script never answers. */
 const FRAME_SNAPSHOT_TIMEOUT_MS = 5_000;
 
 /** Queue a wheel event without treating a delayed renderer acknowledgement as dispatch failure. */
@@ -1020,12 +1020,12 @@ async function createTrackedHeadlessPage(browser: Browser, reportTarget: (target
 
 /**
  * Accessibility snapshots of `frames` and their descendants, in frame-tree order. A frame that does
- * not answer within {@link FRAME_SNAPSHOT_TIMEOUT_MS} is left out with its descendants, so one dead
- * iframe never costs the page its observation. With `root`, only frames inside it are read.
+ * not answer by `deadline` is left out with its descendants, so one dead iframe never costs the page
+ * its observation. With `root`, only frames inside it are read.
  */
 async function snapshotFrames(
 	frames: Frame[],
-	options: { interestingOnly: boolean; root: ElementHandle | null; signal?: AbortSignal },
+	options: { interestingOnly: boolean; root: ElementHandle | null; deadline: number; signal?: AbortSignal },
 ): Promise<SerializedAXNode[]> {
 	const snapshots = await Promise.all(
 		frames.map(async frame => {
@@ -1033,7 +1033,7 @@ async function snapshotFrames(
 			try {
 				snapshot = await withTimeout(
 					snapshotFrame(frame, options),
-					FRAME_SNAPSHOT_TIMEOUT_MS,
+					Math.max(0, options.deadline - Date.now()),
 					`Frame ${frame.url()} did not answer`,
 					options.signal,
 				);
@@ -2519,6 +2519,7 @@ export class WorkerCore {
 			frameSnapshots = await snapshotFrames(page.mainFrame().childFrames(), {
 				interestingOnly: !includeAll,
 				root,
+				deadline: Date.now() + FRAME_SNAPSHOT_TIMEOUT_MS,
 				signal: options.signal,
 			});
 		} finally {
