@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed browser `tab.observe()` leaving out every control inside iframes (embedded sign-in, payment and checkout forms), so they got no ids to act on
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed

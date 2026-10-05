@@ -10,7 +10,14 @@ const CHROMIUM_AVAILABLE = await chromiumAvailable();
 const server = Bun.serve({
 	port: 0,
 	fetch(request) {
-		const { pathname } = new URL(request.url);
+		const { pathname, port } = new URL(request.url);
+		const html = (body: string) =>
+			new Response(`<!doctype html>${body}`, { headers: { "content-type": "text/html" } });
+		if (pathname === "/card") return html(`<input aria-label="Card"><button>Pay</button>`);
+		if (pathname === "/observe-frames") {
+			// localhost and 127.0.0.1 are different sites, so the frame runs out of process.
+			return html(`<button>Main</button><iframe id="pay" src="http://localhost:${port}/card"></iframe>`);
+		}
 		const iframe = `<iframe id="f" name="payment" srcdoc="<!doctype html><input id='in'><div id='out'>ready</div><script>document.querySelector('#in').addEventListener('input',e=>document.querySelector('#out').textContent=e.target.value)</script>"></iframe>`;
 		return new Response(
 			`<!doctype html><title>${pathname}</title><body data-path="${pathname}">${iframe}<script>
@@ -242,6 +249,40 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 				}),
 			),
 		).toBe("direct");
+	}, 30_000);
+
+	test("observes controls inside iframes and acts on them by id", async () => {
+		const invoke = createHost();
+		await invoke({ action: "open", name: "observe-frames", url: `${baseUrl}/observe-frames` });
+		const observed = valueOf(
+			await invoke({ action: "call", name: "observe-frames", chain: [{ method: "observe", args: [] }] }),
+		) as { elements: Array<{ id: number; role: string; name: string }> };
+		expect(observed.elements.map(entry => `${entry.role}:${entry.name}`)).toEqual([
+			"button:Main",
+			"textbox:Card",
+			"button:Pay",
+		]);
+		const card = observed.elements.find(entry => entry.name === "Card")!;
+		await invoke({
+			action: "call",
+			name: "observe-frames",
+			chain: [
+				{ method: "id", args: [card.id] },
+				{ method: "fill", args: ["4242"] },
+			],
+		});
+		expect(
+			valueOf(
+				await invoke({
+					action: "call",
+					name: "observe-frames",
+					chain: [
+						{ method: "frame", args: ["#pay"] },
+						{ method: "value", args: ["input"] },
+					],
+				}),
+			),
+		).toBe("4242");
 	}, 30_000);
 
 	test("lists managed tabs with live metadata", async () => {
