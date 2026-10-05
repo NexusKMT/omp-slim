@@ -735,7 +735,13 @@ function resolveOpenAIResponsesPolicy(
 		supportsPromptCacheBreakpoints,
 		promptCacheBreakpointTtl: supportsPromptCacheBreakpoints ? "30m" : undefined,
 		strictResponsesPairing: isAzure || provider === "github-copilot",
-		supportsImageDetailOriginal: isOpenAIUrl || isAzure || hostMatchesUrl(baseUrl, "openaiCodex"),
+		// Azure's provider id alone only implies support while its endpoint is
+		// resolved at runtime; an explicit non-Azure baseUrl is a proxy, like Codex.
+		supportsImageDetailOriginal:
+			isOpenAIUrl ||
+			hostMatchesUrl(baseUrl, "azureOpenAI") ||
+			(isAzure && !baseUrl) ||
+			hostMatchesUrl(baseUrl, "openaiCodex"),
 		supportsReasoningSummary: !isXaiHost,
 		statefulResponses: undefined,
 		supportsAllTurnsReasoningContext: false,

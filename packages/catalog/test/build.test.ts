@@ -374,6 +374,13 @@ describe("Responses native-resolution image compatibility", () => {
 		["custom Codex proxy", "cc-switch", "openai-codex-responses", "http://127.0.0.1:8080/v1", false],
 		["Azure runtime endpoint", "azure", "azure-openai-responses", "", true],
 		["Azure host", "custom", "openai-responses", "https://resource.openai.azure.com/openai/v1", true],
+		[
+			"Azure provider routed through a custom host",
+			"azure",
+			"azure-openai-responses",
+			"http://127.0.0.1:8080/v1",
+			false,
+		],
 		["Copilot", "github-copilot", "openai-responses", "https://api.githubcopilot.com", false],
 		["xAI", "xai", "openai-responses", "https://api.x.ai/v1", false],
 	] as const)("uses only supported image detail on %s", (_label, provider, api, baseUrl, supported) => {
