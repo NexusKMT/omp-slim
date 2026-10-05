@@ -8377,8 +8377,11 @@ fn process_file(
 					*pat_has_newline = context.hold.has_newline;
 				},
 				'h' => {
-					// Replace hold with the contents of the pattern space.
-					context.hold.content = pattern.as_str()?.to_string();
+					// Replace hold with the contents of the pattern space, reusing
+					// the hold buffer.
+					let content = pattern.as_str()?;
+					context.hold.content.clear();
+					context.hold.content.push_str(content);
 					context.hold.has_newline = pattern.is_newline_terminated();
 				},
 				'H' => {
@@ -8404,10 +8407,12 @@ fn process_file(
 					// Append to pattern `\n` and the next line
 					// Rather than reading input here, which would result
 					// in a double borrow on reader, modify the action
-					// to perform when the next line is read.
+					// to perform when the next line is read. This cycle's
+					// `pattern` is discarded, so move its buffer instead of
+					// copying the accumulated pattern space each time.
 					context.input_action = Some(InputAction {
 						next_command: command.next.clone(),
-						prepend:      pattern.as_str()?.to_string(),
+						prepend:      std::mem::take(pattern.fields_mut()?.0),
 					});
 					continue 'lines;
 				},
@@ -9612,6 +9617,29 @@ mod tests {
 		let (code, capture) = crate::host::run_util::<Sed>(&["2q42"], "one\ntwo\nthree\n", "/");
 		assert_eq!(code, 42);
 		assert_eq!(capture.out(), "one\ntwo\n");
+	}
+
+	#[test]
+	fn builtin_carries_pattern_and_hold_space_across_cycles() {
+		// `:a;N;$!ba` grows the pattern space by one line per cycle; each `N`
+		// must carry everything accumulated so far, for stdin and for file
+		// input (mmapped on unix).
+		let dir = tempfile::tempdir().unwrap();
+		std::fs::write(dir.path().join("in.txt"), "one\ntwo\nthree\n").unwrap();
+		let join = r":a;N;$!ba;s/\n/,/g";
+		for (args, stdin) in [(&[join][..], "one\ntwo\nthree\n"), (&[join, "in.txt"][..], "")] {
+			let (code, capture) = crate::host::run_util::<Sed>(args, stdin, dir.path());
+			assert_eq!(code, 0, "{}", capture.err());
+			assert_eq!(capture.out(), "one,two,three\n", "{args:?}");
+		}
+		// `N` with no next line prints the pending pattern space (GNU).
+		let (code, capture) = crate::host::run_util::<Sed>(&[r"N;s/\n/+/"], "a\nb\nc\n", "/");
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a+b\nc\n");
+		// `1!G;h;$!d` reverses the input through the hold space.
+		let (code, capture) = crate::host::run_util::<Sed>(&["1!G;h;$!d"], "a\nb\nc\n", "/");
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "c\nb\na\n");
 	}
 
 	#[test]
