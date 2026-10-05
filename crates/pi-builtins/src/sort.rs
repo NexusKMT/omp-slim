@@ -2544,8 +2544,6 @@ impl Drop for TmpDirWrapper {
 
 }
 
-#[cfg(not(target_os = "wasi"))]
-use std::num::NonZero;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::{
@@ -2556,7 +2554,7 @@ use std::{
 	num::IntErrorKind,
 	ops::Range,
 	path::{Path, PathBuf},
-	sync::{Arc, OnceLock, atomic::{AtomicBool, Ordering as AtomicOrdering}},
+	sync::{Arc, LazyLock, OnceLock, atomic::{AtomicBool, Ordering as AtomicOrdering}},
 };
 
 use bigdecimal::BigDecimal;
@@ -2917,7 +2915,6 @@ pub struct GlobalSettings {
 	random_source:           Option<PathBuf>,
 	selectors:               Vec<FieldSelector>,
 	separator:               Option<u8>,
-	threads:                 String,
 	line_ending:             LineEnding,
 	buffer_size:             usize,
 	buffer_size_is_explicit: bool,
@@ -2962,6 +2959,7 @@ struct Precomputed {
 	selections_per_line:             usize,
 	fast_lexicographic:              bool,
 	fast_locale_collation:           bool,
+	locale_collation:                bool,
 	fast_ascii_insensitive:          bool,
 	tokenize_blank_thousands_sep:    bool,
 	tokenize_allow_unit_after_blank: bool,
@@ -2992,10 +2990,9 @@ impl GlobalSettings {
 	/// This function **must** be called before starting to sort, and
 	/// `GlobalSettings` may not be altered afterwards.
 	///
-	/// When i18n-collator is enabled, `disable_fast_lexicographic` should be set
-	/// to true if we're in a UTF-8 locale (to force locale-aware collation
-	/// instead of byte comparison).
-	fn init_precomputed(&mut self, disable_fast_lexicographic: bool) {
+	/// `locale_collation` is true when text keys compare with the ICU collator
+	/// (the shell's LC_COLLATE is a UTF-8 locale) instead of by bytes.
+	fn init_precomputed(&mut self, locale_collation: bool) {
 		self.precomputed.needs_tokens = self.selectors.iter().any(|s| s.needs_tokens);
 		self.precomputed.selections_per_line =
 			self.selectors.iter().filter(|s| s.needs_selection).count();
@@ -3024,10 +3021,10 @@ impl GlobalSettings {
 		self.precomputed.tokenize_allow_unit_after_blank =
 			self.precomputed.tokenize_blank_thousands_sep && uses_human_numeric;
 
-		self.precomputed.fast_lexicographic =
-			!disable_fast_lexicographic && self.can_use_fast_lexicographic();
+		self.precomputed.locale_collation = locale_collation;
+		self.precomputed.fast_lexicographic = !locale_collation && self.can_use_fast_lexicographic();
 		self.precomputed.fast_locale_collation =
-			disable_fast_lexicographic && self.can_use_fast_lexicographic();
+			locale_collation && self.can_use_fast_lexicographic();
 		self.precomputed.fast_ascii_insensitive = self.can_use_fast_ascii_insensitive();
 	}
 
@@ -3093,7 +3090,6 @@ impl Default for GlobalSettings {
 			random_source:           None,
 			selectors:               vec![],
 			separator:               None,
-			threads:                 String::new(),
 			line_ending:             LineEnding::Newline,
 			buffer_size:             FALLBACK_AUTOMATIC_BUF_SIZE,
 			buffer_size_is_explicit: false,
@@ -3395,7 +3391,7 @@ impl<'a> Line<'a> {
 				},
 				SortMode::GeneralNumeric => {
 					let initial_selection = &self.line[selection.clone()];
-					let decimal_pt = locale_decimal_pt();
+					let decimal_pt = settings.numeric_locale.decimal_pt.unwrap_or(DECIMAL_PT);
 					let leading = get_leading_gen(initial_selection, decimal_pt);
 
 					// Shorten selection to leading.
@@ -3813,7 +3809,7 @@ impl FieldSelector {
 		} else if self.settings.mode == SortMode::GeneralNumeric {
 			// Parse this number as BigDecimal, as this is the requirement for general
 			// numeric sorting.
-			let decimal_pt = locale_decimal_pt();
+			let decimal_pt = numeric_locale.decimal_pt.unwrap_or(DECIMAL_PT);
 			Selection::AsBigDecimal(general_bd_parse(
 				&range_str[get_leading_gen(range_str, decimal_pt)],
 				decimal_pt,
@@ -3920,11 +3916,51 @@ impl FieldSelector {
 	}
 }
 
-fn detect_numeric_locale() -> NumericLocaleSettings {
+/// The shell's value for locale category `category`: LC_ALL, then the
+/// category, then LANG, with empty values treated as unset (POSIX). Read per
+/// invocation from the shell environment because uucore's getters read the
+/// process environment once and cache it, ignoring `LC_ALL=C sort`.
+fn shell_locale<'h>(host: &'h Host, category: &str) -> Option<&'h str> {
+	["LC_ALL", category, "LANG"]
+		.into_iter()
+		.find_map(|key| host.var(key).filter(|value| !value.is_empty()))
+}
+
+/// Whether `locale` names the C/POSIX locale, using uucore's name parsing.
+fn is_c_locale_name(locale: &str) -> bool {
+	matches!(locale.split(['.', '@']).next(), Some("C" | "POSIX"))
+}
+
+/// Whether the process-global ICU collator exists. uucore builds a single
+/// collator from the process environment's locale, and only for UTF-8 locales;
+/// probing once avoids constructing a throwaway collator on every call.
+static PROCESS_COLLATOR: LazyLock<bool> = LazyLock::new(|| {
+	i18n::collator::init_locale_collation();
+	i18n::get_locale_encoding() == i18n::UEncoding::Utf8
+});
+
+/// Whether text comparisons use locale collation: the shell's LC_COLLATE must
+/// be a UTF-8 locale (uucore's rule) that the system can load (GNU falls back
+/// to byte order otherwise), and the process collator must exist.
+fn use_locale_collation(host: &Host) -> bool {
+	shell_locale(host, "LC_COLLATE").is_some_and(|locale| {
+		let mut parts = locale.split(['.', '@']);
+		!matches!(parts.next(), Some("C" | "POSIX"))
+			&& parts.next().is_some_and(|encoding| {
+				encoding.eq_ignore_ascii_case("utf-8") || encoding.eq_ignore_ascii_case("utf8")
+			})
+	}) && !locale_failed_to_set(host)
+		&& *PROCESS_COLLATOR
+}
+
+fn detect_numeric_locale(host: &Host) -> NumericLocaleSettings {
 	let numeric_locale = i18n::get_numeric_locale();
 	let locale = &numeric_locale.0;
 	let encoding = numeric_locale.1;
-	let is_c_locale = encoding == i18n::UEncoding::Ascii && locale.to_string() == "und";
+	// The locale data comes from the process environment, so it applies only
+	// when the shell also selects a non-C numeric locale.
+	let is_c_locale = shell_locale(host, "LC_NUMERIC").is_none_or(is_c_locale_name)
+		|| (encoding == i18n::UEncoding::Ascii && locale.to_string() == "und");
 
 	if is_c_locale {
 		return NumericLocaleSettings { decimal_pt: Some(DECIMAL_PT), thousands_sep: None };
@@ -4352,15 +4388,31 @@ fn default_merge_batch_size() -> usize {
 }
 
 #[cfg(not(unix))]
-fn locale_failed_to_set() -> bool {
-	use std::env;
-	env::var_os("LC_ALL").as_deref() == Some(OsStr::new("missing"))
+fn locale_failed_to_set(host: &Host) -> bool {
+	host.var("LC_ALL") == Some("missing")
 }
 
+/// Probes the shell's LC_COLLATE with `newlocale` rather than `setlocale`,
+/// which would change the C locale of the whole host process.
 #[cfg(unix)]
-fn locale_failed_to_set() -> bool {
+fn locale_failed_to_set(host: &Host) -> bool {
 	use nix::libc;
-	unsafe { libc::setlocale(libc::LC_COLLATE, c"".as_ptr()).is_null() }
+	let Some(locale) = shell_locale(host, "LC_COLLATE") else {
+		return false;
+	};
+	let Ok(locale) = std::ffi::CString::new(locale) else {
+		return true;
+	};
+	// SAFETY: `locale` is a valid NUL-terminated string; a non-null result is
+	// a fresh locale object owned here and freed immediately.
+	unsafe {
+		let handle = libc::newlocale(libc::LC_COLLATE_MASK, locale.as_ptr(), std::ptr::null_mut());
+		if handle.is_null() {
+			return true;
+		}
+		libc::freelocale(handle);
+	}
+	false
 }
 
 fn key_zero_width(selector: &FieldSelector) -> bool {
@@ -4400,14 +4452,14 @@ fn emit_debug_warnings(
 	settings: &GlobalSettings,
 	flags: &GlobalOptionFlags,
 	legacy_warnings: &[LegacyKeyWarning],
+	locale_collation: bool,
 ) {
-	if locale_failed_to_set() {
+	if locale_failed_to_set(host) {
 		show_error!(&mut host.stderr, "{}", "failed to set locale");
 	}
 
-	let (locale, encoding) = i18n::get_collating_locale();
-
-	if matches!(encoding, i18n::UEncoding::Utf8) {
+	if locale_collation {
+		let locale = &i18n::get_collating_locale().0;
 		let locale_as_posix = format!("{}.UTF-8", locale.to_string().replace('-', "_"));
 		show_error!(&mut host.stderr, "{}", format!("text ordering performed using ‘{locale_as_posix}’ sorting rules"));
 	} else {
@@ -4623,7 +4675,7 @@ impl Utility for Sort {
 fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWarning]) -> SortResult<()> {
 	let fs = host.fs().clone();
 	let mut settings = GlobalSettings {
-		numeric_locale: detect_numeric_locale(),
+		numeric_locale: detect_numeric_locale(host),
 		cancel: host.cancel_flag(),
 		..Default::default()
 	};
@@ -4748,25 +4800,6 @@ fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWa
 	settings.dictionary_order = dictionary_order;
 	settings.ignore_non_printing = ignore_non_printing;
 	settings.ignore_case = ignore_case;
-	if matches.contains_id(options::PARALLEL) {
-		// "0" is default - threads = num of cores
-		settings.threads = matches
-			.get_one::<String>(options::PARALLEL)
-			.map_or_else(|| "0".to_string(), String::from);
-		#[cfg(not(target_os = "wasi"))]
-		{
-			if rayon_global_pool_available() {
-				let num_threads = match settings.threads.parse::<usize>() {
-					Ok(0) | Err(_) => std::thread::available_parallelism().map_or(1, NonZero::get),
-					Ok(n) => n,
-				};
-				let _ = rayon::ThreadPoolBuilder::new()
-					.num_threads(num_threads)
-					.build_global();
-			}
-		}
-	}
-
 	if let Some(size_str) = matches.get_one::<String>(options::BUF_SIZE) {
 		settings.buffer_size = GlobalSettings::parse_byte_count(size_str).map_err(|e| {
 			SortError::message(format_error_message(&e, size_str, options::BUF_SIZE))
@@ -4944,17 +4977,13 @@ fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWa
 		.map(|path| host.resolve(path).into_os_string());
 	let output = Output::new(&fs, output_path.as_ref(), Some(host.stdout_clone()))?;
 
+	let locale_collation = use_locale_collation(host);
 	if settings.debug {
 		let global_flags = GlobalOptionFlags::from_matches(matches);
-		emit_debug_warnings(host, &settings, &global_flags, legacy_warnings);
+		emit_debug_warnings(host, &settings, &global_flags, legacy_warnings, locale_collation);
 	}
 
-	// Initialize locale collation if needed (UTF-8 locales)
-	// This MUST happen before init_precomputed() to avoid the performance
-	// regression
-	let needs_locale_collation = i18n::collator::init_locale_collation();
-
-	settings.init_precomputed(needs_locale_collation);
+	settings.init_precomputed(locale_collation);
 
 	exec(&fs, &stdin_operand, &mut files, &settings, output, &mut tmp_dir, host.stderr_clone())
 }
@@ -5384,8 +5413,10 @@ fn compare_by<'a>(
 						settings.dictionary_order,
 						settings.ignore_case,
 					)
-				} else {
+				} else if global_settings.precomputed.locale_collation {
 					locale_cmp(a_str, b_str)
+				} else {
+					a_str.cmp(b_str)
 				}
 			},
 		};
@@ -5979,6 +6010,19 @@ mod tests {
 			run_util::<Sort>(&["-o", "values", "values"], "", dir.path());
 		assert_eq!(code, 0, "{}", capture.err());
 		assert_eq!(std::fs::read_to_string(path).expect("output"), "alpha\nbeta\n");
+	}
+
+	#[test]
+	fn shell_lc_all_c_selects_byte_order_on_every_call() {
+		// The process environment may carry a UTF-8 locale; the shell's
+		// `LC_ALL=C` must still win, for whole-line and keyed sorts alike.
+		for args in [&["sort"][..], &["sort", "-k1,1"], &["sort"]] {
+			let (mut host, capture) = Host::for_test("sort", b"b\nA\na\n".to_vec(), "/");
+			host.set_test_var("LC_ALL", "C");
+			let parsed = <Sort as clap::Parser>::try_parse_from(args).expect("parse");
+			assert_eq!(parsed.run(&mut host), 0, "{}", capture.err());
+			assert_eq!(capture.out(), "A\na\nb\n", "{args:?}");
+		}
 	}
 
 }
