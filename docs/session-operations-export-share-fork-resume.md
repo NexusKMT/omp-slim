@@ -368,7 +368,7 @@ With an argument:
 
 `createSessionManager()` resolution order:
 
-1. If value looks like path (`/`, `\`, or `.jsonl`), open directly.
+1. If value looks like path (`/`, `\`, or `.jsonl`), open directly. A path that does not exist fails with `Session "<path>" not found.` rather than creating a session there.
 2. Else `resolveResumableSession(...)` searches:
    - current scope (`SessionManager.list(cwd, sessionDir)`)
    - global sessions (`SessionManager.listAll()`) only when no explicit `sessionDir` was provided
