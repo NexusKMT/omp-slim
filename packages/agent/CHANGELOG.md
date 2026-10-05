@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [18.6.1] - 2026-10-04
+
+### Fixed
+
+- Fixed native OpenAI context compaction for sessions containing many screenshots, preventing image-size estimates from incorrectly causing compaction requests to be rejected.
+
+## [18.6.0] - 2026-10-03
+
 ### Fixed
 
 - Fixed the failed V2 remote compaction warning claiming a V1 fallback on Codex, where V1 does not run ([#14245](https://github.com/can1357/oh-my-pi/pull/14245) by [@will-bogusz](https://github.com/will-bogusz))
