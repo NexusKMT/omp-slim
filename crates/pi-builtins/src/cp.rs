@@ -1414,14 +1414,14 @@ fn copy_source(
 	if options.parents {
 		make_parent_dirs(host, state, source, &dest, options)?;
 	}
-	let result = copy_file(host, state, source, &dest, options, true);
+	let result = copy_file(host, state, source, &dest, options, true, None);
 	if options.parents {
 		for (x, y) in aligned_ancestors(source, &dest) {
 			if let Ok(src) = filesystem.canonicalize_with(
 				host.resolve(&x),
 				&CanonicalizeOptions::new(MissingHandling::Normal, ResolveMode::Physical),
 			) {
-				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context)?;
+				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context, None)?;
 			}
 		}
 	}
@@ -1585,7 +1585,10 @@ fn copy_extended_attrs(
 }
 
 /// Copy the specified attributes from one path to another. `follow_source`
-/// reads the attributes of the file a symlinked `source` points to.
+/// reads the attributes of the file a symlinked `source` points to;
+/// `source_metadata`, when the caller already holds it, must have been read
+/// the same way.
+#[allow(clippy::too_many_arguments, reason = "mirrors the call sites' copy state")]
 fn copy_attributes(
 	host: &mut Host,
 	source: &Path,
@@ -1594,17 +1597,32 @@ fn copy_attributes(
 	dest_is_freshly_created_dir: bool,
 	follow_source: bool,
 	skip_selinux_xattr: bool,
+	source_metadata: Option<&Metadata>,
 ) -> CopyResult<()> {
+	// Plain `cp`/`cp -r` preserves nothing: skip the stats below. A freshly
+	// created directory always gets its mode set, one way or the other.
+	let preserves_nothing = [attributes.ownership, attributes.mode, attributes.timestamps, attributes.xattr]
+		.iter()
+		.all(|preserve| matches!(preserve, Preserve::No { .. }));
+	if preserves_nothing && !dest_is_freshly_created_dir {
+		return Ok(());
+	}
 	let filesystem = host.fs().clone();
 	let source_fs = host.resolve(source);
 	let dest_fs = host.resolve(dest);
-	let context = context_for(source, dest);
-	let source_metadata = if follow_source {
-		filesystem.metadata(&source_fs)
-	} else {
-		filesystem.symlink_metadata(&source_fs)
-	}
-	.map_err(|e| CpError::IoErrContext(e, context))?;
+	let fetched;
+	let source_metadata = match source_metadata {
+		Some(metadata) => metadata,
+		None => {
+			fetched = if follow_source {
+				filesystem.metadata(&source_fs)
+			} else {
+				filesystem.symlink_metadata(&source_fs)
+			}
+			.map_err(|e| CpError::IoErrContext(e, context_for(source, dest)))?;
+			&fetched
+		},
+	};
 	let dest_is_symlink = filesystem.is_symlink(&dest_fs);
 
 	let mode_explicitly_disabled = matches!(attributes.mode, Preserve::No { explicit: true });
@@ -2160,21 +2178,29 @@ fn copy_file(
 	dest: &Path,
 	options: &Options,
 	source_in_command_line: bool,
+	// An lstat of `source` the caller already holds.
+	source_lstat: Option<Metadata>,
 ) -> CopyResult<()> {
 	let filesystem = host.fs().clone();
 	let source_fs = host.resolve(source);
 	let dest_fs = host.resolve(dest);
 	let dereference = options.dereference(source_in_command_line);
 
-	// GNU stats the source before touching the destination.
-	let source_metadata = if dereference {
-		filesystem.metadata(&source_fs)
-	} else {
-		filesystem.symlink_metadata(&source_fs)
+	// GNU stats the source before touching the destination. The caller's
+	// lstat answers unless dereferencing must look through a symlink.
+	let lstat_is_symlink = source_lstat.as_ref().map(Metadata::is_symlink);
+	let source_metadata = match source_lstat {
+		Some(lstat) if !dereference || !lstat.is_symlink() => Ok(lstat),
+		_ if dereference => filesystem.metadata(&source_fs),
+		_ => filesystem.symlink_metadata(&source_fs),
 	}
 	.map_err(|e| CpError::IoErrContext(e, format!("cannot stat {}", source.quote())))?;
 
-	let source_is_symlink = filesystem.is_symlink(&source_fs);
+	let source_is_symlink = if dereference {
+		lstat_is_symlink.unwrap_or_else(|| filesystem.is_symlink(&source_fs))
+	} else {
+		source_metadata.is_symlink()
+	};
 	let initial_dest_metadata = match filesystem.symlink_metadata(&dest_fs) {
 		Ok(metadata) => Some(metadata),
 		Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -2185,7 +2211,9 @@ fn copy_file(
 	let dest_is_symlink = initial_dest_metadata
 		.as_ref()
 		.is_some_and(Metadata::is_symlink);
-	let dest_target_exists = filesystem.try_exists(&dest_fs).unwrap_or(false);
+	// Set when a branch below removes or renames the destination, so its
+	// first stat no longer describes it.
+	let mut dest_replaced = false;
 	// Fail if dest is a dangling symlink or a symlink this program created
 	// previously
 	if dest_is_symlink {
@@ -2202,7 +2230,7 @@ fn copy_file(
 
 		let copy_contents = dereference || !source_is_symlink;
 		if copy_contents
-			&& !dest_target_exists
+			&& !filesystem.try_exists(&dest_fs).unwrap_or(false)
 			&& !options.remove_destination()
 			&& !is_symlink_loop(&filesystem, &dest_fs)
 			&& host.var("POSIXLY_CORRECT").is_none()
@@ -2217,6 +2245,7 @@ fn copy_file(
 			&& options.backup == BackupMode::None
 		{
 			filesystem.remove_file(&dest_fs)?;
+			dest_replaced = true;
 		}
 	}
 
@@ -2225,6 +2254,7 @@ fn copy_file(
 		&& are_hardlinks_to_same_file(&filesystem, &source_fs, &dest_fs)
 	{
 		filesystem.remove_file(&dest_fs)?;
+		dest_replaced = true;
 	}
 
 	let check_existing_dest = initial_dest_metadata.is_some()
@@ -2288,6 +2318,7 @@ fn copy_file(
 	let mut backup = None;
 	if check_existing_dest {
 		backup = handle_existing_dest(host, state, source, dest, options, source_in_command_line)?;
+		dest_replaced = true;
 		if are_hardlinks_to_same_file(&filesystem, &source_fs, &dest_fs) {
 			if options.copy_mode == CopyMode::Copy {
 				return Ok(());
@@ -2339,9 +2370,14 @@ fn copy_file(
 		&& (filesystem.is_symlink(&dest_fs) || filesystem.is_file(&dest_fs))
 	{
 		delete_path(host, state, dest, options)?;
+		dest_replaced = true;
 	}
 
-	let dest_metadata = filesystem.symlink_metadata(&dest_fs).ok();
+	let dest_metadata = if dest_replaced {
+		filesystem.symlink_metadata(&dest_fs).ok()
+	} else {
+		initial_dest_metadata
+	};
 
 	let source_is_stream = is_stream(&source_metadata);
 
@@ -2389,6 +2425,7 @@ fn copy_file(
 			false,
 			dereference,
 			options.set_selinux_context,
+			Some(&source_metadata),
 		)?;
 	}
 
@@ -2532,7 +2569,7 @@ fn copy_link(
 		CpError::IoErrContext(e, format!("cannot read symbolic link {}", source.quote()))
 	})?;
 	symlink_file(host, state, &link, dest)?;
-	copy_attributes(host, source, dest, &options.attributes, false, false, options.set_selinux_context)
+	copy_attributes(host, source, dest, &options.attributes, false, false, options.set_selinux_context, None)
 }
 
 /// Streams `source` into `dest` through their handles, polling cancellation
@@ -2923,7 +2960,7 @@ fn copy_directory(
 				host.resolve(&x),
 				&CanonicalizeOptions::new(MissingHandling::Normal, ResolveMode::Physical),
 			) {
-				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context)?;
+				copy_attributes(host, &src, &y, &options.attributes, false, true, options.set_selinux_context, None)?;
 			}
 		}
 	}
@@ -2958,7 +2995,7 @@ fn copy_entry(
 	};
 
 	if !source_is_dir {
-		return match copy_file(host, state, source, dest, options, false) {
+		return match copy_file(host, state, source, dest, options, false, Some(metadata)) {
 			// With --archive a symlink may be copied before the file it names.
 			Err(_) if options.preserve_hard_links() && entry_is_symlink => Ok(()),
 			result => result,
@@ -3026,6 +3063,7 @@ fn copy_entry(
 	// Directories are created without some permissions so nobody can use
 	// them before they are ready; now that the contents are in place, give
 	// the directory its final attributes.
+	// The entry's lstat is its followed stat unless it is a symlink.
 	copy_attributes(
 		host,
 		source,
@@ -3034,6 +3072,7 @@ fn copy_entry(
 		created && options.copy_mode != CopyMode::Link,
 		true,
 		options.set_selinux_context,
+		(!entry_is_symlink).then_some(&metadata),
 	)
 }
 
