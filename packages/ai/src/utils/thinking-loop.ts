@@ -516,10 +516,10 @@ const exactZ = new Uint16Array(EXACT_MAX_UNIT + 1);
  * Detect an exact cycle at the text suffix. A Z-array over the reversed tail
  * finds every possible suffix period in linear time without substring churn.
  * The reversal is virtual (indexed from the end) and only `z[1..maxUnit]` is
- * computed — the period check reads nothing past it, and each `z[i]` depends
- * only on earlier entries. Short cycles retain the original
- * 180-character/four-repeat sensitivity; long cycles require at least three
- * repeats and 1024 repeated characters.
+ * computed — the period check reads nothing past it, and each `z[i]` reads
+ * only `z[i - left]` with `i - left < i`, which is already filled. Short
+ * cycles retain the original 180-character/four-repeat sensitivity; long
+ * cycles require at least three repeats and 1024 repeated characters.
  */
 function detectExactSuffixCycle(text: string): [unit: string, count: number] | null {
 	const n = text.length;
