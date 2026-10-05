@@ -1943,17 +1943,21 @@ export class CmuxTab implements InProcessRunTab {
 					// An exact value wins over a visible label.
 					const options = Array.from(element.options);
 					const wanted = [];
+					const missing = [];
 					for (const value of values) {
 						const option =
 							options.find(candidate => candidate.value === value) ||
 							options.find(candidate => candidate.label === value || candidate.text.replace(/\\s+/g, " ").trim() === value);
 						if (option) wanted.push(option);
+						else missing.push(value);
 					}
+					// A value that matches nothing leaves the select untouched rather than committing its default option.
+					if (missing.length > 0) throw new Error("No <select> option matches " + missing.map(value => JSON.stringify(value)).join(", "));
 					if (wanted.length === 0) for (const option of options) option.selected = false;
 					else if (element.multiple) for (const option of options) option.selected = wanted.includes(option);
 					else element.selectedIndex = wanted[0].index;
 					inputEvent(element);
-					return wanted.length === 0 ? [] : options.filter(option => option.selected).map(option => option.value);
+					return options.filter(option => option.selected).map(option => option.value);
 				}
 				case "uploadFile": {
 					const transfer = new DataTransfer();

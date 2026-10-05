@@ -351,10 +351,11 @@ const valueWins = await tab.select("#size", "Large");
 const firstOnSingle = await tab.select("#country", "Canada", "us");
 const handleFirstOnSingle = await handle.select("us", "ca");
 const afterFirst = await tab.value("#country");
-const noMatch = await tab.select("#country", "Mexico");
-const handleNoMatch = await handle.select("Mexico");
+const noMatch = await tab.select("#country", "Mexico").catch(error => error.message);
+const handleNoMatch = await handle.select("ca", "Mexico").catch(error => error.message);
+const afterNoMatch = await tab.value("#country");
 const multiple = await tab.select("#extras", "Cheese", "olives");
-return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, firstOnSingle, handleFirstOnSingle, afterFirst, noMatch, handleNoMatch, multiple };`,
+return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, firstOnSingle, handleFirstOnSingle, afterFirst, noMatch, handleNoMatch, afterNoMatch, multiple };`,
 					timeout: 20,
 				},
 				context,
@@ -369,8 +370,9 @@ return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, fi
 				firstOnSingle: ["ca"],
 				handleFirstOnSingle: ["us"],
 				afterFirst: "us",
-				noMatch: [],
-				handleNoMatch: [],
+				noMatch: expect.stringContaining('No <select> option matches "Mexico"'),
+				handleNoMatch: expect.stringContaining('No <select> option matches "Mexico"'),
+				afterNoMatch: "us",
 				multiple: ["cheese", "olives"],
 			});
 
@@ -391,9 +393,11 @@ return { byLabel, afterLabel, byValue, handleByLabel, afterHandle, valueWins, fi
 			expect({
 				byLabel: await cmux.select("#country", "United States"),
 				firstOnSingle: await cmux.select("#country", "Canada", "us"),
-				noMatch: await cmux.select("#country", "Mexico"),
 				multiple: await cmux.select("#extras", "Ham", "olives"),
-			}).toEqual({ byLabel: ["us"], firstOnSingle: ["ca"], noMatch: [], multiple: ["ham", "olives"] });
+			}).toEqual({ byLabel: ["us"], firstOnSingle: ["ca"], multiple: ["ham", "olives"] });
+			const noMatch = await cmux.select("#country", "Mexico").catch((error: Error) => error.message);
+			expect(noMatch).toContain('No <select> option matches "Mexico"');
+			expect(await cmux.value("#country")).toBe("ca");
 		} finally {
 			await prelude.invoke({ action: "close", name: SELECT_TAB_NAME, kill: true }, context).catch(() => undefined);
 		}
