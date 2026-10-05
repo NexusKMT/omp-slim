@@ -2,7 +2,7 @@
 //!
 //! This backend recursively builds a writable directory tree at `merged` from
 //! `lower`. Directories and symlinks are recreated, while regular files are
-//! cloned with [`cow::clone_file`](crate::cow::clone_file) (the Linux
+//! cloned with [`cow`](crate::cow) (the Linux
 //! `FICLONE` ioctl) so filesystems such as btrfs, XFS,
 //! OCFS2, and bcachefs can share extents until either side is modified. There
 //! is no mount or kernel state to undo, so [`stop`](IsolationBackend::stop) is
@@ -80,7 +80,7 @@ impl IsolationBackend for LinuxReflinkBackend {
 mod imp {
 	use std::{
 		ffi::CString,
-		fs,
+		fs::{self, FileTimes},
 		os::unix::{
 			ffi::OsStrExt,
 			fs::{MetadataExt, PermissionsExt},
@@ -223,12 +223,25 @@ mod imp {
 		Ok(())
 	}
 
+	/// Clones the regular file `src` into the fresh tree, then gives the clone
+	/// `src`'s mode and timestamps through the descriptors the clone used.
 	fn clone_file(src: &Path, dst: &Path) -> IsoResult<()> {
-		let meta = fs::symlink_metadata(src)
-			.map_err(|err| IsoError::other(format!("symlink_metadata {}: {err}", src.display())))?;
-		cow::clone_file(src, dst).map_err(|err| map_clone_error(src, dst, &err))?;
-		preserve_permissions(dst, &meta)?;
-		let _ = set_times_nofollow(dst, &meta);
+		let (src_file, dst_file) =
+			cow::clone_new(src, dst).map_err(|err| map_clone_error(src, dst, &err))?;
+		let meta = src_file
+			.metadata()
+			.map_err(|err| IsoError::other(format!("metadata {}: {err}", src.display())))?;
+		dst_file
+			.set_permissions(meta.permissions())
+			.map_err(|err| IsoError::other(format!("set permissions on {}: {err}", dst.display())))?;
+		let mut times = FileTimes::new();
+		if let Ok(accessed) = meta.accessed() {
+			times = times.set_accessed(accessed);
+		}
+		if let Ok(modified) = meta.modified() {
+			times = times.set_modified(modified);
+		}
+		let _ = dst_file.set_times(times);
 		Ok(())
 	}
 
