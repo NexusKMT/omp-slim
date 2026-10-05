@@ -448,7 +448,8 @@ mod imp {
 	}
 
 	pub fn stop(projection_root: &str) {
-		let projection_root_path = resolve_absolute_path(Path::new(projection_root));
+		let projection_root_path =
+			std::path::absolute(projection_root).unwrap_or_else(|_| PathBuf::from(projection_root));
 		let projection_root_path =
 			fs::canonicalize(&projection_root_path).unwrap_or(projection_root_path);
 		let key = normalize_session_key(&projection_root_path);
@@ -828,7 +829,7 @@ mod imp {
 	}
 
 	fn resolve_existing_dir(path: &str) -> crate::IsoResult<PathBuf> {
-		let resolved = resolve_absolute_path(Path::new(path));
+		let resolved = std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path));
 		let metadata = fs::metadata(&resolved).map_err(|err| {
 			IsoError::other(format!("Invalid ProjFS lower root {}: {err}", resolved.display()))
 		})?;
@@ -842,7 +843,7 @@ mod imp {
 	}
 
 	fn resolve_projection_root(path: &str) -> crate::IsoResult<PathBuf> {
-		let resolved = resolve_absolute_path(Path::new(path));
+		let resolved = std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path));
 		fs::create_dir_all(&resolved).map_err(|err| {
 			IsoError::other(format!(
 				"Unable to create ProjFS projection root {}: {err}",
@@ -862,14 +863,6 @@ mod imp {
 			)));
 		}
 		Ok(fs::canonicalize(&resolved).unwrap_or(resolved))
-	}
-
-	fn resolve_absolute_path(path: &Path) -> PathBuf {
-		if path.is_absolute() {
-			path.to_path_buf()
-		} else {
-			std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
-		}
 	}
 
 	fn normalize_session_key(path: &Path) -> String {

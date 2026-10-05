@@ -37,6 +37,7 @@ mod linux_reflink;
 mod overlayfs;
 mod projfs;
 mod rcopy;
+mod tree;
 mod windows_block_clone;
 mod zfs;
 

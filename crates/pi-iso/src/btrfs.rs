@@ -66,12 +66,12 @@ mod imp {
 	use std::{
 		fs,
 		os::unix::fs::MetadataExt,
-		path::{Path, PathBuf},
+		path::Path,
 		process::{Command, Stdio},
 		sync::LazyLock,
 	};
 
-	use crate::{IsoError, IsoResult, ProbeResult, statfs_magic};
+	use crate::{IsoError, IsoResult, ProbeResult, statfs_magic, tree};
 
 	/// `statfs` magic of a btrfs filesystem.
 	const BTRFS_SUPER_MAGIC: u32 = 0x9123_683e;
@@ -107,7 +107,7 @@ mod imp {
 	}
 
 	pub fn start(lower: &Path, merged: &Path) -> IsoResult<()> {
-		let lower = canonical_existing_dir(lower)?;
+		let lower = tree::canonical_existing_dir(lower, "btrfs snapshot source", IsoError::other)?;
 		// `btrfs subvolume snapshot` only snapshots a subvolume root; answer
 		// that from `stat`/`statfs` instead of spawning it to find out.
 		let is_subvolume_root = fs::metadata(&lower)
@@ -161,24 +161,6 @@ mod imp {
 
 	pub fn stop(merged: &Path) -> IsoResult<()> {
 		delete_subvolume_or_tree(merged)
-	}
-
-	fn canonical_existing_dir(path: &Path) -> IsoResult<PathBuf> {
-		let resolved = if path.is_absolute() {
-			path.to_path_buf()
-		} else {
-			std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
-		};
-		let meta = fs::metadata(&resolved).map_err(|err| {
-			IsoError::other(format!("invalid btrfs snapshot source {}: {err}", resolved.display()))
-		})?;
-		if !meta.is_dir() {
-			return Err(IsoError::other(format!(
-				"btrfs snapshot source {} is not a directory",
-				resolved.display()
-			)));
-		}
-		Ok(fs::canonicalize(&resolved).unwrap_or(resolved))
 	}
 
 	fn prepare_destination(merged: &Path) -> IsoResult<()> {

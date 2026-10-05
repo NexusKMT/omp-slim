@@ -79,38 +79,33 @@ impl IsolationBackend for WindowsBlockCloneBackend {
 #[cfg(windows)]
 mod imp {
 	use std::{
-		fs::{self, File, FileTimes, OpenOptions},
+		fs::{self, File, FileTimes, FileType, OpenOptions},
 		io,
-		os::windows::fs::{FileTimesExt, FileTypeExt, OpenOptionsExt},
-		path::{Path, PathBuf},
+		os::windows::fs::{FileTimesExt, OpenOptionsExt},
+		path::Path,
 	};
 
 	use windows_sys::Win32::Storage::FileSystem::{
 		FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_WRITE_ATTRIBUTES,
 	};
 
-	use crate::{IsoError, IsoResult, cow};
+	use crate::{
+		IsoError, IsoResult, cow,
+		tree::{self, TreeCopy},
+	};
 
 	pub fn start(lower: &Path, merged: &Path) -> IsoResult<()> {
-		let lower = canonical_existing_dir(lower)?;
-		prepare_destination(merged)?;
-
-		let result = recursive_block_clone(&lower, merged);
-		if result.is_err() {
-			let _ = remove_path(merged);
-		}
-		result
+		clone_tree(lower, merged, &[])
 	}
 
 	pub fn clone_tree(lower: &Path, merged: &Path, skip: &[&std::ffi::OsStr]) -> IsoResult<()> {
-		let lower = canonical_existing_dir(lower)?;
-		prepare_destination(merged)?;
+		let lower = tree::canonical_existing_dir(lower, "block-clone source", IsoError::other)?;
+		tree::prepare_destination(merged, "block clone", remove_path)?;
 		let result = (|| {
 			fs::create_dir_all(merged)
 				.map_err(|err| IsoError::other(format!("create {}: {err}", merged.display())))?;
-			clone_dir_contents(&lower, merged, Some(skip))?;
-			copy_path_metadata_best_effort(&lower, merged);
-			Ok(())
+			tree::copy_dir_contents(&lower, merged, skip, &BlockClone)?;
+			BlockClone.finish_dir(&lower, merged)
 		})();
 		if result.is_err() {
 			let _ = remove_path(merged);
@@ -122,36 +117,6 @@ mod imp {
 		remove_path(merged).map_err(|err| {
 			IsoError::other(format!("unable to remove block-cloned tree {}: {err}", merged.display()))
 		})
-	}
-
-	fn canonical_existing_dir(path: &Path) -> IsoResult<PathBuf> {
-		let resolved = if path.is_absolute() {
-			path.to_path_buf()
-		} else {
-			std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
-		};
-		let meta = fs::metadata(&resolved).map_err(|err| {
-			IsoError::other(format!("invalid block-clone source {}: {err}", resolved.display()))
-		})?;
-		if !meta.is_dir() {
-			return Err(IsoError::other(format!(
-				"block-clone source {} is not a directory",
-				resolved.display()
-			)));
-		}
-		Ok(fs::canonicalize(&resolved).unwrap_or(resolved))
-	}
-
-	fn prepare_destination(merged: &Path) -> IsoResult<()> {
-		if let Some(parent) = merged.parent() {
-			fs::create_dir_all(parent).map_err(|err| {
-				IsoError::other(format!("create parent of {}: {err}", merged.display()))
-			})?;
-		}
-		remove_path(merged).map_err(|err| {
-			IsoError::other(format!("unable to clear {} before block clone: {err}", merged.display()))
-		})?;
-		Ok(())
 	}
 
 	fn remove_path(path: &Path) -> io::Result<()> {
@@ -199,62 +164,29 @@ mod imp {
 		}
 	}
 
-	fn recursive_block_clone(lower: &Path, merged: &Path) -> IsoResult<()> {
-		fs::create_dir_all(merged)
-			.map_err(|err| IsoError::other(format!("create {}: {err}", merged.display())))?;
-		clone_dir_contents(lower, merged, None)?;
-		copy_path_metadata_best_effort(lower, merged);
-		Ok(())
-	}
+	struct BlockClone;
 
-	fn clone_dir_contents(
-		src: &Path,
-		dst: &Path,
-		skip: Option<&[&std::ffi::OsStr]>,
-	) -> IsoResult<()> {
-		let entries = fs::read_dir(src)
-			.map_err(|err| IsoError::other(format!("read_dir {}: {err}", src.display())))?;
-		for entry in entries {
-			let entry = entry
-				.map_err(|err| IsoError::other(format!("dir entry in {}: {err}", src.display())))?;
-			if skip.is_some_and(|names| names.contains(&entry.file_name().as_os_str())) {
-				continue;
-			}
-			let file_type = entry.file_type().map_err(|err| {
-				IsoError::other(format!("file_type {}: {err}", entry.path().display()))
-			})?;
-			let src_path = entry.path();
-			let dst_path = dst.join(entry.file_name());
+	impl TreeCopy for BlockClone {
+		fn symlink(&self, src: &Path, dst: &Path, file_type: FileType) -> IsoResult<()> {
+			tree::copy_symlink(src, dst, file_type)?;
+			copy_path_metadata_best_effort(src, dst);
+			Ok(())
+		}
 
-			if file_type.is_symlink() {
-				clone_symlink(&src_path, &dst_path, file_type.is_symlink_dir())?;
-				copy_path_metadata_best_effort(&src_path, &dst_path);
-			} else if file_type.is_dir() {
-				fs::create_dir_all(&dst_path)
-					.map_err(|err| IsoError::other(format!("create {}: {err}", dst_path.display())))?;
-				clone_dir_contents(&src_path, &dst_path, None)?;
-				copy_path_metadata_best_effort(&src_path, &dst_path);
-			} else if file_type.is_file() {
-				clone_regular_file(&src_path, &dst_path)?;
-			} else {
+		fn file(&self, src: &Path, dst: &Path, file_type: FileType) -> IsoResult<()> {
+			if !file_type.is_file() {
 				return Err(IsoError::other(format!(
 					"unsupported filesystem entry for block clone: {}",
-					src_path.display()
+					src.display()
 				)));
 			}
+			clone_regular_file(src, dst)
 		}
-		Ok(())
-	}
 
-	fn clone_symlink(src: &Path, dst: &Path, is_dir: bool) -> IsoResult<()> {
-		let target = fs::read_link(src)
-			.map_err(|err| IsoError::other(format!("read_link {}: {err}", src.display())))?;
-		let res = if is_dir {
-			std::os::windows::fs::symlink_dir(target, dst)
-		} else {
-			std::os::windows::fs::symlink_file(target, dst)
-		};
-		res.map_err(|err| IsoError::other(format!("symlink {}: {err}", dst.display())))
+		fn finish_dir(&self, src: &Path, dst: &Path) -> IsoResult<()> {
+			copy_path_metadata_best_effort(src, dst);
+			Ok(())
+		}
 	}
 
 	/// Clones the regular file `src` into the fresh tree, then gives the clone
