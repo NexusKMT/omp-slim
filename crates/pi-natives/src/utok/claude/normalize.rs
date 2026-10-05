@@ -788,7 +788,9 @@ struct Stream<F: FnMut(&[u8])> {
 }
 
 impl<F: FnMut(&[u8])> Stream<F> {
-	const CHUNK: usize = 4096;
+	/// Large enough that normalization and tiling alternate rarely: at 4 KiB
+	/// their tables evicted each other often enough to cost ~2% of a count.
+	const CHUNK: usize = 128 * 1024;
 	const KEEP: usize = 8;
 
 	/// Write ⟨bow⟩, applying the seam law: in `⟨eow⟩ ' ' [case markers] ⟨bow⟩`

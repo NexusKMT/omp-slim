@@ -177,13 +177,16 @@ impl RankTable {
 			})
 		};
 		// Size `short` to its real population: dead slots and pair/long
-		// tokens would otherwise round a sparse table up a power of two.
+		// tokens would otherwise round a sparse table up a power of two. A
+		// sparse subset table (Jev's base set: 49k short tokens over 200k
+		// ranks) still keeps half the container's slots: it answers mostly
+		// misses, which at a ~0.75 load cost Jev ~12% of its count time.
 		let short_count = entries()
 			.filter(|(_, key)| !key.is_empty() && key.len() != 2 && key.len() <= 15)
 			.count();
 		let mut pairs: Box<[u32; 65536]> =
 			vec![u32::MAX; 65536].into_boxed_slice().try_into().unwrap();
-		let mut short = HashMap::with_capacity_and_hasher(short_count, Fx::default());
+		let mut short = HashMap::with_capacity_and_hasher(short_count.max(n / 2), Fx::default());
 		let mut long = FxMap::default();
 		let mut max_token_len = 0usize;
 		for (rank, key) in entries() {
@@ -250,18 +253,17 @@ impl RankTable {
 		n
 	}
 
-	/// Token count of `piece` from the merge loop alone, over the subset of
-	/// this table whose ranks satisfy `keep`: unlike
-	/// [`count_piece`](Self::count_piece), a whole-piece hit is not
+	/// Token count of `piece` from the merge loop alone: unlike
+	/// [`count_piece`](Self::count_piece), a whole-piece table hit is not
 	/// short-circuited, so entries the merges cannot reach stay split. Jev
-	/// merges over a base subset of o200k and resolves whole pieces against
-	/// a separate vocabulary.
-	pub fn count_merged_in(&self, piece: &[u8], keep: impl Fn(u32) -> bool) -> u32 {
+	/// resolves whole pieces against a separate vocabulary and uses its
+	/// base table only for merging.
+	pub fn count_merged(&self, piece: &[u8]) -> u32 {
 		if piece.is_empty() {
 			return 0;
 		}
 		let mut n = 0u32;
-		Self::merge(piece, |p| self.rank(p).filter(|&r| keep(r)).unwrap_or(u32::MAX), |_, _| n += 1);
+		Self::merge(piece, |p| self.rank(p).unwrap_or(u32::MAX), |_, _| n += 1);
 		n
 	}
 

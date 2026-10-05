@@ -107,8 +107,8 @@
   },
   "jev": {
     "source": "cache/jev-1.13.vocab.json (measured from live usage.input_tokens; see data/README.md) + cache/o200k_base.tiktoken",
-    "blobs": ["jev_sets"],
-    "rank": "o200k rank bitsets over the shared o200k_base table: base set then whole set, ceil(199998 / 8) bytes each, rank r = bit (r & 7) of byte (r >> 3)",
+    "blobs": ["jev_base", "jev_whole"],
+    "rank": "o200k rank; slots outside each set are empty",
     "whole": 144562,
     "base": 53622,
     "normalizer": "NFC",

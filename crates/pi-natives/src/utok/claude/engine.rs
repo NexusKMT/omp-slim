@@ -286,40 +286,46 @@ pub struct Tiler<'a> {
 impl Tiler<'_> {
 	/// Consume the next stream bytes.
 	pub fn push(&mut self, bytes: &[u8]) {
-		let vocab = &self.core.vocab;
+		// The DP runs on locals, written back once per chunk: kept in `self`
+		// across the calls in the loop, they were reloaded and stored per byte.
+		let core = self.core;
+		let vocab = &core.vocab;
+		let mask = self.mask;
+		let best = &mut self.best[..=mask];
+		let (mut state, mut end) = (self.state, self.end);
+		let (mut ch, mut ch_len, mut ch_need) = (self.ch, self.ch_len, self.ch_need);
 		for &b in bytes {
-			self.state = vocab.advance(self.state, b);
-			self.end += 1;
+			state = vocab.advance(state, b);
+			end += 1;
 			if !is_continuation(b) {
-				self.ch_len = 0;
-				self.ch_need = match b {
+				ch_len = 0;
+				ch_need = match b {
 					0x00..=0x7f => 1,
 					0xc0..=0xdf => 2,
 					0xe0..=0xef => 3,
 					_ => 4,
 				};
 			}
-			self.ch[self.ch_len] = b;
-			self.ch_len += 1;
+			ch[ch_len & 3] = b;
+			ch_len += 1;
 			// Tiles start and end on character boundaries only; interior byte
 			// positions of a character are never a DP state.
-			if self.ch_len < self.ch_need {
+			if ch_len < ch_need {
 				continue;
 			}
-			let (end, mask) = (self.end, self.mask);
-			let start = end - self.ch_len;
 			let mut cost = u32::MAX;
 			let mut spelled = false;
-			for len in vocab.matches(self.state) {
-				cost = cost.min(self.best[(end - len) & mask] + 1);
-				spelled |= len == self.ch_len;
+			for len in vocab.matches(state) {
+				cost = cost.min(best[(end - len) & mask] + 1);
+				spelled |= len == ch_len;
 			}
 			if !spelled {
-				cost = cost
-					.min(self.best[start & mask] + self.core.uncovered_cost(&self.ch[..self.ch_len]));
+				cost = cost.min(best[(end - ch_len) & mask] + core.uncovered_cost(&ch[..ch_len]));
 			}
-			self.best[end & mask] = cost;
+			best[end & mask] = cost;
 		}
+		(self.state, self.end) = (state, end);
+		(self.ch, self.ch_len, self.ch_need) = (ch, ch_len, ch_need);
 	}
 
 	/// Token count of everything pushed (0 for an empty stream).
