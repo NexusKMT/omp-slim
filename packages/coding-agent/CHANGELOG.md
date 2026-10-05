@@ -5,6 +5,17 @@
 ### Fixed
 
 - Fixed the `/usage` sheet in Tern missing the Close button the other report sheets have ([#14455](https://github.com/can1357/oh-my-pi/pull/14455) by [@H4vC](https://github.com/H4vC)).
+### Changed
+
+- Bash commands that print binary or other non-UTF-8 output no longer stall while their output is decoded.
+- `@` file mentions autocomplete faster in large repositories.
+- Large mermaid flowcharts and state diagrams render much faster while a response streams.
+
+### Fixed
+
+- Fixed cancelling a bash command on Windows sometimes terminating an unrelated program.
+- Fixed `umask` in a bash command changing the umask of omp itself.
+- Fixed a mermaid `xychart` whose axis range is finer than floating-point precision freezing the terminal.
 
 ## [18.6.2] - 2026-10-04
 
