@@ -11,6 +11,7 @@
 - Sped up `sed` scripts that use regular expressions, `printf` output, and `sort -`, which now reads standard input directly instead of copying it to a temporary file ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Staging files or hunks keeps the git index's file stat cache, so the next status check no longer re-reads every tracked file; staging many files rewrites the index once ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Applying a patch to the worktree reads only the files the patch touches ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Sped up `listWorkspace`, `fuzzyFind` with followed symlinks, and `fd`; the file-mention scan cache releases expired entries sooner ([#14527](https://github.com/can1357/oh-my-pi/pull/14527) by [@H4vC](https://github.com/H4vC))
 - Sped up parsing of large hashline edits ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - `Process.waitForExit()` on a single process waits for the operating system's exit notification instead of polling every 50 ms ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 
