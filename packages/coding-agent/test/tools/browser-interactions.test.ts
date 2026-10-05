@@ -202,6 +202,23 @@ return { fragments, clicked: await tab.evaluate(() => window.clicked), ternHit }
 			await call("evaluate", ["document.querySelector('#overlay').remove()"]);
 			await call("click", ["#covered"]);
 
+			// The page renders the button after a delay, as a framework would; the click must wait for it.
+			const late = await invoke({
+				action: "run",
+				name: TAB_NAME,
+				code: `await tab.evaluate(() => setTimeout(() => {
+	const button = document.createElement("button");
+	button.id = "late";
+	button.onclick = () => { button.dataset.clicked = "1"; };
+	button.textContent = "Late";
+	document.body.append(button);
+}, 300));
+await tab.click("#late");
+return tab.attr("#late", "data-clicked");`,
+				timeout: 10,
+			});
+			expect(valueFrom<string>(late)).toBe("1");
+
 			await call("check", ["#check"]);
 			await call("check", ["#check"]);
 			expect(await call("evaluate", ["document.querySelector('#check').checked"])).toBe(true);
