@@ -5,6 +5,7 @@
 use std::{
 	borrow::Cow,
 	cell::{Cell, OnceCell, RefCell},
+	cmp::Reverse,
 	ffi::{OsStr, OsString},
 	io::{ErrorKind, Write},
 	ops::RangeInclusive,
@@ -5120,18 +5121,14 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 fn sort_entries(entries: &mut [PathData], config: &Config) {
 	match config.sort {
 		// GNU breaks time and size ties by name instead of leaving them unordered.
-		Sort::Time => entries.sort_unstable_by(|a, b| {
-			let time = |p: &PathData| {
+		Sort::Time => sort_by_key_then_name(entries, |p| {
+			Reverse(
 				p.metadata()
 					.and_then(|md| metadata_get_time(md, config.time))
-					.unwrap_or(UNIX_EPOCH)
-			};
-			time(b).cmp(&time(a)).then_with(|| a.display_name().cmp(b.display_name()))
+					.unwrap_or(UNIX_EPOCH),
+			)
 		}),
-		Sort::Size => entries.sort_unstable_by(|a, b| {
-			let len = |p: &PathData| p.metadata().map_or(0, |md| md.len());
-			len(b).cmp(&len(a)).then_with(|| a.display_name().cmp(b.display_name()))
-		}),
+		Sort::Size => sort_by_key_then_name(entries, |p| Reverse(p.metadata().map_or(0, |md| md.len()))),
 		// The default sort in GNU ls is case insensitive
 		Sort::Name => entries.sort_unstable_by(|a, b| a.display_name().cmp(b.display_name())),
 		Sort::Version => entries.sort_unstable_by(|a, b| {
@@ -5171,6 +5168,31 @@ fn sort_entries(entries: &mut [PathData], config: &Config) {
 				_ => get_metadata_with_deref_opt(p.fs(), &p.fs_path, true).is_ok_and(|m| m.is_dir()),
 			}
 		});
+	}
+}
+
+/// Sorts `entries` by `key`, then by display name.
+///
+/// Each key is derived once, and the sort moves `(key, name, index)` tuples
+/// rather than whole `PathData`s, which are then placed by one in-place
+/// permutation (as `slice::sort_by_cached_key` does).
+fn sort_by_key_then_name<K: Ord>(entries: &mut [PathData], key: impl Fn(&PathData) -> K) {
+	let mut keyed: Vec<_> = entries
+		.iter()
+		.enumerate()
+		.map(|(index, entry)| (key(entry), entry.display_name(), index))
+		.collect();
+	keyed.sort_unstable();
+	let mut order: Vec<usize> = keyed.into_iter().map(|(.., index)| index).collect();
+	for i in 0..order.len() {
+		// Entries before `i` are placed; one an earlier swap moved away is found
+		// by following the indices it was swapped through.
+		let mut index = order[i];
+		while index < i {
+			index = order[index];
+		}
+		order[i] = index;
+		entries.swap(i, index);
 	}
 }
 
