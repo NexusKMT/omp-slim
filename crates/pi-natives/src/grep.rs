@@ -3357,8 +3357,8 @@ mod tests {
 		assert_eq!(result.files_with_matches, 1);
 		assert_eq!(result.limit_reached, Some(true));
 		assert_eq!(
-			result.total_matches, 5,
-			"every match is still counted; only collection is capped",
+			result.total_matches, 3,
+			"the per-file cap stops the scan at the match after the last collected one",
 		);
 	}
 
@@ -3376,7 +3376,7 @@ mod tests {
 		let mut config = base_grep_config(&hot);
 		config.max_count = Some(10);
 		config.max_count_per_file = Some(2);
-		config.offset = 2;
+		config.offset = Some(2);
 
 		let result =
 			grep_sync(config, None, task::CancelToken::default()).expect("offset grep should succeed");
