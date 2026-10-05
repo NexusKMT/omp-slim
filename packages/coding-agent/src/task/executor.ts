@@ -3413,7 +3413,7 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	// Revalidate until the worker survives an install round-trip unchanged: the
 	// waits/rebuild above can outlast the idle TTL, letting park() detach this
 	// instance mid-install. Each observed replacement means another full park
-	// cycle, so reinstall on the fresh session (revivals start empty) and check
+	// cycle, so reinstall on the fresh session (a revival restores only the last persisted contract) and check
 	// again; genuine churn fails fast instead of driving a stale instance, and
 	// a released worker throws instead of driving a corpse. A replacement may
 	// already be streaming a wake, so ownership is reacquired every round.

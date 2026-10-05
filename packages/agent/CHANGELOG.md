@@ -9,6 +9,7 @@
 ### Changed
 
 - `SessionInitEntry.systemPrompt` holds the system prompt blocks as sent; session files written earlier keep one joined string ([#14338](https://github.com/can1357/oh-my-pi/pull/14338) by [@will-bogusz](https://github.com/will-bogusz))
+
 ### Fixed
 
 - Fixed OpenAI and Codex Remote Compaction V2 dropping your recent messages instead of keeping them next to the compaction summary ([#14247](https://github.com/can1357/oh-my-pi/pull/14247) by [@will-bogusz](https://github.com/will-bogusz))

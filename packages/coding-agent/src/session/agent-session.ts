@@ -8919,6 +8919,13 @@ export class AgentSession implements SettingsScope {
 			// Record what this rebuild published for future rollbacks: the live set
 			// as of success. Then drain any wake parked while pooled.
 			this.#lastPublishedWorkPoolYieldItems = this.#workPoolYieldItems.map(item => ({ ...item }));
+			// Persist the contract now: a batch-end clear makes no model call, and a
+			// cold revival must not restore the finished batch's items. Only once a
+			// model call has resolved this transcript's session_init; before that,
+			// the executor has not written it yet.
+			if (this.#sessionInit?.init && this.#sessionInit.sessionFile === this.sessionManager.getSessionFile()) {
+				this.#recordModelCallSystemPrompt(this.#tools.baseSystemPrompt);
+			}
 			// A deferred wake may be parked while pooled; now that the fresh
 			// contract is published, let it wake (or stay parked when pooled).
 			this.#resumeStrandedIrcAsides();

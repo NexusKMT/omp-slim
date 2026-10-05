@@ -1229,7 +1229,12 @@ describe("cold revival replays the system prompt the last request sent", () => {
 			agent,
 			sessionManager,
 			settings: Settings.isolated({ "compaction.enabled": false, "todo.enabled": false }),
-			modelRegistry: { getApiKey: async () => "test-key", getAvailable: () => [] } as never,
+			modelRegistry: {
+				getApiKey: async () => "test-key",
+				getAvailable: () => [],
+				find: () => agent.state.model,
+				hasConfiguredAuth: () => true,
+			} as never,
 			toolRegistry: new Map(tools.map(tool => [tool.name, tool])),
 			extensionRunner: {
 				initialize: () => {},
@@ -1347,7 +1352,7 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		expect((await reviveAndFollowUp(cwd)).system).toEqual(spawned.requests.at(-1)!);
 	});
 
-	it("replays the blocks after a warm revive rebuilds the base and runs a request", async () => {
+	it("replays the blocks after a warm revive rebuilds the base and runs a request, without the finished batch's items", async () => {
 		const cwd = makeTempDir("@pi-revive-warm-rebuild-");
 		let batch = 1;
 		const buildPrompt = (toolNames: string[]) => ["base", `batch ${batch}`, `tools: ${toolNames.join(",")}`];
@@ -1368,11 +1373,13 @@ describe("cold revival replays the system prompt the last request sent", () => {
 		await live.waitForIdle();
 		expect(warm.requests.at(-1)).toEqual(["base", "batch 2", "tools: read,yield"]);
 		expect(warm.toolRequests.at(-1)).toContain("yield tool item#0");
+		// The pool clears the contract when the batch finishes, without a model call.
+		await live.setWorkPoolYieldItems([]);
 		await lifecycle.park("prompt-blocks");
 
 		const revived = await reviveAndFollowUp(cwd);
 		expect(revived.system).toEqual(warm.requests.at(-1)!);
-		expect(revived.tools).toBe(warm.toolRequests.at(-1)!);
+		expect(revived.tools).not.toContain("item#0");
 	});
 
 	it("replays the base a before_agent_start override was built from when the base rebuilds in the request window", async () => {
