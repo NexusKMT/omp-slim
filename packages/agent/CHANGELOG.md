@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- Fixed the failed V2 remote compaction warning claiming a V1 fallback on Codex, where V1 does not run ([#14245](https://github.com/can1357/oh-my-pi/pull/14245) by [@will-bogusz](https://github.com/will-bogusz))
 - When a DeepSeek turn ends with raw `<｜DSML｜…>` tool-call text that could not be parsed into a real call, and no tool call was made, the broken markup is now removed from the message before it is saved to history. The agent then tells the model the tool call failed, shows it the correct format, and asks it again, at most twice in a row. Previously the markup stayed in history, and the agent stopped as if the model had finished ([#14202](https://github.com/can1357/oh-my-pi/pull/14202) by [@H4vC](https://github.com/H4vC)).
 
 ## [18.5.1] - 2026-10-03
