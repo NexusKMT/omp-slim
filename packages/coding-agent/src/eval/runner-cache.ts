@@ -9,6 +9,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { logger } from "@oh-my-pi/pi-utils";
+import { assertOwnerPrivateDir } from "../utils/owner-private-dir";
 
 // Memoized staged path per cache directory. The value is re-validated on every
 // call: a tmpdir sweep (e.g. macOS `periodic daily clean_tmps`) or any external
@@ -20,7 +22,11 @@ const stagedPaths = new Map<string, string>();
  *
  * The directory is per-uid because `os.tmpdir()` is shared between accounts: a
  * single shared name lets whichever account creates it first own it, and every
- * other account's runner write then fails with EACCES.
+ * other account's runner write then fails with EACCES. The per-uid name is
+ * still predictable, so an existing entry must be a real directory owned by us
+ * with mode 0700; otherwise another account could block staging or plant the
+ * runner file (whose name is a deterministic hash) for us to execute. A
+ * squatted path falls back to a fresh `mkdtemp` directory for this process.
  *
  * The staged path is memoized per `dirName` but re-checked with `fs.existsSync`
  * before reuse, so a runner deleted mid-session is re-written on the next call
@@ -33,9 +39,7 @@ const stagedPaths = new Map<string, string>();
 export async function stageRunnerScript(dirName: string, ext: string, script: string): Promise<string> {
 	const memoized = stagedPaths.get(dirName);
 	if (memoized && fs.existsSync(memoized)) return memoized;
-	const uid = process.getuid?.();
-	const dir = path.join(os.tmpdir(), uid === undefined ? dirName : `${dirName}-${uid}`);
-	await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+	const dir = await resolveStagingDir(dirName);
 	const hash = Bun.hash(script).toString(36);
 	const target = path.join(dir, `runner-${hash}.${ext}`);
 	if (!fs.existsSync(target)) {
@@ -43,4 +47,23 @@ export async function stageRunnerScript(dirName: string, ext: string, script: st
 	}
 	stagedPaths.set(dirName, target);
 	return target;
+}
+
+async function resolveStagingDir(dirName: string): Promise<string> {
+	const uid = process.getuid?.();
+	// No uid (Windows): the temp dir is already per-user, and O_NOFOLLOW is unavailable.
+	if (uid === undefined) {
+		const dir = path.join(os.tmpdir(), dirName);
+		await fs.promises.mkdir(dir, { recursive: true });
+		return dir;
+	}
+	const dir = path.join(os.tmpdir(), `${dirName}-${uid}`);
+	try {
+		await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+		assertOwnerPrivateDir(dir, "Runner staging directory");
+		return dir;
+	} catch (err) {
+		logger.warn("Runner staging dir unusable; staging in a fresh private dir", { dir, error: String(err) });
+		return await fs.promises.mkdtemp(`${dir}-`);
+	}
 }

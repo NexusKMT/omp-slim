@@ -24,9 +24,13 @@ describe("stageRunnerScript re-validation", () => {
 	}
 
 	afterEach(() => {
-		for (const name of dirs) {
-			fs.rmSync(stagingDir(name), { recursive: true, force: true });
-			fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
+		// Covers the shared name, the per-uid dir, mkdtemp fallbacks, and decoys:
+		// every name is unique per pid/test/time, so a prefix match is safe.
+		const tmp = os.tmpdir();
+		for (const entry of fs.readdirSync(tmp)) {
+			if (dirs.some(name => entry.startsWith(name))) {
+				fs.rmSync(path.join(tmp, entry), { recursive: true, force: true });
+			}
 		}
 		dirs.length = 0;
 	});
@@ -80,4 +84,33 @@ describe("stageRunnerScript re-validation", () => {
 			expect(fs.statSync(path.dirname(staged)).mode & 0o777).toBe(0o700);
 		},
 	);
+
+	// The per-uid name is predictable, so another account can pre-create it. A
+	// symlink to a directory it controls, holding a runner under the
+	// deterministic hashed name, must not be executed as ours.
+	it.skipIf(process.getuid?.() === undefined)("refuses a runner planted behind a symlinked staging dir", async () => {
+		const dirName = uniqueDir();
+		const script = "print('ours')\n";
+		const decoy = path.join(os.tmpdir(), `${dirName}-decoy`);
+		const planted = path.join(decoy, `runner-${Bun.hash(script).toString(36)}.py`);
+		fs.mkdirSync(decoy, { mode: 0o777 });
+		fs.writeFileSync(planted, "print('planted')\n");
+		fs.symlinkSync(decoy, stagingDir(dirName));
+
+		const staged = await stageRunnerScript(dirName, "py", script);
+
+		expect(fs.realpathSync(staged)).not.toBe(fs.realpathSync(planted));
+		expect(await Bun.file(staged).text()).toBe(script);
+		expect(fs.statSync(path.dirname(staged)).mode & 0o777).toBe(0o700);
+	});
+
+	// A non-directory squatting the per-uid name must not block staging.
+	it.skipIf(process.getuid?.() === undefined)("stages when the per-uid name is a squatted file", async () => {
+		const dirName = uniqueDir();
+		fs.writeFileSync(stagingDir(dirName), "");
+
+		const staged = await stageRunnerScript(dirName, "py", "print('ok')\n");
+
+		expect(await Bun.file(staged).text()).toBe("print('ok')\n");
+	});
 });
