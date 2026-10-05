@@ -5,7 +5,6 @@
 use std::{
 	borrow::Cow,
 	cell::{Cell, OnceCell, RefCell},
-	cmp::Reverse,
 	ffi::{OsStr, OsString},
 	io::{ErrorKind, Write},
 	ops::RangeInclusive,
@@ -4794,16 +4793,16 @@ impl<'a> PathData<'a> {
 
 		let fs = config.runtime.fs();
 		let followed_path = config.runtime.paths.resolve(&p_buf);
+		// The DirArgs probe is the followed stat `metadata()` would repeat for a
+		// dereferenced operand, so keep it to seed the cache below.
+		let mut probed_dir_md = None;
 		let must_dereference = match &config.dereference {
 			Dereference::All => true,
 			Dereference::Args => command_line,
 			Dereference::DirArgs => {
-				if command_line {
-					if let Ok(md) = fs.metadata(&followed_path) {
-						md.is_dir()
-					} else {
-						false
-					}
+				if command_line && let Ok(md) = fs.metadata(&followed_path) && md.is_dir() {
+					probed_dir_md = Some(md);
+					true
 				} else {
 					false
 				}
@@ -4821,6 +4820,10 @@ impl<'a> PathData<'a> {
 		// nearly free compared to a metadata() call on a Path
 		let ft: OnceCell<Option<FileType>> = OnceCell::new();
 		let md: OnceCell<Option<Metadata>> = OnceCell::new();
+		if let Some(md_probe) = probed_dir_md {
+			ft.get_or_init(|| Some(md_probe.file_type()));
+			md.get_or_init(|| Some(md_probe));
+		}
 		let security_context: OnceCell<Box<str>> = OnceCell::new();
 
 		let de: RefCell<Option<DirEntry>> = if let Some(de) = dir_entry {
@@ -5060,9 +5063,12 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 			Ok(rd) => rd,
 		};
 
-		state
-			.listed_ancestors
-			.insert(DirIdentity::of(fs, &path_data.fs_path, path_data.must_dereference)?);
+		// Ancestor identities are only consulted to break `-R` cycles.
+		if config.recursive {
+			state
+				.listed_ancestors
+				.insert(DirIdentity::of(fs, &path_data.fs_path, path_data.must_dereference)?);
+		}
 
 		// List each of the arguments to ls first.
 		depth_first_list(
@@ -5113,16 +5119,19 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 
 fn sort_entries(entries: &mut [PathData], config: &Config) {
 	match config.sort {
-		Sort::Time => entries.sort_unstable_by_key(|k| {
-			Reverse(
-				k.metadata()
+		// GNU breaks time and size ties by name instead of leaving them unordered.
+		Sort::Time => entries.sort_unstable_by(|a, b| {
+			let time = |p: &PathData| {
+				p.metadata()
 					.and_then(|md| metadata_get_time(md, config.time))
-					.unwrap_or(UNIX_EPOCH),
-			)
+					.unwrap_or(UNIX_EPOCH)
+			};
+			time(b).cmp(&time(a)).then_with(|| a.display_name().cmp(b.display_name()))
 		}),
-		Sort::Size => {
-			entries.sort_unstable_by_key(|k| Reverse(k.metadata().map_or(0, |md| md.len())));
-		},
+		Sort::Size => entries.sort_unstable_by(|a, b| {
+			let len = |p: &PathData| p.metadata().map_or(0, |md| md.len());
+			len(b).cmp(&len(a)).then_with(|| a.display_name().cmp(b.display_name()))
+		}),
 		// The default sort in GNU ls is case insensitive
 		Sort::Name => entries.sort_unstable_by(|a, b| a.display_name().cmp(b.display_name())),
 		Sort::Version => entries.sort_unstable_by(|a, b| {
@@ -5152,24 +5161,14 @@ fn sort_entries(entries: &mut [PathData], config: &Config) {
 	}
 
 	if config.group_directories_first && config.sort != Sort::None {
-		entries.sort_unstable_by_key(|p| {
-			let ft = {
-				// We will always try to deref symlinks to group directories, so PathData.md
-				// is not always useful.
-				if p.must_dereference {
-					p.file_type()
-				} else {
-					None
-				}
-			};
-
-			!match ft {
-				None => {
-					// If it metadata cannot be determined, treat as a file.
-					get_metadata_with_deref_opt(p.fs(), &p.fs_path, true)
-						.map_or_else(|_| false, |m| m.is_dir())
-				},
-				Some(ft) => ft.is_dir(),
+		// Stable, so each group keeps the order chosen above. The cached file type
+		// (from the dir entry or the dereferenced stat) answers for everything but
+		// symlinks, which are grouped by their target like GNU's `is_linked_directory`.
+		entries.sort_by_cached_key(|p| {
+			!match p.file_type() {
+				Some(ft) if !ft.is_symlink() => ft.is_dir(),
+				// If metadata cannot be determined, treat as a file.
+				_ => get_metadata_with_deref_opt(p.fs(), &p.fs_path, true).is_ok_and(|m| m.is_dir()),
 			}
 		});
 	}
