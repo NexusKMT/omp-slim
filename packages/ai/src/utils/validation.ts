@@ -2087,7 +2087,9 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): ToolCall[
 	}
 
 	// Single-argument tools (e.g. `edit`): if the model put the lone required
-	// string under a different key, adopt the first string field as that key.
+	// string under a different key, adopt the sole string field as that key. Two
+	// or more candidates are ambiguous, so they are left alone and validation
+	// fails, and the model sees its own arguments back.
 	const singleStringNorm = normalizeSingleStringField(json, normalizedArgs);
 	if (singleStringNorm.changed) {
 		normalizedArgs = singleStringNorm.value;

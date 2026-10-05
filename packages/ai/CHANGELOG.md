@@ -12,7 +12,7 @@
 - Fixed replayed Responses and Codex history, including persisted Codex user/developer and assistant items, sending `detail: "original"` images to endpoints whose `supportsImageDetailOriginal` is off ([#13687](https://github.com/can1357/oh-my-pi/pull/13687) by [@alphastorm](https://github.com/alphastorm)).
 ### Fixed
 
-- Fixed single-string tool calls whose payload arrived under a mislabelled key resolving to different arguments depending only on JSON key order: with two or more string candidates the arguments are now returned to the model unchanged instead of adopting the first one found, while a lone candidate is still adopted as the declared key ([#9653](https://github.com/can1357/oh-my-pi/issues/9653) by [@F0Rextasy](https://github.com/F0Rextasy)).
+- Fixed a single-string tool call carrying two or more mislabelled string fields silently dispatching whichever one the JSON key order reached first; ambiguous payloads now fail validation and are returned to the model unchanged ([#14414](https://github.com/can1357/oh-my-pi/pull/14414) by [@F0Rextasy](https://github.com/F0Rextasy)).
 
 ## [18.6.1] - 2026-10-04
 
