@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed OpenAI Responses endpoints other than OpenAI, Azure OpenAI, and Codex (custom and local servers, proxies, OpenRouter) to default `supportsImageDetailOriginal` to `false`, so snapcompact frames and computer screenshots go out as `detail: "auto"` instead of failing on servers that reject `original`; set `compat.supportsImageDetailOriginal: true` to opt a host in ([#13687](https://github.com/can1357/oh-my-pi/pull/13687) by [@alphastorm](https://github.com/alphastorm)).
+
 ## [18.6.2] - 2026-10-04
 
 ### Fixed
@@ -62,9 +66,6 @@
 - Bundled prompt-cache lifetimes are recomputed from current policy instead of being inherited from previous generated models ([#13966](https://github.com/can1357/oh-my-pi/pull/13966) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Fixed HTTP 400 `messages.N.output_config: Extra inputs are not permitted` on later turns with Claude Sonnet 5.5, Opus 5, Opus 5.5, and Fable 5.1 on Google Vertex AI ([#13994](https://github.com/can1357/oh-my-pi/issues/13994))
 - Fixed Claude Opus 5.5 conversations failing with a "bound to a different conversation" 400 after the system prompt changed. Opus 5.5 now gets Sonnet 5.5's prefix-bound thinking handling on every provider, and Bedrock asks the server to drop stale signed thinking instead of rejecting the request ([#14019](https://github.com/can1357/oh-my-pi/pull/14019) by [@nick-maderight](https://github.com/nick-maderight))
-### Changed
-
-- Changed OpenAI Responses endpoints other than OpenAI, Azure OpenAI, and Codex (custom and local servers, proxies, OpenRouter) to default `supportsImageDetailOriginal` to `false`, so snapcompact frames and computer screenshots go out as `detail: "auto"` instead of failing on servers that reject `original`; set `compat.supportsImageDetailOriginal: true` to opt a host in ([#13687](https://github.com/can1357/oh-my-pi/pull/13687) by [@alphastorm](https://github.com/alphastorm)).
 
 ## [18.4.9] - 2026-10-01
 
