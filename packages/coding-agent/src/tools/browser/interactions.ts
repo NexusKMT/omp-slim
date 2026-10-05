@@ -239,17 +239,29 @@ export async function fillViaHandle(
 	type: (text: string) => Promise<unknown> = text => handle.type(text, { delay: 0 }),
 ): Promise<void> {
 	await untilAborted(signal, () =>
-		handle.evaluate(el => {
+		handle.evaluate((el, clearing) => {
 			const node = el as unknown as {
 				value?: string;
 				focus?: () => void;
 				isContentEditable?: boolean;
 				innerText?: string;
+				dispatchEvent(event: unknown): boolean;
 			};
 			node.focus?.();
 			if (node.isContentEditable) node.innerText = "";
-			else if ("value" in node) node.value = "";
-		}),
+			else if ("value" in node) {
+				// The prototype setter bypasses value trackers that frameworks (React) install on the
+				// element, so they see the cleared value as a change instead of their own write.
+				const setValue = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node), "value")?.set;
+				if (setValue) setValue.call(node, "");
+				else node.value = "";
+			}
+			// Typing a value fires its own input events; an empty value types nothing.
+			if (!clearing) return;
+			const { Event } = globalThis as unknown as PageGlobals;
+			node.dispatchEvent(new Event("input", { bubbles: true }));
+			node.dispatchEvent(new Event("change", { bubbles: true }));
+		}, value === ""),
 	);
 	await untilAborted(signal, () => type(value));
 }
