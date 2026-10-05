@@ -1052,19 +1052,17 @@ pub fn draw_graph(graph: &mut AsciiGraph) {
 			continue;
 		};
 		let offset = DrawingCoord::new(bounds.min_x, bounds.min_y);
-		graph.canvas = graph.canvas.merged(offset, use_ascii, &[&canvas]);
+		graph.canvas.merge(offset, use_ascii, &[&canvas]);
 		fill_roles_from_canvas(&mut graph.role_canvas, &canvas, offset, CharRole::Border);
 	}
 
-	for node_id in 0..graph.nodes.len() {
-		let drawing = graph.nodes[node_id].drawing.clone();
-		let coord = graph.nodes[node_id].drawing_coord;
-		if !graph.nodes[node_id].drawn
-			&& let (Some(drawing), Some(coord)) = (drawing, coord)
+	for node in &mut graph.nodes {
+		if !node.drawn
+			&& let (Some(drawing), Some(coord)) = (&node.drawing, node.drawing_coord)
 		{
-			graph.canvas = graph.canvas.merged(coord, use_ascii, &[&drawing]);
-			fill_roles_for_node_box(&mut graph.role_canvas, &drawing, coord);
-			graph.nodes[node_id].drawn = true;
+			graph.canvas.merge(coord, use_ascii, &[drawing]);
+			fill_roles_for_node_box(&mut graph.role_canvas, drawing, coord);
+			node.drawn = true;
 		}
 	}
 
@@ -1131,7 +1129,7 @@ pub fn draw_graph(graph: &mut AsciiGraph) {
 			continue;
 		}
 		let (label, offset) = draw_subgraph_label(graph, sg);
-		graph.canvas = graph.canvas.merged(offset, use_ascii, &[&label]);
+		graph.canvas.merge(offset, use_ascii, &[&label]);
 		fill_roles_from_canvas(&mut graph.role_canvas, &label, offset, CharRole::Text);
 	}
 }

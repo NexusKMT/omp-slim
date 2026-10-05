@@ -487,13 +487,18 @@ fn draw_relationships(
 				if y < 0 {
 					continue;
 				}
+				// Every cell at x >= 0 needs columns through x + 1 and rows
+				// through y + 1; the last cell sets the extent.
+				let last_x = label_x + cells.len() as i32 - 1;
+				if !cells.is_empty() && last_x >= 0 {
+					canvas.ensure_size(last_x + 2, y + 2);
+					roles.ensure_size(last_x + 2, y + 2);
+				}
 				for (index, cell) in cells.into_iter().enumerate() {
 					let x = label_x + index as i32;
 					if x < 0 {
 						continue;
 					}
-					canvas.ensure_size(x + 2, y + 2);
-					roles.ensure_size(x + 2, y + 2);
 					set_cell(canvas, roles, x, y, cell, CharRole::Text);
 				}
 			}
