@@ -1046,7 +1046,7 @@ fn encode_literal_markers(text: &str) -> String {
 		.replace(SELECT_DIVIDER, LITERAL_DIVIDER)
 }
 
-fn decode_literal_markers(text: &str) -> String {
+pub(super) fn decode_literal_markers(text: &str) -> String {
 	text
 		.replace(LITERAL_OPEN, SELECT_OPEN)
 		.replace(LITERAL_CLOSE, SELECT_CLOSE)

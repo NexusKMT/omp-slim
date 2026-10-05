@@ -5,6 +5,7 @@ use std::{
 	borrow::Cow,
 	collections::{BTreeSet, HashMap},
 	path::Path,
+	sync::Arc,
 };
 
 use super::{
@@ -107,9 +108,8 @@ fn mismatch(
 	// file the tag was actually for and the model doesn't follow a wrong-tree
 	// suggestion.
 	let tag_origin_paths: Vec<String> = store
-		.find_by_hash(expected)
+		.paths_with_hash(expected)
 		.into_iter()
-		.map(|snapshot| snapshot.path)
 		.filter(|path| path != canonical)
 		.map(|path| path.to_string_lossy().into_owned())
 		.collect();
@@ -119,7 +119,7 @@ fn mismatch(
 		actual_file_hash: actual,
 		file_lines: normalized.split('\n').map(str::to_owned).collect(),
 		anchor_lines: section.collect_anchor_lines().unwrap_or_default(),
-		hash_recognized: store.by_hash(canonical, expected).is_some(),
+		hash_recognized: store.has_hash(canonical, expected),
 		tag_origin_paths,
 	})
 }
@@ -200,7 +200,7 @@ fn shifted_images(old_text: &str, new_text: &str) -> Vec<Option<u32>> {
 /// One retained version's seen set plus its lines' images in the current
 /// text, computed once per rescue instead of once per anchor.
 struct VersionMap {
-	seen:      BTreeSet<u32>,
+	seen:      Arc<BTreeSet<u32>>,
 	same_text: bool,
 	image:     Vec<Option<u32>>,
 }
@@ -537,12 +537,9 @@ pub(crate) fn recover_target(
 	let tag = section.file_hash.as_deref()?;
 	let authored_name = initial.absolute.file_name();
 	let mut candidates = store
-		.find_by_hash(tag)
+		.paths_with_hash(tag)
 		.into_iter()
-		.filter(|snapshot| {
-			snapshot.path.file_name() == authored_name && snapshot.path != initial.absolute
-		})
-		.map(|snapshot| snapshot.path)
+		.filter(|path| path.file_name() == authored_name && *path != initial.absolute)
 		.collect::<Vec<_>>();
 	candidates.sort();
 	candidates.dedup();

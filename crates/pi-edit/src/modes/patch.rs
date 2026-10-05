@@ -1623,18 +1623,6 @@ fn entry_input<'a>(path: &'a str, entry: &'a EditEntry) -> Result<PatchInput<'a>
 	})
 }
 
-fn extract_added_lines(text: &str, whole_on_empty: bool) -> String {
-	let added = text
-		.split('\n')
-		.filter_map(|line| line.strip_prefix('+').filter(|_| !line.starts_with("+++ ")))
-		.collect::<Vec<_>>();
-	if added.is_empty() && whole_on_empty {
-		text.to_owned()
-	} else {
-		added.join("\n")
-	}
-}
-
 impl ModeEngine for PatchEngine {
 	fn mode(&self) -> EditMode {
 		EditMode::Patch
@@ -1817,11 +1805,21 @@ impl ModeEngine for PatchEngine {
 		let mut file_ops = Vec::new();
 		for entry in &args.edits {
 			if let Some(diff) = &entry.diff {
-				let added = extract_added_lines(diff, entry.op.as_deref() == Some("create"));
-				digest = Some(match digest {
-					Some(current) => format!("{current}\n{added}"),
-					None => added,
+				// Create bodies may omit `+` prefixes; their digest is then the whole text.
+				let added = super::added_lines(diff.split('\n')).unwrap_or_else(|| {
+					if entry.op.as_deref() == Some("create") {
+						diff.clone()
+					} else {
+						String::new()
+					}
 				});
+				match &mut digest {
+					Some(current) => {
+						current.push('\n');
+						current.push_str(&added);
+					},
+					None => digest = Some(added),
+				}
 			}
 			if entry.op.as_deref() == Some("delete") {
 				file_ops.push(FileOpIntent::Delete { path: path.clone() });
@@ -1847,9 +1845,23 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn strips_create_prefixes() {
-		assert_eq!(extract_added_lines("+one\n+two", true), "one\ntwo");
-		assert_eq!(extract_added_lines("one\ntwo", true), "one\ntwo");
+	fn inspect_digest_strips_create_prefixes() {
+		let inspect = |diff: &str| {
+			let args = ArgSnapshot {
+				path: Some("a.txt".into()),
+				edits: vec![EditEntry {
+					op: Some("create".into()),
+					diff: Some(diff.into()),
+					..EditEntry::default()
+				}],
+				..ArgSnapshot::default()
+			};
+			PatchEngine { allow_fuzzy: false, fuzzy_threshold: 0.95 }
+				.inspect(&args)
+				.entries
+		};
+		assert_eq!(inspect("+one\n+two"), vec![("a.txt".to_owned(), "one\ntwo".to_owned())]);
+		assert_eq!(inspect("one\ntwo"), vec![("a.txt".to_owned(), "one\ntwo".to_owned())]);
 	}
 
 	#[test]

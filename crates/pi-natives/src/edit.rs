@@ -308,8 +308,7 @@ impl EditStore {
 	pub fn head_hash(&self, absolute_path: String) -> Option<String> {
 		self
 			.inner
-			.head(&canonical_key(Path::new(&absolute_path)))
-			.map(|s| s.hash)
+			.head_hash(&canonical_key(Path::new(&absolute_path)))
 	}
 
 	/// Recorded text of `absolutePath` tagged `hash`.
@@ -328,7 +327,7 @@ impl EditStore {
 		self
 			.inner
 			.by_hash(&canonical_key(Path::new(&absolute_path)), &hash)
-			.and_then(|s| s.seen_lines.map(|set| set.into_iter().collect()))
+			.and_then(|s| s.seen_lines.map(|set| set.iter().copied().collect()))
 	}
 
 	#[napi]
@@ -385,6 +384,14 @@ impl Shared {
 	fn enqueue(&self, op: ArgOp) {
 		self.queue.lock().push(op);
 		let _ = self.wake.try_send(());
+	}
+
+	/// Drop the session's cached file reads, URL answers, and argument buffer
+	/// once it is closed, so they do not wait for the JS GC to finalize the
+	/// wrapper (nothing reports this native memory to the GC). A closed session
+	/// is never previewed or applied again, so a fresh one is equivalent.
+	fn release(session: &mut Session) {
+		*session = Session::new(session.config().clone(), session.store().clone());
 	}
 
 	/// Apply every queued mutation to the locked session.
@@ -575,6 +582,8 @@ impl EditSession {
 			}
 			break outcome;
 		};
+		Shared::release(&mut session);
+		drop(session);
 		Ok(match outcome {
 			Ok(outcome) => EditApplyOutcome {
 				text:     outcome.text,
@@ -610,6 +619,12 @@ impl EditSession {
 	pub fn close(&self) {
 		self.shared.closed.store(true, Ordering::Release);
 		let _ = self.shared.wake.try_send(());
+		// A busy lock belongs to apply or a preview pass; both release on
+		// their way out once they observe `closed`.
+		if let Ok(mut session) = self.shared.session.try_lock() {
+			self.shared.queue.lock().clear();
+			Shared::release(&mut session);
+		}
 	}
 }
 
@@ -665,6 +680,10 @@ async fn settled_preview(shared: &Arc<Shared>) -> Option<PreviewBatch> {
 				return None;
 			}
 			let batch = session.preview();
+			if compute.closed.load(Ordering::Acquire) {
+				Shared::release(&mut session);
+				return None;
+			}
 			Some((batch, session.take_unresolved()))
 		})
 		.await;
@@ -684,6 +703,10 @@ async fn settled_preview(shared: &Arc<Shared>) -> Option<PreviewBatch> {
 			answers.push((url, resolution));
 		}
 		let mut session = shared.session.lock().await;
+		if shared.closed.load(Ordering::Acquire) {
+			Shared::release(&mut session);
+			return None;
+		}
 		for (url, resolution) in answers {
 			session.provide(url, resolution);
 		}

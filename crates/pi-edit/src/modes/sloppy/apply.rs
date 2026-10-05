@@ -12,7 +12,8 @@ use std::{
 
 use super::{
 	parse::{
-		edit_header, has_marker_lines, missing_unmarked_lines, operation_payload, parse_section,
+		decode_literal_markers, edit_header, has_marker_lines, missing_unmarked_lines,
+		operation_payload, parse_section,
 	},
 	types::{
 		ATOMICITY_NOTICE, Candidate, CandidateResult, EdgeGaps, LiteralFallback, MAX_CANDIDATES,
@@ -24,7 +25,7 @@ use super::{
 use crate::{
 	error::EditError,
 	fuzzy::{PatternDistance, levenshtein_within},
-	store::EditStore,
+	store::{EditStore, payload_hash},
 	text::normalize_unicode,
 };
 
@@ -1429,13 +1430,6 @@ pub(crate) fn diff_shaped_candidates(pattern_text: &str) -> Vec<String> {
 	}
 }
 
-fn decode_literal_markers(text: String) -> String {
-	text
-		.replace("\0V8LITOPEN\0", SELECT_OPEN)
-		.replace("\0V8LITCLOSE\0", SELECT_CLOSE)
-		.replace("\0V8LITDIV\0", SELECT_DIVIDER)
-}
-
 /// Drop the `*** Replace` ellipses that re-emit `*** Find`'s open edges. An
 /// edge gap captured nothing, so re-emitting it writes nothing; a whole-line
 /// edge `…` takes the newline joining it to the rest of the rewrite with it.
@@ -1557,7 +1551,7 @@ fn render_rewrite(
 		rendered.push(character);
 		index += character.len_utf8();
 	}
-	Ok(decode_literal_markers(rendered))
+	Ok(decode_literal_markers(&rendered))
 }
 
 fn align_boundary_echoes(content: &str, candidate: &Candidate, replacement: &str) -> String {
@@ -2232,15 +2226,6 @@ fn resolve_references(rewrite: &str, removed: &[Option<String>]) -> Result<Strin
 	Ok(lines.join("\n"))
 }
 
-fn fnv_payload(input: &str) -> u64 {
-	let mut hash = 2_166_136_261_u32;
-	for unit in input.encode_utf16() {
-		hash ^= u32::from(unit);
-		hash = hash.wrapping_mul(16_777_619);
-	}
-	u64::from(hash)
-}
-
 fn no_op_error(
 	context: &ApplyContext<'_>,
 	payload: u64,
@@ -2326,7 +2311,7 @@ fn apply_operations(
 	input: &str,
 	context: &mut ApplyContext<'_>,
 ) -> Result<String, EditError> {
-	let payload = fnv_payload(input);
+	let payload = payload_hash(input);
 	let operations = parse_section(input, content, context.path, context.streaming)?;
 	let mut removed = vec![None; operations.len()];
 	let mut planned = Vec::new();
