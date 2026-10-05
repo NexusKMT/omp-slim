@@ -866,6 +866,7 @@ describe("AgentSession retry fallback", () => {
 		session = new AgentSession({
 			agent,
 			sessionManager: SessionManager.inMemory(),
+			providerSessionId: "shared-provider-session",
 			settings,
 			modelRegistry,
 		});
@@ -892,6 +893,21 @@ describe("AgentSession retry fallback", () => {
 		await session.prompt("Ask again for a new reserve episode");
 		await session.waitForIdle();
 		expect(confirmFallback).toHaveBeenCalledTimes(2);
+		session.freshSession();
+		await session.prompt("Keep the decision after resetting the provider connection");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(2);
+		const otherModel = getBundledModel("anthropic", "claude-haiku-4-5");
+		if (!otherModel) throw new Error("Expected another bundled reserve model");
+		await session.setModel(otherModel);
+		await session.prompt("Ask before spending another model's reserve");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(3);
+		await session.newSession();
+		await session.setModel(otherModel);
+		await session.prompt("Ask in a different transcript with the same provider session override");
+		await session.waitForIdle();
+		expect(confirmFallback).toHaveBeenCalledTimes(4);
 	});
 
 	it("honors a live fail-closed policy after reserve spending was approved", async () => {

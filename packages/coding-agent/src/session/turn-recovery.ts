@@ -1827,7 +1827,7 @@ export class TurnRecovery {
 		if (!cfgRetryUsageAwareFallback.get(this.#host.settings)) return false;
 		const currentModel = this.#host.model();
 		if (!currentModel) return false;
-		const sessionId = this.#host.sessionId();
+		const sessionId = this.#host.sessionManager.getSessionId();
 		const currentSelector = formatRetryFallbackSelector(currentModel, this.#host.thinkingLevel());
 		let health: ModelUsageHealth;
 		try {
@@ -1961,7 +1961,7 @@ export class TurnRecovery {
 			);
 			if (
 				signal.aborted ||
-				this.#host.sessionId() !== sessionId ||
+				this.#host.sessionManager.getSessionId() !== sessionId ||
 				!modelsAreEqual(this.#host.model(), currentModel)
 			)
 				return false;
