@@ -4,7 +4,7 @@ import { scheduler } from "node:timers/promises";
 import { type } from "@oh-my-pi/omptype";
 import { Agent, type AgentMessage, RESCUE_SHAKE_CONFIG, Tokenizer } from "@oh-my-pi/pi-agent-core";
 import * as compactionModule from "@oh-my-pi/pi-agent-core/compaction";
-import type { AssistantMessage, ImageContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@oh-my-pi/pi-ai";
 import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -1050,5 +1050,44 @@ describe("AgentSession shake", () => {
 		);
 		expect(blockCall).toBeGreaterThan(-1);
 		expect(messages[blockCall + 1]).toMatchObject({ role: "toolResult", toolCallId: "call_block" });
+	});
+
+	it("drops an earlier turn's unpaired tool call from a rebuild while the next turn streams", async () => {
+		const staleUser: UserMessage = {
+			role: "user",
+			content: [{ type: "text", text: "start" }],
+			timestamp: Date.now() - 2,
+		};
+		const staleAssistant: AssistantMessage = {
+			role: "assistant",
+			content: [{ type: "toolCall", id: "call_stale", name: "bash", arguments: { command: "ls" } }],
+			...apiInfo,
+			stopReason: "toolUse",
+			usage,
+			timestamp: Date.now() - 1,
+		};
+		sessionManager.appendMessage(staleUser);
+		sessionManager.appendMessage(staleAssistant);
+		session.agent.replaceMessages([staleUser, staleAssistant]);
+		const promptRecorded = Promise.withResolvers<void>();
+		session.subscribe(event => {
+			if (event.type === "message_end" && event.message.role === "user") promptRecorded.resolve();
+		});
+		session.agent.streamFn = createMockModel({
+			responses: [{ content: ["done"], stopReason: "stop", delayMs: 5_000 }],
+		}).stream;
+
+		const run = session.prompt("continue");
+		await promptRecorded.promise;
+		expect(session.agent.state.isStreaming).toBe(true);
+		const rebuilt = session.buildDisplaySessionContext().messages;
+		await session.abort();
+		await run.catch(() => undefined);
+
+		expect(
+			rebuilt.some(
+				m => m.role === "assistant" && m.content.some(b => b.type === "toolCall" && b.id === "call_stale"),
+			),
+		).toBe(false);
 	});
 });
