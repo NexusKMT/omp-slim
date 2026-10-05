@@ -4,7 +4,7 @@ import { FileType } from "@oh-my-pi/pi-natives";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { Settings } from "../../src/config/settings";
 import type { ToolSession } from "../../src/tools";
-import { GlobTool, type GlobOperationsOptions } from "../../src/tools/glob";
+import { GlobTool } from "../../src/tools/glob";
 import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
 import { findUniqueWorkspaceSuffixWithGlobForTest } from "../../src/tools/path-utils";
 import { ToolAbortError } from "../../src/tools/tool-errors";
@@ -301,39 +301,97 @@ describe("GlobTool custom backend contract", () => {
 		expect(textOf(result)).not.toContain("No files found");
 	});
 
-	test("hands the custom backend the caller's search policy and result limit", async () => {
-		// These options are the extension's whole contract: a backend that reads
-		// `limit` and `hidden` can only honour them if the tool passes the values
-		// the caller actually asked for, not its own defaults.
+	test("reports a timeout, not a missing path, when the deadline expires during exists()", async () => {
+		// exists() is the first call a custom backend sees, so a backend that is
+		// slow to answer (a cold SSH round trip, say) burns the whole deadline
+		// before any match is looked for. The old `false` fallback for the
+		// un-answered call then read as "the root does not exist" and the
+		// single-root path threw `Path not found: <root>`, telling the model the
+		// directory is gone when in fact the scan simply ran out of time.
+		const tool = new GlobTool(createSession(), {
+			timeoutMs: 100,
+			operations: {
+				exists: () => new Promise<boolean>(() => {}),
+				glob: () => ["src/kept.ts"],
+			},
+		});
+
+		let thrown: unknown;
+		let result: GlobExecuteResult | undefined;
+		try {
+			result = await tool.execute("glob-custom-exists-deadline", { path: "src/**/*.ts" });
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toBeUndefined();
+		expect(detailsOf(result as GlobExecuteResult).timedOut).toBe(true);
+		expect(textOf(result as GlobExecuteResult)).toContain("timed out");
+		expect(textOf(result as GlobExecuteResult)).not.toContain("No files found");
+	});
+
+	test("applies the caller's hidden and gitignore policy through the backend options", async () => {
+		// Asserted on what the caller ends up seeing, never on the bag the backend
+		// was handed: a backend that read a missing field as its own default left
+		// the previous version of this test green whether or not the tool
+		// forwarded anything. Both flags are read here the way a remote delegate
+		// must read a decision rather than a preference, so a field that never
+		// arrives (undefined) is visibly not the `false` the caller asked for.
+		// The corpus is small enough that the result cap cannot trim the evidence.
 		const corpus = [
-			...Array.from({ length: 20 }, (_, i) => `src/file-${String(i).padStart(2, "0")}.ts`),
 			...Array.from({ length: 3 }, (_, i) => `src/.hidden-${i}.ts`),
+			...Array.from({ length: 3 }, (_, i) => `src/gitignored-${i}.ts`),
+			...Array.from({ length: 3 }, (_, i) => `src/plain-${i}.ts`),
 		];
-		let captured: GlobOperationsOptions | undefined;
 		const tool = new GlobTool(createSession(), {
 			operations: {
 				exists: () => true,
 				glob: (_pattern, _cwd, options) => {
-					captured = options;
-					const visible = options.hidden ? corpus : corpus.filter(p => !p.includes("/."));
-					return visible.slice(0, options.limit);
+					let visible = corpus;
+					if (options.hidden === false) visible = visible.filter(p => !p.includes("/."));
+					if (options.gitignore !== false) visible = visible.filter(p => !p.includes("gitignored-"));
+					return visible;
 				},
 			},
 		});
 
-		const result = await tool.execute("glob-custom-policy", {
+		const result = await tool.execute("glob-custom-policy-flags", {
 			path: "src/**/*.ts",
 			hidden: false,
 			gitignore: false,
+		});
+
+		const text = textOf(result);
+		// `hidden: false` reached the backend, so no dotfile came back.
+		expect(text).not.toContain(".hidden-");
+		// `gitignore: false` reached the backend, so the ignored sources did.
+		expect(text).toContain("gitignored-");
+		expect(detailsOf(result).fileCount).toBe(6);
+	});
+
+	test("applies the caller's result limit inside the custom backend", async () => {
+		// `fileCount` alone cannot pin this: the tool re-caps the returned array at
+		// its own limit, so a backend that ignored `options.limit` still reports
+		// seven. What differs is *which* seven, so the backend slices from the end
+		// and the assertions name the boundary entries.
+		const corpus = Array.from({ length: 20 }, (_, i) => `src/file-${String(i).padStart(2, "0")}.ts`);
+		const tool = new GlobTool(createSession(), {
+			operations: {
+				exists: () => true,
+				glob: (_pattern, _cwd, options) => corpus.slice(-options.limit),
+			},
+		});
+
+		const result = await tool.execute("glob-custom-policy-limit", {
+			path: "src/**/*.ts",
 			limit: 7,
 		});
 
-		expect(captured?.limit).toBe(7);
-		expect(captured?.hidden).toBe(false);
-		expect(captured?.gitignore).toBe(false);
-		expect(captured?.signal).toBeInstanceOf(AbortSignal);
 		const text = textOf(result);
+		// The newest seven, which only happens if the backend sliced to the limit
+		// it was handed; the tool's own cap would have kept the oldest seven.
+		expect(text).toContain("file-19.ts");
+		expect(text).not.toContain("file-06.ts");
 		expect(detailsOf(result).fileCount).toBe(7);
-		expect(text).not.toContain(".hidden-");
 	});
 });

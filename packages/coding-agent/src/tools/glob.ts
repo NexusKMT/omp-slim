@@ -352,11 +352,19 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 				let customTimedOut = false;
 				// A custom backend is third-party code that may never settle and is
 				// under no obligation to honour the signal, so never await one
-				// outright: race every call against the tool deadline and fall back
-				// to "this root contributed nothing". The detached operation keeps a
-				// settlement handler attached, so a late rejection lands there
-				// instead of becoming an unhandled rejection after we returned.
-				const runCustom = async <T>(operation: Promise<T>, fallback: T): Promise<T> => {
+				// outright: race every call against the tool deadline instead. The
+				// detached operation keeps a settlement handler attached, so a late
+				// rejection lands there instead of becoming an unhandled rejection
+				// after we returned.
+				//
+				// An unanswered call resolves to `{ timedOut: true }` rather than to a
+				// stand-in value. A stand-in is a lie the caller cannot see: reading
+				// "the deadline fired" as "the path is absent" turned a slow `exists()`
+				// into `Path not found: <root>`, telling the model a directory is gone
+				// when the scan merely ran out of time. Absence and timeout are
+				// different user-facing outcomes, so each call site decides.
+				type CustomCall<T> = { timedOut: false; value: T } | { timedOut: true; value?: never };
+				const runCustom = async <T>(operation: Promise<T>): Promise<CustomCall<T>> => {
 					const settled = operation.then(
 						value => ({ kind: "settled" as const, value }),
 						(error: unknown) => ({ kind: "failed" as const, error }),
@@ -373,24 +381,26 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 						if (outcome === ABORTED) {
 							if (signal?.aborted) throw new ToolAbortError();
 							customTimedOut = true;
-							return fallback;
+							return { timedOut: true };
 						}
 						if (outcome.kind === "failed") throw outcome.error;
-						return outcome.value;
+						return { timedOut: false, value: outcome.value };
 					} finally {
 						if (onAbort) combinedSignal.removeEventListener("abort", onAbort);
 					}
 				};
 				const perTarget = await Promise.all(
 					targets.map(async target => {
-						const exists = await runCustom(Promise.resolve(customOps.exists(target.searchPath)), false);
-						if (!exists) {
+						const exists = await runCustom(Promise.resolve(customOps.exists(target.searchPath)));
+						if (exists.timedOut) return [] as string[];
+						if (!exists.value) {
 							if (isSingle) throw new ToolError(`Path not found: ${scopePath}`);
 							return [] as string[];
 						}
 						if (!target.hasGlob && customOps.stat) {
-							const stat = await runCustom(Promise.resolve(customOps.stat(target.searchPath)), undefined);
-							if (stat?.isFile()) return [formatScopePath(target.searchPath)];
+							const stat = await runCustom(Promise.resolve(customOps.stat(target.searchPath)));
+							if (stat.timedOut) return [] as string[];
+							if (stat.value.isFile()) return [formatScopePath(target.searchPath)];
 						}
 						const results = await runCustom(
 							Promise.resolve(
@@ -402,9 +412,9 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 									signal: combinedSignal,
 								}),
 							),
-							[] as string[],
 						);
-						return results.map(matchPath => formatMatchPath(matchPath, target.searchPath));
+						if (results.timedOut) return [] as string[];
+						return results.value.map(matchPath => formatMatchPath(matchPath, target.searchPath));
 					}),
 				);
 				const seen = new Set<string>();

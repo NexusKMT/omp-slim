@@ -28,6 +28,7 @@
 ### Fixed
 
 - Fixed custom `GlobOperations` backends hanging a `glob` call forever: the call now stops at the tool's scan deadline and reports the scan as incomplete, and the backend receives the resolved hidden/gitignore/limit policy plus a cancellation signal ([#6370](https://github.com/can1357/oh-my-pi/issues/6370), [#14426](https://github.com/can1357/oh-my-pi/pull/14426) by [@F0Rextasy](https://github.com/F0Rextasy))
+- Fixed a `glob` call with a custom `GlobOperations` backend reporting `Path not found: <root>` when the scan deadline expired while `exists()` was still pending. A call the tool abandoned is now reported as a timeout, not as a missing path ([#6370](https://github.com/can1357/oh-my-pi/issues/6370), [#14426](https://github.com/can1357/oh-my-pi/pull/14426) by [@F0Rextasy](https://github.com/F0Rextasy))
 
 ## [18.6.2] - 2026-10-04
 
