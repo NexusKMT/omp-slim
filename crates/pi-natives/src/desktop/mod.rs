@@ -483,7 +483,7 @@ impl Worker {
 			Request::AxNode { reference, .. } => {
 				let h = self.registry.resolve(reference)?;
 				let props = self.ax()?.props(&h)?;
-				Ok(Response::Node(Some(axnode(reference.clone(), props))))
+				Ok(Response::Node(Some(ax::node_to_napi(reference.clone(), props))))
 			},
 			Request::AxAttributes { reference, .. } => {
 				let h = self.registry.resolve(reference)?;
@@ -580,28 +580,6 @@ impl Worker {
 			},
 			Request::Close { .. } => Ok(Response::Unit),
 		}
-	}
-}
-
-fn axnode(reference: String, props: ax::AxProps) -> AxNode {
-	let (x, y, width, height) = props
-		.bounds
-		.map_or((None, None, None, None), |b| (Some(b.x), Some(b.y), Some(b.width), Some(b.height)));
-	AxNode {
-		ref_: reference,
-		role: props.role,
-		native_role: props.native_role,
-		title: props.title,
-		value: props.value,
-		description: props.description,
-		enabled: props.enabled,
-		focused: props.focused,
-		x,
-		y,
-		width,
-		height,
-		actions: (!props.actions.is_empty()).then_some(props.actions),
-		child_count: props.child_count,
 	}
 }
 

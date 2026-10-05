@@ -19,7 +19,7 @@ use super::{
 	super::{
 		backend::{DeliveryMode, Modifiers, MouseButton, PointerEvent},
 		error::{CoreResult, DesktopError},
-		keys::KeyName,
+		keys::{KeyDirection, KeyName, hold_keys},
 		types::{DesktopWindow, Target},
 	},
 	ax,
@@ -150,7 +150,9 @@ impl MacInput {
 				let (pid, wid) = window_identity(&window)?;
 				match mode {
 					DeliveryMode::Background => {
-						if keys.iter().copied().any(is_modifier) && process::is_screen_sharing(pid) {
+						if keys.iter().copied().any(KeyName::is_modifier)
+							&& process::is_screen_sharing(pid)
+						{
 							return Err(screen_sharing_refusal(
 								&window,
 								"modifier flags on routed chords",
@@ -815,25 +817,23 @@ fn key_chord(
 		return Err(DesktopError::invalid_key("key chord must not be empty"));
 	}
 	let mut active = Modifiers::default();
-	let mut pressed = 0;
-	let mut result = Ok(());
-	for &key in keys {
-		update_modifier(&mut active, key, true);
-		pressed += 1;
-		if let Err(error) = post_key(source, key, true, modifier_flags(active), &mut post) {
-			result = Err(error);
-			break;
-		}
-		thread::sleep(KEY_GAP);
-	}
-	let mut cleanup = Ok(());
-	for &key in keys[..pressed].iter().rev() {
-		update_modifier(&mut active, key, false);
-		let release = post_key(source, key, false, modifier_flags(active), &mut post);
-		cleanup = skylight::after_cleanup(cleanup, release);
-		thread::sleep(KEY_GAP);
-	}
-	skylight::after_cleanup(result, cleanup)
+	hold_keys(
+		&mut active,
+		keys.iter().copied(),
+		|active, key, direction| {
+			let down = direction == KeyDirection::Press;
+			update_modifier(active, key, down);
+			let posted = post_key(source, key, down, modifier_flags(*active), &mut post);
+			// A press is followed by the next key only once it posted; every release
+			// paces cleanup the same way.
+			if posted.is_ok() || !down {
+				thread::sleep(KEY_GAP);
+			}
+			posted
+		},
+		|_| Ok(()),
+		skylight::after_cleanup,
+	)
 }
 
 fn post_key(
@@ -848,10 +848,6 @@ fn post_key(
 		.map_err(|()| DesktopError::input_failed("failed to create a Quartz keyboard event"))?;
 	event.set_flags(flags);
 	post(&event)
-}
-
-const fn is_modifier(key: KeyName) -> bool {
-	matches!(key, KeyName::Ctrl | KeyName::Alt | KeyName::Shift | KeyName::Meta)
 }
 
 const fn update_modifier(modifiers: &mut Modifiers, key: KeyName, down: bool) {
