@@ -21,7 +21,8 @@ export function normalizeSnowflakeAccountUrl(input: string): string {
 			"Snowflake account is required: run /login snowflake or set SNOWFLAKE_ACCOUNT",
 		);
 	}
-	const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value);
+	// Only `<scheme>://` is a scheme; `host:443` is a schemeless authority.
+	const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value);
 	if (scheme && scheme[1].toLowerCase() !== "https") {
 		throw new AIError.ConfigurationError("Snowflake account URL must use https");
 	}
@@ -52,17 +53,19 @@ export function normalizeSnowflakeAccountUrl(input: string): string {
 	} else {
 		if (/[/?#]/.test(value)) throw new AIError.ConfigurationError(INVALID_ACCOUNT_MESSAGE);
 		host = value.toLowerCase().replaceAll("_", "-");
+		if (host.endsWith(":443")) host = host.slice(0, -4);
 		if (!host.endsWith(".snowflakecomputing.com") && !host.endsWith(".snowflakecomputing.cn")) {
 			host += ".snowflakecomputing.com";
 		}
 	}
 
-	const suffix = host.endsWith(".snowflakecomputing.com")
-		? ".snowflakecomputing.com"
-		: host.endsWith(".snowflakecomputing.cn")
-			? ".snowflakecomputing.cn"
-			: undefined;
-	if (!suffix || host.length === suffix.length || !host.split(".").every(isDnsLabel)) {
+	if (host.endsWith(".snowflakecomputing.cn")) {
+		throw new AIError.ConfigurationError(
+			"Snowflake Cortex REST API is not available in China-region accounts (.snowflakecomputing.cn)",
+		);
+	}
+	const suffix = ".snowflakecomputing.com";
+	if (!host.endsWith(suffix) || host.length === suffix.length || !host.split(".").every(isDnsLabel)) {
 		throw new AIError.ConfigurationError(INVALID_ACCOUNT_MESSAGE);
 	}
 	return `https://${host}`;
@@ -89,16 +92,18 @@ export function parseSnowflakeCredential(value: string): SnowflakeCredential | n
 		) {
 			throw new Error("Invalid token");
 		}
-		if ("enterpriseUrl" in credential) {
-			if (typeof credential.enterpriseUrl !== "string" || !credential.enterpriseUrl.trim()) {
-				throw new Error("Invalid account");
-			}
-			return {
-				token: credential.token.trim(),
-				accountUrl: normalizeSnowflakeAccountUrl(credential.enterpriseUrl),
-			};
+		if (
+			!("enterpriseUrl" in credential) ||
+			typeof credential.enterpriseUrl !== "string" ||
+			!credential.enterpriseUrl.trim()
+		) {
+			// Structured keys are OAuth bearers; without their account they must not get PAT routing.
+			throw new Error("Invalid account");
 		}
-		return { token: credential.token.trim() };
+		return {
+			token: credential.token.trim(),
+			accountUrl: normalizeSnowflakeAccountUrl(credential.enterpriseUrl),
+		};
 	} catch {
 		throw new AIError.ConfigurationError("Invalid Snowflake credential; run /login snowflake again");
 	}
@@ -106,7 +111,8 @@ export function parseSnowflakeCredential(value: string): SnowflakeCredential | n
 
 export const snowflakeTransport: ProviderTransport = {
 	prepareRequest: (model, options) => {
-		const credential = parseSnowflakeCredential(options.apiKey ?? $env.SNOWFLAKE_PAT ?? "");
+		// Match stream.ts: an empty apiKey falls through to the environment.
+		const credential = parseSnowflakeCredential(options.apiKey?.trim() || $env.SNOWFLAKE_PAT || "");
 		if (!credential) return { model, options };
 		let baseUrl = model.baseUrl;
 		if (

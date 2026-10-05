@@ -7,13 +7,13 @@ import type { OAuthController, OAuthCredentials } from "@oh-my-pi/pi-ai/registry
 import { normalizeSnowflakeAccountUrl } from "@oh-my-pi/pi-ai/registry/snowflake";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { Context, FetchImpl } from "@oh-my-pi/pi-ai/types";
-import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { seedModels } from "@oh-my-pi/pi-catalog/compat/providers";
+import { Effort } from "@oh-my-pi/pi-catalog/effort";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { withEnv } from "./helpers";
 
 const ACCOUNT = "https://myorg-acct.snowflakecomputing.com";
-const CLAUDE = buildModel(seedModels("snowflake").find(model => model.id === "claude-sonnet-4-6")!);
-const OPENAI = buildModel(seedModels("snowflake").find(model => model.id === "openai-gpt-5.1")!);
+const CLAUDE = getBundledModel<"anthropic-messages">("snowflake", "claude-sonnet-4-6");
+const OPENAI = getBundledModel<"openai-completions">("snowflake", "openai-gpt-5.1");
 const CONTEXT: Context = {
 	systemPrompt: ["Answer concisely."],
 	messages: [{ role: "user", content: "Say hello", timestamp: 0 }],
@@ -106,6 +106,15 @@ describe("Snowflake Cortex requests", () => {
 		});
 	});
 
+	test("empty apiKey falls through to the environment PAT and account", async () => {
+		await withEnv({ SNOWFLAKE_PAT: "env-pat", SNOWFLAKE_ACCOUNT: "env-acct" }, async () => {
+			const captured: CapturedRequest = {};
+			await stream(OPENAI, CONTEXT, { apiKey: "", fetch: captureRequest(captured) }).result();
+			expect(captured.url).toBe("https://env-acct.snowflakecomputing.com/api/v2/cortex/v1/chat/completions");
+			expect(captured.headers?.get("authorization")).toBe("Bearer env-pat");
+		});
+	});
+
 	test.each([
 		["truncated JSON", '{"token":'],
 		["empty token", '{"token":" "}'],
@@ -113,6 +122,7 @@ describe("Snowflake Cortex requests", () => {
 		["invalid account type", '{"token":"tok","enterpriseUrl":123}'],
 		["empty stored account", '{"token":"tok","enterpriseUrl":""}'],
 		["untrusted account", '{"token":"tok","enterpriseUrl":"https://evil.test"}'],
+		["missing account", '{"token":"tok"}'],
 	])("rejects %s credentials before fetch", (_name, apiKey) => {
 		const captured: CapturedRequest = {};
 		expect(() => stream(CLAUDE, CONTEXT, { apiKey, fetch: captureRequest(captured) })).toThrow(
@@ -154,7 +164,7 @@ describe("Snowflake account normalization", () => {
 			"https://xy12345.us-east-2.privatelink.snowflakecomputing.com/ui?q=1",
 			"https://xy12345.us-east-2.privatelink.snowflakecomputing.com",
 		],
-		["acct.snowflakecomputing.cn", "https://acct.snowflakecomputing.cn"],
+		["acct.snowflakecomputing.com:443", "https://acct.snowflakecomputing.com"],
 	])("normalizes %s to a trusted origin", (input, origin) => {
 		expect(normalizeSnowflakeAccountUrl(input)).toBe(origin);
 	});
@@ -174,8 +184,23 @@ describe("Snowflake account normalization", () => {
 		"https://app.snowflake.com/org",
 		"https://-acct.snowflakecomputing.com",
 		"https://app.snowflake.com/us-east-1/xy12345/#/home",
+		"acct.snowflakecomputing.com:8443",
 	])("rejects unsafe account %s", input => {
 		expect(() => normalizeSnowflakeAccountUrl(input)).toThrow(AIError.ConfigurationError);
+	});
+
+	test("schemeless host:port is not mistaken for a URL scheme", () => {
+		expect(() => normalizeSnowflakeAccountUrl("acct.snowflakecomputing.com:8443")).not.toThrow("must use https");
+		expect(() => normalizeSnowflakeAccountUrl("http://acct.snowflakecomputing.com")).toThrow("must use https");
+	});
+
+	test("China-region accounts are rejected because Cortex REST is unavailable there", () => {
+		expect(() => normalizeSnowflakeAccountUrl("acct.snowflakecomputing.cn")).toThrow(
+			"not available in China-region accounts",
+		);
+		expect(() => normalizeSnowflakeAccountUrl("https://acct.snowflakecomputing.cn")).toThrow(
+			AIError.ConfigurationError,
+		);
 	});
 });
 
@@ -213,8 +238,8 @@ describe("Snowflake browser OAuth", () => {
 			authorize!.searchParams.get("code_challenge")!,
 		);
 		expect(credentials).toMatchObject({ access: "a", refresh: "r", enterpriseUrl: ACCOUNT });
-		expect(credentials.expires).toBeGreaterThanOrEqual(before + 535_000);
-		expect(credentials.expires).toBeLessThanOrEqual(Date.now() + 545_000);
+		expect(credentials.expires).toBeGreaterThanOrEqual(before + 600_000);
+		expect(credentials.expires).toBeLessThanOrEqual(Date.now() + 600_000);
 	});
 
 	test.each(["before-prompt", "after-prompt", "after-auth"])(
@@ -236,14 +261,26 @@ describe("Snowflake browser OAuth", () => {
 		},
 	);
 
-	test("accounts without refresh issuance expire instead of becoming infinite credentials", async () => {
+	test("login stores the real token expiry and no refresh grant when none is issued", async () => {
 		const before = Date.now();
 		const credentials = await loginSnowflake(
 			manualLoginController(captureRequest({}, () => Response.json({ access_token: "a", expires_in: 60 }))),
 		);
 		expect(credentials.refresh).toBe("");
-		expect(credentials.expires).toBeGreaterThanOrEqual(before + 49_000);
-		expect(credentials.expires).toBeLessThanOrEqual(Date.now() + 59_000);
+		// The shared auth layer applies refresh skew; a provider-local skew would expire 60s tokens on arrival.
+		expect(credentials.expires).toBeGreaterThanOrEqual(before + 60_000);
+		expect(credentials.expires).toBeLessThanOrEqual(Date.now() + 60_000);
+	});
+
+	test("abort during token exchange rejects as login cancellation", async () => {
+		const abort = new AbortController();
+		const ctrl = manualLoginController(async (_input, init) => {
+			abort.abort(new Error("raw abort reason"));
+			init?.signal?.throwIfAborted();
+			return Response.json({ access_token: "a", expires_in: 600 });
+		});
+		ctrl.signal = abort.signal;
+		await expect(loginSnowflake(ctrl)).rejects.toBeInstanceOf(AIError.LoginCancelledError);
 	});
 
 	test("exchange HTTP errors omit reflected authorization codes and token bodies", async () => {
@@ -278,8 +315,8 @@ describe("Snowflake refresh transitions", () => {
 					refresh: refreshToken ?? "old-refresh",
 					enterpriseUrl: ACCOUNT,
 				});
-				expect(refreshed.expires).toBeGreaterThanOrEqual(before + 49_000);
-				expect(refreshed.expires).toBeLessThanOrEqual(Date.now() + 59_000);
+				expect(refreshed.expires).toBeGreaterThanOrEqual(before + 60_000);
+				expect(refreshed.expires).toBeLessThanOrEqual(Date.now() + 60_000);
 				expect(captured.url).toBe(`${ACCOUNT}/oauth/token-request`);
 				expect(captured.redirect).toBe("error");
 				const form = new URLSearchParams(captured.body);
@@ -374,5 +411,21 @@ describe("Snowflake refresh transitions", () => {
 		} finally {
 			mock.mockRestore();
 		}
+	});
+});
+
+describe("Snowflake bundled thinking ladders", () => {
+	// Live Cortex probes: Opus 4.7+/Sonnet 5 accept xhigh and max; Opus 4.6 and
+	// Sonnet 4.6 reject xhigh; GPT-5.x documents minimal..high.
+	test.each([
+		["claude-opus-5-5", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
+		["claude-opus-4-7", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
+		["claude-sonnet-5", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
+		["claude-opus-4-6", [Effort.Low, Effort.Medium, Effort.High, Effort.Max]],
+		["claude-sonnet-4-6", [Effort.Low, Effort.Medium, Effort.High]],
+		["openai-gpt-5.1", [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]],
+		["openai-gpt-5-nano", [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]],
+	])("%s ships the effort ladder Cortex accepts", (id, efforts) => {
+		expect(getBundledModel("snowflake", id)?.thinking?.efforts).toEqual(efforts);
 	});
 });

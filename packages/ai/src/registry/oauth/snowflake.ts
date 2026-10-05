@@ -1,3 +1,4 @@
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import * as AIError from "../../error";
 import { normalizeSnowflakeAccountUrl } from "../snowflake";
@@ -6,7 +7,12 @@ import { generatePKCE } from "./pkce";
 import type { OAuthController, OAuthCredentials } from "./types";
 
 export const SNOWFLAKE_OAUTH_CLIENT_ID = "LOCAL_APPLICATION";
-export const SNOWFLAKE_OAUTH_CALLBACK_PORT = 54551;
+
+function snowflakeCallbackPort(): number {
+	const port = authPolicyFor("snowflake")?.callbackPort;
+	if (port === undefined) throw new Error("Snowflake auth policy is missing callback-port");
+	return port;
+}
 
 interface SnowflakeTokens {
 	access: string;
@@ -65,7 +71,7 @@ async function parseTokenResponse(
 	return {
 		access: body.access_token,
 		refresh: body.refresh_token,
-		expires: Date.now() + lifetimeMs - Math.min(60_000, lifetimeMs / 10),
+		expires: Date.now() + lifetimeMs,
 	};
 }
 
@@ -75,11 +81,10 @@ class SnowflakeOAuthFlow extends OAuthCallbackFlow {
 
 	constructor(ctrl: OAuthController, accountUrl: string) {
 		super(ctrl, {
-			preferredPort: SNOWFLAKE_OAUTH_CALLBACK_PORT,
+			preferredPort: snowflakeCallbackPort(),
 			// Some local-app integrations reject callback subpaths despite the documented allowance.
 			callbackPath: "/",
 			callbackHostname: "127.0.0.1",
-			allowPortFallback: true,
 		});
 		this.#accountUrl = accountUrl;
 	}
@@ -105,20 +110,26 @@ class SnowflakeOAuthFlow extends OAuthCallbackFlow {
 	async exchangeToken(code: string, _state: string, redirectUri: string): Promise<OAuthCredentials> {
 		const signal = this.ctrl.signal;
 		const fetchImpl = this.ctrl.fetch ?? fetch;
-		const response = await fetchImpl(`${this.#accountUrl}/oauth/token-request`, {
-			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: new URLSearchParams({
-				grant_type: "authorization_code",
-				code,
-				redirect_uri: redirectUri,
-				code_verifier: this.#verifier,
-				client_id: SNOWFLAKE_OAUTH_CLIENT_ID,
-			}),
-			signal,
-			redirect: "error",
-		});
-		const tokens = await parseTokenResponse(response, "token-exchange", signal);
+		let tokens: SnowflakeTokens;
+		try {
+			const response = await fetchImpl(`${this.#accountUrl}/oauth/token-request`, {
+				method: "POST",
+				headers: { "Content-Type": "application/x-www-form-urlencoded" },
+				body: new URLSearchParams({
+					grant_type: "authorization_code",
+					code,
+					redirect_uri: redirectUri,
+					code_verifier: this.#verifier,
+					client_id: SNOWFLAKE_OAUTH_CLIENT_ID,
+				}),
+				signal,
+				redirect: "error",
+			});
+			tokens = await parseTokenResponse(response, "token-exchange", signal);
+		} catch (error) {
+			if (signal?.aborted) throw new AIError.LoginCancelledError();
+			throw error;
+		}
 		return { ...tokens, refresh: tokens.refresh ?? "", enterpriseUrl: this.#accountUrl };
 	}
 }
