@@ -1859,8 +1859,9 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			}
 
 			case "abort_and_restore_queue": {
-				// Mirrors the TUI Esc restore: withdraw queued user input (including live-claimed
-				// steers) before aborting, so abort()'s stranded-queue drain cannot run it.
+				// Mirrors the TUI Esc restore: withdraw queued user input (including input the run
+				// dequeued but never recorded) before aborting, so neither the aborted turn nor
+				// abort()'s stranded-queue drain can run it.
 				const restored = session.clearQueue({ forInterrupt: true });
 				goalController.stopForHostAbort();
 				await session.abort({ reason: USER_INTERRUPT_LABEL });

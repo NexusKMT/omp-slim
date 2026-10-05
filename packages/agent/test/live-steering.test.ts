@@ -238,7 +238,7 @@ describe("agent loop live steering", () => {
 		// Esc hands the steer back to the editor: the abort must neither requeue nor record it.
 		const { agent, steer, running } = await startLiveSteeredRun();
 
-		expect(agent.withdrawLiveSteering()).toEqual([steer]);
+		expect(agent.withdrawUndeliveredQueuedMessages()).toEqual({ steering: [steer], followUp: [] });
 		agent.abort();
 		await running;
 

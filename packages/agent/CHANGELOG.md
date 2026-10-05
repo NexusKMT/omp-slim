@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `Agent.withdrawLiveSteering()` is now `withdrawUndeliveredQueuedMessages()` and returns `{ steering, followUp }`: it also takes back queued input already dequeued for the next model call, which the aborted run then no longer records ([#14179](https://github.com/can1357/oh-my-pi/pull/14179) by [@andrebrait](https://github.com/andrebrait))
+
 ## [18.6.1] - 2026-10-04
 
 ### Fixed
