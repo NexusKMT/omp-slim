@@ -143,22 +143,11 @@ fn temp_dir_options(options: &TempOptions) -> DirOptions {
 	DirOptions::new().mode(options.get_mode().unwrap_or(0o700))
 }
 
-/// The bits a facade's creation mask clears from host creation modes. Unix
-/// only: Windows creation modes merely toggle the read-only attribute, which
-/// a umask must never reach.
-const fn host_mask(mask: Option<u32>) -> u32 {
-	match mask {
-		Some(mask) if cfg!(unix) => mask,
-		_ => 0,
-	}
-}
-
-/// A directory creation mode with `mask` applied (`0o777` when unset).
-fn masked_dir_mode(mask: Option<u32>, mode: Option<u32>) -> Option<u32> {
-	match host_mask(mask) {
-		0 => mode,
-		mask => Some(mode.unwrap_or(0o777) & !mask),
-	}
+/// The facade's creation mask where it applies: Unix host creations. Windows
+/// creation modes merely toggle the read-only attribute, which a umask must
+/// never reach.
+fn host_mask(scope: &Scope) -> Option<u32> {
+	scope.creation_mask.filter(|_| cfg!(unix))
 }
 
 /// Opens a host path under the facade's creation mask: a file the open
@@ -167,7 +156,7 @@ fn masked_dir_mode(mask: Option<u32>, mode: Option<u32>) -> Option<u32> {
 /// on creation, so the new file's mode is set again afterwards: a looser mask
 /// (`umask 000`) must keep the bits the process umask clears.
 fn native_open(scope: &Scope, path: &Path, options: &OpenOptions) -> io::Result<File> {
-	let Some(mask) = scope.creation_mask.filter(|_| cfg!(unix)) else {
+	let Some(mask) = host_mask(scope) else {
 		return native::open(path, options);
 	};
 	if !(options.is_create() || options.is_create_new()) {
@@ -192,6 +181,71 @@ fn native_open(scope: &Scope, path: &Path, options: &OpenOptions) -> io::Result<
 		},
 		Err(err) => Err(err),
 	}
+}
+
+/// Creates a host directory under the facade's creation mask: each directory
+/// it creates gets exactly its requested mode (`0o777` by default) less the
+/// mask, set again after creation as in [`native_open`]. Existing ones keep
+/// their modes.
+fn native_create_dir(
+	scope: &Scope,
+	path: &Path,
+	mode: Option<u32>,
+	recursive: bool,
+) -> io::Result<()> {
+	let Some(mask) = host_mask(scope) else {
+		return native::create_dir(path, mode, recursive);
+	};
+	let mode = mode.unwrap_or(0o777) & !mask;
+	if recursive {
+		create_dir_all_exact(path, mode)
+	} else {
+		create_dir_exact(path, mode)
+	}
+}
+
+/// Creates one directory with exactly `mode`.
+fn create_dir_exact(path: &Path, mode: u32) -> io::Result<()> {
+	native::create_dir(path, Some(mode), false)?;
+	// Best effort, as for files.
+	let _ = native::set_permissions(path, Permissions::from_mode(mode));
+	Ok(())
+}
+
+/// [`create_dir_exact`] for each missing directory up to `path`, walked as
+/// `std::fs::create_dir_all` walks them.
+fn create_dir_all_exact(path: &Path, mode: u32) -> io::Result<()> {
+	if path.as_os_str().is_empty() {
+		return Ok(());
+	}
+	match create_dir_exact(path, mode) {
+		Ok(()) => return Ok(()),
+		Err(err) if err.kind() == io::ErrorKind::NotFound => {},
+		Err(_) if path.is_dir() => return Ok(()),
+		Err(err) => return Err(err),
+	}
+	match path.parent() {
+		Some(parent) => create_dir_all_exact(parent, mode)?,
+		None => return Err(io::Error::other("failed to create whole tree")),
+	}
+	match create_dir_exact(path, mode) {
+		Ok(()) => Ok(()),
+		Err(_) if path.is_dir() => Ok(()),
+		Err(err) => Err(err),
+	}
+}
+
+/// Creates a host node under the facade's creation mask, with exactly its
+/// requested mode less the mask, as in [`native_open`].
+fn native_make_node(scope: &Scope, path: &Path, kind: NodeKind, mode: u32) -> io::Result<()> {
+	let Some(mask) = host_mask(scope) else {
+		return native::make_node(path, kind, mode);
+	};
+	let mode = mode & !mask;
+	native::make_node(path, kind, mode)?;
+	// Best effort, as for files.
+	let _ = native::set_permissions(path, Permissions::from_mode(mode));
+	Ok(())
 }
 
 fn too_many_temps() -> io::Error {
@@ -356,11 +410,12 @@ impl Fs {
 		fs
 	}
 
-	/// A view whose host file, directory, and node creations clear the bits in
-	/// `mask` from their requested modes, as a process umask would, so a
-	/// shell can scope its `umask` to itself; `None` leaves modes as given.
-	/// The process umask still applies on top. Unix only; providers and other
-	/// platforms ignore it.
+	/// A view whose host file, directory, and node creations get exactly
+	/// their requested mode less `mask`, as if `mask` were the process umask,
+	/// so a shell can scope its `umask` to itself; `None` leaves creations to
+	/// the process umask. The kernel still applies the process umask, so each
+	/// new entry's mode is set again after it is created. Unix only; providers
+	/// and other platforms ignore it.
 	pub fn with_creation_mask(&self, mask: Option<u32>) -> Self {
 		let mut fs = self.clone();
 		fs.scope.creation_mask = mask;
@@ -671,9 +726,7 @@ impl Fs {
 		let path = path.as_ref();
 		let (mode, recursive) = (options.get_mode(), options.is_recursive());
 		match self.route(path)? {
-			Route::Native => {
-				native::create_dir(path, masked_dir_mode(self.scope.creation_mask, mode), recursive)
-			},
+			Route::Native => native_create_dir(&self.scope, path, mode, recursive),
 			Route::Provider(provider) if recursive => {
 				self.guard(provider.create_dir_all(path, mode)).await
 			},
@@ -1020,9 +1073,7 @@ impl Fs {
 	) -> io::Result<()> {
 		let path = path.as_ref();
 		match self.route(path)? {
-			Route::Native => {
-				native::make_node(path, kind, mode & !host_mask(self.scope.creation_mask))
-			},
+			Route::Native => native_make_node(&self.scope, path, kind, mode),
 			Route::Provider(provider) => self.guard(provider.make_node(path, kind, mode)).await,
 			Route::Mounted(_) => Err(already_exists()),
 		}
@@ -1287,9 +1338,7 @@ impl BlockingFs {
 		let path = path.as_ref();
 		let (mode, recursive) = (options.get_mode(), options.is_recursive());
 		match self.fs.route(path)? {
-			Route::Native => {
-				native::create_dir(path, masked_dir_mode(self.fs.scope.creation_mask, mode), recursive)
-			},
+			Route::Native => native_create_dir(&self.fs.scope, path, mode, recursive),
 			Route::Provider(provider) if recursive => self.run(provider.create_dir_all(path, mode)),
 			Route::Provider(provider) => self.run(provider.create_dir(path, mode)),
 			Route::Mounted(_) => Err(already_exists()),
@@ -1582,9 +1631,7 @@ impl BlockingFs {
 	pub fn make_node(&self, path: impl AsRef<Path>, kind: NodeKind, mode: u32) -> io::Result<()> {
 		let path = path.as_ref();
 		match self.fs.route(path)? {
-			Route::Native => {
-				native::make_node(path, kind, mode & !host_mask(self.fs.scope.creation_mask))
-			},
+			Route::Native => native_make_node(&self.fs.scope, path, kind, mode),
 			Route::Provider(provider) => self.run(provider.make_node(path, kind, mode)),
 			Route::Mounted(_) => Err(already_exists()),
 		}

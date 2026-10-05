@@ -96,6 +96,11 @@ impl GitRepo {
 	pub fn stage_files(&self, files: &[String]) -> Result<()> {
 		let repo = self.gix()?;
 		let mut index = load_index_or_head(&repo, "git add")?;
+		// Whole seconds since the epoch before any file is stat'ed (see
+		// `stage_one`).
+		let staging_started = std::time::SystemTime::now()
+			.duration_since(std::time::UNIX_EPOCH)
+			.map_or(0, |elapsed| elapsed.as_secs());
 		let all = files.is_empty();
 		let mut requested: BTreeSet<String> = files
 			.iter()
@@ -132,7 +137,7 @@ impl GitRepo {
 		let mut replaced = std::collections::HashSet::<BString>::new();
 		let mut staged = Vec::new();
 		for path in selected {
-			match stage_one(self.root(), &mut filter, &filter_index, &path)? {
+			match stage_one(self.root(), &mut filter, &filter_index, &path, staging_started)? {
 				Staged::Entry(entry) => {
 					replaced.insert(path.into());
 					staged.push(entry);
@@ -144,6 +149,16 @@ impl GitRepo {
 			}
 		}
 		index.remove_entries(|_, path, _| replaced.contains(path));
+		// A kept entry's stat as new as the old index is racy: only that
+		// index's timestamp makes git re-check the file's content, and the
+		// index written here is newer, so the stat is dropped to keep the
+		// check (git smudges such entries when it writes an index).
+		let racy_from = index.timestamp();
+		for entry in index.entries_mut() {
+			if entry.stat.is_racy(racy_from, Default::default()) {
+				entry.stat = gix::index::entry::Stat::default();
+			}
+		}
 		for entry in staged {
 			index.dangerously_push_entry(
 				entry.stat,
@@ -1324,15 +1339,19 @@ fn stage_one(
 	filter: &mut gix::filter::Pipeline<'_>,
 	filter_index: &gix::index::State,
 	path: &str,
+	staging_started: u64,
 ) -> Result<Staged> {
 	use gix::objs::tree::EntryKind;
 	let rela_path = path.as_bytes().as_bstr();
 	// Stat before reading, as `git add` does, so the entry keeps a valid stat
 	// cache: a write landing after the stat changes the file's stat and later
-	// status calls re-hash it.
+	// status calls re-hash it. A file last changed in the second staging
+	// began could change again within that second and keep its stat, so its
+	// stat is not recorded and the next status compares contents instead.
 	let stat = gix::index::fs::Metadata::from_path_no_follow(&root.join(path))
 		.ok()
 		.and_then(|metadata| gix::index::entry::Stat::from_fs(&metadata).ok())
+		.filter(|stat| u64::from(stat.mtime.secs) < staging_started)
 		.unwrap_or_default();
 	let Some((id, kind, _)) = filter
 		.worktree_file_to_object(rela_path, filter_index)
@@ -2003,22 +2022,29 @@ mod tests {
 
 	/// Staged entries record the file's stat so later status calls can skip
 	/// re-hashing them; a zeroed stat would force a content check every time.
+	/// A file changed in the second staging began could change again within
+	/// that second without its stat changing, so it records none.
 	#[test]
-	fn stage_files_records_the_stat_cache() {
+	fn stage_files_records_the_stat_cache_unless_racy() {
 		let (temp, repo) = fixture();
+		let set_mtime = |path: &str, when: std::time::SystemTime| {
+			fs::OpenOptions::new()
+				.write(true)
+				.open(temp.path().join(path))
+				.and_then(|file| file.set_modified(when))
+				.unwrap();
+		};
+		let now = std::time::SystemTime::now();
 		fs::write(temp.path().join("a"), "changed content\n").unwrap();
+		set_mtime("a", now - std::time::Duration::from_secs(30));
+		set_mtime("b", now + std::time::Duration::from_secs(60));
 		repo.stage_files(&[]).unwrap();
 		let index = gix::open(temp.path()).unwrap().open_index().unwrap();
-		for path in ["a", "b"] {
-			let stat = index.entry_by_path(path.into()).unwrap().stat;
-			let size = fs::metadata(temp.path().join(path)).unwrap().len();
-			assert_eq!(u64::from(stat.size), size, "{path} records its size");
-			assert_ne!(
-				stat.mtime,
-				gix::index::entry::stat::Time::default(),
-				"{path} records its mtime"
-			);
-		}
+		let stat = |path: &str| index.entry_by_path(path.into()).unwrap().stat;
+		let size = fs::metadata(temp.path().join("a")).unwrap().len();
+		assert_eq!(u64::from(stat("a").size), size, "a records its size");
+		assert_ne!(stat("a").mtime, gix::index::entry::stat::Time::default(), "a records its mtime");
+		assert_eq!(stat("b"), gix::index::entry::Stat::default(), "a racy stat is not recorded");
 		assert_eq!(git(temp.path(), &["status", "--porcelain"]), "M  a");
 	}
 

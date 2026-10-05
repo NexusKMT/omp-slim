@@ -468,10 +468,21 @@ fn creation_mask_clears_bits_from_host_creations() {
 		.unwrap();
 	assert_eq!(mode(&dir.0.join("file")), 0o644);
 
-	// A mask looser than the process umask keeps the bits the umask clears.
+	// A mask looser than the process umask keeps the bits the umask clears,
+	// for every kind of entry, and for each directory a recursive create
+	// makes.
 	let loose = Fs::native().with_creation_mask(Some(0)).blocking();
 	loose.create(dir.0.join("open")).unwrap();
+	loose.create_dir(dir.0.join("loose")).unwrap();
+	loose.create_dir_all(dir.0.join("deep/er")).unwrap();
+	loose
+		.make_node(dir.0.join("fifo"), crate::NodeKind::Fifo, 0o666)
+		.unwrap();
 	assert_eq!(mode(&dir.0.join("open")), 0o666);
+	assert_eq!(mode(&dir.0.join("loose")), 0o777);
+	assert_eq!(mode(&dir.0.join("deep")), 0o777);
+	assert_eq!(mode(&dir.0.join("deep/er")), 0o777);
+	assert_eq!(mode(&dir.0.join("fifo")), 0o666);
 }
 
 #[test]

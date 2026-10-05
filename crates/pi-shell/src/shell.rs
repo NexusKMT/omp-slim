@@ -5548,6 +5548,26 @@ mod tests {
 		assert!(output.contains("suspend-refused"), "{output}");
 	}
 
+	/// `sort -m -o f - g < f` truncates `f` for its output while stdin is still
+	/// reading it, so stdin must be copied first or the rest of `f` is lost.
+	/// The input is far larger than what stdin reads ahead, and the small
+	/// buffer makes the merge read it in many chunks.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn sort_merge_into_the_file_on_stdin_keeps_all_input() {
+		let dir = tempfile::tempdir().expect("temp dir");
+		let odd: String = (0..20_000).map(|n| format!("{:06}\n", 2 * n + 1)).collect();
+		let even: String = (0..20_000).map(|n| format!("{:06}\n", 2 * n)).collect();
+		std::fs::write(dir.path().join("f"), odd).expect("write f");
+		std::fs::write(dir.path().join("g"), even).expect("write g");
+		let (result, output) =
+			execute_captured(format!("cd '{}' && sort -m -S 1K -o f - g < f", dir.path().display()))
+				.await;
+		assert_eq!(result.exit_code, Some(0), "{output}");
+		let merged = std::fs::read_to_string(dir.path().join("f")).expect("read f");
+		let expected: String = (0..40_000).map(|n| format!("{n:06}\n")).collect();
+		assert!(merged == expected, "merged {} of 40000 lines", merged.lines().count());
+	}
+
 	/// `umask` belongs to the shell: it masks files the shell, its builtins,
 	/// and its external commands create, subshells keep their own copy, and
 	/// the host process umask never changes.

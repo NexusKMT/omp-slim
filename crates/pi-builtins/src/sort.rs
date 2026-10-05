@@ -4915,9 +4915,12 @@ fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWa
 	}
 
 	// `-c` reads its input on a detached thread, so it gets a private copy of
-	// stdin. Every other mode reads the shell's stdin directly; spilling it to
-	// a temporary file first would cost a disk round trip on every `| sort`.
-	if settings.check {
+	// stdin. A merge with `-o` truncates the output file before it has read
+	// all of its inputs, and stdin may be that file (`sort -m -o f - < f`), so
+	// it copies stdin first too. Every other mode reads the shell's stdin
+	// directly; spilling it to a temporary file first would cost a disk round
+	// trip on every `| sort`.
+	if settings.check || (settings.merge && matches.contains_id(options::OUTPUT)) {
 		materialize_stdin(host, &mut files, &mut tmp_dir)?;
 	}
 	let stdin_operand = if files.iter().any(|file| file == STDIN_FILE) {

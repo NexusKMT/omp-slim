@@ -897,12 +897,12 @@ fn filter_psql(input: &str, exit_code: i32) -> String {
 	};
 	// Table rows and expanded `key | value` fields are data, already capped by
 	// the compactors; only messages outside them need preserving.
-	let skip_cells = table || expanded;
+	let structured = table || expanded;
 
 	if exit_code == 0 {
-		preserve_important_lines(input, &compacted, skip_cells)
+		preserve_important_lines(input, &compacted, structured)
 	} else {
-		preserve_important_lines(input, &head_tail_dedup(&compacted, 80, 40), skip_cells)
+		preserve_important_lines(input, &head_tail_dedup(&compacted, 80, 40), structured)
 	}
 }
 
@@ -1096,10 +1096,11 @@ fn compact_psql_table(input: &str) -> String {
 			row_count_lines.push(trimmed.to_string());
 			continue;
 		}
-		// Message lines (ERROR:, DETAIL:, ...) are kept verbatim, but once the
-		// header is known a pipe-separated line is a data row, whatever its
-		// first cell says, and stays under the row cap.
-		if is_important_line(trimmed) && !(saw_header && trimmed.contains('|')) {
+		// psql's own messages stay verbatim, even when they quote SQL with `|`
+		// (`ERROR:  operator does not exist: integer || integer`). Any other
+		// line with a `|` is a table row, whatever its first cell says, and
+		// counts against the row cap.
+		if is_psql_message(line) {
 			out.push(trimmed.to_string());
 			continue;
 		}
@@ -1144,6 +1145,13 @@ fn compact_psql_expanded(input: &str) -> String {
 			flush_record(&mut out, &mut current, records);
 			records += 1;
 			current.push(trimmed.to_string());
+			continue;
+		}
+		// A psql message ends the record before it and stays verbatim, even
+		// when it quotes SQL with `|`.
+		if is_psql_message(line) {
+			flush_record(&mut out, &mut current, records);
+			out.push(trimmed.to_string());
 			continue;
 		}
 		if is_important_line(trimmed) && current.is_empty() {
@@ -1200,15 +1208,21 @@ fn is_psql_row_count(line: &str) -> bool {
 		&& trimmed.chars().any(|ch| ch.is_ascii_digit())
 }
 
-/// Puts important lines the compaction dropped back in front of it. With
-/// `skip_cells`, lines holding a `|` cell separator are data, not messages.
-fn preserve_important_lines(original: &str, compacted: &str, skip_cells: bool) -> String {
+/// Puts important lines the compaction dropped back in front of it. In
+/// `structured` (table or expanded) output, a line holding a `|` is a cell or
+/// field rather than a message unless psql printed it as one.
+fn preserve_important_lines(original: &str, compacted: &str, structured: bool) -> String {
 	let mut kept: Option<HashSet<&str>> = None;
 	let mut seen = HashSet::new();
 	let mut out = Vec::new();
 	for line in original.lines() {
 		let trimmed = line.trim();
-		if (skip_cells && trimmed.contains('|')) || !is_important_line(trimmed) {
+		let important = if structured && trimmed.contains('|') {
+			is_psql_message(line)
+		} else {
+			is_important_line(trimmed)
+		};
+		if !important {
 			continue;
 		}
 		let kept = kept.get_or_insert_with(|| compacted.lines().map(str::trim).collect());
@@ -1229,6 +1243,20 @@ fn preserve_important_lines(original: &str, compacted: &str, skip_cells: bool) -
 	text.push_str(compacted.trim_end());
 	text.push('\n');
 	text
+}
+
+/// A message psql printed itself (`ERROR:  …`, `HINT:  …`, `LINE 1: …`), as
+/// opposed to a table cell or an expanded-record field that merely starts
+/// with such a word. psql writes messages from column 0 as the level and a
+/// colon; table rows start with cell padding or a border, and record fields
+/// with a column name followed by ` | `.
+fn is_psql_message(line: &str) -> bool {
+	const LEVELS: [&str; 5] = ["ERROR:", "FATAL:", "PANIC:", "DETAIL:", "HINT:"];
+	LEVELS.iter().any(|level| line.starts_with(level))
+		|| line.strip_prefix("LINE ").is_some_and(|rest| {
+			let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+			digits > 0 && rest.as_bytes().get(digits) == Some(&b':')
+		})
 }
 
 fn is_important_line(line: &str) -> bool {
@@ -1376,6 +1404,55 @@ mod tests {
 				.contains(&format!("[…{} rows elided…]", 5000 - MAX_PSQL_ROWS))
 		);
 		assert!(out.text.ends_with("(5000 rows)\n"));
+	}
+
+	/// psql messages after a table that quote SQL with `||` are messages, not
+	/// rows: they stay verbatim even once the table has used up the row cap.
+	#[test]
+	fn psql_messages_quoting_pipes_after_a_table_stay_verbatim() {
+		let cfg = MinimizerConfig { enabled: true, ..Default::default() };
+		let ctx = ctx("psql", &cfg);
+		let mut input = String::from(" id | name\n----+------\n");
+		for idx in 0..50 {
+			input.push_str(&format!(" {idx:>2} | n{idx}\n"));
+		}
+		input.push_str(
+			"(50 rows)\n\nERROR:  operator does not exist: integer || integer\nLINE 1: select 1 || \
+			 2\n                 ^\nHINT:  No operator matches the given name and argument types.\n",
+		);
+		let out = filter(&ctx, &input, 1);
+		assert!(
+			out.text
+				.contains("ERROR:  operator does not exist: integer || integer\n"),
+			"{}",
+			out.text
+		);
+		assert!(out.text.contains("LINE 1: select 1 || 2\n"), "{}", out.text);
+		assert!(
+			out.text
+				.contains(&format!("[…{} rows elided…]", 50 - MAX_PSQL_ROWS)),
+			"{}",
+			out.text
+		);
+	}
+
+	/// The same in expanded output: the message after the records stays
+	/// verbatim instead of turning into a field of the last record.
+	#[test]
+	fn psql_messages_quoting_pipes_after_expanded_records_stay_verbatim() {
+		let cfg = MinimizerConfig { enabled: true, ..Default::default() };
+		let ctx = ctx("psql", &cfg);
+		let input = "-[ RECORD 1 ]-----\nid | 1\nname | alice\nERROR:  operator does not exist: \
+		             integer || integer\nLINE 1: select 1 || 2\n";
+		let out = filter(&ctx, input, 1);
+		assert!(out.text.contains("-[ RECORD 1 ]----- id=1 name=alice\n"), "{}", out.text);
+		assert!(
+			out.text
+				.contains("ERROR:  operator does not exist: integer || integer\n"),
+			"{}",
+			out.text
+		);
+		assert!(out.text.contains("LINE 1: select 1 || 2\n"), "{}", out.text);
 	}
 
 	#[test]

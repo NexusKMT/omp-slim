@@ -343,16 +343,14 @@ fn create_single_dir(
 
 	match filesystem.create_dir_with(&fs_path, &DirOptions::new().mode(create_mode)) {
 		Ok(()) => {
-			// The process umask (and the shell's creation mask) clear bits from
-			// the `mkdir` mode. The process umask is shared with every thread of
-			// the host, so it is never changed; a native directory that may have
-			// lost bits is `chmod`ed instead, as GNU mkdir does for `-m`.
-			// Providers apply the mode as given.
+			// The effective umask (the shell's, which the filesystem applies,
+			// or else the host's, which the kernel applies) cleared bits that
+			// `-m` and `-p` parents must keep. The host umask is shared with
+			// every thread of the host, so it is never changed; the directory
+			// is `chmod`ed instead, as GNU mkdir does for `-m`. Providers apply
+			// the mode as given.
 			#[cfg(unix)]
-			if filesystem.is_native_local(&fs_path)
-				&& create_mode & (crate::host::process_umask() | filesystem.creation_mask().unwrap_or(0))
-					!= 0
-			{
+			if filesystem.is_native_local(&fs_path) && create_mode & host.umask() != 0 {
 				filesystem
 					.set_permissions(&fs_path, pi_vfs::Permissions::from_mode(create_mode))
 					.map_err(|source| MkdirError::Io {

@@ -1514,16 +1514,27 @@ fn write_index_map_at(
 	for (path, entry) in map {
 		validate_repo_path(path).map_err(ApplyFailure::into_error)?;
 		let rela_path = BStr::new(path.as_bytes());
-		let unchanged = previous
-			.as_ref()
-			.and_then(|index| index.entry_by_path_and_stage(rela_path, Stage::Unconflicted))
-			.filter(|old| {
-				old.id == entry.id
-					&& old.mode == entry.mode
-					&& old.flags.contains(Flags::INTENT_TO_ADD) == entry.intent_to_add
-			});
+		let unchanged = previous.as_ref().and_then(|index| {
+			let old = index
+				.entry_by_path_and_stage(rela_path, Stage::Unconflicted)
+				.filter(|old| {
+					old.id == entry.id
+						&& old.mode == entry.mode
+						&& old.flags.contains(Flags::INTENT_TO_ADD) == entry.intent_to_add
+				})?;
+			// A stat as new as the old index is racy: only that index's
+			// timestamp makes git re-check the file's content, and the index
+			// written here is newer, so the stat is dropped to keep the check
+			// (git smudges such entries when it writes an index).
+			let stat = if old.stat.is_racy(index.timestamp(), Default::default()) {
+				Stat::default()
+			} else {
+				old.stat
+			};
+			Some((stat, old.flags))
+		});
 		let (stat, flags) = match unchanged {
-			Some(old) => (old.stat, old.flags),
+			Some(kept) => kept,
 			// INTENT_TO_ADD lives in the extended flag word; losing it here
 			// would silently stage promised paths as empty files.
 			None if entry.intent_to_add => (Stat::default(), Flags::EXTENDED | Flags::INTENT_TO_ADD),
@@ -1934,6 +1945,15 @@ mod tests {
 			.stat
 	}
 
+	/// Back-date `path`'s modification time to `when`.
+	fn set_mtime(path: &Path, when: std::time::SystemTime) {
+		fs::OpenOptions::new()
+			.write(true)
+			.open(path)
+			.and_then(|file| file.set_modified(when))
+			.expect("set mtime");
+	}
+
 	/// Staging hunks rewrites the index; entries the patch does not touch must
 	/// keep their stat cache, or every later `git status` re-hashes them, and
 	/// their flags, or a sparse checkout's skipped files read as deleted.
@@ -1944,6 +1964,11 @@ mod tests {
 			("untouched.txt", b"same\n"),
 			("sparse.txt", b"elsewhere\n"),
 		]);
+		// A stat from the second the index was written is racy and is not
+		// kept; give `untouched.txt` an older one, as settled files have.
+		let then = std::time::SystemTime::now() - std::time::Duration::from_secs(30);
+		set_mtime(&temp.path().join("untouched.txt"), then);
+		git(temp.path(), &["update-index", "--refresh"]);
 		git(temp.path(), &["update-index", "--skip-worktree", "sparse.txt"]);
 		fs::remove_file(temp.path().join("sparse.txt")).expect("drop skipped file");
 		let before = index_stat(temp.path(), "untouched.txt");
@@ -1956,6 +1981,33 @@ mod tests {
 		assert_eq!(index_stat(temp.path(), "untouched.txt"), before);
 		assert_eq!(git(temp.path(), &["ls-files", "-v", "sparse.txt"]), "S sparse.txt\n");
 		assert_eq!(git(temp.path(), &["status", "--porcelain"]), "M  edited.txt\n");
+	}
+
+	/// An entry whose stat is as new as the index is racy: git compares its
+	/// content, because a same-second, same-size edit leaves the stat alone.
+	/// A newer index written later must keep that check, or the edit vanishes
+	/// from `git status`.
+	#[test]
+	fn stage_hunks_keeps_racy_entries_checked_by_content() {
+		let temp = init(&[("edited.txt", b"one\n"), ("racy.txt", b"base\n")]);
+		git(temp.path(), &["config", "core.trustctime", "false"]);
+		let then = std::time::SystemTime::now() - std::time::Duration::from_secs(30);
+		// Stage a change, then change the file again within what the index
+		// sees as the second it was written, keeping the size.
+		fs::write(temp.path().join("racy.txt"), b"one!\n").expect("write");
+		set_mtime(&temp.path().join("racy.txt"), then);
+		git(temp.path(), &["add", "racy.txt"]);
+		fs::write(temp.path().join("racy.txt"), b"two!\n").expect("rewrite");
+		set_mtime(&temp.path().join("racy.txt"), then);
+		set_mtime(&temp.path().join(".git/index"), then);
+		let status = || git(temp.path(), &["--no-optional-locks", "status", "--porcelain"]);
+		assert_eq!(status(), "MM racy.txt\n", "git sees the racy edit");
+
+		fs::write(temp.path().join("edited.txt"), b"two\n").expect("edit");
+		repo(temp.path())
+			.stage_hunks(&[HunkSelection { path: "edited.txt".into(), hunks: HunkSpec::All }], None)
+			.expect("stage hunks");
+		assert_eq!(status(), "M  edited.txt\nMM racy.txt\n");
 	}
 
 	/// Applying to the worktree reads only the files the patch touches: an
