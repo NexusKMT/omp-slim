@@ -533,6 +533,7 @@ async function createDefaultRuntime(configFiles: string[] | undefined): Promise<
 	const authStorage = await discoverAuthStorage(undefined, { settings });
 	try {
 		const modelRegistry = new ModelRegistry(authStorage);
+		await modelRegistry.hydrateCredentialScopedModelCaches();
 		await loadCliExtensionProviders(modelRegistry, settings, cwd);
 		return {
 			modelRegistry,
