@@ -227,7 +227,8 @@ export const cfgExpandThinkingBlocks = register({
 		tab: "model",
 		group: "Thinking",
 		label: "Expand Thinking Blocks",
-		description: "Tern only: keep finished thinking blocks expanded instead of collapsing them when the turn ends",
+		description: "Keep finished thinking blocks expanded instead of collapsing them when the turn ends",
+		condition: "nativeRendering",
 	},
 });
 
