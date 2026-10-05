@@ -183,6 +183,8 @@ field.addEventListener("change", () => reported.push("change:" + field.value));
 					action: "run",
 					name: tabName,
 					code: `await tab.fill("#q", "");
+// A field that is already empty has nothing to report.
+await tab.fill("#q", "");
 return { value: await tab.value("#q"), reported: await tab.evaluate(() => window.reported) };`,
 					timeout: 25,
 				},

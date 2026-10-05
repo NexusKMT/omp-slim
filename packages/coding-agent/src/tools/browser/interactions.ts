@@ -248,6 +248,7 @@ export async function fillViaHandle(
 				dispatchEvent(event: unknown): boolean;
 			};
 			node.focus?.();
+			const before = node.isContentEditable ? node.innerText : node.value;
 			if (node.isContentEditable) node.innerText = "";
 			else if ("value" in node) {
 				// The prototype setter bypasses value trackers that frameworks (React) install on the
@@ -256,8 +257,9 @@ export async function fillViaHandle(
 				if (setValue) setValue.call(node, "");
 				else node.value = "";
 			}
-			// Typing a value fires its own input events; an empty value types nothing.
-			if (!clearing) return;
+			// Typing a value fires its own input events; an empty value types nothing,
+			// so report the clear itself when there was something to clear.
+			if (!clearing || !before) return;
 			const { Event } = globalThis as unknown as PageGlobals;
 			node.dispatchEvent(new Event("input", { bubbles: true }));
 			node.dispatchEvent(new Event("change", { bubbles: true }));
