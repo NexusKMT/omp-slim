@@ -79,7 +79,9 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser interaction parity", () => {
 		const session = makeSession();
 		const prelude = createBrowserPrelude(session);
 		const tabName = `locked-${crypto.randomUUID()}`;
-		const lockedHtml = `<!doctype html><input id="locked" disabled value="kept"><input id="fixed" readonly value="kept"><input id="other">`;
+		const lockedHtml = `<!doctype html><input id="locked" disabled value="kept"><input id="fixed" readonly value="kept">
+<input id="locksOnFocus" value="kept" onfocus="this.readOnly = true"><input id="disablesOnFocus" onfocus="this.disabled = true">
+<input id="other">`;
 		const context = { session, toolCallId: "browser-locked" };
 		await prelude.invoke(
 			{ action: "open", name: tabName, url: `data:text/html,${encodeURIComponent(lockedHtml)}` },
@@ -103,8 +105,11 @@ return {
 	fillDisabled: await attempt(() => tab.fill("#locked", "typed")),
 	fillReadOnly: await attempt(() => tab.fill("#fixed", "typed")),
 	typeDisabled: await attempt(() => tab.type("#locked", "typed")),
+	fillLockedOnFocus: await attempt(() => tab.fill("#locksOnFocus", "typed")),
+	typeDisabledOnFocus: await attempt(() => tab.type("#disablesOnFocus", "typed")),
 	locked: await tab.value("#locked"),
 	fixed: await tab.value("#fixed"),
+	lockedOnFocus: await tab.value("#locksOnFocus"),
 	other: await tab.value("#other"),
 };`,
 					timeout: 25,
@@ -115,8 +120,11 @@ return {
 				fillDisabled: "Cannot fill a disabled element",
 				fillReadOnly: "Cannot fill a read-only element",
 				typeDisabled: "Cannot type into a disabled element",
+				fillLockedOnFocus: "Cannot fill a read-only element",
+				typeDisabledOnFocus: "Cannot type into a disabled element",
 				locked: "kept",
 				fixed: "kept",
+				lockedOnFocus: "kept",
 				other: "",
 			});
 		} finally {

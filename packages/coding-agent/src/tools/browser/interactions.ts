@@ -221,18 +221,24 @@ export async function clickElement(
 }
 
 /**
- * Refuse a text-entry target that cannot take keystrokes. A disabled control
- * ignores `focus()`, so they would land in whichever element had focus; a
- * read-only one drops them.
+ * Focus a text-entry target, refusing one that cannot take keystrokes. A
+ * disabled control ignores `focus()`, so they would land in whichever element
+ * had focus; a read-only one drops them. The check runs after `focus()` so a
+ * focus handler that locks the field is seen.
  */
-export async function assertTextEntryTarget(
+export async function focusTextEntryTarget(
 	handle: ElementHandle,
 	action: "fill" | "type into",
 	signal?: AbortSignal,
 ): Promise<void> {
 	const refusal = await untilAborted(signal, () =>
 		handle.evaluate(el => {
-			const node = el as unknown as { readOnly?: boolean; matches(selector: string): boolean };
+			const node = el as unknown as {
+				readOnly?: boolean;
+				focus?: () => void;
+				matches(selector: string): boolean;
+			};
+			node.focus?.();
 			if (node.matches(":disabled")) return "disabled";
 			if (node.readOnly) return "read-only";
 			return null;
@@ -242,7 +248,7 @@ export async function assertTextEntryTarget(
 }
 
 /**
- * Refuse a disabled or read-only target, then focus, clear any existing value, and retype.
+ * Focus a field that can take text, clear any existing value, then retype.
  *
  * Every step is a DOM evaluation or an input dispatch, so this works on tabs
  * that produce no animation frames — unlike Puppeteer's `Locator.fill`, whose
@@ -259,7 +265,7 @@ export async function fillViaHandle(
 	signal?: AbortSignal,
 	type: (text: string) => Promise<unknown> = text => handle.type(text, { delay: 0 }),
 ): Promise<void> {
-	await assertTextEntryTarget(handle, "fill", signal);
+	await focusTextEntryTarget(handle, "fill", signal);
 	await untilAborted(signal, () =>
 		handle.evaluate(el => {
 			const node = el as unknown as {

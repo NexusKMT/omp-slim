@@ -159,11 +159,11 @@ import {
 	diffAriaSnapshot,
 } from "./snapshot-plus";
 import {
-	assertTextEntryTarget,
 	clickAt,
 	clickElement,
 	clickQueryHandlerText,
 	fillViaHandle,
+	focusTextEntryTarget,
 	highlightElement,
 	type HighlightOptions,
 	type InteractionHandle,
@@ -785,13 +785,7 @@ async function typeViaHandle(
 	options: Readonly<KeyboardTypeOptions> | undefined,
 	signal: AbortSignal,
 ): Promise<void> {
-	await assertTextEntryTarget(handle, "type into", signal);
-	await untilAborted(signal, () =>
-		handle.evaluate(el => {
-			const node = el as unknown as { focus?: () => void };
-			node.focus?.();
-		}),
-	);
+	await focusTextEntryTarget(handle, "type into", signal);
 	for (const character of text) {
 		throwIfAborted(signal);
 		await untilAborted(signal, () => handle.frame.page().keyboard.type(character, options));
@@ -1904,7 +1898,7 @@ export class WorkerCore {
 					async sig => {
 						const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
 						try {
-							await assertTextEntryTarget(handle, "type into", sig);
+							await focusTextEntryTarget(handle, "type into", sig);
 							await untilAborted(sig, () => handle.type(text, { delay: 0 }));
 						} finally {
 							await handle.dispose().catch(() => undefined);
