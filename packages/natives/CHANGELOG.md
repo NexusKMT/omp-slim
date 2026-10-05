@@ -42,6 +42,7 @@
 ### Fixed
 
 - Fixed `maxCountPerFile` being ignored when `grep` is given a single explicit file. It reached only the directory walks, so a hot file returned the whole global `maxCount` budget; the option is documented as unconditional, and the offset now survives the fold so paginated single-file searches are unaffected ([#14162](https://github.com/can1357/oh-my-pi/issues/14162)).
+- Fixed single-file `count` mode applying the `maxCount` content cap. `single_file_params` now clears `max_count` for `OutputMode::Count` the way `per_file_params` already did, so `grep({ path: file, mode: Count, maxCount: 2 })` reports every match in the file instead of the cap's `max+1` value and matches the directory path ([#14327](https://github.com/can1357/oh-my-pi/pull/14327)).
 
 ## [18.5.1] - 2026-10-03
 

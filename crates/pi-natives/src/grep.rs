@@ -3258,6 +3258,63 @@ mod tests {
 		assert_eq!(result.matches[0].match_count, Some(2));
 	}
 
+	/// roboomp: `single_file_params` also changed single-file Count mode.
+	///
+	/// Before this change the direct-file branch passed the caller's `max_count`
+	/// to `MatchCollector`, so `grep({ path: file, mode: Count, maxCount: 2 })` on a
+	/// file with 5 matches stopped at the third match and reported `matchCount: 3`, the
+	/// max+1 value from the early `Ok(false)`. With `Count => None` the same call now
+	/// reports 5, matching the directory path, where aggregation pushes the full
+	/// `result.match_count`.
+	///
+	/// Self-contained on purpose: the shared `write_file` and `base_grep_config`
+	/// helpers are `#[cfg(unix)]`, so this case builds its own file and config and
+	/// therefore runs on every platform.
+	#[test]
+	fn grep_single_file_count_mode_reports_every_match() {
+		let dir = std::env::temp_dir().join(format!(
+			"omp-grep-count-{}-{:?}",
+			std::process::id(),
+			std::thread::current().id()
+		));
+		std::fs::create_dir_all(&dir).expect("create temp dir");
+		let file = dir.join("only.txt");
+		std::fs::write(&file, "needle 1\nneedle 2\nneedle 3\nneedle 4\nneedle 5\n")
+			.expect("write test file");
+
+		let config = super::GrepConfig {
+			pattern:            "needle".to_string(),
+			path:               file.to_string_lossy().into_owned(),
+			glob:               None,
+			recursive:          None,
+			type_filter:        None,
+			ignore_case:        None,
+			multiline:          None,
+			hidden:             None,
+			gitignore:          Some(false),
+			max_count:          Some(2),
+			offset:             None,
+			context_before:     None,
+			context_after:      None,
+			context:            None,
+			max_columns:        None,
+			mode:               Some(super::GrepOutputMode::Count),
+			max_count_per_file: None,
+			filesystem:         super::BlockingFs::native(),
+			stream:             None,
+		};
+
+		let result = super::grep_sync(config, None, crate::task::CancelToken::default())
+			.expect("single-file grep should succeed");
+		let _ = std::fs::remove_dir_all(&dir);
+
+		assert_eq!(
+			result.matches[0].match_count,
+			Some(5),
+			"count mode must report every match in a single file, not the content cap"
+		);
+	}
+
 	#[cfg(unix)]
 	#[test]
 	fn grep_streaming_respects_pre_cancelled_token() {
