@@ -75,6 +75,55 @@ afterAll(async () => {
 });
 
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser interaction parity", () => {
+	test("refuses to fill or type into a disabled or read-only field", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const tabName = `locked-${crypto.randomUUID()}`;
+		const lockedHtml = `<!doctype html><input id="locked" disabled value="kept"><input id="fixed" readonly value="kept"><input id="other">`;
+		const context = { session, toolCallId: "browser-locked" };
+		await prelude.invoke(
+			{ action: "open", name: tabName, url: `data:text/html,${encodeURIComponent(lockedHtml)}` },
+			context,
+		);
+		try {
+			const result = await prelude.invoke(
+				{
+					action: "run",
+					name: tabName,
+					code: `const attempt = async action => {
+	try {
+		await action();
+		return "ok";
+	} catch (error) {
+		return error instanceof Error ? error.message : String(error);
+	}
+};
+await tab.focus("#other");
+return {
+	fillDisabled: await attempt(() => tab.fill("#locked", "typed")),
+	fillReadOnly: await attempt(() => tab.fill("#fixed", "typed")),
+	typeDisabled: await attempt(() => tab.type("#locked", "typed")),
+	locked: await tab.value("#locked"),
+	fixed: await tab.value("#fixed"),
+	other: await tab.value("#other"),
+};`,
+					timeout: 25,
+				},
+				context,
+			);
+			expect(valueFrom<Record<string, string>>(result)).toEqual({
+				fillDisabled: "Cannot fill a disabled element",
+				fillReadOnly: "Cannot fill a read-only element",
+				typeDisabled: "Cannot type into a disabled element",
+				locked: "kept",
+				fixed: "kept",
+				other: "",
+			});
+		} finally {
+			await prelude.invoke({ action: "close", name: tabName, kill: true }, context).catch(() => undefined);
+		}
+	}, 40_000);
+
 	test("guards covered clicks and drives keyboard, pointer, drop-zone, checked-state, and highlight interactions", async () => {
 		const session = makeSession();
 		const prelude = createBrowserPrelude(session);
