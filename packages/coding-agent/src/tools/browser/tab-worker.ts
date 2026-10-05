@@ -159,6 +159,7 @@ import {
 	diffAriaSnapshot,
 } from "./snapshot-plus";
 import {
+	ClickRefusedError,
 	clickAt,
 	clickElement,
 	clickQueryHandlerText,
@@ -567,13 +568,23 @@ async function runGuardedHandleAction<T>(
 	} catch (error) {
 		if (!signal.aborted) throw error;
 		state.invalidatedBy = label;
-		void pending.catch(() => undefined);
+		let actionError: unknown;
 		await withTimeout(
-			Promise.all([handle.dispose().catch(() => undefined), invalidate?.().catch(() => undefined)]),
+			Promise.all([
+				pending.then(
+					() => undefined,
+					(err: unknown) => {
+						actionError = err;
+					},
+				),
+				handle.dispose().catch(() => undefined),
+				invalidate?.().catch(() => undefined),
+			]),
 			HANDLE_ACTION_INVALIDATION_TIMEOUT_MS,
 			`Timed out invalidating ${label}`,
 		).catch(() => undefined);
-		throw error;
+		// A click still refused when the deadline hit carries the reason on its own abort error.
+		throw actionError instanceof ClickRefusedError ? actionError : error;
 	}
 }
 
@@ -1696,7 +1707,13 @@ export class WorkerCore {
 				!cellSignal.aborted &&
 				(opTimeout?.aborted || (err instanceof Error && err.name === "TimeoutError"))
 			) {
-				const hint = selector ? await this.#selectorTimeoutHint(selector) : "";
+				const refusal = err instanceof ClickRefusedError ? err.refusal : undefined;
+				const count = selector ? await this.#selectorMatchCount(selector) : undefined;
+				const hint = refusal
+					? `; the element never became clickable (last check: ${refusal}${count === undefined ? "" : `; selector matches ${count} element(s)`})`
+					: count === undefined
+						? ""
+						: formatSelectorMatchHint(count);
 				throw markBrowserRunRejection(
 					new ToolError(`${label} timed out after ${perOpTimeoutMs}ms${hint}`),
 					active.rejectionOwner,
@@ -1744,22 +1761,21 @@ export class WorkerCore {
 	}
 
 	/**
-	 * Best-effort match-count probe for a timed-out selector op. Never throws;
-	 * empty string when the probe fails, stalls, or the selector is an aria-ref.
+	 * Best-effort match count for a timed-out selector op. Never throws;
+	 * undefined when the probe fails, stalls, or the selector is an aria-ref.
 	 */
-	async #selectorTimeoutHint(selector: string): Promise<string> {
-		if (parseAriaRefSelector(selector) !== null) return "";
+	async #selectorMatchCount(selector: string): Promise<number | undefined> {
+		if (parseAriaRefSelector(selector) !== null) return undefined;
 		try {
 			const handles = await Promise.race([
 				this.#requirePage().$$(normalizeSelector(selector)),
 				Bun.sleep(1_000).then(() => null),
 			]);
-			if (!handles) return "";
-			const count = handles.length;
+			if (!handles) return undefined;
 			for (const handle of handles) void handle.dispose().catch(() => undefined);
-			return formatSelectorMatchHint(count);
+			return handles.length;
 		} catch {
-			return "";
+			return undefined;
 		}
 	}
 
@@ -1873,24 +1889,25 @@ export class WorkerCore {
 					return content;
 				}),
 			click: selector =>
-				op(`tab.click(${JSON.stringify(selector)})`, actionOpMs, async sig => {
-					const label = `tab.click(${JSON.stringify(selector)})`;
-					const resolved = normalizeSelector(selector);
-					if (resolved.startsWith("text/") && parseAriaRefSelector(selector) === null) {
-						await clickQueryHandlerText(page, resolved, label, actionOpMs, sig);
-						return;
-					}
-					const handle =
-						parseAriaRefSelector(selector) !== null
-							? await this.#resolveAriaRef(selector)
-							: ((await untilAborted(sig, () => page.$(resolved))) as ElementHandle | null);
-					if (!handle) throw new ToolError(`${label} matched no visible element`);
-					try {
-						await clickElement(handle, label, sig);
-					} finally {
-						void handle.dispose().catch(() => undefined);
-					}
-				}),
+				op(
+					`tab.click(${JSON.stringify(selector)})`,
+					actionOpMs,
+					async sig => {
+						const label = `tab.click(${JSON.stringify(selector)})`;
+						const resolved = normalizeSelector(selector);
+						if (resolved.startsWith("text/") && parseAriaRefSelector(selector) === null) {
+							await clickQueryHandlerText(page, resolved, label, actionOpMs, sig);
+							return;
+						}
+						const handle = await this.#resolveActionHandle(selector, actionOpMs, sig);
+						try {
+							await clickElement(handle, label, sig);
+						} finally {
+							void handle.dispose().catch(() => undefined);
+						}
+					},
+					{ selector, zeroMatchAfterMs: ZERO_MATCH_FAIL_FAST_MS },
+				),
 			type: (selector, text) =>
 				op(
 					`tab.type(${JSON.stringify(selector)})`,
