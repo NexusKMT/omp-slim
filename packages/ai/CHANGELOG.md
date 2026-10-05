@@ -10,6 +10,9 @@
 
 - Codex native-lane steering rejections (`unsupported_native_inflight_message`) now classify as retryable from their error text alone, matching the provider's own classification, and `AIError.isCodexSteerRejection()` identifies them so the agent retry can stay on the same model ([#14242](https://github.com/can1357/oh-my-pi/pull/14242) by [@alphastorm](https://github.com/alphastorm))
 - Fixed replayed Responses and Codex history, including persisted Codex user/developer and assistant items, sending `detail: "original"` images to endpoints whose `supportsImageDetailOriginal` is off ([#13687](https://github.com/can1357/oh-my-pi/pull/13687) by [@alphastorm](https://github.com/alphastorm)).
+### Fixed
+
+- Fixed single-string tool calls whose payload arrived under a mislabelled key resolving to different arguments depending only on JSON key order: with two or more string candidates the arguments are now returned to the model unchanged instead of adopting the first one found, while a lone candidate is still adopted as the declared key ([#9653](https://github.com/can1357/oh-my-pi/issues/9653) by [@F0Rextasy](https://github.com/F0Rextasy)).
 
 ## [18.6.1] - 2026-10-04
 
