@@ -2,8 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
+import { navigateMainFrame } from "@oh-my-pi/pi-coding-agent/tools/browser/navigation";
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
+import type { Page } from "puppeteer-core";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
@@ -77,6 +79,20 @@ afterAll(async () => {
 	await releaseAllTabs({ kill: true });
 	await disposeAllVmContexts();
 	server.stop(true);
+});
+
+test("fails a navigation whose main document reaches its event only after the timeout", async () => {
+	const events = new Set<string>();
+	const page = { mainFrame: () => ({ _lifecycleEvents: events }) } as unknown as Page;
+	// Real time on purpose: the wait polls the frame on a timer and must stop reading at its deadline.
+	const late = setTimeout(() => events.add("load"), 90);
+	try {
+		await expect(navigateMainFrame(page, "load", 60, undefined, async () => null)).rejects.toThrow(
+			"Navigation timeout of 60 ms exceeded",
+		);
+	} finally {
+		clearTimeout(late);
+	}
 });
 
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and tab listing", () => {

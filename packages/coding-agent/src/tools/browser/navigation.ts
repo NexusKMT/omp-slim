@@ -91,8 +91,10 @@ export async function navigateMainFrame(
 	await untilAborted(signal, () => navigate({ waitUntil: [], timeout }));
 	const event = MAIN_FRAME_LIFECYCLE_EVENTS[waitUntil];
 	while (!page.mainFrame()._lifecycleEvents.has(event)) {
-		if (Date.now() >= deadline) throw new TimeoutError(`Navigation timeout of ${timeout} ms exceeded`);
-		await untilAborted(signal, () => Bun.sleep(MAIN_FRAME_POLL_MS));
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) throw new TimeoutError(`Navigation timeout of ${timeout} ms exceeded`);
+		// The last read lands on the deadline, so an event that arrives after it is a timeout.
+		await untilAborted(signal, () => Bun.sleep(Math.min(MAIN_FRAME_POLL_MS, remaining)));
 	}
 }
 
