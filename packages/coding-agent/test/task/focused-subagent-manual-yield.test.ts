@@ -66,21 +66,22 @@ afterEach(async () => {
 	await removeWithRetries(root);
 });
 
-/** Text of the newest user/developer message the mock model sees. */
-function lastPromptText(messages: ReadonlyArray<{ role: string; content: unknown }>): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message.role !== "user" && message.role !== "developer") continue;
-		if (typeof message.content === "string") return message.content;
-		if (!Array.isArray(message.content)) return "";
-		return message.content
-			.map(part => (part && typeof part === "object" && "text" in part ? String(part.text) : ""))
-			.join("");
-	}
-	return "";
+/** Whether any user/developer message the mock model sees asked it to "go on" (a manual focused prompt). */
+function sawManualPrompt(messages: ReadonlyArray<{ role: string; content: unknown }>): boolean {
+	return messages.some(message => {
+		if (message.role !== "user" && message.role !== "developer") return false;
+		if (typeof message.content === "string") return message.content.includes("go on");
+		return (
+			Array.isArray(message.content) &&
+			message.content.some(
+				part => part && typeof part === "object" && "text" in part && String(part.text).includes("go on"),
+			)
+		);
+	});
 }
 
-it("a focused manual prompt's yield rewrites the artifact and notifies the parent", async () => {
+/** Runs `AGENT_ID` to a kept-alive idle state that yielded `initial result`, with the parent's delivery sink recording completions. */
+async function spawnKeptAliveChild() {
 	const cwd = path.join(root, "work");
 	const artifactsDir = path.join(root, "artifacts");
 	await fs.mkdir(cwd, { recursive: true });
@@ -94,17 +95,23 @@ it("a focused manual prompt's yield rewrites the artifact and notifies the paren
 			if (!(context.tools ?? []).some(tool => tool.name === "yield")) return { content: ["label"] };
 			// A turn that already yielded ends on the tool result; answer it with prose.
 			if (context.messages.at(-1)?.role === "toolResult") return { content: ["ok"] };
-			const data = lastPromptText(context.messages).includes("go on") ? "manual result" : "initial result";
+			const data = sawManualPrompt(context.messages) ? "manual result" : "initial result";
 			return { content: [{ type: "toolCall", name: "yield", arguments: { type: "result", data } }] };
 		},
 	});
 	const catalogAvailable = modelRegistry.getAvailable.bind(modelRegistry);
 	vi.spyOn(modelRegistry, "getAvailable").mockImplementation(kind => [mock, ...catalogAvailable(kind)]);
 
-	const delivered = Promise.withResolvers<string>();
+	const deliveries: string[] = [];
+	const firstDelivery = Promise.withResolvers<string>();
 	const unregisterSink = manager.registerDeliverySink(PARENT_ID, (_jobId, text) => {
-		delivered.resolve(text);
+		deliveries.push(text);
+		firstDelivery.resolve(text);
 	});
+	const close = (): void => {
+		unregisterSink();
+		authStorage.close();
+	};
 	try {
 		const result = await runSubprocess({
 			cwd,
@@ -131,19 +138,59 @@ it("a focused manual prompt's yield rewrites the artifact and notifies the paren
 			enableIrc: false,
 		});
 		expect(result.exitCode).toBe(0);
-		const artifact = path.join(artifactsDir, `${AGENT_ID}.md`);
-		expect(await Bun.file(artifact).text()).toContain("initial result");
+	} catch (error) {
+		close();
+		throw error;
+	}
+	const artifact = path.join(artifactsDir, `${AGENT_ID}.md`);
+	expect(await Bun.file(artifact).text()).toContain("initial result");
+	const session = AgentRegistry.global().get(AGENT_ID)?.session;
+	if (!session) {
+		close();
+		throw new Error("kept-alive subagent has no live session");
+	}
+	return { session, artifact, deliveries, firstDelivery: firstDelivery.promise, close };
+}
 
+it("a focused manual prompt's yield rewrites the artifact and notifies the parent", async () => {
+	const child = await spawnKeptAliveChild();
+	try {
 		// The focused-session input path: a plain user prompt on the idle child.
-		const session = AgentRegistry.global().get(AGENT_ID)?.session;
-		if (!session) throw new Error("kept-alive subagent has no live session");
-		await session.prompt("go on");
+		await child.session.prompt("go on");
 
 		// The job settles only after finalization has rewritten the artifact.
-		expect(await delivered.promise).toContain("manual result");
-		expect(await Bun.file(artifact).text()).toContain("manual result");
+		expect(await child.firstDelivery).toContain("manual result");
+		expect(await Bun.file(child.artifact).text()).toContain("manual result");
 	} finally {
-		unregisterSink();
-		authStorage.close();
+		child.close();
+	}
+}, 15_000);
+
+it("a prompt typed while the previous turn awaits owned background work delivers one completion", async () => {
+	const child = await spawnKeptAliveChild();
+	try {
+		// Owned background work keeps the first manual turn's observation open
+		// after the turn itself returns, leaving the child idle for another prompt.
+		const gate = Promise.withResolvers<void>();
+		manager.register(
+			"bash",
+			"background build",
+			async () => {
+				await gate.promise;
+				return "build done";
+			},
+			{ ownerId: AGENT_ID, agentId: AGENT_ID },
+		);
+		await child.session.prompt("go on");
+		await child.session.prompt("go on");
+		gate.resolve();
+
+		await child.firstDelivery;
+		await manager.waitForOwnerJobs(PARENT_ID);
+		await manager.drainDeliveries({ filter: { ownerId: PARENT_ID } });
+		expect(child.deliveries).toHaveLength(1);
+		expect(child.deliveries[0]).toContain("manual result");
+	} finally {
+		child.close();
 	}
 }, 15_000);
