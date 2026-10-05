@@ -17,8 +17,11 @@
 //! 3. Any other piece is cut into [`WINDOW`]-byte windows, and each window runs
 //!    tiktoken's byte-pair merge with o200k ranks, restricted to a ~54k-token
 //!    base subset of o200k. Whole-piece hits in the base table are *not*
-//!    short-circuited ([`RankTable::count_merged`]): `token` is a whole word
+//!    short-circuited ([`RankTable::count_merged_in`]): `token` is a whole word
 //!    but not a base token, so `tokenize` costs 3.
+//!
+//! Both sets are o200k subsets, so they are stored as rank bitsets over the
+//! shared o200k table rather than as two more rank tables.
 //!
 //! Counts are state *content*: the request frame (question text, template,
 //! 269 tokens for a minimal one-noul request) is excluded, matching the
@@ -29,8 +32,10 @@
 use std::sync::LazyLock;
 
 use crate::utok::{
-	bpe::{BpeEncoding, RankTable},
+	Encoding,
+	bpe::{self, RankTable},
 	pretoken::Splitter,
+	tables,
 	utf::Unit,
 };
 
@@ -40,34 +45,46 @@ use crate::utok::{
 /// once it crosses byte 512 mid-character).
 const WINDOW: usize = 512;
 
+/// Bytes per rank bitset: one bit per o200k rank (199,998 ranks).
+const SET_BYTES: usize = 25_000;
+
 struct Jev {
-	/// Base merge table (o200k ranks, non-base slots empty) plus the shared
-	/// Qwen3.5 splitter and NFC contract.
-	bpe:   BpeEncoding,
-	/// Whole-word entries; only membership is read.
-	whole: RankTable,
+	o200k: &'static RankTable,
+	/// Base set bits, then whole-word set bits; rank `r` is bit `r & 7` of
+	/// byte `r >> 3` within its set.
+	sets:  Box<[u8]>,
 }
 
-static JEV: LazyLock<Jev> = LazyLock::new(|| Jev {
-	bpe:   BpeEncoding {
-		table:         RankTable::parse(include_bytes!("../../data/jev_base.bin.zst")),
-		splitter:      Splitter::Qwen,
-		nfc:           true,
-		ignore_merges: false,
-	},
-	whole: RankTable::parse(include_bytes!("../../data/jev_whole.bin.zst")),
+static JEV: LazyLock<Jev> = LazyLock::new(|| {
+	let sets = zstd::decode_all(&include_bytes!("../../data/jev_sets.bin.zst")[..])
+		.expect("utoken: zstd decode failed");
+	assert_eq!(sets.len(), 2 * SET_BYTES, "utoken: bad jev set blob");
+	Jev { o200k: &tables::bpe_for(Encoding::O200kBase).table, sets: sets.into_boxed_slice() }
 });
+
+impl Jev {
+	#[inline]
+	fn member(&self, set: usize, rank: u32) -> bool {
+		let r = rank as usize;
+		self.sets[set * SET_BYTES + (r >> 3)] >> (r & 7) & 1 != 0
+	}
+}
 
 /// Jev input-token count of `units` (any UTF flavor) as state content,
 /// excluding the request frame. Valid text counts flavor-invariantly.
 pub fn content_token_count<U: Unit>(units: &[U]) -> u32 {
+	const BASE: usize = 0;
+	const WHOLE: usize = 1;
 	let jev = &*JEV;
 	let mut n = 0u32;
-	jev.bpe.run(units, &mut |base, piece| {
-		n += if jev.whole.rank(piece).is_some() {
+	bpe::for_each_piece(&Splitter::Qwen, true, units, &mut |piece| {
+		n += if jev.o200k.rank(piece).is_some_and(|r| jev.member(WHOLE, r)) {
 			1
 		} else {
-			piece.chunks(WINDOW).map(|w| base.count_merged(w)).sum()
+			piece
+				.chunks(WINDOW)
+				.map(|w| jev.o200k.count_merged_in(w, |r| jev.member(BASE, r)))
+				.sum()
 		};
 	});
 	n

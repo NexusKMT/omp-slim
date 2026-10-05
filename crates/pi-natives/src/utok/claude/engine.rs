@@ -45,6 +45,8 @@ pub struct PieceMatcher {
 	/// Dense transitions out of the root, which is the hottest state by far.
 	/// Zero (the root itself) where no piece starts with that byte.
 	root_goto:    [u32; 256],
+	/// Byte length of the longest piece: how far back the tiling DP reads.
+	max_len:      usize,
 }
 
 /// One automaton state: goto edges, the fail link, and the piece chain the DP
@@ -130,7 +132,8 @@ impl Builder {
 				dict:       0,
 			})
 			.collect();
-		let mut matcher = PieceMatcher { states, edge_bytes, edge_targets, root_goto: [0; 256] };
+		let mut matcher =
+			PieceMatcher { states, edge_bytes, edge_targets, root_goto: [0; 256], max_len: 0 };
 		matcher.link(&self.terminal, &self.depth);
 		matcher
 	}
@@ -152,6 +155,7 @@ impl PieceMatcher {
 		while let Some(u) = queue.pop_front() {
 			let fail = self.states[u as usize].fail;
 			self.states[u as usize].out_len = if terminal[u as usize] {
+				self.max_len = self.max_len.max(depth[u as usize] as usize);
 				u16::try_from(depth[u as usize]).expect("piece length fits u16")
 			} else {
 				0
@@ -268,7 +272,12 @@ pub fn min_vocab_tile(
 	if n == 0 {
 		return 0;
 	}
-	let mut best = vec![0u32; n + 1];
+	// `best` is read only at `end - len` for a piece ending at `end` and at
+	// the start of the final character (≤ 4 bytes back), so a ring over that
+	// reach replaces a stream-length array. Continuation offsets are never
+	// written or read, so their stale slots are harmless.
+	let mask = (vocab.max_len.max(4) + 1).next_power_of_two() - 1;
+	let mut best = vec![0u32; mask + 1];
 	let mut state = 0u32;
 	for end in 1..=n {
 		state = vocab.advance(state, s[end - 1]);
@@ -285,15 +294,15 @@ pub fn min_vocab_tile(
 		let mut cost = u32::MAX;
 		let mut spelled = false;
 		for len in vocab.matches(state) {
-			cost = cost.min(best[end - len] + 1);
+			cost = cost.min(best[(end - len) & mask] + 1);
 			spelled |= len == single;
 		}
 		if !spelled {
-			cost = cost.min(best[start] + unit_cost(start, end));
+			cost = cost.min(best[start & mask] + unit_cost(start, end));
 		}
-		best[end] = cost;
+		best[end & mask] = cost;
 	}
-	best[n]
+	best[n & mask]
 }
 
 /// What a codepoint costs when no piece covers it: a min-cost tiling of its
