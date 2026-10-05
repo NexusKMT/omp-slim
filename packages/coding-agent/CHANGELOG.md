@@ -27,7 +27,7 @@
 - Auto-retry no longer switches to the fallback chain when Codex's native turn lane rejects live steering after the response streamed reasoning; the turn retries on the same model with the steering message as ordinary input, and the chain is consulted only once no same-model retry is left ([#14242](https://github.com/can1357/oh-my-pi/pull/14242) by [@alphastorm](https://github.com/alphastorm))
 ### Fixed
 
-- Fixed `--resume <path>` silently creating a brand new session when the path did not exist; it now fails with a message naming the path, matching `--fork <path>` and `--resume <id>` ([#14404](https://github.com/can1357/oh-my-pi/pull/14404) by [@F0Rextasy](https://github.com/F0Rextasy), fixes [#13928](https://github.com/can1357/oh-my-pi/issues/13928))
+- Fixed `--resume <path>` silently creating a brand new session when the path did not exist; it now fails with a message naming the path, matching `--fork <path>` and `--resume <id>` ([#14404](https://github.com/can1357/oh-my-pi/pull/14404) by [@F0Rextasy](https://github.com/F0Rextasy))
 
 ## [18.6.2] - 2026-10-04
 
