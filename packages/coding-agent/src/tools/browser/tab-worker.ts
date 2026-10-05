@@ -1684,6 +1684,10 @@ export class WorkerCore {
 		// the finally (stops the watchdog's polling once the op settles either way).
 		const earlyAc = new AbortController();
 		try {
+			// A download this op starts before a pending `waitForDownload()` has enabled
+			// tracking would bypass it, so hold the op until tracking applies.
+			const arming = this.#downloads?.arming;
+			if (arming) await arming.catch(() => undefined);
 			if (!watchdog) return await fn(opSignal);
 			const racedSignal = AbortSignal.any([opSignal, earlyAc.signal]);
 			return await Promise.race([
