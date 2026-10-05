@@ -95,9 +95,12 @@ const TEXT_NODE = 3;
 /**
  * Text of a subtree with line breaks where the document has block boundaries.
  * Whitespace outside `<pre>` is collapsed the way a renderer collapses it;
- * `<pre>` keeps its indentation and blank lines.
+ * `<pre>` keeps its indentation and blank lines. A raw-text root (`<script>`,
+ * `<template>`, …) returns its text as is. Only trailing whitespace is trimmed,
+ * so a leading empty-cell tab keeps the first row's columns aligned.
  */
-function blockText(root: DomNs.Node): string {
+function blockText(root: DomNs.Element): string {
+	if (SKIP_TAGS[root.tagName.toUpperCase()]) return (root.textContent ?? "").trimEnd();
 	// Parts are never empty, so the last part's last character is the output's.
 	// Only the last parts are ever rewritten, which keeps the walk linear.
 	const parts: string[] = [];
@@ -122,7 +125,8 @@ function blockText(root: DomNs.Node): string {
 		if (node.nodeType === TEXT_NODE) {
 			let text = node.textContent ?? "";
 			if (!pre) {
-				text = text.replace(/\s+/g, " ");
+				// ASCII whitespace only: `&nbsp;` is not collapsed by renderers either.
+				text = text.replace(/[ \t\n\r\f]+/g, " ");
 				const last = parts[parts.length - 1];
 				if (pendingBreaks > 0 || !last || " \n\t".includes(last.at(-1)!)) text = text.replace(/^ /, "");
 			}
@@ -147,7 +151,7 @@ function blockText(root: DomNs.Node): string {
 		for (const child of node.childNodes) walk(child, pre || tag === "PRE");
 		pendingBreaks = Math.max(pendingBreaks, breaks);
 	};
-	walk(root, false);
+	walk(root, root.parentElement?.closest("pre") != null);
 	return parts.join("").trimEnd();
 }
 
@@ -179,7 +183,7 @@ export async function extractReadableFromHtml(
 			const result = await toReadableResult(
 				url,
 				format,
-				body ? blockText(body) : article.textContent,
+				body ? blockText(body) : article.textContent?.trim(),
 				article.content,
 				{
 					title: article.title,
@@ -282,7 +286,9 @@ async function toReadableResult(
 	meta: { title?: string | null; byline?: string | null; excerpt?: string | null; length?: number | null },
 	options: ReadableExtractOptions,
 ): Promise<ReadableResult | null> {
-	const text = normalize(textContent);
+	// Text-format content is `blockText` output, already free of leading whitespace except a
+	// first-cell tab or `<pre>` indentation, both of which are content.
+	const text = format === "text" ? textContent?.trimEnd() || undefined : normalize(textContent);
 	let processedMarkdown = normalize(await htmlToBasicMarkdown(htmlContent ?? "")) ?? text;
 	if (!processedMarkdown) return null;
 	if (options.filter) processedMarkdown = normalize(filterMarkdownSections(processedMarkdown, options.filter));

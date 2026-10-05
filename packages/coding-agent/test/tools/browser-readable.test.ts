@@ -105,14 +105,40 @@ describe("browser readable extraction", () => {
 		);
 	});
 
-	it("returns the text of a selected script element", async () => {
-		const html = `<main><p>Body.</p><script type="application/ld+json">{"a":1}</script></main>`;
+	it("returns the text of a selected script element verbatim", async () => {
+		const json = '{\n  "name": "A   B",\n  "a": 1\n}';
+		const html = `<main><p>Body.</p><script type="application/ld+json">${json}</script></main>`;
 		const selector = "script[type='application/ld+json']";
 
 		const text = await extractReadableFromHtml(html, "https://example.com/", "text", { selector });
 		const markdown = await extractReadableFromHtml(html, "https://example.com/", "markdown", { selector });
 
-		expect(text?.text).toBe('{"a":1}');
-		expect(markdown?.markdown).toContain('{"a":1}');
+		expect(text?.text).toBe(json);
+		expect(markdown?.markdown).toContain('"a": 1');
+	});
+
+	it("keeps code whitespace when the selector lands inside a <pre>", async () => {
+		const code = "def f(x):\n    if x:\n        return 1\n\nprint(f(1))";
+		const html = `<main><p>Intro.</p><pre><code class="language-python">${code}</code></pre></main>`;
+
+		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "pre code" });
+
+		expect(result?.text).toBe(code);
+	});
+
+	it("keeps an empty corner cell so the first row's headers stay over their columns", async () => {
+		const html = `<main><table><tr><th></th><th>Free</th><th>Pro</th></tr><tr><td>Seats</td><td>1</td><td>10</td></tr></table></main>`;
+
+		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "table" });
+
+		expect(result?.text).toBe("\tFree\tPro\nSeats\t1\t10");
+	});
+
+	it("does not collapse non-breaking spaces", async () => {
+		const html = `<main><p>def f():<br>&nbsp;&nbsp;&nbsp;&nbsp;return 1</p></main>`;
+
+		const result = await extractReadableFromHtml(html, "https://example.com/", "text", { selector: "p" });
+
+		expect(result?.text).toBe("def f():\n\u00a0\u00a0\u00a0\u00a0return 1");
 	});
 });
