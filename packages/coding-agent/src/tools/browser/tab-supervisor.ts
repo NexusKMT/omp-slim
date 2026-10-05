@@ -810,31 +810,29 @@ async function runInTabWithSnapshot(
 			session: snapshot,
 		});
 		try {
-			return await raceWithTimeout(
+			const result = await raceWithTimeout(
 				promise,
 				opts.timeoutMs + GRACE_MS,
 				"Browser code execution hung past grace; tab killed",
 				async reason => await forceKillTab(name, reason),
 			);
+			if (result.recoverTab) {
+				await recoverWorkerTab(
+					tab,
+					name,
+					opts.timeoutMs,
+					"Browser request interception cleanup failed; tab killed",
+				);
+			}
+			return result;
 		} catch (error) {
 			const runTimedOut =
 				error instanceof ToolError && error.message.startsWith("Browser code execution timed out after ");
 			if (runTimedOut || error instanceof RecoverableWorkerError) {
-				try {
-					if (tab.worker.mode === "inline") {
-						const reason = runTimedOut
-							? "Browser code execution timed out; tab killed"
-							: "Browser request interception cleanup failed; tab killed";
-						await forceKillTab(name, reason);
-					} else {
-						await recycleTimedOutWorkerTab(tab, opts.timeoutMs + GRACE_MS);
-					}
-				} catch (recycleError) {
-					logger.warn("Failed to recycle browser tab worker; killing tab", {
-						error: recycleError instanceof Error ? recycleError.message : String(recycleError),
-					});
-					await forceKillTab(name, "Browser tab worker recovery failed; tab killed");
-				}
+				const reason = runTimedOut
+					? "Browser code execution timed out; tab killed"
+					: "Browser request interception cleanup failed; tab killed";
+				await recoverWorkerTab(tab, name, opts.timeoutMs, reason);
 			}
 			throw error;
 		}
@@ -844,6 +842,19 @@ async function runInTabWithSnapshot(
 		// Completion is use too: a run outlasting the idle timeout must
 		// not look stale to the sweep right after it finishes.
 		tab.lastActivityAt = Date.now();
+	}
+}
+
+/** Recycle a worker whose tab state is unknown; an inline worker shares this process, so its tab is killed instead. */
+async function recoverWorkerTab(tab: WorkerTabSession, name: string, timeoutMs: number, reason: string): Promise<void> {
+	try {
+		if (tab.worker.mode === "inline") await forceKillTab(name, reason);
+		else await recycleTimedOutWorkerTab(tab, timeoutMs + GRACE_MS);
+	} catch (recycleError) {
+		logger.warn("Failed to recycle browser tab worker; killing tab", {
+			error: recycleError instanceof Error ? recycleError.message : String(recycleError),
+		});
+		await forceKillTab(name, "Browser tab worker recovery failed; tab killed");
 	}
 }
 
