@@ -223,8 +223,12 @@ try {
 	it("keeps one port's relay running when another relay starts on a different port", async () => {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-relay-ports-"));
 		const globalRuntimeDir = path.join(home, ".omp", "run", "daemons", "global", "browser-relay");
-		const firstUrl = `http://127.0.0.1:${await findFreeCdpPort()}`;
-		const secondUrl = `http://127.0.0.1:${await findFreeCdpPort()}`;
+		const firstPort = await findFreeCdpPort();
+		let secondPort = await findFreeCdpPort();
+		// The finder releases its probe listener, so it can hand back the same port twice.
+		while (secondPort === firstPort) secondPort = await findFreeCdpPort();
+		const firstUrl = `http://127.0.0.1:${firstPort}`;
+		const secondUrl = `http://127.0.0.1:${secondPort}`;
 		const child = Bun.spawn(
 			[
 				process.execPath,
