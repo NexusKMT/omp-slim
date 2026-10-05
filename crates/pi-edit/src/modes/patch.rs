@@ -5,8 +5,8 @@ use std::{cell::OnceCell, collections::HashSet, fmt::Write, sync::Arc};
 
 use crate::{
 	diff_string::{
-		BlockContextSource, DiffHunk, generate_diff_string, generate_unified_diff_string,
-		normalize_create_content, parse_diff_hunks,
+		BlockContextSource, DiffHunk, LineDiff, generate_diff_string, normalize_create_content,
+		parse_diff_hunks,
 	},
 	engine::{
 		EditMode, FileOp, FileOpIntent, HeaderKind, Inspection, ModeEngine, PreviewFile, Resolved,
@@ -1377,17 +1377,12 @@ fn stage_from_parts(
 	let source_path = move_to
 		.as_ref()
 		.map_or(input.path, |value| value.display.as_str());
-	let unified =
-		generate_unified_diff_string(&before, comparison_after, None, &BlockContextSource {
-			path:      Some(source_path),
-			lang:      None,
-			streaming: false,
-		});
-	let preview = generate_diff_string(&before, comparison_after, None, &BlockContextSource {
-		path:      Some(source_path),
-		lang:      None,
-		streaming: false,
-	});
+	// Both renderings come from one Myers run over the same line tokens.
+	let source =
+		BlockContextSource { path: Some(source_path), lang: None, streaming: false };
+	let line_diff = LineDiff::new(&before, comparison_after);
+	let unified = line_diff.unified(None, &source);
+	let preview = line_diff.numbered(None, &source);
 	let op = engine_op(input.op);
 	let persisted = match after.as_deref() {
 		Some(text) if use_new_encoding || read.is_none() => Some(persist_new(&resolved, text)?),
