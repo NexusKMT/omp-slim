@@ -173,6 +173,7 @@ import {
 	mouseDown,
 	mouseMove,
 	mouseUp,
+	pressKey,
 	setElementChecked,
 	type ScrollOptions,
 	uploadFilesToElement,
@@ -333,7 +334,7 @@ interface TabApi {
 	click(selector: string): Promise<void>;
 	type(selector: string, text: string): Promise<void>;
 	fill(selector: string, value: string): Promise<void>;
-	press(key: KeyInput, opts?: { selector?: string }): Promise<void>;
+	press(key: string, opts?: { selector?: string }): Promise<void>;
 	scroll(deltaX: number, deltaY: number, opts?: ScrollOptions): Promise<void>;
 	drag(from: DragTarget, to: DragTarget): Promise<void>;
 	waitFor(selector: string, opts?: { timeout?: number }): Promise<ActionableHandle>;
@@ -684,6 +685,16 @@ export function toActionableHandle(
 		for (const method of GUARDED_HANDLE_METHODS) {
 			const original = methods[method];
 			if (typeof original === "function") interactive[method] = original.bind(enriched);
+		}
+		// Puppeteer's `ElementHandle.press` takes a single key name; focus and press
+		// through `pressKey` so combos and the macOS editing commands work on handles too.
+		const focus = interactive.focus;
+		if (focus) {
+			const press: ElementHandle["press"] = async (key, options) => {
+				await focus();
+				await pressKey(enriched.frame.page(), key, options);
+			};
+			interactive.press = press as RawHandleMethod;
 		}
 		originals = { interactive, type: enriched.type.bind(enriched) };
 		enriched[RAW_HANDLE_METHODS] = originals;
@@ -1960,7 +1971,7 @@ export class WorkerCore {
 							}
 						} else await untilAborted(sig, () => page.focus(normalizeSelector(selector)));
 					}
-					await untilAborted(sig, () => page.keyboard.press(key));
+					await untilAborted(sig, () => pressKey(page, key));
 				}),
 			scroll: (deltaX, deltaY, opts) =>
 				op("tab.scroll()", actionOpMs, async sig => {

@@ -1,8 +1,9 @@
 import * as path from "node:path";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import type { ElementHandle, KeyInput, MouseButton, Page } from "puppeteer-core";
+import type { ElementHandle, KeyInput, KeyPressOptions, MouseButton, Page } from "puppeteer-core";
 import { ToolAbortError, throwIfAborted } from "../tool-errors";
+import { splitKeyCombo, ternKey } from "./tern/keys";
 
 /** Options accepted by coordinate-based mouse clicks. */
 export interface ClickAtOptions {
@@ -595,6 +596,62 @@ export async function keyDown(page: Page, key: KeyInput, signal?: AbortSignal): 
 /** Release a keyboard key previously pressed with keyDown. */
 export async function keyUp(page: Page, key: KeyInput, signal?: AbortSignal): Promise<void> {
 	await untilAborted(signal, () => page.keyboard.up(key));
+}
+
+/**
+ * macOS runs editing shortcuts as app-menu commands a CDP key event never reaches, so the key-down
+ * names Chrome's editor command instead; elsewhere the plain key event already edits.
+ * Keyed by the sorted Tern modifiers and the lower-cased letter.
+ */
+const EDITING_COMMANDS: Readonly<Record<string, string>> =
+	process.platform === "darwin"
+		? {
+				"meta+a": "selectAll",
+				"meta+c": "copy",
+				"meta+v": "paste",
+				"meta+x": "cut",
+				"meta+z": "undo",
+				"meta+shift+z": "redo",
+			}
+		: {};
+
+/** The editor command a combo names on macOS, whatever its spelling (`Meta+c`, `MetaLeft+KeyC`, `Shift+Meta+Z`). */
+function editingCommand(keys: readonly string[]): string | undefined {
+	const key = keys[keys.length - 1]!;
+	if (keys.length < 2 || !/^(?:Key[A-Z]|[A-Za-z])$/.test(key)) return undefined;
+	const modifiers = new Set<string>();
+	for (const name of keys.slice(0, -1)) {
+		// ternKey throws on names Tern cannot type; only modifiers can select a command.
+		const modifier = /^(?:Shift|Control|Alt|Meta)(?:Left|Right)?$/.test(name) ? ternKey(name).modifier : undefined;
+		if (!modifier) return undefined;
+		modifiers.add(modifier);
+	}
+	return EDITING_COMMANDS[`${[...modifiers].sort().join("+")}+${ternKey(key).key.toLowerCase()}`];
+}
+
+/**
+ * Press a key or a `+`-joined combo (`Enter`, `Shift+Tab`, `Meta+a`): the leading
+ * keys go down in order, the last key is pressed with `options`, then the leading
+ * keys are released in reverse.
+ */
+export async function pressKey(page: Page, combo: string, options?: KeyPressOptions): Promise<void> {
+	// Unchecked on purpose: puppeteer validates each name and throws `Unknown key: "…"`.
+	const keys = splitKeyCombo(combo) as KeyInput[];
+	const key = keys[keys.length - 1]!;
+	const held = keys.slice(0, -1);
+	const command = editingCommand(keys);
+	const pressed: KeyInput[] = [];
+	try {
+		for (const modifier of held) {
+			await page.keyboard.down(modifier);
+			pressed.push(modifier);
+		}
+		// `commands` is @deprecated in puppeteer but still forwarded to Input.dispatchKeyEvent,
+		// and puppeteer never adds the macOS editing commands itself.
+		await page.keyboard.press(key, command ? { ...options, commands: [command] } : options);
+	} finally {
+		for (const modifier of pressed.reverse()) await page.keyboard.up(modifier);
+	}
 }
 
 /** Move the page pointer to viewport coordinates. */
