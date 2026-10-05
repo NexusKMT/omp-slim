@@ -82,4 +82,43 @@ describe("Cursor account email", () => {
 			store.close();
 		}
 	});
+
+	test("a stalled profile lookup still keeps the tokens a refresh minted", async () => {
+		dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cursor-stall-"));
+		const store = await SqliteAuthCredentialStore.open(path.join(dir, "agent.db"));
+		const stale = cursorAccessToken("stale");
+		await store.upsertAuthCredential("cursor", {
+			type: "oauth",
+			access: stale,
+			refresh: stale,
+			expires: Date.now() - 1,
+		});
+		const auth = new AuthStorage(store);
+		try {
+			await auth.credentials.reload();
+			const fresh = cursorAccessToken("fresh");
+			const profileDeadline = new AbortController();
+			vi.spyOn(AbortSignal, "timeout").mockReturnValue(profileDeadline.signal);
+			vi.spyOn(globalThis, "fetch").mockImplementation((async (
+				input: string | URL | Request,
+				init?: RequestInit,
+			) => {
+				const url = input instanceof Request ? input.url : String(input);
+				if (url === "https://api2.cursor.sh/auth/exchange_user_api_key") {
+					return Response.json({ accessToken: fresh, refreshToken: fresh });
+				}
+				if (url !== "https://cursor.com/api/auth/me") throw new Error(`unexpected request: ${url}`);
+				// The profile never answers; only the lookup's own deadline ends it.
+				const { promise, reject } = Promise.withResolvers<Response>();
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+				profileDeadline.abort();
+				return promise;
+			}) as typeof fetch);
+
+			expect(await auth.keys.get("cursor", "session")).toBe(fresh);
+		} finally {
+			auth.close();
+			store.close();
+		}
+	});
 });

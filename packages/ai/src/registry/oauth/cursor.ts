@@ -8,6 +8,7 @@ const CURSOR_LOGIN_URL = "https://cursor.com/loginDeepControl";
 const CURSOR_POLL_URL = "https://api2.cursor.sh/auth/poll";
 const CURSOR_REFRESH_URL = "https://api2.cursor.sh/auth/exchange_user_api_key";
 const CURSOR_PROFILE_URL = "https://cursor.com/api/auth/me";
+const CURSOR_PROFILE_TIMEOUT_MS = 3_000;
 
 const POLL_MAX_ATTEMPTS = 150;
 const POLL_BASE_DELAY = 1000;
@@ -102,18 +103,19 @@ export async function loginCursor(
 
 	const expiresAt = getTokenExpiry(accessToken);
 
-	return withCursorAccountEmail({
+	return {
 		access: accessToken,
 		refresh: refreshToken,
 		expires: expiresAt,
-	});
+	};
 }
 
 export async function loginCursorHook(callbacks: OAuthController): Promise<OAuthCredentials> {
-	return loginCursor(
+	const credentials = await loginCursor(
 		url => callbacks.onAuth?.({ url }),
 		callbacks.onProgress ? () => callbacks.onProgress?.("Waiting for browser authentication...") : undefined,
 	);
+	return withCursorAccountEmail(credentials, callbacks.fetch ?? fetch, callbacks.signal);
 }
 
 export async function refreshCursorToken(apiKeyOrRefreshToken: string): Promise<OAuthCredentials> {
@@ -154,7 +156,7 @@ export async function refreshCursorHook(
 ): Promise<OAuthCredentials> {
 	const refreshed = await refreshCursorToken(credentials.refresh);
 	// A stored email survives the refresh merge; rows stored before email capture gain it here.
-	return credentials.email ? refreshed : withCursorAccountEmail(refreshed, signal);
+	return credentials.email ? refreshed : withCursorAccountEmail(refreshed, fetch, signal);
 }
 
 /** Request headers that present `accessToken` to cursor.com as its user's web session. */
@@ -186,8 +188,18 @@ export async function fetchCursorAccountEmail(
 }
 
 /** Attach the account email so account policies and pickers can name this login; a failed lookup leaves it off. */
-async function withCursorAccountEmail(credentials: OAuthCredentials, signal?: AbortSignal): Promise<OAuthCredentials> {
-	const email = await fetchCursorAccountEmail(credentials.access, fetch, signal).catch(() => undefined);
+async function withCursorAccountEmail(
+	credentials: OAuthCredentials,
+	fetchImpl: FetchImpl,
+	signal?: AbortSignal,
+): Promise<OAuthCredentials> {
+	// Refresh runs under a 10s deadline; a stalled lookup must not discard tokens the exchange already minted.
+	const timeout = AbortSignal.timeout(CURSOR_PROFILE_TIMEOUT_MS);
+	const email = await fetchCursorAccountEmail(
+		credentials.access,
+		fetchImpl,
+		signal ? AbortSignal.any([signal, timeout]) : timeout,
+	).catch(() => undefined);
 	return email ? { ...credentials, email } : credentials;
 }
 
