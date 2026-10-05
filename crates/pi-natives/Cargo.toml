@@ -49,6 +49,8 @@ tinyvec.workspace = true
 inferno.workspace = true
 napi.workspace = true
 napi-derive.workspace = true
+# Already in the graph via pi-builtins; wakes the OAuth callback wait.
+notify = "=8.2.0"
 pi-vcs.workspace = true
 parking_lot.workspace = true
 pdf-inspector.workspace = true
