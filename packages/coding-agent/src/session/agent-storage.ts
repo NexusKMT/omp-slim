@@ -5,6 +5,7 @@ import {
 	type AuthCredential,
 	type AuthCredentialStore,
 	SqliteAuthCredentialStore,
+	type ServiceTier,
 	type StoredAuthCredential,
 } from "@oh-my-pi/pi-ai";
 import {
@@ -112,6 +113,18 @@ const MODEL_PERF_BACKFILL_MAX_AGE_MS = 90 * 86_400_000;
 const MODEL_PERF_BACKFILL_CHUNK = 2048;
 /** Hard ceiling on rows scanned per backfill run, whatever the age cutoff admits — bounds total CPU on very high-volume databases (models only seen earlier than the newest N measurable rows get no backfill). */
 const MODEL_PERF_BACKFILL_MAX_ROWS = 250_000;
+
+/**
+ * `model_perf` row key: the model, plus the service tier when the turn ran on a
+ * non-default one (`provider/model@ultrafast`). Tier rows keep a fast serving
+ * path's throughput from blending into the standard average — a 300 t/s
+ * ultrafast turn and a 25 t/s standard turn are different measurements, not one
+ * 160 t/s model. Readers that do not know the tier read the bare
+ * `provider/model` row, which stays the standard/default-tier aggregate.
+ */
+export function modelPerfKey(modelKey: string, serviceTier?: ServiceTier | null): string {
+	return serviceTier && serviceTier !== "auto" && serviceTier !== "default" ? `${modelKey}@${serviceTier}` : modelKey;
+}
 
 /**
  * Validates one request timing and shapes it for the model_perf upsert.
@@ -559,9 +572,11 @@ FROM model_usage_legacy
 	 * the turn-completion hot path. Fire-and-forget safe — flush failures are
 	 * logged, never thrown; await the returned promise only to observe the flush.
 	 * @param modelKey - Model key in "provider/modelId" format
+	 * @param serviceTier - Tier the turn ran on; non-default tiers aggregate in
+	 * their own row (see {@link modelPerfKey})
 	 */
-	recordModelPerf(modelKey: string, sample: ModelPerfSample): Promise<void> {
-		const row = normalizeModelPerfSample(modelKey, sample);
+	recordModelPerf(modelKey: string, sample: ModelPerfSample, serviceTier?: ServiceTier | null): Promise<void> {
+		const row = normalizeModelPerfSample(modelPerfKey(modelKey, serviceTier), sample);
 		if (!row) return Promise.resolve();
 		return this.#perfDrain.push(row, rows => this.#flushModelPerf(rows));
 	}

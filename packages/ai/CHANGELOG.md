@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed Ultrafast service-tier turns being billed at standard rates; they now carry the published 6x premium (GPT-6 Astra), and the premium-request counter counts them.
+
 ## [18.6.1] - 2026-10-04
 
 ### Fixed

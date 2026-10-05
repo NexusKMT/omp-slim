@@ -3765,11 +3765,24 @@ export class AgentSession implements SettingsScope {
 				// /models TPS/TTFT display). Errored turns measure nothing; aborted
 				// turns with reported usage are still valid throughput samples.
 				if (assistantMsg.stopReason !== "error" && assistantMsg.duration !== undefined) {
-					this.settings.getStorage()?.recordModelPerf(`${assistantMsg.provider}/${assistantMsg.model}`, {
-						outputTokens: assistantMsg.usage.output,
-						durationMs: assistantMsg.duration,
-						ttftMs: assistantMsg.ttft,
-					});
+					// Attribute the sample to the tier the turn ran on, so a fast serving
+					// path's throughput does not blend into the standard average. Only the
+					// active model's tier is known here; a fallback-served turn records
+					// against the standard row.
+					const active = this.model;
+					const tier =
+						active && active.provider === assistantMsg.provider && active.id === assistantMsg.model
+							? this.#models.effectiveServiceTier(active)
+							: undefined;
+					this.settings.getStorage()?.recordModelPerf(
+						`${assistantMsg.provider}/${assistantMsg.model}`,
+						{
+							outputTokens: assistantMsg.usage.output,
+							durationMs: assistantMsg.duration,
+							ttftMs: assistantMsg.ttft,
+						},
+						tier,
+					);
 				}
 				if (
 					assistantMsg.disabledFeatures?.includes("priority") &&

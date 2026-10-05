@@ -72,6 +72,33 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(stats?.ttftMs).toBeCloseTo(750, 5);
 	});
 
+	it("keeps a non-default service tier's samples in their own row", async () => {
+		const storage = await openStorage();
+
+		const standard = storage.recordModelPerf("openai-codex/gpt-6-astra", {
+			outputTokens: 100,
+			durationMs: 4000,
+		});
+		const ultrafast = storage.recordModelPerf(
+			"openai-codex/gpt-6-astra",
+			{ outputTokens: 3000, durationMs: 10000 },
+			"ultrafast",
+		);
+		// `default`/`auto` are the standard serving path, so they share the bare row.
+		const explicitDefault = storage.recordModelPerf(
+			"openai-codex/gpt-6-astra",
+			{ outputTokens: 100, durationMs: 4000 },
+			"default",
+		);
+		await flushPerf(standard, ultrafast, explicitDefault);
+
+		const perf = storage.getModelPerf();
+		expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(2);
+		expect(perf.get("openai-codex/gpt-6-astra")?.tps).toBeCloseTo(200000 / 8000, 5);
+		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
+		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.tps).toBeCloseTo(300, 5);
+	});
+
 	it("persists a still-batched sample when the storage closes before the window elapses", async () => {
 		const storage = await openStorage();
 		const dbPath = path.join(tempDir.path(), "agent.db");
