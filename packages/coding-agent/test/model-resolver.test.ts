@@ -1599,6 +1599,20 @@ describe("resolveCliModel", () => {
 		expect(result.model?.id).toBe("gpt-5.5");
 	});
 
+	test("ranks an exact bare id carried by several authenticated providers by modelProviderOrder", () => {
+		// Registry order and the built-in provider priority both favor Codex.
+		const models = [...openaiGpt55Models].reverse();
+		const registry = { getAll: () => models, getAvailable: () => models };
+		const preferences = { providerOrder: ["openai"] };
+
+		const bare = resolveCliModel({ cliModel: "gpt-5.5", modelRegistry: registry, preferences });
+		const suffixed = resolveCliModel({ cliModel: "gpt-5.5:high", modelRegistry: registry, preferences });
+
+		expect(bare.model?.provider).toBe("openai");
+		expect(suffixed.model?.provider).toBe("openai");
+		expect(suffixed.thinkingLevel).toBe(Effort.High);
+	});
+
 	test("prefers an authenticated provider for flat slashful ids whose prefix is a provider slug", () => {
 		const mirror = (provider: string, baseUrl: string): Model<"anthropic-messages"> =>
 			buildModel({
