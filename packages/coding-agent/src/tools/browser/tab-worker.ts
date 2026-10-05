@@ -8,6 +8,7 @@ import type {
 	Browser,
 	CDPSession,
 	ElementHandle,
+	Frame,
 	HTTPResponse,
 	JSHandle,
 	KeyboardTypeOptions,
@@ -226,10 +227,16 @@ declare module "puppeteer-core" {
 	interface Realm {
 		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
 		adoptHandle<T extends JSHandle>(handle: T): Promise<T>;
+		/** Resolve a CDP backend node id in this realm (`@internal` upstream, stripped from published types). */
+		adoptBackendNode(backendNodeId: number): Promise<JSHandle>;
 	}
 	interface JSHandle {
 		/** Realm that created this handle (`@internal` upstream, stripped from published types). */
 		readonly realm: Realm;
+	}
+	interface SerializedAXNode {
+		/** DOM node behind this AX node (`@internal` upstream, stripped from published types). */
+		readonly backendNodeId?: number;
 	}
 }
 
@@ -1022,8 +1029,41 @@ function collectInteractiveObservationAncestors(node: SerializedAXNode, ancestor
 	return found;
 }
 
+/** Where an observed element lives; `tab.id(n)` resolves it to a handle on first use. */
+interface ObservedElement {
+	frame: Frame;
+	backendNodeId: number;
+}
+
+/**
+ * Resolve a CDP backend node id to a connected element handle in `frame`'s main world, or
+ * null when the node no longer exists or left the document. Text nodes resolve to their parent.
+ */
+async function resolveBackendNode(frame: Frame, backendNodeId: number): Promise<ElementHandle | null> {
+	let node: JSHandle;
+	try {
+		node = await frame.mainRealm().adoptBackendNode(backendNodeId);
+	} catch (error) {
+		if (error instanceof Error && error.message.includes("No node with given id")) return null;
+		throw error;
+	}
+	try {
+		const resolved = await node.evaluateHandle(value => {
+			const candidate = value as unknown as { nodeType: number; parentElement: Element | null };
+			const element = candidate.nodeType === 3 ? candidate.parentElement : (value as unknown as Element);
+			return element?.isConnected ? element : null;
+		});
+		const element = resolved.asElement();
+		if (!element) await resolved.dispose().catch(() => undefined);
+		return element as ElementHandle | null;
+	} finally {
+		await node.dispose().catch(() => undefined);
+	}
+}
+
 async function collectObservationEntries(
 	core: WorkerCore,
+	frame: Frame,
 	node: SerializedAXNode,
 	entries: ObservationEntry[],
 	options: {
@@ -1037,48 +1077,46 @@ async function collectObservationEntries(
 		(node.role === "generic" || node.role === "none" || node.role === "group") &&
 		!node.name &&
 		!options.interactiveAncestors.has(node);
-	if ((options.includeAll || isInteractiveNode(node)) && !(options.compact && emptyStructural)) {
-		const handle = await node.elementHandle();
-		if (handle) {
-			let inViewport = true;
-			if (options.viewportOnly) {
-				try {
-					inViewport = await handle.isIntersectingViewport();
-				} catch {
-					inViewport = false;
-				}
-			}
-			if (inViewport) {
-				const id = core.nextElementId();
-				const states: string[] = [];
-				if (node.disabled) states.push("disabled");
-				if (node.checked !== undefined) states.push(`checked=${String(node.checked)}`);
-				if (node.pressed !== undefined) states.push(`pressed=${String(node.pressed)}`);
-				if (node.selected !== undefined) states.push(`selected=${String(node.selected)}`);
-				if (node.expanded !== undefined) states.push(`expanded=${String(node.expanded)}`);
-				if (node.required) states.push("required");
-				if (node.readonly) states.push("readonly");
-				if (node.multiselectable) states.push("multiselectable");
-				if (node.multiline) states.push("multiline");
-				if (node.modal) states.push("modal");
-				if (node.focused) states.push("focused");
-				core.cacheElement(id, handle as ElementHandle);
-				entries.push({
-					id,
-					role: node.role,
-					name: node.name,
-					value: node.value,
-					description: node.description,
-					keyshortcuts: node.keyshortcuts,
-					states,
-				});
-			} else {
-				await handle.dispose();
-			}
+	if (
+		node.backendNodeId !== undefined &&
+		(options.includeAll || isInteractiveNode(node)) &&
+		!(options.compact && emptyStructural)
+	) {
+		let handle: ElementHandle | null = null;
+		let inViewport = true;
+		if (options.viewportOnly) {
+			handle = await resolveBackendNode(frame, node.backendNodeId);
+			inViewport = (await handle?.isIntersectingViewport().catch(() => false)) ?? false;
+		}
+		if (inViewport) {
+			const id = core.observeElement({ frame, backendNodeId: node.backendNodeId }, handle ?? undefined);
+			const states: string[] = [];
+			if (node.disabled) states.push("disabled");
+			if (node.checked !== undefined) states.push(`checked=${String(node.checked)}`);
+			if (node.pressed !== undefined) states.push(`pressed=${String(node.pressed)}`);
+			if (node.selected !== undefined) states.push(`selected=${String(node.selected)}`);
+			if (node.expanded !== undefined) states.push(`expanded=${String(node.expanded)}`);
+			if (node.required) states.push("required");
+			if (node.readonly) states.push("readonly");
+			if (node.multiselectable) states.push("multiselectable");
+			if (node.multiline) states.push("multiline");
+			if (node.modal) states.push("modal");
+			if (node.focused) states.push("focused");
+			entries.push({
+				id,
+				role: node.role,
+				name: node.name,
+				value: node.value,
+				description: node.description,
+				keyshortcuts: node.keyshortcuts,
+				states,
+			});
+		} else {
+			await handle?.dispose().catch(() => undefined);
 		}
 	}
 	for (const child of node.children ?? []) {
-		await collectObservationEntries(core, child, entries, options);
+		await collectObservationEntries(core, frame, child, entries, options);
 	}
 }
 
@@ -1151,6 +1189,7 @@ export class WorkerCore {
 	#page?: Page;
 	#targetId?: string;
 	#elementCache = new Map<number, ElementHandle>();
+	#observedElements = new Map<number, ObservedElement>();
 	#elementCounter = 0;
 	#active: ActiveRun | null = null;
 	#runtime: JsRuntime | null = null;
@@ -1234,13 +1273,12 @@ export class WorkerCore {
 		return failure;
 	}
 
-	nextElementId(): number {
+	/** Number an observed element; keeps `handle` when the observation already resolved it. */
+	observeElement(element: ObservedElement, handle?: ElementHandle): number {
 		this.#elementCounter += 1;
+		this.#observedElements.set(this.#elementCounter, element);
+		if (handle) this.#elementCache.set(this.#elementCounter, handle);
 		return this.#elementCounter;
-	}
-
-	cacheElement(id: number, handle: ElementHandle): void {
-		this.#elementCache.set(id, handle);
 	}
 
 	async #handleMessage(msg: WorkerInbound): Promise<void> {
@@ -2469,7 +2507,7 @@ export class WorkerCore {
 		const entries: ObservationEntry[] = [];
 		const interactiveAncestors = new Set<SerializedAXNode>();
 		if (options.compact) collectInteractiveObservationAncestors(snapshot, interactiveAncestors);
-		await collectObservationEntries(this, snapshot, entries, {
+		await collectObservationEntries(this, page.mainFrame(), snapshot, entries, {
 			includeAll,
 			viewportOnly,
 			compact: options.compact ?? false,
@@ -2817,7 +2855,17 @@ export class WorkerCore {
 
 	async #resolveCachedHandle(id: number): Promise<ElementHandle> {
 		const handle = this.#elementCache.get(id);
-		if (!handle) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
+		if (!handle) {
+			const element = this.#observedElements.get(id);
+			if (!element) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
+			const resolved = await resolveBackendNode(element.frame, element.backendNodeId);
+			if (!resolved) {
+				this.#clearElementCache();
+				throw new ToolError(`Element id ${id} is stale. Run tab.observe() again.`);
+			}
+			this.#elementCache.set(id, resolved);
+			return resolved;
+		}
 		try {
 			const isConnected = (await handle.evaluate(el => el.isConnected)) as boolean;
 			if (!isConnected) {
@@ -2855,6 +2903,7 @@ export class WorkerCore {
 		)) as ElementHandle;
 	}
 	#clearElementCache(): void {
+		this.#observedElements.clear();
 		if (this.#elementCache.size === 0) {
 			this.#elementCounter = 0;
 			return;
