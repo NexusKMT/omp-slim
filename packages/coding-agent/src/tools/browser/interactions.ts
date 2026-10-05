@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { ElementHandle, KeyInput, MouseButton, Page } from "puppeteer-core";
-import { throwIfAborted } from "../tool-errors";
+import { ToolAbortError, throwIfAborted } from "../tool-errors";
 
 /** Options accepted by coordinate-based mouse clicks. */
 export interface ClickAtOptions {
@@ -83,6 +83,7 @@ interface PageShadowRoot {
 interface PageElement {
 	readonly tagName: string;
 	id: string;
+	readonly isConnected: boolean;
 	type: string;
 	checked: boolean;
 	files: unknown;
@@ -95,6 +96,7 @@ interface PageElement {
 	parentElement: PageElement | null;
 	shadowRoot: PageShadowRoot | null;
 	getBoundingClientRect(): PageRect;
+	getClientRects(): ArrayLike<PageRect>;
 	getRootNode(): PageRoot;
 	contains(other: PageElement): boolean;
 	getAttribute(name: string): string | null;
@@ -127,6 +129,16 @@ interface PageGlobals {
 	DragEvent: new (type: string, options: { bubbles: boolean; cancelable: boolean; dataTransfer: unknown }) => unknown;
 }
 
+/** A click aborted while its element was still refused; `refusal` names the last failed check. */
+export class ClickRefusedError extends ToolAbortError {
+	constructor(
+		readonly refusal: string,
+		options?: ErrorOptions,
+	) {
+		super(undefined, options);
+	}
+}
+
 function requireFiniteNumber(value: number, label: string): void {
 	if (!Number.isFinite(value)) throw new ToolError(`${label} must be a finite number`);
 }
@@ -145,6 +157,10 @@ export async function isClickActionable(
 		handle.evaluate((el, { viaLabel, transparent }) => {
 			const element = el as unknown as PageElement;
 			const page = globalThis as unknown as PageGlobals;
+			// A node the page replaced (e.g. a re-render) has no computed style; say so rather than misread it.
+			if (!element.isConnected) {
+				return { ok: false as const, reason: "detached (the page replaced this element; look it up again)" };
+			}
 			const style = page.getComputedStyle(element);
 			if (style.display === "none") return { ok: false as const, reason: "display:none" };
 			if (style.visibility === "hidden" || style.visibility === "collapse") {
@@ -154,10 +170,21 @@ export async function isClickActionable(
 			if (!transparent && Number(style.opacity) === 0) return { ok: false as const, reason: "opacity:0" };
 			const rect = element.getBoundingClientRect();
 			if (rect.width < 1 || rect.height < 1) return { ok: false as const, reason: "zero-size" };
-			const left = Math.max(0, Math.min(page.innerWidth, rect.left));
-			const right = Math.max(0, Math.min(page.innerWidth, rect.right));
-			const top = Math.max(0, Math.min(page.innerHeight, rect.top));
-			const bottom = Math.max(0, Math.min(page.innerHeight, rect.bottom));
+			// A wrapped link's box centre can fall between its lines, on the parent; aim at its first visible line.
+			const fragments = Array.from(element.getClientRects());
+			const box =
+				fragments.length === 0
+					? rect
+					: fragments.find(
+							r =>
+								Math.min(page.innerWidth, r.right) - Math.max(0, r.left) >= 1 &&
+								Math.min(page.innerHeight, r.bottom) - Math.max(0, r.top) >= 1,
+						);
+			if (!box) return { ok: false as const, reason: "off-viewport" };
+			const left = Math.max(0, Math.min(page.innerWidth, box.left));
+			const right = Math.max(0, Math.min(page.innerWidth, box.right));
+			const top = Math.max(0, Math.min(page.innerHeight, box.top));
+			const bottom = Math.max(0, Math.min(page.innerHeight, box.bottom));
 			if (right - left < 1 || bottom - top < 1) return { ok: false as const, reason: "off-viewport" };
 			const x = Math.floor((left + right) / 2);
 			const y = Math.floor((top + bottom) / 2);
@@ -219,25 +246,32 @@ async function actionableClickPoint(
 		}),
 	);
 	let previous = await untilAborted(signal, () => handle.boundingBox());
-	while (true) {
-		throwIfAborted(signal);
-		await untilAborted(signal, () => Bun.sleep(16));
-		const current = await untilAborted(signal, () => handle.boundingBox());
-		const stable =
-			previous !== null &&
-			current !== null &&
-			Math.abs(previous.x - current.x) < 0.5 &&
-			Math.abs(previous.y - current.y) < 0.5 &&
-			Math.abs(previous.width - current.width) < 0.5 &&
-			Math.abs(previous.height - current.height) < 0.5;
-		const result = await isClickActionable(handle, signal, options);
-		// ElementHandle.boundingBox() is relative to the main frame; elementFromPoint() above is frame-local.
-		if (stable && result.ok && current) return { x: current.x + result.x, y: current.y + result.y };
-		if (stable && !result.ok && result.coveredBy) {
-			throw new ToolError(`${label} blocked: covered by ${result.coveredBy}`);
+	let refusal: string | undefined;
+	try {
+		while (true) {
+			throwIfAborted(signal);
+			await untilAborted(signal, () => Bun.sleep(16));
+			const current = await untilAborted(signal, () => handle.boundingBox());
+			const stable =
+				previous !== null &&
+				current !== null &&
+				Math.abs(previous.x - current.x) < 0.5 &&
+				Math.abs(previous.y - current.y) < 0.5 &&
+				Math.abs(previous.width - current.width) < 0.5 &&
+				Math.abs(previous.height - current.height) < 0.5;
+			const result = await isClickActionable(handle, signal, options);
+			// ElementHandle.boundingBox() is relative to the main frame; elementFromPoint() above is frame-local.
+			if (stable && result.ok && current) return { x: current.x + result.x, y: current.y + result.y };
+			if (stable && !result.ok && result.coveredBy) {
+				throw new ToolError(`${label} blocked: covered by ${result.coveredBy}`);
+			}
+			refusal = result.ok ? "still moving" : result.coveredBy ? `covered by ${result.coveredBy}` : result.reason;
+			previous = current;
+			await untilAborted(signal, () => Bun.sleep(34));
 		}
-		previous = current;
-		await untilAborted(signal, () => Bun.sleep(34));
+	} catch (error) {
+		if (signal?.aborted && refusal !== undefined) throw new ClickRefusedError(refusal, { cause: signal.reason });
+		throw error;
 	}
 }
 

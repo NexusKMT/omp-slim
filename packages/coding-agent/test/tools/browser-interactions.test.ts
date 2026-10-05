@@ -6,6 +6,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { TERN_KIT_SOURCE } from "@oh-my-pi/pi-coding-agent/tools/browser/tern/page-kit";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { chromiumAvailable } from "./chromium-probe";
 
@@ -74,7 +75,102 @@ afterAll(async () => {
 	if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
 });
 
+describe.skipIf(!CHROMIUM_AVAILABLE)("browser click timeouts", () => {
+	test("says why a click that never became clickable timed out", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const context = { session, toolCallId: "browser-unclickable" };
+		const tabName = `unclickable-${crypto.randomUUID()}`;
+		const unclickableHtml = `<!doctype html><button id="hidden" style="display:none">Hidden</button><button id="faded" style="opacity:0">Faded</button>
+<button class="multi" style="display:none">First</button><button class="multi">Second</button>
+<button id="swap">Swap</button>`;
+		await prelude.invoke(
+			{ action: "open", name: tabName, url: `data:text/html,${encodeURIComponent(unclickableHtml)}` },
+			context,
+		);
+		try {
+			const attempt = async (call: string) => {
+				const result = await prelude.invoke(
+					{
+						action: "run",
+						name: tabName,
+						code: `try {
+	await ${call};
+	return "clicked";
+} catch (error) {
+	return error instanceof Error ? error.message : String(error);
+}`,
+						// A 3 s cell caps the per-op deadline at 2 s.
+						timeout: 3,
+					},
+					context,
+				);
+				return valueFrom<string>(result);
+			};
+			// display:none has no box (never stable); opacity:0 is stable but refused.
+			const hidden = await attempt(`tab.click("#hidden")`);
+			expect(hidden).toMatch(/^tab\.click\("#hidden"\) timed out after \d+ms/);
+			expect(hidden).toContain("last check: display:none");
+			expect(await attempt(`tab.click("#faded")`)).toContain("last check: opacity:0");
+			// The count tells the caller the first of several matches is the hidden one.
+			const multi = await attempt(`tab.dblclick(".multi")`);
+			expect(multi).toContain("last check: display:none");
+			expect(multi).toContain("matches 2 element(s)");
+			// The page replaces the element (as a re-render would) after the caller resolved its handle.
+			expect(
+				await attempt(`(async () => {
+	const { elements } = await tab.observe();
+	const swap = await tab.id(elements.find(element => element.name === "Swap").id);
+	await tab.evaluate(() => { const old = document.querySelector("#swap"); old.replaceWith(old.cloneNode(true)); });
+	await swap.click();
+})()`),
+			).toContain("last check: detached");
+		} finally {
+			await prelude.invoke({ action: "close", name: tabName, kill: true }, context).catch(() => undefined);
+		}
+	}, 30_000);
+});
+
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser interaction parity", () => {
+	test("clicks a link that wraps across two lines on the link, not on its paragraph, on puppeteer and Tern", async () => {
+		const session = makeSession();
+		const prelude = createBrowserPrelude(session);
+		const context = { session, toolCallId: "browser-wrapped-link" };
+		const tabName = `wrapped-${crypto.randomUUID()}`;
+		const wrappedHtml = `<!doctype html><p id="para" style="width:33ch;font:16px/20px monospace;margin:0">aaaaaaaaaaaaaaaaaaaaaaa <a id="link" href="#">wrapped link</a> bbbbbbbbbbbbbbbbbbbbbbbbbbbb</p>
+<script>window.clicked = []; document.addEventListener("click", event => { clicked.push(event.target.id); event.preventDefault(); });</script>`;
+		await prelude.invoke(
+			{ action: "open", name: tabName, url: `data:text/html,${encodeURIComponent(wrappedHtml)}` },
+			context,
+		);
+		try {
+			const result = await prelude.invoke(
+				{
+					action: "run",
+					name: tabName,
+					// The Tern page kit is plain page script, so its aim point is checked on this page.
+					code: `const fragments = await tab.evaluate(() => document.querySelector("#link").getClientRects().length);
+await tab.click("#link");
+await tab.evaluate(${JSON.stringify(`(function () {\n${TERN_KIT_SOURCE}\n})()`)});
+const ternHit = await tab.evaluate(async () => {
+	const target = await globalThis.__ompTernKit.target({ engine: "css", query: "#link" }, "click");
+	return target.ok ? document.elementFromPoint(target.x, target.y)?.id : target.reason;
+});
+return { fragments, clicked: await tab.evaluate(() => window.clicked), ternHit };`,
+					timeout: 15,
+				},
+				context,
+			);
+			expect(valueFrom<{ fragments: number; clicked: string[]; ternHit: string }>(result)).toEqual({
+				fragments: 2,
+				clicked: ["link"],
+				ternHit: "link",
+			});
+		} finally {
+			await prelude.invoke({ action: "close", name: tabName, kill: true }, context).catch(() => undefined);
+		}
+	}, 30_000);
+
 	test("guards covered clicks and drives keyboard, pointer, drop-zone, checked-state, and highlight interactions", async () => {
 		const session = makeSession();
 		const prelude = createBrowserPrelude(session);
