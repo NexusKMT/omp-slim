@@ -14,7 +14,10 @@ mod win32;
 use std::{
 	collections::HashMap,
 	panic::AssertUnwindSafe,
-	sync::Arc,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
 	thread::{self, JoinHandle},
 	time::Duration,
 };
@@ -222,15 +225,24 @@ impl ParsedPointerOptions {
 	}
 }
 
+/// The worker's latest capabilities, shared with the session so the getter
+/// answers without waiting behind queued operations.
+#[derive(Default)]
+struct CapabilitiesCache {
+	snapshot:       Mutex<Option<DesktopCapabilities>>,
+	/// A background refresh is queued and has not started yet.
+	refresh_queued: AtomicBool,
+}
+
 struct Worker {
 	backend:      CoreResult<Box<dyn Backend>>,
 	registry:     AxRegistry,
 	frames:       HashMap<String, FrameGeometry>,
-	capabilities: Arc<Mutex<DesktopCapabilities>>,
+	capabilities: Arc<CapabilitiesCache>,
 }
 
 impl Worker {
-	fn new(selector: DisplaySelector, capabilities: Arc<Mutex<DesktopCapabilities>>) -> Self {
+	fn new(selector: DisplaySelector, capabilities: Arc<CapabilitiesCache>) -> Self {
 		let backend = create_backend(selector);
 		Self { backend, registry: AxRegistry::default(), frames: HashMap::new(), capabilities }
 	}
@@ -289,11 +301,15 @@ impl Worker {
 	fn process(&mut self, request: &Request) -> CoreResult<Response> {
 		match request {
 			Request::Capabilities { .. } => {
+				self
+					.capabilities
+					.refresh_queued
+					.store(false, Ordering::Release);
 				let caps = match self.backend.as_mut() {
 					Ok(backend) => backend.capabilities(),
 					Err(_) => DesktopCapabilities::unavailable(),
 				};
-				*self.capabilities.lock() = caps.clone();
+				*self.capabilities.snapshot.lock() = Some(caps.clone());
 				Ok(Response::Capabilities(caps))
 			},
 			Request::ListDisplays { .. } => Ok(Response::Displays(self.backend()?.displays()?)),
@@ -328,8 +344,17 @@ impl Worker {
 				let displays = geometry.display_metadata(&source);
 				let png = encode_png(image)?;
 				self.frames.insert(target.key().to_string(), geometry);
-				let capabilities = self.backend()?.capabilities();
-				*self.capabilities.lock() = capabilities.clone();
+				// Backend and display server are fixed for a live backend, so the
+				// snapshot answers them; recomputing capabilities here would
+				// enumerate the displays a third time per capture.
+				let snapshot = self.capabilities.snapshot.lock().clone();
+				let capabilities = if let Some(capabilities) = snapshot {
+					capabilities
+				} else {
+					let capabilities = self.backend()?.capabilities();
+					*self.capabilities.snapshot.lock() = Some(capabilities.clone());
+					capabilities
+				};
 				Ok(Response::Capture(DesktopCapture {
 					data: Uint8Array::from(png),
 					width,
@@ -606,7 +631,7 @@ struct Lifecycle {
 struct SessionCore {
 	selector:     DisplaySelector,
 	lifecycle:    Mutex<Lifecycle>,
-	capabilities: Arc<Mutex<DesktopCapabilities>>,
+	capabilities: Arc<CapabilitiesCache>,
 }
 impl SessionCore {
 	fn new(selector: DisplaySelector) -> Arc<Self> {
@@ -618,7 +643,7 @@ impl SessionCore {
 				join:   None,
 				closed: false,
 			}),
-			capabilities: Arc::new(Mutex::new(DesktopCapabilities::unavailable())),
+			capabilities: Arc::default(),
 		})
 	}
 
@@ -669,6 +694,28 @@ impl SessionCore {
 		rxr.recv_timeout(OPERATION_TIMEOUT).map_err(|e| {
 			DesktopError::timeout(format!("native desktop operation did not complete: {e}"))
 		})?
+	}
+
+	/// Queue one background capabilities refresh unless one is already
+	/// queued; nothing waits for its reply.
+	fn refresh_capabilities(&self) {
+		if self
+			.capabilities
+			.refresh_queued
+			.swap(true, Ordering::AcqRel)
+		{
+			return;
+		}
+		let (reply, _) = flume::bounded(1);
+		let queued = self
+			.ensure_started()
+			.is_ok_and(|tx| tx.send(Request::Capabilities { reply }).is_ok());
+		if !queued {
+			self
+				.capabilities
+				.refresh_queued
+				.store(false, Ordering::Release);
+		}
 	}
 
 	fn close(&self) -> CoreResult<()> {
@@ -727,11 +774,19 @@ impl DesktopSession {
 		Ok(Self { core: SessionCore::new(DisplaySelector::parse(options.and_then(|o| o.display))) })
 	}
 
+	/// Answers from the latest snapshot and queues a background refresh, so a
+	/// read never waits behind an in-flight capture. Only a read before any
+	/// snapshot exists round-trips to the worker.
 	#[napi(getter)]
 	pub fn capabilities(&self) -> DesktopCapabilities {
+		let snapshot = self.core.capabilities.snapshot.lock().clone();
+		if let Some(snapshot) = snapshot {
+			self.core.refresh_capabilities();
+			return snapshot;
+		}
 		match self.core.call(|reply| Request::Capabilities { reply }) {
 			Ok(Response::Capabilities(c)) => c,
-			_ => self.core.capabilities.lock().clone(),
+			_ => DesktopCapabilities::unavailable(),
 		}
 	}
 
@@ -1247,7 +1302,7 @@ mod capture_tests {
 			backend:      Ok(Box::new(backend)),
 			registry:     AxRegistry::default(),
 			frames:       HashMap::new(),
-			capabilities: Arc::new(Mutex::new(DesktopCapabilities::unavailable())),
+			capabilities: Arc::default(),
 		}
 	}
 

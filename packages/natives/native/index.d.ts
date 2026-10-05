@@ -31,6 +31,11 @@ export declare class AudioPlayback {
 /** Persistent, serialized native desktop capture/input/accessibility session. */
 export declare class DesktopSession {
   constructor(options?: DesktopSessionOptions | undefined | null)
+  /**
+   * Answers from the latest snapshot and queues a background refresh, so a
+   * read never waits behind an in-flight capture. Only a read before any
+   * snapshot exists round-trips to the worker.
+   */
   get capabilities(): DesktopCapabilities
   listDisplays(): Promise<Array<DesktopDisplay>>
   listWindows(): Promise<Array<DesktopWindow>>
