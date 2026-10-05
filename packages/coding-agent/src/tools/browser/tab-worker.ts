@@ -1426,9 +1426,24 @@ export class WorkerCore {
 		return {
 			url: redactUrlCredentials(page.url()),
 			title: dialogPending ? undefined : await page.title().catch(() => undefined),
-			viewport: page.viewport() ?? DEFAULT_VIEWPORT,
+			viewport: dialogPending
+				? (page.viewport() ?? DEFAULT_VIEWPORT)
+				: await this.#viewport().catch(() => DEFAULT_VIEWPORT),
 			targetId,
 		};
+	}
+
+	/** The emulated viewport, else the window's own: connected and visible browsers emulate none. */
+	async #viewport(signal?: AbortSignal): Promise<ReadyInfo["viewport"]> {
+		const page = this.#requirePage();
+		const emulated = page.viewport();
+		if (emulated) return emulated;
+		return (await untilAborted(signal, () =>
+			page.evaluate(() => {
+				const win = globalThis as unknown as { innerWidth: number; innerHeight: number; devicePixelRatio: number };
+				return { width: win.innerWidth, height: win.innerHeight, deviceScaleFactor: win.devicePixelRatio };
+			}),
+		)) as ReadyInfo["viewport"];
 	}
 
 	/** Apply an automatic dialog policy selected while opening the tab. */
@@ -2498,7 +2513,7 @@ export class WorkerCore {
 		return {
 			url: page.url(),
 			title: (await untilAborted(options.signal, () => page.title())) as string,
-			viewport: page.viewport() ?? DEFAULT_VIEWPORT,
+			viewport: await this.#viewport(options.signal),
 			scroll,
 			elements: entries,
 		};
