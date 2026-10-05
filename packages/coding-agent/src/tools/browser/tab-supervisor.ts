@@ -817,12 +817,18 @@ async function runInTabWithSnapshot(
 				async reason => await forceKillTab(name, reason),
 			);
 			if (result.recoverTab) {
-				await recoverWorkerTab(
+				const reattached = await recoverWorkerTab(
 					tab,
 					name,
 					opts.timeoutMs,
 					"Browser request interception cleanup failed; tab killed",
 				);
+				result.displays.push({
+					type: "text",
+					text: reattached
+						? "Browser request interception could not be reset after this run; the tab was reattached, so tab.route routes, the request log, HAR recording and run globals were reset."
+						: "Browser request interception could not be reset after this run; the tab was closed.",
+				});
 			}
 			return result;
 		} catch (error) {
@@ -845,16 +851,29 @@ async function runInTabWithSnapshot(
 	}
 }
 
-/** Recycle a worker whose tab state is unknown; an inline worker shares this process, so its tab is killed instead. */
-async function recoverWorkerTab(tab: WorkerTabSession, name: string, timeoutMs: number, reason: string): Promise<void> {
+/**
+ * Recycle a worker whose tab state is unknown; an inline worker shares this process, so its tab is killed instead.
+ * Resolves `true` when the tab was reattached to a new worker, `false` when it was killed.
+ */
+async function recoverWorkerTab(
+	tab: WorkerTabSession,
+	name: string,
+	timeoutMs: number,
+	reason: string,
+): Promise<boolean> {
 	try {
-		if (tab.worker.mode === "inline") await forceKillTab(name, reason);
-		else await recycleTimedOutWorkerTab(tab, timeoutMs + GRACE_MS);
+		if (tab.worker.mode === "inline") {
+			await forceKillTab(name, reason);
+			return false;
+		}
+		await recycleTimedOutWorkerTab(tab, timeoutMs + GRACE_MS);
+		return true;
 	} catch (recycleError) {
 		logger.warn("Failed to recycle browser tab worker; killing tab", {
 			error: recycleError instanceof Error ? recycleError.message : String(recycleError),
 		});
 		await forceKillTab(name, "Browser tab worker recovery failed; tab killed");
+		return false;
 	}
 }
 

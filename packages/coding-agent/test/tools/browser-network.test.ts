@@ -251,16 +251,18 @@ return "done";`,
 	test("keeps a completed run's result when its interception cannot be reset", async () => {
 		const invoke = createHost();
 		await invoke({ action: "open", name: "stuck-interception", url: `${baseUrl}/` });
-		const result = valueOf(
-			await invoke({
-				action: "run",
-				name: "stuck-interception",
-				code: `await page.setRequestInterception(true);
+		const completed = await invoke({
+			action: "run",
+			name: "stuck-interception",
+			code: `await page.setRequestInterception(true);
 ${STALL_FETCH_DISABLE}
 return "done";`,
-			}),
-		);
-		expect(result).toBe("done");
+		});
+		expect(valueOf(completed)).toBe("done");
+		expect(completed.content).toContainEqual({
+			type: "text",
+			text: "Browser request interception could not be reset after this run; the tab was reattached, so tab.route routes, the request log, HAR recording and run globals were reset.",
+		});
 		const next = valueOf(
 			await invoke({
 				action: "run",
