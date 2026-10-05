@@ -43,7 +43,10 @@ const NON_ASCII_TEXT_RE = /[^\x00-\x7F]/;
 
 // Paired emphasis wrappers only. QUESTION_PROMPT_RE is ^-anchored, so a bolded
 // question missed it and the stop-time reminder fired on the model's own question.
-const INLINE_EMPHASIS_RE = /^(\*\*\*|\*\*|\*|___|__|_|~~)([\s\S]+)\1$/;
+// Strikethrough is deliberately absent: `~~…~~` marks the author as having
+// discarded the span, so unwrapping it would promote a retracted question back to
+// a live one and idle the session waiting for an answer nobody is going to give.
+const INLINE_EMPHASIS_RE = /^(\*\*\*|\*\*|\*|___|__|_)([\s\S]+)\1$/;
 
 interface PromptLine {
 	text: string;
