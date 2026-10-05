@@ -468,6 +468,12 @@ export interface TerminalGraceIteratorOptions {
 	 * the transport until that pending read settles.
 	 */
 	onGraceEnd?: () => void;
+	/**
+	 * Wait for the bounded drain when the consumer returns early. Capped
+	 * requests must not release their in-flight permit while the transport
+	 * still owns a live connection.
+	 */
+	awaitDrainOnReturn?: boolean;
 }
 
 /**
@@ -480,12 +486,10 @@ export interface TerminalGraceIteratorOptions {
  * already-successful turn into a timeout error. Grace expiry is a clean end
  * of iteration, never an error.
  *
- * A consumer that stops early (`break`) after `finishedAtMs()` is set is not
- * held up, but the source is not torn down either: its remaining items are
- * drained in the background, bounded by the same grace deadline. Cancelling
- * the source immediately would drop the connection before compliant servers
- * finish sending `[DONE]`, and gateways record such requests as
- * client-cancelled even though the response was delivered in full.
+ * A consumer that stops early (`break`) after `finishedAtMs()` is set leaves
+ * the source draining until `[DONE]`/EOF or the same grace deadline. Without
+ * `awaitDrainOnReturn`, the consumer is not held up; capped requests await
+ * the drain before completing and releasing their in-flight permit.
  */
 export async function* iterateWithTerminalGrace<T>(
 	iterable: AsyncIterable<T>,
@@ -505,7 +509,8 @@ export async function* iterateWithTerminalGrace<T>(
 		}
 	} finally {
 		if (consumerStopped && options.finishedAtMs() !== undefined) {
-			void drainWithinGrace(iterator, options);
+			if (options.awaitDrainOnReturn) await drainWithinGrace(iterator, options);
+			else void drainWithinGrace(iterator, options);
 		} else {
 			releaseIterator(iterator);
 		}

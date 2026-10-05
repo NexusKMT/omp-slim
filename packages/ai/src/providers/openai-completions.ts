@@ -1336,6 +1336,7 @@ const streamOpenAICompletionsOnce = (
 				// and release the socket immediately (a queued `.return()` alone
 				// would wait on the never-arriving next chunk).
 				onGraceEnd: () => requestAbortController.abort(),
+				awaitDrainOnReturn: options?.waitForTerminalDrain,
 			});
 			for await (const chunk of terminalAwareStream) {
 				if (!chunk || typeof chunk !== "object") continue;
