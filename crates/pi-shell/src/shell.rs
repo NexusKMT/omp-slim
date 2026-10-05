@@ -3219,6 +3219,51 @@ mod tests {
 		}));
 	}
 
+	/// Contract: `read` from a file consumes exactly one line of the shared
+	/// offset — the next `read`, and any later reader of the same descriptor,
+	/// resumes right after it.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn read_from_a_file_leaves_the_rest_for_the_next_reader() {
+		let dir = tempfile::tempdir().expect("temporary directory");
+		let path = dir.path().join("lines.txt");
+		std::fs::write(&path, "one\ntwo\nthree\nfour\n").expect("write fixture");
+		let path = path.to_string_lossy().replace('\\', "/");
+		let (result, output) = execute_captured(format!(
+			"{{ read -r a; read -r b; echo \"[$a][$b]\"; cat; }} < '{path}'"
+		))
+		.await;
+		assert_eq!(result.exit_code, Some(0), "{output:?}");
+		assert_eq!(output, "[one][two]\nthree\nfour\n");
+	}
+
+	/// Contract: `read` assigns UTF-8 input as text, not one Latin-1
+	/// character per byte.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn read_decodes_utf8_input() {
+		let (result, output) = execute_captured(
+			"printf 'é ü\\n' | { read -r first rest; echo \"$first|$rest\"; }".to_owned(),
+		)
+		.await;
+		assert_eq!(result.exit_code, Some(0), "{output:?}");
+		assert_eq!(output, "é|ü\n");
+	}
+
+	/// Contract: `mapfile -n` from a file consumes exactly the lines it
+	/// stores; a later reader of the descriptor gets the rest.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn mapfile_count_from_a_file_leaves_the_rest_for_the_next_reader() {
+		let dir = tempfile::tempdir().expect("temporary directory");
+		let path = dir.path().join("lines.txt");
+		std::fs::write(&path, "one\ntwo\nthree\nfour\n").expect("write fixture");
+		let path = path.to_string_lossy().replace('\\', "/");
+		let (result, output) = execute_captured(format!(
+			"{{ mapfile -t -n 2 lines; echo \"${{lines[*]}}\"; cat; }} < '{path}'"
+		))
+		.await;
+		assert_eq!(result.exit_code, Some(0), "{output:?}");
+		assert_eq!(output, "one two\nthree\nfour\n");
+	}
+
 	#[tokio::test(flavor = "multi_thread")]
 	async fn ps_builtin_lists_one_line_per_thread_with_m() {
 		// Field report: `ps -M -p <pid>` failed with "unsupported option '-M'".
