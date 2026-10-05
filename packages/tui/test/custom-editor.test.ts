@@ -772,6 +772,7 @@ describe("CustomEditor space-hold push-to-talk", () => {
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	it("recognizes a held bar from a steady fast cadence and tracks back the burst", () => {
@@ -813,7 +814,6 @@ describe("CustomEditor space-hold push-to-talk", () => {
 		expect(events).toEqual(["start"]);
 		vi.advanceTimersByTime(SPACE_HOLD_RELEASE_MS + 1);
 		expect(events).toEqual(["start", "end"]);
-		vi.restoreAllMocks();
 	});
 
 	it("does not trigger when the space bar is smashed at an irregular cadence", () => {
