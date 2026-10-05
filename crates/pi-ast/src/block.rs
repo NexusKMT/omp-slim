@@ -340,6 +340,20 @@ pub struct NodeSpan {
 	pub kind:       String,
 }
 
+/// Parse `code` into the shared tree cache.
+///
+/// The next block query over the same source and language is then a cache
+/// hit. Does nothing for empty source or an unrecognized language, where the
+/// queries never parse either.
+pub fn warm_parse(code: &str, lang: Option<&str>, path: Option<&str>) -> Result<()> {
+	if !code.is_empty()
+		&& let Some(language) = resolve_language(lang, path)
+	{
+		parse_cached(code, language)?;
+	}
+	Ok(())
+}
+
 /// Named-node chain containing `options.line`, innermost-first, excluding the
 /// whole-file root.
 ///

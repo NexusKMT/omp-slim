@@ -1013,6 +1013,15 @@ export interface AxSnapshotOptions {
   all?: boolean
 }
 
+export interface BlockParseOptions {
+  /** Source code to parse. */
+  code: string
+  /** Language alias (e.g. "rust", "typescript") used before path inference. */
+  lang?: string
+  /** File path used to infer language by extension when `lang` is omitted. */
+  path?: string
+}
+
 export interface BlockRange {
   /** 1-indexed inclusive first line of the resolved block. */
   startLine: number
@@ -3496,6 +3505,17 @@ export interface VectorTopK {
  * Tabs count as a fixed-width cell.
  */
 export declare function visibleWidth(text: string, tabWidth: number): number
+
+/**
+ * Parse `options.code` into the shared tree cache on the native blocking
+ * pool.
+ *
+ * [`enclosing_block_boundaries`], [`block_range_at`] and [`node_chain_at`]
+ * are synchronous and parse on the JS thread when their source is not
+ * cached; awaiting this first makes that parse a cache hit. Resolves without
+ * parsing when the language is unrecognized.
+ */
+export declare function warmBlockParse(options: BlockParseOptions): Promise<undefined>
 
 /**
  * Warm syntax grammars, scope matchers, and the regexes of commonly
