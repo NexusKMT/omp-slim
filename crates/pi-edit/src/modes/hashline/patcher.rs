@@ -680,8 +680,9 @@ pub fn stage_patch(
 			_ => EngineFileOp::Update,
 		};
 		let diff = generate_diff_string(&read.text, &apply.text, None, &BlockContextSource {
-			path: Some(&section.path),
-			lang: None,
+			path:      Some(&section.path),
+			lang:      None,
+			streaming: false,
 		});
 		let move_to = if let Some(FileOp::Move { dest }) = &parsed.file_op {
 			Some(files.resolve(dest, false)?)

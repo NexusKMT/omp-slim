@@ -200,8 +200,9 @@ fn preview_section(
 			)));
 		}
 		let diff = generate_diff_string(&read.text, &applied.text, None, &BlockContextSource {
-			path: Some(&target.path),
-			lang: None,
+			path:      Some(&target.path),
+			lang:      None,
+			streaming: false,
 		});
 		result.diff = Some(diff.diff);
 		result.first_changed_line = applied.first_changed_line.or(diff.first_changed_line);

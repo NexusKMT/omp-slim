@@ -476,6 +476,7 @@ impl ModeEngine for ApplyPatchEngine {
 					self.allow_fuzzy,
 					self.fuzzy_threshold,
 					false,
+					false,
 				)
 			})
 			.collect()

@@ -169,6 +169,7 @@ impl ModeEngine for ReplaceEngine {
 		let output = generate_diff_string(&before, &after, None, &BlockContextSource {
 			path: Some(&display),
 			lang: None,
+			streaming,
 		});
 		vec![PreviewFile {
 			display,
@@ -218,8 +219,9 @@ impl ModeEngine for ReplaceEngine {
 
 		let persisted = read.persist(&after)?;
 		let output = generate_diff_string(&before, &after, None, &BlockContextSource {
-			path: Some(&display),
-			lang: None,
+			path:      Some(&display),
+			lang:      None,
+			streaming: false,
 		});
 		let mut staged = StagedFile::new(display, read.resolved.absolute.clone(), FileOp::Update);
 		staged.before_raw = Some(read.raw.clone());

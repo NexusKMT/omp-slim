@@ -105,6 +105,7 @@ impl ModeEngine for SloppyEngine {
 							generate_diff_string(&read.text, &after, None, &BlockContextSource {
 								path: Some(&read.resolved.display),
 								lang: None,
+								streaming,
 							});
 						Some(PreviewFile {
 							display: read.resolved.display.clone(),
@@ -174,8 +175,9 @@ impl ModeEngine for SloppyEngine {
 			})?;
 			let persisted = read.persist(&after)?;
 			let output = generate_diff_string(&read.text, &after, None, &BlockContextSource {
-				path: Some(&read.resolved.display),
-				lang: None,
+				path:      Some(&read.resolved.display),
+				lang:      None,
+				streaming: false,
 			});
 			let mut file = StagedFile::new(
 				read.resolved.display.clone(),

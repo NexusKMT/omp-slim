@@ -257,7 +257,8 @@ pub fn line_tokens_str(text: &str) -> Vec<&str> {
 	text.split_inclusive('\n').collect()
 }
 
-fn diff_line_tokens<T: Eq + Hash + Copy>(old_tokens: &[T], new_tokens: &[T]) -> Vec<Run> {
+/// Myers runs over pre-split line tokens.
+pub fn diff_line_tokens<T: Eq + Hash + Copy>(old_tokens: &[T], new_tokens: &[T]) -> Vec<Run> {
 	let (old_ids, new_ids) = intern(old_tokens, new_tokens);
 	myers_diff(&old_ids, &new_ids)
 }
@@ -285,28 +286,12 @@ pub fn concat_tokens_u16(tokens: &[&[u16]]) -> Vec<u16> {
 	out
 }
 
-fn concat_tokens_str(tokens: &[&str]) -> String {
-	let mut out = String::with_capacity(tokens.iter().map(|token| token.len()).sum());
-	for token in tokens {
-		out.push_str(token);
-	}
-	out
-}
-
 /// Line changes with jsdiff `diffLines` semantics over UTF-16 code units.
 pub fn diff_lines_u16(old: &[u16], new: &[u16]) -> Vec<Change<Vec<u16>>> {
 	let old_tokens = line_tokens_u16(old);
 	let new_tokens = line_tokens_u16(new);
 	let runs = diff_line_tokens(&old_tokens, &new_tokens);
 	build_changes(&runs, &old_tokens, &new_tokens, concat_tokens_u16)
-}
-
-/// Line changes with jsdiff `diffLines` semantics over UTF-8 text.
-pub fn line_changes_str(old: &str, new: &str) -> Vec<Change<String>> {
-	let old_tokens = line_tokens_str(old);
-	let new_tokens = line_tokens_str(new);
-	let runs = diff_line_tokens(&old_tokens, &new_tokens);
-	build_changes(&runs, &old_tokens, &new_tokens, concat_tokens_str)
 }
 
 /// One hunk of a unified diff.
@@ -885,24 +870,6 @@ mod tests {
 	}
 
 	#[test]
-	fn utf8_and_utf16_line_changes_agree_for_ascii() {
-		let old = "a\nb\nc\n";
-		let new = "a\nx\nc\n";
-		let utf8 = line_changes_str(old, new);
-		let utf16 = diff_lines_u16(&u16s(old), &u16s(new));
-		let utf16_shaped: Vec<Change<String>> = utf16
-			.into_iter()
-			.map(|change| Change {
-				value:   String::from_utf16(&change.value).unwrap(),
-				count:   change.count,
-				added:   change.added,
-				removed: change.removed,
-			})
-			.collect();
-		assert_eq!(utf8, utf16_shaped);
-	}
-
-	#[test]
 	fn common_runs_take_values_from_new_tokens() {
 		let old = String::from("same");
 		let new = String::from("same");
@@ -916,7 +883,6 @@ mod tests {
 		);
 		assert_eq!(changes[0].value, new.as_ptr());
 		assert_ne!(changes[0].value, old.as_ptr());
-		assert_eq!(line_changes_str(&old, &new)[0].value, new);
 	}
 
 	#[test]

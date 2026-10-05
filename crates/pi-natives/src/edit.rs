@@ -764,8 +764,9 @@ pub fn edit_diff_string(
 	path: Option<String>,
 ) -> EditDiffResult {
 	let output = generate_diff_string(&old_text, &new_text, None, &BlockContextSource {
-		path: path.as_deref(),
-		lang: None,
+		path:      path.as_deref(),
+		lang:      None,
+		streaming: false,
 	});
 	EditDiffResult { diff: output.diff, first_changed_line: output.first_changed_line }
 }
