@@ -17,8 +17,15 @@ describe("stageRunnerScript re-validation", () => {
 		return name;
 	}
 
+	// Mirrors stageRunnerScript's per-uid directory naming.
+	function stagingDir(name: string) {
+		const uid = process.getuid?.();
+		return path.join(os.tmpdir(), uid === undefined ? name : `${name}-${uid}`);
+	}
+
 	afterEach(() => {
 		for (const name of dirs) {
+			fs.rmSync(stagingDir(name), { recursive: true, force: true });
 			fs.rmSync(path.join(os.tmpdir(), name), { recursive: true, force: true });
 		}
 		dirs.length = 0;
@@ -32,7 +39,7 @@ describe("stageRunnerScript re-validation", () => {
 		expect(fs.existsSync(first)).toBe(true);
 
 		// Simulate a mid-session tmpdir sweep clearing the whole cache dir.
-		fs.rmSync(path.join(os.tmpdir(), dirName), { recursive: true, force: true });
+		fs.rmSync(stagingDir(dirName), { recursive: true, force: true });
 		expect(fs.existsSync(first)).toBe(false);
 
 		// Same process, memo still set: the warm path must fall through and
@@ -54,4 +61,23 @@ describe("stageRunnerScript re-validation", () => {
 		expect(first.endsWith(".rb")).toBe(true);
 		expect(fs.existsSync(second)).toBe(true);
 	});
+
+	// The shared, un-suffixed tmpdir name may be owned by another account (e.g.
+	// root created it 0755 first); staging must not write into it, or every other
+	// user's Python eval fails with EACCES. A non-writable dir stands in for the
+	// foreign owner; root bypasses mode bits and Windows has no getuid, so skip both.
+	it.skipIf(process.getuid?.() === undefined || process.getuid?.() === 0)(
+		"stages outside a shared dir the current user cannot write",
+		async () => {
+			const dirName = uniqueDir();
+			const shared = path.join(os.tmpdir(), dirName);
+			fs.mkdirSync(shared, { mode: 0o555 });
+
+			const staged = await stageRunnerScript(dirName, "py", "print('ok')\n");
+
+			expect(path.dirname(staged)).not.toBe(shared);
+			expect(await Bun.file(staged).text()).toBe("print('ok')\n");
+			expect(fs.statSync(path.dirname(staged)).mode & 0o777).toBe(0o700);
+		},
+	);
 });
