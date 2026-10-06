@@ -7,6 +7,9 @@
  *
  * `OMP_NATIVE_CARGO_PROFILE` selects the cargo profile (default `local`:
  * incremental, unstripped). Image builds set `ci` for a stripped addon.
+ *
+ * `OMP_NATIVE_FEATURES` passes extra cargo features to `napi build --features`
+ * (e.g. `wayland-pipewire`). Cargo path only; Bazel builds ignore it.
  */
 
 import * as fsSync from "node:fs";
