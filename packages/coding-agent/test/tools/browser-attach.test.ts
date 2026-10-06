@@ -32,7 +32,7 @@ import {
 	normalizeConnectedCdpUrl,
 	releaseBrowser,
 } from "@oh-my-pi/pi-coding-agent/tools/browser/registry";
-import { acquireTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
+import { acquireTab, getTab } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import { Process, ProcessStatus } from "@oh-my-pi/pi-natives";
 import type { Browser, HTTPRequest, Page, Target } from "puppeteer-core";
 import { rejectionOf } from "../helpers/rejection";
@@ -570,6 +570,7 @@ describe("pickElectronTarget", () => {
 			let attached: BrowserHandle | undefined;
 
 			let attempted = false;
+			const tabName = `attach-failure-${process.pid}-${Math.random().toString(36).slice(2)}`;
 			try {
 				attached = await acquireBrowser(
 					{ kind: "connected", cdpUrl: `http://${endpoint.host}` },
@@ -581,7 +582,7 @@ describe("pickElectronTarget", () => {
 				// this thread's CDP socket, so the paused request never reaches
 				// `onRequest` and worker init times out instead.
 				const error = await rejectionOf(
-					acquireTab(`attach-failure-${process.pid}-${Math.random().toString(36).slice(2)}`, attached, {
+					acquireTab(tabName, attached, {
 						// Loopback keeps a hypothetical interception miss local and
 						// loud (instant connection refusal, count 0) instead of
 						// wandering into DNS or a proxy.
@@ -593,6 +594,9 @@ describe("pickElectronTarget", () => {
 				expect(error).toBeInstanceOf(Error);
 				expect(error).toMatchObject({ message: expect.stringMatching(/net::ERR_FAILED/) });
 				expect(requestCount).toBe(1);
+				// The failed open rolls back its tab, and with it the tab's hold on the attached browser.
+				expect(getTab(tabName)).toBeUndefined();
+				expect(attached.refCount).toBe(0);
 			} finally {
 				targetPage.off("request", onRequest);
 				await targetPage.setRequestInterception(false);

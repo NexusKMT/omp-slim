@@ -5,9 +5,11 @@ import * as path from "node:path";
 import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
 import type { HTMLElement } from "@oh-my-pi/pi-utils/dom";
 import type {
+	Accessibility,
 	Browser,
 	CDPSession,
 	ElementHandle,
+	Frame,
 	HTTPResponse,
 	JSHandle,
 	KeyboardTypeOptions,
@@ -163,6 +165,7 @@ import {
 	ClickRefusedError,
 	clickAt,
 	clickElement,
+	composedContains,
 	clickQueryHandlerText,
 	fillViaHandle,
 	focusTextEntryTarget,
@@ -227,6 +230,10 @@ declare module "puppeteer-core" {
 	interface Frame {
 		/** Puppeteer's main JavaScript realm, retained by our pinned runtime patch. */
 		mainRealm(): Realm;
+		/** This frame's accessibility tree (`@internal` upstream, stripped from published types). */
+		readonly accessibility: Accessibility;
+		/** Loader of the document the frame shows; changes on every navigation (`@internal` upstream). */
+		readonly _loaderId: string;
 	}
 	interface Realm {
 		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
@@ -296,6 +303,8 @@ const SCROLL_ACK_TIMEOUT_MS = 2_000;
 const REQUEST_INTERCEPTION_CLEANUP_TIMEOUT_MS = 500;
 /** Bound cleanup window after a timed-out raw handle action. */
 const HANDLE_ACTION_INVALIDATION_TIMEOUT_MS = 500;
+/** Bound on reading every iframe in one observation; a frame whose renderer is stuck in script never answers. */
+const FRAME_SNAPSHOT_TIMEOUT_MS = 5_000;
 
 /** Queue a wheel event without treating a delayed renderer acknowledgement as dispatch failure. */
 export async function dispatchScroll(
@@ -849,6 +858,9 @@ function redactUrlCredentials(url: string): string {
 
 class RequestInterceptionCleanupError extends ToolError {}
 
+/** `tab.goto` outlasted its budget; the page stays on what loaded. */
+class NavigationTimeoutError extends ToolError {}
+
 interface RunPageScope {
 	page: Page;
 	/** Restore the page's own listener methods and remove every handler this run registered. */
@@ -988,6 +1000,7 @@ function createRunPageScope(page: Page, restoreInterception: () => Promise<void>
 
 function errorPayload(error: unknown): RunErrorPayload {
 	const recoverTab = error instanceof RequestInterceptionCleanupError || undefined;
+	const navigationTimeout = error instanceof NavigationTimeoutError || undefined;
 	if (error instanceof ToolAbortError) {
 		return { name: error.name, message: error.message, stack: error.stack, isToolError: false, isAbort: true };
 	}
@@ -999,6 +1012,7 @@ function errorPayload(error: unknown): RunErrorPayload {
 			isToolError: true,
 			isAbort: false,
 			recoverTab,
+			navigationTimeout,
 		};
 	}
 	if (error instanceof Error) {
@@ -1060,6 +1074,68 @@ async function createTrackedHeadlessPage(browser: Browser, reportTarget: (target
 	const page = await target.page();
 	if (!page) throw new ToolError(`Created headless target ${targetId} did not expose a page`);
 	return page;
+}
+
+/**
+ * Frames that missed an observation deadline, mapped to the document they showed then. Observe skips
+ * them until they navigate, so a frame stuck in script costs only the first observation its wait.
+ */
+const unresponsiveFrames = new WeakMap<Frame, string>();
+
+function frameDocumentKey(frame: Frame): string {
+	return `${frame._loaderId} ${frame.url()}`;
+}
+
+/**
+ * Accessibility snapshots of `frames` and their descendants, in frame-tree order. A frame that does
+ * not answer by `deadline` is left out with its descendants, and skipped by later observations until
+ * it navigates, so one dead iframe never costs the page its observation. With `root`, only frames
+ * inside it are read.
+ */
+async function snapshotFrames(
+	frames: Frame[],
+	options: { interestingOnly: boolean; root: ElementHandle | null; deadline: number; signal?: AbortSignal },
+): Promise<SerializedAXNode[]> {
+	const snapshots = await Promise.all(
+		frames.map(async frame => {
+			if (unresponsiveFrames.get(frame) === frameDocumentKey(frame)) return [];
+			const timeout = new Error(`Frame ${frame.url()} did not answer`);
+			let snapshot: SerializedAXNode | null;
+			try {
+				snapshot = await withTimeout(
+					snapshotFrame(frame, options),
+					Math.max(0, options.deadline - Date.now()),
+					timeout,
+					options.signal,
+				);
+			} catch (error) {
+				if (options.signal?.aborted) throw error;
+				if (error === timeout) unresponsiveFrames.set(frame, frameDocumentKey(frame));
+				return [];
+			}
+			if (!snapshot) return [];
+			return [snapshot, ...(await snapshotFrames(frame.childFrames(), { ...options, root: null }))];
+		}),
+	);
+	return snapshots.flat();
+}
+
+async function snapshotFrame(
+	frame: Frame,
+	options: { interestingOnly: boolean; root: ElementHandle | null },
+): Promise<SerializedAXNode | null> {
+	if (options.root) {
+		const owner = await frame.frameElement();
+		if (!owner) return null;
+		const scoped = await options.root.realm.adoptHandle(owner).finally(() => owner.dispose().catch(() => undefined));
+		try {
+			// The owner may sit in a web component's shadow root under `root`, where `Node.contains` stops.
+			if (!(await options.root.evaluate(composedContains, scoped))) return null;
+		} finally {
+			await scoped.dispose().catch(() => undefined);
+		}
+	}
+	return await frame.accessibility.snapshot({ interestingOnly: options.interestingOnly });
 }
 
 function collectInteractiveObservationAncestors(node: SerializedAXNode, ancestors: Set<SerializedAXNode>): boolean {
@@ -1334,8 +1410,7 @@ export class WorkerCore {
 
 			// Realm setup is done: puppeteer loaded and browser connected. Sent before
 			// page acquisition so the supervisor's cold-start budget bounds only the
-			// realm setup; page creation and the first navigation run under the ready
-			// wait.
+			// realm setup; page creation runs under the ready wait.
 			this.#transport.send({ type: "setup" });
 			if (payload.mode === "headless") {
 				// Create the target directly so its id is reportable before
@@ -1387,14 +1462,6 @@ export class WorkerCore {
 			this.#tracing = new BrowserTracingController(this.#page);
 			this.#network = new BrowserNetworkManager(this.#page, payload.allowedDomains);
 			await this.#network.start();
-			if (payload.url) {
-				await this.#page.goto(payload.url, {
-					// Default to "load" because dev servers with HMR/WS never reach networkidle.
-					waitUntil: payload.waitUntil ?? "load",
-					timeout: payload.timeoutMs,
-				});
-			}
-			this.#targetId = await targetIdForPage(this.#page);
 			this.#transport.send({ type: "ready", info: await this.#currentReadyInfo() });
 		} catch (error) {
 			// A failed headless init leaves the worker's page orphaned in the shared
@@ -1917,7 +1984,7 @@ export class WorkerCore {
 							// Abandon the hung navigation NOW — a still-pending load stalls every
 							// later op on this page and cascades into more opaque timeouts.
 							await this.#stopLoading();
-							throw new ToolError(
+							throw new NavigationTimeoutError(
 								`tab.goto(${JSON.stringify(url)}) timed out after ${budgetBound}ms; pending navigation stopped — retry with a longer tool timeout or waitUntil:"domcontentloaded"`,
 							);
 						}
@@ -2555,23 +2622,32 @@ export class WorkerCore {
 			}
 		}
 		let snapshot: SerializedAXNode | null;
+		let frameSnapshots: SerializedAXNode[];
 		try {
 			snapshot = (await untilAborted(options.signal, () =>
 				page.accessibility.snapshot({ interestingOnly: !includeAll, root: root ?? undefined }),
 			)) as SerializedAXNode | null;
+			frameSnapshots = await snapshotFrames(page.mainFrame().childFrames(), {
+				interestingOnly: !includeAll,
+				root,
+				deadline: Date.now() + FRAME_SNAPSHOT_TIMEOUT_MS,
+				signal: options.signal,
+			});
 		} finally {
 			await root?.dispose().catch(() => undefined);
 		}
 		if (!snapshot) throw new ToolError("Accessibility snapshot unavailable");
 		const entries: ObservationEntry[] = [];
 		const interactiveAncestors = new Set<SerializedAXNode>();
-		if (options.compact) collectInteractiveObservationAncestors(snapshot, interactiveAncestors);
-		await collectObservationEntries(this, snapshot, entries, {
-			includeAll,
-			viewportOnly,
-			compact: options.compact ?? false,
-			interactiveAncestors,
-		});
+		for (const tree of [snapshot, ...frameSnapshots]) {
+			if (options.compact) collectInteractiveObservationAncestors(tree, interactiveAncestors);
+			await collectObservationEntries(this, tree, entries, {
+				includeAll,
+				viewportOnly,
+				compact: options.compact ?? false,
+				interactiveAncestors,
+			});
+		}
 		const scroll = (await untilAborted(options.signal, () =>
 			page.evaluate(() => {
 				const win = globalThis as unknown as {
