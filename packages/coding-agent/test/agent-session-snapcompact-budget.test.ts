@@ -333,7 +333,7 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 		expect(compactSpy).toHaveBeenCalledTimes(1);
 		const maxFrames = compactSpy.mock.calls[0]?.[1]?.maxFrames ?? 0;
 		expect(maxFrames).toBeGreaterThan(1);
-		expect(maxFrames).toBeLessThan(snapcompact.maxFramesForDataBudget());
+		expect(maxFrames).toBeLessThan(snapcompact.maxFramesForDataBudget(shape));
 
 		const settings = { enabled: true as const, reserveTokens: 16384, keepRecentTokens: 4000 };
 		const budget = model.contextWindow - effectiveReserveTokens(model.contextWindow, settings);
@@ -389,6 +389,41 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			extensionState: "keep-me",
 			[snapcompact.PRESERVE_KEY]: archive,
 		});
+	});
+
+	it("re-renders an archive over the frame payload budget at fewer frames instead of rejecting it", async () => {
+		const branchEntries = sessionManager.getBranch();
+		const lastEntry = branchEntries[branchEntries.length - 1];
+		if (!lastEntry?.id) throw new Error("Expected branch entry with id");
+		const frame = { data: "A".repeat(1_000_000), mimeType: "image/png", cols: 10, rows: 10, chars: 10 };
+		const archiveResult = (frames: number) => ({
+			summary: "stubbed snapcompact",
+			shortSummary: "stub",
+			firstKeptEntryId: lastEntry.id,
+			tokensBefore: 100_000,
+			details: { readFiles: [], modifiedFiles: [] },
+			preserveData: {
+				[snapcompact.PRESERVE_KEY]: {
+					frames: Array.from({ length: frames }, () => frame),
+					totalChars: 10,
+					truncatedChars: 0,
+				},
+			},
+		});
+		// 4 frames of 1 MB overshoot the 3 MB payload budget; the re-render fits.
+		const compactSpy = vi
+			.spyOn(snapcompact, "compact")
+			.mockResolvedValueOnce(archiveResult(4))
+			.mockResolvedValueOnce(archiveResult(3));
+
+		await session.compact(undefined, { mode: "snapcompact" });
+
+		expect(compactSpy).toHaveBeenCalledTimes(2);
+		// 4 frames × 3 MB budget / 4 MB rendered = 3 frames.
+		expect(compactSpy.mock.calls[1]?.[1]).toEqual({ ...compactSpy.mock.calls[0]?.[1], maxFrames: 3 });
+		const entry = sessionManager.getBranch().findLast(e => e.type === "compaction");
+		if (entry?.type !== "compaction") throw new Error("Expected the re-rendered archive to be committed");
+		expect(snapcompact.getPreservedArchive(entry.preserveData)?.frames).toHaveLength(3);
 	});
 
 	it("keeps the frame archive out of the auto_compaction_end event after persisting it", async () => {
