@@ -359,6 +359,7 @@ import {
 	cfgImagesBlockImages,
 	cfgStartupQuiet,
 	cfgTuiReactions,
+	cfgTuiAutoGraph,
 	cfgTuiRenderMermaid,
 	cfgTuiRenderSvg,
 } from "./modes/settings";
@@ -3902,6 +3903,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				renderMermaid: cfgTuiRenderMermaid.get(settings),
 				// Figures are for a reader with a UI; subagent and headless output is read as text.
 				renderSvg: agentKind === "main" && options.hasUI === true && cfgTuiRenderSvg.get(settings),
+				autoGraph: agentKind === "main" && options.hasUI === true && cfgTuiAutoGraph.get(settings) !== "off",
 				reactions: agentKind === "main" && options.hasUI === true && cfgTuiReactions.get(settings),
 				activeRepoContext,
 			});
