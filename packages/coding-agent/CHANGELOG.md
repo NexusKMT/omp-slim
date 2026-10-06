@@ -18,6 +18,7 @@
 - Fixed the `edit` tool hanging on a FIFO or terminal, or exhausting memory on `/dev/zero`; targets that are neither regular files nor directories, including `/dev/null`, are now rejected in every edit mode ([#14462](https://github.com/can1357/oh-my-pi/pull/14462) by [@DrFaustus-vic](https://github.com/DrFaustus-vic)).
 - Fixed long conversations silently losing screenshots and other images the model was still meant to see: images the assistant itself generated no longer counted against the provider's per-request image cap, which had made the clamp evict real user and tool-result images to make room for them ([#14390](https://github.com/can1357/oh-my-pi/pull/14390) by [@F0Rextasy](https://github.com/F0Rextasy)).
 - Fixed the `local://` fallback root escaping to the temp directory or the shared `omp-local` directory when a session id is `.` or `..` ([#14385](https://github.com/can1357/oh-my-pi/pull/14385) by [@jaredlyon](https://github.com/jaredlyon))
+- Fixed `omp gc --archive --apply` leaving one orphan `session_titles` row per archived session behind in `history.db` ([#13930](https://github.com/can1357/oh-my-pi/issues/13930), [#14358](https://github.com/can1357/oh-my-pi/pull/14358) by [@F0Rextasy](https://github.com/F0Rextasy))
 
 ## [18.6.3] - 2026-10-06
 
