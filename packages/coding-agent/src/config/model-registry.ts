@@ -98,6 +98,7 @@ import {
 	resolveProviderBaseUrl,
 	type ProviderOverride,
 	providersWithAuthoritativeProjectCatalog,
+	unservedOverrideKind,
 } from "./model-patch";
 import {
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
@@ -280,6 +281,9 @@ export class ModelRegistry {
 	#customModelOverlays: CustomModelOverlay[] = [];
 	#providerOverrides: Map<string, ProviderOverride> = new Map();
 	#modelOverrides: Map<string, Map<string, ModelOverride>> = new Map();
+	// `provider/id:kind` of modelOverrides kinds already reported as unserved, so
+	// every rebuild does not log the same ignored override again.
+	#warnedUnservedOverrideKinds: Set<string> = new Set();
 	#configError: ConfigError | undefined = undefined;
 	#modelsConfigFile: ConfigFile<ModelsConfig>;
 	#lastStaticLoadMtime: number | null = null;
@@ -2542,6 +2546,19 @@ export class ModelRegistry {
 	 * both, so the clamp must hold on both.
 	 */
 	#applyModelOverrideWithClamp(model: Model<Api>, override: ModelOverride): Model<Api> {
+		const unservedKind = unservedOverrideKind(model, override);
+		if (unservedKind !== undefined) {
+			const warningKey = `${model.provider}/${model.id}:${unservedKind}`;
+			if (!this.#warnedUnservedOverrideKinds.has(warningKey)) {
+				this.#warnedUnservedOverrideKinds.add(warningKey);
+				logger.warn("modelOverrides kind ignored: the model's api does not serve it", {
+					provider: model.provider,
+					model: model.id,
+					kind: unservedKind,
+					api: override.api ?? model.api,
+				});
+			}
+		}
 		const overridden = applyModelOverride(model, override);
 		if (
 			override.contextWindow === undefined ||

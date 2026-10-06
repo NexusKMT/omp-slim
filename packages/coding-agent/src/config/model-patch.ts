@@ -9,6 +9,7 @@ import { isRecord } from "@oh-my-pi/pi-utils";
 import { createConfigHeaderResolver } from "./resolve-config-value";
 import { SPECIAL_MODEL_MANAGER_PROVIDER_IDS } from "./model-provider-discovery";
 import type { ModelOverride } from "./models-config-schema";
+import { servedKinds } from "./models-config";
 /** Provider override config (baseUrl, headers, apiKey, compat, transport). */
 export interface ProviderOverride {
 	baseUrl?: string;
@@ -348,8 +349,33 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 	return built;
 }
 
+/**
+ * The explicit `kind` of a `modelOverrides` entry that the api `model` ends up
+ * on does not serve. Config validation only sees apis named in models.yml;
+ * built-in, discovered, and `kind-apis` rows are checked here, against their
+ * resolved api, and the override's kind is ignored.
+ */
+export function unservedOverrideKind(model: Model<Api>, override: ModelOverride): ModelKind | undefined {
+	if (override.kind === undefined) return undefined;
+	const served = servedKinds(override.api ?? model.api);
+	return served === undefined || served.includes(override.kind) ? undefined : override.kind;
+}
+
+/**
+ * The kind a `modelOverrides` entry gives `model`; `undefined` leaves it alone.
+ * An explicit kind applies when the api the model ends up on serves it.
+ * Otherwise an `api` change takes a runner api's kind, keeps a kind the new api
+ * still serves, and falls back to `chat`.
+ */
+function overrideKind(model: Model<Api>, override: ModelOverride): ModelKind | undefined {
+	if (override.kind !== undefined && unservedOverrideKind(model, override) === undefined) return override.kind;
+	if (override.api === undefined) return undefined;
+	const runnerKind = runnerApiKind(override.api);
+	if (runnerKind !== undefined) return runnerKind;
+	const served = servedKinds(override.api);
+	return served === undefined || served.includes(modelKind(model)) ? undefined : "chat";
+}
+
 export function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<Api> {
-	// An `api` change without `kind` takes the api's kind, as validated in `validateProviderConfiguration`.
-	const kind = override.kind ?? (override.api === undefined ? undefined : (runnerApiKind(override.api) ?? "chat"));
-	return applyModelPatch(model, { ...(override as ModelPatch), kind }, "merge");
+	return applyModelPatch(model, { ...(override as ModelPatch), kind: overrideKind(model, override) }, "merge");
 }

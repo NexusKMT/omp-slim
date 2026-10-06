@@ -37,15 +37,21 @@ export interface ProviderValidationConfig {
 	models: ProviderValidationModel[];
 }
 
+const CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny"];
+const IMAGE_CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny", "image"];
+const KIND_LIST = new Intl.ListFormat("en", { type: "disjunction" });
+
 /**
  * Kinds a model on `api` may declare: a runner api serves its own kind; a chat
- * transport serves `chat`, plus `image` when `generate_image` runs it (hosted
- * Responses image tool, Gemini image models).
+ * transport serves `chat` and `tiny`, plus `image` when `generate_image` runs it
+ * (hosted Responses image tool, Gemini image models). `undefined` for
+ * `local-inference`, which hosts several kinds chosen by the model itself.
  */
-function servedKinds(api: Api): readonly ModelKind[] {
+export function servedKinds(api: Api): readonly ModelKind[] | undefined {
+	if (api === "local-inference") return undefined;
 	const runnerKind = runnerApiKind(api);
 	if (runnerKind !== undefined) return [runnerKind];
-	return isImageGenerationApi(api) ? ["chat", "image"] : ["chat"];
+	return isImageGenerationApi(api) ? IMAGE_CHAT_TRANSPORT_KINDS : CHAT_TRANSPORT_KINDS;
 }
 
 export function validateProviderConfiguration(
@@ -99,14 +105,12 @@ export function validateProviderConfiguration(
 	}
 
 	// Runners dispatch on `api`, so an explicit `kind` must be one its api serves. An
-	// omitted `kind` follows the api. `local-inference` hosts several kinds, so it
-	// accepts any `kind`.
+	// omitted `kind` follows the api.
 	const checkKind = (subject: string, kind: ModelKind, api: Api) => {
-		if (api === "local-inference") return;
 		const served = servedKinds(api);
-		if (served.includes(kind)) return;
+		if (served === undefined || served.includes(kind)) return;
 		throw new Error(
-			`Provider ${providerName}, ${subject}: kind "${kind}" does not match api "${api}", which serves kind ${served.map(k => `"${k}"`).join(" or ")}.`,
+			`Provider ${providerName}, ${subject}: kind "${kind}" does not match api "${api}", which serves kind ${KIND_LIST.format(served.map(k => `"${k}"`))}.`,
 		);
 	};
 	for (const modelDef of models) {
@@ -132,15 +136,13 @@ export function validateProviderConfiguration(
 		}
 	}
 
+	// Only an api this file names is known here. Built-in, discovered, and `kind-apis`
+	// rows get their api later, so `applyModelOverride` checks their kind against it.
 	for (const [modelId, override] of Object.entries(config.modelOverrides ?? {})) {
 		if (override.kind === undefined) continue;
-		const api = override.api ?? models.find(model => model.id === modelId)?.api ?? config.api;
-		if (api === undefined) {
-			throw new Error(
-				`Provider ${providerName}, modelOverrides.${modelId}: "kind" requires "api" on the override or the provider.`,
-			);
-		}
-		checkKind(`modelOverrides.${modelId}`, override.kind, api);
+		const declared = models.find(model => model.id === modelId);
+		const api = override.api ?? (declared ? (declared.api ?? config.api) : undefined);
+		if (api !== undefined) checkKind(`modelOverrides.${modelId}`, override.kind, api);
 	}
 }
 

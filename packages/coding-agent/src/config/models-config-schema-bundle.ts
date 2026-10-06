@@ -110,11 +110,12 @@ export const getModelsConfigSchemaBundle = once(() => {
 	);
 
 	// Models may also name a runner API (web search is built in). `validateProviderConfiguration`
-	// checks that `kind` matches the api's kind.
+	// checks that `kind` matches the api's kind. `search` is left out with `web-search`: no api
+	// a models.yml entry can name serves it.
 	const ModelApiSchema = ApiSchema.or(
 		type.enumerated(...Object.keys(RUNNER_API_KINDS).filter(api => api !== "web-search")),
 	);
-	const ModelKindSchema = type.enumerated(...MODEL_KINDS);
+	const ModelKindSchema = type.enumerated(...MODEL_KINDS.filter(kind => kind !== "search"));
 
 	const EffortSchema = type('"minimal" | "low" | "medium" | "high" | "xhigh" | "max"');
 

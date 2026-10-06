@@ -128,27 +128,59 @@ describe("model kind must match its api", () => {
 		expect(validate({ models: [{ id: "img", api: "openai-images", kind: "image" }] })).not.toThrow();
 	});
 
-	test("chat transports that generate_image runs also serve image", () => {
+	test("chat transports serve chat and tiny, plus image where generate_image runs them", () => {
 		expect(validate({ models: [{ id: "gpt-image-2", api: "openai-responses", kind: "image" }] })).not.toThrow();
 		expect(
 			validate({ models: [{ id: "gemini-3-pro-image", api: "google-generative-ai", kind: "image" }] }),
 		).not.toThrow();
+		expect(validate({ models: [{ id: "qwen-small", api: "openai-completions", kind: "tiny" }] })).not.toThrow();
 		expect(validate({ models: [{ id: "voice", api: "openai-responses", kind: "tts" }] })).toThrow(
-			/model voice: kind "tts" does not match api "openai-responses", which serves kind "chat" or "image"/,
+			/model voice: kind "tts" does not match api "openai-responses"/,
 		);
 	});
 
-	test("checks an override kind against the api it resolves to", () => {
-		const provider = { api: "openai-responses" as const, models: [] };
+	test("the schema rejects kind search, which no models.yml api serves", () => {
+		const checked = ModelsConfigSchema({
+			providers: {
+				gateway: { baseUrl, apiKey: "key", api: "openai-completions", models: [{ id: "s", kind: "search" }] },
+			},
+		});
+		if (!(checked instanceof OmpErrors)) throw new Error("expected the schema to reject kind search");
+		expect(checked.summary).toContain("providers.gateway.models[0].kind");
+		expect(checked.summary).toContain('(was "search")');
+	});
+
+	test("checks an override kind against an api the file names", () => {
+		const provider = { api: "openai-responses" as const, models: [{ id: "gpt-image-2" }] };
 		expect(validate({ ...provider, modelOverrides: { "gpt-image-2": { kind: "tts" } } })).toThrow(
 			/modelOverrides\.gpt-image-2: kind "tts" does not match api "openai-responses"/,
+		);
+		expect(validate({ models: [], modelOverrides: { x: { kind: "tts", api: "openai-images" } } })).toThrow(
+			/modelOverrides\.x: kind "tts" does not match api "openai-images"/,
 		);
 		expect(
 			validate({ ...provider, modelOverrides: { "gpt-image-2": { kind: "image", api: "openai-images" } } }),
 		).not.toThrow();
-		expect(validate({ models: [], modelOverrides: { "gpt-image-2": { kind: "image" } } })).toThrow(
-			/modelOverrides\.gpt-image-2: "kind" requires "api"/,
-		);
+	});
+
+	test("leaves an undeclared model's override kind to the api the model resolves to", () => {
+		// A built-in provider names no api in the file.
+		expect(() =>
+			validateProviderConfiguration(
+				"openrouter",
+				{ models: [], modelOverrides: { "black-forest-labs/flux.2-flex": { kind: "image" } } },
+				"models-config",
+			),
+		).not.toThrow();
+		// A discovered row can get a runner api (here `openai-embeddings`), not the provider's chat api.
+		expect(
+			validate({
+				api: "openai-completions",
+				discovery: { type: "openai-models-list" },
+				models: [],
+				modelOverrides: { "embed-x": { kind: "embedding" } },
+			}),
+		).not.toThrow();
 	});
 
 	test("multi-kind local-inference accepts any kind", () => {
