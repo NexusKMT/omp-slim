@@ -60,6 +60,7 @@ import {
 	loadPuppeteerInWorker,
 	loadedKnownDevices,
 	loadedNetworkConditions,
+	readPageViewport,
 } from "./launch";
 import { extractReadableFromHtml, type ReadableExtractOptions, type ReadableFormat } from "./readable";
 import { assertTabPressArgs } from "./tab-arguments";
@@ -1181,6 +1182,8 @@ export class WorkerCore {
 	#browser?: Browser;
 	#page?: Page;
 	#targetId?: string;
+	/** Last viewport read from the page; reported while a dialog or failure blocks a fresh read. */
+	#lastViewport?: ReadyInfo["viewport"];
 	#elementCache = new Map<number, ElementHandle>();
 	#elementCounter = 0;
 	#active: ActiveRun | null = null;
@@ -1457,9 +1460,16 @@ export class WorkerCore {
 		return {
 			url: redactUrlCredentials(page.url()),
 			title: dialogPending ? undefined : await page.title().catch(() => undefined),
-			viewport: page.viewport() ?? DEFAULT_VIEWPORT,
+			viewport: dialogPending
+				? (page.viewport() ?? this.#lastViewport ?? DEFAULT_VIEWPORT)
+				: await this.#viewport().catch(() => this.#lastViewport ?? DEFAULT_VIEWPORT),
 			targetId,
 		};
+	}
+
+	async #viewport(signal?: AbortSignal): Promise<ReadyInfo["viewport"]> {
+		this.#lastViewport = await readPageViewport(this.#requirePage(), signal);
+		return this.#lastViewport;
 	}
 
 	/** Apply an automatic dialog policy selected while opening the tab. */
@@ -2545,7 +2555,7 @@ export class WorkerCore {
 		return {
 			url: page.url(),
 			title: (await untilAborted(options.signal, () => page.title())) as string,
-			viewport: page.viewport() ?? DEFAULT_VIEWPORT,
+			viewport: await this.#viewport(options.signal),
 			scroll,
 			elements: entries,
 		};
