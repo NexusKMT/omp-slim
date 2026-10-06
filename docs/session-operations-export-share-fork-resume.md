@@ -386,7 +386,8 @@ prompt. If its recorded cwd is missing or permission-blocked, startup retains
 the launch cwd without relocating the transcript; a failed cwd switch/rescope
 also prints a fallback warning.
 The same enterability policy applies to picker selections. A missing direct path
-initializes a new session at that path; malformed non-empty headers fail closed.
+fails with `Session "<path>" not found.`; an existing empty file or malformed
+non-empty headers fail closed without modifying the file.
 
 ## CLI `--continue`
 
