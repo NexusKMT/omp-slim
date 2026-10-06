@@ -24,6 +24,8 @@ import type {
 	RpcAskDialogQuestion,
 	RpcAvailableCommandsUpdateFrame,
 	RpcAvailableSlashCommand,
+	RpcBtwDeltaFrame,
+	RpcBtwRecordFrame,
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -56,6 +58,7 @@ import type {
 import type * as Wire from "@oh-my-pi/pi-coding-agent/modes/rpc/wire/rpc-wire.generated";
 import type { RestoredQueuedMessage } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
 import type { SessionStats } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import type { BtwHistoryRecord, BtwHistoryTurn } from "@oh-my-pi/pi-coding-agent/session/btw-history";
 import type { UsageLimitState } from "@oh-my-pi/pi-coding-agent/session/usage-limit";
 import type { ContextUsage } from "@oh-my-pi/pi-tui/status-line/types";
 import type { Goal } from "@oh-my-pi/pi-tui/tools/goal";
@@ -206,6 +209,8 @@ export type Frames = Assert<
 		liveLevels: Outbound<RpcLiveLevelsFrame, Wire.LiveLevelsEvent>;
 		liveTranscript: Outbound<RpcLiveTranscriptFrame, Wire.LiveTranscriptEvent>;
 		liveEnd: Outbound<RpcLiveEndFrame, Wire.LiveEndEvent>;
+		btwDelta: Outbound<RpcBtwDeltaFrame, Wire.BtwDeltaEvent>;
+		btwRecord: Outbound<RpcBtwRecordFrame, Wire.BtwRecordEvent>;
 		hostToolCall: Outbound<RpcHostToolCallRequest, Wire.HostToolCallRequest>;
 		hostToolCancel: Outbound<RpcHostToolCancelRequest, Wire.HostToolCancelRequest>;
 		hostUriRequest: Outbound<RpcHostUriRequest, Wire.HostUriRequest>;
@@ -265,6 +270,9 @@ export type State = Assert<
 		slashSubcommand: Outbound<NonNullable<RpcAvailableSlashCommand["subcommands"]>[number], Wire.SlashSubcommand>;
 		subagentSnapshot: Outbound<RpcSubagentSnapshot, Wire.SubagentSnapshot>;
 		subagentMessages: Outbound<RpcSubagentMessagesResult, Wire.SubagentMessages>;
+		btwHistoryRecord: Outbound<BtwHistoryRecord, Wire.BtwHistoryRecord>;
+		btwHistoryTurn: Outbound<BtwHistoryTurn, Wire.BtwHistoryTurn>;
+		btwStatuses: Same<BtwHistoryTurn["status"], Wire.BtwStatus>;
 		model: OutboundSubset<Model, Wire.ModelInfo>;
 		modelCost: OutboundSubset<Model["cost"], Wire.ModelCost>;
 		thinkingConfig: OutboundSubset<NonNullable<Model["thinking"]>, Wire.ThinkingConfig>;

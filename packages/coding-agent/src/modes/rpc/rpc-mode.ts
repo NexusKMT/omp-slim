@@ -19,7 +19,7 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { $env, isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
+import { $env, isRecord, logger, Snowflake, toError } from "@oh-my-pi/pi-utils";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
 	type ExtensionAskDialogQuestion,
@@ -71,6 +71,7 @@ import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
 import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
 import { claimRpcInput, readRpcInputFrames } from "./rpc-input";
 import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR, RpcMessagesPageError } from "./rpc-messages";
+import { RpcBtwController } from "./rpc-btw";
 import { RpcGoalController } from "./rpc-goal";
 import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
 import { RpcOutputWriter } from "./rpc-output";
@@ -411,10 +412,16 @@ export function dispatchRpcControlFrame(parsed: unknown, deps: RpcInputFrameDeps
 /**
  * Commands that skip the serial queue entirely; see {@link dispatchRpcInputFrame}.
  * (`prompt` and `steer_subagent` are also backgrounded there, but start through
- * the serial tail.)
+ * the serial tail.) `btw_cancel` is synchronous and must overtake a `btw` still
+ * starting or a long serial command.
  * A Set, not a Record: `type` is untrusted input and must not hit prototype keys.
  */
-const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>(["bash", "predict_word", "live_start"]);
+const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+	"bash",
+	"predict_word",
+	"live_start",
+	"btw_cancel",
+]);
 
 /**
  * Dispatch a single parsed frame from the RPC input stream.
@@ -1383,6 +1390,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 
 	const extensionUserMessageTracker = new RpcExtensionUserMessageTracker();
 	const wordPredictor = new RpcWordPredictor();
+	const btw = new RpcBtwController(session, output);
 	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
 	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
 	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
@@ -1615,6 +1623,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			change: () => Promise<T>,
 			{ detachesRun }: { detachesRun: boolean },
 		): Promise<T> => {
+			await btw.close();
 			await goalController.beginSessionChange();
 			let result: T | undefined;
 			try {
@@ -1681,6 +1690,12 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	 */
 	const disposeAndExit = async (): Promise<never> => {
 		try {
+			// The process ends regardless; report an unsaved side answer instead of skipping dispose.
+			await btw.close().catch(btwError => {
+				const message = toError(btwError).message;
+				logger.error(message);
+				output({ type: "notice", level: "error", message, source: "btw-history" });
+			});
 			// Close the realtime call (microphone, socket) before the session it delegates into.
 			await liveBridge.stop();
 			await session.dispose();
@@ -1942,6 +1957,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				}
 				const requestedModel =
 					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
+				// Validation first: a refused change must not cancel the running side question.
+				await btw.close();
 				await goalController.beginSessionChange();
 				let result: RpcSessionChangeResult | undefined;
 				try {
@@ -1972,6 +1989,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "open_session": {
 				const requestedModel = await resolveRequestedRpcModel(session, command);
 				const fileBeforeOpen = session.sessionFile;
+				await btw.close();
 				await goalController.beginSessionChange();
 				let result: RpcOpenSessionResult | undefined;
 				try {
@@ -2514,6 +2532,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					return error(id, "login", err instanceof Error ? err.message : String(err));
 				}
 			}
+
+			// =================================================================
+			// Side questions (/btw)
+			// =================================================================
+
+			case "btw": {
+				const record = await btw.ask(command.question, command.recordId);
+				return success(id, "btw", { record });
+			}
+
+			case "btw_cancel":
+				return success(id, "btw_cancel", { cancelled: btw.cancel(command.recordId) });
+
+			case "get_btw_history":
+				return success(id, "get_btw_history", { records: await btw.history() });
 
 			// =================================================================
 			// Word prediction
