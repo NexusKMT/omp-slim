@@ -23,6 +23,7 @@
 - Sped up parsing of large hashline edits ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up copy-on-write task isolation setup on reflink (Linux) and ReFS (Windows) volumes ([#14528](https://github.com/can1357/oh-my-pi/pull/14528) by [@H4vC](https://github.com/H4vC))
 - `Process.waitForExit()` on a single process waits for the operating system's exit notification instead of polling every 50 ms ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Reduced the memory used by the local completion model's tokenizer ([#14533](https://github.com/can1357/oh-my-pi/pull/14533) by [@H4vC](https://github.com/H4vC))
 - Long lines cut by the lint, gt and system output minimizers now end in `…[+N]`, showing how many characters were dropped ([#14532](https://github.com/can1357/oh-my-pi/pull/14532) by [@H4vC](https://github.com/H4vC))
 - Reduced the memory used by tokenizer tables and by counting Claude tokens on long inputs ([#14530](https://github.com/can1357/oh-my-pi/pull/14530) by [@H4vC](https://github.com/H4vC))
 
