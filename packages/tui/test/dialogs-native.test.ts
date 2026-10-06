@@ -5,10 +5,13 @@ import type { DescribeContext, NativeChild, NativeNode } from "@oh-my-pi/pi-tui/
 import { AskDialogComponent, type ExtensionAskDialogQuestion } from "@oh-my-pi/pi-tui/overlays/ask-dialog";
 import { LoginDialogComponent } from "@oh-my-pi/pi-tui/overlays/login-dialog";
 import { PlanReviewOverlay } from "@oh-my-pi/pi-tui/overlays/plan-review-overlay";
+import { setNativeRendering } from "@oh-my-pi/pi-tui/native/state";
 import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
 
 const ENTER = "\n";
 const DOWN = "\x1b[B";
+const RIGHT = "\x1b[C";
+const SHIFT_RIGHT = "\x1b[1;2C";
 
 /** A terminal that draws every kind (`meter` included). */
 const CX: DescribeContext = { cols: 100, reduceMotion: false, dark: true, supports: () => true, feature: () => true };
@@ -136,6 +139,29 @@ describe("dialogs under a native surface", () => {
 		pointed.handleNativeEvent({ type: "action", key: "tools/copyPlan", act: "copyPlan", mods: [] });
 		expect(viaButton.mock.calls).toEqual(viaKey.mock.calls);
 		expect(viaKey).toHaveBeenCalledTimes(1);
+	});
+
+	it("plan review: ←/→ walk the horizontal decision bar and Shift+→ steps the model slider", () => {
+		const onPick = vi.fn();
+		const onChange = vi.fn();
+		const overlay = new PlanReviewOverlay(
+			"# Plan\n\nbody\n",
+			{
+				options: ["Approve", "Refine", "Stay"],
+				slider: { segments: [{ label: "Fast" }, { label: "Smart" }], index: 0, onChange },
+			},
+			{ onPick, onCancel: vi.fn() },
+		);
+		setNativeRendering(true);
+		try {
+			overlay.handleInput(RIGHT);
+			overlay.handleInput(SHIFT_RIGHT);
+			overlay.handleInput(ENTER);
+		} finally {
+			setNativeRendering(false);
+		}
+		expect(onChange).toHaveBeenCalledWith(1);
+		expect(onPick).toHaveBeenCalledWith("Refine");
 	});
 
 	it("login: Cancel runs Esc's path and Continue submits the pasted code", async () => {
