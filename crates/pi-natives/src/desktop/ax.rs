@@ -134,11 +134,12 @@ impl AxRegistry {
 
 	/// Returns the element's ref under `target`, minting one the first time it
 	/// is seen there, and renews it for `target`'s `generation`. An identity
-	/// read again with another role or label gets a new ref; the old ref keeps
-	/// the element it was read from until it expires like any ref not read
-	/// again.
+	/// read again with another role or label, or whose element from the last
+	/// read is gone, gets a new ref; the old ref keeps the element it was read
+	/// from until it expires like any ref not read again.
 	pub(crate) fn register(
 		&mut self,
+		backend: &mut dyn AxBackend,
 		target: &str,
 		generation: u64,
 		handle: AxHandle,
@@ -157,7 +158,7 @@ impl AxRegistry {
 			self
 				.entries
 				.get(id)
-				.is_some_and(|entry| entry.fingerprint == fingerprint)
+				.is_some_and(|entry| entry.fingerprint == fingerprint && backend.alive(&entry.handle))
 		});
 		let id = renewed.unwrap_or_else(|| {
 			let id = self.next_ref;
@@ -406,13 +407,14 @@ fn format_tree(
 	node: WalkNode,
 	depth: usize,
 	window: &DesktopWindow,
+	backend: &mut dyn AxBackend,
 	registry: &mut AxRegistry,
 	target: &str,
 	generation: u64,
 	text: &mut String,
 	nodes: &mut u32,
 ) {
-	let reference = registry.register(target, generation, node.handle, &node.props);
+	let reference = registry.register(backend, target, generation, node.handle, &node.props);
 	if !text.is_empty() {
 		text.push('\n');
 	}
@@ -449,7 +451,7 @@ fn format_tree(
 	}
 	*nodes += 1;
 	for child in node.children {
-		format_tree(child, depth + 1, window, registry, target, generation, text, nodes);
+		format_tree(child, depth + 1, window, backend, registry, target, generation, text, nodes);
 	}
 }
 
@@ -474,7 +476,17 @@ pub fn snapshot(
 	let mut text = String::new();
 	let mut node_count = 0;
 	if let Some(root) = root {
-		format_tree(root, 0, window, registry, target, generation, &mut text, &mut node_count);
+		format_tree(
+			root,
+			0,
+			window,
+			backend,
+			registry,
+			target,
+			generation,
+			&mut text,
+			&mut node_count,
+		);
 	}
 	registry.end_snapshot(target, generation);
 	if state.truncated {
@@ -522,7 +534,7 @@ pub fn query(
 			&& contains(label(&node.props), title.as_ref())
 			&& contains(node.props.value.as_deref(), value.as_ref())
 		{
-			let reference = registry.register(target, generation, node.handle, &node.props);
+			let reference = registry.register(backend, target, generation, node.handle, &node.props);
 			result.push(node_to_napi(reference, node.props));
 			if result.len() >= limit {
 				break;
@@ -540,7 +552,7 @@ pub fn register_node(
 ) -> CoreResult<AxNode> {
 	let props = backend.props(&handle)?;
 	let generation = registry.current_generation(target);
-	let reference = registry.register(target, generation, handle, &props);
+	let reference = registry.register(backend, target, generation, handle, &props);
 	Ok(node_to_napi(reference, props))
 }
 pub fn element_at_node(
@@ -617,13 +629,22 @@ pub fn normalize_role_atspi(native: &str, multiline: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashMap;
+	use std::collections::{HashMap, HashSet};
 
 	use super::{super::error::ErrorCode, *};
 
+	#[derive(Default)]
 	struct Mock {
 		props:    HashMap<u64, AxProps>,
 		children: HashMap<u64, Vec<u64>>,
+		/// Nodes whose earlier reads are gone, their identity taken over.
+		gone:     HashSet<u64>,
+	}
+	fn node(h: &AxHandle) -> u64 {
+		let AxHandle::Test(id) = h else {
+			unreachable!()
+		};
+		*id
 	}
 	impl AxBackend for Mock {
 		fn window_root(&mut self, _: &DesktopWindow) -> CoreResult<AxHandle> {
@@ -635,23 +656,18 @@ mod tests {
 		}
 
 		fn props(&mut self, h: &AxHandle) -> CoreResult<AxProps> {
-			let AxHandle::Test(id) = h else {
-				unreachable!()
-			};
+			let id = node(h);
 			self
 				.props
-				.get(id)
+				.get(&id)
 				.cloned()
 				.ok_or_else(|| DesktopError::ax_failed(format!("unreadable test node {id}")))
 		}
 
 		fn children(&mut self, h: &AxHandle) -> CoreResult<Vec<AxHandle>> {
-			let AxHandle::Test(id) = h else {
-				unreachable!()
-			};
 			Ok(self
 				.children
-				.get(id)
+				.get(&node(h))
 				.into_iter()
 				.flatten()
 				.map(|id| AxHandle::Test(*id))
@@ -695,6 +711,10 @@ mod tests {
 		fn attributes(&mut self, _: &AxHandle) -> CoreResult<Vec<(String, String)>> {
 			Ok(Vec::new())
 		}
+
+		fn alive(&mut self, h: &AxHandle) -> bool {
+			!self.gone.contains(&node(h))
+		}
 	}
 	fn p(role: &str, title: Option<&str>) -> AxProps {
 		AxProps {
@@ -725,10 +745,11 @@ mod tests {
 	}
 	#[test]
 	fn generations_keep_current_and_previous() {
+		let mut m = Mock::default();
 		let mut r = AxRegistry::default();
 		for g in 1..=3 {
 			let generation = r.begin_snapshot("x");
-			r.register("x", generation, AxHandle::Test(g), &p("button", None));
+			r.register(&mut m, "x", generation, AxHandle::Test(g), &p("button", None));
 			r.end_snapshot("x", generation);
 		}
 		assert!(r.resolve("e1").is_err());
@@ -738,13 +759,14 @@ mod tests {
 	#[test]
 	fn reread_elements_keep_their_ref_and_removed_ones_expire() {
 		let mut m = Mock {
-			props:    [
+			props: [
 				(1, p("window", Some("Title"))),
 				(2, p("button", Some("Keep"))),
 				(3, p("button", Some("Gone"))),
 			]
 			.into(),
 			children: [(1, vec![2, 3])].into(),
+			..Default::default()
 		};
 		let mut registry = AxRegistry::default();
 		let first =
@@ -777,8 +799,9 @@ mod tests {
 	#[test]
 	fn a_relabelled_element_keeps_its_old_ref_until_it_expires() {
 		let mut m = Mock {
-			props:    [(1, p("window", Some("Title"))), (2, p("button", Some("Play")))].into(),
+			props: [(1, p("window", Some("Title"))), (2, p("button", Some("Play")))].into(),
 			children: [(1, vec![2])].into(),
+			..Default::default()
 		};
 		let mut registry = AxRegistry::default();
 		let options = AxSnapshotOptions::default();
@@ -808,13 +831,14 @@ mod tests {
 	#[test]
 	fn an_element_missing_from_one_snapshot_keeps_its_ref() {
 		let mut m = Mock {
-			props:    [
+			props: [
 				(1, p("window", Some("Title"))),
 				(2, p("button", Some("Keep"))),
 				(3, p("button", Some("Flicker"))),
 			]
 			.into(),
 			children: [(1, vec![2, 3])].into(),
+			..Default::default()
 		};
 		let mut registry = AxRegistry::default();
 		let options = AxSnapshotOptions::default();
@@ -827,14 +851,35 @@ mod tests {
 		assert!(back.text.ends_with("button \"Flicker\" [ref=e3]"));
 	}
 	#[test]
+	fn an_identity_whose_element_is_gone_gets_a_new_ref() {
+		let mut m = Mock {
+			props: [(1, p("window", Some("Title"))), (2, p("button", Some("Go")))].into(),
+			children: [(1, vec![2])].into(),
+			..Default::default()
+		};
+		let mut registry = AxRegistry::default();
+		let options = AxSnapshotOptions::default();
+		snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		m.gone.insert(2);
+		let replaced = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(
+			replaced.text,
+			"- window \"Title\" [ref=e1] app=Safari (focused)\n  - button \"Go\" [ref=e3]"
+		);
+		m.gone.clear();
+		let reread = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(reread.text, replaced.text);
+	}
+	#[test]
 	fn refs_are_per_target() {
+		let mut m = Mock::default();
 		let mut r = AxRegistry::default();
 		let go = p("button", Some("Go"));
 		let desktop = r.current_generation("desktop");
-		assert_eq!(r.register("desktop", desktop, AxHandle::Test(5), &go), "e1");
+		assert_eq!(r.register(&mut m, "desktop", desktop, AxHandle::Test(5), &go), "e1");
 		for _ in 0..2 {
 			let generation = r.begin_snapshot("7");
-			assert_eq!(r.register("7", generation, AxHandle::Test(5), &go), "e2");
+			assert_eq!(r.register(&mut m, "7", generation, AxHandle::Test(5), &go), "e2");
 			r.end_snapshot("7", generation);
 		}
 		for _ in 0..2 {
@@ -846,10 +891,11 @@ mod tests {
 	}
 	#[test]
 	fn hard_cap_evicts_oldest_generation_of_largest_target() {
+		let mut m = Mock::default();
 		let mut r = AxRegistry::default();
 		let g = r.current_generation("x");
 		for n in 0..5_001 {
-			r.register("x", g, AxHandle::Test(n), &p("button", None));
+			r.register(&mut m, "x", g, AxHandle::Test(n), &p("button", None));
 		}
 		assert!(r.entries.len() <= 5_000);
 		assert!(r.resolve("e1").is_err());
@@ -857,13 +903,14 @@ mod tests {
 	#[test]
 	fn snapshot_text_and_filter_are_exact() {
 		let mut m = Mock {
-			props:    [
+			props: [
 				(1, p("window", Some("Title"))),
 				(2, p("group", None)),
 				(3, p("button", Some("Go"))),
 			]
 			.into(),
 			children: [(1, vec![2]), (2, vec![3])].into(),
+			..Default::default()
 		};
 		m.props.get_mut(&3).unwrap().actions.push("press".into());
 		let s =
@@ -880,7 +927,7 @@ mod tests {
 		// A Reminders-shaped window: an unnamed split group holding a list pane and
 		// a detail pane, an unnamed splitter, and an empty wrapper.
 		let mut m = Mock {
-			props:    [
+			props: [
 				(1, p("window", Some("Title"))),
 				(2, p("splitgroup", None)),
 				(3, p("scrollarea", None)),
@@ -892,6 +939,7 @@ mod tests {
 			]
 			.into(),
 			children: [(1, vec![2]), (2, vec![3, 5, 6, 8]), (3, vec![4]), (6, vec![7])].into(),
+			..Default::default()
 		};
 		let s =
 			snapshot(&mut m, &mut AxRegistry::default(), &window(), &AxSnapshotOptions::default())
@@ -910,8 +958,9 @@ mod tests {
 		reload.description = Some("Reload".into());
 		reload.actions.push("press".into());
 		let mut m = Mock {
-			props:    [(1, p("window", Some("Title"))), (2, reload)].into(),
+			props: [(1, p("window", Some("Title"))), (2, reload)].into(),
 			children: [(1, vec![2])].into(),
+			..Default::default()
 		};
 		let snapshot =
 			snapshot(&mut m, &mut AxRegistry::default(), &window(), &AxSnapshotOptions::default())
@@ -932,8 +981,9 @@ mod tests {
 	#[test]
 	fn truncation_sets_flag_and_trailer() {
 		let mut m = Mock {
-			props:    [(1, p("window", Some("Title"))), (2, p("button", Some("A")))].into(),
+			props: [(1, p("window", Some("Title"))), (2, p("button", Some("A")))].into(),
 			children: [(1, vec![2])].into(),
+			..Default::default()
 		};
 		let s = snapshot(&mut m, &mut AxRegistry::default(), &window(), &AxSnapshotOptions {
 			max_nodes: Some(1),
@@ -946,8 +996,9 @@ mod tests {
 	#[test]
 	fn unreadable_subtree_is_skipped_with_trailer() {
 		let mut m = Mock {
-			props:    [(1, p("window", Some("Title"))), (3, p("button", Some("Ready")))].into(),
+			props: [(1, p("window", Some("Title"))), (3, p("button", Some("Ready")))].into(),
 			children: [(1, vec![2, 3])].into(),
+			..Default::default()
 		};
 		let s =
 			snapshot(&mut m, &mut AxRegistry::default(), &window(), &AxSnapshotOptions::default())
@@ -984,10 +1035,8 @@ mod tests {
 		let bounds = AxBounds { x: -420.0, y: 75.0, width: 80.0, height: 50.0 };
 		let mut hit = p("button", Some("Global"));
 		hit.bounds = Some(bounds);
-		let mut m = Mock {
-			props:    [(1, p("window", Some("Title"))), (2, hit)].into(),
-			children: HashMap::new(),
-		};
+		let mut m =
+			Mock { props: [(1, p("window", Some("Title"))), (2, hit)].into(), ..Default::default() };
 		let mut registry = AxRegistry::default();
 		let node = element_at_node(
 			&mut m,

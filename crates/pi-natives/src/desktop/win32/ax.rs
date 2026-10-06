@@ -539,6 +539,13 @@ impl AxBackend for Win32Ax {
 		}
 		Ok(attributes)
 	}
+
+	/// `RuntimeId`s are only unique among live elements. Any failure to read
+	/// the stored element counts as gone: a needless new ref is harmless, a ref
+	/// renewed onto another element is not.
+	fn alive(&mut self, handle: &AxHandle) -> bool {
+		Self::element(handle).is_ok_and(|element| element.get_process_id().is_ok())
+	}
 }
 
 #[cfg(test)]
