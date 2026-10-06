@@ -23,6 +23,7 @@ import {
 	compact,
 	compactionContextTokens,
 	computeFileLists,
+	countResponsesHistoryTokens,
 	createCompactionSummaryMessage,
 	DEFAULT_SHAKE_CONFIG,
 	type CompactionSettings as EngineCompactionSettings,
@@ -53,15 +54,15 @@ import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/to
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
+	Context,
 	Message,
 	Model,
-	OpenAIResponsesHistoryPayload,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { isRecord, logger, prompt, Snowflake, stringifyJson } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { writeArtifact } from "./artifacts";
 import type { ModelRegistry } from "../config/model-registry";
@@ -91,6 +92,7 @@ import {
 	assistantTurnDelivered,
 	convertToLlm,
 	invalidateConvertToLlmArrayCache,
+	isUserAuthoredMessage,
 	stripImagesFromMessage,
 } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
@@ -448,6 +450,12 @@ export interface SessionMaintenanceHost {
 	drainStrandedQueuedMessages(): void;
 	buildDisplaySessionContext(): SessionContext;
 	convertToLlmForSideRequest(messages: AgentMessage[]): Message[];
+	/** The provider context a live turn sends for `summarized` + `retained`, cut to the `summarized` range. */
+	buildLiveProviderContext(
+		summarized: AgentMessage[],
+		retained: AgentMessage[],
+		signal?: AbortSignal,
+	): Promise<Context>;
 	obfuscateTextForProvider(text: string | undefined): string | undefined;
 	obfuscatePreparationForProvider(preparation: CompactionPreparation): CompactionPreparation;
 	closeCodexProviderSessionsForHistoryRewrite(): void;
@@ -3427,6 +3435,9 @@ export class SessionMaintenance {
 						...options,
 						metadata: this.#host.agent.metadataForProvider(candidate.provider),
 						convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+						buildProviderContext: (summarized, retained, signal) =>
+							this.#host.buildLiveProviderContext(summarized, retained, signal),
+						isUserAuthored: isUserAuthoredMessage,
 						telemetry,
 						// Honor the user's /model thinking selection (incl. `off`) on
 						// the manual `/compact` path. Clamped per-model inside compact()
@@ -3541,9 +3552,10 @@ export class SessionMaintenance {
 
 	/**
 	 * Cap on snapcompact frames the post-compaction context can carry without
-	 * busting the model window. Mirrors the per-frame token charge used by the
-	 * projection ({@link snapcompact.FRAME_TOKEN_ESTIMATE}, the conservative
-	 * high-res Anthropic ceiling), so picking `maxFrames` from this helper makes
+	 * busting the model window. Charges each frame at least the per-frame price
+	 * the tokenizer will bill ({@link snapcompact.FRAME_TOKEN_ESTIMATE}, the
+	 * conservative high-res Anthropic ceiling, or the shape's own higher price),
+	 * so picking `maxFrames` from this helper makes
 	 * {@link #projectSnapcompactContextTokens} succeed by construction.
 	 *
 	 * Skip vs. cap use different reserves on purpose. The **skip** decision
@@ -3619,9 +3631,13 @@ export class SessionMaintenance {
 		const SUMMARY_TEMPLATE_TOKENS = 2000;
 		const capReserve = textEdgeTokens + SUMMARY_TEMPLATE_TOKENS;
 		const frameBudget = totalBudget - baseTokens - capReserve;
-		if (frameBudget < snapcompact.FRAME_TOKEN_ESTIMATE) return 1;
+		// Size at the conservative ceiling, or at the shape's own frame price when a
+		// forced large shape (2576px `5x8-*` on OpenAI) bills more, so the tokenizer's
+		// per-frame charge never exceeds what this cap assumed.
+		const frameCost = Math.max(snapcompact.FRAME_TOKEN_ESTIMATE, shape.frameTokenEstimate);
+		if (frameBudget < frameCost) return 1;
 		return Math.min(
-			Math.floor(frameBudget / snapcompact.FRAME_TOKEN_ESTIMATE),
+			Math.floor(frameBudget / frameCost),
 			snapcompact.MAX_FRAMES_DEFAULT,
 			snapcompact.maxFramesForDataBudget(),
 			snapcompact.providerFrameBudget(this.#model?.provider),
@@ -3695,7 +3711,6 @@ export class SessionMaintenance {
 		const blocks = archive
 			? snapcompact.historyBlocks(archive, { maxFrameDataBytes: snapcompact.FRAME_DATA_BYTES_BUDGET })
 			: undefined;
-		const projectionOptions = { excludeEncryptedReasoning: true } as const;
 		if (!leaf) {
 			const summaryMessage = createCompactionSummaryMessage(
 				args.summary,
@@ -3707,7 +3722,7 @@ export class SessionMaintenance {
 					blocks,
 				},
 			);
-			return nonMessageTokens + this.#tokenizer.countMessages(convertToLlm([summaryMessage]), projectionOptions);
+			return nonMessageTokens + this.#countProjectedMessages([summaryMessage]);
 		}
 		const pending: CompactionEntry = {
 			type: "compaction",
@@ -3724,10 +3739,10 @@ export class SessionMaintenance {
 			providerReplayThroughEntryId: args.providerReplayThroughEntryId,
 		};
 		const rebuilt = buildSessionContext([...branch, pending]);
-		const rebuiltMessages = convertToLlm(rebuilt.messages);
+		const rebuiltTokens = this.#countProjectedMessages(rebuilt.messages);
 		const providerPayload = getOpenAiRemoteCompactionPayload(pending);
 		if (!providerPayload) {
-			return nonMessageTokens + this.#tokenizer.countMessages(rebuiltMessages, projectionOptions);
+			return nonMessageTokens + rebuiltTokens;
 		}
 
 		const summaryMessage = createCompactionSummaryMessage(args.summary, args.tokensBefore, new Date().toISOString(), {
@@ -3736,19 +3751,28 @@ export class SessionMaintenance {
 			method: args.method,
 			blocks,
 		});
-		const summaryTokens = this.#tokenizer.countMessages(convertToLlm([summaryMessage]), projectionOptions);
-		const nativeHistoryTokens = this.#countOpenAiNativeHistoryTokens(providerPayload);
-		return (
-			nonMessageTokens +
-			this.#tokenizer.countMessages(rebuiltMessages, projectionOptions) -
-			summaryTokens +
-			nativeHistoryTokens
-		);
+		const summaryTokens = this.#countProjectedMessages([summaryMessage]);
+		const nativeHistoryTokens = countResponsesHistoryTokens(providerPayload.items, this.#tokenizer);
+		return nonMessageTokens + rebuiltTokens - summaryTokens + nativeHistoryTokens;
 	}
 
-	#countOpenAiNativeHistoryTokens(providerPayload: OpenAIResponsesHistoryPayload): number {
-		const serialized = stringifyJson(providerPayload.items);
-		return serialized === undefined ? 0 : this.#tokenizer.countTokens(serialized);
+	/**
+	 * Count a rebuilt context the way {@link #estimateStoredContextTokens} will once it is committed:
+	 * a summary carrying frames is counted as itself so each frame gets the active model's frame
+	 * price, not the generic image estimate `convertToLlm` would give it.
+	 */
+	#countProjectedMessages(messages: AgentMessage[]): number {
+		const options = { excludeEncryptedReasoning: true } as const;
+		const archives: AgentMessage[] = [];
+		const rest: AgentMessage[] = [];
+		for (const message of messages) {
+			const hasFrames =
+				message.role === "compactionSummary" && (message.blocks !== undefined || message.images !== undefined);
+			(hasFrames ? archives : rest).push(message);
+		}
+		return (
+			this.#tokenizer.countMessages(archives, options) + this.#tokenizer.countMessages(convertToLlm(rest), options)
+		);
 	}
 
 	/**
@@ -3985,13 +4009,14 @@ export class SessionMaintenance {
 		const textEdgeTokens = Math.ceil((2 * edgeCap * 1.15) / 4);
 		const SUMMARY_TEMPLATE_TOKENS = 2000;
 		const frameBudget = recoveryBandTokens - baseTokens - keptTailTokens - textEdgeTokens - SUMMARY_TEMPLATE_TOKENS;
-		if (frameBudget < snapcompact.FRAME_TOKEN_ESTIMATE) return 0;
+		const frameCost = Math.max(snapcompact.FRAME_TOKEN_ESTIMATE, shape.frameTokenEstimate);
+		if (frameBudget < frameCost) return 0;
 		// Same hard caps as #computeSnapcompactMaxFrames: a threshold-derived
 		// count above the per-request payload or provider image budget would
 		// "shrink" a huge archive to a frame count the rebuilt prompt can never
 		// attach anyway.
 		return Math.min(
-			Math.floor(frameBudget / snapcompact.FRAME_TOKEN_ESTIMATE),
+			Math.floor(frameBudget / frameCost),
 			snapcompact.MAX_FRAMES_DEFAULT,
 			snapcompact.maxFramesForDataBudget(),
 			snapcompact.providerFrameBudget(this.#model?.provider),
@@ -4820,6 +4845,9 @@ export class SessionMaintenance {
 									metadata: this.#host.agent.metadataForProvider(candidate.provider),
 									initiatorOverride: "agent",
 									convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+									buildProviderContext: (summarized, retained, signal) =>
+										this.#host.buildLiveProviderContext(summarized, retained, signal),
+									isUserAuthored: isUserAuthoredMessage,
 									telemetry,
 									// Honor the user's /model thinking selection on the
 									// auto-compaction path — the most-fired compaction
