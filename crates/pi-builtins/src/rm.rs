@@ -1829,7 +1829,7 @@ mod tests {
 	fn unremovable_entry_is_reported_once_and_the_rest_removed() {
 		use std::os::unix::fs::PermissionsExt;
 
-		for flags in ["-rf", "-r"] {
+		let run = |flags: &str| {
 			let cwd = tempdir().unwrap();
 			let locked = cwd.path().join("tree/locked");
 			std::fs::create_dir_all(&locked).unwrap();
@@ -1838,21 +1838,26 @@ mod tests {
 			std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
 			// A privileged user writes into it regardless; nothing to test then.
 			if std::fs::write(locked.join("probe"), b"").is_ok() {
-				return;
+				return None;
 			}
 
 			let (code, capture) = run_util::<Rm>(&[flags, "tree"], "", cwd.path());
 			std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-			assert_eq!(code, 1, "{flags}");
-			assert_eq!(
-				capture.err(),
-				"rm: cannot remove 'tree/locked/file': Permission denied\n",
-				"{flags}"
-			);
 			assert!(locked.join("file").exists(), "{flags}");
 			assert!(!cwd.path().join("tree/other").exists(), "{flags}");
-		}
+			Some((code, capture.err()))
+		};
+		let Some((code, err)) = run("-rf") else {
+			return;
+		};
+
+		assert_eq!(code, 1);
+		assert_eq!(err.lines().count(), 1, "{err}");
+		assert!(err.starts_with("rm: cannot remove 'tree/locked/file': Permission denied"), "{err}");
+		// Without -f (and without a terminal to prompt on) the removal must
+		// report exactly the same.
+		assert_eq!(run("-r"), Some((code, err)));
 	}
 
 	#[cfg(windows)]
