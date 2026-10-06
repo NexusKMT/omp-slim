@@ -4,22 +4,22 @@
 
 ### Breaking Changes
 
-- Renamed the `linux-all` target of `scripts/bazel-natives.ts` (`//:natives-linux-all`) to `all` (`//:natives-all`); it now covers the darwin addons too
-- Removed the `gen:native` and `gen:native:reset` scripts: standalone binary builds embed the addon archive and manifest in memory and no longer write to `native/`
+- Renamed the `linux-all` Bazel target (`//:natives-linux-all`) to `all` (`//:natives-all`); the renamed target now includes Darwin addons.
+- Removed the `gen:native` and `gen:native:reset` scripts. Standalone binary builds now embed the native addon archive and manifest instead of writing them to `native/`.
 
 ### Added
 
-- `rasterizeSvg` takes an optional `scale` to draw an SVG above its intrinsic size (still bounded by the max box), and an optional `cell` that pads the PNG to whole terminal cells so a terminal shows it 1:1 instead of resampling it
-- Added `OMP_NATIVE_FEATURES`, which passes extra cargo features to the local cargo/napi-rs build of the native addon (e.g. `OMP_NATIVE_FEATURES=wayland-pipewire`); Bazel builds ignore it ([#14058](https://github.com/can1357/oh-my-pi/pull/14058) by [@justdoGIT](https://github.com/justdoGIT))
-- Added macOS addon builds from Linux hosts: `bazel build //:natives-darwin-*` now cross-compiles with a hermetic clang + ld64.lld toolchain against the macOS SDK from Apple's Command Line Tools package, and builds the Apple Foundation Models bridge with the swift.org Linux Swift toolchain; mac hosts keep building with Xcode
+- Enhanced `rasterizeSvg` with optional scaling and terminal-cell padding, allowing SVGs to render larger while preserving 1:1 display in terminals.
+- Added `OMP_NATIVE_FEATURES` for passing extra Cargo features to local native addon builds; Bazel builds ignore this setting.
+- Added support for cross-compiling macOS native addons from Linux hosts.
 
 ### Changed
 
-- Stamping the release version into a signed macOS addon now refreshes its ad-hoc signature in place, so darwin addons can be stamped on any host instead of only on macOS
+- macOS addon release stamping now works on any host by refreshing the addon's ad-hoc signature automatically.
 
 ### Fixed
 
-- Fixed `tail` printing nothing, or dropping lines from the file's first 64 KiB, when the file size is an exact multiple of 64 KiB ([#14264](https://github.com/can1357/oh-my-pi/pull/14264) by [@jchanghong023](https://github.com/jchanghong023))
+- Fixed `tail` failing to print files, or omitting their first 64 KiB, when file sizes were exact multiples of 64 KiB.
 
 ## [18.6.3] - 2026-10-06
 
