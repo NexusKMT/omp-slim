@@ -61,8 +61,9 @@ impl builtins::Command for MapFileCommand {
 		}
 
 		if let Some((_, var)) = context.shell.env().get(&self.array_var_name) {
-			// Refused before any input is read, as in bash: input read ahead of
-			// a pipe could not be given back if an assignment failed mid-loop.
+			// Refused before any input is read, as in bash. Assigning an element
+			// does not check this itself (so -O wrote into a readonly array), and
+			// a failure mid-loop would lose input read ahead of a pipe.
 			if var.is_readonly() {
 				return Err(ErrorKind::ReadonlyVariable.into());
 			}
