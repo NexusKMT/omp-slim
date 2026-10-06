@@ -154,6 +154,14 @@ function extractJsonObject(raw: string): string {
 	return raw.trim();
 }
 
+/**
+ * Parse model output into a {@link GeneratedAgentSpec}. Accepts a bare JSON object
+ * (tried first) or one wrapped in a code fence. Returns the spec with trimmed fields.
+ * Throws if the output is not valid JSON or not an object, if `identifier`, `whenToUse`
+ * or `systemPrompt` is missing or not a string, if the identifier is not lowercase
+ * kebab-case with 2+ words, if `whenToUse` does not start with "Use this agent when",
+ * or if `systemPrompt` is empty.
+ */
 export function parseGeneratedAgentSpec(raw: string): GeneratedAgentSpec {
 	const parsed = JSON.parse(extractJsonObject(raw)) as Partial<GeneratedAgentSpec>;
 	if (!parsed || typeof parsed !== "object") {
