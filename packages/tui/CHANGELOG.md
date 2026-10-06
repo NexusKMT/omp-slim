@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed ANSI `/annotate` layout: diff source lines wrap with aligned continuations, focused truncated filenames reveal over existing rows and wrap within the frame, and note editing follows the configured terminal hardware-cursor preference like ask-tool notes (with a software cursor when disabled). The final glyph remains visible at the exact text width; overflow wraps.
+- Fixed ANSI `/annotate` content wrapping, focused filename legibility, and annotation-input wrapping and terminal-cursor behavior ([#14609](https://github.com/can1357/oh-my-pi/pull/14609) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.6.3] - 2026-10-06
 
