@@ -343,4 +343,46 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			slow.stop(true);
 		}
 	}, 30_000);
+
+	test("does not call a cancelled run's page listeners for the requests the cancel stops", async () => {
+		const requested = Promise.withResolvers<void>();
+		const slow = Bun.serve({
+			port: 0,
+			idleTimeout: 0,
+			fetch(request) {
+				requested.resolve();
+				const { promise, resolve } = Promise.withResolvers<Response>();
+				request.signal.addEventListener("abort", () => resolve(new Response(null, { status: 499 })));
+				return promise;
+			},
+		});
+		try {
+			const invoke = createHost();
+			await invoke({ action: "open", name: "cancelled-listener", url: `${baseUrl}/one` });
+			const cancel = new AbortController();
+			const run = invoke(
+				{
+					action: "run",
+					name: "cancelled-listener",
+					code: `page.on("requestfailed", () => {
+							globalThis.failedCalls = (globalThis.failedCalls ?? 0) + 1;
+							page.url();
+						});
+						await tab.goto("http://127.0.0.1:${slow.port}/slow");`,
+				},
+				cancel.signal,
+			);
+			await requested.promise;
+			cancel.abort();
+			await expect(run).rejects.toThrow("Operation aborted");
+			const after = await invoke({
+				action: "run",
+				name: "cancelled-listener",
+				code: "return { url: page.url(), failedCalls: globalThis.failedCalls ?? 0 };",
+			});
+			expect(valueOf(after)).toEqual({ url: `${baseUrl}/one`, failedCalls: 0 });
+		} finally {
+			slow.stop(true);
+		}
+	}, 30_000);
 });
