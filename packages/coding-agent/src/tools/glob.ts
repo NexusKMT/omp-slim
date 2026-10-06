@@ -166,8 +166,8 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 		// Preparation still rejects immediately on caller abort. Once every
 		// filesystem stat has settled, detach this proxy before launching native
 		// scans so execute can drain each worker through the real caller signal.
-		// Custom operations have no signal API and keep immediate abort coverage
-		// for their entire execution.
+		// Custom operations receive the combined signal via GlobOperationsOptions,
+		// but keep immediate caller-abort coverage for their entire execution.
 		const preparationController = !this.#customOps?.glob && signal ? new AbortController() : undefined;
 		const abortPreparation = (): void => preparationController?.abort();
 		if (preparationController && signal) {
@@ -369,13 +369,11 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 						value => ({ kind: "settled" as const, value }),
 						(error: unknown) => ({ kind: "failed" as const, error }),
 					);
-					let onAbort: (() => void) | undefined;
 					const ABORTED = Symbol("custom-glob-aborted");
-					const aborted = new Promise<typeof ABORTED>(resolve => {
-						onAbort = (): void => resolve(ABORTED);
-						if (combinedSignal.aborted) resolve(ABORTED);
-						else combinedSignal.addEventListener("abort", onAbort, { once: true });
-					});
+					const { promise: aborted, resolve: resolveAborted } = Promise.withResolvers<typeof ABORTED>();
+					const onAbort = (): void => resolveAborted(ABORTED);
+					if (combinedSignal.aborted) resolveAborted(ABORTED);
+					else combinedSignal.addEventListener("abort", onAbort, { once: true });
 					try {
 						const outcome = await Promise.race([settled, aborted]);
 						if (outcome === ABORTED) {
@@ -386,7 +384,7 @@ export class GlobTool implements AgentTool<typeof findSchema, GlobToolDetails> {
 						if (outcome.kind === "failed") throw outcome.error;
 						return { timedOut: false, value: outcome.value };
 					} finally {
-						if (onAbort) combinedSignal.removeEventListener("abort", onAbort);
+						combinedSignal.removeEventListener("abort", onAbort);
 					}
 				};
 				const perTarget = await Promise.all(

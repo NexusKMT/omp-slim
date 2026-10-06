@@ -281,7 +281,7 @@ describe("GlobTool custom backend contract", () => {
 				exists: () => true,
 				glob: (_pattern, _cwd, options) => {
 					receivedSignal = options.signal;
-					return new Promise<string[]>(() => {});
+					return Promise.withResolvers<string[]>().promise;
 				},
 			},
 		});
@@ -311,7 +311,7 @@ describe("GlobTool custom backend contract", () => {
 		const tool = new GlobTool(createSession(), {
 			timeoutMs: 100,
 			operations: {
-				exists: () => new Promise<boolean>(() => {}),
+				exists: () => Promise.withResolvers<boolean>().promise,
 				glob: () => ["src/kept.ts"],
 			},
 		});
