@@ -214,7 +214,7 @@ pub fn parse_modifiers(mods: &[String]) -> CoreResult<Modifiers> {
 	Ok(result)
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos", test))]
+#[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyDirection {
 	Press,
@@ -228,7 +228,7 @@ pub enum KeyDirection {
 /// `merge(primary, cleanup)` folds each release result into the cleanup
 /// result and that into the primary result, so each backend keeps its own
 /// policy for reporting cleanup failures next to the delivery failure.
-#[cfg(any(target_os = "windows", target_os = "macos", test))]
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn hold_keys<C, E>(
 	ctx: &mut C,
 	keys: impl IntoIterator<Item = KeyName>,

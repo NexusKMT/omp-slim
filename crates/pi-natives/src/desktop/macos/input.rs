@@ -19,7 +19,7 @@ use super::{
 	super::{
 		backend::{DeliveryMode, Modifiers, MouseButton, PointerEvent},
 		error::{CoreResult, DesktopError},
-		keys::{KeyDirection, KeyName, hold_keys},
+		keys::KeyName,
 		types::{DesktopWindow, Target},
 	},
 	ax,
@@ -817,23 +817,28 @@ fn key_chord(
 		return Err(DesktopError::invalid_key("key chord must not be empty"));
 	}
 	let mut active = Modifiers::default();
-	hold_keys(
-		&mut active,
-		keys.iter().copied(),
-		|active, key, direction| {
-			let down = direction == KeyDirection::Press;
-			update_modifier(active, key, down);
-			let posted = post_key(source, key, down, modifier_flags(*active), &mut post);
-			// A press is followed by the next key only once it posted; every release
-			// paces cleanup the same way.
-			if posted.is_ok() || !down {
-				thread::sleep(KEY_GAP);
-			}
-			posted
-		},
-		|_| Ok(()),
-		skylight::after_cleanup,
-	)
+	let mut pressed = 0;
+	let mut result = Ok(());
+	// The attempted key counts as pressed before it posts: a failed post may
+	// still have reached the target, and its release clears its modifier flag
+	// before the held keys' releases carry `active` (unlike `hold_keys`).
+	for &key in keys {
+		update_modifier(&mut active, key, true);
+		pressed += 1;
+		if let Err(error) = post_key(source, key, true, modifier_flags(active), &mut post) {
+			result = Err(error);
+			break;
+		}
+		thread::sleep(KEY_GAP);
+	}
+	let mut cleanup = Ok(());
+	for &key in keys[..pressed].iter().rev() {
+		update_modifier(&mut active, key, false);
+		let release = post_key(source, key, false, modifier_flags(active), &mut post);
+		cleanup = skylight::after_cleanup(cleanup, release);
+		thread::sleep(KEY_GAP);
+	}
+	skylight::after_cleanup(result, cleanup)
 }
 
 fn post_key(
@@ -1517,6 +1522,33 @@ mod tests {
 			(CGEventType::KeyDown as u32, 36, true),
 			(CGEventType::KeyUp as u32, 36, true),
 			(CGEventType::FlagsChanged as u32, 59, false),
+		]);
+	}
+
+	#[test]
+	fn failed_modifier_press_leaves_no_flag_on_cleanup_releases() {
+		let source = source().expect("Quartz event source");
+		let mut events = Vec::new();
+		let result = key_chord(&source, &[KeyName::Ctrl, KeyName::Shift, KeyName::Enter], |event| {
+			let kind = event.get_type();
+			let code = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+			let flags = event.get_flags();
+			let shift = flags.contains(CGEventFlags::CGEventFlagShift);
+			events.push((kind as u32, code, flags.contains(CGEventFlags::CGEventFlagControl), shift));
+			if code == 56 && shift {
+				Err(DesktopError::input_failed("focus changed"))
+			} else {
+				Ok(())
+			}
+		});
+		assert!(result.is_err());
+		// Shift's failed press is released first, so no later release still
+		// carries its flag.
+		assert_eq!(events, vec![
+			(CGEventType::FlagsChanged as u32, 59, true, false),
+			(CGEventType::FlagsChanged as u32, 56, true, true),
+			(CGEventType::FlagsChanged as u32, 56, true, false),
+			(CGEventType::FlagsChanged as u32, 59, false, false),
 		]);
 	}
 

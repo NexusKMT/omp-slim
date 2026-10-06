@@ -16,7 +16,7 @@ use std::{
 	panic::AssertUnwindSafe,
 	sync::{
 		Arc,
-		atomic::{AtomicBool, Ordering},
+		atomic::{AtomicUsize, Ordering},
 	},
 	thread::{self, JoinHandle},
 	time::Duration,
@@ -225,24 +225,20 @@ impl ParsedPointerOptions {
 	}
 }
 
-/// The worker's latest capabilities, shared with the session so the getter
-/// answers without waiting behind queued operations.
-#[derive(Default)]
-struct CapabilitiesCache {
-	snapshot:       Mutex<Option<DesktopCapabilities>>,
-	/// A background refresh is queued and has not started yet.
-	refresh_queued: AtomicBool,
-}
-
 struct Worker {
 	backend:      CoreResult<Box<dyn Backend>>,
 	registry:     AxRegistry,
 	frames:       HashMap<String, FrameGeometry>,
-	capabilities: Arc<CapabilitiesCache>,
+	/// Latest capabilities the worker computed, shared with the session so the
+	/// getter can answer while an operation holds the worker.
+	capabilities: Arc<Mutex<Option<DesktopCapabilities>>>,
 }
 
 impl Worker {
-	fn new(selector: DisplaySelector, capabilities: Arc<CapabilitiesCache>) -> Self {
+	fn new(
+		selector: DisplaySelector,
+		capabilities: Arc<Mutex<Option<DesktopCapabilities>>>,
+	) -> Self {
 		let backend = create_backend(selector);
 		Self { backend, registry: AxRegistry::default(), frames: HashMap::new(), capabilities }
 	}
@@ -301,15 +297,11 @@ impl Worker {
 	fn process(&mut self, request: &Request) -> CoreResult<Response> {
 		match request {
 			Request::Capabilities { .. } => {
-				self
-					.capabilities
-					.refresh_queued
-					.store(false, Ordering::Release);
 				let caps = match self.backend.as_mut() {
 					Ok(backend) => backend.capabilities(),
 					Err(_) => DesktopCapabilities::unavailable(),
 				};
-				*self.capabilities.snapshot.lock() = Some(caps.clone());
+				*self.capabilities.lock() = Some(caps.clone());
 				Ok(Response::Capabilities(caps))
 			},
 			Request::ListDisplays { .. } => Ok(Response::Displays(self.backend()?.displays()?)),
@@ -344,17 +336,10 @@ impl Worker {
 				let displays = geometry.display_metadata(&source);
 				let png = encode_png(image)?;
 				self.frames.insert(target.key().to_string(), geometry);
-				// Backend and display server are fixed for a live backend, so the
-				// snapshot answers them; recomputing capabilities here would
-				// enumerate the displays a third time per capture.
-				let snapshot = self.capabilities.snapshot.lock().clone();
-				let capabilities = if let Some(capabilities) = snapshot {
-					capabilities
-				} else {
-					let capabilities = self.backend()?.capabilities();
-					*self.capabilities.snapshot.lock() = Some(capabilities.clone());
-					capabilities
-				};
+				// Refreshing here keeps the snapshot current for getter reads that
+				// land while a later operation holds the worker.
+				let capabilities = self.backend()?.capabilities();
+				*self.capabilities.lock() = Some(capabilities.clone());
 				Ok(Response::Capture(DesktopCapture {
 					data: Uint8Array::from(png),
 					width,
@@ -609,7 +594,9 @@ struct Lifecycle {
 struct SessionCore {
 	selector:     DisplaySelector,
 	lifecycle:    Mutex<Lifecycle>,
-	capabilities: Arc<CapabilitiesCache>,
+	capabilities: Arc<Mutex<Option<DesktopCapabilities>>>,
+	/// `call`s sent to the worker that have not returned yet.
+	in_flight:    AtomicUsize,
 }
 impl SessionCore {
 	fn new(selector: DisplaySelector) -> Arc<Self> {
@@ -622,6 +609,7 @@ impl SessionCore {
 				closed: false,
 			}),
 			capabilities: Arc::default(),
+			in_flight: AtomicUsize::new(0),
 		})
 	}
 
@@ -665,35 +653,18 @@ impl SessionCore {
 
 	fn call(&self, make: impl FnOnce(Reply) -> Request) -> CoreResult<Response> {
 		let (txr, rxr) = flume::bounded(1);
-		self
-			.ensure_started()?
+		let tx = self.ensure_started()?;
+		self.in_flight.fetch_add(1, Ordering::AcqRel);
+		let response = tx
 			.send(make(txr))
-			.map_err(|_| DesktopError::internal("native desktop worker stopped unexpectedly"))?;
-		rxr.recv_timeout(OPERATION_TIMEOUT).map_err(|e| {
-			DesktopError::timeout(format!("native desktop operation did not complete: {e}"))
-		})?
-	}
-
-	/// Queue one background capabilities refresh unless one is already
-	/// queued; nothing waits for its reply.
-	fn refresh_capabilities(&self) {
-		if self
-			.capabilities
-			.refresh_queued
-			.swap(true, Ordering::AcqRel)
-		{
-			return;
-		}
-		let (reply, _) = flume::bounded(1);
-		let queued = self
-			.ensure_started()
-			.is_ok_and(|tx| tx.send(Request::Capabilities { reply }).is_ok());
-		if !queued {
-			self
-				.capabilities
-				.refresh_queued
-				.store(false, Ordering::Release);
-		}
+			.map_err(|_| DesktopError::internal("native desktop worker stopped unexpectedly"))
+			.and_then(|()| {
+				rxr.recv_timeout(OPERATION_TIMEOUT).map_err(|e| {
+					DesktopError::timeout(format!("native desktop operation did not complete: {e}"))
+				})
+			});
+		self.in_flight.fetch_sub(1, Ordering::AcqRel);
+		response?
 	}
 
 	fn close(&self) -> CoreResult<()> {
@@ -752,19 +723,25 @@ impl DesktopSession {
 		Ok(Self { core: SessionCore::new(DisplaySelector::parse(options.and_then(|o| o.display))) })
 	}
 
-	/// Answers from the latest snapshot and queues a background refresh, so a
-	/// read never waits behind an in-flight capture. Only a read before any
-	/// snapshot exists round-trips to the worker.
+	/// Asks the worker when it is idle, so permissions are read live. While
+	/// another operation holds the worker, answers from the snapshot of the
+	/// latest capabilities read or capture instead of blocking the JS thread
+	/// behind it.
 	#[napi(getter)]
 	pub fn capabilities(&self) -> DesktopCapabilities {
-		let snapshot = self.core.capabilities.snapshot.lock().clone();
-		if let Some(snapshot) = snapshot {
-			self.core.refresh_capabilities();
+		if self.core.in_flight.load(Ordering::Acquire) > 0
+			&& let Some(snapshot) = self.core.capabilities.lock().clone()
+		{
 			return snapshot;
 		}
 		match self.core.call(|reply| Request::Capabilities { reply }) {
 			Ok(Response::Capabilities(c)) => c,
-			_ => DesktopCapabilities::unavailable(),
+			_ => self
+				.core
+				.capabilities
+				.lock()
+				.clone()
+				.unwrap_or_else(DesktopCapabilities::unavailable),
 		}
 	}
 
