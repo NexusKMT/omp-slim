@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- `isoResolve` now returns a Promise; backend probes are cached and run off the JavaScript thread ([#14528](https://github.com/can1357/oh-my-pi/pull/14528) by [@H4vC](https://github.com/H4vC))
+- `isoResolve` now returns a Promise and runs off the JavaScript thread; a backend found available is not re-probed ([#14528](https://github.com/can1357/oh-my-pi/pull/14528) by [@H4vC](https://github.com/H4vC))
 
 ### Changed
 

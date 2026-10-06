@@ -67,7 +67,7 @@ mod imp {
 		fs, io,
 		path::Path,
 		process::{Command, Output},
-		sync::LazyLock,
+		sync::atomic::{AtomicBool, Ordering},
 	};
 
 	use crate::{IsoError, IsoResult, ProbeResult, tree};
@@ -77,13 +77,25 @@ mod imp {
 	#[cfg(target_os = "linux")]
 	const ZFS_SUPER_MAGIC: u32 = 0x2fc1_2fc2;
 
-	/// Whether the zfs CLI runs and can list datasets is a host fact, so it is
-	/// probed once per process.
-	static CLI_AVAILABLE: LazyLock<bool> =
-		LazyLock::new(|| command_available(["version"]) || command_available(["list", "-H"]));
+	/// Set once the zfs CLI has run and listed datasets; a host that has it
+	/// keeps it, so later calls skip the spawns. A failure is not cached: it
+	/// can be transient (module not loaded yet, pool still importing), so the
+	/// next call probes again.
+	static CLI_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+	fn cli_available() -> bool {
+		if CLI_AVAILABLE.load(Ordering::Relaxed) {
+			return true;
+		}
+		let available = command_available(["version"]) || command_available(["list", "-H"]);
+		if available {
+			CLI_AVAILABLE.store(true, Ordering::Relaxed);
+		}
+		available
+	}
 
 	pub fn probe() -> ProbeResult {
-		if *CLI_AVAILABLE {
+		if cli_available() {
 			ProbeResult::available()
 		} else {
 			ProbeResult::unavailable("zfs CLI is unavailable or cannot list datasets")
@@ -91,7 +103,7 @@ mod imp {
 	}
 
 	pub fn start(lower: &Path, merged: &Path) -> IsoResult<()> {
-		if !*CLI_AVAILABLE {
+		if !cli_available() {
 			return Err(IsoError::unavailable("zfs CLI is unavailable or cannot list datasets"));
 		}
 

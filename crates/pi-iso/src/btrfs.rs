@@ -68,7 +68,7 @@ mod imp {
 		os::unix::fs::MetadataExt,
 		path::Path,
 		process::{Command, Stdio},
-		sync::LazyLock,
+		sync::atomic::{AtomicBool, Ordering},
 	};
 
 	use crate::{IsoError, IsoResult, ProbeResult, statfs_magic, tree};
@@ -78,12 +78,20 @@ mod imp {
 	/// Inode number of every btrfs subvolume's root directory.
 	const SUBVOLUME_ROOT_INO: u64 = 256;
 
-	/// Whether the btrfs CLI runs is a host fact, so it is probed once per
-	/// process.
-	static CLI_PROBE: LazyLock<ProbeResult> = LazyLock::new(probe_cli);
+	/// Set once the btrfs CLI has run; a host that has it keeps it, so later
+	/// probes skip the spawn. A failure is not cached: the CLI can be installed
+	/// while a long-running session is up, so the next probe spawns again.
+	static CLI_AVAILABLE: AtomicBool = AtomicBool::new(false);
 
 	pub fn probe() -> ProbeResult {
-		CLI_PROBE.clone()
+		if CLI_AVAILABLE.load(Ordering::Relaxed) {
+			return ProbeResult::available();
+		}
+		let probe = probe_cli();
+		if probe.available {
+			CLI_AVAILABLE.store(true, Ordering::Relaxed);
+		}
+		probe
 	}
 
 	fn probe_cli() -> ProbeResult {

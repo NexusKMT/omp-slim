@@ -79,7 +79,10 @@ mod imp {
 		os::unix::ffi::OsStrExt,
 		path::{Path, PathBuf},
 		process::{Command, Stdio},
-		sync::LazyLock,
+		sync::{
+			LazyLock,
+			atomic::{AtomicBool, Ordering},
+		},
 	};
 
 	use parking_lot::Mutex;
@@ -95,23 +98,24 @@ mod imp {
 	static ACTIVE_MOUNTS: LazyLock<Mutex<BTreeMap<PathBuf, MountFlavor>>> =
 		LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
-	/// Whether `fuse-overlayfs` runs is a host fact, so it is probed once per
-	/// process.
-	static FUSE_OVERLAYFS: LazyLock<bool> = LazyLock::new(|| {
-		Command::new("fuse-overlayfs")
+	/// Set once `fuse-overlayfs` has run; a host that has it keeps it, so later
+	/// probes skip the spawn. A failure is not cached: it can be installed while
+	/// a long-running session is up, so the next probe spawns again.
+	static FUSE_OVERLAYFS: AtomicBool = AtomicBool::new(false);
+
+	pub fn probe() -> ProbeResult {
+		if kernel_overlay_supported() || FUSE_OVERLAYFS.load(Ordering::Relaxed) {
+			return ProbeResult::available();
+		}
+		let fuse_runs = Command::new("fuse-overlayfs")
 			.arg("--version")
 			.stdin(Stdio::null())
 			.stdout(Stdio::null())
 			.stderr(Stdio::null())
 			.status()
-			.is_ok()
-	});
-
-	pub fn probe() -> ProbeResult {
-		if kernel_overlay_supported() {
-			return ProbeResult::available();
-		}
-		if *FUSE_OVERLAYFS {
+			.is_ok();
+		if fuse_runs {
+			FUSE_OVERLAYFS.store(true, Ordering::Relaxed);
 			return ProbeResult::available();
 		}
 		ProbeResult::unavailable(

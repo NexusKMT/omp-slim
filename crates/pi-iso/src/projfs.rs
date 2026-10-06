@@ -132,7 +132,10 @@ mod imp {
 			fs::MetadataExt,
 		},
 		path::{Path, PathBuf},
-		sync::{Arc, LazyLock},
+		sync::{
+			Arc, LazyLock,
+			atomic::{AtomicBool, Ordering},
+		},
 	};
 
 	use parking_lot::Mutex;
@@ -324,15 +327,23 @@ mod imp {
 	static PROJFS_SESSIONS: LazyLock<Mutex<BTreeMap<String, ProjfsSessionState>>> =
 		LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
-	/// Whether the `ProjFS` library loads is a host fact, so it is probed once
-	/// per process.
-	static PROBE: LazyLock<ProbeResult> = LazyLock::new(|| match ProjfsApi::load() {
-		Ok(_) => ProbeResult { available: true, reason: None },
-		Err(reason) => ProbeResult { available: false, reason: Some(reason) },
-	});
+	/// Set once the `ProjFS` library has loaded; a host that has it keeps it,
+	/// so later probes skip the load. A failure is not cached: the optional
+	/// feature can be enabled while a long-running session is up, so the next
+	/// probe loads again.
+	static LOADED: AtomicBool = AtomicBool::new(false);
 
 	pub fn probe() -> ProbeResult {
-		PROBE.clone()
+		if LOADED.load(Ordering::Relaxed) {
+			return ProbeResult::available();
+		}
+		match ProjfsApi::load() {
+			Ok(_) => {
+				LOADED.store(true, Ordering::Relaxed);
+				ProbeResult::available()
+			},
+			Err(reason) => ProbeResult::unavailable(reason),
+		}
 	}
 
 	pub fn start(lower_root: &str, projection_root: &str) -> IsoResult<()> {
