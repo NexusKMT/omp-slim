@@ -103,9 +103,10 @@ const MODEL_PERF_DECAY_AT = 256;
 /** meta-table marker set once historical stats.db rows have been imported into model_perf. */
 const MODEL_PERF_BACKFILL_KEY = "model_perf_backfill_v2";
 /**
- * Marker the v1 import wrote. Its presence means the aggregates already hold a
- * blended import that cannot be separated retroactively, so the v2 pass rebuilds
- * them from the stats database instead of adding the same history again.
+ * Marker the v1 import wrote. Its presence means the aggregates already hold
+ * the stats history (tierless, so blended into the bare rows), so the v2 pass
+ * keeps the live aggregates and only records itself complete instead of adding
+ * the same history again.
  */
 const MODEL_PERF_BACKFILL_V1_KEY = "model_perf_backfill";
 /**
@@ -651,14 +652,17 @@ FROM model_usage_legacy
 			using markerStmt = this.#db.prepare("SELECT value FROM meta WHERE key = ?");
 			const marker = markerStmt.get(MODEL_PERF_BACKFILL_KEY);
 			if (marker) return;
+			// The v1 import already folded the stats history into the bare rows, and no
+			// stats row written before the served-tier field carries a tier, so
+			// re-importing would only double-count it. Keep the live aggregates (blended
+			// history decays out of them) and just record v2.
+			if (markerStmt.get(MODEL_PERF_BACKFILL_V1_KEY)) {
+				using markCompleteStmt = this.#db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");
+				markCompleteStmt.run(MODEL_PERF_BACKFILL_KEY, "complete");
+				return;
+			}
 			const statsDbPath = getStatsDbPath();
 			if (!fs.existsSync(statsDbPath)) return;
-			// The v1 import folded every historical turn into the bare model row, so
-			// importing on top of it would double-count those samples. Rebuild from the
-			// stats database instead — the same source the v1 pass read, now carrying
-			// the served tier. Live samples recorded since the last stats sync are
-			// re-imported with it.
-			if (markerStmt.get(MODEL_PERF_BACKFILL_V1_KEY)) this.#db.run("DELETE FROM model_perf");
 			void this.backfillModelPerfFromStats(statsDbPath)
 				.then(imported => {
 					using markCompleteStmt = this.#db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)");

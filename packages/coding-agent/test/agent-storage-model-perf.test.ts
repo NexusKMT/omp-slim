@@ -115,51 +115,58 @@ describe("AgentStorage model perf aggregates", () => {
 		const storage = await AgentStorage.open(dbPath);
 		const settings = Settings.isolated({ "tier.openai": "ultrafast" }, { storage });
 		const auth = await AuthStorage.create(":memory:");
-		const registry = new ModelRegistry(auth, path.join(tempDir.path(), "models.yml"));
-		registry.getApiKey = async () => "test-key";
-		const model = buildModel({
-			provider: "openai-codex",
-			id: "gpt-6-astra",
-			name: "GPT-6 Astra",
-			api: "openai-codex-responses",
-			baseUrl: "https://example.com",
-			reasoning: true,
-			input: ["text"],
-			cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
-			contextWindow: 200_000,
-			maxTokens: 32_000,
-		});
-		const mock = createMockModel({
-			id: "gpt-6-astra",
-			provider: "openai-codex",
-			responses: [
-				// The backend downgraded the requested ultrafast turn: the echo is what
-				// the row must follow, not the session's live setting.
-				{ content: ["downgraded"], usage: { input: 100, output: 1000 }, serviceTier: "default" },
-				{ content: ["served"], usage: { input: 100, output: 3000 }, serviceTier: "ultrafast" },
-			],
-		});
-		const agent = new Agent({
-			getApiKey: () => "test-key",
-			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
-			streamFn: mock.stream,
-		});
-		const session = new AgentSession({
-			agent,
-			sessionManager: SessionManager.inMemory(),
-			modelRegistry: registry,
-			settings,
-			serviceTierByFamily: { openai: "ultrafast" },
-		});
-		await session.prompt("first");
-		await session.prompt("second");
-		AgentStorage.close(); // flushes the still-batched perf write
+		try {
+			const registry = new ModelRegistry(auth, path.join(tempDir.path(), "models.yml"));
+			registry.getApiKey = async () => "test-key";
+			const model = buildModel({
+				provider: "openai-codex",
+				id: "gpt-6-astra",
+				name: "GPT-6 Astra",
+				api: "openai-codex-responses",
+				baseUrl: "https://example.com",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
+				contextWindow: 200_000,
+				maxTokens: 32_000,
+			});
+			const mock = createMockModel({
+				id: "gpt-6-astra",
+				provider: "openai-codex",
+				responses: [
+					// The backend downgraded the requested ultrafast turn: the echo is what
+					// the row must follow, not the session's live setting.
+					{ content: ["downgraded"], usage: { input: 100, output: 1000 }, serviceTier: "default" },
+					{ content: ["served"], usage: { input: 100, output: 3000 }, serviceTier: "ultrafast" },
+				],
+			});
+			const agent = new Agent({
+				getApiKey: () => "test-key",
+				initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+				streamFn: mock.stream,
+			});
+			const session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(),
+				modelRegistry: registry,
+				settings,
+				serviceTierByFamily: { openai: "ultrafast" },
+			});
+			try {
+				await session.prompt("first");
+				await session.prompt("second");
+			} finally {
+				await session.dispose();
+			}
+			AgentStorage.close(); // flushes the still-batched perf write
 
-		const reopened = await AgentStorage.open(dbPath);
-		const perf = reopened.getModelPerf();
-		expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(1);
-		expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
-		auth.close();
+			const reopened = await AgentStorage.open(dbPath);
+			const perf = reopened.getModelPerf();
+			expect(perf.get("openai-codex/gpt-6-astra")?.samples).toBe(1);
+			expect(perf.get("openai-codex/gpt-6-astra@ultrafast")?.samples).toBe(1);
+		} finally {
+			auth.close();
+		}
 	});
 
 	it("persists a still-batched sample when the storage closes before the window elapses", async () => {
@@ -350,8 +357,8 @@ describe("AgentStorage model perf aggregates", () => {
 		expect(stats?.tps).toBeCloseTo(100, 5);
 	});
 
-	it("rebuilds the aggregates instead of double-counting when the v1 import already ran", async () => {
-		tempDir = TempDir.createSync("@omp-agent-storage-perf-rebuild-");
+	it("keeps live aggregates and skips the re-import when the v1 import already ran", async () => {
+		tempDir = TempDir.createSync("@omp-agent-storage-perf-v1-");
 		const homeDir = tempDir.join("home");
 		const agentDir = tempDir.join("agent");
 		const env = {
@@ -374,41 +381,42 @@ describe("AgentStorage model perf aggregates", () => {
 				'import * as path from "node:path";',
 				'import { getAgentDbPath, getStatsDbPath } from "@oh-my-pi/pi-utils";',
 				`import { AgentStorage } from ${JSON.stringify(AGENT_STORAGE_MODULE)};`,
+				// A stale stats.db that never saw the live Astra turns.
 				"const statsPath = getStatsDbPath();",
 				"fs.mkdirSync(path.dirname(statsPath), { recursive: true });",
 				"const statsDb = new Database(statsPath);",
 				'statsDb.run("CREATE TABLE messages (provider TEXT, model TEXT, output_tokens INTEGER, duration INTEGER, ttft INTEGER, stop_reason TEXT, timestamp INTEGER, service_tier TEXT)");',
-				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ["openai", "repro", 20, 2000, null, "stop", Date.now(), null]);',
+				'statsDb.run("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?, ?)", ["openai", "synced-model", 20, 2000, null, "stop", Date.now(), null]);',
 				"statsDb.close();",
-				// A v1 install: the marker is set and the aggregates hold the blended import.
+				// A v1 install: the marker is set and the aggregates hold live samples.
 				"await AgentStorage.open();",
 				"AgentStorage.close();",
 				"const agentDb = new Database(getAgentDbPath());",
 				'agentDb.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["model_perf_backfill", "complete"]);',
-				'agentDb.run("INSERT OR REPLACE INTO model_perf (model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms) VALUES (?, ?, ?, ?, ?, ?)", ["openai/repro", 5, 5000, 5000, 0, 0]);',
+				'agentDb.run("INSERT OR REPLACE INTO model_perf (model_key, samples, output_tokens, gen_ms, ttft_samples, ttft_ms) VALUES (?, ?, ?, ?, ?, ?)", ["openai-codex/gpt-6-astra", 40, 40000, 400000, 0, 0]);',
 				"agentDb.close();",
-				// Reopening runs the v2 migration: the stale blended row must be replaced
-				// by the stats-db import, not added to. The import is kicked without a
-				// handle, so wait for its completion marker (a child process cannot use
-				// fake timers to drive the deferred work).
+				// Reopening and reading runs the v2 migration.
 				"const storage = await AgentStorage.open();",
-				"const markerDb = new Database(getAgentDbPath());",
-				"for (let i = 0; i < 200; i++) {",
-				'	if (markerDb.query("SELECT value FROM meta WHERE key = ?").get("model_perf_backfill_v2")) break;',
-				"	await Bun.sleep(10);",
-				"}",
+				"const perf = storage.getModelPerf();",
+				"const markerDb = new Database(getAgentDbPath(), { readonly: true });",
+				"const marker = markerDb.query(\"SELECT value FROM meta WHERE key = 'model_perf_backfill_v2'\").get();",
 				"markerDb.close();",
-				"const row = storage.getModelPerf().get('openai/repro');",
-				"console.error(JSON.stringify(row));",
+				"console.error(JSON.stringify({ keys: [...perf.keys()], astra: perf.get('openai-codex/gpt-6-astra'), marker }));",
 				"AgentStorage.close();",
 			].join("\n"),
 			env,
 		);
 		expect(probe.exitCode, probe.stderr).toBe(0);
-		const row = JSON.parse(probe.stderr.trim().split("\n").pop() ?? "null") as { samples: number; tps: number };
-		// 20 tokens over 2000ms from the stats database; the stale 1000 t/s row is gone.
-		expect(row.samples).toBe(1);
-		expect(row.tps).toBeCloseTo(10, 5);
+		const result = JSON.parse(probe.stderr.trim().split("\n").pop() ?? "null") as {
+			keys: string[];
+			astra: { samples: number; tps: number };
+			marker: { value: string } | null;
+		};
+		// The live row survives untouched and nothing is re-imported on top of it.
+		expect(result.keys).toEqual(["openai-codex/gpt-6-astra"]);
+		expect(result.astra.samples).toBe(40);
+		expect(result.astra.tps).toBeCloseTo(100, 5);
+		expect(result.marker).toEqual({ value: "complete" });
 	});
 
 	it("does not start the stats backfill while flushing a live batch on exit", async () => {
