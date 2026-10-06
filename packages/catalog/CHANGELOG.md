@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added Google Cloud partner-model pricing for Claude Opus 5.5 and Sonnet 5.5 on Google Antigravity ([#14195](https://github.com/can1357/oh-my-pi/pull/14195) by [@eggpeat](https://github.com/eggpeat)).
+
+### Changed
+
+- Google Antigravity now lists Claude Opus 5.5 and Sonnet 5.5 once each, with selectable low, medium, and high thinking levels ([#14195](https://github.com/can1357/oh-my-pi/pull/14195) by [@eggpeat](https://github.com/eggpeat)).
+
 ### Fixed
 
 - Fixed GPT-6 Astra's Ultrafast service tier being unpriced: the catalog now carries OpenAI's published multiplier, 6x on the first-party API and 8x (the included-usage rate, matching Fast's 2.5x) on the Codex card ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
