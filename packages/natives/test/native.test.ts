@@ -518,9 +518,7 @@ try {
 		it("caps matches at maxCountPerFile when the path is a single file", async () => {
 			// Regression: the cap reached only the directory walks, so naming one
 			// explicit file dropped it and a hot file returned the whole global
-			// budget. `rust_validate` is gated off pull_request, so the Rust unit
-			// test alone would never run against this change — this is the case
-			// that actually holds the contract on a PR.
+			// budget.
 			const scopedDir = await fs.mkdtemp(path.join(os.tmpdir(), "natives-grep-cap-"));
 			try {
 				const hot = path.join(scopedDir, "hot.txt");

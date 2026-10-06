@@ -1196,20 +1196,15 @@ const ORDERED_STREAMING_STOP_MAX_COUNT: u64 = 64;
 const GREP_STREAM_WINDOW: usize = 512;
 
 fn per_file_params(params: SearchParams) -> SearchParams {
-	let file_limit = match params.mode {
-		OutputMode::Content => {
-			let global = params
-				.max_count
-				.map(|max| max.saturating_add(params.offset));
-			match (global, params.max_count_per_file) {
-				(Some(global), Some(per_file)) => Some(global.min(per_file)),
-				(global, per_file) => global.or(per_file),
-			}
-		},
-		OutputMode::Count => None,
-		OutputMode::FilesWithMatches => Some(1),
-	};
-	SearchParams { max_count: file_limit, offset: 0, ..params }
+	// Directory entries each apply the offset fresh, so fold it into the cap
+	// up front and delegate the mode match to `single_file_params`.
+	single_file_params(SearchParams {
+		max_count: params
+			.max_count
+			.map(|max| max.saturating_add(params.offset)),
+		offset: 0,
+		..params
+	})
 }
 
 /// `per_file_params` for a single explicit file, preserving `offset`.
@@ -2286,10 +2281,7 @@ fn grep_sync_with_matcher<M: Matcher + Sync>(
 		}
 
 		// A single explicit file is one file, so `max_count_per_file` applies to it
-		// exactly as it does inside a directory walk. It used to reach only
-		// `per_file_params`, whose three callers are all directory walks, so the
-		// option was silently dropped the moment the path was a file — the native
-		// contract documents it unconditionally.
+		// exactly as it does inside a directory walk.
 		let params = single_file_params(params);
 		let path_string = search_path.to_string_lossy().into_owned();
 		let search = match stream {
@@ -3261,15 +3253,15 @@ mod tests {
 	/// roboomp: `single_file_params` also changed single-file Count mode.
 	///
 	/// Before this change the direct-file branch passed the caller's `max_count`
-	/// to `MatchCollector`, so `grep({ path: file, mode: Count, maxCount: 2 })` on a
-	/// file with 5 matches stopped at the third match and reported `matchCount: 3`, the
-	/// max+1 value from the early `Ok(false)`. With `Count => None` the same call now
-	/// reports 5, matching the directory path, where aggregation pushes the full
-	/// `result.match_count`.
+	/// to `MatchCollector`, so `grep({ path: file, mode: Count, maxCount: 2 })`
+	/// on a file with 5 matches stopped at the third match and reported
+	/// `matchCount: 3`, the max+1 value from the early `Ok(false)`. With `Count
+	/// => None` the same call now reports 5, matching the directory path, where
+	/// aggregation pushes the full `result.match_count`.
 	///
 	/// Self-contained on purpose: the shared `write_file` and `base_grep_config`
-	/// helpers are `#[cfg(unix)]`, so this case builds its own file and config and
-	/// therefore runs on every platform.
+	/// helpers are `#[cfg(unix)]`, so this case builds its own file and config
+	/// and therefore runs on every platform.
 	#[test]
 	fn grep_single_file_count_mode_reports_every_match() {
 		let dir = std::env::temp_dir().join(format!(
