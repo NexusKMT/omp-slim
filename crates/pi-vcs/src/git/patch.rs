@@ -2127,6 +2127,31 @@ mod tests {
 	}
 
 	#[test]
+	fn patch_apply_second_hunk_rewrites_lines_of_the_first() {
+		// The second hunk targets `ONE`, a line only the first hunk produced, so
+		// it lands behind the forward cursor and takes the materialize-and-splice
+		// path instead of the ascending copy-forward one.
+		let temp = init(&[("a.txt", b"one\ntwo\nthree\nfour\n")]);
+		let patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 \
+		             @@\n-one\n+ONE\n two\n@@ -1 +1 @@\n-ONE\n+uno\n";
+		let options =
+			ApplyOptions { cached: false, index_path: None, reverse: false, three_way: false };
+		let repository = repo(temp.path());
+		assert!(
+			repository
+				.can_apply_patch(patch, &options)
+				.expect("check overlapping patch")
+		);
+		repository
+			.apply_patch(patch, &options)
+			.expect("apply overlapping patch");
+		assert_eq!(
+			fs::read(temp.path().join("a.txt")).expect("read patched"),
+			b"uno\ntwo\nthree\nfour\n"
+		);
+	}
+
+	#[test]
 	fn patch_apply_matches_git_for_text_binary_mode_rename_and_no_eof() {
 		let binary: Vec<u8> = (0_u8..=255).cycle().take(4096).collect();
 		let files: Vec<(&str, &[u8])> = vec![
