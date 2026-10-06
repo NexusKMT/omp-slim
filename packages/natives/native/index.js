@@ -140,6 +140,7 @@ export const vcsJoinPatches = nativeBindings.vcsJoinPatches ?? missingNativeExpo
 export const vcsValidateHunkSelections = nativeBindings.vcsValidateHunkSelections ?? missingNativeExport("vcsValidateHunkSelections");
 export const vectorIndexTopK = nativeBindings.vectorIndexTopK ?? missingNativeExport("vectorIndexTopK");
 export const visibleWidth = nativeBindings.visibleWidth ?? missingNativeExport("visibleWidth");
+export const warmBlockParse = nativeBindings.warmBlockParse ?? missingNativeExport("warmBlockParse");
 export const warmHighlighter = nativeBindings.warmHighlighter ?? missingNativeExport("warmHighlighter");
 export const wrapTextWithAnsi = nativeBindings.wrapTextWithAnsi ?? missingNativeExport("wrapTextWithAnsi");
 
