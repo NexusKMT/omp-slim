@@ -39,6 +39,7 @@
 ### Added
 
 - Added capability-driven extension terminal launches for tmux, Zellij, Herdr, and CMUX, with consolidated multiplexer detection, provider/shell capability feedback, and required POSIX-shell confirmation for shell-input launches; CMUX shell input preserves non-ASCII arguments and pane working directories ([#13620](https://github.com/can1357/oh-my-pi/pull/13620) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Added `/fork pane|window|tab` to launch child sessions in the selected placement; inline hints expose the choices, Herdr and CMUX confirm POSIX-shell compatibility, and pending tools retain an unknown outcome ([#13](https://github.com/anatoli-tsinovoy/oh-my-pi/pull/13) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.6.3] - 2026-10-06
 
@@ -176,7 +177,6 @@
 - The `/models` Roles view shows which saved model preset is in effect, and Ctrl+←/→ (or `p`/`P` on the role rows, for macOS where Ctrl+←/→ switches Spaces) switches to the next or previous one, in Tern and text mode ([#14210](https://github.com/can1357/oh-my-pi/pull/14210) by [@H4vC](https://github.com/H4vC))
 
 ### Changed
-- Typing `/fork ` now previews a pane, window, or tab argument inline so multiplexer placement is easier to discover ([#13](https://github.com/anatoli-tsinovoy/oh-my-pi/pull/13) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 - Picking a model for a role in `/models` now puts the cursor on the model list, so ↑/↓ choose a model and Enter assigns it right away instead of moving through the sidebar and dropping the role selection; ← still reaches the providers ([#14210](https://github.com/can1357/oh-my-pi/pull/14210) by [@H4vC](https://github.com/H4vC))
 - Sped up secret redaction on long conversations: it no longer slows down as history grows ([#14213](https://github.com/can1357/oh-my-pi/pull/14213) by [@H4vC](https://github.com/H4vC))
@@ -259,10 +259,6 @@
 - `/dump all` writes a zip to the temp directory with the main transcript, the LLM request JSON, and one file per subagent transcript (nested subagents included, killed ones marked aborted); the TUI copies the archive path to the clipboard. Plain `/dump` is unchanged ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 - Added `/effort [level]` to set the thinking level without switching models: bare `/effort` opens a picker, and completions offer only the current model's levels within the session effort ceiling. Its description includes thinking and intelligence so either term finds it; `Shift+Tab` still cycles levels ([#12222](https://github.com/can1357/oh-my-pi/pull/12222) by [@Xytronix](https://github.com/Xytronix), [#14113](https://github.com/can1357/oh-my-pi/pull/14113) by [@andrebrait](https://github.com/andrebrait)).
 - Added a per-call `model` selector to task items, eval `agent()`, and `workpool()`: a `provider/model[:level]` pattern or role alias, or an ordered array of them, that takes precedence over `task.agentModelOverrides` and the agent definition. Selection is an ordered preference — requested candidates are tried before configured fallbacks — and the spawn fails at preflight instead of silently routing elsewhere when the selector is the ambiguous literal `default`/`inherit` with or without a `:level` suffix (use `@default`), is blank or comma-only, carries an invalid thinking suffix, matches no available model, or sits on the batch container instead of a `tasks[]` item. A requested model without working credentials fails the spawn instead of running on the parent's model, and the error tells the caller to report the unavailable model rather than substitute another. A pool applies its selector to each worker's first turn and reuses that worker's session afterwards ([#12229](https://github.com/can1357/oh-my-pi/pull/12229) by [@Xytronix](https://github.com/Xytronix), [#13669](https://github.com/can1357/oh-my-pi/pull/13669) by [@andrebrait](https://github.com/andrebrait)).
-- Added interactive extension terminal launches for tmux, Zellij, Herdr, and CMUX, with explicit POSIX-shell requirements for Herdr/CMUX shell-input backends that reject terminal-control bytes before submission ([#13620](https://github.com/can1357/oh-my-pi/pull/13620) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-- Added consolidated multiplexer detection and interactive extension terminal launches for tmux, Zellij, Herdr, and CMUX, with explicit POSIX-shell requirements for Herdr/CMUX shell-input backends that reject terminal-control bytes before submission ([#13620](https://github.com/can1357/oh-my-pi/pull/13620) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-- Added interactive extension terminal launches for tmux, Zellij, Herdr, and CMUX, with explicit POSIX-shell requirements for Herdr/CMUX shell-input backends that reject terminal-control bytes before submission ([#13620](https://github.com/can1357/oh-my-pi/pull/13620) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
-- Added `/fork pane`, `/fork window`, and `/fork tab` to open a child session without leaving the current one ([#13](https://github.com/anatoli-tsinovoy/oh-my-pi/pull/13) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Changed
 
@@ -270,7 +266,6 @@
 - `/changelog`, `/context`, `/tools`, `/hotkeys`, `/advisor status`, `/memory view|queue|stats|diagnostics`, and the mental-model views no longer add their report to the transcript. In text mode a report that fits shows above the editor like `/btw` and Esc dismisses it; a taller one (such as `/changelog full`) opens as a full-screen page on the alternate screen, scrolled with the arrow/page/Home/End keys and the wheel, and Esc returns to the screen exactly as it was. In the native terminal it opens as a sheet like `/usage` whose long reports scroll, closed with Esc or Close ([#14136](https://github.com/can1357/oh-my-pi/pull/14136) by [@H4vC](https://github.com/H4vC)).
 - `/jobs`, `/mcp help|list|resources|prompts|notifications` and `/ssh help|list` no longer add their report to the transcript either: they show the same way, and natively `/jobs` opens the live background-jobs sheet the jobs pill opens (`/jobs full` keeps the full command lines in a report sheet) ([#14138](https://github.com/can1357/oh-my-pi/pull/14138) by [@H4vC](https://github.com/H4vC)).
 - The welcome banner (in the terminal and as Tern's native card) is now the `omp` logo and wordmark with the version and a tip. It no longer shows the "Welcome back!" greeting, the model (the status line does), LSP servers or recent sessions (`/resume`), and the `#` `/` `!` `$` prompt prefixes moved into the rotating tips.
-- Herdr and CMUX terminal forks now ask for confirmation that the destination shell accepts POSIX syntax before launching ([#13](https://github.com/anatoli-tsinovoy/oh-my-pi/pull/13) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ### Fixed
 
@@ -295,7 +290,6 @@
 - Fixed `readlink` in the bash tool printing a provider-backed path (e.g. `local://file`) with a `\\?\` prefix on Windows
 - Fixed the daemon broker on Windows dying with the omp process that started it, which stopped the shared browser relay (and every other broker daemon) while other omp sessions were still using it
 - Fixed the `browser` tool's Tern backend being refused by any Tern newer than the protocol omp was built against; it now speaks Tern's JSON script protocol, which no Tern build ties it to, and a Tern from before it reports as unavailable (update Tern) so the Chromium fallback takes over.
-- Forked sessions report unfinished tools with an unknown outcome rather than claiming they never ran ([#13](https://github.com/anatoli-tsinovoy/oh-my-pi/pull/13) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 
 ## [18.4.12] - 2026-10-02
 
