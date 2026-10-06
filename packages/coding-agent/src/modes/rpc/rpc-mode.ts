@@ -49,6 +49,7 @@ import {
 } from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { requestTextPrediction, textPredictionBackend } from "../../predict/client";
 import { type AgentSession, SessionBusyError } from "../../session/agent-session";
+import type { RestoredQueuedMessage } from "../../session/agent-session-types";
 import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
 import { findMostRecentNonEmptySession } from "../../session/session-listing";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
@@ -83,6 +84,7 @@ import { RpcSessionEventForwarder } from "./rpc-session-events";
 import { isRpcSessionSettled, RpcSessionSettleWatcher, watchedScheduledTurnProbe } from "./rpc-session-settle";
 import { RpcSubagentRegistry, readRpcSubagentTranscript, resolveOwnedLiveSubagent } from "./rpc-subagents";
 import type {
+	RpcAbortAndRestoreQueueResult,
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
@@ -96,6 +98,7 @@ import type {
 	RpcHostUriRequest,
 	RpcHostUriResult,
 	RpcOpenSessionResult,
+	RpcRemoveQueuedMessageResult,
 	RpcResponse,
 	RpcSessionState,
 	RpcSubagentSubscriptionLevel,
@@ -513,7 +516,8 @@ export class RpcUserInputGate {
 
 	/** Call from {@link RpcInputDispatcher.dispatch} before the handler is queued. */
 	accept(command: RpcCommand): void {
-		const isAbort = command.type === "abort" || command.type === "abort_and_prompt";
+		const isAbort =
+			command.type === "abort" || command.type === "abort_and_prompt" || command.type === "abort_and_restore_queue";
 		if (
 			!isAbort &&
 			!Object.hasOwn(USER_INPUT_TYPES, command.type) &&
@@ -677,6 +681,77 @@ export class RpcShutdownCoordinator {
 		}
 		return this.#shutdown;
 	}
+}
+
+/** UTF-8 JSON size of `value`, as compared against `RpcFrameEncoder.maxResponseBytes`. */
+function encodedBytes(value: unknown): number {
+	return Buffer.byteLength(JSON.stringify(value));
+}
+
+/**
+ * Build the `remove_queued_message` response within `maxBytes`. The message is already removed,
+ * so an oversized response must not become a transport-limit error that loses it: its images are
+ * omitted instead (`imagesDropped`).
+ */
+export function fitRemoveQueuedMessageResponse(
+	id: string | undefined,
+	removed: RestoredQueuedMessage | undefined,
+	maxBytes: number,
+): RpcResponse {
+	const response = (data: RpcRemoveQueuedMessageResult): RpcResponse => ({
+		id,
+		type: "response",
+		command: "remove_queued_message",
+		success: true,
+		data,
+	});
+	if (!removed?.images) return response({ removed: removed !== undefined });
+	const full = response({ removed: true, images: removed.images });
+	return encodedBytes(full) <= maxBytes ? full : response({ removed: true, imagesDropped: true });
+}
+
+/**
+ * Build the `abort_and_restore_queue` response within `maxBytes`. The queue is already withdrawn,
+ * so an oversized response must not become a transport-limit error that loses it: images go first
+ * (`imagesDropped`, keeping every text), then the newest entries (`truncated`, keeping an
+ * oldest-first prefix of steering then follow-ups).
+ */
+export function fitAbortAndRestoreQueueResponse(
+	id: string | undefined,
+	restored: RpcAbortAndRestoreQueueResult,
+	maxBytes: number,
+): RpcResponse {
+	const response = (data: RpcAbortAndRestoreQueueResult): RpcResponse => ({
+		id,
+		type: "response",
+		command: "abort_and_restore_queue",
+		success: true,
+		data,
+	});
+	const full = response(restored);
+	if (encodedBytes(full) <= maxBytes) return full;
+	const imagesDropped = [...restored.steering, ...restored.followUp].some(entry => entry.images?.length);
+	const flags = imagesDropped ? { imagesDropped: true as const } : {};
+	const textOnly = {
+		steering: restored.steering.map(({ text }) => ({ text })),
+		followUp: restored.followUp.map(({ text }) => ({ text })),
+	};
+	if (imagesDropped) {
+		const withoutImages = response({ ...textOnly, ...flags });
+		if (encodedBytes(withoutImages) <= maxBytes) return withoutImages;
+	}
+	const fitted: RpcAbortAndRestoreQueueResult = { steering: [], followUp: [], ...flags, truncated: true };
+	// Exact: each entry adds its own JSON plus a comma after the first in its array.
+	let remaining = maxBytes - encodedBytes(response(fitted));
+	for (const queue of ["steering", "followUp"] as const) {
+		for (const entry of textOnly[queue]) {
+			const cost = encodedBytes(entry) + (fitted[queue].length > 0 ? 1 : 0);
+			if (cost > remaining) return response(fitted);
+			fitted[queue].push(entry);
+			remaining -= cost;
+		}
+	}
+	return response(fitted);
 }
 
 export type RpcSubagentResetRegistry = Pick<RpcSubagentRegistry, "clear">;
@@ -1807,9 +1882,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				if (command.queue !== "steering" && command.queue !== "followUp") {
 					return error(id, "remove_queued_message", 'queue must be "steering" or "followUp"');
 				}
-				return success(id, "remove_queued_message", {
-					removed: session.removeQueuedMessage(command.message, command.queue),
-				});
+				return fitRemoveQueuedMessageResponse(
+					id,
+					session.takeQueuedMessage(command.message, command.queue),
+					frameEncoder.maxResponseBytes,
+				);
 			}
 
 			case "promote_queued_message": {
@@ -1823,6 +1900,16 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				goalController.stopForHostAbort();
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
 				return success(id, "abort");
+			}
+
+			case "abort_and_restore_queue": {
+				// Mirrors the TUI Esc restore: withdraw queued user input (including input the run
+				// dequeued but never recorded) before aborting, so neither the aborted turn nor
+				// abort()'s stranded-queue drain can run it.
+				const restored = session.clearQueue({ forInterrupt: true });
+				goalController.stopForHostAbort();
+				await session.abort({ reason: USER_INTERRUPT_LABEL });
+				return fitAbortAndRestoreQueueResponse(id, restored, frameEncoder.maxResponseBytes);
 			}
 
 			case "abort_and_prompt": {

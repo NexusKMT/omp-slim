@@ -8658,17 +8658,18 @@ export class AgentSession implements SettingsScope {
 	 *  kept (abort()'s #extractQueuedAdvisorCards preserves them as visible advice) and every other
 	 *  non-user steer (hidden goal/plan/budget, IRC/extension asides) is dropped, so abort()'s
 	 *  #drainStrandedQueuedMessages can't auto-resume the run the user just interrupted (the drain only
-	 *  fires while agent.hasQueuedMessages()). `forInterrupt` also withdraws live-steered input the
-	 *  aborted response took but never recorded, returning it first (it was queued first).
+	 *  fires while agent.hasQueuedMessages()). `forInterrupt` also withdraws input the run already
+	 *  dequeued but never recorded — live-steered into the aborted response, or taken for its next
+	 *  model call — and treats it as queued ahead of the rest (it was queued first).
 	 *  Plain Alt+Up dequeue preserves those non-user steers. */
 	clearQueue(options?: { forInterrupt?: boolean }): {
 		steering: RestoredQueuedMessage[];
 		followUp: RestoredQueuedMessage[];
 	} {
-		const steeringAll = this.agent.peekSteeringQueue();
-		const followUpAll = this.agent.peekFollowUpQueue();
-		const withdrawn = options?.forInterrupt ? this.agent.withdrawLiveSteering() : [];
-		const steering = [...withdrawn, ...steeringAll].filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
+		const withdrawn = options?.forInterrupt ? this.agent.withdrawUndeliveredQueuedMessages() : undefined;
+		const steeringAll = [...(withdrawn?.steering ?? []), ...this.agent.peekSteeringQueue()];
+		const followUpAll = [...(withdrawn?.followUp ?? []), ...this.agent.peekFollowUpQueue()];
+		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
 		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
 		const keep: (m: AgentMessage) => boolean = options?.forInterrupt
 			? isAdvisorCard
@@ -8747,13 +8748,22 @@ export class AgentSession implements SettingsScope {
 	 * duplicates.
 	 */
 	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
+		return this.takeQueuedMessage(text, queue) !== undefined;
+	}
+
+	/**
+	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
+	 * content (its chip text and images); undefined when nothing matched.
+	 */
+	takeQueuedMessage(text: string, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
 		const index = this.#findQueuedUserMessage(selected, text);
-		if (index < 0) return false;
+		if (index < 0) return undefined;
 
+		const removed = selected[index];
 		this.agent.replaceQueue(queue, this.#withoutQueuedUserMessage(selected, index));
 		this.#reconcileQueuedMessageDrain();
-		return true;
+		return toRestoredQueuedMessage(removed);
 	}
 
 	/**
