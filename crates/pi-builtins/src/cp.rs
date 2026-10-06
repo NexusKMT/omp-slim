@@ -3297,7 +3297,9 @@ fn copy_entry(
 	if !source_is_dir {
 		return match copy_file(host, state, source, dest, options, false, Some(metadata)) {
 			// With --archive a symlink may be copied before the file it names.
-			Err(_) if options.preserve_hard_links() && entry_is_symlink => Ok(()),
+			// A move always copies into a fresh tree, so its failure is real:
+			// `mv` must report it and keep the source.
+			Err(_) if options.preserve_hard_links() && entry_is_symlink && !options.move_mode => Ok(()),
 			result => result,
 		};
 	}
