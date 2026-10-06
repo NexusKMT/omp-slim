@@ -4,12 +4,11 @@ import { isVertexExpressOpenAIUrl } from "@oh-my-pi/pi-catalog/hosts";
 import { providerEntry } from "@oh-my-pi/pi-catalog/compat/providers";
 import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
 import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
-import { modelKind, type ModelKind, runnerApiKind } from "@oh-my-pi/pi-catalog/types";
+import { apiServesKind, modelKind, type ModelKind, runnerApiKind } from "@oh-my-pi/pi-catalog/types";
 import { isRecord } from "@oh-my-pi/pi-utils";
 import { createConfigHeaderResolver } from "./resolve-config-value";
 import { SPECIAL_MODEL_MANAGER_PROVIDER_IDS } from "./model-provider-discovery";
 import type { ModelOverride } from "./models-config-schema";
-import { servedKinds } from "./models-config";
 /** Provider override config (baseUrl, headers, apiKey, compat, transport). */
 export interface ProviderOverride {
 	baseUrl?: string;
@@ -329,7 +328,15 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
 			delete result.promptCache;
 			delete result.promptCacheConfig;
 		}
-		if (patch.kind === undefined) delete result.kindConfig;
+		if (patch.kind === undefined) {
+			delete result.kindConfig;
+			// The base row's kind came with its old api; keep it only if the new api serves it.
+			const kind = kindOnApi(result, result.api);
+			if (kind !== undefined) {
+				result.kind = kind;
+				result.kindConfig = kind;
+			}
+		}
 	}
 	const built = buildModel({ ...toModelSpec(result), compat } as ModelSpec<Api>);
 	if (patch.thinking !== undefined && built.thinking !== undefined) {
@@ -357,8 +364,17 @@ export function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: 
  */
 export function unservedOverrideKind(model: Model<Api>, override: ModelOverride): ModelKind | undefined {
 	if (override.kind === undefined) return undefined;
-	const served = servedKinds(override.api ?? model.api);
-	return served === undefined || served.includes(override.kind) ? undefined : override.kind;
+	return apiServesKind(override.api ?? model.api, override.kind) ? undefined : override.kind;
+}
+
+/**
+ * The kind `model` takes on `api`: a runner api's kind, else `undefined` (keep the
+ * current kind) when `api` serves it, else `chat`.
+ */
+function kindOnApi(model: Model<Api>, api: Api): ModelKind | undefined {
+	const runnerKind = runnerApiKind(api);
+	if (runnerKind !== undefined) return runnerKind;
+	return apiServesKind(api, modelKind(model)) ? undefined : "chat";
 }
 
 /**
@@ -369,11 +385,7 @@ export function unservedOverrideKind(model: Model<Api>, override: ModelOverride)
  */
 function overrideKind(model: Model<Api>, override: ModelOverride): ModelKind | undefined {
 	if (override.kind !== undefined && unservedOverrideKind(model, override) === undefined) return override.kind;
-	if (override.api === undefined) return undefined;
-	const runnerKind = runnerApiKind(override.api);
-	if (runnerKind !== undefined) return runnerKind;
-	const served = servedKinds(override.api);
-	return served === undefined || served.includes(modelKind(model)) ? undefined : "chat";
+	return override.api === undefined ? undefined : kindOnApi(model, override.api);
 }
 
 export function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<Api> {

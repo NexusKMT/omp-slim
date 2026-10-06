@@ -140,7 +140,7 @@ labeling action. `getAllTools()` returns tool schemas and source metadata, while
 
 ### Provider registration
 
-Provider `models` entries and rows returned by `fetchDynamicModels` accept the same `api`/`kind` pairs as `models.yml` (see [Models](./models.md)): a runner API such as `openai-images` implies its kind, so the model reaches the `image` role and `generate_image` instead of registering as chat.
+Provider `models` entries and rows returned by `fetchDynamicModels` accept the same `api`/`kind` pairs as `models.yml` (see [Models](./models.md)): a runner API such as `openai-images` implies its kind, so the model reaches the `image` role and `generate_image` instead of registering as chat. A static `models` entry whose `kind` its api cannot serve fails `registerProvider`; such a `fetchDynamicModels` row is dropped with a logged warning.
 
 ```ts
 pi.registerProvider("my-gateway", {

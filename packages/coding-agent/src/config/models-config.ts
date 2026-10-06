@@ -2,9 +2,8 @@
  * Custom model/provider config file handle and validation.
  */
 
-import { isImageGenerationApi } from "@oh-my-pi/pi-ai/images";
 import type { Api, ModelSpec } from "@oh-my-pi/pi-ai/types";
-import { type ModelKind, runnerApiKind } from "@oh-my-pi/pi-catalog/types";
+import { type ModelKind, servedKinds } from "@oh-my-pi/pi-catalog/types";
 import { ConfigFile } from "./config-file";
 import type { ModelsConfig, ProviderAuthMode, ProviderDiscovery } from "./models-config-schema";
 import { getModelsConfigSchema } from "./models-config-schema-bundle";
@@ -37,22 +36,7 @@ export interface ProviderValidationConfig {
 	models: ProviderValidationModel[];
 }
 
-const CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny"];
-const IMAGE_CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny", "image"];
 const KIND_LIST = new Intl.ListFormat("en", { type: "disjunction" });
-
-/**
- * Kinds a model on `api` may declare: a runner api serves its own kind; a chat
- * transport serves `chat` and `tiny`, plus `image` when `generate_image` runs it
- * (hosted Responses image tool, Gemini image models). `undefined` for
- * `local-inference`, which hosts several kinds chosen by the model itself.
- */
-export function servedKinds(api: Api): readonly ModelKind[] | undefined {
-	if (api === "local-inference") return undefined;
-	const runnerKind = runnerApiKind(api);
-	if (runnerKind !== undefined) return [runnerKind];
-	return isImageGenerationApi(api) ? IMAGE_CHAT_TRANSPORT_KINDS : CHAT_TRANSPORT_KINDS;
-}
 
 export function validateProviderConfiguration(
 	providerName: string,

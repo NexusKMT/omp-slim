@@ -179,6 +179,26 @@ describe("ModelRegistry runtime provider registration", () => {
 		expect(registry.getAll("image").some(isGatewayImage)).toBe(true);
 	});
 
+	test("fetchDynamicModels drops a row whose api cannot serve its kind", async () => {
+		registry.registerProvider(
+			"my-gateway",
+			{
+				baseUrl: "https://gateway.example.com/v1",
+				apiKey: "RUNTIME_KEY",
+				api: "openai-completions",
+				fetchDynamicModels: async () => [
+					{ ...baseModel, id: "mismatched", api: "openai-images", kind: "chat" },
+					{ ...baseModel, id: "gpt-image-2", api: "openai-images" },
+				],
+			},
+			"ext://runtime",
+		);
+		await registry.refreshRuntimeProviders("online");
+
+		expect(registry.find("my-gateway", "mismatched")).toBeUndefined();
+		expect(registry.find("my-gateway", "gpt-image-2")).toMatchObject({ kind: "image" });
+	});
+
 	test("registerProvider rebuilds inferred computer capability after OpenAI runtime reroutes", async () => {
 		const modelId = "gpt-5.4";
 		const directModel = registry.find("openai", modelId);

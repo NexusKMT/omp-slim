@@ -82,6 +82,38 @@ export function runnerApiKind(api: Api): ModelKind | undefined {
 	return RUNNER_API_KIND_BY_API.get(api);
 }
 
+/** Catalog APIs `generate_image` runs through a pi-ai image client; the hosted Responses pair needs a carrier model. */
+export const IMAGE_GENERATION_APIS = [
+	"openai-images",
+	"openrouter-images",
+	"google-generative-ai",
+	"google-gemini-cli",
+	"openai-responses",
+	"openai-codex-responses",
+] as const;
+export type ImageGenerationApi = (typeof IMAGE_GENERATION_APIS)[number];
+
+const CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny"];
+const IMAGE_CHAT_TRANSPORT_KINDS: readonly ModelKind[] = ["chat", "tiny", "image"];
+
+/**
+ * Kinds a model on `api` may declare: a runner api serves its own kind; a chat
+ * transport serves `chat` and `tiny`, plus `image` when `generate_image` runs it
+ * (hosted Responses image tool, Gemini image models). `undefined` for
+ * `local-inference`, which hosts several kinds chosen by the model itself.
+ */
+export function servedKinds(api: Api): readonly ModelKind[] | undefined {
+	if (api === "local-inference") return undefined;
+	const runnerKind = runnerApiKind(api);
+	if (runnerKind !== undefined) return [runnerKind];
+	return (IMAGE_GENERATION_APIS as readonly Api[]).includes(api) ? IMAGE_CHAT_TRANSPORT_KINDS : CHAT_TRANSPORT_KINDS;
+}
+
+/** Whether a model of `kind` can run on `api`. */
+export function apiServesKind(api: Api, kind: ModelKind): boolean {
+	return servedKinds(api)?.includes(kind) ?? true;
+}
+
 /** Resolve a model's kind while preserving chat semantics for existing catalog rows. */
 export function modelKind(model: Pick<Model, "kind">): ModelKind {
 	return model.kind ?? "chat";

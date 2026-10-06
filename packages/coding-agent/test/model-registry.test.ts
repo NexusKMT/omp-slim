@@ -2216,6 +2216,29 @@ describe("ModelRegistry", () => {
 			expect(flux?.api).toBe("openai-completions");
 		});
 
+		test("a same-id definition on a chat api drops a built-in runner kind that api cannot serve", () => {
+			const registry = readonlyRegistry({
+				providers: {
+					openrouter: {
+						baseUrl: "https://openrouter.ai/api/v1",
+						apiKey: "openrouter-key",
+						models: [
+							{ id: "black-forest-labs/flux.2-flex", api: "openai-completions" },
+							{ id: "openai/text-embedding-3-small", api: "openai-completions" },
+							{ id: "google/gemini-3-pro-image-preview", api: "openai-responses" },
+						],
+					},
+				},
+			});
+			const flux = registry.find("openrouter", "black-forest-labs/flux.2-flex");
+			expect(flux).toMatchObject({ api: "openai-completions" });
+			expect(modelKind(flux!)).toBe("chat");
+			expect(registry.getAll().some(model => model.id === "black-forest-labs/flux.2-flex")).toBe(true);
+			expect(modelKind(registry.find("openrouter", "openai/text-embedding-3-small")!)).toBe("chat");
+			// `openai-responses` serves image through the hosted tool, so an image row keeps its kind.
+			expect(registry.find("openrouter", "google/gemini-3-pro-image-preview")).toMatchObject({ kind: "image" });
+		});
+
 		test("an override kind on a built-in model is checked against the model's own api", () => {
 			// openrouter names no api in models.yml; each row resolves its own.
 			const registry = readonlyRegistry({
