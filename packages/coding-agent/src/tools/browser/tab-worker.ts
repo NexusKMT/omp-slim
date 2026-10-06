@@ -863,7 +863,10 @@ class NavigationTimeoutError extends ToolError {}
 
 interface RunPageScope {
 	page: Page;
-	cleanup(): Promise<void>;
+	/** Restore the page's own listener methods and remove every handler this run registered. */
+	detach(): void;
+	/** Return request interception to the tab's persistent route/allowlist state. */
+	restoreInterception(): Promise<void>;
 }
 
 /**
@@ -959,7 +962,7 @@ function createRunPageScope(page: Page, restoreInterception: () => Promise<void>
 
 	return {
 		page,
-		async cleanup() {
+		detach() {
 			if (onDescriptor) Object.defineProperty(page, "on", onDescriptor);
 			else Reflect.deleteProperty(page, "on");
 			if (offDescriptor) Object.defineProperty(page, "off", offDescriptor);
@@ -974,6 +977,8 @@ function createRunPageScope(page: Page, restoreInterception: () => Promise<void>
 				for (const handler of owned) Reflect.apply(off, page, [type, handler]);
 			}
 			handlers.clear();
+		},
+		async restoreInterception() {
 			if (!interceptionChanged) return;
 			try {
 				await withTimeout(
@@ -1703,8 +1708,16 @@ export class WorkerCore {
 		} finally {
 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 			await Bun.sleep(0);
+			// Detach first: the stop below fails the cancelled requests, and run handlers that see
+			// those events would touch the aborted run's facade.
+			runPage?.detach();
+			// A cancelled run abandons its main-frame navigation: left loading, it still replaces the
+			// page later and holds up any interception restore below. Stopping is gated on
+			// that navigation because Page.stopLoading also cancels every fetch and subresource
+			// load in flight. A run that merely ended keeps an unawaited goto going.
+			if (ac.signal.aborted && this.#network?.hasPendingMainFrameNavigation()) await this.#stopLoading();
 			try {
-				await runPage?.cleanup();
+				await runPage?.restoreInterception();
 			} catch (error) {
 				// A finished run keeps its result; the supervisor still recycles the tab.
 				if (completed && active.floatingRejections.length === 0) {
