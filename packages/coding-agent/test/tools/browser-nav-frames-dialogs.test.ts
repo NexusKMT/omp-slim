@@ -5,7 +5,7 @@ import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { navigateMainFrame } from "@oh-my-pi/pi-coding-agent/tools/browser/navigation";
 import { releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
-import type { Page } from "puppeteer-core";
+import type { Page, WaitForOptions } from "puppeteer-core";
 import { chromiumAvailable } from "./chromium-probe";
 
 const CHROMIUM_AVAILABLE = await chromiumAvailable();
@@ -81,18 +81,69 @@ afterAll(async () => {
 	server.stop(true);
 });
 
+function fakePage(frame: { _lifecycleEvents: Set<string>; detached?: boolean }, closed = () => false): Page {
+	return {
+		mainFrame: () => frame,
+		isClosed: closed,
+		browser: () => ({ connected: true }),
+	} as unknown as Page;
+}
+
 test("fails a navigation whose main document reaches its event only after the timeout", async () => {
 	const events = new Set<string>();
-	const page = { mainFrame: () => ({ _lifecycleEvents: events }) } as unknown as Page;
+	const page = fakePage({ _lifecycleEvents: events });
 	// Real time on purpose: the wait polls the frame on a timer and must stop reading at its deadline.
 	const late = setTimeout(() => events.add("load"), 90);
 	try {
-		await expect(navigateMainFrame(page, "load", 60, undefined, async () => null)).rejects.toThrow(
-			"Navigation timeout of 60 ms exceeded",
-		);
+		const error = await navigateMainFrame(page, "load", 60, undefined, async () => null).catch(err => err);
+		expect(error).toBeInstanceOf(Error);
+		expect(error.name).toBe("TimeoutError");
+		expect(error.message).toBe("Navigation timeout of 60 ms exceeded");
 	} finally {
 		clearTimeout(late);
 	}
+});
+
+// Both detach tests flip state on the wait's second read: one poll still sees a live frame,
+// then the frame goes away mid-wait. A wait that ignores it would run out the 10s budget.
+test("stops waiting as soon as the navigating main frame detaches", async () => {
+	let reads = 0;
+	const frame = {
+		_lifecycleEvents: new Set<string>(),
+		get detached() {
+			reads += 1;
+			return reads > 1;
+		},
+	};
+	await expect(navigateMainFrame(fakePage(frame), "load", 10_000, undefined, async () => null)).rejects.toThrow(
+		"Navigating frame was detached",
+	);
+	expect(reads).toBe(2);
+});
+
+test("stops waiting as soon as the page closes", async () => {
+	let checks = 0;
+	const closed = () => ++checks > 1;
+	await expect(
+		navigateMainFrame(
+			fakePage({ _lifecycleEvents: new Set() }, closed),
+			"domcontentloaded",
+			10_000,
+			undefined,
+			async () => null,
+		),
+	).rejects.toThrow("Navigating frame was detached");
+	expect(checks).toBe(2);
+});
+
+test("hands any waitUntil other than load/domcontentloaded to Puppeteer unchanged", async () => {
+	const seen: unknown[] = [];
+	const page = fakePage({ _lifecycleEvents: new Set() });
+	const values: NonNullable<WaitForOptions["waitUntil"]>[] = ["networkidle0", ["load", "networkidle2"]];
+	for (const waitUntil of values) {
+		await navigateMainFrame(page, waitUntil, 1_000, undefined, async options => seen.push(options.waitUntil));
+	}
+	expect(seen).toEqual(["networkidle0", ["load", "networkidle2"]]);
 });
 
 describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and tab listing", () => {
@@ -173,6 +224,32 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			`,
 		});
 		expect(valueOf(result)).toEqual([`${baseUrl}/stuck-frame`, "interactive"]);
+	}, 60_000);
+
+	test("validates Playwright-style and array waitUntil values through Puppeteer", async () => {
+		const invoke = createHost();
+		await invoke({ action: "open", name: "wait-values", url: `${baseUrl}/one` });
+		const result = await invoke({
+			action: "run",
+			name: "wait-values",
+			timeout: 20,
+			code: `
+				const started = Date.now();
+				let message = "";
+				try {
+					await tab.goto(${JSON.stringify(`${baseUrl}/two`)}, { waitUntil: "networkidle" });
+				} catch (error) {
+					message = String(error?.message ?? error);
+				}
+				const elapsed = Date.now() - started;
+				await tab.goto(${JSON.stringify(`${baseUrl}/three`)}, { waitUntil: ["load", "domcontentloaded"] });
+				return [message, elapsed < 5000, tab.url()];
+			`,
+		});
+		const [message, fast, url] = valueOf(result) as [string, boolean, string];
+		expect(message).toContain("Unknown value for options.waitUntil: networkidle");
+		expect(fast).toBe(true);
+		expect(url).toBe(`${baseUrl}/three`);
 	}, 60_000);
 
 	test("auto-accepts alerts and explicitly settles confirm and prompt dialogs", async () => {

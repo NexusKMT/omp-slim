@@ -1,5 +1,5 @@
 import { untilAborted } from "@oh-my-pi/pi-utils";
-import { type Page, TimeoutError, type WaitForOptions } from "puppeteer-core";
+import type { Page, WaitForOptions } from "puppeteer-core";
 
 declare module "puppeteer-core" {
 	interface Frame {
@@ -15,6 +15,13 @@ export type NavigationWaitUntil = "load" | "domcontentloaded" | "networkidle0" |
 const MAIN_FRAME_LIFECYCLE_EVENTS = { load: "load", domcontentloaded: "DOMContentLoaded" } as const;
 /** How often the main-frame wait re-reads the frame's lifecycle events. */
 const MAIN_FRAME_POLL_MS = 50;
+
+/** Puppeteer-compatible timeout error; built by name so this module keeps `puppeteer-core` type-only. */
+function navigationTimeoutError(timeout: number): Error {
+	const error = new Error(`Navigation timeout of ${timeout} ms exceeded`);
+	error.name = "TimeoutError";
+	return error;
+}
 
 interface PageNavigationGlobal {
 	next?: { router?: { push?: (target: string) => unknown } };
@@ -74,25 +81,30 @@ export async function pushStateInPage(destination: string): Promise<string> {
  * that started loading, so one iframe that never finishes (ad, chat widget, challenge) times
  * out a page whose own document is ready. Puppeteer therefore only waits for the commit, and
  * the main frame's lifecycle events, which Puppeteer's own wait reads too, decide the rest.
- * `networkidle*` keep Puppeteer's page-wide wait.
+ * Any other `waitUntil` (`networkidle*`, arrays, invalid values) keeps Puppeteer's own wait,
+ * which also validates the value.
  */
 export async function navigateMainFrame(
 	page: Page,
-	waitUntil: NavigationWaitUntil,
+	waitUntil: NonNullable<WaitForOptions["waitUntil"]>,
 	timeout: number,
 	signal: AbortSignal | undefined,
 	navigate: (options: WaitForOptions) => Promise<unknown>,
 ): Promise<void> {
-	if (waitUntil === "networkidle0" || waitUntil === "networkidle2") {
+	if (waitUntil !== "load" && waitUntil !== "domcontentloaded") {
 		await untilAborted(signal, () => navigate({ waitUntil, timeout }));
 		return;
 	}
 	const deadline = Date.now() + timeout;
 	await untilAborted(signal, () => navigate({ waitUntil: [], timeout }));
 	const event = MAIN_FRAME_LIFECYCLE_EVENTS[waitUntil];
-	while (!page.mainFrame()._lifecycleEvents.has(event)) {
+	for (;;) {
+		if (page.isClosed() || !page.browser().connected) throw new Error("Navigating frame was detached");
+		const frame = page.mainFrame();
+		if (frame.detached) throw new Error("Navigating frame was detached");
+		if (frame._lifecycleEvents.has(event)) return;
 		const remaining = deadline - Date.now();
-		if (remaining <= 0) throw new TimeoutError(`Navigation timeout of ${timeout} ms exceeded`);
+		if (remaining <= 0) throw navigationTimeoutError(timeout);
 		// The last read lands on the deadline, so an event that arrives after it is a timeout.
 		await untilAborted(signal, () => Bun.sleep(Math.min(MAIN_FRAME_POLL_MS, remaining)));
 	}
