@@ -55,7 +55,9 @@ const renderSidebar = async (model: GitViewState): Promise<string> => {
 			onAction: () => {},
 			onFocusDiff: () => {},
 			requestRender: () => {},
-		}).render(48, 24).join("\n"),
+		})
+			.render(48, 24)
+			.join("\n"),
 	);
 };
 
@@ -78,7 +80,16 @@ describe("git footer hints", () => {
 
 	it("keeps the keys that still work in the commit view", () => {
 		expect(gitFooterHints(true, "sidebar")).toContain("quit");
-		expect(gitFooterHints(true, "diff")).toContain("commit");
+		expect(gitFooterHints(true, "diff")).toContain("view");
+	});
+
+	it("drops commit and select in the commit view, where both are no-ops", () => {
+		for (const focus of ["sidebar", "diff"] as const) {
+			expect(gitFooterHints(true, focus)).not.toContain("commit");
+		}
+		expect(gitFooterHints(true, "diff")).not.toContain("select");
+		expect(gitFooterHints(false, "diff")).toContain("commit");
+		expect(gitFooterHints(false, "diff")).toContain("select");
 	});
 });
 

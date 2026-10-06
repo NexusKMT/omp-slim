@@ -95,8 +95,9 @@ type Focus = "diff" | "sidebar";
  * and discard cannot fire: `#patchTargetFor` returns null and
  * `#discardCurrentFile` returns early for `area: "commit"` rows, and the
  * sidebar only builds stage/discard actions for the unstaged/staged
- * sections. Advertising those keys there points at dead shortcuts, so the
- * commit view drops them and says what it is showing instead.
+ * sections. `commit` needs the commit form (absent on a clean tree) and
+ * `select` feeds the line-level stage/discard actions (no-ops on commit
+ * rows), so the commit view drops those too and says what it is showing.
  */
 export function gitFooterHints(clean: boolean, focus: Focus): string {
 	const edit = clean
@@ -104,9 +105,11 @@ export function gitFooterHints(clean: boolean, focus: Focus): string {
 		: focus === "diff"
 			? ` · ${formatKeyHints(["s", "u"])} stage · ${formatKeyHints(["x", "delete"])} discard`
 			: ` · ${formatKeyHint("space")} stage · ${formatKeyHint("delete")} discard`;
+	const commit = clean ? "" : ` · ${formatKeyHint("c")} commit`;
+	const select = clean || focus !== "diff" ? "" : ` · ${formatKeyHints(["shift+up", "shift+down"])} select`;
 	return focus === "diff"
-		? `${formatKeyHints(["alt+down", "alt+up"])} hunk · ${formatKeyHints(["]", "["])} file · ${formatKeyHints(["shift+up", "shift+down"])} select${edit} · ${formatKeyHint("v")} view · ${formatKeyHint("c")} commit · ${formatKeyHint("?")} keys · ${formatKeyHint("q")} quit`
-		: `${formatKeyHints(["up", "down"])} move · ${formatKeyHints(["left", "right"])} fold${edit} · ${formatKeyHint("enter")} open · ${formatKeyHints(["alt+down", "alt+up"])} hunk · ${formatKeyHint("c")} commit · ${formatKeyHint("t")} tree · ${formatKeyHint("?")} keys · ${formatKeyHint("q")} quit`;
+		? `${formatKeyHints(["alt+down", "alt+up"])} hunk · ${formatKeyHints(["]", "["])} file${select}${edit} · ${formatKeyHint("v")} view${commit} · ${formatKeyHint("?")} keys · ${formatKeyHint("q")} quit`
+		: `${formatKeyHints(["up", "down"])} move · ${formatKeyHints(["left", "right"])} fold${edit} · ${formatKeyHint("enter")} open · ${formatKeyHints(["alt+down", "alt+up"])} hunk${commit} · ${formatKeyHint("t")} tree · ${formatKeyHint("?")} keys · ${formatKeyHint("q")} quit`;
 }
 
 /** Tone of a status message: its colour in the header and its span token natively. */
