@@ -4,11 +4,11 @@
 
 ### Added
 
-- Cancel a pending model handoff with `/prewalk off` without changing the active model or saved prewalk setting ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
+- Cancel a pending model handoff with `/prewalk off` without changing the active model, saved prewalk setting, or delivered continuation history ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 
 ### Fixed
 
-- `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model only while the previous handoff still owns the selection ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
+- `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model after automatic recovery when no explicit selection supersedes the handoff ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 
 ## [18.6.3] - 2026-10-06
 

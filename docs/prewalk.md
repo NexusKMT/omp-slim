@@ -23,6 +23,8 @@ The configured setting arms new sessions, not resumed/imported sessions. Explici
 
 `/new` starts a fresh cycle using `prewalk.enabled` and the current `@smol` assignment, rather than inheriting a consumed handoff or the previous todo gate. Startup flags apply to the startup session; `/new` uses the configured setting. When prewalk is enabled, the new session restores the previous planning model and thinking level after a handoff only if you have not manually changed them. Resuming an existing session does not automatically re-arm prewalk.
 
+Automatic fallback and restoration are not manual selections. When recovery returns to the handoff model and effort, `/new` can still restore the previous planning model.
+
 | Flag | Effect |
 | --- | --- |
 | `--prewalk` | Arm prewalk for the new session. |
@@ -67,7 +69,7 @@ Run these slash commands without restarting OMP:
 
 `/prewalk` arms a one-shot handoff from the active model to the current `@smol` assignment.
 
-`/prewalk off` cancels a pending handoff and clears its planning steering without changing the active model or saved configuration. It is safe to run when already off or after a handoff; it does not switch back to the planning model. Cancellation applies only to the current session: `/new` re-arms prewalk when the configured setting is enabled.
+`/prewalk off` cancels a pending handoff and clears its planning steering without changing the active model, saved configuration, or already-delivered continuation history. It is safe to run when already off or after a handoff; it does not switch back to the planning model. Cancellation applies only to the current session: `/new` re-arms prewalk when the configured setting is enabled.
 
 After a handoff, `/prewalk restart` immediately returns the session to the current `@default` assignment and re-arms the handoff to `@smol`. Both roles are resolved when the command runs, so the cycle is independent of concrete model names and does not alter either role's persisted configuration.
 

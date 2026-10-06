@@ -394,24 +394,25 @@ export class PrewalkCoordinator {
 	}
 
 	#scrubPlanNudge(liveMessages?: AgentMessage[], includeContinuation = false): void {
-		const isPlanNudge = (message: AgentMessage): boolean =>
-			isPrewalkPlanNudge(message) ||
-			(includeContinuation && message.role === "custom" && message.customType === PREWALK_CONTINUE_MESSAGE_TYPE);
 		if (liveMessages) {
 			for (let index = liveMessages.length - 1; index >= 0; index--) {
-				if (!isPlanNudge(liveMessages[index])) continue;
+				if (!isPrewalkPlanNudge(liveMessages[index])) continue;
 				invalidateMessageCache(liveMessages[index]);
 				liveMessages.splice(index, 1);
 			}
 		}
 		const stateMessages = this.#host.agent.state.messages;
-		const filtered = stateMessages.filter(message => !isPlanNudge(message));
+		const filtered = stateMessages.filter(message => !isPrewalkPlanNudge(message));
 		if (filtered.length !== stateMessages.length) this.#host.agent.replaceMessages(filtered);
+		// Delivered continuations are persisted history; only pending ones can be canceled.
+		const isPendingNudge = (message: AgentMessage): boolean =>
+			isPrewalkPlanNudge(message) ||
+			(includeContinuation && message.role === "custom" && message.customType === PREWALK_CONTINUE_MESSAGE_TYPE);
 		const steering = this.#host.agent.peekSteeringQueue();
-		if (steering.some(isPlanNudge)) {
+		if (steering.some(isPendingNudge)) {
 			this.#host.agent.replaceQueue(
 				"steering",
-				steering.filter(message => !isPlanNudge(message)),
+				steering.filter(message => !isPendingNudge(message)),
 			);
 		}
 	}

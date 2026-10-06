@@ -1597,7 +1597,8 @@ export class AgentSession implements SettingsScope {
 			restoreThinkingLevel: level => this.#models.restoreThinkingLevel(level),
 			resolveDefaultPrewalk: () => this.#resolveDefaultPrewalk(),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
-			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
+			setModelTemporary: (model, thinkingLevel, options) =>
+				this.#models.setModelTemporary(model, thinkingLevel, options, "automatic"),
 			setActiveToolsByName: names => this.setActiveToolsByName(names),
 			restoreNonMCPToolPresentation: (nonMCPToolNames, nonMCPMountedToolNames) =>
 				this.restoreNonMCPToolPresentation(nonMCPToolNames, nonMCPMountedToolNames),
@@ -1653,7 +1654,11 @@ export class AgentSession implements SettingsScope {
 			promptGeneration: () => this.#promptGeneration,
 			resolveActiveEditMode: () => this.#tools.resolveActiveEditMode(),
 			syncAfterModelChange: previousEditMode => this.#tools.syncAfterModelChange(previousEditMode),
-			setModelWithProviderSessionReset: model => this.#setModelWithProviderSessionReset(model),
+			setModelWithProviderSessionReset: async (model, selection = "explicit") => {
+				await this.#setModelWithProviderSessionReset(model);
+				// Only a completed explicit selection, including same-model reselection, takes ownership.
+				if (selection === "explicit") this.#prewalk.releaseHandoff();
+			},
 			clearActiveRetryFallback: () => this.#recovery.clearActiveRetryFallback(),
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			magicKeywordEnabled: keyword => this.#magicKeywordEnabled(keyword),
@@ -1696,7 +1701,7 @@ export class AgentSession implements SettingsScope {
 			textOutputCommitted: () => this.#textOutputCommitted,
 			thinkingLevel: () => this.thinkingLevel,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
-			setThinkingLevel: level => this.setThinkingLevel(level),
+			setThinkingLevel: level => this.#models.setThinkingLevel(level),
 			thinkingLevelCeiling: () => this.#models.thinkingLevelCeiling,
 			isDisposed: () => this.#isDisposed,
 			isStreaming: () => this.isStreaming,
@@ -2285,7 +2290,8 @@ export class AgentSession implements SettingsScope {
 			runRecoveryCompactionWithRollback: (reason, message, options) =>
 				this.#recovery.runRecoveryCompactionWithRollback(reason, message, options),
 			parseRetryAfterMsFromError: errorMessage => this.#recovery.parseRetryAfterMsFromError(errorMessage),
-			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
+			setModelTemporary: (model, thinkingLevel, options) =>
+				this.#models.setModelTemporary(model, thinkingLevel, options, "automatic"),
 			abort: options => this.abort(options),
 			abortHandoff: () => this.abortHandoff(),
 		};
@@ -10341,8 +10347,6 @@ export class AgentSession implements SettingsScope {
 	}
 
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
-		// A selection, even of the same model, supersedes ownership of a previous prewalk handoff.
-		this.#prewalk.releaseHandoff();
 		const currentModel = this.model;
 		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
 		if (currentModel) {

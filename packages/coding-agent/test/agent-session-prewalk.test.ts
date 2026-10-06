@@ -12,12 +12,18 @@ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
-import { cfgPrewalkEnabled } from "@oh-my-pi/pi-coding-agent/session/settings";
+import {
+	cfgPrewalkEnabled,
+	cfgRetryBaseDelayMs,
+	cfgRetryFallbackChains,
+	cfgRetryFallbackRevertPolicy,
+} from "@oh-my-pi/pi-coding-agent/session/settings";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import { AUTO_THINKING } from "@oh-my-pi/pi-tui/thinking";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { mockSchedulerWaitWithClock } from "./helpers/mock-scheduler-clock";
 
 /**
  * Prewalk: one-way switch from the starting model to a fast/cheap target
@@ -44,6 +50,8 @@ describe("AgentSession prewalk", () => {
 	afterEach(async () => {
 		if (session) await session.dispose();
 		session = undefined;
+		vi.restoreAllMocks();
+		modelRegistry.clearSuppressedSelectors();
 	});
 
 	afterAll(() => {
@@ -197,6 +205,62 @@ describe("AgentSession prewalk", () => {
 			created.target.id,
 		]);
 		expect(created.nudges[boundary]).not.toContain("prewalk-checklist");
+	});
+
+	it("/new restores the prewalk source and effort after automatic fallback and primary restoration", async () => {
+		const fallback = modelOrThrow("claude-opus-4-6");
+		const created = createLifecycleSession([
+			toolCall("old-todo", "todo"),
+			toolCall("old-write", "write"),
+			{ content: ["old done"] },
+			{ throw: "rate limit exceeded retry-after-ms=200" },
+			{ content: ["fallback done"] },
+			{ content: ["restored done"] },
+			toolCall("fresh-write-before-todo", "write"),
+			toolCall("fresh-todo", "todo"),
+			toolCall("fresh-write", "write"),
+			{ content: ["fresh done"] },
+		]);
+		cfgRetryBaseDelayMs.override(created.settings, 5);
+		cfgRetryFallbackChains.override(created.settings, {
+			[`${created.target.provider}/${created.target.id}`]: [`${fallback.provider}/${fallback.id}:high`],
+		});
+		cfgRetryFallbackRevertPolicy.override(created.settings, "cooldown-expiry");
+		let now = Date.now();
+		vi.spyOn(Date, "now").mockImplementation(() => now);
+		mockSchedulerWaitWithClock();
+
+		await created.session.prompt("old task");
+		expect(created.session.model?.id).toBe(created.target.id);
+		expect(created.session.configuredThinkingLevel()).toBe(Effort.Low);
+		const retryBoundary = created.requested.length;
+		await created.session.prompt("continue through a rate limit");
+		await created.session.waitForIdle();
+		expect(created.requested.slice(retryBoundary)).toEqual([created.target.id, fallback.id]);
+		expect(created.session.model?.id).toBe(fallback.id);
+		expect(created.session.configuredThinkingLevel()).toBe(Effort.High);
+
+		now += 240;
+		await created.session.prompt("continue after the primary cooldown");
+		await created.session.waitForIdle();
+		expect(created.requested.slice(retryBoundary)).toEqual([created.target.id, fallback.id, created.target.id]);
+		expect(created.session.model?.id).toBe(created.target.id);
+		expect(created.session.configuredThinkingLevel()).toBe(Effort.Low);
+
+		expect(await created.session.newSession()).toBe(true);
+		expect(created.session.model?.id).toBe(created.primary.id);
+		expect(created.session.configuredThinkingLevel()).toBe(Effort.High);
+		expect(created.session.getPrewalkState()?.target.id).toBe(created.target.id);
+		expect(created.session.getPrewalkState()?.thinkingLevel).toBe(Effort.Low);
+		const freshBoundary = created.requested.length;
+		await created.session.prompt("fresh task");
+		expect(created.requested.slice(freshBoundary)).toEqual([
+			created.primary.id,
+			created.primary.id,
+			created.primary.id,
+			created.target.id,
+		]);
+		expect(created.nudges[freshBoundary]).not.toContain("prewalk-checklist");
 	});
 
 	it("/new restores automatic effort after a prewalk handoff pins target effort", async () => {
@@ -384,6 +448,22 @@ describe("AgentSession prewalk", () => {
 		expect(created.requested.slice(boundary)).toEqual([manual.id, manual.id, created.target.id]);
 	});
 
+	it("/new retains handoff ownership after a failed selection and no-op role cycle", async () => {
+		const created = createLifecycleSession([
+			toolCall("old-todo", "todo"),
+			toolCall("old-write", "write"),
+			{ content: ["old done"] },
+		]);
+		await created.session.prompt("old task");
+		vi.spyOn(modelRegistry, "hasConfiguredAuth").mockReturnValueOnce(false);
+		await expect(created.session.setModel(created.target)).rejects.toThrow("No API key");
+		expect(await created.session.cycleRoleModels(["smol"])).toBeUndefined();
+		expect(await created.session.newSession()).toBe(true);
+		expect(created.session.model?.id).toBe(created.primary.id);
+		expect(created.session.configuredThinkingLevel()).toBe(Effort.High);
+		expect(created.session.getPrewalkState()?.target.id).toBe(created.target.id);
+	});
+
 	it("/new preserves a deliberate selection of the same handoff model and effort", async () => {
 		const created = createLifecycleSession([
 			toolCall("old-todo", "todo"),
@@ -393,7 +473,6 @@ describe("AgentSession prewalk", () => {
 		]);
 		await created.session.prompt("old task");
 		await created.session.setModel(created.target);
-		created.session.setThinkingLevel(Effort.Low);
 		expect(await created.session.newSession()).toBe(true);
 		expect(created.session.model?.id).toBe(created.target.id);
 		expect(created.session.configuredThinkingLevel()).toBe(Effort.Low);
