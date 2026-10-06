@@ -582,6 +582,25 @@ impl Host {
 		Arc::clone(&self.cancel)
 	}
 
+	/// A `pi_walker` heartbeat that fails with `Interrupted` once the host
+	/// cancels. Without it the walker's per-entry heartbeat never sees the
+	/// flag, and a cancelled walk traverses the whole tree before the utility
+	/// notices (#3949, #3933). The walker surfaces the error as
+	/// `WalkError::Interrupted`; `grep`, `rg`, and `fd` tell it from a real
+	/// failure with [`Host::is_cancelled`] and stay silent, since the shell
+	/// adapter owns the cancellation status (130), while `find` prints it as
+	/// `Error: cancelled`.
+	pub fn cancel_heartbeat(&self) -> impl Fn() -> io::Result<()> + Send + Sync + 'static {
+		let cancel = Arc::clone(&self.cancel);
+		move || {
+			if cancel.load(Ordering::Relaxed) {
+				Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"))
+			} else {
+				Ok(())
+			}
+		}
+	}
+
 	/// Whether stdin is a shell pipe, virtual file, or custom stream, and so should be treated
 	/// as implicit input rather than a terminal. `rg PATTERN` uses this to
 	/// decide between searching stdin and searching `.`.

@@ -4497,7 +4497,7 @@ pub mod matchers {
 use std::{
 	cell::{Cell, RefCell},
 	error::Error,
-	io::{self, Write},
+	io::Write,
 	path::{Path, PathBuf},
 	rc::Rc,
 	time::SystemTime,
@@ -4758,16 +4758,9 @@ fn process_dir_walk_request(
 	let current_dir = RefCell::new(None);
 	let ret = Cell::new(0);
 	let local_quit = Cell::new(false);
-	let cancel = host.cancel_flag();
 	let mut walk_stderr = host.stderr_clone();
 	let status = request.for_each_entry_with_heartbeat(
-		move || {
-			if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-				Err(io::Error::new(io::ErrorKind::Interrupted, "cancelled"))
-			} else {
-				Ok(())
-			}
-		},
+		host.cancel_heartbeat(),
 		|entry: pi_walker::EntryMeta<'_>| {
 			let walk_entry = WalkEntry::new(
 				fs.clone(),
