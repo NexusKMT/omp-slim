@@ -416,6 +416,62 @@ describe("AgentSession shake", () => {
 			expect(result.tokensFreed).toBe(imageTokens);
 			expect(session.getContextUsage()?.tokens).toBe(20_000 - imageTokens);
 		});
+
+		it("does not subtract post-anchor image tokens from the provider-anchored meter", async () => {
+			const png: ImageContent = { type: "image", data: "iVBORw0KGgo", mimeType: "image/png" };
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "latest answer" }],
+				...apiInfo,
+				stopReason: "stop",
+				usage: { ...usage, input: 20_000, totalTokens: 20_008 },
+				timestamp: Date.now() - 1,
+			});
+			const withImage: UserMessage = {
+				role: "user",
+				content: [{ type: "text", text: "look" }, png],
+				timestamp: Date.now(),
+			};
+			sessionManager.appendMessage(withImage);
+			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+
+			const tokenizer = new Tokenizer();
+			const imageTokens =
+				tokenizer.countMessage(withImage) -
+				tokenizer.countMessage({ ...withImage, content: [{ type: "text", text: "look" }] });
+			expect(imageTokens).toBeGreaterThan(0);
+			const before = session.getContextUsage()?.tokens ?? 0;
+			expect(before).toBeGreaterThan(20_000);
+
+			const result = await session.shake("images");
+
+			expect(result.imagesDropped).toBe(1);
+			expect(result.tokensFreed).toBe(imageTokens);
+			expect(session.getContextUsage()?.tokens).toBe(before - imageTokens);
+			const anchor = sessionManager
+				.getBranch()
+				.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+			expect(
+				anchor?.type === "message" && anchor.message.role === "assistant"
+					? anchor.message.contextSnapshot?.historyRewriteTokensRemoved
+					: undefined,
+			).toBeUndefined();
+		});
+
+		it("drops images from custom messages through the projected message", async () => {
+			const png: ImageContent = { type: "image", data: "iVBORw0KGgo", mimeType: "image/png" };
+			sessionManager.appendCustomMessageEntry("test-note", [{ type: "text", text: "note" }, png], true);
+			session.agent.replaceMessages(session.buildDisplaySessionContext().messages);
+
+			const result = await session.shake("images");
+
+			expect(result.imagesDropped).toBe(1);
+			expect(result.tokensFreed).toBeGreaterThan(0);
+			const branch = sessionManager.getBranch();
+			const custom = branch.find(e => e.type === "custom_message");
+			const parts = (custom as { content: Array<{ type: string }> }).content;
+			expect(parts.some(part => part.type === "image")).toBe(false);
+		});
 	});
 
 	describe("thinking", () => {
