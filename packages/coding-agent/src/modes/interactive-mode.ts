@@ -325,7 +325,6 @@ import { UiHelpers } from "./utils/ui-helpers";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgComposerShape,
-	cfgComposerThinkingInModel,
 	cfgComposerTokenRate,
 	cfgDisplayCacheMissMarker,
 	cfgDisplayCollapseCompacted,
@@ -405,7 +404,6 @@ const cfgLiveUiSettings = combine({
 	"spelling.autocomplete": cfgSpellingAutocomplete,
 	"spelling.autocorrect": cfgSpellingAutocorrect,
 	"composer.shape": cfgComposerShape,
-	"composer.thinkingInModel": cfgComposerThinkingInModel,
 	"tui.vimMode": cfgTuiVimMode,
 	"tui.vimModeDisplay": cfgTuiVimModeDisplay,
 	"display.pinnedAgents": cfgDisplayPinnedAgents,
@@ -3410,8 +3408,6 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.updateEditorBorderColor();
 		}
 		if (any("composer.shape")) this.syncComposerShape();
-		// The native composer re-reads the setting as it describes.
-		if (any("composer.thinkingInModel")) this.ui.requestRender();
 		if (any("tui.vimMode", "tui.vimModeDisplay")) this.#applyVimModeSetting();
 		if (any("display.pinnedAgents")) this.applyPinnedAgentsSetting();
 		if (any("display.subagentLivePreview")) {
@@ -3722,7 +3718,7 @@ export class InteractiveMode implements InteractiveModeContext {
 					? { kind: "python", excluded: draft.startsWith("$$") }
 					: undefined,
 			thinking: thinkingLevelWord(this.viewSession),
-			thinkingInModel: cfgComposerThinkingInModel.get(settings),
+			thinkingInModel: cfgStatusLineCompactThinkingLevel.get(settings),
 			rate: this.#nativeTokenRate(),
 			running: this.loadingAnimation !== undefined || this.session.isStreaming,
 			viewing: this.#viewingLineage(),
