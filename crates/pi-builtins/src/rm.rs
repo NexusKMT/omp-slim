@@ -538,10 +538,39 @@ fn handle_error_with_force(host: &mut Host, e: io::Error, path: &Path, options: 
 	!options.force
 }
 
+/// Removes the empty directory `fs_path`.
+///
+/// On Windows a directory carrying the read-only attribute refuses removal,
+/// although on Unix only the parent's permissions decide; the attribute is
+/// cleared for one more attempt and put back if that fails too.
+fn remove_empty_dir(host: &mut Host, fs_path: &Path) -> io::Result<()> {
+	let result = host.fs().remove_dir(fs_path);
+	#[cfg(windows)]
+	if let Err(e) = &result
+		&& e.kind() == io::ErrorKind::PermissionDenied
+		&& let Ok(metadata) = host.fs().symlink_metadata(fs_path)
+		// Not a symlink or junction: set_permissions would follow it.
+		&& metadata.is_dir()
+		&& metadata.permissions().readonly()
+	{
+		let mut writable = metadata.permissions();
+		writable.set_readonly(false);
+		if host.fs().set_permissions(fs_path, writable).is_ok() {
+			let retry = host.fs().remove_dir(fs_path);
+			if retry.is_err() {
+				// Best effort: the retry's error is the one to report.
+				let _ = host.fs().set_permissions(fs_path, metadata.permissions());
+			}
+			return retry;
+		}
+	}
+	result
+}
+
 /// Helper function to remove directory handling special cases
 fn remove_dir_with_special_cases(host: &mut Host, path: &Path, options: &Options, error_occurred: bool) -> bool {
 	let path_fs = host.resolve(path);
-	match host.fs().remove_dir(&path_fs) {
+	match remove_empty_dir(host, &path_fs) {
 		Err(_) if !error_occurred && !is_readable(host, path) => {
 			// For compatibility with GNU test case
 			// `tests/rm/unread2.sh`, show "Permission denied" in this
@@ -572,7 +601,8 @@ fn remove_dir_with_special_cases(host: &mut Host, path: &Path, options: &Options
 
 /// Helper function to remove a directory and handle results
 fn remove_dir_with_feedback(host: &mut Host, path: &Path, options: &Options) -> bool {
-	match host.fs().remove_dir(&host.resolve(path)) {
+	let path_fs = host.resolve(path);
+	match remove_empty_dir(host, &path_fs) {
 		Ok(_) => {
 			verbose_removed_directory(host, path, options);
 			false
@@ -1208,19 +1238,6 @@ fn remove_dir_recursive(host: &mut Host,
 		return remove_file(host, path, options, progress_bar);
 	}
 
-	// With nothing to ask or report per entry, a native tree goes in one
-	// call, which on Windows deletes each file through a handle relative to
-	// its directory rather than by full path; the walk then only runs to
-	// report what that call could not remove.
-	if options.interactive == InteractiveMode::Never
-		&& !options.verbose
-		&& progress_bar.is_none()
-		&& host.fs().is_native_local(&fs_path)
-		&& host.fs().remove_dir_all(&fs_path).is_ok()
-	{
-		return false;
-	}
-
 	remove_dir_tree(host, path, options, progress_bar)
 }
 
@@ -1659,12 +1676,16 @@ fn is_symlink_dir(metadata: &Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use std::path::Path;
+	use std::{
+		path::Path,
+		sync::atomic::{AtomicBool, Ordering},
+	};
 
+	use clap::Parser;
 	use tempfile::{Builder, tempdir};
 
 	use super::{Rm, clean_trailing_slashes};
-	use crate::host::run_util;
+	use crate::host::{Host, Utility, run_util};
 
 	#[test]
 	fn collapses_repeated_root_slashes() {
@@ -1770,5 +1791,91 @@ mod tests {
 		let (code, capture) = run_util::<Rm>(&["-f"], "", "/");
 		assert_eq!(code, 0);
 		assert_eq!(capture.err(), "");
+	}
+
+	#[test]
+	fn cancellation_stops_a_recursive_removal_midway() {
+		let cwd = tempdir().unwrap();
+		let tree = cwd.path().join("tree");
+		for i in 0..3000 {
+			let dir = tree.join(format!("d{i:04}"));
+			std::fs::create_dir_all(&dir).unwrap();
+			std::fs::write(dir.join("f"), b"").unwrap();
+		}
+		// rm walks in listing order, so the first listed child goes first;
+		// cancelling the moment it is gone must leave most of the tree.
+		let first = std::fs::read_dir(&tree).unwrap().next().unwrap().unwrap().path();
+		let (mut host, _capture) = Host::for_test(Rm::NAME, "", cwd.path());
+		let cancel = host.cancel_flag_for_test();
+		let done = AtomicBool::new(false);
+		let rm = Rm::try_parse_from(["rm", "-rf", "tree"]).unwrap();
+
+		let code = std::thread::scope(|scope| {
+			scope.spawn(|| {
+				while first.exists() && !done.load(Ordering::Relaxed) {}
+				cancel.store(true, Ordering::Relaxed);
+			});
+			let code = rm.run(&mut host);
+			done.store(true, Ordering::Relaxed);
+			code
+		});
+
+		assert_eq!(code, 1);
+		assert!(tree.is_dir(), "rm ran to completion despite cancellation");
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn unremovable_entry_is_reported_once_and_the_rest_removed() {
+		use std::os::unix::fs::PermissionsExt;
+
+		for flags in ["-rf", "-r"] {
+			let cwd = tempdir().unwrap();
+			let locked = cwd.path().join("tree/locked");
+			std::fs::create_dir_all(&locked).unwrap();
+			std::fs::write(locked.join("file"), b"").unwrap();
+			std::fs::write(cwd.path().join("tree/other"), b"").unwrap();
+			std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+			// A privileged user writes into it regardless; nothing to test then.
+			if std::fs::write(locked.join("probe"), b"").is_ok() {
+				return;
+			}
+
+			let (code, capture) = run_util::<Rm>(&[flags, "tree"], "", cwd.path());
+			std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+			assert_eq!(code, 1, "{flags}");
+			assert_eq!(
+				capture.err(),
+				"rm: cannot remove 'tree/locked/file': Permission denied\n",
+				"{flags}"
+			);
+			assert!(locked.join("file").exists(), "{flags}");
+			assert!(!cwd.path().join("tree/other").exists(), "{flags}");
+		}
+	}
+
+	#[cfg(windows)]
+	#[test]
+	fn removes_directories_with_the_read_only_attribute() {
+		let set_read_only = |path: &Path| {
+			let mut permissions = std::fs::metadata(path).unwrap().permissions();
+			permissions.set_readonly(true);
+			std::fs::set_permissions(path, permissions).unwrap();
+		};
+		for flags in ["-rf", "-r", "-d"] {
+			let cwd = tempdir().unwrap();
+			let dir = cwd.path().join("dir");
+			std::fs::create_dir(&dir).unwrap();
+			if flags != "-d" {
+				std::fs::write(dir.join("file"), b"").unwrap();
+			}
+			set_read_only(&dir);
+
+			let (code, capture) = run_util::<Rm>(&[flags, "dir"], "", cwd.path());
+
+			assert_eq!(code, 0, "{flags}: {}", capture.err());
+			assert!(!dir.exists(), "{flags}");
+		}
 	}
 }
