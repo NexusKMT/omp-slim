@@ -4,7 +4,6 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Settings } from "../../src/config/settings";
 import { ReadTool } from "../../src/tools/read";
-import { parseJsonPathCandidates, parseJsonSelector } from "../../src/tools/read-json";
 
 type ToolTextResult = {
 	content: Array<{ type: string; text?: string }>;
@@ -35,6 +34,8 @@ describe("JSON query in read tool", () => {
 	let tempDir: string;
 	let jsonFile: string;
 	let jsonlFile: string;
+	let numbersFile: string;
+	let mixedFile: string;
 	let session: SessionLike;
 	let readTool: ReadTool;
 
@@ -42,6 +43,8 @@ describe("JSON query in read tool", () => {
 		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-json-test-"));
 		jsonFile = path.join(tempDir, "data.json");
 		jsonlFile = path.join(tempDir, "events.jsonl");
+		numbersFile = path.join(tempDir, "numbers.json");
+		mixedFile = path.join(tempDir, "mixed.json");
 
 		const testData = {
 			name: "my-project",
@@ -66,6 +69,10 @@ describe("JSON query in read tool", () => {
 
 		await fs.writeFile(jsonFile, JSON.stringify(testData, null, 2), "utf-8");
 		await fs.writeFile(jsonlFile, testLines.join("\n") + "\n", "utf-8");
+		// Literals JS numbers cannot hold; jaq prints them verbatim.
+		await fs.writeFile(numbersFile, '{"ids":[12345678901234567890,1.0,3]}', "utf-8");
+		// `.name` fails on the third element.
+		await fs.writeFile(mixedFile, '[{"name":"a"},{"name":"b"},3]', "utf-8");
 
 		session = createSession(tempDir);
 		readTool = new ReadTool(session);
@@ -75,26 +82,6 @@ describe("JSON query in read tool", () => {
 		await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
 	});
 
-	it("parses candidate paths with query parameters", () => {
-		const candidates = parseJsonPathCandidates("src/package.json?q=.name");
-		expect(candidates.length).toBeGreaterThan(0);
-		expect(candidates[0].jsonPath).toBe("src/package.json");
-		expect(candidates[0].queryString).toBe("q=.name");
-	});
-
-	it("parses selector parameters correctly", () => {
-		const selector = parseJsonSelector("", "q=.items[] | .id&raw=true&compact=true");
-		expect(selector).not.toBeNull();
-		expect(selector?.kind).toBe("query");
-		expect(selector?.query).toBe(".items[] | .id");
-		expect(selector?.raw).toBe(true);
-		expect(selector?.compact).toBe(true);
-	});
-
-	it("returns null selector when no q or query parameter is present", () => {
-		const selector = parseJsonSelector("", "limit=20");
-		expect(selector).toBeNull();
-	});
 	it("queries a simple property from a JSON file", async () => {
 		const result = await readTool.execute("call_1", { path: `${jsonFile}?q=.name` });
 		const text = getText(result);
@@ -193,7 +180,44 @@ describe("JSON query in read tool", () => {
 		expect(text).toContain("bob");
 		expect(text).not.toContain("alice");
 		expect(text).not.toContain("charlie");
-		expect(text).toContain("[1 more items; append ?q=.user&raw=true&limit=1&offset=2 to continue]");
+		expect(text).toContain("[more results; append ?q=.user&raw=true&limit=1&offset=2 to continue]");
+	});
+
+	it("keeps number literals verbatim when paging an array", async () => {
+		const result = await readTool.execute("call_big", { path: `${numbersFile}?q=.ids&limit=2` });
+		expect(getText(result)).toBe(
+			"[\n  12345678901234567890,\n  1.0\n]\n[1 more items; append ?q=.ids&limit=2&offset=2 to continue]",
+		);
+	});
+
+	it("pages pretty streams by whole value and the hint round-trips the filter", async () => {
+		const first = getText(
+			await readTool.execute("call_mixed", { path: `${jsonFile}?q=.items[] | .id, {name}&limit=3` }),
+		);
+		expect(first).toBe(
+			'1\n{\n  "name": "item-one"\n}\n2\n[more results; append ?q=.items[] | .id, {name}&limit=3&offset=3 to continue]',
+		);
+
+		const suffix = /append (\?.*) to continue\]$/.exec(first)?.[1];
+		const next = getText(await readTool.execute("call_mixed_next", { path: `${jsonFile}${suffix}` }));
+		expect(next).toBe('{\n  "name": "item-two"\n}\n3\n{\n  "name": "item-three"\n}');
+	});
+
+	it("pages raw streams of objects by whole value", async () => {
+		const result = await readTool.execute("call_raw_objects", { path: `${jsonFile}?q=.items[]&raw=true&limit=1` });
+		expect(getText(result)).toBe(
+			'{\n  "id": 1,\n  "name": "item-one",\n  "active": true\n}\n[more results; append ?q=.items[]&raw=true&limit=1&offset=1 to continue]',
+		);
+	});
+
+	it("stops jq once the page is full, before later results fail", async () => {
+		const result = await readTool.execute("call_early_stop", { path: `${mixedFile}?q=.[] | .name&raw=true&limit=1` });
+		expect(getText(result)).toBe("a\n[more results; append ?q=.[] | .name&raw=true&limit=1&offset=1 to continue]");
+	});
+
+	it("treats a filter starting with - as a filter, not jq flags", async () => {
+		const result = await readTool.execute("call_negate", { path: `${jsonFile}?q=-.items[0].id` });
+		expect(getText(result)).toBe("-1");
 	});
 
 	it("applies trailing line range selectors over query output", async () => {

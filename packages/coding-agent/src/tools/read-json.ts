@@ -1,8 +1,14 @@
-import { Shell } from "@oh-my-pi/pi-natives";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import type { ToolSession } from "../sdk";
+import { Shell } from "@oh-my-pi/pi-natives";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { DEFAULT_MAX_LINES, truncateHead, truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+import { isEnoent } from "@oh-my-pi/pi-utils";
+import type { ToolSession } from "../sdk";
+import { quotePosixPath } from "../ssh/utils";
 import { resolveReadPath } from "./path-utils";
 import { buildInMemorySelectorResult, prependSuffixResolutionNotice, toReadTruncationStats } from "./read-format";
 import {
@@ -13,387 +19,368 @@ import {
 } from "./read-path-resolution";
 import { parseSel } from "./read-selector";
 import { throwIfAborted } from "./tool-errors";
-import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { toolResult } from "./tool-result";
 
-const JSON_PATH_PATTERN = /\.(?:jsonl?|ndjson)(?=(?::|\?|$))/gi;
+const JSON_FILE_PATTERN = /\.(?:jsonl?|ndjson)$/i;
 const DEFAULT_JSON_QUERY_LIMIT = 100;
 const MAX_JSON_QUERY_LIMIT = 1000;
-const MAX_QUERY_CAPTURE_BYTES = 5 * 1024 * 1024;
+const MAX_QUERY_CAPTURE_CHARS = 5 * 1024 * 1024;
 const JSON_QUERY_TIMEOUT_MS = 30_000;
-/** jq prints its error last; partial results before it stay out of the error text. */
-const JSON_QUERY_ERROR_TAIL_LINES = 20;
+/**
+ * Aborting a shell run costs a reader grace period (hundreds of ms), while a
+ * filled page usually means jaq is about to exit; let it finish first.
+ */
+const PAGE_FULL_ABORT_DELAY_MS = 50;
+/** Bounds the jq stderr quoted in a failure; the tail keeps the error after any `debug` lines. */
+const JSON_QUERY_ERROR_MAX_BYTES = 8 * 1024;
+/** jaq's default pretty-print indent. */
+const PRETTY_INDENT = "  ";
 
-export interface JsonPathCandidate {
-	jsonPath: string;
-	subPath: string;
-	queryString: string;
+/** One page of query results requested via `offset`/`limit`. */
+export interface JsonPage {
+	offset: number;
+	limit: number;
 }
 
+/** Options parsed from the query string of a `file.json?q=<filter>` read. */
 export interface JsonSelector {
-	kind: "query";
 	query: string;
-	raw?: boolean;
-	compact?: boolean;
-	limit?: number;
-	offset?: number;
+	raw: boolean;
+	compact: boolean;
+	/** Present when `offset` or `limit` asks for a page instead of the whole output. */
+	page?: JsonPage;
 }
 
-function splitJsonRemainder(remainder: string): { subPath: string; queryString: string } {
-	const queryIndex = remainder.indexOf("?");
-	if (queryIndex === -1) {
-		return { subPath: remainder, queryString: "" };
-	}
-	return {
-		subPath: remainder.slice(0, queryIndex),
-		queryString: remainder.slice(queryIndex + 1),
-	};
+/** Why output capture ended before jq exited on its own. */
+type JqStop = "capture-cap" | "page-full";
+
+/**
+ * Splits `file.json?q=…` at its first `?`; null unless the text before it names
+ * a `.json`, `.jsonl`, or `.ndjson` file. jq filters may contain `?`, paths rarely do.
+ */
+export function splitJsonQueryTarget(readPath: string): { jsonPath: string; queryString: string } | null {
+	const queryIndex = readPath.indexOf("?");
+	if (queryIndex === -1) return null;
+	const jsonPath = readPath.slice(0, queryIndex);
+	return JSON_FILE_PATTERN.test(jsonPath) ? { jsonPath, queryString: readPath.slice(queryIndex + 1) } : null;
 }
 
-export function parseJsonPathCandidates(filePath: string): JsonPathCandidate[] {
-	const normalized = filePath.replace(/\\/g, "/");
-	const seen = new Set<string>();
-	const candidates: JsonPathCandidate[] = [];
-
-	let match: RegExpExecArray | null;
-	JSON_PATH_PATTERN.lastIndex = 0;
-	while (true) {
-		match = JSON_PATH_PATTERN.exec(normalized);
-		if (match === null) break;
-
-		const end = match.index + match[0].length;
-		const jsonPath = filePath.slice(0, end);
-		const remainder = normalized.slice(end);
-		const { subPath, queryString } = splitJsonRemainder(remainder);
-		const key = `${jsonPath}\0${subPath}\0${queryString}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		candidates.push({ jsonPath, subPath, queryString });
+/**
+ * Parses `q`, `raw`, `compact`, `offset`, and `limit`; null without a filter.
+ * `q` is percent-decoded but never form-decoded, so jq's `+` survives.
+ */
+export function parseJsonSelector(queryString: string): JsonSelector | null {
+	const match = /(?:^|&)(?:q|query)=([^&]*)/.exec(queryString);
+	if (!match?.[1]) return null;
+	let query: string;
+	try {
+		query = decodeURIComponent(match[1]);
+	} catch {
+		// A filter with a bare `%` (jq modulo) is not valid percent-encoding; take it verbatim.
+		query = match[1];
 	}
-
-	return candidates.sort((left, right) => right.jsonPath.length - left.jsonPath.length);
-}
-
-export function parseJsonSelector(subPath: string, queryString: string): JsonSelector | null {
-	const trimmedSubPath = subPath.replace(/^:+/, "").trim();
-
-	// Extract query without form-urlencoded '+' -> ' ' conversion to preserve jq arithmetic '+'
-	let query: string | undefined;
-	const qMatch = queryString.match(/(?:^|&)(?:q|query)=([^&]*)/);
-	if (qMatch) {
-		try {
-			query = decodeURIComponent(qMatch[1]);
-		} catch {
-			query = qMatch[1];
-		}
-	} else if (trimmedSubPath.startsWith("q=")) {
-		query = trimmedSubPath.slice(2);
-	}
-
-	if (!query) return null;
 
 	const params = new URLSearchParams(queryString);
-	const rawParam = params.get("raw")?.toLowerCase();
-	const raw = rawParam === "true" || rawParam === "1" || trimmedSubPath.includes("raw");
-
-	const compactParam = params.get("compact")?.toLowerCase();
-	const compact = compactParam === "true" || compactParam === "1" || trimmedSubPath.includes("compact");
-
-	let limit: number | undefined;
-	const limitParam = params.get("limit");
-	if (limitParam !== null) {
-		const parsed = Number.parseInt(limitParam, 10);
-		if (Number.isFinite(parsed) && parsed > 0) limit = Math.min(parsed, MAX_JSON_QUERY_LIMIT);
-	}
-
-	let offset: number | undefined;
-	const offsetParam = params.get("offset");
-	if (offsetParam !== null) {
-		const parsed = Number.parseInt(offsetParam, 10);
-		if (Number.isFinite(parsed) && parsed >= 0) offset = parsed;
-	}
-
+	const flag = (name: string) => {
+		const value = params.get(name)?.toLowerCase();
+		return value === "true" || value === "1";
+	};
+	const offset = parseCount(params.get("offset"), 0);
+	const limit = parseCount(params.get("limit"), 1);
 	return {
-		kind: "query",
 		query,
-		raw,
-		compact,
-		limit,
-		offset,
+		raw: flag("raw"),
+		compact: flag("compact"),
+		page:
+			offset === undefined && limit === undefined
+				? undefined
+				: { offset: offset ?? 0, limit: Math.min(limit ?? DEFAULT_JSON_QUERY_LIMIT, MAX_JSON_QUERY_LIMIT) },
 	};
 }
 
-function stripTrailingNewline(text: string): string {
-	if (text.endsWith("\r\n")) {
-		return text.slice(0, -2);
-	}
-	if (text.endsWith("\n")) {
-		return text.slice(0, -1);
-	}
-	return text;
+function parseCount(value: string | null, min: number): number | undefined {
+	if (value === null) return undefined;
+	const parsed = Number.parseInt(value, 10);
+	return Number.isFinite(parsed) && parsed >= min ? parsed : undefined;
 }
 
-function splitJsonValues(text: string): string[] {
-	const values: string[] = [];
-	let start = 0;
-	let inString = false;
-	let escape = false;
+/** A followable `?q=…&offset=` suffix for the next page; `remaining` is known only for array pages. */
+function continuationHint(selector: JsonSelector, page: JsonPage, nextOffset: number, remaining?: number): string {
+	const flags = `${selector.raw ? "&raw=true" : ""}${selector.compact ? "&compact=true" : ""}`;
+	const count = remaining === undefined ? "more results" : `${remaining} more items`;
+	// Inverse of the `q` decoding in parseJsonSelector: escaping only `%` and `&` round-trips any filter.
+	const query = selector.query.replaceAll("%", "%25").replaceAll("&", "%26");
+	return `[${count}; append ?q=${query}${flags}&limit=${page.limit}&offset=${nextOffset} to continue]`;
+}
+
+/** Index of the quote closing the JSON string that opens at `open`. */
+function stringEnd(text: string, open: number): number {
+	for (let i = open + 1; i < text.length; i++) {
+		if (text[i] === "\\") i++;
+		else if (text[i] === '"') return i;
+	}
+	return text.length - 1;
+}
+
+/**
+ * Lays out one compact JSON value the way jaq pretty-prints it. Works on the
+ * text, so number literals beyond f64 precision stay verbatim.
+ */
+function prettyJson(compact: string): string {
+	let out = "";
 	let depth = 0;
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		if (escape) {
-			escape = false;
-			continue;
+	for (let i = 0; i < compact.length; i++) {
+		const ch = compact[i];
+		switch (ch) {
+			case '"': {
+				const end = stringEnd(compact, i);
+				out += compact.slice(i, end + 1);
+				i = end;
+				break;
+			}
+			case "{":
+			case "[":
+				if (compact[i + 1] === (ch === "{" ? "}" : "]")) {
+					out += compact.slice(i, i + 2);
+					i++;
+				} else {
+					depth++;
+					out += `${ch}\n${PRETTY_INDENT.repeat(depth)}`;
+				}
+				break;
+			case "}":
+			case "]":
+				depth--;
+				out += `\n${PRETTY_INDENT.repeat(depth)}${ch}`;
+				break;
+			case ",":
+				out += `,\n${PRETTY_INDENT.repeat(depth)}`;
+				break;
+			case ":":
+				out += ": ";
+				break;
+			default:
+				out += ch;
 		}
-		if (ch === "\\") {
-			escape = true;
-			continue;
-		}
+	}
+	return out;
+}
+
+/** Splits a compact JSON array into the compact text of each element. */
+function splitCompactArray(compact: string): string[] {
+	const items: string[] = [];
+	let depth = 0;
+	let start = 1;
+	for (let i = 0; i < compact.length; i++) {
+		const ch = compact[i];
 		if (ch === '"') {
-			inString = !inString;
-			continue;
-		}
-		if (inString) continue;
-		if (ch === "{" || ch === "[") {
+			i = stringEnd(compact, i);
+		} else if (ch === "[" || ch === "{") {
 			depth++;
-		} else if (ch === "}" || ch === "]") {
+		} else if (ch === "]" || ch === "}") {
 			depth--;
-			if (depth === 0) {
-				const chunk = text.slice(start, i + 1).trim();
-				if (chunk) values.push(chunk);
-				start = i + 1;
-			}
+			if (depth === 0 && i > start) items.push(compact.slice(start, i));
+		} else if (ch === "," && depth === 1) {
+			items.push(compact.slice(start, i));
+			start = i + 1;
 		}
 	}
-	return values;
+	return items;
 }
 
-function formatContinuationHint(
-	selector: JsonSelector,
-	remaining: number,
-	nextOffset: number,
-	effectiveLimit: number,
-): string {
-	const params = new URLSearchParams();
-	params.set("q", selector.query);
-	if (selector.raw) params.set("raw", "true");
-	if (selector.compact) params.set("compact", "true");
-	params.set("limit", String(effectiveLimit));
-	params.set("offset", String(nextOffset));
-
-	return `\n[${remaining} more items; append ?${params.toString()} to continue]`;
+/** Renders one compact jq value as `jq` prints it under the selector's `-r`/`-c` flags. */
+function renderValue(value: string, selector: JsonSelector): string {
+	if (selector.raw && value.startsWith('"')) return JSON.parse(value);
+	return selector.compact ? value : prettyJson(value);
 }
 
-function applyPagination(text: string, selector: JsonSelector): string {
-	if (selector.offset === undefined && selector.limit === undefined) {
-		return text;
+/** Pages the elements of a query's single array result; the page stays one array. */
+function pageArray(array: string, selector: JsonSelector, page: JsonPage): string {
+	const items = splitCompactArray(array);
+	const slice = items.slice(page.offset, page.offset + page.limit);
+	const compact = `[${slice.join(",")}]`;
+	const text = selector.compact ? compact : prettyJson(compact);
+	const remaining = items.length - page.offset - slice.length;
+	return remaining > 0 ? `${text}\n${continuationHint(selector, page, page.offset + slice.length, remaining)}` : text;
+}
+
+/** Pages a stream of query results, one value per unit. */
+function pageStream(values: string[], selector: JsonSelector, page: JsonPage, more: boolean): string {
+	const slice = values.slice(page.offset, page.offset + page.limit);
+	const lines = slice.map(value => renderValue(value, selector));
+	if (more) {
+		lines.push(continuationHint(selector, page, page.offset + slice.length));
+	} else if (slice.length === 0 && page.offset > 0) {
+		lines.push(`[offset ${page.offset} is past the last result (${values.length} total)]`);
 	}
-	const effectiveOffset = selector.offset ?? 0;
-	const effectiveLimit = selector.limit ?? DEFAULT_JSON_QUERY_LIMIT;
+	return lines.join("\n");
+}
 
-	// 1. Single JSON array
+async function readStderr(stderrPath: string): Promise<string> {
 	try {
-		const parsed = JSON.parse(text);
-		if (Array.isArray(parsed)) {
-			const sliced = parsed.slice(effectiveOffset, effectiveOffset + effectiveLimit);
-			const indent = selector.compact ? undefined : 2;
-			let result = JSON.stringify(sliced, null, indent);
-			const total = parsed.length;
-			const remaining = Math.max(0, total - (effectiveOffset + sliced.length));
-			if (remaining > 0) {
-				const nextOffset = effectiveOffset + sliced.length;
-				result += formatContinuationHint(selector, remaining, nextOffset, effectiveLimit);
-			}
-			return result;
-		}
-		// Single JSON object or primitive: do not slice mid-syntax!
-		return text;
-	} catch {
-		// Not a single JSON value, proceed to stream handling
+		return await Bun.file(stderrPath).text();
+	} catch (err) {
+		if (isEnoent(err)) return "";
+		throw err;
 	}
-
-	// 2. Raw line stream
-	if (selector.raw) {
-		const lines = text.split(/\r?\n/);
-		if (lines.length <= 1 && effectiveOffset === 0) {
-			return text;
-		}
-		const sliced = lines.slice(effectiveOffset, effectiveOffset + effectiveLimit);
-		let result = sliced.join("\n");
-		const total = lines.length;
-		const remaining = Math.max(0, total - (effectiveOffset + sliced.length));
-		if (remaining > 0) {
-			const nextOffset = effectiveOffset + sliced.length;
-			result += formatContinuationHint(selector, remaining, nextOffset, effectiveLimit);
-		}
-		return result;
-	}
-
-	// 3. Compact mode stream (1 value per line)
-	if (selector.compact) {
-		const lines = text.split(/\r?\n/).filter(line => line.length > 0);
-		if (lines.length <= 1 && effectiveOffset === 0) {
-			return text;
-		}
-		const sliced = lines.slice(effectiveOffset, effectiveOffset + effectiveLimit);
-		let result = sliced.join("\n");
-		const total = lines.length;
-		const remaining = Math.max(0, total - (effectiveOffset + sliced.length));
-		if (remaining > 0) {
-			const nextOffset = effectiveOffset + sliced.length;
-			result += formatContinuationHint(selector, remaining, nextOffset, effectiveLimit);
-		}
-		return result;
-	}
-
-	// 4. Pretty-printed multi-value stream
-	const values = splitJsonValues(text);
-	if (values.length > 1) {
-		const sliced = values.slice(effectiveOffset, effectiveOffset + effectiveLimit);
-		let result = sliced.join("\n");
-		const total = values.length;
-		const remaining = Math.max(0, total - (effectiveOffset + sliced.length));
-		if (remaining > 0) {
-			const nextOffset = effectiveOffset + sliced.length;
-			result += formatContinuationHint(selector, remaining, nextOffset, effectiveLimit);
-		}
-		return result;
-	}
-
-	return text;
 }
 
+/**
+ * Runs the bundled jaq over `filePath` and captures stdout; stderr goes to a
+ * temp file so diagnostics never mix into result values. Capture stops at
+ * {@link MAX_QUERY_CAPTURE_CHARS} or after `stopAfterLines` newlines.
+ *
+ * @throws ToolError when jq fails, times out, or the caller aborts.
+ */
+async function runJq(
+	filePath: string,
+	query: string,
+	flags: string[],
+	options: { signal?: AbortSignal; stopAfterLines?: number },
+): Promise<{ output: string; stopped?: JqStop }> {
+	const { signal, stopAfterLines } = options;
+	throwIfAborted(signal);
+
+	const stderrPath = path.join(os.tmpdir(), `omp-jq-${crypto.randomUUID()}.err`);
+	// jaq parses any argument starting with `-` as flags even when shell-quoted;
+	// `--` keeps filters such as `-.price` positional.
+	const command = `jq ${flags.join(" ")} -- ${quotePosixPath(query)} ${quotePosixPath(filePath)} 2>${quotePosixPath(stderrPath)}`;
+
+	let output = "";
+	let lines = 0;
+	let stopped: JqStop | undefined;
+	let callbackError = false;
+	let abortTimer: NodeJS.Timeout | undefined;
+	const run = new AbortController();
+	const stop = (reason: JqStop) => {
+		stopped = reason;
+		if (reason === "page-full") abortTimer = setTimeout(() => run.abort(), PAGE_FULL_ABORT_DELAY_MS);
+		else run.abort();
+	};
+	const onAbort = () => run.abort();
+	signal?.addEventListener("abort", onAbort, { once: true });
+
+	try {
+		const result = await new Shell().run(
+			{ command, timeoutMs: JSON_QUERY_TIMEOUT_MS, signal: run.signal },
+			(err, chunk) => {
+				if (err) callbackError = true;
+				if (!chunk || stopped) return;
+				const room = MAX_QUERY_CAPTURE_CHARS - output.length;
+				const piece = chunk.length > room ? chunk.slice(0, room) : chunk;
+				output += piece;
+				if (stopAfterLines !== undefined) {
+					for (let i = piece.indexOf("\n"); i !== -1; i = piece.indexOf("\n", i + 1)) lines++;
+					if (lines >= stopAfterLines) return stop("page-full");
+				}
+				if (output.length >= MAX_QUERY_CAPTURE_CHARS) stop("capture-cap");
+			},
+		);
+
+		throwIfAborted(signal);
+		if (stopped) return { output, stopped };
+		if (result.timedOut) throw new ToolError(`JSON query timed out after ${JSON_QUERY_TIMEOUT_MS / 1000} seconds`);
+		if (result.exitCode !== 0 || callbackError) {
+			const stderr = truncateTail((await readStderr(stderrPath)).trim(), {
+				maxBytes: JSON_QUERY_ERROR_MAX_BYTES,
+			}).content;
+			throw new ToolError(`Failed to execute JSON query: ${stderr || `jq exited with code ${result.exitCode}`}`);
+		}
+		return { output };
+	} finally {
+		clearTimeout(abortTimer);
+		signal?.removeEventListener("abort", onAbort);
+		await fs.rm(stderrPath, { force: true });
+	}
+}
+
+/**
+ * Evaluates `selector.query` over `filePath` with the bundled jaq.
+ *
+ * Without a page, returns jaq's output verbatim (minus the final newline).
+ * With one, jaq runs compact so each line is exactly one value and stops once
+ * the page plus one lookahead value is captured; a single array result pages
+ * its elements instead. Values are re-rendered from text, never reparsed.
+ *
+ * @throws ToolError on jq errors and timeouts, or when the values before the
+ * requested page exceed the capture cap.
+ */
 export async function executeJsonQuery(
 	filePath: string,
 	selector: JsonSelector,
 	signal?: AbortSignal,
 ): Promise<string> {
-	if (signal?.aborted) {
-		throw new ToolError("Operation aborted");
+	const { page } = selector;
+	if (!page) {
+		const flags = [...(selector.raw ? ["-r"] : []), ...(selector.compact ? ["-c"] : [])];
+		const { output } = await runJq(filePath, selector.query, flags, { signal });
+		return output.endsWith("\n") ? output.slice(0, -1) : output;
 	}
 
-	const shell = new Shell();
-	const flags: string[] = [];
-	if (selector.raw) flags.push("-r");
-	if (selector.compact) flags.push("-c");
-
-	const quotedQuery = `'${selector.query.replace(/'/g, "'\\''")}'`;
-	const quotedPath = `'${filePath.replace(/'/g, "'\\''")}'`;
-	// jaq parses any argument starting with `-` as flags even when shell-quoted;
-	// `--` keeps filters such as `-.price` positional.
-	const command = `jq ${flags.join(" ")} -- ${quotedQuery} ${quotedPath}`;
-
-	let output = "";
-	let bytesCaptured = 0;
-	let hasError = false;
-	const runController = new AbortController();
-
-	const onAbort = () => {
-		runController.abort();
-	};
-	if (signal) {
-		signal.addEventListener("abort", onAbort, { once: true });
-	}
-
-	try {
-		const result = await shell.run(
-			{
-				command,
-				timeoutMs: JSON_QUERY_TIMEOUT_MS,
-				signal: runController.signal,
-			},
-			(err, chunk) => {
-				if (err) {
-					hasError = true;
-				}
-				if (chunk) {
-					if (bytesCaptured < MAX_QUERY_CAPTURE_BYTES) {
-						const remaining = MAX_QUERY_CAPTURE_BYTES - bytesCaptured;
-						const toAppend = chunk.length > remaining ? chunk.slice(0, remaining) : chunk;
-						output += toAppend;
-						bytesCaptured += toAppend.length;
-					}
-					if (bytesCaptured >= MAX_QUERY_CAPTURE_BYTES) {
-						runController.abort();
-					}
-				}
-			},
+	const { output, stopped } = await runJq(filePath, selector.query, ["-c"], {
+		signal,
+		stopAfterLines: page.offset + page.limit + 1,
+	});
+	const values = output.split("\n");
+	// jaq ends every compact value with a newline; text after the last one is a cut-off value.
+	const tail = values.pop();
+	if (tail && !stopped) values.push(tail);
+	if (stopped === "capture-cap" && values.length <= page.offset) {
+		throw new ToolError(
+			`JSON query output before the requested page exceeds ${MAX_QUERY_CAPTURE_CHARS / (1024 * 1024)} MB; narrow the filter or stream large arrays with .[]`,
 		);
-
-		if (signal?.aborted || (result.cancelled && bytesCaptured === 0)) {
-			throw new ToolError("Operation aborted");
-		}
-
-		if (result.timedOut) {
-			throw new ToolError("JSON query timed out after 30 seconds");
-		}
-
-		if (result.exitCode !== 0 || hasError) {
-			if (bytesCaptured < MAX_QUERY_CAPTURE_BYTES) {
-				const errMsg =
-					truncateTail(output.trim(), { maxLines: JSON_QUERY_ERROR_TAIL_LINES }).content ||
-					`jq exited with code ${result.exitCode}`;
-				throw new ToolError(`Failed to execute JSON query: ${errMsg}`);
-			}
-		}
-
-		const formatted = stripTrailingNewline(output);
-		return applyPagination(formatted, selector);
-	} finally {
-		if (signal) {
-			signal.removeEventListener("abort", onAbort);
-		}
 	}
+	if (!stopped && values.length === 1 && values[0].startsWith("[")) return pageArray(values[0], selector, page);
+	return pageStream(values, selector, page, stopped !== undefined || values.length > page.offset + page.limit);
 }
 
+/** A JSON file path with its parsed `?q=` selector, ready for {@link readJson}. */
 export interface ResolvedJsonReadPath {
 	absolutePath: string;
 	selector: JsonSelector;
 	suffixResolution?: { from: string; to: string };
 }
 
+/**
+ * Resolves `file.json?q=…` to an existing file, falling back to a unique
+ * workspace suffix match; null when the path is not a JSON query or no file exists.
+ */
 export async function resolveJsonReadPath(
 	session: ToolSession,
 	readPath: string,
 	suffixCache: SuffixMatchCache,
 	signal?: AbortSignal,
 ): Promise<ResolvedJsonReadPath | null> {
-	const candidates = parseJsonPathCandidates(readPath);
-	for (const candidate of candidates) {
-		const selector = parseJsonSelector(candidate.subPath, candidate.queryString);
-		if (!selector) continue;
+	const target = splitJsonQueryTarget(readPath);
+	if (!target) return null;
+	const selector = parseJsonSelector(target.queryString);
+	if (!selector) return null;
 
-		const absolutePath = resolveReadPath(candidate.jsonPath, session.cwd);
-
-		try {
-			const stat = await Bun.file(absolutePath).stat();
-			if (!stat.isFile()) continue;
-
-			return { absolutePath, selector };
-		} catch (error) {
-			if (!isNotFoundError(error) || isRemoteMountPath(absolutePath)) continue;
-
-			const suffixMatch = await findSuffixMatchCached(session, suffixCache, candidate.jsonPath, signal);
-			if (!suffixMatch) continue;
-
-			try {
-				const retryStat = await Bun.file(suffixMatch.absolutePath).stat();
-				if (!retryStat.isFile()) continue;
-
-				return {
-					absolutePath: suffixMatch.absolutePath,
-					selector,
-					suffixResolution: { from: candidate.jsonPath, to: suffixMatch.displayPath },
-				};
-			} catch {
-				// Suffix retry failed, continue to next candidate
-			}
-		}
+	const absolutePath = resolveReadPath(target.jsonPath, session.cwd);
+	try {
+		const stat = await Bun.file(absolutePath).stat();
+		return stat.isFile() ? { absolutePath, selector } : null;
+	} catch (error) {
+		if (!isNotFoundError(error) || isRemoteMountPath(absolutePath)) return null;
 	}
 
-	return null;
+	const suffixMatch = await findSuffixMatchCached(session, suffixCache, target.jsonPath, signal);
+	if (!suffixMatch) return null;
+	try {
+		const stat = await Bun.file(suffixMatch.absolutePath).stat();
+		if (!stat.isFile()) return null;
+	} catch (error) {
+		if (isNotFoundError(error)) return null;
+		throw error;
+	}
+	return {
+		absolutePath: suffixMatch.absolutePath,
+		selector,
+		suffixResolution: { from: target.jsonPath, to: suffixMatch.displayPath },
+	};
 }
 
+/** Runs a resolved JSON query and renders it as a read result; `lineSelector` slices the output. */
 export async function readJson(
 	session: ToolSession,
 	resolvedJsonPath: ResolvedJsonReadPath,

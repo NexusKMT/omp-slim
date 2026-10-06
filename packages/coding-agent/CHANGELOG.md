@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added page-aware streaming for JSON/JSONL queries to support efficient reading of large files
+- Added persistent continuation hints to paginated JSON queries for simpler retrieval of subsequent result pages
 - Added first-class JSON and JSONL querying to the `read` tool via `?q=<jq-filter>`, supporting in-process jaq evaluation, raw/compact formatting, and offset/limit pagination ([#14141](https://github.com/can1357/oh-my-pi/pull/14141) by [@asuffield](https://github.com/asuffield)).
 - Cancel a pending model handoff with `/prewalk off` without changing the active model, saved prewalk setting, or delivered continuation history ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 - RPC clients can log out like `/logout`: `get_logout_accounts` lists a provider's stored credentials and `logout` removes one; the TypeScript client and the generated Python, Go, and Rust SDKs gain matching methods ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
@@ -11,11 +13,15 @@
 
 ### Changed
 
+- Switched to streaming jq execution for JSON queries to bound resource usage and support partial results
+- Improved precision and formatting for paginated JSON result values
 - Clarified how agents request line ranges in `read` calls with complete examples ([#13956](https://github.com/can1357/oh-my-pi/pull/13956) by [@Dante-dan](https://github.com/Dante-dan)).
 - `/dump all` writes a zip to the temp directory with the main transcript, the LLM request JSON, and one file per subagent transcript (nested subagents included, killed ones marked aborted); the TUI copies the archive path to the clipboard. Plain `/dump` is unchanged ([#13908](https://github.com/can1357/oh-my-pi/pull/13908) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
+- Fixed JSON query parsing to correctly handle filters starting with hyphens
+- Fixed unreliable query parameter decoding in JSON read paths
 - `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model after automatic recovery when no explicit selection supersedes the handoff ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 - Fixed `/logout` for an alias login such as `openai-codex-device` reporting no stored credentials; it now lists and removes the accounts stored under the provider it logs in to ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
 - Fixed logging in through an alias login such as `openai-codex-device` (`/login` or RPC `login`) not refreshing the logged-in provider's models, and RPC `get_login_providers` reporting alias logins as unauthenticated ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
