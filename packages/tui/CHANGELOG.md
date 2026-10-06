@@ -8,6 +8,8 @@
 
 ### Fixed
 
+- Fixed `/annotate` truncating long source lines and selected filenames, losing indentation when wrapping, and hiding typed note characters ([#14609](https://github.com/can1357/oh-my-pi/pull/14609) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
+- Fixed fullscreen inputs such as setup sign-in showing no cursor when the hardware-cursor setting is on ([#14609](https://github.com/can1357/oh-my-pi/pull/14609) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Fixed autocomplete popups (slash commands, arguments, `@` files, `#` actions, `^` model mentions, emoji, internal URLs) lagging 100 ms behind typing; they now update on every keystroke, so typing `/mod` and pressing Enter quickly runs `/model` instead of the top row shown for `/` (e.g. `/login`) ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
 - Fixed same-provider `-latest` models (e.g. `chatgpt-4o-latest` variants) swapping places in the model picker and mention list depending on the query; they now sort alphabetically ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
 - Fixed the model browser showing one blended speed for a model run on a fast service tier: rows now show the tier's own measured numbers, labeled with the tier ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
