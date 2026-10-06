@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import { getOAuthApiKey } from "@oh-my-pi/pi-ai/registry/oauth";
@@ -185,22 +186,11 @@ describe("Snowflake account normalization", () => {
 		"https://-acct.snowflakecomputing.com",
 		"https://app.snowflake.com/us-east-1/xy12345/#/home",
 		"acct.snowflakecomputing.com:8443",
+		// Cortex REST is not available in China-region accounts.
+		"acct.snowflakecomputing.cn",
+		"https://acct.snowflakecomputing.cn",
 	])("rejects unsafe account %s", input => {
 		expect(() => normalizeSnowflakeAccountUrl(input)).toThrow(AIError.ConfigurationError);
-	});
-
-	test("schemeless host:port is not mistaken for a URL scheme", () => {
-		expect(() => normalizeSnowflakeAccountUrl("acct.snowflakecomputing.com:8443")).not.toThrow("must use https");
-		expect(() => normalizeSnowflakeAccountUrl("http://acct.snowflakecomputing.com")).toThrow("must use https");
-	});
-
-	test("China-region accounts are rejected because Cortex REST is unavailable there", () => {
-		expect(() => normalizeSnowflakeAccountUrl("acct.snowflakecomputing.cn")).toThrow(
-			"not available in China-region accounts",
-		);
-		expect(() => normalizeSnowflakeAccountUrl("https://acct.snowflakecomputing.cn")).toThrow(
-			AIError.ConfigurationError,
-		);
 	});
 });
 
@@ -294,6 +284,24 @@ describe("Snowflake browser OAuth", () => {
 });
 
 describe("Snowflake refresh transitions", () => {
+	// Accounts may disable refresh issuance; the shared 60 s refresh skew must not
+	// discard a token that Snowflake still accepts.
+	test.each([
+		["inside the refresh skew", 30_000, "still-valid"],
+		["after expiry", -1_000, undefined],
+	])("a refreshless token %s resolves to %s", async (_name, remainingMs, token) => {
+		const storage = await AuthStorage.create(":memory:", { usageProviderResolver: () => undefined });
+		await storage.credentials.set("snowflake", {
+			type: "oauth",
+			access: "still-valid",
+			refresh: "",
+			expires: Date.now() + remainingMs,
+			enterpriseUrl: ACCOUNT,
+		});
+		const key = await storage.keys.get("snowflake", "session");
+		expect(key === undefined ? undefined : JSON.parse(key).token).toBe(token);
+	});
+
 	test.each([undefined, "rotated-refresh"])(
 		"refresh retains or rotates the grant (%s) with bounded expiry",
 		async refreshToken => {

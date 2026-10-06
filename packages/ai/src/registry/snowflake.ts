@@ -2,7 +2,10 @@ import { $env } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import type { ProviderTransport } from "./build";
 
-export const SNOWFLAKE_ACCOUNT_ORIGIN_PLACEHOLDER = "https://<account>.snowflakecomputing.com";
+// Catalog rows carry this origin until prepareRequest swaps in the account URL. It must
+// parse (models.json invariant), and `.invalid` (RFC 6761) never resolves, so an
+// unrewritten request fails before reaching any host.
+export const SNOWFLAKE_ACCOUNT_ORIGIN_PLACEHOLDER = "https://snowflake-account.invalid";
 
 const INVALID_ACCOUNT_MESSAGE = "Paste your Snowflake account identifier (orgname-accountname) or account URL";
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;

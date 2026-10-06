@@ -151,6 +151,8 @@ export async function refreshSnowflakeToken(
 	signal?: AbortSignal,
 ): Promise<OAuthCredentials> {
 	if (!credentials.refresh.trim()) {
+		// Without refresh issuance the shared refresh skew would discard a still-valid token.
+		if (Date.now() < credentials.expires) return credentials;
 		throw new AIError.OAuthError(
 			"Snowflake did not issue a refresh token; run /login snowflake again or use SNOWFLAKE_ACCOUNT and SNOWFLAKE_PAT",
 			{ kind: "token-refresh", provider: "snowflake" },
