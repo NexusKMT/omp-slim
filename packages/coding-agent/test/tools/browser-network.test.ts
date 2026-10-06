@@ -261,7 +261,7 @@ return "done";`,
 		expect(valueOf(completed)).toBe("done");
 		expect(completed.content).toContainEqual({
 			type: "text",
-			text: "Browser request interception could not be reset after this run; the tab was reattached, so tab.route routes, the request log, HAR recording and run globals were reset.",
+			text: "Browser request interception could not be reset after this run; the tab was reattached to a new worker. Tab state set since it was opened was reset (tab.route routes, emulation and user agent, init scripts, element ids, the request log, HAR recording, run globals), any open dialog was dismissed, and any page still loading was stopped.",
 		});
 		const next = valueOf(
 			await invoke({

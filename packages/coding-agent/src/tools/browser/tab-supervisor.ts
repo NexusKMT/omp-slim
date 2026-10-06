@@ -826,7 +826,7 @@ async function runInTabWithSnapshot(
 				result.displays.push({
 					type: "text",
 					text: reattached
-						? "Browser request interception could not be reset after this run; the tab was reattached, so tab.route routes, the request log, HAR recording and run globals were reset."
+						? "Browser request interception could not be reset after this run; the tab was reattached to a new worker. Tab state set since it was opened was reset (tab.route routes, emulation and user agent, init scripts, element ids, the request log, HAR recording, run globals), any open dialog was dismissed, and any page still loading was stopped."
 						: "Browser request interception could not be reset after this run; the tab was closed.",
 				});
 			}
