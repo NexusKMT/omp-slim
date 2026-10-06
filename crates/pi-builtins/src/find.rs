@@ -563,6 +563,9 @@ pub mod matchers {
 				{
 					command = command.current_dir(dir);
 				}
+				// The child writes to the shared fd directly: flush what find
+				// printed so far so its output stays in order.
+				let _ = matcher_io.deps.get_output().borrow_mut().flush();
 				match matcher_io.host().run_command(command) {
 					Ok(status) => status.success(),
 					Err(e) => {
@@ -620,6 +623,9 @@ pub mod matchers {
 				if let Some(dir) = command.get_current_dir() {
 					shell_command = shell_command.current_dir(dir);
 				}
+				// The child writes to the shared fd directly: flush what find
+				// printed so far so its output stays in order.
+				let _ = matcher_io.deps.get_output().borrow_mut().flush();
 				match matcher_io.host().run_command(shell_command) {
 					Ok(status) => {
 						if !status.success() {
@@ -1923,7 +1929,6 @@ pub mod matchers {
 				print_error_message: bool,
 			) {
 				match write!(out, "{}{}", file_info.display_path().to_string_lossy(), self.delimiter)
-					.and_then(|()| out.flush())
 				{
 					Ok(()) => {},
 					Err(e) => {
@@ -2527,7 +2532,9 @@ pub mod matchers {
 				Ok(Self { format: FormatString::parse(format)?, output_file, fs_cache: fs::Cache::default() })
 			}
 
-			fn print(&self, file_info: &WalkEntry, mut out: impl Write, mut err: impl Write) {
+			/// Prints the format for `file_info`; a directive that cannot be
+			/// rendered stops the line and is returned for the caller to report.
+			fn print(&self, file_info: &WalkEntry, mut out: impl Write) -> Result<(), Box<dyn Error>> {
 				for component in &self.format.components {
 					match component {
 						FormatComponent::Literal(literal) => write!(out, "{literal}").unwrap(),
@@ -2548,29 +2555,29 @@ pub mod matchers {
 										write!(out, "{content}").unwrap();
 									}
 								},
-								Err(e) => {
-									let _ = writeln!(
-										err,
-										"Error processing '{}': {}",
-										file_info.path().to_string_lossy(),
-										e
-									);
-									break;
-								},
+								Err(e) => return Err(e),
 							}
 						},
 					}
 				}
+				Ok(())
 			}
 		}
 
 		impl Matcher for Printf {
 			fn matches(&self, file_info: &WalkEntry, matcher_io: &mut MatcherIO) -> bool {
-				let err = matcher_io.host().stderr_clone();
-				if let Some(file) = &self.output_file {
-					self.print(file_info, file, err);
+				let printed = if let Some(file) = &self.output_file {
+					self.print(file_info, file)
 				} else {
-					self.print(file_info, &mut *matcher_io.deps.get_output().borrow_mut(), err);
+					self.print(file_info, &mut *matcher_io.deps.get_output().borrow_mut())
+				};
+				if let Err(e) = printed {
+					let _ = writeln!(
+						matcher_io.host().stderr,
+						"Error processing '{}': {}",
+						file_info.path().to_string_lossy(),
+						e
+					);
 				}
 
 				true
@@ -4558,7 +4565,10 @@ struct StandardDependencies {
 impl StandardDependencies {
 	#[must_use]
 	fn new(host: &Host) -> Self {
-		Self { output: Rc::new(RefCell::new(host.stdout_clone())), now: SystemTime::now() }
+		// Line-buffered on pipes (one write per printed path), block-buffered
+		// for files, and shared with stderr under 2>&1 so diagnostics stay in
+		// order.
+		Self { output: Rc::new(RefCell::new(host.stdout_writer())), now: SystemTime::now() }
 	}
 }
 
@@ -5023,13 +5033,18 @@ impl Utility for Find {
 			None => raw,
 		};
 		let deps = StandardDependencies::new(host);
-		match do_find(&args, &deps, host) {
+		let code = match do_find(&args, &deps, host) {
 			Ok(code) => code,
 			Err(error) => {
+				let _ = deps.get_output().borrow_mut().flush();
 				let _ = writeln!(host.stderr, "Error: {error}");
 				1
 			},
-		}
+		};
+		// Like the per-entry writes before it, a failed stdout flush is not
+		// reported.
+		let _ = deps.get_output().borrow_mut().flush();
+		code
 	}
 }
 

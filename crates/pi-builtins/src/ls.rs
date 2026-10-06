@@ -3993,7 +3993,10 @@ impl Utility for Ls {
 			.matches
 			.get_many::<OsString>(options::PATHS)
 			.map_or_else(|| vec![Path::new(".")], |v| v.map(Path::new).collect());
-		match list(locs, &config, host.stdout_clone()) {
+		// A listing only prints once its directory is read and sorted, so
+		// per-line flushing would show nothing sooner: block-buffer and flush
+		// once per directory instead.
+		match list(locs, &config, StreamWriter::block(host.stdout_clone())) {
 			Ok(()) => runtime.status.get(),
 			Err(err) => {
 				host.error(&err, 1);
@@ -4967,7 +4970,7 @@ struct ListState<'a> {
 }
 
 #[allow(clippy::cognitive_complexity)]
-pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Result<()> {
+pub fn list(locs: Vec<&Path>, config: &Config, out: StreamWriter) -> std::io::Result<()> {
 	let fs = config.runtime.fs();
 	let mut files = Vec::<PathData>::new();
 	let mut dirs = Vec::<PathData>::new();
@@ -4976,7 +4979,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 	let now = SystemTime::now();
 
 	let mut state = ListState {
-		out: StreamWriter::new(stdout),
+		out,
 		style_manager: config
 			.color
 			.as_ref()
@@ -5044,6 +5047,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 	}
 
 	display_items(&files, config, &mut state, &mut dired)?;
+	state.out.flush()?;
 
 	for (pos, path_data) in dirs.iter().enumerate() {
 		let needs_blank_line = pos != 0 || !files.is_empty();
@@ -5115,7 +5119,7 @@ pub fn list(locs: Vec<&Path>, config: &Config, stdout: OpenFile) -> std::io::Res
 	if config.dired && !config.hyperlink {
 		dired::print_dired_output(config, &dired, &mut state.out)?;
 	}
-	Ok(())
+	state.out.flush()
 }
 
 fn sort_entries(entries: &mut [PathData], config: &Config) {
@@ -5305,6 +5309,7 @@ fn depth_first_list(
 	}
 
 	display_items(buf, config, state, dired)?;
+	state.out.flush()?;
 
 	if config.recursive {
 		for e in buf
