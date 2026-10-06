@@ -25,7 +25,7 @@
 ### Changed
 
 - In Tern the spinner, elapsed time and intent share one activity line with the todo, which stays in place between turns, and the tok/s readout moves into the composer bar after the thinking level
-- In Tern the per-turn usage row's time and its tooltip follow the terminal's 12- or 24-hour clock, like the user message time
+- In Tern the per-turn usage row's time and its tooltip follow the terminal's 12- or 24-hour clock, like the user message time ([#14565](https://github.com/can1357/oh-my-pi/pull/14565) by [@wolfiesch](https://github.com/wolfiesch))
 - Computer-use desktop captures now default to the focused window's monitor, with primary-monitor fallback; `computer.display: all` remains available explicitly.
 - Computer-use guidance selects AX for semantic controls and screenshots for custom-drawn surfaces, with grouped actions and explicit state verification.
 - Bash commands that print binary or other non-UTF-8 output no longer stall while their output is decoded ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
