@@ -357,8 +357,10 @@ fn interactable(props: &AxProps) -> bool {
 				| "radio"
 				| "textfield"
 				| "textarea"
-				| "link" | "menuitem"
-				| "tab" | "slider"
+				| "link"
+				| "menuitem"
+				| "tab"
+				| "slider"
 				| "combobox"
 				| "popupbutton"
 				| "listitem"
@@ -418,7 +420,7 @@ fn escaped_truncated(value: &str, max: usize) -> String {
 		.replace('\n', " ")
 }
 
-fn node_to_napi(reference: String, props: AxProps) -> AxNode {
+pub fn node_to_napi(reference: String, props: AxProps) -> AxNode {
 	let (x, y, width, height) = props
 		.bounds
 		.map_or((None, None, None, None), |b| (Some(b.x), Some(b.y), Some(b.width), Some(b.height)));
@@ -1003,8 +1005,8 @@ mod tests {
 	}
 	#[test]
 	fn unnamed_containers_keep_their_surviving_content() {
-		// A Reminders-shaped window: an unnamed split group holding a list pane and
-		// a detail pane, an unnamed splitter, and an empty wrapper.
+		// A Reminders-shaped window: an unnamed split group holding a list pane
+		// and a detail pane, an unnamed splitter, and an empty wrapper.
 		let mut m = Mock {
 			props: [
 				(1, p("window", Some("Title"))),
