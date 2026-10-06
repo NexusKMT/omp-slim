@@ -159,6 +159,8 @@ At each call, the executor loads settings shell config (`shell`, `env`, optional
 
 Unless `bash.direnv` is `"off"`, preflight attempts to load the cwd's direnv/devenv changes within `bash.direnvLoadTimeoutMs`, additionally bounded by a positive command timeout. Direnv-provided variables are merged below explicit caller `env`; safe variables removed by direnv are prepended as `unset -v ...`. ACP-terminal and PTY routes run the same preflight before their backend; the non-PTY executor runs it internally.
 
+Successful exports retain their loaded environment and `DIRENV_*` state per `.envrc` directory. Each call still runs `direnv export json` to check direnv's watched inputs and authorization state, but an unchanged environment avoids re-running `.envrc` and devenv setup. OMP returns the complete diff relative to its process environment. A change to that process environment, or to the nanosecond timestamp, size, or existence of the `.envrc` or any direnv-watched path (including direnv's allow/deny files), restarts the load from a clean baseline; so does a warm export that reports any change. This cache does not modify OMP's process environment.
+
 If the selected shell includes `bash`, it attempts `getOrCreateSnapshot()`:
 
 - snapshot captures aliases/functions/options from user rc,
@@ -198,7 +200,7 @@ Behavior highlights:
 - `esc` while running kills the PTY session,
 - terminal resize propagates to PTY (`session.resize(cols, rows)`).
 
-Unlike the non-PTY engine, the interactive PTY path does **not** apply the non-interactive hardening. It inherits the user's environment and sets a real `TERM=xterm-256color` (applied as an override on the Rust side) so editors, pagers, and TUIs behave like a normal terminal.
+Unlike the non-PTY engine, the interactive PTY path does **not** apply the non-interactive hardening. The Rust side starts from the process's native environment and applies the env it is handed as overrides; Bun's `process.env` writes never reach that base, so the PTY is handed the shell spawn environment (`getShellConfig().env`) minus its non-interactive guards (`GIT_EDITOR`, `GPG_TTY`, `CI`) and `NO_COLOR`, then a real `TERM=xterm-256color` so editors, pagers, and TUIs behave like a normal terminal, then the direnv values, which win over both. A key left out keeps the inherited value.
 
 PTY output is normalized (`CRLF`/`CR` to `LF`, `sanitizeText`) and written into `OutputSink`, including artifact spill support.
 
