@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Point, TreeCursor};
 
 use crate::{
-	parse_cache::parse_cached,
+	parse_cache::{MAX_ENTRY_SOURCE_BYTES, parse_cached},
 	summary::{node_content_end_line, node_start_line, resolve_language},
 };
 
@@ -344,9 +344,11 @@ pub struct NodeSpan {
 ///
 /// The next block query over the same source and language is then a cache
 /// hit. Does nothing for empty source or an unrecognized language, where the
-/// queries never parse either.
+/// queries never parse either, nor for a source the cache will not retain
+/// (the tree would be discarded and parsed again by the query).
 pub fn warm_parse(code: &str, lang: Option<&str>, path: Option<&str>) -> Result<()> {
 	if !code.is_empty()
+		&& code.len() <= MAX_ENTRY_SOURCE_BYTES
 		&& let Some(language) = resolve_language(lang, path)
 	{
 		parse_cached(code, language)?;
