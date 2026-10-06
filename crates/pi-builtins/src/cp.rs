@@ -3421,24 +3421,22 @@ fn build_dir(
 }
 
 /// Native Linux data copies after a declined or failed clone:
-/// `copy_file_range`, `sendfile` and `SEEK_DATA`/`SEEK_HOLE` sparse copies on
-/// already opened descriptors.
+/// `copy_file_range` (through `io::copy`) and `SEEK_DATA`/`SEEK_HOLE` sparse
+/// copies on already opened descriptors.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod linux {
 	use std::{
 		fs::{File, Metadata},
-		io::{self, Read as _, Seek as _, SeekFrom, Write as _},
+		io::{self, Read as _, Seek as _, SeekFrom},
 		os::{
 			fd::AsRawFd as _,
 			unix::fs::{FileExt as _, MetadataExt as _},
 		},
 		path::Path,
-		ptr,
 	};
 
 	use super::{
-		COPY_BUFFER, CopyDebug, CopyResult, CpError, OffloadReflinkDebug, SparseDebug, SparseMode,
-		context_for,
+		CopyDebug, CopyResult, CpError, OffloadReflinkDebug, SparseDebug, SparseMode, context_for,
 	};
 
 	/// Debug report of a copy whose source could not be inspected.
@@ -3462,70 +3460,10 @@ mod linux {
 		SparseCopyWithoutHole,
 	}
 
-	/// Copies all of `source` into `dest` from their current offsets, giving
-	/// each kernel copy up where `io::copy` does: `copy_file_range`, then
-	/// `sendfile` (another filesystem, a pipe, a `/proc` file that reads as
-	/// empty), then reads and writes. Unlike `io::copy`, it does not `fstat`
-	/// both files first.
+	/// Copies all of `source` into `dest` from their current offsets;
+	/// `io::copy` uses `copy_file_range`/`sendfile` between files.
 	fn fs_copy(source: &File, dest: &File) -> io::Result<()> {
-		let (source_fd, dest_fd) = (source.as_raw_fd(), dest.as_raw_fd());
-		let mut copied = false;
-		loop {
-			// SAFETY: copies between two live descriptors at their own offsets.
-			let result = unsafe {
-				libc::syscall(
-					libc::SYS_copy_file_range,
-					source_fd,
-					ptr::null_mut::<libc::loff_t>(),
-					dest_fd,
-					ptr::null_mut::<libc::loff_t>(),
-					1usize << 30,
-					0u32,
-				)
-			};
-			match result {
-				0 if copied => return Ok(()),
-				// Nothing copied: maybe a `/proc` file that reports no data.
-				0 => break,
-				1.. => copied = true,
-				_ => {
-					let error = io::Error::last_os_error();
-					match error.raw_os_error() {
-						Some(libc::EOVERFLOW) => break,
-						Some(
-							libc::ENOSYS | libc::EXDEV | libc::EINVAL | libc::EPERM | libc::EOPNOTSUPP | libc::EBADF,
-						) if !copied => break,
-						_ => return Err(error),
-					}
-				},
-			}
-		}
-		let mut sent = false;
-		loop {
-			// SAFETY: as above.
-			let result = unsafe { libc::sendfile(dest_fd, source_fd, ptr::null_mut(), 0x7fff_f000) };
-			match result {
-				0 => return Ok(()),
-				1.. => sent = true,
-				_ => {
-					let error = io::Error::last_os_error();
-					match error.raw_os_error() {
-						Some(libc::EOVERFLOW) => break,
-						Some(libc::ENOSYS | libc::EPERM | libc::EINVAL) if !sent => break,
-						_ => return Err(error),
-					}
-				},
-			}
-		}
-		let mut buffer = vec![0; COPY_BUFFER];
-		loop {
-			match (&*source).read(&mut buffer) {
-				Ok(0) => return Ok(()),
-				Ok(read) => (&*dest).write_all(&buffer[..read])?,
-				Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
-				Err(error) => return Err(error),
-			}
-		}
+		io::copy(&mut &*source, &mut &*dest).map(drop)
 	}
 
 	/// Whether `source`, described by `metadata`, holds any data: `(has data,
