@@ -48,6 +48,17 @@ const server = Bun.serve({
 				{ headers },
 			);
 		}
+		if (pathname === "/observe-shadow-frame") {
+			const card = `http://localhost:${new URL(request.url).port}/card`;
+			return new Response(
+				`<section id="checkout"><button>Main</button><pay-widget></pay-widget></section><script>
+					customElements.define("pay-widget", class extends HTMLElement {
+						constructor() { super(); this.attachShadow({ mode: "open" }).innerHTML = '<iframe src="${card}"></iframe>'; }
+					});
+				</script>`,
+				{ headers },
+			);
+		}
 		return new Response(
 			`<!doctype html><title>${pathname}</title><body data-path="${pathname}">${iframe}<script>
 				sessionStorage.setItem('loads', String(Number(sessionStorage.getItem('loads') || 0) + 1));
@@ -83,6 +94,13 @@ function valueOf(result: { details?: unknown }): unknown {
 	const { details } = result;
 	if (!details || typeof details !== "object" || !("value" in details)) return undefined;
 	return details.value;
+}
+
+async function observe(invoke: (parameters: unknown) => Promise<{ details?: unknown }>, name: string, options: object) {
+	const { elements } = valueOf(
+		await invoke({ action: "call", name, chain: [{ method: "observe", args: [options] }] }),
+	) as { elements: Array<{ id: number; role: string; name: string }> };
+	return { elements, names: elements.map(entry => `${entry.role}:${entry.name}`) };
 }
 
 afterAll(async () => {
@@ -395,15 +413,13 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 	test("observes controls inside iframes and acts on them by id", async () => {
 		const invoke = createHost();
 		await invoke({ action: "open", name: "observe-frames", url: `${baseUrl}/observe-frames` });
-		const observe = async (options: object) => {
-			const { elements } = valueOf(
-				await invoke({ action: "call", name: "observe-frames", chain: [{ method: "observe", args: [options] }] }),
-			) as { elements: Array<{ id: number; role: string; name: string }> };
-			return { elements, names: elements.map(entry => `${entry.role}:${entry.name}`) };
-		};
 		// A selector reads only the iframes inside it.
-		expect((await observe({ selector: "#checkout" })).names).toEqual(["button:Main", "textbox:Card", "button:Pay"]);
-		const observed = await observe({});
+		expect((await observe(invoke, "observe-frames", { selector: "#checkout" })).names).toEqual([
+			"button:Main",
+			"textbox:Card",
+			"button:Pay",
+		]);
+		const observed = await observe(invoke, "observe-frames", {});
 		expect(observed.names).toEqual(["button:Main", "textbox:Card", "button:Pay", "button:Outside"]);
 		const card = observed.elements.find(entry => entry.name === "Card")!;
 		await invoke({
@@ -426,6 +442,16 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 				}),
 			),
 		).toBe("4242");
+	}, 30_000);
+
+	test("scoped observe reads an iframe inside a web component's shadow root under the selector", async () => {
+		const invoke = createHost();
+		await invoke({ action: "open", name: "observe-shadow-frame", url: `${baseUrl}/observe-shadow-frame` });
+		expect((await observe(invoke, "observe-shadow-frame", { selector: "#checkout" })).names).toEqual([
+			"button:Main",
+			"textbox:Card",
+			"button:Pay",
+		]);
 	}, 30_000);
 
 	test("lists managed tabs with live metadata", async () => {

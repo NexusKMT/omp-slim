@@ -165,6 +165,7 @@ import {
 	ClickRefusedError,
 	clickAt,
 	clickElement,
+	composedContains,
 	clickQueryHandlerText,
 	fillViaHandle,
 	focusTextEntryTarget,
@@ -1102,7 +1103,8 @@ async function snapshotFrame(
 		if (!owner) return null;
 		const scoped = await options.root.realm.adoptHandle(owner).finally(() => owner.dispose().catch(() => undefined));
 		try {
-			if (!(await options.root.evaluate((root, element) => root.contains(element), scoped))) return null;
+			// The owner may sit in a web component's shadow root under `root`, where `Node.contains` stops.
+			if (!(await options.root.evaluate(composedContains, scoped))) return null;
 		} finally {
 			await scoped.dispose().catch(() => undefined);
 		}
