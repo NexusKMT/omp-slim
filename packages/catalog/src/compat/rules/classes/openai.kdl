@@ -90,10 +90,12 @@ class "openai" {
 
 // GPT-5.2+ bills images in 32px patches × 1.2, sized per `detail` level:
 // https://developers.openai.com/api/docs/guides/images-vision#calculating-costs
-// Older lines carry no rule; callers fall back to their own estimate.
+// Older lines carry no lineage rule and bill at their wire API's fallback
+// (providers/image-tokenization.kdl).
 class "openai" {
-	// gpt-5.6 sizing, shared by later lines.
-	revision ">=5.6" {
+	// gpt-5.6 sizing, shared by later lines. `<10` keeps separator-collapsed
+	// revisions (`openai-gpt-52-codex` parses as 52) off the 5.6+ sizing.
+	revision ">=5.6 <10" {
 		image-tokenization {
 			regime "openai-patch"
 			multiplier 1.2
