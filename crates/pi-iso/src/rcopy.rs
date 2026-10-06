@@ -313,14 +313,42 @@ fn copy_mtime(src: &Path, dst: &Path) {
 	let Ok(mtime) = std::fs::metadata(src).and_then(|meta| meta.modified()) else {
 		return;
 	};
-	let _ = open_for_times(dst).and_then(|file| file.set_modified(mtime));
+	let _ = set_mtime(dst, mtime);
 }
 
-/// Opens `path` (file or directory) with just enough access to set its
-/// timestamps; Windows needs backup semantics to open a directory, and
-/// write-attributes access works on readonly files.
+/// One path-based `utimensat`: rcopy holds no handle to `dst`
+/// (`std::fs::copy` closes it), so opening one for `futimens` would add an
+/// open and a close per copied entry. `dst` is never a symlink here, but
+/// `AT_SYMLINK_NOFOLLOW` keeps a swapped-in link from redirecting the write.
+#[cfg(unix)]
+fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
+	use std::os::unix::ffi::OsStrExt;
+
+	let dur = mtime
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_err(std::io::Error::other)?;
+	let times = [libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT }, libc::timespec {
+		tv_sec:  dur.as_secs() as _,
+		tv_nsec: dur.subsec_nanos() as libc::c_long,
+	}];
+	let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
+	// SAFETY: `c_path` and `times` outlive the syscall; the kernel does
+	// not retain the pointers.
+	let rc = unsafe {
+		libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), libc::AT_SYMLINK_NOFOLLOW)
+	};
+	if rc == 0 {
+		Ok(())
+	} else {
+		Err(std::io::Error::last_os_error())
+	}
+}
+
+/// Windows has no path-based time setter, so open `path` with just enough
+/// access: backup semantics to open a directory, and write-attributes access,
+/// which works on readonly files.
 #[cfg(windows)]
-fn open_for_times(path: &Path) -> std::io::Result<std::fs::File> {
+fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
 	use std::os::windows::fs::OpenOptionsExt;
 
 	use windows_sys::Win32::Storage::FileSystem::{
@@ -330,17 +358,16 @@ fn open_for_times(path: &Path) -> std::io::Result<std::fs::File> {
 	std::fs::OpenOptions::new()
 		.access_mode(FILE_WRITE_ATTRIBUTES)
 		.custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-		.open(path)
+		.open(path)?
+		.set_modified(mtime)
 }
 
-/// Opens `path` (file or directory) read-only; `futimens` needs only
-/// ownership, not write access.
-#[cfg(not(windows))]
-fn open_for_times(path: &Path) -> std::io::Result<std::fs::File> {
-	std::fs::File::open(path)
+#[cfg(not(any(unix, windows)))]
+fn set_mtime(path: &Path, mtime: std::time::SystemTime) -> std::io::Result<()> {
+	std::fs::File::open(path)?.set_modified(mtime)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
 	use std::{
 		fs,
@@ -350,6 +377,69 @@ mod tests {
 	};
 
 	use super::*;
+
+	/// The non-git `start` path mirrors file and directory mtimes, including
+	/// on readonly files, so the mtime-skipping diff stays fast.
+	#[cfg(unix)]
+	#[test]
+	fn rcopy_preserves_file_and_dir_mtimes() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let root = TempDirGuard::new();
+		let lower = root.path().join("lower");
+		let sub = lower.join("sub");
+		fs::create_dir_all(&sub).expect("create lower/sub");
+		let file = sub.join("file.txt");
+		fs::write(&file, b"hello").expect("write lower file");
+		let file_mtime = UNIX_EPOCH + std::time::Duration::new(1_000_000_000, 123_456_789);
+		let dir_mtime = UNIX_EPOCH + std::time::Duration::new(1_100_000_000, 0);
+		fs::File::open(&file)
+			.and_then(|f| f.set_modified(file_mtime))
+			.expect("set file mtime");
+		fs::set_permissions(&file, fs::Permissions::from_mode(0o444)).expect("make file readonly");
+		fs::File::open(&sub)
+			.and_then(|d| d.set_modified(dir_mtime))
+			.expect("set dir mtime");
+
+		let merged = root.path().join("merged");
+		RcopyBackend.start(&lower, &merged).expect("rcopy start");
+
+		let mtime = |path: &Path| {
+			fs::metadata(path)
+				.and_then(|m| m.modified())
+				.expect("mtime")
+		};
+		assert_eq!(mtime(&merged.join("sub/file.txt")), file_mtime);
+		assert_eq!(mtime(&merged.join("sub")), dir_mtime);
+	}
+
+	/// A directory symlink must be recreated as a directory link; Windows
+	/// cannot traverse a file link that points at a directory.
+	#[cfg(windows)]
+	#[test]
+	fn rcopy_recreates_directory_symlink_as_directory_link() {
+		use std::os::windows::fs::FileTypeExt as _;
+
+		let root = TempDirGuard::new();
+		let lower = root.path().join("lower");
+		fs::create_dir_all(lower.join("target")).expect("create lower/target");
+		fs::write(lower.join("target/inner.txt"), b"inner").expect("write inner file");
+		if let Err(err) = std::os::windows::fs::symlink_dir("target", lower.join("link")) {
+			// Creating symlinks needs Developer Mode or the symlink privilege.
+			eprintln!("skipping: cannot create directory symlink: {err}");
+			return;
+		}
+
+		let merged = root.path().join("merged");
+		RcopyBackend.start(&lower, &merged).expect("rcopy start");
+
+		let link = merged.join("link");
+		let file_type = fs::symlink_metadata(&link)
+			.expect("link metadata")
+			.file_type();
+		assert!(file_type.is_symlink_dir(), "expected a directory link, got {file_type:?}");
+		assert_eq!(fs::read(link.join("inner.txt")).expect("read through link"), b"inner");
+	}
 
 	struct TempDirGuard(PathBuf);
 
@@ -380,6 +470,7 @@ mod tests {
 		}
 	}
 
+	#[cfg(unix)]
 	#[test]
 	fn git_apply_drains_stderr_while_writing_stdin() {
 		use std::os::unix::fs::PermissionsExt as _;
