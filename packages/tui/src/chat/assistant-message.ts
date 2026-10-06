@@ -259,6 +259,8 @@ export class AssistantMessageComponent extends Container {
 	#kittyConverted = new Map<string, ImageContent>();
 	#showImages = true;
 	#showToolResultImages = true;
+	/** Charts under numeric tables; off for subagent transcripts. */
+	#showTableCharts = true;
 	#transcriptBlockFinalized: boolean;
 	/** See {@link setMidStreamPublication}; the wire's `stream-revision` axis decides it. */
 	#midStreamPublication = true;
@@ -834,7 +836,7 @@ export class AssistantMessageComponent extends Container {
 				const streaming = live && index === tailIndex;
 				if (content.type === "text" && canonicalizeMessage(content.text)) {
 					const source = content.text.trim();
-					if (!this.#showImages || !hasChartTable(source)) {
+					if (!this.#showImages || !this.#showTableCharts || !hasChartTable(source)) {
 						children.push(markdown(`t${index}`, `t${index}`, source, streaming));
 						continue;
 					}
@@ -1266,7 +1268,7 @@ export class AssistantMessageComponent extends Container {
 			this.#showImages &&
 			TERMINAL.imageProtocol !== null &&
 			!isNativeRendering() &&
-			((svgFigureRendering() && hasSvgFence(text)) || hasChartTable(text))
+			((svgFigureRendering() && hasSvgFence(text)) || (this.#showTableCharts && hasChartTable(text)))
 		);
 	}
 
@@ -1294,6 +1296,7 @@ export class AssistantMessageComponent extends Container {
 		} else {
 			block = new FigureMarkdown(text, {
 				markdown: value => this.#createMarkdown("text", value),
+				charts: this.#showTableCharts,
 				budget: this.#imageBudget,
 				onChange: () => {
 					this.#blockVersion++;
@@ -1419,6 +1422,18 @@ export class AssistantMessageComponent extends Container {
 	setImagesVisible(visible: boolean): void {
 		if (this.#showImages === visible) return;
 		this.#showImages = visible;
+		if (this.#lastMessage) {
+			this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
+		}
+	}
+
+	/** Toggle charts under numeric tables (the main session's transcript only, never a subagent's). */
+	setTableChartsVisible(visible: boolean): void {
+		if (this.#showTableCharts === visible) return;
+		this.#showTableCharts = visible;
+		// Figure blocks bake the switch in; rebuild them rather than reuse.
+		for (const block of this.#figureBlocks.values()) block.dispose();
+		this.#figureBlocks.clear();
 		if (this.#lastMessage) {
 			this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
 		}

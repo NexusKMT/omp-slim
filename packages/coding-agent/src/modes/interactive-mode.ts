@@ -1562,6 +1562,9 @@ export class InteractiveMode implements InteractiveModeContext {
 	get assistantImagesVisible(): boolean {
 		return cfgTerminalShowImages.get(this.settings);
 	}
+	get tableChartsVisible(): boolean {
+		return this.#focusController.target === undefined;
+	}
 	resolveAssistantMessageLinks(texts: readonly string[]): Promise<ReadonlyMap<string, string>> {
 		const session = this.viewSession;
 		return resolveMarkdownLinkTargets(texts, {
