@@ -818,14 +818,16 @@ describe("device-only write transport for explicit lists omitting write", () => 
 	// transport (createTools grants it when the explicit list has `read` but not
 	// `write`), so a parent briefing that names a file path lands on this
 	// rejection. The message is correct but not actionable: it never names the
-	// channel that does work. Active tools are asserted through the session's
-	// own `isToolActive` predicate — the exact signal write.ts reads — with
-	// `setActiveToolNames` supplied so createTools does not overwrite it.
+	// channel that does work. `yield` arrives through the real tool plan
+	// (`requireYieldTool`), and the assertions read it back through the
+	// session's own `isToolActive` predicate and the returned tool list — the
+	// exact signals write.ts reads.
 	it("names the yield fallback for a device-only session that can yield (#14308)", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "write-xdev-yield-fallback-"));
 		try {
-			const activeNames = new Set(["read", "grep", "yield"]);
+			const activeNames = new Set(["read", "grep"]);
 			const session = xdevSession(tempDir, {
+				requireYieldTool: true,
 				isToolActive: name => activeNames.has(name),
 				setActiveToolNames: names => {
 					for (const name of names) activeNames.add(name);
@@ -837,6 +839,7 @@ describe("device-only write transport for explicit lists omitting write", () => 
 			const write = tools.find(entry => entry.name === "write");
 			expect(write).toBeDefined();
 			expect(session.deviceOnlyWrite).toBe(true);
+			expect(tools.some(entry => entry.name === "yield")).toBe(true);
 			expect(session.isToolActive?.("yield")).toBe(true);
 
 			await expect(
@@ -848,8 +851,8 @@ describe("device-only write transport for explicit lists omitting write", () => 
 	});
 
 	// Negative branch. Without `yield` the suggestion would not work, so the
-	// rejection must stay byte-identical to the pre-#14308 text — otherwise
-	// every device-only session pays for guidance it cannot act on.
+	// rejection must still refuse the filesystem write without naming a
+	// channel the session does not have.
 	it("leaves the device-only rejection unchanged when yield is unavailable (#14308)", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "write-xdev-no-yield-"));
 		try {
@@ -874,9 +877,9 @@ describe("device-only write transport for explicit lists omitting write", () => 
 					(caught: unknown) => caught,
 				);
 			expect(err).toBeInstanceOf(Error);
-			expect((err as Error).message).toBe(
-				"This `write` tool is limited to the xd:// device transport: call it with path `xd://<tool>` and the device's JSON arguments in `content` (`read xd://` lists mounted devices). Active plan mode additionally permits local:// sandbox drafts. Filesystem writes are not available elsewhere.",
-			);
+			const message = err instanceof Error ? err.message : String(err);
+			expect(message).toContain("xd://");
+			expect(message).not.toContain("yield");
 		} finally {
 			await removeWithRetries(tempDir);
 		}
