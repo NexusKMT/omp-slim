@@ -58,7 +58,7 @@ await tab.close();
 | `dialogs` | `"accept"` or `"dismiss"` automatic policy. Without one, alerts and beforeunload prompts are accepted; confirms and prompts remain pending. |
 | `allowed_domains` | Exact hostnames or `*.example.com` patterns (including the bare domain). The network manager aborts intercepted HTTP(S)/WS(S) requests to other hosts; an empty list leaves requests unrestricted. This is not a sandbox, and native-webview coverage differs below. |
 | `init_scripts` | Document-start JavaScript sources or cwd-relative source-file paths. |
-| `downloads` | Absolute or cwd-relative download directory. |
+| `downloads` | Absolute or cwd-relative directory for this tab's downloads; defaults to a temporary folder per tab. Managed, spawned and connected Chromium tabs keep separate folders while they share a browser, downloads their iframes start included. |
 | `user_agent` | Per-tab user-agent override. |
 | `ignore_https_errors` | Ignore invalid HTTPS certificates for the tab. |
 | `allow_file_access` | Launch flag permitting local file pages to read local files; cannot change an already-running shared Chromium. |
