@@ -20,6 +20,8 @@
 ### Fixed
 
 - Fixed `tail` failing to print files, or omitting their first 64 KiB, when file sizes were exact multiples of 64 KiB.
+- Fixed `tail` printing nothing, or dropping lines from the file's first 64 KiB, when the file size is an exact multiple of 64 KiB ([#14264](https://github.com/can1357/oh-my-pi/pull/14264) by [@jchanghong023](https://github.com/jchanghong023))
+- Fixed native `sed` and `jq` killing the host process with SIGBUS when an input file is truncated while they read it ([#14613](https://github.com/can1357/oh-my-pi/issues/14613))
 
 ## [18.6.3] - 2026-10-06
 

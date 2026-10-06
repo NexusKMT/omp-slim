@@ -6689,7 +6689,6 @@ dependencies = [
  "libc",
  "lscolors",
  "memchr",
- "memmap2",
  "nix 0.31.3",
  "nom 8.0.0",
  "notify",
