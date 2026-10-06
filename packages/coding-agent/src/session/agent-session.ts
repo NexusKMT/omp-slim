@@ -2655,19 +2655,20 @@ export class AgentSession implements SettingsScope {
 	}
 
 	/**
-	 * Re-anchor mode state to the session a branch just minted. Branching mints a
-	 * new session id/file (see {@link SessionManager.createBranchedSession}), so
-	 * without this the interactive-mode reconciler keeps the pre-branch vibe owner
-	 * scope and disabling vibe mode trips the stale-scope guard in
-	 * `VibeRuntime.#persistModeExit` (issue #10468). Mirrors the reconcile step
-	 * `switchSession` runs for the same reason. Best-effort: a reconcile failure
-	 * must not roll back an otherwise-successful branch.
+	 * Re-anchor mode state to the session a branch or `/new` just minted. Both
+	 * mint a new session id/file, so without this the interactive-mode reconciler
+	 * keeps the previous session's transient mode: a stale vibe owner scope trips
+	 * the guard in `VibeRuntime.#persistModeExit` after a branch (issue #10468),
+	 * and plan/goal mode keeps running in a new session that records no mode
+	 * (issue #14653). Mirrors the reconcile step `switchSession` runs for the same
+	 * reason. Best-effort: a reconcile failure must not roll back an
+	 * otherwise-successful transition.
 	 */
-	async #reconcileModeAfterBranch(): Promise<void> {
+	async #reconcileModeAfterTransition(): Promise<void> {
 		try {
 			await this.#sessionSwitchReconciler?.();
 		} catch (error) {
-			logger.warn("Failed to reconcile session mode after branch", {
+			logger.warn("Failed to reconcile session mode after session transition", {
 				sessionFile: this.sessionFile,
 				error: String(error),
 			});
@@ -9559,6 +9560,7 @@ export class AgentSession implements SettingsScope {
 			this.#advisors.resetSessionState();
 			advisorRecordersDetached = false;
 			this.#reconnectToAgent();
+			await this.#reconcileModeAfterTransition();
 			// Drop the process-lifetime context-file cache so the rebuild re-reads
 			// AGENTS.md and friends from disk: the user may have edited them since
 			// the previous session started, and refreshBaseSystemPrompt() re-runs
@@ -11537,7 +11539,7 @@ export class AgentSession implements SettingsScope {
 
 			this.#advisors.reattachRecorderFeeds();
 			advisorRecordersDetached = false;
-			await this.#reconcileModeAfterBranch();
+			await this.#reconcileModeAfterTransition();
 			return true;
 		} finally {
 			if (advisorRecordersDetached) {
@@ -11653,7 +11655,7 @@ export class AgentSession implements SettingsScope {
 			this.#advisors.resetSessionState();
 			this.#closeCodexProviderSessionsForHistoryRewrite();
 			advisorRecordersDetached = false;
-			await this.#reconcileModeAfterBranch();
+			await this.#reconcileModeAfterTransition();
 
 			return { cancelled: false, sessionFile: this.sessionFile };
 		} finally {
