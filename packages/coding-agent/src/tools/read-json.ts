@@ -2,7 +2,7 @@ import { Shell } from "@oh-my-pi/pi-natives";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { ToolSession } from "../sdk";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
-import { DEFAULT_MAX_LINES, truncateHead } from "@oh-my-pi/pi-tui/tools/streaming-output";
+import { DEFAULT_MAX_LINES, truncateHead, truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { resolveReadPath } from "./path-utils";
 import { buildInMemorySelectorResult, prependSuffixResolutionNotice, toReadTruncationStats } from "./read-format";
 import {
@@ -21,6 +21,8 @@ const DEFAULT_JSON_QUERY_LIMIT = 100;
 const MAX_JSON_QUERY_LIMIT = 1000;
 const MAX_QUERY_CAPTURE_BYTES = 5 * 1024 * 1024;
 const JSON_QUERY_TIMEOUT_MS = 30_000;
+/** jq prints its error last; partial results before it stay out of the error text. */
+const JSON_QUERY_ERROR_TAIL_LINES = 20;
 
 export interface JsonPathCandidate {
 	jsonPath: string;
@@ -277,7 +279,9 @@ export async function executeJsonQuery(
 
 	const quotedQuery = `'${selector.query.replace(/'/g, "'\\''")}'`;
 	const quotedPath = `'${filePath.replace(/'/g, "'\\''")}'`;
-	const command = `jq ${flags.join(" ")} ${quotedQuery} ${quotedPath}`;
+	// jaq parses any argument starting with `-` as flags even when shell-quoted;
+	// `--` keeps filters such as `-.price` positional.
+	const command = `jq ${flags.join(" ")} -- ${quotedQuery} ${quotedPath}`;
 
 	let output = "";
 	let bytesCaptured = 0;
@@ -326,7 +330,9 @@ export async function executeJsonQuery(
 
 		if (result.exitCode !== 0 || hasError) {
 			if (bytesCaptured < MAX_QUERY_CAPTURE_BYTES) {
-				const errMsg = output.trim() || `jq exited with code ${result.exitCode}`;
+				const errMsg =
+					truncateTail(output.trim(), { maxLines: JSON_QUERY_ERROR_TAIL_LINES }).content ||
+					`jq exited with code ${result.exitCode}`;
 				throw new ToolError(`Failed to execute JSON query: ${errMsg}`);
 			}
 		}
@@ -342,8 +348,6 @@ export async function executeJsonQuery(
 
 export interface ResolvedJsonReadPath {
 	absolutePath: string;
-	jsonSubPath: string;
-	queryString: string;
 	selector: JsonSelector;
 	suffixResolution?: { from: string; to: string };
 }
@@ -359,20 +363,13 @@ export async function resolveJsonReadPath(
 		const selector = parseJsonSelector(candidate.subPath, candidate.queryString);
 		if (!selector) continue;
 
-		let absolutePath = resolveReadPath(candidate.jsonPath, session.cwd);
-		let suffixResolution: { from: string; to: string } | undefined;
+		const absolutePath = resolveReadPath(candidate.jsonPath, session.cwd);
 
 		try {
 			const stat = await Bun.file(absolutePath).stat();
 			if (!stat.isFile()) continue;
 
-			return {
-				absolutePath,
-				jsonSubPath: candidate.subPath,
-				queryString: candidate.queryString,
-				selector,
-				suffixResolution,
-			};
+			return { absolutePath, selector };
 		} catch (error) {
 			if (!isNotFoundError(error) || isRemoteMountPath(absolutePath)) continue;
 
@@ -385,10 +382,8 @@ export async function resolveJsonReadPath(
 
 				return {
 					absolutePath: suffixMatch.absolutePath,
-					jsonSubPath: candidate.subPath,
-					queryString: candidate.queryString,
 					selector,
-					suffixResolution: { from: candidate.jsonPath, to: suffixMatch.relativePath },
+					suffixResolution: { from: candidate.jsonPath, to: suffixMatch.displayPath },
 				};
 			} catch {
 				// Suffix retry failed, continue to next candidate

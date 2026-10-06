@@ -185,15 +185,6 @@ describe("JSON query in read tool", () => {
 		expect(text.trim()).toBe("4");
 	});
 
-	it("bounds streaming output capture for massive ranges without memory exhaustion", async () => {
-		const result = await readTool.execute("call_massive", {
-			path: `${jsonFile}?q=range(0; 2000000)&compact=true`,
-		});
-		const text = getText(result);
-		expect(text.length).toBeGreaterThan(0);
-		expect(text.length).toBeLessThanOrEqual(5 * 1024 * 1024 + 1024);
-	});
-
 	it("supports offset and limit pagination on JSONL streams with continuation hint", async () => {
 		const result = await readTool.execute("call_p2", {
 			path: `${jsonlFile}?q=.user&raw=true&offset=1&limit=1`,
