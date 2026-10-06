@@ -318,6 +318,51 @@ async fn virtual_follow_observes_append_same_size_rotation_and_truncation() {
 	);
 }
 
+/// A provider path has no kernel watcher, so `tail -f` polls it; that idle
+/// loop must still stop once the reader of its stdout pipe exits, as in
+/// `tail -f virtual://log | grep -m1 line`.
+#[cfg(unix)]
+#[tokio::test]
+async fn virtual_follow_stops_once_stdout_reader_is_gone() {
+	let directory = tempfile::tempdir().expect("isolated provider filesystem");
+	fs::write(directory.path().join("log"), b"line\n").expect("followed log");
+	let error = tempfile::tempfile().expect("captured stderr");
+	let (mut reader, writer) = io::pipe().expect("stdout pipe");
+	let mut shell = virtual_shell(directory.path()).await;
+	let mut parameters = shell.default_exec_params();
+	parameters.set_fd(OpenFiles::STDIN_FD, openfiles::null().expect("null stdin"));
+	parameters.set_fd(OpenFiles::STDOUT_FD, OpenFile::from(writer));
+	parameters
+		.set_fd(OpenFiles::STDERR_FD, OpenFile::from(error.try_clone().expect("stderr descriptor")));
+	let cancel = CancellationToken::new();
+	parameters.set_cancel_token(cancel.clone());
+	let runner = tokio::spawn(async move {
+		shell
+			.run_string(
+				"tail -f --sleep-interval=.01 virtual://log",
+				&SourceInfo::from("vfs-follow-reader-gone"),
+				&parameters,
+			)
+			.await
+	});
+	// Consume the first line like `grep -m1 line`, then close the read end.
+	let first = tokio::task::spawn_blocking(move || {
+		let mut first = [0; 5];
+		reader.read_exact(&mut first).map(|()| first)
+	})
+	.await
+	.expect("reader thread")
+	.expect("initial output");
+	assert_eq!(&first, b"line\n");
+	let stopped = tokio::time::timeout(Duration::from_secs(5), runner).await;
+	cancel.cancel();
+	let result = stopped
+		.expect("tail -f kept following after its reader exited")
+		.expect("tail worker")
+		.expect("tail command");
+	assert_eq!(u8::from(result.exit_code), 0, "{}", captured_text(&error));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn backed_urls_expose_physical_paths_without_changing_native_readlink() {
