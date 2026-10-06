@@ -7,6 +7,7 @@ use uiautomation::{
 		UISelectionItemPattern, UITogglePattern, UIValuePattern,
 	},
 	types::{ControlType, ExpandCollapseState, Handle, Point, UIProperty},
+	variants::Value,
 };
 use windows_sys::Win32::{
 	Foundation::{HWND, POINT},
@@ -167,9 +168,17 @@ fn ax_error(error: impl std::fmt::Display) -> DesktopError {
 
 /// Handle for `element` carrying the `RuntimeId` that identifies it across
 /// reads. An element that reports none gets an empty one, which every
-/// operation refuses, so a walk counts it among its unreadable nodes.
+/// operation refuses, so a walk counts it among its unreadable nodes. Read as
+/// a property: `UIElement::get_runtime_id` leaks the array UI Automation
+/// returns.
 fn uia_handle(element: UIElement) -> AxHandle {
-	let runtime_id = element.get_runtime_id().unwrap_or_default();
+	let runtime_id = match element
+		.get_property_value(UIProperty::RuntimeId)
+		.and_then(|value| value.get_value())
+	{
+		Ok(Value::ArrayI4(id)) => id,
+		_ => Vec::new(),
+	};
 	AxHandle::Uia(element, runtime_id.into_boxed_slice())
 }
 
