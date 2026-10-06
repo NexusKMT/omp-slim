@@ -6,6 +6,7 @@ import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProvider
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
 import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-attestation";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
+import { getEnvApiKey, isOfficialCodexApiUrl } from "@oh-my-pi/pi-ai/stream";
 import type {
 	Api,
 	Context,
@@ -267,8 +268,7 @@ export class ModelRegistry {
 	#catalogMetrics = new CatalogMetricsIndex();
 	#internedStaticModels: Map<string, Model<Api>> = new Map();
 	#providerLookupSnapshots: Map<string, Model<Api>[]> = new Map();
-	#fullKindSnapshotSource: Model<Api>[] | undefined;
-	#fullKindSnapshots: Partial<Record<ModelKind, Model<Api>[]>> = {};
+	#fullKindSnapshots = new WeakMap<Model<Api>[], Partial<Record<ModelKind, Model<Api>[]>>>();
 	#customProviderApiKeys: Map<string, string> = new Map();
 	// Every command-backed (`!cmd`) config value a provider carries — apiKey plus
 	// provider/model-override header values — keyed by provider. The 401 auth
@@ -2123,13 +2123,11 @@ export class ModelRegistry {
 	): Promise<ModelManagerOptions<Api>[]> {
 		const specialProviderDescriptors: Array<{
 			providerId: string;
-			authoritative: boolean;
 			resolveKey: (value: string | undefined) => string | undefined;
 			createOptions: (key: string, raw: string | undefined) => ModelManagerOptions<Api>;
 		}> = [
 			{
 				providerId: "google-antigravity",
-				authoritative: false,
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: oauthToken =>
 					googleAntigravityModelManagerOptions({
@@ -2140,7 +2138,6 @@ export class ModelRegistry {
 			},
 			{
 				providerId: "google-gemini-cli",
-				authoritative: false,
 				resolveKey: extractGoogleOAuthToken,
 				createOptions: (oauthToken, raw) =>
 					googleGeminiCliModelManagerOptions({
@@ -2152,13 +2149,33 @@ export class ModelRegistry {
 			},
 			{
 				providerId: "openai-codex",
-				authoritative: true,
 				resolveKey: value => value,
-				createOptions: accessToken =>
-					openaiCodexModelManagerOptions({
-						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
+				createOptions: accessToken => {
+					// A custom endpoint (models.yml `baseUrl`) receives only a configured,
+					// runtime, or command key. Official credentials (stored ChatGPT OAuth or
+					// the provider env token) keep discovering against chatgpt.com, as on a
+					// relay setup chat still works with them. The check looks at the token
+					// actually being sent: a runtime provider's command key is only a
+					// fallback behind a live OAuth token, which `peek` returns first.
+					const configuredBaseUrl = this.#descriptorBaseUrl("openai-codex");
+					const officialCredential =
+						accessToken === getEnvApiKey("openai-codex") ||
+						getOAuthCredentialsForProvider(this.authStorage, "openai-codex").some(
+							credential => credential.access === accessToken,
+						);
+					if (officialCredential || isOfficialCodexApiUrl(configuredBaseUrl)) {
+						return openaiCodexModelManagerOptions({
+							baseUrl: officialCredential ? undefined : configuredBaseUrl,
+							resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
+							fetch: this.#fetch,
+						});
+					}
+					return openaiCodexModelManagerOptions({
+						baseUrl: configuredBaseUrl,
+						resolveAccounts: async () => [{ accessToken }],
 						fetch: this.#fetch,
-					}),
+					});
+				},
 			},
 		];
 		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
@@ -2190,7 +2207,7 @@ export class ModelRegistry {
 					descriptor.providerId,
 					strategy,
 					descriptor.providerId,
-					descriptor.authoritative,
+					AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS.has(descriptor.providerId),
 				),
 			),
 		);
@@ -2650,14 +2667,15 @@ export class ModelRegistry {
 	getAll(kind: ModelKind | "all" = "chat"): Model<Api>[] {
 		const models = this.#ensureFullSnapshot();
 		if (kind === "all") return models;
-		if (this.#fullKindSnapshotSource !== models) {
-			this.#fullKindSnapshotSource = models;
-			this.#fullKindSnapshots = {};
+		let snapshots = this.#fullKindSnapshots.get(models);
+		if (!snapshots) {
+			snapshots = {};
+			this.#fullKindSnapshots.set(models, snapshots);
 		}
-		const cached = this.#fullKindSnapshots[kind];
+		const cached = snapshots[kind];
 		if (cached) return cached;
 		const filtered = models.filter(model => modelKind(model) === kind);
-		this.#fullKindSnapshots[kind] = filtered;
+		snapshots[kind] = filtered;
 		return filtered;
 	}
 

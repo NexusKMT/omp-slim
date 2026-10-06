@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [18.6.3] - 2026-10-06
+
+### Breaking Changes
+
+- Replaced the `cursorPosition` option of `TerminalQueryResponder` with `hostCursorHandshake`, which leaves only the PTY host's own session-start cursor query unanswered instead of every cursor-position query
+
+## [18.5.1] - 2026-10-03
+
+### Added
+
+- Added utilities for detecting and scanning own-line display-math blocks in growing text, including identifying possible openers and closers efficiently.
+- Added an option to `TerminalQueryResponder` that lets PTY hosts provide cursor-position reports themselves.
+- Added `refreshShellConfigCache()` to rebuild the cached shell spawn environment from the current process environment.
+
+### Fixed
+
+- Fixed the Markdown lexer dropping text preceding U+2028 or U+2029 line-separator characters.
+
 ## [18.5.0] - 2026-10-03
 
 ### Added
