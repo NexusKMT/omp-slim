@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `/agents` New agent no longer fails with a JSON parse error when the generated system prompt contains a markdown code fence ([#12255](https://github.com/can1357/oh-my-pi/issues/12255))
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes
