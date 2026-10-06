@@ -295,6 +295,7 @@ import { normalizePromptPath } from "./utils/prompt-path";
 import { buildNamedToolChoice } from "./utils/tool-choice";
 import { VibeSessionRegistry } from "./vibe/runtime";
 import { registerLocalInferenceApi } from "./tiny/local-inference-api";
+import { shutdownTinyTitleClient } from "./tiny/title-client";
 import { buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 
 import {
@@ -4950,6 +4951,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					}
 					await originalDispose();
 				} finally {
+					// The tiny-model client is a process singleton shared by every session.
+					// Only the session that owns process state may drop its connections,
+					// since that fails every request still in flight.
+					if (bindsProcessState) await shutdownTinyTitleClient();
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled();
 					unbindSessionEffects?.();
