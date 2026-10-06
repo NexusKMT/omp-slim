@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Expanded status-line project directory detection to include the user's `repos` folder
 - Model mentions (`^`), `/switch` completions, and model picker search stay responsive on every keystroke with large model catalogs ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed

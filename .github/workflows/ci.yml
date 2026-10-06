@@ -759,11 +759,11 @@ jobs:
            run: bun scripts/gen-clippy-bazelrc.ts --check
          - run: echo "release validation green"
 
-   # Builds (does not publish) every release binary on Linux in parallel with
-   # the test fan-out; the needs are the two native_addons jobs, whose
-   # artifacts supply their addons. bun cross-compiles the macOS and Windows
-   # binaries; macOS ones are Developer ID signed and notarized here too
-   # (rcodesign), and run on real hardware in release_smoke_darwin.
+   # Builds (does not publish) every release binary on one Linux x64 image in
+   # parallel with the test fan-out; the needs are the two native_addons jobs,
+   # whose artifacts supply their addons. bun cross-compiles every target;
+   # macOS binaries are Developer ID signed and notarized here too
+   # (rcodesign). release_smoke then runs each binary on its own platform.
    # Publishing (npm leaves, GitHub release, core npm) is gated on
    # release_gate downstream.
    release_binary:
@@ -779,75 +779,56 @@ jobs:
                # Addons cross-built by Bazel (clang + ld64.lld against the
                # Command Line Tools SDK) in native_addons_cross.
                - {
-                    os: ubuntu-22.04,
                     platform: darwin,
-                    arch: x64,
                     target_id: darwin-x64,
                     binary_path: packages/coding-agent/binaries/omp-darwin-x64,
                     native_targets: darwin-x64-baseline,
                  }
                - {
-                    os: ubuntu-22.04,
                     platform: darwin,
-                    arch: arm64,
                     target_id: darwin-arm64,
                     binary_path: packages/coding-agent/binaries/omp-darwin-arm64,
                     native_targets: darwin-arm64,
                  }
                - {
-                    os: ubuntu-22.04,
                     platform: linux,
-                    arch: x64,
                     target_id: linux-x64,
                     binary_path: packages/coding-agent/binaries/omp-linux-x64,
                     native_targets: linux-x64-baseline linux-x64-modern,
                  }
                - {
-                    os: ubuntu-22.04,
                     platform: linux,
-                    libc: musl,
-                    arch: x64,
                     target_id: linux-musl-x64,
                     binary_path: packages/coding-agent/binaries/omp-linux-musl-x64,
                     native_targets: linux-musl-x64-baseline,
                  }
                - {
-                    os: ubuntu-24.04-arm,
                     platform: linux,
-                    arch: arm64,
                     target_id: linux-arm64,
                     binary_path: packages/coding-agent/binaries/omp-linux-arm64,
                     native_targets: linux-arm64,
                  }
                - {
-                    os: ubuntu-24.04-arm,
                     platform: linux,
-                    libc: musl,
-                    arch: arm64,
                     target_id: linux-musl-arm64,
                     binary_path: packages/coding-agent/binaries/omp-linux-musl-arm64,
                     native_targets: linux-musl-arm64,
                  }
                - {
-                    os: ubuntu-22.04,
                     platform: win32,
-                    arch: x64,
                     target_id: win32-x64,
                     binary_path: packages/coding-agent/binaries/omp-windows-x64.exe,
                     native_targets: win32-x64-baseline,
                  }
                # Addon cross-built by Bazel (clang-cl + xwin arm64 splat) in
-               # native_addons_cross, binary cross-compiled by bun; the
-               # release_smoke_win32_arm64 job runs it on real hardware.
+               # native_addons_cross.
                - {
-                    os: ubuntu-22.04,
                     platform: win32,
-                    arch: arm64,
                     target_id: win32-arm64,
                     binary_path: packages/coding-agent/binaries/omp-windows-arm64.exe,
                     native_targets: win32-arm64,
                  }
-      runs-on: ${{ matrix.os }}
+      runs-on: ubuntu-22.04
       permissions:
          contents: read
       steps:
@@ -883,29 +864,6 @@ jobs:
               APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
               APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
            run: bash scripts/ci-macos-sign.sh "${{ matrix.binary_path }}"
-         # macOS and Windows binaries are cross-built here; release_smoke_darwin
-         # and release_smoke_win32_arm64 run them on real hardware (win32-x64 is
-         # covered by the bun `--compile --target=bun-windows-x64-*` cross-compile
-         # alone). Musl binaries need the musl loader, which glibc runners lack —
-         # they are smoked in the Alpine container step below instead.
-         - name: Smoke release binary
-           if: matrix.platform == 'linux' && matrix.libc != 'musl'
-           run: |
-              runtime_dir="$(mktemp -d)"
-              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --version
-              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --smoke-test
-         - name: Smoke musl release binary on Alpine
-           if: matrix.libc == 'musl'
-           run: |
-              binary="$(realpath "${{ matrix.binary_path }}")"
-              # Bun's musl-target binaries link libstdc++/libgcc dynamically;
-              # Alpine users install them alongside the binary (same as bun itself).
-              docker run --rm -v "$binary:/usr/local/bin/omp:ro" alpine:3.22 sh -ec '
-                apk add --no-cache libstdc++ libgcc >/dev/null
-                runtime_dir="$(mktemp -d)"
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --version
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --smoke-test
-              '
          - name: Upload release binary artifact
            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
@@ -922,57 +880,68 @@ jobs:
               path: ~/.bun/install/cache
               key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
 
-   # The macOS binaries are cross-built, signed and notarized on Linux
-   # (release_binary); this runs both on real hardware before anything
-   # publishes: Apple's own signature check, then the launch under the final
-   # signature (hardened runtime and entitlements included when signed). One
-   # Apple silicon runner covers both: the x86_64 binary runs under Rosetta.
-   # It must be macos-15, not macos-14: only macOS 15's Rosetta translates the
-   # AVX2 the bun-darwin-x64 runtime uses (macOS 14: "CPU lacks AVX support",
-   # SIGILL on --smoke-test).
-   release_smoke_darwin:
-      name: "Smoke release binaries: darwin"
+   # Every release binary is cross-built on Linux (release_binary); this runs
+   # each one on its own platform before anything publishes: download the
+   # artifact, then `--version` and `--smoke-test` in a throwaway home. macOS
+   # legs first run Apple's own signature check, and launch under the final
+   # signature (hardened runtime and entitlements included when signed).
+   release_smoke:
+      name: "Smoke release binary: ${{ matrix.target_id }}"
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_binary.result == 'success' }}
       needs: [release_metadata, release_binary]
-      runs-on: macos-15
+      strategy:
+         fail-fast: false
+         matrix:
+            include:
+               - { os: ubuntu-22.04, target_id: linux-x64, binary: omp-linux-x64 }
+               - { os: ubuntu-24.04-arm, target_id: linux-arm64, binary: omp-linux-arm64 }
+               # musl binaries need the musl loader, which glibc runners lack:
+               # they run in an Alpine container of the runner's arch.
+               - { os: ubuntu-22.04, target_id: linux-musl-x64, binary: omp-linux-musl-x64, alpine: true }
+               - { os: ubuntu-24.04-arm, target_id: linux-musl-arm64, binary: omp-linux-musl-arm64, alpine: true }
+               - { os: macos-15-intel, target_id: darwin-x64, binary: omp-darwin-x64 }
+               - { os: macos-15, target_id: darwin-arm64, binary: omp-darwin-arm64 }
+               - { os: windows-2025, target_id: win32-x64, binary: omp-windows-x64.exe }
+               - { os: windows-11-arm, target_id: win32-arm64, binary: omp-windows-arm64.exe }
+      runs-on: ${{ matrix.os }}
       permissions:
          contents: read
       steps:
          - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
            with:
-              pattern: omp-binary-darwin-*
+              name: omp-binary-${{ matrix.target_id }}
               path: binaries
-              merge-multiple: true
-         - name: Smoke release binaries (macOS)
+         - name: Smoke release binary
+           if: runner.os != 'Windows' && !matrix.alpine
+           env:
+              BINARY: binaries/${{ matrix.binary }}
            run: |
               set -euo pipefail
-              for binary in binaries/omp-darwin-arm64 binaries/omp-darwin-x64; do
-                chmod +x "$binary"
-                codesign --verify --strict --verbose=2 "$binary"
+              chmod +x "$BINARY"
+              if [ "$RUNNER_OS" = macOS ]; then codesign --verify --strict --verbose=2 "$BINARY"; fi
+              runtime_dir="$(mktemp -d)"
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "$BINARY" --version
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "$BINARY" --smoke-test
+         - name: Smoke release binary (Alpine)
+           if: matrix.alpine
+           env:
+              BINARY: binaries/${{ matrix.binary }}
+           run: |
+              chmod +x "$BINARY"
+              # Bun's musl-target binaries link libstdc++/libgcc dynamically;
+              # Alpine users install them alongside the binary (same as bun itself).
+              docker run --rm -v "$(realpath "$BINARY"):/usr/local/bin/omp:ro" alpine:3.22 sh -ec '
+                apk add --no-cache libstdc++ libgcc >/dev/null
                 runtime_dir="$(mktemp -d)"
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "$binary" --version
-                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "$binary" --smoke-test
-              done
-
-   # win32-arm64 is cross-built on Linux (addon: Bazel msvc arm64 toolchain;
-   # binary: bun --compile); this runs it on real Windows ARM64 hardware
-   # before anything publishes. Replaces the ~13-20 min native cargo leg.
-   release_smoke_win32_arm64:
-      name: "Smoke release binary: win32-arm64"
-      if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
-         needs.release_binary.result == 'success' }}
-      needs: [release_metadata, release_binary]
-      runs-on: windows-11-arm
-      permissions:
-         contents: read
-      steps:
-         - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-           with:
-              name: omp-binary-win32-arm64
-              path: packages/coding-agent/binaries
+                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --version
+                HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" omp --smoke-test
+              '
          - name: Smoke release binary (Windows)
+           if: runner.os == 'Windows'
            shell: pwsh
+           env:
+              BINARY: binaries/${{ matrix.binary }}
            run: |
               $runtimeDir = Join-Path $env:RUNNER_TEMP "omp-smoke"
               $env:HOME = Join-Path $runtimeDir "home"
@@ -980,9 +949,9 @@ jobs:
               $env:LOCALAPPDATA = Join-Path $runtimeDir "local"
               $env:XDG_DATA_HOME = Join-Path $runtimeDir "xdg"
               New-Item -ItemType Directory -Force -Path $env:HOME, $env:LOCALAPPDATA, $env:XDG_DATA_HOME | Out-Null
-              & "packages/coding-agent/binaries/omp-windows-arm64.exe" --version
+              & $env:BINARY --version
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-              & "packages/coding-agent/binaries/omp-windows-arm64.exe" --smoke-test
+              & $env:BINARY --smoke-test
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
    # Publishes the six @oh-my-pi/pi-natives-<tag> leaf packages once
@@ -994,10 +963,9 @@ jobs:
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
-         needs.release_smoke_darwin.result == 'success' &&
-         needs.release_smoke_win32_arm64.result == 'success' &&
+         needs.release_smoke.result == 'success' &&
          !inputs.skip_npm }}
-      needs: [release_metadata, release_gate, release_binary, release_smoke_darwin, release_smoke_win32_arm64]
+      needs: [release_metadata, release_gate, release_binary, release_smoke]
       runs-on: ubuntu-22.04
       # id-token lets npm mint the OIDC token for trusted publishing; the
       # NODE_AUTH_TOKEN below is the fallback for unconfigured packages.
@@ -1083,9 +1051,8 @@ jobs:
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_gate.result == 'success' &&
          needs.release_binary.result == 'success' &&
-         needs.release_smoke_darwin.result == 'success' &&
-         needs.release_smoke_win32_arm64.result == 'success' }}
-      needs: [release_metadata, release_gate, release_binary, release_smoke_darwin, release_smoke_win32_arm64]
+         needs.release_smoke.result == 'success' }}
+      needs: [release_metadata, release_gate, release_binary, release_smoke]
       runs-on: ubuntu-22.04
       permissions:
          contents: write
@@ -1173,15 +1140,14 @@ jobs:
       name: Publish to npm
       if: ${{ needs.release_metadata.outputs.is-release == 'true' && !cancelled() &&
          needs.release_binary.result == 'success' &&
-         needs.release_smoke_darwin.result == 'success' &&
-         needs.release_smoke_win32_arm64.result == 'success' &&
+         needs.release_smoke.result == 'success' &&
          needs.release_github_verify.result == 'success' &&
          needs.release_native_leaves.result == 'success' &&
          !inputs.skip_npm }}
       # release_native_leaves must finish first: the core package lists the
       # leaf packages as lockstep-versioned optionalDependencies, so installs
       # resolve them the moment the core version is live.
-      needs: [release_metadata, release_binary, release_smoke_darwin, release_smoke_win32_arm64, release_github_verify, release_native_leaves]
+      needs: [release_metadata, release_binary, release_smoke, release_github_verify, release_native_leaves]
       runs-on: ubuntu-22.04
       # `id-token: write` lets npm mint the GitHub OIDC token it exchanges for a
       # short-lived publish token (trusted publishing + provenance). When a

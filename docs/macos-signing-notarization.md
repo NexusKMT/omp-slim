@@ -30,8 +30,8 @@ script signs with the Developer ID and notarizes; with none, it signs ad hoc
    - packages the binary in a ZIP and submits it with
      `rcodesign notary-submit --wait`, retrying a failed submission up to three
      times. Credential files are removed on exit.
-3. `release_smoke_darwin` runs both binaries on a `macos-15` runner (x86_64
-   under Rosetta) before anything publishes: `codesign --verify --strict`,
+3. `release_smoke` runs each binary on its own hardware (`macos-15-intel`,
+   `macos-15`) before anything publishes: `codesign --verify --strict`,
    then `--version` and `--smoke-test` under the final signature, which is the
    hardened-runtime launch check.
 4. `release_github_verify` re-downloads the published arm64 asset, runs
@@ -54,7 +54,7 @@ bridge, so the hardened runtime needs:
 | `com.apple.security.cs.disable-library-validation`       | omp extracts its native addon (`pi_natives.<triple>.node`) and other optional dylibs to a runtime cache and `dlopen()`s them. They do not share the main binary's Team ID, so without this the hardened runtime aborts with _"mapping process and mapped file have different Team IDs"_ — breaking effectively every command. |
 
 Without `disable-library-validation`, a signed+notarized binary signs and
-notarizes fine but **fails at first real use**. `release_smoke_darwin` runs
+notarizes fine but **fails at first real use**. `release_smoke` runs
 `--smoke-test` under the shipped signature specifically to catch this before
 anything publishes.
 

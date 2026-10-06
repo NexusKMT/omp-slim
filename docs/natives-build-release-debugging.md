@@ -51,9 +51,9 @@ Root `BUILD.bazel` instantiates one `native_addon` per Bazel-built `(platform, a
 
 Notes:
 
-- Windows ARM64 cross-builds from Linux like win32-x64 (msvc toolchain with an aarch64 xwin splat); `release_smoke_win32_arm64` runs the resulting binary on `windows-11-arm`. A Windows ARM64 dev host can still build `host` through Cargo/N-API.
+- Windows ARM64 cross-builds from Linux like win32-x64 (msvc toolchain with an aarch64 xwin splat); `release_smoke` runs the resulting binary on `windows-11-arm`. A Windows ARM64 dev host can still build `host` through Cargo/N-API.
 - musl addons **intentionally reuse** the plain `linux-<arch>` filenames — the loader never sees gnu and musl side by side; release jobs keep them in separate invocations/dest dirs (`scripts/bazel-natives.ts` hard-errors on a basename collision within one run).
-- Darwin addons cross-build from Linux too (`//bazel/toolchains/darwin`, below); mac hosts build them with the host Xcode toolchain instead. `release_smoke_darwin` runs the release binaries on a `macos-15` runner.
+- Darwin addons cross-build from Linux too (`//bazel/toolchains/darwin`, below); mac hosts build them with the host Xcode toolchain instead. `release_smoke` runs the release binaries on `macos-15-intel` and `macos-15`.
 - Aggregates: `//:natives-all` (every addon; linux hosts cross-build all of them) and `//:natives-darwin-all`.
 
 ### 2) `native_addon` rule (`bazel/defs.bzl`)
@@ -194,7 +194,7 @@ Single source of truth for cache wiring, emitted as a bazelrc fragment (its `rc`
 
 ### Release binary builds and publishing
 
-Binary builds are build-only and run in parallel with the test fan-out. `release_binary` builds every binary on Linux (bun cross-compiles darwin and win32) and needs only the two addon jobs, whose workflow artifacts supply its addons. The darwin legs then sign with `scripts/ci-macos-sign.sh` (rcodesign: Developer ID + notarization when the `APPLE_*` secrets exist, ad hoc otherwise; see `docs/macos-signing-notarization.md`). `release_smoke_darwin` runs both darwin binaries on `macos-15` (x86_64 under Rosetta, whose AVX2 support needs macOS 15) and `release_smoke_win32_arm64` runs the win32-arm64 binary on `windows-11-arm` before publishing.
+Binary builds are build-only and run in parallel with the test fan-out. `release_binary` builds every binary on one `ubuntu-22.04` image (bun cross-compiles every target) and needs only the two addon jobs, whose workflow artifacts supply its addons. The darwin legs then sign with `scripts/ci-macos-sign.sh` (rcodesign: Developer ID + notarization when the `APPLE_*` secrets exist, ad hoc otherwise; see `docs/macos-signing-notarization.md`). Before publishing, the `release_smoke` matrix downloads each binary on its own platform and runs `--version` and `--smoke-test`: `ubuntu-22.04` / `ubuntu-24.04-arm` for linux (musl inside an Alpine container), `macos-15-intel` / `macos-15` for darwin (after `codesign --verify --strict`), `windows-2025` / `windows-11-arm` for win32.
 
 ## Debugging playbook
 
