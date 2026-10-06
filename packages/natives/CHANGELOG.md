@@ -14,6 +14,7 @@
 - Sped up the embedded shell on command output that is not valid UTF-8: decoding is linear, so commands printing binary data no longer stall (1 MiB took 14 s), and captured output is decoded once ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up edit previews while edit arguments stream: diffs, fuzzy matching and hashline parsing no longer redo or copy all their work for every streamed chunk ([#14520](https://github.com/can1357/oh-my-pi/pull/14520) by [@H4vC](https://github.com/H4vC))
 - Sped up `fuzzyFind`: a cached scan is scored in place instead of being copied on every call ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Sped up applying multi-hunk patches and `astEdit` calls with many edits ([#14521](https://github.com/can1357/oh-my-pi/pull/14521) by [@H4vC](https://github.com/H4vC))
 - Sped up `countTokens` on long runs of one kind of character, such as whitespace or letters ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up flowchart and state diagram rendering in `renderMermaidAscii`; a 40-node flowchart renders about 14× faster, with identical output ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up `find -type`, `rm -r`, `mkdir -p`, `ls` and `stat`, especially on Windows ([#14523](https://github.com/can1357/oh-my-pi/pull/14523) by [@H4vC](https://github.com/H4vC))
@@ -30,6 +31,7 @@
 ### Fixed
 
 - Fixed `umask` in the embedded shell changing the host process's umask; the mask now belongs to the shell, applies to files created by redirections, builtins such as `touch`, `mkdir` and `cp`, and external commands, and a subshell's `umask` no longer leaks out ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Fixed diff hunk headers sometimes naming a different enclosing function than `git diff` does ([#14521](https://github.com/can1357/oh-my-pi/pull/14521) by [@H4vC](https://github.com/H4vC))
 - Fixed `enable exec` and `enable suspend` restoring builtins that replace or stop the host process ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Fixed `ls -t` and `ls -S` listing entries with equal times or sizes in arbitrary order, and `ls --group-directories-first` scrambling entries within each group; ties now sort by name as in GNU `ls` ([#14523](https://github.com/can1357/oh-my-pi/pull/14523) by [@H4vC](https://github.com/H4vC))
 - Fixed `rm -r` and `rm -d` on Windows failing on a directory that has the read-only attribute ([#14523](https://github.com/can1357/oh-my-pi/pull/14523) by [@H4vC](https://github.com/H4vC))
