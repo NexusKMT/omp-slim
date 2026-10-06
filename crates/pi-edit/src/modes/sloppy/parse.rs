@@ -106,11 +106,23 @@ impl RewriteBody {
 /// The grammar allows one operator per `*** Find`; a second one can only
 /// discard the staged body, so refuse the payload instead of silently
 /// dropping it.
+///
+/// The lead phrase is shared with [`is_conflicting_operators_error`] so region
+/// extraction can recognize a payload the edit pipeline must report. The full
+/// message stays byte-identical: models are trained on these strings.
+const CONFLICTING_OPERATORS_LEAD: &str = "*** Find is followed by both";
 fn conflicting_operators(staged: &str, incoming: &str) -> EditError {
 	parse_error(format!(
-		"*** Find is followed by both {staged} and {incoming}. Use exactly one of *** Replace, *** \
+		"{CONFLICTING_OPERATORS_LEAD} {staged} and {incoming}. Use exactly one of *** Replace, *** \
 		 Insert Before, or *** Insert After per *** Find."
 	))
+}
+
+/// Whether this rejection is the conflicting-operators signal. Region
+/// extraction preserves such payloads so the pipeline reports the parser
+/// error instead of completing the turn with no tool call.
+fn is_conflicting_operators_error(error: &EditError) -> bool {
+	matches!(error, EditError::Parse { message, .. } if message.starts_with(CONFLICTING_OPERATORS_LEAD))
 }
 
 /// Internal op-stream prefix carrying a JSON-encoded insertion body.
@@ -466,8 +478,14 @@ pub fn extract_inline_sloppy_regions(text: &str) -> Vec<InlineSloppyRegion> {
 			scan += 1;
 		}
 		let payload = lines[index..=last].join("\n");
-		// A payload the sloppy parser rejects is not an inline sloppy region.
-		if split_sloppy_sections(&payload).is_ok_and(|sections| !sections.is_empty()) {
+		// A payload the sloppy parser rejects is not an inline sloppy region —
+		// except a conflicting-operators payload, which the edit pipeline must
+		// report rather than silently skip.
+		let recognized = match split_sloppy_sections(&payload) {
+			Ok(sections) => !sections.is_empty(),
+			Err(error) => is_conflicting_operators_error(&error),
+		};
+		if recognized {
 			regions.push(InlineSloppyRegion { start: starts[index], end: line_end(last), payload });
 		}
 		index = scan.max(last + 1);

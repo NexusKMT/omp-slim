@@ -239,6 +239,18 @@ fn a_second_operator_on_one_find_is_rejected_instead_of_discarding_the_staged_bo
 }
 
 #[test]
+fn conflicting_operators_payload_is_still_an_inline_region_for_the_pipeline_to_report() {
+	let payload = concat!(
+		"*** Edit File: src/a.ts\n*** Find\nold\n*** Insert Before\nstaged\n",
+		"*** Replace\nnew\n",
+	);
+	let text = format!("Before.\n{payload}*** End Patch\nAfter.");
+	let regions = extract_inline_sloppy_regions(&text);
+	assert_eq!(regions.len(), 1);
+	assert_eq!(regions[0].payload, payload.trim_end_matches('\n'));
+}
+
+#[test]
 fn optional_patch_envelope_is_silent_during_normalization() {
 	let input = "\n```text\n*** Begin Patch\n*** Edit File:\n*** Find\nold\n*** Replace\nnew\n*** \
 	             End Patch\n```";
