@@ -14,6 +14,7 @@
 - Fixed plan review in Tern still using ↑/↓ to move between its horizontally laid-out options; ←/→ now select options and Shift+←/→ step the model slider ([#14607](https://github.com/can1357/oh-my-pi/pull/14607) by [@H4vC](https://github.com/H4vC))
 - Fixed the Ask dialog footer showing the question-switch keys without a label; they now read `⇥/←/→ question` ([#14269](https://github.com/can1357/oh-my-pi/issues/14269), [#14590](https://github.com/can1357/oh-my-pi/pull/14590) by [@tahakotil](https://github.com/tahakotil))
 - `/agents` New agent no longer fails with a JSON parse error when the generated system prompt contains a markdown code fence ([#12255](https://github.com/can1357/oh-my-pi/issues/12255), [#14589](https://github.com/can1357/oh-my-pi/pull/14589) by [@tahakotil](https://github.com/tahakotil))
+- Fixed a `glob` result that ended in a timeout being shown as merely "truncated" in the transcript, which read like a result-limit cut; partial listings from a timed-out scan are now labelled "timed out" ([#6370](https://github.com/can1357/oh-my-pi/issues/6370), [#14426](https://github.com/can1357/oh-my-pi/pull/14426) by [@F0Rextasy](https://github.com/F0Rextasy))
 
 ## [18.6.3] - 2026-10-06
 
