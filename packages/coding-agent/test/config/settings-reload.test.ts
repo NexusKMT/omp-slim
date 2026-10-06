@@ -124,6 +124,46 @@ describe("Settings layer refresh", () => {
 		}
 	});
 
+	// Root ignores directory permissions and Windows ignores POSIX modes, so the save could not fail.
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+		"reloads over a save that fails, keeping the unsaved change live until a later save lands",
+		async () => {
+			// config.yml is a symlink into a read-only directory (e.g. a Nix store file).
+			const storeDir = tempDir.join("store");
+			const storeConfig = path.join(storeDir, "config.yml");
+			fs.mkdirSync(storeDir);
+			fs.writeFileSync(storeConfig, YAML.stringify({ temperature: 0.1, modelRoles: { default: "openai/base" } }));
+			fs.symlinkSync(storeConfig, configPath());
+			fs.chmodSync(storeDir, 0o555);
+			const settings = await Settings.init({ cwd: startProject, agentDir });
+			try {
+				cfgTemperature.set(settings, 0.5);
+				settings.setModelRole("default", "openai/session");
+				settings.setProjectModelRole("slow", "openai/project");
+				await expect(settings.flush()).rejects.toThrow();
+
+				// Every later reload (task preflight) must still succeed with the in-memory values.
+				await settings.reloadFromDisk();
+				await settings.reloadFromDisk();
+				expect(cfgTemperature.get(settings)).toBe(0.5);
+				expect(settings.getModelRole("default")).toBe("openai/session");
+				expect(settings.getProjectModelRole("slow")).toBe("openai/project");
+
+				fs.chmodSync(storeDir, 0o755);
+				await settings.reloadFromDisk();
+				expect(YAML.parse(await Bun.file(storeConfig).text())).toEqual({
+					temperature: 0.5,
+					modelRoles: { default: "openai/session" },
+				});
+				expect(cfgTemperature.get(settings)).toBe(0.5);
+				expect(settings.getModelRole("default")).toBe("openai/session");
+				expect(settings.getProjectModelRole("slow")).toBe("openai/project");
+			} finally {
+				fs.chmodSync(storeDir, 0o755);
+			}
+		},
+	);
+
 	it("notifies listeners when a reload only reorders a precedence-sensitive record", async () => {
 		await writeConfig({ edit: { modelVariants: { claude: "patch", sonnet: "replace" } } });
 		const settings = await Settings.init({ cwd: startProject, agentDir });
