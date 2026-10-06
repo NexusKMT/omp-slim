@@ -2358,10 +2358,15 @@ mod follow {
 				if observer.watcher_rx.is_none() {
 					// No kernel watcher observes these operands: inspect them
 					// through the provider, sleeping only after an idle pass.
-					if !observer.poll_provider(settings)?
-						&& !sleep_interval(&observer.cancel, settings.sleep_sec)
-					{
-						break;
+					if !observer.poll_provider(settings)? {
+						// Stop once the reader of our stdout pipe has gone away.
+						#[cfg(unix)]
+						if stdout_reader_gone(stdout) {
+							return Ok(());
+						}
+						if !sleep_interval(&observer.cancel, settings.sleep_sec) {
+							break;
+						}
 					}
 					continue;
 				}
