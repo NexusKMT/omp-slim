@@ -1201,7 +1201,10 @@ async function resolveObservedElement(observed: ObservedElement): Promise<Elemen
 		const resolved = await node.evaluateHandle(value => {
 			const candidate = value as unknown as { nodeType: number; parentElement: Element | null };
 			const element = (candidate.nodeType === 3 ? candidate.parentElement : value) as unknown as Element | null;
-			return element?.isConnected && (element.ownerDocument as unknown) === document ? element : null;
+			if (!element?.isConnected) return null;
+			// The document itself (the root `includeAll` lists) has no owner document.
+			const owner: unknown = candidate.nodeType === 9 ? value : element.ownerDocument;
+			return owner === document ? element : null;
 		});
 		const element = resolved.asElement();
 		// The frame may have committed another document while the node resolved.

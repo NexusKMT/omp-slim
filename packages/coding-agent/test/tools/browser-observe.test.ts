@@ -162,4 +162,23 @@ describe("browser observe", () => {
 		},
 		45_000,
 	);
+
+	it.skipIf(!CHROMIUM_AVAILABLE)(
+		"resolves the document root listed by includeAll without dropping the other ids",
+		async () => {
+			const result = await runOnPage(
+				PAGE,
+				`
+					const observation = await tab.observe({ includeAll: true });
+					const root = observation.elements[0];
+					const nodeType = await (await tab.id(root.id)).evaluate(node => node.nodeType);
+					const button = observation.elements.find(entry => entry.role === "button" && entry.name === "Item 7");
+					await (await tab.id(button.id)).click();
+					return { role: root.role, nodeType, title: await tab.title() };
+				`,
+			);
+			expect(result).toEqual({ role: "RootWebArea", nodeType: 9, title: "clicked 7" });
+		},
+		45_000,
+	);
 });
