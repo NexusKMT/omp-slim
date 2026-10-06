@@ -32,8 +32,9 @@ if (process.argv[2] === "child") {
 		if (done) break;
 		output += decoder.decode(value);
 	}
-	// Exit normally (not SIGKILL) when the child died before arming, so the
-	// test can tell a broken fixture from a reaped orphan.
-	if (!output.includes("armed")) process.exit(1);
+	// Exit with a distinct code (not SIGKILL, and not Windows' TerminateProcess
+	// code 1) when the child died before arming, so the test can tell a broken
+	// fixture from a reaped orphan.
+	if (!output.includes("armed")) process.exit(2);
 	process.kill(process.pid, "SIGKILL");
 }

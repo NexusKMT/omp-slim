@@ -13,7 +13,10 @@ describe("startParentWatchdog", () => {
 		const middle = Bun.spawn([process.execPath, FIXTURE], { stdout: "pipe", stderr: "inherit" });
 		const childPid = Number.parseInt((await new Response(middle.stdout).text()).trim(), 10);
 		await middle.exited;
-		expect(middle.signalCode).toBe("SIGKILL");
+		// The middle hard-killed itself after the child armed: a signal on POSIX,
+		// TerminateProcess exit code 1 on Windows (the never-armed path exits 2).
+		if (process.platform === "win32") expect(middle.exitCode).toBe(1);
+		else expect(middle.signalCode).toBe("SIGKILL");
 
 		const child = Process.fromPid(childPid);
 		if (!child) return; // Already gone: the watchdog won the race.
