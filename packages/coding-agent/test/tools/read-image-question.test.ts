@@ -238,11 +238,16 @@ describe("read image questions", () => {
 		expect(options?.reasoning).toBe("high");
 	});
 
-	it("selects unqualified literal :max and :auto vision model ids without inventing effort", async () => {
-		for (const id of ["a:max", "a:auto"]) {
+	it("selects case-insensitive unqualified literal vision ids without inventing effort", async () => {
+		for (const [id, selector] of [
+			["a:max", "a:max"],
+			["a:auto", "a:auto"],
+			["a:max", "A:max"],
+			["a:auto", "A:auto"],
+		]) {
 			const literalVisionModel = { ...reasoningVisionModel, id };
 			const settings = Settings.isolated();
-			settings.setModelRole("vision", id);
+			settings.setModelRole("vision", selector);
 			const stub = createCompleteSimpleSuccessStub("Red");
 			const session = createSession(testDir, literalVisionModel, "test-key", settings, {
 				configureVisionRole: false,

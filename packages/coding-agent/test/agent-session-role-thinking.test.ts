@@ -217,18 +217,27 @@ describe("AgentSession role model thinking behavior", () => {
 		expect(sessionSettings.getModelRole("default")).toBe(`${slowModel.provider}/${slowModel.id}:off`);
 	});
 
-	it("does not reinterpret an unqualified literal :max when reassigning a role", async () => {
+	it.each([
+		{ selector: "a:max", id: "a:max", available: true },
+		{ selector: "a:max", id: "a:max", available: false },
+		{ selector: "A:max", id: "a:max", available: true },
+		{ selector: "A:auto", id: "a:auto", available: false },
+	])("does not inherit literal effort from $selector (available=$available)", async ({ selector, id, available }) => {
 		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
 		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
-		const literalModel = { ...defaultModel, id: "a:max" };
+		const literalModel = { ...defaultModel, id };
 
 		await createSession({
 			initialModelId: defaultModel.id,
 			initialThinkingLevel: Effort.High,
-			modelRoles: { default: "a:max" },
+			modelRoles: { default: selector },
 		});
-		const availableModels = modelRegistry.getAvailable();
-		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([...availableModels, literalModel]);
+		const allModels = modelRegistry.getAll("all");
+		vi.spyOn(modelRegistry, "getAll").mockReturnValue([...allModels, literalModel]);
+		if (available) {
+			const availableModels = modelRegistry.getAvailable();
+			vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([...availableModels, literalModel]);
+		}
 
 		await session.setModel(nextModel, "default", { persist: true });
 
