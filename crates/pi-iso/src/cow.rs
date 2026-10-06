@@ -61,7 +61,10 @@ pub fn clone_file(src: &Path, dst: &Path) -> io::Result<()> {
 	#[cfg(unix)]
 	check_same_device(src, dst, existing.as_ref())?;
 	match existing {
-		None => clone_new(src, dst),
+		None => {
+			clone_new(src, dst)?;
+			Ok(())
+		},
 		// Swap the file a symlinked `dst` names, as an in-place copy writes it.
 		Some(metadata) => clone_over(src, &fs::canonicalize(dst)?, &metadata),
 	}
@@ -182,20 +185,27 @@ fn clone_new(src: &Path, dst: &Path) -> io::Result<()> {
 	clonefile(src, dst, 0)
 }
 
-/// Creates `dst` as a clone of `src`, removing it again on failure.
+/// Creates the missing `dst` as a clone of `src`, removing it again on
+/// failure.
+///
+/// Returns `src` and `dst` still open, so the tree-cloning backends, which
+/// clone into fresh directories, read the source's metadata and apply it to
+/// the clone through the handles rather than by path, and skip
+/// [`clone_file`]'s existence probe and device check: a clone across devices
+/// fails with an [`is_unsupported`] error anyway.
 #[cfg(any(target_os = "linux", target_os = "android", windows))]
-fn clone_new(src: &Path, dst: &Path) -> io::Result<()> {
+pub(crate) fn clone_new(src: &Path, dst: &Path) -> io::Result<(File, File)> {
 	let src = File::open(src)?;
 	let dst_file = fs::OpenOptions::new()
 		.write(true)
 		.create_new(true)
 		.open(dst)?;
-	let cloned = imp::clone_into(&src, &dst_file);
-	if cloned.is_err() {
+	if let Err(err) = imp::clone_into(&src, &dst_file) {
 		drop(dst_file);
 		let _ = fs::remove_file(dst);
+		return Err(err);
 	}
-	cloned
+	Ok((src, dst_file))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", windows)))]
