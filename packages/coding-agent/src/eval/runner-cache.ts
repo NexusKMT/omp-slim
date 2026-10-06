@@ -38,7 +38,10 @@ const stagedPaths = new Map<string, string>();
  */
 export async function stageRunnerScript(dirName: string, ext: string, script: string): Promise<string> {
 	const memoized = stagedPaths.get(dirName);
-	if (memoized && fs.existsSync(memoized)) return memoized;
+	if (memoized) {
+		if (isReusableStagedPath(memoized)) return memoized;
+		stagedPaths.delete(dirName);
+	}
 	const dir = await resolveStagingDir(dirName);
 	const hash = Bun.hash(script).toString(36);
 	const target = path.join(dir, `runner-${hash}.${ext}`);
@@ -47,6 +50,27 @@ export async function stageRunnerScript(dirName: string, ext: string, script: st
 	}
 	stagedPaths.set(dirName, target);
 	return target;
+}
+
+/**
+ * Whether a memoized runner path is still safe to reuse. On POSIX the parent
+ * dir is re-checked with the owner guard: after a tmp sweep another account
+ * can recreate the predictable per-uid dir and plant the hashed runner name.
+ */
+function isReusableStagedPath(target: string): boolean {
+	if (process.getuid) {
+		const dir = path.dirname(target);
+		try {
+			assertOwnerPrivateDir(dir, "Runner staging directory");
+		} catch (err) {
+			// ENOENT is the ordinary sweep case; anything else is a rejected dir.
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+				logger.warn("Memoized runner staging dir rejected; re-staging", { dir, error: String(err) });
+			}
+			return false;
+		}
+	}
+	return fs.existsSync(target);
 }
 
 async function resolveStagingDir(dirName: string): Promise<string> {

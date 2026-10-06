@@ -104,6 +104,27 @@ describe("stageRunnerScript re-validation", () => {
 		expect(fs.statSync(path.dirname(staged)).mode & 0o777).toBe(0o700);
 	});
 
+	// The warm memo path must re-check the dir too: after a tmp sweep another
+	// account can recreate the per-uid name and plant the hashed runner there.
+	it.skipIf(process.getuid?.() === undefined)("re-validates the staging dir before reusing the memo", async () => {
+		const dirName = uniqueDir();
+		const script = "print('ours')\n";
+		const first = await stageRunnerScript(dirName, "py", script);
+
+		fs.rmSync(stagingDir(dirName), { recursive: true, force: true });
+		const decoy = path.join(os.tmpdir(), `${dirName}-decoy`);
+		fs.mkdirSync(decoy, { mode: 0o777 });
+		fs.writeFileSync(path.join(decoy, path.basename(first)), "print('planted')\n");
+		fs.symlinkSync(decoy, stagingDir(dirName));
+		expect(fs.existsSync(first)).toBe(true);
+
+		const second = await stageRunnerScript(dirName, "py", script);
+
+		expect(second).not.toBe(first);
+		expect(await Bun.file(second).text()).toBe(script);
+		expect(fs.statSync(path.dirname(second)).mode & 0o777).toBe(0o700);
+	});
+
 	// A non-directory squatting the per-uid name must not block staging.
 	it.skipIf(process.getuid?.() === undefined)("stages when the per-uid name is a squatted file", async () => {
 		const dirName = uniqueDir();
