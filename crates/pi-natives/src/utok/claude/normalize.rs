@@ -673,34 +673,6 @@ fn case_form(span: &str, allcaps_min: Option<usize>, head_mark: bool) -> CaseFor
 	CaseForm::Literal
 }
 
-fn emit_case_body(span: &str, form: &CaseForm, out: &mut Vec<u8>) {
-	match form {
-		CaseForm::Literal => out.extend_from_slice(span.as_bytes()),
-		// Per-char lowering never applies Final_Sigma, so Σ lowers to σ
-		// everywhere — exactly the oracle's ⟨caps⟩ body spelling.
-		CaseForm::Shift | CaseForm::Caps => {
-			if span.is_ascii() {
-				out.extend(span.bytes().map(|b| b.to_ascii_lowercase()));
-			} else {
-				for c in span.chars() {
-					push_lower(c, out);
-				}
-			}
-		},
-		CaseForm::ShiftKeepDotted => {
-			let mut chars = span.chars();
-			push_lower(chars.next().expect("run bodies are non-empty"), out);
-			for c in chars {
-				if c == 'İ' {
-					push_char(c, out);
-				} else {
-					push_lower(c, out);
-				}
-			}
-		},
-	}
-}
-
 /// Whether run `r` is a lone `'` that opens the word after it (`a 'b`,
 /// `'First`, `x 'REXX`). Only a punct run that is exactly `'` qualifies.
 fn opens_word(s: &str, r: &Run, next: Option<&Run>) -> bool {
@@ -836,6 +808,41 @@ impl<F: FnMut(&[u8])> Stream<F> {
 		self.out.extend_from_slice(&body[k..]);
 	}
 
+	/// Append a word body in its case form. A lowered body is written
+	/// `CHUNK` source bytes at a time with a flush between, so a long word
+	/// never sits whole in `out` any more than a long literal run does.
+	fn case_body(&mut self, span: &str, form: &CaseForm) {
+		// `case_form` never opens a `ShiftKeepDotted` span with İ, so keeping
+		// every İ is keeping all but the first character's: no piece needs to
+		// know whether it holds the span's head.
+		let keep_dotted = match form {
+			CaseForm::Literal => return self.text(span.as_bytes()),
+			CaseForm::Shift | CaseForm::Caps => false,
+			CaseForm::ShiftKeepDotted => true,
+		};
+		let mut rest = span;
+		while !rest.is_empty() {
+			let (piece, tail) = rest.split_at(rest.floor_char_boundary(Self::CHUNK));
+			if piece.is_ascii() {
+				self
+					.out
+					.extend(piece.bytes().map(|b| b.to_ascii_lowercase()));
+			} else {
+				// Per-char lowering never applies Final_Sigma, so Σ lowers to
+				// σ everywhere — exactly the oracle's ⟨caps⟩ body spelling.
+				for c in piece.chars() {
+					if keep_dotted && c == 'İ' {
+						push_char(c, &mut self.out);
+					} else {
+						push_lower(c, &mut self.out);
+					}
+				}
+			}
+			self.settle();
+			rest = tail;
+		}
+	}
+
 	/// Flush all but the rewritable tail once the buffer is large.
 	fn settle(&mut self) {
 		if self.out.len() > Self::CHUNK {
@@ -939,7 +946,7 @@ pub fn stream_norm(norm: &str, p: &FrameParams, raw_head_space: bool, sink: impl
 				if !(fused || contraction_seam(s, r, prev.as_ref(), prev2.as_ref())) {
 					stream.push_bow();
 				}
-				emit_case_body(body, &form, &mut stream.out);
+				stream.case_body(body, &form);
 				stream.out.push(EOW);
 			},
 			Class::StrayMark => {
