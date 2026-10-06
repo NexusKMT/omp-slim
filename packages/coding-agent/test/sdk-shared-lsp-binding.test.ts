@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { Api, Model, ModelSpec } from "@oh-my-pi/pi-ai";
+import type { Api, ModelSpec } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { resetCapabilityForTests } from "@oh-my-pi/pi-coding-agent/capability";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -13,7 +13,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
-const model = buildModel({
+const modelSpec: ModelSpec<Api> = {
 	id: "shared-lsp-binding",
 	name: "Shared LSP binding",
 	api: "test-shared-lsp-binding",
@@ -24,7 +24,8 @@ const model = buildModel({
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	contextWindow: 32_768,
 	maxTokens: 1024,
-} as ModelSpec<Api>) as Model<Api>;
+};
+const model = buildModel(modelSpec);
 
 // The shared-LSP flag is process-global and read on every client cold start;
 // subagent and helper sessions must not switch it off for the parent.
