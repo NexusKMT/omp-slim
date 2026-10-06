@@ -19,6 +19,7 @@
 - Fixed long conversations silently losing screenshots and other images the model was still meant to see: images the assistant itself generated no longer counted against the provider's per-request image cap, which had made the clamp evict real user and tool-result images to make room for them ([#14390](https://github.com/can1357/oh-my-pi/pull/14390) by [@F0Rextasy](https://github.com/F0Rextasy)).
 - Fixed the `local://` fallback root escaping to the temp directory or the shared `omp-local` directory when a session id is `.` or `..` ([#14385](https://github.com/can1357/oh-my-pi/pull/14385) by [@jaredlyon](https://github.com/jaredlyon))
 - Fixed `omp gc --archive --apply` leaving one orphan `session_titles` row per archived session behind in `history.db` ([#13930](https://github.com/can1357/oh-my-pi/issues/13930), [#14358](https://github.com/can1357/oh-my-pi/pull/14358) by [@F0Rextasy](https://github.com/F0Rextasy))
+- Fixed `/retry` reporting "Nothing to retry" after a process exit interrupted a reopened `ask` picker when an extension registered a `context` handler ([#14188](https://github.com/can1357/oh-my-pi/pull/14188) by [@schickling-assistant](https://github.com/schickling-assistant)).
 
 ## [18.6.3] - 2026-10-06
 
