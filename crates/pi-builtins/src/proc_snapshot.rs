@@ -920,13 +920,20 @@ pub mod sys {
 		ffi::c_void,
 		mem::size_of,
 		os::windows::io::{AsRawHandle, HandleOrInvalid, HandleOrNull, OwnedHandle, RawHandle},
+		sync::Arc,
 	};
 
+	/// Process access right needed by [`terminate`].
 	pub const PROCESS_TERMINATE: u32 = 0x0001;
+	/// Process access right for [`process_times`], [`image_path`],
+	/// [`parent_pid`] and [`command_line`].
 	pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+	/// Access right to wait on a process handle ([`has_exited`], [`exited`]).
 	pub const SYNCHRONIZE: u32 = 0x0010_0000;
 	const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
 	const WAIT_OBJECT_0: u32 = 0;
+	const INFINITE: u32 = u32::MAX;
+	const WT_EXECUTEONLYONCE: u32 = 0x0000_0008;
 	const PROCESS_BASIC_INFORMATION: u32 = 0;
 	const PROCESS_COMMAND_LINE_INFORMATION: u32 = 60;
 
@@ -1000,6 +1007,15 @@ pub mod sys {
 		fn OpenProcess(access: u32, inherit: i32, pid: u32) -> RawHandle;
 		fn TerminateProcess(handle: RawHandle, exit_code: u32) -> i32;
 		fn WaitForSingleObject(handle: RawHandle, milliseconds: u32) -> u32;
+		fn RegisterWaitForSingleObject(
+			wait: *mut RawHandle,
+			object: RawHandle,
+			callback: unsafe extern "system" fn(context: *mut c_void, timed_out: u8),
+			context: *const c_void,
+			milliseconds: u32,
+			flags: u32,
+		) -> i32;
+		fn UnregisterWaitEx(wait: RawHandle, completion_event: RawHandle) -> i32;
 		fn GetProcessTimes(
 			handle: RawHandle,
 			creation: *mut FileTime,
@@ -1119,6 +1135,77 @@ pub mod sys {
 	pub fn terminate(process: &OwnedHandle) -> bool {
 		// SAFETY: the handle is open; the exit code is passed by value.
 		unsafe { TerminateProcess(process.as_raw_handle(), 1) != 0 }
+	}
+
+	/// Resolves once `process` exits; needs `SYNCHRONIZE` access.
+	///
+	/// A registered thread-pool wait wakes the task, so no thread is parked
+	/// per waiter: a blocking wait would hold one of the runtime's few
+	/// blocking-pool threads for as long as the process lives. Dropping the
+	/// future unregisters the wait.
+	pub async fn exited(process: Arc<OwnedHandle>) -> std::io::Result<()> {
+		let wait = ExitWait::register(process)?;
+		wait.notify.notified().await;
+		Ok(())
+	}
+
+	/// A registered thread-pool wait that wakes `notify` when `process` is
+	/// signalled. Dropping it unregisters the wait before releasing the
+	/// reference the callback holds; `process` stays open until then.
+	struct ExitWait {
+		/// The wait handle as an integer, so the awaiting future stays `Send`.
+		wait:    isize,
+		notify:  Arc<tokio::sync::Notify>,
+		process: Arc<OwnedHandle>,
+	}
+
+	impl ExitWait {
+		fn register(process: Arc<OwnedHandle>) -> std::io::Result<Self> {
+			let notify = Arc::new(tokio::sync::Notify::new());
+			let context = Arc::into_raw(Arc::clone(&notify));
+			let mut wait: RawHandle = std::ptr::null_mut();
+			// SAFETY: `process` is a live handle the returned `ExitWait` keeps
+			// open for as long as the wait is registered; `context` is a counted
+			// `Notify` reference the callback borrows until `Drop` unregisters it.
+			let registered = unsafe {
+				RegisterWaitForSingleObject(
+					&raw mut wait,
+					process.as_raw_handle(),
+					Self::signalled,
+					context.cast(),
+					INFINITE,
+					WT_EXECUTEONLYONCE,
+				)
+			};
+			if registered == 0 {
+				let err = std::io::Error::last_os_error();
+				// SAFETY: registration failed, so the callback never receives
+				// `context`; this releases the reference made for it.
+				drop(unsafe { Arc::from_raw(context) });
+				return Err(err);
+			}
+			Ok(Self { wait: wait as isize, notify, process })
+		}
+
+		unsafe extern "system" fn signalled(context: *mut c_void, _timed_out: u8) {
+			// SAFETY: `context` is the `Notify` reference `register` handed over;
+			// it stays alive until `Drop` has unregistered this callback.
+			unsafe { &*context.cast::<tokio::sync::Notify>() }.notify_one();
+		}
+	}
+
+	impl Drop for ExitWait {
+		fn drop(&mut self) {
+			// `INVALID_HANDLE_VALUE`: block until a running callback returns.
+			let wait_for_callbacks = -1isize as RawHandle;
+			// SAFETY: `self.wait` is the registered wait. Blocking on a running
+			// callback is brief (it only stores a permit), after which no
+			// callback can start.
+			let _ = unsafe { UnregisterWaitEx(self.wait as RawHandle, wait_for_callbacks) };
+			// SAFETY: the callback can no longer run, so the reference created
+			// for it in `register` is released exactly once.
+			drop(unsafe { Arc::from_raw(Arc::as_ptr(&self.notify)) });
+		}
 	}
 
 	/// The parent pid recorded at creation (see [`ProcessEntry::ppid`]).
@@ -1450,6 +1537,12 @@ mod proc_snapshot {
 			} else {
 				ProcessStatus::Running
 			}
+		}
+
+		/// Resolves once this process exits. Waits on the handle the snapshot
+		/// opened, so a process that later reuses the pid cannot stand in for it.
+		pub async fn exited(&self) -> std::io::Result<()> {
+			sys::exited(Arc::clone(&self.handle)).await
 		}
 
 		pub fn signal(&self, signal: i32, _queue: Option<i32>) -> bool {

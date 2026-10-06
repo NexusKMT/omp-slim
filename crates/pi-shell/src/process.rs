@@ -482,85 +482,18 @@ mod platform {
 mod platform {
 	use std::{
 		collections::{HashMap, HashSet},
-		ffi::{OsStr, c_void},
-		os::windows::{
-			ffi::OsStrExt,
-			io::{AsRawHandle, OwnedHandle},
-		},
+		ffi::OsStr,
+		os::windows::{ffi::OsStrExt, io::OwnedHandle},
 		sync::Arc,
 	};
 
 	use pi_builtins::proc_sys as sys;
 	use smallvec::SmallVec;
-	use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 
 	use super::ProcessStatus;
 
 	const PROCESS_REFERENCE_ACCESS: u32 =
 		sys::PROCESS_TERMINATE | sys::PROCESS_QUERY_LIMITED_INFORMATION | sys::SYNCHRONIZE;
-
-	/// A registered thread-pool wait that wakes `notify` when a process handle
-	/// is signalled. Dropping it unregisters the wait before releasing the
-	/// reference the callback holds.
-	struct ExitWait {
-		wait:   isize,
-		notify: Arc<tokio::sync::Notify>,
-	}
-
-	impl ExitWait {
-		/// Registers the wait. `process` must stay open while the `ExitWait`
-		/// lives.
-		fn register(process: HANDLE) -> std::io::Result<Self> {
-			use windows_sys::Win32::System::Threading::{
-				INFINITE, RegisterWaitForSingleObject, WT_EXECUTEONLYONCE,
-			};
-
-			let notify = Arc::new(tokio::sync::Notify::new());
-			let context = Arc::into_raw(Arc::clone(&notify));
-			let mut wait: HANDLE = std::ptr::null_mut();
-			// SAFETY: `process` is a live handle with `SYNCHRONIZE` access that
-			// outlives the wait; `context` is a counted `Notify` reference the
-			// callback borrows until `Drop` unregisters the wait.
-			let registered = unsafe {
-				RegisterWaitForSingleObject(
-					&raw mut wait,
-					process,
-					Some(Self::signalled),
-					context.cast(),
-					INFINITE,
-					WT_EXECUTEONLYONCE,
-				)
-			};
-			if registered == 0 {
-				let err = std::io::Error::last_os_error();
-				// SAFETY: registration failed, so the callback never receives
-				// `context`; this releases the reference made for it.
-				drop(unsafe { Arc::from_raw(context) });
-				return Err(err);
-			}
-			Ok(Self { wait: wait as isize, notify })
-		}
-
-		unsafe extern "system" fn signalled(context: *mut c_void, _timed_out: bool) {
-			// SAFETY: `context` is the `Notify` reference `register` handed over;
-			// it stays alive until `Drop` has unregistered this callback.
-			unsafe { &*context.cast::<tokio::sync::Notify>() }.notify_one();
-		}
-	}
-
-	impl Drop for ExitWait {
-		fn drop(&mut self) {
-			use windows_sys::Win32::System::Threading::UnregisterWaitEx;
-
-			// SAFETY: `self.wait` is the registered wait. `INVALID_HANDLE_VALUE`
-			// blocks until a running callback returns (it only stores a
-			// permit), after which no callback can start.
-			let _ = unsafe { UnregisterWaitEx(self.wait as HANDLE, INVALID_HANDLE_VALUE) };
-			// SAFETY: the callback can no longer run, so the reference created
-			// for it in `register` is released exactly once.
-			drop(unsafe { Arc::from_raw(Arc::as_ptr(&self.notify)) });
-		}
-	}
 
 	#[derive(Clone)]
 	/// Stable Windows process reference backed by an owned process handle plus
@@ -691,9 +624,7 @@ mod platform {
 		/// Resolves once the process exits, through a thread-pool wait on the
 		/// process handle, so no thread is parked per waiter.
 		pub async fn exited(&self) -> std::io::Result<()> {
-			let wait = ExitWait::register(self.handle.as_raw_handle())?;
-			wait.notify.notified().await;
-			Ok(())
+			sys::exited(Arc::clone(&self.handle)).await
 		}
 	}
 

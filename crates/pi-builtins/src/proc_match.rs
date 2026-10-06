@@ -317,117 +317,19 @@ async fn wait_for_watchable_exits(
 	polled
 }
 
-/// Waits on a SYNCHRONIZE handle per process and returns the processes that
-/// need polling.
+/// Waits on each process's snapshot handle and returns the processes whose
+/// wait could not be registered, which need polling.
 #[cfg(windows)]
 async fn wait_for_watchable_exits(
 	processes: &[proc_snapshot::ProcInfo],
 ) -> Vec<&proc_snapshot::ProcInfo> {
-	use std::{
-		os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
-		sync::Arc,
-	};
-
-	use proc_snapshot::sys;
-
-	const INFINITE: u32 = u32::MAX;
-	const WAIT_OBJECT_0: u32 = 0;
-	// WaitForMultipleObjects accepts at most 64 handles; one slot per call is
-	// the cancel event.
-	const MAXIMUM_WAIT_OBJECTS: usize = 64;
-
-	#[link(name = "kernel32")]
-	unsafe extern "system" {
-		fn CreateEventW(
-			attributes: *const std::ffi::c_void,
-			manual_reset: i32,
-			initial_state: i32,
-			name: *const u16,
-		) -> RawHandle;
-		fn SetEvent(event: RawHandle) -> i32;
-		fn WaitForMultipleObjects(
-			count: u32,
-			handles: *const RawHandle,
-			wait_all: i32,
-			milliseconds: u32,
-		) -> u32;
-	}
-
-	/// Wakes the blocking waiter when the async wait is dropped (cancelled)
-	/// so the worker thread does not outlive the command.
-	struct WakeOnDrop(Arc<OwnedHandle>);
-	impl Drop for WakeOnDrop {
-		fn drop(&mut self) {
-			// SAFETY: the event handle stays open while the Arc is alive.
-			unsafe { SetEvent(self.0.as_raw_handle()) };
-		}
-	}
-
-	// SAFETY: CreateEventW takes no required pointers and returns a new owned
-	// handle or null.
-	let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
-	if event.is_null() {
-		return processes.iter().collect();
-	}
-	// SAFETY: the successful CreateEventW above returned a uniquely owned handle.
-	let event = Arc::new(unsafe { OwnedHandle::from_raw_handle(event) });
-
 	let mut polled = Vec::new();
-	let mut watched = Vec::new();
+	// A process handle stays signalled once its process has exited, so
+	// awaiting them one after another is the same as awaiting all.
 	for process in processes {
-		let Ok(pid) = u32::try_from(process.pid()) else {
+		if process.exited().await.is_err() {
 			polled.push(process);
-			continue;
-		};
-		let Some(handle) = sys::open_process(pid, sys::SYNCHRONIZE) else {
-			polled.push(process);
-			continue;
-		};
-		// The snapshot holds its own handle to the selected process, and Windows
-		// never reuses a pid while a handle to it is open, so a pid that still
-		// reports running names the same process this handle was opened on.
-		if process.status() == proc_snapshot::ProcessStatus::Exited {
-			continue;
 		}
-		watched.push((process, handle));
-	}
-	if watched.is_empty() {
-		return polled;
-	}
-
-	let (watched_processes, handles): (Vec<_>, Vec<OwnedHandle>) = watched.into_iter().unzip();
-	let _wake = WakeOnDrop(Arc::clone(&event));
-	let all_exited = tokio::task::spawn_blocking(move || {
-		// Slot 0 is always the cancel event; `swap_remove` of a signaled process
-		// (index >= 1) never moves it.
-		let mut wait_set: Vec<RawHandle> = std::iter::once(event.as_raw_handle())
-			.chain(handles.iter().map(AsRawHandle::as_raw_handle))
-			.collect();
-		while wait_set.len() > 1 {
-			let count = wait_set.len().min(MAXIMUM_WAIT_OBJECTS);
-			// SAFETY: `wait_set[..count]` are open handles owned by `event` and
-			// `handles`, both alive for this closure.
-			let signaled = unsafe {
-				WaitForMultipleObjects(count as u32, wait_set.as_ptr(), 0, INFINITE)
-			}
-			.wrapping_sub(WAIT_OBJECT_0) as usize;
-			match signaled {
-				0 => return false,
-				index if index < count => {
-					wait_set.swap_remove(index);
-				},
-				// WAIT_FAILED or an abandoned-mutex code: give up on handles.
-				_ => return false,
-			}
-		}
-		true
-	})
-	.await
-	.unwrap_or(false);
-	// A cancelled wait drops this future before here, so `false` means the
-	// kernel wait failed; let the status poll finish the job.
-	if !all_exited {
-		polled.extend(watched_processes);
 	}
 	polled
 }
