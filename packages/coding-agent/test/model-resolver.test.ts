@@ -1599,7 +1599,7 @@ describe("resolveCliModel", () => {
 		expect(result.model?.id).toBe("gpt-5.5");
 	});
 
-	test("ranks an exact bare id carried by several authenticated providers by modelProviderOrder", () => {
+	test("ranks an exact bare id carried by several authenticated providers like modelRoles", () => {
 		// Registry order and the built-in provider priority both favor Codex.
 		const models = [...openaiGpt55Models].reverse();
 		const registry = { getAll: () => models, getAvailable: () => models };
@@ -1611,6 +1611,14 @@ describe("resolveCliModel", () => {
 		expect(bare.model?.provider).toBe("openai");
 		expect(suffixed.model?.provider).toBe("openai");
 		expect(suffixed.thinkingLevel).toBe(Effort.High);
+
+		// Recent use outranks modelProviderOrder, as for roles; this registry lists plain OpenAI first.
+		const recent = resolveCliModel({
+			cliModel: "gpt-5.5",
+			modelRegistry: { getAll: () => openaiGpt55Models, getAvailable: () => openaiGpt55Models },
+			preferences: { usageOrder: ["openai-codex/gpt-5.5"], providerOrder: ["openai"] },
+		});
+		expect(recent.model?.provider).toBe("openai-codex");
 	});
 
 	test("prefers an authenticated provider for flat slashful ids whose prefix is a provider slug", () => {
