@@ -28,6 +28,7 @@
 - Fixed repeated coding-plan fallback confirmations after choosing No when thinking changes, quota data is unavailable, or only another account recovers ([#14475](https://github.com/can1357/oh-my-pi/pull/14475) by [@lemonleks](https://github.com/lemonleks)).
 - Fixed Python eval failing with EACCES when another user created the shared runner temp dir ([#14449](https://github.com/can1357/oh-my-pi/pull/14449) by [@TheRockPusher](https://github.com/TheRockPusher))
 - Fixed multi-select questions in a multi-question `ask` having no way to continue in RPC clients: the `Done selecting` row now appears there too, instead of relying on the TUI-only right-arrow key ([#14253](https://github.com/can1357/oh-my-pi/pull/14253) by [@ataberkus](https://github.com/ataberkus))
+- Fixed tool descriptions that misdescribed runtime behaviour: a single non-raw `read` range adds 1 line before and 3 after and only `:raw` is exact, non-`pty` `bash` calls move to the background after 60 s by default, eval Python is not IPython (no `get_ipython()`), the replace edit prompt suggested the uninstalled `sd` instead of the built-in `sed`, and `goal` `drop` removes the goal tool so a new goal can't be created afterwards ([#13998](https://github.com/can1357/oh-my-pi/pull/13998) by [@radkawar](https://github.com/radkawar))
 
 ## [18.6.3] - 2026-10-06
 
