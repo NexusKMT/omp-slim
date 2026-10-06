@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.6.3] - 2026-10-06
+
 ### Breaking Changes
 
 - `WorkingRowSpec` no longer takes `rate`: the native working row reads spinner, elapsed time, divider, then the intent, and the tok/s readout moved to the composer bar
