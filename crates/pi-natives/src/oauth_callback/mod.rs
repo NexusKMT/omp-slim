@@ -7,6 +7,10 @@ mod darwin;
 mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
+// The relay binary owns publication; tests reuse it to publish callbacks the
+// way the relay does.
+#[cfg(test)]
+mod publication;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 mod unsupported {
 	use anyhow::bail;
@@ -647,10 +651,26 @@ async fn wait_for_callback_async(
 	let changed = Arc::new(tokio::sync::Notify::new());
 	let watcher = path.parent().and_then(|directory| {
 		let changed = Arc::clone(&changed);
+		// A failed watch (e.g. exhausted inotify instances) only costs latency, so
+		// the wait falls back to polling; logged because that fallback is otherwise
+		// invisible.
 		let mut watcher =
-			notify::recommended_watcher(move |_: notify::Result<notify::Event>| changed.notify_one())
-				.ok()?;
-		watcher.watch(directory, RecursiveMode::NonRecursive).ok()?;
+			match notify::recommended_watcher(move |_: notify::Result<notify::Event>| {
+				changed.notify_one();
+			}) {
+				Ok(watcher) => watcher,
+				Err(error) => {
+					log::warn!("OAuth callback watcher unavailable, polling instead: {error}");
+					return None;
+				},
+			};
+		if let Err(error) = watcher.watch(directory, RecursiveMode::NonRecursive) {
+			log::warn!(
+				"OAuth callback watch on {} failed, polling instead: {error}",
+				directory.display()
+			);
+			return None;
+		}
 		Some(watcher)
 	});
 	loop {
