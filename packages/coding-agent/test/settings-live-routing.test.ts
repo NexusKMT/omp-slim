@@ -30,6 +30,17 @@ async function waitFor(check: () => boolean): Promise<void> {
 	}
 }
 
+// Windows cannot rename a directory link over an existing one (EPERM), so it swaps non-atomically.
+async function retargetDirLink(link: string, target: string): Promise<void> {
+	if (process.platform === "win32") {
+		await fs.unlink(link);
+		await fs.symlink(target, link, "dir");
+		return;
+	}
+	await fs.symlink(target, `${link}.next`, "dir");
+	await fs.rename(`${link}.next`, link);
+}
+
 function selection(settings: Settings) {
 	return resolveAgentModelSelection({
 		settingsOverride: cfgTaskAgentModelOverrides.get(settings).worker,
@@ -124,8 +135,7 @@ describe("live routing config files", () => {
 		const profile = tempDir.join("profile");
 		await fs.symlink(first, profile, "dir");
 		await start(path.join(profile, "config", "routing.yml"));
-		await fs.symlink(second, `${profile}.next`, "dir");
-		await fs.rename(`${profile}.next`, profile);
+		await retargetDirLink(profile, second);
 		await waitFor(() => settings.getModelRole("smol") === "anthropic/second");
 		expect(selection(settings).patterns).toEqual(["anthropic/second"]);
 		await Bun.write(path.join(second, "config", "routing.yml"), YAML.stringify(routing("third")));
@@ -162,8 +172,7 @@ describe("live routing config files", () => {
 		await start(path.join(profile, "routing.yml"));
 		cfgTaskAgentModelOverrides.override(settings, { worker: "anthropic/runtime" });
 		const warnings = vi.spyOn(logger, "warn");
-		await fs.symlink(second, `${profile}.next`, "dir");
-		await fs.rename(`${profile}.next`, profile);
+		await retargetDirLink(profile, second);
 		await waitFor(() => warnings.mock.calls.some(([message]) => message.includes("keeping last good config")));
 		expect(settings.getModelRole("smol")).toBe("anthropic/first");
 		expect(await Bun.file(path.join(second, "routing.yml")).text()).toBe("modelRoles: [\n");
