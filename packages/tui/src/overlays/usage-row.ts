@@ -191,7 +191,7 @@ class UsageRowBlock extends Container {
 	 * full timestamp in the tooltip, and throughput as a `rate`.
 	 */
 	override describe(cx?: DescribeContext): NativeNode {
-		// The terminal's clock: Bun's own default locale ignores the user's.
+		// The terminal's clock: the process locale doesn't reliably carry the user's 12/24-hour choice.
 		const hour12 = cx?.hour12;
 		if (this.#nativeNode && this.#nativeHour12 === hour12) return this.#nativeNode;
 		this.#nativeHour12 = hour12;
@@ -199,11 +199,12 @@ class UsageRowBlock extends Container {
 		const parts: string[] = [];
 		const timestamp = this.#timestamp;
 		const stamped = timestamp !== undefined && Number.isFinite(timestamp) && timestamp > 0;
+		// Only a 12-hour clock goes through the locale; 24-hour keeps the tooltip's own `HH:mm`.
 		if (stamped) {
 			parts.push(
-				hour12 === undefined
-					? formatUsageTimestamp(timestamp).slice(11, 16)
-					: new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 }),
+				hour12
+					? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 })
+					: formatUsageTimestamp(timestamp).slice(11, 16),
 			);
 		}
 		if (this.#turnElapsedMs !== undefined && this.#turnElapsedMs > 0) {
