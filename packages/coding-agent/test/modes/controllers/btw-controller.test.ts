@@ -14,7 +14,6 @@ import type { InteractiveModeContext } from "@oh-my-pi/pi-coding-agent/modes/typ
 import * as clipboard from "@oh-my-pi/pi-coding-agent/utils/clipboard";
 import { Container, replaceTabs, type TUI } from "@oh-my-pi/pi-tui";
 import type { NativeChild, NativeNode } from "@oh-my-pi/pi-tui/native/node";
-import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
 
 const usage: Usage = {
 	input: 0,
@@ -73,12 +72,6 @@ function makeCtx(session: InteractiveModeContext["session"], btwContainer = new 
 		keybindings: KeybindingsManager.inMemory(),
 		btwContainer,
 		session,
-		keybindings: { getKeys: () => [] },
-		dictationSpaceHold: (): SpaceHoldHandler => ({
-			enabled: () => false,
-			onStart: () => {},
-			onEnd: () => {},
-		}),
 		sessionManager: {
 			getLeafId: () => leafId,
 			getSessionId: () => sessionId,
