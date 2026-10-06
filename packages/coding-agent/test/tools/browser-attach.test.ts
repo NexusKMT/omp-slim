@@ -488,7 +488,9 @@ describe("pickElectronTarget", () => {
 					throw new Error("run returned no value");
 				// `run` details carry the cell's return value untyped.
 				const { observed, window } = details.value as { observed: unknown; window: unknown };
-				expect(window).toMatchObject({ width: 900, deviceScaleFactor: 2 });
+				// The window's chrome eats into --window-size differently per OS, so pin only the forced
+				// pixel ratio; it differs from DEFAULT_VIEWPORT's 1.25, which main reported here.
+				expect(window).toMatchObject({ deviceScaleFactor: 2 });
 				expect(observed).toEqual(window);
 				expect(opened.details).toMatchObject({ viewport: window });
 			} finally {
