@@ -22,6 +22,7 @@
 
 ### Fixed
 
+- Fixed eval accepting unsupported languages as JavaScript and crashing on missing code; invalid cell arguments now return a ToolError before execution ([#14624](https://github.com/can1357/oh-my-pi/pull/14624) by [@alphastorm](https://github.com/alphastorm))
 - Fixed JSON query parsing to correctly handle filters starting with hyphens
 - Fixed unreliable query parameter decoding in JSON read paths
 - `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model after automatic recovery when no explicit selection supersedes the handoff ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
