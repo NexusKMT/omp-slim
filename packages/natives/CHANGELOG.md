@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `encodeSixelAsync` and `decodeSixelToPngAsync`, which encode and decode SIXEL off the JavaScript thread ([#14529](https://github.com/can1357/oh-my-pi/pull/14529) by [@H4vC](https://github.com/H4vC))
 ### Breaking Changes
 
 - `isoResolve` now returns a Promise and runs off the JavaScript thread; a backend found available is not re-probed ([#14528](https://github.com/can1357/oh-my-pi/pull/14528) by [@H4vC](https://github.com/H4vC))
@@ -28,6 +31,8 @@
 - Sped up parsing of large hashline edits ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
 - Sped up copy-on-write task isolation setup on reflink (Linux) and ReFS (Windows) volumes ([#14528](https://github.com/can1357/oh-my-pi/pull/14528) by [@H4vC](https://github.com/H4vC))
 - `Process.waitForExit()` on a single process waits for the operating system's exit notification instead of polling every 50 ms ([#14454](https://github.com/can1357/oh-my-pi/pull/14454) by [@H4vC](https://github.com/H4vC))
+- Reduced memory and copying in `renderMermaidAscii`, snapcompact rendering and single-display desktop screenshots ([#14529](https://github.com/can1357/oh-my-pi/pull/14529) by [@H4vC](https://github.com/H4vC))
+- `DesktopSession.capabilities` no longer blocks behind a running capture or input operation: while one runs, it answers from the capabilities read by the latest capture or capabilities call; otherwise it reads them live ([#14529](https://github.com/can1357/oh-my-pi/pull/14529) by [@H4vC](https://github.com/H4vC))
 - Native OAuth logins are detected as soon as the browser redirects, without polling every 20 ms ([#14531](https://github.com/can1357/oh-my-pi/pull/14531) by [@H4vC](https://github.com/H4vC))
 - Reduced the memory used by the local completion model's tokenizer ([#14533](https://github.com/can1357/oh-my-pi/pull/14533) by [@H4vC](https://github.com/H4vC))
 - Long lines cut by the lint, gt and system output minimizers now end in `…[+N]`, showing how many characters were dropped ([#14532](https://github.com/can1357/oh-my-pi/pull/14532) by [@H4vC](https://github.com/H4vC))

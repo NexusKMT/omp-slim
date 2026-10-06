@@ -31,6 +31,12 @@ export declare class AudioPlayback {
 /** Persistent, serialized native desktop capture/input/accessibility session. */
 export declare class DesktopSession {
   constructor(options?: DesktopSessionOptions | undefined | null)
+  /**
+   * Asks the worker when it is idle, so permissions are read live. While
+   * another operation holds the worker, answers from the snapshot of the
+   * latest capabilities read or capture instead of blocking the JS thread
+   * behind it.
+   */
   get capabilities(): DesktopCapabilities
   listDisplays(): Promise<Array<DesktopDisplay>>
   listWindows(): Promise<Array<DesktopWindow>>
@@ -1109,7 +1115,7 @@ export declare function cosineSimilarityPairs(vectors: Float64Array, count: numb
 export declare function countTokens(input: string | string[], encoding?: Encoding | undefined | null): number
 
 /**
- * Decode one complete SIXEL control string into a PNG.
+ * Decode one complete SIXEL control string into a PNG on the calling thread.
  *
  * The decoder is deliberately bounded before handing the stream to
  * `icy_sixel`: raster declarations, repeats, and row advances are scanned
@@ -1117,6 +1123,12 @@ export declare function countTokens(input: string | string[], encoding?: Encodin
  * larger internal maximum.
  */
 export declare function decodeSixelToPng(bytes: Uint8Array): Uint8Array
+
+/**
+ * Same result as [`decode_sixel_to_png`], but the decode runs on the native
+ * blocking pool instead of the JS thread.
+ */
+export declare function decodeSixelToPngAsync(bytes: Uint8Array): Promise<Uint8Array>
 
 export interface DesktopCapabilities {
   backend: string
@@ -1529,15 +1541,26 @@ export interface EnclosingBoundaryOptions {
 }
 
 /**
- * Encode image bytes into a SIXEL escape sequence for terminal rendering.
+ * Encode image bytes into a SIXEL escape sequence for terminal rendering, on
+ * the calling thread.
  *
  * The input image is decoded and resized to the requested pixel dimensions
- * before encoding.
+ * before encoding. Prefer [`encode_sixel_async`] unless the caller cannot
+ * wait: the decode, resize and dither block the JS thread.
  *
  * # Errors
  * Returns an error if decoding, resizing, or SIXEL encoding fails.
  */
 export declare function encodeSixel(bytes: Uint8Array, targetWidthPx: number, targetHeightPx: number): string
+
+/**
+ * Same result as [`encode_sixel`], but the decode, resize and dither run on
+ * the native blocking pool, so they never stall the JavaScript event loop.
+ *
+ * # Errors
+ * Rejects if decoding, resizing, or SIXEL encoding fails.
+ */
+export declare function encodeSixelAsync(bytes: Uint8Array, targetWidthPx: number, targetHeightPx: number): Promise<string>
 
 /** Tokenizer encoding to use. */
 export declare enum Encoding {
