@@ -2281,9 +2281,9 @@ enum DestFate {
 	/// the source's permissions.
 	Recreated,
 	/// Created by the copy where there was none, with `mode` (permission
-	/// bits) in place, and owned by `owner` (uid, gid) when the copy looked:
-	/// only ownership preservation needs it.
-	Created { mode: u32, owner: Option<(u32, u32)> },
+	/// bits) in place when known, and owned by `owner` (uid, gid) when the
+	/// copy looked: only ownership preservation needs it.
+	Created { mode: Option<u32>, owner: Option<(u32, u32)> },
 }
 
 /// What a caller knows of a destination without looking at it again.
@@ -2559,7 +2559,7 @@ fn copy_file(
 
 	// A file this copy created has a known mode and maybe owner.
 	let (mut created_mode, owner) = match fate {
-		DestFate::Created { mode, owner } => (Some(mode), owner),
+		DestFate::Created { mode, owner } => (mode, owner),
 		DestFate::Kept | DestFate::Recreated => (None, None),
 	};
 
@@ -2919,10 +2919,11 @@ fn copy_data(
 	let cannot_create =
 		|e| CpError::IoErrContext(e, format!("cannot create regular file {}", dest.quote()));
 	let (dest_file, fate) = match filesystem.open_with(&dest_fs, &dest_options) {
-		// A host file this open created has exactly its creation mode less the
-		// umask (see `Fs::with_creation_mask`).
+		// A host file this open created has its creation mode less the umask
+		// (see `Fs::with_creation_mask`), unless the parent directory has a
+		// default ACL; see the fstat below for when that matters.
 		Ok(file) if dest_metadata.is_none() && native => {
-			(file, DestFate::Created { mode: create_mode & !host.umask(), owner: None })
+			(file, DestFate::Created { mode: Some(create_mode & !host.umask()), owner: None })
 		},
 		Ok(file) => (file, DestFate::Kept),
 		// `-f`: remove a destination that cannot be opened, and try again.
@@ -3018,14 +3019,23 @@ fn copy_data(
 	};
 
 	// Preserving ownership changes it only where it differs; the open handle
-	// tells a created file's owner cheaper than a chown that changes nothing.
+	// tells a created file's owner cheaper than a chown that changes nothing,
+	// and its actual mode with it. A default ACL on the parent replaces the
+	// umask, so without that fstat the computed mode only stands where no
+	// preserved mode relies on it to skip the chmod: a plain copy, like GNU
+	// cp's, keeps whatever mode the open gave it.
 	let fate = match fate {
-		DestFate::Created { mode, .. } if matches!(options.attributes.ownership, Preserve::Yes { .. }) => {
-			let owner = dest_file
-				.metadata()
-				.ok()
-				.and_then(|metadata| metadata.uid().zip(metadata.gid()));
-			DestFate::Created { mode, owner }
+		DestFate::Created { .. } if matches!(options.attributes.ownership, Preserve::Yes { .. }) => {
+			match dest_file.metadata() {
+				Ok(metadata) => DestFate::Created {
+					mode:  Some(metadata.permissions().mode() & 0o7777),
+					owner: metadata.uid().zip(metadata.gid()),
+				},
+				Err(_) => DestFate::Created { mode: None, owner: None },
+			}
+		},
+		DestFate::Created { owner, .. } if matches!(options.attributes.mode, Preserve::Yes { .. }) => {
+			DestFate::Created { mode: None, owner }
 		},
 		fate => fate,
 	};
@@ -3895,5 +3905,42 @@ mod tests {
 		let modified = |name: &str| fs::metadata(fixture.path().join(name)).unwrap().modified().unwrap();
 		assert_eq!(modified("kept"), past);
 		assert_ne!(modified("fresh"), past);
+	}
+
+	/// Under a default ACL the parent's ACL, not the umask, shapes a new
+	/// file's mode, so a preserved mode must not be assumed in place.
+	#[test]
+	#[cfg(target_os = "linux")]
+	fn preserved_mode_is_set_under_a_default_acl() {
+		use std::os::unix::fs::PermissionsExt as _;
+
+		let fixture = tempdir().unwrap();
+		let path = |name: &str| fixture.path().join(name);
+		fs::write(path("source"), b"x").unwrap();
+		fs::set_permissions(path("source"), fs::Permissions::from_mode(0o644)).unwrap();
+		fs::create_dir(path("shared")).unwrap();
+		// `default:user::rwx,group::rwx,other::---` in the kernel's xattr form:
+		// version 2, then (tag, permissions, unused id) per entry.
+		let mut acl = 2u32.to_le_bytes().to_vec();
+		for (tag, permissions) in [(0x01u16, 7u16), (0x04, 7), (0x20, 0)] {
+			acl.extend(tag.to_le_bytes());
+			acl.extend(permissions.to_le_bytes());
+			acl.extend(u32::MAX.to_le_bytes());
+		}
+		if let Err(error) = pi_vfs::BlockingFs::native().set_xattr(
+			path("shared"),
+			"system.posix_acl_default",
+			&acl,
+			true,
+		) {
+			eprintln!("skipped: no POSIX ACLs on the temporary filesystem: {error}");
+			return;
+		}
+
+		for (flag, dest) in [("-p", "shared/all"), ("--preserve=mode", "shared/mode")] {
+			let (code, capture) = run_util::<Cp>(&[flag, "source", dest], "", fixture.path());
+			assert_eq!(code, 0, "{}", capture.err());
+			assert_eq!(fs::metadata(path(dest)).unwrap().permissions().mode() & 0o7777, 0o644, "{flag}");
+		}
 	}
 }
