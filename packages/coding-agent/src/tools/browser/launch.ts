@@ -1,7 +1,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { $which, getPuppeteerDir, isRecord, logger, removeWithRetries, toError, untilAborted } from "@oh-my-pi/pi-utils";
+import {
+	$which,
+	getPuppeteerDir,
+	isRecord,
+	logger,
+	removeWithRetries,
+	toError,
+	untilAborted,
+} from "@oh-my-pi/pi-utils";
 import type * as BrowsersNs from "@oh-my-pi/pi-utils/browsers";
 import type {
 	Browser,

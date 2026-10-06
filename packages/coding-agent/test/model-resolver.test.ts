@@ -405,6 +405,7 @@ describe("pickDefaultAvailableModel", () => {
 
 		expect(pickDefaultAvailableModel([apple])).toBeUndefined();
 		expect(pickDefaultAvailableModel([apple, anthropic])).toBe(anthropic);
+		expect(pickDefaultAvailableModel([apple, anthropic], () => true)).toBe(anthropic);
 		expect(parseModelPattern("apple/on-device", [apple]).model).toBe(apple);
 	});
 	test("prefers Codex OAuth over plain OpenAI for the shared GPT default", () => {
