@@ -268,9 +268,10 @@ describe("createUsageRowBlock describe", () => {
 		expect(shown(undefined).title).toBe("2026-01-01 18:05:09");
 		const twelve = shown(true);
 		expect(twelve.line).toMatch(/"0?6:05\s?PM · /);
-		expect(twelve.title).toContain("PM");
+		expect(twelve.title).toMatch(/^2026-01-01 0?6:05:09\s?PM$/);
 		const twentyFour = shown(false);
 		expect(twentyFour.line).toContain('"18:05 · ');
-		expect(twentyFour.title).not.toContain("PM");
+		expect(twentyFour.title).toBe("2026-01-01 18:05:09");
+		expect(shown(undefined).title).toBe("2026-01-01 18:05:09");
 	});
 });

@@ -10,12 +10,14 @@ import type { DescribeContext, NativeChild, NativeNode } from "../native/node";
 /** Below this the rate is nonsense (cached/instant responses yield absurd tok/s). */
 const MIN_DURATION_MS = 100;
 
-/** Local `YYYY-MM-DD HH:mm:ss` stamp for the per-turn usage row. */
-function formatUsageTimestamp(ms: number): string {
+/** Local ISO date with a wall-clock time; only the hour cycle follows the terminal. */
+function formatUsageTimestamp(ms: number, hour12 = false): string {
 	const d = new Date(ms);
 	const pad = (n: number): string => String(n).padStart(2, "0");
 	const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-	const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+	const time = hour12
+		? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12 })
+		: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 	return `${date} ${time}`;
 }
 
@@ -222,14 +224,7 @@ class UsageRowBlock extends Container {
 			role: "omp.usage.turn",
 			gap: "none",
 			align: "baseline",
-			...(stamped
-				? {
-						title:
-							hour12 === undefined
-								? formatUsageTimestamp(timestamp)
-								: new Date(timestamp).toLocaleString([], { hour12 }),
-					}
-				: {}),
+			...(stamped ? { title: formatUsageTimestamp(timestamp, hour12) } : {}),
 		});
 		return this.#nativeNode;
 	}
