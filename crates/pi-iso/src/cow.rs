@@ -86,6 +86,48 @@ pub fn is_unsupported(err: &io::Error) -> bool {
 	}
 }
 
+/// Clones `src`'s data into `dst`, two files the caller already holds open.
+///
+/// `dst` must be writable and empty (just created or truncated). This is the
+/// copy GNU `cp` issues on its open descriptors, without [`clone_file`]'s
+/// path lookups, probe file and rename.
+///
+/// # Errors
+///
+/// As [`clone_file`]. A failed clone leaves `dst` empty and, on Windows, not
+/// sparse, so the caller can copy the data into it instead.
+#[cfg(any(target_os = "linux", target_os = "android", windows))]
+pub fn clone_open(src: &File, dst: &File) -> io::Result<()> {
+	let cloned = imp::clone_into(src, dst);
+	#[cfg(windows)]
+	if cloned.is_err() {
+		// The block clone extends `dst` and makes it sparse before cloning.
+		let _ = dst.set_len(0);
+		let _ = imp::set_sparse(dst, false);
+	}
+	cloned
+}
+
+/// Whether an [`is_unsupported`] error from [`clone_open`] says the files
+/// are on different devices, rather than that the source's filesystem
+/// cannot clone: only the latter holds for every later copy from it.
+pub fn is_cross_device(err: &io::Error) -> bool {
+	#[cfg(unix)]
+	{
+		err.raw_os_error() == Some(libc::EXDEV)
+	}
+	#[cfg(windows)]
+	{
+		err.raw_os_error()
+			.is_some_and(|code| code as u32 == windows_sys::Win32::Foundation::ERROR_NOT_SAME_DEVICE)
+	}
+	#[cfg(not(any(unix, windows)))]
+	{
+		let _ = err;
+		false
+	}
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) use imp::{CLONE_NOFOLLOW, clonefile};
 
@@ -361,7 +403,7 @@ mod imp {
 		}
 	}
 
-	fn set_sparse(file: &File, sparse: bool) -> io::Result<()> {
+	pub fn set_sparse(file: &File, sparse: bool) -> io::Result<()> {
 		fsctl(file, FSCTL_SET_SPARSE, &FILE_SET_SPARSE_BUFFER { SetSparse: sparse }, &mut ())
 	}
 
