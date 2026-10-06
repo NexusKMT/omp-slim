@@ -775,9 +775,9 @@ export class RpcClient {
 	 * session on OpenAI/Google, or the persisted Claude low-priority setting
 	 * (`providers.anthropic.slowMode`) on Anthropic.
 	 */
-	async setSlowMode(enabled: boolean): Promise<{ enabled: boolean }> {
+	async setSlowMode(enabled: boolean): Promise<boolean> {
 		const response = await this.#send({ type: "set_slow_mode", enabled });
-		return this.#getData(response);
+		return this.#getData<{ enabled: boolean }>(response).enabled;
 	}
 
 	/**

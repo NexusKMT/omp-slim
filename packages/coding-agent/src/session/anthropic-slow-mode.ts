@@ -232,14 +232,6 @@ export class AnthropicSlowModeController {
 		};
 	}
 
-	/**
-	 * Compact status-line label, or `undefined` outside both stages. The
-	 * low-priority label shows only when `lowPriority` (this session's `/slow`).
-	 */
-	statusLabel(now = Date.now(), lowPriority = true): string | undefined {
-		return formatUsageLimitLabel(this.status(now, lowPriority), now);
-	}
-
 	/** Whether the slow lane can be entered now, and on which window. */
 	availability(now = Date.now()): AnthropicSlowModeAvailability {
 		if (this.isActive(now)) return { kind: "unavailable", reason: "Low priority is already on." };
