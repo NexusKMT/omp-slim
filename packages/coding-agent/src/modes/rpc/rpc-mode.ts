@@ -1936,6 +1936,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					fastModeEnabled: session.isFastModeEnabled(),
 					tokensPerSecond: calculateTokensPerSecond(session.messages, session.isStreaming),
 					fastModeActive: session.isFastModeActive(),
+					slowModeSupported: session.isSlowModeSupported(),
+					slowModeEnabled: session.isSlowModeEnabled(),
+					slowModeScope: session.getSlowModeScope(),
+					usageLimit: session.getUsageLimitState(),
 					messageCount: session.messages.length,
 					systemPrompt: session.systemPrompt,
 					dumpTools: session.agent.state.tools.map(tool => ({
@@ -1959,6 +1963,18 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					enabled: session.isFastModeEnabled(),
 					active: session.isFastModeActive(),
 				});
+			}
+
+			case "set_slow_mode": {
+				// A truthy non-boolean must not flip a persisted global setting.
+				if (typeof command.enabled !== "boolean") {
+					return error(id, "set_slow_mode", "set_slow_mode requires boolean enabled");
+				}
+				const supported = session.setSlowMode(command.enabled);
+				if (command.enabled && !supported) {
+					return error(id, "set_slow_mode", "Slow mode is unavailable for the current model.");
+				}
+				return success(id, "set_slow_mode", { enabled: session.isSlowModeEnabled() });
 			}
 
 			case "goal": {
