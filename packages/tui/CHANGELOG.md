@@ -5,6 +5,12 @@
 ### Changed
 
 - Reduced memory held by retired transcript history in long sessions ([#13632](https://github.com/can1357/oh-my-pi/pull/13632) by [@iliaal](https://github.com/iliaal)).
+- Model mentions (`^`), `/switch` completions, and model picker search stay responsive on every keystroke with large model catalogs ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
+
+### Fixed
+
+- Fixed autocomplete popups (slash commands, arguments, `@` files, `#` actions, `^` model mentions, emoji, internal URLs) lagging 100 ms behind typing; they now update on every keystroke, so typing `/mod` and pressing Enter quickly runs `/model` instead of the top row shown for `/` (e.g. `/login`) ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
+- Fixed same-provider `-latest` models (e.g. `chatgpt-4o-latest` variants) swapping places in the model picker and mention list depending on the query; they now sort alphabetically ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
 
 ## [18.6.3] - 2026-10-06
 
