@@ -59,15 +59,9 @@ impl TokenIndex {
 		Self { tokens, cont_ids, boundary_ids, sorted }
 	}
 
-	/// Text of an id from `sorted` (`cont_ids` and search paths are drawn
-	/// from it).
+	/// Text of an id; empty for ids whose bytes are not valid UTF-8.
 	fn text(&self, id: u32) -> &str {
-		let bytes = self.tokens.get(id);
-		debug_assert!(std::str::from_utf8(bytes).is_ok(), "token {id} is not indexed text");
-		// SAFETY: `new` admits only ids whose bytes are valid UTF-8 into
-		// `sorted`, and callers pass only those ids; re-validating here would
-		// cost a UTF-8 scan per candidate in the search's hot loop.
-		unsafe { std::str::from_utf8_unchecked(bytes) }
+		std::str::from_utf8(self.tokens.get(id)).unwrap_or_default()
 	}
 
 	/// Position in `sorted` of the first text not below `r`.
