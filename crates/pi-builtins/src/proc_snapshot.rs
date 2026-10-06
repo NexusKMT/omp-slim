@@ -943,14 +943,17 @@ pub mod sys {
 	pub struct ProcessEntry {
 		size:              u32,
 		usage:             u32,
+		/// The process id.
 		pub pid:           u32,
 		default_heap:      usize,
 		module_id:         u32,
+		/// Number of threads in the process when the snapshot was taken.
 		pub threads:       u32,
 		/// The parent pid recorded at creation. Windows never rewrites it, so
 		/// once the parent exits it can name an unrelated process that reused
 		/// the pid.
 		pub ppid:          u32,
+		/// Base scheduling priority of the process's threads.
 		pub base_priority: i32,
 		flags:             u32,
 		exe:               [u16; 260],
@@ -1078,12 +1081,13 @@ pub mod sys {
 		fn next(&mut self) -> Option<ProcessEntry> {
 			let snapshot = self.snapshot.as_ref()?.as_raw_handle();
 			let entry = &raw mut self.entry;
-			// SAFETY: the snapshot is open and the entry carries its ABI size.
-			let found = if std::mem::replace(&mut self.started, true) {
-				unsafe { Process32NextW(snapshot, entry) }
+			let step = if std::mem::replace(&mut self.started, true) {
+				Process32NextW
 			} else {
-				unsafe { Process32FirstW(snapshot, entry) }
+				Process32FirstW
 			};
+			// SAFETY: the snapshot is open and the entry carries its ABI size.
+			let found = unsafe { step(snapshot, entry) };
 			if found == 0 {
 				self.snapshot = None;
 				return None;
