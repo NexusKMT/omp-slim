@@ -95,12 +95,8 @@ export async function handleSpeech(bootOpts: AuthGatewayRouteOptions, req: Reque
 		return response;
 	} catch (error) {
 		if (controller.signal.aborted) return aborted();
-		// Adapter-level validation is a client error, not an upstream failure: the
-		// wire schema accepts `response_format` values a given speech API cannot
-		// serve (xAI serves mp3/wav only) and no length cap, so synthesizeSpeech
-		// rejects those requests with a ValidationError. classifyGatewayError has
-		// no status or keyword to match in "xai-tts does not support flac output",
-		// and would bill the client a 502 upstream_error that blames the provider.
+		// Adapter validation is a client error: the wire schema admits values the
+		// adapter cannot serve, and the classifier would bill them as a 502.
 		if (error instanceof ValidationError) {
 			return speechWire.formatError(400, "invalid_request_error", error.message);
 		}
