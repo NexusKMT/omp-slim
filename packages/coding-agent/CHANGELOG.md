@@ -15,6 +15,7 @@
 - Fixed model speed aggregates blending an OpenAI or Codex fast service tier's throughput into the standard average; turns served on a non-default tier keep their own row, and `/models` shows that tier's numbers, labeled, for the tier the live session would send ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
 - Released obsolete model catalogs after refreshes and provider changes without waiting for the model picker to reopen ([#14317](https://github.com/can1357/oh-my-pi/pull/14317) by [@iliaal](https://github.com/iliaal)).
 - Fixed the `write` tool freezing the whole TUI on a FIFO or terminal target (directly or through a symlink) and hanging on an `x.db:table` path whose database is a FIFO; targets that are neither regular files nor directories, including `/dev/null`, are now rejected ([#14452](https://github.com/can1357/oh-my-pi/pull/14452) by [@DrFaustus-vic](https://github.com/DrFaustus-vic)).
+- Fixed the `edit` tool hanging on a FIFO or terminal, or exhausting memory on `/dev/zero`; targets that are neither regular files nor directories, including `/dev/null`, are now rejected in every edit mode ([#14462](https://github.com/can1357/oh-my-pi/pull/14462) by [@DrFaustus-vic](https://github.com/DrFaustus-vic)).
 
 ## [18.6.3] - 2026-10-06
 
