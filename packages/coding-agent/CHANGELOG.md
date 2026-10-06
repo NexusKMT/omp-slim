@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed the `advisor.immuneTurns` setting description claiming blockers are suppressed during the cooldown; blockers have always been exempt, and the description now says so ([#10493](https://github.com/can1357/oh-my-pi/issues/10493))
 ### Added
 
 - Cancel a pending model handoff with `/prewalk off` without changing the active model, saved prewalk setting, or delivered continuation history ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
@@ -12,6 +9,7 @@
 
 ### Fixed
 
+- Fixed the `advisor.immuneTurns` setting description claiming blockers are suppressed during the cooldown; blockers are exempt from it ([#10493](https://github.com/can1357/oh-my-pi/issues/10493), [#14360](https://github.com/can1357/oh-my-pi/pull/14360) by [@F0Rextasy](https://github.com/F0Rextasy))
 - `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model after automatic recovery when no explicit selection supersedes the handoff ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 - Fixed `/logout` for an alias login such as `openai-codex-device` reporting no stored credentials; it now lists and removes the accounts stored under the provider it logs in to ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
 - Fixed logging in through an alias login such as `openai-codex-device` (`/login` or RPC `login`) not refreshing the logged-in provider's models, and RPC `get_login_providers` reporting alias logins as unauthenticated ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
