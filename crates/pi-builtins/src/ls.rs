@@ -5534,19 +5534,19 @@ mod integration_tests {
 	#[test]
 	fn size_sort_breaks_ties_by_name() {
 		let dir = tempfile::tempdir().unwrap();
-		// Created out of name order so a directory listing order that
-		// follows creation (tmpfs, ext4 hash order) cannot pass by luck.
-		for name in ["b", "c", "a"] {
+		// Created out of name order, and enough of them that a listing order
+		// following creation (tmpfs) or a hash (ext4) is not name order by luck.
+		for name in ["e", "h", "b", "j", "a", "g", "c", "i", "f", "d"] {
 			std::fs::write(dir.path().join(name), b"same").unwrap();
 		}
 
 		let (code, capture) = run_util::<Ls>(&["-S"], "", dir.path());
 		assert_eq!(code, 0, "{}", capture.err());
-		assert_eq!(capture.out(), "a\nb\nc\n");
+		assert_eq!(capture.out(), "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n");
 
 		let (code, capture) = run_util::<Ls>(&["-Sr"], "", dir.path());
 		assert_eq!(code, 0, "{}", capture.err());
-		assert_eq!(capture.out(), "c\nb\na\n");
+		assert_eq!(capture.out(), "j\ni\nh\ng\nf\ne\nd\nc\nb\na\n");
 	}
 
 	#[test]
