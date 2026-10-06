@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- RPC clients can log out like `/logout`: `get_logout_accounts` lists a provider's stored credentials and `logout` removes one; the TypeScript client and the generated Python, Go, and Rust SDKs gain matching methods ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
+
 ### Fixed
 
+- Fixed `/logout` for an alias login such as `openai-codex-device` reporting no stored credentials; it now lists and removes the accounts stored under the provider it logs in to ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
+- Fixed logging in through an alias login such as `openai-codex-device` (`/login` or RPC `login`) not refreshing the logged-in provider's models, and RPC `get_login_providers` reporting alias logins as unauthenticated ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
 - Fixed model speed aggregates blending an OpenAI or Codex fast service tier's throughput into the standard average; turns served on a non-default tier keep their own row, and `/models` shows that tier's numbers, labeled, for the tier the live session would send ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
 
 ## [18.6.3] - 2026-10-06
