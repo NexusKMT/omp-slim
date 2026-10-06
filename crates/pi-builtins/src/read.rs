@@ -8,16 +8,12 @@ use brush_core::{ErrorKind, builtins, env, error, openfiles::OpenFile, variables
 use clap::Parser;
 use itertools::Itertools;
 
-use crate::line_input::{LineInput, ReadAhead};
+use crate::line_input::{CTRL_C, CTRL_D, LineInput, ReadAhead, decode_line};
 
 /// Exit code returned when `read` times out.
 /// This is 128 + SIGALRM (14) = 142, matching bash behavior.
 const TIMEOUT_EXIT_CODE: u8 = 142;
 
-/// ASCII control character for Ctrl+C (ETX - End of Text).
-const CTRL_C: u8 = 0x03;
-/// ASCII control character for Ctrl+D (EOT - End of Transmission).
-const CTRL_D: u8 = 0x04;
 /// Backslash character used for escape processing.
 const BACKSLASH: u8 = b'\\';
 /// Default line delimiter (newline).
@@ -484,12 +480,6 @@ struct LineReaderConfig {
 	char_limit:      Option<usize>,
 	/// Whether to process backslash escapes (false for -r mode).
 	process_escapes: bool,
-}
-
-/// The bytes of a read line as text: UTF-8 decoded once per line, invalid
-/// sequences replaced rather than each byte read as a Latin-1 character.
-fn decode_line(line: Vec<u8>) -> String {
-	String::from_utf8(line).unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 /// Reads a complete line of input using the given reader and configuration.

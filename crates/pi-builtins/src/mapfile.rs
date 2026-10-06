@@ -3,12 +3,7 @@ use std::io::Write;
 use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, env, escape, variables};
 use clap::Parser;
 
-use crate::line_input::{LineInput, ReadAhead};
-
-/// ASCII control character for Ctrl+C (ETX - End of Text).
-const CTRL_C: u8 = 0x03;
-/// ASCII control character for Ctrl+D (EOT - End of Transmission).
-const CTRL_D: u8 = 0x04;
+use crate::line_input::{CTRL_C, CTRL_D, LineInput, ReadAhead, decode_line};
 
 /// Read lines from standard input into an indexed array variable.
 #[derive(Parser)]
@@ -66,6 +61,11 @@ impl builtins::Command for MapFileCommand {
 		}
 
 		if let Some((_, var)) = context.shell.env().get(&self.array_var_name) {
+			// Refused before any input is read, as in bash: input read ahead of
+			// a pipe could not be given back if an assignment failed mid-loop.
+			if var.is_readonly() {
+				return Err(ErrorKind::ReadonlyVariable.into());
+			}
 			if matches!(
 				var.value(),
 				variables::ShellValue::AssociativeArray(_)
@@ -125,11 +125,13 @@ impl MapFileCommand {
 		};
 
 		let terminal = input_file.is_terminal();
-		// Without -n every byte up to EOF is consumed, so any input is read in
-		// blocks; -n may stop early, and then only a regular file, whose
-		// offset is given back, is. (A callback that breaks out of the loop
-		// leaves what was read ahead of a pipe unconsumed.)
-		let read_ahead = if max_count == 0 { ReadAhead::ToEof } else { ReadAhead::Seekable };
+		// Without -n or -C every byte up to EOF is consumed before anything
+		// else reads the descriptor, so any input is read in blocks. -n may
+		// stop early, and a -C callback may read the descriptor itself or
+		// end the loop; then only a regular file, whose offset is given
+		// back, is (bash's mapfile reads a pipe unbuffered too).
+		let read_ahead =
+			if max_count == 0 && self.callback.is_none() { ReadAhead::ToEof } else { ReadAhead::Seekable };
 		let mut input = LineInput::new(input_file, read_ahead);
 
 		while max_count == 0 || entry_count < max_count {
@@ -162,13 +164,13 @@ impl MapFileCommand {
 				line.pop();
 			}
 
-			let line_str = String::from_utf8(line)
-				.unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
+			let line_str = decode_line(line);
 			let array_index = self.origin.unwrap_or(0) + i64::try_from(entry_count)?;
 
 			if let Some(callback) = &self.callback
 				&& (entry_count + 1).is_multiple_of(callback_group_size)
 			{
+				input.give_back();
 				let result = run_callback(callback, array_index, &line_str, context).await?;
 				if !result.is_normal_flow() {
 					return Ok(Some(result));

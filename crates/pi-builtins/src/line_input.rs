@@ -7,6 +7,17 @@ use brush_core::openfiles::OpenFile;
 /// Bytes per read-ahead.
 const BLOCK: usize = 4096;
 
+/// ASCII control character for Ctrl+C (ETX - End of Text).
+pub(crate) const CTRL_C: u8 = 0x03;
+/// ASCII control character for Ctrl+D (EOT - End of Transmission).
+pub(crate) const CTRL_D: u8 = 0x04;
+
+/// The bytes of a read line as text: UTF-8 decoded once per line, invalid
+/// sequences replaced rather than each byte read as a Latin-1 character.
+pub(crate) fn decode_line(line: Vec<u8>) -> String {
+	String::from_utf8(line).unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
+}
+
 /// When a [`LineInput`] may read past the bytes it hands out.
 #[derive(Clone, Copy)]
 pub(crate) enum ReadAhead {
@@ -78,15 +89,26 @@ impl LineInput {
 		self.pos += 1;
 		Ok(Some(self.block[self.pos - 1]))
 	}
+
+	/// Gives the bytes read ahead but not handed out back to a regular
+	/// file's shared offset, so another reader of the descriptor resumes
+	/// right after the last byte consumed. Bash's `mapfile` does the same
+	/// before each `-C` callback. Read-ahead that cannot be given back is
+	/// kept and handed out as usual.
+	pub(crate) fn give_back(&mut self) {
+		let unread = self.block.len() - self.pos;
+		if unread > 0
+			&& let OpenFile::File(file) = &mut self.input
+			&& file.seek(SeekFrom::Current(-(unread as i64))).is_ok()
+		{
+			self.block.clear();
+			self.pos = 0;
+		}
+	}
 }
 
 impl Drop for LineInput {
 	fn drop(&mut self) {
-		let unread = self.block.len() - self.pos;
-		if unread > 0
-			&& let OpenFile::File(file) = &mut self.input
-		{
-			let _ = file.seek(SeekFrom::Current(-(unread as i64)));
-		}
+		self.give_back();
 	}
 }
