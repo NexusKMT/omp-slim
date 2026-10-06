@@ -9,6 +9,7 @@
 ### Fixed
 
 - Fixed `tail` printing nothing, or dropping lines from the file's first 64 KiB, when the file size is an exact multiple of 64 KiB ([#14264](https://github.com/can1357/oh-my-pi/pull/14264) by [@jchanghong023](https://github.com/jchanghong023))
+- Fixed `tail -f` piped into a command that exits early (such as `head -n 1` or `grep -m1`) never stopping on macOS ([#14614](https://github.com/can1357/oh-my-pi/issues/14614))
 
 ## [18.6.3] - 2026-10-06
 
