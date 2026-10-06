@@ -141,7 +141,7 @@ Types: `OpenAICompat` / `ResolvedOpenAISharedCompat` in `packages/catalog/src/ty
 | `supportsLongPromptCacheRetention` | Official OpenAI | Sends `prompt_cache_retention: "24h"` when requested |
 | `strictResponsesPairing` | Azure OpenAI, Copilot Responses | Enforces strict 1:1 tool-call/tool-result pairing when building Responses input items |
 | `statefulResponses` | Unset; falls back to `officialEndpoint` at request time | On the OpenAI Responses handler (including OpenRouter Responses dispatch), enables `previous_response_id` plus delta input and forces `store: true`; `false` uses full replay with `store: false`. Does not change Codex or Azure handlers |
-| `supportsImageDetailOriginal` | `false` for Copilot and xAI hosts | `detail: "original"` vs `detail: "auto"` on input images |
+| `supportsImageDetailOriginal` | `true` for OpenAI, Azure OpenAI, and Codex; `false` for other hosts | Clamps `detail: "original"` to `"auto"` on input images when disabled. Custom hosts that accept `original` can opt in with `compat.supportsImageDetailOriginal: true`; explicit overrides win in both directions |
 | `supportsReasoningSummary` | `false` on first-party xAI | Omits `reasoning.summary` on hosts that reject it |
 | `supportsAllTurnsReasoningContext` | GPT-5.4+ on Codex | Gates explicit `reasoning.context: "all_turns"` overrides; Responses Lite always requires that scope |
 | `requiresReasoningOffJuiceInstruction` | GPT-5.6+ class rule | Forced-off requests add a developer `# Juice: … !important` instruction |
