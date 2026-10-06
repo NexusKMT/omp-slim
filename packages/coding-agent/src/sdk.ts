@@ -4925,6 +4925,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 		{
 			const originalDispose = session.dispose.bind(session);
+			let tinyClientReleased = false;
 			session.dispose = async () => {
 				try {
 					// Reject new session work (eval starts) the moment disposal
@@ -4952,9 +4953,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					await originalDispose();
 				} finally {
 					// The tiny-model client is a process singleton shared by every session.
-					// Only the session that owns process state may drop its connections,
-					// since that fails every request still in flight.
-					if (bindsProcessState) await shutdownTinyTitleClient();
+					// Only the session that owns process state drops its connections, once:
+					// that fails every request still in flight, and a repeat dispose must not
+					// cancel requests other sessions made since.
+					if (bindsProcessState && !tinyClientReleased) {
+						tinyClientReleased = true;
+						try {
+							await shutdownTinyTitleClient();
+						} catch (error) {
+							logger.warn("Session dispose: tiny-model client shutdown failed", { error: String(error) });
+						}
+					}
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled();
 					unbindSessionEffects?.();
