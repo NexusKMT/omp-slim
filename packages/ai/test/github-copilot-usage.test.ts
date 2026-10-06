@@ -57,7 +57,7 @@ function billingPayload(items: BillingItem[]): Record<string, unknown> {
 
 /** Answers the billing endpoint, and 404s everything else so the internal path cannot answer. */
 function billingFetch(payload: unknown): FetchImpl {
-	const fn = async (input: string | URL | Request) => {
+	return async (input: string | URL | Request) => {
 		if (!String(input).includes("/settings/billing/premium_request/usage")) {
 			return new Response("not found", { status: 404 });
 		}
@@ -66,7 +66,6 @@ function billingFetch(payload: unknown): FetchImpl {
 			headers: { "content-type": "application/json" },
 		});
 	};
-	return fn as unknown as typeof fetch;
 }
 
 /** Run the provider against one billing payload and return its report. */
@@ -143,9 +142,7 @@ describe("github copilot usage provider — billing units", () => {
 	});
 
 	it("falls back to requests for a unit type it does not recognise", async () => {
-		const report = await reportFor(
-			billingPayload([{ ...CREDIT_ITEM, unitType: "SOME_FUTURE_UNIT" }]),
-		);
+		const report = await reportFor(billingPayload([{ ...CREDIT_ITEM, unitType: "SOME_FUTURE_UNIT" }]));
 		const allowance = report.limits.find(limit => limit.id === "copilot:premium");
 		expect(allowance?.label).toBe("Premium Requests");
 		expect(allowance?.amount.unit).toBe("requests");

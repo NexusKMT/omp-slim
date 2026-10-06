@@ -9,6 +9,7 @@ import { COPILOT_GITHUB_HEADERS } from "@oh-my-pi/pi-catalog/wire/github-copilot
 import * as AIError from "../error";
 import type {
 	UsageAmount,
+	UsageUnit,
 	UsageFetchContext,
 	UsageFetchParams,
 	UsageLimit,
@@ -47,7 +48,7 @@ type BillingUsageItem = {
 	product: string;
 	sku: string;
 	model?: string;
-	unitType: string;
+	unitType?: string;
 	grossQuantity: number;
 	netQuantity: number;
 	limit?: number;
@@ -266,27 +267,19 @@ function normalizeQuotaSnapshots(
 	return { limits, window };
 }
 
-
 /**
- * The unit GitHub's billing API metered one usage item in, in the vocabulary
- * the shared UsageReport speaks, plus the label that names it.
- *
- * Copilot moved individual plans to usage-based billing on 2026-06-01, where a
- * plan's allowance is AI credits rather than premium requests. The payload
- * always said which one it was — `BillingUsageItem.unitType` was declared in
- * the type above and then never read — so every plan rendered as "Premium
- * Requests" with unit `requests`, and a Copilot Pro allowance of 1,500 AI
- * credits was reported as 1,125 premium requests used (#13849).
- *
- * Only AI credits is recognised. Any other value, including a unit type added
- * after this was written, keeps the previous wording: an unrecognised unit is
- * not evidence about how the account is billed, and the established name is
- * safer than a guess that reads as authoritative.
+ * The unit GitHub's billing API metered one usage item in, plus the label
+ * that names it. Only AI credits is recognised: any other value keeps the
+ * legacy wording, since an unrecognised unit is not evidence about how the
+ * account is billed.
  */
-function resolveBillingUnit(unitType: string | undefined): { unit: UsageAmount["unit"]; label: string } {
+function resolveBillingUnit(unitType: string | undefined): { unit: UsageUnit; label: string } {
 	if (typeof unitType !== "string") return { unit: "requests", label: "Premium Requests" };
 	// "AI_CREDITS", "ai-credits" and "Ai Credits" all name the same unit.
-	return unitType.toUpperCase().replace(/[^A-Z]/g, "").includes("CREDIT")
+	return unitType
+		.toUpperCase()
+		.replace(/[^A-Z]/g, "")
+		.includes("CREDIT")
 		? { unit: "credits", label: "AI Credits" }
 		: { unit: "requests", label: "Premium Requests" };
 }
