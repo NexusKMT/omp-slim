@@ -1921,6 +1921,48 @@ mod tests {
 		);
 	}
 
+	// The function-context line is lossy-converted onto the header, so a tight
+	// `max_bytes` must refuse it before converting. git's 80-byte funcname cap
+	// bounds the conversion itself; the line still needs a qualifying (ASCII
+	// letter) first byte to be picked at all.
+	#[test]
+	fn hunk_writer_bounds_the_function_context_line_before_converting_it() {
+		use gix::diff::blob::unified_diff::{ConsumeHunk, DiffLineKind, HunkHeader};
+
+		let mut old_data = vec![b'A'];
+		old_data.extend(std::iter::repeat_n(0x80_u8, 1_000_000));
+		old_data.extend_from_slice(b"\nunchanged\n");
+		let lines: Vec<(DiffLineKind, &[u8])> = vec![(DiffLineKind::Add, b"x\n".as_slice())];
+		// `before_hunk_start: 2` makes the function context the first line of
+		// `old_data`: `A` followed by 79 invalid bytes after the cap, 240 bytes
+		// once each becomes U+FFFD.
+		let header = HunkHeader {
+			before_hunk_start: 2,
+			before_hunk_len:   0,
+			after_hunk_start:  1,
+			after_hunk_len:    1,
+		};
+
+		let mut out = String::new();
+		let mut sink =
+			GitHunks::new(&mut out, &old_data, Some(RenderBudget { limit: 100, already: 0 }));
+		let err = sink.consume_hunk(header, &lines).unwrap_err();
+		assert!(
+			err.get_ref()
+				.is_some_and(|inner| inner.downcast_ref::<BudgetExceeded>().is_some()),
+			"{err:?}"
+		);
+		assert!(out.len() <= 100, "wrote {} bytes past a 100-byte budget: {out:?}", out.len());
+
+		let mut out = String::new();
+		let mut sink =
+			GitHunks::new(&mut out, &old_data, Some(RenderBudget { limit: 1_000, already: 0 }));
+		sink
+			.consume_hunk(header, &lines)
+			.expect("capped context fits");
+		assert_eq!(out, format!("@@ -1,0 +1 @@ A{}\n+x\n", "\u{FFFD}".repeat(79)));
+	}
+
 	// Regression for the P1 gap: base85-encoding a binary body can expand well
 	// past a tiny remaining budget even though the input itself fit under it;
 	// the block writer must stop once its own growth crosses the cap rather
