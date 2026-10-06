@@ -163,13 +163,17 @@ describe("google-gemini-cli effort-tier variant routing", () => {
 				expect(request.body.request?.generationConfig?.thinkingConfig?.thinkingLevel).toBeUndefined();
 			}
 
-			// These SKUs always think: off and external scratchpads must keep a
-			// valid backing tier rather than sending the unserved logical id.
-			for (const options of [{}, { forceReasoningOff: true }]) {
-				const request = await captureRequest(model, undefined, options);
+			// These SKUs always think: off and external scratchpads (an effort is
+			// selected but reasoning is forced off) must keep a valid backing tier
+			// rather than sending the unserved logical id.
+			for (const [reasoning, options] of [
+				[undefined, {}],
+				[Effort.High, { forceReasoningOff: true }],
+			] as const) {
+				const request = await captureRequest(model, reasoning, options);
 				expect(request.body.model).toBe(`${id}-low`);
 				expect(request.body.request?.generationConfig?.thinkingConfig?.includeThoughts).toBe(true);
-				expect(request.body.request?.generationConfig?.thinkingConfig?.thinkingBudget).toBeGreaterThan(0);
+				expect(request.body.request?.generationConfig?.thinkingConfig?.thinkingBudget).toBe(4096);
 			}
 		}
 	});
