@@ -1726,7 +1726,7 @@ mod tests {
 				} else {
 					"body"
 				};
-				text.push_str(&format!("    {body} {index} {row}\n"));
+				writeln!(text, "    {body} {index} {row}").expect("write to String");
 			}
 			text
 		};
