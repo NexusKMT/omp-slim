@@ -2239,7 +2239,7 @@ describe("openai-codex streaming", () => {
 		expect(result.usage.cost.output).toBeCloseTo(0.000012);
 	});
 
-	it("bills ultrafast turns at the model's baked 6x multiplier (gpt-6-astra)", async () => {
+	it("bills ultrafast turns at the model's baked 8x multiplier (gpt-6-astra)", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 
@@ -2250,9 +2250,8 @@ describe("openai-codex streaming", () => {
 		const fetchMock: FetchImpl = async () =>
 			new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
 
-		// Astra is the only model with a published ultrafast price (6x the standard
-		// card); the subscription route bills it in credits, so the credit-equivalent
-		// cost mirrors that premium instead of staying at 1x.
+		// Astra is the only model with a published ultrafast rate. The Codex table
+		// uses OpenAI's included-usage multipliers: Ultrafast 8x, Fast 2.5x.
 		const astra = buildModel({
 			id: "gpt-6-astra",
 			name: "Codex",
@@ -2265,7 +2264,9 @@ describe("openai-codex streaming", () => {
 			contextWindow: 400000,
 			maxTokens: 128000,
 		});
-		expect(astra.serviceTierCost).toEqual({ flex: 0.5, priority: 2.5, ultrafast: 6 });
+		expect(astra.serviceTierCost).toEqual({ flex: 0.5, priority: 2.5, ultrafast: 8 });
+		// The catalog bakes Astra's $10/$50 card over the spec's placeholder cost.
+		expect(astra.cost).toMatchObject({ input: 10, output: 50 });
 
 		const result = await streamOpenAICodexResponses(
 			astra,
@@ -2275,9 +2276,9 @@ describe("openai-codex streaming", () => {
 			},
 			{ fetch: fetchMock, apiKey: createCodexTestToken(), serviceTier: "ultrafast" },
 		).result();
-		// 5 input tokens at $1/MTok * 6, 3 output at $2/MTok * 6.
-		expect(result.usage.cost.input).toBeCloseTo(0.00003);
-		expect(result.usage.cost.output).toBeCloseTo(0.000036);
+		// 5 input tokens at $10/MTok * 8, 3 output at $50/MTok * 8.
+		expect(result.usage.cost.input).toBeCloseTo(0.0004, 12);
+		expect(result.usage.cost.output).toBeCloseTo(0.0012, 12);
 	});
 
 	it("bills a requested priority turn at standard rates when the response reports default", async () => {

@@ -76,13 +76,12 @@ provider "openai-codex" {
 		service-tier-cost {
 			flex 0.5
 			priority 2.5
-			// Ultrafast is Astra-only. OpenAI publishes Codex Ultrafast at 8x Standard
-			// against included plan usage and 6x for purchased credits / Enterprise
-			// pay-as-you-go (Fast: 2.5x and 2x); the first-party API card is also 6x
-			// ($60/$300 vs $10/$50 per 1M). See
+			// Ultrafast is Astra-only. This table uses OpenAI's included-usage
+			// multipliers for Codex: Ultrafast 8x and Fast 2.5x Standard (purchased
+			// credits / Enterprise pay-as-you-go bill 6x and 2x instead). See
 			// https://learn.chatgpt.com/docs/agent-configuration/speed and
 			// https://learn.chatgpt.com/docs/pricing.
-			ultrafast 6
+			ultrafast 8
 		}
 		limits-patch {
 			context-window 272000
