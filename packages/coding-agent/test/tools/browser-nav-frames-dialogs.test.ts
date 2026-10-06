@@ -298,4 +298,49 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			slow.stop(true);
 		}
 	}, 30_000);
+
+	test("leaves the page's in-flight fetches alone when a run that is not navigating is cancelled", async () => {
+		const pending = Promise.withResolvers<AbortSignal>();
+		const waiting = Promise.withResolvers<void>();
+		const slow = Bun.serve({
+			port: 0,
+			idleTimeout: 0,
+			fetch(request) {
+				if (new URL(request.url).pathname === "/pending") pending.resolve(request.signal);
+				else waiting.resolve();
+				return new Promise<Response>(() => {});
+			},
+		});
+		try {
+			const invoke = createHost();
+			await invoke({ action: "open", name: "cancelled-wait", url: `${baseUrl}/one` });
+			await invoke({
+				action: "run",
+				name: "cancelled-wait",
+				code: `await page.evaluate(url => { fetch(url, { mode: "no-cors" }).catch(() => {}); }, "http://127.0.0.1:${slow.port}/pending");`,
+			});
+			const request = await pending.promise;
+			const cancel = new AbortController();
+			const run = invoke(
+				{
+					action: "run",
+					name: "cancelled-wait",
+					code: `await page.evaluate(url => { fetch(url, { mode: "no-cors" }).catch(() => {}); }, "http://127.0.0.1:${slow.port}/waiting");
+						await wait(60_000);`,
+				},
+				cancel.signal,
+			);
+			await waiting.promise;
+			cancel.abort();
+			await expect(run).rejects.toThrow("Operation aborted");
+			const dropped = new Promise<string>(resolve => {
+				if (request.aborted) resolve("dropped");
+				request.addEventListener("abort", () => resolve("dropped"));
+			});
+			// Proving the fetch survives needs real time: nothing signals "Chrome did not cancel it".
+			expect(await Promise.race([dropped, Bun.sleep(1_000).then(() => "pending")])).toBe("pending");
+		} finally {
+			slow.stop(true);
+		}
+	}, 30_000);
 });

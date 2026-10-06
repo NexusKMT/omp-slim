@@ -1612,10 +1612,11 @@ export class WorkerCore {
 		} finally {
 			runAc.abort(postmortem.markExpectedCleanupError(new ToolAbortError("Browser run ended")));
 			await Bun.sleep(0);
-			// A cancelled run abandons its navigation: left loading, it holds up the interception
-			// restore below and still replaces the page later. A run that merely ended keeps an
-			// unawaited goto going.
-			if (ac.signal.aborted) await this.#stopLoading();
+			// A cancelled run abandons its main-frame navigation: left loading, it holds up the
+			// interception restore below and still replaces the page later. Stopping is gated on
+			// that navigation because Page.stopLoading also cancels every fetch and subresource
+			// load in flight. A run that merely ended keeps an unawaited goto going.
+			if (ac.signal.aborted && this.#network?.hasPendingMainFrameNavigation()) await this.#stopLoading();
 			try {
 				await runPage?.cleanup();
 			} catch (error) {
