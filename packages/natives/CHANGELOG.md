@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Renamed the `linux-all` target of `scripts/bazel-natives.ts` (`//:natives-linux-all`) to `all` (`//:natives-all`); it now covers the darwin addons too
+- Removed the `gen:native` and `gen:native:reset` scripts: standalone binary builds embed the addon archive and manifest in memory and no longer write to `native/`
 
 ### Added
 
