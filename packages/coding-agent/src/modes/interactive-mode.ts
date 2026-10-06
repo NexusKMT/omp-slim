@@ -325,6 +325,7 @@ import { UiHelpers } from "./utils/ui-helpers";
 import {
 	cfgAutocompleteMaxVisible,
 	cfgComposerShape,
+	cfgComposerThinkingInModel,
 	cfgComposerTokenRate,
 	cfgDisplayCacheMissMarker,
 	cfgDisplayCollapseCompacted,
@@ -404,6 +405,7 @@ const cfgLiveUiSettings = combine({
 	"spelling.autocomplete": cfgSpellingAutocomplete,
 	"spelling.autocorrect": cfgSpellingAutocorrect,
 	"composer.shape": cfgComposerShape,
+	"composer.thinkingInModel": cfgComposerThinkingInModel,
 	"tui.vimMode": cfgTuiVimMode,
 	"tui.vimModeDisplay": cfgTuiVimModeDisplay,
 	"display.pinnedAgents": cfgDisplayPinnedAgents,
@@ -657,23 +659,13 @@ class TodoHudContainer extends AnchoredLiveContainer {
 		}
 		return super.render(width);
 	}
-
-	/**
-	 * The plan built with the ANSI rows: a HUD `checklist` where the terminal
-	 * has one, else the phase tree. The short-terminal fold is ANSI layout only.
-	 */
-	override describe(cx: DescribeContext): NativeNode {
-		const hud = this.mode.todoHudNative;
-		if (!hud) return EMPTY_HUD;
-		return cx.supports("checklist") ? hud.checklist : hud.fallback;
-	}
 }
 
 /**
- * Native-only dock row of HUD pills (§8.1), right-aligned above the working
- * row: the todo HUD, the agents pill and the background-jobs pill. ANSI
- * renders the todo HUD and the pinned agent list in their own containers and
- * the agent and job counts in the status line, so this row renders nothing.
+ * Native-only dock row of HUD pills (§8.1), right-aligned above the activity
+ * line: the agents pill and the background-jobs pill. ANSI renders the pinned
+ * agent list in its own container and the agent and job counts in the status
+ * line, so this row renders nothing.
  */
 class HudPillsRow implements Component {
 	constructor(private readonly mode: InteractiveMode) {}
@@ -745,8 +737,8 @@ class StatusHudContainer extends AnchoredLiveContainer {
 		super();
 	}
 
-	override describe(): NativeNode {
-		return this.mode.describeStatusHud(this.children);
+	override describe(cx: DescribeContext): NativeNode {
+		return this.mode.describeStatusHud(this.children, cx);
 	}
 
 	override render(width: number): readonly string[] {
@@ -1323,18 +1315,17 @@ export class InteractiveMode implements InteractiveModeContext {
 	 * loader recreated by a focus switch keeps the real elapsed time.
 	 */
 	#workingStartedAt = 0;
-	#idleStatusNative: { rate: number | undefined; node: NativeNode } | undefined;
-	#statusHudNative: { children: readonly Component[]; slot: NativeNode | undefined; node: NativeNode } | undefined;
+	#statusHudNative: { children: readonly Component[]; todo: NativeNode | undefined; node: NativeNode } | undefined;
 	/**
 	 * The todo HUD, rebuilt with its ANSI rows; undefined while hidden. A
 	 * terminal with `checklist` gets the whole plan as a HUD checklist, others
-	 * the same stage window as a tree.
+	 * the same stage window as a tree; both keyed `todo` in the activity line.
 	 */
-	todoHudNative: { checklist: NativeNode; fallback: NativeNode } | undefined;
-	#hudPillsNative: { children: readonly NativeChild[]; empty: boolean; node: NativeNode } | undefined;
+	#todoHudNative: { checklist: NativeNode; fallback: NativeNode } | undefined;
+	#hudPillsNative: { children: readonly NativeChild[]; node: NativeNode } | undefined;
 	#agentsPill: RunningPill | undefined;
 	#jobsPill: RunningPill | undefined;
-	/** Live gen tok/s for the native working row, one decimal (a steadier `rate` target). */
+	/** Gen tok/s for the native composer bar, one decimal (a steadier `rate` target): live while running, else the last reading. */
 	#nativeTokenRate(): number | undefined {
 		if (!cfgComposerTokenRate.get(settings)) return undefined;
 		const rate = this.tokenRate.rate();
@@ -1345,14 +1336,13 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.focusedAgentId) return undefined;
 		return this.keybindings.getKeys("app.interrupt")[0] ?? "escape";
 	}
-	/** The running turn's working row (§8.1): the intent, its elapsed time, tok/s and the stop control. */
+	/** The running turn's working row (§8.1): its elapsed time, the intent and the stop control. */
 	#workingRowSpec(): WorkingRowSpec {
 		const accent = this.#getWorkingMessageAccent() !== undefined;
 		return {
 			label: this.#workingMessage,
 			startedAt: this.#workingStartedAt,
 			palette: accent ? NATIVE_ACCENT_SHIMMER : undefined,
-			rate: this.#nativeTokenRate(),
 			interruptKey: this.keybindings.getKeys("app.interrupt")[0] ?? "escape",
 		};
 	}
@@ -1360,22 +1350,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	interruptFromPointer(): void {
 		this.editor.onEscape?.();
 	}
-	/** Between turns: the last tok/s reading, docked right; nothing when there is none. */
-	#describeIdleStatusHud(): NativeNode | undefined {
-		const rate = this.#nativeTokenRate();
-		if (rate === undefined) return undefined;
-		if (this.#idleStatusNative?.rate !== rate) {
-			this.#idleStatusNative = {
-				rate,
-				node: row([node("rate", { value: rate, unit: "tok/s" }, undefined, "rate")], {
-					justify: "end",
-					role: "omp.working.idle",
-				}),
-			};
-		}
-		return this.#idleStatusNative.node;
-	}
-	/** The native HUD pills row: the todo HUD, the agents pill, then the jobs pill; hidden while all are empty. */
+	/** The native HUD pills row: the agents pill, then the jobs pill; hidden while both are absent. */
 	describeHudPills(): NativeNode {
 		// Agents count as the status-line badge counts them, from the agent
 		// registry: the observer registry only hears task-executor lifecycles,
@@ -1399,36 +1374,39 @@ export class InteractiveMode implements InteractiveModeContext {
 				count,
 			),
 		);
-		const children: NativeChild[] = [this.todoContainer];
+		const children: NativeChild[] = [];
 		if (this.#agentsPill) children.push(this.#agentsPill.node);
 		if (this.#jobsPill) children.push(this.#jobsPill.node);
 		const memo = this.#hudPillsNative;
-		const empty = this.todoHudNative === undefined && children.length === 1;
-		if (memo && memo.empty === empty && sameItems(memo.children, children)) return memo.node;
-		const described = row(children, { role: "omp.hud", justify: "end", gap: "sm", hidden: empty || undefined });
-		this.#hudPillsNative = { children, empty, node: described };
+		if (memo && sameItems(memo.children, children)) return memo.node;
+		const described = row(children, {
+			role: "omp.hud",
+			justify: "end",
+			gap: "sm",
+			hidden: children.length === 0 || undefined,
+		});
+		this.#hudPillsNative = { children, node: described };
 		return described;
 	}
 	/**
-	 * Native status HUD: the working, retry and compaction loaders describe
-	 * themselves as the working row; other rows describe themselves; an empty
-	 * HUD shows the idle tok/s readout.
+	 * Native activity line (`omp.hud.activity`): the status rows (the working,
+	 * retry and compaction loaders describe themselves as the working row;
+	 * other rows describe themselves) in an `omp.hud.status` column, then the
+	 * todo HUD, so the todo holds its place as the turn starts and ends.
+	 * Nothing to show describes the empty HUD.
 	 */
-	describeStatusHud(children: readonly Component[]): NativeNode {
-		const slot = children.length === 0 ? this.#describeIdleStatusHud() : undefined;
+	describeStatusHud(children: readonly Component[], cx: DescribeContext): NativeNode {
+		const hud = this.#todoHudNative;
+		const todo = hud && (cx.supports("checklist") ? hud.checklist : hud.fallback);
 		const memo = this.#statusHudNative;
-		if (
-			memo &&
-			memo.slot === slot &&
-			memo.children.length === children.length &&
-			memo.children.every((child, index) => child === children[index])
-		) {
-			return memo.node;
-		}
-		const parts: NativeChild[] = children.length === 0 ? (slot ? [slot] : []) : children.slice();
-		const hud = parts.length === 0 ? EMPTY_HUD : col(parts, { role: "omp.hud.status" });
-		this.#statusHudNative = { children: children.slice(), slot, node: hud };
-		return hud;
+		if (memo && memo.todo === todo && sameItems(memo.children, children)) return memo.node;
+		const parts: NativeChild[] = [];
+		if (children.length > 0) parts.push(node("col", { role: "omp.hud.status" }, children.slice(), "status"));
+		if (todo) parts.push(todo);
+		const described =
+			parts.length === 0 ? EMPTY_HUD : row(parts, { role: "omp.hud.activity", align: "center", gap: "sm" });
+		this.#statusHudNative = { children: children.slice(), todo, node: described };
+		return described;
 	}
 	unsubscribe?: () => void;
 	onInputCallback?: (input: SubmittedUserInput) => void;
@@ -3432,6 +3410,8 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.updateEditorBorderColor();
 		}
 		if (any("composer.shape")) this.syncComposerShape();
+		// The native composer re-reads the setting as it describes.
+		if (any("composer.thinkingInModel")) this.ui.requestRender();
 		if (any("tui.vimMode", "tui.vimModeDisplay")) this.#applyVimModeSetting();
 		if (any("display.pinnedAgents")) this.applyPinnedAgentsSetting();
 		if (any("display.subagentLivePreview")) {
@@ -3730,7 +3710,8 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/**
 	 * What the TSP composer shows: the draft's shell mode, the effort chip
-	 * (the viewed agent's, like the model chip beside it), and send vs Stop.
+	 * (the viewed agent's, like the model chip beside it) or the model chip's
+	 * effort icon, the tok/s readout after it, and send vs Stop.
 	 */
 	#composerNativeState(): ComposerNativeState {
 		const draft = this.editor.getText().trimStart();
@@ -3741,6 +3722,8 @@ export class InteractiveMode implements InteractiveModeContext {
 					? { kind: "python", excluded: draft.startsWith("$$") }
 					: undefined,
 			thinking: thinkingLevelWord(this.viewSession),
+			thinkingInModel: cfgComposerThinkingInModel.get(settings),
+			rate: this.#nativeTokenRate(),
 			running: this.loadingAnimation !== undefined || this.session.isStreaming,
 			viewing: this.#viewingLineage(),
 		};
@@ -4131,7 +4114,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#renderTodoList(): void {
 		this.todoContainer.clear();
-		this.todoHudNative = undefined;
+		this.#todoHudNative = undefined;
 		if (this.#todoHudHidden) return;
 		const phases = this.todoPhases.filter(phase => phase.tasks.length > 0);
 		if (phases.length === 0) return;
@@ -4288,7 +4271,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (hiddenStages > 0) {
 			phaseNodes.push({ id: "more", label: [span(formatMoreItems(hiddenStages, "stage"), "muted")] });
 		}
-		const fallback = col(
+		const fallback = node(
+			"col",
+			{ role: "omp.hud.todo" },
 			[
 				row(
 					[
@@ -4299,7 +4284,7 @@ export class InteractiveMode implements InteractiveModeContext {
 				),
 				node("tree", { nodes: phaseNodes }),
 			],
-			{ role: "omp.hud.todo" },
+			"todo",
 		);
 		// A `checklist` HUD is a pill with the whole plan as its popover.
 		const checklistPhases: TspChecklistPhase[] = phases.map((phase, phaseIndex) => ({
@@ -4325,8 +4310,13 @@ export class InteractiveMode implements InteractiveModeContext {
 				};
 			}),
 		}));
-		this.todoHudNative = {
-			checklist: node("checklist", { phases: checklistPhases, mode: "hud", role: "omp.hud.todo" }),
+		this.#todoHudNative = {
+			checklist: node(
+				"checklist",
+				{ phases: checklistPhases, mode: "hud", role: "omp.hud.todo" },
+				undefined,
+				"todo",
+			),
 			fallback,
 		};
 	}
