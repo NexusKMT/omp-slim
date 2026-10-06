@@ -134,7 +134,7 @@ export async function renderPdfPageScreenshot(
 		throw error;
 	} finally {
 		try {
-			// A failed navigation keeps the published tab, so release it by name.
+			// A timed-out navigation keeps the published tab, so release it by name.
 			await releaseTab(tabName, { kill: false });
 		} finally {
 			if (browserLease && browser) await releaseBrowser(browser, { kill: false });

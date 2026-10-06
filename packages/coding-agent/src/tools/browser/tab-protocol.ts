@@ -124,14 +124,15 @@ export interface RunErrorPayload {
 	isAbort: boolean;
 	/** The worker could not restore tab-scoped browser state and must be recycled. */
 	recoverTab?: boolean;
+	/** `tab.goto` outlasted its budget; the page stays on what loaded. */
+	navigationTimeout?: boolean;
 }
 
 export type WorkerOutbound =
 	| {
 			/**
 			 * Puppeteer loaded, browser connected. Sent before page acquisition so the supervisor's cold-start budget
-			 * bounds only the realm setup (cold import + connect); page creation and the first navigation run under the
-			 * ready wait.
+			 * bounds only the realm setup (cold import + connect); page creation runs under the ready wait.
 			 */
 			type: "setup";
 	  }

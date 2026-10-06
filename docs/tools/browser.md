@@ -51,7 +51,7 @@ await tab.close();
 | Option | Contract |
 |---|---|
 | `name` | Managed-tab name; default `"main"`. |
-| `url` | Navigate the opened or reused tab to this URL. On Chromium-backed tabs, a navigation that fails or outlasts `timeout` throws but keeps the tab on what loaded; reach it with `browser.tab(name)`. |
+| `url` | Navigate the opened or reused tab to this URL. On Chromium-backed tabs, a navigation that outlasts `timeout` throws an error naming the tab and keeps it on what loaded; reach it with `browser.tab(name)`. A navigation that fails outright (refused connection, blocked domain, certificate error) or an open that is cancelled closes a tab the open created; a reused tab stays open. |
 | `app` | `{ cdp_url?, path?, args?, relay?, tern?, target? }`; backend selection is described below. `target` selects an attached page by URL/title substring. |
 | `viewport` | `{ width, height, scale? }`; `scale` becomes the device scale factor. |
 | `wait_until` | `"load"`, `"domcontentloaded"`, `"networkidle0"`, or `"networkidle2"`. |
