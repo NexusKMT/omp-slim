@@ -87,7 +87,7 @@ struct Registered {
 	target_key:  String,
 	generation:  u64,
 	/// Role and label at registration. An identity read again with another
-	/// role or label is a different element that reuses it.
+	/// role or label gets a new ref.
 	fingerprint: u64,
 }
 
@@ -129,8 +129,9 @@ impl AxRegistry {
 
 	/// Returns the element's ref under `target`, minting one the first time it
 	/// is seen there, and renews it for `target`'s `generation`. An identity
-	/// that now names an element with another role or label gets a new ref,
-	/// and the old one expires so it cannot act on the newcomer.
+	/// read again with another role or label gets a new ref; the old ref keeps
+	/// the element it was read from until it expires like any ref not read
+	/// again.
 	pub(crate) fn register(
 		&mut self,
 		target: &str,
@@ -147,29 +148,22 @@ impl AxRegistry {
 			.get(target)
 			.and_then(|refs| refs.get(&handle))
 			.copied();
-		let id = match known {
-			Some(id)
-				if self
-					.entries
-					.get(&id)
-					.is_some_and(|entry| entry.fingerprint == fingerprint) =>
-			{
-				id
-			},
-			reused => {
-				if let Some(id) = reused {
-					self.entries.remove(&id);
-				}
-				let id = self.next_ref;
-				self.next_ref = self.next_ref.saturating_add(1);
-				self
-					.refs
-					.entry(target.to_string())
-					.or_default()
-					.insert(handle.clone(), id);
-				id
-			},
-		};
+		let renewed = known.filter(|id| {
+			self
+				.entries
+				.get(id)
+				.is_some_and(|entry| entry.fingerprint == fingerprint)
+		});
+		let id = renewed.unwrap_or_else(|| {
+			let id = self.next_ref;
+			self.next_ref = self.next_ref.saturating_add(1);
+			self
+				.refs
+				.entry(target.to_string())
+				.or_default()
+				.insert(handle.clone(), id);
+			id
+		});
 		self.entries.insert(id, Registered {
 			handle,
 			target_key: target.to_string(),
@@ -198,11 +192,16 @@ impl AxRegistry {
 			.ok_or_else(|| DesktopError::stale_ref(format!("{reference} expired; re-run ax()/find()")))
 	}
 
+	/// Drops expired refs. An identity a newer ref took over keeps pointing at
+	/// that one.
 	fn evict(&mut self, mut expired: impl FnMut(&Registered) -> bool) {
 		let refs = &mut self.refs;
-		self.entries.retain(|_, entry| {
+		self.entries.retain(|id, entry| {
 			let expired = expired(entry);
-			if expired && let Some(target_refs) = refs.get_mut(&entry.target_key) {
+			if expired
+				&& let Some(target_refs) = refs.get_mut(&entry.target_key)
+				&& target_refs.get(&entry.handle) == Some(id)
+			{
 				target_refs.remove(&entry.handle);
 			}
 			!expired
@@ -769,7 +768,38 @@ mod tests {
 		assert_eq!(registry.resolve("e3").err().map(|error| error.code), Some(ErrorCode::StaleRef));
 	}
 	#[test]
-	fn refs_are_per_target_and_a_reused_identity_gets_a_new_ref() {
+	fn a_relabelled_element_keeps_its_old_ref_until_it_expires() {
+		let mut m = Mock {
+			props:    [(1, p("window", Some("Title"))), (2, p("button", Some("Play")))].into(),
+			children: [(1, vec![2])].into(),
+		};
+		let mut registry = AxRegistry::default();
+		let options = AxSnapshotOptions::default();
+		snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		m.props.insert(2, p("button", Some("Pause")));
+		let relabelled = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(
+			relabelled.text,
+			"- window \"Title\" [ref=e1] app=Safari (focused)\n  - button \"Pause\" [ref=e3]"
+		);
+		let found = query(&mut m, &mut registry, &window(), &AxQuery {
+			role:  Some("button".into()),
+			title: None,
+			value: None,
+			limit: None,
+		})
+		.unwrap();
+		assert_eq!(found[0].ref_, "e3");
+		assert!(matches!(registry.resolve("e2").unwrap(), AxHandle::Test(2)));
+		for _ in 0..2 {
+			let reread = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+			assert_eq!(reread.text, relabelled.text);
+		}
+		assert_eq!(registry.resolve("e2").err().map(|error| error.code), Some(ErrorCode::StaleRef));
+		assert!(matches!(registry.resolve("e3").unwrap(), AxHandle::Test(2)));
+	}
+	#[test]
+	fn refs_are_per_target() {
 		let mut r = AxRegistry::default();
 		let go = p("button", Some("Go"));
 		let desktop = r.current_generation("desktop");
@@ -778,15 +808,9 @@ mod tests {
 			let generation = r.begin_snapshot("7");
 			assert_eq!(r.register("7", generation, AxHandle::Test(5), &go), "e2");
 		}
-		let generation = r.begin_snapshot("7");
-		assert_eq!(
-			r.register("7", generation, AxHandle::Test(5), &p("checkbox", Some("Done"))),
-			"e3"
-		);
-		assert_eq!(r.resolve("e2").err().map(|error| error.code), Some(ErrorCode::StaleRef));
 		r.begin_snapshot("7");
 		r.begin_snapshot("7");
-		assert!(r.resolve("e3").is_err());
+		assert!(r.resolve("e2").is_err());
 		assert!(r.resolve("e1").is_ok());
 	}
 	#[test]
