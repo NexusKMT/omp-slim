@@ -540,6 +540,29 @@ describe("RelayBridge child targets", () => {
 
 		expect(childTraffic(cdp)).toEqual([]);
 	});
+
+	it("detaches children from connections still holding the tab when the extension lost its attachment", async () => {
+		const bridge = new RelayBridge({});
+		const ext = new FakeExtSocket();
+		connect(bridge, ext, [tab({ tabId: 1 })]);
+		const cdp = new FakeCdpSocket();
+		const conn = bridge.cdpConnected(cdp);
+		const session = await attachPage(bridge, ext, cdp, conn, 1);
+		await armAutoAttach(bridge, ext, conn, session);
+		emit(bridge, ext, ATTACH);
+		await armAutoAttach(bridge, ext, conn, "CHILD1");
+		emit(bridge, ext, NESTED_ATTACH);
+		const start = cdp.messages.length;
+
+		// A service-worker restart reconnects without the tab's debugger attachment.
+		connect(bridge, new FakeExtSocket(), [tab({ tabId: 1 })]);
+		await flush();
+
+		expect(trafficSince(cdp, start).filter(([method]) => method === "Target.detachedFromTarget")).toEqual([
+			["Target.detachedFromTarget", "CHILD1", "CHILD2"],
+			["Target.detachedFromTarget", session, "CHILD1"],
+		]);
+	});
 });
 
 describe("RelayBridge Runtime sessions", () => {

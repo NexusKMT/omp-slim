@@ -1389,11 +1389,19 @@ export class RelayBridge {
 		tab.runtimeGeneration++;
 	}
 
-	/** Drop the tab's real child sessions: they end with its debugger attachment. */
+	/**
+	 * Drop the tab's real child sessions, which end with its debugger attachment, and send each
+	 * connection told of one its detach; nested children go first, while their parent is still known.
+	 */
 	#forgetChildren(tab: TabState): void {
-		for (const child of tab.realSessions.keys()) {
+		for (const child of [...tab.realSessions.keys()].reverse()) {
 			this.#realSessionTabs.delete(child);
-			for (const conn of this.#conns.values()) conn.childParents.delete(child);
+			for (const conn of this.#conns.values()) {
+				const parent = conn.childParents.get(child);
+				if (parent === undefined) continue;
+				conn.childParents.delete(child);
+				this.#emit(conn, "Target.detachedFromTarget", { sessionId: child }, parent);
+			}
 		}
 		tab.realSessions.clear();
 	}
