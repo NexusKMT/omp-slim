@@ -23,6 +23,7 @@
 - Fixed browser runs through the relay not seeing cross-origin iframes that had loaded before the tab was opened, so `tab.observe()` listed none of their controls and their content could not be read or clicked ([#14422](https://github.com/can1357/oh-my-pi/pull/14422) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed browser clicks on Chromium tabs timing out on radios and checkboxes whose real input is invisible (`opacity:0`) under the control the page draws, as on GOV.UK forms ([#14555](https://github.com/can1357/oh-my-pi/pull/14555) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed `/model` leaving the session on its current model when you pick the model a project's `modelRoles.default` already names; it reported "role cleared" instead of switching ([#14382](https://github.com/can1357/oh-my-pi/pull/14382) by [@jshield](https://github.com/jshield))
+- Fixed `wait` being cut short by a queued background completion that had already been consumed elsewhere, such as by an eval cell awaiting its subagent, which left no message to follow. Such a consumed result also no longer counts as pending background work when the session decides whether it is idle ([#14257](https://github.com/can1357/oh-my-pi/pull/14257) by [@nick-maderight](https://github.com/nick-maderight))
 
 ## [18.6.3] - 2026-10-06
 
