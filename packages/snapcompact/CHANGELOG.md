@@ -6,6 +6,12 @@
 
 - Added `frameTokens` and `frameBillingKey`, which price a rendered frame at what the model reading it is billed ([#14291](https://github.com/can1357/oh-my-pi/pull/14291) by [@will-bogusz](https://github.com/will-bogusz))
 
+## [18.6.2] - 2026-10-04
+
+### Fixed
+
+- Fixed short snapcompact frames being rejected by vision backends that require image dimensions above 32px ([#14355](https://github.com/can1357/oh-my-pi/issues/14355)).
+
 ## [18.2.9] - 2026-09-22
 
 ### Fixed

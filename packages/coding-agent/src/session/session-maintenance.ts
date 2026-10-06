@@ -23,6 +23,7 @@ import {
 	compact,
 	compactionContextTokens,
 	computeFileLists,
+	countResponsesHistoryTokens,
 	createCompactionSummaryMessage,
 	DEFAULT_SHAKE_CONFIG,
 	type CompactionSettings as EngineCompactionSettings,
@@ -53,15 +54,15 @@ import type { ProtectedToolMatcher } from "@oh-my-pi/pi-agent-core/compaction/to
 import type {
 	AssistantMessage,
 	CodexCompactionContext,
+	Context,
 	Message,
 	Model,
-	OpenAIResponsesHistoryPayload,
 	ProviderSessionState,
 } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
-import { isRecord, logger, prompt, Snowflake, stringifyJson } from "@oh-my-pi/pi-utils";
+import { isRecord, logger, prompt, Snowflake } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
 import { writeArtifact } from "./artifacts";
 import type { ModelRegistry } from "../config/model-registry";
@@ -91,6 +92,7 @@ import {
 	assistantTurnDelivered,
 	convertToLlm,
 	invalidateConvertToLlmArrayCache,
+	isUserAuthoredMessage,
 	stripImagesFromMessage,
 } from "./messages";
 import { isTerminalTextAssistantAnswer } from "./queued-messages";
@@ -448,6 +450,12 @@ export interface SessionMaintenanceHost {
 	drainStrandedQueuedMessages(): void;
 	buildDisplaySessionContext(): SessionContext;
 	convertToLlmForSideRequest(messages: AgentMessage[]): Message[];
+	/** The provider context a live turn sends for `summarized` + `retained`, cut to the `summarized` range. */
+	buildLiveProviderContext(
+		summarized: AgentMessage[],
+		retained: AgentMessage[],
+		signal?: AbortSignal,
+	): Promise<Context>;
 	obfuscateTextForProvider(text: string | undefined): string | undefined;
 	obfuscatePreparationForProvider(preparation: CompactionPreparation): CompactionPreparation;
 	closeCodexProviderSessionsForHistoryRewrite(): void;
@@ -3427,6 +3435,9 @@ export class SessionMaintenance {
 						...options,
 						metadata: this.#host.agent.metadataForProvider(candidate.provider),
 						convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+						buildProviderContext: (summarized, retained, signal) =>
+							this.#host.buildLiveProviderContext(summarized, retained, signal),
+						isUserAuthored: isUserAuthoredMessage,
 						telemetry,
 						// Honor the user's /model thinking selection (incl. `off`) on
 						// the manual `/compact` path. Clamped per-model inside compact()
@@ -3736,7 +3747,7 @@ export class SessionMaintenance {
 			blocks,
 		});
 		const summaryTokens = this.#countProjectedMessages([summaryMessage]);
-		const nativeHistoryTokens = this.#countOpenAiNativeHistoryTokens(providerPayload);
+		const nativeHistoryTokens = countResponsesHistoryTokens(providerPayload.items, this.#tokenizer);
 		return nonMessageTokens + rebuiltTokens - summaryTokens + nativeHistoryTokens;
 	}
 
@@ -3757,11 +3768,6 @@ export class SessionMaintenance {
 		return (
 			this.#tokenizer.countMessages(archives, options) + this.#tokenizer.countMessages(convertToLlm(rest), options)
 		);
-	}
-
-	#countOpenAiNativeHistoryTokens(providerPayload: OpenAIResponsesHistoryPayload): number {
-		const serialized = stringifyJson(providerPayload.items);
-		return serialized === undefined ? 0 : this.#tokenizer.countTokens(serialized);
 	}
 
 	/**
@@ -4833,6 +4839,9 @@ export class SessionMaintenance {
 									metadata: this.#host.agent.metadataForProvider(candidate.provider),
 									initiatorOverride: "agent",
 									convertToLlm: messages => this.#host.convertToLlmForSideRequest(messages),
+									buildProviderContext: (summarized, retained, signal) =>
+										this.#host.buildLiveProviderContext(summarized, retained, signal),
+									isUserAuthored: isUserAuthoredMessage,
 									telemetry,
 									// Honor the user's /model thinking selection on the
 									// auto-compaction path — the most-fired compaction
