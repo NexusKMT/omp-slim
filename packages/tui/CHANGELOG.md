@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- Fixed terminal resizing flickering by synchronizing the viewport-erase sequence with the alternate-screen buffer switch
 - Fixed resizing the terminal flashing an empty frame before the resized screen appears
 - Fixed `/annotate` truncating long source lines and selected filenames, losing indentation when wrapping, and hiding typed note characters ([#14609](https://github.com/can1357/oh-my-pi/pull/14609) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
 - Fixed fullscreen inputs such as setup sign-in showing no cursor when the hardware-cursor setting is on ([#14609](https://github.com/can1357/oh-my-pi/pull/14609) by [@anatoli-tsinovoy](https://github.com/anatoli-tsinovoy)).
