@@ -5,7 +5,7 @@ import { formatDuration, formatNumber } from "@oh-my-pi/pi-utils";
 import { theme } from "../theme/theme";
 import { formatMetricRow, MetricRow, type MetricSpec } from "../components/metric";
 import { node, row, span, text } from "../native/describe";
-import type { NativeChild, NativeNode } from "../native/node";
+import type { DescribeContext, NativeChild, NativeNode } from "../native/node";
 
 /** Below this the rate is nonsense (cached/instant responses yield absurd tok/s). */
 const MIN_DURATION_MS = 100;
@@ -161,6 +161,8 @@ class UsageRowBlock extends Container {
 	readonly #timestamp: number | undefined;
 	readonly #turnElapsedMs: number | undefined;
 	#nativeNode: NativeNode | undefined;
+	/** The terminal's clock {@link #nativeNode} was described with. */
+	#nativeHour12: boolean | undefined;
 
 	constructor(usage: Usage, durationMs?: number, ttftMs?: number, timestamp?: number, turnElapsedMs?: number) {
 		super();
@@ -186,13 +188,22 @@ class UsageRowBlock extends Container {
 	 * ttft 0.9s · 96 tok/s`): worded metrics instead of the ANSI icons, the
 	 * full timestamp in the tooltip, and throughput as a `rate`.
 	 */
-	override describe(): NativeNode {
-		if (this.#nativeNode) return this.#nativeNode;
+	override describe(cx?: DescribeContext): NativeNode {
+		// The terminal's clock: Bun's own default locale ignores the user's.
+		const hour12 = cx?.hour12;
+		if (this.#nativeNode && this.#nativeHour12 === hour12) return this.#nativeNode;
+		this.#nativeHour12 = hour12;
 		const usage = this.#usage;
 		const parts: string[] = [];
 		const timestamp = this.#timestamp;
 		const stamped = timestamp !== undefined && Number.isFinite(timestamp) && timestamp > 0;
-		if (stamped) parts.push(formatUsageTimestamp(timestamp).slice(11, 16));
+		if (stamped) {
+			parts.push(
+				hour12 === undefined
+					? formatUsageTimestamp(timestamp).slice(11, 16)
+					: new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12 }),
+			);
+		}
 		if (this.#turnElapsedMs !== undefined && this.#turnElapsedMs > 0) {
 			parts.push(`Δ ${formatDuration(Math.round(this.#turnElapsedMs))}`);
 		}
@@ -211,7 +222,14 @@ class UsageRowBlock extends Container {
 			role: "omp.usage.turn",
 			gap: "none",
 			align: "baseline",
-			...(stamped ? { title: formatUsageTimestamp(timestamp) } : {}),
+			...(stamped
+				? {
+						title:
+							hour12 === undefined
+								? formatUsageTimestamp(timestamp)
+								: new Date(timestamp).toLocaleString([], { hour12 }),
+					}
+				: {}),
 		});
 		return this.#nativeNode;
 	}
