@@ -211,6 +211,9 @@ mod pkill;
 /// Shared process-matching engine behind `pgrep`, `pkill`, and `pidwait`.
 #[cfg(feature = "util.proc-match")]
 mod proc_match;
+/// Process selector lists shared by `ps` and the process-matching engine.
+#[cfg(any(feature = "util.ps", feature = "util.proc-match"))]
+mod proc_select;
 /// Shared process-table snapshot behind the process builtins.
 #[cfg(feature = "util.procs")]
 mod proc_snapshot;
@@ -280,6 +283,14 @@ pub use withheld::withheld_builtin;
 /// same snapshot its `ps`/`pgrep`/`kill` builtins use.
 #[cfg(feature = "util.procs")]
 pub use proc_snapshot::{ProcInfo, ProcessStatus};
+/// The OS process primitives under those snapshots. `pi-shell` builds its
+/// identity-pinned process references on them, so each platform query has one
+/// implementation.
+#[cfg(all(
+	feature = "util.procs",
+	any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+pub use proc_snapshot::sys as proc_sys;
 
 /// Macro to define a struct that represents a shell built-in flag argument that
 /// can be enabled or disabled by specifying an option with a leading '+' or '-'
