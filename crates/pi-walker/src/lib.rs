@@ -3079,7 +3079,7 @@ impl<H> WalkContext<'_, H> {
 			}
 		}
 
-		if !self.options.is_unignored_file(name, entry_file_type)
+		if !self.options.is_unignored_file(name, file_type)
 			&& self
 				.matcher
 				.is_ignored(dir_ignore, &self.absolute_path, is_dir)
@@ -5626,6 +5626,104 @@ mod tests {
 			paths.iter().any(|path| path == "link/child.txt"),
 			"FollowLinks::Always should yield descendants through symlink paths, got: {paths:?}"
 		);
+	}
+
+	#[cfg(unix)]
+	struct LoopVisitor {
+		seen:   Vec<String>,
+		errors: Vec<(PathBuf, String)>,
+	}
+
+	#[cfg(unix)]
+	impl EntryVisitor for LoopVisitor {
+		type Error = Infallible;
+
+		fn visit(&mut self, entry: Entry<'_>) -> std::result::Result<WalkControl, Self::Error> {
+			self.seen.push(entry.relative.to_string());
+			Ok(WalkControl::Continue)
+		}
+
+		fn visit_directory_error(
+			&mut self,
+			error: DirectoryError<'_>,
+		) -> std::result::Result<WalkControl, Self::Error> {
+			self
+				.errors
+				.push((error.path.to_path_buf(), error.error.to_string()));
+			Ok(WalkControl::Continue)
+		}
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn walk_entries_always_reports_symlink_cycles_to_ancestors() {
+		let tree = temp_tree("follow-always-cycle");
+		let a = tree.path().join("a");
+		fs::create_dir_all(&a).expect("a dir should be created");
+		fs::write(a.join("file.txt"), "ok").expect("file should be written");
+		// One link back to the walk root and one back to its own parent: both
+		// resolve to an ancestor on the follow stack and must not be descended.
+		std::os::unix::fs::symlink("..", a.join("to_root")).expect("root link should be created");
+		std::os::unix::fs::symlink(".", a.join("to_parent")).expect("parent link should be created");
+
+		let mut visitor = LoopVisitor { seen: Vec::new(), errors: Vec::new() };
+		let status = walk_entries(
+			tree.path(),
+			WalkOptions {
+				follow_links: FollowLinks::Always,
+				directory_errors: DirectoryErrorMode::Visit,
+				..test_options()
+			},
+			&mut visitor,
+			|| Ok::<(), Infallible>(()),
+		)
+		.expect("walk should not fail");
+		assert_eq!(status, WalkStatus::Complete);
+
+		let mut seen = visitor.seen;
+		seen.sort();
+		// Loop links are reported as directory errors instead of yielded: the
+		// ancestor check runs before the entry reaches the visitor.
+		assert_eq!(seen, vec!["a", "a/file.txt"]);
+		let mut errors = visitor.errors;
+		errors.sort();
+		assert_eq!(errors, vec![
+			(a.join("to_parent"), "filesystem loop detected".to_string()),
+			(a.join("to_root"), "filesystem loop detected".to_string()),
+		]);
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn unignored_file_name_does_not_exempt_followed_symlink_directories() {
+		let tree = temp_tree("unignored-symlink-dir");
+		fs::write(tree.path().join(".gitignore"), "AGENTS.md\n")
+			.expect(".gitignore should be written");
+		fs::create_dir_all(tree.path().join("real")).expect("real dir should be created");
+		fs::write(tree.path().join("real").join("inner.txt"), "ok").expect("inner should be written");
+		std::os::unix::fs::symlink("real", tree.path().join("AGENTS.md"))
+			.expect("dir link should be created");
+		fs::create_dir_all(tree.path().join("sub")).expect("sub dir should be created");
+		fs::write(tree.path().join("sub").join("AGENTS.md"), "rules")
+			.expect("file should be written");
+
+		let mut visitor = PathsVisitor { seen: Vec::new() };
+		walk_entries(
+			tree.path(),
+			WalkOptions {
+				follow_links: FollowLinks::Always,
+				use_gitignore: true,
+				unignored_file_name: Some("AGENTS.md"),
+				..test_options()
+			},
+			&mut visitor,
+			|| Ok::<(), Infallible>(()),
+		)
+		.expect("walk should not fail");
+
+		let mut seen = visitor.seen;
+		seen.sort();
+		assert_eq!(seen, vec![".gitignore", "real", "real/inner.txt", "sub", "sub/AGENTS.md"]);
 	}
 
 	#[cfg(unix)]
