@@ -758,6 +758,13 @@ impl Process {
 		self.inner.args()
 	}
 
+	/// Send `signal` to this process only, through its pinned identity, so it
+	/// never reaches a process that reused the pid after this one was reaped.
+	/// On Windows the process is terminated whatever `signal` is.
+	pub fn signal(&self, signal: i32) -> bool {
+		self.inner.kill(signal)
+	}
+
 	/// Send `signal` to this process and its descendants, children first.
 	///
 	/// On Linux and macOS the signal is forwarded as-is. On Windows there is no

@@ -455,17 +455,19 @@ fn run_pty_sync(
 	});
 
 	// Pin the kill targets before the waiter thread can reap the child: after
-	// the reap its pid may be recycled, and a pid-only lookup at cancellation
-	// time would signal whatever process took it (#4605).
+	// the reap its pid may be recycled, and a pid-only signal (a lookup at
+	// cancellation time, or portable-pty's `clone_killer`) would hit whatever
+	// process took it (#4605). The child is only ever signalled through
+	// `pinned_child`.
 	let mut targets = ps::TerminationTargets::new();
 	#[cfg(unix)]
 	if let Some(pgid) = master.process_group_leader().filter(|pgid| *pgid > 0) {
 		targets.add_pgid(pgid);
 	}
-	if let Some(pid) = child_pid {
-		targets.add_pid(pid);
+	let pinned_child = child_pid.and_then(pi_shell::process::Process::from_pid);
+	if let Some(process) = &pinned_child {
+		targets.add_process(process.clone());
 	}
-	let mut killer = child.clone_killer();
 	// Exit, cancellation and JS failure all arrive as control messages, so the
 	// loop below parks in `recv` instead of polling `try_wait`/`heartbeat` on a
 	// timer: an idle session costs no wakeups, and exit is seen immediately.
@@ -561,7 +563,12 @@ fn run_pty_sync(
 		};
 		if terminate && give_up_at.is_none() {
 			targets.signal(ps::TERM_SIGNAL);
-			let _ = killer.kill();
+			// The hangup a closing terminal delivers: interactive shells ignore
+			// SIGTERM but exit on SIGHUP. On Windows TERM already terminated it.
+			#[cfg(unix)]
+			if let Some(process) = &pinned_child {
+				let _ = process.signal(libc::SIGHUP);
+			}
 			let now = Instant::now();
 			kill_at = Some(now + KILL_GRACE);
 			give_up_at = Some(now + KILL_GRACE + CANCEL_EXIT_WAIT);
