@@ -4,7 +4,7 @@
 
 ### Added
 
-- MiniMax-M3.1-Flash-Preview now offers thinking levels low through max on MiniMax hosts; turning thinking off uses the lowest level, since the model always thinks ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
+- MiniMax-M3.1-Flash-Preview now offers thinking levels low through max on MiniMax hosts. Like MiniMax M2, it is marked as requiring reasoning effort because the model always thinks: thinking-off and forced-off requests run at the low level ([#13696](https://github.com/can1357/oh-my-pi/pull/13696) by [@eggpeat](https://github.com/eggpeat))
 
 ### Changed
 

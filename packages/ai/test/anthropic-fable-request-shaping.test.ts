@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
+import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type { AssistantMessage, Context, Model, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
@@ -421,14 +422,29 @@ describe("MiniMax Anthropic adaptive thinking", () => {
 		expect(payload.output_config?.effort).toBe(wire);
 	});
 
-	it("keeps MiniMax-M3.1-Flash-Preview thinking on at the lowest effort when thinking is off", async () => {
-		// The model 400s on `thinking.type: "disabled"` (error 2013).
-		const payload = await capturePayload(makeMiniMaxAnthropicModel("MiniMax-M3.1-Flash-Preview", "minimax-code"), {
-			thinkingEnabled: false,
-		});
+	// The model 400s on `thinking.type: "disabled"` (error 2013), so the row is
+	// mandatory-reasoning: no off level, and forced-off or effort-less requests
+	// clamp to the lowest effort before reaching the transport.
+	it.each([
+		["an effort-less request", {}],
+		["a forced-off request", { forceReasoningOff: true }],
+		["a disabled-reasoning request", { disableReasoning: true }],
+	] as const)("clamps MiniMax-M3.1-Flash-Preview %s to low effort with thinking on", async (_label, opts) => {
+		const model = makeMiniMaxAnthropicModel("MiniMax-M3.1-Flash-Preview", "minimax-code");
+		expect(model.thinking?.requiresEffort).toBe(true);
 
-		expect(payload.thinking).toBeUndefined();
-		expect(payload.output_config?.effort).toBe("low");
+		let payload: CapturedPayload | undefined;
+		await streamSimple(model, CONTEXT, {
+			apiKey: "test-key",
+			signal: abortedSignal(),
+			onPayload: captured => {
+				payload = captured as CapturedPayload;
+			},
+			...opts,
+		}).result();
+
+		expect(payload?.thinking).toEqual({ type: "adaptive" });
+		expect(payload?.output_config?.effort).toBe("low");
 	});
 
 	it("drives Token Plan MiniMax-M3 through the adaptive tag like the pay-as-you-go host", async () => {
