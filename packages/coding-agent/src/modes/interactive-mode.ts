@@ -671,9 +671,9 @@ class TodoHudContainer extends AnchoredLiveContainer {
 
 /**
  * Native-only dock row of HUD pills (§8.1), right-aligned above the working
- * row: the todo HUD, the subagent pill and the background-jobs pill. ANSI
- * renders the first two in their own containers and the jobs count in the
- * status line, so this row renders nothing.
+ * row: the todo HUD, the agents pill and the background-jobs pill. ANSI
+ * renders the todo HUD and the pinned agent list in their own containers and
+ * the agent and job counts in the status line, so this row renders nothing.
  */
 class HudPillsRow implements Component {
 	constructor(private readonly mode: InteractiveMode) {}
@@ -686,34 +686,57 @@ class HudPillsRow implements Component {
 		return this.mode.describeHudPills();
 	}
 
-	/** A click on the jobs pill opens the jobs sheet. */
+	/** A click on the agents pill opens the agent hub; one on the jobs pill, the jobs sheet. */
 	handleNativeEvent(event: NativeUiEvent): void {
-		if (event.type === "action" && event.act === "jobs.open") this.mode.showJobsSheet();
+		if (event.type !== "action") return;
+		if (event.act === "agents.open") this.mode.showAgentHub();
+		else if (event.act === "jobs.open") this.mode.showJobsSheet();
 	}
 }
 
-/** Native jobs pill (§8.1): the running background jobs, with a spinner; a click sends `jobs.open`. */
-function describeJobsHud(running: number): NativeNode {
+/** A described running-work pill with the count it shows, so an unchanged count reuses the node. */
+interface RunningPill {
+	readonly running: number;
+	readonly node: NativeNode;
+}
+
+/** `prev` while it still shows `running`, else a fresh pill from `describe`; undefined when nothing runs. */
+function runningPill(
+	prev: RunningPill | undefined,
+	running: number,
+	describe: (running: number) => NativeNode,
+): RunningPill | undefined {
+	if (running === 0) return undefined;
+	return prev?.running === running ? prev : { running, node: describe(running) };
+}
+
+/** What a running-work pill shows and the action a click on it sends to {@link HudPillsRow}. */
+interface RunningPillSpec {
+	/** Sibling key in the HUD row: the pill keeps its id, and skips its entrance, as the count changes. */
+	readonly key: string;
+	readonly icon: string;
+	/** Singular noun the count reads with (`1 job running`, `2 jobs running`). */
+	readonly noun: string;
+	readonly title: string;
+	readonly act: string;
+}
+
+/** Native dock pill (§8.1) counting running work, with a spinner. */
+function describeRunningPill(spec: RunningPillSpec, running: number): NativeNode {
 	return node(
 		"row",
-		{
-			role: "omp.hud.pill",
-			gap: "xs",
-			align: "center",
-			title: "Background jobs  /jobs",
-			actions: { click: "jobs.open" },
-		},
+		{ role: "omp.hud.pill", gap: "xs", align: "center", title: spec.title, actions: { click: spec.act } },
 		[
-			node("icon", { name: "job" }, undefined, "icon"),
+			node("icon", { name: spec.icon }, undefined, "icon"),
 			node("spinner", { style: "dots", tone: "accent" }, undefined, "spinner"),
 			node(
 				"text",
-				{ text: `${running} ${running === 1 ? "job" : "jobs"} running`, wrap: "none" },
+				{ text: `${running} ${spec.noun}${running === 1 ? "" : "s"} running`, wrap: "none" },
 				undefined,
 				"label",
 			),
 		],
-		"jobs",
+		spec.key,
 	);
 }
 
@@ -822,37 +845,19 @@ export class SubagentHudComponent implements Component {
 	#lines: readonly string[];
 	#order: readonly string[];
 	#toggleLine: number | undefined;
-	#node: NativeNode;
-	readonly #onOpen: (() => void) | undefined;
 	#physicalOwner?: (string | undefined)[];
 	#renderedWidth?: number;
 	#renderedRows = 0;
 	#renderedWidthConfigEpoch?: number;
-	constructor(lines: readonly string[], order: readonly string[], toggleRow?: number, native?: SubagentHudNative) {
+	constructor(lines: readonly string[], order: readonly string[], toggleRow?: number) {
 		this.#text = new Text(lines.join("\n"), 1, 0);
 		this.#lines = lines;
 		this.#order = order;
 		this.#toggleLine = toggleRow;
-		this.#node = native?.node ?? EMPTY_HUD;
-		this.#onOpen = native?.onOpen;
 	}
 
-	describe(): NativeNode {
-		return this.#node;
-	}
-
-	/** A click on the pill opens the agent hub, as the hub key does. */
-	handleNativeEvent(event: NativeUiEvent): void {
-		if (event.type === "action" && event.act === "agents.open") this.#onOpen?.();
-	}
-	/**
-	 * Repaint in place with a new view. Keeping the instance keeps its native
-	 * wire id, so the dock pill stays mounted (a fresh component would be
-	 * removed and re-added, replaying its entrance) and the HUD memo holds.
-	 * The click map rebuilds lazily.
-	 */
-	update(lines: readonly string[], order: readonly string[], toggleRow: number | undefined, node: NativeNode): void {
-		this.#node = node;
+	/** Repaint in place with a new view; the click map rebuilds lazily. */
+	update(lines: readonly string[], order: readonly string[], toggleRow: number | undefined): void {
 		this.#order = order;
 		this.#toggleLine = toggleRow;
 		this.#text.setText(lines.join("\n"));
@@ -909,41 +914,6 @@ export class SubagentHudComponent implements Component {
 		}
 		this.#physicalOwner = owner;
 	}
-}
-
-/** Native side of the subagent HUD: the pill and what a click on it opens. */
-export interface SubagentHudNative {
-	readonly node: NativeNode;
-	/** Open the agent hub. */
-	onOpen(): void;
-}
-
-/**
- * Native subagent HUD: one dock pill (§8.1) counting the running subagents,
- * with a spinner while they run; a click sends `agents.open`.
- */
-export function describeSubagentHud(sessions: ObservableSession[]): NativeNode {
-	const running = sessions.filter(isHudSubagent).length;
-	if (running === 0) return EMPTY_HUD;
-	return row(
-		[
-			node("icon", { name: "users" }, undefined, "icon"),
-			node("spinner", { style: "dots", tone: "accent" }, undefined, "spinner"),
-			node(
-				"text",
-				{ text: `${running} ${running === 1 ? "agent" : "agents"} running`, wrap: "none" },
-				undefined,
-				"label",
-			),
-		],
-		{
-			role: "omp.hud.pill",
-			gap: "xs",
-			align: "center",
-			title: `Agents  ${formatDoubleTap("left")}`,
-			actions: { click: "agents.open" },
-		},
-	);
 }
 
 const SUBAGENT_OBSERVER_UI_COALESCE_MS = 100;
@@ -1362,7 +1332,8 @@ export class InteractiveMode implements InteractiveModeContext {
 	 */
 	todoHudNative: { checklist: NativeNode; fallback: NativeNode } | undefined;
 	#hudPillsNative: { children: readonly NativeChild[]; empty: boolean; node: NativeNode } | undefined;
-	#jobsHudNative: { running: number; node: NativeNode } | undefined;
+	#agentsPill: RunningPill | undefined;
+	#jobsPill: RunningPill | undefined;
 	/** Live gen tok/s for the native working row, one decimal (a steadier `rate` target). */
 	#nativeTokenRate(): number | undefined {
 		if (!cfgComposerTokenRate.get(settings)) return undefined;
@@ -1404,17 +1375,35 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 		return this.#idleStatusNative.node;
 	}
-	/** The native HUD pills row: the todo HUD, the subagent pill, then the jobs pill; hidden while all are empty. */
+	/** The native HUD pills row: the todo HUD, the agents pill, then the jobs pill; hidden while all are empty. */
 	describeHudPills(): NativeNode {
-		const running = this.statusLine.runningBackgroundJobCount();
-		if (running === 0) this.#jobsHudNative = undefined;
-		else if (this.#jobsHudNative?.running !== running) {
-			this.#jobsHudNative = { running, node: describeJobsHud(running) };
-		}
-		const children: NativeChild[] = [this.todoContainer, ...this.subagentContainer.children];
-		if (this.#jobsHudNative) children.push(this.#jobsHudNative.node);
+		// Agents count as the status-line badge counts them, from the agent
+		// registry: the observer registry only hears task-executor lifecycles,
+		// so an agent a peer message woke or revived would run without a pill.
+		const agents = cfgDisplayPinnedAgents.get(settings) === "off" ? 0 : this.#runningSubagentCount;
+		this.#agentsPill = runningPill(this.#agentsPill, agents, count =>
+			describeRunningPill(
+				{
+					key: "agents",
+					icon: "users",
+					noun: "agent",
+					title: `Agents  ${formatDoubleTap("left")}`,
+					act: "agents.open",
+				},
+				count,
+			),
+		);
+		this.#jobsPill = runningPill(this.#jobsPill, this.statusLine.runningBackgroundJobCount(), count =>
+			describeRunningPill(
+				{ key: "jobs", icon: "job", noun: "job", title: "Background jobs  /jobs", act: "jobs.open" },
+				count,
+			),
+		);
+		const children: NativeChild[] = [this.todoContainer];
+		if (this.#agentsPill) children.push(this.#agentsPill.node);
+		if (this.#jobsPill) children.push(this.#jobsPill.node);
 		const memo = this.#hudPillsNative;
-		const empty = this.todoHudNative === undefined && this.subagentContainer.children.length === 0 && running === 0;
+		const empty = this.todoHudNative === undefined && children.length === 1;
 		if (memo && memo.empty === empty && sameItems(memo.children, children)) return memo.node;
 		const described = row(children, { role: "omp.hud", justify: "end", gap: "sm", hidden: empty || undefined });
 		this.#hudPillsNative = { children, empty, node: described };
@@ -4460,24 +4449,15 @@ export class InteractiveMode implements InteractiveModeContext {
 			this.subagentContainer.clear();
 			return;
 		}
-		const node = describeSubagentHud(view.sessions);
 		const hud = this.subagentContainer.children[0];
-		if (hud instanceof SubagentHudComponent) hud.update(view.lines, view.order, view.toggleRow, node);
-		else {
-			this.subagentContainer.addChild(
-				new SubagentHudComponent(view.lines, view.order, view.toggleRow, {
-					node,
-					onOpen: () => this.showAgentHub(),
-				}),
-			);
-		}
+		if (hud instanceof SubagentHudComponent) hud.update(view.lines, view.order, view.toggleRow);
+		else this.subagentContainer.addChild(new SubagentHudComponent(view.lines, view.order, view.toggleRow));
 		this.#armSubagentPreviewTick(view.tickMs);
 	}
 
 	/** Inputs for one HUD paint; undefined when the HUD is off or nothing is running. */
 	#buildSubagentHudView():
 		| {
-				sessions: ObservableSession[];
 				lines: string[];
 				order: string[];
 				toggleRow: number | undefined;
@@ -4497,7 +4477,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			livePreview && !agentPauseGate.paused
 				? nextSubagentPreviewTickMs(running.slice(0, layout.itemRows), Date.now())
 				: undefined;
-		return { sessions, lines, order: running.map(session => session.id), toggleRow: layout.toggleRow, tickMs };
+		return { lines, order: running.map(session => session.id), toggleRow: layout.toggleRow, tickMs };
 	}
 
 	#armSubagentPreviewTick(tickMs: number | undefined): void {
