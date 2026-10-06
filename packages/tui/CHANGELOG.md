@@ -2,14 +2,9 @@
 
 ## [Unreleased]
 
-### Added
-
-- `FuzzyCorpus` prepares a candidate list once for repeated `fuzzyRank`-equivalent ranking, and `ModelItemRanker` does the same for `rankModelItems` ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
-
 ### Changed
 
-- `AutocompleteProvider.trySyncSlashCompletion` now returns the same command-name list as `getSuggestions`, including bare `/` and the collapsed `/skill:` row; the editor's Enter path skips the namespace row itself ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
-- `^` model mentions, `/switch` model completions, and the model picker search rank about 3–7× faster per keystroke on large catalogs (e.g. ~6–16 ms → ~2 ms over 5.6k models) ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
+- Model mentions (`^`), `/switch` completions, and model picker search stay responsive on every keystroke with large model catalogs ([#14595](https://github.com/can1357/oh-my-pi/pull/14595) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 

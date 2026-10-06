@@ -330,18 +330,6 @@ describe("CombinedAutocompleteProvider", () => {
 			expect(result.cursorCol).toBe("/skill:superpowers/tdd ".length);
 		});
 
-		it("lists the collapsed skill namespace row on the sync path like the async popup", async () => {
-			const provider = new CombinedAutocompleteProvider(
-				[{ name: "skill:humanizer", description: "Remove signs of AI writing" }],
-				"/tmp",
-			);
-
-			const asyncResult = await provider.getSuggestions(["/sk"], 0, 3);
-			expect(provider.trySyncSlashCompletion("/sk")?.items.map(i => i.value)).toEqual(
-				asyncResult!.items.map(i => i.value),
-			);
-		});
-
 		it("lists every skill while typing toward the skill: namespace mid-prompt", async () => {
 			const provider = new CombinedAutocompleteProvider(
 				[
