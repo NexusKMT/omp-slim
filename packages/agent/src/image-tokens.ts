@@ -1,8 +1,9 @@
 import type { ImageContent } from "@oh-my-pi/pi-ai";
 import {
-	DEFAULT_OPENAI_PATCH_TOKENIZATION,
 	type ImageSize,
+	type ImageTokenization,
 	imageTokens,
+	resolveImageTokenization,
 } from "@oh-my-pi/pi-catalog/compat/image-tokenization";
 import { parseImageMetadata } from "@oh-my-pi/pi-utils";
 
@@ -14,8 +15,8 @@ import { parseImageMetadata } from "@oh-my-pi/pi-utils";
  * stayed under the local compaction trigger yet was refused as over-window by
  * the remote probe.
  *
- * Follows OpenAI's patch-based rule (32px patches, a per-detail pixel limit
- * and patch budget, x1.2 multiplier; the catalog's `openai-patch` formula),
+ * Follows the catalog's image rule for the OpenAI Responses wire (GPT-5.5's
+ * 32px patches, a per-detail pixel limit and patch budget, x1.2 multiplier),
  * which is also a close upper estimate for other providers once omp has
  * downscaled the image (≤1568px by default).
  */
@@ -29,16 +30,23 @@ export type { ImageSize };
 // the level's full patch budget.
 const UNKNOWN_SIZE: ImageSize = { width: 65_535, height: 65_535 };
 
+let wireRule: ImageTokenization | undefined;
+
+/** The OpenAI Responses wire's image rule, resolved from the catalog once. */
+function openAiWireRule(): ImageTokenization {
+	if (wireRule) return wireRule;
+	const rule = resolveImageTokenization({ api: "openai-responses" });
+	if (!rule) throw new Error("The catalog has no image-tokenization rule for the openai-responses wire");
+	wireRule = rule;
+	return rule;
+}
+
 /**
  * Estimated input tokens for one image. Unknown dimensions (undecodable data,
  * remote URLs, provider file ids) charge the detail level's full patch budget.
  */
 export function estimateImageTokens(size: ImageSize | null | undefined, detail?: ImageDetail): number {
-	return imageTokens(
-		DEFAULT_OPENAI_PATCH_TOKENIZATION,
-		size && size.width > 0 && size.height > 0 ? size : UNKNOWN_SIZE,
-		detail,
-	);
+	return imageTokens(openAiWireRule(), size && size.width > 0 && size.height > 0 ? size : UNKNOWN_SIZE, detail);
 }
 
 // Enough decoded bytes to reach a JPEG SOF marker behind typical EXIF/ICC

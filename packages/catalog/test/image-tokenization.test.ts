@@ -1,15 +1,25 @@
 import { describe, expect, it } from "bun:test";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
-	DEFAULT_OPENAI_PATCH_TOKENIZATION,
 	type ImageTokenization,
 	imageTokens,
 	resolveImageTokenization,
 } from "@oh-my-pi/pi-catalog/compat/image-tokenization";
+import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
+import rules from "../src/compat/rules.json";
 
 const HIRES: ImageTokenization = { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 };
 const STANDARD: ImageTokenization = { regime: "anthropic-patch", maxEdge: 1568, maxTokens: 1568 };
-const GPT_PATCH = DEFAULT_OPENAI_PATCH_TOKENIZATION;
+/** GPT-5.5's sizing; `auto` sizes like `original`. */
+const GPT_PATCH: ImageTokenization = {
+	regime: "openai-patch",
+	multiplier: 1.2,
+	auto: "original",
+	low: { maxEdge: 512 },
+	high: { maxEdge: 2048, patchBudget: 2500 },
+	original: { maxEdge: 6000, patchBudget: 10_000 },
+};
 
 function ruleFor(provider: string, id: string): ImageTokenization {
 	const rule = resolveImageTokenization({ provider, id });
@@ -32,8 +42,27 @@ describe("resolveImageTokenization", () => {
 		]) {
 			expect(resolveImageTokenization({ provider: "anthropic", id })).toEqual(HIRES);
 		}
-		// Separator-collapsed `claude-opus-45` is Opus 4.5, not revision 45.
+		// Separator-collapsed revisions parse as two digits: `claude-opus-45` is
+		// Opus 4.5 (standard), `claude-opus-47` is Opus 4.7 (high-res).
 		expect(resolveImageTokenization({ provider: "anthropic", id: "claude-opus-45" })).toEqual(STANDARD);
+		expect(resolveImageTokenization({ provider: "anthropic", id: "claude-opus-47" })).toEqual(HIRES);
+	});
+
+	it("prices unversioned Claude aliases at the high-res tier", () => {
+		expect(resolveImageTokenization({ provider: "anthropic", id: "claude-opus-latest" })).toEqual(HIRES);
+		expect(resolveImageTokenization({ provider: "anthropic", id: "claude-sonnet-latest" })).toEqual(HIRES);
+		for (const [provider, id] of [
+			["openrouter", "~anthropic/claude-opus-latest"],
+			["openrouter", "~anthropic/claude-sonnet-latest"],
+			["kilo", "~anthropic/claude-opus-latest"],
+			["kilo", "~anthropic/claude-sonnet-latest"],
+			["nanogpt", "anthropic/claude-opus-latest"],
+			["nanogpt", "anthropic/claude-sonnet-latest"],
+		] as const) {
+			const model = getBundledModel(provider, id);
+			if (!model) throw new Error(`Expected bundled ${provider}/${id}`);
+			expect(resolveImageTokenization(model)).toEqual(HIRES);
+		}
 	});
 
 	it("follows the Claude lineage through gateways and cloud hosts", () => {
@@ -93,7 +122,7 @@ describe("resolveImageTokenization", () => {
 		expect(imageTokens(gpt54, { width: 1932, height: 1920 }, "original")).toBe(4392);
 	});
 
-	it("bills Gemini 3 a fixed budget and leaves unruled lines to the caller", () => {
+	it("bills Gemini 3 a fixed budget and leaves unruled lines without a wire to the caller", () => {
 		expect(resolveImageTokenization({ provider: "google", id: "gemini-3.5-flash" })).toEqual({
 			regime: "fixed",
 			tokens: 1120,
@@ -102,6 +131,51 @@ describe("resolveImageTokenization", () => {
 		expect(resolveImageTokenization({ provider: "openrouter", id: "moonshotai/kimi-k2.6" })).toBeUndefined();
 		for (const id of ["gpt-5.1-codex-max", "gpt-5.1", "gpt-5-mini", "gpt-4.1", "gpt-4o", "o3"]) {
 			expect(resolveImageTokenization({ provider: "openai", id })).toBeUndefined();
+		}
+	});
+
+	it("falls back to the wire API's rule when the lineage has none", () => {
+		for (const api of [
+			"openai-completions",
+			"openai-responses",
+			"openai-codex-responses",
+			"azure-openai-responses",
+		]) {
+			expect(resolveImageTokenization({ api })).toEqual(GPT_PATCH);
+			expect(resolveImageTokenization({ provider: "openrouter", api, id: "moonshotai/kimi-k2.6" })).toEqual(
+				GPT_PATCH,
+			);
+		}
+		for (const api of ["google-generative-ai", "google-gemini-cli", "google-vertex"]) {
+			expect(resolveImageTokenization({ provider: "google", api, id: "gemini-2.5-pro" })).toEqual({
+				regime: "fixed",
+				tokens: 1120,
+			});
+		}
+		for (const api of ["anthropic-messages", "bedrock-converse-stream", "openrouter", "ollama-chat"]) {
+			expect(resolveImageTokenization({ api, id: "qwen/qwen3-vl" })).toEqual(HIRES);
+		}
+		// The lineage rule wins over the wire carrying it.
+		expect(
+			resolveImageTokenization({
+				provider: "openrouter",
+				api: "openai-completions",
+				id: "anthropic/claude-opus-4.6",
+			}),
+		).toEqual(STANDARD);
+		expect(resolveImageTokenization({ api: "anthropic-messages", id: "gemini-3.5-flash" })).toEqual({
+			regime: "fixed",
+			tokens: 1120,
+		});
+		// An unregistered API carries no rule.
+		expect(resolveImageTokenization({ api: "some-future-api", id: "qwen/qwen3-vl" })).toBeUndefined();
+	});
+
+	it("keeps separator-collapsed GPT revisions off the gpt-5.6+ sizing", () => {
+		for (const id of ["openai-gpt-52-codex", "openai-gpt-53-codex", "openai-gpt-54", "openai-gpt-55"]) {
+			const model = getBundledModel("venice", id);
+			if (!model) throw new Error(`Expected bundled venice/${id}`);
+			expect(resolveImageTokenization(model)).toEqual(GPT_PATCH);
 		}
 	});
 
@@ -155,5 +229,58 @@ describe("imageTokens", () => {
 		expect(imageTokens(STANDARD, { width: 3000, height: 2999 })).toBe(39 * 39);
 		expect(imageTokens(STANDARD, { width: 2999, height: 3000 })).toBe(39 * 39);
 		expect(imageTokens({ regime: "fixed", tokens: 1120 }, { width: 2048, height: 2048 })).toBe(1120);
+	});
+});
+
+function isPositiveNumber(value: unknown): boolean {
+	return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/** Why a compiled `image-tokenization` payload cannot be priced, or [] when it can. */
+function payloadProblems(payload: unknown): string[] {
+	if (!isRecord(payload)) return ["not an object"];
+	const problems: string[] = [];
+	const requirePositive = (record: Record<string, unknown>, field: string, path: string) => {
+		if (!isPositiveNumber(record[field])) problems.push(`${path}${field} is not a positive number`);
+	};
+	switch (payload.regime) {
+		case "fixed":
+			requirePositive(payload, "tokens", "");
+			break;
+		case "anthropic-patch":
+			requirePositive(payload, "maxEdge", "");
+			requirePositive(payload, "maxTokens", "");
+			break;
+		case "openai-patch":
+			requirePositive(payload, "multiplier", "");
+			if (payload.auto !== "high" && payload.auto !== "original") problems.push("auto is not high or original");
+			for (const level of ["low", "high", "original"]) {
+				const sizing = payload[level];
+				if (!isRecord(sizing)) {
+					problems.push(`${level} is not an object`);
+					continue;
+				}
+				requirePositive(sizing, "maxEdge", `${level}.`);
+				if (sizing.patchBudget !== undefined) requirePositive(sizing, "patchBudget", `${level}.`);
+			}
+			break;
+		default:
+			problems.push(`unknown regime ${String(payload.regime)}`);
+	}
+	return problems;
+}
+
+describe("compiled image-tokenization payloads", () => {
+	it("carry every field their regime prices with", () => {
+		const offenders: string[] = [];
+		let checked = 0;
+		for (const rule of rules.cascade.rules) {
+			const catalog: Record<string, unknown> | undefined = rule.catalog;
+			if (catalog?.imageTokenization === undefined) continue;
+			checked++;
+			for (const problem of payloadProblems(catalog.imageTokenization)) offenders.push(`${rule.source}: ${problem}`);
+		}
+		expect(checked).toBeGreaterThan(0);
+		expect(offenders).toEqual([]);
 	});
 });

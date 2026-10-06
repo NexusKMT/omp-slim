@@ -645,17 +645,20 @@ describe("estimateInlineSavings", () => {
 	});
 
 	it("assumes the next request carries a user message even with empty history", () => {
+		const model = makeModel();
 		const estimate = estimateInlineSavings({
 			options: { renderSystemPrompt: "all", renderToolResults: false, shape: TEST_SHAPE },
-			model: makeModel(),
+			model,
 			systemPrompt: [LARGE],
 			messages: [],
 		});
 		expect(estimate.visionCapable).toBe(true);
 		expect(estimate.systemPrompt?.applied).toBe(true);
 		expect(estimate.systemPrompt?.frames).toBe(2);
+		// Anthropic wire, unclassified model: the high-res tier's 56² per 1568px frame.
+		expect(snapcompact.resolveShape(model, TEST_SHAPE).frameTokenEstimate).toBe(56 * 56);
 		expect(estimate.systemPrompt?.imageTokens).toBe(
-			estimate.systemPrompt!.frames * snapcompact.resolveShape(undefined, TEST_SHAPE).frameTokenEstimate,
+			estimate.systemPrompt!.frames * snapcompact.resolveShape(model, TEST_SHAPE).frameTokenEstimate,
 		);
 		expect(estimate.systemPrompt?.savedTokens).toBe(
 			estimate.systemPrompt!.textTokens - estimate.systemPrompt!.imageTokens,

@@ -1,6 +1,8 @@
 /**
- * Billed input tokens per image, from the model line's `image-tokenization`
- * rule in `rules/classes/*.kdl`: the lineage's rule applies on every host.
+ * Billed input tokens per image, from the `image-tokenization` rules in the
+ * compat cascade: a model line's lineage rule (`rules/classes/*.kdl`) applies
+ * on every host, and readers without one fall back to the rule for the wire
+ * API carrying the request (`rules/providers/image-tokenization.kdl`).
  */
 import { isRecord } from "@oh-my-pi/pi-utils/type-guards";
 import { classifyModel } from "../identity";
@@ -42,15 +44,8 @@ export type ImageTokenization =
 	/** A fixed per-image budget regardless of pixels (Gemini 3 `media_resolution`). */
 	| { regime: "fixed"; tokens: number };
 
-/** GPT-5.5's image billing, for readers without a catalog rule; `auto` sizes like `original`. */
-export const DEFAULT_OPENAI_PATCH_TOKENIZATION: OpenAiPatchTokenization = {
-	regime: "openai-patch",
-	multiplier: 1.2,
-	low: { maxEdge: 512 },
-	high: { maxEdge: 2048, patchBudget: 2_500 },
-	original: { maxEdge: 6_000, patchBudget: 10_000 },
-	auto: "original",
-};
+/** A `class: "unknown"` identity for targets resolved by wire API alone. */
+const UNCLASSIFIED: Pick<ModelIdentity, "class"> = { class: "unknown" };
 
 function isImageTokenization(value: unknown): value is ImageTokenization {
 	return (
@@ -59,23 +54,29 @@ function isImageTokenization(value: unknown): value is ImageTokenization {
 	);
 }
 
-/** What reads the image: a built model, or any `{ id }` with optional host and identity. */
+/** What reads the image: a built model, any `{ id }` with optional host and identity, or just a wire `{ api }`. */
 export interface ImageTokenizationTarget {
-	id: string;
+	id?: string;
 	provider?: string;
 	api?: string;
 	identity?: Pick<ModelIdentity, "class" | "family" | "revision">;
 }
 
-/** The model's image billing rule, or undefined when no lineage rule covers it. */
+/**
+ * The reader's image billing rule: its lineage rule, else its wire API's
+ * fallback; undefined when neither covers it (an unclassified model on an
+ * unregistered API).
+ */
 export function resolveImageTokenization(target: ImageTokenizationTarget): ImageTokenization | undefined {
 	const provider = target.provider ?? "";
-	const identity = target.identity ?? classifyModel(provider, target.id, { lenient: true });
+	const model = target.id ?? "";
+	const identity: Pick<ModelIdentity, "class" | "family" | "revision"> =
+		target.identity ?? (model ? classifyModel(provider, model, { lenient: true }) : UNCLASSIFIED);
 	const rule = resolveCascade({
 		provider,
 		api: target.api ?? "",
 		class: identity.class,
-		model: target.id,
+		model,
 		reasoning: false,
 		...(identity.family !== undefined && { family: identity.family }),
 		...(identity.revision !== undefined && { revision: identity.revision }),

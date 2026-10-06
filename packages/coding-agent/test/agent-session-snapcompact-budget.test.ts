@@ -21,6 +21,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { effectiveReserveTokens, prepareCompaction } from "@oh-my-pi/pi-agent-core/compaction";
+import { base64ImageSize } from "@oh-my-pi/pi-agent-core/image-tokens";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -421,8 +422,16 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 	});
 
 	it.each([
-		{ name: "Gemini", provider: "google", id: "gemini-3.1-pro-preview", frameSize: 2048, frameTokens: 1120 },
-		{ name: "Codex", provider: "openai-codex", id: "gpt-6.1-sol", frameSize: 1568, frameTokens: 2882 },
+		// Gemini 3 bills a fixed 1,120 per image at any size.
+		{ name: "Gemini", provider: "google", id: "gemini-3.1-pro-preview", frameSize: 2048, frameTokens: () => 1120 },
+		// GPT bills 32px patches × 1.2 over the frame's real height (the last frame hugs its rows).
+		{
+			name: "Codex",
+			provider: "openai-codex",
+			id: "gpt-6.1-sol",
+			frameSize: 1568,
+			frameTokens: (height: number) => Math.ceil(49 * Math.ceil(height / 32) * 1.2),
+		},
 	] as const)(
 		"persists the trigger's post-commit count as tokensAfter for a real $name archive",
 		async ({ provider, id, frameSize, frameTokens }) => {
@@ -444,7 +453,13 @@ describe("AgentSession snapcompact frame-budget sizing", () => {
 			expect(blocks.filter(block => block.type === "image")).toHaveLength(frames.length);
 			const tokenizer = session.agent.tokenizer;
 			const textOnly = { ...summary, blocks: blocks.filter(block => block.type === "text") };
-			expect(tokenizer.countMessage(summary) - tokenizer.countMessage(textOnly)).toBe(frames.length * frameTokens);
+			let expectedFrameTokens = 0;
+			for (const frame of frames) {
+				const size = base64ImageSize(frame.data);
+				if (size?.width !== frameSize) throw new Error(`Expected a ${frameSize}px-wide frame`);
+				expectedFrameTokens += frameTokens(size.height);
+			}
+			expect(tokenizer.countMessage(summary) - tokenizer.countMessage(textOnly)).toBe(expectedFrameTokens);
 			expect(entry.tokensAfter).toBe(
 				computeNonMessageTokens(session, tokenizer, session.settings.revision) +
 					tokenizer.countMessages(session.messages, { excludeEncryptedReasoning: true }),

@@ -267,7 +267,7 @@ describe("shape resolution", () => {
 		expect(snapcompact.resolveShape({ api: "openai-responses" })).toEqual(snapcompact.SHAPES.openai);
 		expect(snapcompact.resolveShape({ api: "azure-openai-responses" })).toEqual(snapcompact.SHAPES.openai);
 		expect(snapcompact.resolveShape({ api: "google-generative-ai" })).toEqual(snapcompact.SHAPES.google);
-		// Unknown and absent APIs fall back to the unknown family default (8on22-bw with Anthropic token billing).
+		// Unknown and absent APIs fall back to the unknown family default (8on22-bw, billed at the ceiling).
 		const unknownFallback = snapcompact.resolveShape({ api: "some-future-api" });
 		expect(unknownFallback.cellHeight).toBe(22);
 		expect(unknownFallback.variant).toBe("bw");
@@ -419,6 +419,18 @@ describe("shape resolution", () => {
 				identity: { class: "anthropic", family: "opus", revision: "4.6.0" },
 			}).frameTokenEstimate,
 		).toBe(1521);
+		// Unversioned Claude aliases price at the high-res tier: 56² for a 1568px frame.
+		expect(
+			snapcompact.resolveShape({ api: "openrouter", provider: "openrouter", id: "~anthropic/claude-opus-latest" })
+				.frameTokenEstimate,
+		).toBe(56 * 56);
+		// An unclassified model bills at its wire API's rule; with no rule at all it costs the ceiling.
+		expect(snapcompact.resolveShape({ api: "openai-completions", id: "qwen/qwen3-vl" }).frameTokenEstimate).toBe(
+			2882,
+		);
+		expect(snapcompact.resolveShape({ api: "some-future-api", id: "qwen/qwen3-vl" }).frameTokenEstimate).toBe(
+			snapcompact.FRAME_TOKEN_ESTIMATE,
+		);
 	});
 
 	it("every catalog variant resolves to a complete, renderable shape", () => {

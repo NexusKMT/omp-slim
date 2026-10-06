@@ -40,9 +40,9 @@
  *
  * The per-frame token estimate follows the reading model's catalog
  * `image-tokenization` rule (its lineage, not the gateway), so Claude behind
- * OpenRouter is billed as Claude and Opus 4.6 under its 1,568-token cap. Models
- * without a rule fall back to their wire family's formula, with Anthropic's
- * high-res rule as the ceiling for unknown APIs.
+ * OpenRouter is billed as Claude and Opus 4.6 under its 1,568-token cap.
+ * Models without a lineage rule fall back to the catalog rule for their wire
+ * API; a reader with neither costs {@link FRAME_TOKEN_ESTIMATE} per frame.
  *
  * The whole pass is local and deterministic — no LLM call, no API key, no
  * latency beyond rendering. Rasterization and PNG encoding happen in native
@@ -53,7 +53,7 @@
 
 import type { Api, ImageContent, Message, TextContent } from "@oh-my-pi/pi-ai";
 import {
-	DEFAULT_OPENAI_PATCH_TOKENIZATION,
+	type ImageSize,
 	type ImageTokenization,
 	type ImageTokenizationTarget,
 	imageTokens,
@@ -238,40 +238,42 @@ function apiFamily(api?: Api): ApiFamily {
 }
 
 /**
- * Image billing for readers without a catalog `image-tokenization` rule, by
- * wire family; Anthropic's high-res rule, the largest per-image bill, covers
- * unknown APIs.
+ * How a reader is billed per frame: its catalog `image-tokenization` rule
+ * (the model's lineage, else its wire API's fallback) and the `detail` hint
+ * snapcompact sends. OpenAI-family wires send `detail: "original"` (`high`
+ * caps the frame at 2,500 patches). Without a rule, every frame costs
+ * {@link FRAME_TOKEN_ESTIMATE}.
  */
-const FALLBACK_IMAGE_TOKENIZATION: Record<ApiFamily, ImageTokenization> = {
-	anthropic: { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 },
-	google: { regime: "fixed", tokens: 1120 },
-	openai: DEFAULT_OPENAI_PATCH_TOKENIZATION,
-	unknown: { regime: "anthropic-patch", maxEdge: 2576, maxTokens: 4784 },
-};
-
-/**
- * Per-frame billing for a square frame of edge `frameSize` read by `target`,
- * from the model's catalog image rule or its wire family's fallback.
- * OpenAI-family wires send `detail: "original"` (`high` caps the frame at
- * 2,500 patches). The square price is a planning bound: shorter frames can
- * bill differently.
- */
-function frameBilling(
-	target: ShapeTarget | undefined,
-	frameSize: number,
-): Pick<Shape, "frameTokenEstimate" | "imageDetail"> {
-	const family = apiFamily(target?.api);
-	const imageDetail = family === "openai" ? "original" : undefined;
-	const rule =
-		(target?.id ? resolveImageTokenization({ ...target, id: target.id }) : undefined) ??
-		FALLBACK_IMAGE_TOKENIZATION[family];
-	const frameTokenEstimate = imageTokens(rule, { width: frameSize, height: frameSize }, imageDetail);
-	return imageDetail ? { frameTokenEstimate, imageDetail } : { frameTokenEstimate };
+export interface FrameBilling {
+	rule?: ImageTokenization;
+	imageDetail?: ImageContent["detail"];
 }
 
-/** Attach the reader's billing to a variant geometry. */
+/** Resolve the frame billing of `target`. */
+export function frameBilling(target: ShapeTarget | undefined): FrameBilling {
+	const rule = target ? resolveImageTokenization(target) : undefined;
+	const imageDetail = apiFamily(target?.api) === "openai" ? "original" : undefined;
+	return { ...(rule && { rule }), ...(imageDetail && { imageDetail }) };
+}
+
+/** Identity of a frame price list: equal keys price every frame alike. */
+export function frameBillingKey(billing: FrameBilling): string {
+	return `${billing.imageDetail ?? "auto"}:${billing.rule ? JSON.stringify(billing.rule) : "ceiling"}`;
+}
+
+/** Billed-token estimate for one rendered frame of `size` under `billing`. */
+export function frameTokens(billing: FrameBilling, size: ImageSize): number {
+	return billing.rule ? imageTokens(billing.rule, size, billing.imageDetail) : FRAME_TOKEN_ESTIMATE;
+}
+
+/**
+ * Attach the reader's billing to a variant geometry. The square price is a
+ * planning bound: shorter frames can bill differently.
+ */
 function priceShape(base: ShapeGeometry, target: ShapeTarget | undefined): Shape {
-	return { ...base, ...frameBilling(target, base.frameSize) };
+	const billing = frameBilling(target);
+	const frameTokenEstimate = frameTokens(billing, { width: base.frameSize, height: base.frameSize });
+	return { ...base, frameTokenEstimate, ...(billing.imageDetail && { imageDetail: billing.imageDetail }) };
 }
 
 /** Eval-validated shapes, keyed by the provider family they won on. */
@@ -457,19 +459,6 @@ export function resolveShapeForText(text: string, model?: ShapeTarget, variant?:
 	return shape.font !== "silver" && isCjkHeavyText(text) && scanRenderability(text, { shape: silver }).isSafe
 		? silver
 		: shape;
-}
-
-/** Identity of the frame price list `target` bills under; equal keys price every frame alike. */
-export function frameBillingKey(target: ShapeTarget | undefined): string {
-	return billingFamily(target?.api);
-}
-
-/**
- * Billed-token estimate for one rendered frame of `size` read by `target`. The
- * family formulas take one edge, so the frame is priced at its longer edge.
- */
-export function frameTokens(target: ShapeTarget | undefined, size: { width: number; height: number }): number {
-	return familyBilling(billingFamily(target?.api), Math.max(size.width, size.height)).frameTokenEstimate;
 }
 
 // ============================================================================
