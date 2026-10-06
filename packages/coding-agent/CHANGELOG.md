@@ -49,6 +49,10 @@
 - Fixed custom `GlobOperations` backends hanging a `glob` call forever: the call now stops at the tool's scan deadline and reports the scan as incomplete, and the backend receives the resolved hidden/gitignore/limit policy plus a cancellation signal ([#6370](https://github.com/can1357/oh-my-pi/issues/6370), [#14426](https://github.com/can1357/oh-my-pi/pull/14426) by [@F0Rextasy](https://github.com/F0Rextasy))
 - Fixed `--resume <path>` silently creating a brand new session when the path did not exist; it now fails with a message naming the path, matching `--fork <path>` and `--resume <id>` ([#14404](https://github.com/can1357/oh-my-pi/pull/14404) by [@F0Rextasy](https://github.com/F0Rextasy))
 
+### Removed
+
+- Removed the PI_SUBPROCESS_CMD environment variable; subagents run in-process and never read it
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes
