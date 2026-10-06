@@ -78,7 +78,10 @@ describe("server-declared repetition stops (#12525)", () => {
 	for (const choice of REPETITION_CHOICES) {
 		it(`classifies ${JSON.stringify(choice)} as a thinking loop and drops the partial`, async () => {
 			const { fetchMock, requests } = repetitionStream(choice);
-			const result = await streamOpenAICompletions(model, context, { apiKey: "test-key", fetch: fetchMock }).result();
+			const result = await streamOpenAICompletions(model, context, {
+				apiKey: "test-key",
+				fetch: fetchMock,
+			}).result();
 
 			// One request: the provider stops at the terminal signal rather than
 			// resampling on its own.

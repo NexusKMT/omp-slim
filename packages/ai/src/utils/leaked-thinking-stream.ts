@@ -49,6 +49,7 @@ import {
 	type StreamingPartialJsonCarrier,
 	setStreamingPartialJson,
 } from "./block-symbols";
+import * as AIError from "../error";
 import { AssistantMessageEventStream } from "./event-stream";
 
 type StreamingToolCall = ToolCall & StreamingPartialJsonCarrier;
@@ -137,6 +138,15 @@ export function wrapLeakedThinkingStream(inner: AssistantMessageEventStream): As
 						return;
 					}
 					case "error": {
+						// A ThinkingLoop-flagged terminal already carries the verdict: the
+						// provider dropped the partial before throwing, so there is nothing
+						// to re-project. Rebuilding content here would resurrect the
+						// degenerate reasoning and break the guard's empty-content retry
+						// check downstream (`isRetryableThinkingLoop` in `../stream.ts`).
+						if (AIError.is(event.error.errorId, AIError.Flag.ThinkingLoop)) {
+							out.push(event);
+							return;
+						}
 						projector ??= new LeakedThinkingProjector(out, event.error);
 						const content = projector.finish(event.error);
 						out.push({ type: "error", reason: event.reason, error: { ...event.error, content } });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type {
 	AnthropicServerToolContent,
@@ -775,6 +776,32 @@ describe("wrapLeakedThinkingStream", () => {
 		expect(result.content.map(b => b.type)).toEqual(["text", "thinking", "text"]);
 		expect(texts(result)).toEqual(["Partial.", "Recovered."]);
 		expect(result.stopReason).toBe("error");
+	});
+
+	it("passes a ThinkingLoop-flagged error through without rebuilding content", async () => {
+		const { result } = await runWrapper(inner => {
+			inner.push({ type: "start", partial: msg() });
+			inner.push({
+				type: "text_delta",
+				contentIndex: 0,
+				delta: "?!".repeat(40),
+				partial: msg({ content: [{ type: "text", text: "?!".repeat(40) }] }),
+			});
+			inner.push({
+				type: "error",
+				reason: "error",
+				error: msg({
+					content: [],
+					stopReason: "error",
+					errorId: AIError.create(AIError.Flag.ThinkingLoop),
+				}),
+			});
+		});
+
+		// The provider already dropped the partial; re-projecting the recorded
+		// deltas would resurrect it and break the guard's empty-content check.
+		expect(result.content).toEqual([]);
+		expect(AIError.is(result.errorId, AIError.Flag.ThinkingLoop)).toBe(true);
 	});
 });
 

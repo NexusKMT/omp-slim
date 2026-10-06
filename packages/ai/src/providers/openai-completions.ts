@@ -1401,7 +1401,9 @@ const streamOpenAICompletionsOnce = (
 				// the same terminal bookkeeping a `finish_reason` chunk would. The
 				// classification itself is deferred to just before the error checks
 				// below: `output.content` is not final until the block sweep has run.
-				repetitionStop = detectRepetitionStop(choice);
+				// Latched: a trailing frame without the signal must not clear the one
+				// an earlier chunk carried.
+				repetitionStop ??= detectRepetitionStop(choice);
 				if (repetitionStop) streamFinishedAt ??= Date.now();
 
 				if (choice.finish_reason) {
@@ -2920,7 +2922,10 @@ const EMPTY_OLLAMA_LENGTH_COMPLETION_MESSAGE =
 function detectRepetitionStop(choice: ChatCompletionChunk.Choice): string | undefined {
 	const finishReason: string | null | undefined = choice.finish_reason;
 	const stopReason = (choice as OpenAICompletionsRepetitionChoice).stop_reason;
-	const namesRepetition = (value: string): boolean => value.toLowerCase().includes("repetition");
+	const namesRepetition = (value: string): boolean => {
+		const lower = value.toLowerCase();
+		return lower === "repetition" || lower === "repetition_detected";
+	};
 	const flagged =
 		(typeof finishReason === "string" && namesRepetition(finishReason)) ||
 		(typeof stopReason === "string" && namesRepetition(stopReason));
