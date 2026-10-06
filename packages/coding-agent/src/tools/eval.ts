@@ -516,6 +516,12 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 		onUpdate?: AgentToolUpdateCallback,
 		ctx?: AgentToolContext,
 	): Promise<AgentToolResult<EvalToolDetails | undefined>> {
+		const validated = evalSchema(params);
+		if (validated instanceof type.errors) {
+			throw new ToolError(`eval received invalid arguments: ${validated.summary}`);
+		}
+		params = validated;
+
 		const shadowCell = this.#shadowCells.get(_toolCallId);
 		this.#shadowCells.delete(_toolCallId);
 		if (this.#proxyExecutor) {
