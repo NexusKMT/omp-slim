@@ -1644,8 +1644,8 @@ export class WorkerCore {
 			// Detach first: the stop below fails the cancelled requests, and run handlers that see
 			// those events would touch the aborted run's facade.
 			runPage?.detach();
-			// A cancelled run abandons its main-frame navigation: left loading, it holds up the
-			// interception restore below and still replaces the page later. Stopping is gated on
+			// A cancelled run abandons its main-frame navigation: left loading, it still replaces the
+			// page later and holds up any interception restore below. Stopping is gated on
 			// that navigation because Page.stopLoading also cancels every fetch and subresource
 			// load in flight. A run that merely ended keeps an unawaited goto going.
 			if (ac.signal.aborted && this.#network?.hasPendingMainFrameNavigation()) await this.#stopLoading();
