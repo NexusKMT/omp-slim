@@ -138,8 +138,7 @@ fn is_structured_kubectl_output(input: &str) -> bool {
 }
 
 /// Walk a `kubectl` command line and yield the base name of every `-o`
-/// format (the part before any `=`, so `jsonpath={..}` yields `jsonpath`),
-/// plus the bare `--no-headers` flag, which also forces non-table output.
+/// format (the part before any `=`, so `jsonpath={..}` yields `jsonpath`).
 ///
 /// Handles all three kubectl `-o` forms:
 ///   `-o json`      (space-separated)
@@ -166,8 +165,6 @@ fn kubectl_output_formats(command: &str) -> impl Iterator<Item = &str> {
 				.filter(|v| !v.is_empty() && !v.starts_with('='))
 			{
 				val
-			} else if tok == "--no-headers" {
-				return Some(tok);
 			} else {
 				continue;
 			};
@@ -183,24 +180,24 @@ fn is_explicit_kubectl_json_yaml(command: &str) -> bool {
 
 /// Whether `kubectl get` was invoked with a non-table output format.
 /// These formats (`-o name`, `-o jsonpath/...`, `-o go-template/...`,
-/// `-o template/...`, `-o custom-columns/...`, `--no-headers`) produce
+/// `-o template/...`, `-o custom-columns/...`) and `--no-headers` produce
 /// listings or single values, not tables — `compact_table` would treat
 /// the first entry as a header and corrupt the requested format.
 fn is_kubectl_non_table_format(command: &str) -> bool {
-	kubectl_output_formats(command).any(|fmt| {
-		matches!(
-			fmt,
-			"name"
-				| "jsonpath"
-				| "go-template"
-				| "go-template-file"
-				| "template"
-				| "templatefile"
-				| "custom-columns"
-				| "custom-columns-file"
-				| "--no-headers"
-		)
-	})
+	command.split_whitespace().any(|tok| tok == "--no-headers")
+		|| kubectl_output_formats(command).any(|fmt| {
+			matches!(
+				fmt,
+				"name"
+					| "jsonpath"
+					| "go-template"
+					| "go-template-file"
+					| "template"
+					| "templatefile"
+					| "custom-columns"
+					| "custom-columns-file"
+			)
+		})
 }
 
 /// Try to parse kubectl `get -o json` output and produce a compact table.

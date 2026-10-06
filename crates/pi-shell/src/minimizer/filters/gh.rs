@@ -32,10 +32,10 @@ pub fn filter(ctx: &MinimizerCtx<'_>, input: &str, exit_code: i32) -> MinimizerO
 		Some("pr") if primitives::command_has_ordered_tokens(ctx.command, "pr", "checks") => {
 			match filter_pr_checks(&cleaned) {
 				Some(summary) => summary,
-				None => primitives::markdown_view(&cleaned, exit_code),
+				None => markdown_view(&cleaned, exit_code),
 			}
 		},
-		Some("pr" | "issue") => primitives::markdown_view(&cleaned, exit_code),
+		Some("pr" | "issue") => markdown_view(&cleaned, exit_code),
 		Some("run" | "workflow") => filter_run(&cleaned, exit_code),
 		_ => primitives::head_tail_dedup(&cleaned),
 	};
@@ -180,6 +180,67 @@ fn contains_failure_signal(input: &str) -> bool {
 	})
 }
 
+/// Issue/PR view filter, shared with `glab` issue/MR view.
+///
+/// On failure keep the raw output (dedup + head/tail) so error context
+/// survives; on success strip markdown body noise (HTML comments,
+/// badges/images, horizontal rules, blank-line runs) first.
+#[must_use]
+pub(super) fn markdown_view(input: &str, exit_code: i32) -> String {
+	if exit_code != 0 {
+		return primitives::head_tail_dedup(input);
+	}
+	primitives::head_tail_dedup(&strip_markdown_noise(input))
+}
+
+fn strip_markdown_noise(input: &str) -> String {
+	let mut out = String::new();
+	let mut in_html_comment = false;
+	let mut previous_blank = false;
+	let mut comment_lines = 0usize;
+
+	for line in input.lines() {
+		let trimmed = line.trim();
+		if in_html_comment {
+			if trimmed.contains("-->") {
+				in_html_comment = false;
+				comment_lines = 0;
+			} else {
+				comment_lines += 1;
+				// Cap unclosed comment consumption at 50 lines so malformed or
+				// truncated markdown cannot swallow the rest of the body.
+				if comment_lines > 50 {
+					in_html_comment = false;
+					comment_lines = 0;
+				}
+			}
+			continue;
+		}
+		if trimmed.starts_with("<!--") {
+			if !trimmed.contains("-->") {
+				in_html_comment = true;
+				comment_lines = 0;
+			}
+			continue;
+		}
+		if primitives::is_markdown_badge_or_image(trimmed) || primitives::is_horizontal_rule(trimmed)
+		{
+			continue;
+		}
+		if trimmed.is_empty() {
+			if !previous_blank {
+				out.push('\n');
+			}
+			previous_blank = true;
+			continue;
+		}
+		previous_blank = false;
+		out.push_str(line.trim_end());
+		out.push('\n');
+	}
+	out
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -197,7 +258,7 @@ mod tests {
 	fn pr_issue_filter_removes_markdown_template_noise() {
 		let input =
 			"<!-- template -->\n# Title\n[![CI](https://img.shields.io/badge.svg)](url)\nBody\n---\n";
-		let out = primitives::markdown_view(input, 0);
+		let out = markdown_view(input, 0);
 		assert!(!out.contains("template"));
 		assert!(!out.contains("shields.io"));
 		assert!(out.contains("# Title"));

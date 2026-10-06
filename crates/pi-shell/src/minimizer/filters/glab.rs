@@ -47,7 +47,7 @@ pub fn filter(ctx: &MinimizerCtx<'_>, input: &str, exit_code: i32) -> MinimizerO
 			if primitives::command_has_ordered_tokens(ctx.command, "mr", "view")
 				|| primitives::command_has_ordered_tokens(ctx.command, "issue", "view") =>
 		{
-			primitives::markdown_view(&cleaned, exit_code)
+			super::gh::markdown_view(&cleaned, exit_code)
 		},
 		_ => primitives::head_tail_dedup(&cleaned),
 	};
