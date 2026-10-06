@@ -262,8 +262,8 @@ await runRpcMode(session, {
 			`
 export default function(pi) {
   globalThis.fetch = async () => { throw new Error("Offline login fixture refuses network"); };
-  for (const secret of [true, false]) {
-    const id = secret ? "rpc-secret" : "rpc-ordinary";
+  // rpc-alias is a second login for rpc-ordinary's credentials, like openai-codex-device.
+  for (const [id, secret, storeCredentialsAs] of [["rpc-secret", true], ["rpc-ordinary", false], ["rpc-alias", false, "rpc-ordinary"]]) {
     pi.registerProvider(id, {
       baseUrl: "http://127.0.0.1:9/v1",
       api: "openai-completions",
@@ -278,6 +278,7 @@ export default function(pi) {
       }],
       oauth: {
         name: id,
+        storeCredentialsAs,
         login: async callbacks => {
           callbacks.onAuth({ url: "https://example.invalid/authorize" });
           return callbacks.onPrompt({ message: id, ...(secret ? { secret: true } : {}) });
@@ -355,14 +356,14 @@ export default function(pi) {
 					await send({ type: "get_login_providers", id: "loggedIn" });
 				} else if (frame.type === "response" && frame.id === "loggedIn") {
 					loggedInProvidersResponse = frame;
-					await send({ type: "get_logout_accounts", providerId: "rpc-ordinary", id: "accounts" });
+					await send({ type: "get_logout_accounts", providerId: "rpc-alias", id: "accounts" });
 				} else if (frame.type === "response" && frame.id === "accounts") {
 					accountsResponse = frame;
 					const accounts = isRecord(frame.data) && Array.isArray(frame.data.accounts) ? frame.data.accounts : [];
 					loggedOutCredentialId = isRecord(accounts[0]) ? accounts[0].credentialId : undefined;
 					await send({
 						type: "logout",
-						providerId: "rpc-ordinary",
+						providerId: "rpc-alias",
 						credentialId: loggedOutCredentialId,
 						id: "logout",
 					});
