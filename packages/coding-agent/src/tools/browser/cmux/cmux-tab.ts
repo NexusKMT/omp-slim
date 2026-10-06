@@ -2210,7 +2210,18 @@ class CmuxElementHandle {
 		this.#selector = selector;
 	}
 
-	async click(): Promise<void> {
+	async click(options?: { button?: string; count?: number }): Promise<void> {
+		// Every cmux element-click path presses the left button once; refuse rather than mis-deliver.
+		if (options?.button !== undefined && options.button !== "left") {
+			throw new ToolError(
+				`handle.click({ button: ${JSON.stringify(options.button)} }) is not supported in a cmux browser, which only left-clicks elements`,
+			);
+		}
+		if (options?.count !== undefined && options.count !== 1) {
+			throw new ToolError(
+				`handle.click({ count: ${options.count} }) is not supported in a cmux browser; use handle.dblclick() for a double click`,
+			);
+		}
 		await this.#tab.click(this.#selector);
 	}
 
