@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed model speed aggregates blending an OpenAI or Codex fast service tier's throughput into the standard average; turns served on a non-default tier keep their own row, and `/models` shows that tier's numbers, labeled, for the tier the live session would send ([#14471](https://github.com/can1357/oh-my-pi/pull/14471) by [@eggpeat](https://github.com/eggpeat)).
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes

@@ -134,6 +134,12 @@ export interface ModelBrowserSource extends ModelRoleLookup {
 	readonly knownRoleIds: readonly string[];
 	readonly mruOrder: readonly string[];
 	readonly modelPerf: ReadonlyMap<string, ModelBrowserPerf>;
+	/**
+	 * Service tier the host would send for `model`, when it runs one. Rows with a
+	 * measured tier aggregate (`selector@tier`) then display that tier's numbers
+	 * instead of the standard aggregate.
+	 */
+	serviceTierFor?(model: Model): string | undefined;
 	getRoleInfo(role: string): ModelBrowserRoleInfo;
 	defaultRoleChain(role: string): string[];
 	resolveRoleValue(value: string | undefined, models: Model[], roleLookup?: ModelRoleLookup): ResolvedModelRoleValue;
@@ -1327,14 +1333,40 @@ export class ModelBrowser implements Component {
 		return index;
 	}
 
+	/**
+	 * Measured perf for a row: the tier the host would send, else the standard
+	 * aggregate, else any measured tier (fastest first) so a model only ever run
+	 * on a non-default tier still shows its real speed. `tier` is set whenever
+	 * the numbers come from a tier aggregate, for the caller to label.
+	 */
+	#perfFor(item: ModelBrowserItem): { perf: ModelBrowserPerf; tier?: string } | undefined {
+		const tier = this.#settings.serviceTierFor?.(item.model);
+		if (tier) {
+			const tiered = this.#perf.get(`${item.selector}@${tier}`);
+			if (tiered) return { perf: tiered, tier };
+		}
+		const standard = this.#perf.get(item.selector);
+		if (standard) return { perf: standard };
+		const prefix = `${item.selector}@`;
+		let best: { perf: ModelBrowserPerf; tier: string } | undefined;
+		for (const [key, perf] of this.#perf) {
+			if (!key.startsWith(prefix)) continue;
+			if (!best || perf.tps > best.perf.tps) best = { perf, tier: key.slice(prefix.length) };
+		}
+		return best;
+	}
+
 	/** Measured TPS/TTFT, falling back to the catalog TPS as an estimated `~118t/s`. */
 	#perfCell(item: ModelBrowserItem, mode: PerfMode): string {
 		if (mode === "off") return "";
-		const perf = this.#perf.get(item.selector);
-		if (perf) {
-			const tps = formatTps(perf.tps);
-			if (mode === "full" && perf.ttftMs !== null) return `${formatTtft(perf.ttftMs)} ${tps}`;
-			return tps;
+		const measured = this.#perfFor(item);
+		if (measured) {
+			const tps = formatTps(measured.perf.tps);
+			const tier = measured.tier ? ` ${measured.tier}` : "";
+			if (mode === "full" && measured.perf.ttftMs !== null) {
+				return `${formatTtft(measured.perf.ttftMs)} ${tps}${tier}`;
+			}
+			return `${tps}${tier}`;
 		}
 		const tps = item.model.tps;
 		return tps != null && Number.isFinite(tps) && tps > 0 ? `~${formatTps(tps)}` : "";
@@ -1416,10 +1448,10 @@ export class ModelBrowser implements Component {
 		if (model.input.includes("image")) facts.push("vision");
 		const intelligence = formatIntelligence(model);
 		if (intelligence) facts.push(intelligence);
-		const perf = this.#perf.get(selected.selector);
-		if (perf) {
-			facts.push(`~${formatTps(perf.tps)}`);
-			if (perf.ttftMs !== null) facts.push(`${formatTtft(perf.ttftMs)} ttft`);
+		const measured = this.#perfFor(selected);
+		if (measured) {
+			facts.push(`~${formatTps(measured.perf.tps)}${measured.tier ? ` ${measured.tier}` : ""}`);
+			if (measured.perf.ttftMs !== null) facts.push(`${formatTtft(measured.perf.ttftMs)} ttft`);
 		} else if (model.tps != null && Number.isFinite(model.tps) && model.tps > 0) {
 			facts.push(`~${formatTps(model.tps)}`);
 		}
@@ -1684,10 +1716,10 @@ export class ModelBrowser implements Component {
 			if (model.input.includes("image")) facts.push("vision");
 			const intelligence = formatIntelligence(model);
 			if (intelligence) facts.push(intelligence);
-			const perf = this.#perf.get(selected.selector);
-			if (perf) {
-				facts.push(`~${formatTps(perf.tps)}`);
-				if (perf.ttftMs !== null) facts.push(`${formatTtft(perf.ttftMs)} ttft`);
+			const measured = this.#perfFor(selected);
+			if (measured) {
+				facts.push(`~${formatTps(measured.perf.tps)}${measured.tier ? ` ${measured.tier}` : ""}`);
+				if (measured.perf.ttftMs !== null) facts.push(`${formatTtft(measured.perf.ttftMs)} ttft`);
 			} else if (model.tps != null && Number.isFinite(model.tps) && model.tps > 0) {
 				facts.push(`~${formatTps(model.tps)}`);
 			}
@@ -1799,7 +1831,9 @@ export class ModelBrowser implements Component {
 		const facts: Record<string, TspText | number> = {};
 		const int = model.int != null && Number.isFinite(model.int) ? model.int : undefined;
 		if (int !== undefined) facts.int = String(Math.round(int));
-		const speed = this.#perfCell(item, "tps").replace(/t\/s$/, "");
+		const speed = this.#perfCell(item, "tps")
+			.replace(/\s*t\/s\s*/, " ")
+			.trim();
 		if (speed) facts.speed = speed;
 		if (model.contextWindow) facts.ctx = model.contextWindow;
 		facts.price = pickerPrice(model);
@@ -1961,7 +1995,7 @@ export class ModelBrowser implements Component {
 	modelPreview(item: ModelBrowserItem, mode: "full" | "compact", current: string | undefined): NativeChild[] {
 		const model = item.model;
 		const selector = `${model.provider}/${model.id}`;
-		const perf = this.#perf.get(selector);
+		const measured = this.#perfFor(item);
 		const ctx = model.contextWindow ?? 0;
 		const out = model.maxTokens ?? 0;
 		const overContext = this.isOverContext(item);
@@ -2021,10 +2055,12 @@ export class ModelBrowser implements Component {
 		if (badges.length > 0) children.push(row(badges, { gap: "xs", wrap: true }));
 
 		const speed: string[] = [];
-		if (perf) {
-			speed.push(`${formatTps(perf.tps).replace("t/s", " t/s")}`);
-			if (perf.ttftMs !== null) speed.push(`${formatTtft(perf.ttftMs).replace("s", " s")} TTFT`);
-			speed.push(`${perf.samples} ${perf.samples === 1 ? "sample" : "samples"}`);
+		if (measured) {
+			speed.push(
+				`${formatTps(measured.perf.tps).replace("t/s", " t/s")}${measured.tier ? ` ${measured.tier}` : ""}`,
+			);
+			if (measured.perf.ttftMs !== null) speed.push(`${formatTtft(measured.perf.ttftMs).replace("s", " s")} TTFT`);
+			speed.push(`${measured.perf.samples} ${measured.perf.samples === 1 ? "sample" : "samples"}`);
 		} else if (model.tps != null && Number.isFinite(model.tps) && model.tps > 0) {
 			speed.push(`~${formatTps(model.tps).replace("t/s", " t/s")} (catalog)`);
 		}
