@@ -19,6 +19,7 @@
 - Fixed thinking in turns kept after Anthropic native compaction being rejected or dropped on the next request ([#14251](https://github.com/can1357/oh-my-pi/pull/14251) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed Claude usage being re-polled every 10 seconds while Anthropic rate-limits the account; a failed refresh now waits a minute before trying again ([#14515](https://github.com/can1357/oh-my-pi/pull/14515) by [@will-bogusz](https://github.com/will-bogusz))
 - An OpenAI Responses turn whose connection drops mid-stream now recovers the finished answer from the provider (on hosts that store results, such as Muse Code) instead of re-running the whole turn and discarding the reasoning already done. Storage is on by default; set `PI_MUSE_STORE_RESPONSES=0` to opt out (disables storing and resume) ([#14293](https://github.com/can1357/oh-my-pi/pull/14293) by [@abilliontokens](https://github.com/abilliontokens)).
+- Fixed Devin requests skipping the `onPayload` hook, so payload capture now sees each Devin chat request and a returned replacement is what gets sent ([#14506](https://github.com/can1357/oh-my-pi/pull/14506) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.6.1] - 2026-10-04
 
