@@ -40,6 +40,15 @@ const server = Bun.serve({
 		const iframe = `<iframe id="f" name="payment" srcdoc="<!doctype html><input id='in'><div id='out'>ready</div><script>document.querySelector('#in').addEventListener('input',e=>document.querySelector('#out').textContent=e.target.value)</script>"></iframe>`;
 		const headers = { "content-type": "text/html" };
 		if (pathname === "/card") return new Response(`<input aria-label="Card"><button>Pay</button>`, { headers });
+		// Answers its load, then never returns from script again.
+		if (pathname === "/stuck") {
+			return new Response(
+				`<button>Stuck</button><script>onload = () => setTimeout(() => { for (;;) {} })</script>`,
+				{
+					headers,
+				},
+			);
+		}
 		if (pathname === "/observe-frames") {
 			// localhost and 127.0.0.1 are different sites, so the frame runs out of process.
 			const card = `http://localhost:${new URL(request.url).port}/card`;
@@ -58,6 +67,10 @@ const server = Bun.serve({
 				</script>`,
 				{ headers },
 			);
+		}
+		if (pathname === "/observe-stuck-frame") {
+			const stuck = `http://localhost:${new URL(request.url).port}/stuck`;
+			return new Response(`<button>Main</button><iframe id="stuck" src="${stuck}"></iframe>`, { headers });
 		}
 		return new Response(
 			`<!doctype html><title>${pathname}</title><body data-path="${pathname}">${iframe}<script>
@@ -103,11 +116,12 @@ async function observe(invoke: (parameters: unknown) => Promise<{ details?: unkn
 	return { elements, names: elements.map(entry => `${entry.role}:${entry.name}`) };
 }
 
+// Chromium takes about 10 s to shut down while the stuck-frame test's renderer is still spinning.
 afterAll(async () => {
 	await releaseAllTabs({ kill: true });
 	await disposeAllVmContexts();
 	server.stop(true);
-});
+}, 30_000);
 
 function fakePage(frame: { _lifecycleEvents: Set<string>; detached?: boolean }, closed = () => false): Page {
 	return {
@@ -453,6 +467,30 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			"button:Pay",
 		]);
 	}, 30_000);
+
+	test("skips a cross-site frame stuck in script until it navigates", async () => {
+		const invoke = createHost();
+		await invoke({ action: "open", name: "observe-stuck-frame", url: `${baseUrl}/observe-stuck-frame` });
+		// The first observation waits out the frame, then still lists the page.
+		expect((await observe(invoke, "observe-stuck-frame", {})).names).toEqual(["button:Main"]);
+		const started = performance.now();
+		expect((await observe(invoke, "observe-stuck-frame", {})).names).toEqual(["button:Main"]);
+		expect(performance.now() - started).toBeLessThan(2_500);
+		// Navigating the frame clears the memo; the evaluation settles once the new document has loaded.
+		await invoke({
+			action: "call",
+			name: "observe-stuck-frame",
+			chain: [
+				{
+					method: "evaluate",
+					args: [
+						`(async () => { const { promise, resolve } = Promise.withResolvers(); const frame = document.querySelector("#stuck"); frame.onload = () => resolve(true); frame.srcdoc = "<button>Fresh</button>"; await promise; })()`,
+					],
+				},
+			],
+		});
+		expect((await observe(invoke, "observe-stuck-frame", {})).names).toEqual(["button:Main", "button:Fresh"]);
+	}, 60_000);
 
 	test("lists managed tabs with live metadata", async () => {
 		const invoke = createHost();

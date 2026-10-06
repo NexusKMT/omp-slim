@@ -232,6 +232,8 @@ declare module "puppeteer-core" {
 		mainRealm(): Realm;
 		/** This frame's accessibility tree (`@internal` upstream, stripped from published types). */
 		readonly accessibility: Accessibility;
+		/** Loader of the document the frame shows; changes on every navigation (`@internal` upstream). */
+		readonly _loaderId: string;
 	}
 	interface Realm {
 		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
@@ -1065,9 +1067,20 @@ async function createTrackedHeadlessPage(browser: Browser, reportTarget: (target
 }
 
 /**
+ * Frames that missed an observation deadline, mapped to the document they showed then. Observe skips
+ * them until they navigate, so a frame stuck in script costs only the first observation its wait.
+ */
+const unresponsiveFrames = new WeakMap<Frame, string>();
+
+function frameDocumentKey(frame: Frame): string {
+	return `${frame._loaderId} ${frame.url()}`;
+}
+
+/**
  * Accessibility snapshots of `frames` and their descendants, in frame-tree order. A frame that does
- * not answer by `deadline` is left out with its descendants, so one dead iframe never costs the page
- * its observation. With `root`, only frames inside it are read.
+ * not answer by `deadline` is left out with its descendants, and skipped by later observations until
+ * it navigates, so one dead iframe never costs the page its observation. With `root`, only frames
+ * inside it are read.
  */
 async function snapshotFrames(
 	frames: Frame[],
@@ -1075,16 +1088,19 @@ async function snapshotFrames(
 ): Promise<SerializedAXNode[]> {
 	const snapshots = await Promise.all(
 		frames.map(async frame => {
+			if (unresponsiveFrames.get(frame) === frameDocumentKey(frame)) return [];
+			const timeout = new Error(`Frame ${frame.url()} did not answer`);
 			let snapshot: SerializedAXNode | null;
 			try {
 				snapshot = await withTimeout(
 					snapshotFrame(frame, options),
 					Math.max(0, options.deadline - Date.now()),
-					`Frame ${frame.url()} did not answer`,
+					timeout,
 					options.signal,
 				);
 			} catch (error) {
 				if (options.signal?.aborted) throw error;
+				if (error === timeout) unresponsiveFrames.set(frame, frameDocumentKey(frame));
 				return [];
 			}
 			if (!snapshot) return [];
