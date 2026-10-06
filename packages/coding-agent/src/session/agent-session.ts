@@ -1474,6 +1474,11 @@ export class AgentSession implements SettingsScope {
 		return this.#prewalk.arm(target, thinkingLevel);
 	}
 
+	/** Cancel only this session's pending prewalk without changing the active model or settings. */
+	disarmPrewalk(): void {
+		this.#prewalk.disarm();
+	}
+
 	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
 	restartPrewalk(
 		source: Model,
@@ -1589,6 +1594,8 @@ export class AgentSession implements SettingsScope {
 			settings: this.settings,
 			model: () => this.model,
 			configuredThinkingLevel: () => this.configuredThinkingLevel(),
+			restoreThinkingLevel: level => this.#models.restoreThinkingLevel(level),
+			resolveDefaultPrewalk: () => this.#resolveDefaultPrewalk(),
 			emitNotice: (level, message, source) => this.emitNotice(level, message, source),
 			setModelTemporary: (model, thinkingLevel, options) => this.setModelTemporary(model, thinkingLevel, options),
 			setActiveToolsByName: names => this.setActiveToolsByName(names),
@@ -2403,28 +2410,34 @@ export class AgentSession implements SettingsScope {
 				return;
 			}
 			if (this.#prewalk.state) return;
-			const scoped = this.scopedModels.map(entry => entry.model);
-			const resolved = resolveCliModel({
-				cliModel: DEFAULT_PREWALK_TARGET,
-				modelRegistry: this.#modelRegistry,
-				availableModels: scoped.length > 0 ? scoped : undefined,
-				settings: this.settings,
-				preferences: getModelMatchPreferences(this.settings),
-			});
-			const target = resolved.model;
-			const problem = !target
-				? (resolved.error ?? `model "${DEFAULT_PREWALK_TARGET}" not found`)
-				: cfgDisabledProviders.get(this.settings).includes(target.provider)
-					? `provider "${target.provider}" is disabled`
-					: !this.#modelRegistry.hasConfiguredAuth(target)
-						? `no API key for ${target.provider}/${target.id}`
-						: undefined;
-			if (!target || problem) {
-				this.emitNotice("warning", `Prewalk not armed: ${problem}.`, "prewalk");
-				return;
-			}
-			this.#prewalk.arm(target, resolved.thinkingLevel);
+			const prewalk = this.#resolveDefaultPrewalk();
+			if (prewalk) this.#prewalk.arm(prewalk.target, prewalk.thinkingLevel);
 		});
+	}
+
+	/** Resolve the configured startup/new-session handoff using the settings-change selection path. */
+	#resolveDefaultPrewalk(): Prewalk | undefined {
+		const scoped = this.scopedModels.map(entry => entry.model);
+		const resolved = resolveCliModel({
+			cliModel: DEFAULT_PREWALK_TARGET,
+			modelRegistry: this.#modelRegistry,
+			availableModels: scoped.length > 0 ? scoped : undefined,
+			settings: this.settings,
+			preferences: getModelMatchPreferences(this.settings),
+		});
+		const target = resolved.model;
+		const problem = !target
+			? (resolved.error ?? `model "${DEFAULT_PREWALK_TARGET}" not found`)
+			: cfgDisabledProviders.get(this.settings).includes(target.provider)
+				? `provider "${target.provider}" is disabled`
+				: !this.#modelRegistry.hasConfiguredAuth(target)
+					? `no API key for ${target.provider}/${target.id}`
+					: undefined;
+		if (!target || problem) {
+			this.emitNotice("warning", `Prewalk not armed: ${problem}.`, "prewalk");
+			return undefined;
+		}
+		return { target, thinkingLevel: resolved.thinkingLevel };
 	}
 
 	/**
@@ -9476,6 +9489,7 @@ export class AgentSession implements SettingsScope {
 			this.#freshProviderSessionId = undefined;
 			this.#clearInheritedProviderPromptCacheKey();
 			this.#syncAgentSessionId();
+			await this.#prewalk.resetForNewSession(this.#agentKind === "main" && cfgPrewalkEnabled.get(this.settings));
 			// Re-apply the configured selector so the new session does not inherit
 			// the previous session's auto-classified effort: auto stays auto but
 			// restarts at the provisional level; a pinned level re-resolves to itself.
@@ -9767,11 +9781,13 @@ export class AgentSession implements SettingsScope {
 
 	/** Selects the session thinking level and optionally persists it as the default. */
 	setThinkingLevel(level: ConfiguredThinkingLevel | undefined, persist: boolean = false): void {
+		this.#prewalk.releaseHandoff();
 		this.#models.setThinkingLevel(level, persist);
 	}
 
 	/** Advances through the thinking selectors supported by the active model. */
 	cycleThinkingLevel(): ConfiguredThinkingLevel | undefined {
+		this.#prewalk.releaseHandoff();
 		return this.#models.cycleThinkingLevel();
 	}
 
@@ -10325,6 +10341,8 @@ export class AgentSession implements SettingsScope {
 	}
 
 	async #setModelWithProviderSessionReset(model: Model): Promise<void> {
+		// A selection, even of the same model, supersedes ownership of a previous prewalk handoff.
+		this.#prewalk.releaseHandoff();
 		const currentModel = this.model;
 		const isChanging = !currentModel || !modelsAreEqual(currentModel, model);
 		if (currentModel) {

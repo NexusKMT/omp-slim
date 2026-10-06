@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Cancel a pending model handoff with `/prewalk off` without changing the active model or saved prewalk setting.
+
+### Fixed
+
+- `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model only while the previous handoff still owns the selection.
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes
