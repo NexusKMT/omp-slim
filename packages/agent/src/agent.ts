@@ -26,6 +26,7 @@ import type { Dialect } from "@oh-my-pi/pi-ai/dialect";
 import type { HarmonyAuditEvent } from "@oh-my-pi/pi-ai/utils/harmony-leak";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { logger } from "@oh-my-pi/pi-utils";
+import * as snapcompact from "@oh-my-pi/snapcompact";
 import {
 	abortReasonText,
 	agentLoop,
@@ -484,6 +485,7 @@ export class Agent {
 	#onHarmonyLeak?: (event: HarmonyAuditEvent) => void | Promise<void>;
 	#onBeforeYield?: () => Promise<void> | void;
 	#onTurnEnd?: (messages: AgentMessage[], signal?: AbortSignal, context?: AgentTurnEndContext) => Promise<void> | void;
+	#onModelCallSystemPrompt?: (systemPrompt: string[]) => void;
 	#beforeModelCall?: AgentBeforeModelCall;
 	#additionalBeforeModelCalls = new Set<AgentBeforeModelCall>();
 	#asideMessageProvider?: () => AsideMessage[] | Promise<AsideMessage[]>;
@@ -831,19 +833,22 @@ export class Agent {
 
 	/**
 	 * Tokenizer for the active model. The instance is replaced whenever the
-	 * active model's encoding changes (see {@link setModel}), so callers must
-	 * not cache it across model switches.
+	 * active model's encoding or snapcompact frame pricing changes (see
+	 * {@link setModel}), so callers must not cache it across model switches.
 	 */
 	get tokenizer(): Tokenizer {
 		return this.#tokenizer;
 	}
 
 	/**
-	 * Swap the tokenizer only when the encoding actually changes, so the warm
-	 * per-message memo survives same-encoding model switches.
+	 * Swap the tokenizer only when the encoding or frame pricing actually
+	 * changes, so the warm per-message memo survives same-pricing model switches.
 	 */
 	#syncTokenizer(model: Model | null | undefined): void {
-		if (tokenizerEncodingForModel(model) !== this.#tokenizer.encoding) {
+		if (
+			tokenizerEncodingForModel(model) !== this.#tokenizer.encoding ||
+			snapcompact.frameBillingKey(model ?? undefined) !== this.#tokenizer.frameBillingKey
+		) {
 			this.#tokenizer = new Tokenizer(model);
 		}
 	}
@@ -1099,6 +1104,11 @@ export class Agent {
 			| undefined,
 	): void {
 		this.#onTurnEnd = fn;
+	}
+
+	/** Called with the exact system prompt each model call is built from, after before-model-call hooks. */
+	setOnModelCallSystemPrompt(fn: ((systemPrompt: string[]) => void) | undefined): void {
+		this.#onModelCallSystemPrompt = fn;
 	}
 
 	/**
@@ -1800,6 +1810,7 @@ export class Agent {
 					await Bun.sleep(0);
 				}
 				context.systemPrompt = this.#state.systemPrompt;
+				this.#onModelCallSystemPrompt?.(context.systemPrompt);
 				context.tools = this.#toolsForModel(this.#state.model ?? model);
 			},
 			beforeModelCall:
