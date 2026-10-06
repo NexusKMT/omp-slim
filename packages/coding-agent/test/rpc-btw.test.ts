@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
+import { RpcClient, RpcCommandError } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
 import type { BtwHistoryRecord } from "@oh-my-pi/pi-coding-agent/session/btw-history";
-import { isRecord, removeWithRetries } from "@oh-my-pi/pi-utils";
+import { isRecord, readJsonl, removeWithRetries } from "@oh-my-pi/pi-utils";
 
 /** Settle a request before `expect` sees it (see rpc-goal.test.ts). */
 async function rejectionOf(request: Promise<unknown>): Promise<Error> {
@@ -157,6 +157,19 @@ describe("RPC /btw", () => {
 		expect((await rpc.getState()).isStreaming).toBe(true);
 	}, 30_000);
 
+	test("a fork refused as busy leaves the running side question alone", async () => {
+		const { rpc, deltas, until, settled } = await start();
+		await rpc.prompt("slow main turn");
+		const slow = await rpc.btw("slow beside a refused fork");
+		await until(() => deltas[0]);
+		const refusal = await rejectionOf(rpc.fork());
+		expect(refusal).toBeInstanceOf(RpcCommandError);
+		expect((refusal as RpcCommandError).code).toBe("session_busy");
+		expect((await rpc.getBtwHistory())[0]).toMatchObject({ id: slow.id, status: "running" });
+		expect(await rpc.cancelBtw()).toBe(true);
+		expect(await settled(slow.id)).toMatchObject({ status: "cancelled" });
+	}, 30_000);
+
 	test("a checkpoint that fails after the response is reported, and blocks session changes until saved", async () => {
 		const { rpc, deltas, until, settled } = await start();
 		const notices: string[] = [];
@@ -187,6 +200,29 @@ describe("RPC /btw", () => {
 		expect(await Bun.file(entry).json()).toMatchObject({ status: "cancelled", answer: "Thinking" });
 	}, 30_000);
 
+	test("a checkpoint whose topic was removed on disk is reported lost and no longer blocks session changes", async () => {
+		const { rpc, deltas, until, settled } = await start();
+		const notices: string[] = [];
+		rpc.onSessionEvent(event => {
+			if (event.type === "notice" && event.source === "btw-history") notices.push(event.message);
+		});
+		const sessionFile = (await rpc.getState()).sessionFile!;
+		const slow = await rpc.btw("slow, then deleted");
+		await until(() => deltas[0]);
+		const entry = path.join(sessionFile.replace(/\.jsonl$/, ""), "btw-history", `entry-${slow.id}.json`);
+		await fs.rm(entry);
+		await fs.mkdir(entry);
+		expect(await rpc.cancelBtw()).toBe(true);
+		await settled(slow.id);
+		await until(() => notices[0]);
+
+		// The entry is gone for good: retrying against its old revision can never succeed.
+		await fs.rm(entry, { recursive: true });
+		expect((await rpc.newSession()).cancelled).toBe(false);
+		expect(notices[1]).toContain(`/btw answer ${slow.id} was not saved`);
+		expect((await rpc.getState()).sessionFile).not.toBe(sessionFile);
+	}, 30_000);
+
 	test("over raw stdio: the response precedes the turn's frames, and EOF saves a running question", async () => {
 		directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-rpc-btw-"));
 		const child = Bun.spawn([process.execPath, path.join(import.meta.dir, "fixtures", "btw-rpc-agent.ts")], {
@@ -201,25 +237,24 @@ describe("RPC /btw", () => {
 		const at = (value: unknown, ...keys: string[]): unknown =>
 			keys.reduce<unknown>((current, key) => (isRecord(current) ? current[key] : undefined), value);
 		let waiter: (() => void) | undefined;
+		let ended = false;
 		const wake = () => waiter?.();
 		const reading = (async () => {
-			let buffer = "";
-			for await (const chunk of child.stdout.pipeThrough(new TextDecoderStream())) {
-				buffer += chunk;
-				let newline = buffer.indexOf("\n");
-				while (newline !== -1) {
-					frames.push(JSON.parse(buffer.slice(0, newline)));
-					buffer = buffer.slice(newline + 1);
-					newline = buffer.indexOf("\n");
+			try {
+				for await (const parsed of readJsonl<unknown>(child.stdout)) {
+					frames.push(parsed);
+					wake();
 				}
+			} finally {
+				ended = true;
 				wake();
 			}
-			wake();
 		})();
 		const frame = async (match: (frame: unknown) => boolean) => {
 			for (;;) {
 				const index = frames.findIndex(match);
 				if (index !== -1) return index;
+				if (ended) throw new Error("RPC stdout ended before the expected frame");
 				const { promise, resolve } = Promise.withResolvers<void>();
 				waiter = resolve;
 				await promise;

@@ -1819,12 +1819,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			case "switch_session":
 			case "branch":
 			case "fork": {
-				await btw.close();
 				// Fast refusal before the goal controller voids a waiting continuation;
 				// fork() repeats the check after each of its own awaits.
 				if (command.type === "fork" && session.isBusyForSnapshot) {
 					return error(id, "fork", new SessionBusyError("fork the session").message, "session_busy");
 				}
+				// Validation first: a refused change must not cancel the running side question.
+				await btw.close();
 				await goalController.beginSessionChange();
 				let result: RpcSessionChangeResult | undefined;
 				try {

@@ -1032,6 +1032,9 @@ The answer is kept in memory: the next `btw` and every session change retry
 it first, and while it still cannot be saved they fail with
 `/btw history could not be saved: …` and the session stays where it is. At
 shutdown the process exits anyway and reports the loss as another such notice.
+If the retry finds the topic deleted or rewritten on disk (for example by
+another process), it can never succeed: the answer is reported lost as another
+such notice and dropped, and the `btw` or session change proceeds.
 
 ## Prompt/Queue Concurrency and Ordering
 

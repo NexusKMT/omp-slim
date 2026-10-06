@@ -12,6 +12,7 @@ import type { AgentSession } from "../../session/agent-session";
 import {
 	type BtwHistoryRecord,
 	type BtwHistoryTurn,
+	BtwHistoryConflictError,
 	BtwHistoryStore,
 	getBtwLatestTurn,
 } from "../../session/btw-history";
@@ -138,7 +139,11 @@ export class RpcBtwController {
 		await this.#settleWrites();
 	}
 
-	/** Await terminal checkpoints, retrying failed ones once against their original revision. */
+	/**
+	 * Await terminal checkpoints, retrying failed ones once against their original revision.
+	 * A retry that conflicts (the topic was deleted or rewritten on disk) can never succeed:
+	 * the record is reported lost and dropped instead of blocking every later session change.
+	 */
 	async #settleWrites(): Promise<void> {
 		while (this.#writes.size > 0) await Promise.all(this.#writes);
 		for (const [id, failed] of this.#unsaved) {
@@ -146,6 +151,13 @@ export class RpcBtwController {
 				await failed.store.retry(failed.record);
 				this.#unsaved.delete(id);
 			} catch (error) {
+				if (error instanceof BtwHistoryConflictError) {
+					this.#unsaved.delete(id);
+					const message = `/btw answer ${id} was not saved: ${error.message}; it changed or was removed on disk`;
+					logger.error(message);
+					this.#output({ type: "notice", level: "error", message, source: "btw-history" });
+					continue;
+				}
 				throw new Error(
 					`/btw history could not be saved: ${toError(error).message}. Fix the storage and retry; unsaved answers remain in this session.`,
 					{ cause: error },
