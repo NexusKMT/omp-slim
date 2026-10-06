@@ -1827,6 +1827,7 @@ fn execute_search<M: Matcher, W: Write>(
 impl Utility for Rg {
 	const NAME: &'static str = "rg";
 	const USAGE_ERROR: u8 = 2;
+	const CHECKS_STDOUT_PATH: bool = true;
 
 	fn run(self, host: &mut Host) -> i32 {
 		let cli = self;
