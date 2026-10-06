@@ -476,10 +476,39 @@ impl InputReader {
 struct LineReaderConfig {
 	/// Byte that terminates input (None for -N mode).
 	delimiter:       Option<u8>,
-	/// Maximum bytes to read (for -n or -N).
+	/// Maximum characters to read (for -n or -N).
 	char_limit:      Option<usize>,
 	/// Whether to process backslash escapes (false for -r mode).
 	process_escapes: bool,
+}
+
+/// Characters read toward a `-n`/`-N` limit. Bash counts characters, not
+/// bytes: a UTF-8 lead byte starts one, and the limit is reached only once
+/// its continuation bytes are in, so a multibyte character is never split.
+#[derive(Default)]
+struct CharCount {
+	chars:        usize,
+	continuation: u8,
+}
+
+impl CharCount {
+	fn push(&mut self, byte: u8) {
+		if self.continuation > 0 && byte & 0xC0 == 0x80 {
+			self.continuation -= 1;
+		} else {
+			self.chars += 1;
+			self.continuation = match byte {
+				0xC0..=0xDF => 1,
+				0xE0..=0xEF => 2,
+				0xF0..=0xF7 => 3,
+				_ => 0,
+			};
+		}
+	}
+
+	fn reached(&self, limit: Option<usize>) -> bool {
+		self.continuation == 0 && limit.is_some_and(|limit| self.chars >= limit)
+	}
 }
 
 /// Reads a complete line of input using the given reader and configuration.
@@ -501,6 +530,7 @@ where
 	F: Fn() -> bool,
 {
 	let mut line = Vec::new();
+	let mut count = CharCount::default();
 	let mut pending_backslash = false;
 
 	loop {
@@ -547,9 +577,10 @@ where
 
 						// For other bytes, add the byte literally (backslash consumed).
 						line.push(byte);
+						count.push(byte);
 
 						// Check character limit (based on output length).
-						if config.char_limit.is_some_and(|limit| line.len() >= limit) {
+						if count.reached(config.char_limit) {
 							return Ok(ReadResult::Line(decode_line(line)));
 						}
 						continue;
@@ -572,9 +603,10 @@ where
 				}
 
 				line.push(byte);
+				count.push(byte);
 
 				// Check character limit (based on output length).
-				if config.char_limit.is_some_and(|limit| line.len() >= limit) {
+				if count.reached(config.char_limit) {
 					return Ok(ReadResult::Line(decode_line(line)));
 				}
 			},

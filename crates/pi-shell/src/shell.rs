@@ -3248,6 +3248,18 @@ mod tests {
 		assert_eq!(output, "é|ü\n");
 	}
 
+	/// Contract: `read -n` counts characters, not bytes, as bash does in a
+	/// UTF-8 locale; a multibyte character is never split.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn read_count_takes_whole_utf8_characters() {
+		let (result, output) = execute_captured(
+			"printf 'éa\\n' | { read -r -n 1 first; read -r rest; echo \"$first|$rest\"; }".to_owned(),
+		)
+		.await;
+		assert_eq!(result.exit_code, Some(0), "{output:?}");
+		assert_eq!(output, "é|a\n");
+	}
+
 	/// Contract: `mapfile -n` from a file consumes exactly the lines it
 	/// stores; a later reader of the descriptor gets the rest.
 	#[tokio::test(flavor = "multi_thread")]
@@ -3296,16 +3308,18 @@ mod tests {
 		assert_eq!(output, "cb:0:1:2\ncb:1:3:4\narr=1 3\n");
 	}
 
-	/// Contract: `mapfile` into a readonly array fails before reading, so
-	/// the piped input stays for the next reader (bash checks first too).
+	/// Contract: `mapfile` into a readonly array fails before reading, as in
+	/// bash: the array is unchanged and the piped input stays for the next
+	/// reader.
 	#[tokio::test(flavor = "multi_thread")]
 	async fn mapfile_into_a_readonly_array_leaves_the_input_unread() {
 		let (_, output) = execute_captured(
-			"printf 'a\\nb\\n' | { arr=(x); readonly arr; mapfile -t -O 1 arr; echo \"rc=$?\"; cat; }"
+			"printf 'a\\nb\\n' | { arr=(x); readonly arr; mapfile -t -O 1 arr; echo \"rc=$? \
+			 ${arr[*]}\"; cat; }"
 				.to_owned(),
 		)
 		.await;
-		assert!(output.ends_with("rc=1\na\nb\n"), "{output:?}");
+		assert!(output.ends_with("rc=1 x\na\nb\n"), "{output:?}");
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
