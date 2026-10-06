@@ -2546,6 +2546,8 @@ impl Drop for TmpDirWrapper {
 
 #[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(not(target_os = "wasi"))]
+use std::num::NonZero;
 use std::{
 	cmp::Ordering,
 	ffi::{OsStr, OsString},
@@ -2923,8 +2925,23 @@ pub struct GlobalSettings {
 	numeric_locale:          NumericLocaleSettings,
 	/// ICU collator for the shell's LC_COLLATE; `None` compares text by bytes.
 	collator:                Option<Arc<CollatorBorrowed<'static>>>,
+	parallelism:             Parallelism,
 	precomputed:             Precomputed,
 	cancel:                  Arc<AtomicBool>,
+}
+
+/// The pool `sort_by` runs on.
+#[derive(Clone)]
+enum Parallelism {
+	/// No `--parallel`: Rayon's process-global pool, when the embedder made it
+	/// available.
+	Global,
+	/// `--parallel=1`, or a requested pool whose workers could not be spawned.
+	Sequential,
+	/// `--parallel=N`: a pool owned by this call, so the limit never leaks into
+	/// the shared global pool other commands use.
+	#[cfg(not(target_os = "wasi"))]
+	Pool(Arc<rayon::ThreadPool>),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -3094,6 +3111,7 @@ impl Default for GlobalSettings {
 			merge_batch_size:        default_merge_batch_size(),
 			numeric_locale:          NumericLocaleSettings::default(),
 			collator:                None,
+			parallelism:             Parallelism::Global,
 			cancel:                  Arc::new(AtomicBool::new(false)),
 			precomputed:             Precomputed::default(),
 		}
@@ -4841,6 +4859,10 @@ fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWa
 	settings.dictionary_order = dictionary_order;
 	settings.ignore_non_printing = ignore_non_printing;
 	settings.ignore_case = ignore_case;
+	let parallel = matches
+		.get_one::<String>(options::PARALLEL)
+		.map(|threads| parse_parallel(threads))
+		.transpose()?;
 	if let Some(size_str) = matches.get_one::<String>(options::BUF_SIZE) {
 		settings.buffer_size = GlobalSettings::parse_byte_count(size_str).map_err(|e| {
 			SortError::message(format_error_message(&e, size_str, options::BUF_SIZE))
@@ -5017,6 +5039,14 @@ fn uu_sort(host: &mut Host, matches: &ArgMatches, legacy_warnings: &[LegacyKeyWa
 		.get_one::<OsString>(options::OUTPUT)
 		.map(|path| host.resolve(path).into_os_string());
 	let output = Output::new(&fs, output_path.as_ref(), Some(host.stdout_clone()))?;
+
+	// Only a sort runs `sort_by`; `-c` and `-m` never need the pool's workers.
+	if let Some(requested) = parallel
+		&& !settings.check
+		&& !settings.merge
+	{
+		settings.parallelism = invocation_parallelism(requested);
+	}
 
 	settings.collator = shell_collator(host);
 	if settings.debug {
@@ -5300,29 +5330,71 @@ fn exec(
 
 fn sort_by<'a>(unsorted: &mut Vec<Line<'a>>, settings: &GlobalSettings, line_data: &LineData<'a>) {
 	let cmp = |a: &Line<'a>, b: &Line<'a>| compare_by(a, b, settings, line_data, line_data);
-	// WASI does not support threads, so use non-parallel sort to avoid
-	// rayon's thread pool which triggers an unreachable trap. Windows can also
-	// force sequential sort when pi-natives could not safely configure Rayon's
-	// process-global worker pool under commit pressure.
-	if settings.stable || settings.unique {
-		#[cfg(not(target_os = "wasi"))]
-		if rayon_global_pool_available() {
+	let stable = settings.stable || settings.unique;
+	// WASI has no threads (rayon's pool hits an unreachable trap there), and
+	// Windows leaves the global pool unavailable when pi-natives could not
+	// safely configure it under commit pressure; both sort sequentially.
+	#[cfg(not(target_os = "wasi"))]
+	let sort_parallel = |unsorted: &mut Vec<Line<'a>>| {
+		if stable {
 			unsorted.par_sort_by(cmp);
 		} else {
-			unsorted.sort_by(cmp);
-		}
-		#[cfg(target_os = "wasi")]
-		unsorted.sort_by(cmp);
-	} else {
-		#[cfg(not(target_os = "wasi"))]
-		if rayon_global_pool_available() {
 			unsorted.par_sort_unstable_by(cmp);
-		} else {
-			unsorted.sort_unstable_by(cmp);
 		}
-		#[cfg(target_os = "wasi")]
-		unsorted.sort_unstable_by(cmp);
+	};
+	match &settings.parallelism {
+		#[cfg(not(target_os = "wasi"))]
+		Parallelism::Pool(pool) => pool.install(|| sort_parallel(unsorted)),
+		#[cfg(not(target_os = "wasi"))]
+		Parallelism::Global if rayon_global_pool_available() => sort_parallel(unsorted),
+		_ if stable => unsorted.sort_by(cmp),
+		_ => unsorted.sort_unstable_by(cmp),
 	}
+}
+
+/// Parses `--parallel`'s NUM_THREADS like GNU's `xstrtoumax`: optional
+/// leading whitespace and `+`, then decimal digits and nothing else. Values
+/// past `usize` saturate, as GNU's do; zero is rejected.
+fn parse_parallel(arg: &str) -> SortResult<usize> {
+	let number = arg.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+	let digits = number.strip_prefix('+').unwrap_or(number);
+	let digit_count = digits.bytes().take_while(u8::is_ascii_digit).count();
+	if digit_count == 0 {
+		return Err(SortError::message(format!("invalid --parallel argument {}", arg.quote())));
+	}
+	if digit_count != digits.len() {
+		return Err(SortError::message(format!(
+			"invalid suffix in --parallel argument {}",
+			arg.quote()
+		)));
+	}
+	match digits.parse::<usize>() {
+		Ok(0) => Err(SortError::message("number in parallel must be nonzero")),
+		Ok(threads) => Ok(threads),
+		Err(_) => Ok(usize::MAX),
+	}
+}
+
+/// How a sort with `--parallel=N` runs: on a pool of its own, so the limit
+/// stays local to this call instead of resizing the process-global pool.
+#[cfg(not(target_os = "wasi"))]
+fn invocation_parallelism(requested: usize) -> Parallelism {
+	// Rayon spawns every worker up front, and more workers than cores cannot
+	// speed up the sort, so the request is capped at the core count.
+	let threads = requested.min(std::thread::available_parallelism().map_or(1, NonZero::get));
+	if threads == 1 {
+		return Parallelism::Sequential;
+	}
+	// Spawning fails under memory pressure; the sort then runs on its own thread.
+	rayon::ThreadPoolBuilder::new()
+		.num_threads(threads)
+		.build()
+		.map_or(Parallelism::Sequential, |pool| Parallelism::Pool(Arc::new(pool)))
+}
+
+#[cfg(target_os = "wasi")]
+fn invocation_parallelism(_requested: usize) -> Parallelism {
+	Parallelism::Sequential
 }
 
 fn compare_by<'a>(
@@ -6125,6 +6197,39 @@ mod tests {
 			let (code, out, err) = sort_in_locale("LC_NUMERIC", "de_DE.UTF-8", &["-s", mode], "2,5\n3\n2,1\n");
 			assert_eq!(code, 0, "{err}");
 			assert_eq!(out, "2,1\n2,5\n3\n", "{mode}");
+		}
+	}
+
+	// Failure mode: `--parallel` was accepted and ignored, so invalid thread
+	// counts sorted silently instead of failing as GNU sort does.
+	#[test]
+	fn parallel_validates_the_thread_count_like_gnu() {
+		for (value, message) in [
+			("0", "number in parallel must be nonzero"),
+			("abc", "invalid --parallel argument 'abc'"),
+			("", "invalid --parallel argument ''"),
+			("-1", "invalid --parallel argument '-1'"),
+			("4x", "invalid suffix in --parallel argument '4x'"),
+		] {
+			let (code, capture) = run_util::<Sort>(&[&format!("--parallel={value}")], "b\na\n", "/");
+			assert_eq!(code, 2, "{value:?}");
+			assert_eq!(capture.err(), format!("sort: {message}\n"), "{value:?}");
+			assert_eq!(capture.out(), "", "{value:?}");
+		}
+	}
+
+	#[test]
+	fn parallel_sorts_on_its_own_pool() {
+		let input: String = (0..5000).rev().map(|n| format!("{n:05}\n")).collect();
+		let expected: String = (0..5000).map(|n| format!("{n:05}\n")).collect();
+		for value in ["1", "2", " 4", "+4", "99999999999999999999999"] {
+			for stable in [&[][..], &["-s"]] {
+				let parallel = format!("--parallel={value}");
+				let args: Vec<&str> = stable.iter().copied().chain([parallel.as_str()]).collect();
+				let (code, capture) = run_util::<Sort>(&args, &input, "/");
+				assert_eq!(code, 0, "{value:?}: {}", capture.err());
+				assert!(capture.out() == expected, "{value:?} {stable:?}");
+			}
 		}
 	}
 }
