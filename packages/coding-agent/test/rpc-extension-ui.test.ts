@@ -405,7 +405,11 @@ export default function(pi) {
 		expect(ordinaryResponse).toMatchObject({ type: "response", command: "login", success: true });
 		expect(loggedInProvidersResponse).toMatchObject({
 			data: {
-				providers: expect.arrayContaining([expect.objectContaining({ id: "rpc-ordinary", authenticated: true })]),
+				providers: expect.arrayContaining([
+					expect.objectContaining({ id: "rpc-ordinary", authenticated: true }),
+					// The alias stores under rpc-ordinary, so it is authenticated by the same credential.
+					expect.objectContaining({ id: "rpc-alias", authenticated: true }),
+				]),
 			},
 		});
 		expect(accountsResponse).toMatchObject({
@@ -425,6 +429,7 @@ export default function(pi) {
 				providers: expect.arrayContaining([
 					expect.objectContaining({ id: "rpc-secret", authenticated: false }),
 					expect.objectContaining({ id: "rpc-ordinary", authenticated: false }),
+					expect.objectContaining({ id: "rpc-alias", authenticated: false }),
 				]),
 			},
 		});

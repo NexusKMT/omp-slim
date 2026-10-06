@@ -2473,7 +2473,9 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					id: provider.id,
 					name: provider.name,
 					available: provider.available,
-					authenticated: session.modelRegistry.authStorage.keys.source(provider.id) !== undefined,
+					authenticated:
+						session.modelRegistry.authStorage.keys.source(provider.storeCredentialsAs ?? provider.id) !==
+						undefined,
 				}));
 				return success(id, "get_login_providers", { providers });
 			}
@@ -2527,7 +2529,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 					// Provider-scoped online refresh so the just-persisted credential
 					// re-runs discovery instead of reusing a fresh authoritative cache
 					// row (#5780).
-					await session.modelRegistry.refreshProvider(command.providerId, "online");
+					await session.modelRegistry.refreshProvider(
+						knownProvider.storeCredentialsAs ?? knownProvider.id,
+						"online",
+					);
 					return success(id, "login", { providerId: command.providerId });
 				} catch (err: unknown) {
 					return error(id, "login", err instanceof Error ? err.message : String(err));

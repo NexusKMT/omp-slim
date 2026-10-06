@@ -1,4 +1,4 @@
-import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+import { getOAuthCredentialProvider } from "@oh-my-pi/pi-ai/oauth";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { AuthStorage, OAuthAccountIdentity, StoredAuthCredential } from "../../session/auth-storage";
 
@@ -102,18 +102,13 @@ export function toLogoutAccounts(
 		});
 }
 
-/** Login aliases (`openai-codex-device`) store credentials under another provider (`openai-codex`). */
-function credentialProvider(provider: string): string {
-	return getOAuthProviders().find(info => info.id === provider)?.storeCredentialsAs ?? provider;
-}
-
 /** Stored accounts `/logout` can remove for `provider`, active first. Reloads the store to see other processes' changes. */
 export async function listLogoutAccounts(
 	authStorage: AuthStorage,
 	loginProvider: string,
 	sessionId: string,
 ): Promise<LogoutAccount[]> {
-	const provider = credentialProvider(loginProvider);
+	const provider = getOAuthCredentialProvider(loginProvider);
 	await authStorage.credentials.reload();
 	return toLogoutAccounts(provider, authStorage.credentials.list(provider), {
 		activeIdentity: authStorage.oauth.identity(provider, sessionId),
@@ -132,7 +127,7 @@ export async function logoutCredential(
 	credentialId: number,
 	sessionId: string,
 ): Promise<{ removed: boolean; remainingSource?: string }> {
-	const provider = credentialProvider(loginProvider);
+	const provider = getOAuthCredentialProvider(loginProvider);
 	const authStorage = modelRegistry.authStorage;
 	// Reload so an id stored by another process is found, not reported missing.
 	await authStorage.credentials.reload();
