@@ -13,7 +13,7 @@ const INPUT_CAPACITY = WIDTH - 6;
 let darkTheme: Theme | undefined;
 
 function makeOverlay(): AnnotationOverlay {
-	const tui = { requestRender() {}, stop() {}, start() {} } as unknown as TUI;
+	const tui = { terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as unknown as TUI;
 	const keybindings = KeybindingsManager.inMemory({
 		"tui.select.cancel": "escape",
 		"app.editor.external": "ctrl+e",

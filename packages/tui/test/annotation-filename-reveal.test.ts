@@ -36,7 +36,7 @@ function makeOverlay(paths: readonly string[], backgroundLines: readonly string[
 		isBinary: false,
 	}));
 	return new AnnotationOverlay(
-		{ requestRender() {}, stop() {}, start() {} } as unknown as TUI,
+		{ terminal: { rows: 40 }, requestRender() {}, stop() {}, start() {} } as unknown as TUI,
 		darkTheme!,
 		getKeybindings() as KeybindingsManager,
 		files,
@@ -66,6 +66,30 @@ describe("AnnotationOverlay filename reveal", () => {
 		const lines = render(makeOverlay([path]));
 
 		expect(lines.some(line => line.includes(path))).toBe(true);
+	});
+
+	it("reveals an exactly fitting filename when a note reduces its sidebar label budget", () => {
+		// At width 90 the sidebar has 25 cells: two cursor cells, 17 label cells, and six change-badge cells.
+		const path = "src/boundaries.ts";
+		const overlay = makeOverlay([path]);
+		const before = render(overlay)[1]!;
+		expect(before.slice(4, 21)).toBe(path);
+		expect(before.slice(21, 27)).toBe(" +0/-0");
+
+		overlay.handleInput("a");
+		overlay.handleInput("boundary note");
+		overlay.handleInput("\r");
+		const revealed = render(overlay)[1]!;
+		expect(revealed.slice(4, 21)).toBe(path);
+
+		overlay.handleInput(TAB);
+		const collapsed = render(overlay)[1]!;
+		expect(collapsed.slice(4, 21)).not.toBe(path);
+		expect(collapsed.slice(4, 27)).toContain("…");
+		expect(collapsed.slice(4, 27)).toContain("✎1");
+
+		overlay.handleInput("\x1b[Z");
+		expect(render(overlay)[1]!.slice(4, 21)).toBe(path);
 	});
 
 	it("keeps file rows stable while selection moves and reveals the new selection", () => {
@@ -138,7 +162,7 @@ describe("AnnotationOverlay filename reveal", () => {
 		expect(revealedPath).toBe(path);
 		expect(revealed.some(line => line.includes("BOTTOM_FILENAME_TAIL.ts"))).toBe(true);
 		expect(revealed).toHaveLength(collapsedBefore.length);
-		expect(revealed.length).toBeLessThanOrEqual(process.stdout.rows || 40);
+		expect(revealed.length).toBeLessThanOrEqual(40);
 		expect(revealed.every(line => visibleWidth(line) <= width)).toBe(true);
 
 		overlay.handleInput(TAB);
@@ -154,7 +178,7 @@ describe("AnnotationOverlay filename reveal", () => {
 
 		expect(lines.some(line => line.slice(4, width - 1).startsWith("…"))).toBe(true);
 		expect(lines.some(line => line.includes("BOTTOM_FILENAME_TAIL.ts"))).toBe(true);
-		expect(lines.length).toBeLessThanOrEqual(process.stdout.rows || 40);
+		expect(lines.length).toBeLessThanOrEqual(40);
 		expect(lines.every(line => visibleWidth(line) <= width)).toBe(true);
 	});
 

@@ -12,6 +12,7 @@ import {
 	wrapTextWithAnsi,
 } from "../index";
 import { compositeLineAt } from "../render/composite";
+import { wrapLiteralLine } from "../utils";
 import { appKey, editorKey } from "../chrome/keybinding-hints";
 import { formatKeyHint, formatKeyHints, type KeybindingsManager } from "../app-keybindings";
 import type { Keybinding } from "../keybindings";
@@ -881,8 +882,7 @@ export class AnnotationOverlay implements Focusable {
 			}
 			renderedRowBySource[sourceIndex] = lines.length;
 			const displayLine = replaceTabs(sanitizeText(sourceLine));
-			const wrapped = wrapTextWithAnsi(displayLine, textWidth);
-			const visualRows = wrapped.length > 0 ? wrapped : [""];
+			const visualRows = wrapLiteralLine(displayLine, textWidth);
 			for (const [rowIndex, visualRow] of visualRows.entries()) {
 				const selected = this.#focus === "diff" && sourceIndex === this.#sourceIndex;
 				const gutter =
@@ -932,10 +932,9 @@ export class AnnotationOverlay implements Focusable {
 						: diffRow.kind === "removed"
 							? "toolDiffRemoved"
 							: "toolDiffContext";
-				const sourceContent = this.#theme.fg(contentColor, replaceTabs(sanitizeText(diffRow.content)));
+				const sourceContent = replaceTabs(sanitizeText(diffRow.content));
 				const contentWidthForRow = Math.max(1, normalizedWidth - SOURCE_SELECTION_GUTTER_WIDTH - prefixWidth);
-				const wrapped = wrapTextWithAnsi(sourceContent, contentWidthForRow);
-				const visualRows = wrapped.length > 0 ? wrapped : [""];
+				const visualRows = wrapLiteralLine(sourceContent, contentWidthForRow);
 				const firstRenderedRow = lines.length;
 				renderedRowBySource[sourceIndex] = firstRenderedRow;
 				for (const [rowIndex, visualRow] of visualRows.entries()) {
@@ -944,9 +943,10 @@ export class AnnotationOverlay implements Focusable {
 					const continuationPrefix = " ".repeat(prefixWidth);
 					const prefixForRow = first ? this.#theme.fg(contentColor, prefix) : continuationPrefix;
 					const selectedGutter = first ? fit(`${this.#theme.nav.cursor} `, SOURCE_SELECTION_GUTTER_WIDTH) : gutter;
-					lines.push(`${gutter}${prefixForRow}${visualRow}`);
+					const styledRow = this.#theme.fg(contentColor, visualRow);
+					lines.push(`${gutter}${prefixForRow}${styledRow}`);
 					sourceIndexByRenderedRow.push(sourceIndex);
-					selectedSourceLines.push(`${selectedGutter}${prefixForRow}${visualRow}`);
+					selectedSourceLines.push(`${selectedGutter}${prefixForRow}${styledRow}`);
 				}
 				sourceIndex++;
 			}
@@ -1154,8 +1154,14 @@ export class AnnotationOverlay implements Focusable {
 		return Math.max(0, Math.min(this.#fileIndex - Math.floor(rows / 2), Math.max(0, this.#files.length - rows)));
 	}
 
+	#renderSidebarBadge(file: ReviewDiffFile, count: number): string {
+		const changes = ` +${file.linesAdded}/-${file.linesRemoved}`;
+		const annotations = count ? ` ✎${count}` : "";
+		return this.#theme.fg("dim", changes) + (annotations ? this.#theme.fg("warning", annotations) : "");
+	}
+
 	#sidebarLabelWidth(file: ReviewDiffFile, count: number, width: number): number {
-		const badge = ` +${file.linesAdded}/-${file.linesRemoved}${count ? ` ✎${count}` : ""}`;
+		const badge = this.#renderSidebarBadge(file, count);
 		return Math.max(0, width - visibleWidth(badge) - 2);
 	}
 
@@ -1167,7 +1173,7 @@ export class AnnotationOverlay implements Focusable {
 			if (!file) return "";
 			const selected = index === this.#fileIndex;
 			const count = this.#annotationCount(index);
-			const badge = `${this.#theme.fg("dim", ` +${file.linesAdded}/-${file.linesRemoved}`)}${count ? this.#theme.fg("warning", ` ✎${count}`) : ""}`;
+			const badge = this.#renderSidebarBadge(file, count);
 			const available = this.#sidebarLabelWidth(file, count, width);
 			const label = truncateToWidth(sanitizeStatusText(displayFileLabel(file)), available, Ellipsis.Unicode);
 			const cursor = selected ? (this.#focus === "files" ? "› " : "▎ ") : "  ";
@@ -1228,7 +1234,7 @@ export class AnnotationOverlay implements Focusable {
 		this.#sidebarShown = !this.#textSource;
 		if (!this.#sidebarShown && this.#focus === "files") this.#focus = "diff";
 		// Page size for PgUp/PgDn, matching the rendered body height.
-		const terminalHeight = this.#tui.terminal?.rows ?? process.stdout.rows ?? 40;
+		const terminalHeight = this.#tui.terminal.rows;
 		this.#bodyHeight = Math.max(MIN_BODY_ROWS, terminalHeight - (this.#actions.length + 8));
 		this.#editor.focused = this.focused && this.#annotating;
 		const body = this.#describeBodyItems();
@@ -1530,7 +1536,7 @@ export class AnnotationOverlay implements Focusable {
 	}
 
 	render(width: number): readonly string[] {
-		const terminalHeight = this.#tui.terminal?.rows ?? process.stdout.rows ?? 40;
+		const terminalHeight = this.#tui.terminal.rows;
 		this.#sidebarShown = this.#textSource ? false : this.#canShowSidebar(width);
 		if (!this.#sidebarShown && this.#focus === "files") this.#focus = "diff";
 		const sidebarWidth = this.#sidebarShown ? this.#sidebarWidth(width) : 0;
