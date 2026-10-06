@@ -24,7 +24,10 @@ export function formatRoleModelValue(
 	const existingRoleValue = settings.getModelRole(role);
 	if (!existingRoleValue) return modelKey;
 	const thinkingLevel = extractExplicitThinkingSelector(existingRoleValue, settings, {
-		isLiteralModelId: (provider, id) => modelRegistry.find(provider, id) !== undefined,
+		isLiteralModelId: (provider, id) =>
+			provider === undefined
+				? modelRegistry.getAvailable().some(candidate => candidate.id === id)
+				: modelRegistry.find(provider, id) !== undefined,
 	});
 	return formatModelSelectorValue(modelKey, thinkingLevel);
 }

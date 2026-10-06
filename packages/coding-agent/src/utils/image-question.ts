@@ -124,7 +124,9 @@ export async function askImageQuestion(
 	const configuredThinking = concreteThinkingLevel(
 		extractExplicitThinkingSelector(selectedPattern, session.settings, {
 			isLiteralModelId: (provider, id) =>
-				availableModels.some(candidate => candidate.provider === provider && candidate.id === id),
+				provider === undefined
+					? availableModels.some(candidate => candidate.id === id)
+					: availableModels.some(candidate => candidate.provider === provider && candidate.id === id),
 		}),
 	);
 	const reasoning = toReasoningEffort(resolveThinkingLevelForModel(model, configuredThinking));

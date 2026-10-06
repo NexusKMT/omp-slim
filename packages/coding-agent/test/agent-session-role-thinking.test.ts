@@ -217,6 +217,24 @@ describe("AgentSession role model thinking behavior", () => {
 		expect(sessionSettings.getModelRole("default")).toBe(`${slowModel.provider}/${slowModel.id}:off`);
 	});
 
+	it("does not reinterpret an unqualified literal :max when reassigning a role", async () => {
+		const defaultModel = getAnthropicModelOrThrow("claude-sonnet-4-5");
+		const nextModel = getAnthropicModelOrThrow("claude-sonnet-4-6");
+		const literalModel = { ...defaultModel, id: "a:max" };
+
+		await createSession({
+			initialModelId: defaultModel.id,
+			initialThinkingLevel: Effort.High,
+			modelRoles: { default: "a:max" },
+		});
+		const availableModels = modelRegistry.getAvailable();
+		vi.spyOn(modelRegistry, "getAvailable").mockReturnValue([...availableModels, literalModel]);
+
+		await session.setModel(nextModel, "default", { persist: true });
+
+		expect(sessionSettings.getModelRole("default")).toBe(`${nextModel.provider}/${nextModel.id}`);
+	});
+
 	it("clamps unsupported selections from model metadata", async () => {
 		const model = getAnthropicModelOrThrow("claude-sonnet-4-6");
 		const agent = new Agent({

@@ -238,6 +238,26 @@ describe("read image questions", () => {
 		expect(options?.reasoning).toBe("high");
 	});
 
+	it("selects unqualified literal :max and :auto vision model ids without inventing effort", async () => {
+		for (const id of ["a:max", "a:auto"]) {
+			const literalVisionModel = { ...reasoningVisionModel, id };
+			const settings = Settings.isolated();
+			settings.setModelRole("vision", id);
+			const stub = createCompleteSimpleSuccessStub("Red");
+			const session = createSession(testDir, literalVisionModel, "test-key", settings, {
+				configureVisionRole: false,
+				availableModels: [literalVisionModel],
+			});
+
+			await new ReadTool(session, stub.fn).execute("call", { path: `${imagePath}?q=What color?` });
+
+			const selected = stub.calls[0]?.[0] as Model<"openai-responses"> | undefined;
+			const options = stub.calls[0]?.[2] as { reasoning?: unknown } | undefined;
+			expect(selected?.id).toBe(id);
+			expect(options?.reasoning).toBeUndefined();
+		}
+	});
+
 	it("maps a stalled vision request to the image question timeout", async () => {
 		const stub = createCompleteSimpleHangingStub();
 		const settings = Settings.isolated({ "images.questionTimeoutMs": 50 });
