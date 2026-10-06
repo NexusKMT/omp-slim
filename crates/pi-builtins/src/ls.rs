@@ -5530,4 +5530,43 @@ mod integration_tests {
 		assert_eq!(ls.run(&mut host), 0);
 		assert!(capture.out().contains("1969-12-31 16:00:00.000000000 -0800"));
 	}
+
+	#[test]
+	fn size_sort_breaks_ties_by_name() {
+		let dir = tempfile::tempdir().unwrap();
+		// Created out of name order so a directory listing order that
+		// follows creation (tmpfs, ext4 hash order) cannot pass by luck.
+		for name in ["b", "c", "a"] {
+			std::fs::write(dir.path().join(name), b"same").unwrap();
+		}
+
+		let (code, capture) = run_util::<Ls>(&["-S"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "a\nb\nc\n");
+
+		let (code, capture) = run_util::<Ls>(&["-Sr"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		assert_eq!(capture.out(), "c\nb\na\n");
+	}
+
+	#[test]
+	fn group_directories_first_keeps_the_sort_within_each_group() {
+		let dir = tempfile::tempdir().unwrap();
+		// More than 20 entries: below that an unstable sort runs as an
+		// insertion sort and happens to keep each group in order.
+		for i in 0..15 {
+			std::fs::create_dir(dir.path().join(format!("d{i:02}"))).unwrap();
+			std::fs::write(dir.path().join(format!("f{i:02}")), vec![b'x'; i + 1]).unwrap();
+		}
+
+		let (code, capture) = run_util::<Ls>(&["--group-directories-first", "-S"], "", dir.path());
+		assert_eq!(code, 0, "{}", capture.err());
+		// Empty directories tie on size and fall back to name order; files
+		// run largest first.
+		let expected: String = (0..15)
+			.map(|i| format!("d{i:02}\n"))
+			.chain((0..15).rev().map(|i| format!("f{i:02}\n")))
+			.collect();
+		assert_eq!(capture.out(), expected);
+	}
 }
