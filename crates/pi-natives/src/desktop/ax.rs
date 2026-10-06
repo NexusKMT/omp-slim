@@ -112,15 +112,20 @@ impl Default for AxRegistry {
 }
 
 impl AxRegistry {
-	/// Starts a snapshot of `target`. Its refs not registered again by this
-	/// snapshot or the previous one expire.
+	/// Starts a snapshot of `target`, returning its generation.
 	pub(crate) fn begin_snapshot(&mut self, target: &str) -> u64 {
 		let generation = self.generations.entry(target.to_string()).or_default();
 		*generation = generation.saturating_add(1);
-		let current = *generation;
-		self
-			.evict(|entry| entry.target_key == target && entry.generation.saturating_add(1) < current);
-		current
+		*generation
+	}
+
+	/// Ends `target`'s snapshot `generation` once it has registered its
+	/// elements: refs that neither it nor the previous snapshot registered
+	/// expire, so an element missing from a single snapshot keeps its ref.
+	pub(crate) fn end_snapshot(&mut self, target: &str, generation: u64) {
+		self.evict(|entry| {
+			entry.target_key == target && entry.generation.saturating_add(1) < generation
+		});
 	}
 
 	pub(crate) fn current_generation(&mut self, target: &str) -> u64 {
@@ -471,6 +476,7 @@ pub fn snapshot(
 	if let Some(root) = root {
 		format_tree(root, 0, window, registry, target, generation, &mut text, &mut node_count);
 	}
+	registry.end_snapshot(target, generation);
 	if state.truncated {
 		if !text.is_empty() {
 			text.push('\n');
@@ -723,6 +729,7 @@ mod tests {
 		for g in 1..=3 {
 			let generation = r.begin_snapshot("x");
 			r.register("x", generation, AxHandle::Test(g), &p("button", None));
+			r.end_snapshot("x", generation);
 		}
 		assert!(r.resolve("e1").is_err());
 		assert!(r.resolve("e2").is_ok());
@@ -799,6 +806,27 @@ mod tests {
 		assert!(matches!(registry.resolve("e3").unwrap(), AxHandle::Test(2)));
 	}
 	#[test]
+	fn an_element_missing_from_one_snapshot_keeps_its_ref() {
+		let mut m = Mock {
+			props:    [
+				(1, p("window", Some("Title"))),
+				(2, p("button", Some("Keep"))),
+				(3, p("button", Some("Flicker"))),
+			]
+			.into(),
+			children: [(1, vec![2, 3])].into(),
+		};
+		let mut registry = AxRegistry::default();
+		let options = AxSnapshotOptions::default();
+		let first = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		m.children.insert(1, vec![2]);
+		snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		m.children.insert(1, vec![2, 3]);
+		let back = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(back.text, first.text);
+		assert!(back.text.ends_with("button \"Flicker\" [ref=e3]"));
+	}
+	#[test]
 	fn refs_are_per_target() {
 		let mut r = AxRegistry::default();
 		let go = p("button", Some("Go"));
@@ -807,9 +835,12 @@ mod tests {
 		for _ in 0..2 {
 			let generation = r.begin_snapshot("7");
 			assert_eq!(r.register("7", generation, AxHandle::Test(5), &go), "e2");
+			r.end_snapshot("7", generation);
 		}
-		r.begin_snapshot("7");
-		r.begin_snapshot("7");
+		for _ in 0..2 {
+			let generation = r.begin_snapshot("7");
+			r.end_snapshot("7", generation);
+		}
 		assert!(r.resolve("e2").is_err());
 		assert!(r.resolve("e1").is_ok());
 	}
