@@ -770,7 +770,6 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 		allowArgs: true,
 		acpDescription: "Arm, restart, or cancel prewalk",
 		acpInputHint: "[restart|off]",
-		inlineHint: "[restart|off]",
 		subcommands: [
 			{ name: "restart", description: "Return to @default and re-arm the handoff to @smol" },
 			{ name: "off", description: "Cancel this session's handoff without changing the active model" },

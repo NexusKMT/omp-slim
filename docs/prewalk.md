@@ -21,14 +21,10 @@ prewalk:
 
 The configured setting arms new sessions, not resumed/imported sessions. Explicit session flags can arm either:
 
-`/new` starts a fresh cycle using `prewalk.enabled` and the current `@smol` assignment, rather than inheriting a consumed handoff or the previous todo gate. Startup flags apply to the startup session; `/new` uses the configured setting. When prewalk is enabled, the new session restores the previous planning model and thinking level after a handoff only if you have not manually changed them. Resuming an existing session does not automatically re-arm prewalk.
-
-Automatic fallback and restoration are not manual selections. When recovery returns to the handoff model and effort, `/new` can still restore the previous planning model.
-
 | Flag | Effect |
 | --- | --- |
 | `--prewalk` | Arm prewalk for the new session. |
-| `--no-prewalk` | Leave prewalk disabled for the session, even when `prewalk.enabled` is `true`. |
+| `--no-prewalk` | Leave prewalk disabled for the startup session, even when `prewalk.enabled` is `true`. `/new` still follows `prewalk.enabled`. |
 | `--prewalk-into <model-or-role>` | Arm prewalk and use the supplied model pattern or role instead of `@smol`. |
 
 For example:
@@ -42,6 +38,10 @@ omp --prewalk-into openai/gpt-5-mini
 At startup, OMP resolves the target with the normal model-role and model-matching rules, trying configured role candidates in order for an authenticated, enabled provider. Extension-provided targets may resolve after extension registration. If no usable target remains, OMP prints a warning and starts with prewalk unarmed.
 
 `--no-prewalk` cannot be combined with `--prewalk` or `--prewalk-into`. An explicit `--prewalk-into @default` resolves against the default role from before `--model` overrides it.
+
+`/new` starts a fresh cycle using `prewalk.enabled` and the current `@smol` assignment, rather than inheriting a consumed handoff or the previous todo gate. Startup flags (`--prewalk`, `--no-prewalk`, `--prewalk-into`) apply only to the startup session; `/new` always uses the configured setting. When prewalk is enabled, the new session restores the previous planning model and thinking level after a handoff unless a later selection replaced them. If the planning model can no longer be used (for example, its credentials were removed), `/new` warns and stays on the current model. Resuming an existing session does not automatically re-arm prewalk.
+
+Any model or thinking-level change made after the handoff counts as a replacement, including the switches plan mode makes on entry and exit. Automatic retry fallback, fallback restoration, and context promotion do not; if the session is back on the handoff model and thinking level when you run `/new`, it still restores the planning model.
 
 ## Handoff trigger
 

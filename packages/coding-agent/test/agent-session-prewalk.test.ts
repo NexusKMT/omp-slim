@@ -464,6 +464,24 @@ describe("AgentSession prewalk", () => {
 		expect(created.session.getPrewalkState()?.target.id).toBe(created.target.id);
 	});
 
+	it("/new completes and stays on the handoff model when the planning model lost its credentials", async () => {
+		const created = createLifecycleSession([
+			toolCall("old-todo", "todo"),
+			toolCall("old-write", "write"),
+			{ content: ["old done"] },
+			{ content: ["fresh done"] },
+		]);
+		await created.session.prompt("old task");
+		const oldSessionId = created.session.sessionId;
+		vi.spyOn(modelRegistry, "hasConfiguredAuth").mockImplementation(model => model.id !== created.primary.id);
+		expect(await created.session.newSession()).toBe(true);
+		expect(created.session.sessionId).not.toBe(oldSessionId);
+		expect(created.session.model?.id).toBe(created.target.id);
+		const boundary = created.requested.length;
+		await created.session.prompt("fresh task");
+		expect(created.requested.slice(boundary)).toEqual([created.target.id]);
+	});
+
 	it("/new preserves a deliberate selection of the same handoff model and effort", async () => {
 		const created = createLifecycleSession([
 			toolCall("old-todo", "todo"),

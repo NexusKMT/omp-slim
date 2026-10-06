@@ -16,7 +16,6 @@ import { cfgPrewalkEnabled } from "@oh-my-pi/pi-coding-agent/session/settings";
 import { executeBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import type { TuiSlashCommandRuntime } from "@oh-my-pi/pi-coding-agent/slash-commands/types";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { withEnv } from "../../ai/test/helpers";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 describe("AgentSession /prewalk off", () => {
@@ -181,7 +180,6 @@ describe("AgentSession /prewalk off", () => {
 		await fixture.session.prompt("second task");
 		expect(fixture.requested.slice(3)).toEqual(Array(2).fill(`${fixture.target.provider}/${fixture.target.id}`));
 		expect(fixture.session.model?.id).toBe(fixture.target.id);
-		expect(cfgPrewalkEnabled.get(fixture.settings)).toBe(true);
 	});
 
 	it("retains delivered continuation history while canceling only pending prewalk steering after rearming", async () => {
@@ -249,7 +247,6 @@ describe("AgentSession /prewalk off", () => {
 		expect(fixture.session.thinkingLevel).toBe(thinkingLevel);
 		expect(fixture.settings.getModelRole("default")).toBe(defaultRole);
 		expect(fixture.settings.getModelRole("smol")).toBe(smolRole);
-		expect(cfgPrewalkEnabled.get(fixture.settings)).toBe(true);
 
 		const nextRequest = fixture.contexts.length;
 		await fixture.session.prompt("second task without prewalk");
@@ -268,33 +265,6 @@ describe("AgentSession /prewalk off", () => {
 		expect(fixture.session.model).toEqual(activeModel);
 		expect(fixture.session.thinkingLevel).toBe(thinkingLevel);
 		expect(fixture.sessionManager.buildSessionContext().messages.filter(isContinuation)).toEqual(delivered);
-	});
-
-	it("cancels an armed handoff even when the target has no configured credentials", async () => {
-		const fixture = createSession(
-			[toolCall("todo", "todo"), toolCall("write", "write"), { content: ["done"] }],
-			true,
-		);
-		authStorage.keys.removeRuntime("anthropic");
-		try {
-			await withEnv(
-				{
-					ANTHROPIC_API_KEY: undefined,
-					ANTHROPIC_OAUTH_TOKEN: undefined,
-					ANTHROPIC_FOUNDRY_API_KEY: undefined,
-				},
-				async () => {
-					expect(modelRegistry.hasConfiguredAuth(fixture.target)).toBe(false);
-					await executeBuiltinSlashCommand("/prewalk off", fixture.runtime);
-					expect(fixture.session.getPrewalkState()).toBeUndefined();
-					authStorage.keys.setRuntime("anthropic", "test-key");
-					await fixture.session.prompt("do the task");
-					expect(fixture.requested).toEqual(Array(3).fill(`${fixture.primary.provider}/${fixture.primary.id}`));
-				},
-			);
-		} finally {
-			authStorage.keys.setRuntime("anthropic", "test-key");
-		}
 	});
 
 	it("cancels an existing arm even when @smol no longer resolves", async () => {

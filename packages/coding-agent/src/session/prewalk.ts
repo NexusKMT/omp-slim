@@ -170,10 +170,20 @@ export class PrewalkCoordinator {
 		this.releaseHandoff();
 		if (!enabled) return;
 		if (restoreSource && handoff) {
-			await this.#host.setModelTemporary(handoff.source, handoff.sourceThinkingLevel, { ephemeral: true });
-			// Temporary selection treats undefined as "keep/default"; restoration must preserve
-			// the original selector, including auto or an explicitly inherited effort.
-			this.#host.restoreThinkingLevel(handoff.sourceThinkingLevel);
+			// Best-effort: /new has already committed the transcript switch, so an
+			// unusable planning model must not abort the rest of session setup.
+			try {
+				await this.#host.setModelTemporary(handoff.source, handoff.sourceThinkingLevel, { ephemeral: true });
+				// Temporary selection treats undefined as "keep/default"; restoration must preserve
+				// the original selector, including auto or an explicitly inherited effort.
+				this.#host.restoreThinkingLevel(handoff.sourceThinkingLevel);
+			} catch (error) {
+				this.#host.emitNotice(
+					"warning",
+					`Prewalk: could not restore ${handoff.source.provider}/${handoff.source.id}: ${error instanceof Error ? error.message : String(error)}`,
+					"prewalk",
+				);
+			}
 		}
 		const prewalk = this.#host.resolveDefaultPrewalk();
 		if (!prewalk) return;
