@@ -2,9 +2,18 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Renamed the `linux-all` target of `scripts/bazel-natives.ts` (`//:natives-linux-all`) to `all` (`//:natives-all`); it now covers the darwin addons too
+
 ### Added
 
 - Added `OMP_NATIVE_FEATURES`, which passes extra cargo features to the local cargo/napi-rs build of the native addon (e.g. `OMP_NATIVE_FEATURES=wayland-pipewire`); Bazel builds ignore it ([#14058](https://github.com/can1357/oh-my-pi/pull/14058) by [@justdoGIT](https://github.com/justdoGIT))
+- Added macOS addon builds from Linux hosts: `bazel build //:natives-darwin-*` now cross-compiles with a hermetic clang + ld64.lld toolchain against the macOS SDK from Apple's Command Line Tools package, and builds the Apple Foundation Models bridge with the swift.org Linux Swift toolchain; mac hosts keep building with Xcode
+
+### Changed
+
+- Stamping the release version into a signed macOS addon now refreshes its ad-hoc signature in place, so darwin addons can be stamped on any host instead of only on macOS
 
 ### Fixed
 
