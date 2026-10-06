@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed ANSI `/annotate` layout: diff source lines wrap with aligned continuations, focused truncated filenames reveal over existing rows and wrap within the frame, and note editing follows the configured terminal hardware-cursor preference like ask-tool notes (with a software cursor when disabled). The final glyph remains visible at the exact text width; overflow wraps.
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes

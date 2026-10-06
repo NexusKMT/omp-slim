@@ -17,6 +17,8 @@ const DOWN = "\x1b[B";
 const CANCEL = "\x1b";
 const SHIFT_ENTER = "\x1b[13;2~";
 const CTRL_U = "\x15";
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
 const CTRL_E = "\x05";
 let darkTheme: Theme | undefined;
 let previousKeybindings: KeybindingsManager;
@@ -31,7 +33,7 @@ type DiffOverlayOptions = Omit<AnnotationOverlayCallbacks, "onComplete"> & {
 
 function makeDiffOverlay(files: readonly ReviewDiffFile[], options: DiffOverlayOptions = {}): AnnotationOverlay {
 	const { onComplete = () => {}, ...callbacks } = options;
-	return new AnnotationOverlay(
+	const overlay = new AnnotationOverlay(
 		makeTui(),
 		darkTheme!,
 		getKeybindings() as KeybindingsManager,
@@ -39,13 +41,19 @@ function makeDiffOverlay(files: readonly ReviewDiffFile[], options: DiffOverlayO
 		"Reviewing changes",
 		{ ...callbacks, onComplete },
 	);
+	overlay.focused = true;
+	return overlay;
 }
 
 function makeTextOverlay(
 	source: TextReviewSource,
 	onComplete: (result: TextReviewOverlayResult | undefined) => void = () => {},
 ): AnnotationOverlay {
-	return new AnnotationOverlay(makeTui(), darkTheme!, getKeybindings() as KeybindingsManager, source, { onComplete });
+	const overlay = new AnnotationOverlay(makeTui(), darkTheme!, getKeybindings() as KeybindingsManager, source, {
+		onComplete,
+	});
+	overlay.focused = true;
+	return overlay;
 }
 
 function makeTui(): TUI {
@@ -303,6 +311,7 @@ describe("AnnotationOverlay", () => {
 				onComplete: () => {},
 			},
 		);
+		overlay.focused = true;
 		render(overlay);
 		overlay.handleInput(TAB);
 		overlay.handleInput("a");
@@ -322,5 +331,250 @@ describe("AnnotationOverlay", () => {
 		});
 		overlay.handleInput(CANCEL);
 		expect(completed).toEqual([undefined]);
+	});
+	describe("diff row wrapping", () => {
+		it("preserves long diff contents and aligns wrapped continuations under the code", () => {
+			const content =
+				"const payload = alphaOne betaTwo gammaThree deltaFour epsilonFive zetaSix etaSeven thetaEight iotaNine kappaTen lambdaEleven;";
+			const overlay = makeDiffOverlay([
+				diffFile("src/wrapped.ts", ONE_LINE_HUNK, [
+					{ kind: "added", raw: `+${content}`, content, newLine: 17, hunkHeader: ONE_LINE_HUNK },
+				]),
+			]);
+			const output = render(overlay, 42);
+
+			for (const token of [
+				"const",
+				"payload",
+				"alphaOne",
+				"betaTwo",
+				"gammaThree",
+				"deltaFour",
+				"epsilonFive",
+				"zetaSix",
+				"etaSeven",
+				"thetaEight",
+				"iotaNine",
+				"kappaTen",
+				"lambdaEleven;",
+			]) {
+				expect(output).toContain(token);
+			}
+			expect((output.match(/\+  17 /g) ?? []).length).toBe(1);
+			const rows = output.split("\n");
+			const first = rows.find(line => line.includes("const payload"));
+			const continuation = rows.find(line => line.includes("betaTwo"));
+			expect(first).toBeDefined();
+			expect(continuation).toBeDefined();
+			expect(continuation!.indexOf("betaTwo")).toBe(first!.indexOf("const payload"));
+		});
+
+		it("reflows cached diff contents when the overlay width changes", () => {
+			const content = "resizeAlpha resizeBravo resizeCharlie resizeDelta resizeEcho resizeFoxtrot";
+			const overlay = makeDiffOverlay([
+				diffFile("src/resize.ts", ONE_LINE_HUNK, [
+					{ kind: "added", raw: `+${content}`, content, newLine: 23, hunkHeader: ONE_LINE_HUNK },
+				]),
+			]);
+			const narrow = render(overlay, 42);
+			const wide = render(overlay, 140);
+			const narrowRowCount = narrow
+				.split("\n")
+				.filter(line => /resize(?:Alpha|Bravo|Charlie|Delta|Echo|Foxtrot)/.test(line)).length;
+			const wideRowCount = wide
+				.split("\n")
+				.filter(line => /resize(?:Alpha|Bravo|Charlie|Delta|Echo|Foxtrot)/.test(line)).length;
+
+			expect(narrowRowCount).toBeGreaterThan(wideRowCount);
+			for (const token of [
+				"resizeAlpha",
+				"resizeBravo",
+				"resizeCharlie",
+				"resizeDelta",
+				"resizeEcho",
+				"resizeFoxtrot",
+			]) {
+				expect(narrow).toContain(token);
+				expect(wide).toContain(token);
+			}
+		});
+
+		it("anchors a note to its logical source row after a wrapped row and resize", () => {
+			const firstContent =
+				"const first = FIRST_WRAP_HEAD alpha beta gamma delta epsilon zeta eta theta FIRST_WRAP_TAIL;";
+			const targetContent = "const target = TARGET_LOGICAL_ROW;";
+			const overlay = makeDiffOverlay([
+				diffFile("src/anchor.ts", ONE_LINE_HUNK, [
+					{
+						kind: "added",
+						raw: `+${firstContent}`,
+						content: firstContent,
+						newLine: 10,
+						hunkHeader: ONE_LINE_HUNK,
+					},
+					{
+						kind: "added",
+						raw: `+${targetContent}`,
+						content: targetContent,
+						newLine: 11,
+						hunkHeader: ONE_LINE_HUNK,
+					},
+				]),
+			]);
+			render(overlay, 42);
+			overlay.handleInput(DOWN);
+			render(overlay, 140);
+			overlay.handleInput("a");
+			overlay.handleInput("logical-row-note");
+			overlay.handleInput(ENTER);
+
+			expect(overlay.getAnnotations()).toEqual([expect.objectContaining({ newLine: 11, note: "logical-row-note" })]);
+			const output = render(overlay, 42);
+			expect(output.indexOf("FIRST_WRAP_TAIL")).toBeGreaterThanOrEqual(0);
+			expect(output.indexOf("FIRST_WRAP_TAIL")).toBeLessThan(output.indexOf("logical-row-note"));
+			expect(output.indexOf("logical-row-note")).toBeLessThan(output.indexOf("TARGET_LOGICAL_ROW"));
+		});
+
+		it("pages through one oversized wrapped source row and keeps its raw annotation anchor", () => {
+			const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+			Object.defineProperty(process.stdout, "rows", { configurable: true, value: 14 });
+			try {
+				const rawLine = `+START_MARKER ${"segment ".repeat(100)}TAIL_MARKER`;
+				const overlay = makeDiffOverlay([
+					diffFile("src/long.ts", ONE_LINE_HUNK, [
+						{ kind: "added", raw: rawLine, content: rawLine.slice(1), newLine: 27, hunkHeader: ONE_LINE_HUNK },
+					]),
+				]);
+				render(overlay, 72);
+				overlay.handleInput(TAB);
+				expect(render(overlay, 72)).toContain("START_MARKER");
+				expect(render(overlay, 72)).not.toContain("TAIL_MARKER");
+
+				for (let page = 0; page < 8; page++) overlay.handleInput(PAGE_DOWN);
+				expect(render(overlay, 72)).toContain("TAIL_MARKER");
+				overlay.handleInput("g");
+				expect(render(overlay, 72)).toContain("START_MARKER");
+				for (let page = 0; page < 8; page++) overlay.handleInput(PAGE_DOWN);
+				expect(render(overlay, 72)).toContain("TAIL_MARKER");
+				for (let page = 0; page < 8; page++) overlay.handleInput(PAGE_UP);
+				expect(render(overlay, 72)).toContain("START_MARKER");
+				overlay.handleInput("G");
+				expect(render(overlay, 72)).toContain("TAIL_MARKER");
+
+				overlay.handleInput("a");
+				overlay.handleInput("note");
+				overlay.handleInput(ENTER);
+				expect(overlay.getAnnotations()).toEqual([
+					expect.objectContaining({
+						scope: "line",
+						path: "src/long.ts",
+						newLine: 27,
+						rawLine,
+						note: "note",
+					}),
+				]);
+			} finally {
+				if (originalRows) Object.defineProperty(process.stdout, "rows", originalRows);
+				else Reflect.deleteProperty(process.stdout, "rows");
+			}
+		});
+
+		it("keeps the end-selected diff row anchored while the annotation editor shrinks the viewport", () => {
+			const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+			Object.defineProperty(process.stdout, "rows", { configurable: true, value: 14 });
+			try {
+				const firstContent = `FIRST_WRAP_HEAD ${"segment ".repeat(100)}`;
+				const lastRaw = "+FINAL_LOGICAL_ROW";
+				const overlay = makeDiffOverlay([
+					diffFile("src/last.ts", ONE_LINE_HUNK, [
+						{
+							kind: "added",
+							raw: `+${firstContent}`,
+							content: firstContent,
+							newLine: 1,
+							hunkHeader: ONE_LINE_HUNK,
+						},
+						{
+							kind: "added",
+							raw: lastRaw,
+							content: "FINAL_LOGICAL_ROW",
+							newLine: 2,
+							hunkHeader: ONE_LINE_HUNK,
+						},
+					]),
+				]);
+				render(overlay, 72);
+				overlay.handleInput(TAB);
+				overlay.handleInput("G");
+				expect(render(overlay, 72)).toContain("FINAL_LOGICAL_ROW");
+				overlay.handleInput("a");
+				render(overlay, 72);
+				overlay.handleInput("anchor-check");
+				overlay.handleInput(ENTER);
+				expect(overlay.getAnnotations()).toEqual([
+					expect.objectContaining({
+						scope: "line",
+						path: "src/last.ts",
+						newLine: 2,
+						rawLine: lastRaw,
+						note: "anchor-check",
+					}),
+				]);
+			} finally {
+				if (originalRows) Object.defineProperty(process.stdout, "rows", originalRows);
+				else Reflect.deleteProperty(process.stdout, "rows");
+			}
+		});
+
+		it("keeps the highlighted source row and annotation anchor aligned after viewport reflow", () => {
+			const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+			Object.defineProperty(process.stdout, "rows", { configurable: true, value: 14 });
+			try {
+				const firstContent = `FIRST_ROW_MARKER ${"wrap ".repeat(16)}`;
+				const firstRaw = `+${firstContent}`;
+				const lastRaw = "+LAST_ROW_MARKER";
+				const overlay = makeDiffOverlay([
+					diffFile("src/reflow.ts", ONE_LINE_HUNK, [
+						{
+							kind: "added",
+							raw: firstRaw,
+							content: firstContent,
+							newLine: 1,
+							hunkHeader: ONE_LINE_HUNK,
+						},
+						{
+							kind: "added",
+							raw: lastRaw,
+							content: "LAST_ROW_MARKER",
+							newLine: 2,
+							hunkHeader: ONE_LINE_HUNK,
+						},
+					]),
+				]);
+				render(overlay, 42);
+				overlay.handleInput("G");
+				render(overlay, 42);
+
+				const wide = render(overlay, 180);
+				const selectedRow = wide
+					.split("\n")
+					.find(
+						line =>
+							line.includes(darkTheme!.nav.cursor) &&
+							(line.includes("FIRST_ROW_MARKER") || line.includes("LAST_ROW_MARKER")),
+					);
+				expect(selectedRow).toBeDefined();
+				const expectedRaw = selectedRow!.includes("FIRST_ROW_MARKER") ? firstRaw : lastRaw;
+				overlay.handleInput("a");
+				overlay.handleInput("resize-anchor");
+				overlay.handleInput(ENTER);
+				expect(overlay.getAnnotations()).toEqual([
+					expect.objectContaining({ rawLine: expectedRaw, note: "resize-anchor" }),
+				]);
+			} finally {
+				if (originalRows) Object.defineProperty(process.stdout, "rows", originalRows);
+				else Reflect.deleteProperty(process.stdout, "rows");
+			}
+		});
 	});
 });
