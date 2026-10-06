@@ -89,6 +89,7 @@
 - Pressing Esc while a queued message is about to be sent now restores it to the editor instead of the stopped turn recording it ([#14179](https://github.com/can1357/oh-my-pi/pull/14179) by [@andrebrait](https://github.com/andrebrait))
 - Fixed BTW history sheet regression checks for opening, resume, and cancellation ([#14550](https://github.com/can1357/oh-my-pi/issues/14550)).
 - Fixed `edit` silently dropping late LSP diagnostics from slow servers such as tsserver; they now arrive like they do for `write` ([#14214](https://github.com/can1357/oh-my-pi/issues/14214))
+- Fixed multi-question `ask` dropping the ticked options of a multi-select question when the user also typed an "Other" answer; the model now receives both ([#14369](https://github.com/can1357/oh-my-pi/issues/14369))
 
 ## [18.6.2] - 2026-10-04
 
