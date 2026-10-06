@@ -424,8 +424,8 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			);
 			const request = await requested.promise;
 			cancel.abort();
-			// The cancel itself, not the interception-cleanup failure a still-loading page causes.
-			await expect(run).rejects.toThrow("Operation aborted");
+			// The cancel itself, not a cleanup failure from a page still loading.
+			expect(await run.catch((error: unknown) => error)).toMatchObject({ message: "Operation aborted" });
 			// Chrome drops the request once the load is stopped; a load left running keeps waiting.
 			const dropped = new Promise<string>(resolve => {
 				if (request.aborted) resolve("stopped");
@@ -470,7 +470,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			);
 			await waiting.promise;
 			cancel.abort();
-			await expect(run).rejects.toThrow("Operation aborted");
+			expect(await run.catch((error: unknown) => error)).toMatchObject({ message: "Operation aborted" });
 			const dropped = new Promise<string>(resolve => {
 				if (request.aborted) resolve("dropped");
 				request.addEventListener("abort", () => resolve("dropped"));
@@ -487,11 +487,9 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 		const slow = Bun.serve({
 			port: 0,
 			idleTimeout: 0,
-			fetch(request) {
+			fetch() {
 				requested.resolve();
-				const { promise, resolve } = Promise.withResolvers<Response>();
-				request.signal.addEventListener("abort", () => resolve(new Response(null, { status: 499 })));
-				return promise;
+				return new Promise<Response>(() => {});
 			},
 		});
 		try {
@@ -512,7 +510,7 @@ describe.skipIf(!CHROMIUM_AVAILABLE)("browser navigation, frames, dialogs, and t
 			);
 			await requested.promise;
 			cancel.abort();
-			await expect(run).rejects.toThrow("Operation aborted");
+			expect(await run.catch((error: unknown) => error)).toMatchObject({ message: "Operation aborted" });
 			const after = await invoke({
 				action: "run",
 				name: "cancelled-listener",
