@@ -1,3 +1,4 @@
+import { encodeSixel } from "@oh-my-pi/pi-natives";
 import { $env, isBunTestRuntime, isTerminalHeadless, isWsl } from "@oh-my-pi/pi-utils/env";
 import { writeTerminalSequence } from "./active-terminal";
 import { sendDesktopNotification, shouldDeliverDesktopNotification } from "./desktop-notify";
@@ -933,9 +934,10 @@ export interface ImageRenderOptions {
 	/** When true (Kitty + {@link imageId}), also return the one-time transmit sequence. */
 	includeTransmit?: boolean;
 	/**
-	 * SIXEL sequence for the target pixel size renderImage computes. Encoding
-	 * runs off the JS thread, so the provider answers `undefined` while it is
-	 * pending (the image's rows stay reserved) and `null` once it failed.
+	 * SIXEL sequence for the target pixel size renderImage computes, so the
+	 * caller can encode off the JS thread: answer `undefined` while the encode
+	 * is pending (the image's rows stay reserved) and `null` once it failed.
+	 * Without a provider, renderImage encodes synchronously.
 	 */
 	sixel?: (widthPx: number, heightPx: number) => string | null | undefined;
 }
@@ -1338,6 +1340,19 @@ export function getImageDimensions(base64Data: string, mimeType: string): ImageD
 	return null;
 }
 
+/**
+ * SIXEL sequence for `base64Data` at the given pixel size, encoded on the JS
+ * thread; `null` when the encode fails. For output that cannot wait for an
+ * off-thread encode.
+ */
+export function encodeSixelNow(base64Data: string, widthPx: number, heightPx: number): string | null {
+	try {
+		return encodeSixel(new Uint8Array(Buffer.from(base64Data, "base64")), widthPx, heightPx);
+	} catch {
+		return null;
+	}
+}
+
 export function renderImage(
 	base64Data: string,
 	imageDimensions: ImageDimensions,
@@ -1407,9 +1422,11 @@ export function renderImage(
 		const heightScale = targetHeightPx / rawHeightPx;
 		const targetWidthPx = Math.max(1, Math.round(fit.columns * cellDims.widthPx * heightScale));
 		const rows = Math.max(1, Math.ceil(targetHeightPx / cellDims.heightPx));
-		const sequence = options.sixel?.(targetWidthPx, targetHeightPx);
+		const sequence = options.sixel
+			? options.sixel(targetWidthPx, targetHeightPx)
+			: encodeSixelNow(base64Data, targetWidthPx, targetHeightPx);
 		if (sequence === null) return null;
-		// Undefined while the encode is pending: the rows stay reserved.
+		// Undefined while the provider's encode is pending: the rows stay reserved.
 		return { sequence, rows };
 	}
 	if (TERMINAL.imageProtocol === ImageProtocol.Iterm2) {

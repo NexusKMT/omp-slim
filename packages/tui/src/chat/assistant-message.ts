@@ -1373,7 +1373,12 @@ export class AssistantMessageComponent extends Container {
 						displayImage.data,
 						displayImage.mimeType,
 						{ fallbackColor: (text: string) => theme.fg("toolOutput", text) },
-						{ ...resolveImageOptions(), budget: this.#imageBudget, imageKey: key },
+						{
+							...resolveImageOptions(),
+							budget: this.#imageBudget,
+							imageKey: key,
+							requestRender: this.#onImageUpdate,
+						},
 					),
 				);
 				continue;

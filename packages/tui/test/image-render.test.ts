@@ -187,6 +187,17 @@ describe("terminal image rendering", () => {
 		expect(failed).toBeNull();
 	});
 
+	it("encodes SIXEL synchronously when the caller supplies no provider", () => {
+		terminal.imageProtocol = ImageProtocol.Sixel;
+		const result = renderImage(BASE64_ONE_PIXEL_PNG, SQUARE_DIMENSIONS, {
+			maxWidthCells: 10,
+			maxHeightCells: 2,
+		});
+
+		expect(result?.rows).toBe(2);
+		expect((result?.sequence ?? "").startsWith("\x1bP")).toBe(true);
+	});
+
 	it("moves back up before multi-row direct Kitty output and restores the cursor below it", () => {
 		terminal.imageProtocol = ImageProtocol.Kitty;
 		const image = new Image(
