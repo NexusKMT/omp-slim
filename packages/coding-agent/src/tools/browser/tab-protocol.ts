@@ -114,6 +114,8 @@ export interface RunResultOk {
 	displays: Array<TextContent | ImageContent>;
 	returnValue: unknown;
 	screenshots: ScreenshotResult[];
+	/** The run finished but tab-scoped browser state was not restored; the tab must be recycled. */
+	recoverTab?: boolean;
 }
 
 export interface RunErrorPayload {
