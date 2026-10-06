@@ -25,6 +25,7 @@
 - Fixed `bun run build` failing with `Could not resolve: "../native/embedded-addons.<platform>-<arch>.tar.gz"`; standalone binaries now embed the native addon in memory
 - Fixed JSON query parsing to correctly handle filters starting with hyphens
 - Fixed unreliable query parameter decoding in JSON read paths
+- Fixed every later `task` call failing preflight with the write error after a settings change could not be saved (e.g. a read-only `config.yml`); subagents now start with the unsaved in-memory settings, and the save failure stays a warning ([#14620](https://github.com/can1357/oh-my-pi/issues/14620))
 - `/new` starts a fresh configured prewalk cycle after a handoff or cancellation, resets the todo gate, and restores the planning model after automatic recovery when no explicit selection supersedes the handoff ([#14587](https://github.com/can1357/oh-my-pi/pull/14587) by [@NaC-L](https://github.com/NaC-L)).
 - Fixed `/logout` for an alias login such as `openai-codex-device` reporting no stored credentials; it now lists and removes the accounts stored under the provider it logs in to ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
 - Fixed logging in through an alias login such as `openai-codex-device` (`/login` or RPC `login`) not refreshing the logged-in provider's models, and RPC `get_login_providers` reporting alias logins as unauthenticated ([#14588](https://github.com/can1357/oh-my-pi/pull/14588) by [@andrebrait](https://github.com/andrebrait))
