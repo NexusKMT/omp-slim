@@ -53,10 +53,7 @@ impl Win32Ax {
 	)]
 	fn element(handle: &AxHandle) -> CoreResult<&UIElement> {
 		match handle {
-			AxHandle::Uia(element, runtime_id) if !runtime_id.is_empty() => Ok(element),
-			AxHandle::Uia(..) => {
-				Err(DesktopError::ax_failed("UI Automation element reports no RuntimeId"))
-			},
+			AxHandle::Uia(element, _) => Ok(element),
 			#[cfg(test)]
 			_ => Err(DesktopError::ax_failed("accessibility handle does not belong to UI Automation")),
 		}
@@ -167,19 +164,17 @@ fn ax_error(error: impl std::fmt::Display) -> DesktopError {
 }
 
 /// Handle for `element` carrying the `RuntimeId` that identifies it across
-/// reads. An element that reports none gets an empty one, which every
-/// operation refuses, so a walk counts it among its unreadable nodes. Read as
-/// a property: `UIElement::get_runtime_id` leaks the array UI Automation
-/// returns.
+/// reads, or none when the element reports none. Read as a property:
+/// `UIElement::get_runtime_id` leaks the array UI Automation returns.
 fn uia_handle(element: UIElement) -> AxHandle {
 	let runtime_id = match element
 		.get_property_value(UIProperty::RuntimeId)
 		.and_then(|value| value.get_value())
 	{
-		Ok(Value::ArrayI4(id)) => id,
-		_ => Vec::new(),
+		Ok(Value::ArrayI4(id)) if !id.is_empty() => Some(id.into_boxed_slice()),
+		_ => None,
 	};
-	AxHandle::Uia(element, runtime_id.into_boxed_slice())
+	AxHandle::Uia(element, runtime_id)
 }
 
 /// Native window handle `element` represents, if any.

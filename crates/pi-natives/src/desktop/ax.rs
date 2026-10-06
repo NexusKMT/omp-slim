@@ -14,13 +14,38 @@ use super::{
 pub enum AxHandle {
 	#[cfg(target_os = "macos")]
 	Mac(objc2_core_foundation::CFRetained<objc2_application_services::AXUIElement>),
-	/// The element and its `RuntimeId`, read once when the handle is made.
+	/// The element and its `RuntimeId`, read once when the handle is made;
+	/// `None` when the element reports none.
 	#[cfg(target_os = "windows")]
-	Uia(uiautomation::UIElement, Box<[i32]>),
+	Uia(uiautomation::UIElement, Option<Box<[i32]>>),
 	#[cfg(target_os = "linux")]
 	AtSpi(atspi::ObjectRefOwned),
 	#[cfg(test)]
 	Test(u64),
+	/// A test element without an identity, like a UIA element whose
+	/// `RuntimeId` cannot be read: all of them compare equal.
+	#[cfg(test)]
+	TestUnidentified(u64),
+}
+
+impl AxHandle {
+	/// Whether the handle carries an identity naming its element across reads.
+	/// Handles without one all compare equal, so they never enter the ref
+	/// index.
+	const fn identified(&self) -> bool {
+		match self {
+			#[cfg(target_os = "macos")]
+			Self::Mac(_) => true,
+			#[cfg(target_os = "windows")]
+			Self::Uia(_, runtime_id) => runtime_id.is_some(),
+			#[cfg(target_os = "linux")]
+			Self::AtSpi(_) => true,
+			#[cfg(test)]
+			Self::Test(_) => true,
+			#[cfg(test)]
+			Self::TestUnidentified(_) => false,
+		}
+	}
 }
 
 /// Two handles are equal when they name the same live element, however many
@@ -37,6 +62,8 @@ impl PartialEq for AxHandle {
 			(Self::AtSpi(a), Self::AtSpi(b)) => a == b,
 			#[cfg(test)]
 			(Self::Test(a), Self::Test(b)) => a == b,
+			#[cfg(test)]
+			(Self::TestUnidentified(_), Self::TestUnidentified(_)) => true,
 			#[cfg(test)]
 			_ => false,
 		}
@@ -56,6 +83,8 @@ impl Hash for AxHandle {
 			Self::AtSpi(object) => object.hash(state),
 			#[cfg(test)]
 			Self::Test(id) => id.hash(state),
+			#[cfg(test)]
+			Self::TestUnidentified(_) => {},
 		}
 	}
 }
@@ -136,7 +165,8 @@ impl AxRegistry {
 	/// is seen there, and renews it for `target`'s `generation`. An identity
 	/// read again with another role or label, or whose element from the last
 	/// read is gone, gets a new ref; the old ref keeps the element it was read
-	/// from until it expires like any ref not read again.
+	/// from until it expires like any ref not read again. An element without an
+	/// identity gets a new ref on every read.
 	pub(crate) fn register(
 		&mut self,
 		backend: &mut dyn AxBackend,
@@ -149,11 +179,16 @@ impl AxRegistry {
 		props.role.hash(&mut hasher);
 		label(props).hash(&mut hasher);
 		let fingerprint = hasher.finish();
-		let known = self
-			.refs
-			.get(target)
-			.and_then(|refs| refs.get(&handle))
-			.copied();
+		let identified = handle.identified();
+		let known = if identified {
+			self
+				.refs
+				.get(target)
+				.and_then(|refs| refs.get(&handle))
+				.copied()
+		} else {
+			None
+		};
 		let renewed = known.filter(|id| {
 			self
 				.entries
@@ -163,11 +198,13 @@ impl AxRegistry {
 		let id = renewed.unwrap_or_else(|| {
 			let id = self.next_ref;
 			self.next_ref = self.next_ref.saturating_add(1);
-			self
-				.refs
-				.entry(target.to_string())
-				.or_default()
-				.insert(handle.clone(), id);
+			if identified {
+				self
+					.refs
+					.entry(target.to_string())
+					.or_default()
+					.insert(handle.clone(), id);
+			}
 			id
 		});
 		self.entries.insert(id, Registered {
@@ -635,20 +672,31 @@ mod tests {
 
 	#[derive(Default)]
 	struct Mock {
-		props:    HashMap<u64, AxProps>,
-		children: HashMap<u64, Vec<u64>>,
+		props:        HashMap<u64, AxProps>,
+		children:     HashMap<u64, Vec<u64>>,
+		/// Nodes read without an identity.
+		unidentified: HashSet<u64>,
 		/// Nodes whose earlier reads are gone, their identity taken over.
-		gone:     HashSet<u64>,
+		gone:         HashSet<u64>,
+	}
+	impl Mock {
+		fn handle(&self, id: u64) -> AxHandle {
+			if self.unidentified.contains(&id) {
+				AxHandle::TestUnidentified(id)
+			} else {
+				AxHandle::Test(id)
+			}
+		}
 	}
 	fn node(h: &AxHandle) -> u64 {
-		let AxHandle::Test(id) = h else {
-			unreachable!()
-		};
-		*id
+		match h {
+			AxHandle::Test(id) | AxHandle::TestUnidentified(id) => *id,
+			_ => unreachable!(),
+		}
 	}
 	impl AxBackend for Mock {
 		fn window_root(&mut self, _: &DesktopWindow) -> CoreResult<AxHandle> {
-			Ok(AxHandle::Test(1))
+			Ok(self.handle(1))
 		}
 
 		fn window_id(&mut self, _: &AxHandle, _: &[DesktopWindow]) -> CoreResult<String> {
@@ -670,7 +718,7 @@ mod tests {
 				.get(&node(h))
 				.into_iter()
 				.flatten()
-				.map(|id| AxHandle::Test(*id))
+				.map(|id| self.handle(*id))
 				.collect())
 		}
 
@@ -700,7 +748,7 @@ mod tests {
 							&& y >= bounds.y
 							&& y < bounds.y + bounds.height
 					})
-					.map(|_| AxHandle::Test(*id))
+					.map(|_| self.handle(*id))
 			}))
 		}
 
@@ -869,6 +917,37 @@ mod tests {
 		m.gone.clear();
 		let reread = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
 		assert_eq!(reread.text, replaced.text);
+	}
+	#[test]
+	fn elements_without_an_identity_get_a_new_ref_on_every_read() {
+		let mut m = Mock {
+			props: [
+				(1, p("window", Some("Title"))),
+				(2, p("button", Some("Go"))),
+				(3, p("button", Some("Go"))),
+			]
+			.into(),
+			children: [(1, vec![2, 3])].into(),
+			unidentified: [1, 2, 3].into(),
+			..Default::default()
+		};
+		let mut registry = AxRegistry::default();
+		let options = AxSnapshotOptions::default();
+		let first = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(
+			first.text,
+			"- window \"Title\" [ref=e1] app=Safari (focused)\n  - button \"Go\" [ref=e2]\n  - \
+			 button \"Go\" [ref=e3]"
+		);
+		let second = snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(
+			second.text,
+			"- window \"Title\" [ref=e4] app=Safari (focused)\n  - button \"Go\" [ref=e5]\n  - \
+			 button \"Go\" [ref=e6]"
+		);
+		assert!(matches!(registry.resolve("e3").unwrap(), AxHandle::TestUnidentified(3)));
+		snapshot(&mut m, &mut registry, &window(), &options).unwrap();
+		assert_eq!(registry.resolve("e3").err().map(|error| error.code), Some(ErrorCode::StaleRef));
 	}
 	#[test]
 	fn refs_are_per_target() {
