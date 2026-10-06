@@ -5,9 +5,11 @@ import * as path from "node:path";
 import { postmortem, Snowflake, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
 import type { HTMLElement } from "@oh-my-pi/pi-utils/dom";
 import type {
+	Accessibility,
 	Browser,
 	CDPSession,
 	ElementHandle,
+	Frame,
 	HTTPResponse,
 	JSHandle,
 	KeyboardTypeOptions,
@@ -163,6 +165,7 @@ import {
 	ClickRefusedError,
 	clickAt,
 	clickElement,
+	composedContains,
 	clickQueryHandlerText,
 	fillViaHandle,
 	focusTextEntryTarget,
@@ -227,6 +230,10 @@ declare module "puppeteer-core" {
 	interface Frame {
 		/** Puppeteer's main JavaScript realm, retained by our pinned runtime patch. */
 		mainRealm(): Realm;
+		/** This frame's accessibility tree (`@internal` upstream, stripped from published types). */
+		readonly accessibility: Accessibility;
+		/** Loader of the document the frame shows; changes on every navigation (`@internal` upstream). */
+		readonly _loaderId: string;
 	}
 	interface Realm {
 		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
@@ -296,6 +303,8 @@ const SCROLL_ACK_TIMEOUT_MS = 2_000;
 const REQUEST_INTERCEPTION_CLEANUP_TIMEOUT_MS = 500;
 /** Bound cleanup window after a timed-out raw handle action. */
 const HANDLE_ACTION_INVALIDATION_TIMEOUT_MS = 500;
+/** Bound on reading every iframe in one observation; a frame whose renderer is stuck in script never answers. */
+const FRAME_SNAPSHOT_TIMEOUT_MS = 5_000;
 
 /** Queue a wheel event without treating a delayed renderer acknowledgement as dispatch failure. */
 export async function dispatchScroll(
@@ -1060,6 +1069,68 @@ async function createTrackedHeadlessPage(browser: Browser, reportTarget: (target
 	const page = await target.page();
 	if (!page) throw new ToolError(`Created headless target ${targetId} did not expose a page`);
 	return page;
+}
+
+/**
+ * Frames that missed an observation deadline, mapped to the document they showed then. Observe skips
+ * them until they navigate, so a frame stuck in script costs only the first observation its wait.
+ */
+const unresponsiveFrames = new WeakMap<Frame, string>();
+
+function frameDocumentKey(frame: Frame): string {
+	return `${frame._loaderId} ${frame.url()}`;
+}
+
+/**
+ * Accessibility snapshots of `frames` and their descendants, in frame-tree order. A frame that does
+ * not answer by `deadline` is left out with its descendants, and skipped by later observations until
+ * it navigates, so one dead iframe never costs the page its observation. With `root`, only frames
+ * inside it are read.
+ */
+async function snapshotFrames(
+	frames: Frame[],
+	options: { interestingOnly: boolean; root: ElementHandle | null; deadline: number; signal?: AbortSignal },
+): Promise<SerializedAXNode[]> {
+	const snapshots = await Promise.all(
+		frames.map(async frame => {
+			if (unresponsiveFrames.get(frame) === frameDocumentKey(frame)) return [];
+			const timeout = new Error(`Frame ${frame.url()} did not answer`);
+			let snapshot: SerializedAXNode | null;
+			try {
+				snapshot = await withTimeout(
+					snapshotFrame(frame, options),
+					Math.max(0, options.deadline - Date.now()),
+					timeout,
+					options.signal,
+				);
+			} catch (error) {
+				if (options.signal?.aborted) throw error;
+				if (error === timeout) unresponsiveFrames.set(frame, frameDocumentKey(frame));
+				return [];
+			}
+			if (!snapshot) return [];
+			return [snapshot, ...(await snapshotFrames(frame.childFrames(), { ...options, root: null }))];
+		}),
+	);
+	return snapshots.flat();
+}
+
+async function snapshotFrame(
+	frame: Frame,
+	options: { interestingOnly: boolean; root: ElementHandle | null },
+): Promise<SerializedAXNode | null> {
+	if (options.root) {
+		const owner = await frame.frameElement();
+		if (!owner) return null;
+		const scoped = await options.root.realm.adoptHandle(owner).finally(() => owner.dispose().catch(() => undefined));
+		try {
+			// The owner may sit in a web component's shadow root under `root`, where `Node.contains` stops.
+			if (!(await options.root.evaluate(composedContains, scoped))) return null;
+		} finally {
+			await scoped.dispose().catch(() => undefined);
+		}
+	}
+	return await frame.accessibility.snapshot({ interestingOnly: options.interestingOnly });
 }
 
 function collectInteractiveObservationAncestors(node: SerializedAXNode, ancestors: Set<SerializedAXNode>): boolean {
@@ -2538,23 +2609,32 @@ export class WorkerCore {
 			}
 		}
 		let snapshot: SerializedAXNode | null;
+		let frameSnapshots: SerializedAXNode[];
 		try {
 			snapshot = (await untilAborted(options.signal, () =>
 				page.accessibility.snapshot({ interestingOnly: !includeAll, root: root ?? undefined }),
 			)) as SerializedAXNode | null;
+			frameSnapshots = await snapshotFrames(page.mainFrame().childFrames(), {
+				interestingOnly: !includeAll,
+				root,
+				deadline: Date.now() + FRAME_SNAPSHOT_TIMEOUT_MS,
+				signal: options.signal,
+			});
 		} finally {
 			await root?.dispose().catch(() => undefined);
 		}
 		if (!snapshot) throw new ToolError("Accessibility snapshot unavailable");
 		const entries: ObservationEntry[] = [];
 		const interactiveAncestors = new Set<SerializedAXNode>();
-		if (options.compact) collectInteractiveObservationAncestors(snapshot, interactiveAncestors);
-		await collectObservationEntries(this, snapshot, entries, {
-			includeAll,
-			viewportOnly,
-			compact: options.compact ?? false,
-			interactiveAncestors,
-		});
+		for (const tree of [snapshot, ...frameSnapshots]) {
+			if (options.compact) collectInteractiveObservationAncestors(tree, interactiveAncestors);
+			await collectObservationEntries(this, tree, entries, {
+				includeAll,
+				viewportOnly,
+				compact: options.compact ?? false,
+				interactiveAncestors,
+			});
+		}
 		const scroll = (await untilAborted(options.signal, () =>
 			page.evaluate(() => {
 				const win = globalThis as unknown as {
