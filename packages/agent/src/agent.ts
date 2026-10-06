@@ -847,7 +847,7 @@ export class Agent {
 	#syncTokenizer(model: Model | null | undefined): void {
 		if (
 			tokenizerEncodingForModel(model) !== this.#tokenizer.encoding ||
-			snapcompact.frameBillingKey(model ?? undefined) !== this.#tokenizer.frameBillingKey
+			snapcompact.frameBillingKey(snapcompact.frameBilling(model ?? undefined)) !== this.#tokenizer.frameBillingKey
 		) {
 			this.#tokenizer = new Tokenizer(model);
 		}
