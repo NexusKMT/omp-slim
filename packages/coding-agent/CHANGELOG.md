@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Fixed model-preset tests failing when provider credentials are configured in the environment.
 - Fixed standalone builds failing when the native addon archive could not be resolved.
 - Fixed JSON query parsing and parameter decoding for filters beginning with hyphens and other encoded query values.
 - Fixed task execution after settings could not be saved; subagents now use the current in-memory settings while the save failure is reported as a warning.

@@ -10,9 +10,6 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 const cliEntry = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
 const TTY_ERROR = "interactive mode requires a terminal";
-/** Credential-bearing variables that could hand the child a usable model. */
-const CREDENTIAL_ENV =
-	/(_API_KEY|_TOKEN|_ACCESS_KEY_ID|_SECRET_ACCESS_KEY|_CREDENTIALS|^AWS_PROFILE|^GOOGLE_CLOUD_PROJECT)$/;
 
 interface LaunchRun {
 	exitCode: number;
@@ -29,23 +26,19 @@ async function launchWithoutTerminal(
 	fs.mkdirSync(home, { recursive: true });
 	// Isolated home and no credentials: print mode can only end at the headless
 	// "No models available" exit, which the interactive path never reaches.
-	const env: Record<string, string | undefined> = { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: "1" };
-	for (const key of Object.keys(env)) {
-		if (CREDENTIAL_ENV.test(key)) delete env[key];
-	}
-	for (const key of [
-		"PI_CODING_AGENT_DIR",
-		"PI_CONFIG_DIR",
-		"PI_CONFIG_FILES",
-		"OMP_PROFILE",
-		"PI_PROFILE",
-		"XDG_CACHE_HOME",
-		"XDG_CONFIG_HOME",
-		"XDG_DATA_HOME",
-		"XDG_STATE_HOME",
-	]) {
-		delete env[key];
-	}
+	const env: Record<string, string | undefined> = {
+		PATH: process.env.PATH,
+		TMPDIR: process.env.TMPDIR,
+		TMP: process.env.TMP,
+		TEMP: process.env.TEMP,
+		SystemRoot: process.env.SystemRoot,
+		WINDIR: process.env.WINDIR,
+		HOME: home,
+		USERPROFILE: home,
+		NO_COLOR: "1",
+		// CI can run on EC2 even when no credential variables are inherited.
+		AWS_EC2_METADATA_DISABLED: "true",
+	};
 	const discoveryArgs = extensionDiscovery ? [] : ["--no-extensions"];
 	const proc = Bun.spawn([process.execPath, cliEntry, "--no-session", ...discoveryArgs, ...args], {
 		cwd: tempDir.path(),
