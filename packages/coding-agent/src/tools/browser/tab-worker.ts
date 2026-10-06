@@ -15,6 +15,7 @@ import type {
 	KeyboardTypeOptions,
 	KeyInput,
 	Page,
+	Protocol,
 	Realm,
 	SerializedAXNode,
 	Target,
@@ -232,8 +233,13 @@ declare module "puppeteer-core" {
 		mainRealm(): Realm;
 		/** This frame's accessibility tree (`@internal` upstream, stripped from published types). */
 		readonly accessibility: Accessibility;
-		/** Loader of the document the frame shows; changes on every navigation (`@internal` upstream). */
+		/**
+		 * Loader of the document the frame shows (`@internal` upstream). Changes on every navigation that
+		 * loads a document; a back/forward cache restore keeps the previous document's value.
+		 */
 		readonly _loaderId: string;
+		/** CDP session that drives this frame (`@internal` upstream, stripped from published types). */
+		readonly client: CDPSession;
 	}
 	interface Realm {
 		/** Re-home a DOM handle into this realm (`@internal` upstream, stripped from published types). */
@@ -248,6 +254,8 @@ declare module "puppeteer-core" {
 	interface SerializedAXNode {
 		/** DOM node behind this AX node (`@internal` upstream, stripped from published types). */
 		readonly backendNodeId?: number;
+		/** Loader of the frame's document when the snapshot was taken (`@internal` upstream, stripped from published types). */
+		readonly loaderId: string;
 	}
 }
 
@@ -1164,17 +1172,28 @@ function collectInteractiveObservationAncestors(node: SerializedAXNode, ancestor
 interface ObservedElement {
 	frame: Frame;
 	backendNodeId: number;
+	/**
+	 * Loader of the document `frame` showed when observed. Backend node ids are unique only within
+	 * one renderer process, so once the frame shows another document the id may name an unrelated node.
+	 */
+	loaderId: string;
+}
+
+/** Whether the frame has loaded another document since `element` was observed. */
+function isObservedDocumentGone(element: ObservedElement): boolean {
+	return element.frame._loaderId !== element.loaderId;
 }
 
 /**
- * Resolve a CDP backend node id to an element handle in `frame`'s main world, or null when the
- * node is gone, has left the document, or belongs to a document the frame no longer shows (any
+ * Resolve an observed element to a handle in its frame's main world, or null when the node is
+ * gone, has left the document, or the frame no longer shows the document it was observed in (any
  * resolution failure counts as gone). Text nodes resolve to their parent.
  */
-async function resolveBackendNode(frame: Frame, backendNodeId: number): Promise<ElementHandle | null> {
+async function resolveObservedElement(observed: ObservedElement): Promise<ElementHandle | null> {
+	if (isObservedDocumentGone(observed)) return null;
 	let node: JSHandle;
 	try {
-		node = await frame.mainRealm().adoptBackendNode(backendNodeId);
+		node = await observed.frame.mainRealm().adoptBackendNode(observed.backendNodeId);
 	} catch {
 		return null;
 	}
@@ -1185,8 +1204,10 @@ async function resolveBackendNode(frame: Frame, backendNodeId: number): Promise<
 			return element?.isConnected && (element.ownerDocument as unknown) === document ? element : null;
 		});
 		const element = resolved.asElement();
-		if (!element) await resolved.dispose().catch(() => undefined);
-		return element as ElementHandle | null;
+		// The frame may have committed another document while the node resolved.
+		if (element && !isObservedDocumentGone(observed)) return element as ElementHandle;
+		await resolved.dispose().catch(() => undefined);
+		return null;
 	} catch {
 		return null;
 	} finally {
@@ -1215,14 +1236,15 @@ async function collectObservationEntries(
 		(options.includeAll || isInteractiveNode(node)) &&
 		!(options.compact && emptyStructural)
 	) {
+		const observed: ObservedElement = { frame, backendNodeId: node.backendNodeId, loaderId: node.loaderId };
 		let handle: ElementHandle | null = null;
 		let inViewport = true;
 		if (options.viewportOnly) {
-			handle = await resolveBackendNode(frame, node.backendNodeId);
+			handle = await resolveObservedElement(observed);
 			inViewport = (await handle?.isIntersectingViewport().catch(() => false)) ?? false;
 		}
 		if (inViewport) {
-			const id = core.observeElement({ frame, backendNodeId: node.backendNodeId }, handle ?? undefined);
+			const id = core.observeElement(observed, handle ?? undefined);
 			const states: string[] = [];
 			if (node.disabled) states.push("disabled");
 			if (node.checked !== undefined) states.push(`checked=${String(node.checked)}`);
@@ -1344,6 +1366,13 @@ export class WorkerCore {
 	#screenshotHistory = new Map<string, ScreenshotHistory>();
 	#webmcp?: WebMcpController;
 	readonly #recording = new RecordingController();
+	/**
+	 * A back/forward cache restore brings a document back without loading it, so the frame keeps the
+	 * loader id of the document it replaced and the ids observed there would still pass as current.
+	 */
+	readonly #onFrameNavigated = (event: Protocol.Page.FrameNavigatedEvent): void => {
+		if (event.type === "BackForwardCacheRestore") this.#clearElementCache();
+	};
 
 	constructor(transport: Transport, isolated: boolean) {
 		this.#transport = transport;
@@ -1481,6 +1510,7 @@ export class WorkerCore {
 				this.#observeDialogs();
 				if (payload.dialogs) this.#applyDialogPolicy(payload.dialogs);
 			}
+			this.#page.mainFrame().client.on("Page.frameNavigated", this.#onFrameNavigated);
 			if (payload.mode === "headless" || payload.emulateFocus) {
 				// Background Chromium tabs stop producing frames, stalling rAF,
 				// IntersectionObserver, and input acknowledgements. Keep owned tabs
@@ -3001,11 +3031,15 @@ export class WorkerCore {
 	}
 
 	async #resolveCachedHandle(id: number): Promise<ElementHandle> {
+		const element = this.#observedElements.get(id);
+		if (!element) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
+		if (isObservedDocumentGone(element)) {
+			this.#clearElementCache();
+			throw new ToolError(`Element id ${id} is stale. Run tab.observe() again.`);
+		}
 		const handle = this.#elementCache.get(id);
 		if (!handle) {
-			const element = this.#observedElements.get(id);
-			if (!element) throw new ToolError(`Unknown element id ${id}. Run tab.observe() to refresh the element list.`);
-			const resolved = await resolveBackendNode(element.frame, element.backendNodeId);
+			const resolved = await resolveObservedElement(element);
 			// An observe() during the await renumbers ids, so the id may now name another element.
 			if (!resolved || this.#observedElements.get(id) !== element) {
 				await resolved?.dispose().catch(() => undefined);
