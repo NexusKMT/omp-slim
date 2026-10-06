@@ -336,6 +336,9 @@ pub mod matchers {
 			follow:  Follow,
 			/// Cached metadata.
 			meta:    OnceCell<Result<Metadata, WalkError>>,
+			/// The type the walker already reported, when it needs no stat to
+			/// trust: a regular file or directory seen without following links.
+			known_type: Option<FileType>,
 			/// Operand-relative path used for display and path-based matching, when it
 			/// differs from the real filesystem path. The shell host roots the walk at
 			/// a working-directory-resolved (often absolute) path so stat/exec/delete
@@ -350,7 +353,23 @@ pub mod matchers {
 			pub fn new(fs: BlockingFs, path: impl Into<PathBuf>, depth: usize, follow: Follow) -> Self {
 				let path = path.into();
 				let display = forward_slash_display(&path);
-				Self { fs, path, depth, follow, meta: OnceCell::new(), display }
+				Self { fs, path, depth, follow, meta: OnceCell::new(), known_type: None, display }
+			}
+
+			/// Record the type the walker reported, so `-type`, `-prune` and the
+			/// like answer without a stat. Only regular files and directories
+			/// seen without following links qualify: the Windows walker reports
+			/// every reparse point as a symlink, which needs the stat to tell.
+			#[must_use]
+			pub fn with_walker_type(mut self, file_type: pi_walker::FileType) -> Self {
+				if !self.follow() {
+					self.known_type = match file_type {
+						pi_walker::FileType::File => Some(FileType::Regular),
+						pi_walker::FileType::Dir => Some(FileType::Directory),
+						pi_walker::FileType::Symlink => None,
+					};
+				}
+				self
 			}
 
 			/// Get the filesystem this entry lives on.
@@ -426,6 +445,9 @@ pub mod matchers {
 
 			/// Get the file type of this entry.
 			pub fn file_type(&self) -> FileType {
+				if let Some(file_type) = self.known_type {
+					return file_type;
+				}
 				self
 					.metadata()
 					.map(|m| m.file_type().into())
@@ -4649,12 +4671,13 @@ fn apply_find_entry(
 	entry.set_display_root(operand, resolved_root);
 	let mut matcher_io = matchers::MatcherIO::new(deps, host);
 
-	let new_dir = pi_vfs::parent_path(entry.path()).map(Path::to_path_buf);
-	if new_dir != *current_dir {
+	// Allocated only when the directory changes, not for every entry.
+	let new_dir = pi_vfs::parent_path(entry.path());
+	if new_dir != current_dir.as_deref() {
 		if let Some(dir) = current_dir.take() {
 			matcher.finished_dir(dir.as_path(), &mut matcher_io);
 		}
-		*current_dir = new_dir;
+		*current_dir = new_dir.map(Path::to_path_buf);
 	}
 
 	matcher.matches(&entry, &mut matcher_io);
@@ -4751,7 +4774,8 @@ fn process_dir_walk_request(
 				entry.absolute_path.as_ref().to_path_buf(),
 				entry.depth,
 				config.follow,
-			);
+			)
+			.with_walker_type(entry.file_type);
 			let mut current_dir = current_dir.borrow_mut();
 			let mut ret_value = ret.get();
 			let (should_quit, should_skip_current_dir) = apply_find_entry(

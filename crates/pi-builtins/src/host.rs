@@ -1932,6 +1932,12 @@ mod testing {
 		pub(crate) fn cancel_for_test(&self) {
 			self.cancel.store(true, super::Ordering::Relaxed);
 		}
+
+		/// The cancellation flag of a test host, for a test that cancels
+		/// from another thread while a utility runs.
+		pub(crate) fn cancel_flag_for_test(&self) -> Arc<AtomicBool> {
+			Arc::clone(&self.cancel)
+		}
 	}
 
 	#[cfg(windows)]
