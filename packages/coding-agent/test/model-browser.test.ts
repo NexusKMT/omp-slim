@@ -1,9 +1,13 @@
 import { createModelBrowserSource } from "../src/modes/model-browser-source";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
+import { Agent, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
 	buildBrowserItems,
 	buildSearchAffinity,
@@ -545,7 +549,54 @@ describe("Factory Droid credits badge", () => {
 });
 
 describe("serviceTierFor", () => {
-	test("returns the configured tier only when the request would carry it", () => {
+	beforeAll(async () => {
+		await initTheme(false);
+	});
+
+	test("labels the live session tier rather than the configured setting", async () => {
+		// The setting asks for ultrafast, but `/fast ultra` and `/slow` act on the
+		// session's per-family map; the browser must follow the session.
+		const settings = Settings.isolated({ "tier.openai": "ultrafast" });
+		const astra = makeModel("openai", "gpt-6-astra");
+		const auth = await AuthStorage.create(":memory:");
+		try {
+			const session = new AgentSession({
+				agent: new Agent({ initialState: { model: astra, systemPrompt: ["Test"], tools: [], messages: [] } }),
+				sessionManager: SessionManager.inMemory(),
+				modelRegistry: new ModelRegistry(auth),
+				settings,
+			});
+			try {
+				const browser = new ModelBrowser(
+					createModelBrowserSource(settings, model => session.effectiveServiceTier(model)),
+				);
+				browser.setItems(buildBrowserItems([astra]));
+				browser.setPerfStats(
+					new Map([
+						["openai/gpt-6-astra", { samples: 4, tps: 25, ttftMs: null }],
+						["openai/gpt-6-astra@ultrafast", { samples: 2, tps: 300, ttftMs: null }],
+					]),
+				);
+				const row = () => Bun.stripANSI(browser.render(120)[2] ?? "");
+
+				expect(row()).toContain("25t/s");
+				expect(row()).not.toContain("ultrafast");
+
+				expect(session.setUltrafastMode(true)).toBe(true);
+				expect(row()).toContain("300t/s ultrafast");
+
+				session.setUltrafastMode(false);
+				expect(row()).toContain("25t/s");
+				expect(row()).not.toContain("ultrafast");
+			} finally {
+				await session.dispose();
+			}
+		} finally {
+			auth.close();
+		}
+	});
+
+	test("without a session, returns the configured tier only when the request would carry it", () => {
 		const source = createModelBrowserSource(Settings.isolated({ "tier.openai": "ultrafast" }));
 		const firstParty = makeModel("openai", "gpt-6-astra");
 		const codexUnlisted = makeModel("openai-codex", "gpt-6-astra");
@@ -584,10 +635,10 @@ describe("serviceTierFor", () => {
 		// No configured tier for the family.
 		expect(source.serviceTierFor?.(anthropic)).toBeUndefined();
 
-		// Anthropic realizes priority through fast mode rather than a service_tier
-		// field, so a configured priority tier still labels its measurements.
+		// Anthropic realizes priority through fast mode, not a `service_tier` field,
+		// so no served tier is ever recorded for it and there is no row to label.
 		const anthropicPriority = createModelBrowserSource(Settings.isolated({ "tier.anthropic": "priority" }));
-		expect(anthropicPriority.serviceTierFor?.(anthropic)).toBe("priority");
+		expect(anthropicPriority.serviceTierFor?.(anthropic)).toBeUndefined();
 		expect(anthropicPriority.serviceTierFor?.(firstParty)).toBeUndefined();
 	});
 });

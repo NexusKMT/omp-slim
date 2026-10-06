@@ -9797,6 +9797,11 @@ export class AgentSession implements SettingsScope {
 		return this.#models.isFastModeActive();
 	}
 
+	/** Effective wire service tier for a request to `model` under the live per-family tiers. */
+	effectiveServiceTier(model: Model): ServiceTier | undefined {
+		return this.#models.effectiveServiceTier(model);
+	}
+
 	/** Record the Claude account lane that served this session's latest Anthropic request. */
 	noteAnthropicSlowModeLane(lane: string): void {
 		this.#anthropicSlowModeLane = lane;

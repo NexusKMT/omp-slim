@@ -1,4 +1,4 @@
-import { realizesPriorityServiceTier, resolveModelServiceTier, shouldSendServiceTier } from "@oh-my-pi/pi-ai";
+import { type Model, resolveModelServiceTier, type ServiceTier, shouldSendServiceTier } from "@oh-my-pi/pi-ai";
 import type { ModelHubSource } from "@oh-my-pi/pi-tui/overlays/model-hub";
 import { findActiveModelPreset, getModelPresetNames } from "../config/model-presets";
 import { resolveModelRoleValue, rolePriorityDefaults } from "../config/model-resolver";
@@ -20,8 +20,17 @@ import {
 	cfgTierOpenai,
 } from "../session/settings";
 
-/** Supply live model-overlay preferences and runtime resolution from the host. */
-export function createModelBrowserSource(settings: Settings): ModelHubSource {
+/**
+ * Supply live model-overlay preferences and runtime resolution from the host.
+ * @param settings - Settings backing preferences, roles, and model perf
+ * @param sessionServiceTier - The live session's effective tier for a model
+ *   (`/fast`, `/fast ultra`, `/slow`, resumed tiers). Omit only where no session
+ *   exists; the configured `tier.*` settings stand in then.
+ */
+export function createModelBrowserSource(
+	settings: Settings,
+	sessionServiceTier?: (model: Model) => ServiceTier | undefined,
+): ModelHubSource {
 	return {
 		get revision() {
 			return settings.revision;
@@ -42,21 +51,19 @@ export function createModelBrowserSource(settings: Settings): ModelHubSource {
 			return settings.getStorage()?.getModelPerf() ?? new Map();
 		},
 		serviceTierFor: model => {
-			const tier = resolveModelServiceTier(
-				buildServiceTierByFamily(
-					cfgTierOpenai.get(settings),
-					cfgTierAnthropic.get(settings),
-					cfgTierGoogle.get(settings),
-				),
-				model,
-			);
-			// The browser must show the tier the request would actually carry. Priority
-			// realizes through Anthropic's fast mode or the provider's tier gate; the
-			// other tiers go through the wire gate alone.
-			if (!tier) return undefined;
-			const realized =
-				tier === "priority" ? realizesPriorityServiceTier(tier, model) : shouldSendServiceTier(tier, model);
-			return realized ? tier : undefined;
+			const tier = sessionServiceTier
+				? sessionServiceTier(model)
+				: resolveModelServiceTier(
+						buildServiceTierByFamily(
+							cfgTierOpenai.get(settings),
+							cfgTierAnthropic.get(settings),
+							cfgTierGoogle.get(settings),
+						),
+						model,
+					);
+			// Label only a tier the request carries as `service_tier`: that is what the
+			// provider echoes back as the served tier, which keys the perf row.
+			return shouldSendServiceTier(tier, model) ? tier : undefined;
 		},
 		get disabledProviders() {
 			return cfgDisabledProviders.get(settings);
