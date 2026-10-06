@@ -858,6 +858,9 @@ function redactUrlCredentials(url: string): string {
 
 class RequestInterceptionCleanupError extends ToolError {}
 
+/** `tab.goto` outlasted its budget; the page stays on what loaded. */
+class NavigationTimeoutError extends ToolError {}
+
 interface RunPageScope {
 	page: Page;
 	cleanup(): Promise<void>;
@@ -992,6 +995,7 @@ function createRunPageScope(page: Page, restoreInterception: () => Promise<void>
 
 function errorPayload(error: unknown): RunErrorPayload {
 	const recoverTab = error instanceof RequestInterceptionCleanupError || undefined;
+	const navigationTimeout = error instanceof NavigationTimeoutError || undefined;
 	if (error instanceof ToolAbortError) {
 		return { name: error.name, message: error.message, stack: error.stack, isToolError: false, isAbort: true };
 	}
@@ -1003,6 +1007,7 @@ function errorPayload(error: unknown): RunErrorPayload {
 			isToolError: true,
 			isAbort: false,
 			recoverTab,
+			navigationTimeout,
 		};
 	}
 	if (error instanceof Error) {
@@ -1400,8 +1405,7 @@ export class WorkerCore {
 
 			// Realm setup is done: puppeteer loaded and browser connected. Sent before
 			// page acquisition so the supervisor's cold-start budget bounds only the
-			// realm setup; page creation and the first navigation run under the ready
-			// wait.
+			// realm setup; page creation runs under the ready wait.
 			this.#transport.send({ type: "setup" });
 			if (payload.mode === "headless") {
 				// Create the target directly so its id is reportable before
@@ -1453,14 +1457,6 @@ export class WorkerCore {
 			this.#tracing = new BrowserTracingController(this.#page);
 			this.#network = new BrowserNetworkManager(this.#page, payload.allowedDomains);
 			await this.#network.start();
-			if (payload.url) {
-				await this.#page.goto(payload.url, {
-					// Default to "load" because dev servers with HMR/WS never reach networkidle.
-					waitUntil: payload.waitUntil ?? "load",
-					timeout: payload.timeoutMs,
-				});
-			}
-			this.#targetId = await targetIdForPage(this.#page);
 			this.#transport.send({ type: "ready", info: await this.#currentReadyInfo() });
 		} catch (error) {
 			// A failed headless init leaves the worker's page orphaned in the shared
@@ -1975,7 +1971,7 @@ export class WorkerCore {
 							// Abandon the hung navigation NOW — a still-pending load stalls every
 							// later op on this page and cascades into more opaque timeouts.
 							await this.#stopLoading();
-							throw new ToolError(
+							throw new NavigationTimeoutError(
 								`tab.goto(${JSON.stringify(url)}) timed out after ${budgetBound}ms; pending navigation stopped — retry with a longer tool timeout or waitUntil:"domcontentloaded"`,
 							);
 						}
