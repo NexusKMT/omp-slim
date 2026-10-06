@@ -10,6 +10,8 @@ import { TempDir } from "@oh-my-pi/pi-utils";
 const repoRoot = path.resolve(import.meta.dir, "../../..");
 const cliEntry = path.join(repoRoot, "packages/coding-agent/src/cli.ts");
 const TTY_ERROR = "interactive mode requires a terminal";
+const NO_API_KEY = "No API key found for anthropic.";
+const MODEL_ARGS = ["--provider", "anthropic", "--model", "claude-sonnet-4-5"];
 
 interface LaunchRun {
 	exitCode: number;
@@ -24,8 +26,8 @@ async function launchWithoutTerminal(
 ): Promise<LaunchRun> {
 	const home = tempDir.join("home");
 	fs.mkdirSync(home, { recursive: true });
-	// Isolated home and no credentials: print mode can only end at the headless
-	// "No models available" exit, which the interactive path never reaches.
+	// An isolated home, minimal environment, and explicit authenticated model
+	// keep prompts off ambient cloud credentials and keyless on-device models.
 	const env: Record<string, string | undefined> = {
 		PATH: process.env.PATH,
 		TMPDIR: process.env.TMPDIR,
@@ -40,7 +42,7 @@ async function launchWithoutTerminal(
 		AWS_EC2_METADATA_DISABLED: "true",
 	};
 	const discoveryArgs = extensionDiscovery ? [] : ["--no-extensions"];
-	const proc = Bun.spawn([process.execPath, cliEntry, "--no-session", ...discoveryArgs, ...args], {
+	const proc = Bun.spawn([process.execPath, cliEntry, "--no-session", ...discoveryArgs, ...MODEL_ARGS, ...args], {
 		cwd: tempDir.path(),
 		env,
 		stdin: "ignore",
@@ -57,7 +59,7 @@ async function launchWithoutTerminal(
 
 /**
  * Write an extension registering flag `name` that reports the value it received
- * on exit — usage failures exit before any session event fires.
+ * at session start or exit — usage failures exit before any session event fires.
  */
 async function writeFlagExtension(
 	tempDir: TempDir,
@@ -70,7 +72,14 @@ async function writeFlagExtension(
 		[
 			"export default function (pi) {",
 			`\tpi.registerFlag(${JSON.stringify(name)}, { type: ${JSON.stringify(type)} });`,
-			`\tprocess.once("exit", () => process.stderr.write("EXT_FLAG=" + pi.getFlag(${JSON.stringify(name)}) + "\\n"));`,
+			"\tlet reported = false;",
+			"\tconst report = () => {",
+			"\t\tif (reported) return;",
+			"\t\treported = true;",
+			`\t\tprocess.stderr.write("EXT_FLAG=" + pi.getFlag(${JSON.stringify(name)}) + "\\n");`,
+			"\t};",
+			'\tpi.on("session_start", report);',
+			'\tprocess.once("exit", report);',
 			"}",
 		].join("\n"),
 	);
@@ -93,7 +102,7 @@ describe("launch without a terminal on stdin", () => {
 		const run = await launchWithoutTerminal(tempDir, ["say ok"]);
 
 		expect(run.stderr).not.toContain(TTY_ERROR);
-		expect(run.stderr).toContain("No models available.");
+		expect(run.stderr).toContain(NO_API_KEY);
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
 
@@ -124,7 +133,7 @@ describe("launch without a terminal on stdin", () => {
 
 		expect(run.exitCode, run.stderr).toBe(2);
 		expect(run.stderr).toContain(`Error: ${TTY_ERROR}, but stdin is not a TTY.`);
-		expect(run.stderr).not.toContain("No models available.");
+		expect(run.stderr).not.toContain(NO_API_KEY);
 		expect(run.stderr).toContain("EXT_FLAG=reviewer");
 	}, 30_000);
 
@@ -134,7 +143,7 @@ describe("launch without a terminal on stdin", () => {
 		const run = await launchWithoutTerminal(tempDir, ["-e", extensionPath, "--spawn-peer", "reviewer", "say ok"]);
 
 		expect(run.stderr).not.toContain(TTY_ERROR);
-		expect(run.stderr).toContain("No models available.");
+		expect(run.stderr).toContain(NO_API_KEY);
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
 
@@ -147,7 +156,7 @@ describe("launch without a terminal on stdin", () => {
 
 		expect(run.stderr).not.toContain(TTY_ERROR);
 		expect(run.stderr).not.toContain("Invalid --mode value");
-		expect(run.stderr).toContain("No models available.");
+		expect(run.stderr).toContain(NO_API_KEY);
 		expect(run.stderr).toContain("EXT_FLAG=true");
 		expect(run.exitCode, run.stderr).toBe(1);
 	}, 30_000);
@@ -156,17 +165,7 @@ describe("launch without a terminal on stdin", () => {
 describe("mode-dependent guards defer to flag-value errors", () => {
 	it("starts rpc-ui with headless extensions instead of rejecting --no-ui", async () => {
 		using tempDir = TempDir.createSync("@omp-no-ui-rpc-ui-");
-		// An explicit catalog model starts RPC without credentials, so the result
-		// does not depend on which keyless local models the host provides.
-		const run = await launchWithoutTerminal(tempDir, [
-			"--mode",
-			"rpc-ui",
-			"--no-ui",
-			"--provider",
-			"anthropic",
-			"--model",
-			"claude-sonnet-4-5",
-		]);
+		const run = await launchWithoutTerminal(tempDir, ["--mode", "rpc-ui", "--no-ui"]);
 
 		expect(run.stderr).not.toContain("--no-ui requires --mode rpc");
 		expect(run.exitCode, run.stderr).toBe(0);
