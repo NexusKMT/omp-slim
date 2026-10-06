@@ -423,6 +423,38 @@ async fn streaming_preview_keeps_finished_ops_while_the_next_find_streams() {
 	assert!(!diff.contains("-3|gamma") && !diff.contains("gamma2"), "{diff}");
 }
 
+#[tokio::test]
+async fn streaming_preview_recovers_a_bare_find_in_a_closed_section() {
+	let workspace = Workspace::new(EditMode::Sloppy);
+	workspace.write("a.txt", "alpha one two three\n");
+	workspace.write("b.txt", "beta\n");
+	let mut files = FileCache::new(workspace.config.policy.clone());
+	let engine = SloppyEngine { allow_fuzzy: true, fuzzy_threshold: 0.95 };
+	// The `b.txt` header closes the a.txt section, so its bare Find is final
+	// and recovers exactly as it will on apply; only the last section may
+	// still be streaming.
+	let args = ArgSnapshot {
+		input: Some(
+			"*** Edit File: a.txt\n*** Find\nalpha one two threX\n*** Edit File: b.txt\n*** \
+			 Find\nbeta\n*** Replace\nBETA\n"
+				.to_owned(),
+		),
+		..ArgSnapshot::default()
+	};
+	let streaming = engine.preview(&args, true, &mut files, &workspace.store);
+	let finished = engine.preview(&args, false, &mut files, &workspace.store);
+	let a_txt = |preview: &[pi_edit::PreviewFile]| {
+		preview
+			.iter()
+			.find(|file| file.display == "a.txt")
+			.cloned()
+			.expect("a.txt previews")
+	};
+	let streamed = a_txt(&streaming);
+	assert_eq!(streamed.error, None, "{streamed:?}");
+	assert_eq!(streamed.diff, a_txt(&finished).diff);
+}
+
 #[test]
 fn inspect_exposes_matcher_paths_and_entries() {
 	let engine = SloppyEngine { allow_fuzzy: false, fuzzy_threshold: 0.95 };

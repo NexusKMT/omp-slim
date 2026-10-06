@@ -82,9 +82,12 @@ impl ModeEngine for SloppyEngine {
 			.into_iter()
 			.enumerate()
 			.filter_map(|(index, section)| {
+				// Only the last section can still be streaming; the next
+				// `*** Edit File:` header closes every earlier one.
+				let streaming = streaming && index == last;
 				let read = match files.read(&section.path) {
 					Ok(read) => read,
-					Err(_error) if streaming && index == last => return None,
+					Err(_error) if streaming => return None,
 					Err(error) => {
 						return Some(PreviewFile {
 							display: section.path,
@@ -116,7 +119,7 @@ impl ModeEngine for SloppyEngine {
 							..PreviewFile::default()
 						})
 					},
-					Err(_) if streaming && index == last => None,
+					Err(_) if streaming => None,
 					Err(error) => Some(PreviewFile {
 						display: read.resolved.display.clone(),
 						error: Some(error.to_string()),
