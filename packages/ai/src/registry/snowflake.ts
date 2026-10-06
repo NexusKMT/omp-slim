@@ -5,7 +5,7 @@ import type { ProviderTransport } from "./build";
 // Catalog rows carry this origin until prepareRequest swaps in the account URL. It must
 // parse (models.json invariant), and `.invalid` (RFC 6761) never resolves, so an
 // unrewritten request fails before reaching any host.
-export const SNOWFLAKE_ACCOUNT_ORIGIN_PLACEHOLDER = "https://snowflake-account.invalid";
+const SNOWFLAKE_ACCOUNT_ORIGIN_PLACEHOLDER = "https://snowflake-account.invalid";
 
 const INVALID_ACCOUNT_MESSAGE = "Paste your Snowflake account identifier (orgname-accountname) or account URL";
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -74,42 +74,48 @@ export function normalizeSnowflakeAccountUrl(input: string): string {
 	return `https://${host}`;
 }
 
-export interface SnowflakeCredential {
+interface SnowflakeCredential {
 	token: string;
 	accountUrl?: string;
 }
 
+const INVALID_CREDENTIAL_MESSAGE = "Invalid Snowflake credential; run /login snowflake again";
+
 /** Decode the registry's structured OAuth key; malformed JSON must never become a bearer token. */
-export function parseSnowflakeCredential(value: string): SnowflakeCredential | null {
+function parseSnowflakeCredential(value: string): SnowflakeCredential | null {
 	const trimmed = value.trim();
 	if (!trimmed) return null;
 	if (!trimmed.startsWith("{")) return { token: trimmed };
+	let credential: unknown;
 	try {
-		const credential: unknown = JSON.parse(trimmed);
-		if (
-			!credential ||
-			typeof credential !== "object" ||
-			!("token" in credential) ||
-			typeof credential.token !== "string" ||
-			!credential.token.trim()
-		) {
-			throw new Error("Invalid token");
-		}
-		if (
-			!("enterpriseUrl" in credential) ||
-			typeof credential.enterpriseUrl !== "string" ||
-			!credential.enterpriseUrl.trim()
-		) {
-			// Structured keys are OAuth bearers; without their account they must not get PAT routing.
-			throw new Error("Invalid account");
-		}
-		return {
-			token: credential.token.trim(),
-			accountUrl: normalizeSnowflakeAccountUrl(credential.enterpriseUrl),
-		};
+		credential = JSON.parse(trimmed);
 	} catch {
-		throw new AIError.ConfigurationError("Invalid Snowflake credential; run /login snowflake again");
+		throw new AIError.ConfigurationError(INVALID_CREDENTIAL_MESSAGE);
 	}
+	if (
+		!credential ||
+		typeof credential !== "object" ||
+		!("token" in credential) ||
+		typeof credential.token !== "string" ||
+		!credential.token.trim() ||
+		// Structured keys are OAuth bearers; without their account they must not get PAT routing.
+		!("enterpriseUrl" in credential) ||
+		typeof credential.enterpriseUrl !== "string" ||
+		!credential.enterpriseUrl.trim()
+	) {
+		throw new AIError.ConfigurationError(INVALID_CREDENTIAL_MESSAGE);
+	}
+	let accountUrl: string;
+	try {
+		accountUrl = normalizeSnowflakeAccountUrl(credential.enterpriseUrl);
+	} catch (error) {
+		// Keep the specific account reason (e.g. China-region) visible for stored credentials.
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new AIError.ConfigurationError(
+			`Invalid Snowflake credential account: ${reason}; run /login snowflake again`,
+		);
+	}
+	return { token: credential.token.trim(), accountUrl };
 }
 
 export const snowflakeTransport: ProviderTransport = {

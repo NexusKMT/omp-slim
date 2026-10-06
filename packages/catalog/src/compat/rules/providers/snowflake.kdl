@@ -117,9 +117,10 @@ provider "snowflake" {
 		supports-long-cache-retention #false
 	}
 	// Cortex documents reasoning_effort none/minimal/low/medium/high. Prefixed ids
-	// (openai-gpt-*) carry no `gpt` family, so the lineage ladder must be set here.
+	// (openai-gpt-*) carry no `gpt` family, so the <5.2 lineage ladder is restated
+	// here; 5.2+ rows fall through to the unscoped lineage ladders in classes/openai.kdl.
 	class "openai" {
-		revision ">=5" {
+		revision ">=5 <5.2" {
 			thinking-mode "effort"
 			thinking-efforts "minimal" "low" "medium" "high"
 		}

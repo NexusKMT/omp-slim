@@ -6,7 +6,7 @@ import { OAuthCallbackFlow } from "./callback-server";
 import { generatePKCE } from "./pkce";
 import type { OAuthController, OAuthCredentials } from "./types";
 
-export const SNOWFLAKE_OAUTH_CLIENT_ID = "LOCAL_APPLICATION";
+const SNOWFLAKE_OAUTH_CLIENT_ID = "LOCAL_APPLICATION";
 
 function snowflakeCallbackPort(): number {
 	const port = authPolicyFor("snowflake")?.callbackPort;

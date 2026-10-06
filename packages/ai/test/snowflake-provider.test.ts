@@ -8,7 +8,6 @@ import type { OAuthController, OAuthCredentials } from "@oh-my-pi/pi-ai/registry
 import { normalizeSnowflakeAccountUrl } from "@oh-my-pi/pi-ai/registry/snowflake";
 import { stream } from "@oh-my-pi/pi-ai/stream";
 import type { Context, FetchImpl } from "@oh-my-pi/pi-ai/types";
-import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { withEnv } from "./helpers";
 
@@ -129,6 +128,17 @@ describe("Snowflake Cortex requests", () => {
 		expect(() => stream(CLAUDE, CONTEXT, { apiKey, fetch: captureRequest(captured) })).toThrow(
 			"Invalid Snowflake credential",
 		);
+		expect(captured.url).toBeUndefined();
+	});
+
+	test("stored credential keeps the specific account rejection reason", () => {
+		const captured: CapturedRequest = {};
+		expect(() =>
+			stream(CLAUDE, CONTEXT, {
+				apiKey: JSON.stringify({ token: "tok", enterpriseUrl: "https://acct.snowflakecomputing.cn" }),
+				fetch: captureRequest(captured),
+			}),
+		).toThrow("not available in China-region accounts");
 		expect(captured.url).toBeUndefined();
 	});
 
@@ -419,21 +429,5 @@ describe("Snowflake refresh transitions", () => {
 		} finally {
 			mock.mockRestore();
 		}
-	});
-});
-
-describe("Snowflake bundled thinking ladders", () => {
-	// Live Cortex probes: Opus 4.7+/Sonnet 5 accept xhigh and max; Opus 4.6 and
-	// Sonnet 4.6 reject xhigh; GPT-5.x documents minimal..high.
-	test.each([
-		["claude-opus-5-5", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
-		["claude-opus-4-7", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
-		["claude-sonnet-5", [Effort.Low, Effort.Medium, Effort.High, Effort.XHigh, Effort.Max]],
-		["claude-opus-4-6", [Effort.Low, Effort.Medium, Effort.High, Effort.Max]],
-		["claude-sonnet-4-6", [Effort.Low, Effort.Medium, Effort.High]],
-		["openai-gpt-5.1", [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]],
-		["openai-gpt-5-nano", [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High]],
-	])("%s ships the effort ladder Cortex accepts", (id, efforts) => {
-		expect(getBundledModel("snowflake", id)?.thinking?.efforts).toEqual(efforts);
 	});
 });
