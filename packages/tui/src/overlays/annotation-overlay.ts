@@ -172,6 +172,8 @@ export class AnnotationOverlay implements Focusable {
 	#textSource: TextReviewSource | undefined;
 	#textLines: readonly string[] = [];
 	#viewportDriven = false;
+	/** Last viewport move went toward the end, so a viewport resting at its maximum offset selects the last visible row. */
+	#viewportTowardEnd = false;
 	#renderedRowBySource: readonly number[] = [];
 	#staticRenderedDiffBodies = new WeakMap<ReviewDiffFile, { width: number; body: RenderedDiffBody }>();
 	/** Bumped on every annotation change (each one pushes an undo snapshot) and on undo. */
@@ -427,6 +429,7 @@ export class AnnotationOverlay implements Focusable {
 			} else {
 				this.#scrollView.page(-1);
 				this.#viewportDriven = true;
+				this.#viewportTowardEnd = false;
 				this.#syncCursorToViewport();
 			}
 			return;
@@ -437,6 +440,7 @@ export class AnnotationOverlay implements Focusable {
 			} else {
 				this.#scrollView.page(1);
 				this.#viewportDriven = true;
+				this.#viewportTowardEnd = true;
 				this.#syncCursorToViewport();
 			}
 			return;
@@ -448,6 +452,7 @@ export class AnnotationOverlay implements Focusable {
 			} else {
 				this.#scrollView.scrollToTop();
 				this.#viewportDriven = true;
+				this.#viewportTowardEnd = false;
 			}
 		} else if (data === "G" || matchesKey(data, "end")) {
 			this.#sourceIndex = Math.max(
@@ -459,6 +464,7 @@ export class AnnotationOverlay implements Focusable {
 			} else {
 				this.#scrollView.scrollToBottom();
 				this.#viewportDriven = true;
+				this.#viewportTowardEnd = true;
 			}
 		}
 	}
@@ -539,8 +545,8 @@ export class AnnotationOverlay implements Focusable {
 			lastVisibleSourceIndex = index;
 			if (renderedRow <= viewportTop) topSourceIndex = index;
 		}
-		const atBottom =
-			this.#scrollView.getMaxScrollOffset() > 0 && viewportTop === this.#scrollView.getMaxScrollOffset();
+		// A short pane has no scroll range, so paging toward the end must still reach the last row.
+		const atBottom = this.#viewportTowardEnd && viewportTop >= this.#scrollView.getMaxScrollOffset();
 		this.#sourceIndex = atBottom ? lastVisibleSourceIndex : topSourceIndex;
 	}
 

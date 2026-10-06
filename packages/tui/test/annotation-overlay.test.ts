@@ -378,6 +378,30 @@ describe("AnnotationOverlay", () => {
 		overlay.handleInput(CANCEL);
 		expect(completed).toEqual([undefined]);
 	});
+	it("selects the last and first rows of a diff that fits without scrolling", () => {
+		for (const [toEnd, toStart] of [
+			["G", "g"],
+			[PAGE_DOWN, PAGE_UP],
+		]) {
+			const overlay = makeDiffOverlay(oneLineFiles);
+			render(overlay, 100);
+			overlay.handleInput(TAB);
+			overlay.handleInput(toEnd);
+			render(overlay, 100);
+			overlay.handleInput("a");
+			overlay.handleInput("end");
+			overlay.handleInput(ENTER);
+			overlay.handleInput(toStart);
+			render(overlay, 100);
+			overlay.handleInput("a");
+			overlay.handleInput("start");
+			overlay.handleInput(ENTER);
+			expect(overlay.getAnnotations()).toEqual([
+				expect.objectContaining({ rawLine: "+new", note: "end" }),
+				expect.objectContaining({ rawLine: "-old", note: "start" }),
+			]);
+		}
+	});
 	describe("diff row wrapping", () => {
 		it("keeps forty indentation cells and a long identifier on the numbered row at 60 and 80 columns", () => {
 			const content = " ".repeat(40) + "LONG_IDENTIFIER_".repeat(8);
