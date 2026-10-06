@@ -23,13 +23,18 @@ bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_rust", version = "0.71.3")
 bazel_dep(name = "hermetic_cc_toolchain", version = "4.2.0")
 
-# zig 0.14's cache corrupts under concurrent `zig cc` (ziglang/zig#18763);
-# the patch gives compile-only steps private throwaway caches while links
-# keep the shared cache. See the patch header for measurements.
+# zig-wrapper patches (rationale in each patch header):
+# - zig 0.14's cache corrupts under concurrent `zig cc` (ziglang/zig#18763);
+#   compile-only steps get private throwaway caches, links keep the shared one.
+# - rustc's -Wl,--fix-cortex-a53-843419 on aarch64 linux links is dropped;
+#   zig cc rejects it as an unsupported linker arg.
 single_version_override(
     module_name = "hermetic_cc_toolchain",
     patch_strip = 1,
-    patches = ["//bazel/patches:hermetic_cc_toolchain-isolated-compile-cache.patch"],
+    patches = [
+        "//bazel/patches:hermetic_cc_toolchain-isolated-compile-cache.patch",
+        "//bazel/patches:hermetic_cc_toolchain-drop-cortex-a53-link-arg.patch",
+    ],
 )
 
 # --- Rust toolchains ----------------------------------------------------------
