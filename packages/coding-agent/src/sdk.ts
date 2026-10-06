@@ -3176,7 +3176,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				modelFallbackMessage =
 					patterns && patterns.length > 0
 						? `No model available matching enabledModels (${patterns.join(", ")}) with usable credentials. Configure auth for an allowed provider or adjust enabledModels.`
-						: "No models available. Use /login or set an API key environment variable. Then use /model to select a model.";
+						: "No default model selected. Use /login, set an API key environment variable, or use /model to choose a local model.";
 			}
 		}
 

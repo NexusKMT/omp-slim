@@ -20,6 +20,7 @@
 ### Fixed
 
 - Fixed model-preset tests failing when provider credentials are configured in the environment.
+- Fixed unauthenticated Macs auto-selecting the on-device Apple model when the default prompt exceeds its context window; Apple remains selectable explicitly.
 - Fixed replay and compaction tests failing after bundled model roster changes.
 - Fixed standalone builds failing when the native addon archive could not be resolved.
 - Fixed JSON query parsing and parameter decoding for filters beginning with hyphens and other encoded query values.
