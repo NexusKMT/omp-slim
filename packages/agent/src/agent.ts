@@ -386,6 +386,13 @@ interface CursorToolResultEntry {
 
 type QueuedMessageQueue = "steering" | "followUp";
 
+interface LiveSteeredEntry {
+	message: AgentMessage;
+	controller: AbortController | undefined;
+	/** Context preparation committed for the batch, carried by its last adopted entry. Never requeued. */
+	additional?: readonly AgentMessage[];
+}
+
 interface QueuedMessageClaim {
 	messages: AgentMessage[];
 	controller: AbortController;
@@ -422,7 +429,7 @@ export class Agent {
 	 * replacement must not drop it too; the run's end requeues whatever it did not record, and
 	 * {@link withdrawUndeliveredQueuedMessages} takes it back ahead of an abort.
 	 */
-	#liveSteered: { message: AgentMessage; controller: AbortController | undefined }[] = [];
+	#liveSteered: LiveSteeredEntry[] = [];
 	/** Dequeued originals remain recoverable until their transcript events arrive. `additional` is
 	 *  the context preparation appended after them, which the transcript records with them. */
 	#queuedMessageDeliveries = new Set<{
@@ -1058,10 +1065,15 @@ export class Agent {
 			const pending = delivery.messages.slice(delivery.next);
 			const kept = pending.filter(message => !taken.includes(message));
 			if (kept.length === pending.length) continue;
+			let last: LiveSteeredEntry | undefined;
 			for (const message of pending) {
-				if (taken.includes(message)) this.#liveSteered.push({ message, controller: delivery.controller });
+				if (!taken.includes(message)) continue;
+				last = { message, controller: delivery.controller };
+				this.#liveSteered.push(last);
 			}
 			if (kept.length === 0) {
+				// The delivery record goes away; keep its context withdrawable with the adopted batch.
+				if (last && delivery.additional.length > 0) last.additional = delivery.additional;
 				this.#queuedMessageDeliveries.delete(delivery);
 			} else {
 				delivery.messages = kept;
@@ -1081,9 +1093,10 @@ export class Agent {
 		const suppress = (message: AgentMessage, controller: AbortController | undefined) => {
 			if (controller) this.#withdrawnMessages.set(message, controller);
 		};
-		for (const { message, controller } of this.#liveSteered) {
+		for (const { message, controller, additional } of this.#liveSteered) {
 			withdrawn.steering.push(message);
 			suppress(message, controller);
+			for (const context of additional ?? []) suppress(context, controller);
 		}
 		this.#liveSteered = [];
 		for (const delivery of this.#queuedMessageDeliveries) {
