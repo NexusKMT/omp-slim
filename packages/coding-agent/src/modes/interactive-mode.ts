@@ -21,6 +21,7 @@ import type {
 	AutocompleteProvider,
 	Component,
 	EditorTheme,
+	KeyId,
 	LoaderMessageColorFn,
 	OverlayHandle,
 	SlashCommand,
@@ -1330,7 +1331,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		return rate === null ? undefined : Math.round(rate * 10) / 10;
 	}
 	/** The key that interrupts (the working row's stop control), or undefined when Esc would not cancel. */
-	maintenanceInterruptKey(): string | undefined {
+	maintenanceInterruptKey(): KeyId | undefined {
 		if (this.focusedAgentId) return undefined;
 		return this.keybindings.getKeys("app.interrupt")[0] ?? "escape";
 	}
