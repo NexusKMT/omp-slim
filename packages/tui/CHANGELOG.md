@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.7.0] - 2026-10-06
+
 ### Added
 
 - Assistant SVG code blocks now render as inline, theme-colored images on terminals with graphics support, updating as responses stream and adapting to terminal width; SVG that cannot be rendered remains available as code.

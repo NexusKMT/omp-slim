@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.7.0] - 2026-10-06
+
 ### Added
 
 - Added Mistral Large 4 with reasoning support, image input, a 1M-token context window, and preview pricing.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.7.0] - 2026-10-06
+
 ### Fixed
 
 - Fixed Ultrafast turns not being counted toward the Premium Requests statistic.

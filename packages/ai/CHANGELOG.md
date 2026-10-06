@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.7.0] - 2026-10-06
+
 ### Added
 
 - Added `getOAuthCredentialProvider()` to resolve login aliases, such as `openai-codex-device`, to the provider where their credentials are stored.

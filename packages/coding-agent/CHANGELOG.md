@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.7.0] - 2026-10-06
+
 ### Added
 
 - Added last-chance consumption of eligible banked Codex and Claude resets expiring within five minutes when auto-redeem is enabled, even with low usage or reserved credits.
