@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { hasFsCode, untilAborted } from "@oh-my-pi/pi-utils";
 import type { Browser, CDPSession, Page } from "puppeteer-core";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import { replaceFileAtomically } from "../../utils/atomic-file";
+import { moveFileAcrossDevices, replaceFileAtomically } from "../../utils/atomic-file";
 import { devtoolsFrameId } from "./frames";
 
 /** Completed download metadata returned by tab download helpers. */
@@ -163,12 +163,17 @@ export class DownloadManager {
 				await Bun.sleep(10);
 			}
 		}
-		const target = path.join(directory, pending.suggestedFilename);
-		// A file that cannot be moved is reported where Chromium saved it.
-		const downloadPath = await moveDownload(source, target).then(
-			() => target,
-			() => source,
-		);
+		const name = path.basename(pending.suggestedFilename);
+		const target = path.join(directory, name);
+		// Only a file Chromium saved under this download's GUID is moved, and only under the last segment of its
+		// suggested name; anything else, or a file that cannot be moved, is reported where Chromium saved it.
+		const movable = path.basename(source) === pending.guid && name !== "" && name !== "." && name !== "..";
+		const downloadPath = movable
+			? await moveDownload(source, target).then(
+					() => target,
+					() => source,
+				)
+			: source;
 		const download: BrowserDownload = {
 			path: downloadPath,
 			suggestedFilename: pending.suggestedFilename,
@@ -205,13 +210,8 @@ async function moveDownload(source: string, target: string): Promise<void> {
 		await replaceFileAtomically(source, target);
 	} catch (error) {
 		if (!hasFsCode(error, "EXDEV")) throw error;
-		const staged = `${target}.${crypto.randomUUID()}.part`;
-		try {
-			await fs.copyFile(source, staged);
-			await replaceFileAtomically(staged, target);
-		} finally {
-			await fs.rm(staged, { force: true });
-		}
-		await fs.rm(source);
+		// The cross-device move never replaces, so clear a same-named file first as the rename would.
+		await fs.rm(target, { force: true });
+		await moveFileAcrossDevices(source, target);
 	}
 }

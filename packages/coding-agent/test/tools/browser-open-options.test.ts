@@ -6,11 +6,12 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { disposeAllVmContexts } from "@oh-my-pi/pi-coding-agent/eval/js/context-manager";
 import { createBrowserPrelude } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import { applyIgnoreHttpsErrors, resolveInitScriptSources } from "@oh-my-pi/pi-coding-agent/tools/browser/open-options";
+import { DownloadManager } from "@oh-my-pi/pi-coding-agent/tools/browser/downloads";
 import { buildHeadlessLaunchArgs } from "@oh-my-pi/pi-coding-agent/tools/browser/launch";
 import { getTab, releaseAllTabs } from "@oh-my-pi/pi-coding-agent/tools/browser/tab-supervisor";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/tools/index";
 import { ToolAbortError } from "@oh-my-pi/pi-coding-agent/tools/tool-errors";
-import type { Page } from "puppeteer-core";
+import type { Browser, Page } from "puppeteer-core";
 import { rejectionOf } from "../helpers/rejection";
 import { chromiumAvailable } from "./chromium-probe";
 
@@ -91,6 +92,41 @@ describe("browser open options CDP helpers", () => {
 			"globalThis.fromFile = true;",
 			"globalThis.inline = true;",
 		]);
+	});
+
+	it("moves only a file saved under its download GUID, under the last segment of the suggested name", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
+		const elsewhere = await fs.mkdtemp(path.join(os.tmpdir(), "omp-browser-download-test-"));
+		tempDirs.push(directory, elsewhere);
+		const listeners = new Map<string, (event: unknown) => void>();
+		const session = {
+			on: (event: string, listener: (event: unknown) => void) => listeners.set(event, listener),
+			off: () => undefined,
+			send: async () => undefined,
+			detach: async () => undefined,
+		};
+		const browser = { target: () => ({ createCDPSession: async () => session }) } as unknown as Browser;
+		const page = { frames: () => [{ _id: "frame" }], browserContext: () => ({}) } as unknown as Page;
+		const downloads = new DownloadManager(browser, page, "tab");
+		await downloads.enable(directory);
+		const complete = async (guid: string, filePath: string) => {
+			const waiting = downloads.wait();
+			const started = { guid, url: "https://example.com/", suggestedFilename: "../../report.txt", frameId: "frame" };
+			listeners.get("Browser.downloadWillBegin")!(started);
+			listeners.get("Browser.downloadProgress")!({ guid, state: "completed", receivedBytes: 5, filePath });
+			return (await waiting).path;
+		};
+
+		const unrelated = path.join(elsewhere, "notes.txt");
+		await Bun.write(unrelated, "notes");
+		expect(await complete("first-guid", unrelated)).toBe(unrelated);
+		expect(await Bun.file(unrelated).text()).toBe("notes");
+
+		const saved = path.join(elsewhere, "second-guid");
+		await Bun.write(saved, "bytes");
+		expect(await complete("second-guid", saved)).toBe(path.join(directory, "report.txt"));
+		expect(await Bun.file(path.join(directory, "report.txt")).text()).toBe("bytes");
+		expect(await Bun.file(saved).exists()).toBe(false);
 	});
 });
 
