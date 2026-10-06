@@ -63,7 +63,7 @@ describe("eval argument validation", () => {
 			timeout: 120,
 		});
 		expect(result.isError).toBe(true);
-		expect(result.text).toContain("eval received invalid arguments");
+		expect(result.text).toContain('Validation failed for tool "eval"');
 		expect(result.text).toContain("language");
 		expect(result.text).toContain('"py"');
 		expect(result.text).toContain('"js"');
@@ -72,7 +72,7 @@ describe("eval argument validation", () => {
 	it("reports missing code in a Cursor cells-shaped call as an input error", async () => {
 		const result = await cursorEval({ cells: [{ language: "py", code: "print(1)" }], timeout: 120 });
 		expect(result.isError).toBe(true);
-		expect(result.text).toContain("eval received invalid arguments");
+		expect(result.text).toContain('Validation failed for tool "eval"');
 		expect(result.text).toContain("code");
 	});
 
