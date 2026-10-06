@@ -20,6 +20,7 @@ import { resolveWorkerSpawnCmd } from "../../../subprocess/worker-client";
 import { throwIfAborted } from "../../tool-errors";
 import { probeCdpResponse, probeCdpStatus } from "../attach";
 import { DEFAULT_RELAY_URL } from "./kind";
+import { relayVersionOf } from "./probe";
 
 const DEFAULT_RELAY_PORT = new URL(DEFAULT_RELAY_URL).port;
 
@@ -138,7 +139,9 @@ export async function restartRelayDaemon(opts: { cdpUrl: string; signal?: AbortS
 	const client = await daemonClientForGlobal(RELAY_BROKER_SCOPE);
 	const existing = await describeQuietly(client, name, "Browser relay", opts.signal);
 	if (!existing || existing.state === "exited" || existing.state === "failed") return false;
-	// Another omp of this version may have replaced it since the caller's probe.
+	// Another omp of this version may have replaced it since the caller's probe,
+	// possibly with a relay that has not printed its ready line yet.
+	if (existing.readyAt === undefined) await waitReady(client, name, "Browser relay", opts.signal);
 	if (await servesVersion(opts.cdpUrl, opts.signal)) return true;
 	const stopped = await stopQuietly(client, name, "Browser relay", opts.signal);
 	if (stopped?.state !== "exited" && stopped?.state !== "failed") return false;
@@ -152,12 +155,7 @@ async function servesVersion(cdpUrl: string, signal: AbortSignal | undefined): P
 	if (!response) return false;
 	try {
 		const parsed: unknown = JSON.parse(response.body);
-		return (
-			typeof parsed === "object" &&
-			parsed !== null &&
-			"ompRelayVersion" in parsed &&
-			parsed.ompRelayVersion === VERSION
-		);
+		return typeof parsed === "object" && parsed !== null && relayVersionOf(parsed) === VERSION;
 	} catch {
 		return false;
 	}

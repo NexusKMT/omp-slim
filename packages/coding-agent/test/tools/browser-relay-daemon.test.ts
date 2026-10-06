@@ -284,18 +284,20 @@ try {
 		}
 	}, 60_000);
 
-	it("replaces a broker-owned relay from another omp version, then leaves it and a manually started one alone", async () => {
+	it("replaces a broker-owned relay from another omp version, but not a starting replacement or a manually started one", async () => {
 		const home = await fs.mkdtemp(path.join(os.tmpdir(), "omp-relay-restart-"));
 		const globalRuntimeDir = path.join(home, ".omp", "run", "daemons", "global", "browser-relay");
 		const ownedPort = await findFreeCdpPort();
 		let manualPort = await findFreeCdpPort();
 		while (manualPort === ownedPort) manualPort = await findFreeCdpPort();
-		// Stands in for a relay from an older omp: serves /json/version without the version or capability markers.
-		const staleRelayPath = path.join(home, "stale-relay.ts");
+		// Stands in for a relay: serves /json/version after an optional delay, reporting the given version or,
+		// like a relay from an older omp, no version or capability markers.
+		const staleRelayPath = path.join(home, "stand-in-relay.ts");
 		await Bun.write(
 			staleRelayPath,
-			`const port = Number(process.argv[2]);
-Bun.serve({ hostname: "127.0.0.1", port, fetch: () => Response.json({ Browser: "Chrome/1" }) });
+			`const [port, delayMs, version] = process.argv.slice(2);
+await Bun.sleep(Number(delayMs ?? 0));
+Bun.serve({ hostname: "127.0.0.1", port: Number(port), fetch: () => Response.json({ Browser: "Chrome/1", ompRelayVersion: version }) });
 console.log(\`omp browser relay listening on http://127.0.0.1:\${port}\`);
 `,
 		);
@@ -306,40 +308,50 @@ console.log(\`omp browser relay listening on http://127.0.0.1:\${port}\`);
 				`import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { closeDaemonClients, daemonClientForGlobal } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/launch/client.ts"))};
 import { restartRelayDaemon } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/tools/browser/relay/daemon.ts"))};
-const [ownedPort, manualPort, staleRelay] = [Bun.env.OMP_TEST_OWNED_PORT!, Bun.env.OMP_TEST_MANUAL_PORT!, Bun.env.OMP_TEST_STALE_RELAY!];
+const [ownedPort, manualPort, standIn] = [Bun.env.OMP_TEST_OWNED_PORT!, Bun.env.OMP_TEST_MANUAL_PORT!, Bun.env.OMP_TEST_STALE_RELAY!];
+const name = \`omp.browser.relay.\${ownedPort}\`;
+const ownedUrl = \`http://127.0.0.1:\${ownedPort}\`;
 const versionAt = async (port: string) =>
 	((await (await fetch(\`http://127.0.0.1:\${port}/json/version\`)).json()) as { ompRelayVersion?: string }).ompRelayVersion ?? null;
-const manual = Bun.spawn([process.execPath, staleRelay, manualPort], { stdout: "pipe" });
+const manual = Bun.spawn([process.execPath, standIn, manualPort], { stdout: "pipe" });
 try {
 	const client = await daemonClientForGlobal("browser-relay");
-	await client.request({
-		op: "start",
-		spec: {
-			name: \`omp.browser.relay.\${ownedPort}\`,
-			application: process.execPath,
-			args: [staleRelay, ownedPort],
-			env: {},
-			cwd: process.cwd(),
-			pty: false,
-			ready: { log: "browser relay listening", timeoutMs: 15_000 },
-			restart: "no",
-			persist: false,
-			detached: false,
-		},
-	});
+	const start = (args: string[]) =>
+		client.request({
+			op: "start",
+			spec: {
+				name,
+				application: process.execPath,
+				args: [standIn, ...args],
+				env: {},
+				cwd: process.cwd(),
+				pty: false,
+				ready: { log: "browser relay listening", timeoutMs: 15_000 },
+				restart: "no",
+				persist: false,
+				detached: false,
+			},
+		});
+	const describe = async () => (await client.request({ op: "describe", name })).daemon;
+	await start([ownedPort]);
 	await manual.stdout.getReader().read();
-	const ownedUrl = \`http://127.0.0.1:\${ownedPort}\`;
-	const pid = async () => (await client.request({ op: "describe", name: \`omp.browser.relay.\${ownedPort}\` })).daemon?.pid;
 	const owned = await restartRelayDaemon({ cdpUrl: ownedUrl });
-	const replacement = await pid();
-	const ownedAgain = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	const ownedVersionIsCurrent = (await versionAt(ownedPort)) === VERSION;
+	// Another omp of this version is still starting its replacement when this one decides to restart.
+	await client.request({ op: "stop", name, timeoutMs: 5_000 });
+	const starting = start([ownedPort, "1000", VERSION]);
+	let snapshot = await describe();
+	while (snapshot?.state === "exited") snapshot = await describe();
+	const startingPid = snapshot?.pid;
+	const startingRestarted = await restartRelayDaemon({ cdpUrl: ownedUrl });
+	await starting;
 	const manualRestarted = await restartRelayDaemon({ cdpUrl: \`http://127.0.0.1:\${manualPort}\` });
 	process.stdout.write(
 		JSON.stringify({
 			owned,
-			ownedVersionIsCurrent: (await versionAt(ownedPort)) === VERSION,
-			ownedAgain,
-			replacementKept: replacement !== undefined && (await pid()) === replacement,
+			ownedVersionIsCurrent,
+			startingRestarted,
+			startingKept: startingPid !== undefined && (await describe())?.pid === startingPid,
 			manualRestarted,
 			manualVersion: await versionAt(manualPort),
 		}),
@@ -375,8 +387,8 @@ try {
 			expect(JSON.parse(stdout)).toEqual({
 				owned: true,
 				ownedVersionIsCurrent: true,
-				ownedAgain: true,
-				replacementKept: true,
+				startingRestarted: true,
+				startingKept: true,
 				manualRestarted: false,
 				manualVersion: null,
 			});
