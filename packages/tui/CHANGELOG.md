@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Ask dialog footer showing the question-switch keys without a label; they now read `⇥/←/→ question` ([#14269](https://github.com/can1357/oh-my-pi/issues/14269))
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes
