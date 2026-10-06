@@ -3,6 +3,7 @@ import type { ResetCreditAccountStatus, UsageReport, UsageResetCredit } from "@o
 import {
 	planClaudeResetRedemptions,
 	type ClaudeResetPlanInput,
+	type ClaudeResetSkipReason,
 } from "@oh-my-pi/pi-coding-agent/session/claude-auto-reset";
 
 const NOW = 1_700_000_040_000;
@@ -424,7 +425,7 @@ describe("planClaudeResetRedemptions: expiry salvage", () => {
 	it("never overrides live grant safety or provider constraints for imminent expiry", () => {
 		const urgent = status({ credit: { expiresAt: new Date(NOW + 60_000).toISOString() } });
 		const credit = urgent.credits[0]!;
-		const cases: { live: ResetCreditAccountStatus; reason: string }[] = [
+		const cases: { live: ResetCreditAccountStatus; reason: ClaudeResetSkipReason }[] = [
 			{ live: { ...urgent, eligible: false }, reason: "ineligible" },
 			{ live: { ...urgent, error: "listing failed" }, reason: "credits-unknown" },
 			{ live: { ...urgent, credentialId: Number.NaN }, reason: "no-identity" },
