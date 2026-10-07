@@ -1,5 +1,5 @@
 import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
-import { $env, $envExact } from "@oh-my-pi/pi-utils";
+import { $env, $envExact, logger } from "@oh-my-pi/pi-utils";
 import { type ApiKeyResolver, markAfterSiblingWait, type ResolvedApiKey } from "../auth-retry";
 import { getEnvApiKey, getEnvApiKeyName } from "../env-api-key";
 import * as AIError from "../error";
@@ -308,7 +308,13 @@ export class KeyCascade implements KeysApi {
 		return undefined;
 	}
 
-	/** Resolve a bearer together with the stored row that supplied it. */
+	/**
+	 * Resolve a bearer together with the stored row that supplied it, for a request.
+	 * Same precedence as {@link KeyCascade.get}, but rejects with
+	 * {@link AIError.OAuthRefreshUnavailableError} (transient, retryable) when OAuth
+	 * refresh failed with a retryable error and no other permitted source could serve
+	 * the request, so request paths retry instead of reporting a missing key.
+	 */
 	async getWithCredential(
 		provider: string,
 		sessionId?: string,
@@ -316,7 +322,7 @@ export class KeyCascade implements KeysApi {
 	): Promise<ResolvedApiKey | undefined> {
 		let credentialId: number | undefined;
 		let oauthIdentity: OAuthRequestIdentity | undefined;
-		const apiKey = await this.get(provider, sessionId, options, (id, identity) => {
+		const apiKey = await this.#resolve(provider, sessionId, options, (id, identity) => {
 			credentialId = id;
 			oauthIdentity = identity;
 		});
@@ -331,8 +337,21 @@ export class KeyCascade implements KeysApi {
 	 * OAuth accounts and throws {@link AIError.MissingApiKeyError} when none
 	 * can serve or a config key (a models.yml `apiKey`, often for a proxy
 	 * `baseUrl`) owns the provider, rather than using any other credential.
+	 * A transient OAuth refresh failure resolves `undefined`, so availability
+	 * probes move on to their next candidate; request paths use
+	 * {@link KeyCascade.getWithCredential}, which surfaces it.
 	 */
-	async get(
+	async get(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<string | undefined> {
+		try {
+			return await this.#resolve(provider, sessionId, options);
+		} catch (error) {
+			if (!(error instanceof AIError.OAuthRefreshUnavailableError)) throw error;
+			logger.debug("API key probe skipped transient OAuth refresh failure", { provider, error: error.message });
+			return undefined;
+		}
+	}
+
+	async #resolve(
 		provider: string,
 		sessionId?: string,
 		options?: AuthApiKeyOptions,
@@ -366,11 +385,12 @@ export class KeyCascade implements KeysApi {
 		// A transient OAuth refresh failure still lets later sources serve the request; it is
 		// rethrown only when none can, so callers retry instead of reporting a missing key.
 		let oauthResolved: OAuthResolutionResult | undefined;
-		let oauthFailure: { error: unknown } | undefined;
+		let oauthRefreshFailure: AIError.OAuthRefreshUnavailableError | undefined;
 		try {
 			oauthResolved = await this.#deps.selector.resolveOAuth(provider, sessionId, options);
 		} catch (error) {
-			oauthFailure = { error };
+			if (!(error instanceof AIError.OAuthRefreshUnavailableError)) throw error;
+			oauthRefreshFailure = error;
 		}
 		if (oauthResolved) {
 			if (onCredentialId && oauthResolved.credentialId !== undefined) {
@@ -380,6 +400,7 @@ export class KeyCascade implements KeysApi {
 			return oauthResolved.apiKey;
 		}
 		if (restricted) {
+			if (oauthRefreshFailure) throw oauthRefreshFailure;
 			throw new AIError.MissingApiKeyError(
 				provider,
 				`No API key for provider: ${provider} (session ${sessionId} is restricted to its OAuth account pool and none of those accounts is available)`,
@@ -428,7 +449,7 @@ export class KeyCascade implements KeysApi {
 			if (apiKey !== undefined && credentialId !== undefined) onCredentialId?.(credentialId);
 			return apiKey;
 		}
-		if (oauthFailure) throw oauthFailure.error;
+		if (oauthRefreshFailure) throw oauthRefreshFailure;
 		return undefined;
 	}
 

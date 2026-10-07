@@ -130,8 +130,8 @@ export class OAuthAccounts implements OAuthApi {
 	 * Returns `undefined` when no usable OAuth credential is available
 	 * (none stored, or every one definitively failed to refresh) or
 	 * runtime/config overrides have replaced OAuth with an explicit API key.
-	 * Rejects with the refresh error when a transient failure left no usable
-	 * credential.
+	 * Rejects with {@link AIError.OAuthRefreshUnavailableError} (transient,
+	 * retryable) when a retryable refresh failure left no usable credential.
 	 */
 	async access(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<OAuthAccess | undefined> {
 		// Runtime / config overrides intentionally short-circuit OAuth: when the

@@ -903,7 +903,9 @@ export class CredentialSelector {
 			}
 		}
 
-		if (transientRefreshFailure !== undefined) throw transientRefreshFailure;
+		if (transientRefreshFailure !== undefined) {
+			throw new AIError.OAuthRefreshUnavailableError(provider, transientRefreshFailure);
+		}
 		return undefined;
 	}
 
