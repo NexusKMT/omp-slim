@@ -39,6 +39,8 @@
 - Reduced per-turn advisor work: advisor deltas are rendered only when a single-block fallback or requeue needs them ([#14717](https://github.com/can1357/oh-my-pi/pull/14717) by [@H4vC](https://github.com/H4vC))
 - Reduced memory use of local memory extraction and `run_experiment` on large inputs ([#14718](https://github.com/can1357/oh-my-pi/pull/14718) by [@H4vC](https://github.com/H4vC))
 - Sped up Mnemopi session start ([#14718](https://github.com/can1357/oh-my-pi/pull/14718) by [@H4vC](https://github.com/H4vC))
+- Reduced CPU during live voice calls and dictation by avoiding per-frame audio buffer copies ([#14719](https://github.com/can1357/oh-my-pi/pull/14719) by [@H4vC](https://github.com/H4vC))
+- Reduced RPC `message_update` encoding CPU for streaming messages with many small content blocks, and stopped re-sending unchanged live audio level updates ([#14716](https://github.com/can1357/oh-my-pi/pull/14716) by [@H4vC](https://github.com/H4vC))
 - Fixed multi-second freezes after large pastes with unclosed tags in title/auto-thinking preprocessing ([#14720](https://github.com/can1357/oh-my-pi/pull/14720) by [@H4vC](https://github.com/H4vC))
 - Sped up image resizing up to ~2.6× by decoding the source once ([#14720](https://github.com/can1357/oh-my-pi/pull/14720) by [@H4vC](https://github.com/H4vC))
 - Stopped text prediction from touching the filesystem on every keystroke while SmolLM weights download ([#14720](https://github.com/can1357/oh-my-pi/pull/14720) by [@H4vC](https://github.com/H4vC))
