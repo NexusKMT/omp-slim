@@ -182,4 +182,24 @@ describe("Cursor session refresh", () => {
 			store.close();
 		}
 	});
+
+	test("a renewal that returns no token keeps the stored session active", async () => {
+		const stale = cursorAccessToken("stale");
+		const store = await storeExpiredSession(stale);
+		const auth = new AuthStorage(store);
+		try {
+			await auth.credentials.reload();
+			vi.spyOn(globalThis, "fetch").mockImplementation((async () =>
+				Response.json({ access_token: "", id_token: "", shouldLogout: false })) as typeof fetch);
+
+			expect(await auth.keys.get("cursor", "session")).toBeUndefined();
+			expect(store.listAuthCredentials("cursor").map(row => row.credential)).toMatchObject([
+				{ type: "oauth", access: stale, refresh: stale },
+			]);
+			expect(await store.listDisabledCredentials("cursor")).toEqual([]);
+		} finally {
+			auth.close();
+			store.close();
+		}
+	});
 });
