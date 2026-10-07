@@ -28,6 +28,7 @@
 - Fetching URLs on hosts that are not Mastodon, Lemmy or Discourse no longer re-probes those platforms on every request; a host found not to run one is skipped for 10 minutes ([#14707](https://github.com/can1357/oh-my-pi/pull/14707) by [@H4vC](https://github.com/H4vC))
 - Sped up fetching Hacker News, GitHub, NuGet, docs.rs, Mastodon/Lemmy/Discourse and binary (PDF/document) URLs ([#14708](https://github.com/can1357/oh-my-pi/pull/14708) by [@H4vC](https://github.com/H4vC))
 - Sped up Perplexity OAuth search streaming ([#14708](https://github.com/can1357/oh-my-pi/pull/14708) by [@H4vC](https://github.com/H4vC))
+- Sped up DOCX, PPTX, XLSX and EPUB conversion and cut its memory use on media-heavy documents ([#14709](https://github.com/can1357/oh-my-pi/pull/14709) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
