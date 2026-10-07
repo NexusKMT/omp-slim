@@ -267,7 +267,7 @@ Runtime x64 candidate order also includes the unsuffixed default filename after 
 
 ## Runtime flags
 
-- `PI_NATIVES_DIR`: overrides the native addon extraction/staging root before XDG/default paths; the loader appends the package version. Values are trimmed, `~`-expanded, and normalized; empty or relative values are ignored. Other application data stays at its usual location.
+- `PI_NATIVES_DIR`: overrides the native addon extraction/staging root before XDG/default paths; the loader appends the package version. Values are trimmed, `~`-expanded, and normalized; empty or relative values are ignored. Other application data stays at its usual location. The directory must be writable only by the user(s) running `omp`: reuse checks only the file size, and the version sentinel is read after the addon is loaded, so a same-sized file planted by another user would be loaded.
 - `PI_NATIVE_VARIANT`: x64 runtime override; valid values are `modern` and `baseline`. Invalid values are ignored; the inherited variant cache is consulted before detection.
 - `PI_DEBUG_STARTUP`: writes synchronous `[startup] native:…` markers to stderr around loader entry, embedded extraction, candidate loads, and native Tokio runtime installation; use it to localize startup hangs.
 - `PI_COMPILED`: compiled-mode signal. Release compilation constant-folds `process.env.PI_COMPILED` to `"true"`; a populated embedded-addon manifest and Bun embedded URL markers also signal compiled mode.
