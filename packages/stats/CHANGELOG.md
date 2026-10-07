@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard pages refetch only when stats data actually changed, including commits from other omp processes ([#14723](https://github.com/can1357/oh-my-pi/pull/14723) by [@H4vC](https://github.com/H4vC))
+- Sped up session syncs, stats database opening, package import and the `/usage`, models and timeseries endpoints ([#14723](https://github.com/can1357/oh-my-pi/pull/14723) by [@H4vC](https://github.com/H4vC))
+
 ## [18.7.0] - 2026-10-06
 
 ### Fixed
