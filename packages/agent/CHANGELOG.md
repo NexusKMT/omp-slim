@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Sped up tool-output pruning and telemetry message capture on long sessions ([#14678](https://github.com/can1357/oh-my-pi/pull/14678) by [@H4vC](https://github.com/H4vC))
+- Improved performance when pruning tool output and capturing telemetry messages during long-running sessions.
 
 ## [18.7.0] - 2026-10-06
 
