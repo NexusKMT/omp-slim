@@ -45,6 +45,10 @@
 
 - Fixed Codex Fast (`priority`) and Ultrafast usage being recorded, billed, and reported as Standard when the backend echoed a default service tier; the requested tier is now preserved in usage and performance records.
 
+### Fixed
+
+- Fixed a hosted Cursor `web_fetch` tool call being stripped from every rebuilt transcript when the connection closed mid-fetch; `flushOpenToolCalls` now pairs an interrupted result for it like it already did for `connect-scm`, `todo`, and `cursor-edit` blocks
+
 ## [18.8.0] - 2026-10-07
 
 ### Breaking Changes
