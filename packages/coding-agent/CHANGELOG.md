@@ -26,6 +26,8 @@
 - Reduced eval live-output overhead (~7× less on 100k-line cells) and sped up terminal graphics extraction (~5×) ([#14704](https://github.com/can1357/oh-my-pi/pull/14704) by [@H4vC](https://github.com/H4vC))
 - A backpressured `omp stream` viewer that catches up now gets the current screen redacted with the latest secret patterns ([#14705](https://github.com/can1357/oh-my-pi/pull/14705) by [@H4vC](https://github.com/H4vC))
 - Fetching URLs on hosts that are not Mastodon, Lemmy or Discourse no longer re-probes those platforms on every request; a host found not to run one is skipped for 10 minutes ([#14707](https://github.com/can1357/oh-my-pi/pull/14707) by [@H4vC](https://github.com/H4vC))
+- Sped up fetching Hacker News, GitHub, NuGet, docs.rs, Mastodon/Lemmy/Discourse and binary (PDF/document) URLs ([#14708](https://github.com/can1357/oh-my-pi/pull/14708) by [@H4vC](https://github.com/H4vC))
+- Sped up Perplexity OAuth search streaming ([#14708](https://github.com/can1357/oh-my-pi/pull/14708) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
@@ -38,6 +40,7 @@
 - Fixed quadratic slowdown reading large Python kernel output (big reprs, base64 images) ([#14704](https://github.com/can1357/oh-my-pi/pull/14704) by [@H4vC](https://github.com/H4vC))
 - Sped up TUI repaints of live stream and `/record` rows ([#14705](https://github.com/can1357/oh-my-pi/pull/14705) by [@H4vC](https://github.com/H4vC))
 - Fixed quadratic slowdown in `omp cleanse` on large tsc/clippy/golangci output ([#14706](https://github.com/can1357/oh-my-pi/pull/14706) by [@H4vC](https://github.com/H4vC))
+- Fixed documents served as `application/octet-stream` being downloaded twice ([#14708](https://github.com/can1357/oh-my-pi/pull/14708) by [@H4vC](https://github.com/H4vC))
 
 ## [18.7.0] - 2026-10-06
 
