@@ -181,6 +181,7 @@ const CACHE_LOOKBACK_SUFFIX_BLOCKS = 16;
 /** Content blocks a sent entry contributes to the prompt-cache lookback count (0 for entries that are never sent). */
 function sentContentBlocks(entry: SessionEntry): number {
 	if (entry.type === "custom_message") return Array.isArray(entry.content) ? Math.max(1, entry.content.length) : 1;
+	if (entry.type === "branch_summary") return entry.summary ? 1 : 0;
 	if (entry.type !== "message") return 0;
 	const message = entry.message;
 	return "content" in message && Array.isArray(message.content) ? Math.max(1, message.content.length) : 1;

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-agent-core/compaction";
+import type { BranchSummaryEntry, SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-agent-core/compaction";
 import {
 	DEFAULT_PRUNE_CONFIG,
 	type PruneResult,
@@ -868,5 +868,34 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 		expect(result.prunedCount).toBe(0);
 		expect(resultText(stale)).toBe(FILE_CONTENT);
 		expect(resultMessage(stale).prunedAt).toBeUndefined();
+	});
+
+	test("branch summaries count toward the lookback window in both passes", () => {
+		// Each branch summary replays as one user block: 18 of them plus the newer
+		// read put the stale result 20 blocks back with almost no tokens after it.
+		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
+		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
+		const summaries = Array.from({ length: 18 }, (_, index): BranchSummaryEntry => ({
+			type: "branch_summary",
+			id: nextId(),
+			parentId: null,
+			timestamp: new Date(T0 + 1_000 + index).toISOString(),
+			fromId: `branch-${index}`,
+			summary: "Tried another approach; abandoned.",
+		}));
+		const entries: SessionEntry[] = [call1, stale, ...summaries, call2, latest];
+
+		const supersede = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
+		const guarded = pruneToolOutputs(entries, tokenizer, {
+			protectTokens: 1_000_000,
+			minimumSavings: 0,
+			protectedTools: [],
+			supersedeKey: readToolSupersedeKey,
+			cacheWarmSuffixTokens: 8_000,
+		});
+
+		expect(supersede.prunedCount).toBe(0);
+		expect(guarded.prunedCount).toBe(0);
+		expect(resultText(stale)).toBe(FILE_CONTENT);
 	});
 });
