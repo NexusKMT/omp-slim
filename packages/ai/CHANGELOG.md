@@ -20,6 +20,7 @@
 - Sped up loading the auth modules (`AuthStorage`) by no longer pulling in the provider stream modules for env API key lookup ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
 - Reduced usage-report cache memory by not caching the provider's `raw` payload ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
 - Sped up account ranking, OAuth preflight and credential rate-limit checks by cutting SQLite reads and write locks ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
+- Reduced auth broker server and client CPU use for credential sync and SSE streams ([#14673](https://github.com/can1357/oh-my-pi/pull/14673) by [@H4vC](https://github.com/H4vC))
 
 ## [18.7.0] - 2026-10-06
 
