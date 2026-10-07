@@ -7,11 +7,16 @@
 - Sped up Markdown lexing of large documents (532 KB: ~29 ms → ~19 ms) ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
 - Sped up `OutputSink` on many single-line chunks (100k chunks: ~1.3–9 s → ~15 ms) ([#14679](https://github.com/can1357/oh-my-pi/pull/14679) by [@H4vC](https://github.com/H4vC))
 - Reduced CPU spent redrawing AST, grep, LSP, MCP and generic tool result cards ([#14684](https://github.com/can1357/oh-my-pi/pull/14684) by [@H4vC](https://github.com/H4vC))
+- The debug log viewer stops loading older history once 50,000 entries are loaded; the newest entries are always kept ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
+- Sped up the raw SSE viewer and the git diff pane ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
+- Limited plan review undo history to 100 steps ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
 - Fixed quadratic Markdown lexing of documents with bare `\begin{…}` environments or unclosed `\[` openers ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
 - Fixed quadratic eval display formatting on long semicolon-free JavaScript ([#14685](https://github.com/can1357/oh-my-pi/pull/14685) by [@H4vC](https://github.com/H4vC))
+- Fixed debug log viewer re-formatting every row each frame (select-all over 20k rows: ~3 s → ~2 ms per frame) ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
+- Fixed plan review slowing down on long annotated plans ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 ### Added
 
 - Writes of `.svg` and Mermaid (`.mmd`, `.mermaid`) files draw the image or diagram under the card, as the same code blocks draw in assistant replies: an SVG redraws as it streams, a diagram appears once the file is complete; tool renderers opt in through `figure`.
