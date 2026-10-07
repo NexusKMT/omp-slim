@@ -48,8 +48,13 @@ try {
 	await collect();
 	h.terminal.ackAll();
 	h.flush();
+	assert.ok(h.find(image => image.k === "image" && image.p?.blob === id));
 	assert.deepEqual(h.terminal.blobs.get(id), Buffer.from(PNG, "base64"));
 	assert.equal(h.terminal.log.filter(message => message.verb === "b").length, 1);
+	assert.deepEqual(
+		h.terminal.log.filter(message => message.verb === "q").map(message => message.body),
+		[{ q: "blobs", ids: [id] }],
+	);
 
 	const alias = new ImageSlot();
 	alias.current = base64ImageNode(PNG, "image/png");
@@ -59,7 +64,12 @@ try {
 	const overlay = h.tui.showOverlay(alias, { fullscreen: true });
 	h.flush();
 	await collect();
-	assert.equal(h.terminal.log.filter(message => message.verb === "b").length, 2);
+	assert.equal(
+		h.terminal.log.filter(message => message.verb === "b").length,
+		1,
+		"the alternate surface shares the connection's uploaded blobs",
+	);
+	assert.ok(h.find(image => image.k === "image" && image.p?.blob === id));
 	assert.deepEqual(h.terminal.blobs.get(id), Buffer.from(PNG, "base64"));
 	overlay.hide();
 	h.terminal.ackAll();
@@ -77,9 +87,11 @@ try {
 	h.flush();
 	assert.equal(
 		h.terminal.log.filter(message => message.verb === "b").length,
-		2,
-		"the inline surface already has the image",
+		1,
+		"remounting an image on the same connection must reuse the uploaded blob",
 	);
+	assert.ok(h.find(image => image.k === "image" && image.p?.blob === id));
+	assert.deepEqual(h.terminal.blobs.get(id), Buffer.from(PNG, "base64"));
 
 	h.tui.stop();
 	h.flush();
@@ -88,16 +100,40 @@ try {
 	h.flush();
 	h.terminal.ackAll();
 	h.flush();
-	assert.equal(h.terminal.log.filter(message => message.verb === "b").length, 2);
+	const resumed = new ImageSlot();
+	resumed.current = base64ImageNode(PNG, "image/png");
+	h.tui.addChild(resumed);
+	await h.render();
+	h.terminal.ackAll();
+	h.flush();
+	assert.equal(h.terminal.log.filter(message => message.verb === "b").length, 1);
+	assert.deepEqual(
+		h.terminal.log.filter(message => message.verb === "q").map(message => message.body),
+		[
+			{ q: "blobs", ids: [id] },
+			{ q: "blobs", ids: [id] },
+		],
+	);
+	assert.ok(h.find(image => image.k === "image" && image.p?.blob === id));
+	assert.deepEqual(h.terminal.blobs.get(id), Buffer.from(PNG, "base64"));
 	const lostSurface = h.terminal.surface!;
 	h.terminal.docs.delete(lostSurface);
 	h.terminal.blobs.clear();
 	h.event({ ev: "gone", ids: [lostSurface] });
 	assert.equal(
 		h.terminal.log.filter(message => message.verb === "b").length,
-		3,
-		"a lost surface needs the image uploaded again",
+		2,
+		"a lost surface whose terminal no longer holds the blob needs its image uploaded again",
 	);
+	assert.deepEqual(
+		h.terminal.log.filter(message => message.verb === "q").map(message => message.body),
+		[
+			{ q: "blobs", ids: [id] },
+			{ q: "blobs", ids: [id] },
+			{ q: "blobs", ids: [id] },
+		],
+	);
+	assert.ok(h.find(image => image.k === "image" && image.p?.blob === id));
 	assert.deepEqual(h.terminal.blobs.get(id), Buffer.from(PNG, "base64"));
 	assert.deepEqual(h.errors, []);
 } finally {

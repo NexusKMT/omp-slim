@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { Image, ImageBudget } from "../../../src/components/image";
-import { base64ImageNode, getNativeBlob } from "../../../src/native/blobs";
-import { col } from "../../../src/native/describe";
+import { base64ImageNode, getNativeBlob, nativeImageNode } from "../../../src/native/blobs";
 import { SnapcompactShapePreview } from "../../../src/overlays/snapcompact-shape-preview";
 import { AttachmentChipsBand } from "../../../src/prompt/attachment-chips";
 import { chipLabel } from "../../../src/prompt/composer-attachments";
 import { CustomEditor } from "../../../src/prompt/custom-editor";
 import { getEditorTheme, initTheme } from "../../../src/theme/theme";
-import { writeToolRenderer } from "../../../src/tools/write";
 import type { Component } from "../../../src/tui";
 import { TspHarness } from "../tsp-harness";
 
@@ -17,13 +15,8 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect 
 function component(): Component {
 	if (process.argv[2] === "snapcompact") return new SnapcompactShapePreview("auto");
 	if (process.argv[2] === "svg") {
-		const view = writeToolRenderer.describeResult(
-			{ content: [{ type: "text", text: "Wrote preview.svg" }] },
-			{ expanded: false, isPartial: false },
-			{ path: "preview.svg", content: SVG },
-		);
-		assert.ok(view);
-		return { describe: () => col(view.body ?? []), render: () => [] };
+		const image = nativeImageNode(new TextEncoder().encode(SVG), "image/svg+xml");
+		return { describe: () => image, render: () => [] };
 	}
 	if (process.argv[2] === "image") return new Image(PNG, "image/png", { fallbackColor: text => text });
 	if (process.argv[2] === "attachment") {
