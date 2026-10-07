@@ -367,7 +367,7 @@ export async function runModelsListing(options: RunModelsListingOptions): Promis
 		await modelRegistry.refreshRuntimeProviders(action === "refresh" ? "online" : "online-if-uncached");
 
 		for (const warning of modelRegistry.drainConfigWarnings()) {
-			process.stderr.write(`Warning: ${warning}\n`);
+			process.stderr.write(`${chalk.yellow(`Warning: ${warning}`)}\n`);
 		}
 		renderProviderModels(modelRegistry, action, pattern, json, kind);
 	} finally {
