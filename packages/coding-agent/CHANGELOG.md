@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `ask` questions in Tern covering the end of the transcript with a sheet that blocked scrolling, hiding the explanation the question was about; the question now sits in the composer's place, framed like the composer, below a transcript you can read and scroll while deciding
+
 ## [18.8.0] - 2026-10-07
 
 ### Added
