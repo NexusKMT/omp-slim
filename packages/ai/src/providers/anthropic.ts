@@ -486,7 +486,7 @@ type AnthropicProviderSessionState = ProviderSessionState & {
 	 * this (baseUrl, modelId). Cleared on session close.
 	 */
 	thinkingReplayDisabled: boolean;
-	/** Thinking blocks the API permanently dropped after a prefix mismatch. */
+	/** Thinking blocks stripped after a prefix-binding 400 forced a retry without `drop_block`. */
 	prefixDroppedThinkingBlocks: Set<string>;
 };
 
@@ -1943,10 +1943,16 @@ function rememberPrefixBindingFailure(
 	return true;
 }
 
+/**
+ * Record server-reported input rewrites on the response. A `drop_block`
+ * request keeps replaying the transcript verbatim afterwards: the API drops
+ * the same invalid blocks again on every later request (unbilled), while
+ * omitting them client-side would change the bytes the drop request just
+ * cached and can cost another message-prefix cache miss from the first
+ * dropped block on.
+ */
 function applyReportedInputTransformations(
 	output: AssistantMessage,
-	params: MessageCreateParamsStreaming,
-	state: AnthropicProviderSessionState | undefined,
 	value: unknown,
 	seen: Set<string>,
 	replace = false,
@@ -1965,7 +1971,6 @@ function applyReportedInputTransformations(
 	}
 	if (fresh.length === 0) return;
 	output.inputTransformations = [...(output.inputTransformations ?? []), ...fresh];
-	rememberPrefixDroppedThinking(params, fresh, state);
 	for (const transformation of fresh) {
 		if (transformation.reason !== "prefix_binding_mismatch") continue;
 		logger.warn("anthropic: dropped thinking block after conversation prefix changed", {
@@ -2661,8 +2666,6 @@ const streamAnthropicOnce = (
 							if (startMessage?.id) output.responseId = startMessage.id;
 							applyReportedInputTransformations(
 								output,
-								params,
-								providerSessionState,
 								startMessage?.input_transformations,
 								seenInputTransformations,
 							);
@@ -2978,8 +2981,6 @@ const streamAnthropicOnce = (
 							const delta = event.delta;
 							applyReportedInputTransformations(
 								output,
-								params,
-								providerSessionState,
 								event.input_transformations,
 								seenInputTransformations,
 								true,
