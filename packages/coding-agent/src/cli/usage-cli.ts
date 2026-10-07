@@ -613,7 +613,7 @@ function formatPolicyLine(
 		return `policy: priority ${priority} · reserve ${reserveLabel} · reserve unknown`;
 	}
 	const remainingPct = Math.max(0, 1 - Math.max(...usedFractions)) * 100;
-	const state = remainingPct <= reservePct ? "inside reserve" : "eligible";
+	const state = remainingPct <= 0 ? "exhausted" : remainingPct <= reservePct ? "inside reserve" : "eligible";
 	return `policy: priority ${priority} · reserve ${reserveLabel} · ${state} · ${remainingPct.toFixed(1)}% left`;
 }
 
