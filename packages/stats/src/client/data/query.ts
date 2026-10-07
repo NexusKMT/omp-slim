@@ -22,7 +22,7 @@ import {
 	type Inflight,
 	inflightRequest,
 	loadQuery,
-	type QueryFetchContext,
+	type QueryFetcher,
 	releaseQuery,
 } from "./query-store";
 
@@ -62,7 +62,7 @@ export function prefetchQuery<T>(key: readonly unknown[], fetcher: () => Promise
 
 export function useQuery<T>(
 	key: readonly unknown[],
-	fetcher: (context: QueryFetchContext<T>) => Promise<T>,
+	fetcher: QueryFetcher<T>,
 	options?: QueryOptions,
 ): QueryResult<T> {
 	const keyString = JSON.stringify(key);

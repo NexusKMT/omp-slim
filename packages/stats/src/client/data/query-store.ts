@@ -23,12 +23,18 @@ export interface Inflight {
 }
 
 /** Handed to every fetcher. */
-export interface QueryFetchContext<T> {
+export interface QueryFetchContext {
 	/** Aborted once no query waits for this request any more. */
 	signal: AbortSignal;
-	/** Cached data for this key, for conditional revalidation; `undefined` on first load. */
-	previous: T | undefined;
 }
+
+/**
+ * Loads one key's data. `previous` is the cached data for this key, for
+ * conditional revalidation; `undefined` on first load. It is a separate
+ * parameter so fetchers that ignore it still let `T` be inferred from their
+ * return type.
+ */
+export type QueryFetcher<T> = (context: QueryFetchContext, previous: T | undefined) => Promise<T>;
 
 const defaultBucket: CacheBucket = { entries: new Map(), limit: 128 };
 /** Full session traces: MBs each, at most a few worth keeping. */
@@ -71,7 +77,7 @@ function remember(key: string, entry: CacheEntry): void {
 export function loadQuery<T>(
 	key: string,
 	version: number,
-	fetcher: (context: QueryFetchContext<T>) => Promise<T>,
+	fetcher: QueryFetcher<T>,
 ): Inflight {
 	const pending = inflight.get(key);
 	if (pending) {
@@ -82,7 +88,7 @@ export function loadQuery<T>(
 	// Entries for a key are only ever written by fetchers of that key's type.
 	const previous = cachedEntry(key)?.data as T | undefined;
 	const request: Inflight = {
-		promise: fetcher({ signal: controller.signal, previous })
+		promise: fetcher({ signal: controller.signal }, previous)
 			.then(data => {
 				remember(key, { data, updatedAt: Date.now(), version });
 				return data;

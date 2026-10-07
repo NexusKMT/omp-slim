@@ -176,7 +176,7 @@ describe("trace revalidation", () => {
 			results.push(
 				useQuery<SessionTrace>(
 					["trace", file],
-					({ signal, previous }) => getSessionTrace(file, signal, previous),
+					({ signal }, previous) => getSessionTrace(file, signal, previous),
 					{},
 				),
 			);

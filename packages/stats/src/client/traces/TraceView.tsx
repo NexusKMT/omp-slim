@@ -42,7 +42,7 @@ const LEGEND: Array<{ kind: TraceSpanKind; label: string }> = [
 export function TraceView({ file, active, onBack }: TraceViewProps) {
 	const query = useQuery<SessionTrace>(
 		["trace", file],
-		({ signal, previous }) => getSessionTrace(file, signal, previous),
+		({ signal }, previous) => getSessionTrace(file, signal, previous),
 		{ pollMs: 15000, enabled: active },
 	);
 	// A previous session's trace must never render under this file's header.
