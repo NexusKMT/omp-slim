@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - `getEnvApiKey`, `getEnvApiKeyName` and `listProvidersWithEnvKey` are no longer exported from `@oh-my-pi/pi-ai/stream`; import them from `@oh-my-pi/pi-ai` or `@oh-my-pi/pi-ai/env-api-key` ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
+- `TranscriptionRequest.audio` is now `Uint8Array | Blob`; code that reads `request.audio` must handle a `Blob` (the transcription endpoint passes multipart uploads through without copying) ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
@@ -21,6 +22,12 @@
 - Reduced usage-report cache memory by not caching the provider's `raw` payload ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
 - Sped up account ranking, OAuth preflight and credential rate-limit checks by cutting SQLite reads and write locks ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
 - Reduced auth broker server and client CPU use for credential sync and SSE streams ([#14673](https://github.com/can1357/oh-my-pi/pull/14673) by [@H4vC](https://github.com/H4vC))
+- Sped up Apple Foundation Models tool-call argument parsing ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
+- Reduced auth gateway per-request serialization overhead ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
+- Sped up Cloudflare AI Gateway requests by reusing rebuilt models ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
+- Sped up AWS credential-source detection by caching its probes ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
+- Reduced memory and copying for generated images by sniffing their type from a few bytes and building data URLs only when read ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
+- Reduced GitLab Duo Workflow stream memory by de-duplicating message snapshots by content hash ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
 
 ## [18.7.0] - 2026-10-06
 
