@@ -10,6 +10,7 @@ import {
 	joinAdditionalContext,
 	TOOL_RESULT_ADDITIONAL_CONTEXT,
 	type ToolResultWithAdditionalContext,
+	validateAgentToolArguments,
 } from "@oh-my-pi/pi-agent-core";
 import type {
 	CursorMcpCall,
@@ -20,7 +21,6 @@ import type {
 	CursorExecHandlers as ICursorExecHandlers,
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
-import { validateToolArguments } from "@oh-my-pi/pi-ai";
 import {
 	cursorRawReadPath,
 	omitUndefinedArgs,
@@ -272,23 +272,6 @@ function buildToolErrorResult(message: string): AgentToolResult<unknown> {
 	};
 }
 
-function validateCursorToolArguments(
-	tool: CursorBridgeTool,
-	toolName: string,
-	toolCallId: string,
-	args: Record<string, unknown>,
-): Record<string, unknown> {
-	try {
-		return validateToolArguments(tool, { type: "toolCall", id: toolCallId, name: toolName, arguments: args });
-	} catch (error) {
-		// Match the agent loop: lenience permits schema repair, never malformed JSON.
-		if (!tool.lenientArgValidation || "__parseError" in args) throw error;
-		const fallback = { ...args };
-		delete fallback.__rawJson;
-		return fallback;
-	}
-}
-
 async function executeTool(
 	options: CursorExecBridgeOptions,
 	toolName: string,
@@ -329,7 +312,12 @@ async function executeTool(
 
 	const bridgeContext = createBridgeToolContext(options);
 	try {
-		const validatedArgs = validateCursorToolArguments(tool, toolName, toolCallId, toolArgs);
+		const validatedArgs = validateAgentToolArguments(tool, {
+			type: "toolCall",
+			id: toolCallId,
+			name: toolName,
+			arguments: toolArgs,
+		});
 		result = await tool.execute(toolCallId, validatedArgs, undefined, onUpdate, bridgeContext.context);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -677,7 +665,12 @@ export class CursorExecHandlers implements ICursorExecHandlers {
 
 		const bridgeContext = createBridgeToolContext(this.options);
 		try {
-			const validatedArgs = validateCursorToolArguments(tool, toolName, toolCallId, toolArgs);
+			const validatedArgs = validateAgentToolArguments(tool, {
+				type: "toolCall",
+				id: toolCallId,
+				name: toolName,
+				arguments: toolArgs,
+			});
 			result = await tool.execute(toolCallId, validatedArgs, undefined, onUpdate, bridgeContext.context);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
