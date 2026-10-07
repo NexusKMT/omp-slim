@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- In Tern, relative file links in assistant replies (`[screenshot](artifacts/a.png)`) open the file the session meant: the native transcript now hands Tern the link resolved against the session's working directory, so links written after `/wt` or `/move` no longer resolve against the folder omp was started in and fail with "File not found"
+- In Tern, relative file links in assistant replies (`[screenshot](artifacts/a.png)`) open the file the session meant: the native transcript now hands Tern the link resolved against the session's working directory, so links written after `/wt` or `/move` no longer resolve against the folder omp was started in and fail with "File not found" ([#14879](https://github.com/can1357/oh-my-pi/pull/14879) by [@H4vC](https://github.com/H4vC))
 
 ## [18.8.3] - 2026-10-07
 
