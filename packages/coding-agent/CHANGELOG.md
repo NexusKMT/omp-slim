@@ -21,6 +21,8 @@
 - Reduced per-event session overhead: no branch copies for persisted-message checks, and extension hooks without handlers are skipped before building their context ([#14695](https://github.com/can1357/oh-my-pi/pull/14695) by [@H4vC](https://github.com/H4vC))
 - Reduced edit and `write` CPU on large files ([#14700](https://github.com/can1357/oh-my-pi/pull/14700) by [@H4vC](https://github.com/H4vC))
 - Sped up `read` on large files (`:-N` tails ~8× faster on 50 MB), repeated archive reads, SQLite last pages and speculative reads ([#14701](https://github.com/can1357/oh-my-pi/pull/14701) by [@H4vC](https://github.com/H4vC))
+- Sped up `grep` and `glob` results ([#14702](https://github.com/can1357/oh-my-pi/pull/14702) by [@H4vC](https://github.com/H4vC))
+- Sped up output schema validation by memoizing validators ([#14702](https://github.com/can1357/oh-my-pi/pull/14702) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
@@ -28,6 +30,7 @@
 - Fixed the todo list's auto-clear never firing while subagents were streaming progress ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 - Fixed memory growth while ACP client-terminal commands run ([#14680](https://github.com/can1357/oh-my-pi/pull/14680) by [@H4vC](https://github.com/H4vC))
 - Fixed ephemeral side-channel replies (idle recap, completion probe, `runEphemeralTurn`) truncating in quadratic time ([#14695](https://github.com/can1357/oh-my-pi/pull/14695) by [@H4vC](https://github.com/H4vC))
+- Sped up `omp compress` by tokenizing each draft once per round ([#14702](https://github.com/can1357/oh-my-pi/pull/14702) by [@H4vC](https://github.com/H4vC))
 
 ## [18.7.0] - 2026-10-06
 
