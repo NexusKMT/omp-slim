@@ -17,6 +17,7 @@
 - Sped up agent hub activity rows ([#14688](https://github.com/can1357/oh-my-pi/pull/14688) by [@H4vC](https://github.com/H4vC))
 - Sped up `local://`, `history://` and `artifact://` autocomplete by reusing directory scans for 2 s, so a just-created file can take up to 2 s to appear ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 - Removed quadratic slowdown of TTSR stream rules on long responses ([#14693](https://github.com/can1357/oh-my-pi/pull/14693) by [@H4vC](https://github.com/H4vC))
+- Reduced per-prompt session overhead from pruning, goal-mode token accounting, branch appends, publishing and full session rewrites ([#14694](https://github.com/can1357/oh-my-pi/pull/14694) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
