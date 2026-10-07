@@ -59,7 +59,7 @@ import {
 } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
-import { type OAuthAccountPools, restrictSessionAccounts } from "./config/account-pools";
+import { type OAuthAccountPools, releaseSessionAccounts, restrictSessionAccounts } from "./config/account-pools";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -1849,6 +1849,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		modelRegistry.authStorage.sessions.inherit(options.credentialSourceSessionId, providerSessionId);
 	}
 	restrictSessionAccounts(modelRegistry.authStorage, providerSessionId, options.oauthAccountPools);
+	// A startup failure leaves no session to lift the pool on dispose.
+	startupCleanup.defer(() =>
+		releaseSessionAccounts(modelRegistry.authStorage, providerSessionId, options.oauthAccountPools),
+	);
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
 		options.modelPattern !== undefined ||

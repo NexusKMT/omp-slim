@@ -260,15 +260,16 @@ the task/eval wire formats do not expose a tier field or automatic Fast policy.
 Account selection is independent of model and service-tier selection: an exact, case-sensitive
 `task.agentAccountPools[agentName]` entry maps provider ids to OAuth identity keys (the `identityKey`
 values broker [client account pools](./auth-broker-gateway.md#client-account-pools-routing-not-authorization)
-use, such as `email:<address>|org:<id>` for Anthropic). For each listed provider the child authenticates
+use, such as `email:<address>|org:<id>` for Anthropic; with local credential storage they are the
+`identity_key` column of `auth_credentials` in the agent database, `agent.db`). For each listed provider the child authenticates
 only with those accounts: ranking, the parent's copied account affinity, restored pins, fallback
 passes, and credential rotation stay inside the pool, and runtime, config, environment, and stored
 API keys are not used. When no pooled account can serve, the request fails with `No API key for
 provider: … restricted to its OAuth account pool` instead of borrowing another account; an empty
 list allows no account. Pools do not pick models, so model and retry-fallback policy still decide
 which provider the child calls. Fresh or reset provider sessions and the agent's advisors keep the
-pool, and a parked agent revived after a restart takes the live entry for its persisted agent name.
-A custom SDK `getApiKey` resolver bypasses pools.
+pool, vibe workers take it from their first turn, and a parked agent revived after a restart takes
+the live entry for its persisted agent name. A custom SDK `getApiKey` resolver bypasses pools.
 
 Runtime output schema precedence is:
 
