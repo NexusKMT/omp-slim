@@ -2,7 +2,7 @@
  * Custom model/provider config file handle and validation.
  */
 
-import type { TypeProperty } from "@oh-my-pi/omptype";
+import type { FluentType } from "@oh-my-pi/omptype";
 import type { Api, ModelSpec } from "@oh-my-pi/pi-ai/types";
 import { AXES } from "@oh-my-pi/pi-catalog/compat/axes";
 import { type ModelKind, servedKinds } from "@oh-my-pi/pi-catalog/types";
@@ -133,9 +133,10 @@ export function validateProviderConfiguration(
 	}
 }
 
-interface CompatObjectSchema {
-	readonly props: readonly TypeProperty[];
-	keyof(): { allows(key: unknown): boolean };
+function isObjectSchema(
+	schema: FluentType<unknown>,
+): schema is FluentType<unknown> & FluentType<Record<string, unknown>, unknown> {
+	return schema.ir.k === "object";
 }
 
 // The file schema validates a curated subset of the runtime compatibility fields.
@@ -152,32 +153,42 @@ const getRuntimeCompatKeys = once(
 export function getUnknownCompatKeys(config: ModelsConfig): string[] {
 	const unknownKeys: string[] = [];
 	const { ApiCompatSchema } = getModelsConfigSchemaBundle();
-	const visit = (value: unknown, schema: CompatObjectSchema, path: string): void => {
+	const visit = <Input>(
+		value: unknown,
+		schema: FluentType<Record<string, unknown>, Input>,
+		path: string,
+		level: "compat" | "whenThinking" | "nested",
+	): void => {
 		if (!isRecord(value)) return;
 		const keys = schema.keyof();
 		const properties = schema.props;
 		for (const [key, entry] of Object.entries(value)) {
 			const keyPath = `${path}.${key}`;
-			if (!keys.allows(key) && (schema !== ApiCompatSchema || !getRuntimeCompatKeys().has(key))) {
+			if (!keys.allows(key) && !(level !== "nested" && key !== "whenThinking" && getRuntimeCompatKeys().has(key))) {
 				unknownKeys.push(keyPath);
 				continue;
 			}
 			if (!isRecord(entry)) continue;
 			const property = properties.find(property => property.key === key);
 			// Open records (extraBody) have no declared properties to recurse into.
-			if (property?.value.extends("object")) {
-				visit(entry, property.value.as<Record<string, unknown>>(), keyPath);
+			if (property && isObjectSchema(property.value)) {
+				visit(
+					entry,
+					property.value,
+					keyPath,
+					level === "compat" && key === "whenThinking" ? "whenThinking" : "nested",
+				);
 			}
 		}
 	};
 	for (const [name, provider] of Object.entries(config.providers ?? {})) {
 		const path = `providers.${name}`;
-		visit(provider.compat, ApiCompatSchema, `${path}.compat`);
+		visit(provider.compat, ApiCompatSchema, `${path}.compat`, "compat");
 		for (const [index, model] of (provider.models ?? []).entries()) {
-			visit(model.compat, ApiCompatSchema, `${path}.models.${index}.compat`);
+			visit(model.compat, ApiCompatSchema, `${path}.models.${index}.compat`, "compat");
 		}
 		for (const [id, override] of Object.entries(provider.modelOverrides ?? {})) {
-			visit(override.compat, ApiCompatSchema, `${path}.modelOverrides.${id}.compat`);
+			visit(override.compat, ApiCompatSchema, `${path}.modelOverrides.${id}.compat`, "compat");
 		}
 	}
 	return unknownKeys;

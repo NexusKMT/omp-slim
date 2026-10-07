@@ -126,7 +126,11 @@ describe("ModelRegistry", () => {
 							openRouterRouting: { only: ["example"], onyl: ["example"] },
 							vercelGatewayRouting: { order: ["example"], oder: [] },
 							reasoningEffortMap: { high: "high", hgh: "high" },
-							whenThinking: { supportsStroe: false, extraBody: { arbitrary: { nested: true } } },
+							whenThinking: {
+								supportsStroe: false,
+								extraBody: { arbitrary: { nested: true } },
+								whenThinking: { supportsStore: false },
+							},
 							extraBody: { supportsStroe: false, arbitrary: { nested: true } },
 							defaultLevel: "high",
 							contextWindowFloor: 131072,
@@ -144,6 +148,7 @@ describe("ModelRegistry", () => {
 				"vercelGatewayRouting.oder",
 				"reasoningEffortMap.hgh",
 				"whenThinking.supportsStroe",
+				"whenThinking.whenThinking",
 				"defaultLevel",
 				"contextWindowFloor",
 			].map(
@@ -166,6 +171,11 @@ describe("ModelRegistry", () => {
 							supportsSamplingParams: false,
 							streamFirstEventTimeoutMs: 0,
 							supportsContextManagement: false,
+							whenThinking: {
+								omitReasoningEffort: false,
+								reasoningDisableMode: "none",
+								supportsSamplingParams: false,
+							},
 						},
 					},
 				},
