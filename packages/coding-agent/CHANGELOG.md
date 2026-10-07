@@ -8,6 +8,10 @@
 ### Changed
 
 - Generated session titles now carry their card in the title itself (`🧪 FLAKY: Fix flaky park tests`), so the `/resume` picker and session listings show the icon and short code too; `title.icons` applies to newly generated titles.
+### Added
+
+- Added `task.agentAccountPools` to keep a task agent, by exact name, on named OAuth accounts: everything the agent sends (its turns, advisors, title generation, subagents it spawns without their own entry, and revived sessions) authenticates only with those accounts and fails rather than use another account or an API key ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
+- Added `omp usage accounts`, which lists the provider and identity key of every OAuth account without printing tokens, so `task.agentAccountPools` and broker account pools can name accounts without querying `agent.db` ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.8.0] - 2026-10-07
 
