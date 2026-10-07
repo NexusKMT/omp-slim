@@ -11,6 +11,7 @@
 
 - Reduced CPU and memory spent decoding large Cursor and Devin streamed responses ([#14669](https://github.com/can1357/oh-my-pi/pull/14669) by [@H4vC](https://github.com/H4vC))
 - Reduced per-request CPU and memory use for Codex and OpenAI Responses requests, and moved Codex SSE body compression off the event loop ([#14670](https://github.com/can1357/oh-my-pi/pull/14670) by [@H4vC](https://github.com/H4vC))
+- Sped up in-band tool-call dialect parsing for long tool calls ([#14671](https://github.com/can1357/oh-my-pi/pull/14671) by [@H4vC](https://github.com/H4vC))
 
 ## [18.7.0] - 2026-10-06
 
