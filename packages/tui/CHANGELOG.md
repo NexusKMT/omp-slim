@@ -10,6 +10,8 @@
 - The debug log viewer stops loading older history once 50,000 entries are loaded; the newest entries are always kept ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 - Sped up the raw SSE viewer and the git diff pane ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 - Limited plan review undo history to 100 steps ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
+- Sped up `@` path completion in folders with many symlinks ([#14687](https://github.com/can1357/oh-my-pi/pull/14687) by [@H4vC](https://github.com/H4vC))
+- Sped up model hub search (~4×) and session tree, settings and extension-dashboard search (~2×) on large lists ([#14687](https://github.com/can1357/oh-my-pi/pull/14687) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
