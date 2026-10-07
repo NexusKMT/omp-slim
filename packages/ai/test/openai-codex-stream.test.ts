@@ -2136,7 +2136,7 @@ describe("openai-codex streaming", () => {
 		expect(result.usage.cost.output).toBeCloseTo(0.000012);
 		expect(result.usage.cost.total).toBeCloseTo(0.000022);
 	});
-	it("bills priority turns at the model's baked serviceTierCost multiplier (gpt-5.5 = 2.5x)", async () => {
+	it("bills priority turns at the Codex provider's baked 2.5x serviceTierCost multiplier", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 
@@ -2169,28 +2169,19 @@ describe("openai-codex streaming", () => {
 			maxTokens: 128000,
 		};
 
-		// gpt-5.5: the exact `service-tier-cost` rule bakes { flex: 0.5, priority: 2.5 }.
-		const tiered = buildModel({ ...spec, id: "gpt-5.5" });
-		expect(tiered.serviceTierCost).toEqual({ flex: 0.5, priority: 2.5 });
-		const tieredResult = await streamOpenAICodexResponses(tiered, context, {
-			fetch: fetchMock,
-			apiKey: token,
-			serviceTier: "priority",
-		}).result();
-		// 5 input tokens at $1/MTok * 2.5, 3 output at $2/MTok * 2.5.
-		expect(tieredResult.usage.cost.input).toBeCloseTo(0.0000125);
-		expect(tieredResult.usage.cost.output).toBeCloseTo(0.000015);
-
-		// Other Codex models inherit the provider-root { flex: 0.5, priority: 2 } rule.
+		// Every Codex model without its own table, gpt-5.5 included, bakes the
+		// provider-root { flex: 0.5, priority: 2.5 } rule: Fast draws included usage at
+		// 2.5x Standard. gpt-5.1-codex priced Fast at 2x before that rule changed.
 		const generic = buildModel({ ...spec, id: "gpt-5.1-codex" });
-		expect(generic.serviceTierCost).toEqual({ flex: 0.5, priority: 2 });
+		expect(generic.serviceTierCost).toEqual({ flex: 0.5, priority: 2.5 });
 		const genericResult = await streamOpenAICodexResponses(generic, context, {
 			fetch: fetchMock,
 			apiKey: token,
 			serviceTier: "priority",
 		}).result();
-		expect(genericResult.usage.cost.input).toBeCloseTo(0.00001);
-		expect(genericResult.usage.cost.output).toBeCloseTo(0.000012);
+		// 5 input tokens at $1/MTok * 2.5, 3 output at $2/MTok * 2.5.
+		expect(genericResult.usage.cost.input).toBeCloseTo(0.0000125, 12);
+		expect(genericResult.usage.cost.output).toBeCloseTo(0.000015, 12);
 	});
 
 	it("records a served scale tier without pricing it", async () => {
