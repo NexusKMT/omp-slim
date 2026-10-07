@@ -539,6 +539,11 @@ export class Agent {
 	 * are queued for the next boundary.
 	 */
 	hasBackgroundCompletions?: AgentLoopConfig["hasBackgroundCompletions"];
+	/**
+	 * Hook that peeks whether a passive aside is queued for the next boundary;
+	 * ends an interruptible wait without interrupting other tools.
+	 */
+	hasQueuedAsides?: AgentLoopConfig["hasQueuedAsides"];
 
 	constructor(opts: AgentOptions = {}) {
 		this.#state = { ...this.#state, ...opts.initialState };
@@ -1913,6 +1918,7 @@ export class Agent {
 			onLiveSteeringTaken: messages => this.#adoptLiveSteering(messages),
 			hasIrcInterrupts: this.hasIrcInterrupts,
 			hasBackgroundCompletions: this.hasBackgroundCompletions,
+			hasQueuedAsides: this.hasQueuedAsides,
 			getFollowUpMessages: signal => this.#dequeueFollowUpMessagesAfterHooks(signal ?? loopSignal),
 			getAsideMessages: async () => (await this.#asideMessageProvider?.()) ?? [],
 			onBeforeYield: () => this.#onBeforeYield?.(),

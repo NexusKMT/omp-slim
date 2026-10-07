@@ -328,6 +328,16 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * background.
 	 */
 	hasBackgroundCompletions?: () => boolean | Promise<boolean>;
+	/**
+	 * Peeks whether a passive aside (an extension or user message queued with
+	 * `deliverAs: "aside"`) is waiting for injection at the next boundary.
+	 *
+	 * Same rules as {@link hasBackgroundCompletions}: non-consuming, ends only
+	 * *interruptible* waits, never raises {@link ToolCallContext.steeringSignal}.
+	 * The host still injects the aside once at the boundary; ordinary running
+	 * tools finish first.
+	 */
+	hasQueuedAsides?: () => boolean | Promise<boolean>;
 
 	/**
 	 * Returns follow-up messages to process after the agent would otherwise stop.

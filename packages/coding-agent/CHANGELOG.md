@@ -10,6 +10,7 @@
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
+- Fixed an `aside` message (such as one sent by an extension) waiting behind a running `wait`: it now ends the wait and reaches the model at the next step, and the job result still arrives later
 
 ## [18.7.0] - 2026-10-06
 
