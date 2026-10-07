@@ -535,6 +535,32 @@ describe("formatUsageBreakdown", () => {
 		expect(text).toContain("policy: priority 10 · reserve 0% (override) · exhausted · 0.0% left");
 	});
 
+	it("reports an account sitting exactly on its reserve as inside reserve", () => {
+		const reports = [
+			makeReport("openai-codex", "boundary@example.test", [
+				makeLimit({
+					id: "5h",
+					provider: "openai-codex",
+					usedFraction: 0.7,
+					durationMs: FIVE_HOURS,
+					windowId: "5h",
+				}),
+			]),
+		];
+		const policyOptions: UsagePolicyDiagnosticsOptions = {
+			globalReservePct: 10,
+			getAccountPolicy: () => ({
+				provider: "openai-codex",
+				account: { email: "boundary@example.test" },
+				reservePct: 30,
+			}),
+		};
+
+		const text = stripVTControlCharacters(
+			formatUsageBreakdown(reports, [], Date.now(), undefined, [], policyOptions),
+		);
+		expect(text).toContain("policy: priority 0 · reserve 30% (override) · inside reserve · 30.0% left");
+	});
 	it("marks reserve state unknown when a configured account has no transient usage report", () => {
 		const accounts: UsageAccountIdentity[] = [
 			{ provider: "anthropic", type: "oauth", email: "offline@example.test" },
