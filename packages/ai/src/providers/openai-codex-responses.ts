@@ -1926,13 +1926,19 @@ async function openCodexWebSocketTransport(
 	}
 	recordCodexTurnRequestDiagnostics(websocketState, websocketRequest, "websocket", canAppendBeforeRequest);
 	const requestBodyForState = cloneJsonTree(requestContext.transformedBody);
-	// `onPayload` may rewrite the outgoing frame (e.g. drop `stream_options`);
-	// recorded state must reflect what was actually sent — the sequential-cutoff
-	// summary decoder keys off it.
+	// `onPayload` may rewrite the outgoing frame (e.g. drop `stream_options` or
+	// change `service_tier`); recorded state must reflect what was actually
+	// sent — the sequential-cutoff summary decoder and the served-tier
+	// fallback key off it.
 	if (websocketRequest.stream_options === undefined) {
 		delete requestBodyForState.stream_options;
 	} else {
 		requestBodyForState.stream_options = websocketRequest.stream_options;
+	}
+	if (websocketRequest.service_tier === undefined) {
+		delete requestBodyForState.service_tier;
+	} else {
+		requestBodyForState.service_tier = websocketRequest.service_tier;
 	}
 	requestContext.rawRequestDump.body = websocketRequest;
 	CODEX_DEBUG &&
