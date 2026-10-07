@@ -8,7 +8,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionTrace } from "../api";
 import { useQuery } from "../data/query";
-import type { TraceSpan, TraceSpanKind, TraceTrack } from "../types";
+import type { SessionTrace, TraceSpan, TraceSpanKind, TraceTrack } from "../types";
 import { Card, ChartSkeleton, PageHeader, QueryView, SearchInput, Segmented } from "../ui";
 import { AggregatesPanel } from "./AggregatesPanel";
 import { Minimap } from "./Minimap";
@@ -40,7 +40,11 @@ const LEGEND: Array<{ kind: TraceSpanKind; label: string }> = [
 ];
 
 export function TraceView({ file, active, onBack }: TraceViewProps) {
-	const query = useQuery(["trace", file], () => getSessionTrace(file), { pollMs: 15000, enabled: active });
+	const query = useQuery<SessionTrace>(
+		["trace", file],
+		({ signal, previous }) => getSessionTrace(file, signal, previous),
+		{ pollMs: 15000, enabled: active },
+	);
 	// A previous session's trace must never render under this file's header.
 	const trace = query.stale ? null : query.data;
 
