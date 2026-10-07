@@ -312,7 +312,7 @@ export class SessionTools {
 	 * process's prompt; see {@link #transcriptBindsPrompt}.
 	 */
 	#restoredReply: AgentMessage | undefined;
-	/** Latched once the primary conversation sends a request; see {@link markPrimaryRequestSent}. */
+	/** Latched once a primary assistant reply is recorded; see {@link markPrimaryRequestSent}. */
 	#primaryRequestSent = false;
 	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
@@ -1360,11 +1360,12 @@ export class SessionTools {
 	}
 
 	/**
-	 * Record that the primary conversation sent a request with the current
-	 * prompt. Never reset: from then on the transcript's signed thinking may be
-	 * bound to this prompt, whatever later history edits (`/tree`, fork,
-	 * recovery) leave as the newest reply. Side requests (`runEphemeralTurn`)
-	 * do not count.
+	 * Record that a primary assistant reply started, normally for a request sent
+	 * with the current prompt (gate-stop and pre-stream aborted replies latch too;
+	 * they freeze anyway). Never reset: from then on the transcript's signed
+	 * thinking may be bound to this prompt, whatever later history edits (`/tree`,
+	 * fork, recovery) leave as the newest reply. Side requests
+	 * (`runEphemeralTurn`) do not count.
 	 */
 	markPrimaryRequestSent(): void {
 		this.#primaryRequestSent = true;
@@ -1372,8 +1373,8 @@ export class SessionTools {
 
 	/**
 	 * Whether the transcript's signed thinking may be bound to the current
-	 * prompt: it holds a reply, and either the primary conversation already
-	 * sent a request from this session or the newest reply is not one restored
+	 * prompt: it holds a reply, and either a primary reply was already recorded
+	 * in this session or the newest reply is not one restored
 	 * at construction (a transcript switched in later). A resumed process builds
 	 * its base prompt before its first primary request, so tools that register
 	 * before that request (lazily registered extension tools, MCP servers)
