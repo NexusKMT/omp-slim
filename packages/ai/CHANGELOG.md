@@ -20,6 +20,7 @@
 - Fixed false thinking-loop detections for Gemini, DeepSeek, and Grok when responses contain repetitive code or markup such as VRML, SVG, or JSON; valid output is no longer discarded and retried.
 - Fixed the Cursor provider retaining request resources after requests completed.
 - Fixed session-affinity pins growing without bound in long-lived gateways; pins are now capped at 256 sessions per provider.
+- Fixed Anthropic sessions failing every request with HTTP 400 ("role 'system' must precede an 'assistant' message") after a tool change coincided with compaction or an interrupted or failed reply; sessions already stuck this way recover on the next message ([#14746](https://github.com/can1357/oh-my-pi/issues/14746)).
 
 ## [18.7.0] - 2026-10-06
 
