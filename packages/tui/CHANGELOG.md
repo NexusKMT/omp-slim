@@ -14,6 +14,8 @@
 - Sped up model hub search (~4×) and session tree, settings and extension-dashboard search (~2×) on large lists ([#14687](https://github.com/can1357/oh-my-pi/pull/14687) by [@H4vC](https://github.com/H4vC))
 - Reduced idle agent transcript viewer file I/O ([#14688](https://github.com/can1357/oh-my-pi/pull/14688) by [@H4vC](https://github.com/H4vC))
 - Reduced status-line work: fast repaints and brand-fade frames happen only with the animated `pi` segment, and git refreshes follow cache expiry instead of a 1 s poll ([#14691](https://github.com/can1357/oh-my-pi/pull/14691) by [@H4vC](https://github.com/H4vC))
+- Assistant messages extract their link targets once per text change, and converted Kitty images are no longer pinned after they leave the screen (they reconvert if shown again) ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
+- `AssistantMessageHost.resolveAssistantMessageLinks(texts)` is replaced by `resolveAssistantMessageLinkHrefs(hrefs)`, which takes already-extracted link destinations ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
