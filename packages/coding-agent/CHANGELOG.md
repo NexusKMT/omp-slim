@@ -25,6 +25,7 @@
 - Sped up output schema validation by memoizing validators ([#14702](https://github.com/can1357/oh-my-pi/pull/14702) by [@H4vC](https://github.com/H4vC))
 - Reduced eval live-output overhead (~7× less on 100k-line cells) and sped up terminal graphics extraction (~5×) ([#14704](https://github.com/can1357/oh-my-pi/pull/14704) by [@H4vC](https://github.com/H4vC))
 - A backpressured `omp stream` viewer that catches up now gets the current screen redacted with the latest secret patterns ([#14705](https://github.com/can1357/oh-my-pi/pull/14705) by [@H4vC](https://github.com/H4vC))
+- Fetching URLs on hosts that are not Mastodon, Lemmy or Discourse no longer re-probes those platforms on every request; a host found not to run one is skipped for 10 minutes ([#14707](https://github.com/can1357/oh-my-pi/pull/14707) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
