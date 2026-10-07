@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.2] - 2026-10-07
+
 ### Removed
 
 - Removed per-call `model` fields from task parameter types.
