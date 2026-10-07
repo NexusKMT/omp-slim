@@ -142,7 +142,7 @@ function isolateCulpritHunks(path: string, a: string[], b: string[], hunks: Edit
 		}
 	}
 
-	const keep = new Array<boolean>(n).fill(true);
+	const keep = Array.from({ length: n }, () => true);
 	// Whether reverting exactly the current `keep` set is known to parse.
 	let keepParses = false;
 	for (let i = 0; i < n; i++) {
