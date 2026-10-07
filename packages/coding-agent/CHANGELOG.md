@@ -8,6 +8,9 @@
 ### Changed
 
 - Generated session titles now carry their card in the title itself (`🧪 FLAKY: Fix flaky park tests`), so the `/resume` picker and session listings show the icon and short code too; `title.icons` applies to newly generated titles.
+### Added
+
+- Added `task.agentAccountPools` to keep a task agent, by exact name, on named OAuth accounts: its sessions, advisors and revived sessions authenticate only with those accounts and fail rather than use another account or an API key ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.8.0] - 2026-10-07
 

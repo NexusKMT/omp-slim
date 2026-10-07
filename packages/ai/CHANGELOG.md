@@ -5,6 +5,9 @@
 ### Fixed
 
 - Fixed Codex Fast (`priority`) and Ultrafast turns being recorded and priced as Standard when the backend echoes `service_tier: "default"`: a `default` or `auto` echo now keeps the tier that was sent, so those turns carry their tier's cost multiplier, count as premium requests, and keep their own model-perf row ([#14815](https://github.com/can1357/oh-my-pi/pull/14815) by [@alphastorm](https://github.com/alphastorm)).
+### Added
+
+- Added `AuthStorage.sessions.restrict(provider, sessionId, identityKeys)`, which keeps a provider session on the listed OAuth accounts: selection, pins, fallback and rotation stay inside the list, API keys are never used, and requests fail instead of borrowing another account ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.8.0] - 2026-10-07
 
