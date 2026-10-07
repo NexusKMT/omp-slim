@@ -5,7 +5,7 @@ import {
 	streamOpenAICodexResponses,
 } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import type { Message, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { createCodexModel } from "./helpers";
 
 describe("provider routing session release", () => {
 	it("closes every Codex credential and Lite socket for one session while preserving another response chain", async () => {
@@ -58,7 +58,7 @@ describe("provider routing session release", () => {
 			},
 		});
 		const model: Model<"openai-codex-responses"> = {
-			...getBundledModel("openai-codex", "gpt-5.5"),
+			...createCodexModel("gpt-5.5"),
 			baseUrl: `http://127.0.0.1:${server.port}`,
 		};
 		const providerSessionState = new Map<string, ProviderSessionState>();
