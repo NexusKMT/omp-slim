@@ -2281,7 +2281,51 @@ describe("openai-codex streaming", () => {
 		expect(result.usage.cost.output).toBeCloseTo(0.0012, 12);
 	});
 
-	it("bills a requested priority turn at standard rates when the response reports default", async () => {
+	it.each(["default", "auto"] as const)(
+		"bills a requested priority turn at the priority rate when the response echoes %s",
+		async echo => {
+			const tempDir = TempDir.createSync("@pi-codex-stream-");
+			setAgentDir(tempDir.path());
+			const sse = `${[
+				`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Hello" }] } })}`,
+				`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", service_tier: echo, usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8, input_tokens_details: { cached_tokens: 0 } } } })}`,
+			].join("\n\n")}\n\n`;
+			const model = buildModel({
+				id: "gpt-5.5",
+				name: "Codex",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://chatgpt.com/backend-api",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0 },
+				contextWindow: 400000,
+				maxTokens: 128000,
+			});
+			expect(model.serviceTierCost?.priority).toBe(2.5);
+			const result = await streamOpenAICodexResponses(
+				model,
+				{
+					systemPrompt: ["You are a helpful assistant."],
+					messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+				},
+				{
+					fetch: async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
+					apiKey: createCodexTestToken(),
+					serviceTier: "priority",
+				},
+			).result();
+			// The Codex backend echoes `default` on turns it serves Fast, so neither
+			// that echo nor `auto` overrides the sent tier: 5 input tokens at $1/MTok
+			// and 3 output at $2/MTok, times 2.5, counted as one premium request.
+			expect(result.serviceTier).toBe("priority");
+			expect(result.usage.cost.input).toBeCloseTo(0.0000125, 12);
+			expect(result.usage.cost.output).toBeCloseTo(0.000015, 12);
+			expect(result.usage.premiumRequests).toBe(1);
+		},
+	);
+
+	it("records an unrequested turn as default at standard rates when the response echoes default", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 		const sse = `${[
@@ -2309,12 +2353,13 @@ describe("openai-codex streaming", () => {
 			{
 				fetch: async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
 				apiKey: createCodexTestToken(),
-				serviceTier: "priority",
 			},
 		).result();
-		// 5 input tokens at $1/MTok and 3 output at $2/MTok, no 2.5x priority multiplier.
-		expect(result.usage.cost.input).toBeCloseTo(0.000005);
-		expect(result.usage.cost.output).toBeCloseTo(0.000006);
+		// 5 input tokens at $1/MTok and 3 output at $2/MTok, no multiplier.
+		expect(result.serviceTier).toBe("default");
+		expect(result.usage.cost.input).toBeCloseTo(0.000005, 12);
+		expect(result.usage.cost.output).toBeCloseTo(0.000006, 12);
+		expect(result.usage.premiumRequests).toBe(0);
 	});
 
 	it("fails truncated SSE streams that never emit a terminal response event", async () => {
@@ -3967,6 +4012,86 @@ describe("openai-codex streaming", () => {
 		// request, so live sessions and the stats backfill agree.
 		expect(result.serviceTier).toBe("priority");
 		expect(result.usage.premiumRequests).toBe(1);
+	});
+
+	it("records the websocket tier onPayload sent when the response echoes default", async () => {
+		const tempDir = TempDir.createSync("@pi-codex-stream-");
+		setAgentDir(tempDir.path());
+		const sentRequests: Array<Record<string, unknown>> = [];
+		const fetchMock = vi.fn(async () => {
+			throw new Error("SSE fallback should not be called");
+		});
+
+		class DefaultEchoWebSocket extends MockWebSocket {
+			constructor(url: string, options?: { headers?: WsHeaders }) {
+				super(url, options);
+				this.scheduleOpen();
+			}
+
+			override send(data: string): void {
+				sentRequests.push(JSON.parse(data) as Record<string, unknown>);
+				this.sendJson({
+					type: "response.output_item.added",
+					item: { type: "message", id: "msg_ws", role: "assistant", status: "in_progress", content: [] },
+				});
+				this.sendJson({ type: "response.content_part.added", part: { type: "output_text", text: "" } });
+				this.sendJson({ type: "response.output_text.delta", delta: "Hello WS" });
+				this.sendJson({
+					type: "response.output_item.done",
+					item: {
+						type: "message",
+						id: "msg_ws",
+						role: "assistant",
+						status: "completed",
+						content: [{ type: "output_text", text: "Hello WS" }],
+					},
+				});
+				this.sendJson({
+					type: "response.done",
+					response: { id: "resp_ws", status: "completed", service_tier: "default", usage: DEFAULT_USAGE },
+				});
+			}
+		}
+
+		global.WebSocket = DefaultEchoWebSocket as unknown as typeof WebSocket;
+
+		const model: Model<"openai-codex-responses"> = buildModel({
+			id: "gpt-5.5",
+			name: "Codex",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			baseUrl: "https://chatgpt.com/backend-api",
+			reasoning: true,
+			preferWebsockets: true,
+			input: ["text"],
+			cost: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0 },
+			contextWindow: 400000,
+			maxTokens: 128000,
+		});
+		const result = await streamOpenAICodexResponses(
+			model,
+			{
+				systemPrompt: ["You are a helpful assistant."],
+				messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+			},
+			{
+				fetch: fetchMock as FetchImpl,
+				apiKey: createCodexTestToken(),
+				serviceTier: "priority",
+				sessionId: "ws-payload-tier-session",
+				providerSessionState: new Map<string, ProviderSessionState>(),
+				onPayload: async payload => ({ ...(payload as Record<string, unknown>), service_tier: "flex" }),
+			},
+		).result();
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(sentRequests[0]?.service_tier).toBe("flex");
+		// The hook sent flex instead of the requested priority, so the `default`
+		// echo resolves to flex: 5 input tokens at $1/MTok and 3 output at $2/MTok,
+		// times 0.5, with no premium request.
+		expect(result.serviceTier).toBe("flex");
+		expect(result.usage.cost.input).toBeCloseTo(0.0000025, 12);
+		expect(result.usage.cost.output).toBeCloseTo(0.000003, 12);
+		expect(result.usage.premiumRequests).toBe(0);
 	});
 
 	it("continues websocket chains across Standard → Fast → Standard service tiers", async () => {
