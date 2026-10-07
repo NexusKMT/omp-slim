@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the `lsp` tool and `generate_image` hanging on a FIFO or terminal path, or exhausting memory on `/dev/zero`; such files are now refused before they're read ([#14730](https://github.com/can1357/oh-my-pi/pull/14730) by [@DrFaustus-vic](https://github.com/DrFaustus-vic)).
+
 ## [18.8.0] - 2026-10-07
 
 ### Added
