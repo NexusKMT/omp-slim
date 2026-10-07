@@ -2281,7 +2281,51 @@ describe("openai-codex streaming", () => {
 		expect(result.usage.cost.output).toBeCloseTo(0.0012, 12);
 	});
 
-	it("bills a requested priority turn at standard rates when the response reports default", async () => {
+	it.each(["default", "auto"] as const)(
+		"bills a requested priority turn at the priority rate when the response echoes %s",
+		async echo => {
+			const tempDir = TempDir.createSync("@pi-codex-stream-");
+			setAgentDir(tempDir.path());
+			const sse = `${[
+				`data: ${JSON.stringify({ type: "response.output_item.added", item: { type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Hello" }] } })}`,
+				`data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", service_tier: echo, usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8, input_tokens_details: { cached_tokens: 0 } } } })}`,
+			].join("\n\n")}\n\n`;
+			const model = buildModel({
+				id: "gpt-5.5",
+				name: "Codex",
+				api: "openai-codex-responses",
+				provider: "openai-codex",
+				baseUrl: "https://chatgpt.com/backend-api",
+				reasoning: true,
+				input: ["text"],
+				cost: { input: 1, output: 2, cacheRead: 0.5, cacheWrite: 0 },
+				contextWindow: 400000,
+				maxTokens: 128000,
+			});
+			expect(model.serviceTierCost?.priority).toBe(2.5);
+			const result = await streamOpenAICodexResponses(
+				model,
+				{
+					systemPrompt: ["You are a helpful assistant."],
+					messages: [{ role: "user", content: "Say hello", timestamp: Date.now() }],
+				},
+				{
+					fetch: async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
+					apiKey: createCodexTestToken(),
+					serviceTier: "priority",
+				},
+			).result();
+			// The Codex backend echoes `default` on turns it serves Fast, so neither
+			// that echo nor `auto` overrides the sent tier: 5 input tokens at $1/MTok
+			// and 3 output at $2/MTok, times 2.5, counted as one premium request.
+			expect(result.serviceTier).toBe("priority");
+			expect(result.usage.cost.input).toBeCloseTo(0.0000125, 12);
+			expect(result.usage.cost.output).toBeCloseTo(0.000015, 12);
+			expect(result.usage.premiumRequests).toBe(1);
+		},
+	);
+
+	it("records an unrequested turn as default at standard rates when the response echoes default", async () => {
 		const tempDir = TempDir.createSync("@pi-codex-stream-");
 		setAgentDir(tempDir.path());
 		const sse = `${[
@@ -2309,12 +2353,13 @@ describe("openai-codex streaming", () => {
 			{
 				fetch: async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } }),
 				apiKey: createCodexTestToken(),
-				serviceTier: "priority",
 			},
 		).result();
-		// 5 input tokens at $1/MTok and 3 output at $2/MTok, no 2.5x priority multiplier.
-		expect(result.usage.cost.input).toBeCloseTo(0.000005);
-		expect(result.usage.cost.output).toBeCloseTo(0.000006);
+		// 5 input tokens at $1/MTok and 3 output at $2/MTok, no multiplier.
+		expect(result.serviceTier).toBe("default");
+		expect(result.usage.cost.input).toBeCloseTo(0.000005, 12);
+		expect(result.usage.cost.output).toBeCloseTo(0.000006, 12);
+		expect(result.usage.premiumRequests).toBe(0);
 	});
 
 	it("fails truncated SSE streams that never emit a terminal response event", async () => {
