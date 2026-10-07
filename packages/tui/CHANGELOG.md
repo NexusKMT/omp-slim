@@ -13,6 +13,7 @@
 - Sped up `@` path completion in folders with many symlinks ([#14687](https://github.com/can1357/oh-my-pi/pull/14687) by [@H4vC](https://github.com/H4vC))
 - Sped up model hub search (~4×) and session tree, settings and extension-dashboard search (~2×) on large lists ([#14687](https://github.com/can1357/oh-my-pi/pull/14687) by [@H4vC](https://github.com/H4vC))
 - Reduced idle agent transcript viewer file I/O ([#14688](https://github.com/can1357/oh-my-pi/pull/14688) by [@H4vC](https://github.com/H4vC))
+- Reduced status-line work: fast repaints and brand-fade frames happen only with the animated `pi` segment, and git refreshes follow cache expiry instead of a 1 s poll ([#14691](https://github.com/can1357/oh-my-pi/pull/14691) by [@H4vC](https://github.com/H4vC))
 
 ### Fixed
 
