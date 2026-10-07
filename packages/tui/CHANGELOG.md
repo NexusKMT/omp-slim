@@ -11,6 +11,7 @@
 ### Fixed
 
 - Fixed quadratic Markdown lexing of documents with bare `\begin{…}` environments or unclosed `\[` openers ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
+- Fixed quadratic eval display formatting on long semicolon-free JavaScript ([#14685](https://github.com/can1357/oh-my-pi/pull/14685) by [@H4vC](https://github.com/H4vC))
 ### Added
 
 - Writes of `.svg` and Mermaid (`.mmd`, `.mermaid`) files draw the image or diagram under the card, as the same code blocks draw in assistant replies: an SVG redraws as it streams, a diagram appears once the file is complete; tool renderers opt in through `figure`.
