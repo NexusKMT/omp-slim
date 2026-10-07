@@ -65,13 +65,14 @@ describe("parseCardTitleReply", () => {
 describe("formatCardTitle", () => {
 	const card = { code: "FLAKY", emoji: "🧪", nf: "nf-md-flask" };
 
-	it("uses the Nerd Fonts glyph only when glyphs are allowed", () => {
-		expect(formatCardTitle("Fix flaky park tests", card, true)).toBe("\u{f0093} FLAKY: Fix flaky park tests");
-		expect(formatCardTitle("Fix flaky park tests", card, false)).toBe("🧪 FLAKY: Fix flaky park tests");
+	it("shows the icon the style allows", () => {
+		expect(formatCardTitle("Fix flaky park tests", card, "nf+emoji")).toBe("\u{f0093} FLAKY: Fix flaky park tests");
+		expect(formatCardTitle("Fix flaky park tests", card, "emoji")).toBe("🧪 FLAKY: Fix flaky park tests");
+		expect(formatCardTitle("Fix flaky park tests", card, "boring")).toBe("Fix flaky park tests");
 	});
 
 	it("falls back to the plain title when the card has no icon to show", () => {
-		expect(formatCardTitle("Fix flaky park tests", { code: "FLAKY", nf: "nf-md-flask" }, false)).toBe(
+		expect(formatCardTitle("Fix flaky park tests", { code: "FLAKY", nf: "nf-md-flask" }, "emoji")).toBe(
 			"Fix flaky park tests",
 		);
 	});

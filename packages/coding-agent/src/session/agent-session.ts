@@ -490,7 +490,7 @@ import {
 	cfgExtendedContext,
 	cfgWorkspaceAdditionalDirectories,
 } from "./context-settings";
-import { cfgTitleRefreshOnReplan } from "../goals/settings";
+import { cfgTitleGenerator, cfgTitleIcons, cfgTitleRefreshOnReplan } from "../utils/title-settings";
 import {
 	cfgArchiveEnabled,
 	cfgComputerEnabled,
@@ -9192,13 +9192,14 @@ export class AgentSession implements SettingsScope {
 	 * user message persists titles with the same environment, signal, and local
 	 * extension-command policy.
 	 *
-	 * Call before submitting the message. The title comes from a fork of the
-	 * reply this message starts: at the reply's first non-thinking block, the
-	 * title request runs as an ephemeral side turn on the same model, system
-	 * prompt, tools and prompt-cache key, so it reads the whole prefix from cache
-	 * and sees the model's own reading of the task, and asks for a card index
-	 * (icon and code) with the title. The title model ({@link generateTitle})
-	 * takes over when the fork cannot run, fails, times out or declines.
+	 * Call before submitting the message. Under `title.generator: fork` the title
+	 * comes from a fork of the reply this message starts: at the reply's first
+	 * non-thinking block, the title request runs as an ephemeral side turn on the
+	 * same model, system prompt, tools and prompt-cache key, so it reads the whole
+	 * prefix from cache and sees the model's own reading of the task, and asks for
+	 * a card index (icon and code, unless `title.icons` is `boring`) with the
+	 * title. The title model ({@link generateTitle}) takes over when the fork
+	 * cannot run, fails, times out or declines, and is the only path under `tiny`.
 	 */
 	maybeStartTitleGeneration(firstMessage: string): void {
 		const extensionCommandSpace = firstMessage.indexOf(" ");
@@ -9225,7 +9226,12 @@ export class AgentSession implements SettingsScope {
 		// The fork needs a reply of its own to branch from (a busy session queues
 		// this message behind another turn) and gives way to a TITLE_SYSTEM.md
 		// override, which only the title model applies.
-		if (this.model && !this.isStreaming && this.#titleSystemPrompt === undefined) {
+		if (
+			cfgTitleGenerator.get(this.settings) === "fork" &&
+			this.model &&
+			!this.isStreaming &&
+			this.#titleSystemPrompt === undefined
+		) {
 			this.#armTitleFork(firstMessage, sessionId, attachmentOnly);
 			return;
 		}
@@ -9300,9 +9306,13 @@ export class AgentSession implements SettingsScope {
 		if (this.sessionManager.getSessionId() !== sessionId || this.sessionName) return;
 		this.#titleGenerationInFlightFor = sessionId;
 		const started = performance.now();
+		const icons = cfgTitleIcons.get(this.settings);
 		this.runEphemeralTurn({
-			// Without Nerd Fonts the card shows its emoji, so only that is asked for.
-			promptText: prompt.render(titleForkPrompt, { nerdFonts: nerdGlyphsActive() }),
+			// Ask only for the icons the title can show: an emoji without Nerd Fonts, no card when boring.
+			promptText: prompt.render(titleForkPrompt, {
+				card: icons !== "boring",
+				nerdFonts: icons === "nf+emoji" && nerdGlyphsActive(),
+			}),
 			signal: AbortSignal.any([fork.signal, AbortSignal.timeout(TITLE_FORK_TIMEOUT_MS)]),
 		})
 			.then(

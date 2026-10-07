@@ -4,6 +4,7 @@
  * window title of the form `<icon> <CODE>: <title>`; any other title is shown
  * as-is, so a title without a card stays a plain title.
  */
+import type { TitleIcons } from "./title-settings";
 import type { SessionTitleCard } from "../session/session-entries";
 import { normalizeGeneratedTitle } from "../tiny/text";
 import { canonicalNerdFontName, nerdFontGlyph } from "./nerd-font-glyphs";
@@ -99,12 +100,12 @@ export function parseCardTitleReply(reply: string, sourceText?: string): CardTit
 
 /**
  * The window title for `title` with its card: `<icon> <CODE>: <title>`
- * (`🧪 FLAKY: Fix flaky park tests`), or the plain title without a card or
- * without an icon to show. The icon is the Nerd Fonts glyph when `nerdGlyphs`
- * and the catalog knows the card's name, else the card's emoji.
+ * (`🧪 FLAKY: Fix flaky park tests`), or the plain title without a card, without
+ * an icon to show, or under `boring` icons. The icon is the Nerd Fonts glyph under
+ * `nf+emoji` when the catalog knows the card's name, else the card's emoji.
  */
-export function formatCardTitle(title: string, card: SessionTitleCard | undefined, nerdGlyphs: boolean): string {
-	if (!card) return title;
-	const icon = (nerdGlyphs && card.nf ? nerdFontGlyph(card.nf) : undefined) ?? card.emoji;
+export function formatCardTitle(title: string, card: SessionTitleCard | undefined, icons: TitleIcons): string {
+	if (!card || icons === "boring") return title;
+	const icon = (icons === "nf+emoji" && card.nf ? nerdFontGlyph(card.nf) : undefined) ?? card.emoji;
 	return icon ? `${icon} ${card.code}: ${title}` : title;
 }

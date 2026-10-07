@@ -26,6 +26,7 @@ import { roleCandidatePool } from "../config/model-roles";
 import { formatModelStringWithRouting } from "../config/model-resolver";
 import { collectOnlineTinyCandidates, expandOnlineTinyModelFallbacks } from "../tiny/online-candidates";
 import type { Settings } from "../config/settings";
+import type { TitleIcons } from "./title-settings";
 import type { SessionTitleCard } from "../session/session-entries";
 import titleMarkerInstruction from "../prompts/system/title-marker-instruction.md" with { type: "text" };
 import titleSystemPrompt from "../prompts/system/title-system.md" with { type: "text" };
@@ -640,11 +641,11 @@ function writeTerminalTitle(title: string, recomposeStaticOnFailure = false): vo
 /**
  * Set the session's base terminal title. With a `card` (the session manager's
  * `getSessionTitleCard()`) the session name is shown in the card form
- * `<icon> <CODE>: <name>` that Tern indexes parked panes by. The icon
- * is the card's Nerd Fonts glyph only while a TSP terminal renders the title
- * and the effective symbol preset is `nerd` (forced while a Tern surface is
- * live); window titles elsewhere render in the OS UI font, so they get the
- * card's emoji.
+ * `<icon> <CODE>: <name>` that Tern indexes parked panes by, unless `title.icons`
+ * is `boring`. Under `nf+emoji` the icon is the card's Nerd Fonts glyph only
+ * while a TSP terminal renders the title and the effective symbol preset is
+ * `nerd` (forced while a Tern surface is live); window titles elsewhere render in
+ * the OS UI font, so they get the card's emoji.
  */
 export function setSessionTerminalTitle(sessionName: string | undefined, cwd?: string, card?: SessionTitleCard): void {
 	// An authoritative session title (rename, new session, focus swap) supersedes
@@ -663,14 +664,33 @@ export function setSessionTerminalTitle(sessionName: string | undefined, cwd?: s
 	terminalTitleRuntime.label =
 		terminalTitleRuntime.sessionName === undefined
 			? getFallbackTerminalTitle(cwd)
-			: formatCardTitle(terminalTitleRuntime.sessionName, card, false);
+			: formatCardTitle(terminalTitleRuntime.sessionName, card, iconsWithoutNerdFonts());
 	emitTerminalTitle();
 	reportTernSession();
 }
 
 /**
- * Whether the effective symbol preset is `nerd`: card titles then show the
- * card's Nerd Fonts glyph, and the title fork asks the model for one.
+ * Choose how the session title shows its card icon (driven by `title.icons`).
+ * Re-renders the current title in the new style.
+ */
+export function setTerminalTitleIcons(icons: TitleIcons): void {
+	if (icons === terminalTitleRuntime.icons) return;
+	terminalTitleRuntime.icons = icons;
+	const { sessionName, card } = terminalTitleRuntime;
+	if (sessionName !== undefined)
+		terminalTitleRuntime.label = formatCardTitle(sessionName, card, iconsWithoutNerdFonts());
+	emitTerminalTitle();
+}
+
+/** `title.icons` for a title rendered without Nerd Fonts: `nf+emoji` shows the emoji. */
+function iconsWithoutNerdFonts(): TitleIcons {
+	return terminalTitleRuntime.icons === "nf+emoji" ? "emoji" : terminalTitleRuntime.icons;
+}
+
+/**
+ * Whether the effective symbol preset is `nerd`: under `nf+emoji` title icons,
+ * card titles then show the card's Nerd Fonts glyph, and the title fork asks the
+ * model for one.
  */
 export function nerdGlyphsActive(): boolean {
 	return typeof theme !== "undefined" && theme.getSymbolPreset() === "nerd";
@@ -794,6 +814,8 @@ const terminalTitleRuntime: {
 	sessionName: string | undefined;
 	/** The session name's card index, if it has one. */
 	card: SessionTitleCard | undefined;
+	/** How the card shows its icon (`title.icons`). */
+	icons: TitleIcons;
 	/** The branch's pull request, shown in the native title only. */
 	pullRequest: number | undefined;
 	/** Unsubscribes the native-rendering watch taken by `initTerminalTitleState()`. */
@@ -824,6 +846,7 @@ const terminalTitleRuntime: {
 	label: undefined,
 	sessionName: undefined,
 	card: undefined,
+	icons: "nf+emoji",
 	pullRequest: undefined,
 	unwatchNative: undefined,
 	state: "idle",
@@ -889,7 +912,11 @@ function emitTerminalTitle(): void {
 	const native = isNativeRendering();
 	const nativeName =
 		native && terminalTitleRuntime.sessionName !== undefined
-			? formatCardTitle(terminalTitleRuntime.sessionName, terminalTitleRuntime.card, nerdGlyphsActive())
+			? formatCardTitle(
+					terminalTitleRuntime.sessionName,
+					terminalTitleRuntime.card,
+					nerdGlyphsActive() ? terminalTitleRuntime.icons : iconsWithoutNerdFonts(),
+				)
 			: undefined;
 	const next =
 		terminalTitleRuntime.extensionOverride ??

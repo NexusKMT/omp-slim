@@ -35,7 +35,11 @@ const FIRST_MESSAGE = "fix the flaky park tests";
 const CARD_REPLY = '<title nf="nf-md-flask" emoji="🧪" code="FLAKY">Fix flaky park tests</title>';
 
 /** A session whose main turns answer from `main` and whose side turns (the title fork) from `side`. */
-async function createSession(main: MockModel, side: MockModel): Promise<AgentSession> {
+async function createSession(
+	main: MockModel,
+	side: MockModel,
+	settings: Record<string, unknown> = {},
+): Promise<AgentSession> {
 	authStorage = await AuthStorage.create(":memory:");
 	authStorage.keys.setRuntime("anthropic", "test-key");
 	const model = getBundledModel("anthropic", "claude-sonnet-4-5");
@@ -51,6 +55,7 @@ async function createSession(main: MockModel, side: MockModel): Promise<AgentSes
 			"compaction.enabled": false,
 			"retry.enabled": false,
 			modelRoles: { tiny: `${model.provider}/${model.id}` },
+			...settings,
 		}),
 		modelRegistry: new ModelRegistry(authStorage),
 		sideStreamFn: side.stream,
@@ -118,6 +123,22 @@ describe("AgentSession title fork", () => {
 		expect(target.sessionManager.getSessionTitleCard()).toBeUndefined();
 		expect(titleInputs).toHaveLength(1);
 		expect(titleInputs[0]).toContain(FIRST_MESSAGE);
+	});
+
+	it("titles with the title model alone under title.generator tiny", async () => {
+		const main = createMockModel({ responses: [{ content: ["Reading the park tests first."] }] });
+		const side = createMockModel({ handler: { content: [CARD_REPLY] } });
+		const target = await createSession(main, side, { "title.generator": "tiny" });
+		vi.spyOn(ai, "completeSimple").mockResolvedValue(createAssistantMessage("<title>Fix flaky park tests</title>"));
+		const titled = nextTitle(target);
+
+		target.maybeStartTitleGeneration(FIRST_MESSAGE);
+		await target.prompt(FIRST_MESSAGE);
+		await titled;
+
+		expect(target.sessionName).toBe("Fix flaky park tests");
+		expect(target.sessionManager.getSessionTitleCard()).toBeUndefined();
+		expect(side.calls).toHaveLength(0);
 	});
 
 	it("cancels an armed fork on interrupt without blocking the next message's title", async () => {
