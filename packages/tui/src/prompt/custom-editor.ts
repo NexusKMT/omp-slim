@@ -222,7 +222,7 @@ function normalizePastedPath(path: string): string {
 			}
 		}
 	}
-	return unquoted.replace(SHELL_ESCAPED_PATH_CHAR_REGEX, "$1");
+	return (unquoted.startsWith("\\~/") ? unquoted.slice(1) : unquoted).replace(SHELL_ESCAPED_PATH_CHAR_REGEX, "$1");
 }
 
 function isExplicitPastedPath(path: string): boolean {
