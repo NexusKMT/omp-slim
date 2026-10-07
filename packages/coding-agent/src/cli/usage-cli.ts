@@ -289,6 +289,18 @@ function reportAccountLabel(report: UsageReport, index: number): string {
 	return `account ${index + 1}`;
 }
 
+/** Bold identity plus the dim same-email qualifier and plan the main view shows. */
+function formatQualifiedIdentity(
+	report: UsageReport,
+	peers: readonly UsageReport[],
+	label: string,
+	redaction?: Map<string, string>,
+): string {
+	const identity = sanitizeText((redaction?.get(label) ?? label).replace(/[\r\n\t]+/g, " "));
+	const rendered = formatCodexUsageReportLabel(report, peers, label, redaction, true, "inline");
+	return `${chalk.bold(identity)}${chalk.dim(rendered.slice(identity.length))}`;
+}
+
 function formatAccountHeader(
 	report: UsageReport,
 	peers: readonly UsageReport[],
@@ -301,9 +313,7 @@ function formatAccountHeader(
 	const label = reportAccountLabel(report, index);
 	let header = `${icon} ${chalk.bold(redaction?.get(label) ?? label)}`;
 	if (report.provider === "openai-codex") {
-		const identity = sanitizeText((redaction?.get(label) ?? label).replace(/[\r\n\t]+/g, " "));
-		const rendered = formatCodexUsageReportLabel(report, peers, label, redaction, true, "inline");
-		header = `${icon} ${chalk.bold(identity)}${chalk.dim(rendered.slice(identity.length))}`;
+		header = `${icon} ${formatQualifiedIdentity(report, peers, label, redaction)}`;
 	} else {
 		const metaOrgName = report.metadata?.orgName;
 		const metaOrgId = report.metadata?.orgId;
@@ -749,6 +759,8 @@ interface HistorySeries {
 
 interface HistoryAccount {
 	label: string;
+	/** Identity stand-in so same-email accounts get the main view's qualifier. */
+	report: UsageReport;
 	series: Map<string, HistorySeries>;
 }
 
@@ -762,8 +774,17 @@ function historySeriesTitle(entry: UsageHistoryEntry): string {
 	return `${label} (${windowLabel})`;
 }
 
-function historyAccountLabel(entry: UsageHistoryEntry): string {
-	return entry.email ?? entry.accountId ?? entry.accountKey;
+function historyAccount(entry: UsageHistoryEntry): HistoryAccount {
+	return {
+		label: entry.email ?? entry.accountId ?? entry.accountKey,
+		report: {
+			provider: entry.provider,
+			fetchedAt: entry.recordedAt,
+			limits: [],
+			metadata: { email: entry.email, accountId: entry.accountId },
+		},
+		series: new Map(),
+	};
 }
 
 function historyStatus(fraction: number | undefined, status: UsageHistoryEntry["status"]): LimitStatus {
@@ -826,7 +847,7 @@ export function formatUsageHistory(
 		}
 		let account = accounts.get(entry.accountKey);
 		if (!account) {
-			account = { label: historyAccountLabel(entry), series: new Map() };
+			account = historyAccount(entry);
 			accounts.set(entry.accountKey, account);
 		}
 		let series = account.series.get(entry.limitId);
@@ -851,8 +872,9 @@ export function formatUsageHistory(
 			`${chalk.bold.cyan(formatProviderName(provider))} ${chalk.dim(`— ${accounts.size} ${accounts.size === 1 ? "account" : "accounts"}`)}`,
 		);
 		const sortedAccounts = [...accounts.values()].sort((a, b) => a.label.localeCompare(b.label));
+		const peers = sortedAccounts.map(account => account.report);
 		for (const account of sortedAccounts) {
-			lines.push(`  ${chalk.bold(redaction?.get(account.label) ?? account.label)}`);
+			lines.push(`  ${formatQualifiedIdentity(account.report, peers, account.label, redaction)}`);
 			const labelWidth = [...account.series.values()].reduce((max, series) => Math.max(max, series.title.length), 0);
 			const sortedSeries = [...account.series.values()].sort((a, b) => a.title.localeCompare(b.title));
 			for (const series of sortedSeries) {

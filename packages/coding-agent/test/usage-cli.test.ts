@@ -993,6 +993,27 @@ describe("formatUsageHistory", () => {
 		expect(text).not.toContain("dummy.primary@example.test");
 		expect(text).toContain("du*");
 	});
+
+	it("qualifies accounts that share an email the way the main view does", () => {
+		const shared = { provider: "openai-codex", email: "dummy.shared@example.test", limitId: "openai-codex:primary" };
+		const text = stripVTControlCharacters(
+			formatUsageHistory(
+				[
+					historyEntry(NOW - HOUR, 0.1, { ...shared, accountKey: "codex|team", accountId: "acct-team" }),
+					historyEntry(NOW - HOUR, 0.5, { ...shared, accountKey: "codex|pro", accountId: "acct-pro" }),
+					historyEntry(NOW - HOUR, 0.3),
+				],
+				SINCE,
+				NOW,
+			),
+		);
+		const accountLines = text.split("\n").filter(line => line.startsWith("  ") && !line.startsWith("    "));
+		expect(accountLines).toEqual([
+			"  dummy.primary@example.test",
+			"  dummy.shared@example.test · acct-team",
+			"  dummy.shared@example.test · acct-pro",
+		]);
+	});
 });
 
 describe("usage command configuration", () => {
