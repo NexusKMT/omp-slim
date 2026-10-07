@@ -6,6 +6,11 @@
 
 - Added `PI_NATIVES_DIR` to choose where a compiled binary extracts its native addon; the version subdirectory is still appended, so runs with separate `HOME`s can share one copy without sharing other data ([#14735](https://github.com/can1357/oh-my-pi/pull/14735) by [@alphastorm](https://github.com/alphastorm))
 
+### Fixed
+
+- Fixed background builtins started in a subshell, such as `(yes > /dev/null &)`, running forever inside the host process after the subshell exited; they now end with it, as external commands already did
+- Fixed `kill %N` failing with `failed to send signal` on background jobs that run inside the shell (builtins, functions, compound commands); it now stops them
+
 ## [18.7.0] - 2026-10-06
 
 ### Breaking Changes
