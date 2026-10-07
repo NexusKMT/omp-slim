@@ -197,6 +197,37 @@ describe("AuthStorage OAuth account selection", () => {
 		expect(refreshedIds).toEqual([target.credentialId]);
 	});
 
+	test("oauth.accessById auth-recovery force reuses this process's recent mint", async () => {
+		const storage = authStorage;
+		if (!storage) throw new Error("test setup failed");
+		let mints = 0;
+		vi.spyOn(oauthUtils, "refreshOAuthToken").mockImplementation(async (_provider, credential) => {
+			mints += 1;
+			return { ...credential, access: `access-b-mint-${mints}`, expires: Date.now() + 60 * 60_000 };
+		});
+		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
+			const credential = credentials[provider];
+			if (!credential) return null;
+			return { newCredentials: credential, apiKey: credential.access };
+		});
+		await storage.credentials.set(PROVIDER, [oauthCredential("a"), oauthCredential("b")]);
+		const target = storage.oauth.accounts(PROVIDER)[1];
+		if (!target) throw new Error("expected second OAuth account");
+		const recovery = { forceRefresh: true, refreshReason: "auth-recovery" as const };
+
+		expect(await storage.oauth.accessById(PROVIDER, target.credentialId, recovery)).toMatchObject({
+			accessToken: "access-b-mint-1",
+		});
+		expect(await storage.oauth.accessById(PROVIDER, target.credentialId, recovery)).toMatchObject({
+			accessToken: "access-b-mint-1",
+		});
+		expect(mints).toBe(1);
+		// A generic forced refresh still mints.
+		expect(await storage.oauth.accessById(PROVIDER, target.credentialId, { forceRefresh: true })).toMatchObject({
+			accessToken: "access-b-mint-2",
+		});
+	});
+
 	test("resolving the selected account by ID fails without touching siblings", async () => {
 		const storage = authStorage;
 		if (!storage) throw new Error("test setup failed");

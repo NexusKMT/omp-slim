@@ -177,7 +177,11 @@ export class OAuthAccounts implements OAuthApi {
 	): Promise<OAuthAccessResolution> {
 		try {
 			// tryOAuth refreshes only expired tokens; it resyncs this row from the store after a forced re-mint.
-			if (options?.forceRefresh) await this.refresh(selection.credentialId, options.signal);
+			if (options?.forceRefresh) {
+				await this.refresh(selection.credentialId, options.signal, {
+					reuseRecentMint: options.refreshReason === "auth-recovery",
+				});
+			}
 			const resolved = await this.#deps.selector.tryOAuth(
 				provider,
 				{ credential: selection.credential, index: selection.index },
