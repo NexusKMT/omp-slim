@@ -33,6 +33,8 @@
 - Sped up LSP/DAP message framing ([#14710](https://github.com/can1357/oh-my-pi/pull/14710) by [@H4vC](https://github.com/H4vC))
 - Reduced MCP refreshes by coalescing bursts of tool-set change notifications and `tools/list` refreshes ([#14711](https://github.com/can1357/oh-my-pi/pull/14711) by [@H4vC](https://github.com/H4vC))
 - Sped up repeated LLM requests with inline images and blob uploads ([#14712](https://github.com/can1357/oh-my-pi/pull/14712) by [@H4vC](https://github.com/H4vC))
+- Sped up concurrent subagent launches by sharing one agent discovery scan ([#14713](https://github.com/can1357/oh-my-pi/pull/14713) by [@H4vC](https://github.com/H4vC))
+- Sped up ssh:// file operations by reusing verified connections for 30 s ([#14713](https://github.com/can1357/oh-my-pi/pull/14713) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
