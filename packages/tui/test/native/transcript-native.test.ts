@@ -118,6 +118,31 @@ describe("native transcript", () => {
 		expect(h.errors).toEqual([]);
 	});
 
+	it("hands the terminal session-resolved targets for relative links once the segment closes", async () => {
+		const component = new AssistantMessageComponent();
+		const h = await startWith(h => h.tui.addChild(component));
+		const source = [
+			"| Board | Shot |",
+			"|---|---|",
+			"| 10×10 | [Open screenshot](artifacts/10x10.png) |",
+			"",
+			"Code `[x](artifacts/10x10.png)` stays, [web](https://x.dev) and [gone](missing.md) too.",
+		].join("\n");
+		component.updateContent(assistant([{ type: "text", text: source }]), { transient: true });
+		await h.render();
+		expect(h.find(node => node.k === "md")?.p).toMatchObject({ text: source, stream: true });
+
+		const target = "file:///C:/Users/me/.omp/wt/cr2-43939c6/artifacts/10x10.png";
+		component.updateContent(assistant([{ type: "text", text: source }]));
+		component.setLinkTargets(new Map([["artifacts/10x10.png", target]]));
+		component.markTranscriptBlockFinalized();
+		await h.render();
+		expect(h.find(node => node.k === "md")?.p).toMatchObject({
+			text: source.replace("[Open screenshot](artifacts/10x10.png)", `[Open screenshot](${target})`),
+		});
+		expect(h.errors).toEqual([]);
+	});
+
 	it("mirrors a native toggle into the tool card and re-collapses it on a transcript-wide collapse", async () => {
 		let builder: ChatTranscriptBuilder | undefined;
 		const h = await startWith(h => {
