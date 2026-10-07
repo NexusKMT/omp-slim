@@ -12,6 +12,7 @@ import {
 	ErrorDetailsSchema,
 	InteractionUpdateSchema,
 	ReadArgsSchema,
+	StepCompletedUpdateSchema,
 	TextDeltaUpdateSchema,
 	ToolCallSchema,
 	ToolCallStartedUpdateSchema,
@@ -30,6 +31,9 @@ type Scenario =
 	| { kind: "connect-classification-detail-after-turn" }
 	| { kind: "connect-cursor-error-details-after-turn"; isRetryable: boolean }
 	| { kind: "connect-structured-error-after-turn" }
+	| { kind: "connect-provider-error-after-step"; isRetryable: boolean | undefined }
+	| { kind: "cut-after-step-completed" }
+	| { kind: "cut-after-content-following-step" }
 	| { kind: "grpc-trailer-after-turn" }
 	| { kind: "end-before-turn" }
 	| { kind: "hang-after-turn" }
@@ -79,6 +83,31 @@ function turnEndedFrame(): Buffer {
 		},
 	});
 	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+function stepCompletedFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "interactionUpdate",
+			value: create(InteractionUpdateSchema, {
+				message: {
+					case: "stepCompleted",
+					value: create(StepCompletedUpdateSchema, { stepId: 0n, stepDurationMs: 1n }),
+				},
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+/**
+ * The head of a frame whose length prefix promises more bytes than ever
+ * arrive: the shape of a stream closed partway through Cursor's trailing
+ * checkpoint.
+ */
+function truncatedFrame(): Buffer {
+	const frame = frameConnectMessage(Buffer.alloc(4096, 0x1a));
+	return frame.subarray(0, 512);
 }
 
 function connectEndErrorFrame(code: string, message: string, details?: unknown): Buffer {
@@ -226,6 +255,47 @@ async function startServer(): Promise<string> {
 			// not ending.
 			stream.write(
 				Buffer.concat([execRequestFrame(), connectEndErrorFrame("unavailable", "mid-exec transport failure")]),
+			);
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "cut-after-step-completed") {
+			// Captured from live Cursor turns: the answer and `stepCompleted`
+			// arrive, then the stream closes partway through the trailing repeat
+			// checkpoint, so `turnEnded` and the end frame never come.
+			stream.write(Buffer.concat([textDeltaFrame("complete answer"), stepCompletedFrame(), truncatedFrame()]));
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "cut-after-content-following-step") {
+			stream.write(Buffer.concat([stepCompletedFrame(), textDeltaFrame("still streaming")]));
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "connect-provider-error-after-step") {
+			// Shape captured from a live Cursor rejection: ERROR_PROVIDER_ERROR (57)
+			// whose binary detail carries Cursor's retry verdict.
+			const details = create(ErrorDetailsSchema, {
+				error: CursorError.ERROR_PROVIDER_ERROR,
+				details: create(CustomErrorDetailsSchema, {
+					title: "Provider Error",
+					detail:
+						"We're having trouble connecting to the model provider. This might be temporary - please try again in a moment.",
+					...(scenario.isRetryable === undefined ? {} : { isRetryable: scenario.isRetryable }),
+				}),
+				isExpected: true,
+			});
+			stream.write(stepCompletedFrame());
+			stream.write(
+				connectEndErrorFrame("resource_exhausted", "Error", [
+					{
+						type: "aiserver.v1.ErrorDetails",
+						value: Buffer.from(toBinary(ErrorDetailsSchema, details)).toString("base64"),
+					},
+				]),
 			);
 			stream.end();
 			return;
@@ -483,6 +553,43 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("Cursor stream ended before turnEnded");
 	});
+
+	it("completes a turn whose stream was cut after stepCompleted", async () => {
+		scenario = { kind: "cut-after-step-completed" };
+		const baseUrl = await startServer();
+		const { eventTypes, result } = await collectStream(makeModel(baseUrl));
+		expect(eventTypes.at(-1)).toBe("done");
+		expect(result.stopReason).toBe("stop");
+		expect(result.errorMessage).toBeUndefined();
+		expect(result.content.map(block => (block.type === "text" ? block.text : block.type))).toEqual([
+			"complete answer",
+		]);
+	});
+
+	it("still rejects a stream cut after content that followed stepCompleted", async () => {
+		scenario = { kind: "cut-after-content-following-step" };
+		const baseUrl = await startServer();
+		const { eventTypes, result } = await collectStream(makeModel(baseUrl));
+		expect(eventTypes.at(-1)).toBe("error");
+		expect(result.errorMessage).toContain("Cursor stream ended before turnEnded");
+	});
+
+	it.each([
+		{ isRetryable: false, retriable: false, status: 400 },
+		{ isRetryable: true, retriable: true, status: 503 },
+		{ isRetryable: undefined, retriable: true, status: 503 },
+	])(
+		"retries ERROR_PROVIDER_ERROR only when Cursor allows it (isRetryable=$isRetryable)",
+		async ({ isRetryable, retriable, status }) => {
+			scenario = { kind: "connect-provider-error-after-step", isRetryable };
+			const baseUrl = await startServer();
+			const { result } = await collectStream(makeModel(baseUrl));
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toContain("Cursor PROVIDER_ERROR: Provider Error");
+			expect(result.errorStatus).toBe(status);
+			expect(AIError.retriable(AIError.classifyMessage(result))).toBe(retriable);
+		},
+	);
 
 	it("pairs and closes a server-owned call the dying stream left open", async () => {
 		// The failure this guards: a native todo block is stamped resolved at
