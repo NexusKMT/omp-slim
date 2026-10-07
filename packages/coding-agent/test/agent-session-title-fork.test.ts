@@ -125,6 +125,34 @@ describe("AgentSession title fork", () => {
 		expect(titleInputs[0]).toContain(FIRST_MESSAGE);
 	});
 
+	it("forks a title for a message that arrived while a declining title request still ran", async () => {
+		const main = createMockModel({ handler: { content: ["Reading the park tests first."] } });
+		const side = createMockModel({ responses: [{ content: ["<title/>"] }], handler: { content: [CARD_REPLY] } });
+		const target = await createSession(main, side);
+		const titleModelStarted = Promise.withResolvers<void>();
+		const titleModelReply = Promise.withResolvers<ai.AssistantMessage>();
+		const titleModel = vi.spyOn(ai, "completeSimple").mockImplementation(() => {
+			titleModelStarted.resolve();
+			return titleModelReply.promise;
+		});
+
+		// The first message's fork declines, so the title model takes over and is still running...
+		target.maybeStartTitleGeneration("look at the park tests");
+		await target.prompt("look at the park tests");
+		await titleModelStarted.promise;
+		// ...when the second message arrives; the title model then declines too.
+		target.maybeStartTitleGeneration(FIRST_MESSAGE);
+		await target.prompt(FIRST_MESSAGE);
+		const titled = nextTitle(target);
+		titleModelReply.resolve(createAssistantMessage("<title/>"));
+		await titled;
+
+		expect(target.sessionName).toBe("Fix flaky park tests");
+		expect(target.sessionManager.getSessionTitleCard()).toEqual({ code: "FLAKY", emoji: "🧪", nf: "nf-md-flask" });
+		expect(side.calls).toHaveLength(2);
+		expect(titleModel).toHaveBeenCalledTimes(1);
+	});
+
 	it("titles with the title model alone under title.generator tiny", async () => {
 		const main = createMockModel({ responses: [{ content: ["Reading the park tests first."] }] });
 		const side = createMockModel({ handler: { content: [CARD_REPLY] } });

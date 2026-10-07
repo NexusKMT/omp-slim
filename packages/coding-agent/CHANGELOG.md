@@ -25,6 +25,7 @@
 
 ### Fixed
 
+- Fixed a message sent while an earlier title request was still running never getting its own try at naming the session when that request came back empty.
 - Fixed `/new` incorrectly carrying plan mode, its plan-specific model, or goal mode into the new session.
 - Fixed todo lists failing to auto-clear while subagents streamed progress.
 - Fixed memory growth during ACP client-terminal commands.
