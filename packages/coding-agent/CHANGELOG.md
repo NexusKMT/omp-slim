@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed agents repeatedly asking unanswered choice questions when todo reminders are enabled.
+- Fixed agents repeatedly asking unanswered choice questions when todo reminders are enabled ([#14800](https://github.com/can1357/oh-my-pi/pull/14800) by [@mrmans0n](https://github.com/mrmans0n)).
 
 ## [18.8.0] - 2026-10-07
 
