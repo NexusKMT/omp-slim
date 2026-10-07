@@ -12,6 +12,7 @@
 - Fixed false thinking-loop detections on Gemini, DeepSeek, and Grok when the model drafts or answers with repetitive code or markup (VRML, SVG, JSON); such output is no longer discarded and retried.
 - Fixed Cursor provider leaking conversation checkpoints, blob stores and abort listeners after requests end ([#14669](https://github.com/can1357/oh-my-pi/pull/14669) by [@H4vC](https://github.com/H4vC))
 - Fixed session-affinity pins growing without bound in long-lived gateways (now capped at 256 sessions per provider) ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
+- Stripped `uniqueItems` and unsupported array/content validation keywords (`contains`, `minContains`, `maxContains`, `additionalItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `$id`, `$anchor`) during Google and Cloud Code Assist schema normalization (`normalizeSchemaForGoogle` and `normalizeSchemaForCCA`). Prevents Google Cloud Code Assist HTTP 400 errors (`Invalid JSON payload received. Unknown name "uniqueItems" at 'request.tools[...].parameters...': Cannot find field`) when using tools with array schemas defining `uniqueItems: true`.
 
 ### Changed
 
@@ -28,9 +29,6 @@
 - Sped up AWS credential-source detection by caching its probes ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
 - Reduced memory and copying for generated images by sniffing their type from a few bytes and building data URLs only when read ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
 - Reduced GitLab Duo Workflow stream memory by de-duplicating message snapshots by content hash ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
-### Fixed
-
-- Stripped `uniqueItems` and unsupported array/content validation keywords (`contains`, `minContains`, `maxContains`, `additionalItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `$id`, `$anchor`) during Google and Cloud Code Assist schema normalization (`normalizeSchemaForGoogle` and `normalizeSchemaForCCA`). Prevents Google Cloud Code Assist HTTP 400 errors (`Invalid JSON payload received. Unknown name "uniqueItems" at 'request.tools[...].parameters...': Cannot find field`) when using tools with array schemas defining `uniqueItems: true`.
 
 ## [18.7.0] - 2026-10-06
 
