@@ -28,6 +28,7 @@
 ### Added
 
 - Writes of `.svg` and Mermaid (`.mmd`, `.mermaid`) files draw the image or diagram under the card, as the same code blocks draw in assistant replies: an SVG redraws as it streams, a diagram appears once the file is complete; tool renderers opt in through `figure`.
+- `NativeToolView.open` starts a tool's native card expanded whatever the transcript's expand state; the todo checklist uses it
 
 ## [18.7.0] - 2026-10-06
 
