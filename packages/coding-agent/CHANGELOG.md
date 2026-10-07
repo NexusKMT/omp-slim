@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
+
 ## [18.8.0] - 2026-10-07
 
 ### Added
