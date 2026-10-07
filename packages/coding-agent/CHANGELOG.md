@@ -36,6 +36,7 @@
 - Sped up concurrent subagent launches by sharing one agent discovery scan ([#14713](https://github.com/can1357/oh-my-pi/pull/14713) by [@H4vC](https://github.com/H4vC))
 - Sped up ssh:// file operations by reusing verified connections for 30 s ([#14713](https://github.com/can1357/oh-my-pi/pull/14713) by [@H4vC](https://github.com/H4vC))
 - Reduced collab host overhead: nothing is mirrored while no guest is joined, and frames and guest joins serialize once ([#14714](https://github.com/can1357/oh-my-pi/pull/14714) by [@H4vC](https://github.com/H4vC))
+- Reduced per-turn advisor work: advisor deltas are rendered only when a single-block fallback or requeue needs them ([#14717](https://github.com/can1357/oh-my-pi/pull/14717) by [@H4vC](https://github.com/H4vC))
 - Reduced memory use of local memory extraction and `run_experiment` on large inputs ([#14718](https://github.com/can1357/oh-my-pi/pull/14718) by [@H4vC](https://github.com/H4vC))
 - Sped up Mnemopi session start ([#14718](https://github.com/can1357/oh-my-pi/pull/14718) by [@H4vC](https://github.com/H4vC))
 ### Fixed
