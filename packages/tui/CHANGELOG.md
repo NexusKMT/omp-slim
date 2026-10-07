@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Sped up Markdown lexing of large documents (532 KB: ~29 ms → ~19 ms) ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
+
+### Fixed
+
+- Fixed quadratic Markdown lexing of documents with bare `\begin{…}` environments or unclosed `\[` openers ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
+
 ## [18.7.0] - 2026-10-06
 
 ### Added
