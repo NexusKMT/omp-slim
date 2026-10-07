@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed agents repeatedly asking unanswered choice questions when todo reminders are enabled.
+
 ## [18.8.0] - 2026-10-07
 
 ### Added

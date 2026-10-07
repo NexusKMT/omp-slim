@@ -192,6 +192,28 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		expect(continueSpy).not.toHaveBeenCalled();
 	});
 
+	it.each([
+		"Go with A?",
+		[
+			"Next question, which decides the sandbox: **do your prototypes need network access?**",
+			"",
+			"1. **Fully offline.** Inline CSS and JS only.",
+			"2. **Read-only CDN access.** Load scripts, styles, fonts and images over HTTPS.",
+			"3. **Unrestricted.** Anything the page asks for.",
+			"",
+			"I'd recommend 2. Offline mode would break mocks that use CDN assets.",
+		].join("\n"),
+	])("does not resume an unanswered choice prompt: %s", async text => {
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		emitTextOnlyStop(text);
+		await session.waitForIdle();
+
+		expect(reminderAttempts).toEqual([]);
+		expect(todoReminderTranscriptEntry()).toBeUndefined();
+		expect(continueSpy).not.toHaveBeenCalled();
+	});
+
 	it("still reminds when the assistant answers its own prompt-shaped question", async () => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
 
