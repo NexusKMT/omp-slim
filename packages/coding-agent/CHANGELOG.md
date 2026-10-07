@@ -8,6 +8,9 @@
 
 ### Changed
 
+- New sessions are titled by the session's own model from its first reply (a cached side request, about 1-2 s after the reply starts); the tiny title model takes over when that fails or declines, and a `TITLE_SYSTEM.md` override still titles with the tiny model
+- Generated session titles carry a card index, an icon and a short code: the window title reads `🧪 FLAKY: Fix flaky park tests`, which Tern shows on parked panes' cards, with the Nerd Fonts icon instead of the emoji inside a Tern pane
+- Without the Nerd Font symbol preset, session titling asks the model only for the card's emoji, not a Nerd Fonts icon it cannot show
 - A subagent's completion bar jumps to 99% once it submits its result, instead of holding its last estimate while it finishes up
 - Inside a Tern pane, browser opens with `headed: false` now show as a Tern picture-in-picture too; only `app.tern: false` (or `browser.tern` / `PI_BROWSER_TERN=0`) opens Chromium instead
 - Inside a Tern pane, `/fork` opens the fork in a new pane beside the original, which keeps the original session

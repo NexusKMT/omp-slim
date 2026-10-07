@@ -2239,7 +2239,11 @@ export class InteractiveMode implements InteractiveModeContext {
 			file: () => this.sessionManager.getSessionFile(),
 			cwd: () => this.sessionManager.getCwd(),
 		});
-		setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
+		setSessionTerminalTitle(
+			this.sessionManager.getSessionName(),
+			this.sessionManager.getCwd(),
+			this.sessionManager.getSessionTitleCard(),
+		);
 		// Seeds the border, the status-line `vim` segment, and the cursor shape in one call.
 		// Deliberately here rather than beside #applyVimMode in the constructor: that runs before
 		// #focusController exists, which updateEditorBorderColor dereferences.
@@ -2261,7 +2265,11 @@ export class InteractiveMode implements InteractiveModeContext {
 			}),
 			this.sessionManager.onPersistenceNotice(notice => this.showWarning(formatPersistenceNotice(notice))),
 			this.sessionManager.onSessionNameChanged(() => {
-				setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
+				setSessionTerminalTitle(
+					this.sessionManager.getSessionName(),
+					this.sessionManager.getCwd(),
+					this.sessionManager.getSessionTitleCard(),
+				);
 				this.#handleSessionAccentInputsChanged();
 			}),
 			// Fork and branch adopt a new session file without retitling.
@@ -2756,7 +2764,11 @@ export class InteractiveMode implements InteractiveModeContext {
 			);
 			return false;
 		}
-		setSessionTerminalTitle(this.sessionManager.getSessionName(), this.sessionManager.getCwd());
+		setSessionTerminalTitle(
+			this.sessionManager.getSessionName(),
+			this.sessionManager.getCwd(),
+			this.sessionManager.getSessionTitleCard(),
+		);
 		this.statusLine.applyCwdChange();
 		return true;
 	}
