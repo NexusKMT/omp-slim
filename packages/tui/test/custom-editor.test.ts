@@ -232,6 +232,22 @@ describe("CustomEditor bracketed path paste", () => {
 		]);
 	});
 
+	it("attaches a shell-escaped home image path instead of treating it as a cwd-relative path", () => {
+		const { editor } = makeEditor();
+		const imagePath = "~/Pictures/image.png";
+		const pasted = String.raw`\~/Pictures/image.png`;
+		const attached: string[] = [];
+		editor.onPasteImagePath = path => {
+			attached.push(path);
+		};
+
+		editor.handleInput(bracketedPaste(pasted));
+
+		expect(attached).toEqual([imagePath]);
+		expect(editor.getText()).toBe("");
+		expect(extractImagePathFromText(pasted)).toBe(imagePath);
+	});
+
 	it("routes a pasted video path through the attachment callback", () => {
 		const { editor } = makeEditor();
 		const video = "/Users/me/Movies/launch cut.mp4";

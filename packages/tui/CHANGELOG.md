@@ -24,6 +24,7 @@
 - Fixed debug log viewer re-formatting every row each frame (select-all over 20k rows: ~3 s → ~2 ms per frame) ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 - Fixed plan review slowing down on long annotated plans ([#14686](https://github.com/can1357/oh-my-pi/pull/14686) by [@H4vC](https://github.com/H4vC))
 - Fixed prompt editor lag on large drafts containing a magic keyword ([#14690](https://github.com/can1357/oh-my-pi/pull/14690) by [@H4vC](https://github.com/H4vC))
+- Fixed image paste paths starting with an escaped home directory (`\~/…`) attaching as missing files over SSH ([#14739](https://github.com/can1357/oh-my-pi/issues/14739))
 ### Added
 
 - Writes of `.svg` and Mermaid (`.mmd`, `.mermaid`) files draw the image or diagram under the card, as the same code blocks draw in assistant replies: an SVG redraws as it streams, a diagram appears once the file is complete; tool renderers opt in through `figure`.
