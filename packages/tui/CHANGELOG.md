@@ -4,7 +4,7 @@
 
 ### Changed
 
-- `ComposerNativeState.title` makes the TSP composer's placeholder the quoted title in italics (`em`); untitled it reads "What are we cooking?", and `CustomEditor.describePlaceholder` returns `TspText`
+- `ComposerNativeState.title` makes the TSP composer's placeholder the title in curly quotes and italics (`em`); untitled it reads "What are we cooking?", and `CustomEditor.describePlaceholder` returns `TspText`
 - TSP blob uploads (`b`) no longer send an `id` parameter: Tern names each blob by the SHA-256 of its bytes
 - Sped up Markdown lexing of large documents (532 KB: ~29 ms → ~19 ms) ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
 - Sped up `OutputSink` on many single-line chunks (100k chunks: ~1.3–9 s → ~15 ms) ([#14679](https://github.com/can1357/oh-my-pi/pull/14679) by [@H4vC](https://github.com/H4vC))

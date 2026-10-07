@@ -1048,7 +1048,7 @@ export class CustomEditor extends Editor {
 		if (agent !== undefined) return `Message ${agent}`;
 		if (!title) return NATIVE_COMPOSER_PLACEHOLDER;
 		if (this.#titlePlaceholder?.title !== title) {
-			this.#titlePlaceholder = { title, text: [{ t: `"${title}"`, s: "em" }] };
+			this.#titlePlaceholder = { title, text: [{ t: `“${title}”`, s: "em" }] };
 		}
 		return this.#titlePlaceholder.text;
 	};
