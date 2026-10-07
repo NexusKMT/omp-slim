@@ -2,13 +2,14 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed Codex Fast (`priority`) and Ultrafast turns being recorded and priced as Standard when the backend echoes `service_tier: "default"`: a `default` or `auto` echo now keeps the tier that was sent, so those turns carry their tier's cost multiplier, count as premium requests, and keep their own model-perf row ([#14815](https://github.com/can1357/oh-my-pi/pull/14815) by [@alphastorm](https://github.com/alphastorm)).
 ### Added
 
-- Added `AuthStorage.sessions.restrict(provider, sessionId, identityKeys)`, which keeps a provider session on the listed OAuth accounts: selection, pins, fallback and rotation stay inside the list, API keys are never used (a `models.yml` config key fails the request rather than receive a pooled token), and requests fail instead of borrowing another account. It returns a lease, and `sessions.unrestrict(provider, sessionId, lease)` lifts the restriction only while that lease is current ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
-- Exported `resolveCredentialIdentityKey(provider, credential)`, which computes the identity key that broker account pools and `sessions.restrict` match ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
+- Added session restrictions for OAuth account pools via `AuthStorage.sessions.restrict`, limiting selection, fallback, rotation, and authentication to specified accounts until the returned lease is released with `sessions.unrestrict`. API keys and other accounts are not used when a session is restricted.
+- Exported `resolveCredentialIdentityKey` for determining the identity key used to match credentials with broker account pools and session restrictions.
+
+### Fixed
+
+- Fixed Codex Fast (`priority`) and Ultrafast usage being recorded, billed, and reported as Standard when the backend echoed a default service tier; the requested tier is now preserved in usage and performance records.
 
 ## [18.8.0] - 2026-10-07
 

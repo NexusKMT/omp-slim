@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the native ask dialog opening as a modal sheet over the transcript; on TSP surfaces it now takes the composer's place in the dock, framed as the composer (`omp.editor`), so the transcript above stays readable and scrollable ([#14812](https://github.com/can1357/oh-my-pi/pull/14812) by [@H4vC](https://github.com/H4vC))
+- Fixed the native ask dialog on TSP surfaces so it replaces the composer instead of opening as a modal over the transcript, keeping the transcript readable and scrollable.
 
 ## [18.8.0] - 2026-10-07
 

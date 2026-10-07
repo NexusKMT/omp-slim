@@ -4,8 +4,8 @@
 
 ### Fixed
 
-- Fixed Codex Fast (`priority`) being priced at 2x Standard instead of OpenAI's 2.5x included-usage rate on every model except GPT-5.5 and GPT-6 Astra ([#14816](https://github.com/can1357/oh-my-pi/pull/14816) by [@alphastorm](https://github.com/alphastorm)).
-- Fixed GitHub Copilot models with tier-level prompt limits showing the long-context window by default ([#14770](https://github.com/can1357/oh-my-pi/issues/14770)).
+- Fixed Codex Fast (`priority`) pricing to use OpenAI’s 2.5× included-usage rate for supported models, excluding GPT-5.5 and GPT-6 Astra.
+- Fixed GitHub Copilot models with tier-specific prompt limits incorrectly defaulting to the long-context window.
 
 ## [18.8.0] - 2026-10-07
 
