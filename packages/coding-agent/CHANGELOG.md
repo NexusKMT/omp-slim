@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Fixed repeat clicks on Tern's composer model chip or agents pill, or a repeated `/model`, `/switch`, or `/agents`, stacking another copy of the picker or hub on top of the open one; the open one is focused instead
 - Fixed long Anthropic sessions with repeated tool screenshots exceeding the request-size limit; live images are now trimmed by bytes, recoverable 413s may compact older history, and terminal subagent failures reach the parent ([#14453](https://github.com/can1357/oh-my-pi/issues/14453)).
 
 ## [18.8.1] - 2026-10-07
