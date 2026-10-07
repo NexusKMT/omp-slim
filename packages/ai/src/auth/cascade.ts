@@ -7,7 +7,7 @@ import { isUsageLimitOutcome } from "../error/rate-limit";
 import { AUTHENTICATED_SENTINEL } from "../registry/types";
 import type { SessionAffinity } from "./affinity";
 import type { CredentialPool } from "./pool";
-import type { CredentialSelector } from "./select";
+import type { CredentialSelector, OAuthResolutionResult } from "./select";
 import type {
 	AuthApiKeyOptions,
 	AuthCredential,
@@ -363,7 +363,15 @@ export class KeyCascade implements KeysApi {
 
 		// Precedence: a deliberate OAuth/login credential wins, then an explicit env var,
 		// then a stored static api_key (which may be a stale broker-migrated copy) as a last resort.
-		const oauthResolved = await this.#deps.selector.resolveOAuth(provider, sessionId, options);
+		// A transient OAuth refresh failure still lets later sources serve the request; it is
+		// rethrown only when none can, so callers retry instead of reporting a missing key.
+		let oauthResolved: OAuthResolutionResult | undefined;
+		let oauthFailure: { error: unknown } | undefined;
+		try {
+			oauthResolved = await this.#deps.selector.resolveOAuth(provider, sessionId, options);
+		} catch (error) {
+			oauthFailure = { error };
+		}
 		if (oauthResolved) {
 			if (onCredentialId && oauthResolved.credentialId !== undefined) {
 				const { orgId, region, inferenceRegion } = oauthResolved.credential;
@@ -420,6 +428,7 @@ export class KeyCascade implements KeysApi {
 			if (apiKey !== undefined && credentialId !== undefined) onCredentialId?.(credentialId);
 			return apiKey;
 		}
+		if (oauthFailure) throw oauthFailure.error;
 		return undefined;
 	}
 
