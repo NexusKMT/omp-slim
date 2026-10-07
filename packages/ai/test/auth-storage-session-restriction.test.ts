@@ -69,7 +69,7 @@ describe("AuthStorage session account restrictions", () => {
 		storage.keys.setConfig(PROVIDER, "config-key");
 
 		storage.sessions.restrict(PROVIDER, "allowed", ["account:acc-a"]);
-		storage.sessions.restrict(PROVIDER, "missing", ["account:acc-z"]);
+		const missing = storage.sessions.restrict(PROVIDER, "missing", ["account:acc-z"]);
 		storage.sessions.restrict(PROVIDER, "empty", []);
 
 		expect(await storage.keys.get(PROVIDER, "allowed")).toBe("access-a");
@@ -83,8 +83,22 @@ describe("AuthStorage session account restrictions", () => {
 		expect(await storage.keys.get(PROVIDER, "unrestricted")).toBe("runtime-key");
 
 		// The owner lifts a restriction when its session ends.
-		storage.sessions.unrestrict(PROVIDER, "missing");
+		storage.sessions.unrestrict(PROVIDER, "missing", missing);
 		expect(await storage.keys.get(PROVIDER, "missing")).toBe("runtime-key");
+	});
+
+	test("lifts a restriction only with the lease that installed it", async () => {
+		await storage.credentials.set(PROVIDER, [oauthCredential("a"), oauthCredential("b")]);
+		storage.keys.setRuntime(PROVIDER, "runtime-key");
+		const stale = storage.sessions.restrict(PROVIDER, "session", ["account:acc-b"]);
+		// A revived owner restricts the same session id again.
+		const current = storage.sessions.restrict(PROVIDER, "session", ["account:acc-b"]);
+
+		storage.sessions.unrestrict(PROVIDER, "session", stale);
+		expect(await storage.keys.get(PROVIDER, "session")).toBe("access-b");
+
+		storage.sessions.unrestrict(PROVIDER, "session", current);
+		expect(await storage.keys.get(PROVIDER, "session")).toBe("runtime-key");
 	});
 
 	test("rotates only among allowed accounts", async () => {

@@ -1848,10 +1848,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	if (options.credentialSourceSessionId) {
 		modelRegistry.authStorage.sessions.inherit(options.credentialSourceSessionId, providerSessionId);
 	}
-	restrictSessionAccounts(modelRegistry.authStorage, providerSessionId, options.oauthAccountPools);
+	const startupAccountLeases = restrictSessionAccounts(
+		modelRegistry.authStorage,
+		providerSessionId,
+		options.oauthAccountPools,
+	);
 	// A startup failure leaves no session to lift the pool on dispose.
 	startupCleanup.defer(() =>
-		releaseSessionAccounts(modelRegistry.authStorage, providerSessionId, options.oauthAccountPools),
+		releaseSessionAccounts(modelRegistry.authStorage, providerSessionId, startupAccountLeases),
 	);
 	const forkCacheShapeChanged =
 		options.model !== undefined ||

@@ -114,7 +114,12 @@ import { loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
-import { type OAuthAccountPools, releaseSessionAccounts, restrictSessionAccounts } from "../config/account-pools";
+import {
+	type OAuthAccountPools,
+	releaseSessionAccounts,
+	restrictSessionAccounts,
+	type SessionAccountLeases,
+} from "../config/account-pools";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -907,8 +912,8 @@ export class AgentSession implements SettingsScope {
 	#providerSessionId: string | undefined;
 	#freshProviderSessionId: string | undefined;
 	#oauthAccountPools: OAuthAccountPools | undefined;
-	/** Provider session ids restricted to {@link #oauthAccountPools}, lifted on dispose. */
-	#oauthRestrictedSessionIds = new Set<string>();
+	/** Pool leases for each provider session id this session or its advisors restricted; lifted on dispose. */
+	#oauthAccountLeases = new Map<string, SessionAccountLeases>();
 	#inheritedProviderPromptCacheKey: string | undefined;
 	#autolearnCaptureAbortController: AbortController | undefined;
 	#autolearnCaptureTask: Promise<void> | undefined;
@@ -5312,20 +5317,23 @@ export class AgentSession implements SettingsScope {
 
 	/**
 	 * Install this session's account pools on a provider session id it or one
-	 * of its advisors adopts, remembering the id so dispose can lift it.
+	 * of its advisors adopts, keeping the leases so dispose can lift them.
 	 */
 	#restrictOAuthAccounts(providerSessionId: string): void {
-		if (!this.#oauthAccountPools) return;
-		restrictSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, this.#oauthAccountPools);
-		this.#oauthRestrictedSessionIds.add(providerSessionId);
+		const leases = restrictSessionAccounts(
+			this.#modelRegistry.authStorage,
+			providerSessionId,
+			this.#oauthAccountPools,
+		);
+		if (leases) this.#oauthAccountLeases.set(providerSessionId, leases);
 	}
 
 	/** Lift those restrictions once no request can resolve a key for these ids. */
 	#releaseOAuthAccounts(): void {
-		for (const providerSessionId of this.#oauthRestrictedSessionIds) {
-			releaseSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, this.#oauthAccountPools);
+		for (const [providerSessionId, leases] of this.#oauthAccountLeases) {
+			releaseSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, leases);
 		}
-		this.#oauthRestrictedSessionIds.clear();
+		this.#oauthAccountLeases.clear();
 	}
 
 	#notifySessionChangeCallbacks(): void {
@@ -5695,9 +5703,11 @@ export class AgentSession implements SettingsScope {
 		// graph shed its heavy payloads even while the lifecycle adoption record's
 		// reviver closure still references the session object. Fixes #8003.
 		this.#releaseRetainedSessionMemory();
-		// A run past the deadline may still resolve keys, and a revival can
-		// restrict the same ids again once dispose returns, so only a settled
-		// session lifts its account pools; an unsettled one keeps them.
+		// A run past the deadline may still resolve keys, so the account pools
+		// are lifted only once the run has settled: here when it drained,
+		// otherwise in the deferred pass below. Each lease lifts only the
+		// restriction it installed, never one a revival has installed on the
+		// same provider session id since.
 		if (drained) this.#releaseOAuthAccounts();
 
 		// The deadline does not cancel the drain: a handler parked in a slow
@@ -5705,14 +5715,16 @@ export class AgentSession implements SettingsScope {
 		// state released above. Its disk writes are already dead — the release
 		// SEALED the session manager (a revival may reopen the same JSONL
 		// through a new manager the moment dispose returns, and this manager
-		// must never race that writer) — so re-run only the in-memory reset
-		// once the pipeline genuinely settles. The extension runner bounds hook
-		// runtime, so this deferred pass is not unbounded.
+		// must never race that writer) — so re-run only the in-memory reset,
+		// and lift the account pools, once the pipeline genuinely settles. The
+		// extension runner bounds hook runtime, so this deferred pass is not
+		// unbounded.
 		if (!drained) {
 			void (async () => {
 				await this.agent.waitForIdle();
 				await this.#drainInFlightEventHandlers();
 				this.#releaseRetainedSessionMemory();
+				this.#releaseOAuthAccounts();
 			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}
 	}

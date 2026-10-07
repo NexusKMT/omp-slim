@@ -1,4 +1,4 @@
-import type { AuthStorage } from "@oh-my-pi/pi-ai/auth-storage";
+import type { AuthStorage, SessionRestrictionLease } from "@oh-my-pi/pi-ai/auth-storage";
 import { isRecord } from "@oh-my-pi/pi-utils";
 
 /**
@@ -48,30 +48,39 @@ export function validateAgentAccountPools(value: unknown): Record<string, OAuthA
 	return pools;
 }
 
+/** Leases of one session's pool restrictions, by provider id; see {@link restrictSessionAccounts}. */
+export type SessionAccountLeases = ReadonlyMap<string, SessionRestrictionLease>;
+
 /**
- * Install `pools` as `sessionId`'s OAuth account restrictions. Sessions call
- * this for every provider session id they adopt: a fresh or reset id starts
- * unrestricted otherwise.
+ * Install `pools` as `sessionId`'s OAuth account restrictions and return their
+ * leases. Sessions call this for every provider session id they adopt: a fresh
+ * or reset id starts unrestricted otherwise.
  */
 export function restrictSessionAccounts(
 	authStorage: Pick<AuthStorage, "sessions">,
 	sessionId: string,
 	pools: OAuthAccountPools | undefined,
-): void {
-	if (!pools) return;
+): SessionAccountLeases | undefined {
+	if (!pools) return undefined;
+	const leases = new Map<string, SessionRestrictionLease>();
 	for (const [provider, identityKeys] of Object.entries(pools)) {
-		authStorage.sessions.restrict(provider, sessionId, identityKeys);
+		leases.set(provider, authStorage.sessions.restrict(provider, sessionId, identityKeys));
 	}
+	return leases;
 }
 
-/** Remove `pools`' restrictions from `sessionId` once the session has ended. */
+/**
+ * Lift the restrictions `leases` installed on `sessionId` once that session has
+ * ended. A restriction installed on the same id since, such as a revived
+ * session's, stays.
+ */
 export function releaseSessionAccounts(
 	authStorage: Pick<AuthStorage, "sessions">,
 	sessionId: string,
-	pools: OAuthAccountPools | undefined,
+	leases: SessionAccountLeases | undefined,
 ): void {
-	if (!pools) return;
-	for (const provider of Object.keys(pools)) {
-		authStorage.sessions.unrestrict(provider, sessionId);
+	if (!leases) return;
+	for (const [provider, lease] of leases) {
+		authStorage.sessions.unrestrict(provider, sessionId, lease);
 	}
 }

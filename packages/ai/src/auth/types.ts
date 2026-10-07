@@ -1088,6 +1088,12 @@ export interface OAuthApi {
 	): Promise<StoredOAuthRefreshResult<T>>;
 }
 
+/**
+ * Handle for one {@link SessionsApi.restrict} call. {@link SessionsApi.unrestrict}
+ * lifts a restriction only with the lease of the call that installed it.
+ */
+export type SessionRestrictionLease = symbol;
+
 /** Session credential affinity operations. */
 export interface SessionsApi {
 	/**
@@ -1124,12 +1130,16 @@ export interface SessionsApi {
 	 * another account. An empty list allows no account. Replaces any earlier
 	 * restriction for the same provider and session; {@link inherit} does not
 	 * copy restrictions. Restrictions are never evicted, because that would
-	 * widen a live session; the owner calls {@link unrestrict} when the session
-	 * ends.
+	 * widen a live session; the owner passes the returned lease to
+	 * {@link unrestrict} when the session ends.
 	 */
-	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): void;
-	/** Remove the {@link restrict} restriction of a session that has ended. */
-	unrestrict(provider: string, sessionId: string): void;
+	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): SessionRestrictionLease;
+	/**
+	 * Lift the restriction that `lease` installed. Once a later {@link restrict}
+	 * call has replaced it for the same provider and session, this does nothing,
+	 * so a stale owner never lifts the restriction a newer owner relies on.
+	 */
+	unrestrict(provider: string, sessionId: string, lease: SessionRestrictionLease): void;
 	/**
 	 * Release a session's sticky credential so its next {@link getApiKey} call
 	 * re-runs native pool ranking. This never blocks or penalizes the released

@@ -1,7 +1,7 @@
 import { logger } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
 import { getEnvApiKey } from "../env-api-key";
-import type { AuthCredential, OAuthCredential, SessionsApi } from "./types";
+import type { AuthCredential, OAuthCredential, SessionRestrictionLease, SessionsApi } from "./types";
 import type { AuthCredentialStore } from "./store";
 import type { CredentialPool } from "./pool";
 import type { KeyOverrides } from "./cascade";
@@ -40,12 +40,15 @@ export type SessionCredential = {
 	explicit?: true;
 };
 
+/** One installed restriction: the allowed OAuth identity keys and the lease that lifts it. */
+type SessionRestriction = { readonly allowed: ReadonlySet<string>; readonly lease: SessionRestrictionLease };
+
 /**
- * Provider → session id → allowed OAuth identity keys. Owned by `AuthStorage`
- * so restrictions outlive store replacement, which rebuilds every store-bound
+ * Provider → session id → installed restriction. Owned by `AuthStorage` so
+ * restrictions outlive store replacement, which rebuilds every store-bound
  * module (pins included) around the same identities.
  */
-export type SessionRestrictions = Map<string, Map<string, ReadonlySet<string>>>;
+export type SessionRestrictions = Map<string, Map<string, SessionRestriction>>;
 
 /** Session → credential affinity (pins), persisted in the store cache. */
 export class SessionAffinity implements SessionsApi {
@@ -70,17 +73,20 @@ export class SessionAffinity implements SessionsApi {
 		this.#restrictions = restrictions;
 	}
 
-	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): void {
+	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): SessionRestrictionLease {
 		if (!provider || !sessionId) throw new Error("sessions.restrict requires a provider and a session id");
-		const sessions = this.#restrictions.get(provider) ?? new Map<string, ReadonlySet<string>>();
-		sessions.set(sessionId, new Set(identityKeys));
+		const lease = Symbol("sessions.restrict");
+		const sessions = this.#restrictions.get(provider) ?? new Map<string, SessionRestriction>();
+		sessions.set(sessionId, { allowed: new Set(identityKeys), lease });
 		this.#restrictions.set(provider, sessions);
+		return lease;
 	}
 
-	unrestrict(provider: string, sessionId: string): void {
+	unrestrict(provider: string, sessionId: string, lease: SessionRestrictionLease): void {
 		const sessions = this.#restrictions.get(provider);
-		if (!sessions?.delete(sessionId) || sessions.size > 0) return;
-		this.#restrictions.delete(provider);
+		if (sessions?.get(sessionId)?.lease !== lease) return;
+		sessions.delete(sessionId);
+		if (sessions.size === 0) this.#restrictions.delete(provider);
 	}
 
 	/** True when {@link restrict} limits `sessionId` for `provider`. */
@@ -93,7 +99,7 @@ export class SessionAffinity implements SessionsApi {
 	 * session, otherwise only an OAuth credential whose identity key is allowed.
 	 */
 	allows(provider: string, sessionId: string | undefined, credential: AuthCredential): boolean {
-		const allowed = sessionId === undefined ? undefined : this.#restrictions.get(provider)?.get(sessionId);
+		const allowed = sessionId === undefined ? undefined : this.#restrictions.get(provider)?.get(sessionId)?.allowed;
 		if (allowed === undefined) return true;
 		if (credential.type !== "oauth") return false;
 		const identityKey = resolveCredentialIdentityKey(provider, credential);
