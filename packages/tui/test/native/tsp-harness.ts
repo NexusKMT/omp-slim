@@ -295,8 +295,9 @@ export class TspTestTerminal implements Terminal {
 				return;
 			}
 			case "b": {
-				const id = raw.params.id;
-				if (id) this.blobs.set(id, Buffer.from(body, "base64"));
+				// Named by the sha256 of its bytes, as Tern names it.
+				const bytes = Buffer.from(body, "base64");
+				this.blobs.set(new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), bytes);
 				return;
 			}
 			default:

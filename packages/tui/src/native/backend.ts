@@ -596,8 +596,9 @@ export class NativeBackend {
 			surface.uploaded.add(id);
 			const body = Buffer.from(blob.bytes.buffer, blob.bytes.byteOffset, blob.bytes.byteLength).toString("base64");
 			// The full body, so a replay (Tern's `surface-play`) shows the image.
-			this.#record("out", "b", { id, mime: blob.mime }, body);
-			this.#host.terminal.write(encodeTspMessage("b", body, { id, mime: blob.mime }, this.#limit));
+			// No `id` parameter: Tern names the blob by the sha256 of the bytes it receives.
+			this.#record("out", "b", { mime: blob.mime }, body);
+			this.#host.terminal.write(encodeTspMessage("b", body, { mime: blob.mime }, this.#limit));
 		}
 	}
 
