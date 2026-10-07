@@ -11,6 +11,7 @@
 ### Added
 
 - Added `task.agentAccountPools` to keep a task agent, by exact name, on named OAuth accounts: its sessions, advisors and revived sessions authenticate only with those accounts and fail rather than use another account or an API key ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
+- Added `omp usage accounts`, which lists the provider and identity key of every OAuth account without printing tokens, so `task.agentAccountPools` and broker account pools can name accounts without querying `agent.db` ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.8.0] - 2026-10-07
 

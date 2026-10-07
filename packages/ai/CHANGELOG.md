@@ -8,6 +8,7 @@
 ### Added
 
 - Added `AuthStorage.sessions.restrict(provider, sessionId, identityKeys)`, which keeps a provider session on the listed OAuth accounts: selection, pins, fallback and rotation stay inside the list, API keys are never used, and requests fail instead of borrowing another account. It returns a lease, and `sessions.unrestrict(provider, sessionId, lease)` lifts the restriction only while that lease is current ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
+- Exported `resolveCredentialIdentityKey(provider, credential)`, which computes the identity key that broker account pools and `sessions.restrict` match ([#14740](https://github.com/can1357/oh-my-pi/pull/14740) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.8.0] - 2026-10-07
 
