@@ -192,6 +192,8 @@ type MenuKind = "settings" | "model-picker" | "model-hub" | "agents-dashboard" |
 interface OpenMenu {
 	component?: Component;
 	handle?: OverlayHandle;
+	/** Shows `component` as a new overlay and focuses it; also raises a covered menu. */
+	mount?: () => OverlayHandle;
 }
 
 export class SelectorController {
@@ -221,13 +223,36 @@ export class SelectorController {
 		return handle;
 	}
 
-	/** Focus the open `kind` menu; true when one was open and the request is handled. */
+	/**
+	 * Bring the open `kind` menu forward; true when one was open and the request
+	 * is handled. Overlays have no raise API, so a menu another overlay covers
+	 * is remounted on top rather than handed keys while hidden.
+	 */
 	#focusOpenMenu(kind: MenuKind): boolean {
 		const open = this.#openMenus.get(kind);
 		if (!open) return false;
-		if (open.component) this.ctx.ui.setFocus(open.component);
+		if (open.component && open.mount && this.#isCovered(open.component)) {
+			open.handle?.hide();
+			open.handle = open.mount();
+		} else if (open.component) {
+			this.ctx.ui.setFocus(open.component);
+		}
 		this.ctx.ui.requestRender();
 		return true;
+	}
+
+	/** Whether a visible overlay sits above `component`'s overlay. */
+	#isCovered(component: Component): boolean {
+		const stack = this.ctx.ui.overlayStack;
+		const at = stack.findIndex(entry => entry.component === component);
+		return at >= 0 && stack.slice(at + 1).some(entry => !entry.hidden);
+	}
+
+	/** Mount `component` as `menu`'s overlay through `mount`, which also raises it later. */
+	#mountMenu(menu: OpenMenu, component: Component, mount: () => OverlayHandle): void {
+		menu.component = component;
+		menu.mount = mount;
+		menu.handle = mount();
 	}
 
 	/** Register a new `kind` menu; pass it to {@link #releaseMenu} when it closes or fails to open. */
@@ -389,8 +414,7 @@ export class SelectorController {
 						},
 					},
 				);
-				menu.component = selector;
-				menu.handle = this.#showFullscreenMenu(selector);
+				this.#mountMenu(menu, selector, () => this.#showFullscreenMenu(selector));
 			})
 			.catch((error: unknown) => {
 				// A menu that never opened must not block the next `/settings`.
@@ -671,8 +695,7 @@ export class SelectorController {
 			this.#releaseMenu("agents-dashboard", menu);
 			throw error;
 		}
-		menu.component = hub;
-		menu.handle = this.#showFullscreenMenu(hub);
+		this.#mountMenu(menu, hub, () => this.#showFullscreenMenu(hub));
 	}
 
 	/**
@@ -831,14 +854,16 @@ export class SelectorController {
 			},
 		);
 		const menu = this.#claimMenu("model-picker");
-		menu.component = picker;
-		menu.handle = this.ctx.ui.showOverlay(picker, {
-			anchor: "bottom-center",
-			width: "100%",
-			maxHeight: "100%",
-			margin: 0,
+		this.#mountMenu(menu, picker, () => {
+			const handle = this.ctx.ui.showOverlay(picker, {
+				anchor: "bottom-center",
+				width: "100%",
+				maxHeight: "100%",
+				margin: 0,
+			});
+			this.ctx.ui.setFocus(picker);
+			return handle;
 		});
-		this.ctx.ui.setFocus(picker);
 		this.ctx.ui.requestRender();
 	}
 
@@ -1101,8 +1126,7 @@ export class SelectorController {
 			},
 		);
 		const menu = this.#claimMenu("model-hub");
-		menu.component = hub;
-		menu.handle = this.#showFullscreenMenu(hub);
+		this.#mountMenu(menu, hub, () => this.#showFullscreenMenu(hub));
 	}
 
 	/** /login round-trip for a locked provider; reopen the hub on that provider only after a successful login. */
@@ -2306,7 +2330,15 @@ export class SelectorController {
 	}
 
 	showAgentHub(observers: SessionObserverRegistry, options?: AgentHubOpenOptions): void {
-		if (this.#focusOpenMenu("agent-hub")) return;
+		// A repeat request reuses the open hub, still honoring its deep link (`/hub` → activity).
+		const reuseOpenHub = (): boolean => {
+			const open = this.#openMenus.get("agent-hub")?.component;
+			if (!this.#focusOpenMenu("agent-hub")) return false;
+			if (options?.initialSection && open instanceof AgentHubOverlayComponent)
+				open.showSection(options.initialSection);
+			return true;
+		};
+		if (reuseOpenHub()) return;
 		const hubKeys = [
 			...this.ctx.keybindings.getKeys("app.agents.hub"),
 			...this.ctx.keybindings.getKeys("app.session.observe"),
@@ -2365,7 +2397,7 @@ export class SelectorController {
 				return;
 			}
 			// Another open mounted while discovery was pending: keep that one.
-			if (this.#focusOpenMenu("agent-hub")) {
+			if (reuseOpenHub()) {
 				done();
 				return;
 			}
@@ -2374,8 +2406,7 @@ export class SelectorController {
 			// gesture opened the hub, so the next single ← dismisses it.
 			if (options?.armCloseTap) hub.armCloseTap();
 			menu = this.#claimMenu("agent-hub");
-			menu.component = hub;
-			menu.handle = this.#showFullscreenMenu(hub);
+			this.#mountMenu(menu, hub, () => this.#showFullscreenMenu(hub));
 		};
 
 		if (options?.requireContent && hub.isEmpty) {
