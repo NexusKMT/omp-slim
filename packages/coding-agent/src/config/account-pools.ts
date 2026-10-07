@@ -13,7 +13,8 @@ export type OAuthAccountPools = Readonly<Record<string, readonly string[]>>;
  * id → identity keys). An absent or empty (`null`) mapping means no pools, and
  * a `null` agent entry clears one inherited from a lower-priority settings
  * layer. Any other malformed level fails settings load: dropping it would
- * silently widen a restricted agent to every account.
+ * silently widen a restricted agent to every account. Both levels are
+ * null-prototype maps, so a name such as `__proto__` stays an own entry.
  */
 export function validateAgentAccountPools(value: unknown): Record<string, OAuthAccountPools> {
 	if (value === undefined || value === null) return {};
@@ -22,7 +23,7 @@ export function validateAgentAccountPools(value: unknown): Record<string, OAuthA
 			`Invalid task.agentAccountPools: expected a map of agent name to provider account pools, got ${Array.isArray(value) ? "an array" : `a ${typeof value}`}.`,
 		);
 	}
-	const pools: Record<string, OAuthAccountPools> = {};
+	const pools: Record<string, OAuthAccountPools> = Object.create(null);
 	for (const [agentName, providers] of Object.entries(value)) {
 		if (providers === null) continue;
 		if (!isRecord(providers)) {
@@ -30,7 +31,7 @@ export function validateAgentAccountPools(value: unknown): Record<string, OAuthA
 				`Invalid task.agentAccountPools.${agentName}: expected a map of provider to OAuth identity keys, got ${Array.isArray(providers) ? "an array" : `a ${typeof providers}`}.`,
 			);
 		}
-		const agentPools: Record<string, readonly string[]> = {};
+		const agentPools: Record<string, readonly string[]> = Object.create(null);
 		for (const [provider, identityKeys] of Object.entries(providers)) {
 			if (
 				!Array.isArray(identityKeys) ||
@@ -60,5 +61,17 @@ export function restrictSessionAccounts(
 	if (!pools) return;
 	for (const [provider, identityKeys] of Object.entries(pools)) {
 		authStorage.sessions.restrict(provider, sessionId, identityKeys);
+	}
+}
+
+/** Remove `pools`' restrictions from `sessionId` once the session has ended. */
+export function releaseSessionAccounts(
+	authStorage: Pick<AuthStorage, "sessions">,
+	sessionId: string,
+	pools: OAuthAccountPools | undefined,
+): void {
+	if (!pools) return;
+	for (const provider of Object.keys(pools)) {
+		authStorage.sessions.unrestrict(provider, sessionId);
 	}
 }

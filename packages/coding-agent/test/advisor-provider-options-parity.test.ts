@@ -343,7 +343,7 @@ describe("AgentSession advisor provider-options parity", () => {
 		expect(metadataSessionId(capturedStreamOptions[0])).not.toBe(previousAdvisorSessionId);
 	});
 
-	it("keeps the advisor inside the primary session's OAuth account pool", async () => {
+	it("keeps the advisor inside the primary session's OAuth account pool until dispose", async () => {
 		const pooledStorage = createInMemoryAuthStorage();
 		try {
 			await pooledStorage.credentials.set(
@@ -374,8 +374,15 @@ describe("AgentSession advisor provider-options parity", () => {
 			expect(session.setAdvisorEnabled(true)).toBe(true);
 
 			const getApiKey = session.getAdvisorAgent()?.getApiKey;
-			if (!getApiKey) throw new Error("Expected advisor credential resolver");
+			const mainProviderSessionId = mainAgent.sessionId;
+			if (!getApiKey || !mainProviderSessionId) throw new Error("Expected advisor resolver and main session id");
 			expect(await resolveApiKeyOnce(await getApiKey(model))).toBe("access-c");
+			expect(await pooledStorage.keys.get("anthropic", mainProviderSessionId)).toBe("access-c");
+
+			// Dispose lifts the pool from every provider session id the session restricted.
+			await session.dispose();
+			expect(await resolveApiKeyOnce(await getApiKey(model))).toBe("runtime-key");
+			expect(await pooledStorage.keys.get("anthropic", mainProviderSessionId)).toBe("runtime-key");
 		} finally {
 			await session.dispose();
 			pooledStorage.close();

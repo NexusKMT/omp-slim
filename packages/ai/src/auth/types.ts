@@ -1123,9 +1123,13 @@ export interface SessionsApi {
 	 * listed account can serve, key resolution fails instead of borrowing
 	 * another account. An empty list allows no account. Replaces any earlier
 	 * restriction for the same provider and session; {@link inherit} does not
-	 * copy restrictions.
+	 * copy restrictions. Restrictions are never evicted, because that would
+	 * widen a live session; the owner calls {@link unrestrict} when the session
+	 * ends.
 	 */
 	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): void;
+	/** Remove the {@link restrict} restriction of a session that has ended. */
+	unrestrict(provider: string, sessionId: string): void;
 	/**
 	 * Release a session's sticky credential so its next {@link getApiKey} call
 	 * re-runs native pool ranking. This never blocks or penalizes the released

@@ -114,7 +114,7 @@ import { loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
-import { type OAuthAccountPools, restrictSessionAccounts } from "../config/account-pools";
+import { type OAuthAccountPools, releaseSessionAccounts, restrictSessionAccounts } from "../config/account-pools";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -907,6 +907,8 @@ export class AgentSession implements SettingsScope {
 	#providerSessionId: string | undefined;
 	#freshProviderSessionId: string | undefined;
 	#oauthAccountPools: OAuthAccountPools | undefined;
+	/** Provider session ids restricted to {@link #oauthAccountPools}, lifted on dispose. */
+	#oauthRestrictedSessionIds = new Set<string>();
 	#inheritedProviderPromptCacheKey: string | undefined;
 	#autolearnCaptureAbortController: AbortController | undefined;
 	#autolearnCaptureTask: Promise<void> | undefined;
@@ -2178,7 +2180,7 @@ export class AgentSession implements SettingsScope {
 				this.#recovery.noteRetryFallbackCooldown(selector, retryAfterMs, errorMessage),
 			createCodexCompactionContext: createMaintenanceCodexCompactionContext,
 			sessionId: () => this.sessionId,
-			oauthAccountPools: () => this.#oauthAccountPools,
+			restrictOAuthAccounts: providerSessionId => this.#restrictOAuthAccounts(providerSessionId),
 		};
 		this.#advisors = new SessionAdvisors(advisorsHost, {
 			enabled: cfgAdvisorEnabled.get(this.settings),
@@ -5291,7 +5293,7 @@ export class AgentSession implements SettingsScope {
 		);
 		// Account pools are keyed by provider session id; a fresh or reset id
 		// must not start unrestricted, and restored pins must see the pool.
-		restrictSessionAccounts(this.#modelRegistry.authStorage, sid, this.#oauthAccountPools);
+		this.#restrictOAuthAccounts(sid);
 		// Restore the session's recorded provider accounts before the first
 		// request routes: sticky rows are process-local under a remote auth
 		// broker, and losing them re-ranks onto a different account, cold-missing
@@ -5306,6 +5308,24 @@ export class AgentSession implements SettingsScope {
 		// conversation's session id/metadata (issue #6625). Guarded because this
 		// runs once during construction before the advisor controller exists.
 		if (this.#advisors) this.#advisors.refreshProviderIdentity();
+	}
+
+	/**
+	 * Install this session's account pools on a provider session id it or one
+	 * of its advisors adopts, remembering the id so dispose can lift it.
+	 */
+	#restrictOAuthAccounts(providerSessionId: string): void {
+		if (!this.#oauthAccountPools) return;
+		restrictSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, this.#oauthAccountPools);
+		this.#oauthRestrictedSessionIds.add(providerSessionId);
+	}
+
+	/** Lift those restrictions once no request can resolve a key for these ids. */
+	#releaseOAuthAccounts(): void {
+		for (const providerSessionId of this.#oauthRestrictedSessionIds) {
+			releaseSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, this.#oauthAccountPools);
+		}
+		this.#oauthRestrictedSessionIds.clear();
 	}
 
 	#notifySessionChangeCallbacks(): void {
@@ -5675,6 +5695,10 @@ export class AgentSession implements SettingsScope {
 		// graph shed its heavy payloads even while the lifecycle adoption record's
 		// reviver closure still references the session object. Fixes #8003.
 		this.#releaseRetainedSessionMemory();
+		// A run past the deadline may still resolve keys, and a revival can
+		// restrict the same ids again once dispose returns, so only a settled
+		// session lifts its account pools; an unsettled one keeps them.
+		if (drained) this.#releaseOAuthAccounts();
 
 		// The deadline does not cancel the drain: a handler parked in a slow
 		// extension hook resumes afterwards and would repopulate exactly the

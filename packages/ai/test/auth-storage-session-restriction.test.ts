@@ -73,12 +73,18 @@ describe("AuthStorage session account restrictions", () => {
 		storage.sessions.restrict(PROVIDER, "empty", []);
 
 		expect(await storage.keys.get(PROVIDER, "allowed")).toBe("access-a");
+		// Metadata and usage attribution follow the OAuth account the request uses.
+		expect(storage.oauth.identity(PROVIDER, "allowed")?.accountId).toBe("acc-a");
 		for (const sessionId of ["missing", "empty"]) {
 			await expect(storage.keys.get(PROVIDER, sessionId)).rejects.toThrow(
 				`No API key for provider: ${PROVIDER} (session ${sessionId} is restricted to its OAuth account pool`,
 			);
 		}
 		expect(await storage.keys.get(PROVIDER, "unrestricted")).toBe("runtime-key");
+
+		// The owner lifts a restriction when its session ends.
+		storage.sessions.unrestrict(PROVIDER, "missing");
+		expect(await storage.keys.get(PROVIDER, "missing")).toBe("runtime-key");
 	});
 
 	test("rotates only among allowed accounts", async () => {

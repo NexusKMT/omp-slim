@@ -73,7 +73,6 @@ import {
 	slugifyAdvisorName,
 } from "../advisor";
 import { evictStaleToolResults } from "../advisor/tool-result-eviction";
-import { type OAuthAccountPools, restrictSessionAccounts } from "../config/account-pools";
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	formatModelString,
@@ -511,8 +510,8 @@ export interface SessionAdvisorsHost {
 		phase: CodexCompactionContext["phase"];
 	}): CodexCompactionContext;
 	sessionId(): string;
-	/** Account pools of the primary session; advisors run under the same pools. */
-	oauthAccountPools(): OAuthAccountPools | undefined;
+	/** Put an advisor's provider session under the primary session's account pools. */
+	restrictOAuthAccounts(providerSessionId: string): void;
 }
 
 /**
@@ -993,13 +992,7 @@ export class SessionAdvisors {
 			this.#host.sessionId(),
 			slug,
 		);
-		if (providerSessionId) {
-			restrictSessionAccounts(
-				this.#host.modelRegistry.authStorage,
-				providerSessionId,
-				this.#host.oauthAccountPools(),
-			);
-		}
+		if (providerSessionId) this.#host.restrictOAuthAccounts(providerSessionId);
 		return providerSessionId;
 	}
 

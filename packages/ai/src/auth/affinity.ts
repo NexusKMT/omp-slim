@@ -77,6 +77,12 @@ export class SessionAffinity implements SessionsApi {
 		this.#restrictions.set(provider, sessions);
 	}
 
+	unrestrict(provider: string, sessionId: string): void {
+		const sessions = this.#restrictions.get(provider);
+		if (!sessions?.delete(sessionId) || sessions.size > 0) return;
+		this.#restrictions.delete(provider);
+	}
+
 	/** True when {@link restrict} limits `sessionId` for `provider`. */
 	isRestricted(provider: string, sessionId: string | undefined): boolean {
 		return sessionId !== undefined && this.#restrictions.get(provider)?.has(sessionId) === true;
@@ -295,7 +301,9 @@ export class SessionAffinity implements SessionsApi {
 
 		// Runtime / config overrides bypass OAuth account_uuid attribution — the
 		// caller is authenticating with an explicit key, not the broker's OAuth.
-		if (this.#overrides.has(provider)) return undefined;
+		// A restricted session never uses those keys (see `KeyCascade.get`).
+		const restricted = this.isRestricted(provider, sessionId);
+		if (!restricted && this.#overrides.has(provider)) return undefined;
 
 		// Prefer the session-sticky credential when available.
 		const sessionPref = this.get(provider, sessionId);
@@ -308,7 +316,7 @@ export class SessionAffinity implements SessionsApi {
 		// would misattribute traffic. Only apply this guard when sessionPref is absent; a
 		// recorded OAuth sticky (sessionPref.type === "oauth") must NOT be blocked even if an
 		// env key also happens to exist.
-		if (!sessionPref && getEnvApiKey(provider)) return undefined;
+		if (!restricted && !sessionPref && getEnvApiKey(provider)) return undefined;
 		// Resolve the sticky index against the full credential list — the index is
 		// recorded against the unfiltered provider array (by record /
 		// CredentialSelector.tryOAuth), not the OAuth-only subset, so dereferencing it into the
