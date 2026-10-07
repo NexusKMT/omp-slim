@@ -64,12 +64,12 @@ Schemas sent on the Google JSON Schema path MUST follow:
 
 1. **Unsupported JSON Schema keywords are stripped (except property names under `properties`)**
    - Unsupported keys (`UNSUPPORTED_SCHEMA_FIELDS`):
-      - `$schema`, `$ref`, `$defs`, `$dynamicRef`, `$dynamicAnchor`
+      - `$schema`, `$id`, `$anchor`, `$ref`, `$defs`, `$dynamicRef`, `$dynamicAnchor`
       - `examples`, `prefixItems`, `unevaluatedProperties`, `unevaluatedItems`
       - `patternProperties`, `additionalProperties`
-      - `minItems`, `maxItems`, `minLength`, `maxLength`
-      - `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`
-      - `pattern`, `format`
+      - `minItems`, `maxItems`, `uniqueItems`, `contains`, `minContains`, `maxContains`, `additionalItems`
+      - `minLength`, `maxLength`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`
+      - `pattern`, `format`, `contentEncoding`, `contentMediaType`, `contentSchema`
       - `dependencies`, `dependentSchemas`, `dependentRequired`
       - `deprecated`, `readOnly`, `writeOnly`, `$comment`
    - Important: keys inside a `properties` object are treated as property names and MUST NOT be stripped by keyword match.

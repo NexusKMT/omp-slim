@@ -435,6 +435,37 @@ describe("Cloud Code Assist Claude tool schema conversion", () => {
 			},
 		);
 	});
+
+	it("strips uniqueItems from tool parameters in convertTools for gemini and claude models", () => {
+		const parameters = {
+			type: "object",
+			properties: {
+				edu: {
+					type: "array",
+					items: { type: "string", enum: ["College", "University"] },
+					description: "Education levels",
+					uniqueItems: true,
+				},
+			},
+		} as unknown as TJsonSchema;
+		const tools: Tool[] = [{ name: "search_jobs", description: "Search jobs", parameters }];
+
+		const geminiDeclaration = convertTools(tools, createModel("gemini-3.5-flash"))?.[0]
+			?.functionDeclarations[0] as Record<string, unknown>;
+		const geminiParams = geminiDeclaration.parametersJsonSchema as {
+			properties: { edu: { uniqueItems?: unknown; description: string } };
+		};
+		expect(geminiParams.properties.edu.uniqueItems).toBeUndefined();
+		expect(geminiParams.properties.edu.description).toBe("Education levels\n\n{uniqueItems: true}");
+
+		const claudeDeclaration = convertTools(tools, createModel("claude-sonnet-4-5"))?.[0]
+			?.functionDeclarations[0] as Record<string, unknown>;
+		const claudeParams = claudeDeclaration.parameters as {
+			properties: { edu: { uniqueItems?: unknown; description: string } };
+		};
+		expect(claudeParams.properties.edu.uniqueItems).toBeUndefined();
+		expect(claudeParams.properties.edu.description).toBe("Education levels\n\n{uniqueItems: true}");
+	});
 });
 
 /**
