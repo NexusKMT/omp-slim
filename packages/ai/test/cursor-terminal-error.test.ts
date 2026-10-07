@@ -6,11 +6,15 @@ import type { Context, CursorToolResultHandler, Model, ToolResultMessage } from 
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	AgentServerMessageSchema,
+	ConversationStateStructureSchema,
 	ExecServerMessageSchema,
 	CustomErrorDetailsSchema,
 	CursorError,
 	ErrorDetailsSchema,
+	GetBlobArgsSchema,
+	HeartbeatUpdateSchema,
 	InteractionUpdateSchema,
+	KvServerMessageSchema,
 	McpArgsSchema,
 	McpToolCallSchema,
 	ReadArgsSchema,
@@ -36,6 +40,7 @@ type Scenario =
 	| { kind: "connect-structured-error-after-turn" }
 	| { kind: "connect-provider-error-after-step"; isRetryable: boolean | undefined }
 	| { kind: "cut-after-step-completed" }
+	| { kind: "cut-after-step-trailing-frames" }
 	| { kind: "cut-after-content-following-step" }
 	| { kind: "cut-after-tool-call-step" }
 	| { kind: "cut-with-tool-call-open" }
@@ -113,6 +118,41 @@ function stepCompletedFrame(): Buffer {
 function truncatedFrame(): Buffer {
 	const frame = frameConnectMessage(Buffer.alloc(4096, 0x1a));
 	return frame.subarray(0, 512);
+}
+
+function checkpointFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "conversationCheckpointUpdate",
+			value: create(ConversationStateStructureSchema, {}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+function heartbeatFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "interactionUpdate",
+			value: create(InteractionUpdateSchema, {
+				message: { case: "heartbeat", value: create(HeartbeatUpdateSchema, {}) },
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
+}
+
+function kvGetBlobFrame(): Buffer {
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "kvServerMessage",
+			value: create(KvServerMessageSchema, {
+				id: 1,
+				message: { case: "getBlobArgs", value: create(GetBlobArgsSchema, { blobId: new Uint8Array(32) }) },
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
 }
 
 /** An MCP tool call's start or completion envelope, correlated by `callId`. */
@@ -300,6 +340,23 @@ async function startServer(): Promise<string> {
 			// arrive, then the stream closes partway through the trailing repeat
 			// checkpoint, so `turnEnded` and the end frame never come.
 			stream.write(Buffer.concat([textDeltaFrame("complete answer"), stepCompletedFrame(), truncatedFrame()]));
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "cut-after-step-trailing-frames") {
+			// The repeat checkpoint arrives whole, with keepalive and blob traffic,
+			// and the cut lands in the `turnEnded` frame that follows it.
+			stream.write(
+				Buffer.concat([
+					textDeltaFrame("complete answer"),
+					stepCompletedFrame(),
+					checkpointFrame(),
+					heartbeatFrame(),
+					kvGetBlobFrame(),
+					truncatedFrame(),
+				]),
+			);
 			stream.end();
 			return;
 		}
@@ -618,17 +675,20 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		expect(result.errorMessage).toContain("Cursor stream ended before turnEnded");
 	});
 
-	it("completes a turn whose stream was cut after stepCompleted", async () => {
-		scenario = { kind: "cut-after-step-completed" };
-		const baseUrl = await startServer();
-		const { eventTypes, result } = await collectStream(makeModel(baseUrl));
-		expect(eventTypes.at(-1)).toBe("done");
-		expect(result.stopReason).toBe("stop");
-		expect(result.errorMessage).toBeUndefined();
-		expect(result.content.map(block => (block.type === "text" ? block.text : block.type))).toEqual([
-			"complete answer",
-		]);
-	});
+	it.each(["cut-after-step-completed", "cut-after-step-trailing-frames"] as const)(
+		"completes a turn whose stream was cut after stepCompleted (%s)",
+		async kind => {
+			scenario = { kind };
+			const baseUrl = await startServer();
+			const { eventTypes, result } = await collectStream(makeModel(baseUrl));
+			expect(eventTypes.at(-1)).toBe("done");
+			expect(result.stopReason).toBe("stop");
+			expect(result.errorMessage).toBeUndefined();
+			expect(result.content.map(block => (block.type === "text" ? block.text : block.type))).toEqual([
+				"complete answer",
+			]);
+		},
+	);
 
 	it.each(["cut-after-content-following-step", "cut-after-tool-call-step", "cut-with-tool-call-open"] as const)(
 		"still rejects a stream cut after stepCompleted that did not end the turn (%s)",
