@@ -1089,8 +1089,8 @@ function streamCursorWithWireMode(
 		const h2Completion = Promise.withResolvers<void>();
 		let h2Settled = false;
 		let sawTurnEnded = false;
-		// Cursor sends `stepCompleted` once per turn, after all content and tool
-		// calls; only a repeat checkpoint and the `turnEnded` usage frame follow.
+		// After the final step's `stepCompleted`, only a repeat checkpoint and the
+		// `turnEnded` usage frame follow.
 		let stepCompletedIsLatest = false;
 		let endStreamError: Error | null = null;
 		let progressVersion = 0;
@@ -1119,11 +1119,12 @@ function streamCursorWithWireMode(
 			}
 			if (!sawTurnEnded) {
 				// A stream cut after the final step lost only usage and a repeat
-				// checkpoint, so the turn is complete. A turn without content or
-				// with a tool call still open is still treated as truncated.
+				// checkpoint, so the turn is complete. The final step ends on answer
+				// text; a step that ended on tool calls, or left one open, may be
+				// followed by another step and is still treated as truncated.
 				if (
 					stepCompletedIsLatest &&
-					output.content.length > 0 &&
+					output.content.at(-1)?.type === "text" &&
 					openBlockState?.currentToolCall === null &&
 					openBlockState.openToolCalls.size === 0
 				) {

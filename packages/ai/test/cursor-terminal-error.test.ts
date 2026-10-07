@@ -11,9 +11,12 @@ import {
 	CursorError,
 	ErrorDetailsSchema,
 	InteractionUpdateSchema,
+	McpArgsSchema,
+	McpToolCallSchema,
 	ReadArgsSchema,
 	StepCompletedUpdateSchema,
 	TextDeltaUpdateSchema,
+	ToolCallCompletedUpdateSchema,
 	ToolCallSchema,
 	ToolCallStartedUpdateSchema,
 	TurnEndedUpdateSchema,
@@ -34,6 +37,8 @@ type Scenario =
 	| { kind: "connect-provider-error-after-step"; isRetryable: boolean | undefined }
 	| { kind: "cut-after-step-completed" }
 	| { kind: "cut-after-content-following-step" }
+	| { kind: "cut-after-tool-call-step" }
+	| { kind: "cut-with-tool-call-open" }
 	| { kind: "grpc-trailer-after-turn" }
 	| { kind: "end-before-turn" }
 	| { kind: "hang-after-turn" }
@@ -108,6 +113,36 @@ function stepCompletedFrame(): Buffer {
 function truncatedFrame(): Buffer {
 	const frame = frameConnectMessage(Buffer.alloc(4096, 0x1a));
 	return frame.subarray(0, 512);
+}
+
+/** An MCP tool call's start or completion envelope, correlated by `callId`. */
+function mcpToolCallFrame(phase: "toolCallStarted" | "toolCallCompleted"): Buffer {
+	const toolCall = create(ToolCallSchema, {
+		tool: {
+			case: "mcpToolCall",
+			value: create(McpToolCallSchema, {
+				args: create(McpArgsSchema, { name: "read", toolName: "read", toolCallId: "call-step" }),
+			}),
+		},
+	});
+	const message = create(AgentServerMessageSchema, {
+		message: {
+			case: "interactionUpdate",
+			value: create(InteractionUpdateSchema, {
+				message:
+					phase === "toolCallStarted"
+						? {
+								case: "toolCallStarted",
+								value: create(ToolCallStartedUpdateSchema, { callId: "envelope-step", toolCall }),
+							}
+						: {
+								case: "toolCallCompleted",
+								value: create(ToolCallCompletedUpdateSchema, { callId: "envelope-step", toolCall }),
+							},
+			}),
+		},
+	});
+	return frameConnectMessage(toBinary(AgentServerMessageSchema, message));
 }
 
 function connectEndErrorFrame(code: string, message: string, details?: unknown): Buffer {
@@ -271,6 +306,35 @@ async function startServer(): Promise<string> {
 
 		if (scenario.kind === "cut-after-content-following-step") {
 			stream.write(Buffer.concat([stepCompletedFrame(), textDeltaFrame("still streaming")]));
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "cut-after-tool-call-step") {
+			// A step that ended on a settled tool call: another model step may
+			// follow, so a cut here is not a finished turn.
+			stream.write(
+				Buffer.concat([
+					textDeltaFrame("checking"),
+					mcpToolCallFrame("toolCallStarted"),
+					mcpToolCallFrame("toolCallCompleted"),
+					stepCompletedFrame(),
+					truncatedFrame(),
+				]),
+			);
+			stream.end();
+			return;
+		}
+
+		if (scenario.kind === "cut-with-tool-call-open") {
+			stream.write(
+				Buffer.concat([
+					mcpToolCallFrame("toolCallStarted"),
+					textDeltaFrame("while the call runs"),
+					stepCompletedFrame(),
+					truncatedFrame(),
+				]),
+			);
 			stream.end();
 			return;
 		}
@@ -566,13 +630,17 @@ describe("Cursor terminal lifecycle after turnEnded", () => {
 		]);
 	});
 
-	it("still rejects a stream cut after content that followed stepCompleted", async () => {
-		scenario = { kind: "cut-after-content-following-step" };
-		const baseUrl = await startServer();
-		const { eventTypes, result } = await collectStream(makeModel(baseUrl));
-		expect(eventTypes.at(-1)).toBe("error");
-		expect(result.errorMessage).toContain("Cursor stream ended before turnEnded");
-	});
+	it.each(["cut-after-content-following-step", "cut-after-tool-call-step", "cut-with-tool-call-open"] as const)(
+		"still rejects a stream cut after stepCompleted that did not end the turn (%s)",
+		async kind => {
+			scenario = { kind };
+			const baseUrl = await startServer();
+			const { eventTypes, result } = await collectStream(makeModel(baseUrl));
+			expect(eventTypes.at(-1)).toBe("error");
+			expect(result.stopReason).toBe("error");
+			expect(result.errorMessage).toContain("Cursor stream ended before turnEnded");
+		},
+	);
 
 	it.each([
 		{ isRetryable: false, retriable: false, status: 400 },
