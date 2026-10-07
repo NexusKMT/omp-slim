@@ -48,7 +48,9 @@ export interface PruneConfig {
 	 * already-sent cache prefix: mutating it forces the provider to re-write the
 	 * whole suffix (cacheWrite premium). Such results — including superseded and
 	 * useless ones, which otherwise bypass {@link protectTokens} — are left for
-	 * compaction/shake (which rebuild the cache anyway) to reclaim. Undefined =
+	 * compaction/shake (which rebuild the cache anyway) to reclaim. A suffix
+	 * past the prompt-cache lookback window ({@link CACHE_LOOKBACK_SUFFIX_BLOCKS}
+	 * content blocks) is warm prefix too, whatever its token count. Undefined =
 	 * no cache guard (legacy: superseded/useless prune at any depth).
 	 */
 	cacheWarmSuffixTokens?: number;
@@ -135,7 +137,11 @@ export interface SupersedePruneConfig {
 	supersedeComplete?: SupersedeCompleteFn;
 	/** Also prune results flagged useless by their tool. Default false. */
 	pruneUseless?: boolean;
-	/** Prune a candidate now when all messages after it total at most this many estimated tokens. Default 8 000. */
+	/**
+	 * Prune a candidate now when all messages after it total at most this many
+	 * estimated tokens and stay inside the prompt-cache lookback window
+	 * ({@link CACHE_LOOKBACK_SUFFIX_BLOCKS} content blocks). Default 8 000.
+	 */
 	suffixTokenLimit?: number;
 	/**
 	 * Prune all candidates when the last message is at least this old: the
@@ -159,6 +165,26 @@ export interface SupersedePruneConfig {
 
 const DEFAULT_SUFFIX_TOKEN_LIMIT = 8_000;
 const DEFAULT_IDLE_FLUSH_MS = 30 * 60_000;
+
+/**
+ * Prompt-cache lookback window, in content blocks after a rewritten result.
+ * Anthropic resolves a cache breakpoint by checking only the ~20 content-block
+ * boundaries before it. When a warm-cache rewrite sits further back than that
+ * from the next request's tail, no cache entry written after the rewrite point
+ * is reachable and the lookup falls back to an older breakpoint, usually just
+ * the tools + system head, so the whole conversation is re-written rather than
+ * the small suffix the token limits budget for. The window stays below 20 to
+ * leave room for the rewritten result itself and per-request injections.
+ */
+const CACHE_LOOKBACK_SUFFIX_BLOCKS = 16;
+
+/** Content blocks a sent entry contributes to the prompt-cache lookback count (0 for entries that are never sent). */
+function sentContentBlocks(entry: SessionEntry): number {
+	if (entry.type === "custom_message") return Array.isArray(entry.content) ? Math.max(1, entry.content.length) : 1;
+	if (entry.type !== "message") return 0;
+	const message = entry.message;
+	return "content" in message && Array.isArray(message.content) ? Math.max(1, message.content.length) : 1;
+}
 
 function createPrunedNotice(tokens: number): string {
 	return `[Output truncated - ${tokens} tokens]`;
@@ -387,16 +413,23 @@ export function pruneSupersededToolResults(
 	} else {
 		// Mutating a candidate re-writes its suffix (tokens of every message
 		// strictly after it) in the warm cache, so prune only when that suffix is
-		// small. The suffix only grows walking back, so stop at the first index
-		// past the limit instead of measuring the whole branch.
+		// small and still inside the provider's cache lookback window. Both only
+		// grow walking back, so stop at the first index past either limit
+		// instead of measuring the whole branch.
 		const suffixTokenLimit = config.suffixTokenLimit ?? DEFAULT_SUFFIX_TOKEN_LIMIT;
 		toPrune = [];
 		let suffixTokens = 0;
+		let suffixBlocks = 0;
 		let next = candidates.length - 1;
-		for (let i = entries.length - 1; next >= 0 && suffixTokens <= suffixTokenLimit; i--) {
+		for (
+			let i = entries.length - 1;
+			next >= 0 && suffixTokens <= suffixTokenLimit && suffixBlocks <= CACHE_LOOKBACK_SUFFIX_BLOCKS;
+			i--
+		) {
 			while (next >= 0 && candidates[next].index === i) toPrune.push(candidates[next--]);
 			const entry = entries[i];
 			if (entry.type === "message") suffixTokens += tokenizer.countMessage(entry.message as AgentMessage);
+			suffixBlocks += sentContentBlocks(entry);
 		}
 		toPrune.reverse();
 	}
@@ -451,12 +484,16 @@ export function pruneToolOutputs(
 			: undefined;
 
 	const cacheWarmSuffixTokens = config.cacheWarmSuffixTokens;
-	// Tokens of every message strictly after entry `i` (cache guard only).
+	// Tokens of every message strictly after entry `i`, and content blocks of
+	// every sent entry strictly after it (cache guard only).
 	let messageSuffix = 0;
+	let blockSuffix = 0;
 
 	for (let i = entries.length - 1; i >= boundaryIndex; i--) {
 		const entry = entries[i];
 		const suffixAfter = messageSuffix;
+		const blocksAfter = blockSuffix;
+		blockSuffix += sentContentBlocks(entry);
 		const message = getToolResultMessage(entry);
 		if (!message) {
 			if (cacheWarmSuffixTokens !== undefined && entry.type === "message") {
@@ -470,10 +507,17 @@ export function pruneToolOutputs(
 
 		// Prompt-cache guard: a result whose all-message suffix exceeds the
 		// warm-cache window sits in the already-sent cached prefix — mutating it
-		// re-writes the whole suffix (cacheWrite premium). The suffix only grows
-		// walking back, so every older result is in the warm prefix too. Deeper,
-		// still-cached superseded/useless copies are left for compaction/shake.
-		if (cacheWarmSuffixTokens !== undefined && suffixAfter > cacheWarmSuffixTokens) break;
+		// re-writes the whole suffix (cacheWrite premium), or the whole
+		// conversation once the suffix is past the provider's cache lookback
+		// window. Both suffixes only grow walking back, so every older result is
+		// in the warm prefix too. Deeper, still-cached superseded/useless copies
+		// are left for compaction/shake.
+		if (
+			cacheWarmSuffixTokens !== undefined &&
+			(suffixAfter > cacheWarmSuffixTokens || blocksAfter > CACHE_LOOKBACK_SUFFIX_BLOCKS)
+		) {
+			break;
+		}
 
 		if (message.prunedAt !== undefined) {
 			accumulatedTokens += tokens;

@@ -6,6 +6,10 @@
 
 - Sped up tool-output pruning and telemetry message capture on long sessions ([#14678](https://github.com/can1357/oh-my-pi/pull/14678) by [@H4vC](https://github.com/H4vC))
 
+### Fixed
+
+- Fixed warm-cache tool-result pruning re-writing a whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
+
 ## [18.7.0] - 2026-10-06
 
 ### Fixed

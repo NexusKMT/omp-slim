@@ -796,3 +796,77 @@ describe("cache-stable boundary — warm prefix protection", () => {
 		expect(resultMessage(result2).prunedAt).toBeDefined(); // at/after boundary, in tail -> pruned
 	});
 });
+
+/** `count` small, unkeyed bash call/result pairs: many content blocks, few tokens. */
+function smallTurns(count: number, timestamp: number): SessionMessageEntry[] {
+	const turns: SessionMessageEntry[] = [];
+	for (let turn = 0; turn < count; turn++) {
+		const callId = `call-${idCounter++}`;
+		turns.push(
+			messageEntry(
+				assistantMessage(
+					[{ type: "toolCall", id: callId, name: "bash", arguments: { command: "true" } }],
+					timestamp,
+				),
+				timestamp,
+			),
+			messageEntry(toolResultMessage("bash", callId, "ok", timestamp), timestamp),
+		);
+	}
+	return turns;
+}
+
+describe("warm-cache guard — prompt-cache lookback window", () => {
+	// 12 small turns + the newer read = 26 content blocks after the stale result,
+	// far below the 8k token limit but past Anthropic's ~20-block breakpoint lookback:
+	// rewriting it would re-write the whole conversation, not just the suffix.
+	function staleReadBehind(turns: number): { stale: SessionMessageEntry; entries: SessionEntry[] } {
+		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
+		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
+		return { stale, entries: [call1, stale, ...smallTurns(turns, T0 + 1_000), call2, latest] };
+	}
+
+	test("per-turn supersede pass leaves a result beyond the lookback window byte-identical", () => {
+		const { stale, entries } = staleReadBehind(12);
+
+		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
+
+		expect(result.prunedCount).toBe(0);
+		expect(resultText(stale)).toBe(FILE_CONTENT);
+		expect(resultMessage(stale).prunedAt).toBeUndefined();
+	});
+
+	test("per-turn supersede pass still prunes inside the lookback window", () => {
+		const { stale, entries } = staleReadBehind(6);
+
+		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
+
+		expect(result.prunedCount).toBe(1);
+		expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
+	});
+
+	test("idle flush still prunes beyond the lookback window once the cache is cold", () => {
+		const { stale, entries } = staleReadBehind(12);
+
+		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 2_000 + 31 * 60_000 }));
+
+		expect(result.prunedCount).toBe(1);
+		expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
+	});
+
+	test("cache-guarded prune pass leaves a result beyond the lookback window byte-identical", () => {
+		const { stale, entries } = staleReadBehind(12);
+
+		const result = pruneToolOutputs(entries, tokenizer, {
+			protectTokens: 1_000_000,
+			minimumSavings: 0,
+			protectedTools: [],
+			supersedeKey: readToolSupersedeKey,
+			cacheWarmSuffixTokens: 8_000,
+		});
+
+		expect(result.prunedCount).toBe(0);
+		expect(resultText(stale)).toBe(FILE_CONTENT);
+		expect(resultMessage(stale).prunedAt).toBeUndefined();
+	});
+});
