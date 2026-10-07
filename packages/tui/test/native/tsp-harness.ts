@@ -51,6 +51,8 @@ export interface TspHarnessOptions {
 	blobDir?: string;
 	/** Answer `blobs` queries (default true). */
 	answerBlobs?: boolean;
+	/** Reject a blob whose `id` isn't the sha256 of its bytes, as Tern 0.5.3 and earlier do. */
+	requireBlobId?: boolean;
 }
 
 /** The id Tern names a blob by. */
@@ -338,7 +340,9 @@ export class TspTestTerminal implements Terminal {
 			case "b": {
 				// Named by the sha256 of its bytes, as Tern names it.
 				const bytes = Buffer.from(body, "base64");
-				this.blobs.set(blobId(bytes), bytes);
+				const id = blobId(bytes);
+				if (this.#options.requireBlobId && raw.params.id !== id) return;
+				this.blobs.set(id, bytes);
 				return;
 			}
 			default:

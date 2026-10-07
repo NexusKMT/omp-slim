@@ -155,6 +155,15 @@ async function cacheBlob(dir: string, blob: NativeBlob): Promise<void> {
 	}
 }
 
+/**
+ * A `b` message's parameters. Tern names a blob by the sha256 of the bytes it
+ * receives and ignores `id`, but Tern 0.5.3 and earlier reject a blob without
+ * it, so it stays until those are gone.
+ */
+function blobParams(blob: NativeBlob): Record<string, string> {
+	return { id: blob.id, mime: blob.mime };
+}
+
 class NativeContext implements DescribeContext {
 	cols: number;
 	reduceMotion: boolean;
@@ -706,7 +715,7 @@ export class NativeBackend {
 				const body = Buffer.from(blob.bytes.buffer, blob.bytes.byteOffset, blob.bytes.byteLength).toString(
 					"base64",
 				);
-				this.#record("out", "b", { mime: blob.mime }, body);
+				this.#record("out", "b", blobParams(blob), body);
 			}
 		}
 		if (!query?.timer) return;
@@ -727,9 +736,8 @@ export class NativeBackend {
 		this.#blobs.set(blob.id, "sent");
 		const body = Buffer.from(blob.bytes.buffer, blob.bytes.byteOffset, blob.bytes.byteLength).toString("base64");
 		// The full body, so a replay (Tern's `surface-play`) shows the image.
-		// No `id` parameter: Tern names the blob by the sha256 of the bytes it receives.
-		this.#record("out", "b", { mime: blob.mime }, body);
-		this.#host.terminal.write(encodeTspMessage("b", body, { mime: blob.mime }, this.#limit));
+		this.#record("out", "b", blobParams(blob), body);
+		this.#host.terminal.write(encodeTspMessage("b", body, blobParams(blob), this.#limit));
 	}
 
 	/**

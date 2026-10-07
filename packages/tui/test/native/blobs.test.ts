@@ -68,6 +68,13 @@ describe("native blob delivery", () => {
 		expect(harness.terminal.blobs.get(pic.id)).toEqual(pic.bytes);
 	});
 
+	it("reaches a Tern that still names blobs by their id parameter", async () => {
+		const pic = image();
+		harness = await TspHarness.start(tui => tui.addChild(pic.probe()), { requireBlobId: true });
+		expect(sent(harness, "b")).toHaveLength(1);
+		expect(harness.terminal.blobs.get(pic.id)).toEqual(pic.bytes);
+	});
+
 	it("doesn't upload a blob the terminal already holds", async () => {
 		const pic = image();
 		harness = await TspHarness.start(tui => tui.addChild(pic.probe()), { heldBlobs: [pic.bytes] });
@@ -99,7 +106,7 @@ describe("native blob delivery", () => {
 			expect.objectContaining({
 				dir: "out",
 				verb: "b",
-				params: { mime: "image/png" },
+				params: { id: pic.id, mime: "image/png" },
 				body: Buffer.from(pic.bytes).toString("base64"),
 			}),
 		]);
