@@ -414,6 +414,7 @@ function isAwaitingUserAnswer(message: AssistantMessage): boolean {
 	// Options and a recommendation do not answer the question on the user's behalf.
 	// Stop at other prose so self-answered questions still allow unfinished work to resume.
 	let optionCount = 0;
+	let hasRecommendation = false;
 	for (let index = lines.length - 1; index >= 0; index--) {
 		const line = lines[index].trim();
 		if (!line) continue;
@@ -421,8 +422,21 @@ function isAwaitingUserAnswer(message: AssistantMessage): boolean {
 			optionCount++;
 			continue;
 		}
-		if (optionCount > 0) return optionCount >= 2 && isQuestionPromptLine(line);
-		if (RECOMMENDATION_RE.test(promptLine(line).text)) continue;
+		const candidate = promptLine(line);
+		if (optionCount > 0) {
+			return (
+				optionCount >= 2 &&
+				isQuestionPromptLine(line) &&
+				(hasRecommendation ||
+					candidate.hadPromptLabel ||
+					USER_DIRECTED_PROMPT_RE.test(candidate.text) ||
+					CHOICE_CONFIRMATION_RE.test(candidate.text))
+			);
+		}
+		if (RECOMMENDATION_RE.test(candidate.text)) {
+			hasRecommendation = true;
+			continue;
+		}
 		return false;
 	}
 	return false;

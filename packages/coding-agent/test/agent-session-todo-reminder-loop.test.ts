@@ -203,6 +203,7 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 			"",
 			"I'd recommend 2. Offline mode would break mocks that use CDN assets.",
 		].join("\n"),
+		"Which approach?\n1. MCP tool\n2. Markdown fence\n\nI recommend the MCP tool.",
 	])("does not resume an unanswered choice prompt: %s", async text => {
 		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
 
@@ -212,6 +213,17 @@ describe("AgentSession todo reminder self-continuation suppression", () => {
 		expect(reminderAttempts).toEqual([]);
 		expect(todoReminderTranscriptEntry()).toBeUndefined();
 		expect(continueSpy).not.toHaveBeenCalled();
+	});
+
+	it("still resumes unfinished work after a question-headed status list", async () => {
+		const continueSpy = vi.spyOn(session.agent, "continue").mockResolvedValue();
+
+		emitTextOnlyStop("Finished slice 81.\n\n**What's left?**\n- Slice 82\n- Slice 83");
+		await session.waitForIdle();
+
+		expect(reminderAttempts).toEqual([1]);
+		expect(todoReminderTranscriptEntry()).toBeDefined();
+		expect(continueSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it("still reminds when the assistant answers its own prompt-shaped question", async () => {
