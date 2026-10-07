@@ -307,9 +307,10 @@ export class SessionAffinity implements SessionsApi {
 
 		// Runtime / config overrides bypass OAuth account_uuid attribution — the
 		// caller is authenticating with an explicit key, not the broker's OAuth.
-		// A restricted session never uses those keys (see `KeyCascade.get`).
+		// A restricted session skips a runtime key, and a config key fails it
+		// closed (see `KeyCascade.get`).
 		const restricted = this.isRestricted(provider, sessionId);
-		if (!restricted && this.#overrides.has(provider)) return undefined;
+		if (this.#overrides.suppressesOAuth(provider, restricted)) return undefined;
 
 		// Prefer the session-sticky credential when available.
 		const sessionPref = this.get(provider, sessionId);
@@ -346,7 +347,7 @@ export class SessionAffinity implements SessionsApi {
 	 * account, a stale resume re-ranks.
 	 */
 	pin(provider: string, sessionId: string, credentialId: number, options?: { restoredAtMs?: number }): boolean {
-		if (!sessionId || this.#overrides.has(provider)) {
+		if (!sessionId || this.#overrides.suppressesOAuth(provider, this.isRestricted(provider, sessionId))) {
 			return false;
 		}
 		const stored = this.#pool.entries(provider);

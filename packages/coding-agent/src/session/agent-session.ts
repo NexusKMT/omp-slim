@@ -114,12 +114,7 @@ import { loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
-import {
-	type OAuthAccountPools,
-	releaseSessionAccounts,
-	restrictSessionAccounts,
-	type SessionAccountLeases,
-} from "../config/account-pools";
+import type { SessionAccountPoolScope } from "../config/account-pools";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -911,9 +906,8 @@ export class AgentSession implements SettingsScope {
 	#scoutAllowedBySpawnPolicy = true;
 	#providerSessionId: string | undefined;
 	#freshProviderSessionId: string | undefined;
-	#oauthAccountPools: OAuthAccountPools | undefined;
-	/** Pool leases for each provider session id this session or its advisors restricted; lifted on dispose. */
-	#oauthAccountLeases = new Map<string, SessionAccountLeases>();
+	/** OAuth account pools enforced on this session's key lookups; lifted on dispose. */
+	#accountPoolScope: SessionAccountPoolScope | undefined;
 	#inheritedProviderPromptCacheKey: string | undefined;
 	#autolearnCaptureAbortController: AbortController | undefined;
 	#autolearnCaptureTask: Promise<void> | undefined;
@@ -2069,7 +2063,7 @@ export class AgentSession implements SettingsScope {
 		this.#textOutputCommitted = this.#agentKind === "main";
 		this.#scoutAllowedBySpawnPolicy = config.scoutAllowedBySpawnPolicy ?? true;
 		this.#providerSessionId = config.providerSessionId;
-		this.#oauthAccountPools = config.oauthAccountPools;
+		this.#accountPoolScope = config.accountPoolScope;
 		this.#inheritedProviderPromptCacheKey =
 			config.providerPromptCacheKeySource === "fork" ? this.agent.promptCacheKey : undefined;
 		// Owner-routed async delivery: completions for jobs this agent owns are
@@ -2185,7 +2179,7 @@ export class AgentSession implements SettingsScope {
 				this.#recovery.noteRetryFallbackCooldown(selector, retryAfterMs, errorMessage),
 			createCodexCompactionContext: createMaintenanceCodexCompactionContext,
 			sessionId: () => this.sessionId,
-			restrictOAuthAccounts: providerSessionId => this.#restrictOAuthAccounts(providerSessionId),
+			restrictOAuthAccounts: providerSessionId => this.#accountPoolScope?.restrict(providerSessionId),
 		};
 		this.#advisors = new SessionAdvisors(advisorsHost, {
 			enabled: cfgAdvisorEnabled.get(this.settings),
@@ -5296,9 +5290,9 @@ export class AgentSession implements SettingsScope {
 		this.agent.setMetadataResolver((provider: string) =>
 			buildSessionMetadata(sid, provider, this.#modelRegistry.authStorage),
 		);
-		// Account pools are keyed by provider session id; a fresh or reset id
-		// must not start unrestricted, and restored pins must see the pool.
-		this.#restrictOAuthAccounts(sid);
+		// A fresh or reset id becomes the pool scope's primary id, restricted
+		// before restored pins are seeded so they cannot leave the pool.
+		this.#accountPoolScope?.adopt(sid);
 		// Restore the session's recorded provider accounts before the first
 		// request routes: sticky rows are process-local under a remote auth
 		// broker, and losing them re-ranks onto a different account, cold-missing
@@ -5313,27 +5307,6 @@ export class AgentSession implements SettingsScope {
 		// conversation's session id/metadata (issue #6625). Guarded because this
 		// runs once during construction before the advisor controller exists.
 		if (this.#advisors) this.#advisors.refreshProviderIdentity();
-	}
-
-	/**
-	 * Install this session's account pools on a provider session id it or one
-	 * of its advisors adopts, keeping the leases so dispose can lift them.
-	 */
-	#restrictOAuthAccounts(providerSessionId: string): void {
-		const leases = restrictSessionAccounts(
-			this.#modelRegistry.authStorage,
-			providerSessionId,
-			this.#oauthAccountPools,
-		);
-		if (leases) this.#oauthAccountLeases.set(providerSessionId, leases);
-	}
-
-	/** Lift those restrictions once no request can resolve a key for these ids. */
-	#releaseOAuthAccounts(): void {
-		for (const [providerSessionId, leases] of this.#oauthAccountLeases) {
-			releaseSessionAccounts(this.#modelRegistry.authStorage, providerSessionId, leases);
-		}
-		this.#oauthAccountLeases.clear();
 	}
 
 	#notifySessionChangeCallbacks(): void {
@@ -5708,7 +5681,7 @@ export class AgentSession implements SettingsScope {
 		// otherwise in the deferred pass below. Each lease lifts only the
 		// restriction it installed, never one a revival has installed on the
 		// same provider session id since.
-		if (drained) this.#releaseOAuthAccounts();
+		if (drained) this.#accountPoolScope?.release();
 
 		// The deadline does not cancel the drain: a handler parked in a slow
 		// extension hook resumes afterwards and would repopulate exactly the
@@ -5724,7 +5697,7 @@ export class AgentSession implements SettingsScope {
 				await this.agent.waitForIdle();
 				await this.#drainInFlightEventHandlers();
 				this.#releaseRetainedSessionMemory();
-				this.#releaseOAuthAccounts();
+				this.#accountPoolScope?.release();
 			})().catch(error => logger.warn("Deferred dispose finalization failed", { error: String(error) }));
 		}
 	}

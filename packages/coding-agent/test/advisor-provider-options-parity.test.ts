@@ -16,6 +16,7 @@ import type { FetchImpl, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { streamSimple } from "@oh-my-pi/pi-ai";
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { SessionAccountPoolScope } from "@oh-my-pi/pi-coding-agent/config/account-pools";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -362,26 +363,36 @@ describe("AgentSession advisor provider-options parity", () => {
 			const mainAgent = new Agent({
 				initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
 			});
+			const accountPoolScope = new SessionAccountPoolScope(
+				pooledStorage,
+				{ anthropic: ["email:c@example.com|org:org-c"] },
+				sessionManager.getSessionId(),
+			);
 			session = new AgentSession({
 				agent: mainAgent,
 				sessionManager,
 				settings: settings(),
-				modelRegistry: new ModelRegistry(pooledStorage),
+				modelRegistry: accountPoolScope.registry(new ModelRegistry(pooledStorage)),
 				advisorTools: [],
-				oauthAccountPools: { anthropic: ["email:c@example.com|org:org-c"] },
+				accountPoolScope,
 			});
 			session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
 			expect(session.setAdvisorEnabled(true)).toBe(true);
 
-			const getApiKey = session.getAdvisorAgent()?.getApiKey;
+			const advisor = session.getAdvisorAgent();
+			const getApiKey = advisor?.getApiKey;
+			const advisorProviderSessionId = advisor?.sessionId;
 			const mainProviderSessionId = mainAgent.sessionId;
-			if (!getApiKey || !mainProviderSessionId) throw new Error("Expected advisor resolver and main session id");
+			if (!getApiKey || !advisorProviderSessionId || !mainProviderSessionId) {
+				throw new Error("Expected advisor resolver and provider session ids");
+			}
 			expect(await resolveApiKeyOnce(await getApiKey(model))).toBe("access-c");
+			expect(await pooledStorage.keys.get("anthropic", advisorProviderSessionId)).toBe("access-c");
 			expect(await pooledStorage.keys.get("anthropic", mainProviderSessionId)).toBe("access-c");
 
 			// Dispose lifts the pool from every provider session id the session restricted.
 			await session.dispose();
-			expect(await resolveApiKeyOnce(await getApiKey(model))).toBe("runtime-key");
+			expect(await pooledStorage.keys.get("anthropic", advisorProviderSessionId)).toBe("runtime-key");
 			expect(await pooledStorage.keys.get("anthropic", mainProviderSessionId)).toBe("runtime-key");
 		} finally {
 			await session.dispose();

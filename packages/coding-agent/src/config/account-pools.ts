@@ -1,5 +1,8 @@
-import type { AuthStorage, SessionRestrictionLease } from "@oh-my-pi/pi-ai/auth-storage";
+import type { AuthApiKeyOptions, AuthStorage, SessionRestrictionLease } from "@oh-my-pi/pi-ai/auth-storage";
+import type { Api, Model } from "@oh-my-pi/pi-ai/types";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
+import type { ModelRegistry } from "./model-registry";
 
 /**
  * Provider id → OAuth identity keys one session may authenticate with; see
@@ -48,39 +51,139 @@ export function validateAgentAccountPools(value: unknown): Record<string, OAuthA
 	return pools;
 }
 
-/** Leases of one session's pool restrictions, by provider id; see {@link restrictSessionAccounts}. */
-export type SessionAccountLeases = ReadonlyMap<string, SessionRestrictionLease>;
+/** Unscoped registry behind each registry {@link SessionAccountPoolScope.registry} returned. */
+const scopedRegistryTargets = new WeakMap<ModelRegistry, ModelRegistry>();
 
 /**
- * Install `pools` as `sessionId`'s OAuth account restrictions and return their
- * leases. Sessions call this for every provider session id they adopt: a fresh
- * or reset id starts unrestricted otherwise.
+ * One agent session's OAuth account pools, enforced at its key lookups.
+ *
+ * The registry from {@link registry} restricts every provider session id that
+ * resolves a pooled provider's key through it before resolving, so requests
+ * the session sends under ids it mints on the side (title generation, skill
+ * compression, advisors, nested subagents) stay in the pool without each call
+ * site opting in. A lookup without a session id resolves under the primary id
+ * instead of falling back to the provider's unrestricted credentials.
+ *
+ * The scope holds the lease of every id it restricted; {@link release} lifts
+ * them once the session can no longer resolve keys. A lease lifts only the
+ * restriction it installed, so a restriction another session has installed on
+ * the same id since, such as a revived session's, stays.
  */
-export function restrictSessionAccounts(
-	authStorage: Pick<AuthStorage, "sessions">,
-	sessionId: string,
-	pools: OAuthAccountPools | undefined,
-): SessionAccountLeases | undefined {
-	if (!pools) return undefined;
-	const leases = new Map<string, SessionRestrictionLease>();
-	for (const [provider, identityKeys] of Object.entries(pools)) {
-		leases.set(provider, authStorage.sessions.restrict(provider, sessionId, identityKeys));
+export class SessionAccountPoolScope {
+	readonly #authStorage: Pick<AuthStorage, "sessions">;
+	readonly #pools: OAuthAccountPools;
+	/** Provider id → restriction lease, by restricted provider session id. */
+	readonly #leases = new Map<string, Map<string, SessionRestrictionLease>>();
+	#primarySessionId: string;
+
+	constructor(authStorage: Pick<AuthStorage, "sessions">, pools: OAuthAccountPools, primarySessionId: string) {
+		this.#authStorage = authStorage;
+		this.#pools = pools;
+		this.#primarySessionId = primarySessionId;
+		this.restrict(primarySessionId);
 	}
-	return leases;
-}
 
-/**
- * Lift the restrictions `leases` installed on `sessionId` once that session has
- * ended. A restriction installed on the same id since, such as a revived
- * session's, stays.
- */
-export function releaseSessionAccounts(
-	authStorage: Pick<AuthStorage, "sessions">,
-	sessionId: string,
-	leases: SessionAccountLeases | undefined,
-): void {
-	if (!leases) return;
-	for (const [provider, lease] of leases) {
-		authStorage.sessions.unrestrict(provider, sessionId, lease);
+	/** Restrict `sessionId` to the pools, once per id until {@link release}. */
+	restrict(sessionId: string): void {
+		if (this.#leases.has(sessionId)) return;
+		const leases = new Map<string, SessionRestrictionLease>();
+		for (const [provider, identityKeys] of Object.entries(this.#pools)) {
+			leases.set(provider, this.#authStorage.sessions.restrict(provider, sessionId, identityKeys));
+		}
+		this.#leases.set(sessionId, leases);
+	}
+
+	/** Make `sessionId` the session's primary id: restricted, and the id for lookups that carry none. */
+	adopt(sessionId: string): void {
+		this.restrict(sessionId);
+		this.#primarySessionId = sessionId;
+	}
+
+	/** Lift every restriction this scope installed. */
+	release(): void {
+		for (const [sessionId, leases] of this.#leases) {
+			for (const [provider, lease] of leases) {
+				this.#authStorage.sessions.unrestrict(provider, sessionId, lease);
+			}
+		}
+		this.#leases.clear();
+	}
+
+	/** The session id a key lookup for `provider` resolves under, restricted first when pooled. */
+	#sessionIdFor(provider: string, sessionId: string | undefined): string | undefined {
+		if (!Object.hasOwn(this.#pools, provider)) return sessionId;
+		const scopedSessionId = sessionId ?? this.#primarySessionId;
+		this.restrict(scopedSessionId);
+		return scopedSessionId;
+	}
+
+	/**
+	 * `registry` with its key lookups (`getApiKey`, `getApiKeyForProvider`,
+	 * `getApiKeyWithCredentialForProvider`, `getApiKeyAndHeaders`, `resolver`)
+	 * routed through this scope. Every other member is the unscoped registry's,
+	 * so model state, discovery, and caches stay shared. A registry another
+	 * scope returned is unwrapped first: a nested agent with its own pools uses
+	 * them, not its parent's.
+	 */
+	registry(registry: ModelRegistry): ModelRegistry {
+		const target = scopedRegistryTargets.get(registry) ?? registry;
+		const getApiKey = (model: Model<Api>, sessionId?: string, options?: { signal?: AbortSignal }) =>
+			target.getApiKey(model, this.#sessionIdFor(model.provider, sessionId), options);
+		const getApiKeyWithCredentialForProvider = (provider: string, sessionId?: string, options?: AuthApiKeyOptions) =>
+			target.getApiKeyWithCredentialForProvider(provider, this.#sessionIdFor(provider, sessionId), options);
+		const scoped: Partial<ModelRegistry> = {
+			getApiKey,
+			getApiKeyWithCredentialForProvider,
+			getApiKeyForProvider: async (provider, sessionId, options) =>
+				(await getApiKeyWithCredentialForProvider(provider, sessionId, options))?.apiKey,
+			getApiKeyAndHeaders: async model => {
+				try {
+					const apiKey = await getApiKey(model);
+					if (apiKey === undefined) {
+						return { ok: false, error: `No API key found for "${model.provider}"` };
+					}
+					return { ok: true, apiKey, headers: await target.getProviderHeaders(model.provider) };
+				} catch (error) {
+					return { ok: false, error: error instanceof Error ? error.message : String(error) };
+				}
+			},
+			resolver: ((
+				resolverTarget: string | ApiKeyResolverModel,
+				optionsOrSessionId?: ApiKeyResolverOptions | string,
+			) => {
+				const options =
+					typeof optionsOrSessionId === "string" ? { sessionId: optionsOrSessionId } : (optionsOrSessionId ?? {});
+				const provider = typeof resolverTarget === "string" ? resolverTarget : resolverTarget.provider;
+				return createApiKeyResolver(
+					{ getApiKeyWithCredentialForProvider, authStorage: target.authStorage },
+					provider,
+					{
+						...options,
+						...(typeof resolverTarget === "string"
+							? {}
+							: { baseUrl: resolverTarget.baseUrl, modelId: resolverTarget.id }),
+						sessionId: this.#sessionIdFor(provider, options.sessionId),
+					},
+				);
+			}) as ModelRegistry["resolver"],
+		};
+		// ModelRegistry keeps its state in #private fields, so every other member
+		// runs against the target itself; bound methods are cached per name.
+		const bound = new Map<PropertyKey, unknown>();
+		const proxy = new Proxy(target, {
+			get(object, property) {
+				if (Object.hasOwn(scoped, property)) return scoped[property as keyof ModelRegistry];
+				const value: unknown = Reflect.get(object, property, object);
+				if (typeof value !== "function") return value;
+				let method = bound.get(property);
+				if (method === undefined) {
+					method = value.bind(object);
+					bound.set(property, method);
+				}
+				return method;
+			},
+		});
+		scopedRegistryTargets.set(proxy, target);
+		return proxy;
 	}
 }

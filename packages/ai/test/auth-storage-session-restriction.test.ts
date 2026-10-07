@@ -63,18 +63,19 @@ describe("AuthStorage session account restrictions", () => {
 		expect(await storage.keys.get(PROVIDER, "parent")).toBe("access-b");
 	});
 
-	test("never falls through to an override or stored API key", async () => {
+	test("skips a runtime key and stored API keys, and fails closed past a config key", async () => {
 		await storage.credentials.set(PROVIDER, [oauthCredential("a"), { type: "api_key", key: "stored-key" }]);
 		storage.keys.setRuntime(PROVIDER, "runtime-key");
-		storage.keys.setConfig(PROVIDER, "config-key");
 
 		storage.sessions.restrict(PROVIDER, "allowed", ["account:acc-a"]);
 		const missing = storage.sessions.restrict(PROVIDER, "missing", ["account:acc-z"]);
 		storage.sessions.restrict(PROVIDER, "empty", []);
 
 		expect(await storage.keys.get(PROVIDER, "allowed")).toBe("access-a");
-		// Metadata and usage attribution follow the OAuth account the request uses.
+		// Metadata, usage attribution, and OAuth-access callers (web search) follow
+		// the account the request uses, not the runtime key.
 		expect(storage.oauth.identity(PROVIDER, "allowed")?.accountId).toBe("acc-a");
+		expect((await storage.oauth.access(PROVIDER, "allowed"))?.accessToken).toBe("access-a");
 		for (const sessionId of ["missing", "empty"]) {
 			await expect(storage.keys.get(PROVIDER, sessionId)).rejects.toThrow(
 				`No API key for provider: ${PROVIDER} (session ${sessionId} is restricted to its OAuth account pool`,
@@ -85,6 +86,14 @@ describe("AuthStorage session account restrictions", () => {
 		// The owner lifts a restriction when its session ends.
 		storage.sessions.unrestrict(PROVIDER, "missing", missing);
 		expect(await storage.keys.get(PROVIDER, "missing")).toBe("runtime-key");
+
+		// A config key marks the provider's endpoint (often a proxy) as taking that
+		// key: the pooled session fails rather than sending it an OAuth token.
+		storage.keys.setConfig(PROVIDER, "config-key");
+		await expect(storage.keys.get(PROVIDER, "allowed")).rejects.toThrow("pooled OAuth tokens are never sent past it");
+		expect(await storage.oauth.access(PROVIDER, "allowed")).toBeUndefined();
+		expect(storage.oauth.identity(PROVIDER, "allowed")).toBeUndefined();
+		expect(await storage.keys.get(PROVIDER, "unrestricted")).toBe("runtime-key");
 	});
 
 	test("lifts a restriction only with the lease that installed it", async () => {

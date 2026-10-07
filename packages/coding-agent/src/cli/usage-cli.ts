@@ -1055,6 +1055,14 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 				process.exitCode = 1;
 				return;
 			}
+			// The listed keys get pasted into task.agentAccountPools, so read the
+			// broker's current accounts, not a cached snapshot; offline brokers
+			// keep the snapshot.
+			try {
+				await authStorage.credentials.revalidate();
+			} catch {
+				// Stale identities beat no output.
+			}
 			const rows = collectOAuthIdentityKeys(authStorage, cmd.provider?.toLowerCase());
 			if (cmd.json) {
 				process.stdout.write(`${JSON.stringify({ accounts: rows }, null, 2)}\n`);

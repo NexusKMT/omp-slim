@@ -4,6 +4,7 @@ import { Agent } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { AsyncJobManager } from "@oh-my-pi/pi-coding-agent/async";
+import { SessionAccountPoolScope } from "@oh-my-pi/pi-coding-agent/config/account-pools";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { ExtensionRuntime, loadExtensionFromFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
@@ -53,16 +54,23 @@ describe("AgentSession account pools after a dispose deadline", () => {
 	/**
 	 * A session pooled to account c on {@link PROVIDER_SESSION_ID}. With
 	 * `stallUntil`, its `message_end` handler holds dispose past its deadline
-	 * until that promise resolves; `settled` resolves once dispose's deferred
-	 * pass has run.
+	 * until that promise resolves; `released` resolves once the session has
+	 * released its pool scope.
 	 */
 	async function createPooledSession(
 		stallUntil?: Promise<void>,
-	): Promise<{ session: AgentSession; settled: Promise<void> }> {
+	): Promise<{ session: AgentSession; released: Promise<void> }> {
 		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!model) throw new Error("expected bundled model");
 		const sessionManager = SessionManager.inMemory(tempDir.path());
-		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml"));
+		const accountPoolScope = new SessionAccountPoolScope(
+			authStorage,
+			{ anthropic: ["email:c@example.com|org:org-c"] },
+			PROVIDER_SESSION_ID,
+		);
+		const modelRegistry = accountPoolScope.registry(
+			new ModelRegistry(authStorage, path.join(tempDir.path(), "models.yml")),
+		);
 		const reached = Promise.withResolvers<void>();
 		let extensionRunner: ExtensionRunner | undefined;
 		if (stallUntil) {
@@ -89,18 +97,15 @@ describe("AgentSession account pools after a dispose deadline", () => {
 			agentId: "Main",
 			extensionRunner,
 			providerSessionId: PROVIDER_SESSION_ID,
-			oauthAccountPools: { anthropic: ["email:c@example.com|org:org-c"] },
+			accountPoolScope,
 		});
 		sessions.push(session);
 
-		// dispose() releases retained entries once at its deadline and again in
-		// the deferred pass, which then lifts the pools in the same tick.
-		const settled = Promise.withResolvers<void>();
-		let releases = 0;
-		const releaseRetainedEntries = sessionManager.releaseRetainedEntries.bind(sessionManager);
-		vi.spyOn(sessionManager, "releaseRetainedEntries").mockImplementation(() => {
-			releaseRetainedEntries();
-			if (++releases === 2) settled.resolve();
+		const released = Promise.withResolvers<void>();
+		const release = accountPoolScope.release.bind(accountPoolScope);
+		vi.spyOn(accountPoolScope, "release").mockImplementation(() => {
+			release();
+			released.resolve();
 		});
 		if (stallUntil) {
 			const message: AssistantMessage = {
@@ -123,29 +128,29 @@ describe("AgentSession account pools after a dispose deadline", () => {
 			session.agent.emitExternalEvent({ type: "message_end", message });
 			await reached.promise;
 		}
-		return { session, settled: settled.promise };
+		return { session, released: released.promise };
 	}
 
 	it("lifts the pool once a run that outlived the deadline settles", async () => {
 		const release = Promise.withResolvers<void>();
-		const { session, settled } = await createPooledSession(release.promise);
+		const { session, released } = await createPooledSession(release.promise);
 		await session.dispose({ drainTimeoutMs: 20 });
 		// The unsettled run may still resolve keys, so the pool stays for now.
 		expect(await authStorage.keys.get("anthropic", PROVIDER_SESSION_ID)).toBe("access-c");
 
 		release.resolve();
-		await settled;
+		await released;
 		expect(await authStorage.keys.get("anthropic", PROVIDER_SESSION_ID)).toBe("runtime-key");
 	});
 
 	it("keeps the pool a revival installed on the same provider session id", async () => {
 		const release = Promise.withResolvers<void>();
-		const { session, settled } = await createPooledSession(release.promise);
+		const { session, released } = await createPooledSession(release.promise);
 		await session.dispose({ drainTimeoutMs: 20 });
 
 		const { session: revived } = await createPooledSession();
 		release.resolve();
-		await settled;
+		await released;
 		// The late release holds the timed-out session's lease, not the revival's.
 		expect(await authStorage.keys.get("anthropic", PROVIDER_SESSION_ID)).toBe("access-c");
 

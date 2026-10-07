@@ -309,4 +309,80 @@ describe("task subagent OAuth pin inheritance", () => {
 			tempDir.removeSync();
 		}
 	});
+
+	it("keeps every key lookup of a pooled session in its pool, whatever session id it carries", async () => {
+		const tempDir = TempDir.createSync("@pi-subagent-account-pool-scope-");
+		const authStorage = createInMemoryAuthStorage();
+		const sessions: AgentSession[] = [];
+		try {
+			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!model) throw new Error("Expected bundled test model");
+			await authStorage.credentials.set("anthropic", [
+				{ ...oauthCredential("a"), orgId: "org-a" },
+				{ ...oauthCredential("c"), orgId: "org-c" },
+			]);
+			// An unrestricted lookup takes the runtime key first.
+			authStorage.keys.setRuntime("anthropic", "runtime-key");
+			const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+			const settings = Settings.isolated({
+				"async.enabled": false,
+				"compaction.enabled": false,
+				"task.batch": true,
+				"task.isolation.enabled": false,
+				"todo.enabled": false,
+			});
+			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+			const dispatched: executorModule.ExecutorOptions[] = [];
+			vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+				dispatched.push(options);
+				return subprocessResult(options.id ?? "task");
+			});
+
+			const { session: pooled } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager: SessionManager.inMemory(tempDir.path()),
+				authStorage,
+				modelRegistry,
+				settings,
+				model,
+				providerSessionId: "pooled-provider-session",
+				oauthAccountPools: { anthropic: ["email:c@example.com|org:org-c"] },
+				toolNames: ["task"],
+				disableExtensionDiscovery: true,
+			});
+			sessions.push(pooled);
+			// Side requests (title generation, skill compression) mint their own
+			// provider session ids or pass none; both stay in the pool.
+			expect(await pooled.modelRegistry.getApiKey(model, "title-provider-session")).toBe("access-c");
+			expect(await pooled.modelRegistry.getApiKey(model)).toBe("access-c");
+			expect(await resolveApiKeyOnce(pooled.modelRegistry.resolver(model, "side-provider-session"))).toBe(
+				"access-c",
+			);
+			// The shared registry the session was handed stays unrestricted.
+			expect(await modelRegistry.getApiKey(model, "unpooled-provider-session")).toBe("runtime-key");
+
+			// A subagent it spawns without its own pool entry resolves through the same pool.
+			const task = pooled.getToolByName("task");
+			if (!task) throw new Error("Expected task tool");
+			await task.execute("nested-task-call", {
+				context: "Check the target.",
+				tasks: [{ agent: "task", name: "Child", task: "Inspect the target." }],
+			});
+			const childRegistry = dispatched[0]?.modelRegistry;
+			if (!childRegistry) throw new Error("Expected the dispatched registry");
+			expect(await childRegistry.getApiKey(model, "nested-provider-session")).toBe("access-c");
+
+			// A config key (a models.yml apiKey, often for a proxy) fails the pool
+			// closed instead of sending a pooled OAuth token past it.
+			authStorage.keys.setConfig("anthropic", "proxy-key");
+			await expect(pooled.modelRegistry.getApiKey(model, "title-provider-session")).rejects.toThrow(
+				"pooled OAuth tokens are never sent past it",
+			);
+		} finally {
+			for (const session of sessions.reverse()) await session.dispose();
+			authStorage.close();
+			tempDir.removeSync();
+		}
+	});
 });

@@ -42,6 +42,17 @@ export class KeyOverrides {
 		return this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider);
 	}
 
+	/**
+	 * Whether an override replaces OAuth for a session. Any override does for an
+	 * unrestricted session. A restricted session skips the runtime key, but a
+	 * config key still blocks OAuth: it marks the provider's endpoint (often a
+	 * proxy) as taking that key, so the session fails closed instead of sending
+	 * a pooled OAuth token there (see `KeyCascade.get`).
+	 */
+	suppressesOAuth(provider: string, restricted: boolean): boolean {
+		return restricted ? this.#configOverrides.has(provider) : this.has(provider);
+	}
+
 	runtimeKey(provider: string): string | undefined {
 		return this.#runtimeOverrides.get(provider);
 	}
@@ -318,7 +329,8 @@ export class KeyCascade implements KeysApi {
 	 * login API key, environment variable, then another stored API key.
 	 * A session restricted by `sessions.restrict` resolves only its allowed
 	 * OAuth accounts and throws {@link AIError.MissingApiKeyError} when none
-	 * can serve, rather than falling through to any other credential.
+	 * can serve or a config key (a models.yml `apiKey`, often for a proxy
+	 * `baseUrl`) owns the provider, rather than using any other credential.
 	 */
 	async get(
 		provider: string,
@@ -338,6 +350,12 @@ export class KeyCascade implements KeysApi {
 		// (e.g. an auth-gateway) and supplied the bearer for that endpoint —
 		// honor it instead of forwarding an upstream OAuth token that the proxy
 		// won't accept.
+		if (restricted && this.#deps.overrides.configKey(provider) !== undefined) {
+			throw new AIError.MissingApiKeyError(
+				provider,
+				`No API key for provider: ${provider} (session ${sessionId} is restricted to its OAuth account pool, but models.yml configures an apiKey for this provider, and pooled OAuth tokens are never sent past it)`,
+			);
+		}
 		const configKey = restricted ? undefined : this.#deps.overrides.configKey(provider);
 		if (configKey !== undefined) {
 			return this.#deps.overrides.resolve(configKey);
