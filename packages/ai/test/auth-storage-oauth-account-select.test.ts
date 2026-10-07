@@ -154,14 +154,24 @@ describe("AuthStorage OAuth account selection", () => {
 		}
 	});
 
-	test("oauth.accessById refreshes only the durable requested row", async () => {
-		const storage = authStorage;
-		if (!storage) throw new Error("test setup failed");
-		const seen: string[] = [];
+	test("oauth.accessById force-refreshes only the durable requested row", async () => {
+		if (!store) throw new Error("test setup failed");
+		const refreshedIds: number[] = [];
+		const storage = new AuthStorage(store, {
+			refreshOAuthCredential: async (_provider, credentialId, credential) => {
+				refreshedIds.push(credentialId);
+				return {
+					access: `${credential.access}-reminted`,
+					refresh: credential.refresh,
+					expires: Date.now() + 60 * 60_000,
+					accountId: credential.accountId,
+					email: credential.email,
+				};
+			},
+		});
 		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
 			const credential = credentials[provider];
 			if (!credential) return null;
-			seen.push(credential.access);
 			return { newCredentials: credential, apiKey: credential.access };
 		});
 		await storage.credentials.set(PROVIDER, [oauthCredential("a"), oauthCredential("b"), oauthCredential("c")]);
@@ -170,12 +180,21 @@ describe("AuthStorage OAuth account selection", () => {
 
 		const result = await storage.oauth.accessById(PROVIDER, target.credentialId, { forceRefresh: true });
 
-		expect(result?.ok).toBe(true);
-		if (!result?.ok) throw new Error("expected ok resolution");
-		expect(result.credentialId).toBe(target.credentialId);
-		expect(result.accountId).toBe("acc-b");
-		expect(result.accessToken).toBe("access-b");
-		expect(seen).toEqual(["access-b"]);
+		expect(result).toMatchObject({
+			ok: true,
+			credentialId: target.credentialId,
+			accountId: "acc-b",
+			accessToken: "access-b-reminted",
+		});
+		expect(refreshedIds).toEqual([target.credentialId]);
+		expect(
+			store.listAuthCredentials(PROVIDER).map(row => (row.credential.type === "oauth" ? row.credential.access : "")),
+		).toEqual(["access-a", "access-b-reminted", "access-c"]);
+
+		// Without forceRefresh the still-fresh row is served as stored.
+		const again = await storage.oauth.accessById(PROVIDER, target.credentialId);
+		expect(again).toMatchObject({ ok: true, accessToken: "access-b-reminted" });
+		expect(refreshedIds).toEqual([target.credentialId]);
 	});
 
 	test("resolving the selected account by ID fails without touching siblings", async () => {
