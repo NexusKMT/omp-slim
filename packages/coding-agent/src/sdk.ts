@@ -59,6 +59,7 @@ import {
 } from "./capability/rule";
 import { bucketRules } from "./capability/rule-buckets";
 import type { EffectiveExtensionRoots } from "./capability/types";
+import { type OAuthAccountPools, restrictSessionAccounts } from "./config/account-pools";
 import { shouldEnableAppendOnlyContext } from "./config/append-only-context-mode";
 import { shouldInlineToolDescriptors } from "./config/inline-tool-descriptors-mode";
 import { isAuthenticated, kNoAuth, ModelRegistry } from "./config/model-registry";
@@ -547,6 +548,15 @@ export interface CreateAgentSessionOptions {
 	 * @internal
 	 */
 	credentialSourceSessionId?: string;
+	/**
+	 * OAuth account pools for this session: provider id → identity keys (see
+	 * `AuthStorage.sessions.restrict`). A listed provider authenticates only with
+	 * those accounts, never another account or an API key, and requests fail
+	 * when none of them can serve. Applied after {@link credentialSourceSessionId}
+	 * affinity is copied, and again for every provider session id the session
+	 * or its advisors adopt later. A custom {@link getApiKey} bypasses it.
+	 */
+	oauthAccountPools?: OAuthAccountPools;
 
 	/** Model to use. Default: from settings, else first available */
 	model?: Model;
@@ -1838,6 +1848,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	if (options.credentialSourceSessionId) {
 		modelRegistry.authStorage.sessions.inherit(options.credentialSourceSessionId, providerSessionId);
 	}
+	restrictSessionAccounts(modelRegistry.authStorage, providerSessionId, options.oauthAccountPools);
 	const forkCacheShapeChanged =
 		options.model !== undefined ||
 		options.modelPattern !== undefined ||
@@ -4605,6 +4616,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			agentId: resolvedAgentId,
 			agentKind,
 			providerSessionId: options.providerSessionId,
+			oauthAccountPools: options.oauthAccountPools,
 			providerPromptCacheKeySource,
 			advisorTools,
 			// Same per-call `grep` seam the primary bridge gets, built against the

@@ -212,4 +212,101 @@ describe("task subagent OAuth pin inheritance", () => {
 			tempDir.removeSync();
 		}
 	});
+
+	it("restricts a spawned agent to its task.agentAccountPools entry over the parent's pin", async () => {
+		const tempDir = TempDir.createSync("@pi-subagent-account-pool-");
+		const authStorage = createInMemoryAuthStorage();
+		const sessions: AgentSession[] = [];
+		try {
+			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!model) throw new Error("Expected bundled test model");
+			const accountA = { ...oauthCredential("a"), orgId: "org-a" };
+			const accountB = { ...oauthCredential("b"), orgId: "org-b" };
+			await authStorage.credentials.set("anthropic", [
+				accountA,
+				accountB,
+				{ ...oauthCredential("c"), orgId: "org-c" },
+			]);
+			const parentProviderSessionId = "parent-provider-session";
+			const storedB = authStorage.oauth.accounts("anthropic").find(account => account.accountId === "account-b");
+			if (!storedB) throw new Error("Expected account B");
+			expect(authStorage.sessions.pin("anthropic", parentProviderSessionId, storedB.credentialId)).toBe(true);
+
+			const modelRegistry = new ModelRegistry(authStorage, tempDir.join("models.yml"));
+			const settings = Settings.isolated({
+				"async.enabled": false,
+				"compaction.enabled": false,
+				"task.batch": true,
+				"task.isolation.enabled": false,
+				"todo.enabled": false,
+				"task.agentAccountPools": { task: { anthropic: ["email:c@example.com|org:org-c"] } },
+			});
+			vi.spyOn(discoveryModule, "discoverAgents").mockResolvedValue({ agents: [taskAgent], projectAgentsDir: null });
+			const dispatched: executorModule.ExecutorOptions[] = [];
+			vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+				dispatched.push(options);
+				return subprocessResult(options.id ?? "task");
+			});
+
+			const { session: parent } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager: SessionManager.inMemory(tempDir.path()),
+				authStorage,
+				modelRegistry,
+				settings,
+				model,
+				providerSessionId: parentProviderSessionId,
+				toolNames: ["task"],
+				disableExtensionDiscovery: true,
+			});
+			sessions.push(parent);
+			const parentTask = parent.getToolByName("task");
+			if (!parentTask) throw new Error("Expected parent task tool");
+			await parentTask.execute("pooled-task-call", {
+				context: "Check the target.",
+				tasks: [{ agent: "task", name: "Child", task: "Inspect the target." }],
+			});
+
+			expect(dispatched).toHaveLength(1);
+			const childOptions = dispatched[0];
+			if (!childOptions) throw new Error("Expected child options");
+			expect(childOptions.oauthAccountPools).toEqual({ anthropic: ["email:c@example.com|org:org-c"] });
+			const { session: child } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager: SessionManager.inMemory(tempDir.path()),
+				authStorage,
+				modelRegistry,
+				settings,
+				model,
+				providerSessionId: "child-provider-session",
+				credentialSourceSessionId: childOptions.credentialSourceSessionId,
+				oauthAccountPools: childOptions.oauthAccountPools,
+				toolNames: ["read"],
+				disableExtensionDiscovery: true,
+			});
+			sessions.push(child);
+			const childGetApiKey = child.agent.getApiKey;
+			if (!childGetApiKey) throw new Error("Expected child credential resolver");
+			expect(metadataUserId(child.agent.metadataForProvider("anthropic")).account_uuid).toBe("account-c");
+			expect(await resolveApiKeyOnce(await childGetApiKey(model))).toBe("access-c");
+
+			// A fresh provider session id starts inside the pool too.
+			expect(child.freshSession()).toBeDefined();
+			expect(child.agent.sessionId).not.toBe("child-provider-session");
+			expect(metadataUserId(child.agent.metadataForProvider("anthropic")).account_uuid).toBe("account-c");
+			expect(await resolveApiKeyOnce(await childGetApiKey(model))).toBe("access-c");
+
+			// Without its pooled account the child fails instead of borrowing another.
+			await authStorage.credentials.set("anthropic", [accountA, accountB]);
+			await expect(resolveApiKeyOnce(await childGetApiKey(model))).rejects.toThrow(
+				"restricted to its OAuth account pool",
+			);
+		} finally {
+			for (const session of sessions.reverse()) await session.dispose();
+			authStorage.close();
+			tempDir.removeSync();
+		}
+	});
 });

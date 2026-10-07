@@ -269,6 +269,10 @@ The file is parsed once when broker-backed auth storage starts. An unreadable fi
 
 This is a **trusted-client routing policy, not an authorization boundary**. The client still holds a broker bearer token, receives raw broker responses before applying its local view, and can call broker endpoints directly. Use server-side authorization—not account pools—when clients must be prevented from retrieving other credentials.
 
+### Per-agent and per-session pools
+
+A process-wide pool decides which accounts a client sees; a session pool narrows one session further with the same identity keys. Set `task.agentAccountPools` to pool a task agent by exact name ([Settings](./settings.md#providers-and-services)), pass `oauthAccountPools` to `createAgentSession()`, or call `authStorage.sessions.restrict(provider, sessionId, identityKeys)` directly. For each listed provider the session authenticates only with visible OAuth accounts in its list: selection, pins, fallback passes, and rotation stay inside it, API keys (stored, runtime, config, or environment) are never used, and a request fails rather than borrow another account when none can serve. An empty list allows no account. Session pools are the same trusted-client routing policy as client pools, not an authorization boundary.
+
 ## Operator opt-in
 
 Broker-backed credential storage is **off** unless `OMP_AUTH_BROKER_URL` (or `auth.broker.url` in the agent's `config.yml`/`config.yaml`) is set. SDK discovery delegates through `packages/coding-agent/src/session/auth-broker-config.ts` to the shared `pi-ai` resolver and selects `RemoteAuthCredentialStore` instead of local SQLite. Runtime/config/env key overrides still participate in the normal credential ladder; selecting broker storage does not make those keys remote.

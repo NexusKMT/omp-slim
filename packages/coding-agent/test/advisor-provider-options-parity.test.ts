@@ -14,6 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { Agent, type StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { FetchImpl, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { streamSimple } from "@oh-my-pi/pi-ai";
+import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
@@ -340,5 +341,44 @@ describe("AgentSession advisor provider-options parity", () => {
 
 		expect(metadataSessionId(capturedStreamOptions[0])).toBe(advisor.sessionId);
 		expect(metadataSessionId(capturedStreamOptions[0])).not.toBe(previousAdvisorSessionId);
+	});
+
+	it("keeps the advisor inside the primary session's OAuth account pool", async () => {
+		const pooledStorage = createInMemoryAuthStorage();
+		try {
+			await pooledStorage.credentials.set(
+				"anthropic",
+				["a", "b", "c"].map(suffix => ({
+					type: "oauth" as const,
+					access: `access-${suffix}`,
+					refresh: `refresh-${suffix}`,
+					expires: Date.now() + 60 * 60_000,
+					accountId: `account-${suffix}`,
+					email: `${suffix}@example.com`,
+					orgId: `org-${suffix}`,
+				})),
+			);
+			pooledStorage.keys.setRuntime("anthropic", "runtime-key");
+			const mainAgent = new Agent({
+				initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			});
+			session = new AgentSession({
+				agent: mainAgent,
+				sessionManager,
+				settings: settings(),
+				modelRegistry: new ModelRegistry(pooledStorage),
+				advisorTools: [],
+				oauthAccountPools: { anthropic: ["email:c@example.com|org:org-c"] },
+			});
+			session.settings.setModelRole("advisor", "anthropic/claude-sonnet-4-5");
+			expect(session.setAdvisorEnabled(true)).toBe(true);
+
+			const getApiKey = session.getAdvisorAgent()?.getApiKey;
+			if (!getApiKey) throw new Error("Expected advisor credential resolver");
+			expect(await resolveApiKeyOnce(await getApiKey(model))).toBe("access-c");
+		} finally {
+			await session.dispose();
+			pooledStorage.close();
+		}
 	});
 });

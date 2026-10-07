@@ -1114,6 +1114,19 @@ export interface SessionsApi {
 	 */
 	inherit(sourceSessionId: string, targetSessionId: string): number;
 	/**
+	 * Restrict one session's credentials for `provider` to the OAuth accounts
+	 * whose identity key (`email:<address>|org:<id>` for org-scoped providers;
+	 * otherwise `account:`, `email:`, or `project:` — the keys broker account
+	 * pools use) is listed. Selection, session pins, inherited affinity,
+	 * fallback passes, and rotation never leave the list, and runtime, config,
+	 * environment, and stored API keys are not used for that session; when no
+	 * listed account can serve, key resolution fails instead of borrowing
+	 * another account. An empty list allows no account. Replaces any earlier
+	 * restriction for the same provider and session; {@link inherit} does not
+	 * copy restrictions.
+	 */
+	restrict(provider: string, sessionId: string, identityKeys: readonly string[]): void;
+	/**
 	 * Release a session's sticky credential so its next {@link getApiKey} call
 	 * re-runs native pool ranking. This never blocks or penalizes the released
 	 * account; usage-aware routing uses it when another sibling has more

@@ -114,6 +114,7 @@ import { loadAdvisorTranscriptCosts } from "../advisor";
 import { ASYNC_JOB_MANAGER_SHUTDOWN_REASON, type AsyncJob, AsyncJobManager } from "../async";
 import { reset as resetCapabilities } from "../capability";
 import type { EffectiveExtensionRoots } from "../capability/types";
+import { type OAuthAccountPools, restrictSessionAccounts } from "../config/account-pools";
 import { shouldEnableAppendOnlyContext } from "../config/append-only-context-mode";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -905,6 +906,7 @@ export class AgentSession implements SettingsScope {
 	#scoutAllowedBySpawnPolicy = true;
 	#providerSessionId: string | undefined;
 	#freshProviderSessionId: string | undefined;
+	#oauthAccountPools: OAuthAccountPools | undefined;
 	#inheritedProviderPromptCacheKey: string | undefined;
 	#autolearnCaptureAbortController: AbortController | undefined;
 	#autolearnCaptureTask: Promise<void> | undefined;
@@ -2060,6 +2062,7 @@ export class AgentSession implements SettingsScope {
 		this.#textOutputCommitted = this.#agentKind === "main";
 		this.#scoutAllowedBySpawnPolicy = config.scoutAllowedBySpawnPolicy ?? true;
 		this.#providerSessionId = config.providerSessionId;
+		this.#oauthAccountPools = config.oauthAccountPools;
 		this.#inheritedProviderPromptCacheKey =
 			config.providerPromptCacheKeySource === "fork" ? this.agent.promptCacheKey : undefined;
 		// Owner-routed async delivery: completions for jobs this agent owns are
@@ -2175,6 +2178,7 @@ export class AgentSession implements SettingsScope {
 				this.#recovery.noteRetryFallbackCooldown(selector, retryAfterMs, errorMessage),
 			createCodexCompactionContext: createMaintenanceCodexCompactionContext,
 			sessionId: () => this.sessionId,
+			oauthAccountPools: () => this.#oauthAccountPools,
 		};
 		this.#advisors = new SessionAdvisors(advisorsHost, {
 			enabled: cfgAdvisorEnabled.get(this.settings),
@@ -5285,6 +5289,9 @@ export class AgentSession implements SettingsScope {
 		this.agent.setMetadataResolver((provider: string) =>
 			buildSessionMetadata(sid, provider, this.#modelRegistry.authStorage),
 		);
+		// Account pools are keyed by provider session id; a fresh or reset id
+		// must not start unrestricted, and restored pins must see the pool.
+		restrictSessionAccounts(this.#modelRegistry.authStorage, sid, this.#oauthAccountPools);
 		// Restore the session's recorded provider accounts before the first
 		// request routes: sticky rows are process-local under a remote auth
 		// broker, and losing them re-ranks onto a different account, cold-missing

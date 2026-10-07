@@ -40,6 +40,7 @@ import {
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
 import type { CompactionThresholdPair } from "../config/compaction-threshold";
+import type { OAuthAccountPools } from "../config/account-pools";
 import { type OverlayLayers, Settings } from "../config/settings";
 
 import type { ToolPathWithSource } from "../extensibility/custom-tools";
@@ -533,6 +534,8 @@ export interface ExecutorOptions {
 	serviceTierOverride?: ServiceTierInheritSettingValue;
 	/** Exact-name `task.agentCompactionThresholdOverrides` pair selected by dispatch. */
 	compactionThresholdOverride?: CompactionThresholdPair;
+	/** Exact-name `task.agentAccountPools` entry selected by dispatch; see `CreateAgentSessionOptions.oauthAccountPools`. */
+	oauthAccountPools?: OAuthAccountPools;
 	/** Override local:// protocol options so subagent shares parent's local:// root */
 	localProtocolOptions?: LocalProtocolOptions;
 	/**
@@ -4284,6 +4287,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					modelRegistry,
 					getApiKey: options.getApiKey,
 					credentialSourceSessionId: options.credentialSourceSessionId,
+					oauthAccountPools: options.oauthAccountPools,
 					inheritedSessionAgents: options.inheritedSessionAgents,
 					model,
 					modelPattern: model || modelOverride === undefined ? undefined : modelPatterns,

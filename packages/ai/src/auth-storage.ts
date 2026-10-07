@@ -19,7 +19,7 @@
  * const apiKey = await auth.keys.get("anthropic", sessionId, { modelId });
  */
 import { logger } from "@oh-my-pi/pi-utils";
-import { SessionAffinity } from "./auth/affinity";
+import { SessionAffinity, type SessionRestrictions } from "./auth/affinity";
 import { BlockStoreHealth, CredentialBlocks } from "./auth/blocks";
 import { KeyCascade, KeyOverrides } from "./auth/cascade";
 import { CredentialHealth } from "./auth/health";
@@ -81,6 +81,7 @@ export class AuthStorage {
 	readonly #options: AuthStorageOptions;
 	readonly #overrides: KeyOverrides;
 	readonly #policies: AccountPolicies;
+	readonly #restrictions: SessionRestrictions = new Map();
 	#modules: AuthStorageModules;
 
 	constructor(store: AuthCredentialStore, options: AuthStorageOptions = {}) {
@@ -145,9 +146,9 @@ export class AuthStorage {
 	 * Swap the backing credential store in place (live `auth.broker.url` change).
 	 * Loads `store` into fresh store-bound state — pins, blocks, and usage caches are
 	 * keyed by the old store's row ids — then closes the previous store. Runtime key
-	 * overrides, account policies, usage-provider overrides, and credential event
-	 * subscribers carry over. On a load failure `store` is closed and the current
-	 * store stays active.
+	 * overrides, account policies, session account restrictions, usage-provider
+	 * overrides, and credential event subscribers carry over. On a load failure
+	 * `store` is closed and the current store stays active.
 	 */
 	async replaceStore(store: AuthCredentialStore, options: { sourceLabel?: string } = {}): Promise<void> {
 		const next = this.#compose(store, options.sourceLabel ?? this.#options.sourceLabel);
@@ -185,7 +186,7 @@ export class AuthStorage {
 		// override's `cacheVersion` separates its rows from other processes sharing the store.
 		const usageCache = new UsageCache(store, pool, provider => usage.providerFor(provider));
 		const blocks = new CredentialBlocks({ store, pool, health: blockHealth, usageCache, strategies });
-		const affinity = new SessionAffinity(store, pool, overrides);
+		const affinity = new SessionAffinity(store, pool, overrides, this.#restrictions);
 		const usage = new UsageService({
 			store,
 			pool,
