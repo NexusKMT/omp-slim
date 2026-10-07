@@ -980,6 +980,12 @@ export function formatClientUsage(clients: ClientUsageClientSummary[], sinceMs: 
 	return lines.join("\n");
 }
 
+/** The configured auth broker's client, or undefined when this machine reads its own store. */
+async function resolveBrokerClient(): Promise<AuthBrokerClient | undefined> {
+	const config = await resolveAuthBrokerConfig();
+	return config ? new AuthBrokerClient({ url: config.url, token: config.token }) : undefined;
+}
+
 export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 	const settings = await Settings.loadReadOnly();
 	const authStorage = await discoverAuthStorage(undefined, { settings });
@@ -1000,14 +1006,10 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const sinceMs = nowMs - days * 86_400_000;
 			// Prefer the broker's fleet-wide record; fall back to the local agent
 			// DB, which has rows only when this machine hosts the broker.
-			const brokerConfig = await resolveAuthBrokerConfig();
-			let clients: ClientUsageClientSummary[];
-			if (brokerConfig) {
-				const client = new AuthBrokerClient({ url: brokerConfig.url, token: brokerConfig.token });
-				clients = (await client.fetchClientUsageSummary({ sinceMs })).clients;
-			} else {
-				clients = authStorage.usage.clientSummary(sinceMs).clients;
-			}
+			const broker = await resolveBrokerClient();
+			const clients = broker
+				? (await broker.fetchClientUsageSummary({ sinceMs })).clients
+				: authStorage.usage.clientSummary(sinceMs).clients;
 			if (cmd.json) {
 				process.stdout.write(`${JSON.stringify({ generatedAt: nowMs, sinceMs, clients }, null, 2)}\n`);
 				return;
@@ -1028,7 +1030,12 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			const days = cmd.days !== undefined && Number.isFinite(cmd.days) && cmd.days > 0 ? cmd.days : 7;
 			const nowMs = Date.now();
 			const sinceMs = nowMs - days * 86_400_000;
-			const entries = authStorage.usage.history({ sinceMs, provider: cmd.provider?.toLowerCase() });
+			const provider = cmd.provider?.toLowerCase();
+			// The broker host records every upstream usage fetch; a broker client's own store holds none.
+			const broker = await resolveBrokerClient();
+			const entries = broker
+				? (await broker.fetchUsageHistory({ sinceMs, provider })).entries
+				: authStorage.usage.history({ sinceMs, provider });
 			const redaction = cmd.redact ? buildRedactionMap(collectHistoryIdentityStrings(entries)) : undefined;
 			if (cmd.json) {
 				const masked = redaction
