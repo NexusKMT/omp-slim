@@ -5,7 +5,7 @@
 ### Fixed
 
 - Fixed `ask` questions in Tern covering the end of the transcript with a sheet that blocked scrolling, hiding the explanation the question was about; the question now sits in the composer's place, framed like the composer, below a transcript you can read and scroll while deciding ([#14812](https://github.com/can1357/oh-my-pi/pull/14812) by [@H4vC](https://github.com/H4vC))
-- Fixed judge-gated features resolving a new judge role while the next judgment still used the previous role's cached model chain.
+- Fixed judge-gated features resolving a new judge role while the next judgment still used the previous role's cached model chain ([#14861](https://github.com/can1357/oh-my-pi/pull/14861) by [@alnaggar-dev](https://github.com/alnaggar-dev))
 
 ### Changed
 
