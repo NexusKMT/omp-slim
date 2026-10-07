@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.0] - 2026-10-07
+
 ### Changed
 
 - Improved performance when pruning tool output and capturing telemetry messages during long-running sessions.

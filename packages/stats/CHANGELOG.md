@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.0] - 2026-10-07
+
 ### Changed
 
 - Improved dashboard responsiveness and efficiency by reducing unnecessary data refreshes and re-rendering, speeding up session synchronization, database access, package imports, and usage, model, and time-series requests, and avoiding repeated downloads of unchanged traces.

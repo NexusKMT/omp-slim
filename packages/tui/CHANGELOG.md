@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.0] - 2026-10-07
+
 ### Added
 
 - SVG and Mermaid files now render as images or diagrams beneath their file cards, with SVG previews updating while the file streams and Mermaid previews appearing when the file is complete.

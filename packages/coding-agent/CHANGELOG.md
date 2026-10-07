@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.0] - 2026-10-07
+
 ### Added
 
 - Write-tool previews now render as files stream: SVG files appear as images, and Mermaid files (`.mmd` and `.mermaid`) appear as diagrams. Tern also previews supported 3D model formats (`.obj`, `.ply`, `.wrl`, `.x3dv`, `.stl`, `.gltf`, and `.usda`) and renders SVG writes as SVG figures.
