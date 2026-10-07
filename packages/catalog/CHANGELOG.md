@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Fixed
 
 - Fixed Codex Fast (`priority`) pricing to use OpenAI’s 2.5× included-usage rate for supported models, excluding GPT-5.5 and GPT-6 Astra.

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Added
 
 - Added account pools for task agents, allowing an agent and its related work—including advisors, title generation, subagents, and resumed sessions—to use only specified OAuth accounts and fail rather than fall back to another account or an API key.

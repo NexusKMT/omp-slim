@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Added
 
 - Added the public `validateAgentToolArguments()` API for consistent, lenient-aware validation of agent tool arguments across agent and coding-agent workflows.

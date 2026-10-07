@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Added
 
 - Added session restrictions for OAuth account pools via `AuthStorage.sessions.restrict`, limiting selection, fallback, rotation, and authentication to specified accounts until the returned lease is released with `sessions.unrestrict`. API keys and other accounts are not used when a session is restricted.

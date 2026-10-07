@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Added
 
 - Added the `PI_NATIVES_DIR` configuration option to control where compiled native addons are extracted. The version-specific subdirectory remains appended, allowing separate `HOME` environments to share the same native addon copy without sharing other data.

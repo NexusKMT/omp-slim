@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.1] - 2026-10-07
+
 ### Added
 
 - Added `PI_NATIVES_DIR` support to `getNativesDir()` for configuring the native addon directory.
