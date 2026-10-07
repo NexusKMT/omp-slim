@@ -7,6 +7,10 @@
 - `getEnvApiKey`, `getEnvApiKeyName` and `listProvidersWithEnvKey` are no longer exported from `@oh-my-pi/pi-ai/stream`; import them from `@oh-my-pi/pi-ai` or `@oh-my-pi/pi-ai/env-api-key` ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
 - `TranscriptionRequest.audio` is now `Uint8Array | Blob`; code that reads `request.audio` must handle a `Blob` (the transcription endpoint passes multipart uploads through without copying) ([#14674](https://github.com/can1357/oh-my-pi/pull/14674) by [@H4vC](https://github.com/H4vC))
 
+### Added
+
+- Auth gateway route option `excludeProviders` leaves those providers' accounts out of `/v1/usage` and `/v1/credentials/check`
+
 ### Fixed
 
 - Fixed false thinking-loop detections on Gemini, DeepSeek, and Grok when the model drafts or answers with repetitive code or markup (VRML, SVG, JSON); such output is no longer discarded and retried.
