@@ -157,7 +157,7 @@ function unionOfMatchKeys(matchKeys: ReadonlyMap<ConfigurableEditorAction, Reado
 }
 
 const BRACKETED_IMAGE_PATH_REGEX = /\.(?:png|jpe?g|gif|webp)$/i;
-const SHELL_ESCAPED_PATH_CHAR_REGEX = /\\([\\\s'"()[\]{}&;<>|?*!$`~])/g;
+const SHELL_ESCAPED_PATH_CHAR_REGEX = /\\([\\\s'"()[\]{}&;<>|?*!$`])/g;
 const URI_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i;
 const FILE_URI_REGEX = /^file:\/\//i;
 /**
@@ -220,7 +220,7 @@ function normalizePastedPath(path: string): string {
 			}
 		}
 	}
-	return unquoted.replace(SHELL_ESCAPED_PATH_CHAR_REGEX, "$1");
+	return (unquoted.startsWith("\\~/") ? unquoted.slice(1) : unquoted).replace(SHELL_ESCAPED_PATH_CHAR_REGEX, "$1");
 }
 
 function isExplicitPastedPath(path: string): boolean {

@@ -232,20 +232,23 @@ describe("CustomEditor bracketed path paste", () => {
 		]);
 	});
 
-	it("attaches a shell-escaped home image path instead of treating it as a cwd-relative path", () => {
-		const { editor } = makeEditor();
-		const imagePath = "~/Pictures/image.png";
-		const pasted = String.raw`\~/Pictures/image.png`;
-		const attached: string[] = [];
-		editor.onPasteImagePath = path => {
-			attached.push(path);
-		};
+	it("attaches escaped home paths without unescaping Windows tilde directories", () => {
+		for (const [pasted, imagePath] of [
+			[String.raw`\~/Pictures/image.png`, "~/Pictures/image.png"],
+			[String.raw`C:\~\capture.png`, String.raw`C:\~\capture.png`],
+		]) {
+			const { editor } = makeEditor();
+			const attached: string[] = [];
+			editor.onPasteImagePath = path => {
+				attached.push(path);
+			};
 
-		editor.handleInput(bracketedPaste(pasted));
+			editor.handleInput(bracketedPaste(pasted));
 
-		expect(attached).toEqual([imagePath]);
-		expect(editor.getText()).toBe("");
-		expect(extractImagePathFromText(pasted)).toBe(imagePath);
+			expect(attached).toEqual([imagePath]);
+			expect(editor.getText()).toBe("");
+			expect(extractImagePathFromText(pasted)).toBe(imagePath);
+		}
 	});
 
 	it("routes a pasted video path through the attachment callback", () => {
