@@ -18,11 +18,11 @@
 - Sped up `local://`, `history://` and `artifact://` autocomplete by reusing directory scans for 2 s, so a just-created file can take up to 2 s to appear ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 ### Fixed
 
+- Fixed misspelled `compat` keys in `models.yml` being accepted silently: each key that neither the file schema nor the runtime compatibility vocabulary recognizes now produces one warning naming the file and key path (a startup notification, or stderr in print and RPC modes and `omp models`), and the configuration still loads ([#14737](https://github.com/can1357/oh-my-pi/pull/14737) by [@alphastorm](https://github.com/alphastorm))
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
 - Fixed parallel first bash calls each spawning an rc-sourcing shell ([#14680](https://github.com/can1357/oh-my-pi/pull/14680) by [@H4vC](https://github.com/H4vC))
 - Fixed the todo list's auto-clear never firing while subagents were streaming progress ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 - Fixed memory growth while ACP client-terminal commands run ([#14680](https://github.com/can1357/oh-my-pi/pull/14680) by [@H4vC](https://github.com/H4vC))
-- Fixed misspelled `compat` keys in `models.yml` being accepted silently: each key that neither the file schema nor the runtime compatibility vocabulary recognizes now produces one warning naming the file and key path (a startup notification, or stderr in print and RPC modes and `omp models`), and the configuration still loads ([#14737](https://github.com/can1357/oh-my-pi/pull/14737) by [@alphastorm](https://github.com/alphastorm))
 
 ## [18.7.0] - 2026-10-06
 
