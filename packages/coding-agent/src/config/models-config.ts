@@ -2,11 +2,14 @@
  * Custom model/provider config file handle and validation.
  */
 
+import type { TypeProperty } from "@oh-my-pi/omptype";
 import type { Api, ModelSpec } from "@oh-my-pi/pi-ai/types";
+import { AXES } from "@oh-my-pi/pi-catalog/compat/axes";
 import { type ModelKind, servedKinds } from "@oh-my-pi/pi-catalog/types";
+import { isRecord, once } from "@oh-my-pi/pi-utils";
 import { ConfigFile } from "./config-file";
 import type { ModelsConfig, ProviderAuthMode, ProviderDiscovery } from "./models-config-schema";
-import { getModelsConfigSchema } from "./models-config-schema-bundle";
+import { getModelsConfigSchema, getModelsConfigSchemaBundle } from "./models-config-schema-bundle";
 
 export type ProviderValidationMode = "models-config" | "runtime-register";
 
@@ -128,6 +131,56 @@ export function validateProviderConfiguration(
 		const api = override.api ?? (declared ? (declared.api ?? config.api) : undefined);
 		if (api !== undefined) checkKind(`modelOverrides.${modelId}`, override.kind, api);
 	}
+}
+
+interface CompatObjectSchema {
+	readonly props: readonly TypeProperty[];
+	keyof(): { allows(key: unknown): boolean };
+}
+
+// The file schema validates a curated subset of the runtime compatibility fields.
+const getRuntimeCompatKeys = once(
+	() =>
+		new Set(
+			Object.values(AXES)
+				.filter(axis => axis.set === "wire")
+				.map(axis => axis.key),
+		),
+);
+
+/** Unknown keys are diagnostic only: keep newer-release configuration intact. */
+export function getUnknownCompatKeys(config: ModelsConfig): string[] {
+	const unknownKeys: string[] = [];
+	const { ApiCompatSchema } = getModelsConfigSchemaBundle();
+	const visit = (value: unknown, schema: CompatObjectSchema, path: string): void => {
+		if (!isRecord(value)) return;
+		const keys = schema.keyof();
+		const properties = schema.props;
+		for (const [key, entry] of Object.entries(value)) {
+			const keyPath = `${path}.${key}`;
+			if (!keys.allows(key) && (schema !== ApiCompatSchema || !getRuntimeCompatKeys().has(key))) {
+				unknownKeys.push(keyPath);
+				continue;
+			}
+			if (!isRecord(entry)) continue;
+			const property = properties.find(property => property.key === key);
+			// Open records (extraBody) have no declared properties to recurse into.
+			if (property?.value.extends("object")) {
+				visit(entry, property.value.as<Record<string, unknown>>(), keyPath);
+			}
+		}
+	};
+	for (const [name, provider] of Object.entries(config.providers ?? {})) {
+		const path = `providers.${name}`;
+		visit(provider.compat, ApiCompatSchema, `${path}.compat`);
+		for (const [index, model] of (provider.models ?? []).entries()) {
+			visit(model.compat, ApiCompatSchema, `${path}.models.${index}.compat`);
+		}
+		for (const [id, override] of Object.entries(provider.modelOverrides ?? {})) {
+			visit(override.compat, ApiCompatSchema, `${path}.modelOverrides.${id}.compat`);
+		}
+	}
+	return unknownKeys;
 }
 
 export const ModelsConfigFile = new ConfigFile<ModelsConfig>("models", {
