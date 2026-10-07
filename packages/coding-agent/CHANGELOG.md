@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Agent Hub keeps existing agents in place while open; new agents appear first in the flat roster or within their tree sibling group ([#13066](https://github.com/can1357/oh-my-pi/pull/13066) by [@kmccleary3301](https://github.com/kmccleary3301))
+
 ### Fixed
 
 - Fixed relative file links in Tern assistant replies opening against the folder omp was started in after `/wt` or `/move`; they now open the file in the session's working directory ([#14879](https://github.com/can1357/oh-my-pi/pull/14879) by [@H4vC](https://github.com/H4vC))
@@ -921,9 +925,6 @@
 - Fixed supervised service exits being missed or repeatedly replayed instead of being delivered to the session that started the service.
 - Fixed memory backend failures to identify the affected item and underlying storage error.
 - Fixed `write xd://<tool>` validation behavior so devices can return precise schema-mismatch responses.
-### Changed
-
-- Agent Hub keeps existing agents in place while open; new agents appear first in the flat roster or within their tree sibling group.
 
 ## [18.3.0] - 2026-09-24
 
