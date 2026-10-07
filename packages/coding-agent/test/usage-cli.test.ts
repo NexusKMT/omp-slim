@@ -994,14 +994,16 @@ describe("formatUsageHistory", () => {
 		expect(text).toContain("du*");
 	});
 
-	it("qualifies accounts that share an email the way the main view does", () => {
+	it("qualifies Codex accounts that share an email the way the main view does", () => {
 		const shared = { provider: "openai-codex", email: "dummy.shared@example.test", limitId: "openai-codex:primary" };
 		const text = stripVTControlCharacters(
 			formatUsageHistory(
 				[
 					historyEntry(NOW - HOUR, 0.1, { ...shared, accountKey: "codex|team", accountId: "acct-team" }),
 					historyEntry(NOW - HOUR, 0.5, { ...shared, accountKey: "codex|pro", accountId: "acct-pro" }),
-					historyEntry(NOW - HOUR, 0.3),
+					// Anthropic multi-org logins share email and account uuid; the main view's qualifier is Codex-only.
+					historyEntry(NOW - HOUR, 0.3, { accountKey: "anthropic|org-a", accountId: "uuid-user" }),
+					historyEntry(NOW - HOUR, 0.4, { accountKey: "anthropic|org-b", accountId: "uuid-user" }),
 				],
 				SINCE,
 				NOW,
@@ -1009,6 +1011,7 @@ describe("formatUsageHistory", () => {
 		);
 		const accountLines = text.split("\n").filter(line => line.startsWith("  ") && !line.startsWith("    "));
 		expect(accountLines).toEqual([
+			"  dummy.primary@example.test",
 			"  dummy.primary@example.test",
 			"  dummy.shared@example.test · acct-team",
 			"  dummy.shared@example.test · acct-pro",

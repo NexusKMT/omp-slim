@@ -874,7 +874,11 @@ export function formatUsageHistory(
 		const sortedAccounts = [...accounts.values()].sort((a, b) => a.label.localeCompare(b.label));
 		const peers = sortedAccounts.map(account => account.report);
 		for (const account of sortedAccounts) {
-			lines.push(`  ${formatQualifiedIdentity(account.report, peers, account.label, redaction)}`);
+			const identity =
+				provider === "openai-codex"
+					? formatQualifiedIdentity(account.report, peers, account.label, redaction)
+					: chalk.bold(redaction?.get(account.label) ?? account.label);
+			lines.push(`  ${identity}`);
 			const labelWidth = [...account.series.values()].reduce((max, series) => Math.max(max, series.title.length), 0);
 			const sortedSeries = [...account.series.values()].sort((a, b) => a.title.localeCompare(b.title));
 			for (const series of sortedSeries) {
