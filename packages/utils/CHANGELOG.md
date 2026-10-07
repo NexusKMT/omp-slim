@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `ptree` retaining all drained stderr for a child's lifetime, so long-lived children (LSP, DAP, daemons) no longer grow the heap ([#14664](https://github.com/can1357/oh-my-pi/pull/14664) by [@H4vC](https://github.com/H4vC))
+- Fixed `ConcatSink` readers (`readLines`/`readJsonl`/SSE) holding peak-size buffers for the stream's life ([#14664](https://github.com/can1357/oh-my-pi/pull/14664) by [@H4vC](https://github.com/H4vC))
+- Fixed unbounded growth of the `prompt.compile` template cache ([#14664](https://github.com/can1357/oh-my-pi/pull/14664) by [@H4vC](https://github.com/H4vC))
+- Fixed `fetchWithRetry` leaking the discarded response body when retrying a 429/5xx ([#14664](https://github.com/can1357/oh-my-pi/pull/14664) by [@H4vC](https://github.com/H4vC))
+
 ## [18.6.3] - 2026-10-06
 
 ### Breaking Changes
