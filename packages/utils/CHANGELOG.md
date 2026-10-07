@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Sped up Turndown HTML-to-Markdown on nested tables, long ordered lists and large pages ([#14668](https://github.com/can1357/oh-my-pi/pull/14668) by [@H4vC](https://github.com/H4vC))
+- Sped up Readability extraction ~5–10× on large pages and reduced parsed-DOM heap ~30% ([#14668](https://github.com/can1357/oh-my-pi/pull/14668) by [@H4vC](https://github.com/H4vC))
 - Sped up markdown lexing (`@oh-my-pi/pi-utils/marked`) from quadratic to linear in document size (199 KB: 1.6 s → 35 ms) ([#14667](https://github.com/can1357/oh-my-pi/pull/14667) by [@H4vC](https://github.com/H4vC))
 - Reduced vterm memory use ~5× and sped up parsing ~4× and resize reflow ~7× ([#14666](https://github.com/can1357/oh-my-pi/pull/14666) by [@H4vC](https://github.com/H4vC))
 - Sped up terminal styling, streaming tool-argument parsing and log writes ([#14665](https://github.com/can1357/oh-my-pi/pull/14665) by [@H4vC](https://github.com/H4vC))
