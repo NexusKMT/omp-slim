@@ -978,6 +978,83 @@ describe("AgentSession retry delay cap", () => {
 		}
 	});
 
+	it("keeps a fallback chain off its primary until the reported usage reset", async () => {
+		// Contract: a hintless usage-limit error whose usage report puts the
+		// reset ~2h out cools the primary down until that reset. Returning on
+		// the 30-minute heuristic sends a request to a still-exhausted primary
+		// and switches models twice for nothing.
+		const primaryModel = getBundledModel("opencode-go", "deepseek-v4-flash");
+		const fallbackModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!primaryModel || !fallbackModel) {
+			throw new Error("Expected bundled OpenCode Go and Anthropic test models to exist");
+		}
+		const primarySelector = `${primaryModel.provider}/${primaryModel.id}`;
+		const fallbackSelector = `${fallbackModel.provider}/${fallbackModel.id}`;
+		const startMs = Date.now();
+		const resetAtMs = startMs + 7_200_000;
+
+		const localStorage = await createOpencodeStorageWithUsage(
+			{ status: "ok", percent: 12, resetsAtIso: new Date(startMs + 300_000).toISOString() },
+			{ status: "rate-limited", percent: 100, resetsAtIso: new Date(resetAtMs).toISOString() },
+		);
+		try {
+			localStorage.keys.setRuntime("anthropic", "anthropic-test-key");
+			const localRegistry = new ModelRegistry(localStorage, path.join(tempDir.path(), "models.yml"));
+			let now = startMs;
+			const mock = createMockModel();
+			const requestedModels: string[] = [];
+			const agent = new Agent({
+				getApiKey: model => localRegistry.resolver(model, agent.sessionId),
+				initialState: { model: primaryModel, systemPrompt: ["Test"], tools: [], messages: [] },
+				streamFn: (requestedModel, context, options) => {
+					const selector = `${requestedModel.provider}/${requestedModel.id}`;
+					requestedModels.push(selector);
+					mock.push(
+						selector === primarySelector && now < resetAtMs
+							? { throw: "429 quota exceeded for this account" }
+							: { content: [`ok:${selector}`] },
+					);
+					return mock.stream(requestedModel, context, options);
+				},
+			});
+
+			const settings = Settings.isolated({
+				"compaction.enabled": false,
+				"retry.baseDelayMs": 5,
+				"retry.fallbackChains": { [primarySelector]: [fallbackSelector] },
+				"retry.fallbackRevertPolicy": "cooldown-expiry",
+			});
+			settings.setModelRole("default", primarySelector);
+
+			session = new AgentSession({
+				agent,
+				sessionManager: SessionManager.inMemory(),
+				settings,
+				modelRegistry: localRegistry,
+			});
+			vi.spyOn(Date, "now").mockImplementation(() => now);
+
+			await session.prompt("Primary hits its usage limit");
+			await session.waitForIdle();
+			expect(requestedModels).toEqual([primarySelector, fallbackSelector]);
+
+			// Past the 30-minute heuristic, still inside the reported window.
+			now = startMs + 31 * 60_000;
+			await session.prompt("Primary is still exhausted");
+			await session.waitForIdle();
+			expect(requestedModels).toEqual([primarySelector, fallbackSelector, fallbackSelector]);
+
+			now = resetAtMs + 60_000;
+			await session.prompt("Primary has reset");
+			await session.waitForIdle();
+			expect(requestedModels).toEqual([primarySelector, fallbackSelector, fallbackSelector, primarySelector]);
+			expect(session.model?.provider).toBe(primaryModel.provider);
+			expect(session.model?.id).toBe(primaryModel.id);
+		} finally {
+			localStorage.close();
+		}
+	});
+
 	it("keeps a sibling session's longer stored block over a short report reset", async () => {
 		// Contract: the stored credential block merges every mark call for
 		// the shared credential (longest-wins). When an earlier
