@@ -61,7 +61,10 @@ interface TestSession {
 	rebuild: Mock<(toolNames: string[]) => Promise<string>>;
 }
 
-function newSession(model: Model, options: { beforeAgentStartSystemPrompt?: string[] } = {}): TestSession {
+function newSession(
+	model: Model,
+	options: { beforeAgentStartSystemPrompt?: string[]; sessionManager?: SessionManager } = {},
+): TestSession {
 	const read = createTool("read");
 	const bash = createTool("bash");
 	const toolRegistry = new Map<string, AgentTool>([
@@ -79,7 +82,13 @@ function newSession(model: Model, options: { beforeAgentStartSystemPrompt?: stri
 	const rebuild = vi.spyOn(rebuilder, "rebuildSystemPrompt");
 	const agent = new Agent({
 		getApiKey: () => "test-key",
-		initialState: { model, systemPrompt: ["initial"], tools: [read], messages: [] },
+		initialState: {
+			model,
+			systemPrompt: ["initial"],
+			tools: [read],
+			// A resumed session restores the transcript before it is constructed (sdk.ts).
+			messages: options.sessionManager ? options.sessionManager.buildSessionContext().messages : [],
+		},
 		convertToLlm,
 		streamFn: (requestModel, context, streamOptions) => {
 			contexts.push([...context.messages]);
@@ -89,7 +98,7 @@ function newSession(model: Model, options: { beforeAgentStartSystemPrompt?: stri
 	});
 	const session = new AgentSession({
 		agent,
-		sessionManager: SessionManager.inMemory(),
+		sessionManager: options.sessionManager ?? SessionManager.inMemory(),
 		settings: Settings.isolated({ "compaction.enabled": false }),
 		modelRegistry: { getApiKey: async () => "test-key" } as never,
 		toolRegistry,
@@ -176,6 +185,81 @@ describe("prefix-bound tool roster changes", () => {
 
 		expect(harness.rebuild).toHaveBeenCalledTimes(rebuildsBeforeRosterChange + 1);
 		expect(harness.session.agent.state.systemPrompt).toEqual(["tools:read,bash"]);
+	});
+
+	describe("after a resume", () => {
+		/** Transcript of a process that sent its first turn with `read` and `bash` active. */
+		async function liveTranscript(): Promise<{
+			sessionManager: SessionManager;
+			replyEntryId: string;
+			systemPrompt: string[];
+		}> {
+			const sessionManager = SessionManager.inMemory();
+			const live = newSession(createPrefixBindingModel(), { sessionManager });
+			sessions.push(live.session);
+			await live.session.setActiveToolPresentation(["read", "bash"], []);
+			await live.session.prompt("first");
+			const reply = sessionManager
+				.getEntries()
+				.findLast(entry => entry.type === "message" && entry.message.role === "assistant");
+			if (!reply) throw new Error("live turn persisted no reply");
+			return { sessionManager, replyEntryId: reply.id, systemPrompt: live.systemPrompts[0]! };
+		}
+
+		it("sends the first request with the prompt the transcript was sent with when a tool registers late", async () => {
+			const transcript = await liveTranscript();
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
+			sessions.push(resumed.session);
+			// The new process builds its startup prompt before a lazily registered
+			// tool (an extension or MCP server) joins, then that tool registers
+			// before the first request.
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+			await resumed.session.prompt("second");
+
+			expect(resumed.systemPrompts[0]).toEqual(transcript.systemPrompt);
+			expect(providerText(resumed.contexts[0])).not.toContain("Tool availability changed.");
+		});
+
+		it("keeps the prompt frozen after a resumed request when /tree returns to the restored reply", async () => {
+			const transcript = await liveTranscript();
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+			await resumed.session.prompt("second");
+			// The restored reply is the newest again, but this process already sent its prompt.
+			await resumed.session.navigateTree(transcript.replyEntryId);
+
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.prompt("third");
+
+			expect(resumed.systemPrompts[1]).toEqual(resumed.systemPrompts[0]);
+			expect(providerText(resumed.contexts[1])).toContain("Tool availability changed.");
+		});
+
+		it("freezes a roster rebuild that finishes after the first resumed request", async () => {
+			const transcript = await liveTranscript();
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+			// A background roster change (e.g. an MCP refresh) starts its rebuild
+			// before the first request and finishes after that request was sent.
+			const rebuildGate = Promise.withResolvers<void>();
+			resumed.rebuild.mockImplementationOnce(async toolNames => {
+				await rebuildGate.promise;
+				return `tools:${toolNames.join(",")}`;
+			});
+			const rosterChange = resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.prompt("second");
+			rebuildGate.resolve();
+			await rosterChange;
+
+			await resumed.session.prompt("third");
+
+			expect(resumed.systemPrompts[1]).toEqual(resumed.systemPrompts[0]);
+			expect(providerText(resumed.contexts[1])).toContain("Tool availability changed.");
+		});
 	});
 
 	it("keeps rebuilding roster changes for models without prefix binding", async () => {

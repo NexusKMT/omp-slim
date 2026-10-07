@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Agent, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
+import type { Agent, AgentMessage, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { resolveDelegationBias } from "@oh-my-pi/pi-catalog/compat/delegation";
 import { isRecord, logger, prompt, stringProperty, structuredCloneJSON, untilAborted } from "@oh-my-pi/pi-utils";
@@ -307,6 +307,14 @@ export class SessionTools {
 	 */
 	#basePromptReflectsRosterDelta = false;
 	/**
+	 * Newest assistant reply restored with the transcript this session was
+	 * created with. It and every reply before it were answered under another
+	 * process's prompt; see {@link #transcriptBindsPrompt}.
+	 */
+	#restoredReply: AgentMessage | undefined;
+	/** Latched once the primary conversation sends a request; see {@link markPrimaryRequestSent}. */
+	#primaryRequestSent = false;
+	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
 	 * Seeded lazily from persisted history on resume (see
 	 * {@link #ensureAnnouncedMountsSeeded}) and updated as notices are emitted, so
@@ -438,6 +446,7 @@ export class SessionTools {
 		if (this.#xdev) this.#xdev.decorateExecution = tool => this.#wrapToolForAcpPermission(tool);
 		this.#setActiveToolNames = options.setActiveToolNames;
 		this.#baseSystemPrompt = options.baseSystemPrompt;
+		this.#restoredReply = this.#latestReply();
 		this.#skills = options.skills ?? [];
 		this.#skillWarnings = options.skillWarnings ?? [];
 		this.#skillsSettings = options.skillsSettings;
@@ -1189,6 +1198,8 @@ export class SessionTools {
 		let rebuiltSystemPrompt: string[] | undefined;
 		let rebuiltSignature: string | undefined;
 		let frozenSignature: string | undefined;
+		// Trigger of an implicit (non-forced) rebuild, rechecked at commit.
+		let implicitRebuildSignature: string | undefined;
 		let rebuiltXdevCatalogNames: readonly string[] | undefined;
 		let candidateSurface: PromptSurface | undefined;
 		try {
@@ -1241,9 +1252,7 @@ export class SessionTools {
 				const freezeImplicitPromptRefresh =
 					!forcePromptRefresh &&
 					triggerSignature !== this.#lastAppliedToolSignature &&
-					this.#lastAppliedToolSignature !== undefined &&
-					this.#host.model()?.thinking?.prefixBinding === true &&
-					this.#host.agent.state.messages.some(message => message.role === "assistant");
+					this.#prefixBindingFreezesPrompt();
 				if (freezeImplicitPromptRefresh) {
 					frozenSignature = triggerSignature;
 				} else if (forcePromptRefresh || triggerSignature !== this.#lastAppliedToolSignature) {
@@ -1255,6 +1264,7 @@ export class SessionTools {
 						),
 					);
 					rebuiltSystemPrompt = built.systemPrompt;
+					if (!forcePromptRefresh) implicitRebuildSignature = triggerSignature;
 					rebuiltSignature = signature;
 					rebuiltXdevCatalogNames = built.xdevCatalogNames;
 					candidateSurface = candidate;
@@ -1296,6 +1306,13 @@ export class SessionTools {
 			this.#codeModeDirectWireSignature = codeMode.active
 				? this.#computeCodeModeDirectWireSignature(appliedNames)
 				: undefined;
+			// The first primary request can complete while the rebuild awaits; the
+			// prompt it carried is bound from then on, so an implicit rebuild ends
+			// exactly as if it had frozen up front.
+			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined && this.#prefixBindingFreezesPrompt()) {
+				rebuiltSystemPrompt = undefined;
+				frozenSignature = implicitRebuildSignature;
+			}
 			if (rebuiltSystemPrompt && rebuiltSignature) {
 				if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
 				this.#baseSystemPrompt = rebuiltSystemPrompt;
@@ -1336,6 +1353,50 @@ export class SessionTools {
 
 	#setBasePromptXdevNames(names: readonly string[] | undefined): void {
 		this.#basePromptXdevNames = new Set(names);
+	}
+
+	#latestReply(): AgentMessage | undefined {
+		return this.#host.agent.state.messages.findLast(message => message.role === "assistant");
+	}
+
+	/**
+	 * Record that the primary conversation sent a request with the current
+	 * prompt. Never reset: from then on the transcript's signed thinking may be
+	 * bound to this prompt, whatever later history edits (`/tree`, fork,
+	 * recovery) leave as the newest reply. Side requests (`runEphemeralTurn`)
+	 * do not count.
+	 */
+	markPrimaryRequestSent(): void {
+		this.#primaryRequestSent = true;
+	}
+
+	/**
+	 * Whether the transcript's signed thinking may be bound to the current
+	 * prompt: it holds a reply, and either the primary conversation already
+	 * sent a request from this session or the newest reply is not one restored
+	 * at construction (a transcript switched in later). A resumed process builds
+	 * its base prompt before its first primary request, so tools that register
+	 * before that request (lazily registered extension tools, MCP servers)
+	 * rebuild the prompt as the original process's first turn did, instead of
+	 * freezing a startup prompt the transcript was never sent with.
+	 */
+	#transcriptBindsPrompt(): boolean {
+		const latest = this.#latestReply();
+		if (latest === undefined) return false;
+		return this.#primaryRequestSent || latest !== this.#restoredReply;
+	}
+
+	/**
+	 * Whether an implicit prompt rebuild must freeze instead: a prompt has been
+	 * committed, the model binds signed thinking to its prefix, and the
+	 * transcript may already be bound to that prompt.
+	 */
+	#prefixBindingFreezesPrompt(): boolean {
+		return (
+			this.#lastAppliedToolSignature !== undefined &&
+			this.#host.model()?.thinking?.prefixBinding === true &&
+			this.#transcriptBindsPrompt()
+		);
 	}
 
 	#notifyToolRosterDelta(previousActiveToolNames: readonly string[], appliedNames: readonly string[]): void {

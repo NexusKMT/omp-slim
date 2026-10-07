@@ -3298,6 +3298,10 @@ export class AgentSession implements SettingsScope {
 		// never revoke a foreground-control grant acquired by a later prompt.
 		const computerControlRevocation =
 			event.type === "agent_end" ? revokeComputerControlForOwner(this.#eval.getKernelOwnerId()) : undefined;
+		// A primary assistant message starts only once its request is built from
+		// the current prompt; latched before any await so a roster change landing
+		// mid-request cannot rebuild the prompt this request already carries.
+		if (event.type === "message_start" && event.message.role === "assistant") this.#tools.markPrimaryRequestSent();
 		if (event.type === "tool_execution_end" && this.#isTerminalYieldToolResult(event)) {
 			const alreadyTerminated = this.#synchronouslyTerminatedYieldToolCallIds.delete(event.toolCallId);
 			if (!alreadyTerminated) {
