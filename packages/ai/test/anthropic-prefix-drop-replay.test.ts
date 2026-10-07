@@ -114,7 +114,8 @@ describe("anthropic drop_block replay after reported thinking drops", () => {
 		vi.restoreAllMocks();
 	});
 
-	for (const reportedAt of ["message_start", "message_delta"] as const) {
+	const reportPoints: ReportedAt[] = ["message_start", "message_delta"];
+	for (const reportedAt of reportPoints) {
 		it(`keeps replaying dropped thinking verbatim when drops arrive on ${reportedAt}`, async () => {
 			const providerSessionState = new Map<string, ProviderSessionState>();
 			const payloads: WirePayload[] = [];
@@ -140,7 +141,8 @@ describe("anthropic drop_block replay after reported thinking drops", () => {
 			expect(second.stopReason).toBe("stop");
 			expect(payloads).toHaveLength(2);
 
-			const [firstPayload, secondPayload] = payloads as [WirePayload, WirePayload];
+			const [firstPayload, secondPayload] = payloads;
+			if (!firstPayload || !secondPayload) throw new Error("expected two captured requests");
 			expect(replayedReasoning(firstPayload)).toHaveLength(2);
 			expect(replayedReasoning(secondPayload)).toEqual(replayedReasoning(firstPayload));
 			expect(secondPayload.messages).toEqual(firstPayload.messages);
