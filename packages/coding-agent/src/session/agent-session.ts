@@ -9595,6 +9595,12 @@ export class AgentSession implements SettingsScope {
 		return setSessionName.call(this.sessionManager, name, source, trigger);
 	}
 
+	/** Write pending bash output and every session entry to the session file, as {@link fork} does before copying it. */
+	async flushToDisk(): Promise<void> {
+		await this.#bash.flushPending();
+		await this.sessionManager.flush();
+	}
+
 	/**
 	 * Fork the current session, creating a new session file with the exact same state.
 	 * Copies all entries and artifacts to the new session.
@@ -9642,9 +9648,7 @@ export class AgentSession implements SettingsScope {
 			}
 		}
 
-		await this.#bash.flushPending();
-		// Flush current session to ensure all entries are written
-		await this.sessionManager.flush();
+		await this.flushToDisk();
 		// Work admitted during the hook or flush awaits would be copied mid-flight.
 		if (requireIdleFor) this.#assertIdleForSnapshot(requireIdleFor);
 		let advisorRecordersDetached = false;

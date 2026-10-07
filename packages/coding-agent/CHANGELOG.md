@@ -5,6 +5,7 @@
 ### Changed
 
 - Inside a Tern pane, browser opens with `headed: false` now show as a Tern picture-in-picture too; only `app.tern: false` (or `browser.tern` / `PI_BROWSER_TERN=0`) opens Chromium instead
+- Inside a Tern pane, `/fork` opens the fork in a new pane beside the original, which keeps the original session
 
 ## [18.7.0] - 2026-10-06
 
