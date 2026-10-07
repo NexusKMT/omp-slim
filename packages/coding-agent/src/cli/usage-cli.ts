@@ -10,6 +10,7 @@
 import {
 	ANTHROPIC_OAUTH_GRANT_TTL_MS,
 	type AuthAccountPolicy,
+	type AuthStorage,
 	type DisabledCredentialSummary,
 	type OAuthAccountIdentity,
 	resolveUsedFraction,
@@ -877,6 +878,35 @@ export function formatUsageHistory(
 	return lines.join("\n");
 }
 
+/**
+ * Load extension usage providers and refresh broker credentials, so usage
+ * lookups see every provider and account the live session would.
+ */
+async function loadUsageSources(
+	cmd: UsageCommandArgs,
+	settings: Settings,
+	authStorage: AuthStorage,
+): Promise<ModelRegistry> {
+	const modelRegistry = new ModelRegistry(authStorage);
+	// Extensions contribute usage providers via `registerProvider(name, { usage })`;
+	// without loading them their accounts land in `accountsWithoutUsage`.
+	await loadCliExtensionProviders(modelRegistry, settings, getProjectDir(), {
+		additionalExtensionPaths: cmd.extensions,
+		disableExtensionDiscovery: cmd.noExtensions,
+		includeAmbientHooks: false,
+		discoverModels: false,
+	});
+	// The broker may serve reports for credentials newer than the local
+	// snapshot. Refresh before probing extension providers with local keys
+	// and before labeling accounts; offline brokers keep the cached snapshot.
+	try {
+		await authStorage.credentials.revalidate();
+	} catch {
+		// Stale identities beat no output.
+	}
+	return modelRegistry;
+}
+
 /** Name the providers that do hold credentials so a mistyped `--provider` id is easy to correct. */
 function formatNoProviderCredentials(provider: string, storedAccounts: UsageAccountIdentity[]): string {
 	const stored = [...new Set(storedAccounts.map(account => account.provider))].sort();
@@ -997,8 +1027,14 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		if (cmd.action === "invalidate") {
 			const provider = cmd.provider?.toLowerCase();
 			if (provider) {
+				// Usage providers registered by extensions and broker credentials newer than
+				// the cached snapshot count too, so load both before rejecting the id.
+				await loadUsageSources(cmd, settings, authStorage);
 				const storedAccounts = collectStoredAccounts(authStorage);
-				if (!storedAccounts.some(account => account.provider.toLowerCase() === provider)) {
+				const known =
+					authStorage.usage.providerFor(provider) !== undefined ||
+					storedAccounts.some(account => account.provider.toLowerCase() === provider);
+				if (!known) {
 					process.stderr.write(chalk.yellow(formatNoProviderCredentials(provider, storedAccounts)));
 					process.exitCode = 1;
 					return;
@@ -1077,23 +1113,7 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 			globalReservePct: cfgRetryUsageReservePct.get(settings),
 			getAccountPolicy: (provider, identity) => authStorage.oauth.policy(provider, identity),
 		};
-		const modelRegistry = new ModelRegistry(authStorage);
-		// Extensions contribute usage providers via `registerProvider(name, { usage })`;
-		// without loading them their accounts land in `accountsWithoutUsage`.
-		await loadCliExtensionProviders(modelRegistry, settings, getProjectDir(), {
-			additionalExtensionPaths: cmd.extensions,
-			disableExtensionDiscovery: cmd.noExtensions,
-			includeAmbientHooks: false,
-			discoverModels: false,
-		});
-		// The broker may serve reports for credentials newer than the local
-		// snapshot. Refresh before probing extension providers with local keys
-		// and before labeling accounts; offline brokers keep the cached snapshot.
-		try {
-			await authStorage.credentials.revalidate();
-		} catch {
-			// Stale identities beat no output.
-		}
+		const modelRegistry = await loadUsageSources(cmd, settings, authStorage);
 		const reports =
 			(await authStorage.usage.reports({
 				baseUrlResolver: provider => modelRegistry.getProviderBaseUrl(provider),

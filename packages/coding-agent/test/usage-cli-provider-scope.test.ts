@@ -5,12 +5,14 @@ import { runUsageCommand } from "@oh-my-pi/pi-coding-agent/cli/usage-cli";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 
+let db: Database;
 let authStorage: AuthStorage;
 let stdout: string;
 let stderr: string;
 
 beforeEach(async () => {
-	authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")));
+	db = new Database(":memory:");
+	authStorage = new AuthStorage(new SqliteAuthCredentialStore(db));
 	await authStorage.credentials.reload();
 	await authStorage.credentials.set("groq", { type: "api_key", key: "gsk-test" });
 	vi.spyOn(Settings, "loadReadOnly").mockResolvedValue(Settings.isolated());
@@ -41,7 +43,7 @@ test("omp usage --provider with no stored credentials names the providers that h
 });
 
 test("omp usage invalidate refuses a provider with no stored credentials", async () => {
-	await runUsageCommand({ action: "invalidate", provider: "nosuch" });
+	await runUsageCommand({ action: "invalidate", provider: "nosuch", noExtensions: true });
 	expect(stdout).toBe("");
 	expect(Bun.stripANSI(stderr)).toBe(
 		'No credentials stored for provider "nosuch". Providers with stored credentials: groq.\n',
@@ -49,7 +51,23 @@ test("omp usage invalidate refuses a provider with no stored credentials", async
 	expect(process.exitCode).toBe(1);
 
 	process.exitCode = 0;
-	await runUsageCommand({ action: "invalidate", provider: "groq" });
+	await runUsageCommand({ action: "invalidate", provider: "groq", noExtensions: true });
 	expect(stdout).toBe('Invalidated cached usage reports for provider "groq".\n');
+	expect(process.exitCode).toBe(0);
+});
+
+test.each([
+	// A usage provider can report through env or runtime keys with nothing stored.
+	["a provider with a usage endpoint but no stored credential", "anthropic"],
+	// Another process stored this credential after the snapshot was loaded.
+	["a credential missing from a stale snapshot", "xai"],
+])("omp usage invalidate accepts %s", async (_name, provider) => {
+	const writer = new AuthStorage(new SqliteAuthCredentialStore(db));
+	await writer.credentials.reload();
+	await writer.credentials.set("xai", { type: "api_key", key: "xai-test" });
+
+	await runUsageCommand({ action: "invalidate", provider, noExtensions: true });
+	expect(stderr).toBe("");
+	expect(stdout).toBe(`Invalidated cached usage reports for provider "${provider}".\n`);
 	expect(process.exitCode).toBe(0);
 });
