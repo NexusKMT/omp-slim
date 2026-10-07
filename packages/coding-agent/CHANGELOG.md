@@ -8,6 +8,7 @@
 
 ### Changed
 
+- A subagent's completion bar jumps to 99% once it submits its result, instead of holding its last estimate while it finishes up
 - Inside a Tern pane, browser opens with `headed: false` now show as a Tern picture-in-picture too; only `app.tern: false` (or `browser.tern` / `PI_BROWSER_TERN=0`) opens Chromium instead
 - Inside a Tern pane, `/fork` opens the fork in a new pane beside the original, which keeps the original session
 - Inside a Tern pane, the empty composer shows the session title in quotes and italics, or "What are we cooking?" before the session has one
