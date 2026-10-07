@@ -11,7 +11,8 @@ const IMAGE_BUDGET_CACHE_MAX = 8192;
  * applies only while the model targets its official endpoint.
  */
 export function resolveInlineImageByteBudget(model: Model): number | undefined {
-	if (!("officialEndpoint" in model.compat) || !model.compat.officialEndpoint) return undefined;
+	const compat = model.compat;
+	if (!compat || !("officialEndpoint" in compat) || !compat.officialEndpoint) return undefined;
 	const key = `${model.provider} ${model.id} ${model.api}`;
 	let budget = imageBudgetCache.get(key);
 	if (budget === undefined) {
