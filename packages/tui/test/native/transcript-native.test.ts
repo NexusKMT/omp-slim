@@ -126,19 +126,37 @@ describe("native transcript", () => {
 			"|---|---|",
 			"| 10×10 | [Open screenshot](artifacts/10x10.png) |",
 			"",
+			"See [the log][log] and [the crop](crop.png).",
 			"Code `[x](artifacts/10x10.png)` stays, [web](https://x.dev) and [gone](missing.md) too.",
+			"",
+			"[log]: logs/run.txt",
 		].join("\n");
 		component.updateContent(assistant([{ type: "text", text: source }]), { transient: true });
 		await h.render();
 		expect(h.find(node => node.k === "md")?.p).toMatchObject({ text: source, stream: true });
 
-		const target = "file:///C:/Users/me/.omp/wt/cr2-43939c6/artifacts/10x10.png";
+		const wt = "file:///C:/Users/me/.omp/wt/cr2-43939c6";
 		component.updateContent(assistant([{ type: "text", text: source }]));
-		component.setLinkTargets(new Map([["artifacts/10x10.png", target]]));
+		component.setLinkTargets(
+			new Map([
+				["artifacts/10x10.png", `${wt}/artifacts/10x10.png`],
+				["logs/run.txt", `${wt}/logs/run.txt`],
+				["crop.png", `${wt}/crop(1).png`],
+			]),
+		);
 		component.markTranscriptBlockFinalized();
 		await h.render();
 		expect(h.find(node => node.k === "md")?.p).toMatchObject({
-			text: source.replace("[Open screenshot](artifacts/10x10.png)", `[Open screenshot](${target})`),
+			text: [
+				"| Board | Shot |",
+				"|---|---|",
+				`| 10×10 | [Open screenshot](${wt}/artifacts/10x10.png) |`,
+				"",
+				`See [the log][log] and [the crop](<${wt}/crop(1).png>).`,
+				"Code `[x](artifacts/10x10.png)` stays, [web](https://x.dev) and [gone](missing.md) too.",
+				"",
+				`[log]: ${wt}/logs/run.txt`,
+			].join("\n"),
 		});
 		expect(h.errors).toEqual([]);
 	});

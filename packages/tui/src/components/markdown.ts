@@ -1213,6 +1213,14 @@ function formatLinkDestination(target: string): string {
 	return /[\s()<>\\]/.test(target) ? `<${target.replaceAll(/[<>\\]/g, ch => encodeURIComponent(ch))}>` : target;
 }
 
+function isListToken(token: Token): token is Tokens.List {
+	return token.type === "list";
+}
+
+function isTableToken(token: Token): token is Tokens.Table {
+	return token.type === "table";
+}
+
 /**
  * Rewrite the destinations of inline links and link reference definitions in
  * `text` to `resolve(href)`, leaving everything else byte-for-byte intact.
@@ -1250,9 +1258,9 @@ export function rewriteMarkdownLinkDestinations(text: string, resolve: (href: st
 				rewrite(token, close < 0 ? undefined : close + 2);
 				continue;
 			}
-			const children = "tokens" in token && Array.isArray(token.tokens) ? (token.tokens as Token[]) : undefined;
-			const items = "items" in token && Array.isArray(token.items) ? (token.items as Token[]) : undefined;
-			const table = token.type === "table" ? (token as TableToken) : undefined;
+			const children = "tokens" in token && Array.isArray(token.tokens) ? token.tokens : undefined;
+			const items = isListToken(token) ? token.items : undefined;
+			const table = isTableToken(token) ? token : undefined;
 			if (token.type === "image" || (!children && !items && !table)) {
 				// A leaf (text, code span, fenced code, html, image…): step past it so a
 				// later link's source is never matched inside it.
