@@ -252,4 +252,13 @@ export const observed = buildModel({
 		// from `y/index.ts`, which Node would not resolve either.
 		expect(bundledModuleKeys.has("@oh-my-pi/pi-tui/theme/defaults/index")).toBe(false);
 	});
+
+	it("bundles pi-tui native Tern/TSP modules so a compiled extension can import them", () => {
+		// `pi-tui` serves `native/*` only through its `./*` catch-all, which the
+		// bundle intentionally never expands. Without a named `./native/*` export
+		// these keys were absent from the compiled registry, so an extension
+		// importing them failed with `Cannot find package '@oh-my-pi/pi-tui'`.
+		expect(bundledModuleKeys.has("@oh-my-pi/pi-tui/native/overlay")).toBe(true);
+		expect(bundledModuleKeys.has("@oh-my-pi/pi-tui/native/spans")).toBe(true);
+	});
 });
