@@ -359,18 +359,34 @@ function formatLimitLine(limit: UsageLimit, labelWidth: number, nowMs: number): 
 }
 
 interface ProviderLimitTemplate {
-	id: string;
+	key: string;
 	title: string;
 }
 
+/**
+ * One row per meter (label and window), not per limit id: Codex ids name a slot, and an
+ * account without a 5-hour window reports its 7-day one as `primary`. The tier stays out of
+ * the key because most providers put the subscription plan there (see {@link meterForLimit}).
+ */
+function limitRowKey(limit: UsageLimit): string {
+	return `${limit.label}|${limit.window?.id ?? limit.scope.windowId ?? ""}`;
+}
+
 function collectProviderLimitTemplates(reports: UsageReport[]): ProviderLimitTemplate[] {
-	const seen = new Set<string>();
 	const templates: ProviderLimitTemplate[] = [];
 	for (const report of reports) {
+		// A row first seen in a later report goes right after its predecessor in that report,
+		// so each account keeps its own row order.
+		let insertAt = 0;
 		for (const limit of report.limits) {
-			if (seen.has(limit.id)) continue;
-			seen.add(limit.id);
-			templates.push({ id: limit.id, title: limitTitle(limit) });
+			const key = limitRowKey(limit);
+			const existing = templates.findIndex(template => template.key === key);
+			if (existing >= 0) {
+				insertAt = existing + 1;
+				continue;
+			}
+			templates.splice(insertAt, 0, { key, title: limitTitle(limit) });
+			insertAt++;
 		}
 	}
 	return templates;
@@ -689,15 +705,14 @@ export function formatUsageBreakdown(
 				lines.push(`      ${chalk.dim("no limits reported")}`);
 				return;
 			}
-			const limitsById = new Map<string, UsageLimit>();
-			for (const limit of report.limits) limitsById.set(limit.id, limit);
+			const limitsByKey = Map.groupBy(report.limits, limitRowKey);
 			for (const template of providerLimitTemplates) {
-				const limit = limitsById.get(template.id);
-				if (limit) {
-					lines.push(...formatLimitLine(limit, labelWidth, nowMs));
-				} else {
+				const limits = limitsByKey.get(template.key);
+				if (!limits) {
 					lines.push(formatMissingLimitLine(template, labelWidth));
+					continue;
 				}
+				for (const limit of limits) lines.push(...formatLimitLine(limit, labelWidth, nowMs));
 			}
 		});
 

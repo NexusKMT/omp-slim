@@ -665,6 +665,57 @@ describe("formatUsageBreakdown", () => {
 		expect(accountBSection).toContain("60.0% used");
 	});
 
+	it("aligns rows by window when accounts report the same window under different limit ids", () => {
+		// A Codex account without a 5-hour window reports its 7-day one as `primary`.
+		const codexLimit = (key: "primary" | "secondary", window: "5 hours" | "7 days", usedFraction: number) =>
+			makeLimit({
+				id: `openai-codex:${key}`,
+				label: window,
+				provider: "openai-codex",
+				usedFraction,
+				durationMs: window === "5 hours" ? FIVE_HOURS : SEVEN_DAYS,
+				windowId: window,
+			});
+		const providerReports = [
+			makeReport("openai-codex", "weekly-only@example.test", [codexLimit("primary", "7 days", 0.07)]),
+			makeReport("openai-codex", "both-windows@example.test", [
+				codexLimit("primary", "5 hours", 1),
+				codexLimit("secondary", "7 days", 0.16),
+			]),
+		];
+
+		const text = stripVTControlCharacters(formatUsageBreakdown(providerReports, [], Date.now()));
+		const limitRows = text
+			.split("\n")
+			.map(line => line.trim().replace(/\s+[█░·]+\s+/, " ").replace(/\s+/g, " "))
+			.filter(line => /^[●○] /.test(line) && !line.includes("@"));
+		expect(limitRows).toEqual([
+			// weekly-only@example.test
+			"○ 5 hours not reported",
+			"● 7 days 7.0% used",
+			// both-windows@example.test
+			"● 5 hours 100.0% used",
+			"● 7 days 16.0% used",
+		]);
+	});
+
+	it("keeps one row per window for accounts on different plans", () => {
+		const dailyQuota = (tier: string, usedFraction: number) => ({
+			...makeLimit({ id: "devin:quota:daily", label: "Daily Quota", provider: "devin", usedFraction }),
+			window: { id: "1d", label: "Daily Quota", durationMs: 24 * HOUR },
+			scope: { provider: "devin", windowId: "1d", tier },
+		});
+		const providerReports = [
+			makeReport("devin", "free@example.test", [dailyQuota("Free", 0.1)]),
+			makeReport("devin", "pro@example.test", [dailyQuota("Pro", 0.2)]),
+		];
+
+		const text = stripVTControlCharacters(formatUsageBreakdown(providerReports, [], Date.now()));
+		expect(text).toContain("Daily Quota (Free)");
+		expect(text).toContain("Daily Quota (Pro)");
+		expect(text).not.toContain("not reported");
+	});
+
 	it("redacts account labels through the provided map without leaking the originals", () => {
 		const redaction = buildRedactionMap(["dummy.primary@example.test", "dummy.secondary@example.test"]);
 		const text = stripVTControlCharacters(formatUsageBreakdown(reports, accounts, Date.now(), redaction));
