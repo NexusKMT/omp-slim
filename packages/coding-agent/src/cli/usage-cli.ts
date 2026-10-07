@@ -877,6 +877,16 @@ export function formatUsageHistory(
 	return lines.join("\n");
 }
 
+/** Name the providers that do hold credentials so a mistyped `--provider` id is easy to correct. */
+function formatNoProviderCredentials(provider: string, storedAccounts: UsageAccountIdentity[]): string {
+	const stored = [...new Set(storedAccounts.map(account => account.provider))].sort();
+	const hint =
+		stored.length > 0
+			? `Providers with stored credentials: ${stored.join(", ")}.`
+			: "Run `omp` and use /login to add accounts.";
+	return `No credentials stored for provider "${provider}". ${hint}\n`;
+}
+
 /** Apply a redaction mask to an optional identity field. */
 function maskIdentity(redaction: Map<string, string>, value: string | undefined): string | undefined {
 	return value === undefined ? undefined : (redaction.get(value) ?? value);
@@ -986,6 +996,14 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 	try {
 		if (cmd.action === "invalidate") {
 			const provider = cmd.provider?.toLowerCase();
+			if (provider) {
+				const storedAccounts = collectStoredAccounts(authStorage);
+				if (!storedAccounts.some(account => account.provider.toLowerCase() === provider)) {
+					process.stderr.write(chalk.yellow(formatNoProviderCredentials(provider, storedAccounts)));
+					process.exitCode = 1;
+					return;
+				}
+			}
 			await authStorage.usage.invalidate(provider);
 			if (provider) {
 				process.stdout.write(`Invalidated cached usage reports for provider "${provider}".\n`);
@@ -1152,13 +1170,17 @@ export async function runUsageCommand(cmd: UsageCommandArgs): Promise<void> {
 		}
 
 		if (filteredReports.length === 0 && accounts.length === 0) {
-			const scope = cmd.provider ? ` for provider "${cmd.provider}"` : "";
-			// Credentials exist but every one is for a provider without a usage
-			// endpoint — say so rather than implying nothing is logged in.
-			const message =
-				storedAccounts.length > 0
-					? `No usage data${scope}. Stored credentials are for providers without a usage endpoint.\n`
-					: `No credentials found${scope}. Run \`omp\` and use /login to add accounts.\n`;
+			// An explicit --provider keeps every stored account of that provider, so
+			// reaching here with one means none is stored for it. Without one,
+			// credentials may exist only for providers without a usage endpoint.
+			let message: string;
+			if (cmd.provider) {
+				message = formatNoProviderCredentials(cmd.provider, storedAccounts);
+			} else if (storedAccounts.length > 0) {
+				message = "No usage data. Stored credentials are for providers without a usage endpoint.\n";
+			} else {
+				message = "No credentials found. Run `omp` and use /login to add accounts.\n";
+			}
 			process.stderr.write(chalk.yellow(message));
 			process.exitCode = 1;
 			return;
