@@ -8,6 +8,7 @@ import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { credentialPinHash } from "@oh-my-pi/pi-coding-agent/session/credential-pin";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
@@ -206,6 +207,52 @@ describe("task subagent OAuth pin inheritance", () => {
 				session_id: "grandchild-provider-session",
 				account_uuid: "account-b",
 			});
+		} finally {
+			for (const session of sessions.reverse()) await session.dispose();
+			authStorage.close();
+			tempDir.removeSync();
+		}
+	});
+
+	it("keeps a revived child's own warm transcript pin over the parent's affinity", async () => {
+		// A parked subagent is revived by re-running createAgentSession with its spawn
+		// options (credentialSourceSessionId included) over its reopened transcript.
+		const tempDir = TempDir.createSync("@pi-subagent-revive-pin-");
+		const authStorage = createInMemoryAuthStorage();
+		const sessions: AgentSession[] = [];
+		try {
+			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!model) throw new Error("Expected bundled test model");
+			await authStorage.credentials.set("anthropic", [oauthCredential("a"), oauthCredential("b")]);
+			const parentProviderSessionId = "parent-provider-session";
+			const accountA = authStorage.oauth
+				.accounts("anthropic", parentProviderSessionId)
+				.find(account => account.accountId === "account-a");
+			if (!accountA) throw new Error("Expected account A");
+			expect(authStorage.sessions.pin("anthropic", parentProviderSessionId, accountA.credentialId)).toBe(true);
+
+			// The child's earlier run was served by account B, which holds its warm prompt cache.
+			const childTranscript = SessionManager.inMemory(tempDir.path());
+			const childHash = credentialPinHash("anthropic", { accountId: "account-b", email: "b@example.com" });
+			if (!childHash) throw new Error("Expected a pin hash");
+			childTranscript.appendCredentialPin("anthropic", childHash);
+
+			const { session: child } = await createAgentSession({
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				sessionManager: childTranscript,
+				authStorage,
+				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+				settings: Settings.isolated({ "async.enabled": false, "compaction.enabled": false }),
+				model,
+				credentialSourceSessionId: parentProviderSessionId,
+				toolNames: ["read"],
+				disableExtensionDiscovery: true,
+			});
+			sessions.push(child);
+			const childGetApiKey = child.agent.getApiKey;
+			if (!childGetApiKey) throw new Error("Expected child credential resolver");
+			expect(await resolveApiKeyOnce(await childGetApiKey(model))).toBe("access-b");
 		} finally {
 			for (const session of sessions.reverse()) await session.dispose();
 			authStorage.close();
