@@ -1,5 +1,6 @@
+import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "bun:test";
-import type { OAuthCredential } from "@oh-my-pi/pi-ai";
+import type { OAuthCredential, UsageReport } from "@oh-my-pi/pi-ai";
 import { resolveApiKeyOnce } from "@oh-my-pi/pi-ai/auth-retry";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
@@ -8,6 +9,7 @@ import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { credentialPinHash } from "@oh-my-pi/pi-coding-agent/session/credential-pin";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
@@ -32,6 +34,37 @@ function oauthCredential(suffix: string): OAuthCredential {
 		expires: Date.now() + 60 * 60_000,
 		accountId: `account-${suffix}`,
 		email: `${suffix}@example.com`,
+	};
+}
+
+function claudeUsage(accountId: string, usedFraction: number): UsageReport {
+	const used = usedFraction * 100;
+	return {
+		provider: "anthropic",
+		fetchedAt: Date.now(),
+		metadata: { accountId },
+		limits: [
+			{
+				id: "anthropic:5h",
+				label: "Claude 5 Hour",
+				scope: { provider: "anthropic", windowId: "5h", shared: true },
+				window: {
+					id: "5h",
+					label: "Claude 5 Hour",
+					durationMs: 5 * 60 * 60_000,
+					resetsAt: Date.now() + 60 * 60_000,
+				},
+				amount: {
+					unit: "percent",
+					used,
+					limit: 100,
+					remaining: 100 - used,
+					usedFraction,
+					remainingFraction: 1 - usedFraction,
+				},
+				status: "ok",
+			},
+		],
 	};
 }
 
@@ -214,30 +247,44 @@ describe("task subagent OAuth pin inheritance", () => {
 		}
 	});
 
-	it("keeps a revived child's own warm transcript pin over the parent's affinity", async () => {
-		// A parked subagent is revived by re-running createAgentSession with its spawn
-		// options (credentialSourceSessionId included) over its reopened transcript.
+	// A parked subagent is revived by re-running createAgentSession with its spawn options
+	// (credentialSourceSessionId included) over its reopened transcript. The child's earlier
+	// run pinned `childAccount` there; the parent was pinned to `parentAccount` after.
+	async function reviveChildKey(
+		authStorage: AuthStorage,
+		childAccount: string,
+		parentAccount: string,
+		parentPinOptions?: { restoredAtMs: number },
+	): Promise<string | undefined> {
 		const tempDir = TempDir.createSync("@pi-subagent-revive-pin-");
-		const authStorage = createInMemoryAuthStorage();
-		const sessions: AgentSession[] = [];
+		let child: AgentSession | undefined;
 		try {
 			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
 			if (!model) throw new Error("Expected bundled test model");
 			await authStorage.credentials.set("anthropic", [oauthCredential("a"), oauthCredential("b")]);
-			const parentProviderSessionId = "parent-provider-session";
-			const accountA = authStorage.oauth
-				.accounts("anthropic", parentProviderSessionId)
-				.find(account => account.accountId === "account-a");
-			if (!accountA) throw new Error("Expected account A");
-			expect(authStorage.sessions.pin("anthropic", parentProviderSessionId, accountA.credentialId)).toBe(true);
-
-			// The child's earlier run was served by account B, which holds its warm prompt cache.
 			const childTranscript = SessionManager.inMemory(tempDir.path());
-			const childHash = credentialPinHash("anthropic", { accountId: "account-b", email: "b@example.com" });
+			const childHash = credentialPinHash("anthropic", {
+				accountId: `account-${childAccount}`,
+				email: `${childAccount}@example.com`,
+			});
 			if (!childHash) throw new Error("Expected a pin hash");
 			childTranscript.appendCredentialPin("anthropic", childHash);
 
-			const { session: child } = await createAgentSession({
+			const parentProviderSessionId = "parent-provider-session";
+			const parentCredential = authStorage.oauth
+				.accounts("anthropic", parentProviderSessionId)
+				.find(account => account.accountId === `account-${parentAccount}`);
+			if (!parentCredential) throw new Error("Expected the parent's account");
+			expect(
+				authStorage.sessions.pin(
+					"anthropic",
+					parentProviderSessionId,
+					parentCredential.credentialId,
+					parentPinOptions,
+				),
+			).toBe(true);
+
+			({ session: child } = await createAgentSession({
 				cwd: tempDir.path(),
 				agentDir: tempDir.path(),
 				sessionManager: childTranscript,
@@ -248,16 +295,44 @@ describe("task subagent OAuth pin inheritance", () => {
 				credentialSourceSessionId: parentProviderSessionId,
 				toolNames: ["read"],
 				disableExtensionDiscovery: true,
-			});
-			sessions.push(child);
+			}));
 			const childGetApiKey = child.agent.getApiKey;
 			if (!childGetApiKey) throw new Error("Expected child credential resolver");
-			expect(await resolveApiKeyOnce(await childGetApiKey(model))).toBe("access-b");
+			return await resolveApiKeyOnce(await childGetApiKey(model));
 		} finally {
-			for (const session of sessions.reverse()) await session.dispose();
+			await child?.dispose();
 			authStorage.close();
 			tempDir.removeSync();
 		}
+	}
+
+	it("keeps a revived child's own warm transcript pin over the parent's automatic affinity", async () => {
+		const key = await reviveChildKey(createInMemoryAuthStorage(), "b", "a", { restoredAtMs: Date.now() });
+		expect(key).toBe("access-b");
+	});
+
+	it("moves a revived child onto the parent's explicit pin over its transcript pin", async () => {
+		expect(await reviveChildKey(createInMemoryAuthStorage(), "b", "a")).toBe("access-a");
+	});
+
+	it("keeps the parent's explicit pin explicit in a revived child pinned to the same account", async () => {
+		// Account B sits inside its reserve; only an explicit pin keeps it from ranking away to A.
+		const usedFractionByAccount: Record<string, number> = { "account-a": 0.2, "account-b": 0.7 };
+		const authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")), {
+			usageProviderResolver: provider =>
+				provider === "anthropic"
+					? {
+							id: "anthropic",
+							async fetchUsage({ credential }) {
+								const accountId = credential.accountId;
+								const usedFraction = accountId ? usedFractionByAccount[accountId] : undefined;
+								return accountId && usedFraction !== undefined ? claudeUsage(accountId, usedFraction) : null;
+							},
+						}
+					: undefined,
+			accountPolicies: [{ provider: "anthropic", account: { accountId: "account-b" }, reservePct: 50 }],
+		});
+		expect(await reviveChildKey(authStorage, "b", "b")).toBe("access-b");
 	});
 
 	it("restricts a spawned agent to its task.agentAccountPools entry over the parent's pin", async () => {
