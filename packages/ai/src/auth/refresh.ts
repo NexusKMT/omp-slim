@@ -613,7 +613,7 @@ export class OAuthRefresher {
 		const promise = (async () => {
 			this.#deps.pool.bump("credential-refresh-start");
 			try {
-				return await this.#forceRefreshCredentialByIdUnshared(id, signal);
+				return await this.#forceRefreshCredentialByIdUnshared(id, signal, options?.reason);
 			} catch (error) {
 				this.#deps.pool.bump("credential-refresh-failure");
 				throw error;
@@ -625,7 +625,11 @@ export class OAuthRefresher {
 		return raceSignal(promise, signal, "credential refresh aborted");
 	}
 
-	async #forceRefreshCredentialByIdUnshared(id: number, signal?: AbortSignal): Promise<AuthCredentialSnapshotEntry> {
+	async #forceRefreshCredentialByIdUnshared(
+		id: number,
+		signal?: AbortSignal,
+		reason?: OAuthRefreshReason,
+	): Promise<AuthCredentialSnapshotEntry> {
 		for (const provider of this.#deps.pool.providers()) {
 			const entries = this.#deps.pool.entries(provider);
 			const index = entries.findIndex(entry => entry.id === id);
@@ -645,7 +649,7 @@ export class OAuthRefresher {
 			const stale: OAuthCredential = { ...attempted, expires: 0 };
 			let refreshed: OAuthCredentials;
 			try {
-				refreshed = await this.#refreshSingleFlight(provider as Provider, stale, id, signal);
+				refreshed = await this.#refreshSingleFlight(provider as Provider, stale, id, signal, reason);
 			} catch (error) {
 				// A definitively-dead grant tears the row down here, where the
 				// attempted credential is known. CAS on the persisted credential so a
