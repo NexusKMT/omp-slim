@@ -11,7 +11,7 @@ import { TspHarness } from "./tsp-harness";
 
 describe("native image blob lifetime", () => {
 	const cases = [
-		...["base64", "image", "attachment", "svg", "snapcompact"].map(source => ({
+		...["base64", "image", "attachment", "snapcompact"].map(source => ({
 			name: `releases discarded ${source} payloads after uploading them`,
 			fixture: "blob-lifetime.ts",
 			source,

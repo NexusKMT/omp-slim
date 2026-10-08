@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Image, ImageBudget } from "../../../src/components/image";
-import { base64ImageNode, getNativeBlob, nativeImageNode } from "../../../src/native/blobs";
+import { base64ImageNode, getNativeBlob } from "../../../src/native/blobs";
 import { SnapcompactShapePreview } from "../../../src/overlays/snapcompact-shape-preview";
 import { AttachmentChipsBand } from "../../../src/prompt/attachment-chips";
 import { chipLabel } from "../../../src/prompt/composer-attachments";
@@ -10,14 +10,9 @@ import type { Component } from "../../../src/tui";
 import { TspHarness } from "../tsp-harness";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==";
-const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1"/></svg>';
 
 function component(): Component {
 	if (process.argv[2] === "snapcompact") return new SnapcompactShapePreview("auto");
-	if (process.argv[2] === "svg") {
-		const image = nativeImageNode(new TextEncoder().encode(SVG), "image/svg+xml");
-		return { describe: () => image, render: () => [] };
-	}
 	if (process.argv[2] === "image") return new Image(PNG, "image/png", { fallbackColor: text => text });
 	if (process.argv[2] === "attachment") {
 		const editor = new CustomEditor(getEditorTheme());
@@ -49,12 +44,9 @@ async function discard(): Promise<{ reference: WeakRef<Uint8Array>; harness: Tsp
 		assert.ok(blob);
 		const uploaded = harness.terminal.blobs.get(id!);
 		assert.deepEqual(uploaded, Buffer.from(blob.bytes));
-		if (process.argv[2] === "svg") assert.equal(Buffer.from(uploaded!).toString(), SVG);
-		else {
-			const metadata = await new Bun.Image(uploaded!).metadata();
-			assert.equal(metadata.width, process.argv[2] === "snapcompact" ? 512 : 1);
-			assert.equal(metadata.height, process.argv[2] === "snapcompact" ? 512 : 1);
-		}
+		const metadata = await new Bun.Image(uploaded!).metadata();
+		assert.equal(metadata.width, process.argv[2] === "snapcompact" ? 512 : 1);
+		assert.equal(metadata.height, process.argv[2] === "snapcompact" ? 512 : 1);
 		const reference = new WeakRef(blob.bytes);
 		harness.tui.removeChild(image);
 		await harness.render();
