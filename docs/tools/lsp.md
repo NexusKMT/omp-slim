@@ -252,7 +252,7 @@ Uses the same location normalization and output shape as `definition`, but sends
 
 ## Side Effects
 - Filesystem
-  - Reads config files, target files, and root markers. Non-regular files (FIFOs, devices, sockets) are never read: opening, reconciling, refreshing and symbol-column reads refuse them, and location context skips them.
+  - Reads config files, target files, and root markers. Non-regular files (FIFOs, devices, sockets) are never read: opening, reconciling, refreshing, symbol-column reads and text-edit application refuse them, and location context skips them.
   - `rename` and `code_actions` may edit/create/delete/rename files via `applyWorkspaceEdit()`.
   - `rename_file` always renames the source path on disk in apply mode.
   - Server-initiated `workspace/applyEdit` requests also mutate files through `applyWorkspaceEdit()`.
