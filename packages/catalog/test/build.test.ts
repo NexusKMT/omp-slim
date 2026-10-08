@@ -1313,6 +1313,30 @@ describe("OpenRouter model discovery", () => {
 	});
 });
 
+describe("GitHub Copilot catalog corrections", () => {
+	it("prices Copilot Haiku 5.5 cache legs per tier without a second long-context tier", () => {
+		// `billing.token_prices` carries no cache prices for Haiku 5.5, so both
+		// discovered tiers arrive with $0 cache legs.
+		const base = buildModel(
+			completionsSpec({
+				id: "claude-haiku-5.5",
+				provider: "github-copilot",
+				cost: { input: 0.1, output: 0.5, cacheRead: 0, cacheWrite: 0 },
+			}),
+		);
+		expect(base.cost).toEqual({ input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 });
+		// The `-1m` sibling is the long tier itself; a nested tier would charge it 5x twice.
+		const long = buildModel(
+			completionsSpec({
+				id: "claude-haiku-5.5-1m",
+				provider: "github-copilot",
+				cost: { input: 0.5, output: 2.5, cacheRead: 0, cacheWrite: 0 },
+			}),
+		);
+		expect(long.cost).toEqual({ input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 });
+	});
+});
+
 describe("model cache materialized round trip", () => {
 	it("fingerprints current static content without mutating caller arrays", () => {
 		const staticModels = [completionsSpec({ id: "fingerprint-model" })];
