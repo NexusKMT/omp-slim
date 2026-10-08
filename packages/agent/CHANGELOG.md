@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed warm-cache tool-result pruning re-writing a whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
+
 ## [18.8.1] - 2026-10-07
 
 ### Added
@@ -13,10 +17,6 @@
 ### Changed
 
 - Improved performance when pruning tool output and capturing telemetry messages during long-running sessions.
-
-### Fixed
-
-- Fixed warm-cache tool-result pruning re-writing a whole Anthropic prompt cache when the pruned result sat behind many small turns ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.7.0] - 2026-10-06
 
