@@ -2,12 +2,13 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Reduced memory retained after loading the model catalog cache ([#14252](https://github.com/can1357/oh-my-pi/pull/14252) by [@iliaal](https://github.com/iliaal)).
 ### Added
 
 - Added the `prompt-cache-lookback` catalog axis and `resolvePromptCacheLookback`, giving Claude models on every host their 20-position prompt-cache lookback ([#14751](https://github.com/can1357/oh-my-pi/pull/14751) by [@will-bogusz](https://github.com/will-bogusz))
+
+### Changed
+
+- Reduced memory retained after loading the model catalog cache ([#14252](https://github.com/can1357/oh-my-pi/pull/14252) by [@iliaal](https://github.com/iliaal)).
 
 ### Fixed
 
