@@ -5033,15 +5033,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			}
 		}
 
-		// Broker-shared language servers: one server per project, multiplexed
-		// across omp instances by the LSP mux daemon. Session-level because the
-		// flag lives in module state consulted on every client cold-start.
-		// Re-applied live on `lsp.shared` changes: servers cold-started after the
-		// change use the new mode; already-running clients keep their transport
-		// until they exit or idle out.
-		setSharedLspEnabled(enableLsp && cfgLspShared.get(settings));
-		if (enableLsp) {
-			cfgLspShared.listen(session, shared => setSharedLspEnabled(shared));
+		// Broker-shared language servers (see lsp/mux/protocol.ts). The flag is
+		// module state read on every client cold start, so only a session that binds
+		// process state may set it. A subagent or helper session (usually
+		// enableLsp=false) must not switch the parent's later cold starts to private
+		// servers. Re-applied live on `lsp.shared` changes; running clients keep
+		// their transport until they exit or idle out.
+		if (bindsProcessState) {
+			setSharedLspEnabled(enableLsp && cfgLspShared.get(settings));
+			if (enableLsp) {
+				cfgLspShared.listen(session, shared => setSharedLspEnabled(shared));
+			}
 		}
 
 		// Start LSP warmup in the background so startup does not block on language server initialization.
