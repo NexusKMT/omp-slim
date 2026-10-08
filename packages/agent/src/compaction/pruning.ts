@@ -174,23 +174,32 @@ const DEFAULT_IDLE_FLUSH_MS = 30 * 60_000;
  */
 const CACHE_LOOKBACK_POSITIONS = 20;
 
+/** Positions the next request's own input may add: its prompt, a prepended date/cwd reminder, and two attached or injected blocks. */
+const NEXT_REQUEST_POSITIONS = 4;
+
 type LookbackBlock = "tool_use" | "tool_result" | undefined;
 
 /**
  * Index of the oldest tool result that can be rewritten while the next request
- * still reaches a cache entry.
+ * still reaches a cache entry, as a bound that may err only toward keeping a
+ * result: a skipped prune costs its tokens, a missed lookup the whole cache.
  *
  * Each request writes its tail cache entry at its last block, so rewriting a
- * result invalidates every entry from its issuing assistant turn on; the newest
- * surviving one ends the message before that turn. The next request's tail
- * breakpoint (on its own new input, one position) reaches it only when the
- * issuing turn, its tool-result batch and everything after fit in the lookback
- * window; otherwise the lookup falls back to an older breakpoint and the whole
- * conversation since is re-written, not the small suffix the token limits budget for.
+ * result invalidates every entry from its issuing assistant turn on, and once a
+ * request has 15 user turns its other breakpoint sits on an older decimation
+ * checkpoint. The next request's tail breakpoint then reaches the newest
+ * surviving entry, which ends the message before the issuing turn, only when
+ * the issuing turn, its tool-result batch, everything after and the next input
+ * fit in the lookback window; otherwise the lookup falls back to that
+ * checkpoint and the whole conversation since is re-written, not the small
+ * suffix the token limits budget for. Positions follow what the Anthropic
+ * request converter emits for each entry.
  */
 function cacheLookbackFloor(entries: readonly SessionEntry[], start: number): number {
-	let positions = 1;
+	let positions = NEXT_REQUEST_POSITIONS;
 	let later: LookbackBlock;
+	let runHoistsImages = false;
+	let newerIsAssistant = false;
 	const add = (block: LookbackBlock): void => {
 		if (block === undefined || block !== later) positions++;
 		later = block;
@@ -200,19 +209,36 @@ function cacheLookbackFloor(entries: readonly SessionEntry[], start: number): nu
 		const entry = entries[i];
 		if (entry.type === "message") {
 			const message = entry.message;
-			if (message.role === "toolResult") add("tool_result");
-			else if (message.role === "assistant") {
+			if (message.role === "toolResult") {
+				if (later !== "tool_result") runHoistsImages = false;
+				add("tool_result");
+				// Anthropic rejects images in error results, so the converter moves
+				// them after the result run behind one explanatory text block.
+				const images = message.isError ? message.content.filter(block => block.type === "image").length : 0;
+				if (images > 0) {
+					positions += runHoistsImages ? images : images + 1;
+					runHoistsImages = true;
+				}
+			} else if (message.role === "assistant") {
+				// The converter pads consecutive assistant turns with a user turn.
+				if (newerIsAssistant) add(undefined);
 				for (let b = message.content.length - 1; b >= 0; b--) {
-					add(message.content[b].type === "toolCall" ? "tool_use" : undefined);
+					const block = message.content[b];
+					// The converter drops assistant images and blank text.
+					if (block.type === "image" || (block.type === "text" && block.text.trim().length === 0)) continue;
+					add(block.type === "toolCall" ? "tool_use" : undefined);
 				}
 			} else {
 				const blocks = "content" in message && Array.isArray(message.content) ? message.content.length : 1;
 				for (let b = Math.max(1, blocks); b > 0; b--) add(undefined);
 			}
+			newerIsAssistant = message.role === "assistant";
 		} else if (entry.type === "custom_message") {
 			for (let b = Array.isArray(entry.content) ? Math.max(1, entry.content.length) : 1; b > 0; b--) add(undefined);
+			newerIsAssistant = false;
 		} else if (entry.type === "branch_summary" && entry.summary) {
 			add(undefined);
+			newerIsAssistant = false;
 		}
 		if (positions >= CACHE_LOOKBACK_POSITIONS) return floor;
 		if (entry.type === "message" && entry.message.role === "assistant") floor = i;

@@ -13,7 +13,9 @@ import {
 	USELESS_NOTICE,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ProtectedToolContext } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type { AssistantMessage, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 const tokenizer = new Tokenizer();
 
@@ -131,6 +133,19 @@ const T0 = Date.UTC(2026, 5, 10, 12, 0, 0);
 const FILE_CONTENT = "export function alpha() { return 1; }\n".repeat(50);
 // Comfortably above any small suffixTokenLimit used below.
 const BIG_TEXT = "const value = computeSomething(12345);\n".repeat(500);
+const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZQAAAABJRU5ErkJggg==";
+const anthropicModel = buildModel({
+	id: "claude-sonnet-4-5",
+	name: "Claude Sonnet 4.5",
+	api: "anthropic-messages",
+	provider: "anthropic",
+	baseUrl: "https://api.anthropic.com",
+	reasoning: true,
+	input: ["text", "image"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 200_000,
+	maxTokens: 8_192,
+});
 
 describe("readToolSupersedeKey", () => {
 	test("bare path keys on itself; non-read and non-string paths are exempt", () => {
@@ -817,10 +832,10 @@ function smallTurns(count: number, timestamp: number): SessionMessageEntry[] {
 }
 
 describe("warm-cache guard — prompt-cache lookback window", () => {
-	// 12 small turns put the stale read's issuing turn 29 lookback positions
-	// behind the next request's tail, far below the 8k token limit but past
-	// Anthropic's 20-position lookback: rewriting it would re-write the whole
-	// conversation, not just the suffix.
+	// 12 small turns put 28 stored lookback positions behind the stale read's
+	// issuing turn, far below the 8k token limit but past Anthropic's
+	// 20-position lookback: rewriting it would re-write the whole conversation,
+	// not just the suffix.
 	function staleReadBehind(turns: number): { stale: SessionMessageEntry; entries: SessionEntry[] } {
 		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
 		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
@@ -838,7 +853,7 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 	});
 
 	test("per-turn supersede pass still prunes inside the lookback window", () => {
-		const { stale, entries } = staleReadBehind(6);
+		const { stale, entries } = staleReadBehind(5);
 
 		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
 
@@ -931,19 +946,109 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 		return { stale, entries: [call1, stale, ...after, call2, latest] };
 	}
 
+	function userEntry(): SessionMessageEntry {
+		return messageEntry({ role: "user", content: "Keep going.", timestamp: T0 + 1_000 }, T0 + 1_000);
+	}
+
+	/** Lookback positions the Anthropic request converter emits for `entries`. */
+	function wirePositions(entries: SessionEntry[], nextInput?: Message): number {
+		const messages = entries.map(entry => (entry as SessionMessageEntry).message as Message);
+		if (nextInput) messages.push(nextInput);
+		let positions = 0;
+		let later: string | undefined;
+		for (const param of convertAnthropicMessages(messages, anthropicModel, false)) {
+			for (const block of typeof param.content === "string" ? [{ type: "text" }] : param.content) {
+				if ((block.type !== "tool_use" && block.type !== "tool_result") || block.type !== later) positions++;
+				later = block.type;
+			}
+		}
+		return positions;
+	}
+
 	test("counts the issuing assistant turn: [text, tool_use] + result + 16 positions + prompt is out of reach", () => {
 		// The newest cache entry surviving the rewrite ends the message before the
 		// issuing turn, so its two blocks count too: 2 + 1 + 16 + 1 = 20 positions.
 		const text = { type: "text" as const, text: "Reading it." };
 		for (const pass of guardedPasses) {
 			const outOfReach = staleReadAround([text], smallTurns(7, T0 + 1_000));
+			expect(wirePositions(outOfReach.entries)).toBe(19);
 			expect(pass(outOfReach.entries).prunedCount).toBe(0);
 			expect(resultText(outOfReach.stale)).toBe(FILE_CONTENT);
+		}
+	});
 
-			// One small turn fewer (18 positions) is back in reach.
-			const inReach = staleReadAround([text], smallTurns(6, T0 + 1_000));
+	test("reserves room for a multi-block next input", () => {
+		// 18 stored positions plus a next prompt carrying a prepended date/cwd
+		// reminder put the surviving entry 21 positions back from the tail.
+		const nextInput: Message = {
+			role: "user",
+			content: [
+				{ type: "text", text: "Current date: 2026-10-08" },
+				{ type: "text", text: "Next step." },
+			],
+			timestamp: T0 + 3_000,
+		};
+		const text = { type: "text" as const, text: "Reading it." };
+		for (const pass of guardedPasses) {
+			const { stale, entries } = staleReadAround([text], [...smallTurns(6, T0 + 1_000), userEntry()]);
+			expect(wirePositions(entries, nextInput)).toBe(20);
+
+			expect(pass(entries).prunedCount).toBe(0);
+			expect(resultText(stale)).toBe(FILE_CONTENT);
+		}
+	});
+
+	test("15 stored positions prune and 16 do not, leaving room for the next input", () => {
+		const text = { type: "text" as const, text: "Reading it." };
+		for (const pass of guardedPasses) {
+			const inReach = staleReadAround([text], smallTurns(5, T0 + 1_000));
+			expect(wirePositions(inReach.entries)).toBe(15);
 			expect(pass(inReach.entries).prunedCount).toBe(1);
 			expect(resultText(inReach.stale)).toBe(SUPERSEDED_NOTICE);
+
+			const outOfReach = staleReadAround([text], [...smallTurns(5, T0 + 1_000), userEntry()]);
+			expect(wirePositions(outOfReach.entries)).toBe(16);
+			expect(pass(outOfReach.entries).prunedCount).toBe(0);
+			expect(resultText(outOfReach.stale)).toBe(FILE_CONTENT);
+		}
+	});
+
+	test("counts images an error result hoists out of its tool_result block", () => {
+		// Anthropic takes images out of error results and appends a text block plus
+		// each image after the result run: one stored result, three positions.
+		for (const pass of guardedPasses) {
+			const [failedCall, failed] = readPair("src/shot.png", "render failed", T0 + 1_000);
+			resultMessage(failed).isError = true;
+			resultMessage(failed).content.push({ type: "image", data: PNG_1X1, mimeType: "image/png" });
+			const { stale, entries } = staleReadAround([], [...smallTurns(4, T0 + 1_000), failedCall, failed]);
+			expect(wirePositions(entries)).toBe(16);
+
+			expect(pass(entries).prunedCount).toBe(0);
+			expect(resultText(stale)).toBe(FILE_CONTENT);
+		}
+	});
+
+	test("counts the user turn the converter inserts between consecutive assistant turns", () => {
+		for (const pass of guardedPasses) {
+			const { stale, entries } = staleReadAround([], [...smallTurns(5, T0 + 1_000), textEntry("Done.", T0 + 1_000)]);
+			expect(wirePositions(entries)).toBe(16);
+
+			expect(pass(entries).prunedCount).toBe(0);
+			expect(resultText(stale)).toBe(FILE_CONTENT);
+		}
+	});
+
+	test("assistant images and blank text, which the converter drops, do not count", () => {
+		const dropped: AssistantMessage["content"] = [
+			{ type: "image", data: PNG_1X1, mimeType: "image/png" },
+			{ type: "text", text: "  " },
+		];
+		for (const pass of guardedPasses) {
+			const { stale, entries } = staleReadAround(dropped, smallTurns(5, T0 + 1_000));
+			expect(wirePositions(entries)).toBe(14);
+
+			expect(pass(entries).prunedCount).toBe(1);
+			expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
 		}
 	});
 
