@@ -1073,6 +1073,34 @@ describe("AuthStorage codex oauth ranking", () => {
 		expect(await authStorage.keys.get("openai-codex", "explicit-reserve-pin")).toBe("api-acct-protected");
 	});
 
+	test("routes to an explicit pin before an earlier-unblocking sibling once every account is blocked", async () => {
+		if (!authStorage) throw new Error("test setup failed");
+		await authStorage.credentials.set("openai-codex", [
+			{ type: "oauth", ...createCredential("acct-a", "a@example.com") },
+			{ type: "oauth", ...createCredential("acct-b", "b@example.com") },
+		]);
+		const accounts = authStorage.oauth.accounts("openai-codex");
+		const accountA = accounts.find(account => account.accountId === "acct-a");
+		const accountB = accounts.find(account => account.accountId === "acct-b");
+		if (!accountA || !accountB) throw new Error("expected both accounts");
+		const sessionId = "blocked-explicit-pin";
+
+		await authStorage.limits.markReached("openai-codex", sessionId, {
+			credentialId: accountB.credentialId,
+			retryAfterMs: 4 * HOUR_MS,
+		});
+		expect(authStorage.sessions.pin("openai-codex", sessionId, accountB.credentialId)).toBe(true);
+		// An unblocked sibling still wins over a blocked pin.
+		expect(await authStorage.keys.get("openai-codex", sessionId)).toBe("api-acct-a");
+
+		await authStorage.limits.markReached("openai-codex", sessionId, {
+			credentialId: accountA.credentialId,
+			retryAfterMs: HOUR_MS,
+		});
+		expect(authStorage.sessions.pin("openai-codex", sessionId, accountB.credentialId)).toBe(true);
+		expect(await authStorage.keys.get("openai-codex", sessionId)).toBe("api-acct-b");
+	});
+
 	test("keeps a lone reserve account usable when usage is unknown", async () => {
 		if (!store) throw new Error("test setup failed");
 		authStorage = new AuthStorage(store, {

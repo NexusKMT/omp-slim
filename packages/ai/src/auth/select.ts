@@ -505,9 +505,9 @@ export class CredentialSelector {
 	 * 1. strict: unblocked credentials only, usage limits respected, plan
 	 *    filter enforced (when any account is confirmed eligible);
 	 * 2. plan-fitting last resort: same plan filter, but blocked/exhausted
-	 *    accounts are allowed (blocked candidates rank earliest-unblocking
-	 *    first) so the caller gets real usage-limit semantics from the wire
-	 *    instead of a missing key;
+	 *    accounts are allowed (an explicit session pin first, then blocked
+	 *    candidates earliest-unblocking first) so the caller gets real
+	 *    usage-limit semantics from the wire instead of a missing key;
 	 * 3. unfiltered last resort: the plan filter matched nothing usable —
 	 *    skip it and try every account once; the server is the final arbiter
 	 *    of model access.
@@ -884,9 +884,18 @@ export class CredentialSelector {
 		];
 		if (enforcePlanRequirement) passes.push({ allowBlocked: true, enforcePlanRequirement: false, enforceAccounts });
 		if (enforceAccounts) passes.push({ allowBlocked: true, enforcePlanRequirement: false, enforceAccounts: false });
+		// Blocked candidates rank earliest-unblock first, which would route a
+		// blocked explicit pin to an equally blocked sibling. Once the strict
+		// pass finds no unblocked account, the user's pin goes first.
+		const explicitPin = sessionPinIsExplicit
+			? candidates.find(candidate => candidate.selection.index === sessionPreferredIndex)
+			: undefined;
+		const lastResortCandidates = explicitPin
+			? [explicitPin, ...candidates.filter(candidate => candidate !== explicitPin)]
+			: candidates;
 
 		for (const pass of passes) {
-			for (const candidate of candidates) {
+			for (const candidate of pass.allowBlocked ? lastResortCandidates : candidates) {
 				if (preflightFailures.has(candidate)) continue;
 				const candidateAccountKey = oauthAccountKey(candidate.selection.credential);
 				if (pass.enforceAccounts && (candidateAccountKey === undefined || !accountIds?.has(candidateAccountKey)))
