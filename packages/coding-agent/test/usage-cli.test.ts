@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, vi } from "bun:test";
 import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { UsageReport } from "@oh-my-pi/pi-ai";
@@ -8,12 +8,16 @@ import {
 	computeProviderWindowStats,
 	formatUsageBreakdown,
 	formatUsageHistory,
+	runUsageCommand,
 	type UsagePolicyDiagnosticsOptions,
 } from "@oh-my-pi/pi-coding-agent/cli/usage-cli";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
 import {
 	collectUnreportedAccounts,
 	type UsageAccountIdentity,
 } from "@oh-my-pi/pi-coding-agent/slash-commands/helpers/usage-accounts";
+import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const HOUR = 3_600_000;
 const FIVE_HOURS = 5 * HOUR;
@@ -31,6 +35,7 @@ function makeLimit(opts: {
 	notes?: string[];
 	shared?: boolean;
 	sharedGroup?: string;
+	status?: UsageReport["limits"][number]["status"];
 }): UsageReport["limits"][number] {
 	return {
 		id: opts.id,
@@ -49,6 +54,7 @@ function makeLimit(opts: {
 				: undefined,
 		amount: { unit: "percent", usedFraction: opts.usedFraction },
 		...(opts.notes ? { notes: opts.notes } : {}),
+		...(opts.status ? { status: opts.status } : {}),
 	};
 }
 
@@ -512,6 +518,43 @@ describe("formatUsageBreakdown", () => {
 		);
 		const inheritedSection = text.slice(text.indexOf("inherited@example.test"));
 		expect(inheritedSection).toContain("policy: priority 0 · reserve 10% (global) · inside reserve · 5.0% left");
+	});
+
+	it("reports an exhausted account as exhausted rather than inside a 0% reserve", () => {
+		const report = makeReport("openai-codex", "team@example.test", [
+			makeLimit({ id: "5h", provider: "openai-codex", usedFraction: 1, durationMs: FIVE_HOURS, windowId: "5h" }),
+		]);
+		const policyOptions: UsagePolicyDiagnosticsOptions = {
+			globalReservePct: 10,
+			getAccountPolicy: () => ({
+				provider: "openai-codex",
+				account: { email: "team@example.test" },
+				priority: 10,
+				reservePct: 0,
+			}),
+		};
+
+		const text = stripVTControlCharacters(
+			formatUsageBreakdown([report], [], Date.now(), undefined, [], policyOptions),
+		);
+
+		expect(text).toContain("policy: priority 10 · reserve 0% (override) · exhausted · 0.0% left");
+	});
+
+	it("reports a provider-flagged exhausted window as exhausted even with fractional quota left", () => {
+		const report = makeReport("anthropic", "flagged@example.test", [
+			makeLimit({ id: "5h", usedFraction: 0.995, durationMs: FIVE_HOURS, windowId: "5h", status: "exhausted" }),
+		]);
+		const policyOptions: UsagePolicyDiagnosticsOptions = {
+			globalReservePct: 0,
+			getAccountPolicy: () => ({ provider: "anthropic", account: { email: "flagged@example.test" }, priority: 0 }),
+		};
+
+		const text = stripVTControlCharacters(
+			formatUsageBreakdown([report], [], Date.now(), undefined, [], policyOptions),
+		);
+
+		expect(text).toContain("policy: priority 0 · reserve 0% (global) · exhausted · 0.5% left");
 	});
 
 	it("marks reserve state unknown when a configured account has no transient usage report", () => {
@@ -1098,5 +1141,68 @@ describe("usage command configuration", () => {
 		expect(error).toBe("");
 		expect(exitCode).toBe(0);
 		expect(output).toBe("Invalidated cached usage reports for all providers.\n");
+	});
+});
+
+describe("omp usage accounts", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("lists the identity keys that restrict a session, and no token material", async () => {
+		const authStorage = createInMemoryAuthStorage();
+		const oauth = (
+			suffix: string,
+			identity: { email?: string; accountId?: string; orgId?: string; orgName?: string },
+		) => ({
+			type: "oauth" as const,
+			access: `access-${suffix}`,
+			refresh: `refresh-${suffix}`,
+			expires: Date.now() + 60 * 60_000,
+			...identity,
+		});
+		await authStorage.credentials.set("anthropic", [
+			oauth("team", { email: "dev@example.com", orgId: "org-team", orgName: "Team" }),
+			oauth("personal", { email: "dev@example.com", orgId: "org-personal" }),
+			{ type: "api_key", key: "sk-stored" },
+		]);
+		await authStorage.credentials.set("openai-codex", oauth("codex", { accountId: "acct-codex" }));
+		vi.spyOn(Settings, "loadReadOnly").mockResolvedValue(Settings.isolated());
+		vi.spyOn(sdkModule, "discoverAuthStorage").mockResolvedValue(authStorage);
+		// The command closes the storage it discovered; keep it open to check the keys after.
+		vi.spyOn(authStorage, "close").mockImplementation(() => {});
+		const output: string[] = [];
+		vi.spyOn(process.stdout, "write").mockImplementation(chunk => {
+			output.push(String(chunk));
+			return true;
+		});
+
+		try {
+			await runUsageCommand({ action: "accounts", json: true });
+			const listed = JSON.parse(output.join("")) as {
+				accounts: Array<{ provider: string; identityKey: string; orgName?: string }>;
+			};
+			expect(listed.accounts).toEqual([
+				{ provider: "anthropic", identityKey: "email:dev@example.com|org:org-team", orgName: "Team" },
+				{ provider: "anthropic", identityKey: "email:dev@example.com|org:org-personal" },
+				{ provider: "openai-codex", identityKey: "account:acct-codex" },
+			]);
+
+			// Each listed key, used as a pool, routes a session to exactly that account.
+			for (const [index, account] of listed.accounts.entries()) {
+				authStorage.sessions.restrict(account.provider, `pooled-${index}`, [account.identityKey]);
+			}
+			expect(await authStorage.keys.get("anthropic", "pooled-0")).toBe("access-team");
+			expect(await authStorage.keys.get("anthropic", "pooled-1")).toBe("access-personal");
+
+			output.length = 0;
+			await runUsageCommand({ action: "accounts" });
+			const text = stripVTControlCharacters(output.join(""));
+			for (const account of listed.accounts) expect(text).toContain(account.identityKey);
+			expect(text).not.toMatch(/access-|refresh-|sk-stored/);
+		} finally {
+			vi.restoreAllMocks();
+			authStorage.close();
+		}
 	});
 });
