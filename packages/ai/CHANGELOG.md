@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added scalarizeTypeArrays option to normalize schemas, enabling multi-type arrays to be split into anyOf branches
+- Added dropForeignTypeKeywords to remove irrelevant keywords when normalizing types
+
 ### Fixed
 
 - Fixed auth broker clients judging an account by a sibling account's usage when only the sibling's usage fetch succeeded, so account selection and usage-limit blocks acted on the wrong quota ([#14904](https://github.com/can1357/oh-my-pi/pull/14904) by [@will-bogusz](https://github.com/will-bogusz))
