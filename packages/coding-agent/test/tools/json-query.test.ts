@@ -235,6 +235,12 @@ describe("JSON query in read tool", () => {
 		expect(paged).toEndWith("\n2\n[more results; append ?q=.n + 1&limit=1&offset=1 to continue]");
 	});
 
+	it("strips terminal controls from jq's stderr", async () => {
+		const query = String.raw`.name as $name | "\u001b[31mred\u0000" | stderr | $name`;
+		const text = getText(await readTool.execute("call_stderr_controls", { path: `${jsonFile}?q=${query}` }));
+		expect(text).toBe('[jq stderr: red]\n"my-project"');
+	});
+
 	it("treats a filter starting with - as a filter, not jq flags", async () => {
 		const result = await readTool.execute("call_negate", { path: `${jsonFile}?q=-.items[0].id` });
 		expect(getText(result)).toBe("-1");

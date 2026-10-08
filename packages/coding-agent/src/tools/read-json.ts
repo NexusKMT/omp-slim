@@ -6,7 +6,7 @@ import { Shell } from "@oh-my-pi/pi-natives";
 import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { DEFAULT_MAX_LINES, truncateHead, truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent, sanitizeText } from "@oh-my-pi/pi-utils";
 import type { ToolSession } from "../sdk";
 import { quotePosixPath } from "../ssh/utils";
 import { resolveReadPath } from "./path-utils";
@@ -284,7 +284,7 @@ async function runJq(
 		if (result.timedOut && !stopped) {
 			throw new ToolError(`JSON query timed out after ${JSON_QUERY_TIMEOUT_MS / 1000} seconds`);
 		}
-		const stderr = truncateTail((await readStderr(stderrPath)).trim(), {
+		const stderr = truncateTail(sanitizeText(await readStderr(stderrPath)).trim(), {
 			maxBytes: JSON_QUERY_ERROR_MAX_BYTES,
 		}).content;
 		if (!stopped && (result.exitCode !== 0 || callbackError)) {
