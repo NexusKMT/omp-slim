@@ -83,4 +83,67 @@ describe("legacy aliased-scope roots resolve the upstream 1.1.0 bridges", () => 
 		expect(loaded.composed).toContain("XY");
 		expect(loaded.composed.replace(/\x1b\[[0-9;]*m/g, "")).toBe("abXYefgh");
 	});
+
+	it("resolves the complete published pi-optchat v0.7.2 runtime import closure", async () => {
+		// The consumer that drove these bridges: every runtime name its published
+		// closure imports from the three aliased roots, imported at once. Bun's
+		// static named-export check fails the whole module on any single miss,
+		// so a clean load proves the shim covers the entire consumer surface.
+		const aiNames = ["clampThinkingLevel", "getCurrentSystemMessage", "getSupportedThinkingLevels"];
+		const tuiNames = [
+			"Box",
+			"Container",
+			"Editor",
+			"Input",
+			"Loader",
+			"Markdown",
+			"SelectList",
+			"SettingsList",
+			"Spacer",
+			"Text",
+			"compositeTuiLine",
+			"fuzzyFilter",
+			"getKeybindings",
+			"matchesKey",
+			"sliceByColumn",
+			"truncateToWidth",
+			"visibleWidth",
+			"wrapTextWithAnsi",
+		];
+		const caNames = [
+			"AssistantMessageComponent",
+			"CustomEditor",
+			"CustomMessageComponent",
+			"DefaultResourceLoader",
+			"DynamicBorder",
+			"ModelRegistry",
+			"SessionManager",
+			"SettingsManager",
+			"ToolExecutionComponent",
+			"UserMessageComponent",
+			"createAgentSession",
+			"createBashToolDefinition",
+			"createEditToolDefinition",
+			"createFindToolDefinition",
+			"createGrepToolDefinition",
+			"createLsToolDefinition",
+			"createReadToolDefinition",
+			"createWriteToolDefinition",
+			"getAgentDir",
+			"getMarkdownTheme",
+			"getSelectListTheme",
+			"parseSkillBlock",
+		];
+		const entry = await writeFixtureExtension(
+			[
+				`import { ${aiNames.join(", ")} } from "@earendil-works/pi-ai";`,
+				`import { ${tuiNames.join(", ")} } from "@earendil-works/pi-tui";`,
+				`import { ${caNames.join(", ")} } from "@earendil-works/pi-coding-agent";`,
+				`export const probe = [${[...aiNames, ...tuiNames, ...caNames].join(", ")}];`,
+			].join("\n"),
+		);
+		const loaded = (await loadLegacyPiModule(entry)) as { probe: unknown[] };
+		expect(loaded.probe).toHaveLength(aiNames.length + tuiNames.length + caNames.length);
+		expect(loaded.probe.every(v => v !== undefined)).toBe(true);
+	});
 });
