@@ -226,7 +226,7 @@ describe("exact security OAuth resolver", () => {
 				authStorage: clientStorage,
 				account: { provider, credentialId, accountId: "workspace-a" },
 			});
-			const exact = resolver({ ...model(), provider } as unknown as Parameters<typeof resolver>[0]) as ApiKeyResolver;
+			const exact = resolver({ ...model(), provider }) as ApiKeyResolver;
 
 			const unauthorized = Object.assign(new Error("401 invalid_api_key"), { status: 401 });
 			expect(await exact({ lastChance: false, error: unauthorized })).toBe("access-1");
