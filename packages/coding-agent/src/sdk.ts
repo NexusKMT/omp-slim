@@ -548,7 +548,8 @@ export interface CreateAgentSessionOptions {
 	getApiKey?: AgentOptions["getApiKey"];
 	/**
 	 * Session whose stored credential affinities are copied into this session
-	 * before any child credential operation.
+	 * before any child credential operation: explicit pins always, automatic
+	 * affinity only for providers this session's own transcript has not pinned.
 	 * @internal
 	 */
 	credentialSourceSessionId?: string;
@@ -1852,7 +1853,17 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	}
 	const providerSessionId = options.providerSessionId ?? sessionManager.getSessionId();
 	if (options.credentialSourceSessionId) {
-		modelRegistry.authStorage.sessions.inherit(options.credentialSourceSessionId, providerSessionId);
+		// A revived or resumed child already pins, in its own transcript, the accounts that
+		// hold its conversation cache. Inheriting the parent's automatic sticky for those
+		// providers would make seedCredentialPins defer to it (a live sticky for another
+		// account wins) and cold-miss the child's whole prefix. An explicit parent pin is
+		// the user's choice and still reaches the child.
+		const ownPins = sessionManager.getCredentialPins();
+		modelRegistry.authStorage.sessions.inherit(
+			options.credentialSourceSessionId,
+			providerSessionId,
+			(provider, explicit) => explicit || !ownPins.has(provider),
+		);
 	}
 	// From here on the session resolves every key through its pools; see
 	// SessionAccountPoolScope. A startup failure leaves no session to lift them.

@@ -378,6 +378,22 @@ describe("collectUnreportedAccounts", () => {
 		expect(collectUnreportedAccounts([aliceReport], [alice, bob, orgOnly])).toEqual([bob]);
 	});
 
+	it("does not let one Antigravity account's report cover a sibling on the same Google project", () => {
+		const project = "aicode-consumers";
+		const alice: UsageAccountIdentity = {
+			provider: "google-antigravity",
+			type: "oauth",
+			email: "alice@example.test",
+			projectId: project,
+		};
+		const bob: UsageAccountIdentity = { ...alice, email: "bob@example.test" };
+		const aliceReport = {
+			...makeReport("google-antigravity", alice.email!, []),
+			metadata: { email: alice.email, projectId: project },
+		};
+		expect(collectUnreportedAccounts([aliceReport], [alice, bob])).toEqual([bob]);
+	});
+
 	it("keeps an org-less account covered by its own org-less report when org-scoped siblings exist", () => {
 		// Live incident shape: legacy org-less rows (pre-org-capture logins)
 		// beside fresh org-scoped logins. Every account fetched successfully —

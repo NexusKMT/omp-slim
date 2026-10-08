@@ -29,12 +29,13 @@ import {
 } from "./rank";
 import { mergeRefreshedCredential, OAUTH_REFRESH_SKEW_MS, type OAuthRefresher } from "./refresh";
 import type { AuthCredentialStore } from "./store";
-import type {
-	ApiKeyCredential,
-	AuthApiKeyOptions,
-	AuthCredential,
-	OAuthCredential,
-	StoredAuthCredential,
+import {
+	type ApiKeyCredential,
+	type AuthApiKeyOptions,
+	type AuthCredential,
+	type OAuthCredential,
+	oauthAccountKey,
+	type StoredAuthCredential,
 } from "./types";
 import type { UsageService } from "./usage";
 import {
@@ -550,9 +551,10 @@ export class CredentialSelector {
 		const accountIds = options?.accountIds?.length ? new Set(options.accountIds) : undefined;
 		const enforceAccounts =
 			accountIds !== undefined &&
-			credentials.some(
-				({ credential }) => credential.accountId !== undefined && accountIds.has(credential.accountId),
-			);
+			credentials.some(({ credential }) => {
+				const accountKey = oauthAccountKey(credential);
+				return accountKey !== undefined && accountIds.has(accountKey);
+			});
 		const hasAccountPolicy = credentials.some(
 			({ credential }) => this.#deps.policies.forCredential(provider, credential) !== undefined,
 		);
@@ -886,8 +888,8 @@ export class CredentialSelector {
 		for (const pass of passes) {
 			for (const candidate of candidates) {
 				if (preflightFailures.has(candidate)) continue;
-				const candidateAccountId = candidate.selection.credential.accountId;
-				if (pass.enforceAccounts && (candidateAccountId === undefined || !accountIds?.has(candidateAccountId)))
+				const candidateAccountKey = oauthAccountKey(candidate.selection.credential);
+				if (pass.enforceAccounts && (candidateAccountKey === undefined || !accountIds?.has(candidateAccountKey)))
 					continue;
 				const resolved = await this.tryOAuth(provider, candidate.selection, providerKey, sessionId, options, {
 					checkUsage,
