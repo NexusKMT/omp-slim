@@ -53,6 +53,16 @@ describe("model merge reuse", () => {
 		expect(merged).toBe(discovered);
 	});
 
+	test("reapplies changed fallbacks when the same model objects are merged again", () => {
+		const discovered = fixtureModel();
+		const existing = fixtureModel();
+
+		expect(mergeDiscoveredModel(discovered, existing)).toBe(discovered);
+		existing.transport = "pi-native";
+
+		expect(mergeDiscoveredModel(discovered, existing).transport).toBe("pi-native");
+	});
+
 	test("shares discovery with an out-of-scope endpoint override but applies matching overrides", () => {
 		const discovered = fixtureModel();
 		const override = { baseUrl: "https://proxy.example/v1" };
