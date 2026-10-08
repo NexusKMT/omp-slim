@@ -646,6 +646,8 @@ mod tests {
 		assert!(store.by_content(a, &emoji).is_some());
 		assert!(store.head(b).is_some());
 		store.record_seen_lines(a, &file_hash(&replacement), &[1]);
+		assert!(store.head(b).is_some());
+		assert!(store.head(a).is_some());
 		store.record(Path::new("c"), &"c".repeat(1_000), None);
 		assert!(store.head(b).is_none());
 		assert_eq!(&*store.head(a).unwrap().text, replacement);
