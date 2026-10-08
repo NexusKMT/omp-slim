@@ -3,6 +3,7 @@ import { streamAnthropic } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { AnthropicApiRequest, AnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic-client";
 import type { AssistantMessage, Context, Message, Model, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
+import { logger } from "@oh-my-pi/pi-utils";
 
 /**
  * A `drop_block` request whose replayed thinking the API reports as dropped
@@ -124,6 +125,8 @@ describe("anthropic drop_block replay after reported thinking drops", () => {
 				payloads.push(structuredClone(params));
 				return droppedResponse(reportedAt);
 			});
+			const warn = vi.spyOn(logger, "warn");
+			const dropWarning = "anthropic: dropped thinking block after conversation prefix changed";
 
 			const run = async () => {
 				const stream = streamAnthropic(model, context, { apiKey: "sk-ant-test", providerSessionState });
@@ -136,10 +139,14 @@ describe("anthropic drop_block replay after reported thinking drops", () => {
 			const first = await run();
 			expect(first.stopReason).toBe("stop");
 			expect(first.inputTransformations).toEqual(droppedTransformations);
+			expect(warn.mock.calls.filter(([message]) => message === dropWarning)).toHaveLength(2);
 
 			const second = await run();
 			expect(second.stopReason).toBe("stop");
 			expect(payloads).toHaveLength(2);
+			expect(second.inputTransformations).toEqual(droppedTransformations);
+			// The API reports the same drops on every replay; they were already warned about.
+			expect(warn.mock.calls.filter(([message]) => message === dropWarning)).toHaveLength(2);
 
 			const [firstPayload, secondPayload] = payloads;
 			if (!firstPayload || !secondPayload) throw new Error("expected two captured requests");
