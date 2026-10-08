@@ -1400,6 +1400,18 @@ type ListToken = Token & {
 type TableCellToken = { tokens?: Token[] };
 type TableToken = Token & { header: TableCellToken[]; rows: TableCellToken[][]; raw?: string };
 
+/** `item` as marked lexes it inside a loose list: tight `text` blocks become paragraphs. */
+function loosenListItem(item: Tokens.ListItem): Tokens.ListItem {
+	if (item.loose) return item;
+	return {
+		...item,
+		loose: true,
+		tokens: item.tokens.map(token =>
+			token.type === "text" ? ({ ...token, type: "paragraph" } as Tokens.Paragraph) : token,
+		),
+	};
+}
+
 function formatHyperlink(text: string, target: string): string {
 	if (!TERMINAL.hyperlinks || !target) {
 		return text;
@@ -2186,31 +2198,13 @@ export class Markdown implements Component {
 		const list = first as Tokens.List;
 		if (!listMayContinueAt(list.raw, 0, cached.list.raw)) return undefined;
 		const loose = cached.list.loose || list.loose;
-		let completed = cached.list.items.slice(0, cached.stableCount);
-		if (loose !== cached.list.loose) {
-			completed = completed.map(item => ({
-				...item,
-				loose,
-				tokens: item.tokens.map(token =>
-					token.type === "text" ? ({ ...token, type: "paragraph" } as Tokens.Paragraph) : token,
-				),
-			}));
-		}
-		const growing = list.items.map(item => {
-			if (item.loose === loose) return item;
-			return {
-				...item,
-				loose,
-				tokens: item.tokens.map(token =>
-					token.type === "text" ? ({ ...token, type: "paragraph" } as Tokens.Paragraph) : token,
-				),
-			};
-		});
+		const completed = cached.list.items.slice(0, cached.stableCount);
+		const items = [...completed, ...list.items];
 		const merged: Tokens.List = {
 			...cached.list,
 			raw: text.slice(cached.start, cached.tailStart + list.raw.length),
 			loose,
-			items: [...completed, ...growing],
+			items: loose ? items.map(loosenListItem) : items,
 		};
 		return [...cached.before, merged, ...tail.slice(1)];
 	}
