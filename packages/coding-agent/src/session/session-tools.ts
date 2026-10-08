@@ -458,7 +458,9 @@ export class SessionTools {
 		const restoredReply = this.#latestReply();
 		const restoredPromptDigest = restoredReply && this.#recordedPromptDigest();
 		this.#restoredTranscript =
-			restoredReply && restoredPromptDigest ? { reply: restoredReply, promptDigest: restoredPromptDigest } : undefined;
+			restoredReply && restoredPromptDigest
+				? { reply: restoredReply, promptDigest: restoredPromptDigest }
+				: undefined;
 		this.#skills = options.skills ?? [];
 		this.#skillWarnings = options.skillWarnings ?? [];
 		this.#skillsSettings = options.skillsSettings;
