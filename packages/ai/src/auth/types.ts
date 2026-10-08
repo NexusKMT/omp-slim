@@ -1004,7 +1004,7 @@ export interface KeysApi {
 	resolver(provider: string, options?: { sessionId?: string; baseUrl?: string; modelId?: string }): ApiKeyResolver;
 }
 
-/** Controls whether a row-id refresh may reuse a token minted by this refresher. */
+/** Controls whether a row-id refresh may reuse a recently minted token. */
 export interface OAuthRefreshByIdOptions {
 	/**
 	 * Return the stored credential when it still holds a fresh access token this
@@ -1012,7 +1012,11 @@ export interface OAuthRefreshByIdOptions {
 	 * refresh tokens repeatedly when a provider rejects every valid bearer.
 	 */
 	reuseRecentMint?: boolean;
-	/** Provider-401 recovery intent, forwarded to a delegated (broker) refresh. */
+	/**
+	 * Provider-401 recovery intent. Forwarded to a delegated refresh (an auth
+	 * broker), which may then return a token it minted in the last five minutes.
+	 * Local reuse still requires {@link reuseRecentMint}.
+	 */
 	reason?: OAuthRefreshReason;
 }
 
@@ -1096,8 +1100,9 @@ export interface OAuthApi {
 	 * Refresh the OAuth credential with the given id through a per-credential
 	 * single-flight. Concurrent callers for the same row await the same upstream
 	 * refresh attempt, which is required for providers that rotate refresh tokens
-	 * on every successful refresh. Mints unconditionally unless
-	 * {@link OAuthRefreshByIdOptions.reuseRecentMint} is set.
+	 * on every successful refresh. Mints unless {@link OAuthRefreshByIdOptions.reuseRecentMint}
+	 * finds a recent local mint, or a delegated refresh given
+	 * {@link OAuthRefreshByIdOptions.reason} `"auth-recovery"` returns its recent mint.
 	 */
 	refresh(id: number, signal?: AbortSignal, options?: OAuthRefreshByIdOptions): Promise<AuthCredentialSnapshotEntry>;
 	/**
