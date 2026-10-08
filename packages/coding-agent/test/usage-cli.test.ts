@@ -5,6 +5,7 @@ import type { UsageReport } from "@oh-my-pi/pi-ai";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import {
 	buildRedactionMap,
+	collectHistoryIdentityStrings,
 	computeProviderWindowStats,
 	formatUsageBreakdown,
 	formatUsageHistory,
@@ -1053,12 +1054,24 @@ describe("formatUsageHistory", () => {
 			),
 		);
 		const accountLines = text.split("\n").filter(line => line.startsWith("  ") && !line.startsWith("    "));
-		expect(accountLines).toEqual([
+		expect(accountLines.toSorted()).toEqual([
 			"  dummy.primary@example.test",
 			"  dummy.primary@example.test",
-			"  dummy.shared@example.test · acct-team",
 			"  dummy.shared@example.test · acct-pro",
+			"  dummy.shared@example.test · acct-team",
 		]);
+	});
+
+	it("redacts the Codex account ids shown as same-email qualifiers", () => {
+		const shared = { provider: "openai-codex", email: "dummy.shared@example.test", limitId: "openai-codex:primary" };
+		const history = [
+			historyEntry(NOW - HOUR, 0.1, { ...shared, accountKey: "codex|team", accountId: "acct-team" }),
+			historyEntry(NOW - HOUR, 0.5, { ...shared, accountKey: "codex|pro", accountId: "acct-pro" }),
+		];
+		const redaction = buildRedactionMap(collectHistoryIdentityStrings(history));
+		const text = stripVTControlCharacters(formatUsageHistory(history, SINCE, NOW, redaction));
+		for (const secret of ["dummy.shared@example.test", "acct-team", "acct-pro"]) expect(text).not.toContain(secret);
+		for (const id of ["acct-team", "acct-pro"]) expect(text).toContain(redaction.get(id) ?? id);
 	});
 });
 

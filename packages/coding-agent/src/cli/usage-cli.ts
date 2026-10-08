@@ -767,8 +767,10 @@ interface HistorySeries {
 
 interface HistoryAccount {
 	label: string;
-	/** Identity stand-in so same-email accounts get the main view's qualifier. */
-	report: UsageReport;
+	provider: string;
+	email?: string;
+	accountId?: string;
+	recordedAt: number;
 	series: Map<string, HistorySeries>;
 }
 
@@ -785,13 +787,21 @@ function historySeriesTitle(entry: UsageHistoryEntry): string {
 function historyAccount(entry: UsageHistoryEntry): HistoryAccount {
 	return {
 		label: entry.email ?? entry.accountId ?? entry.accountKey,
-		report: {
-			provider: entry.provider,
-			fetchedAt: entry.recordedAt,
-			limits: [],
-			metadata: { email: entry.email, accountId: entry.accountId },
-		},
+		provider: entry.provider,
+		email: entry.email,
+		accountId: entry.accountId,
+		recordedAt: entry.recordedAt,
 		series: new Map(),
+	};
+}
+
+/** Identity stand-in so same-email accounts get the main view's qualifier. */
+function historyIdentityReport(account: HistoryAccount): UsageReport {
+	return {
+		provider: account.provider,
+		fetchedAt: account.recordedAt,
+		limits: [],
+		metadata: { email: account.email, accountId: account.accountId },
 	};
 }
 
@@ -826,7 +836,7 @@ function renderHistorySparkline(entries: UsageHistoryEntry[], sinceMs: number, n
 }
 
 /** Identity strings a history rendering could surface — input for {@link buildRedactionMap}. */
-function collectHistoryIdentityStrings(entries: UsageHistoryEntry[]): string[] {
+export function collectHistoryIdentityStrings(entries: UsageHistoryEntry[]): string[] {
 	const values: string[] = [];
 	for (const entry of entries) {
 		if (entry.email) values.push(entry.email);
@@ -880,12 +890,11 @@ export function formatUsageHistory(
 			`${chalk.bold.cyan(formatProviderName(provider))} ${chalk.dim(`— ${accounts.size} ${accounts.size === 1 ? "account" : "accounts"}`)}`,
 		);
 		const sortedAccounts = [...accounts.values()].sort((a, b) => a.label.localeCompare(b.label));
-		const peers = sortedAccounts.map(account => account.report);
-		for (const account of sortedAccounts) {
-			const identity =
-				provider === "openai-codex"
-					? formatQualifiedIdentity(account.report, peers, account.label, redaction)
-					: chalk.bold(redaction?.get(account.label) ?? account.label);
+		const reports = provider === "openai-codex" ? sortedAccounts.map(historyIdentityReport) : undefined;
+		for (const [index, account] of sortedAccounts.entries()) {
+			const identity = reports
+				? formatQualifiedIdentity(reports[index], reports, account.label, redaction)
+				: chalk.bold(redaction?.get(account.label) ?? account.label);
 			lines.push(`  ${identity}`);
 			const labelWidth = [...account.series.values()].reduce((max, series) => Math.max(max, series.title.length), 0);
 			const sortedSeries = [...account.series.values()].sort((a, b) => a.title.localeCompare(b.title));
