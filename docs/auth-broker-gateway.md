@@ -85,7 +85,7 @@ omp auth-broker status    [--json]
 | `GET`    | `/v1/usage/history`          | bearer | Persisted usage history; optional `sinceMs` and `provider` filters |
 | `POST`   | `/v1/usage/observed`         | bearer | Record usage observed by a broker client                           |
 | `GET`    | `/v1/usage/clients`          | bearer | Summarize client-observed usage since optional `sinceMs`           |
-| `POST`   | `/v1/usage/stale`            | bearer | Invalidate the broker's current usage cache                        |
+| `POST`   | `/v1/usage/stale`            | bearer | Invalidate the broker's usage cache; optional `provider` scope     |
 
 Requests use `Authorization: Bearer <token>`. The server compares against an in-memory token allow-list; the gateway’s implementation uses a timing-safe comparison.
 

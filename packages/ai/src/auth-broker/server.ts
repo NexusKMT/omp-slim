@@ -912,9 +912,10 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					return json(200, { generatedAt: Date.now(), clients: summary.clients });
 				}
 				if (req.method === "POST" && pathname === "/v1/usage/stale") {
+					const provider = url.searchParams.get("provider") || undefined;
 					try {
-						await opts.storage.usage.invalidate?.();
-						logger.info("auth-broker usage cache invalidated", { peer });
+						await opts.storage.usage.invalidate?.(provider);
+						logger.info("auth-broker usage cache invalidated", { peer, provider });
 						return json(200, { ok: true });
 					} catch (error) {
 						const message = error instanceof Error ? error.message : String(error);
