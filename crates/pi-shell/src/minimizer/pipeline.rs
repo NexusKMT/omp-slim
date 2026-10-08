@@ -80,6 +80,9 @@ pub struct PipelineDef {
 	/// always.
 	#[serde(default)]
 	pub except_on_exit:       Vec<i32>,
+	/// Apply only when this regex does not match the output.
+	#[serde(default)]
+	pub except_on_output:     Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,6 +159,7 @@ pub struct CompiledPipeline {
 	pub preserve_if_empty: bool,
 	pub only_on_exit:      Vec<i32>,
 	pub except_on_exit:    Vec<i32>,
+	pub except_on_output:  Option<Regex>,
 }
 
 /// Compile an ordered regex-substitution list; `label` names the TOML key
@@ -216,6 +220,11 @@ pub fn compile(name: String, def: PipelineDef) -> Result<CompiledPipeline, Strin
 				.map_err(|e| format!("invalid keep_lines_matching: {e}"))?,
 		)
 	};
+	let except_on_output = def
+		.except_on_output
+		.as_deref()
+		.map(|p| Regex::new(p).map_err(|e| format!("invalid except_on_output: {e}")))
+		.transpose()?;
 
 	Ok(CompiledPipeline {
 		name,
@@ -236,6 +245,7 @@ pub fn compile(name: String, def: PipelineDef) -> Result<CompiledPipeline, Strin
 		preserve_if_empty: def.preserve_if_empty,
 		only_on_exit: def.only_on_exit,
 		except_on_exit: def.except_on_exit,
+		except_on_output,
 	})
 }
 
@@ -265,6 +275,15 @@ impl CompiledPipeline {
 			return true;
 		}
 		false
+	}
+
+	/// Whether this pipeline is gated off for the supplied output.
+	#[must_use]
+	pub fn skipped_by_output(&self, output: &str) -> bool {
+		self
+			.except_on_output
+			.as_ref()
+			.is_some_and(|rx| rx.is_match(output))
 	}
 
 	/// Apply the full 10-stage pipeline to `input`.
@@ -464,10 +483,10 @@ pub fn run_tests(registry: &PipelineRegistry) -> Vec<TestOutcome> {
 			continue;
 		};
 		for test in tests {
-			if let Some(exit) = test.exit
-				&& pipeline.skipped_by_exit(exit)
+			if test.exit.is_some_and(|exit| pipeline.skipped_by_exit(exit))
+				|| pipeline.skipped_by_output(&test.input)
 			{
-				// Explicit exit gate — pipeline is disabled for this exit;
+				// Explicit exit or output gate — pipeline is disabled for this run;
 				// expected output should be the raw input unchanged.
 				let passed = test.input == test.expected;
 				out.push(TestOutcome {

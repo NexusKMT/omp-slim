@@ -2,13 +2,16 @@
 # match_command adapted for the local (program, subcommand) dispatch model.
 #
 # Gated on exit 0: `max_lines` keeps the head, and a failing run prints its
-# error last, after whatever output came before it.
+# error last, after whatever output came before it. Like jq, a run whose
+# failing input is not the last exits 0 with the error amid its output, so a
+# run that printed an error is never truncated either.
 
 [filters.jq]
 description = "Compact jq output — truncate large JSON results (exit 0 only)"
 match_command = "^jq$"
 strip_ansi = true
 only_on_exit = [0]
+except_on_output = "(?m)^(Error: |jq: error)"
 strip_lines_matching = [
   "^\\s*$",
 ]
