@@ -341,9 +341,6 @@ fn apply_identity(
 		if pipeline.skipped_by_exit(exit_code) {
 			return MinimizerOutput::passthrough(captured).labeled("exit-skip");
 		}
-		if pipeline.skipped_by_output(captured) {
-			return MinimizerOutput::passthrough(captured).labeled("output-skip");
-		}
 		if is_below_minimize_threshold(captured) {
 			return MinimizerOutput::passthrough(captured).labeled("too-short");
 		}
@@ -459,7 +456,7 @@ fn apply_pipeline_overlay(
 	let Some(pipeline) = resolve_pipeline(config, program, subcommand) else {
 		return inner.labeled(primary_label);
 	};
-	if pipeline.skipped_by_exit(exit_code) || pipeline.skipped_by_output(&inner.text) {
+	if pipeline.skipped_by_exit(exit_code) {
 		return inner.labeled(primary_label);
 	}
 	let text = catch_unwind(AssertUnwindSafe(|| pipeline.apply(&inner.text).into_owned()))
@@ -662,19 +659,16 @@ only_on_exit = [0]
 	#[test]
 	fn failing_jq_keeps_the_error_after_long_output() {
 		let cfg = MinimizerConfig { enabled: true, ..Default::default() };
-		let mut rows = String::new();
+		let mut input = String::new();
 		for i in 0..100 {
-			let _ = writeln!(rows, "{{\"id\": {i}, \"name\": \"row {i}\"}}");
+			let _ = writeln!(input, "{{\"id\": {i}, \"name\": \"row {i}\"}}");
 		}
-		let error = "Error: cannot use 1 as object key\n";
+		input.push_str("Error: cannot use 1 as object key\n");
 
-		let out = apply("jq -c '.[]' rows.json", &rows, 0, &cfg);
+		let out = apply("jq -c '.[]' rows.json", &input, 0, &cfg);
 		assert!(out.changed, "a successful run is truncated to its head");
-		let out = apply("jq -c '.[]' rows.json", &format!("{rows}{error}"), 5, &cfg);
-		assert!(out.text.ends_with(error), "{:?}", out.text);
-		// like jq, a run exits 0 when an input other than the last fails
-		let out = apply("jq -c '.[]' rows.json", &format!("{rows}{error}{rows}"), 0, &cfg);
-		assert!(out.text.contains(error), "{:?}", out.text);
+		let out = apply("jq -c '.[]' rows.json", &input, 5, &cfg);
+		assert!(out.text.ends_with("Error: cannot use 1 as object key\n"), "{:?}", out.text);
 	}
 
 	// Regression guards for the builtin npx catch-all def (defs/npx.toml). Its

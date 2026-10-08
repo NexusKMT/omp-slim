@@ -652,6 +652,7 @@ def tonumber: tonumber_;
 			}
 			if let Some(error) = failed.take() {
 				session.write_stderr(format!("{error}").as_bytes());
+				session.report_error();
 			}
 			let input = item.map_err(|e| read_failed().unwrap_or(Error::Parse(e)))?;
 			for output in filter.id.run((ctx.clone(), input)) {
@@ -1414,10 +1415,11 @@ fn resolve_cli_paths(cli: &mut Cli, host: &Host) {
 /// Per-invocation state that natives read: the shell's exported environment
 /// and stderr, its cancellation flag, and the position of the current input.
 struct Session {
-	env:    Val,
-	stderr: RefCell<OpenFile>,
-	cancel: Arc<AtomicBool>,
-	input:  read::Position,
+	env:            Val,
+	stderr:         RefCell<OpenFile>,
+	cancel:         Arc<AtomicBool>,
+	reported_error: Option<Arc<AtomicBool>>,
+	input:          read::Position,
 }
 
 impl Session {
@@ -1426,10 +1428,11 @@ impl Session {
 			.env()
 			.map(|(key, value)| (Val::from(key.to_owned()), Val::from(value.to_owned())));
 		Self {
-			env:    Val::obj(env.collect()),
-			stderr: RefCell::new(host.stderr_clone()),
-			cancel: host.cancel_flag(),
-			input:  read::Position::default(),
+			env:            Val::obj(env.collect()),
+			stderr:         RefCell::new(host.stderr_clone()),
+			cancel:         host.cancel_flag(),
+			reported_error: host.reported_error_flag(),
+			input:          read::Position::default(),
 		}
 	}
 
@@ -1439,6 +1442,14 @@ impl Session {
 
 	fn write_stderr(&self, bytes: &[u8]) {
 		let _ = self.stderr.borrow_mut().write_all(bytes);
+	}
+
+	/// Tells the shell an input's error was reported and the run went on, so
+	/// its exit status will not show it.
+	fn report_error(&self) {
+		if let Some(flag) = &self.reported_error {
+			flag.store(true, Ordering::Relaxed);
+		}
 	}
 }
 

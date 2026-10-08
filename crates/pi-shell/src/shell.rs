@@ -6,7 +6,10 @@ use std::{
 	collections::HashMap,
 	fs,
 	io::{self},
-	sync::Arc,
+	sync::{
+		Arc,
+		atomic::{AtomicBool, Ordering},
+	},
 	time::Duration,
 };
 
@@ -931,8 +934,10 @@ enum CommandCaptureMode {
 }
 
 struct CommandRunOutput {
-	result:   ExecutionResult,
-	buffered: Option<BufferedOutput>,
+	result:         ExecutionResult,
+	buffered:       Option<BufferedOutput>,
+	/// A command reported an error yet went on, so the exit status hides it.
+	reported_error: bool,
 }
 
 struct ChainCapture {
@@ -1122,7 +1127,10 @@ async fn run_shell_command_single(
 		// `too-large` result with empty `text`/`original_text` was emitted, which
 		// a consumer keying off `minimized` presence could mistake for a real
 		// rewrite that produced empty output.
-		if !buffered.exceeded {
+		// A command that reported an error yet exited 0 (jq after an input that
+		// fails) is left whole: a filter may cut the error, and its exit-code
+		// gate cannot see it.
+		if !buffered.exceeded && !command_run.reported_error {
 			let minimized = match minimizer_mode {
 				minimizer::engine::MinimizerMode::WholeCommand => minimizer::apply(
 					&options.command,
@@ -1253,7 +1261,11 @@ async fn run_shell_command_segmented_chain(
 				if next_input_bytes > max_capture_bytes {
 					aggregate = None;
 				} else {
-					let minimized = minimizer::apply(&segment.command, &buffered.text, exit, config);
+					let minimized = if command_run.reported_error {
+						minimizer::MinimizerOutput::passthrough(&buffered.text)
+					} else {
+						minimizer::apply(&segment.command, &buffered.text, exit, config)
+					};
 					capture.push(
 						&buffered.text,
 						buffered.input_bytes,
@@ -1332,6 +1344,8 @@ async fn run_shell_command_once(
 	params.process_group_policy = ProcessGroupPolicy::NewProcessGroup;
 	params.set_cancel_token(cancel_token.clone());
 	params.set_spawn_observer(spawn_registry.clone());
+	let reported_error = Arc::new(AtomicBool::new(false));
+	params.set_reported_error(Arc::clone(&reported_error));
 	let reader_cancel = CancellationToken::new();
 	let (activity_tx, activity_rx) = flume::bounded::<()>(1);
 	let reader_callback = on_chunk;
@@ -1447,7 +1461,7 @@ async fn run_shell_command_once(
 		Some(OutputRead::Buffered(output)) => Some(output),
 		Some(OutputRead::Streaming) | None => None,
 	};
-	Ok(CommandRunOutput { result, buffered })
+	Ok(CommandRunOutput { result, buffered, reported_error: reported_error.load(Ordering::Relaxed) })
 }
 
 async fn run_shell_command_streams(
@@ -6384,6 +6398,40 @@ replace = [{ pattern = "hello", replacement = "HI" }]
 		assert_eq!(minimized.filter, "chain");
 		assert_eq!(minimized.original_text, expected);
 		assert_eq!(minimized.text, "HI\n".repeat(200));
+	}
+
+	/// Like jq, the built-in jq reports an input that fails and exits 0 when it
+	/// is not the last. Such a run is never shortened, even when the error does
+	/// not start a line; long successful output that only looks like an error
+	/// still is.
+	#[cfg(unix)]
+	#[tokio::test(flavor = "multi_thread")]
+	async fn jq_run_that_reported_an_error_is_not_minimized() {
+		let root = unique_temp_dir("jq-error");
+		std::fs::write(root.join("in.jsonl"), "1\n2\n3\n").expect("write input");
+		let enabled = || minimizer::MinimizerOptions { enabled: Some(true), ..Default::default() };
+		let rows = r#"range(0; 100) | "row with many fields and a longer string value""#;
+		// `stderr` writes no newline, so the error lands mid-line
+		let failing = format!(
+			r#"jq -r 'if . == 2 then "prefix" | stderr | error("boom") else {rows} end' in.jsonl"#
+		);
+		for command in [failing.clone(), format!("cd . && {failing}")] {
+			let (result, output) =
+				run_command_capture(&command, Some(&root), Some(enabled()), CancelToken::default())
+					.await;
+			assert_eq!(result.exit_code, Some(0), "{command}");
+			assert!(output.contains("prefixError: \"boom\""), "{command}: {output:?}");
+			assert!(result.minimized.is_none(), "{command}: {:?}", result.minimized);
+		}
+		for value in ["Error: expected user data", "jq: error is data"] {
+			let command = format!(r#"jq -nr 'range(0; 200) | "{value}"'"#);
+			let (result, _) =
+				run_command_capture(&command, Some(&root), Some(enabled()), CancelToken::default())
+					.await;
+			assert_eq!(result.exit_code, Some(0), "{command}");
+			assert!(result.minimized.is_some(), "{command} is shortened");
+		}
+		let _ = std::fs::remove_dir_all(&root);
 	}
 
 	#[cfg(unix)]
