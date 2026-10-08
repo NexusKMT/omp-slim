@@ -180,14 +180,18 @@ export class OAuthAccounts implements OAuthApi {
 	): Promise<OAuthAccessResolution> {
 		try {
 			// tryOAuth refreshes only expired tokens; it resyncs this row from the store after a forced re-mint.
+			let index = selection.index;
 			if (options?.forceRefresh) {
 				await this.refresh(selection.credentialId, options.signal, {
 					reuseRecentMint: options.refreshReason === "auth-recovery",
 				});
+				// The refresh re-lists rows, so a concurrently removed row can shift this one's position.
+				index = this.#deps.pool.entries(provider).findIndex(entry => entry.id === selection.credentialId);
+				if (index === -1) throw new Error(`OAuth credential ${selection.credentialId} was removed during refresh`);
 			}
 			const resolved = await this.#deps.selector.tryOAuth(
 				provider,
-				{ credential: selection.credential, index: selection.index },
+				{ credential: selection.credential, index },
 				providerKey,
 				undefined,
 				options,

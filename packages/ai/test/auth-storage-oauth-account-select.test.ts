@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { withOAuthAccess } from "@oh-my-pi/pi-ai/auth-retry";
-import { type AuthCredentialStore, AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
+import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai/auth-storage";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
 
 const PROVIDER = "unit-oauth-select";
@@ -21,7 +21,7 @@ function oauthCredential(suffix: string) {
 
 describe("AuthStorage OAuth account selection", () => {
 	let tempDir = "";
-	let store: AuthCredentialStore | null = null;
+	let store: SqliteAuthCredentialStore | null = null;
 	let authStorage: AuthStorage | null = null;
 
 	beforeEach(async () => {
@@ -195,6 +195,39 @@ describe("AuthStorage OAuth account selection", () => {
 		const again = await storage.oauth.accessById(PROVIDER, target.credentialId);
 		expect(again).toMatchObject({ ok: true, accessToken: "access-b-reminted" });
 		expect(refreshedIds).toEqual([target.credentialId]);
+	});
+
+	test("oauth.accessById force refresh keeps the requested account when a lower row is removed meanwhile", async () => {
+		if (!store) throw new Error("test setup failed");
+		const storage = new AuthStorage(store, {
+			refreshOAuthCredential: async (_provider, _credentialId, credential) => ({
+				...credential,
+				access: `${credential.access}-reminted`,
+				expires: Date.now() + 60 * 60_000,
+			}),
+		});
+		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, credentials) => {
+			const credential = credentials[provider];
+			if (!credential) return null;
+			return { newCredentials: credential, apiKey: credential.access };
+		});
+		await storage.credentials.set(PROVIDER, [oauthCredential("a"), oauthCredential("b"), oauthCredential("c")]);
+		const [lower, target] = storage.oauth.accounts(PROVIDER);
+		if (!lower || !target) throw new Error("expected three OAuth accounts");
+
+		// Another process holds the target's refresh lease and disables the lower row before releasing it,
+		// so the forced refresh re-lists the provider's rows without that row.
+		expect(store.tryAcquireCredentialRefreshLease(target.credentialId, "peer", Date.now() + 60_000)).toBe(true);
+		const pending = storage.oauth.accessById(PROVIDER, target.credentialId, { forceRefresh: true });
+		await store.deleteAuthCredential(lower.credentialId, "oauth refresh failed: invalid_grant");
+		store.releaseCredentialRefreshLease(target.credentialId, "peer");
+
+		expect(await pending).toMatchObject({
+			ok: true,
+			credentialId: target.credentialId,
+			accountId: "acc-b",
+			accessToken: "access-b-reminted",
+		});
 	});
 
 	test("oauth.accessById auth-recovery force reuses this process's recent mint", async () => {
