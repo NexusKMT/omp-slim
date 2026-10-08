@@ -15,7 +15,7 @@
 - Fixed Anthropic sessions missing the prompt cache a second time after the API dropped thinking blocks from a changed conversation ([#14748](https://github.com/can1357/oh-my-pi/pull/14748) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed Cursor logins never renewing: every refresh was rejected with "Invalid User API Key", so logins lapsed about 60 days after sign-in; a session Cursor has ended is now disabled with a re-login hint ([#14753](https://github.com/can1357/oh-my-pi/pull/14753) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed the auth broker logging caller-supplied `X-Forwarded-For` / `X-Real-IP` values and unknown request paths; peers come from the socket unless `trustProxyHeaders` is set ([#14762](https://github.com/can1357/oh-my-pi/pull/14762) by [@will-bogusz](https://github.com/will-bogusz))
-- Fixed `omp token <provider> --account N --force-refresh` printing the stored token unchanged while it was still valid; it now re-mints that one account (through the auth broker when configured), and security scans pinned to one account re-mint it after a 401 ([#14752](https://github.com/can1357/oh-my-pi/pull/14752) by [@will-bogusz](https://github.com/will-bogusz))
+- Fixed `omp token <provider> --account N --force-refresh` printing the stored token unchanged while it was still valid; it now re-mints that one account (through the auth broker when configured), and security scans pinned to one account refresh it after a 401, reusing a token minted in the previous five minutes ([#14752](https://github.com/can1357/oh-my-pi/pull/14752) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.8.3] - 2026-10-07
 
