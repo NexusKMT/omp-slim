@@ -670,6 +670,30 @@ describe("auth-broker wire surface", () => {
 		}
 	});
 
+	test("logs the forwarded peer when trustProxyHeaders is set", async () => {
+		const proxied = startAuthBroker({
+			storage: storage!,
+			bind: "127.0.0.1:0",
+			bearerTokens: [token],
+			disableRefresher: true,
+			trustProxyHeaders: true,
+		});
+		const peers: unknown[] = [];
+		const dispose = logger.registerLogSink(event => {
+			if (event.message === "auth-broker usage history served") peers.push(event.context?.peer);
+		});
+		try {
+			const res = await fetch(`${proxied.url}/v1/usage/history`, {
+				headers: { Authorization: `Bearer ${token}`, "x-forwarded-for": "203.0.113.7, 10.0.0.1" },
+			});
+			expect(res.status).toBe(200);
+			expect(peers).toEqual(["203.0.113.7"]);
+		} finally {
+			dispose();
+			await proxied.close();
+		}
+	});
+
 	test("GET /v1/snapshot/stream requires bearer", async () => {
 		const res = await fetch(`${handle!.url}/v1/snapshot/stream`);
 		expect(res.status).toBe(401);

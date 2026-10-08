@@ -13,8 +13,8 @@
 import { type Type, type } from "@oh-my-pi/omptype";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AuthCredentialSnapshotEntry, AuthStorage, StoredCredentialBlock } from "../auth-storage";
-import { resolvePeer } from "../auth-gateway/http";
 import { parseBind } from "../utils/parse-bind";
+import { resolvePeer } from "../utils/resolve-peer";
 import { AuthBrokerRefresher, type AuthBrokerRefresherSchedule } from "./refresher";
 import type {
 	ClientUsageReportRequest,
@@ -1071,7 +1071,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 			} catch (error) {
 				logger.error("auth-broker handler crashed", {
 					method: req.method,
-					path: pathname,
+					path: loggablePath(pathname),
 					error: String(error),
 				});
 				return json(500, { error: "internal error" });
