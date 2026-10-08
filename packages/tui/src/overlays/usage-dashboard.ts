@@ -84,7 +84,7 @@ export interface ProviderCard {
 	/** Number of represented accounts, including unavailable usage lookups. */
 	accounts: number;
 	unavailableAccounts: string[];
-	/** Window rows sorted most-pressing first. */
+	/** Window rows in provider-declared order (e.g. 5h → weekly → monthly). */
 	windows: CardWindowRow[];
 	/** True when every account reports no limits (e.g. enterprise plans). */
 	unlimited: boolean;
@@ -146,8 +146,10 @@ function compactWindowTag(window: NonNullable<UsageLimit["window"]>): string {
  * Collapse usage reports into one compact card per provider: limits grouped by
  * quota bucket (label + window), each bucket showing the mean used fraction
  * across accounts (matching the classic report's aggregate "% free") with the
- * most-used account's reset countdown. Cards sort most-pressing first so
- * what's burning is on top-left; fully idle providers collapse into a tick.
+ * most-used account's reset countdown. Rows keep the provider's declared window
+ * order so 5h → week → month reads the same every time; cards sort by their
+ * fullest window so what's burning is on top-left; fully idle providers
+ * collapse into a tick.
  */
 export function buildProviderCards(
 	reports: UsageReport[],
@@ -200,7 +202,6 @@ export function buildProviderCards(
 				usedText: fraction === undefined ? formatAbsoluteOnlyAmount(bucket.limits) : undefined,
 			};
 		});
-		windows.sort((a, b) => (b.fraction ?? -1) - (a.fraction ?? -1));
 		// The window tag earns its columns only when sibling rows would otherwise
 		// be indistinguishable (e.g. Antigravity's daily vs weekly "Usage (Google)").
 		for (const window of windows) {
@@ -264,9 +265,12 @@ export function buildProviderCards(
 		});
 	}
 
+	const worstFraction = new Map(
+		cards.map(card => [card, card.windows.reduce((max, window) => Math.max(max, window.fraction ?? -1), -1)]),
+	);
 	cards.sort((a, b) => {
-		const aWorst = a.windows[0]?.fraction ?? -1;
-		const bWorst = b.windows[0]?.fraction ?? -1;
+		const aWorst = worstFraction.get(a)!;
+		const bWorst = worstFraction.get(b)!;
 		if (aWorst !== bWorst) return bWorst - aWorst;
 		return a.name.localeCompare(b.name);
 	});

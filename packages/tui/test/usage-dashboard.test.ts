@@ -160,6 +160,22 @@ describe("buildProviderCards", () => {
 		expect(unlimited?.unlimited).toBe(true);
 	});
 
+	it("keeps provider window order and ranks cards by their fullest window", () => {
+		// Rows used to sort by used fraction, so 5h/week/month reshuffled as
+		// usage moved and a glance read the wrong window.
+		const reports = [
+			report("opencode-go", "g@x.test", [
+				limit("opencode-go", "g", "5h", "5 Hour limit", 0.01, "ok"),
+				limit("opencode-go", "g", "7d", "Weekly limit", 0.42, "ok"),
+				limit("opencode-go", "g", "monthly", "Monthly limit", 0.21, "ok"),
+			]),
+			report("openai-codex", "o@x.test", [limit("openai-codex", "o", "7d", "7 days", 0.3, "ok")]),
+		];
+		const cards = buildProviderCards(reports, now);
+		expect(cards.map(card => card.provider)).toEqual(["opencode-go", "openai-codex"]);
+		expect(cards[0].windows.map(window => window.label)).toEqual(["5 Hour limit", "Weekly limit", "Monthly limit"]);
+	});
+
 	it("shows a prepaid balance on the card instead of falling back to no data", () => {
 		// Balance-only limits carry no fraction, so the card used to render the
 		// literal "no data" for providers that sell prepaid credits.
