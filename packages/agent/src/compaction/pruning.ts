@@ -174,15 +174,20 @@ const DEFAULT_IDLE_FLUSH_MS = 30 * 60_000;
  */
 const CACHE_LOOKBACK_POSITIONS = 20;
 
-/** Positions the next request's own input may add: its prompt, a prepended date/cwd reminder, and two attached or injected blocks. */
-const NEXT_REQUEST_POSITIONS = 4;
+/**
+ * Positions kept free for the next request's own input (prompt, date/cwd
+ * reminder, attachments) and for projections the count below does not model
+ * (custom-message image notes, orphan-result notes, replayed compaction file
+ * metadata, tool-change controls), leaving stored history at most 13.
+ */
+const RESERVED_LOOKBACK_POSITIONS = 6;
 
 type LookbackBlock = "tool_use" | "tool_result" | undefined;
 
 /**
  * Index of the oldest tool result that can be rewritten while the next request
- * still reaches a cache entry, as a bound that may err only toward keeping a
- * result: a skipped prune costs its tokens, a missed lookup the whole cache.
+ * still reaches a cache entry. A conservative estimate, not an exact count: a
+ * skipped prune costs its tokens, a missed lookup the whole cache.
  *
  * Each request writes its tail cache entry at its last block, so rewriting a
  * result invalidates every entry from its issuing assistant turn on, and once a
@@ -196,7 +201,7 @@ type LookbackBlock = "tool_use" | "tool_result" | undefined;
  * request converter emits for each entry.
  */
 function cacheLookbackFloor(entries: readonly SessionEntry[], start: number): number {
-	let positions = NEXT_REQUEST_POSITIONS;
+	let positions = RESERVED_LOOKBACK_POSITIONS;
 	let later: LookbackBlock;
 	let runHoistsImages = false;
 	let newerIsAssistant = false;

@@ -853,7 +853,7 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 	});
 
 	test("per-turn supersede pass still prunes inside the lookback window", () => {
-		const { stale, entries } = staleReadBehind(5);
+		const { stale, entries } = staleReadBehind(4);
 
 		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
 
@@ -998,16 +998,16 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 		}
 	});
 
-	test("15 stored positions prune and 16 do not, leaving room for the next input", () => {
+	test("13 stored positions prune and 14 do not, leaving room for input and unmodelled projections", () => {
 		const text = { type: "text" as const, text: "Reading it." };
 		for (const pass of guardedPasses) {
-			const inReach = staleReadAround([text], smallTurns(5, T0 + 1_000));
-			expect(wirePositions(inReach.entries)).toBe(15);
+			const inReach = staleReadAround([text], smallTurns(4, T0 + 1_000));
+			expect(wirePositions(inReach.entries)).toBe(13);
 			expect(pass(inReach.entries).prunedCount).toBe(1);
 			expect(resultText(inReach.stale)).toBe(SUPERSEDED_NOTICE);
 
-			const outOfReach = staleReadAround([text], [...smallTurns(5, T0 + 1_000), userEntry()]);
-			expect(wirePositions(outOfReach.entries)).toBe(16);
+			const outOfReach = staleReadAround([text], [...smallTurns(4, T0 + 1_000), userEntry()]);
+			expect(wirePositions(outOfReach.entries)).toBe(14);
 			expect(pass(outOfReach.entries).prunedCount).toBe(0);
 			expect(resultText(outOfReach.stale)).toBe(FILE_CONTENT);
 		}
@@ -1020,8 +1020,8 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 			const [failedCall, failed] = readPair("src/shot.png", "render failed", T0 + 1_000);
 			resultMessage(failed).isError = true;
 			resultMessage(failed).content.push({ type: "image", data: PNG_1X1, mimeType: "image/png" });
-			const { stale, entries } = staleReadAround([], [...smallTurns(4, T0 + 1_000), failedCall, failed]);
-			expect(wirePositions(entries)).toBe(16);
+			const { stale, entries } = staleReadAround([], [...smallTurns(3, T0 + 1_000), failedCall, failed]);
+			expect(wirePositions(entries)).toBe(14);
 
 			expect(pass(entries).prunedCount).toBe(0);
 			expect(resultText(stale)).toBe(FILE_CONTENT);
@@ -1030,8 +1030,8 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 
 	test("counts the user turn the converter inserts between consecutive assistant turns", () => {
 		for (const pass of guardedPasses) {
-			const { stale, entries } = staleReadAround([], [...smallTurns(5, T0 + 1_000), textEntry("Done.", T0 + 1_000)]);
-			expect(wirePositions(entries)).toBe(16);
+			const { stale, entries } = staleReadAround([], [...smallTurns(4, T0 + 1_000), textEntry("Done.", T0 + 1_000)]);
+			expect(wirePositions(entries)).toBe(14);
 
 			expect(pass(entries).prunedCount).toBe(0);
 			expect(resultText(stale)).toBe(FILE_CONTENT);
@@ -1044,8 +1044,8 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 			{ type: "text", text: "  " },
 		];
 		for (const pass of guardedPasses) {
-			const { stale, entries } = staleReadAround(dropped, smallTurns(5, T0 + 1_000));
-			expect(wirePositions(entries)).toBe(14);
+			const { stale, entries } = staleReadAround(dropped, smallTurns(4, T0 + 1_000));
+			expect(wirePositions(entries)).toBe(12);
 
 			expect(pass(entries).prunedCount).toBe(1);
 			expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
