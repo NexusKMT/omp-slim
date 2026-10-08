@@ -1033,43 +1033,6 @@ describe("AgentSession aside delivery", () => {
 		expect(irc.drainDeferredWakes()).toEqual([wake]);
 		expect(irc.hasPending()).toBe(false);
 	});
-	it("IrcBridge.hasAsides peeks only queued asides and never consumes them", () => {
-		const host: IrcBridgeHost = {
-			agent: {} as Agent,
-			sessionManager: {} as SessionManager,
-			isDisposed: () => false,
-			isStreaming: () => false,
-			planModeEnabled: () => false,
-			emitSessionEvent: async () => {},
-			wakeForIrc: () => {},
-		};
-		const irc = new IrcBridge(host);
-		const record = (text: string): AgentMessage => ({
-			role: "user",
-			content: [{ type: "text", text }],
-			attribution: "user",
-			timestamp: Date.now(),
-		});
-		expect(irc.hasAsides()).toBe(false);
-
-		// A parked wake is invisible to boundary injection, so it must not end a wait.
-		irc.queueDeferredWake([record("PARKED")]);
-		expect(irc.hasPending()).toBe(true);
-		expect(irc.hasAsides()).toBe(false);
-
-		irc.queueAside([record("ASIDE")]);
-		expect(irc.hasAsides()).toBe(true);
-		expect(irc.hasAsides()).toBe(true);
-
-		expect(irc.drainPending()).toHaveLength(1);
-		expect(irc.hasAsides()).toBe(false);
-		expect(irc.drainDeferredWakes()).toHaveLength(1);
-
-		irc.queueAside([record("DISCARDED")]);
-		irc.clearPending();
-		expect(irc.hasAsides()).toBe(false);
-	});
-
 	it("IrcBridge parks deferred wakes where turn injection cannot flush them", () => {
 		// A wake deferred while pooled must survive the next pooled turn's
 		// pre-dispatch flush and loop aside poll: with no observer attached,

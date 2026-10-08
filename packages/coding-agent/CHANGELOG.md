@@ -14,6 +14,7 @@
 - Fixed a subagent advisor set to `@advisor` in `/agents` running on the built-in `slow` model (e.g. `gpt-5.6-sol`) instead of your configured advisor role ([#14972](https://github.com/can1357/oh-my-pi/pull/14972) by [@H4vC](https://github.com/H4vC))
 - Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
 - Fixed the `lsp` tool and `generate_image` hanging on a FIFO or terminal path, or exhausting memory on `/dev/zero`; such files are now refused before they're read ([#14730](https://github.com/can1357/oh-my-pi/pull/14730) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
+- Fixed an `aside` message (such as one sent by an extension) waiting behind a running `wait`: it now ends the wait and reaches the model at the next step, and the job result still arrives later ([#14731](https://github.com/can1357/oh-my-pi/pull/14731) by [@mgpai22](https://github.com/mgpai22))
 ## [18.8.5] - 2026-10-08
 
 ### Added
@@ -68,7 +69,6 @@
 - Fixed `omp usage --provider <id>` blaming a missing usage endpoint when no credentials are stored for that provider, and `omp usage invalidate --provider <id>` reporting success for it; both now list the providers that have credentials ([#14763](https://github.com/can1357/oh-my-pi/pull/14763) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed `omp usage` labelling an exhausted account "inside reserve" on its account-policy line; it now says "exhausted" ([#14764](https://github.com/can1357/oh-my-pi/pull/14764) by [@will-bogusz](https://github.com/will-bogusz))
 - Fixed `/new` keeping plan mode (and its plan-role model) or goal mode active in the new session ([#14653](https://github.com/can1357/oh-my-pi/issues/14653))
-- Fixed an `aside` message (such as one sent by an extension) waiting behind a running `wait`: it now ends the wait and reaches the model at the next step, and the job result still arrives later ([#14731](https://github.com/can1357/oh-my-pi/pull/14731) by [@mgpai22](https://github.com/mgpai22))
 - Fixed parallel first bash calls each spawning an rc-sourcing shell ([#14680](https://github.com/can1357/oh-my-pi/pull/14680) by [@H4vC](https://github.com/H4vC))
 - Fixed the todo list's auto-clear never firing while subagents were streaming progress ([#14692](https://github.com/can1357/oh-my-pi/pull/14692) by [@H4vC](https://github.com/H4vC))
 - Fixed memory growth while ACP client-terminal commands run ([#14680](https://github.com/can1357/oh-my-pi/pull/14680) by [@H4vC](https://github.com/H4vC))
