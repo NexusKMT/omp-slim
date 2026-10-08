@@ -43,6 +43,7 @@ export class DownloadManager {
 	readonly #page: Page;
 	readonly #defaultDirectory: string;
 	#directory?: string;
+	#arming?: Promise<void>;
 	#session?: CDPSession;
 	#frameId?: string;
 	readonly #pending = new Map<string, PendingDownload>();
@@ -73,9 +74,19 @@ export class DownloadManager {
 		this.#directory = resolved;
 	}
 
+	/** Enabling started by a `wait()` that has not yet applied; settles once downloads are tracked. */
+	get arming(): Promise<void> | undefined {
+		return this.#arming;
+	}
+
 	/** Wait for the next unclaimed completed download. */
 	async wait(signal?: AbortSignal): Promise<BrowserDownload> {
-		if (!this.#session) await this.enable();
+		if (!this.#directory) {
+			this.#arming ??= this.enable().finally(() => {
+				this.#arming = undefined;
+			});
+			await this.#arming;
+		}
 		const ready = this.#unclaimed.shift();
 		if (ready) return { ...ready };
 		if (signal?.aborted) throw signal.reason;
