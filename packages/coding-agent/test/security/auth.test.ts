@@ -4,9 +4,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AuthBrokerClient, RemoteAuthCredentialStore, startAuthBroker } from "@oh-my-pi/pi-ai/auth-broker";
 import type { ApiKeyResolver } from "@oh-my-pi/pi-ai/auth-retry";
+import * as oauthRegistry from "@oh-my-pi/pi-ai/registry/oauth";
 import { registerOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/registry/oauth";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { createBrokerAuthStorage } from "../../src/cli/auth-broker-cli";
 import { createExactSecurityOAuthResolver, createSecurityAuthResolver, selectSecurityAuth } from "../../src/security";
 import { AuthStorage, SqliteAuthCredentialStore } from "../../src/session/auth-storage";
 
@@ -176,10 +178,9 @@ describe("exact security OAuth resolver", () => {
 		expect(caught.message).not.toContain("undefined");
 	});
 
-	test("a provider 401 reuses the broker's recent mint for the pinned row", async () => {
+	test("a provider 401 reuses the auth broker's recent mint for the pinned row", async () => {
 		const provider = "unit-security-broker-recovery";
 		const sourceId = "security-auth-test";
-		let mints = 0;
 		registerOAuthProvider({
 			id: provider,
 			name: "Security Broker Recovery Unit",
@@ -187,11 +188,15 @@ describe("exact security OAuth resolver", () => {
 			async login() {
 				return { access: "login-access", refresh: "login-refresh", expires: Date.now() + 3_600_000 };
 			},
-			async refreshToken(credentials) {
-				mints += 1;
-				return { ...credentials, access: `access-${mints}`, expires: Date.now() + 3_600_000 };
-			},
 		});
+		// The broker's refresh handler exchanges tokens through the provider registry.
+		let mints = 0;
+		const exchange = vi
+			.spyOn(oauthRegistry, "refreshOAuthToken")
+			.mockImplementation(async (_provider, credential) => {
+				mints += 1;
+				return { ...credential, access: `access-${mints}`, expires: Date.now() + 3_600_000 };
+			});
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "security-broker-recovery-"));
 		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
 		await store.saveOAuth(provider, {
@@ -200,7 +205,7 @@ describe("exact security OAuth resolver", () => {
 			expires: Date.now() + 3_600_000,
 			accountId: "workspace-a",
 		});
-		const brokerStorage = new AuthStorage(store);
+		const brokerStorage = createBrokerAuthStorage(store);
 		await brokerStorage.credentials.reload();
 		const handle = startAuthBroker({
 			storage: brokerStorage,
@@ -215,7 +220,7 @@ describe("exact security OAuth resolver", () => {
 			const initial = await client.fetchSnapshot();
 			if (initial.status !== 200) throw new Error("expected broker snapshot");
 			const credentialId = initial.snapshot.credentials[0]!.id;
-			// Another client's 401 recovery just minted this row on the broker.
+			// A generic refresh just minted this row on the broker.
 			await client.refreshCredential(credentialId);
 			const minted = await client.fetchSnapshot();
 			if (minted.status !== 200) throw new Error("expected minted snapshot");
@@ -231,12 +236,17 @@ describe("exact security OAuth resolver", () => {
 			const unauthorized = Object.assign(new Error("401 invalid_api_key"), { status: 401 });
 			expect(await exact({ lastChance: false, error: unauthorized })).toBe("access-1");
 			expect(mints).toBe(1);
+			// Any other forced refresh still mints.
+			const serverError = Object.assign(new Error("500 server_error"), { status: 500 });
+			expect(await exact({ lastChance: false, error: serverError })).toBe("access-2");
+			expect(mints).toBe(2);
 		} finally {
 			clientStorage?.close();
 			remote?.close();
 			await handle.close();
 			brokerStorage.close();
 			store.close();
+			exchange.mockRestore();
 			unregisterOAuthProviders(sourceId);
 			await removeWithRetries(tempDir);
 		}

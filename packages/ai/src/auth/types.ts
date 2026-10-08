@@ -374,6 +374,12 @@ export type AuthStorageOptions = {
 		reason?: OAuthRefreshReason,
 	) => Promise<OAuthCredentials>;
 	/**
+	 * Set when {@link refreshOAuthCredential} exchanges the refresh token with the
+	 * provider itself instead of delegating (e.g. to a broker), so its tokens count
+	 * as this process's mints for auth-recovery reuse.
+	 */
+	refreshOAuthCredentialMints?: boolean;
+	/**
 	 * Human-readable description of the credential store backing this
 	 * AuthStorage instance. Surfaced through {@link AuthStorage.keys.describe}
 	 * so the TUI can show where a token came from (broker URL or local SQLite path).
