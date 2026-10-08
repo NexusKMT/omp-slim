@@ -1,6 +1,14 @@
 import { type Api, type AuthStorage, type Model, withAuth } from "@oh-my-pi/pi-ai";
 import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/providers/xai-base-url";
+import { buildModelProviderPriorityRank } from "@oh-my-pi/pi-catalog/identity";
+import type { ModelRegistry } from "../../../config/model-registry";
+import { pickDefaultAvailableModel, resolveRoleChain } from "../../../config/model-resolver";
+import { roleCandidatePool } from "../../../config/model-roles";
+import { cfgModelProviderOrder } from "../../../config/model-settings";
+import type { Settings } from "../../../config/settings";
 import type { XAIHttpTransport } from "../../../lib/xai-http";
+import { resolveConfiguredModelTarget } from "../../../session/role-models";
+import { isXHost, xHandle } from "../../x";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
 import { formatQuery, parseSearchQuery, type QuerySyntax, type StructuredQuery } from "../query";
@@ -9,9 +17,11 @@ import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
 import { classifyProviderHttpError, withHardTimeout } from "./utils";
 
-// xAI web search is latency-sensitive, so keep reasoning effort low regardless
-// of the selected model's configured timeout.
-const XAI_WEB_SEARCH_REASONING_EFFORT = "low";
+/**
+ * Reasoning effort for xAI search and X reads: both are latency-sensitive, so
+ * stay low regardless of the selected model's configured thinking level.
+ */
+export const XAI_SEARCH_REASONING_EFFORT = "low";
 const DEFAULT_NUM_RESULTS = 10;
 const MAX_NUM_RESULTS = 30;
 /** Messages at least this long are treated as substantive content, not relay narration. */
@@ -58,9 +68,12 @@ interface XAIResponsesUsage {
 	inputTokens?: number;
 	outputTokens?: number;
 	totalTokens?: number;
+	/** Per-tool counts; X search bills per post and profile fetched. */
+	server_side_tool_usage_details?: { x_posts_fetched?: number; x_users_fetched?: number } | null;
 }
 
-interface XAIResponsesResponse {
+/** Body of a non-streaming xAI Responses API reply, as far as omp reads it. */
+export interface XAIResponsesResponse {
 	id?: string;
 	model?: string;
 	output_text?: string | null;
@@ -102,25 +115,79 @@ function domainFilterList(sites: readonly string[]): string[] {
 	return [...hosts];
 }
 
-/** Hosts whose posts only `x_search` reaches; web_search barely indexes them. */
-const X_HOSTS = ["x.com", "twitter.com"];
+/** Most handles `x_search` accepts per allow or exclude list. */
+const MAX_X_HANDLES = 20;
+/** X's author operator: `from:jack`, `from:@jack`. */
+const FROM_PATTERN = /^from:@?([A-Za-z0-9_]{1,15})$/i;
 
+/** Whether a `site:` value (`x.com/jack`) is on an X host; web_search barely indexes X posts. */
 function isXSite(site: string): boolean {
-	const host = site.split("/", 1)[0];
-	return X_HOSTS.some(x => host === x || host.endsWith(`.${x}`));
+	return isXHost(site.split("/", 1)[0]);
+}
+
+/** Account handle an X `site:` value scopes to (`x.com/jack/status/1` → `jack`). */
+function xSiteHandle(site: string): string | undefined {
+	const [host, segment] = site.split("/");
+	return isXHost(host) ? xHandle(segment) : undefined;
+}
+
+/**
+ * Author filters a query states: `from:` terms and account-scoped
+ * `site:x.com/<handle>` values allow handles, their negations exclude them.
+ * `x_search` rejects both lists together, so an allow list drops the excludes.
+ */
+function xHandleFilter(parsed: StructuredQuery): { allowed: string[]; excluded: string[] } {
+	const allowed = new Set<string>();
+	const excluded = new Set<string>();
+	for (const term of parsed.terms) {
+		const handle = term.phrase ? undefined : FROM_PATTERN.exec(term.text)?.[1];
+		if (handle) (term.negated ? excluded : allowed).add(handle);
+	}
+	for (const site of parsed.sites) {
+		const handle = xSiteHandle(site);
+		if (handle) allowed.add(handle);
+	}
+	for (const site of parsed.excludedSites) {
+		const handle = xSiteHandle(site);
+		if (handle) excluded.add(handle);
+	}
+	return {
+		allowed: [...allowed].slice(0, MAX_X_HANDLES),
+		excluded: allowed.size > 0 ? [] : [...excluded].slice(0, MAX_X_HANDLES),
+	};
+}
+
+/**
+ * Whether a query asks only for X posts: it names `from:` authors, or every
+ * `site:` is an X host. The search pipeline routes such queries to xAI first.
+ */
+export function targetsX(parsed: StructuredQuery): boolean {
+	return xHandleFilter(parsed).allowed.length > 0 || (parsed.sites.length > 0 && parsed.sites.every(isXSite));
+}
+
+/** UTC start date (`YYYY-MM-DD`) of a `recency` window ending now. */
+function recencyStart(recency: NonNullable<SearchParams["recency"]>): string {
+	const start = new Date();
+	if (recency === "day") start.setUTCDate(start.getUTCDate() - 1);
+	else if (recency === "week") start.setUTCDate(start.getUTCDate() - 7);
+	else if (recency === "month") start.setUTCMonth(start.getUTCMonth() - 1);
+	else start.setUTCFullYear(start.getUTCFullYear() - 1);
+	return start.toISOString().slice(0, 10);
 }
 
 /**
  * Hosted tools for one query: `web_search` plus `x_search`, letting Grok pick
- * per query. `site:` limited to X hosts searches X only; `site:` without X
- * hosts, or `-site:x.com`, searches the web only. Date bounds map onto
- * `x_search`'s native range, which matches `after:` (inclusive) and
- * `before:` (exclusive) exactly.
+ * per query. X-only queries (`site:x.com`, `from:` authors) drop web_search;
+ * `site:` without X hosts, or `-site:x.com`, drops x_search. `x_search` takes
+ * author handles natively, and `after:`/`before:` (else `recency`) as its date
+ * range, which matches the directives' inclusive start and exclusive end.
  */
-function searchTools(parsed: StructuredQuery): Record<string, unknown>[] {
+function searchTools(parsed: StructuredQuery, recency: SearchParams["recency"]): Record<string, unknown>[] {
+	const handles = xHandleFilter(parsed);
 	const webSites = parsed.sites.filter(site => !isXSite(site));
+	const unscoped = parsed.sites.length === 0;
 	const tools: Record<string, unknown>[] = [];
-	if (parsed.sites.length === 0 || webSites.length > 0) {
+	if (webSites.length > 0 || (unscoped && handles.allowed.length === 0)) {
 		const webSearch: Record<string, unknown> = { type: "web_search" };
 		// allowed_domains and excluded_domains are mutually exclusive per
 		// request; prefer the allow list, the central filter enforces exclusions.
@@ -131,11 +198,14 @@ function searchTools(parsed: StructuredQuery): Record<string, unknown>[] {
 		}
 		tools.push(webSearch);
 	}
-	const searchX =
-		parsed.sites.length > 0 ? webSites.length < parsed.sites.length : !parsed.excludedSites.some(isXSite);
-	if (searchX) {
+	const xExcluded = parsed.excludedSites.some(site => isXSite(site) && !xSiteHandle(site));
+	if (webSites.length < parsed.sites.length || handles.allowed.length > 0 || (unscoped && !xExcluded)) {
 		const xSearch: Record<string, unknown> = { type: "x_search" };
+		if (handles.allowed.length > 0) xSearch.allowed_x_handles = handles.allowed;
+		else if (handles.excluded.length > 0) xSearch.excluded_x_handles = handles.excluded;
+		// Explicit before:/after: bounds take precedence over recency.
 		if (parsed.after) xSearch.from_date = parsed.after;
+		else if (recency && !parsed.before) xSearch.from_date = recencyStart(recency);
 		if (parsed.before) xSearch.to_date = parsed.before;
 		tools.push(xSearch);
 	}
@@ -152,8 +222,8 @@ function buildRequestBody(params: SearchParams): Record<string, unknown> {
 			{ role: "system", content: params.systemPrompt },
 			{ role: "user", content: query },
 		],
-		tools: searchTools(parsed),
-		reasoning: { effort: XAI_WEB_SEARCH_REASONING_EFFORT },
+		tools: searchTools(parsed, params.recency),
+		reasoning: { effort: XAI_SEARCH_REASONING_EFFORT },
 	};
 
 	if (params.maxOutputTokens !== undefined) {
@@ -166,13 +236,19 @@ function buildRequestBody(params: SearchParams): Record<string, unknown> {
 	return body;
 }
 
+/** Credentialed request context for one xAI Responses call. */
+export type XAIRequest = Pick<
+	SearchParams,
+	"model" | "modelRegistry" | "authStorage" | "sessionId" | "signal" | "timeoutMs" | "fetch"
+>;
+
 async function postXAIResponses(
 	apiKey: string,
-	params: SearchParams,
+	request: XAIRequest,
 	body: Record<string, unknown>,
 	transport: XAIHttpTransport,
 ): Promise<Response> {
-	return (params.fetch ?? fetch)(`${transport.baseURL.replace(/\/+$/, "")}/responses`, {
+	return (request.fetch ?? fetch)(`${transport.baseURL.replace(/\/+$/, "")}/responses`, {
 		method: "POST",
 		headers: {
 			...transport.headers,
@@ -180,7 +256,7 @@ async function postXAIResponses(
 			Authorization: `Bearer ${apiKey}`,
 		},
 		body: JSON.stringify(body),
-		signal: withHardTimeout(params.signal, params.timeoutMs),
+		signal: withHardTimeout(request.signal, request.timeoutMs),
 	});
 }
 
@@ -192,11 +268,11 @@ function throwXAIResponsesError(status: number, errorText: string): never {
 
 async function callXAIResponses(
 	apiKey: string,
-	params: SearchParams,
+	request: XAIRequest,
+	body: Record<string, unknown>,
 	transport: XAIHttpTransport,
 ): Promise<XAIResponsesResponse> {
-	const requestBody = buildRequestBody(params);
-	const response = await postXAIResponses(apiKey, params, requestBody, transport);
+	const response = await postXAIResponses(apiKey, request, body, transport);
 
 	if (!response.ok) {
 		throwXAIResponsesError(response.status, await response.text());
@@ -294,7 +370,8 @@ function collectWebSearchSources(
 	}
 }
 
-function parseAnswer(response: XAIResponsesResponse): string | undefined {
+/** Final answer text of a Responses reply, without relay narration or commentary-phase messages. */
+export function parseXAIAnswer(response: XAIResponsesResponse): string | undefined {
 	const output = Array.isArray(response.output) ? response.output : [];
 	// A top-level aggregate can contain narration even without explicit phases.
 	// Prefer filtered messages; use the aggregate only when no messages exist.
@@ -419,7 +496,7 @@ function parseResponse(
 
 	return {
 		provider: "xai",
-		answer: parseAnswer(response),
+		answer: parseXAIAnswer(response),
 		sources: limited.sources,
 		citations: limited.citations.length > 0 ? limited.citations : undefined,
 		usage: parseUsage(response.usage),
@@ -429,56 +506,100 @@ function parseResponse(
 	};
 }
 
-/** Execute xAI Responses API web and X search. */
-export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
-	if (params.model.provider !== "xai" && params.model.provider !== "xai-oauth") {
-		throw new SearchProviderError(
-			"xai",
-			`Selected model ${params.model.provider}/${params.model.id} is not an xAI model`,
-			400,
-		);
+/**
+ * POST one Responses request with `request.model`'s provider credentials,
+ * resolved through the model registry. Shared by xAI search and the X reader
+ * (`web/scrapers/twitter.ts`).
+ *
+ * @throws SearchProviderError when the model is not an xAI model, when official
+ * xAI OAuth credentials would reach a custom endpoint, on HTTP errors, and on
+ * invalid JSON.
+ */
+export async function requestXAIResponses(
+	request: XAIRequest,
+	body: Record<string, unknown>,
+): Promise<{ response: XAIResponsesResponse; authMode: "api_key" | "oauth" }> {
+	const { model, modelRegistry } = request;
+	if (model.provider !== "xai" && model.provider !== "xai-oauth") {
+		throw new SearchProviderError("xai", `Selected model ${model.provider}/${model.id} is not an xAI model`, 400);
 	}
-	const transport: XAIHttpTransport = {
-		baseURL: params.model.baseUrl,
-		headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
-	};
-	const customEndpoint = transport.baseURL.replace(/\/+$/, "") !== XAI_DEFAULT_BASE_URL;
-	const credentialOrigin = params.authStorage.keys.source(params.model.provider);
-	const hasCommandBackedKey = params.modelRegistry.hasCommandBackedApiKey(params.model.provider);
+	const customEndpoint = model.baseUrl.replace(/\/+$/, "") !== XAI_DEFAULT_BASE_URL;
+	const credentialOrigin = request.authStorage.keys.source(model.provider);
+	const hasCommandBackedKey = modelRegistry.hasCommandBackedApiKey(model.provider);
 	const officialOAuthCredential =
-		params.model.provider === "xai-oauth" &&
+		model.provider === "xai-oauth" &&
 		!hasCommandBackedKey &&
 		(credentialOrigin?.kind === "oauth" || credentialOrigin?.kind === "env");
 	if (customEndpoint && officialOAuthCredential) {
 		throw new SearchProviderError(
 			"xai",
-			`Refusing to send official xAI OAuth credentials to custom endpoint ${transport.baseURL}. Configure an API key for provider "xai-oauth".`,
+			`Refusing to send official xAI OAuth credentials to custom endpoint ${model.baseUrl}. Configure an API key for provider "xai-oauth".`,
 		);
 	}
-	const keyOrResolver = params.modelRegistry.resolver(params.model, params.sessionId);
-	const resultCap = clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
 	const response = await withAuth(
-		keyOrResolver,
+		modelRegistry.resolver(model, request.sessionId),
 		async key => {
-			const requestTransport: XAIHttpTransport = {
+			const transport: XAIHttpTransport = {
 				// XAI_BASE_URL never receives official OAuth credentials: neither an OAuth-origin
 				// credential nor an OAuth access-token bearer leaves the bundled endpoint.
 				baseURL: officialOAuthCredential
-					? params.model.baseUrl
-					: (resolveXaiBaseUrl(params.model.provider, params.model.baseUrl, key) ?? params.model.baseUrl),
-				headers: await params.modelRegistry.resolveModelHeaders(params.model, params.signal),
+					? model.baseUrl
+					: (resolveXaiBaseUrl(model.provider, model.baseUrl, key) ?? model.baseUrl),
+				headers: await modelRegistry.resolveModelHeaders(model, request.signal),
 			};
-			return callXAIResponses(key, params, requestTransport);
+			return callXAIResponses(key, request, body, transport);
 		},
 		{
-			signal: params.signal,
-			missingKeyMessage: `xAI credentials not found for selected provider "${params.model.provider}".`,
+			signal: request.signal,
+			missingKeyMessage: `xAI credentials not found for selected provider "${model.provider}".`,
 		},
 	);
 	const authMode =
-		params.model.provider === "xai-oauth" && (credentialOrigin?.kind === "oauth" || credentialOrigin?.kind === "env")
+		model.provider === "xai-oauth" && (credentialOrigin?.kind === "oauth" || credentialOrigin?.kind === "env")
 			? "oauth"
 			: "api_key";
+	return { response, authMode };
+}
+
+/**
+ * Reorder the xAI-grounded entries of a model chain by provider priority:
+ * `modelProviderOrder`, then the built-in order, which ranks the `xai-oauth`
+ * login above an `xai` API key. Other entries keep their slots; same-provider
+ * entries keep their relative order.
+ */
+export function rankXAIProviders<T>(items: readonly T[], modelOf: (item: T) => Model<Api>, settings: Settings): T[] {
+	const priority = buildModelProviderPriorityRank(cfgModelProviderOrder.get(settings));
+	const rank = (item: T): number => priority.get(modelOf(item).provider.toLowerCase()) ?? Number.POSITIVE_INFINITY;
+	const ranked = items.filter(item => modelOf(item).webSearch === "xai").sort((a, b) => rank(a) - rank(b));
+	let next = 0;
+	return items.map(item => (modelOf(item).webSearch === "xai" ? ranked[next++] : item));
+}
+
+/**
+ * xAI models for X reads and X-only searches, in attempt order: the `web` role
+ * chain's xAI-grounded candidates plus the provider default swapped to its
+ * cheaper `webSearchModel`, ranked by {@link rankXAIProviders}. Empty without
+ * xAI credentials.
+ */
+export function xaiModelChain(modelRegistry: ModelRegistry, settings: Settings): Model<Api>[] {
+	const pool = roleCandidatePool("web", settings, modelRegistry);
+	const chain = resolveRoleChain("web", settings, pool)
+		.map(candidate => candidate.model)
+		.filter(model => model.webSearch === "xai");
+	const grounded = pool.filter(model => model.webSearch === "xai");
+	const fallback = pickDefaultAvailableModel(grounded);
+	const runner = fallback && (resolveConfiguredModelTarget(fallback.webSearchModel, fallback, grounded) ?? fallback);
+	const models =
+		runner && !chain.some(model => model.provider === runner.provider && model.id === runner.id)
+			? [...chain, runner]
+			: chain;
+	return rankXAIProviders(models, model => model, settings);
+}
+
+/** Execute xAI Responses API web and X search. */
+export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
+	const resultCap = clampNumResults(params.numSearchResults ?? params.limit, DEFAULT_NUM_RESULTS, MAX_NUM_RESULTS);
+	const { response, authMode } = await requestXAIResponses(params, buildRequestBody(params));
 	const parsed = parseResponse(response, resultCap, authMode);
 	if (!parsed.answer && parsed.sources.length === 0) {
 		throw new SearchProviderError("xai", "xAI web_search returned no answer or sources", 502);

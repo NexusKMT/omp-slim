@@ -1,9 +1,11 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, setSystemTime, vi } from "bun:test";
 import { AuthStorage, type FetchImpl, type Model, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import { searchXAI, XAIProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/xai";
+import { cfgModelProviderOrder } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { rankXAIProviders, searchXAI, XAIProvider } from "@oh-my-pi/pi-coding-agent/web/search/providers/xai";
 import { SearchProviderError } from "@oh-my-pi/pi-coding-agent/web/search/types";
 
 type CapturedRequest = {
@@ -181,12 +183,65 @@ describe("xAI web search provider", () => {
 			"tern -site:x.com",
 			[{ type: "web_search", filters: { excluded_domains: ["x.com"] } }],
 		],
+		[
+			"from: authors search X only, limited to those handles",
+			"tern from:_can1357 from:@msuiche",
+			[{ type: "x_search", allowed_x_handles: ["_can1357", "msuiche"] }],
+		],
+		[
+			"-from: authors stay out of X results without dropping the web",
+			"tern -from:spam_bot",
+			[{ type: "web_search" }, { type: "x_search", excluded_x_handles: ["spam_bot"] }],
+		],
+		[
+			"site:x.com/<handle> searches X only, limited to that handle",
+			"tern site:x.com/_can1357",
+			[{ type: "x_search", allowed_x_handles: ["_can1357"] }],
+		],
 	])("routes %s", async (_caseName, query, tools) => {
 		const capture = captureFetch({ id: "resp_x_routing", model: "grok-4.7", output_text: "routed answer" });
 
 		await searchXAI({ ...makeParams(capture.fetchMock), query });
 
 		expect(capture.capturedRequest?.body?.tools).toEqual(tools);
+	});
+
+	it("starts the X date range at the recency window unless after:/before: bound it", async () => {
+		setSystemTime(new Date("2026-10-08T12:00:00Z"));
+		try {
+			const capture = captureFetch({ id: "resp_x_recency", model: "grok-4.7", output_text: "recent answer" });
+
+			await searchXAI({ ...makeParams(capture.fetchMock), recency: "week" });
+			expect(capture.capturedRequest?.body?.tools).toEqual([
+				{ type: "web_search" },
+				{ type: "x_search", from_date: "2026-10-01" },
+			]);
+
+			await searchXAI({ ...makeParams(capture.fetchMock), query: "tern before:2026-09-01", recency: "week" });
+			expect(capture.capturedRequest?.body?.tools).toEqual([
+				{ type: "web_search" },
+				{ type: "x_search", to_date: "2026-09-01" },
+			]);
+		} finally {
+			setSystemTime();
+		}
+	});
+
+	it("ranks the xai-oauth login above an xai API key unless modelProviderOrder says otherwise", async () => {
+		const settings = await Settings.init({ inMemory: true });
+		try {
+			const engine = { ...xaiModel("parallel", "web"), webSearch: undefined };
+			const chain = [xaiModel("grok-4.5", "xai"), engine, xaiModel("grok-4.5", "xai-oauth")];
+			const order = () => rankXAIProviders(chain, model => model, settings).map(model => model.provider);
+
+			// xAI entries swap within their slots; the engine between them stays put.
+			expect(order()).toEqual(["xai-oauth", "web", "xai"]);
+
+			cfgModelProviderOrder.set(settings, ["xai"]);
+			expect(order()).toEqual(["xai", "web", "xai-oauth"]);
+		} finally {
+			resetSettingsForTest();
+		}
 	});
 
 	it("titles X post citations by URL instead of their numeric citation markers", async () => {

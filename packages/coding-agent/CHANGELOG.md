@@ -6,6 +6,13 @@
 
 - Added `worktree.onStart` and `worktree.onExit` settings to start each session in its own worktree and clean it up on exit ([#14908](https://github.com/can1357/oh-my-pi/pull/14908) by [@gitpushoriginmaster](https://github.com/gitpushoriginmaster))
 - Added X post search to xAI web search: Grok can now search X alongside the web, `site:x.com` searches X only, and `after:`/`before:` limit the X post date range.
+- Added X post search to xAI web search: Grok can now search X alongside the web; `site:x.com`, `site:x.com/<handle>`, and `from:<handle>` search X only (limited to those authors), `-from:<handle>` leaves authors out, and `after:`/`before:` or `recency` limit the post dates.
+- Added xAI-first routing for X-only searches (`site:x.com`, `from:<handle>`) when xAI credentials exist, even if another engine is the web search model.
+- Added reading X links through Grok's X tools when logged in to xAI: posts with their thread and replies, profiles with recent posts, searches, and hashtags. This replaces the Nitter mirrors, which no longer serve X.
+
+### Changed
+
+- Changed web search to try an `xai-oauth` login before an `xai` API key wherever both are in the web search chain, unless `modelProviderOrder` says otherwise.
 
 ### Fixed
 
