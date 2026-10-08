@@ -1,8 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { type AgentMessage, Tokenizer } from "@oh-my-pi/pi-agent-core";
-import type { BranchSummaryEntry, SessionEntry, SessionMessageEntry } from "@oh-my-pi/pi-agent-core/compaction";
+import type {
+	BranchSummaryEntry,
+	CustomMessageEntry,
+	SessionEntry,
+	SessionMessageEntry,
+} from "@oh-my-pi/pi-agent-core/compaction";
 import {
+	type CacheLookbackConfig,
+	type ConvertToLlm,
 	DEFAULT_PRUNE_CONFIG,
+	defaultConvertToLlm,
 	type PruneResult,
 	pruneSupersededToolResults,
 	pruneToolOutputs,
@@ -13,7 +21,7 @@ import {
 	USELESS_NOTICE,
 } from "@oh-my-pi/pi-agent-core/compaction";
 import type { ProtectedToolContext } from "@oh-my-pi/pi-agent-core/compaction/tool-protection";
-import type { AssistantMessage, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage } from "@oh-my-pi/pi-ai";
 import { convertAnthropicMessages } from "@oh-my-pi/pi-ai/providers/anthropic";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
@@ -832,106 +840,113 @@ function smallTurns(count: number, timestamp: number): SessionMessageEntry[] {
 }
 
 describe("warm-cache guard — prompt-cache lookback window", () => {
-	// 12 small turns put 28 stored lookback positions behind the stale read's
-	// issuing turn, far below the 8k token limit but past Anthropic's
-	// 20-position lookback: rewriting it would re-write the whole conversation,
-	// not just the suffix.
-	function staleReadBehind(turns: number): { stale: SessionMessageEntry; entries: SessionEntry[] } {
-		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
-		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
-		return { stale, entries: [call1, stale, ...smallTurns(turns, T0 + 1_000), call2, latest] };
+	/** Anthropic's lookback, as `prompt-cache-lookback` resolves it for Claude. */
+	const ANTHROPIC_LOOKBACK: CacheLookbackConfig = { cacheLookbackPositions: 20 };
+
+	/** Per-turn supersede pass and cache-guarded prune pass, each run on fresh entries. */
+	function passes(lookback: CacheLookbackConfig): Array<(entries: SessionEntry[]) => PruneResult> {
+		return [
+			entries => pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000, ...lookback })),
+			entries =>
+				pruneToolOutputs(entries, tokenizer, {
+					protectTokens: 1_000_000,
+					minimumSavings: 0,
+					protectedTools: [],
+					supersedeKey: readToolSupersedeKey,
+					cacheWarmSuffixTokens: 8_000,
+					...lookback,
+				}),
+		];
 	}
-
-	test("per-turn supersede pass leaves a result beyond the lookback window byte-identical", () => {
-		const { stale, entries } = staleReadBehind(12);
-
-		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
-
-		expect(result.prunedCount).toBe(0);
-		expect(resultText(stale)).toBe(FILE_CONTENT);
-		expect(resultMessage(stale).prunedAt).toBeUndefined();
-	});
-
-	test("per-turn supersede pass still prunes inside the lookback window", () => {
-		const { stale, entries } = staleReadBehind(4);
-
-		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
-
-		expect(result.prunedCount).toBe(1);
-		expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
-	});
+	const guardedPasses = passes(ANTHROPIC_LOOKBACK);
 
 	test("idle flush still prunes beyond the lookback window once the cache is cold", () => {
-		const { stale, entries } = staleReadBehind(12);
+		// 12 small turns put 28 stored positions behind the stale read's issuing turn.
+		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
+		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
+		const entries = [call1, stale, ...smallTurns(12, T0 + 1_000), call2, latest];
 
-		const result = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 2_000 + 31 * 60_000 }));
+		const result = pruneSupersededToolResults(
+			entries,
+			tokenizer,
+			cfg({ now: T0 + 2_000 + 31 * 60_000, ...ANTHROPIC_LOOKBACK }),
+		);
 
 		expect(result.prunedCount).toBe(1);
 		expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
 	});
 
-	test("cache-guarded prune pass leaves a result beyond the lookback window byte-identical", () => {
-		const { stale, entries } = staleReadBehind(12);
+	test("a model without a known lookback bound prunes past the Anthropic window", () => {
+		for (const pass of passes({})) {
+			const { stale, entries } = staleReadAround([], smallTurns(12, T0 + 1_000));
 
-		const result = pruneToolOutputs(entries, tokenizer, {
-			protectTokens: 1_000_000,
-			minimumSavings: 0,
-			protectedTools: [],
-			supersedeKey: readToolSupersedeKey,
-			cacheWarmSuffixTokens: 8_000,
-		});
-
-		expect(result.prunedCount).toBe(0);
-		expect(resultText(stale)).toBe(FILE_CONTENT);
-		expect(resultMessage(stale).prunedAt).toBeUndefined();
+			expect(pass(entries).prunedCount).toBe(1);
+			expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
+		}
 	});
 
 	test("branch summaries count toward the lookback window in both passes", () => {
 		// Each branch summary replays as one user block: 18 of them plus the newer
 		// read put the stale result 20 blocks back with almost no tokens after it.
-		const [call1, stale] = readPair("src/foo.ts", FILE_CONTENT, T0);
-		const [call2, latest] = readPair("src/foo.ts", FILE_CONTENT, T0 + 2_000);
-		const summaries = Array.from({ length: 18 }, (_, index): BranchSummaryEntry => ({
-			type: "branch_summary",
-			id: nextId(),
-			parentId: null,
-			timestamp: new Date(T0 + 1_000 + index).toISOString(),
-			fromId: `branch-${index}`,
-			summary: "Tried another approach; abandoned.",
-		}));
-		const entries: SessionEntry[] = [call1, stale, ...summaries, call2, latest];
+		for (const pass of guardedPasses) {
+			const summaries = Array.from({ length: 18 }, (_, index): BranchSummaryEntry => ({
+				type: "branch_summary",
+				id: nextId(),
+				parentId: null,
+				timestamp: new Date(T0 + 1_000 + index).toISOString(),
+				fromId: `branch-${index}`,
+				summary: "Tried another approach; abandoned.",
+			}));
+			const { stale, entries } = staleReadAround([], summaries);
 
-		const supersede = pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 }));
-		const guarded = pruneToolOutputs(entries, tokenizer, {
-			protectTokens: 1_000_000,
-			minimumSavings: 0,
-			protectedTools: [],
-			supersedeKey: readToolSupersedeKey,
-			cacheWarmSuffixTokens: 8_000,
-		});
-
-		expect(supersede.prunedCount).toBe(0);
-		expect(guarded.prunedCount).toBe(0);
-		expect(resultText(stale)).toBe(FILE_CONTENT);
+			expect(pass(entries).prunedCount).toBe(0);
+			expect(resultText(stale)).toBe(FILE_CONTENT);
+		}
 	});
 
-	/** Per-turn supersede pass and cache-guarded prune pass, each run on fresh entries. */
-	const guardedPasses: Array<(entries: SessionEntry[]) => PruneResult> = [
-		entries => pruneSupersededToolResults(entries, tokenizer, cfg({ now: T0 + 3_000 })),
-		entries =>
-			pruneToolOutputs(entries, tokenizer, {
-				protectTokens: 1_000_000,
-				minimumSavings: 0,
-				protectedTools: [],
-				supersedeKey: readToolSupersedeKey,
-				cacheWarmSuffixTokens: 8_000,
-			}),
-	];
+	test("counts app messages as convertToLlm projects them", () => {
+		// The stale read sits 12 positions back before the attachment. The core
+		// projection sends the attachment as one developer block (13: prunes); an
+		// app projection that splits off its images, as the coding agent does for
+		// file mentions, sends developer [text] + user [text, image, image] (16).
+		const attachment = (): CustomMessageEntry => ({
+			type: "custom_message",
+			id: nextId(),
+			parentId: null,
+			timestamp: new Date(T0 + 1_500).toISOString(),
+			customType: "attachment",
+			content: [{ type: "text", text: "shot.png" }],
+			display: true,
+		});
+		const image: ImageContent = { type: "image", data: PNG_1X1, mimeType: "image/png" };
+		const splitImages: ConvertToLlm = messages =>
+			messages.flatMap((message): Message[] =>
+				message.role === "custom"
+					? [
+							{ role: "developer", content: [{ type: "text", text: "shot.png" }], timestamp: message.timestamp },
+							{
+								role: "user",
+								content: [{ type: "text", text: "Images attached." }, image, image],
+								timestamp: message.timestamp,
+							},
+						]
+					: defaultConvertToLlm([message]),
+			);
+		for (const pass of guardedPasses) {
+			const inReach = staleReadAround([], [...smallTurns(4, T0 + 1_000), attachment()]);
+			expect(pass(inReach.entries).prunedCount).toBe(1);
+		}
+		for (const pass of passes({ ...ANTHROPIC_LOOKBACK, convertToLlm: splitImages })) {
+			const outOfReach = staleReadAround([], [...smallTurns(4, T0 + 1_000), attachment()]);
+			expect(pass(outOfReach.entries).prunedCount).toBe(0);
+			expect(resultText(outOfReach.stale)).toBe(FILE_CONTENT);
+		}
+	});
 
 	/** Stale read issued by an assistant turn of `before` blocks, followed by `after` entries and a newer read. */
 	function staleReadAround(
 		before: AssistantMessage["content"],
-		after: SessionMessageEntry[],
+		after: SessionEntry[],
 	): { stale: SessionMessageEntry; entries: SessionEntry[] } {
 		const callId = `call-${idCounter++}`;
 		const call1 = messageEntry(
@@ -1054,7 +1069,7 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 
 	test("a parallel batch counts as runs, not one position per tool block", () => {
 		// [text, 8 tool_use] + 8 tool_result is 3 positions, so the stale read's
-		// rewrite needs 1 + 1 + 3 + 2 + 1 = 8 positions, not 22.
+		// rewrite needs 1 + 1 + 3 + 1 + 1 = 7 positions, not 21.
 		for (const pass of guardedPasses) {
 			const callIds = Array.from({ length: 8 }, () => `call-${idCounter++}`);
 			const batch = [
@@ -1076,6 +1091,7 @@ describe("warm-cache guard — prompt-cache lookback window", () => {
 				...callIds.map(id => messageEntry(toolResultMessage("bash", id, "ok", T0 + 1_000), T0 + 1_000)),
 			];
 			const { stale, entries } = staleReadAround([], batch);
+			expect(wirePositions(entries)).toBe(7);
 
 			expect(pass(entries).prunedCount).toBe(1);
 			expect(resultText(stale)).toBe(SUPERSEDED_NOTICE);
