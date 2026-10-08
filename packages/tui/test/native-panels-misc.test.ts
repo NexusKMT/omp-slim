@@ -73,6 +73,10 @@ describe("MoveOverlay native events", () => {
 		overlay.handleNativeEvent({ type: "select", key: "results", item: "/work/gamma" });
 		overlay.handleNativeEvent({ type: "action", key: "actions/accept", act: "accept", mods: [] });
 		expect(results).toEqual([]);
+		// Accept filled the field, so the suggestions narrowed to the accepted folder.
+		expect(listOf(overlay.describe()).c?.map(child => (isNode(child) ? child.key : undefined))).toEqual([
+			"/work/gamma",
+		]);
 		overlay.handleNativeEvent({ type: "action", key: "actions/confirm", act: "confirm", mods: [] });
 		expect(results).toEqual([{ directory: "/work/gamma" }]);
 
