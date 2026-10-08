@@ -1344,8 +1344,12 @@ async fn run_shell_command_once(
 	params.process_group_policy = ProcessGroupPolicy::NewProcessGroup;
 	params.set_cancel_token(cancel_token.clone());
 	params.set_spawn_observer(spawn_registry.clone());
-	let reported_error = Arc::new(AtomicBool::new(false));
-	params.set_reported_error(Arc::clone(&reported_error));
+	// Only a buffered capture can be minimized, so only it asks for the report.
+	let reported_error = matches!(capture_mode, CommandCaptureMode::Buffered { .. })
+		.then(|| Arc::new(AtomicBool::new(false)));
+	if let Some(flag) = &reported_error {
+		params.set_reported_error(Arc::clone(flag));
+	}
 	let reader_cancel = CancellationToken::new();
 	let (activity_tx, activity_rx) = flume::bounded::<()>(1);
 	let reader_callback = on_chunk;
@@ -1461,7 +1465,8 @@ async fn run_shell_command_once(
 		Some(OutputRead::Buffered(output)) => Some(output),
 		Some(OutputRead::Streaming) | None => None,
 	};
-	Ok(CommandRunOutput { result, buffered, reported_error: reported_error.load(Ordering::Relaxed) })
+	let reported_error = reported_error.is_some_and(|flag| flag.load(Ordering::Relaxed));
+	Ok(CommandRunOutput { result, buffered, reported_error })
 }
 
 async fn run_shell_command_streams(
