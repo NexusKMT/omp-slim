@@ -3,7 +3,7 @@ import { resolveXaiBaseUrl, XAI_DEFAULT_BASE_URL } from "@oh-my-pi/pi-ai/provide
 import type { XAIHttpTransport } from "../../../lib/xai-http";
 import type { SearchCitation, SearchResponse, SearchSource, SearchUsage } from "../types";
 import { SearchProviderError } from "../../../web/search/types";
-import { formatQuery, parseSearchQuery, type QuerySyntax } from "../query";
+import { formatQuery, parseSearchQuery, type QuerySyntax, type StructuredQuery } from "../query";
 import { clampNumResults } from "../utils";
 import type { SearchParams } from "./base";
 import { SearchProvider } from "./base";
@@ -72,11 +72,11 @@ interface XAIResponsesResponse {
 
 /**
  * Query syntax re-emitted for the Grok search agent. `site:`/`-site:` are
- * stripped because hosts map natively onto the web_search domain filters;
- * `before:`/`after:` stay in the query text — the Responses web_search tool
- * has no date parameters (`from_date`/`to_date` exist only on `x_search` and
- * the deprecated Live Search `search_parameters`, which now returns 410) and
- * the agent honors the tokens as natural-language hints.
+ * stripped because hosts map natively onto the web_search domain filters and
+ * the web_search/x_search tool split; `before:`/`after:` stay in the query
+ * text as hints for web_search, which has no date parameters (only `x_search`
+ * takes `from_date`/`to_date`; the deprecated Live Search `search_parameters`
+ * now returns 410).
  */
 const XAI_QUERY_SYNTAX: QuerySyntax = {
 	phrases: true,
@@ -102,20 +102,49 @@ function domainFilterList(sites: readonly string[]): string[] {
 	return [...hosts];
 }
 
-function buildRequestBody(params: SearchParams): Record<string, unknown> {
-	const parsed = params.parsedQuery ?? parseSearchQuery(params.query);
-	const webSearchTool: Record<string, unknown> = { type: "web_search" };
-	let query = params.query;
-	if (parsed.hasDirectives) {
-		query = formatQuery(parsed, XAI_QUERY_SYNTAX);
+/** Hosts whose posts only `x_search` reaches; web_search barely indexes them. */
+const X_HOSTS = ["x.com", "twitter.com"];
+
+function isXSite(site: string): boolean {
+	const host = site.split("/", 1)[0];
+	return X_HOSTS.some(x => host === x || host.endsWith(`.${x}`));
+}
+
+/**
+ * Hosted tools for one query: `web_search` plus `x_search`, letting Grok pick
+ * per query. `site:` limited to X hosts searches X only; `site:` without X
+ * hosts, or `-site:x.com`, searches the web only. Date bounds map onto
+ * `x_search`'s native range, which matches `after:` (inclusive) and
+ * `before:` (exclusive) exactly.
+ */
+function searchTools(parsed: StructuredQuery): Record<string, unknown>[] {
+	const webSites = parsed.sites.filter(site => !isXSite(site));
+	const tools: Record<string, unknown>[] = [];
+	if (parsed.sites.length === 0 || webSites.length > 0) {
+		const webSearch: Record<string, unknown> = { type: "web_search" };
 		// allowed_domains and excluded_domains are mutually exclusive per
 		// request; prefer the allow list, the central filter enforces exclusions.
-		if (parsed.sites.length > 0) {
-			webSearchTool.filters = { allowed_domains: domainFilterList(parsed.sites) };
+		if (webSites.length > 0) {
+			webSearch.filters = { allowed_domains: domainFilterList(webSites) };
 		} else if (parsed.excludedSites.length > 0) {
-			webSearchTool.filters = { excluded_domains: domainFilterList(parsed.excludedSites) };
+			webSearch.filters = { excluded_domains: domainFilterList(parsed.excludedSites) };
 		}
+		tools.push(webSearch);
 	}
+	const searchX =
+		parsed.sites.length > 0 ? webSites.length < parsed.sites.length : !parsed.excludedSites.some(isXSite);
+	if (searchX) {
+		const xSearch: Record<string, unknown> = { type: "x_search" };
+		if (parsed.after) xSearch.from_date = parsed.after;
+		if (parsed.before) xSearch.to_date = parsed.before;
+		tools.push(xSearch);
+	}
+	return tools;
+}
+
+function buildRequestBody(params: SearchParams): Record<string, unknown> {
+	const parsed = params.parsedQuery ?? parseSearchQuery(params.query);
+	const query = parsed.hasDirectives ? formatQuery(parsed, XAI_QUERY_SYNTAX) : params.query;
 
 	const body: Record<string, unknown> = {
 		model: params.model.id,
@@ -123,7 +152,7 @@ function buildRequestBody(params: SearchParams): Record<string, unknown> {
 			{ role: "system", content: params.systemPrompt },
 			{ role: "user", content: query },
 		],
-		tools: [webSearchTool],
+		tools: searchTools(parsed),
 		reasoning: { effort: XAI_WEB_SEARCH_REASONING_EFFORT },
 	};
 
@@ -238,7 +267,8 @@ function collectAnnotationSources(
 			citations,
 			seenUrls,
 			annotation.url,
-			annotation.title,
+			// Bare numbers are citation markers (`[[1]](url)`), not titles.
+			annotation.title && !/^\d+$/.test(annotation.title.trim()) ? annotation.title : undefined,
 			annotation.cited_text ??
 				annotation.text ??
 				extractSnippetAround(contentText, annotation.start_index, annotation.end_index),
@@ -399,7 +429,7 @@ function parseResponse(
 	};
 }
 
-/** Execute xAI Responses API web search. */
+/** Execute xAI Responses API web and X search. */
 export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 	if (params.model.provider !== "xai" && params.model.provider !== "xai-oauth") {
 		throw new SearchProviderError(
@@ -456,7 +486,7 @@ export async function searchXAI(params: SearchParams): Promise<SearchResponse> {
 	return parsed;
 }
 
-/** Search provider for xAI web search. */
+/** Search provider for xAI web and X search. */
 export class XAIProvider extends SearchProvider {
 	readonly id = "xai";
 	readonly label = "xAI";

@@ -38,7 +38,7 @@
   - `packages/coding-agent/src/web/search/providers/ollama.ts` — Ollama web search adapter.
   - `packages/coding-agent/src/web/search/providers/tavily.ts` — Tavily search adapter.
   - `packages/coding-agent/src/web/search/providers/tinyfish.ts` — TinyFish search adapter.
-  - `packages/coding-agent/src/web/search/providers/xai.ts` — xAI Responses web-search adapter.
+  - `packages/coding-agent/src/web/search/providers/xai.ts` — xAI Responses web and X search adapter.
   - `packages/coding-agent/src/web/search/providers/zai.ts` — Z.AI remote MCP adapter.
   - `packages/coding-agent/src/web/parallel.ts` — Parallel search/extract HTTP client.
   - `packages/coding-agent/src/web/kagi.ts` — Kagi HTTP client.
@@ -163,8 +163,9 @@ Each provider search transport receives a hard timeout from `providers.webSearch
     - Parses answer and URL-citation annotations into sources/citations. Grounded responses without sources/citations are rejected by the orchestrator.
   - **xAI** — `packages/coding-agent/src/web/search/providers/xai.ts`
     - Availability: credentials for the selected model's provider (`xai`, `xai-oauth`, or a compatible host). The role candidate chooses the provider; this adapter does not independently prefer OAuth over API-key models.
-    - Querying: POSTs the Responses API with the selected `web` candidate's model id, `tools: [{ type: "web_search", ... }]`, and reasoning effort `low`. A custom model-registry endpoint is supported, but official xAI OAuth credentials are refused for custom endpoints.
-    - Up to five `site:` or `-site:` hosts map to mutually exclusive `allowed_domains` / `excluded_domains` filters (allow-list wins); path restrictions remain for central filtering. Absolute dates stay as query hints because the current Responses `web_search` tool has no date fields.
+    - Querying: POSTs the Responses API with the selected `web` candidate's model id, `tools: [{ type: "web_search", ... }, { type: "x_search", ... }]`, and reasoning effort `low`; Grok decides per query whether to search the web, X posts, or both. A custom model-registry endpoint is supported, but official xAI OAuth credentials are refused for custom endpoints.
+    - `site:` limited to `x.com`/`twitter.com` sends only `x_search`; `site:` without X hosts, or `-site:x.com`/`-site:twitter.com`, sends only `web_search`. Up to five remaining `site:` or `-site:` hosts map to mutually exclusive `web_search` `allowed_domains` / `excluded_domains` filters (allow-list wins); path restrictions remain for central filtering.
+    - `after:`/`before:` become `x_search` `from_date`/`to_date` (inclusive start, exclusive end, matching the directives) and also stay in the query text as hints, because `web_search` has no date fields.
     - The request carries no `search_parameters` (the deprecated Live Search field now returns 410), so `recency` is ignored beyond natural-language date hints in the query text.
     - `max_tokens` and `temperature` pass through. `num_search_results` (or `limit`) only caps parsed sources/citations locally via `clampNumResults(...)`, default `10`, max `30`; it is not sent as an upstream search-count parameter.
     - Output may include `answer`, `sources`, `citations`, `usage`, `model`, `requestId`, `authMode: "api_key" | "oauth"`.

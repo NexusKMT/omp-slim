@@ -113,12 +113,12 @@ describe("xAI web search provider", () => {
 				{ role: "system", content: "Use web search for current xAI facts." },
 				{ role: "user", content: "latest xAI web search" },
 			],
-			tools: [{ type: "web_search" }],
+			tools: [{ type: "web_search" }, { type: "x_search" }],
 			reasoning: { effort: "low" },
 			max_output_tokens: 512,
 			temperature: 0.2,
 		});
-		expect(capture.capturedRequest?.body?.tools).toEqual([{ type: "web_search" }]);
+		expect(capture.capturedRequest?.body?.tools).toEqual([{ type: "web_search" }, { type: "x_search" }]);
 		expect(capture.capturedRequest?.body).not.toHaveProperty("search_parameters");
 	});
 
@@ -149,6 +149,7 @@ describe("xAI web search provider", () => {
 		const body = capture.capturedRequest?.body;
 		expect(body?.tools).toEqual([
 			{ type: "web_search", filters: { excluded_domains: ["reddit.com", "news.ycombinator.com"] } },
+			{ type: "x_search" },
 		]);
 		const input = body?.input as { role: string; content: string }[];
 		expect(input[1]?.content).toBe("grok changelog");
@@ -162,6 +163,54 @@ describe("xAI web search provider", () => {
 		expect(capture.capturedRequest?.body?.tools).toEqual([
 			{ type: "web_search", filters: { allowed_domains: ["docs.x.ai"] } },
 		]);
+	});
+
+	it.each([
+		[
+			"site:x.com searches X only, with after:/before: as its date range",
+			"tern terminal site:x.com after:2026-10-01 before:2026-10-08",
+			[{ type: "x_search", from_date: "2026-10-01", to_date: "2026-10-08" }],
+		],
+		[
+			"mixed sites split web hosts from X hosts",
+			"tern site:github.com site:twitter.com",
+			[{ type: "web_search", filters: { allowed_domains: ["github.com"] } }, { type: "x_search" }],
+		],
+		[
+			"-site:x.com searches the web only",
+			"tern -site:x.com",
+			[{ type: "web_search", filters: { excluded_domains: ["x.com"] } }],
+		],
+	])("routes %s", async (_caseName, query, tools) => {
+		const capture = captureFetch({ id: "resp_x_routing", model: "grok-4.7", output_text: "routed answer" });
+
+		await searchXAI({ ...makeParams(capture.fetchMock), query });
+
+		expect(capture.capturedRequest?.body?.tools).toEqual(tools);
+	});
+
+	it("titles X post citations by URL instead of their numeric citation markers", async () => {
+		const capture = captureFetch({
+			id: "resp_x_citations",
+			model: "grok-4.7",
+			output: [
+				{ type: "custom_tool_call", name: "x_keyword_search", input: '{"query":"tern"}' },
+				{
+					type: "message",
+					content: [
+						{
+							type: "output_text",
+							text: "Tern is popular. [[1]](https://x.com/user/status/1)",
+							annotations: [{ type: "url_citation", url: "https://x.com/user/status/1", title: "1" }],
+						},
+					],
+				},
+			],
+		});
+
+		const response = await searchXAI(makeParams(capture.fetchMock));
+
+		expect(response.sources.map(source => source.title)).toEqual(["https://x.com/user/status/1"]);
 	});
 
 	it("uses credentials for the selected xAI OAuth model provider", async () => {
@@ -249,7 +298,6 @@ describe("xAI web search provider", () => {
 
 		expect(capture.capturedRequest).not.toBeNull();
 		const body = capture.capturedRequest?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
@@ -276,7 +324,6 @@ describe("xAI web search provider", () => {
 
 		expect(capture.capturedRequests).toHaveLength(1);
 		const body = capture.capturedRequests[0]?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
@@ -405,7 +452,6 @@ describe("xAI web search provider", () => {
 		expect(response.citations?.map(citation => citation.url)).toEqual(expectedUrls);
 		expect(capture.capturedRequest).not.toBeNull();
 		const body = capture.capturedRequest?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
@@ -431,7 +477,6 @@ describe("xAI web search provider", () => {
 		expect(response.citations?.map(citation => citation.url)).toEqual(expectedUrls);
 		expect(capture.capturedRequest).not.toBeNull();
 		const body = capture.capturedRequest?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
@@ -499,7 +544,6 @@ describe("xAI web search provider", () => {
 		]);
 		expect(capture.capturedRequest).not.toBeNull();
 		const body = capture.capturedRequest?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
@@ -543,7 +587,6 @@ describe("xAI web search provider", () => {
 		]);
 		expect(capture.capturedRequest).not.toBeNull();
 		const body = capture.capturedRequest?.body;
-		expect(body?.tools).toEqual([{ type: "web_search" }]);
 		expect(body).not.toHaveProperty("search_parameters");
 		expect(Object.keys(body ?? {}).sort()).toEqual(["input", "model", "reasoning", "tools"]);
 	});
