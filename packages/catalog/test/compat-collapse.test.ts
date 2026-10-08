@@ -1682,7 +1682,10 @@ describe("antigravity discovery collapsing", () => {
 					),
 				{ preconnect: fetch.preconnect },
 			);
-			const options = googleAntigravityModelManagerOptions({ oauthToken: "t", fetch: fetcher });
+			const options = googleAntigravityModelManagerOptions({
+				resolveAccounts: async () => [{ accessToken: "t" }],
+				fetch: fetcher,
+			});
 			const result = await resolveProviderModels({ ...options, cacheDbPath: path.join(dir, "models.db") }, "online");
 			return result.models.map(m => m.id);
 		};

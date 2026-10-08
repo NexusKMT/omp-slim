@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `AuthApiKeyOptions.accountIds` also matches the login email of credentials that carry no account id (see `oauthAccountKey`), so Antigravity requests prefer accounts that serve the requested model ([#14924](https://github.com/can1357/oh-my-pi/issues/14924)).
+
 ## [18.8.4] - 2026-10-08
 
 ### Breaking Changes

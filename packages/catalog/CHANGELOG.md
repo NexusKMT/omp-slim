@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `googleAntigravityModelManagerOptions` takes `resolveAccounts` instead of `oauthToken`, so every Antigravity account's model list is read and combined ([#14924](https://github.com/can1357/oh-my-pi/issues/14924)).
+
 ## [18.8.4] - 2026-10-08
 
 ### Fixed
