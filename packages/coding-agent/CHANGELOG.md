@@ -24,6 +24,7 @@
 - Fixed extensions importing `@oh-my-pi/pi-tui/native/*` failing to load in compiled `omp` binaries.
 - Fixed raw token markers appearing instead of Nerd Font icons in Anthropic idle recaps, `/btw` and `/omfg` replies, and streaming previews.
 - Fixed sessions moved with `/wt` disappearing from resume lists; sessions in Git worktrees now remain discoverable and can be resumed or relocated if their worktree was removed.
+- Fixed live config reload ignoring edits made during startup or right after a config symlink was retargeted, until the next unrelated edit.
 
 ## [18.8.5] - 2026-10-08
 
