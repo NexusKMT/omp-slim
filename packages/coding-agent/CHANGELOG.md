@@ -14,6 +14,7 @@
 - Fixed a subagent advisor set to `@advisor` in `/agents` running on the built-in `slow` model (e.g. `gpt-5.6-sol`) instead of your configured advisor role ([#14972](https://github.com/can1357/oh-my-pi/pull/14972) by [@H4vC](https://github.com/H4vC))
 - Fixed `/switch` and the alt+p model picker crashing the TUI when stored model speed stats contained an entry without a model name ([#14784](https://github.com/can1357/oh-my-pi/issues/14784))
 - Fixed the `lsp` tool and `generate_image` hanging on a FIFO or terminal path, or exhausting memory on `/dev/zero`; such files are now refused before they're read ([#14730](https://github.com/can1357/oh-my-pi/pull/14730) by [@DrFaustus-vic](https://github.com/DrFaustus-vic))
+- Fixed an `aside` message (such as one sent by an extension) waiting behind a running `wait`: it now ends the wait and reaches the model at the next step, and the job result still arrives later ([#14731](https://github.com/can1357/oh-my-pi/pull/14731) by [@mgpai22](https://github.com/mgpai22))
 ## [18.8.5] - 2026-10-08
 
 ### Added
