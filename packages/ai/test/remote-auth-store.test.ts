@@ -1557,6 +1557,10 @@ describe("RemoteAuthCredentialStore + AuthStorage integration", () => {
 			const reports = await clientStorage.usage.reports();
 			expect(reports?.map(report => report.provider)).toEqual(["anthropic"]);
 			expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+			await clientStorage.usage.invalidate("anthropic");
+			expect(await clientStorage.usage.reports()).toEqual([]);
+			expect(fetchSpy).toHaveBeenCalledTimes(2);
 		} finally {
 			clientStorage.close();
 		}
