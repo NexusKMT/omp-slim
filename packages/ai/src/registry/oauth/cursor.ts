@@ -135,7 +135,7 @@ export async function refreshCursorToken(refreshToken: string): Promise<OAuthCre
 		});
 	}
 
-	const data = (await response.json()) as { access_token?: string; shouldLogout?: boolean };
+	const data = (await response.json()) as { access_token?: string; refresh_token?: string; shouldLogout?: boolean };
 	// Cursor answers a session it will not renew with 200, an empty token and `shouldLogout`.
 	if (data.shouldLogout === true) {
 		throw new AIError.OAuthError("invalid_grant: Cursor ended this session; run /login cursor again", {
@@ -150,10 +150,11 @@ export async function refreshCursorToken(refreshToken: string): Promise<OAuthCre
 		});
 	}
 
-	// The session token is its own refresh credential, as the IDE stores it.
+	// Cursor's renewal answers only an access token; the IDE keeps its stored refresh token, so do the same
+	// unless a rotated one is returned.
 	return {
 		access: data.access_token,
-		refresh: data.access_token,
+		refresh: data.refresh_token || refreshToken,
 		expires: getTokenExpiry(data.access_token),
 	};
 }

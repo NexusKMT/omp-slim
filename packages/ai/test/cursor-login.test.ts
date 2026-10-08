@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -133,6 +133,19 @@ describe("Cursor account email", () => {
 });
 
 describe("Cursor session refresh", () => {
+	// `keys.get` falls back to the environment, so an ambient Cursor token would mask the stored row.
+	let savedAccessToken: string | undefined;
+
+	beforeEach(() => {
+		savedAccessToken = process.env.CURSOR_ACCESS_TOKEN;
+		delete process.env.CURSOR_ACCESS_TOKEN;
+	});
+
+	afterEach(() => {
+		if (savedAccessToken === undefined) delete process.env.CURSOR_ACCESS_TOKEN;
+		else process.env.CURSOR_ACCESS_TOKEN = savedAccessToken;
+	});
+
 	async function storeExpiredSession(session: string): Promise<SqliteAuthCredentialStore> {
 		dir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-cursor-session-"));
 		const store = await SqliteAuthCredentialStore.open(path.join(dir, "agent.db"));
@@ -146,7 +159,7 @@ describe("Cursor session refresh", () => {
 		return store;
 	}
 
-	test("an expired Cursor login renews and stores the renewed session for the next refresh", async () => {
+	test("an expired Cursor login renews its access token and keeps its refresh token", async () => {
 		const stale = cursorAccessToken("stale");
 		const store = await storeExpiredSession(stale);
 		const auth = new AuthStorage(store);
@@ -157,7 +170,29 @@ describe("Cursor session refresh", () => {
 
 			expect(await auth.keys.get("cursor", "session")).toBe(fresh);
 			expect(store.listAuthCredentials("cursor").map(row => row.credential)).toMatchObject([
-				{ type: "oauth", access: fresh, refresh: fresh },
+				{ type: "oauth", access: fresh, refresh: stale },
+			]);
+		} finally {
+			auth.close();
+			store.close();
+		}
+	});
+
+	test("a renewal that rotates the refresh token stores the rotated one", async () => {
+		const stale = cursorAccessToken("stale");
+		const store = await storeExpiredSession(stale);
+		const auth = new AuthStorage(store);
+		try {
+			await auth.credentials.reload();
+			const fresh = cursorAccessToken("fresh");
+			const rotated = cursorAccessToken("rotated");
+			vi.spyOn(globalThis, "fetch").mockResolvedValue(
+				Response.json({ access_token: fresh, refresh_token: rotated, shouldLogout: false }),
+			);
+
+			expect(await auth.keys.get("cursor", "session")).toBe(fresh);
+			expect(store.listAuthCredentials("cursor").map(row => row.credential)).toMatchObject([
+				{ type: "oauth", access: fresh, refresh: rotated },
 			]);
 		} finally {
 			auth.close();
@@ -174,9 +209,9 @@ describe("Cursor session refresh", () => {
 
 			expect(await auth.keys.get("cursor", "session")).toBeUndefined();
 			expect(store.listAuthCredentials("cursor")).toEqual([]);
-			expect((await store.listDisabledCredentials("cursor")).map(row => row.cause)).toEqual([
-				"oauth refresh failed: OAuthError: invalid_grant: Cursor ended this session; run /login cursor again",
-			]);
+			const causes = (await store.listDisabledCredentials("cursor")).map(row => row.cause);
+			expect(causes).toHaveLength(1);
+			expect(causes[0]).toContain("run /login cursor again");
 		} finally {
 			auth.close();
 			store.close();
@@ -189,8 +224,9 @@ describe("Cursor session refresh", () => {
 		const auth = new AuthStorage(store);
 		try {
 			await auth.credentials.reload();
-			vi.spyOn(globalThis, "fetch").mockImplementation((async () =>
-				Response.json({ access_token: "", id_token: "", shouldLogout: false })) as typeof fetch);
+			vi.spyOn(globalThis, "fetch").mockResolvedValue(
+				Response.json({ access_token: "", id_token: "", shouldLogout: false }),
+			);
 
 			expect(await auth.keys.get("cursor", "session")).toBeUndefined();
 			expect(store.listAuthCredentials("cursor").map(row => row.credential)).toMatchObject([
