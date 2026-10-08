@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Claude Haiku 5.5 on Cursor showing as unpriced; it now uses Cursor's $0.10/$0.50 rate card and 5x long-context tier above 100K input tokens ([#14890](https://github.com/can1357/oh-my-pi/pull/14890) by [@eggpeat](https://github.com/eggpeat)).
+- Fixed Claude Haiku 5.5 on OpenRouter, Vercel AI Gateway, Amazon Bedrock, and Google Vertex omitting the 5x long-context price tier above 100K input tokens ([#14890](https://github.com/can1357/oh-my-pi/pull/14890) by [@eggpeat](https://github.com/eggpeat)).
 
 ## [18.8.3] - 2026-10-07
 

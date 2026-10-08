@@ -1226,6 +1226,63 @@ describe("OpenRouter model discovery", () => {
 		});
 	});
 
+	it("bills discovered Haiku 5.5 rows at 5x their own rates above 100K input", async () => {
+		const haiku = {
+			name: "Anthropic: Claude Haiku 5.5",
+			supported_parameters: ["tools", "tool_choice", "reasoning"],
+			architecture: { input_modalities: ["text", "image"] },
+			top_provider: { max_completion_tokens: 128_000 },
+			context_length: 1_000_000,
+		};
+		const options = openrouterModelManagerOptions({
+			fetch: async url =>
+				String(url) !== "https://openrouter.ai/api/v1/models"
+					? Response.json({ data: [] })
+					: Response.json({
+							// Live OpenRouter wire prices (USD per token) for the standard and batch rows.
+							data: [
+								{
+									...haiku,
+									id: "anthropic/claude-haiku-5.5",
+									pricing: {
+										prompt: "0.0000001",
+										completion: "0.0000005",
+										input_cache_read: "0.00000001",
+										input_cache_write: "0.000000125",
+									},
+								},
+								{
+									...haiku,
+									id: "anthropic/claude-haiku-5.5:batch",
+									pricing: {
+										prompt: "0.00000005",
+										completion: "0.00000025",
+										input_cache_read: "0.000000005",
+										input_cache_write: "0.0000000625",
+									},
+								},
+							],
+						}),
+		});
+		const specs = (await options.fetchDynamicModels?.()) ?? [];
+		const tier = (id: string) => {
+			const spec = specs.find(model => model.id === id);
+			if (!spec) throw new Error(`Expected discovered ${id}`);
+			return buildModel(spec).cost.longContext;
+		};
+
+		const standard = tier("anthropic/claude-haiku-5.5");
+		expect(standard?.inputThreshold).toBe(100_000);
+		expect(standard?.input).toBeCloseTo(0.5, 10);
+		expect(standard?.output).toBeCloseTo(2.5, 10);
+		expect(standard?.cacheRead).toBeCloseTo(0.05, 10);
+		expect(standard?.cacheWrite).toBeCloseTo(0.625, 10);
+		// The batch row bills half price, so its tier must scale from its own card.
+		const batch = tier("anthropic/claude-haiku-5.5:batch");
+		expect(batch?.input).toBeCloseTo(0.25, 10);
+		expect(batch?.output).toBeCloseTo(1.25, 10);
+	});
+
 	it("ignores legacy OpenRouter chat-completions cache rows", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-catalog-openrouter-legacy-cache-"));
 		const dbPath = path.join(tempDir, "models.db");
