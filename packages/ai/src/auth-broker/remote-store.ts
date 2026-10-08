@@ -1510,7 +1510,12 @@ export class RemoteAuthCredentialStore implements AuthCredentialStore {
 	}
 
 	#flushObservedUsage(): Promise<void> {
-		this.#observedUsageFlush = this.#observedUsageFlush.then(() => this.#sendObservedUsage());
+		// The tail never rejects, so one failed send cannot stall every later flush.
+		this.#observedUsageFlush = this.#observedUsageFlush
+			.then(() => this.#sendObservedUsage())
+			.catch(error => {
+				logger.debug("auth-broker observed usage flush failed", { error: String(error) });
+			});
 		return this.#observedUsageFlush;
 	}
 
