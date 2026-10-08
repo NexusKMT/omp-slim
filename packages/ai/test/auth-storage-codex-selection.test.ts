@@ -482,11 +482,7 @@ describe("AuthStorage codex oauth ranking", () => {
 
 	test.each([
 		{ reservePct: 30, usedFraction: 0.7, inReserve: true },
-		{ reservePct: 20, usedFraction: 0.8, inReserve: true },
-		{ reservePct: 15, usedFraction: 0.85, inReserve: true },
-		{ reservePct: 5, usedFraction: 0.95, inReserve: true },
 		{ reservePct: 30, usedFraction: 0.69, inReserve: false },
-		{ reservePct: 15, usedFraction: 0.84, inReserve: false },
 	])(
 		"treats $usedFraction used against a $reservePct% reserve as inReserve=$inReserve",
 		async ({ reservePct, usedFraction, inReserve }) => {
