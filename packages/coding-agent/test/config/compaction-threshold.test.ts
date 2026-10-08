@@ -2,8 +2,15 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import path from "node:path";
-import { validateAgentCompactionThresholdOverrides } from "@oh-my-pi/pi-coding-agent/config/compaction-threshold";
+import {
+	matchModelCompactionThreshold,
+	parseCompactionPointInput,
+	validateAgentCompactionThresholdOverrides,
+} from "@oh-my-pi/pi-coding-agent/config/compaction-threshold";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgCompactionModelThresholds } from "@oh-my-pi/pi-coding-agent/session/context-settings";
+import { resolveModelCompactionSettings } from "@oh-my-pi/pi-coding-agent/session/model-compaction-threshold";
+import { compactionThresholdSettings, createSubagentSettings } from "@oh-my-pi/pi-coding-agent/task/executor";
 import { cfgTaskAgentCompactionThresholdOverrides } from "@oh-my-pi/pi-coding-agent/task/settings";
 
 async function withConfigDirs(run: (dirs: { root: string; agentDir: string; cwd: string }) => Promise<void>) {
@@ -91,5 +98,57 @@ describe("task.agentCompactionThresholdOverrides", () => {
 			"task.agentCompactionThresholdOverrides.scout",
 		);
 		expect(cfgTaskAgentCompactionThresholdOverrides.get(settings)).toEqual({ scout: 90000 });
+	});
+});
+
+describe("compaction.modelThresholds", () => {
+	it("parses typed compaction points into persisted entries", () => {
+		expect(parseCompactionPointInput("90000")).toBe(90000);
+		expect(parseCompactionPointInput("90k")).toBe(90000);
+		expect(parseCompactionPointInput("2M")).toBe(2_000_000);
+		expect(parseCompactionPointInput("1b")).toBe(1_000_000_000);
+		expect(parseCompactionPointInput(" 12.5% ")).toBe("12.5%");
+		expect(parseCompactionPointInput("  ")).toBeNull();
+		for (const input of ["abc", "0", "1.5m", "90 kb", "101%", "-5"]) {
+			expect(() => parseCompactionPointInput(input)).toThrow("Invalid compaction point");
+		}
+	});
+
+	it("prefers the exact model key, then the longest matching prefix", () => {
+		const raw = { "openrouter/*": 50000, "openrouter/anthropic/*": "60%", "openrouter/anthropic/opus": 90000 };
+		expect(matchModelCompactionThreshold(raw, { provider: "openrouter", id: "anthropic/opus" })?.key).toBe(
+			"openrouter/anthropic/opus",
+		);
+		expect(matchModelCompactionThreshold(raw, { provider: "openrouter", id: "anthropic/sonnet" })?.key).toBe(
+			"openrouter/anthropic/*",
+		);
+		expect(matchModelCompactionThreshold(raw, { provider: "openrouter", id: "google/gemini" })?.key).toBe(
+			"openrouter/*",
+		);
+		expect(matchModelCompactionThreshold(raw, { provider: "anthropic", id: "opus" })).toBeUndefined();
+		expect(() => cfgCompactionModelThresholds.set(Settings.isolated(), { opus: 1000 })).toThrow(
+			'compaction.modelThresholds key "opus"',
+		);
+	});
+
+	it("lets a per-agent override outrank model entries without hiding them from that agent's children", () => {
+		const deepseek = { provider: "deepseek", id: "v4" };
+		const root = Settings.isolated({
+			"compaction.thresholdPercent": 80,
+			"compaction.modelThresholds": { "deepseek/*": 90000 },
+		});
+		expect(resolveModelCompactionSettings(root, deepseek)).toMatchObject({ thresholdTokens: 90000 });
+
+		const agent = createSubagentSettings(
+			root,
+			compactionThresholdSettings({ thresholdPercent: 50, thresholdTokens: -1 }, root),
+		);
+		expect(resolveModelCompactionSettings(agent, deepseek)).toMatchObject({
+			thresholdPercent: 50,
+			thresholdTokens: -1,
+		});
+
+		const grandchild = createSubagentSettings(agent);
+		expect(resolveModelCompactionSettings(grandchild, deepseek)).toMatchObject({ thresholdTokens: 90000 });
 	});
 });

@@ -39,7 +39,7 @@ import {
 	resolveSubagentServiceTier,
 	type ServiceTierInheritSettingValue,
 } from "../config/service-tier";
-import type { CompactionThresholdPair } from "../config/compaction-threshold";
+import type { AgentCompactionThresholdOverride, CompactionThresholdPair } from "../config/compaction-threshold";
 import { type OAuthAccountPools, validateAgentAccountPools } from "../config/account-pools";
 import { type OverlayLayers, Settings } from "../config/settings";
 
@@ -146,7 +146,11 @@ import {
 } from "../session/settings";
 import { cfgDisabledProviders } from "../config/model-settings";
 import { getRetryFallbackRole, installRetryFallbackRole } from "../session/retry-fallback-chains";
-import { cfgCompactionThresholdPercent, cfgCompactionThresholdTokens } from "../session/context-settings";
+import {
+	cfgCompactionModelThresholds,
+	cfgCompactionThresholdPercent,
+	cfgCompactionThresholdTokens,
+} from "../session/context-settings";
 
 export type { YieldItem } from "@oh-my-pi/pi-tui/tools/task";
 
@@ -1063,26 +1067,38 @@ function inheritedSubagentServiceTiers(
 /**
  * Compaction thresholds of the root (non-subagent) settings a subagent chain
  * started from. Per-agent `task.agentCompactionThresholdOverrides` entries
- * replace `compaction.threshold*` only for the agent they name; every other
- * descendant resolves against these root values, not an ancestor's override.
+ * replace `compaction.threshold*` and clear `compaction.modelThresholds` only
+ * for the agent they name; every other descendant resolves against these root
+ * values, not an ancestor's override.
  */
 const kRootCompactionThresholds = Symbol("task.rootCompactionThresholds");
 
-/** Settings from {@link createSubagentSettings}, tagged with its chain's root compaction thresholds. */
-interface SubagentChainSettings extends Settings {
-	[kRootCompactionThresholds]?: CompactionThresholdPair;
+interface RootCompactionThresholds extends CompactionThresholdPair {
+	modelThresholds: Readonly<Record<string, AgentCompactionThresholdOverride>>;
 }
 
-/** Settings overrides applying an exact-name compaction threshold entry to one subagent. */
+/** Settings from {@link createSubagentSettings}, tagged with its chain's root compaction thresholds. */
+interface SubagentChainSettings extends Settings {
+	[kRootCompactionThresholds]?: RootCompactionThresholds;
+}
+
+/**
+ * Settings overrides applying an exact-name compaction threshold entry to one
+ * subagent. The agent entry outranks `compaction.modelThresholds`, so every
+ * model entry `settings` configures is cleared for it.
+ */
 export function compactionThresholdSettings(
 	threshold: CompactionThresholdPair | undefined,
+	settings: Settings,
 ): Readonly<Record<string, unknown>> | undefined {
-	return threshold === undefined
-		? undefined
-		: {
-				"compaction.thresholdPercent": threshold.thresholdPercent,
-				"compaction.thresholdTokens": threshold.thresholdTokens,
-			};
+	if (threshold === undefined) return undefined;
+	const clearedModelThresholds: Record<string, null> = {};
+	for (const key in cfgCompactionModelThresholds.get(settings)) clearedModelThresholds[key] = null;
+	return {
+		"compaction.thresholdPercent": threshold.thresholdPercent,
+		"compaction.thresholdTokens": threshold.thresholdTokens,
+		"compaction.modelThresholds": clearedModelThresholds,
+	};
 }
 
 export function createSubagentSettings(
@@ -1102,10 +1118,15 @@ export function createSubagentSettings(
 	const rootThresholds = inheritedRootThresholds ?? {
 		thresholdPercent: cfgCompactionThresholdPercent.get(baseSettings),
 		thresholdTokens: cfgCompactionThresholdTokens.get(baseSettings),
+		modelThresholds: cfgCompactionModelThresholds.get(baseSettings),
 	};
 	// Every other setting reads through to the parent live; writes on the overlay stay local.
 	const subagentSettings: SubagentChainSettings = baseSettings.overlay({
-		...compactionThresholdSettings(inheritedRootThresholds),
+		...(inheritedRootThresholds && {
+			"compaction.thresholdPercent": inheritedRootThresholds.thresholdPercent,
+			"compaction.thresholdTokens": inheritedRootThresholds.thresholdTokens,
+			"compaction.modelThresholds": inheritedRootThresholds.modelThresholds,
+		}),
 		// A subagent's thinking level is chosen at spawn (agent definition, `effort`, or this
 		// snapshot of the parent default); a later parent default edit must not re-steer it.
 		defaultThinkingLevel: cfgDefaultThinkingLevel.get(baseSettings),
@@ -3738,7 +3759,7 @@ async function refreshSubagentIrcRoot(
 interface SubagentSettingsRecipe {
 	parent: Settings;
 	layers: OverlayLayers;
-	rootThresholds: CompactionThresholdPair | undefined;
+	rootThresholds: RootCompactionThresholds | undefined;
 }
 
 function captureSubagentSettings(parent: Settings, settings: SubagentChainSettings): SubagentSettingsRecipe {
@@ -3907,7 +3928,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 	const subagentSettings = createSubagentSettings(
 		settings,
 		{
-			...compactionThresholdSettings(options.compactionThresholdOverride),
+			...compactionThresholdSettings(options.compactionThresholdOverride, settings),
 			...(agent.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
 			// Isolated runs must not expose roots outside the worktree.
 			...(worktree !== undefined ? { "workspace.additionalDirectories": [] } : undefined),
