@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [18.8.0] - 2026-10-07
+
 ### Changed
 
 - Improved streaming transcript performance by reducing unnecessary guest updates and Markdown re-rendering, including faster rendering for transcripts with many unclosed LaTeX delimiters.
