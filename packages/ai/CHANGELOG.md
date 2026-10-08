@@ -9,10 +9,7 @@
 
 ### Fixed
 
-- Fixed false thinking-loop detections on Gemini, DeepSeek, and Grok when the model drafts or answers with repetitive code or markup (VRML, SVG, JSON); such output is no longer discarded and retried.
-- Fixed Cursor provider leaking conversation checkpoints, blob stores and abort listeners after requests end ([#14669](https://github.com/can1357/oh-my-pi/pull/14669) by [@H4vC](https://github.com/H4vC))
-- Fixed session-affinity pins growing without bound in long-lived gateways (now capped at 256 sessions per provider) ([#14672](https://github.com/can1357/oh-my-pi/pull/14672) by [@H4vC](https://github.com/H4vC))
-- Stripped `uniqueItems` and unsupported array/content validation keywords (`contains`, `minContains`, `maxContains`, `additionalItems`, `contentEncoding`, `contentMediaType`, `contentSchema`, `$id`, `$anchor`) during Google and Cloud Code Assist schema normalization (`normalizeSchemaForGoogle` and `normalizeSchemaForCCA`). Prevents Google Cloud Code Assist HTTP 400 errors (`Invalid JSON payload received. Unknown name "uniqueItems" at 'request.tools[...].parameters...': Cannot find field`) when using tools with array schemas defining `uniqueItems: true`.
+- Fixed Google Gemini and Cloud Code Assist (Antigravity) requests failing with HTTP 400 when a tool schema uses `uniqueItems`, `contains`, `contentEncoding` or similar unsupported array/content keywords ([#14766](https://github.com/can1357/oh-my-pi/pull/14766) by [@jwaldrip](https://github.com/jwaldrip))
 - Fixed auth broker clients judging an account by a sibling account's usage when only the sibling's usage fetch succeeded, so account selection and usage-limit blocks acted on the wrong quota ([#14904](https://github.com/can1357/oh-my-pi/pull/14904) by [@will-bogusz](https://github.com/will-bogusz))
 
 ## [18.8.5] - 2026-10-08
