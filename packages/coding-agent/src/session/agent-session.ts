@@ -2024,7 +2024,7 @@ export class AgentSession implements SettingsScope {
 		});
 		this.agent.setOnBeforeYield(() => this.#ttsr.settleJudgments());
 		this.agent.setOnModelCallSystemPrompt(prompt => {
-			this.#tools.markPrimaryRequestSent();
+			this.#tools.recordPrimaryModelCall(prompt);
 			this.#recordModelCallSystemPrompt(prompt);
 		});
 		this.#obfuscator = config.obfuscator;

@@ -223,6 +223,16 @@ const XDEV_MOUNT_NOTICE_MESSAGE_TYPE = "xdev-mount-notice";
 const EVAL_PRELUDE_NOTICE_MESSAGE_TYPE = "eval-prelude-notice";
 const SESSION_AGENT_NOTICE_MESSAGE_TYPE = "session-agent-notice";
 
+/** Custom entry holding the digest of the base prompt the branch's primary model calls are built from. */
+const SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE = "system-prompt-digest";
+
+/** Equal digests mean equal prompt blocks. */
+function systemPromptDigest(blocks: readonly string[]): string {
+	let hash = BigInt(blocks.length);
+	for (const block of blocks) hash = Bun.hash.wyhash(block, hash);
+	return hash.toString(16);
+}
+
 /**
  * Structured payload persisted on each {@link XDEV_MOUNT_NOTICE_MESSAGE_TYPE}
  * custom message. Lets a resumed session reconstruct which dynamic devices the
@@ -308,11 +318,11 @@ export class SessionTools {
 	#basePromptReflectsRosterDelta = false;
 	/**
 	 * Newest assistant reply restored with the transcript this session was
-	 * created with, until this session's first primary model call. It and every
-	 * reply before it were answered under another process's prompt; see
-	 * {@link #transcriptBindsPrompt}.
+	 * created with, and the recorded digest of the prompt that transcript was
+	 * sent with, until this session's first primary model call; see
+	 * {@link #implicitRebuildBinding}.
 	 */
-	#restoredReply: AgentMessage | undefined;
+	#restoredTranscript: { reply: AgentMessage; promptDigest: string } | undefined;
 	/**
 	 * Dynamic (`xd://`) devices the model has already been told are mounted.
 	 * Seeded lazily from persisted history on resume (see
@@ -445,7 +455,10 @@ export class SessionTools {
 		if (this.#xdev) this.#xdev.decorateExecution = tool => this.#wrapToolForAcpPermission(tool);
 		this.#setActiveToolNames = options.setActiveToolNames;
 		this.#baseSystemPrompt = options.baseSystemPrompt;
-		this.#restoredReply = this.#latestReply();
+		const restoredReply = this.#latestReply();
+		const restoredPromptDigest = restoredReply && this.#recordedPromptDigest();
+		this.#restoredTranscript =
+			restoredReply && restoredPromptDigest ? { reply: restoredReply, promptDigest: restoredPromptDigest } : undefined;
 		this.#skills = options.skills ?? [];
 		this.#skillWarnings = options.skillWarnings ?? [];
 		this.#skillsSettings = options.skillsSettings;
@@ -1251,7 +1264,7 @@ export class SessionTools {
 				const freezeImplicitPromptRefresh =
 					!forcePromptRefresh &&
 					triggerSignature !== this.#lastAppliedToolSignature &&
-					this.#prefixBindingFreezesPrompt();
+					this.#implicitRebuildBinding() === "frozen";
 				if (freezeImplicitPromptRefresh) {
 					frozenSignature = triggerSignature;
 				} else if (forcePromptRefresh || triggerSignature !== this.#lastAppliedToolSignature) {
@@ -1307,10 +1320,18 @@ export class SessionTools {
 				: undefined;
 			// The first primary model call can capture the prompt while the rebuild
 			// awaits; that prompt is bound from then on, so an implicit rebuild ends
-			// exactly as if it had frozen up front.
-			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined && this.#prefixBindingFreezesPrompt()) {
-				rebuiltSystemPrompt = undefined;
-				frozenSignature = implicitRebuildSignature;
+			// exactly as if it had frozen up front. Before that call, a resumed
+			// transcript binds the prompt it was sent with: only a rebuild that
+			// reproduces it commits.
+			if (rebuiltSystemPrompt && implicitRebuildSignature !== undefined) {
+				const binding = this.#implicitRebuildBinding();
+				if (
+					binding === "frozen" ||
+					(binding !== "free" && systemPromptDigest(rebuiltSystemPrompt) !== binding.promptDigest)
+				) {
+					rebuiltSystemPrompt = undefined;
+					frozenSignature = implicitRebuildSignature;
+				}
 			}
 			if (rebuiltSystemPrompt && rebuiltSignature) {
 				if (this.#lastAppliedToolSignature !== undefined) this.#host.clearInheritedProviderPromptCacheKey();
@@ -1358,43 +1379,53 @@ export class SessionTools {
 		return this.#host.agent.state.messages.findLast(message => message.role === "assistant");
 	}
 
+	/** Digest of the base prompt the current branch's latest primary model call was built from. */
+	#recordedPromptDigest(): string | undefined {
+		const branch = this.#host.sessionManager.getBranchView();
+		for (let index = branch.length - 1; index >= 0; index--) {
+			const entry = branch[index];
+			if (entry.type === "custom" && entry.customType === SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE) {
+				return entry.data as string;
+			}
+		}
+		return undefined;
+	}
+
 	/**
-	 * Called as a primary model call captures its prompt, before the request is
+	 * Called with the prompt a primary model call captures, before the request is
 	 * sent. From then on the transcript's signed thinking may be bound to that
 	 * prompt, whatever later history edits (`/tree`, fork, recovery) leave as the
-	 * newest reply, so the restored reply is dropped for good. Side requests
+	 * newest reply, so the restored transcript is dropped for good. The base
+	 * prompt's digest is recorded on the branch whenever it changes, so a resumed
+	 * process knows which prompt its transcript was sent with. Side requests
 	 * (`runEphemeralTurn`) do not count.
 	 */
-	markPrimaryRequestSent(): void {
-		this.#restoredReply = undefined;
+	recordPrimaryModelCall(prompt: string[]): void {
+		this.#restoredTranscript = undefined;
+		const digest = systemPromptDigest(this.baseOfSystemPrompt(prompt));
+		if (digest !== this.#recordedPromptDigest()) {
+			this.#host.sessionManager.appendCustomEntry(SYSTEM_PROMPT_DIGEST_CUSTOM_TYPE, digest);
+		}
 	}
 
 	/**
-	 * Whether the transcript's signed thinking may be bound to the current
-	 * prompt: it holds a reply, and that reply is not the one restored at
-	 * construction (this session made a primary model call, or a transcript was
-	 * switched in later). A resumed process builds its base prompt before its
-	 * first primary model call, so tools that register before that call (lazily
-	 * registered extension tools, MCP servers) rebuild the prompt as the original
-	 * process's first turn did, instead of freezing a startup prompt the
-	 * transcript was never sent with.
+	 * What an implicit prompt rebuild must keep when the model binds signed
+	 * thinking to its prompt prefix. `"free"`: no prompt is committed yet, the
+	 * model does not bind, or the transcript holds no reply. `"frozen"`: the
+	 * transcript may be bound to the current prompt. Otherwise the newest reply is
+	 * the restored one and no primary model call has run: a resumed process builds
+	 * its base prompt before tools that register late (extension tools, MCP
+	 * servers), so a rebuild may commit only when it reproduces the prompt the
+	 * transcript was sent with. A transcript restored without a recorded digest,
+	 * or switched in later, stays frozen.
 	 */
-	#transcriptBindsPrompt(): boolean {
+	#implicitRebuildBinding(): "free" | "frozen" | { promptDigest: string } {
+		if (this.#lastAppliedToolSignature === undefined || this.#host.model()?.thinking?.prefixBinding !== true) {
+			return "free";
+		}
 		const latest = this.#latestReply();
-		return latest !== undefined && latest !== this.#restoredReply;
-	}
-
-	/**
-	 * Whether an implicit prompt rebuild must freeze instead: a prompt has been
-	 * committed, the model binds signed thinking to its prefix, and the
-	 * transcript may already be bound to that prompt.
-	 */
-	#prefixBindingFreezesPrompt(): boolean {
-		return (
-			this.#lastAppliedToolSignature !== undefined &&
-			this.#host.model()?.thinking?.prefixBinding === true &&
-			this.#transcriptBindsPrompt()
-		);
+		if (latest === undefined) return "free";
+		return latest === this.#restoredTranscript?.reply ? this.#restoredTranscript : "frozen";
 	}
 
 	#notifyToolRosterDelta(previousActiveToolNames: readonly string[], appliedNames: readonly string[]): void {

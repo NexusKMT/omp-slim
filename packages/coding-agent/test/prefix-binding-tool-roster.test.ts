@@ -194,8 +194,8 @@ describe("prefix-bound tool roster changes", () => {
 	});
 
 	describe("after a resume", () => {
-		/** Transcript of a process that sent its first turn with `read` and `bash` active. */
-		async function liveTranscript(): Promise<{
+		/** Transcript of a process that sent its first turn with `toolNames` active. */
+		async function liveTranscript(toolNames = ["read", "bash"]): Promise<{
 			sessionManager: SessionManager;
 			replyEntryId: string;
 			systemPrompt: string[];
@@ -203,7 +203,7 @@ describe("prefix-bound tool roster changes", () => {
 			const sessionManager = SessionManager.inMemory();
 			const live = newSession(createPrefixBindingModel(), { sessionManager });
 			sessions.push(live.session);
-			await live.session.setActiveToolPresentation(["read", "bash"], []);
+			await live.session.setActiveToolPresentation(toolNames, []);
 			await live.session.prompt("first");
 			const reply = sessionManager
 				.getEntries()
@@ -232,12 +232,12 @@ describe("prefix-bound tool roster changes", () => {
 			const transcript = await liveTranscript();
 			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
 			sessions.push(resumed.session);
-			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+			await resumed.session.setActiveToolPresentation(["read"], []);
 			await resumed.session.prompt("second");
 			// The restored reply is the newest again, but this process already sent its prompt.
 			await resumed.session.navigateTree(transcript.replyEntryId);
 
-			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
 			await resumed.session.prompt("third");
 
 			expect(resumed.systemPrompts[1]).toEqual(resumed.systemPrompts[0]);
@@ -248,7 +248,7 @@ describe("prefix-bound tool roster changes", () => {
 			const transcript = await liveTranscript();
 			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
 			sessions.push(resumed.session);
-			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+			await resumed.session.setActiveToolPresentation(["read"], []);
 			// A background roster change (e.g. an MCP refresh) starts its rebuild
 			// before the first request and finishes after that request was sent.
 			const rebuildGate = Promise.withResolvers<void>();
@@ -256,7 +256,7 @@ describe("prefix-bound tool roster changes", () => {
 				await rebuildGate.promise;
 				return `tools:${toolNames.join(",")}`;
 			});
-			const rosterChange = resumed.session.setActiveToolPresentation(["read"], []);
+			const rosterChange = resumed.session.setActiveToolPresentation(["read", "bash"], []);
 			await resumed.session.prompt("second");
 			rebuildGate.resolve();
 			await rosterChange;
@@ -287,6 +287,56 @@ describe("prefix-bound tool roster changes", () => {
 
 			expect(resumed.systemPrompts[1]).toEqual(resumed.systemPrompts[0]);
 			expect(providerText(resumed.contexts[1])).toContain("Tool availability changed.");
+		});
+
+		it("keeps the transcript's prompt when a tool installed since that run registers late", async () => {
+			const transcript = await liveTranscript(["read"]);
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+			await resumed.session.prompt("second");
+
+			expect(resumed.systemPrompts[0]).toEqual(transcript.systemPrompt);
+			expect(providerText(resumed.contexts[0])).toContain("Now available: bash.");
+		});
+
+		it("keeps the transcript's prompt when a late tool was frozen out mid-conversation", async () => {
+			const sessionManager = SessionManager.inMemory();
+			const live = newSession(createPrefixBindingModel(), { sessionManager });
+			sessions.push(live.session);
+			await live.session.setActiveToolPresentation(["read"], []);
+			await live.session.prompt("first");
+			await live.session.setActiveToolPresentation(["read", "bash"], []);
+			await live.session.prompt("second");
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager });
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+			await resumed.session.prompt("third");
+
+			expect(live.systemPrompts[1]).toEqual(["tools:read"]);
+			expect(resumed.systemPrompts[0]).toEqual(live.systemPrompts[1]);
+		});
+
+		it("keeps the startup prompt for a transcript recorded without a prompt digest", async () => {
+			const transcript = await liveTranscript();
+			// Transcripts written before prompt digests were recorded hold only the messages.
+			const sessionManager = SessionManager.inMemory();
+			for (const entry of transcript.sessionManager.getEntries()) {
+				if (entry.type === "message") sessionManager.appendMessage(entry.message);
+			}
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager });
+			sessions.push(resumed.session);
+			await resumed.session.setActiveToolPresentation(["read"], []);
+			await resumed.session.setActiveToolPresentation(["read", "bash"], []);
+
+			await resumed.session.prompt("second");
+
+			expect(resumed.systemPrompts[0]).toEqual(["tools:read"]);
+			expect(providerText(resumed.contexts[0])).toContain("Now available: bash.");
 		});
 	});
 
