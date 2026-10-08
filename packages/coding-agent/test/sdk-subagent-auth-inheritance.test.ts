@@ -10,14 +10,14 @@ import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
-import { credentialPinHash } from "@oh-my-pi/pi-coding-agent/session/credential-pin";
+import { credentialPinHash, recordCredentialPin } from "@oh-my-pi/pi-coding-agent/session/credential-pin";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import * as discoveryModule from "@oh-my-pi/pi-coding-agent/task/discovery";
 import * as executorModule from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import type { SingleResult } from "@oh-my-pi/pi-tui/tools/task";
 import { TempDir } from "@oh-my-pi/pi-utils";
-import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createAssistantMessage, createInMemoryAuthStorage } from "./helpers/agent-session-setup";
 
 const taskAgent: AgentDefinition = {
 	name: "task",
@@ -66,6 +66,25 @@ function claudeUsage(accountId: string, usedFraction: number): UsageReport {
 			},
 		],
 	};
+}
+
+/** Account B is 70% used and inside its 50% reserve; A is 20% used, so only an explicit pin keeps B. */
+function reserveAuthStorage(): AuthStorage {
+	const usedFractionByAccount: Record<string, number> = { "account-a": 0.2, "account-b": 0.7 };
+	return new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")), {
+		usageProviderResolver: provider =>
+			provider === "anthropic"
+				? {
+						id: "anthropic",
+						async fetchUsage({ credential }) {
+							const accountId = credential.accountId;
+							const usedFraction = accountId ? usedFractionByAccount[accountId] : undefined;
+							return accountId && usedFraction !== undefined ? claudeUsage(accountId, usedFraction) : null;
+						},
+					}
+				: undefined,
+		accountPolicies: [{ provider: "anthropic", account: { accountId: "account-b" }, reservePct: 50 }],
+	});
 }
 
 function metadataUserId(metadata: Record<string, unknown> | undefined): {
@@ -255,6 +274,7 @@ describe("task subagent OAuth pin inheritance", () => {
 		childAccount: string,
 		parentAccount: string,
 		parentPinOptions?: { restoredAtMs: number },
+		oauthAccountPools?: Record<string, string[]>,
 	): Promise<string | undefined> {
 		const tempDir = TempDir.createSync("@pi-subagent-revive-pin-");
 		let child: AgentSession | undefined;
@@ -293,6 +313,7 @@ describe("task subagent OAuth pin inheritance", () => {
 				settings: Settings.isolated({ "async.enabled": false, "compaction.enabled": false }),
 				model,
 				credentialSourceSessionId: parentProviderSessionId,
+				oauthAccountPools,
 				toolNames: ["read"],
 				disableExtensionDiscovery: true,
 			}));
@@ -316,23 +337,70 @@ describe("task subagent OAuth pin inheritance", () => {
 	});
 
 	it("keeps the parent's explicit pin explicit in a revived child pinned to the same account", async () => {
-		// Account B sits inside its reserve; only an explicit pin keeps it from ranking away to A.
-		const usedFractionByAccount: Record<string, number> = { "account-a": 0.2, "account-b": 0.7 };
-		const authStorage = new AuthStorage(new SqliteAuthCredentialStore(new Database(":memory:")), {
-			usageProviderResolver: provider =>
-				provider === "anthropic"
-					? {
-							id: "anthropic",
-							async fetchUsage({ credential }) {
-								const accountId = credential.accountId;
-								const usedFraction = accountId ? usedFractionByAccount[accountId] : undefined;
-								return accountId && usedFraction !== undefined ? claudeUsage(accountId, usedFraction) : null;
-							},
-						}
-					: undefined,
-			accountPolicies: [{ provider: "anthropic", account: { accountId: "account-b" }, reservePct: 50 }],
+		expect(await reviveChildKey(reserveAuthStorage(), "b", "b")).toBe("access-b");
+	});
+
+	it("keeps a revived child inside its account pool over the parent's explicit pin", async () => {
+		const key = await reviveChildKey(createInMemoryAuthStorage(), "b", "a", undefined, {
+			anthropic: ["email:b@example.com"],
 		});
-		expect(await reviveChildKey(authStorage, "b", "b")).toBe("access-b");
+		expect(key).toBe("access-b");
+	});
+
+	it("keeps a child explicit through revival when the parent's pin predates its first run", async () => {
+		const tempDir = TempDir.createSync("@pi-subagent-revive-pin-");
+		const authStorage = reserveAuthStorage();
+		let child: AgentSession | undefined;
+		try {
+			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!model) throw new Error("Expected bundled test model");
+			await authStorage.credentials.set("anthropic", [oauthCredential("a"), oauthCredential("b")]);
+			const parentProviderSessionId = "parent-provider-session";
+			const accountB = authStorage.oauth.accounts("anthropic").find(account => account.accountId === "account-b");
+			if (!accountB) throw new Error("Expected account B");
+			expect(authStorage.sessions.pin("anthropic", parentProviderSessionId, accountB.credentialId)).toBe(true);
+
+			const childTranscript = SessionManager.create(tempDir.path(), tempDir.join("sessions"));
+			const childOptions = {
+				cwd: tempDir.path(),
+				agentDir: tempDir.path(),
+				authStorage,
+				modelRegistry: new ModelRegistry(authStorage, tempDir.join("models.yml")),
+				settings: Settings.isolated({ "async.enabled": false, "compaction.enabled": false }),
+				model,
+				credentialSourceSessionId: parentProviderSessionId,
+				toolNames: ["read"],
+				disableExtensionDiscovery: true,
+			};
+			// The child's first run records B in its transcript, then a later turn.
+			({ session: child } = await createAgentSession({ ...childOptions, sessionManager: childTranscript }));
+			const firstRunGetApiKey = child.agent.getApiKey;
+			if (!firstRunGetApiKey) throw new Error("Expected child credential resolver");
+			expect(await resolveApiKeyOnce(await firstRunGetApiKey(model))).toBe("access-b");
+			const childSessionId = childTranscript.getSessionId();
+			recordCredentialPin(authStorage, childTranscript, childSessionId, "anthropic");
+			const laterTurn = createAssistantMessage("earlier child turn");
+			laterTurn.timestamp = Date.now() + 1000;
+			childTranscript.appendMessage(laterTurn);
+			const sessionFile = childTranscript.getSessionFile();
+			if (!sessionFile) throw new Error("Expected a session file");
+			await child.dispose();
+			child = undefined;
+			authStorage.sessions.release("anthropic", childSessionId);
+
+			// Its reopened transcript pin is newer than the inherited explicit pin; restoring it
+			// must not downgrade B to an automatic pin that reserve ranks away to A.
+			const reopened = await SessionManager.open(sessionFile);
+			expect(reopened.getCredentialPins().has("anthropic")).toBe(true);
+			({ session: child } = await createAgentSession({ ...childOptions, sessionManager: reopened }));
+			const childGetApiKey = child.agent.getApiKey;
+			if (!childGetApiKey) throw new Error("Expected child credential resolver");
+			expect(await resolveApiKeyOnce(await childGetApiKey(model))).toBe("access-b");
+		} finally {
+			await child?.dispose();
+			authStorage.close();
+			tempDir.removeSync();
+		}
 	});
 
 	it("restricts a spawned agent to its task.agentAccountPools entry over the parent's pin", async () => {
