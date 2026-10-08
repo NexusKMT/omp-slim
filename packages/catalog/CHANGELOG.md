@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Fixed the native Bedrock Claude Haiku 5.5 policy to require explicit disabled thinking when reasoning is off.
+- Fixed the native Bedrock Claude Haiku 5.5 policy to require explicit disabled thinking when reasoning is off ([#14996](https://github.com/can1357/oh-my-pi/pull/14996) by [@bse-ai](https://github.com/bse-ai)).
 
 ## [18.8.6] - 2026-10-08
 
