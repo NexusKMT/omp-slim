@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the native Bedrock Claude Haiku 5.5 policy to require explicit disabled thinking when reasoning is off.
+
 ## [18.8.6] - 2026-10-08
 
 ### Added

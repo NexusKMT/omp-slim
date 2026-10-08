@@ -6,6 +6,10 @@
 
 - Added routing-session cleanup for OpenAI Responses and Codex while preserving shared provider fallbacks ([#14334](https://github.com/can1357/oh-my-pi/pull/14334) by [@iliaal](https://github.com/iliaal)).
 
+### Fixed
+
+- Fixed native Bedrock Claude Haiku 5.5 main and helper requests silently enabling adaptive thinking when reasoning is off.
+
 ## [18.8.6] - 2026-10-08
 
 ### Fixed
