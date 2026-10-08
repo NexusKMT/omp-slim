@@ -124,8 +124,11 @@ export function createPersistedSubagentReviverFactory(
 				);
 			}
 			// Rebuild the same advisor opt-in the original spawn resolved: `"on"` =
-			// advisor-role model, anything else = the explicit pattern stamped onto
-			// this session's `modelRoles.advisor`. Absent = unadvised (the
+			// advisor-role model, anything else = the pattern stamped onto this
+			// session's `modelRoles.advisor`. Spawn persists it already expanded
+			// against the spawning owner's roles (a parent subagent may override
+			// them); expanding again is a no-op for those and only resolves aliases
+			// in files written before that. Absent = unadvised (the
 			// createSubagentSettings default).
 			const subagentSettings = createSubagentSettings(ctx.settings, {
 				...(init.readSummarize === false ? { "read.summarize.enabled": false } : undefined),
