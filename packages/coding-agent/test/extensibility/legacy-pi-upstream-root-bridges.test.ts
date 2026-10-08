@@ -1,14 +1,15 @@
 import { describe, expect, it } from "bun:test";
-import { compositeLineAt } from "@oh-my-pi/pi-tui/render/composite";
+import { visibleWidth } from "@oh-my-pi/pi-tui/utils";
 import * as caShim from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-coding-agent-shim";
 import * as tuiShim from "@oh-my-pi/pi-coding-agent/extensibility/legacy-pi-tui-shim";
 
 // Upstream pi-coding-agent exports `parseSkillBlock` from its package root
 // (src/core/agent-session.ts) and upstream pi-tui exports `compositeTuiLine`
 // from its package root. omp folds skill invocation into its own hook
-// pipeline (no parser exported) and renamed the composite helper
-// `compositeLineAt` under `@oh-my-pi/pi-tui/render/composite`, so named
-// imports of either from the aliased roots tripped Bun's static
+// pipeline (no parser exported) and its canonical composite helper
+// (`compositeLineAt`) diverges from upstream (SGR-only reset, image-line
+// overlay replacement), so both names are ported into the compat layer;
+// named imports of either from the aliased roots tripped Bun's static
 // "Export named X not found" check (observed consumer: `pi-optchat`, which
 // uses `parseSkillBlock` to match journaled skill invocations and
 // `compositeTuiLine` to overlay its agent-view status line).
@@ -29,12 +30,27 @@ describe("legacy shim upstream-root bridges", () => {
 		expect(caShim.parseSkillBlock('<skill name="x" location="y">no trailing newline</skill>')).toBeNull();
 	});
 
-	it("compositeTuiLine aliases omp's compositeLineAt exactly", () => {
-		expect(typeof tuiShim.compositeTuiLine).toBe("function");
-		const base = "abcdefgh";
-		// compositeLineAt embeds ANSI reset codes around the overlay, so assert
-		// against the aliased implementation rather than a plain-string literal.
-		expect(tuiShim.compositeTuiLine(base, "XY", 2, 2, 8)).toBe(compositeLineAt(base, "XY", 2, 2, 8));
-		expect(tuiShim.compositeTuiLine(base, "TOOLONG", 0, 3, 8)).toBe(compositeLineAt(base, "TOOLONG", 0, 3, 8));
+	it("compositeTuiLine matches upstream splice geometry and OSC-8 reset semantics", () => {
+		const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x07\x1b]*(\x07|\x1b\\)/g, "");
+
+		// Geometry: splice at column, pad to slot, clamp to totalWidth.
+		expect(strip(tuiShim.compositeTuiLine("abcdefgh", "XY", 2, 2, 8))).toBe("abXYefgh");
+		expect(strip(tuiShim.compositeTuiLine("abcdefgh", "XYZ", 0, 3, 8))).toBe("XYZdefgh");
+
+		// Hyperlink contract (upstream SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07"):
+		// a base line carrying an OSC 8 link must not let the overlay inherit
+		// the link. The link opener is in the prefix; the reset immediately
+		// before the overlay must close it.
+		const linked = "\x1b]8;;https://example.test\x07abcdefgh\x1b]8;;\x07";
+		const composed = tuiShim.compositeTuiLine(linked, "XY", 2, 2, 8);
+		const xyAt = composed.indexOf("XY");
+		expect(xyAt).toBeGreaterThanOrEqual(0);
+		const prefix = composed.slice(0, xyAt);
+		expect(prefix).toContain("\x1b]8;;https://example.test\x07"); // opener preserved in prefix
+		expect(prefix.endsWith("\x1b]8;;\x07")).toBe(true); // link closed immediately before overlay
+		expect(composed.slice(xyAt + 2)).not.toContain("https://example.test"); // overlay is not a link
+
+		// Width clamp survives the extra reset bytes.
+		expect(visibleWidth(tuiShim.compositeTuiLine("abcdefgh", "TOOLONGOVERLAY", 0, 3, 8))).toBeLessThanOrEqual(8);
 	});
 });
