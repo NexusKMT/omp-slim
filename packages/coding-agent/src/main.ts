@@ -723,6 +723,10 @@ async function runInteractiveMode(
 			}
 		}
 
+		if (!resuming && joinLink === undefined) {
+			await mode.maybeAutoCreateWorktree();
+		}
+
 		// `omp join <link>`: dispatch through the same builtin path as a typed
 		// `/join` so collab guards and error rendering stay in one place.
 		if (joinLink !== undefined) {
@@ -2479,6 +2483,10 @@ export async function runRootCommand(
 			}
 
 			const modelRegistryError = modelRegistry.getError();
+			for (const warning of modelRegistry.drainConfigWarnings()) {
+				if (isInteractive) notifs.push({ kind: "warn", message: warning });
+				else process.stderr.write(`${chalk.yellow(`Warning: ${warning}`)}\n`);
+			}
 			if (modelRegistryError) {
 				notifs.push({ kind: "error", message: modelRegistryError.message });
 			}
