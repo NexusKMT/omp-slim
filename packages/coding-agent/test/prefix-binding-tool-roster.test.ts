@@ -338,6 +338,31 @@ describe("prefix-bound tool roster changes", () => {
 			expect(resumed.systemPrompts[0]).toEqual(["tools:read"]);
 			expect(providerText(resumed.contexts[0])).toContain("Now available: bash.");
 		});
+
+		/** Kept out of the test body so no strong local binding outlives the capture. */
+		function weakRefToRestoredReply(session: AgentSession): WeakRef<object> {
+			const reply = session.agent.state.messages.findLast(message => message.role === "assistant");
+			if (!reply) throw new Error("resumed session restored no reply");
+			return new WeakRef(reply);
+		}
+
+		it("releases the restored reply when disposed before its first request", async () => {
+			const transcript = await liveTranscript();
+			const resumed = newSession(createPrefixBindingModel(), { sessionManager: transcript.sessionManager });
+			const reply = weakRefToRestoredReply(resumed.session);
+			for (const session of sessions.splice(0)) await session.dispose();
+
+			await resumed.session.dispose();
+
+			// A WeakRef target stays alive until the current task ends; yield a task between collections.
+			for (let attempt = 0; attempt < 5 && reply.deref() !== undefined; attempt++) {
+				const nextTask = Promise.withResolvers<void>();
+				setImmediate(nextTask.resolve);
+				await nextTask.promise;
+				Bun.gc(true);
+			}
+			expect(reply.deref()).toBeUndefined();
+		});
 	});
 
 	it("keeps rebuilding roster changes for models without prefix binding", async () => {

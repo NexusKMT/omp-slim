@@ -5709,6 +5709,7 @@ export class AgentSession implements SettingsScope {
 	#releaseRetainedSessionMemory(): void {
 		this.#releaseQueuedTtsrReservations();
 		this.agent.reset();
+		this.#tools.releaseRestoredTranscript();
 		this.agent.setAppendOnlyContext(undefined);
 		this.rawSseDebugBuffer.clear();
 		this.sessionManager.releaseRetainedEntries();

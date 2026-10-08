@@ -1408,6 +1408,11 @@ export class SessionTools {
 		}
 	}
 
+	/** Drops the restored reply when the session is disposed before its first primary model call. */
+	releaseRestoredTranscript(): void {
+		this.#restoredTranscript = undefined;
+	}
+
 	/**
 	 * What an implicit prompt rebuild must keep when the model binds signed
 	 * thinking to its prompt prefix. `"free"`: no prompt is committed yet, the
