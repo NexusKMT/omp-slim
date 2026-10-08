@@ -730,7 +730,12 @@ describe("formatUsageBreakdown", () => {
 		const text = stripVTControlCharacters(formatUsageBreakdown(providerReports, [], Date.now()));
 		const limitRows = text
 			.split("\n")
-			.map(line => line.trim().replace(/\s+[█░·]+\s+/, " ").replace(/\s+/g, " "))
+			.map(line =>
+				line
+					.trim()
+					.replace(/\s+[█░·]+\s+/, " ")
+					.replace(/\s+/g, " "),
+			)
 			.filter(line => /^[●○] /.test(line) && !line.includes("@"));
 		expect(limitRows).toEqual([
 			// weekly-only@example.test
@@ -757,6 +762,36 @@ describe("formatUsageBreakdown", () => {
 		expect(text).toContain("Daily Quota (Free)");
 		expect(text).toContain("Daily Quota (Pro)");
 		expect(text).not.toContain("not reported");
+	});
+
+	it("keeps one row per tier when a report repeats a meter per tier in the same window", () => {
+		const tierUsage = (tier: string, usedFraction: number) => ({
+			...makeLimit({ id: `antigravity:${tier}`, label: "Usage", provider: "google-antigravity", usedFraction }),
+			window: { id: "5h", label: "5 hours", durationMs: FIVE_HOURS },
+			scope: { provider: "google-antigravity", windowId: "5h", tier },
+		});
+		const providerReports = [
+			makeReport("google-antigravity", "both@example.test", [tierUsage("Pro", 0.1), tierUsage("Longer Tier", 0.2)]),
+			makeReport("google-antigravity", "one@example.test", [tierUsage("Longer Tier", 0.3)]),
+		];
+
+		const text = stripVTControlCharacters(formatUsageBreakdown(providerReports, [], Date.now()));
+		const rows = text.split("\n").filter(line => /^\s+[●○] /.test(line) && !line.includes("@"));
+		expect(
+			rows.map(line =>
+				line
+					.trim()
+					.replace(/\s+[█░·]+\s+/, " ")
+					.replace(/\s+/g, " "),
+			),
+		).toEqual([
+			"● Usage (Pro) (5 hours) 10.0% used",
+			"● Usage (Longer Tier) (5 hours) 20.0% used",
+			"○ Usage (Pro) (5 hours) not reported",
+			"● Usage (Longer Tier) (5 hours) 30.0% used",
+		]);
+		// Bars start in the same column on every row.
+		expect(new Set(rows.map(line => line.search(/[█░·]/))).size).toBe(1);
 	});
 
 	it("redacts account labels through the provided map without leaking the originals", () => {
