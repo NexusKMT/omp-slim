@@ -159,6 +159,11 @@ impl RankTable {
 		p = &p[6..];
 		let n = u32::from_le_bytes(p[..4].try_into().unwrap()) as usize;
 		p = &p[4..];
+		// Size `short` to its real population: dead slots and pair/long
+		// tokens would otherwise round a sparse table up a power of two. A
+		// sparse subset table (Jev's base set: 49k short tokens over 200k
+		// ranks) still keeps half the container's slots: it answers mostly
+		// misses, which at a ~0.75 load cost Jev ~12% of its count time.
 		let short_count = {
 			let mut entries = p;
 			(0..n)
@@ -168,9 +173,7 @@ impl RankTable {
 		};
 		let mut pairs: Box<[u32; 65536]> =
 			vec![u32::MAX; 65536].into_boxed_slice().try_into().unwrap();
-		// Keep lookup headroom without reserving more than the full vocabulary.
-		let short_capacity = short_count.saturating_mul(2).min(n);
-		let mut short = HashMap::with_capacity_and_hasher(short_capacity, Fx::default());
+		let mut short = HashMap::with_capacity_and_hasher(short_count.max(n / 2), Fx::default());
 		let mut long = FxMap::default();
 		let mut max_token_len = 0usize;
 		for rank in 0..n as u32 {
