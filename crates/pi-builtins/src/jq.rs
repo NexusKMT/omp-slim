@@ -1125,25 +1125,28 @@ mod output {
 			Self { raw: false, join: false, flush: false, indent: None, sort_keys: false, color: false }
 		}
 
-		/// Writes one output value and its separator.
-		pub fn print<W: Write + ?Sized>(&self, w: &mut W, v: &Val) -> Result<(), WriteError> {
+		/// Writes one output value and its separator with a single write,
+		/// rendering them into `buf` first; a value that cannot be rendered
+		/// writes nothing.
+		pub fn print(&self, buf: &mut Vec<u8>, w: &mut dyn Write, v: &Val) -> Result<(), WriteError> {
+			buf.clear();
 			match v {
-				Val::TStr(s) | Val::BStr(s) if self.raw => w.write_all(s)?,
-				_ => self.write(w, v)?,
+				Val::TStr(s) | Val::BStr(s) if self.raw => buf.extend_from_slice(s),
+				_ => self.write(buf, v)?,
 			}
 			if !self.join {
-				writeln!(w)?;
+				buf.push(b'\n');
 			}
+			w.write_all(buf)?;
 			if self.flush {
 				w.flush()?;
 			}
 			Ok(())
 		}
 
-		/// Writes `v` as JSON, failing before any of it is written when it holds
-		/// an object key that JSON cannot express.
+		/// Writes `v` as JSON, failing on an object key that JSON cannot
+		/// express.
 		pub fn write<W: Write + ?Sized>(&self, w: &mut W, v: &Val) -> Result<(), WriteError> {
-			check_keys(v)?;
 			self.write_at(w, 0, v)
 		}
 
@@ -1180,8 +1183,9 @@ mod output {
 				Val::Obj(o) => {
 					self.styled(w, BOLD, |w| Ok(w.write_all(b"{")?))?;
 					let entry = |w: &mut W, (k, v): (&Val, &Val)| {
-						if let Val::TStr(k) | Val::BStr(k) = k {
-							self.styled(w, BOLD, |w| write_str(w, k))?;
+						match k {
+							Val::TStr(k) | Val::BStr(k) => self.styled(w, BOLD, |w| write_str(w, k))?,
+							k => return Err(WriteError::Key(k.clone())),
 						}
 						w.write_all(if self.indent.is_some() { b": " } else { b":" })?;
 						self.write_at(w, level + 1, v)
@@ -1237,18 +1241,6 @@ mod output {
 			write!(w, "\x1b[{style}m")?;
 			f(w)?;
 			Ok(w.write_all(b"\x1b[0m")?)
-		}
-	}
-
-	/// Fails on the first object key in `v` that is not a string.
-	fn check_keys(v: &Val) -> Result<(), WriteError> {
-		match v {
-			Val::Arr(a) => a.iter().try_for_each(check_keys),
-			Val::Obj(o) => o.iter().try_for_each(|(k, v)| match k {
-				Val::TStr(_) | Val::BStr(_) => check_keys(v),
-				k => Err(WriteError::Key(k.clone())),
-			}),
-			_ => Ok(()),
 		}
 	}
 
@@ -1510,10 +1502,11 @@ fn real_main(
 	let counts_lines = program.counts_lines;
 
 	let printer = output::Printer::new(cli, color);
-	let print = |out: &mut dyn Write, v: Val| printer.print(out, &v).map_err(Error::from);
 	let run = |inputs: read::Vals<'_>, on_error, out: &mut dyn Write| {
 		let filter = &program.filter;
-		filter::run(cli.null_input, filter, &ctx, &session, on_error, inputs, |v| print(out, v))
+		let mut buf = Vec::new();
+		let print = |v: Val| printer.print(&mut buf, out, &v).map_err(Error::from);
+		filter::run(cli.null_input, filter, &ctx, &session, on_error, inputs, print)
 	};
 
 	let last = if cli.files.is_empty() {
@@ -1794,7 +1787,7 @@ pub(crate) fn jq_builtin<SE: ShellExtensions>() -> Registration<SE> {
 
 #[cfg(test)]
 mod tests {
-	use std::{collections::HashMap, io::Write, path::PathBuf};
+	use std::{collections::HashMap, io, io::Write, path::PathBuf};
 
 	use clap::Parser as _;
 
@@ -1831,6 +1824,32 @@ mod tests {
 	fn run_jq(args: &[&str], stdin: &str) -> (i32, String, String) {
 		let (code, capture) = run_util::<Jq>(args, stdin, ".");
 		(code, capture.out(), capture.err())
+	}
+
+	/// Records every write it receives, and fails each one when `fail` is set.
+	#[derive(Default)]
+	struct Writes {
+		calls: Vec<Vec<u8>>,
+		fail:  bool,
+	}
+
+	impl Write for Writes {
+		fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+			self.calls.push(buf.to_vec());
+			if self.fail { Err(io::Error::other("disk full")) } else { Ok(buf.len()) }
+		}
+
+		fn flush(&mut self) -> io::Result<()> {
+			Ok(())
+		}
+	}
+
+	/// Runs jq with `out` as its standard output; returns the exit status.
+	fn run_jq_into(out: &mut Writes, args: &[&str], stdin: &str) -> i32 {
+		let (mut host, _) = Host::for_test("jq", stdin, ".");
+		let argv = std::iter::once("jq").chain(args.iter().copied());
+		let cli = Jq::try_parse_from(argv).expect("valid arguments").cli;
+		super::real_main(&cli, &mut host, out, false).unwrap_or_else(|error| error.report())
 	}
 
 	#[test]
@@ -2132,6 +2151,14 @@ mod tests {
 		let (code, out, err) = run_jq(&[". + 1"], "1 2 \"a\"");
 		assert_eq!((code, out.as_str()), (5, "2\n3\n"));
 		assert_eq!(err, "Error: cannot calculate \"a\" + 1\n");
+	}
+
+	#[test]
+	fn printer_writes_each_value_at_once() {
+		let mut out = Writes::default();
+		assert_eq!(run_jq_into(&mut out, &["."], "{\"a\":[1,\"x\"]} 2"), 0);
+		let pretty: &[u8] = b"{\n  \"a\": [\n    1,\n    \"x\"\n  ]\n}\n";
+		assert_eq!(out.calls, [pretty, b"2\n"]);
 	}
 
 	#[test]
