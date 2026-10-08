@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `worktree.onStart` and `worktree.onExit` settings to start each session in its own worktree and clean it up on exit ([#14908](https://github.com/can1357/oh-my-pi/pull/14908) by [@gitpushoriginmaster](https://github.com/gitpushoriginmaster))
+
 ### Fixed
 
 - Fixed judge-gated features resolving a new judge role while the next judgment still used the previous role's cached model chain ([#14861](https://github.com/can1357/oh-my-pi/pull/14861) by [@alnaggar-dev](https://github.com/alnaggar-dev))
