@@ -546,7 +546,8 @@ mod tests {
 
 	#[test]
 	fn provenance_growth_evicts_older_history_without_discarding_current() {
-		let store = EditStore::with_limits(10, 4, 14_000);
+		// x86_64: old + current = 8,704 B; 299 lines add 5,980 B.
+		let store = EditStore::with_limits(10, 4, 8_704);
 		let old = Path::new("old");
 		let current = Path::new("current");
 		store.record(old, &"x".repeat(8_000), None);
@@ -629,7 +630,8 @@ mod tests {
 
 	#[test]
 	fn unicode_budget_survives_promotion_and_version_truncation() {
-		let store = EditStore::with_limits(10, 2, 7_200);
+		// x86_64: a + b = 6,701 B; c adds 1,310 B.
+		let store = EditStore::with_limits(10, 2, 6_701);
 		let a = Path::new("a");
 		let b = Path::new("b");
 		let emoji = "😀".repeat(500);
@@ -668,7 +670,8 @@ mod tests {
 
 	#[test]
 	fn relocation_releases_duplicate_and_truncated_versions() {
-		let store = EditStore::with_limits(10, 2, 11_000);
+		// x86_64: 9,496 B initially; dedup frees room for 4,320 B.
+		let store = EditStore::with_limits(10, 2, 10_000);
 		let from = Path::new("from");
 		let to = Path::new("to");
 		let emoji = "😀".repeat(500);
